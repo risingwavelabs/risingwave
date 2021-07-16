@@ -1,0 +1,51 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+build/
+
+# visual studio code
+.vscode/
+.DS_Store
+.devcontainer/
+
+# CLion
+cmake-build-debug/
+.idea/
+/cmake-build-wsl_profile/
+
+cpp/third_party/cmake-build-debug
+cpp/third_party/output
+cpp/third_party/abseil-cpp/
+**/.idea
+**/.gradle
+cpp/cmake-build
