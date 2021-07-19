@@ -2,10 +2,6 @@ package com.risingwave.catalog;
 
 import javax.annotation.concurrent.ThreadSafe;
 
-/**
- * Manipulating risingwave catalog.
- */
+/** Manipulating risingwave catalog. */
 @ThreadSafe
-public interface CatalogService {
-
-}
+public interface CatalogService {}

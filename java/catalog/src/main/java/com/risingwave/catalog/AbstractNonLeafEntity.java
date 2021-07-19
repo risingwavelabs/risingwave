@@ -11,8 +11,8 @@ import java.util.stream.Collectors;
  * Base class of catalog container entities, e.g., table, schema and database.
  *
  * <p>In current implementation, the container is mutable. However, we should never expose these
- * methods outside of this package, and mutations of these containers should come from
- * {@link CatalogService}.
+ * methods outside of this package, and mutations of these containers should come from {@link
+ * CatalogService}.
  *
  * @param <C> Type of child.
  */
@@ -22,13 +22,13 @@ abstract class AbstractNonLeafEntity<C extends BaseEntity> extends BaseEntity {
 
   AbstractNonLeafEntity(int id, String name, Collection<C> children) {
     super(id, name);
-    childByName = children
-        .stream()
-        .collect(Collectors.toConcurrentMap(BaseEntity::getName, Function.identity()));
+    childByName =
+        children.stream()
+            .collect(Collectors.toConcurrentMap(BaseEntity::getName, Function.identity()));
 
-    childById = children
-        .stream()
-        .collect(Collectors.toConcurrentMap(BaseEntity::getId, Function.identity()));
+    childById =
+        children.stream()
+            .collect(Collectors.toConcurrentMap(BaseEntity::getId, Function.identity()));
   }
 
   C getChildById(int id) {

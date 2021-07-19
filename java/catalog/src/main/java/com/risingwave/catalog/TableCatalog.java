@@ -22,10 +22,14 @@ public class TableCatalog extends AbstractNonLeafEntity<ColumnCatalog> implement
   private final DataDistributionType distributionType;
   private final Integer columnId;
 
-  public TableCatalog(int id, String name, Collection<ColumnCatalog> columns,
-                      boolean materializedView,
-                      ImmutableIntList primaryKeyColumnIds, DataDistributionType distributionType,
-                      Integer columnId) {
+  public TableCatalog(
+      int id,
+      String name,
+      Collection<ColumnCatalog> columns,
+      boolean materializedView,
+      ImmutableIntList primaryKeyColumnIds,
+      DataDistributionType distributionType,
+      Integer columnId) {
     super(id, name, columns);
     this.materializedView = materializedView;
     this.primaryKeyColumnIds = primaryKeyColumnIds;
@@ -51,19 +55,16 @@ public class TableCatalog extends AbstractNonLeafEntity<ColumnCatalog> implement
 
   @Override
   public RelDataType getRowType(RelDataTypeFactory typeFactory) {
-    List<RelDataType> columnDataTypes = getChildren()
-        .stream()
-        .map(ColumnCatalog::getDesc)
-        .map(ColumnDesc::getDataType)
-        .collect(Collectors.toList());
+    List<RelDataType> columnDataTypes =
+        getChildren().stream()
+            .map(ColumnCatalog::getDesc)
+            .map(ColumnDesc::getDataType)
+            .collect(Collectors.toList());
 
-    List<String> fieldNames = getChildren()
-        .stream()
-        .map(ColumnCatalog::getName)
-        .collect(Collectors.toList());
+    List<String> fieldNames =
+        getChildren().stream().map(ColumnCatalog::getName).collect(Collectors.toList());
 
-    return typeFactory
-        .createStructType(StructKind.FULLY_QUALIFIED, columnDataTypes, fieldNames);
+    return typeFactory.createStructType(StructKind.FULLY_QUALIFIED, columnDataTypes, fieldNames);
   }
 
   @Override
@@ -82,9 +83,11 @@ public class TableCatalog extends AbstractNonLeafEntity<ColumnCatalog> implement
   }
 
   @Override
-  public boolean rolledUpColumnValidInsideAgg(String column, SqlCall call,
-                                              @Nullable SqlNode parent,
-                                              @Nullable CalciteConnectionConfig config) {
+  public boolean rolledUpColumnValidInsideAgg(
+      String column,
+      SqlCall call,
+      @Nullable SqlNode parent,
+      @Nullable CalciteConnectionConfig config) {
     return false;
   }
 }
