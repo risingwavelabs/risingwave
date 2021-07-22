@@ -1,0 +1,35 @@
+statement ok
+create table bool_t1 (v1 boolean, v2 boolean, v3 int not null)
+
+statement ok
+insert into bool_t1 values (true, false, 1), (false, true, 2), (false, false, 3), (true, true, 4),
+                           (true, null, 5), (null, true, 6), (false, null, 7), (null, false, 8), (null, null, 9)
+
+query B
+select v1 or v2 from bool_t1
+----
+true
+true
+false
+true
+true
+true
+NULL
+NULL
+NULL
+
+query B
+select v1 and v2 from bool_t1
+----
+false
+false
+false
+true
+NULL
+NULL
+false
+false
+NULL
+
+statement ok
+drop table bool_t1
