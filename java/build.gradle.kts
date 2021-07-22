@@ -36,6 +36,11 @@ subprojects {
                 googleJavaFormat()
             }
         }
+
+
+        tasks.named<Test>("test") {
+            useJUnitPlatform()
+        }
     }
 
     apply<CheckstylePlugin>()
@@ -46,4 +51,5 @@ subprojects {
         toolVersion = "8.44"
         maxWarnings = 0
     }
+
 }

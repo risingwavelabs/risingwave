@@ -1,8 +1,18 @@
 package com.risingwave.catalog;
 
+import com.risingwave.common.entity.EntityBase;
+import com.risingwave.common.entity.NonRootLikeBase;
+import com.risingwave.common.error.MetaServiceError;
+import com.risingwave.common.exception.RisingWaveException;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
+import org.apache.calcite.jdbc.CalciteSchemaWrapper;
 import org.apache.calcite.linq4j.tree.Expression;
 import org.apache.calcite.rel.type.RelProtoDataType;
 import org.apache.calcite.schema.Function;
@@ -10,22 +20,82 @@ import org.apache.calcite.schema.Schema;
 import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.schema.SchemaVersion;
 import org.apache.calcite.schema.Table;
+import org.apache.calcite.util.ImmutableIntList;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-public class SchemaCatalog extends AbstractNonLeafEntity<TableCatalog> implements Schema {
-  public SchemaCatalog(int id, String name, Collection<TableCatalog> tables) {
-    super(id, name, tables);
+public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCatalog.SchemaName>
+    implements Schema {
+  private final AtomicInteger nextTableId = new AtomicInteger(0);
+  private final List<TableCatalog> tables;
+  private final ConcurrentMap<TableCatalog.TableId, TableCatalog> tableById;
+  private final ConcurrentMap<TableCatalog.TableName, TableCatalog> tableByName;
+
+  SchemaCatalog(SchemaId schemaId, SchemaName schemaName) {
+    this(schemaId, schemaName, Collections.emptyList());
+  }
+
+  SchemaCatalog(SchemaId schemaId, SchemaName schemaName, Collection<TableCatalog> tables) {
+    super(schemaId, schemaName);
+    this.tables = new ArrayList<>(tables);
+    this.tableById = EntityBase.groupBy(tables, TableCatalog::getId);
+    this.tableByName = EntityBase.groupBy(tables, TableCatalog::getEntityName);
+  }
+
+  void createTable(CreateTableInfo createTableInfo) {
+    TableCatalog.TableName tableName =
+        new TableCatalog.TableName(createTableInfo.getName(), getEntityName());
+
+    if (tableByName.containsKey(tableName)) {
+      throw RisingWaveException.from(
+          MetaServiceError.TABLE_ALREADY_EXISTS, tableName, getDatabaseName(), getSchemaName());
+    }
+
+    TableCatalog.TableId tableId = new TableCatalog.TableId(nextTableId.incrementAndGet(), getId());
+
+    TableCatalog table =
+        new TableCatalog(
+            tableId,
+            tableName,
+            Collections.emptyList(),
+            createTableInfo.isMv(),
+            ImmutableIntList.of(),
+            DataDistributionType.ALL,
+            0);
+
+    createTableInfo.getColumns().forEach(pair -> table.addColumn(pair.getKey(), pair.getValue()));
+
+    registerTable(table);
+  }
+
+  private void registerTable(TableCatalog table) {
+    tables.add(table);
+    tableByName.put(table.getEntityName(), table);
+    tableById.put(table.getId(), table);
+  }
+
+  private String getDatabaseName() {
+    return getEntityName().getParent().getValue();
+  }
+
+  private String getSchemaName() {
+    return getEntityName().getValue();
+  }
+
+  public TableCatalog getTableCatalog(TableCatalog.TableName tableName) {
+    return tableByName.get(tableName);
   }
 
   @Override
   @Nullable
   public Table getTable(String name) {
-    return getChildByName(name);
+    return tableByName.get(new TableCatalog.TableName(name, getEntityName()));
   }
 
   @Override
   public Set<String> getTableNames() {
-    return getChildrenNames();
+    return tableByName.keySet().stream()
+        .map(TableCatalog.TableName::getValue)
+        .collect(Collectors.toSet());
   }
 
   @Override
@@ -51,7 +121,7 @@ public class SchemaCatalog extends AbstractNonLeafEntity<TableCatalog> implement
 
   @Override
   @Nullable
-  public Schema getSubSchema(String name) {
+  public SchemaPlus getSubSchema(String name) {
     return null;
   }
 
@@ -73,5 +143,29 @@ public class SchemaCatalog extends AbstractNonLeafEntity<TableCatalog> implement
   @Override
   public Schema snapshot(SchemaVersion version) {
     return this;
+  }
+
+  public CalciteSchemaWrapper toCalciteSchemaWrapper() {
+    return new CalciteSchemaWrapper(this, getEntityName().getValue());
+  }
+
+  public SchemaPlus plus() {
+    return toCalciteSchemaWrapper().plus();
+  }
+
+  public static class SchemaId extends NonRootLikeBase<Integer, DatabaseCatalog.DatabaseId> {
+    public SchemaId(Integer value, DatabaseCatalog.DatabaseId parent) {
+      super(value, parent);
+    }
+  }
+
+  public static class SchemaName extends NonRootLikeBase<String, DatabaseCatalog.DatabaseName> {
+    public SchemaName(String value, DatabaseCatalog.DatabaseName parent) {
+      super(value, parent);
+    }
+
+    public static SchemaName of(String database, String schema) {
+      return new SchemaName(schema, DatabaseCatalog.DatabaseName.of(database));
+    }
   }
 }

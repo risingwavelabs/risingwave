@@ -8,6 +8,12 @@ dependencies {
 
     // Declare dependencies, no version required
     api("org.apache.calcite:calcite-core")
+    api(project(":common"))
+    api(project(":catalog"))
+    api("org.slf4j:slf4j-api")
+    testImplementation("org.junit.jupiter:junit-jupiter-api")
+    testImplementation("org.junit.jupiter:junit-jupiter-params")
+    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")
 
     // TODO: Manage all dependency versions in one place.
     antlr("org.antlr:antlr4:4.9.2")

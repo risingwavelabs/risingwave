@@ -8,6 +8,10 @@ public class ColumnDesc {
   private final boolean primary;
   private final ColumnEncoding encoding;
 
+  public ColumnDesc(RisingWaveDataType dataType) {
+    this(dataType, false, ColumnEncoding.RAW);
+  }
+
   public ColumnDesc(RisingWaveDataType dataType, boolean primary, ColumnEncoding encoding) {
     this.dataType = dataType;
     this.primary = primary;

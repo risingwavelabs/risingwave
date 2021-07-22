@@ -1,0 +1,14 @@
+<Root>
+    <TestCase name="test1">
+        <Resource name="sql">
+            <![CDATA[
+select * from table1
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+            fafda
+            ]]>
+        </Resource>
+    </TestCase>
+</Root>

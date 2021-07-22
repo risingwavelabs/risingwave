@@ -1,3 +1,7 @@
 package com.risingwave.planner.planner;
 
-public interface Planner {}
+import org.apache.calcite.sql.SqlNode;
+
+public interface Planner<P> {
+  P plan(SqlNode ast, PlannerContext context);
+}
