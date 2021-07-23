@@ -13,8 +13,11 @@ plugins {
     java
 }
 
-subprojects {
+if (JavaVersion.current() != JavaVersion.VERSION_1_8) {
+    throw GradleException("Only java 8 is supported!")
+}
 
+subprojects {
     group = "com.risingwave"
     version = "0.0.1-SNAPSHOT"
 
@@ -22,10 +25,15 @@ subprojects {
         mavenCentral()
     }
 
+
     // bom is java-platform, can't apply java-library plugin
     if (name != "bom") {
         apply(plugin = "java-library")
 
+        java {
+            sourceCompatibility = JavaVersion.VERSION_1_8
+            targetCompatibility = JavaVersion.VERSION_1_8
+        }
 
         apply<com.diffplug.gradle.spotless.SpotlessPlugin>()
         configure<com.diffplug.gradle.spotless.SpotlessExtension> {
