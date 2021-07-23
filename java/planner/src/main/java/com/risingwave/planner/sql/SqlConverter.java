@@ -3,8 +3,8 @@ package com.risingwave.planner.sql;
 import static java.util.Objects.requireNonNull;
 
 import com.risingwave.common.datatype.RisingWaveTypeFactory;
+import com.risingwave.planner.context.ExecutionContext;
 import com.risingwave.planner.cost.RisingWaveCostFactory;
-import com.risingwave.planner.planner.PlannerContext;
 import java.util.Collections;
 import java.util.List;
 import org.apache.calcite.plan.ConventionTraitDef;
@@ -21,14 +21,11 @@ import org.apache.calcite.sql2rel.SqlToRelConverter;
 public class SqlConverter {
   private final SqlValidator validator;
   private final SqlToRelConverter sqlToRelConverter;
-  private final PlannerContext context;
 
-  private SqlConverter(
-      SqlValidator validator, SqlToRelConverter sqlToRelConverter, PlannerContext context) {
+  private SqlConverter(SqlValidator validator, SqlToRelConverter sqlToRelConverter) {
     this.validator = requireNonNull(validator, "validator can't be null!");
     this.sqlToRelConverter =
         requireNonNull(sqlToRelConverter, "sql to rel converter can't be null!");
-    this.context = requireNonNull(context, "context can't be null!");
   }
 
   public RelRoot toRel(SqlNode ast) {
@@ -36,12 +33,16 @@ public class SqlConverter {
     return sqlToRelConverter.convertQuery(validatedSqlNode, false, true);
   }
 
-  public static Builder builder(PlannerContext context, SchemaPlus rootSchema) {
-    return new Builder(context, rootSchema);
+  public SqlValidator getValidator() {
+    return validator;
+  }
+
+  public static Builder builder(ExecutionContext context) {
+    return new Builder(context);
   }
 
   public static class Builder {
-    private final PlannerContext context;
+    private final ExecutionContext context;
     private final SchemaPlus rootSchema;
 
     private final RisingWaveCostFactory costFactory = new RisingWaveCostFactory();
@@ -52,9 +53,9 @@ public class SqlConverter {
     private VolcanoPlanner planner = null;
     private RelOptCluster cluster = null;
 
-    private Builder(PlannerContext context, SchemaPlus rootSchema) {
+    private Builder(ExecutionContext context) {
       this.context = context;
-      this.rootSchema = rootSchema;
+      this.rootSchema = context.getCalciteRootSchemaChecked();
     }
 
     public Builder withDefaultSchema(List<String> newDefaultSchema) {
@@ -83,7 +84,7 @@ public class SqlConverter {
       SqlToRelConverter sql2RelConverter =
           new SqlToRelConverter(
               catalogReader, validator, catalogReader, cluster, sqlRexConvertletTable, config);
-      return new SqlConverter(validator, sql2RelConverter, context);
+      return new SqlConverter(validator, sql2RelConverter);
     }
 
     private void initAll() {

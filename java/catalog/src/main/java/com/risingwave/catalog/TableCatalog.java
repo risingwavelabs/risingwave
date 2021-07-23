@@ -1,5 +1,7 @@
 package com.risingwave.catalog;
 
+import static com.google.common.base.Preconditions.checkNotNull;
+
 import com.google.common.collect.ImmutableList;
 import com.risingwave.common.entity.EntityBase;
 import com.risingwave.common.entity.NonRootLikeBase;
@@ -8,9 +10,11 @@ import com.risingwave.common.exception.RisingWaveException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import javax.annotation.Nullable;
 import org.apache.calcite.config.CalciteConnectionConfig;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
@@ -22,7 +26,6 @@ import org.apache.calcite.schema.Table;
 import org.apache.calcite.sql.SqlCall;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.util.ImmutableIntList;
-import org.checkerframework.checker.nullness.qual.Nullable;
 
 public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.TableName>
     implements Table {
@@ -71,6 +74,16 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
 
   public ImmutableList<ColumnCatalog.ColumnId> getAllColumnIds() {
     return ImmutableList.copyOf(columnById.keySet());
+  }
+
+  public Optional<ColumnCatalog> getColumn(ColumnCatalog.ColumnId columnId) {
+    checkNotNull(columnId, "column id can't be null!");
+    return Optional.ofNullable(columnById.get(columnId));
+  }
+
+  public ColumnCatalog getColumnChecked(ColumnCatalog.ColumnId columnId) {
+    // TODO: Use PgErrorCode
+    return getColumn(columnId).orElseThrow(() -> new RuntimeException("Column id not found!"));
   }
 
   void addColumn(String name, ColumnDesc columnDesc) {

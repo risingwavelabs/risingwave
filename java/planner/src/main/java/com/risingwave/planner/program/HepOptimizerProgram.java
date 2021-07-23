@@ -1,6 +1,6 @@
 package com.risingwave.planner.program;
 
-import com.risingwave.planner.planner.PlannerContext;
+import com.risingwave.planner.context.ExecutionContext;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.calcite.plan.RelOptRule;
@@ -19,7 +19,7 @@ public class HepOptimizerProgram implements OptimizerProgram {
   }
 
   @Override
-  public RelNode optimize(RelNode root, PlannerContext context) {
+  public RelNode optimize(RelNode root, ExecutionContext context) {
     HepPlanner optimizer = new HepPlanner(hepProgram, context);
     optimizer.setRoot(root);
 

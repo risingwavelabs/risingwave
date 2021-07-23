@@ -5,8 +5,8 @@ import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPh
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.PHYSICAL;
 import static com.risingwave.planner.rules.BatchRuleSets.PHYSICAL_RULES;
 
+import com.risingwave.planner.context.ExecutionContext;
 import com.risingwave.planner.planner.Planner;
-import com.risingwave.planner.planner.PlannerContext;
 import com.risingwave.planner.program.ChainedOptimizerProgram;
 import com.risingwave.planner.program.HepOptimizerProgram;
 import com.risingwave.planner.program.OptimizerProgram;
@@ -20,19 +20,16 @@ import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.sql.SqlNode;
 
 public class BatchPlanner implements Planner<BatchPlan> {
-  private final SqlConverter sqlConverter;
+  public BatchPlanner() {}
 
-  public BatchPlanner(SqlConverter sqlConverter) {
-    this.sqlConverter = sqlConverter;
-  }
-
-  private RelNode toRel(SqlNode sqlNode) {
+  private static RelNode toRel(SqlConverter sqlConverter, SqlNode sqlNode) {
     return sqlConverter.toRel(sqlNode).rel;
   }
 
   @Override
-  public BatchPlan plan(SqlNode ast, PlannerContext context) {
-    RelNode rawPlan = toRel(ast);
+  public BatchPlan plan(SqlNode ast, ExecutionContext context) {
+    SqlConverter sqlConverter = SqlConverter.builder(context).build();
+    RelNode rawPlan = toRel(sqlConverter, ast);
     OptimizerProgram optimizerProgram = buildOptimizerProgram();
 
     RelNode result = optimizerProgram.optimize(rawPlan, context);

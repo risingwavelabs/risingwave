@@ -57,10 +57,10 @@ public class SimpleCatalogService implements CatalogService {
 
   @Override
   public synchronized TableCatalog createTable(
-      String database, String schemaName, CreateTableInfo createTableInfo) {
-    SchemaCatalog schema = getSchemaChecked(SchemaCatalog.SchemaName.of(database, schemaName));
+      SchemaCatalog.SchemaName schemaName, CreateTableInfo createTableInfo) {
+    SchemaCatalog schema = getSchemaChecked(schemaName);
     schema.createTable(createTableInfo);
     return schema.getTableCatalog(
-        TableCatalog.TableName.of(database, schemaName, createTableInfo.getName()));
+        new TableCatalog.TableName(createTableInfo.getName(), schemaName));
   }
 }

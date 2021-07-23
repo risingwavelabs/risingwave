@@ -1,7 +1,7 @@
 package com.risingwave.planner.program;
 
 import com.google.common.collect.ImmutableList;
-import com.risingwave.planner.planner.PlannerContext;
+import com.risingwave.planner.context.ExecutionContext;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -25,7 +25,7 @@ public class VolcanoOptimizerProgram implements OptimizerProgram {
   }
 
   @Override
-  public RelNode optimize(RelNode root, PlannerContext context) {
+  public RelNode optimize(RelNode root, ExecutionContext context) {
     RelTraitSet targetTraits = root.getTraitSet().plusAll(requitedOutputTraits).simplify();
 
     // Ugly part of calcite...

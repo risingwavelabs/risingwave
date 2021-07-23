@@ -1,13 +1,13 @@
 <Root>
-    <TestCase name="test1">
+    <TestCase name="select all columns from table">
         <Resource name="sql">
             <![CDATA[
-select * from table1
+select * from t1
             ]]>
         </Resource>
         <Resource name="plan">
             <![CDATA[
-            fafda
+PhysicalFilterScan(table=[[test_schema, t1]], columns=[a,b])
             ]]>
         </Resource>
     </TestCase>

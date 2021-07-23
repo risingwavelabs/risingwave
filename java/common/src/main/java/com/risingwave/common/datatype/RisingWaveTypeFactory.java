@@ -5,6 +5,9 @@ import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.sql.type.SqlTypeName;
 
 public class RisingWaveTypeFactory extends JavaTypeFactoryImpl {
+  public RisingWaveTypeFactory() {
+    super(new RisingWaveDataTypeSystem());
+  }
 
   public RelDataType createSqlType(SqlTypeName sqlType) {
     switch (sqlType) {

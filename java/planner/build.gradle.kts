@@ -11,8 +11,10 @@ dependencies {
     api(project(":common"))
     api(project(":catalog"))
     api("org.slf4j:slf4j-api")
+    api("org.reflections:reflections")
     testImplementation("org.junit.jupiter:junit-jupiter-api")
     testImplementation("org.junit.jupiter:junit-jupiter-params")
+    testImplementation("org.apache.calcite:calcite-server")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")
 
     // TODO: Manage all dependency versions in one place.

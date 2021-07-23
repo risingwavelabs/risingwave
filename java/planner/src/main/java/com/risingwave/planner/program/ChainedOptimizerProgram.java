@@ -7,7 +7,7 @@ import com.google.common.collect.ImmutableMap;
 import com.risingwave.common.error.PlannerError;
 import com.risingwave.common.exception.RisingWaveException;
 import com.risingwave.common.util.Utils;
-import com.risingwave.planner.planner.PlannerContext;
+import com.risingwave.planner.context.ExecutionContext;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -29,7 +29,7 @@ public class ChainedOptimizerProgram implements OptimizerProgram {
   }
 
   @Override
-  public RelNode optimize(RelNode root, PlannerContext context) {
+  public RelNode optimize(RelNode root, ExecutionContext context) {
     checkNotNull(root, "Root can't be null!");
     RelNode result = root;
     for (OptimizerPhase phase : phases) {

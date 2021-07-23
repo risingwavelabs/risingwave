@@ -52,5 +52,10 @@ public interface CatalogService {
     return getSchemaChecked(SchemaCatalog.SchemaName.of(db, schema));
   }
 
-  TableCatalog createTable(String database, String schema, CreateTableInfo createTableInfo);
+  TableCatalog createTable(SchemaCatalog.SchemaName schemaName, CreateTableInfo createTableInfo);
+
+  default TableCatalog createTable(
+      String database, String schema, CreateTableInfo createTableInfo) {
+    return createTable(SchemaCatalog.SchemaName.of(database, schema), createTableInfo);
+  }
 }
