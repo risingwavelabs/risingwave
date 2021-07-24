@@ -9,6 +9,11 @@ buildscript {
     }
 }
 
+repositories {
+    // Required to download KtLint
+    mavenCentral()
+}
+
 plugins {
     java
 }
