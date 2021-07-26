@@ -1,0 +1,155 @@
+subtest SumTest
+
+statement ok
+create table t(v1 int not null, v2 int not null, v3 float not null)
+
+statement ok
+insert into t values(1,4,2.5), (2,3,3.2), (3,4,4.7), (4,3,5.1)
+
+query IR
+select sum(v1), sum(v3) from t
+----
+10 15.5
+
+query IR
+select sum(v1+v2),sum(v1+v3) from t
+----
+24 25.5
+
+# SimpleMinTest
+
+query I
+select min(v1) from t
+----
+1
+
+# SimpleMaxTest
+
+query I
+select max(v1) from t
+----
+4
+
+# SimpleMaxTest1
+
+query I
+select max(v1) from t where v2>3
+----
+3
+
+# SimpleCountTest
+
+query I
+select count(v1) from t
+----
+4
+
+# SimpleAvgTest
+
+query R
+select avg(v2) from t
+----
+3.5
+
+# SumGroupTest
+
+query II rowsort
+select sum(v1), v2 from t group by v2
+----
+4 4
+6 3
+
+statement ok
+drop table t
+
+subtest SumTest1
+
+statement ok
+create table t(v1 int not null, v2 int not null, v3 float not null)
+
+statement ok
+insert into t values(1,4,2.5)
+
+statement ok
+insert into t values(2,3,3.2)
+
+statement ok
+insert into t values(3,4,4.7)
+
+statement ok
+insert into t values(4,3,5.1)
+
+query IR
+select sum(v1), sum(v3) from t
+----
+10 15.5
+
+query IR
+select sum(v1+v2),sum(v1+v3) from t
+----
+24 25.5
+
+# SimpleMinTest1
+
+query I
+select min(v1) from t
+----
+1
+
+# SimpleMaxTest2
+
+query I
+select max(v1) from t
+----
+4
+
+# SimpleCountTest1
+
+query I
+select count(v1) from t
+----
+4
+
+# SimpleAvgTest1
+
+query R
+select avg(v2) from t
+----
+3.5
+
+statement ok
+drop table t
+
+statement ok
+create table t(v1 float not null, v2 int not null)
+
+statement ok
+insert into t values(-1.0, 1), (-2.0, 1), (1.00, 2), (13.00, 2)
+
+# MinGroupTest
+
+query RI rowsort
+select max(v1), v2 from t group by v2
+----
+-1 1
+13 2
+
+statement ok
+drop table t
+
+subtest EmptyInputTest
+
+statement ok
+create table t(v1 int not null)
+
+query I
+select count(v1) from t
+----
+0
+
+query I
+select count(v1) from t group by v1
+----
+
+statement ok
+drop table t
