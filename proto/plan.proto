@@ -1,0 +1,69 @@
+syntax = "proto3";
+
+
+import "google/protobuf/any.proto";
+import "proto/data.proto";
+
+
+package risingwave.proto.plan;
+option java_package = "com.risingwave.proto.plan";
+option java_multiple_files = true;
+option optimize_for = SPEED;
+
+message FilterScanNode {
+    uint32 table_id = 1;
+    repeated uint32 column_ids = 2;
+}
+
+message InsertValueNode {
+    uint32 table_id = 1;
+    repeated uint32 column_ids = 2;
+    risingwave.proto.data.DataChunk data = 3;
+}
+
+message PlanNode {
+    enum PlanNodeType {
+        INVALID = 0;
+        FILTER_SCAN = 1;
+        INSERT_VALUE = 2;
+    }
+    PlanNodeType node_type = 1;
+    google.protobuf.Any body = 2;
+    repeated PlanNode children = 3;
+}
+
+message ShuffleInfo {
+    enum PartitionMode {
+        // No partitioning at all, used for root segment which aggregates query results
+        SINGLE = 0;
+        BROADCAST = 1;
+        HASH = 2;
+    }
+
+    message BroadcastInfo {
+        uint32 count = 1;
+    }
+
+    message HashInfo {
+        enum HashMethod {
+            CRC32 = 0;
+        }
+        uint32 output_count = 1;
+        HashMethod hash_method = 2;
+        repeated uint32 keys = 3;
+    }
+
+    PartitionMode partition_mode = 1;
+
+    oneof shuffle_info {
+        BroadcastInfo broadcast_info = 2;
+        HashInfo hash_info = 3;
+    }
+
+    // TODO: Add fields to optimize for local buffer
+}
+
+message PlanFragment {
+    PlanNode root = 1;
+    ShuffleInfo shuffle_info = 2;
+}

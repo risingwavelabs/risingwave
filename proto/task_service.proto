@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+import "proto/plan.proto";
+import "proto/data.proto";
+import "proto/common.proto";
+
+
+package risingwave.proto.computenode;
+option java_package = "com.risingwave.proto.computenode";
+option java_multiple_files = true;
+option optimize_for = SPEED;
+
+message QueryId {
+    string trace_id = 1;
+}
+
+message StageId {
+    QueryId query_id = 1;
+    uint32 stage_id = 2;
+}
+
+message TaskId {
+    StageId stage_id = 1;
+    uint32 task_id = 2;
+}
+
+message TaskSinkId {
+    TaskId task_id = 1;
+    uint32 sink_id = 2;
+}
+
+message TaskInfo {
+    enum TaskStatus {
+        NOT_FOUND = 0;
+        PENDING = 1;
+        RUNNING = 2;
+        FAILING = 3;
+        CANCELLING = 4;
+        FINISHED = 5;
+        FIALED = 6;
+    }
+
+    TaskId task_id = 1;
+    TaskStatus task_status = 2;
+}
+
+message CreateTaskRequest {
+    TaskId task_id = 1;
+    risingwave.proto.plan.PlanFragment plan = 2;
+}
+
+message CreateTaskResponse {
+    risingwave.proto.common.Status status = 1;
+}
+
+message AbortTaskRequest {
+    TaskId task_id = 1;
+    bool force = 2;
+}
+
+message AbortTaskResponse {
+    risingwave.proto.common.Status status = 1;
+}
+
+message GetTaskInfoRequest {
+    TaskId task_id = 1;
+}
+
+message GetTaskInfoResponse {
+    risingwave.proto.common.Status status = 1;
+
+    TaskInfo task_info = 2;
+}
+
+message TaskData {
+    risingwave.proto.common.Status status = 1;
+    risingwave.proto.data.DataChunk record_batch = 2;
+}
+
+service TaskService {
+    rpc Create(CreateTaskRequest) returns (CreateTaskResponse);
+    rpc GetTaskInfo(GetTaskInfoRequest) returns (GetTaskInfoResponse);
+    rpc Abort(AbortTaskRequest) returns (AbortTaskResponse);
+}
+
+service ExchangeService {
+    rpc GetData(TaskSinkId) returns (stream TaskData);
+}
+
