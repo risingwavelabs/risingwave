@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 
 import org.apache.calcite.sql.SqlInsert;
 import org.apache.calcite.sql.SqlNode;
+import org.apache.calcite.sql.SqlSelect;
 import org.apache.calcite.sql.ddl.SqlCreateTable;
 import org.junit.jupiter.api.Test;
 
@@ -27,6 +28,17 @@ public class ParserTest {
     assertTrue(
         SqlParser.createStatement("insert into t values (1, 2, 3), (4, 5, 6);")
             instanceof SqlInsert);
+  }
+
+  @Test
+  public void testSimpleSelect() {
+    assertTrue(SqlParser.createStatement("select a, b from t;") instanceof SqlSelect);
+    assertTrue(SqlParser.createStatement("select a from t where b = 1") instanceof SqlSelect);
+    assertTrue(SqlParser.createStatement("select a from t where b >= 1") instanceof SqlSelect);
+    assertTrue(SqlParser.createStatement("select a from t where b > 1") instanceof SqlSelect);
+    assertTrue(SqlParser.createStatement("select a from t where b <= 1") instanceof SqlSelect);
+    assertTrue(SqlParser.createStatement("select a from t where b < 1") instanceof SqlSelect);
+    assertTrue(SqlParser.createStatement("select a from t where b != 1") instanceof SqlSelect);
   }
 
   private static void assertStatement(String query, SqlNode expected) {

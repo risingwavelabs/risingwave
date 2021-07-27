@@ -24,19 +24,25 @@ package com.risingwave.parser;
 import static java.util.stream.Collectors.toList;
 
 import com.risingwave.parser.antlr.v4.SqlBaseBaseVisitor;
+import com.risingwave.parser.antlr.v4.SqlBaseLexer;
 import com.risingwave.parser.antlr.v4.SqlBaseParser;
 import java.util.List;
 import java.util.Locale;
 import org.antlr.v4.runtime.ParserRuleContext;
+import org.antlr.v4.runtime.Token;
+import org.antlr.v4.runtime.tree.TerminalNode;
 import org.apache.calcite.schema.ColumnStrategy;
 import org.apache.calcite.sql.SqlBasicTypeNameSpec;
+import org.apache.calcite.sql.SqlBinaryOperator;
 import org.apache.calcite.sql.SqlDataTypeSpec;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlInsert;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlNodeList;
 import org.apache.calcite.sql.SqlNumericLiteral;
+import org.apache.calcite.sql.SqlSelect;
 import org.apache.calcite.sql.ddl.SqlDdlNodes;
+import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.type.SqlTypeName;
 
@@ -47,7 +53,7 @@ class AstBuilder extends SqlBaseBaseVisitor<SqlNode> {
     return visit(context.statement());
   }
 
-  //  Statements
+  //  DDL statements.
   @Override
   public SqlNode visitCreateTable(SqlBaseParser.CreateTableContext context) {
     boolean notExists = context.EXISTS() != null;
@@ -59,7 +65,65 @@ class AstBuilder extends SqlBaseBaseVisitor<SqlNode> {
         getParserPos(context), false, notExists, (SqlIdentifier) tableName, tableElements, null);
   }
 
-  // Insert
+  // Select statements.
+  @Override
+  public SqlNode visitDefaultQuerySpec(SqlBaseParser.DefaultQuerySpecContext ctx) {
+    // No setQuant.
+    return new SqlSelect(
+        getParserPos(ctx),
+        SqlNodeList.EMPTY,
+        visitCollection(ctx.selectItem(), SqlNode.class),
+        visitCollection(ctx.relation(), SqlNode.class),
+        ctx.where() == null ? null : visit(ctx.where()),
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null);
+  }
+
+  @Override
+  public SqlNode visitPredicated(SqlBaseParser.PredicatedContext context) {
+    if (context.predicate() != null) {
+      return visit(context.predicate());
+    }
+    return visit(context.valueExpression);
+  }
+
+  @Override
+  public SqlNode visitWhere(SqlBaseParser.WhereContext ctx) {
+    return visit(ctx.condition);
+  }
+
+  @Override
+  public SqlNode visitComparison(SqlBaseParser.ComparisonContext ctx) {
+    SqlBinaryOperator op =
+        getComparisonOperator(((TerminalNode) ctx.cmpOp().getChild(0)).getSymbol());
+    return op.createCall(getParserPos(ctx), visit(ctx.value), visit(ctx.right));
+  }
+
+  private static SqlBinaryOperator getComparisonOperator(Token symbol) {
+    switch (symbol.getType()) {
+      case SqlBaseLexer.EQ:
+        return SqlStdOperatorTable.EQUALS;
+      case SqlBaseLexer.LT:
+        return SqlStdOperatorTable.LESS_THAN;
+      case SqlBaseLexer.LTE:
+        return SqlStdOperatorTable.LESS_THAN_OR_EQUAL;
+      case SqlBaseLexer.GT:
+        return SqlStdOperatorTable.GREATER_THAN;
+      case SqlBaseLexer.GTE:
+        return SqlStdOperatorTable.GREATER_THAN_OR_EQUAL;
+      case SqlBaseLexer.NEQ:
+        return SqlStdOperatorTable.NOT_EQUALS;
+      default:
+        throw new ParsingException("Unsupported operator for now");
+    }
+  }
+
+  // DML statements.
   @Override
   public SqlNode visitInsert(SqlBaseParser.InsertContext context) {
     SqlNode tableName = visit(context.table());

@@ -31,7 +31,8 @@ singleStatement
     ;
 
 statement
-    : createStmt
+    : query                                                                          #default
+    | createStmt                                                                     #create
     ;
 
 createStmt
@@ -56,17 +57,50 @@ queryTerm
     ;
 
 querySpec
-//    : SELECT setQuant? selectItem (',' selectItem)*
-//      (FROM relation (',' relation)*)?
-//      where?
-//      (GROUP BY expr (',' expr)*)?
-//      (HAVING having=booleanExpression)?
-//      (WINDOW windows+=namedWindow (',' windows+=namedWindow)*)?                     #defaultQuerySpec
-    : VALUES values (',' values)*                                                    #valuesRelation
+    : SELECT setQuant? selectItem (',' selectItem)*
+      (FROM relation (',' relation)*)?
+      where?
+      (GROUP BY expr (',' expr)*)?
+      (HAVING having=booleanExpression)?                    #defaultQuerySpec
+    | VALUES values (',' values)*                                                    #valuesRelation
+    ;
+
+relation
+//    : left=relation
+//      ( CROSS JOIN right=aliasedRelation
+//      | joinType JOIN rightRelation=relation joinCriteria
+//      | NATURAL joinType JOIN right=aliasedRelation
+//      )                                                                              #joinRelation
+    : aliasedRelation                                                                #relationDefault
+    ;
+
+aliasedRelation
+    : relationPrimary (AS? ident )?
+    ;
+
+relationPrimary
+    : table                                                                          #tableRelation
+//    | '(' query ')'                                                                  #subqueryRelation
+//    | '(' relation ')'                                                               #parenthesizedRelation
+    ;
+
+setQuant
+    : DISTINCT
+    | ALL
+    ;
+
+selectItem
+    : expr (AS? ident)?                                                              #selectSingle
+    | qname '.' ASTERISK                                                             #selectAll
+    | ASTERISK                                                                       #selectAll
     ;
 
 values
     : '(' expr (',' expr)* ')'
+    ;
+
+where
+    : WHERE condition=booleanExpression
     ;
 
 expr
@@ -78,7 +112,15 @@ booleanExpression
     ;
 
 predicated
-    : valueExpression
+    : valueExpression predicate[$valueExpression.ctx]?
+    ;
+
+predicate[ParserRuleContext value]
+    : cmpOp right=valueExpression                                                    #comparison
+    ;
+
+cmpOp
+    : EQ | NEQ | LT | LTE | GT | GTE | LLT | REGEX_MATCH | REGEX_NO_MATCH | REGEX_MATCH_CI | REGEX_NO_MATCH_CI
     ;
 
 valueExpression
@@ -87,6 +129,7 @@ valueExpression
 
 primaryExpression
     : parameterOrLiteral                                                             #defaultParamOrLiteral
+    | ident                                                                          #columnReference
     ;
 
 parameterOrLiteral
