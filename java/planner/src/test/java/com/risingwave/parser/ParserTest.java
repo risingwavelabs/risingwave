@@ -41,6 +41,17 @@ public class ParserTest {
     assertTrue(SqlParser.createStatement("select a from t where b != 1") instanceof SqlSelect);
   }
 
+  @Test
+  public void testSelectStar() {
+    assertTrue(SqlParser.createStatement("select * from t;") instanceof SqlSelect);
+    assertTrue(SqlParser.createStatement("select * from t where b = 1") instanceof SqlSelect);
+    assertTrue(SqlParser.createStatement("select * from t where b >= 1") instanceof SqlSelect);
+    assertTrue(SqlParser.createStatement("select * from t where b > 1") instanceof SqlSelect);
+    assertTrue(SqlParser.createStatement("select * from t where b <= 1") instanceof SqlSelect);
+    assertTrue(SqlParser.createStatement("select * from t where b < 1") instanceof SqlSelect);
+    assertTrue(SqlParser.createStatement("select * from t where b != 1") instanceof SqlSelect);
+  }
+
   private static void assertStatement(String query, SqlNode expected) {
     assertParsed(query, expected, SqlParser.createStatement(query));
   }

@@ -104,6 +104,11 @@ class AstBuilder extends SqlBaseBaseVisitor<SqlNode> {
     return op.createCall(getParserPos(ctx), visit(ctx.value), visit(ctx.right));
   }
 
+  @Override
+  public SqlNode visitSelectAll(SqlBaseParser.SelectAllContext ctx) {
+    return SqlNodeList.SINGLETON_STAR;
+  }
+
   private static SqlBinaryOperator getComparisonOperator(Token symbol) {
     switch (symbol.getType()) {
       case SqlBaseLexer.EQ:

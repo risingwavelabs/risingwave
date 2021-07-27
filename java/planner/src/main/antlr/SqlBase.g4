@@ -91,7 +91,7 @@ setQuant
 
 selectItem
     : expr (AS? ident)?                                                              #selectSingle
-    | qname '.' ASTERISK                                                             #selectAll
+//    | qname '.' ASTERISK                                                             #selectAll
     | ASTERISK                                                                       #selectAll
     ;
 
