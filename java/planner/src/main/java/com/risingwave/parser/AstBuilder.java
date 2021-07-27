@@ -25,7 +25,6 @@ import static java.util.stream.Collectors.toList;
 
 import com.risingwave.parser.antlr.v4.SqlBaseBaseVisitor;
 import com.risingwave.parser.antlr.v4.SqlBaseParser;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import org.antlr.v4.runtime.ParserRuleContext;
@@ -33,8 +32,10 @@ import org.apache.calcite.schema.ColumnStrategy;
 import org.apache.calcite.sql.SqlBasicTypeNameSpec;
 import org.apache.calcite.sql.SqlDataTypeSpec;
 import org.apache.calcite.sql.SqlIdentifier;
+import org.apache.calcite.sql.SqlInsert;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlNodeList;
+import org.apache.calcite.sql.SqlNumericLiteral;
 import org.apache.calcite.sql.ddl.SqlDdlNodes;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.type.SqlTypeName;
@@ -52,14 +53,61 @@ class AstBuilder extends SqlBaseBaseVisitor<SqlNode> {
     boolean notExists = context.EXISTS() != null;
     // FIXME: No clustered by/partitioned by/query for creating table now.
     // Visit each element (columns) and convert into Calcite format.
-    ArrayList<SqlNode> arr = new ArrayList<SqlNode>();
-    for (SqlBaseParser.TableElementContext eleCtx : context.tableElement()) {
-      arr.add(visit(eleCtx));
-    }
-    SqlNodeList tableElements = SqlNodeList.of(getParserPos(context.tableElement(0)), arr);
+    SqlNodeList tableElements = visitCollection(context.tableElement(), SqlNode.class);
     SqlNode tableName = visit(context.table());
     return SqlDdlNodes.createTable(
         getParserPos(context), false, notExists, (SqlIdentifier) tableName, tableElements, null);
+  }
+
+  // Insert
+  @Override
+  public SqlNode visitInsert(SqlBaseParser.InsertContext context) {
+    SqlNode tableName = visit(context.table());
+    SqlNode source = visit(context.insertSource());
+    return new SqlInsert(getParserPos(context), SqlNodeList.EMPTY, tableName, source, null);
+  }
+
+  @Override
+  public SqlNode visitQueryTermDefault(SqlBaseParser.QueryTermDefaultContext context) {
+    return visit(context.querySpec());
+  }
+
+  @Override
+  public SqlNode visitValuesRelation(SqlBaseParser.ValuesRelationContext context) {
+    return visitCollection(context.values(), SqlNode.class);
+  }
+
+  @Override
+  public SqlNode visitValues(SqlBaseParser.ValuesContext context) {
+    return visitCollection(context.expr(), SqlNode.class);
+  }
+
+  @Override
+  public SqlNode visitBooleanDefault(SqlBaseParser.BooleanDefaultContext context) {
+    return visit(context.predicated());
+  }
+
+  @Override
+  public SqlNode visitValueExpressionDefault(SqlBaseParser.ValueExpressionDefaultContext context) {
+    return visit(context.primaryExpression());
+  }
+
+  @Override
+  public SqlNode visitDefaultParamOrLiteral(SqlBaseParser.DefaultParamOrLiteralContext context) {
+    return visit(context.parameterOrLiteral());
+  }
+
+  @Override
+  public SqlNode visitSimpleLiteral(SqlBaseParser.SimpleLiteralContext context) {
+    // TODO: Support more literal type.
+    return SqlNumericLiteral.createExactNumeric(
+        context
+            .parameterOrSimpleLiteral()
+            .numericLiteral()
+            .integerLiteral()
+            .INTEGER_VALUE()
+            .getText(),
+        getParserPos(context));
   }
 
   // Column / Table definition
@@ -68,8 +116,7 @@ class AstBuilder extends SqlBaseBaseVisitor<SqlNode> {
     SqlIdentifier ident =
         new SqlIdentifier(context.ident().getText(), getParserPos(context.ident()));
     SqlNode type = visit(context.dataType());
-    List<SqlIdentifier> constraint =
-        visitCollection(context.columnConstraint(), SqlIdentifier.class);
+    SqlNodeList constraint = visitCollection(context.columnConstraint(), SqlIdentifier.class);
     // Now column constraint is expected to have only one.
     if (constraint.size() == 0 || constraint.size() > 1) {
       throw new ParsingException(
@@ -83,7 +130,7 @@ class AstBuilder extends SqlBaseBaseVisitor<SqlNode> {
         ident,
         (SqlDataTypeSpec) type,
         null,
-        constraint.get(0).names.get(0).equals("NOT_NULL")
+        ((SqlIdentifier) constraint.get(0)).names.get(0).equals("NOT_NULL")
             ? ColumnStrategy.NOT_NULLABLE
             : ColumnStrategy.NULLABLE);
   }
@@ -136,10 +183,7 @@ class AstBuilder extends SqlBaseBaseVisitor<SqlNode> {
   // Helpers
   private static SqlParserPos getParserPos(ParserRuleContext context) {
     return new SqlParserPos(
-        context.getStart().getLine(),
-        context.getStart().getCharPositionInLine(),
-        context.getStop().getLine(),
-        context.getStop().getCharPositionInLine());
+        context.getStart().getLine(), context.getStart().getCharPositionInLine());
   }
 
   private SqlTypeName convertToType(SqlIdentifier ident) {
@@ -152,7 +196,9 @@ class AstBuilder extends SqlBaseBaseVisitor<SqlNode> {
     }
   }
 
-  private <T> List<T> visitCollection(List<? extends ParserRuleContext> contexts, Class<T> clazz) {
-    return contexts.stream().map(this::visit).map(clazz::cast).collect(toList());
+  private <T extends SqlNode> SqlNodeList visitCollection(
+      List<? extends ParserRuleContext> contexts, Class<T> clazz) {
+    List<SqlNode> list = contexts.stream().map(this::visit).map(clazz::cast).collect(toList());
+    return SqlNodeList.of(getParserPos(contexts.get(0)), list);
   }
 }

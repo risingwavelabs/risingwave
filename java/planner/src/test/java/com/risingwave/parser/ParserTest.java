@@ -4,6 +4,7 @@ import static java.lang.String.format;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
+import org.apache.calcite.sql.SqlInsert;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlCreateTable;
 import org.junit.jupiter.api.Test;
@@ -17,10 +18,15 @@ public class ParserTest {
         SqlParser.createStatement(
                 "create table t (a int not null, b int not null, c int not null);")
             instanceof SqlCreateTable);
-    // TODO: Add more tests. But SqlParserPos is difficult to get.
-    //        assertStatement("create table t (a int not null);", new
-    // SqlCreateTable(SqlParserPos.ZERO, false, false, new SqlIdentifier("t", SqlParserPos.ZERO),
-    // ));
+  }
+
+  @Test
+  public void testInsertValues() {
+    assertTrue(SqlParser.createStatement("insert into t values (1);") instanceof SqlInsert);
+    assertTrue(SqlParser.createStatement("insert into t values (1, 2, 3);") instanceof SqlInsert);
+    assertTrue(
+        SqlParser.createStatement("insert into t values (1, 2, 3), (4, 5, 6);")
+            instanceof SqlInsert);
   }
 
   private static void assertStatement(String query, SqlNode expected) {

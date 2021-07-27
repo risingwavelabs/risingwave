@@ -37,9 +37,69 @@ statement
 createStmt
     : CREATE TABLE (IF NOT EXISTS)? table
                 '(' tableElement (',' tableElement)* ')'                           #createTable
+    | INSERT INTO table ('(' ident (',' ident)* ')')? insertSource                 #insert
+
 
     ;
 
+insertSource
+   : query
+   | '(' query ')'
+   ;
+
+query
+    : queryTerm
+    ;
+
+queryTerm
+    : querySpec                                                                      #queryTermDefault
+    ;
+
+querySpec
+//    : SELECT setQuant? selectItem (',' selectItem)*
+//      (FROM relation (',' relation)*)?
+//      where?
+//      (GROUP BY expr (',' expr)*)?
+//      (HAVING having=booleanExpression)?
+//      (WINDOW windows+=namedWindow (',' windows+=namedWindow)*)?                     #defaultQuerySpec
+    : VALUES values (',' values)*                                                    #valuesRelation
+    ;
+
+values
+    : '(' expr (',' expr)* ')'
+    ;
+
+expr
+    : booleanExpression
+    ;
+
+booleanExpression
+    : predicated                                                                     #booleanDefault
+    ;
+
+predicated
+    : valueExpression
+    ;
+
+valueExpression
+    : primaryExpression                                                              #valueExpressionDefault
+    ;
+
+primaryExpression
+    : parameterOrLiteral                                                             #defaultParamOrLiteral
+    ;
+
+parameterOrLiteral
+    : parameterOrSimpleLiteral                                                     #simpleLiteral
+    ;
+
+parameterOrSimpleLiteral
+    : numericLiteral
+    ;
+
+numericLiteral
+    : integerLiteral
+    ;
 table
     : qname                                                                        #tableName
     ;
