@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-import "proto/plan.proto";
-import "proto/data.proto";
-import "proto/common.proto";
+import "plan.proto";
+import "data.proto";
+import "common.proto";
 
 
 package risingwave.proto.computenode;

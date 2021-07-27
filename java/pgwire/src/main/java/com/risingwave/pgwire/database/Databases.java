@@ -1,5 +1,7 @@
 package com.risingwave.pgwire.database;
 
+import com.risingwave.common.exception.PgException;
+
 public class Databases {
   private static DatabaseManager singleton;
 

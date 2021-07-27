@@ -6,6 +6,7 @@ buildscript {
     }
     dependencies {
         classpath("com.diffplug.spotless:spotless-plugin-gradle:5.14.1")
+        classpath("com.google.protobuf:protobuf-gradle-plugin:0.8.17")
     }
 }
 
@@ -22,6 +23,10 @@ if (JavaVersion.current() != JavaVersion.VERSION_1_8) {
     throw GradleException("Only java 8 is supported!")
 }
 
+val bomProject = "bom"
+val appProjects = setOf("pgserver")
+
+
 subprojects {
     group = "com.risingwave"
     version = "0.0.1-SNAPSHOT"
@@ -33,7 +38,12 @@ subprojects {
 
     // bom is java-platform, can't apply java-library plugin
     if (name != "bom") {
-        apply(plugin = "java-library")
+
+        if (appProjects.contains(name)) {
+            apply(plugin = "application")
+        } else {
+            apply(plugin = "java-library")
+        }
 
         java {
             sourceCompatibility = JavaVersion.VERSION_1_8

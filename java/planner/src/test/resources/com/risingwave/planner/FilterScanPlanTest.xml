@@ -7,7 +7,7 @@ select * from t1
         </Resource>
         <Resource name="plan">
             <![CDATA[
-PhysicalFilterScan(table=[[test_schema, t1]], columns=[a,b])
+PhysicalFilterScan(table=[[test_schema, t1]], columns=[b,a])
             ]]>
         </Resource>
     </TestCase>

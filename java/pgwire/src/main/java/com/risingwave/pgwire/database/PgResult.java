@@ -1,5 +1,7 @@
 package com.risingwave.pgwire.database;
 
+import com.risingwave.common.exception.PgException;
+import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.pgwire.types.PgValue;
 import java.util.List;
 import org.jetbrains.annotations.NotNull;
@@ -7,7 +9,7 @@ import org.jetbrains.annotations.NotNull;
 /** The result of a statement. */
 public interface PgResult {
 
-  String getStatementType();
+  StatementType getStatementType();
 
   interface PgIter {
     @NotNull

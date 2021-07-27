@@ -5,7 +5,7 @@ import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPh
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.PHYSICAL;
 import static com.risingwave.planner.rules.BatchRuleSets.PHYSICAL_RULES;
 
-import com.risingwave.planner.context.ExecutionContext;
+import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.planner.planner.Planner;
 import com.risingwave.planner.program.ChainedOptimizerProgram;
 import com.risingwave.planner.program.HepOptimizerProgram;
@@ -34,7 +34,7 @@ public class BatchPlanner implements Planner<BatchPlan> {
 
     RelNode result = optimizerProgram.optimize(rawPlan, context);
 
-    return new BatchPlan(result);
+    return new BatchPlan((RisingWaveBatchPhyRel) result);
   }
 
   private static OptimizerProgram buildOptimizerProgram() {

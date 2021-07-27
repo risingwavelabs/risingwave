@@ -1,7 +1,7 @@
 package com.risingwave.pgwire.msg;
 
-import com.risingwave.pgwire.database.PgErrorCode;
-import com.risingwave.pgwire.database.PgException;
+import com.risingwave.common.exception.PgErrorCode;
+import com.risingwave.common.exception.PgException;
 import com.risingwave.pgwire.database.PgFieldDescriptor;
 import com.risingwave.pgwire.database.TransactionStatus;
 import com.risingwave.pgwire.types.PgValue;
@@ -66,7 +66,8 @@ public class Messages {
   // +-----+-----------+-----------------+
   // | 'C' | int32 len | str commandTag  |
   // +-----+-----------+-----------------+
-  public static void writeCommandComplete(String stmtType, int effectedRowsCnt, ByteBuf buf) {
+  public static void writeCommandComplete(
+      StatementType stmtType, int effectedRowsCnt, ByteBuf buf) {
     CommandComplete complete = new CommandComplete(stmtType, effectedRowsCnt);
     buf.writeByte('C');
     buf.writeInt(4 + complete.getTag().length() + 1);

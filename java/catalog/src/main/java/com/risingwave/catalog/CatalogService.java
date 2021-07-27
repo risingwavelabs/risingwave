@@ -9,6 +9,9 @@ import javax.annotation.concurrent.ThreadSafe;
 @ThreadSafe
 public interface CatalogService {
 
+  String DEFAULT_DATABASE_NAME = "dev";
+  String DEFAULT_SCHEMA_NAME = "main";
+
   default DatabaseCatalog createDatabase(String name) {
     return createDatabase(DatabaseCatalog.DatabaseName.of(name));
   }

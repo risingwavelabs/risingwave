@@ -1,25 +1,25 @@
-package com.risingwave.planner.context;
+package com.risingwave.execution.context;
 
 import static java.util.Objects.requireNonNull;
 
 import com.risingwave.catalog.CatalogService;
 import com.risingwave.catalog.SchemaCatalog;
-import com.risingwave.common.error.ExecutionError;
-import com.risingwave.common.exception.RisingWaveException;
-import java.util.Optional;
+import com.risingwave.common.config.Configuration;
 import org.apache.calcite.plan.Context;
 import org.apache.calcite.schema.SchemaPlus;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 public class ExecutionContext implements Context {
-  private final Optional<String> database;
-  private final Optional<String> schema;
+  private final Configuration conf;
+  private final String database;
+  private final String schema;
   private final CatalogService catalogService;
 
   private ExecutionContext(Builder builder) {
-    this.database = Optional.ofNullable(builder.database);
-    this.schema = Optional.ofNullable(builder.schema);
+    this.database = requireNonNull(builder.database, "Current database can't be null!");
+    this.schema = requireNonNull(builder.schema, "Current schema can't be null!");
     this.catalogService = requireNonNull(builder.catalogService, "Catalog service can't be null!");
+    this.conf = requireNonNull(builder.conf, "Configuration can't be null!");
   }
 
   public static Builder builder() {
@@ -30,16 +30,16 @@ public class ExecutionContext implements Context {
     return catalogService;
   }
 
-  public Optional<String> getDatabase() {
+  public String getDatabase() {
     return database;
   }
 
-  public Optional<String> getSchema() {
+  public String getSchema() {
     return schema;
   }
 
-  public Optional<SchemaCatalog.SchemaName> getCurrentSchema() {
-    return database.flatMap(db -> schema.map(s -> SchemaCatalog.SchemaName.of(db, s)));
+  public SchemaCatalog.SchemaName getCurrentSchema() {
+    return SchemaCatalog.SchemaName.of(database, schema);
   }
 
   /**
@@ -47,13 +47,8 @@ public class ExecutionContext implements Context {
    *
    * @return Current root schema.
    */
-  public Optional<SchemaPlus> getCalciteRootSchema() {
-    return getCurrentSchema().map(catalogService::getSchemaChecked).map(SchemaCatalog::plus);
-  }
-
-  public SchemaPlus getCalciteRootSchemaChecked() {
-    return getCalciteRootSchema()
-        .orElseThrow(() -> RisingWaveException.from(ExecutionError.CURRENT_SCHEMA_NOT_SET));
+  public SchemaPlus getCalciteRootSchema() {
+    return catalogService.getSchemaChecked(getCurrentSchema()).plus();
   }
 
   @Override
@@ -66,6 +61,7 @@ public class ExecutionContext implements Context {
   }
 
   public static class Builder {
+    private Configuration conf;
     private CatalogService catalogService;
     private String database;
     private String schema;
@@ -84,6 +80,11 @@ public class ExecutionContext implements Context {
 
     public Builder withSchema(String schema) {
       this.schema = schema;
+      return this;
+    }
+
+    public Builder withConfiguration(Configuration conf) {
+      this.conf = conf;
       return this;
     }
 

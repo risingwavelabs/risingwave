@@ -1,6 +1,6 @@
 package com.risingwave.planner.program;
 
-import com.risingwave.planner.context.ExecutionContext;
+import com.risingwave.execution.context.ExecutionContext;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.calcite.plan.RelOptRule;

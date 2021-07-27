@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /** A naive in memory implementation of {@link CatalogService}. */
 public class SimpleCatalogService implements CatalogService {
+
   private final AtomicInteger nextDatabaseId = new AtomicInteger(0);
 
   private final ConcurrentMap<DatabaseCatalog.DatabaseId, DatabaseCatalog> databaseById =
@@ -29,6 +30,8 @@ public class SimpleCatalogService implements CatalogService {
     DatabaseCatalog database =
         new DatabaseCatalog(new DatabaseCatalog.DatabaseId(nextDatabaseId), databaseName);
     registerDatabase(database);
+
+    database.createSchema(DEFAULT_SCHEMA_NAME);
 
     return database;
   }

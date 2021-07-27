@@ -1,17 +1,18 @@
 package com.risingwave.pgwire.duckdb;
 
 import com.risingwave.pgwire.database.PgResult;
+import com.risingwave.pgwire.msg.StatementType;
 import java.sql.ResultSet;
 import java.util.Locale;
 import org.jetbrains.annotations.NotNull;
 
 public class JdbcResult implements PgResult {
-  private final String stmtType;
+  private final StatementType stmtType;
   private int rowsCnt;
   private ResultSet res;
 
-  private static String parseStatementType(String sql) {
-    return sql.trim().split(" ", 2)[0].toUpperCase(Locale.ENGLISH);
+  private static StatementType parseStatementType(String sql) {
+    return StatementType.valueOf(sql.trim().split(" ", 2)[0].toUpperCase(Locale.ENGLISH));
   }
 
   JdbcResult(String sql, ResultSet res) {
@@ -27,7 +28,7 @@ public class JdbcResult implements PgResult {
   }
 
   @Override
-  public String getStatementType() {
+  public StatementType getStatementType() {
     return this.stmtType;
   }
 

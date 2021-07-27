@@ -1,5 +1,8 @@
 package com.risingwave.pgwire.database;
 
+import com.risingwave.common.exception.PgErrorCode;
+import com.risingwave.common.exception.PgException;
+
 public class PgFieldDescriptor {
   public final String name;
   public final int tableOid;

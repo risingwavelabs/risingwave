@@ -1,5 +1,10 @@
 package com.risingwave.planner.rel.physical.batch;
 
+import static java.util.Objects.requireNonNull;
+
+import com.risingwave.proto.plan.PlanFragment;
+import com.risingwave.proto.plan.PlanNode;
+import com.risingwave.proto.plan.ShuffleInfo;
 import org.apache.calcite.rel.RelNode;
 
 /**
@@ -7,13 +12,22 @@ import org.apache.calcite.rel.RelNode;
  * streaming execution.
  */
 public class BatchPlan {
-  private final RelNode root;
+  private final RisingWaveBatchPhyRel root;
 
-  public BatchPlan(RelNode root) {
-    this.root = root;
+  public BatchPlan(RisingWaveBatchPhyRel root) {
+    this.root = requireNonNull(root, "Root can't be null!");
   }
 
   public RelNode getRoot() {
     return root;
+  }
+
+  public PlanFragment serialize() {
+    ShuffleInfo shuffleInfo =
+        ShuffleInfo.newBuilder().setPartitionMode(ShuffleInfo.PartitionMode.SINGLE).build();
+
+    PlanNode rootNode = root.serialize();
+
+    return PlanFragment.newBuilder().setRoot(rootNode).setShuffleInfo(shuffleInfo).build();
   }
 }

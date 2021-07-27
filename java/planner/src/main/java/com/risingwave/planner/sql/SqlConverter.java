@@ -3,7 +3,7 @@ package com.risingwave.planner.sql;
 import static java.util.Objects.requireNonNull;
 
 import com.risingwave.common.datatype.RisingWaveTypeFactory;
-import com.risingwave.planner.context.ExecutionContext;
+import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.planner.cost.RisingWaveCostFactory;
 import java.util.Collections;
 import java.util.List;
@@ -55,7 +55,7 @@ public class SqlConverter {
 
     private Builder(ExecutionContext context) {
       this.context = context;
-      this.rootSchema = context.getCalciteRootSchemaChecked();
+      this.rootSchema = context.getCalciteRootSchema();
     }
 
     public Builder withDefaultSchema(List<String> newDefaultSchema) {

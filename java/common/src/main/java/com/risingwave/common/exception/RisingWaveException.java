@@ -3,6 +3,7 @@ package com.risingwave.common.exception;
 import com.risingwave.common.error.ErrorCode;
 import com.risingwave.common.error.ErrorDesc;
 
+// TODO: Deprecate this class
 public class RisingWaveException extends RuntimeException {
   private ErrorDesc errorDesc;
 

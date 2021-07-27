@@ -4,8 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.risingwave.catalog.CatalogService;
 import com.risingwave.catalog.SimpleCatalogService;
-import com.risingwave.planner.context.ExecutionContext;
-import com.risingwave.planner.handler.SqlHandlerFactory;
+import com.risingwave.common.config.Configuration;
+import com.risingwave.execution.context.ExecutionContext;
+import com.risingwave.execution.handler.SqlHandlerFactory;
 import com.risingwave.planner.planner.batch.BatchPlanner;
 import com.risingwave.planner.rel.physical.batch.BatchPlan;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
@@ -44,6 +45,7 @@ public abstract class BatchPlanTestBase {
             .withCatalogService(catalogService)
             .withDatabase(TEST_DB_NAME)
             .withSchema(TEST_SCHEMA_NAME)
+            .withConfiguration(new Configuration())
             .build();
 
     initTables();

@@ -1,9 +1,9 @@
-package com.risingwave.planner.handler;
+package com.risingwave.execution.handler;
 
 import com.google.common.collect.ImmutableMap;
 import com.risingwave.common.error.ExecutionError;
 import com.risingwave.common.exception.RisingWaveException;
-import com.risingwave.planner.context.ExecutionContext;
+import com.risingwave.execution.context.ExecutionContext;
 import java.lang.reflect.Constructor;
 import java.util.Arrays;
 import org.apache.calcite.sql.SqlKind;
@@ -21,7 +21,7 @@ import org.slf4j.LoggerFactory;
  * <p>A {@link SqlHandler} implementation has following requirements:
  *
  * <ul>
- *   <li>Must lie in package {@link com.risingwave.planner.handler}
+ *   <li>Must lie in package {@link com.risingwave.execution.handler}
  *   <li>A public constructor without argument.
  *   <li>Annotated with {@link HandlerSignature} to provides sql kinds it can handle
  *   <li>Implements {@link SqlHandler}.

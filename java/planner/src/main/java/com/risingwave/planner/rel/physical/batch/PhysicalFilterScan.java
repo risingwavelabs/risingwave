@@ -3,9 +3,12 @@ package com.risingwave.planner.rel.physical.batch;
 import static com.google.common.base.Preconditions.checkArgument;
 
 import com.google.common.collect.ImmutableList;
+import com.google.protobuf.Any;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.planner.rel.common.FilterScanBase;
+import com.risingwave.proto.plan.FilterScanNode;
+import com.risingwave.proto.plan.PlanNode;
 import java.util.Collections;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
@@ -37,5 +40,17 @@ public class PhysicalFilterScan extends FilterScanBase implements RisingWaveBatc
         table,
         tableCatalog.getId(),
         tableCatalog.getAllColumnIds());
+  }
+
+  @Override
+  public PlanNode serialize() {
+    FilterScanNode.Builder filterScanNodeBuilder =
+        FilterScanNode.newBuilder().setTableId(tableId.getValue());
+    columnIds.forEach(c -> filterScanNodeBuilder.addColumnIds(c.getValue()));
+
+    return PlanNode.newBuilder()
+        .setNodeType(PlanNode.PlanNodeType.FILTER_SCAN)
+        .setBody(Any.pack(filterScanNodeBuilder.build()))
+        .build();
   }
 }

@@ -4,6 +4,7 @@ plugins {
 
 val junit5Version = "5.7.2"
 val calciteVersion = "1.27.0"
+val grpcVersion = "1.39.0"
 
 dependencies {
     constraints {
@@ -18,6 +19,10 @@ dependencies {
         api("io.netty:netty-buffer:4.1.66.Final")
         api("org.duckdb:duckdb_jdbc:0.2.7")
         api("org.reflections:reflections:0.9.12")
+        api("com.github.pcj:google-options:1.0.0")
+        api("io.grpc:grpc-netty-shaded:${grpcVersion}")
+        api("io.grpc:grpc-protobuf:${grpcVersion}")
+        api("io.grpc:grpc-stub:${grpcVersion}")
         runtime("ch.qos.logback:logback-classic:1.2.3")
         runtime("org.junit.jupiter:junit-jupiter-engine:$junit5Version")
         runtime("org.junit.jupiter:junit-jupiter-params:$junit5Version")

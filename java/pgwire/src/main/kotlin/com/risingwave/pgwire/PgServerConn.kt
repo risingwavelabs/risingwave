@@ -1,5 +1,6 @@
 package com.risingwave.pgwire
 
+import com.risingwave.pgwire.database.DatabaseManager
 import io.ktor.network.sockets.Socket
 import io.ktor.network.sockets.openReadChannel
 import io.ktor.network.sockets.openWriteChannel

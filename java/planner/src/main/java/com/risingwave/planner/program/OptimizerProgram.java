@@ -1,6 +1,6 @@
 package com.risingwave.planner.program;
 
-import com.risingwave.planner.context.ExecutionContext;
+import com.risingwave.execution.context.ExecutionContext;
 import org.apache.calcite.rel.RelNode;
 
 /** An optimizer program is used to group a collection of op */

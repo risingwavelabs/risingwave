@@ -1,7 +1,7 @@
 package com.risingwave.planner.program;
 
 import com.google.common.collect.ImmutableList;
-import com.risingwave.planner.context.ExecutionContext;
+import com.risingwave.execution.context.ExecutionContext;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;

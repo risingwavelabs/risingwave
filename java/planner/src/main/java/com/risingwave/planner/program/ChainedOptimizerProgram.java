@@ -7,7 +7,7 @@ import com.google.common.collect.ImmutableMap;
 import com.risingwave.common.error.PlannerError;
 import com.risingwave.common.exception.RisingWaveException;
 import com.risingwave.common.util.Utils;
-import com.risingwave.planner.context.ExecutionContext;
+import com.risingwave.execution.context.ExecutionContext;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;

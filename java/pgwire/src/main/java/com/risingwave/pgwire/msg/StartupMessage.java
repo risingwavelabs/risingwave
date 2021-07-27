@@ -1,7 +1,7 @@
 package com.risingwave.pgwire.msg;
 
-import com.risingwave.pgwire.database.PgErrorCode;
-import com.risingwave.pgwire.database.PgException;
+import com.risingwave.common.exception.PgErrorCode;
+import com.risingwave.common.exception.PgException;
 import java.nio.charset.StandardCharsets;
 
 // Startup Message

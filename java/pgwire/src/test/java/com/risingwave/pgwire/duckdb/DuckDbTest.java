@@ -3,9 +3,9 @@ package com.risingwave.pgwire.duckdb;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import com.risingwave.common.exception.PgException;
 import com.risingwave.pgwire.database.Database;
 import com.risingwave.pgwire.database.Databases;
-import com.risingwave.pgwire.database.PgException;
 import com.risingwave.pgwire.database.PgResult;
 import com.risingwave.pgwire.types.PgValue;
 import java.util.ArrayList;

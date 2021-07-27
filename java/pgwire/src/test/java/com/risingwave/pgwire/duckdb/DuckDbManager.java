@@ -1,9 +1,9 @@
 package com.risingwave.pgwire.duckdb;
 
+import com.risingwave.common.exception.PgErrorCode;
+import com.risingwave.common.exception.PgException;
 import com.risingwave.pgwire.database.Database;
 import com.risingwave.pgwire.database.DatabaseManager;
-import com.risingwave.pgwire.database.PgErrorCode;
-import com.risingwave.pgwire.database.PgException;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import org.slf4j.Logger;

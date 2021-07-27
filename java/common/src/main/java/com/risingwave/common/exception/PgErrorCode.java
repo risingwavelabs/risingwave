@@ -22,7 +22,7 @@
 // Copied from https://github.com/crate/crate df77bd0
 // crate/server/src/main/java/io/crate/protocols/postgres/PGErrorStatus.java
 
-package com.risingwave.pgwire.database;
+package com.risingwave.common.exception;
 
 public enum PgErrorCode {
   SUCCESSFUL_COMPLETION("00000", "successful_completion"),

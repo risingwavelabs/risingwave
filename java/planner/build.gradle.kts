@@ -10,6 +10,8 @@ dependencies {
     api("org.apache.calcite:calcite-core")
     api(project(":common"))
     api(project(":catalog"))
+    api(project(":pgwire"))
+    implementation(project(":proto"))
     api("org.slf4j:slf4j-api")
     api("org.reflections:reflections")
     testImplementation("org.junit.jupiter:junit-jupiter-api")

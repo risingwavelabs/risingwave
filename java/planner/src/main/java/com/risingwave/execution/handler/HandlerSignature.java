@@ -1,4 +1,4 @@
-package com.risingwave.planner.handler;
+package com.risingwave.execution.handler;
 
 import java.lang.annotation.Documented;
 import java.lang.annotation.ElementType;

@@ -1,5 +1,6 @@
 package com.risingwave.pgwire
 
+import com.risingwave.pgwire.database.DatabaseManager
 import io.ktor.network.selector.ActorSelectorManager
 import io.ktor.network.sockets.ServerSocket
 import io.ktor.network.sockets.Socket
@@ -11,7 +12,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.slf4j.LoggerFactory
 
-class PgServer(private val port: Int) {
+class PgServer(private val port: Int, private val databaseManager: DatabaseManager) {
   companion object {
     private val log = LoggerFactory.getLogger(PgServer::class.java)
   }

@@ -6,9 +6,10 @@ import com.risingwave.pgwire.duckdb.DuckDbManager;
 
 public class DuckServer {
   public static void main(String[] args) {
-    Databases.setDatabaseManager(new DuckDbManager());
+    DuckDbManager duckDbManager = new DuckDbManager();
+    Databases.setDatabaseManager(duckDbManager);
 
-    PgServer srv = new PgServer(12345);
+    PgServer srv = new PgServer(12345, duckDbManager);
     srv.serve();
   }
 }

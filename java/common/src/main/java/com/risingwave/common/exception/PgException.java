@@ -1,7 +1,7 @@
-package com.risingwave.pgwire.database;
+package com.risingwave.common.exception;
 
 /** PgException is the postgres-specific exception. Every instance binds with an error code. */
-public class PgException extends Exception {
+public class PgException extends RuntimeException {
 
   public PgException(PgErrorCode code, String format, Object... args) {
     super(String.format(format, args));
