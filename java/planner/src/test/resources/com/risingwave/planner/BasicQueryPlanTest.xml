@@ -2,12 +2,12 @@
     <TestCase name="select all columns from table">
         <Resource name="sql">
             <![CDATA[
-select * from t1
+select * from t
             ]]>
         </Resource>
         <Resource name="plan">
             <![CDATA[
-PhysicalFilterScan(table=[[test_schema, t1]], columns=[b,a])
+PhysicalFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])
             ]]>
         </Resource>
     </TestCase>

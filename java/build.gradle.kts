@@ -57,6 +57,9 @@ subprojects {
                 importOrder() // standard import order
                 removeUnusedImports()
                 googleJavaFormat()
+
+                // This file fails spotlessApply, which can only be fixed when upgraded to java 11+
+                targetExclude("src/main/java/com/risingwave/sql/SqlFormatter.java")
             }
         }
 

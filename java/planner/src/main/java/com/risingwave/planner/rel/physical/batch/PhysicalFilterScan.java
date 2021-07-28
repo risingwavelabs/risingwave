@@ -39,7 +39,7 @@ public class PhysicalFilterScan extends FilterScanBase implements RisingWaveBatc
         Collections.emptyList(),
         table,
         tableCatalog.getId(),
-        tableCatalog.getAllColumnIds());
+        tableCatalog.getAllColumnIdsSorted());
   }
 
   @Override

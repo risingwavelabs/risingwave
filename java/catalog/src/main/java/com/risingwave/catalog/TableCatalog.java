@@ -8,7 +8,9 @@ import com.risingwave.common.entity.NonRootLikeBase;
 import com.risingwave.common.error.MetaServiceError;
 import com.risingwave.common.exception.RisingWaveException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentMap;
@@ -74,6 +76,12 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
 
   public ImmutableList<ColumnCatalog.ColumnId> getAllColumnIds() {
     return ImmutableList.copyOf(columnById.keySet());
+  }
+
+  public ImmutableList<ColumnCatalog.ColumnId> getAllColumnIdsSorted() {
+    ColumnCatalog.ColumnId[] columnIds = columnById.keySet().toArray(new ColumnCatalog.ColumnId[0]);
+    Arrays.sort(columnIds, Comparator.comparingInt(NonRootLikeBase::getValue));
+    return ImmutableList.copyOf(columnIds);
   }
 
   public Optional<ColumnCatalog> getColumn(ColumnCatalog.ColumnId columnId) {

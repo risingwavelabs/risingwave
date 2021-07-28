@@ -9,8 +9,9 @@ import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ArgumentsSource;
 
+/** Contains query plan for basic query statements, e.g. aggregation, filter scan. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-public class FilterScanPlanTest extends BatchPlanTestBase {
+public class BasicQueryPlanTest extends BatchPlanTestBase {
 
   @BeforeAll
   public void initAll() {

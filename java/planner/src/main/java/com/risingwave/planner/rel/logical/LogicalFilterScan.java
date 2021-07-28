@@ -42,6 +42,6 @@ public class LogicalFilterScan extends FilterScanBase implements RisingWaveLogic
         Collections.emptyList(),
         table,
         tableCatalog.getId(),
-        tableCatalog.getAllColumnIds());
+        tableCatalog.getAllColumnIdsSorted());
   }
 }

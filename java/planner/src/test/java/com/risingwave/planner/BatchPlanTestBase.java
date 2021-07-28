@@ -12,16 +12,13 @@ import com.risingwave.planner.rel.physical.batch.BatchPlan;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
 import com.risingwave.planner.util.PlannerTestCase;
 import com.risingwave.planner.util.PlannerTestDdlLoader;
+import com.risingwave.sql.parser.SqlParser;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.List;
-import org.apache.calcite.config.Lex;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.sql.SqlNode;
-import org.apache.calcite.sql.parser.SqlParseException;
-import org.apache.calcite.sql.parser.SqlParser;
-import org.apache.calcite.sql.parser.ddl.SqlDdlParserImpl;
 
 public abstract class BatchPlanTestBase {
   private static final String TEST_DB_NAME = "test_db";
@@ -63,26 +60,24 @@ public abstract class BatchPlanTestBase {
   }
 
   protected SqlNode parseDdl(String sql) {
-    try {
-      SqlParser.Config config =
-          SqlParser.Config.DEFAULT
-              .withCaseSensitive(true)
-              .withLex(Lex.MYSQL_ANSI)
-              .withParserFactory(SqlDdlParserImpl.FACTORY);
-      return SqlParser.create(sql, config).parseQuery();
-    } catch (SqlParseException e) {
-      throw new RuntimeException(e);
-    }
+    return SqlParser.createCalciteStatement(sql);
+    //      SqlParser config =
+    //          SqlParser.Config.DEFAULT
+    //              .withCaseSensitive(true)
+    //              .withLex(Lex.MYSQL_ANSI)
+    //              .withParserFactory(SqlDdlParserImpl.FACTORY);
+    //      return SqlParser.create(sql, config).parseQuery();
   }
 
   protected SqlNode parseSql(String sql) {
-    try {
-      SqlParser.Config config =
-          SqlParser.Config.DEFAULT.withCaseSensitive(true).withLex(Lex.MYSQL_ANSI);
-      return SqlParser.create(sql, config).parseQuery();
-    } catch (SqlParseException e) {
-      throw new RuntimeException(e);
-    }
+    //    try {
+    //      SqlParser.Config config =
+    //          SqlParser.Config.DEFAULT.withCaseSensitive(true).withLex(Lex.MYSQL_ANSI);
+    //      return SqlParser.create(sql, config).parseQuery();
+    //    } catch (SqlParseException e) {
+    //      throw new RuntimeException(e);
+    //    }
+    return SqlParser.createCalciteStatement(sql);
   }
 
   protected void runTestCase(PlannerTestCase testCase) {

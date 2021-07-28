@@ -15,6 +15,10 @@ public class RisingWaveTypeFactory extends JavaTypeFactoryImpl {
         return new NumericTypeBase(SqlTypeName.INTEGER, 4);
       case BIGINT:
         return new NumericTypeBase(SqlTypeName.BIGINT, 8);
+      case FLOAT:
+        return new NumericTypeBase(SqlTypeName.FLOAT, 4);
+      case DOUBLE:
+        return new NumericTypeBase(SqlTypeName.DOUBLE, 8);
       default:
         return super.createSqlType(sqlType);
     }

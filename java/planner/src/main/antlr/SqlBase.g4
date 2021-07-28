@@ -19,69 +19,108 @@
  * software solely pursuant to the terms of the relevant commercial agreement.
  */
 
-// Minimal grammar file, only include what we need from Crate 2.0.
 grammar SqlBase;
 
 @header {
-    package com.risingwave.parser.antlr.v4;
+    package com.risingwave.sql.parser.antlr.v4;
 }
 
 singleStatement
     : statement SEMICOLON? EOF
     ;
 
+singleExpression
+    : expr EOF
+    ;
+
 statement
     : query                                                                          #default
+    | BEGIN (WORK | TRANSACTION)? (transactionMode (',' transactionMode)*)?          #begin
+    | START TRANSACTION (transactionMode (',' transactionMode)*)?                    #startTransaction
+    | COMMIT                                                                         #commit
+    | EXPLAIN (ANALYZE)? statement                                                   #explain
+    | OPTIMIZE TABLE tableWithPartitions withProperties?                             #optimize
+    | REFRESH TABLE tableWithPartitions                                              #refreshTable
+    | UPDATE aliasedRelation
+        SET assignment (',' assignment)*
+        where?
+        returning?                                                                   #update
+    | DELETE FROM aliasedRelation where?                                             #delete
+    | SHOW (TRANSACTION ISOLATION LEVEL | TRANSACTION_ISOLATION)                     #showTransaction
+    | SHOW CREATE TABLE table                                                        #showCreateTable
+    | SHOW TABLES ((FROM | IN) qname)? (LIKE pattern=stringLiteral | where)?         #showTables
+    | SHOW SCHEMAS (LIKE pattern=stringLiteral | where)?                             #showSchemas
+    | SHOW COLUMNS (FROM | IN) tableName=qname ((FROM | IN) schema=qname)?
+        (LIKE pattern=stringLiteral | where)?                                        #showColumns
+    | SHOW (qname | ALL)                                                             #showSessionParameter
+    | ALTER TABLE alterTableDefinition ADD COLUMN? addColumnDefinition               #addColumn
+    | ALTER TABLE alterTableDefinition DROP CONSTRAINT ident                         #dropCheckConstraint
+    | ALTER TABLE alterTableDefinition
+        (SET '(' genericProperties ')' | RESET ('(' ident (',' ident)* ')')?)        #alterTableProperties
+    | ALTER BLOB TABLE alterTableDefinition
+        (SET '(' genericProperties ')' | RESET ('(' ident (',' ident)* ')')?)        #alterBlobTableProperties
+    | ALTER (BLOB)? TABLE alterTableDefinition (OPEN | CLOSE)                        #alterTableOpenClose
+    | ALTER (BLOB)? TABLE alterTableDefinition RENAME TO qname                       #alterTableRename
+    | ALTER (BLOB)? TABLE alterTableDefinition REROUTE rerouteOption                 #alterTableReroute
+    | ALTER CLUSTER REROUTE RETRY FAILED                                             #alterClusterRerouteRetryFailed
+    | ALTER CLUSTER SWAP TABLE source=qname TO target=qname withProperties?          #alterClusterSwapTable
+    | ALTER CLUSTER DECOMMISSION node=expr                                           #alterClusterDecommissionNode
+    | ALTER CLUSTER GC DANGLING ARTIFACTS                                            #alterClusterGCDanglingArtifacts
+    | ALTER USER name=ident SET '(' genericProperties ')'                            #alterUser
+    | RESET GLOBAL primaryExpression (',' primaryExpression)*                        #resetGlobal
+    | SET (SESSION CHARACTERISTICS AS)? TRANSACTION
+        transactionMode (',' transactionMode)*                                       #setTransaction
+    | SET (SESSION | LOCAL)? SESSION AUTHORIZATION
+        (DEFAULT | username=stringLiteralOrIdentifier)                               #setSessionAuthorization
+    | RESET SESSION AUTHORIZATION                                                    #resetSessionAuthorization
+    | SET (SESSION | LOCAL)? qname
+        (EQ | TO) (DEFAULT | setExpr (',' setExpr)*)                                 #set
+    | SET GLOBAL (PERSISTENT | TRANSIENT)?
+        setGlobalAssignment (',' setGlobalAssignment)*                               #setGlobal
+    | SET LICENSE stringLiteral                                                      #setLicense
+    | KILL (ALL | jobId=parameterOrString)                                           #kill
+    | INSERT INTO table ('(' ident (',' ident)* ')')? insertSource
+        onConflict?
+        returning?                                                                   #insert
+    | RESTORE SNAPSHOT qname
+        (ALL | METADATA | TABLE tableWithPartitions | metatypes=idents)
+        withProperties?                                                              #restore
+    | COPY tableWithPartition FROM path=expr withProperties? (RETURN SUMMARY)?       #copyFrom
+    | COPY tableWithPartition columns? where?
+        TO DIRECTORY? path=expr withProperties?                                      #copyTo
+    | DROP BLOB TABLE (IF EXISTS)? table                                             #dropBlobTable
+    | DROP TABLE (IF EXISTS)? table                                                  #dropTable
+    | DROP ALIAS qname                                                               #dropAlias
+    | DROP REPOSITORY ident                                                          #dropRepository
+    | DROP SNAPSHOT qname                                                            #dropSnapshot
+    | DROP FUNCTION (IF EXISTS)? name=qname
+        '(' (functionArgument (',' functionArgument)*)? ')'                          #dropFunction
+    | DROP USER (IF EXISTS)? name=ident                                              #dropUser
+    | DROP VIEW (IF EXISTS)? names=qnames                                            #dropView
+    | DROP ANALYZER name=ident                                                       #dropAnalyzer
+    | GRANT (priviliges=idents | ALL PRIVILEGES?)
+        (ON clazz qnames)? TO users=idents                                           #grantPrivilege
+    | DENY (priviliges=idents | ALL PRIVILEGES?)
+        (ON clazz qnames)? TO users=idents                                           #denyPrivilege
+    | REVOKE (privileges=idents | ALL PRIVILEGES?)
+        (ON clazz qnames)? FROM users=idents                                         #revokePrivilege
     | createStmt                                                                     #create
+    | DEALLOCATE (PREPARE)? (ALL | prepStmt=stringLiteralOrIdentifierOrQname)        #deallocate
+    | ANALYZE                                                                        #analyze
+    | DISCARD (ALL | PLANS | SEQUENCES | TEMPORARY | TEMP)                           #discard
     ;
 
-createStmt
-    : CREATE TABLE (IF NOT EXISTS)? table
-                '(' tableElement (',' tableElement)* ')'                           #createTable
-    | INSERT INTO table ('(' ident (',' ident)* ')')? insertSource                 #insert
-
-
-    ;
-
-insertSource
-   : query
-   | '(' query ')'
-   ;
-
-query
-    : queryTerm
+query:
+      queryTerm
+      (ORDER BY sortItem (',' sortItem)*)?
+      (LIMIT limit=parameterOrInteger)?
+      (OFFSET offset=parameterOrInteger)?
     ;
 
 queryTerm
     : querySpec                                                                      #queryTermDefault
-    ;
-
-querySpec
-    : SELECT setQuant? selectItem (',' selectItem)*
-      (FROM relation (',' relation)*)?
-      where?
-      (GROUP BY expr (',' expr)*)?
-      (HAVING having=booleanExpression)?                    #defaultQuerySpec
-    | VALUES values (',' values)*                                                    #valuesRelation
-    ;
-
-relation
-//    : left=relation
-//      ( CROSS JOIN right=aliasedRelation
-//      | joinType JOIN rightRelation=relation joinCriteria
-//      | NATURAL joinType JOIN right=aliasedRelation
-//      )                                                                              #joinRelation
-    : aliasedRelation                                                                #relationDefault
-    ;
-
-aliasedRelation
-    : relationPrimary (AS? ident )?
-    ;
-
-relationPrimary
-    : table                                                                          #tableRelation
-//    | '(' query ')'                                                                  #subqueryRelation
-//    | '(' relation ')'                                                               #parenthesizedRelation
+    | first=querySpec operator=(INTERSECT | EXCEPT) second=querySpec                 #setOperation
+    | left=queryTerm operator=UNION setQuant? right=queryTerm                        #setOperation
     ;
 
 setQuant
@@ -89,18 +128,80 @@ setQuant
     | ALL
     ;
 
-selectItem
-    : expr (AS? ident)?                                                              #selectSingle
-//    | qname '.' ASTERISK                                                             #selectAll
-    | ASTERISK                                                                       #selectAll
+sortItem
+    : expr ordering=(ASC | DESC)? (NULLS nullOrdering=(FIRST | LAST))?
     ;
 
-values
-    : '(' expr (',' expr)* ')'
+querySpec
+    : SELECT setQuant? selectItem (',' selectItem)*
+      (FROM relation (',' relation)*)?
+      where?
+      (GROUP BY expr (',' expr)*)?
+      (HAVING having=booleanExpression)?
+      (WINDOW windows+=namedWindow (',' windows+=namedWindow)*)?                     #defaultQuerySpec
+    | VALUES values (',' values)*                                                    #valuesRelation
+    ;
+
+selectItem
+    : expr (AS? ident)?                                                              #selectSingle
+    | qname '.' ASTERISK                                                             #selectAll
+    | ASTERISK                                                                       #selectAll
     ;
 
 where
     : WHERE condition=booleanExpression
+    ;
+
+returning
+    : RETURNING selectItem (',' selectItem)*
+    ;
+
+filter
+    : FILTER '(' where ')'
+    ;
+
+relation
+    : left=relation
+      ( CROSS JOIN right=aliasedRelation
+      | joinType JOIN rightRelation=relation joinCriteria
+      | NATURAL joinType JOIN right=aliasedRelation
+      )                                                                              #joinRelation
+    | aliasedRelation                                                                #relationDefault
+    ;
+
+joinType
+    : INNER?
+    | LEFT OUTER?
+    | RIGHT OUTER?
+    | FULL OUTER?
+    ;
+
+joinCriteria
+    : ON booleanExpression
+    | USING '(' ident (',' ident)* ')'
+    ;
+
+aliasedRelation
+    : relationPrimary (AS? ident aliasedColumns?)?
+    ;
+
+relationPrimary
+    : table                                                                          #tableRelation
+    | '(' query ')'                                                                  #subqueryRelation
+    | '(' relation ')'                                                               #parenthesizedRelation
+    ;
+
+tableWithPartition
+    : qname ( PARTITION '(' assignment ( ',' assignment )* ')')?
+    ;
+
+table
+    : qname                                                                          #tableName
+    | qname '(' valueExpression? (',' valueExpression)* ')'                          #tableFunction
+    ;
+
+aliasedColumns
+    : '(' ident (',' ident)* ')'
     ;
 
 expr
@@ -109,6 +210,11 @@ expr
 
 booleanExpression
     : predicated                                                                     #booleanDefault
+    | NOT booleanExpression                                                          #logicalNot
+    | left=booleanExpression operator=AND right=booleanExpression                    #logicalBinary
+    | left=booleanExpression operator=OR right=booleanExpression                     #logicalBinary
+    | MATCH '(' matchPredicateIdents ',' term=primaryExpression ')'
+        (USING matchType=ident withProperties?)?                                     #match
     ;
 
 predicated
@@ -117,74 +223,456 @@ predicated
 
 predicate[ParserRuleContext value]
     : cmpOp right=valueExpression                                                    #comparison
+    | cmpOp setCmpQuantifier primaryExpression                                       #quantifiedComparison
+    | NOT? BETWEEN lower=valueExpression AND upper=valueExpression                   #between
+    | NOT? IN '(' expr (',' expr)* ')'                                               #inList
+    | NOT? IN subqueryExpression                                                     #inSubquery
+    | NOT? (LIKE | ILIKE) pattern=valueExpression (ESCAPE escape=valueExpression)?   #like
+    | NOT? (LIKE | ILIKE) quant=setCmpQuantifier '(' v=valueExpression')'
+        (ESCAPE escape=valueExpression)?                                             #arrayLike
+    | IS NOT? NULL                                                                   #nullPredicate
+    | IS NOT? DISTINCT FROM right=valueExpression                                    #distinctFrom
+    ;
+
+valueExpression
+    : primaryExpression                                                              #valueExpressionDefault
+    | operator=(MINUS | PLUS) valueExpression                                        #arithmeticUnary
+    | left=valueExpression operator=(ASTERISK | SLASH | PERCENT)
+        right=valueExpression                                                        #arithmeticBinary
+    | left=valueExpression operator=(PLUS | MINUS) right=valueExpression             #arithmeticBinary
+    | left=valueExpression CONCAT right=valueExpression                              #concatenation
+    | dataType stringLiteral                                                         #fromStringLiteralCast
+    ;
+
+primaryExpression
+    : parameterOrLiteral                                                             #defaultParamOrLiteral
+    | explicitFunction                                                               #explicitFunctionDefault
+    | qname '(' ASTERISK ')' filter? over?                                           #functionCall
+    | ident                                                                          #columnReference
+    | qname '(' (setQuant? expr (',' expr)*)? ')' filter? over?                      #functionCall
+    | subqueryExpression                                                             #subqueryExpressionDefault
+    | '(' base=primaryExpression ')' '.' fieldName=ident                             #recordSubscript
+    | '(' expr ')'                                                                   #nestedExpression
+    // This is an extension to ANSI SQL, which considers EXISTS to be a <boolean expression>
+    | EXISTS '(' query ')'                                                           #exists
+    | value=primaryExpression '[' index=valueExpression ']'                          #subscript
+    | ident ('.' ident)*                                                             #dereference
+    | primaryExpression CAST_OPERATOR dataType                                       #doubleColonCast
+    | timestamp=primaryExpression AT TIME ZONE zone=primaryExpression                #atTimezone
+    | 'ARRAY'? '[]'                                                                  #emptyArray
+    ;
+
+explicitFunction
+    : name=CURRENT_DATE                                                              #specialDateTimeFunction
+    | name=CURRENT_TIME ('(' precision=integerLiteral')')?                           #specialDateTimeFunction
+    | name=CURRENT_TIMESTAMP ('(' precision=integerLiteral')')?                      #specialDateTimeFunction
+    | CURRENT_SCHEMA                                                                 #currentSchema
+    | (CURRENT_USER | USER)                                                          #currentUser
+    | SESSION_USER                                                                   #sessionUser
+    | LEFT '(' strOrColName=expr ',' len=expr ')'                                    #left
+    | RIGHT '(' strOrColName=expr ',' len=expr ')'                                   #right
+    | SUBSTRING '(' expr FROM expr (FOR expr)? ')'                                   #substring
+    | TRIM '(' ((trimMode=(LEADING | TRAILING | BOTH))?
+                (charsToTrim=expr)? FROM)? target=expr ')'                           #trim
+    | EXTRACT '(' stringLiteralOrIdentifier FROM expr ')'                            #extract
+    | CAST '(' expr AS dataType ')'                                                  #cast
+    | TRY_CAST '(' expr AS dataType ')'                                              #cast
+    | CASE operand=expr whenClause+ (ELSE elseExpr=expr)? END                        #simpleCase
+    | CASE whenClause+ (ELSE elseExpr=expr)? END                                     #searchedCase
+    | IF '('condition=expr ',' trueValue=expr (',' falseValue=expr)? ')'             #ifCase
+    | ARRAY subqueryExpression                                                       #arraySubquery
+    ;
+
+subqueryExpression
+    : '(' query ')'
+    ;
+
+parameterOrLiteral
+    : parameterOrSimpleLiteral                            #simpleLiteral
+    | ARRAY? '[' (expr (',' expr)*)? ']'                  #arrayLiteral
+    | '{' (objectKeyValue (',' objectKeyValue)*)? '}'     #objectLiteral
+    ;
+
+parameterOrSimpleLiteral
+    : nullLiteral
+    | intervalLiteral
+    | escapedCharsStringLiteral
+    | stringLiteral
+    | numericLiteral
+    | booleanLiteral
+    | bitString
+    | parameterExpr
+    ;
+
+parameterOrInteger
+    : parameterExpr
+    | integerLiteral
+    ;
+
+parameterOrIdent
+    : parameterExpr
+    | ident
+    ;
+
+parameterOrString
+    : parameterExpr
+    | stringLiteral
+    ;
+
+parameterExpr
+    : '$' integerLiteral                                                             #positionalParameter
+    | '?'                                                                            #parameterPlaceholder
+    ;
+
+nullLiteral
+    : NULL
+    ;
+
+escapedCharsStringLiteral
+    : ESCAPED_STRING
+    ;
+
+stringLiteral
+    : STRING
+    ;
+
+bitString
+    : BIT_STRING
+    ;
+
+subscriptSafe
+    : value=subscriptSafe '[' index=valueExpression']'
+    | qname
     ;
 
 cmpOp
     : EQ | NEQ | LT | LTE | GT | GTE | LLT | REGEX_MATCH | REGEX_NO_MATCH | REGEX_MATCH_CI | REGEX_NO_MATCH_CI
     ;
 
-valueExpression
-    : primaryExpression                                                              #valueExpressionDefault
+setCmpQuantifier
+    : ANY | SOME | ALL
     ;
 
-primaryExpression
-    : parameterOrLiteral                                                             #defaultParamOrLiteral
-    | ident                                                                          #columnReference
+whenClause
+    : WHEN condition=expr THEN result=expr
     ;
 
-parameterOrLiteral
-    : parameterOrSimpleLiteral                                                     #simpleLiteral
+namedWindow
+    : name=ident AS windowDefinition
     ;
 
-parameterOrSimpleLiteral
-    : numericLiteral
+over
+    : OVER windowDefinition
     ;
 
-numericLiteral
-    : integerLiteral
+windowDefinition
+    : windowRef=ident
+    | '('
+        (windowRef=ident)?
+        (PARTITION BY partition+=expr (',' partition+=expr)*)?
+        (ORDER BY sortItem (',' sortItem)*)?
+        windowFrame?
+      ')'
     ;
-table
-    : qname                                                                        #tableName
+
+windowFrame
+    : frameType=RANGE start=frameBound
+    | frameType=ROWS start=frameBound
+    | frameType=RANGE BETWEEN start=frameBound AND end=frameBound
+    | frameType=ROWS BETWEEN start=frameBound AND end=frameBound
+    ;
+
+frameBound
+    : UNBOUNDED boundType=PRECEDING                 #unboundedFrame
+    | UNBOUNDED boundType=FOLLOWING                 #unboundedFrame
+    | CURRENT ROW                                   #currentRowBound
+    | expr boundType=(PRECEDING | FOLLOWING)        #boundedFrame
+    ;
+
+qnames
+    : qname (',' qname)*
     ;
 
 qname
     : ident ('.' ident)*
     ;
 
-tableElement
-    : columnDefinition                  #columnDefinitionDefault
+idents
+    : ident (',' ident)*
     ;
-
-columnDefinition
-    : ident dataType?  columnConstraint*
-    ;
-
-columnConstraint
-    : PRIMARY_KEY                                                                    #columnConstraintPrimaryKey
-    | NOT NULL                                                                       #columnConstraintNotNull
-    ;
-
-dataType
-    : baseDataType
-            ('(' integerLiteral (',' integerLiteral )* ')')?    #maybeParametrizedDataType
-    ;
-
-baseDataType
-    : ident             #identDataType
-    ;
-
 
 ident
     : unquotedIdent
+    | quotedIdent
     ;
 
 unquotedIdent
     : IDENTIFIER                        #unquotedIdentifier
     | nonReserved                       #unquotedIdentifier
+    | DIGIT_IDENTIFIER                  #digitIdentifier        // not supported
+    | COLON_IDENT                       #colonIdentifier        // not supported
+    ;
+
+quotedIdent
+    : QUOTED_IDENTIFIER                 #quotedIdentifier
+    | BACKQUOTED_IDENTIFIER             #backQuotedIdentifier   // not supported
+    ;
+
+stringLiteralOrIdentifier
+    : ident
+    | stringLiteral
+    ;
+
+stringLiteralOrIdentifierOrQname
+    : ident
+    | qname
+    | stringLiteral
+    ;
+
+numericLiteral
+    : decimalLiteral
+    | integerLiteral
+    ;
+
+intervalLiteral
+    : INTERVAL sign=(PLUS | MINUS)? stringLiteral from=intervalField (TO to=intervalField)?
+    ;
+
+intervalField
+    : YEAR | MONTH | DAY | HOUR | MINUTE | SECOND
+    ;
+
+booleanLiteral
+    : TRUE
+    | FALSE
+    ;
+
+decimalLiteral
+    : DECIMAL_VALUE
     ;
 
 integerLiteral
     : INTEGER_VALUE
+    ;
+
+objectKeyValue
+    : key=ident EQ value=expr
+    ;
+
+insertSource
+   : query
+   | '(' query ')'
+   ;
+
+onConflict
+   : ON CONFLICT conflictTarget? DO NOTHING
+   | ON CONFLICT conflictTarget DO UPDATE SET assignment (',' assignment)*
+   ;
+
+conflictTarget
+   : '(' subscriptSafe (',' subscriptSafe)* ')'
+   ;
+
+values
+    : '(' expr (',' expr)* ')'
+    ;
+
+columns
+    : '(' primaryExpression (',' primaryExpression)* ')'
+    ;
+
+assignment
+    : primaryExpression EQ expr
+    ;
+
+createStmt
+    : CREATE TABLE (IF NOT EXISTS)? table
+        '(' tableElement (',' tableElement)* ')'
+         partitionedByOrClusteredInto withProperties?                                #createTable
+    | CREATE TABLE table AS insertSource                                             #createTableAs
+    | CREATE BLOB TABLE table numShards=blobClusteredInto? withProperties?           #createBlobTable
+    | CREATE REPOSITORY name=ident TYPE type=ident withProperties?                   #createRepository
+    | CREATE SNAPSHOT qname (ALL | TABLE tableWithPartitions) withProperties?        #createSnapshot
+    | CREATE ANALYZER name=ident (EXTENDS extendedName=ident)?
+        WITH? '(' analyzerElement ( ',' analyzerElement )* ')'                       #createAnalyzer
+    | CREATE (OR REPLACE)? FUNCTION name=qname
+        '(' (functionArgument (',' functionArgument)*)? ')'
+        RETURNS returnType=dataType
+        LANGUAGE language=parameterOrIdent
+        AS body=parameterOrString                                                    #createFunction
+    | CREATE USER name=ident withProperties?                                         #createUser
+    | CREATE ( OR REPLACE )? VIEW name=qname AS query                                #createView
+    ;
+
+functionArgument
+    : (name=ident)? type=dataType
+    ;
+
+alterTableDefinition
+    : ONLY qname                                                                     #tableOnly
+    | tableWithPartition                                                             #tableWithPartitionDefault
+    ;
+
+partitionedByOrClusteredInto
+    : partitionedBy? clusteredBy?
+    | clusteredBy? partitionedBy?
+    ;
+
+partitionedBy
+    : PARTITIONED BY columns
+    ;
+
+clusteredBy
+    : CLUSTERED (BY '(' routing=primaryExpression ')')?
+        (INTO numShards=parameterOrInteger SHARDS)?
+    ;
+
+blobClusteredInto
+    : CLUSTERED INTO numShards=parameterOrInteger SHARDS
+    ;
+
+tableElement
+    : columnDefinition                                                               #columnDefinitionDefault
+    | PRIMARY_KEY columns                                                            #primaryKeyConstraint
+    | INDEX name=ident USING method=ident columns withProperties?                    #indexDefinition
+    | checkConstraint                                                                #tableCheckConstraint
+    ;
+
+columnDefinition
+    : ident dataType? (DEFAULT defaultExpr=expr)? ((GENERATED ALWAYS)? AS generatedExpr=expr)? columnConstraint*
+    ;
+
+addColumnDefinition
+    : subscriptSafe dataType? ((GENERATED ALWAYS)? AS expr)? columnConstraint*
+    ;
+
+rerouteOption
+    : MOVE SHARD shardId=parameterOrInteger FROM fromNodeId=parameterOrString TO toNodeId=parameterOrString #rerouteMoveShard
+    | ALLOCATE REPLICA SHARD shardId=parameterOrInteger ON nodeId=parameterOrString                         #rerouteAllocateReplicaShard
+    | PROMOTE REPLICA SHARD shardId=parameterOrInteger ON nodeId=parameterOrString withProperties?          #reroutePromoteReplica
+    | CANCEL SHARD shardId=parameterOrInteger ON nodeId=parameterOrString withProperties?                   #rerouteCancelShard
+    ;
+
+dataType
+    : baseDataType
+        ('(' integerLiteral (',' integerLiteral )* ')')?    #maybeParametrizedDataType
+    | objectTypeDefinition                                  #objectDataType
+    | ARRAY '(' dataType ')'                                #arrayDataType
+    | dataType '[]'                                         #arrayDataType
+    ;
+
+baseDataType
+    : definedDataType   #definedDataTypeDefault
+    | ident             #identDataType
+    ;
+
+definedDataType
+    : DOUBLE PRECISION
+    | TIMESTAMP WITHOUT TIME ZONE
+    | TIMESTAMP WITH TIME ZONE
+    | TIME WITH TIME ZONE
+    | CHARACTER VARYING
+    ;
+
+objectTypeDefinition
+    : OBJECT ('(' type=(DYNAMIC | STRICT | IGNORED) ')')?
+        (AS '(' columnDefinition ( ',' columnDefinition )* ')')?
+    ;
+
+columnConstraint
+    : PRIMARY_KEY                                                                    #columnConstraintPrimaryKey
+    | NOT NULL                                                                       #columnConstraintNotNull
+    | INDEX USING method=ident withProperties?                                       #columnIndexConstraint
+    | INDEX OFF                                                                      #columnIndexOff
+    | STORAGE withProperties                                                         #columnStorageDefinition
+    | checkConstraint                                                                #columnCheckConstraint
+    ;
+
+checkConstraint
+    : (CONSTRAINT name=ident)? CHECK '(' expression=booleanExpression ')'
+    ;
+
+withProperties
+    : WITH '(' genericProperties ')'                                                 #withGenericProperties
+    ;
+
+genericProperties
+    : genericProperty (',' genericProperty)*
+    ;
+
+genericProperty
+    : ident EQ expr
+    ;
+
+matchPredicateIdents
+    : matchPred=matchPredicateIdent
+    | '(' matchPredicateIdent (',' matchPredicateIdent)* ')'
+    ;
+
+matchPredicateIdent
+    : subscriptSafe boost=parameterOrSimpleLiteral?
+    ;
+
+analyzerElement
+    : tokenizer
+    | tokenFilters
+    | charFilters
+    | genericProperty
+    ;
+
+tokenizer
+    : TOKENIZER namedProperties
+    ;
+
+tokenFilters
+    : TOKEN_FILTERS '(' namedProperties (',' namedProperties )* ')'
+    ;
+
+charFilters
+    : CHAR_FILTERS '(' namedProperties (',' namedProperties )* ')'
+    ;
+
+namedProperties
+    : ident withProperties?
+    ;
+
+tableWithPartitions
+    : tableWithPartition (',' tableWithPartition)*
+    ;
+
+setGlobalAssignment
+    : name=primaryExpression (EQ | TO) value=expr
+    ;
+
+setExpr
+    : stringLiteral
+    | booleanLiteral
+    | numericLiteral
+    | ident
+    | on
+    ;
+
+on
+    : ON
+    ;
+
+clazz
+    : SCHEMA
+    | TABLE
+    | VIEW
+    ;
+
+transactionMode
+    : ISOLATION LEVEL isolationLevel
+    | (READ WRITE | READ ONLY)
+    | (NOT)? DEFERRABLE
+    ;
+
+isolationLevel
+    : SERIALIZABLE
+    | REPEATABLE READ
+    | READ COMMITTED
+    | READ UNCOMMITTED
     ;
 
 nonReserved

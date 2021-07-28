@@ -21,8 +21,8 @@
 
 package com.risingwave.parser;
 
-import com.risingwave.parser.antlr.v4.SqlBaseLexer;
-import com.risingwave.parser.antlr.v4.SqlBaseParser;
+import com.risingwave.sql.parser.antlr.v4.SqlBaseLexer;
+import com.risingwave.sql.parser.antlr.v4.SqlBaseParser;
 import java.util.function.Function;
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
