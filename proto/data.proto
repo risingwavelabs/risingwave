@@ -19,11 +19,16 @@ message Buffer {
 
 message ColumnCommon {
     enum ColumnType {
-        UNKOWN = 0;
+        UNKNOWN = 0;
         INT32 = 1;
         INT64 = 2;
         FLOAT = 3;
         DOUBLE = 4;
+        INT16 = 5;
+        BOOLEAN = 6;
+        CHAR = 7;
+        VARCHAR = 8;
+
     }
 
     ColumnType column_type = 1;

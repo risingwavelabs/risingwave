@@ -37,7 +37,7 @@ message TaskInfo {
         FAILING = 3;
         CANCELLING = 4;
         FINISHED = 5;
-        FIALED = 6;
+        FAILED = 6;
     }
 
     TaskId task_id = 1;

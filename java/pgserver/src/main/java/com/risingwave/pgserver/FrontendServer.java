@@ -4,6 +4,7 @@ import com.google.devtools.common.options.OptionsParser;
 import com.risingwave.catalog.CatalogService;
 import com.risingwave.catalog.SimpleCatalogService;
 import com.risingwave.common.config.Configuration;
+import com.risingwave.common.config.FrontendServerConfigurations;
 import com.risingwave.pgserver.database.RisingWaveDatabaseManager;
 import com.risingwave.pgwire.PgServer;
 import com.risingwave.pgwire.database.DatabaseManager;
@@ -30,7 +31,7 @@ public class FrontendServer {
 
     LOGGER.atInfo().log("Creating pg server.");
     PgServer server =
-        new PgServer(config.get(FrontendServerConfigurations.SERVER_PORT), databaseManager);
+        new PgServer(config.get(FrontendServerConfigurations.PG_WIRE_PORT), databaseManager);
 
     new Thread(server::serve, "PG Server").start();
     LOGGER.atInfo().log("Frontend server started..");

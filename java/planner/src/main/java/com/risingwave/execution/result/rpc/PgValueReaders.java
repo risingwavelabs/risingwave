@@ -40,6 +40,9 @@ public class PgValueReaders {
       case INT64:
         return createValueReader(
             Values::createBigInt, new LongBufferReader(valuesStream), nullBitmap);
+      case BOOLEAN:
+        return createValueReader(
+            Values::createBoolean, new BooleanBufferReader(valuesStream), nullBitmap);
       default:
         throw new PgException(
             PgErrorCode.INTERNAL_ERROR,

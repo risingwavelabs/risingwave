@@ -42,6 +42,10 @@ public class ExecutionContext implements Context {
     return SchemaCatalog.SchemaName.of(database, schema);
   }
 
+  public Configuration getConf() {
+    return conf;
+  }
+
   /**
    * Use by calcite.
    *

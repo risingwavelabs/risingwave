@@ -7,6 +7,7 @@ import com.google.common.collect.ImmutableList;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.execution.result.rpc.PgValueReader;
+import com.risingwave.execution.result.rpc.PgValueReaders;
 import com.risingwave.pgwire.database.PgFieldDescriptor;
 import com.risingwave.pgwire.database.TypeOid;
 import com.risingwave.pgwire.msg.StatementType;
@@ -14,16 +15,18 @@ import com.risingwave.pgwire.types.PgValue;
 import com.risingwave.proto.computenode.TaskData;
 import com.risingwave.proto.data.Buffer;
 import com.risingwave.proto.data.ColumnCommon;
+import com.risingwave.proto.data.DataChunk;
+import java.util.ArrayList;
 import java.util.List;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeField;
 
 /** A wrapper of grpc remote result. */
-public class RemoteBatchPlanResult extends AbstractResult {
-  private final ImmutableList<TaskData> data;
+public class BatchDataChunkResult extends AbstractResult {
+  private final List<TaskData> data;
   private final ImmutableList<PgFieldDescriptor> fields;
 
-  public RemoteBatchPlanResult(
+  public BatchDataChunkResult(
       StatementType statementType, boolean query, List<TaskData> data, RelDataType resultType) {
     super(statementType, totalRowCount(data), query);
     this.data = ImmutableList.copyOf(data);
@@ -41,7 +44,7 @@ public class RemoteBatchPlanResult extends AbstractResult {
     }
 
     return resultType.getFieldList().stream()
-        .map(RemoteBatchPlanResult::createPgFiledDesc)
+        .map(BatchDataChunkResult::createPgFiledDesc)
         .collect(ImmutableList.toImmutableList());
   }
 
@@ -71,16 +74,64 @@ public class RemoteBatchPlanResult extends AbstractResult {
 
   @Override
   public PgIter createIterator() throws PgException {
-    return null;
+    return new BatchDataChunkIter();
   }
 
-  private class RecordBatchIter implements PgIter {
+  private class BatchDataChunkIter implements PgIter {
+    private DataChunkIter internalIter;
+    private int index;
+
+    private BatchDataChunkIter() {
+      index = 0;
+      resetDataIter();
+    }
+
+    @Override
+    public List<PgFieldDescriptor> getRowDesc() throws PgException {
+      return fields;
+    }
+
+    @Override
+    public boolean next() throws PgException {
+      if (index == data.size()) {
+        return false;
+      }
+      boolean hasNext = internalIter.next();
+      if (!hasNext) {
+        // If no data in current task, switch to next one.
+        index++;
+        if (index == data.size()) {
+          return false;
+        }
+        resetDataIter();
+        return internalIter.next();
+      }
+
+      return hasNext;
+    }
+
+    @Override
+    public List<PgValue> getRow() throws PgException {
+      return internalIter.getRow();
+    }
+
+    private void resetDataIter() {
+      DataChunk curData = data.get(index).getRecordBatch();
+      List<PgValueReader> readers =
+          curData.getColumnsList().stream()
+              .map(PgValueReaders::create)
+              .collect(ImmutableList.toImmutableList());
+      this.internalIter = new DataChunkIter(readers, curData.getCardinality());
+    }
+  }
+
+  private class DataChunkIter implements PgIter {
     private final List<PgValueReader> valueReaders;
     private final int cardinality;
-    private int rowIndex = -1;
+    private int rowIndex = 0;
 
-    private RecordBatchIter(List<PgValueReader> valueReaders, int cardinality) {
-      checkArgument(cardinality > 0, "Non positive cardinality: %s", cardinality);
+    private DataChunkIter(List<PgValueReader> valueReaders, int cardinality) {
+      checkArgument(cardinality >= 0, "Non positive cardinality: %s", cardinality);
       this.valueReaders = ImmutableList.copyOf(valueReaders);
       this.cardinality = cardinality;
     }
@@ -92,12 +143,21 @@ public class RemoteBatchPlanResult extends AbstractResult {
 
     @Override
     public boolean next() throws PgException {
-      throw new UnsupportedOperationException("");
+      boolean hasNext = rowIndex < cardinality;
+      if (!hasNext) {
+        return false;
+      }
+      rowIndex++;
+      return true;
     }
 
     @Override
     public List<PgValue> getRow() throws PgException {
-      throw new UnsupportedOperationException("");
+      ArrayList<PgValue> ret = new ArrayList<PgValue>();
+      for (PgValueReader reader : valueReaders) {
+        ret.add(reader.next());
+      }
+      return ret;
     }
   }
 
