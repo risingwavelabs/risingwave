@@ -3,6 +3,7 @@ syntax = "proto3";
 
 import "google/protobuf/any.proto";
 import "data.proto";
+import "expr.proto";
 
 
 package risingwave.executor.proto;
@@ -10,9 +11,32 @@ option java_package = "com.risingwave.proto.plan";
 option java_multiple_files = true;
 option optimize_for = SPEED;
 
+message DatabaseRefId {
+    int32 database_id = 1;
+}
+
+message SchemaRefId {
+    DatabaseRefId database_ref_id = 1;
+    int32 schema_id = 2;
+}
+
+message TableRefId {
+    SchemaRefId schema_ref_id = 1;
+    int32 table_id = 2;
+}
+
+message SeqScanNode {
+    TableRefId table_ref_id = 1;
+    repeated int32 column_ids = 2;
+}
+
+message ProjectNode {
+    repeated risingwave.expr.proto.ExprNode select_list = 1;
+}
+
 message FilterScanNode {
-    uint32 table_id = 1;
-    repeated uint32 column_ids = 2;
+    TableRefId table_ref_id = 1;
+    repeated int32 column_ids = 2;
 }
 
 message InsertValueNode {
@@ -26,6 +50,8 @@ message PlanNode {
         INVALID = 0;
         FILTER_SCAN = 1;
         INSERT_VALUE = 2;
+        SEQ_SCAN = 3;
+        PROJECT = 4;
     }
     PlanNodeType node_type = 1;
     google.protobuf.Any body = 2;

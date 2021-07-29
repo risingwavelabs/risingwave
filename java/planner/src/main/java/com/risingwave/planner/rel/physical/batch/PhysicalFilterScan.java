@@ -7,8 +7,11 @@ import com.google.protobuf.Any;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.planner.rel.common.FilterScanBase;
+import com.risingwave.proto.plan.DatabaseRefId;
 import com.risingwave.proto.plan.FilterScanNode;
 import com.risingwave.proto.plan.PlanNode;
+import com.risingwave.proto.plan.SchemaRefId;
+import com.risingwave.proto.plan.TableRefId;
 import java.util.Collections;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
@@ -45,7 +48,14 @@ public class PhysicalFilterScan extends FilterScanBase implements RisingWaveBatc
   @Override
   public PlanNode serialize() {
     FilterScanNode.Builder filterScanNodeBuilder =
-        FilterScanNode.newBuilder().setTableId(tableId.getValue());
+        FilterScanNode.newBuilder()
+            .setTableRefId(
+                TableRefId.newBuilder()
+                    .setSchemaRefId(
+                        SchemaRefId.newBuilder()
+                            .setDatabaseRefId(DatabaseRefId.newBuilder().setDatabaseId(0))
+                            .setSchemaId(0))
+                    .setTableId(tableId.getValue()));
     columnIds.forEach(c -> filterScanNodeBuilder.addColumnIds(c.getValue()));
 
     return PlanNode.newBuilder()

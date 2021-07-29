@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+
+import "google/protobuf/any.proto";
+import "data.proto";
+
+
+package risingwave.expr.proto;
+option java_package = "com.risingwave.proto.expr";
+option java_multiple_files = true;
+option optimize_for = SPEED;
+
+message ExprNode {
+    enum ExprNodeType {
+        INVALID = 0;
+        INPUT_REF = 1;
+        CONSTANT_VALUE = 2;
+    }
+    ExprNodeType expr_type = 1;
+    google.protobuf.Any body = 2;
+    risingwave.executor.proto.DataType return_type = 3;
+}
+
+message InputRefExpr {
+    int32 column_idx = 1;
+}
