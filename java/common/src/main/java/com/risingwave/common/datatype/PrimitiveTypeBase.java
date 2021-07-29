@@ -1,5 +1,8 @@
 package com.risingwave.common.datatype;
 
+import static java.util.Objects.requireNonNull;
+
+import com.google.common.base.Objects;
 import java.nio.charset.Charset;
 import java.util.Collections;
 import java.util.List;
@@ -16,13 +19,13 @@ import org.apache.calcite.sql.type.SqlTypeExplicitPrecedenceList;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-public abstract class PrimitiveTypeBase implements RisingWaveDataType {
-  private final boolean nullable;
-  private final SqlTypeName sqlTypeName;
+public abstract class PrimitiveTypeBase extends RisingWaveTypeBase {
+  protected final boolean nullable;
+  protected final SqlTypeName sqlTypeName;
 
   protected PrimitiveTypeBase(boolean nullable, SqlTypeName sqlTypeName) {
     this.nullable = nullable;
-    this.sqlTypeName = sqlTypeName;
+    this.sqlTypeName = requireNonNull(sqlTypeName, "sqlTypeName");
   }
 
   @Override
@@ -134,5 +137,23 @@ public abstract class PrimitiveTypeBase implements RisingWaveDataType {
   @Override
   public boolean isDynamicStruct() {
     return false;
+  }
+
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) {
+      return true;
+    }
+    if (o == null || getClass() != o.getClass()) {
+      return false;
+    }
+
+    PrimitiveTypeBase that = (PrimitiveTypeBase) o;
+    return nullable == that.nullable && sqlTypeName == that.sqlTypeName;
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hashCode(nullable, sqlTypeName);
   }
 }

@@ -1,6 +1,8 @@
 package com.risingwave.catalog;
 
 import com.risingwave.common.error.MetaServiceError;
+import com.risingwave.common.exception.PgErrorCode;
+import com.risingwave.common.exception.PgException;
 import com.risingwave.common.exception.RisingWaveException;
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
@@ -60,5 +62,27 @@ public interface CatalogService {
   default TableCatalog createTable(
       String database, String schema, CreateTableInfo createTableInfo) {
     return createTable(SchemaCatalog.SchemaName.of(database, schema), createTableInfo);
+  }
+
+  TableCatalog getTable(TableCatalog.TableName tableName);
+
+  @Nullable
+  default TableCatalog getTable(String database, String schema, String table) {
+    return getTable(TableCatalog.TableName.of(database, schema, table));
+  }
+
+  default TableCatalog getTableChecked(TableCatalog.TableName tableName) {
+    TableCatalog table = getTable(tableName);
+    if (table == null) {
+      throw new PgException(PgErrorCode.UNDEFINED_TABLE, "Table %s not found.", tableName);
+    }
+
+    return table;
+  }
+
+  void dropTable(TableCatalog.TableName tableName);
+
+  default void dropTable(String database, String schema, String tableName) {
+    dropTable(TableCatalog.TableName.of(database, schema, tableName));
   }
 }

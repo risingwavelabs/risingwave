@@ -9,20 +9,37 @@ import com.risingwave.sql.tree.AstVisitor;
 import com.risingwave.sql.tree.ColumnDefinition;
 import com.risingwave.sql.tree.ColumnType;
 import com.risingwave.sql.tree.CreateTable;
+import com.risingwave.sql.tree.DoubleLiteral;
+import com.risingwave.sql.tree.DropTable;
+import com.risingwave.sql.tree.Insert;
+import com.risingwave.sql.tree.IntegerLiteral;
+import com.risingwave.sql.tree.LongLiteral;
+import com.risingwave.sql.tree.Node;
 import com.risingwave.sql.tree.NotNullColumnConstraint;
 import com.risingwave.sql.tree.Query;
 import com.risingwave.sql.tree.QuerySpecification;
+import com.risingwave.sql.tree.StringLiteral;
 import com.risingwave.sql.tree.Table;
+import com.risingwave.sql.tree.Values;
+import com.risingwave.sql.tree.ValuesList;
+import java.math.BigDecimal;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 import org.apache.calcite.schema.ColumnStrategy;
+import org.apache.calcite.sql.SqlBasicCall;
 import org.apache.calcite.sql.SqlBasicTypeNameSpec;
 import org.apache.calcite.sql.SqlDataTypeSpec;
 import org.apache.calcite.sql.SqlIdentifier;
+import org.apache.calcite.sql.SqlInsert;
+import org.apache.calcite.sql.SqlLiteral;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlNodeList;
 import org.apache.calcite.sql.SqlSelect;
 import org.apache.calcite.sql.ddl.SqlDdlNodes;
+import org.apache.calcite.sql.fun.SqlStdOperatorTable;
+import org.apache.calcite.sql.parser.SqlParseException;
+import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.type.SqlTypeName;
 
@@ -103,6 +120,73 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
         SqlParserPos.ZERO, null, selectList, from, null, null, null, null, null, null, null, null);
   }
 
+  @Override
+  public SqlNode visitDropTable(DropTable<?> node, Void context) {
+    SqlIdentifier tableName = visitTable(node.table(), context);
+    return SqlDdlNodes.dropTable(SqlParserPos.ZERO, false, tableName);
+  }
+
+  @Override
+  protected SqlNode visitNode(Node node, Void context) {
+    throw new UnsupportedOperationException("Unknown node: " + node);
+  }
+
+  @Override
+  public SqlNode visitInsert(Insert<?> node, Void context) {
+    SqlNodeList keywords = SqlNodeList.EMPTY;
+    SqlNode table = visitTable(node.table(), context);
+    SqlNode source = visitQuery(node.insertSource(), context);
+    SqlNodeList columnList = null;
+    if (!node.columns().isEmpty()) {
+      columnList =
+          SqlNodeList.of(
+              SqlParserPos.ZERO,
+              node.columns().stream()
+                  .map(c -> new SqlIdentifier(Collections.singletonList(c), SqlParserPos.ZERO))
+                  .collect(Collectors.toList()));
+    }
+
+    return new SqlInsert(SqlParserPos.ZERO, keywords, table, source, columnList);
+  }
+
+  @Override
+  public SqlNode visitValues(Values values, Void context) {
+    SqlNode[] operands =
+        values.rows().stream().map(row -> row.accept(this, context)).toArray(SqlNode[]::new);
+
+    return new SqlBasicCall(SqlStdOperatorTable.VALUES, operands, SqlParserPos.ZERO);
+  }
+
+  @Override
+  protected SqlNode visitIntegerLiteral(IntegerLiteral node, Void context) {
+    return SqlLiteral.createExactNumeric(String.valueOf(node.getValue()), SqlParserPos.ZERO);
+  }
+
+  @Override
+  protected SqlNode visitLongLiteral(LongLiteral node, Void context) {
+    return SqlLiteral.createExactNumeric(String.valueOf(node.getValue()), SqlParserPos.ZERO);
+  }
+
+  @Override
+  protected SqlNode visitDoubleLiteral(DoubleLiteral node, Void context) {
+    // TODO: Optimize this
+    String value = BigDecimal.valueOf(node.getValue()).toString();
+    return SqlLiteral.createApproxNumeric(value, SqlParserPos.ZERO);
+  }
+
+  @Override
+  protected SqlNode visitStringLiteral(StringLiteral node, Void context) {
+    return SqlLiteral.createCharString(node.getValue(), SqlParserPos.ZERO);
+  }
+
+  @Override
+  public SqlNode visitValuesList(ValuesList node, Void context) {
+    SqlNode[] operands =
+        node.values().stream().map(expr -> expr.accept(this, context)).toArray(SqlNode[]::new);
+
+    return new SqlBasicCall(SqlStdOperatorTable.ROW, operands, SqlParserPos.ZERO);
+  }
+
   private static SqlBasicTypeNameSpec toBasicTypeNameSpec(ColumnType<?> columnType) {
     String typeName = columnType.name().toUpperCase();
     switch (typeName) {
@@ -117,5 +201,11 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
       default:
         throw new PgException(PgErrorCode.SYNTAX_ERROR, "Unsupported type name: %s", typeName);
     }
+  }
+
+  public static void main(String[] args) throws SqlParseException {
+    SqlNode node =
+        SqlParser.create("insert into t values(1,4,2), (2,3,3), (3,4,4), (4,3,5)").parseStmt();
+    System.out.println(node);
   }
 }

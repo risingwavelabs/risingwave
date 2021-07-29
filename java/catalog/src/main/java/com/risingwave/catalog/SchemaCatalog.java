@@ -4,10 +4,8 @@ import com.risingwave.common.entity.EntityBase;
 import com.risingwave.common.entity.NonRootLikeBase;
 import com.risingwave.common.error.MetaServiceError;
 import com.risingwave.common.exception.RisingWaveException;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -26,7 +24,6 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCatalog.SchemaName>
     implements Schema {
   private final AtomicInteger nextTableId = new AtomicInteger(0);
-  private final List<TableCatalog> tables;
   private final ConcurrentMap<TableCatalog.TableId, TableCatalog> tableById;
   private final ConcurrentMap<TableCatalog.TableName, TableCatalog> tableByName;
 
@@ -36,7 +33,6 @@ public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCata
 
   SchemaCatalog(SchemaId schemaId, SchemaName schemaName, Collection<TableCatalog> tables) {
     super(schemaId, schemaName);
-    this.tables = new ArrayList<>(tables);
     this.tableById = EntityBase.groupBy(tables, TableCatalog::getId);
     this.tableByName = EntityBase.groupBy(tables, TableCatalog::getEntityName);
   }
@@ -68,9 +64,16 @@ public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCata
   }
 
   private void registerTable(TableCatalog table) {
-    tables.add(table);
     tableByName.put(table.getEntityName(), table);
     tableById.put(table.getId(), table);
+  }
+
+  void dropTable(String table) {
+    TableCatalog.TableName tableName = new TableCatalog.TableName(table, getEntityName());
+    TableCatalog tableCatalog = tableByName.remove(tableName);
+    if (tableCatalog != null) {
+      tableById.remove(tableCatalog.getId());
+    }
   }
 
   private String getDatabaseName() {
@@ -81,6 +84,7 @@ public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCata
     return getEntityName().getValue();
   }
 
+  @Nullable
   public TableCatalog getTableCatalog(TableCatalog.TableName tableName) {
     return tableByName.get(tableName);
   }

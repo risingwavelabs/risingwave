@@ -66,4 +66,14 @@ public class SimpleCatalogService implements CatalogService {
     return schema.getTableCatalog(
         new TableCatalog.TableName(createTableInfo.getName(), schemaName));
   }
+
+  @Override
+  public TableCatalog getTable(TableCatalog.TableName tableName) {
+    return getSchemaChecked(tableName.getParent()).getTableCatalog(tableName);
+  }
+
+  @Override
+  public void dropTable(TableCatalog.TableName tableName) {
+    getSchemaChecked(tableName.getParent()).dropTable(tableName.getValue());
+  }
 }
