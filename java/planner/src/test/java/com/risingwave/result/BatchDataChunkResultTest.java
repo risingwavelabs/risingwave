@@ -11,6 +11,7 @@ import com.risingwave.proto.computenode.TaskData;
 import com.risingwave.proto.data.Buffer;
 import com.risingwave.proto.data.ColumnCommon;
 import com.risingwave.proto.data.DataChunk;
+import com.risingwave.proto.data.DataType;
 import com.risingwave.proto.data.FixedWidthNumericColumn;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -61,7 +62,9 @@ public class BatchDataChunkResultTest {
                               FixedWidthNumericColumn.newBuilder()
                                   .setCommonParts(
                                       ColumnCommon.newBuilder()
-                                          .setColumnType(ColumnCommon.ColumnType.INT32))
+                                          .setColumnType(
+                                              DataType.newBuilder()
+                                                  .setTypeName(DataType.TypeName.INT32)))
                                   .setValues(
                                       Buffer.newBuilder()
                                           .setBody(
@@ -73,7 +76,9 @@ public class BatchDataChunkResultTest {
                               FixedWidthNumericColumn.newBuilder()
                                   .setCommonParts(
                                       ColumnCommon.newBuilder()
-                                          .setColumnType(ColumnCommon.ColumnType.BOOLEAN))
+                                          .setColumnType(
+                                              DataType.newBuilder()
+                                                  .setTypeName(DataType.TypeName.BOOLEAN)))
                                   .setValues(
                                       Buffer.newBuilder()
                                           .setBody(

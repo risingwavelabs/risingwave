@@ -34,7 +34,7 @@ public class PgValueReaders {
     BooleanBufferReader nullBitmap = getNullBitmap(columnCommon);
     InputStream valuesStream = BufferReaders.decode(column.getValues());
 
-    switch (columnCommon.getColumnType()) {
+    switch (columnCommon.getColumnType().getTypeName()) {
       case INT32:
         return createValueReader(Values::createInt, new IntBufferReader(valuesStream), nullBitmap);
       case INT64:

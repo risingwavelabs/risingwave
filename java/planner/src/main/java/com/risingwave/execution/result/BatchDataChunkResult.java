@@ -161,8 +161,7 @@ public class BatchDataChunkResult extends AbstractResult {
     }
   }
 
-  private static PgValue createPgValue(
-      ColumnCommon.ColumnType columnType, Buffer buffer, int rowIndex) {
+  private static PgValue createPgValue(ColumnCommon columnType, Buffer buffer, int rowIndex) {
     throw new UnsupportedOperationException("");
   }
 }
