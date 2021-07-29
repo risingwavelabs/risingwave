@@ -5,7 +5,7 @@ import "data.proto";
 import "common.proto";
 
 
-package risingwave.proto.computenode;
+package risingwave.executor.proto;
 option java_package = "com.risingwave.proto.computenode";
 option java_multiple_files = true;
 option optimize_for = SPEED;
@@ -46,7 +46,7 @@ message TaskInfo {
 
 message CreateTaskRequest {
     TaskId task_id = 1;
-    risingwave.proto.plan.PlanFragment plan = 2;
+    risingwave.executor.proto.PlanFragment plan = 2;
 }
 
 message CreateTaskResponse {
@@ -74,7 +74,7 @@ message GetTaskInfoResponse {
 
 message TaskData {
     risingwave.proto.common.Status status = 1;
-    risingwave.proto.data.DataChunk record_batch = 2;
+    risingwave.executor.proto.DataChunk record_batch = 2;
 }
 
 service TaskService {
@@ -86,4 +86,3 @@ service TaskService {
 service ExchangeService {
     rpc GetData(TaskSinkId) returns (stream TaskData);
 }
-

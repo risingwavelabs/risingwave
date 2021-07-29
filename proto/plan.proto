@@ -5,7 +5,7 @@ import "google/protobuf/any.proto";
 import "data.proto";
 
 
-package risingwave.proto.plan;
+package risingwave.executor.proto;
 option java_package = "com.risingwave.proto.plan";
 option java_multiple_files = true;
 option optimize_for = SPEED;
@@ -18,7 +18,7 @@ message FilterScanNode {
 message InsertValueNode {
     uint32 table_id = 1;
     repeated uint32 column_ids = 2;
-    risingwave.proto.data.DataChunk data = 3;
+    risingwave.executor.proto.DataChunk data = 3;
 }
 
 message PlanNode {

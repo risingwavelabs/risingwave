@@ -2,7 +2,7 @@ syntax = "proto3";
 
 import "google/protobuf/any.proto";
 
-package risingwave.proto.data;
+package risingwave.executor.proto;
 option java_package = "com.risingwave.proto.data";
 option java_multiple_files = true;
 option optimize_for = SPEED;
