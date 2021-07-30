@@ -25,6 +25,22 @@ message TableRefId {
     int32 table_id = 2;
 }
 
+message ColumnDesc {
+    enum ColumnEncodingType {
+        INVALID = 0;
+        RAW = 1;
+        LZO = 2;
+        LZ4 = 3;
+        ZSTD = 4;
+        RUN_LENGTH = 5;
+        BYTE_DICT = 6;
+        DELTA = 7;
+    }
+    risingwave.executor.proto.DataType column_type = 1;
+    ColumnEncodingType encoding = 2;
+    bool is_primary = 3;
+}
+
 message SeqScanNode {
     TableRefId table_ref_id = 1;
     repeated int32 column_ids = 2;
@@ -40,9 +56,22 @@ message FilterScanNode {
 }
 
 message InsertValueNode {
-    uint32 table_id = 1;
-    repeated uint32 column_ids = 2;
-    risingwave.executor.proto.DataChunk data = 3;
+    // Not intended to be a general wrapper of repeated exprs.
+    // Only used when nested in another `repeated`.
+    message ExprTuple {
+        repeated risingwave.expr.proto.ExprNode cells = 1;
+    }
+    TableRefId table_ref_id = 1;
+    repeated int32 column_ids = 2;
+    repeated ExprTuple insert_tuples = 3;
+    repeated risingwave.executor.proto.DataType column_types = 4;
+}
+
+message CreateTableNode {
+    TableRefId table_ref_id = 1;
+    repeated ColumnDesc column_descs = 2;
+    // Other fields not included yet:
+    // primarykey_col_ids, dist_type, distkey_col_id, append_only
 }
 
 message PlanNode {
@@ -52,6 +81,7 @@ message PlanNode {
         INSERT_VALUE = 2;
         SEQ_SCAN = 3;
         PROJECT = 4;
+        CREATE_TABLE = 5;
     }
     PlanNodeType node_type = 1;
     google.protobuf.Any body = 2;
