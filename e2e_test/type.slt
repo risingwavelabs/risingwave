@@ -1,0 +1,19 @@
+# bool
+statement ok
+create table test1 (a boolean)
+
+statement ok
+INSERT INTO test1 VALUES (TRUE)
+
+statement ok
+INSERT INTO test1 VALUES (false)
+
+query B
+select * from test1
+----
+true
+false
+
+statement ok
+drop table test1
+

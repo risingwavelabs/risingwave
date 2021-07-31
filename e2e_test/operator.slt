@@ -1,0 +1,15 @@
+statement ok
+create table t(v1 int not null, v2 int not null)
+
+statement ok
+insert into t values (1, 1), (2, 2), (3, 3)
+
+query I
+select v1 + v2 from t
+----
+2
+4
+6
+
+statement ok
+drop table t

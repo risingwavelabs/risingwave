@@ -1,0 +1,74 @@
+statement ok
+create table t (v1 int not null, v2 int not null, primary key(v1));
+
+statement ok
+insert into t values (1, 1), (4, 6), (3, 2), (2, 1)
+
+query I
+select v1 from t where v1 > 2
+----
+4
+3
+
+query I
+select v2 from t where 3 > v1
+----
+1
+1
+
+statement ok
+drop table t
+
+statement ok
+create table t(v1 int not null, v2 int not null, primary key(v1))
+
+statement ok
+insert into t values(-3, -3), (-2, -2), (-1, -1), (0, 0), (1,1), (2, 2), (3, 3)
+
+statement ok
+insert into t values(-8, -8), (-7, -7), (-6, -6), (3, 3), (7, 7), (8, 8), (9, 9)
+
+query I
+select v1 from t where v1 > 2 and v1 < 4
+----
+3
+3
+
+query I
+select v2 from t where (-7 < v1 or 9 <= v1) and (v1 = 3)
+----
+3
+3
+
+query I
+select v2 from t where (-8 < v1 and v1 <= -7) or (v1 >= 1 and 2 > v1)
+----
+1
+-7
+
+query I
+select v2 from t where ((v1 >= -8 and -4 >= v1) or (v1 >= 0 and 5 > v1)) and ((v1 > 0 and v1 <= 1) or (v1 > -8 and v1 < -6))
+----
+1
+-7
+
+query I
+select v2 from t where (-7 < v1 or 9 <= v1) and (v2 = 3)
+----
+3
+3
+
+query I
+select v2 from t where (-8 < v1 and v2 <= -7) or (v1 >= 1 and 2 > v2)
+----
+1
+-7
+
+query I
+select v2 from t where ((v2 >= -8 and -4 >= v1) or (v1 >= 0 and 5 > v2)) and ((v2 > 0 and v1 <= 1) or (v1 > -8 and v2 < -6))
+----
+1
+-7
+
+statement ok
+drop table t

@@ -1,0 +1,46 @@
+statement ok
+create table t(v1 int not null, v2 int not null)
+
+statement ok
+insert into t values(1, 1), (4, 2), (3, 3), (10, 12), (2, 5)
+
+query I
+select v1 from t order by v1 asc
+----
+1
+2
+3
+4
+10
+
+query I
+select v1 from t order by v1 desc
+----
+10
+4
+3
+2
+1
+
+
+statement ok
+drop table t
+
+statement ok
+create table t(v1 int not null, v2 int not null)
+
+statement ok
+insert into t values (1, 0), ( 2, 2), (3, 15), (2, 12), (3, 9), (1, 5)
+
+query II
+select v1, v2 from t order by v1 asc, v2 desc
+----
+1 5
+1 0
+2 12
+2 2
+3 15
+3 9
+
+statement ok
+drop table t
