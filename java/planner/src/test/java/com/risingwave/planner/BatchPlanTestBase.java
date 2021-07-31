@@ -1,7 +1,12 @@
 package com.risingwave.planner;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import com.google.protobuf.Descriptors;
+import com.google.protobuf.GeneratedMessageV3;
+import com.google.protobuf.InvalidProtocolBufferException;
+import com.google.protobuf.util.JsonFormat;
 import com.risingwave.catalog.CatalogService;
 import com.risingwave.catalog.SimpleCatalogService;
 import com.risingwave.common.config.Configuration;
@@ -9,6 +14,7 @@ import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.execution.handler.SqlHandlerFactory;
 import com.risingwave.planner.planner.batch.BatchPlanner;
 import com.risingwave.planner.rel.physical.batch.BatchPlan;
+import com.risingwave.planner.rel.physical.batch.RisingWaveBatchPhyRel;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
 import com.risingwave.planner.util.PlannerTestCase;
 import com.risingwave.planner.util.PlannerTestDdlLoader;
@@ -19,10 +25,14 @@ import java.io.StringWriter;
 import java.util.List;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.sql.SqlNode;
+import org.reflections.Reflections;
+import org.reflections.util.ConfigurationBuilder;
 
 public abstract class BatchPlanTestBase {
   private static final String TEST_DB_NAME = "test_db";
   private static final String TEST_SCHEMA_NAME = "test_schema";
+
+  private static final JsonFormat.TypeRegistry PROTOBUF_JSON_TYPE_REGISTRY = createTypeRegistry();
 
   protected BatchPlanner batchPlanner;
   protected CatalogService catalogService;
@@ -88,6 +98,9 @@ public abstract class BatchPlanTestBase {
 
     String explainedPlan = explainBatchPlan(plan.getRoot());
     assertEquals(testCase.getPlan(), explainedPlan, "Plan not match!");
+
+    String serializedJsonPlan = serializePlanToJson(plan.getRoot());
+    assertEquals(testCase.getJson(), serializedJsonPlan, "Plan not match!");
   }
 
   private static String explainBatchPlan(RelNode relNode) {
@@ -98,6 +111,38 @@ public abstract class BatchPlanTestBase {
       return sw.toString().trim();
     } catch (IOException e) {
       throw new RuntimeException(e);
+    }
+  }
+
+  private static String serializePlanToJson(RelNode relNode) {
+    checkArgument(relNode instanceof RisingWaveBatchPhyRel, "relNode is not batch physical plan!");
+    RisingWaveBatchPhyRel batchPhyRel = (RisingWaveBatchPhyRel) relNode;
+
+    try {
+      return JsonFormat.printer()
+          .usingTypeRegistry(PROTOBUF_JSON_TYPE_REGISTRY)
+          .print(batchPhyRel.serialize());
+    } catch (InvalidProtocolBufferException e) {
+      throw new RuntimeException("Failed to serialize pan to json.", e);
+    }
+  }
+
+  private static JsonFormat.TypeRegistry createTypeRegistry() {
+    try {
+      String packageName = "com.risingwave.proto";
+      Reflections reflections =
+          new Reflections(new ConfigurationBuilder().forPackages(packageName));
+      JsonFormat.TypeRegistry.Builder typeRegistry = JsonFormat.TypeRegistry.newBuilder();
+
+      for (Class<?> klass : reflections.getSubTypesOf(GeneratedMessageV3.class)) {
+        Descriptors.Descriptor descriptor =
+            (Descriptors.Descriptor) klass.getDeclaredMethod("getDescriptor").invoke(null);
+        typeRegistry.add(descriptor);
+      }
+
+      return typeRegistry.build();
+    } catch (Exception e) {
+      throw new RuntimeException("Failed to create protobuf type registry!", e);
     }
   }
 }

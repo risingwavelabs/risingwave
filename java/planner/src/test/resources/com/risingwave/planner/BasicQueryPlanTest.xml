@@ -10,17 +10,38 @@ select * from t
 PhysicalFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])
             ]]>
         </Resource>
-    </TestCase>
-    <TestCase name="insert into values">
-        <Resource name="sql">
+        <Resource name="json">
             <![CDATA[
-insert into t values(1,4,2), (2,3,3), (3,4,4), (4,3,5)
+{
+  "nodeType": "FILTER_SCAN",
+  "body": {
+    "@type": "type.googleapis.com/risingwave.executor.proto.FilterScanNode",
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      },
+      "tableId": 1
+    },
+    "columnIds": [1, 2, 3]
+  }
+}
             ]]>
         </Resource>
-        <Resource name="plan">
-            <![CDATA[
-PhysicalInsertValues(table=[t], values=[((1,4,2:FLOAT),(2,3,3:FLOAT),(3,4,4:FLOAT),(4,3,5:FLOAT))])
-]]>
-        </Resource>
     </TestCase>
+<!--    <TestCase name="insert into values">-->
+<!--        <Resource name="sql">-->
+<!--            <![CDATA[-->
+<!--insert into t values(1,4,2), (2,3,3), (3,4,4), (4,3,5)-->
+<!--            ]]>-->
+<!--        </Resource>-->
+<!--        <Resource name="plan">-->
+<!--            <![CDATA[-->
+<!--PhysicalInsertValues(table=[t], values=[((1,4,2:FLOAT),(2,3,3:FLOAT),(3,4,4:FLOAT),(4,3,5:FLOAT))])-->
+<!--]]>-->
+<!--        </Resource>-->
+<!--        <Resource name="json">-->
+<!--            fdsa-->
+<!--        </Resource>-->
+<!--    </TestCase>-->
 </Root>

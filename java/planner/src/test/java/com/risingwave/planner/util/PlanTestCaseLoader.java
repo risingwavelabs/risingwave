@@ -54,6 +54,7 @@ public class PlanTestCaseLoader implements ArgumentsProvider {
 
     String sql = null;
     String plan = null;
+    String json = null;
     NodeList resources = element.getElementsByTagName(ResourceUtil.RESOURCE_TAG);
     for (int i = 0; i < resources.getLength(); i++) {
       Element res = (Element) resources.item(i);
@@ -62,16 +63,19 @@ public class PlanTestCaseLoader implements ArgumentsProvider {
         sql = ResourceUtil.getText(res).trim();
       } else if (ResourceUtil.PLAN_TAG.equals(name)) {
         plan = ResourceUtil.getText(res).trim();
+      } else if (ResourceUtil.JSON_TAG.equals(name)) {
+        json = ResourceUtil.getText(res).trim();
       }
 
-      if (sql != null && plan != null) {
+      if (sql != null && plan != null && json != null) {
         break;
       }
     }
 
     verifyNotNull(sql, "Sql content not found in test case: %s!", testCaseName);
     verifyNotNull(plan, "Plan content not found in test case: %s!", testCaseName);
+    verifyNotNull(json, "Json plan content not found in test case: %s!", testCaseName);
 
-    return new PlannerTestCase(testCaseName, sql, plan);
+    return new PlannerTestCase(testCaseName, sql, plan, json);
   }
 }

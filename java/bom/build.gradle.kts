@@ -5,6 +5,7 @@ plugins {
 val junit5Version = "5.7.2"
 val calciteVersion = "1.27.0"
 val grpcVersion = "1.39.0"
+val protobufVersion = "3.17.2"
 
 dependencies {
     constraints {
@@ -23,6 +24,7 @@ dependencies {
         api("io.grpc:grpc-netty-shaded:${grpcVersion}")
         api("io.grpc:grpc-protobuf:${grpcVersion}")
         api("io.grpc:grpc-stub:${grpcVersion}")
+        api("com.google.protobuf:protobuf-java-util:${protobufVersion}")
         runtime("ch.qos.logback:logback-classic:1.2.3")
         runtime("org.junit.jupiter:junit-jupiter-engine:$junit5Version")
         runtime("org.junit.jupiter:junit-jupiter-params:$junit5Version")

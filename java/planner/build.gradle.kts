@@ -17,6 +17,7 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter-api")
     testImplementation("org.junit.jupiter:junit-jupiter-params")
     testImplementation("org.apache.calcite:calcite-server")
+    testImplementation("com.google.protobuf:protobuf-java-util")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")
 
     // TODO: Manage all dependency versions in one place.
