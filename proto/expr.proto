@@ -15,6 +15,37 @@ message ExprNode {
         INVALID = 0;
         INPUT_REF = 1;
         CONSTANT_VALUE = 2;
+
+        // arithmetics operators
+        ADD = 3;
+        SUBTRACT = 4;
+        MULTIPLY = 5;
+        DIVIDE = 6;
+        MODULUS = 7;
+
+        // comparison operators
+        EQUAL = 8;
+        NOT_EQUAL = 9;
+        LESS_THAN = 10;
+        LESS_THAN_OR_EQUAL = 11;
+        GREATER_THAN = 12;
+        GREATER_THAN_OR_EQUAL = 13;
+
+
+        // logical operators
+        AND = 21;
+        OR = 22;
+        NOT = 23;
+
+        // agg functions
+        SUM = 101;
+        MIN = 102;
+        MAX = 103;
+        COUNT = 104;
+        AVG = 105;
+
+        // other functions
+        CAST = 201;
     }
     ExprNodeType expr_type = 1;
     google.protobuf.Any body = 2;
@@ -23,4 +54,15 @@ message ExprNode {
 
 message InputRefExpr {
     int32 column_idx = 1;
+}
+
+message ConstantValue {
+    // bool: one byte, 0 for false, non-zero for true
+    // integer, float,  double: big-endianness
+    // char, varchar: encoded accorded to encoding, currently only utf8 is supported.
+    bytes body = 1;
+}
+
+message FunctionCall {
+    repeated ExprNode children = 1;
 }
