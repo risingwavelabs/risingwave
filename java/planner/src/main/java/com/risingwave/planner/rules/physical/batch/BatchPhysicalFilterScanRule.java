@@ -1,11 +1,12 @@
 package com.risingwave.planner.rules.physical.batch;
 
-import com.risingwave.planner.rel.logical.LogicalFilterScan;
 import com.risingwave.planner.rel.logical.RisingWaveLogicalRel;
-import com.risingwave.planner.rel.physical.batch.PhysicalFilterScan;
+import com.risingwave.planner.rel.logical.RwFilterScan;
+import com.risingwave.planner.rel.physical.batch.BatchFilterScan;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.plan.RelRule;
 
+// TODO: Move this to BatchFilterScan
 public class BatchPhysicalFilterScanRule extends RelRule<BatchPhysicalFilterScanRule.Config> {
   public BatchPhysicalFilterScanRule(BatchPhysicalFilterScanRule.Config config) {
     super(config);
@@ -13,10 +14,11 @@ public class BatchPhysicalFilterScanRule extends RelRule<BatchPhysicalFilterScan
 
   @Override
   public void onMatch(RelOptRuleCall call) {
-    LogicalFilterScan source = call.rel(0);
+    RwFilterScan source = call.rel(0);
 
-    PhysicalFilterScan newTableScan =
-        PhysicalFilterScan.create(source.getCluster(), source.getTraitSet(), source.getTable());
+    BatchFilterScan newTableScan =
+        BatchFilterScan.create(
+            source.getCluster(), source.getTraitSet(), source.getTable(), source.getColumnIds());
 
     call.transformTo(newTableScan);
   }
@@ -26,10 +28,7 @@ public class BatchPhysicalFilterScanRule extends RelRule<BatchPhysicalFilterScan
         Config.EMPTY
             .withDescription("Converting logical filter scan to physical filter scan")
             .withOperandSupplier(
-                t ->
-                    t.operand(LogicalFilterScan.class)
-                        .trait(RisingWaveLogicalRel.LOGICAL)
-                        .noInputs())
+                t -> t.operand(RwFilterScan.class).trait(RisingWaveLogicalRel.LOGICAL).noInputs())
             .as(Config.class);
 
     default BatchPhysicalFilterScanRule toRule() {

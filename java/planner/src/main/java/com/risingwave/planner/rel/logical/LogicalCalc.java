@@ -11,7 +11,7 @@ import org.apache.calcite.rel.hint.RelHint;
 import org.apache.calcite.rex.RexInputRef;
 import org.apache.calcite.rex.RexProgram;
 
-public class LogicalCalc extends Calc {
+public class LogicalCalc extends Calc implements RisingWaveLogicalRel {
   public LogicalCalc(
       RelOptCluster cluster,
       RelTraitSet traits,

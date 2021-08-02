@@ -12,9 +12,9 @@ import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.hint.RelHint;
 
-public class LogicalFilterScan extends FilterScanBase implements RisingWaveLogicalRel {
+public class RwFilterScan extends FilterScanBase implements RisingWaveLogicalRel {
 
-  private LogicalFilterScan(
+  private RwFilterScan(
       RelOptCluster cluster,
       RelTraitSet traitSet,
       List<RelHint> hints,
@@ -26,17 +26,17 @@ public class LogicalFilterScan extends FilterScanBase implements RisingWaveLogic
         traitSet.contains(RisingWaveLogicalRel.LOGICAL), "Not logical convention.");
   }
 
-  public LogicalFilterScan copy(ImmutableList<ColumnCatalog.ColumnId> columnIds) {
-    return new LogicalFilterScan(
+  public RwFilterScan copy(ImmutableList<ColumnCatalog.ColumnId> columnIds) {
+    return new RwFilterScan(
         getCluster(), getTraitSet(), getHints(), getTable(), tableId, columnIds);
   }
 
-  public static LogicalFilterScan create(
+  public static RwFilterScan create(
       RelOptCluster cluster, RelTraitSet traitSet, RelOptTable table) {
     TableCatalog tableCatalog = table.unwrapOrThrow(TableCatalog.class);
     RelTraitSet newTraitSet = traitSet.replace(RisingWaveLogicalRel.LOGICAL);
 
-    return new LogicalFilterScan(
+    return new RwFilterScan(
         cluster,
         newTraitSet,
         Collections.emptyList(),

@@ -28,7 +28,7 @@ public class RisingWaveCostFactory implements RisingWaveOptCostFactory {
 
   @Override
   public RelOptCost makeCost(double rowCount, double cpu, double io) {
-    return makeCost(rowCount, cpu, io, 0, 0);
+    return makeCost(rowCount, cpu, 0, io, 0);
   }
 
   @Override

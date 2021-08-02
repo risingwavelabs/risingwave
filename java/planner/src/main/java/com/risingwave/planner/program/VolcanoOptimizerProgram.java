@@ -33,7 +33,9 @@ public class VolcanoOptimizerProgram implements OptimizerProgram {
 
     Program optProgram = Programs.ofRules(rules);
 
-    return optProgram.run(planner, root, targetTraits, ImmutableList.of(), ImmutableList.of());
+    RelNode result =
+        optProgram.run(planner, root, targetTraits, ImmutableList.of(), ImmutableList.of());
+    return result;
   }
 
   public static Builder builder() {

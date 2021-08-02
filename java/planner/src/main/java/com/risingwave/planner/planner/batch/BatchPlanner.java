@@ -2,6 +2,7 @@ package com.risingwave.planner.planner.batch;
 
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.CALCITE_LOGICAL_OPTIMIZATION;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.LOGICAL_CONVERSION;
+import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.LOGICAL_OPTIMIZATION;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.PHYSICAL;
 import static com.risingwave.planner.rules.BatchRuleSets.PHYSICAL_RULES;
 
@@ -54,6 +55,13 @@ public class BatchPlanner implements Planner<BatchPlan> {
             .withMatchOrder(HepMatchOrder.BOTTOM_UP)
             .withMatchLimit(10)
             .addRules(BatchRuleSets.LOGICAL_CONVERSION_RULES)
+            .build());
+
+    builder.addLast(
+        LOGICAL_OPTIMIZATION,
+        HepOptimizerProgram.builder()
+            .withMatchLimit(10)
+            .addRules(BatchRuleSets.LOGICAL_OPTIMIZATION_RULES)
             .build());
 
     builder.addLast(

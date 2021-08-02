@@ -164,7 +164,7 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
 
   @Override
   public Statistic getStatistic() {
-    return Statistics.UNKNOWN;
+    return Statistics.of(1000, null);
   }
 
   @Override

@@ -17,12 +17,12 @@ import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.sql.SqlKind;
 
-public class PhysicalInsertValues extends AbstractRelNode implements RisingWaveBatchPhyRel {
+public class BatchInsertValues extends AbstractRelNode implements RisingWaveBatchPhyRel {
   private final TableCatalog table;
   private final ImmutableList<ColumnCatalog.ColumnId> columnIds;
   private final ImmutableList<ImmutableList<RexLiteral>> tuples;
 
-  public PhysicalInsertValues(
+  public BatchInsertValues(
       RelOptCluster cluster,
       RelTraitSet traitSet,
       TableCatalog table,
@@ -57,9 +57,7 @@ public class PhysicalInsertValues extends AbstractRelNode implements RisingWaveB
     }
 
     String values =
-        tuples.stream()
-            .map(PhysicalInsertValues::toString)
-            .collect(Collectors.joining(",", "(", ")"));
+        tuples.stream().map(BatchInsertValues::toString).collect(Collectors.joining(",", "(", ")"));
     pw.item("values", values);
     return pw;
   }

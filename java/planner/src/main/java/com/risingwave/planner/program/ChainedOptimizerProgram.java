@@ -62,6 +62,7 @@ public class ChainedOptimizerProgram implements OptimizerProgram {
   public enum OptimizerPhase {
     CALCITE_LOGICAL_OPTIMIZATION("Logical optimization rules from calcite"),
     LOGICAL_CONVERSION("Converting calcite logical plan to rising wave logical plan."),
+    LOGICAL_OPTIMIZATION("Optimising logical plan"),
     PHYSICAL("Physical planning");
 
     private final String description;

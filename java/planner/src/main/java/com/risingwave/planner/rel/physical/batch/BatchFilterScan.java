@@ -19,8 +19,8 @@ import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.hint.RelHint;
 
-public class PhysicalFilterScan extends FilterScanBase implements RisingWaveBatchPhyRel {
-  protected PhysicalFilterScan(
+public class BatchFilterScan extends FilterScanBase implements RisingWaveBatchPhyRel {
+  protected BatchFilterScan(
       RelOptCluster cluster,
       RelTraitSet traitSet,
       List<RelHint> hints,
@@ -31,18 +31,16 @@ public class PhysicalFilterScan extends FilterScanBase implements RisingWaveBatc
     checkArgument(traitSet.contains(RisingWaveBatchPhyRel.BATCH_PHYSICAL));
   }
 
-  public static PhysicalFilterScan create(
-      RelOptCluster cluster, RelTraitSet traitSet, RelOptTable table) {
+  public static BatchFilterScan create(
+      RelOptCluster cluster,
+      RelTraitSet traitSet,
+      RelOptTable table,
+      ImmutableList<ColumnCatalog.ColumnId> columnIds) {
     TableCatalog tableCatalog = table.unwrapOrThrow(TableCatalog.class);
     RelTraitSet newTraitSet = traitSet.replace(RisingWaveBatchPhyRel.BATCH_PHYSICAL);
 
-    return new PhysicalFilterScan(
-        cluster,
-        newTraitSet,
-        Collections.emptyList(),
-        table,
-        tableCatalog.getId(),
-        tableCatalog.getAllColumnIdsSorted());
+    return new BatchFilterScan(
+        cluster, newTraitSet, Collections.emptyList(), table, tableCatalog.getId(), columnIds);
   }
 
   @Override

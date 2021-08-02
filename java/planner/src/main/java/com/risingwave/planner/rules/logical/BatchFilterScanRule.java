@@ -1,6 +1,6 @@
 package com.risingwave.planner.rules.logical;
 
-import com.risingwave.planner.rel.logical.LogicalFilterScan;
+import com.risingwave.planner.rel.logical.RwFilterScan;
 import org.apache.calcite.plan.Convention;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.plan.RelRule;
@@ -15,8 +15,8 @@ public class BatchFilterScanRule extends RelRule<BatchFilterScanRule.Config> {
   public void onMatch(RelOptRuleCall call) {
     LogicalTableScan source = call.rel(0);
 
-    LogicalFilterScan newTableScan =
-        LogicalFilterScan.create(source.getCluster(), source.getTraitSet(), source.getTable());
+    RwFilterScan newTableScan =
+        RwFilterScan.create(source.getCluster(), source.getTraitSet(), source.getTable());
 
     call.transformTo(newTableScan);
   }

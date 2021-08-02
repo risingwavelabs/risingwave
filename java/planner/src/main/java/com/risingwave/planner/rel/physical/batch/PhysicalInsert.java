@@ -3,7 +3,7 @@ package com.risingwave.planner.rel.physical.batch;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
-import com.risingwave.planner.rel.logical.LogicalInsert;
+import com.risingwave.planner.rel.logical.RwInsert;
 import com.risingwave.proto.plan.PlanNode;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
@@ -47,7 +47,7 @@ public class PhysicalInsert extends TableModify implements RisingWaveBatchPhyRel
             .withInTrait(LOGICAL)
             .withOutTrait(BATCH_PHYSICAL)
             .withRuleFactory(PhysicalInsertConverterRule::new)
-            .withOperandSupplier(t -> t.operand(LogicalInsert.class).convert(LOGICAL))
+            .withOperandSupplier(t -> t.operand(RwInsert.class).convert(LOGICAL))
             .withDescription("Converting logical insert into physical insert")
             .as(Config.class)
             .toRule(PhysicalInsertConverterRule.class);
@@ -58,7 +58,7 @@ public class PhysicalInsert extends TableModify implements RisingWaveBatchPhyRel
 
     @Override
     public @Nullable RelNode convert(RelNode rel) {
-      LogicalInsert logicalInsert = (LogicalInsert) rel;
+      RwInsert logicalInsert = (RwInsert) rel;
       RelTraitSet newTraitSet = logicalInsert.getTraitSet().replace(BATCH_PHYSICAL);
 
       return new PhysicalInsert(

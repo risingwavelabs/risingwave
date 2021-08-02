@@ -11,6 +11,8 @@ import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.core.TableScan;
 import org.apache.calcite.rel.hint.RelHint;
+import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.rel.type.RelDataTypeFactory;
 
 public class FilterScanBase extends TableScan {
   protected final TableCatalog.TableId tableId;
@@ -34,6 +36,17 @@ public class FilterScanBase extends TableScan {
 
   public ImmutableList<ColumnCatalog.ColumnId> getColumnIds() {
     return columnIds;
+  }
+
+  @Override
+  public RelDataType deriveRowType() {
+    RelDataTypeFactory.Builder typeBuilder = getCluster().getTypeFactory().builder();
+    TableCatalog tableCatalog = getTable().unwrapOrThrow(TableCatalog.class);
+    columnIds.stream()
+        .map(tableCatalog::getColumnChecked)
+        .forEachOrdered(
+            col -> typeBuilder.add(col.getEntityName().getValue(), col.getDesc().getDataType()));
+    return typeBuilder.build();
   }
 
   @Override

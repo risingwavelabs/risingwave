@@ -5,14 +5,14 @@ import static com.risingwave.planner.rel.physical.batch.RisingWaveBatchPhyRel.BA
 import com.google.common.collect.ImmutableList;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
-import com.risingwave.planner.rel.logical.LogicalInsert;
-import com.risingwave.planner.rel.physical.batch.PhysicalInsertValues;
+import com.risingwave.planner.rel.logical.RwInsert;
+import com.risingwave.planner.rel.logical.RwValues;
+import com.risingwave.planner.rel.physical.batch.BatchInsertValues;
 import java.util.Optional;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.plan.RelRule;
 import org.apache.calcite.plan.RelTraitSet;
-import org.apache.calcite.rel.logical.LogicalValues;
 
 public class BatchPhysicalInsertValuesRule extends RelRule<RelRule.Config> {
   private BatchPhysicalInsertValuesRule(Config config) {
@@ -21,8 +21,8 @@ public class BatchPhysicalInsertValuesRule extends RelRule<RelRule.Config> {
 
   @Override
   public void onMatch(RelOptRuleCall call) {
-    LogicalInsert insert = call.rel(0);
-    LogicalValues values = call.rel(1);
+    RwInsert insert = call.rel(0);
+    RwValues values = call.rel(1);
 
     TableCatalog tableCatalog = insert.getTable().unwrapOrThrow(TableCatalog.class);
     ImmutableList<ColumnCatalog.ColumnId> columnIds =
@@ -38,7 +38,7 @@ public class BatchPhysicalInsertValuesRule extends RelRule<RelRule.Config> {
     RelTraitSet newTraitSet = insert.getTraitSet().replace(BATCH_PHYSICAL);
 
     call.transformTo(
-        new PhysicalInsertValues(
+        new BatchInsertValues(
             insert.getCluster(), newTraitSet, tableCatalog, columnIds, values.getTuples()));
   }
 
@@ -48,8 +48,7 @@ public class BatchPhysicalInsertValuesRule extends RelRule<RelRule.Config> {
             .withDescription("Merge logical insert and logical values")
             .withOperandSupplier(
                 t ->
-                    t.operand(LogicalInsert.class)
-                        .oneInput(t1 -> t1.operand(LogicalValues.class).noInputs()))
+                    t.operand(RwInsert.class).oneInput(t1 -> t1.operand(RwValues.class).noInputs()))
             .as(Config.class);
 
     @Override

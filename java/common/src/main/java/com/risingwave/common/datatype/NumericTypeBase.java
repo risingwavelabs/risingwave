@@ -1,6 +1,7 @@
 package com.risingwave.common.datatype;
 
 import com.google.common.base.Objects;
+import org.apache.calcite.rel.type.RelDataTypeComparability;
 import org.apache.calcite.sql.type.SqlTypeName;
 
 public class NumericTypeBase extends PrimitiveTypeBase {
@@ -38,5 +39,10 @@ public class NumericTypeBase extends PrimitiveTypeBase {
   @Override
   public int hashCode() {
     return Objects.hashCode(dataSize);
+  }
+
+  @Override
+  public RelDataTypeComparability getComparability() {
+    return RelDataTypeComparability.ALL;
   }
 }

@@ -7,7 +7,6 @@ import java.nio.charset.Charset;
 import java.util.Collections;
 import java.util.List;
 import org.apache.calcite.rel.type.RelDataType;
-import org.apache.calcite.rel.type.RelDataTypeComparability;
 import org.apache.calcite.rel.type.RelDataTypeFamily;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rel.type.RelDataTypePrecedenceList;
@@ -127,11 +126,6 @@ public abstract class PrimitiveTypeBase extends RisingWaveTypeBase {
   @Override
   public RelDataTypePrecedenceList getPrecedenceList() {
     return new SqlTypeExplicitPrecedenceList(Collections.singletonList(getSqlTypeName()));
-  }
-
-  @Override
-  public RelDataTypeComparability getComparability() {
-    return RelDataTypeComparability.NONE;
   }
 
   @Override
