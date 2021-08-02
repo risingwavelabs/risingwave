@@ -17,6 +17,7 @@ public class DropTableHandler implements SqlHandler {
     context
         .getCatalogService()
         .dropTable(context.getDatabase(), context.getSchema(), sqlDropTable.name.getSimple());
+    // TODO: set planFragment.
     return new DdlResult(StatementType.OTHER, 0);
   }
 }

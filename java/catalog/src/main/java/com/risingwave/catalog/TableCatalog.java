@@ -88,6 +88,10 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
     return ImmutableList.copyOf(columnIds);
   }
 
+  public ImmutableList<ColumnCatalog> getAllColumnCatalogs() {
+    return ImmutableList.copyOf(columns);
+  }
+
   public Optional<ColumnCatalog> getColumn(ColumnCatalog.ColumnId columnId) {
     checkNotNull(columnId, "column id can't be null!");
     return Optional.ofNullable(columnById.get(columnId));

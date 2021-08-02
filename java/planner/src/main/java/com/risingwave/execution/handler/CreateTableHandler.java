@@ -1,14 +1,22 @@
 package com.risingwave.execution.handler;
 
+import com.google.common.annotations.VisibleForTesting;
+import com.google.protobuf.Any;
+import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.ColumnDesc;
 import com.risingwave.catalog.ColumnEncoding;
 import com.risingwave.catalog.CreateTableInfo;
 import com.risingwave.catalog.SchemaCatalog;
+import com.risingwave.catalog.TableCatalog;
 import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.execution.result.DdlResult;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.planner.sql.SqlConverter;
+import com.risingwave.proto.plan.CreateTableNode;
+import com.risingwave.proto.plan.PlanFragment;
+import com.risingwave.proto.plan.PlanNode;
+import com.risingwave.proto.plan.ShuffleInfo;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlColumnDeclaration;
@@ -19,13 +27,50 @@ import org.apache.calcite.sql.validate.SqlValidator;
 public class CreateTableHandler implements SqlHandler {
   @Override
   public DdlResult handle(SqlNode ast, ExecutionContext context) {
+    executeDdl(ast, context);
+    // FIXME: refactor using Rpc Executor interface.
+    //    RpcHelper helper = new RpcHelper(context);
+    //    CreateTaskResponse response =
+    //        helper.createTaskFromFragment(ddlSerializer(table, tableInfo), helper.buildTaskId());
+
+    return new DdlResult(StatementType.OTHER, 0);
+  }
+
+  private static PlanFragment ddlSerializer(TableCatalog table) {
+    TableCatalog.TableId tableId = table.getId();
+    CreateTableNode.Builder createTableNodeBuilder = CreateTableNode.newBuilder();
+    for (ColumnCatalog columnCatalog : table.getAllColumnCatalogs()) {
+      com.risingwave.proto.plan.ColumnDesc.Builder columnDescBuilder =
+          com.risingwave.proto.plan.ColumnDesc.newBuilder();
+      columnDescBuilder
+          .setEncoding(com.risingwave.proto.plan.ColumnDesc.ColumnEncodingType.RAW)
+          .setColumnType(columnCatalog.getDesc().getDataType().getProtobufType())
+          .setIsPrimary(false);
+      createTableNodeBuilder.addColumnDescs(columnDescBuilder);
+    }
+    CreateTableNode creatTableNode =
+        createTableNodeBuilder.setTableRefId(RpcHelper.getTableRefId(tableId)).build();
+
+    ShuffleInfo shuffleInfo =
+        ShuffleInfo.newBuilder().setPartitionMode(ShuffleInfo.PartitionMode.SINGLE).build();
+
+    PlanNode rootNode =
+        PlanNode.newBuilder()
+            .setBody(Any.pack(creatTableNode))
+            .setNodeType(PlanNode.PlanNodeType.CREATE_TABLE)
+            .build();
+
+    return PlanFragment.newBuilder().setRoot(rootNode).setShuffleInfo(shuffleInfo).build();
+  }
+
+  @VisibleForTesting
+  protected PlanFragment executeDdl(SqlNode ast, ExecutionContext context) {
     SqlCreateTable sql = (SqlCreateTable) ast;
 
     SchemaCatalog.SchemaName schemaName = context.getCurrentSchema();
 
     String tableName = sql.name.getSimple();
     CreateTableInfo.Builder createTableInfoBuilder = CreateTableInfo.builder(tableName);
-
     if (sql.columnList != null) {
       SqlValidator sqlConverter = SqlConverter.builder(context).build().getValidator();
       for (SqlNode column : sql.columnList) {
@@ -39,9 +84,9 @@ public class CreateTableHandler implements SqlHandler {
         createTableInfoBuilder.addColumn(columnDef.name.getSimple(), columnDesc);
       }
     }
-
-    context.getCatalogService().createTable(schemaName, createTableInfoBuilder.build());
-
-    return new DdlResult(StatementType.OTHER, 0);
+    CreateTableInfo tableInfo = createTableInfoBuilder.build();
+    // Build a plan distribute to compute node.
+    TableCatalog table = context.getCatalogService().createTable(schemaName, tableInfo);
+    return ddlSerializer(table);
   }
 }

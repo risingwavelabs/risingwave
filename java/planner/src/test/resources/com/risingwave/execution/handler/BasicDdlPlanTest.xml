@@ -1,0 +1,48 @@
+<Root>
+    <TestCase name="create table">
+        <Resource name="sql">
+            <![CDATA[
+create table t(v1 int not null, v2 int not null, v3 float not null)
+        ]]>
+        </Resource>
+        <Resource name="json">
+            <![CDATA[
+  {
+  "root": {
+    "nodeType": "CREATE_TABLE",
+    "body": {
+      "@type": "type.googleapis.com/risingwave.executor.proto.CreateTableNode",
+      "tableRefId": {
+        "schemaRefId": {
+          "databaseRefId": {
+            "databaseId": 1
+          },
+          "schemaId": 2
+        },
+        "tableId": 1
+      },
+      "columnDescs": [{
+        "columnType": {
+          "typeName": "INT32"
+        },
+        "encoding": "RAW"
+      }, {
+        "columnType": {
+          "typeName": "INT32"
+        },
+        "encoding": "RAW"
+      }, {
+        "columnType": {
+          "typeName": "FLOAT"
+        },
+        "encoding": "RAW"
+      }]
+    }
+  },
+  "shuffleInfo": {
+  }
+}
+            ]]>
+        </Resource>
+    </TestCase>
+</Root>
