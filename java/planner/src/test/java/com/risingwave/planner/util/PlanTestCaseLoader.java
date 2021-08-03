@@ -74,7 +74,7 @@ public class PlanTestCaseLoader implements ArgumentsProvider {
 
     verifyNotNull(sql, "Sql content not found in test case: %s!", testCaseName);
     //  verifyNotNull(plan, "Plan content not found in test case: %s!", testCaseName);
-    verifyNotNull(json, "Json plan content not found in test case: %s!", testCaseName);
+    //  verifyNotNull(json, "Json plan content not found in test case: %s!", testCaseName);
 
     return new PlannerTestCase(testCaseName, sql, plan, json);
   }

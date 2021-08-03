@@ -100,8 +100,10 @@ public abstract class BatchPlanTestBase {
     assertEquals(testCase.getPlan(), explainedPlan, "Plan not match!");
 
     // Comment out this to wait for all plan serializaton to be ready
-    //    String serializedJsonPlan = serializePlanToJson(plan.getRoot());
-    //    assertEquals(testCase.getJson(), serializedJsonPlan, "Json not match!");
+    if (testCase.getJson() != null) {
+      String serializedJsonPlan = serializePlanToJson(plan.getRoot());
+      assertEquals(testCase.getJson(), serializedJsonPlan, "Json not match!");
+    }
   }
 
   private static String explainBatchPlan(RelNode relNode) {

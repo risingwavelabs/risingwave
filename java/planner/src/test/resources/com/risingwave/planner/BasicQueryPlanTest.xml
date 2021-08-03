@@ -29,6 +29,7 @@ BatchFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])
             ]]>
         </Resource>
     </TestCase>
+
     <TestCase name="insert into values">
         <Resource name="sql">
             <![CDATA[
@@ -41,7 +42,141 @@ BatchInsertValues(table=[t], values=[((1,4,2:FLOAT),(2,3,3:FLOAT),(3,4,4:FLOAT),
 ]]>
         </Resource>
         <Resource name="json">
-            dafads
+            <![CDATA[
+{
+  "nodeType": "INSERT_VALUE",
+  "body": {
+    "@type": "type.googleapis.com/risingwave.executor.proto.InsertValueNode",
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+          "databaseId": 1
+        },
+        "schemaId": 2
+      },
+      "tableId": 1
+    },
+    "columnIds": [1, 2, 3],
+    "insertTuples": [{
+      "cells": [{
+        "exprType": "CONSTANT_VALUE",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+          "body": "AAAAAQ=="
+        },
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }, {
+        "exprType": "CONSTANT_VALUE",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+          "body": "AAAABA=="
+        },
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }, {
+        "exprType": "CONSTANT_VALUE",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+          "body": "QAAAAA=="
+        },
+        "returnType": {
+          "typeName": "FLOAT"
+        }
+      }]
+    }, {
+      "cells": [{
+        "exprType": "CONSTANT_VALUE",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+          "body": "AAAAAg=="
+        },
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }, {
+        "exprType": "CONSTANT_VALUE",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+          "body": "AAAAAw=="
+        },
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }, {
+        "exprType": "CONSTANT_VALUE",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+          "body": "QEAAAA=="
+        },
+        "returnType": {
+          "typeName": "FLOAT"
+        }
+      }]
+    }, {
+      "cells": [{
+        "exprType": "CONSTANT_VALUE",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+          "body": "AAAAAw=="
+        },
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }, {
+        "exprType": "CONSTANT_VALUE",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+          "body": "AAAABA=="
+        },
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }, {
+        "exprType": "CONSTANT_VALUE",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+          "body": "QIAAAA=="
+        },
+        "returnType": {
+          "typeName": "FLOAT"
+        }
+      }]
+    }, {
+      "cells": [{
+        "exprType": "CONSTANT_VALUE",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+          "body": "AAAABA=="
+        },
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }, {
+        "exprType": "CONSTANT_VALUE",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+          "body": "AAAAAw=="
+        },
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }, {
+        "exprType": "CONSTANT_VALUE",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+          "body": "QKAAAA=="
+        },
+        "returnType": {
+          "typeName": "FLOAT"
+        }
+      }]
+    }]
+  }
+}
+            ]]>
         </Resource>
     </TestCase>
 
@@ -58,9 +193,6 @@ BatchProject(v1=[$0], v2=[$1], v3=[$2])
     BatchFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])
             ]]>
         </Resource>
-        <Resource name="json">
-            fdsa
-        </Resource>
     </TestCase>
 
     <TestCase name="select with non-key sum 1">
@@ -75,9 +207,9 @@ BatchHashAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
   BatchProject($f0=[+($0, $1)], $f1=[+($0, $2)])
     BatchFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])            ]]>
         </Resource>
-        <Resource name="json">
-            fas
-        </Resource>
+<!--        <Resource name="json">-->
+<!--            fas-->
+<!--        </Resource>-->
     </TestCase>
 
     <TestCase name="select with non-key sum 2">
@@ -92,9 +224,9 @@ BatchHashAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
   BatchFilterScan(table=[[test_schema, t]], columns=[v1,v3])
 ]]>
         </Resource>
-        <Resource name="json">
-            fda
-        </Resource>
+<!--        <Resource name="json">-->
+<!--            fda-->
+<!--        </Resource>-->
     </TestCase>
 
     <TestCase name="select with non-key min">
@@ -109,9 +241,9 @@ BatchHashAgg(group=[{}], EXPR$0=[MIN($0)])
   BatchFilterScan(table=[[test_schema, t]], columns=[v1])
 ]]>
         </Resource>
-        <Resource name="json">
-            fda
-        </Resource>
+<!--        <Resource name="json">-->
+<!--            fda-->
+<!--        </Resource>-->
     </TestCase>
 
     <TestCase name="select with non-key max">
@@ -126,9 +258,9 @@ BatchHashAgg(group=[{}], EXPR$0=[MAX($0)])
   BatchFilterScan(table=[[test_schema, t]], columns=[v1])
 ]]>
         </Resource>
-        <Resource name="json">
-            dfas
-        </Resource>
+<!--        <Resource name="json">-->
+<!--            dfas-->
+<!--        </Resource>-->
     </TestCase>
 
     <TestCase name="select with non-key max with filter">
@@ -145,9 +277,9 @@ BatchHashAgg(group=[{}], EXPR$0=[MAX($0)])
       BatchFilterScan(table=[[test_schema, t]], columns=[v1,v2])
             ]]>
         </Resource>
-        <Resource name="json">
-            fdas
-        </Resource>
+<!--        <Resource name="json">-->
+<!--            fdas-->
+<!--        </Resource>-->
     </TestCase>
 
     <TestCase name="select with non-key avg">
@@ -162,9 +294,9 @@ BatchHashAgg(group=[{}], EXPR$0=[AVG($0)])
   BatchFilterScan(table=[[test_schema, t]], columns=[v2])
 ]]>
         </Resource>
-        <Resource name="json">
-            fdsa
-        </Resource>
+<!--        <Resource name="json">-->
+<!--            fdsa-->
+<!--        </Resource>-->
     </TestCase>
 
     <TestCase name="select with sum and group by">
@@ -180,10 +312,11 @@ BatchProject(EXPR$0=[$1], v2=[$0])
     BatchFilterScan(table=[[test_schema, t]], columns=[v2,v1])
 ]]>
         </Resource>
-        <Resource name="json">
-            fdsa
-        </Resource>
+<!--        <Resource name="json">-->
+<!--            fdsa-->
+<!--        </Resource>-->
     </TestCase>
+
     <TestCase name="select with sum and group by">
         <Resource name="sql">
             <![CDATA[
@@ -196,8 +329,8 @@ BatchProject(EXPR$0=[/(1.000E2:DOUBLE, 8.0E0:DOUBLE)])
   BatchValues(tuples=[[{ 0 }]])
 ]]>
         </Resource>
-        <Resource name="json">
-            fdsa
-        </Resource>
+<!--        <Resource name="json">-->
+<!--            fdsa-->
+<!--        </Resource>-->
     </TestCase>
 </Root>
