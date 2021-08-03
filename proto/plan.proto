@@ -64,7 +64,6 @@ message InsertValueNode {
     TableRefId table_ref_id = 1;
     repeated int32 column_ids = 2;
     repeated ExprTuple insert_tuples = 3;
-    repeated risingwave.executor.proto.DataType column_types = 4;
 }
 
 message CreateTableNode {
