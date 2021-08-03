@@ -49,7 +49,7 @@ public class CreateTableHandler implements SqlHandler {
       createTableNodeBuilder.addColumnDescs(columnDescBuilder);
     }
     CreateTableNode creatTableNode =
-        createTableNodeBuilder.setTableRefId(RpcHelper.getTableRefId(tableId)).build();
+        createTableNodeBuilder.setTableRefId(RpcExecutor.getTableRefId(tableId)).build();
 
     ShuffleInfo shuffleInfo =
         ShuffleInfo.newBuilder().setPartitionMode(ShuffleInfo.PartitionMode.SINGLE).build();

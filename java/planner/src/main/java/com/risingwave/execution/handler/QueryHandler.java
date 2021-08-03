@@ -9,33 +9,31 @@ import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.planner.planner.batch.BatchPlanner;
 import com.risingwave.planner.rel.physical.batch.BatchPlan;
 import com.risingwave.proto.common.Status;
+import com.risingwave.proto.computenode.CreateTaskRequest;
 import com.risingwave.proto.computenode.CreateTaskResponse;
 import com.risingwave.proto.computenode.TaskData;
-import com.risingwave.proto.computenode.TaskId;
+import com.risingwave.proto.computenode.TaskSinkId;
 import java.util.ArrayList;
 import java.util.Iterator;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 @HandlerSignature(sqlKinds = {SqlKind.SELECT})
 public class QueryHandler implements SqlHandler {
-  private static final Logger LOGGER = LoggerFactory.getLogger(QueryHandler.class);
 
   @Override
   public PgResult handle(SqlNode ast, ExecutionContext context) {
     BatchPlanner planner = new BatchPlanner();
     BatchPlan plan = planner.plan(ast, context);
 
-    RpcHelper helper = new RpcHelper(context);
-    TaskId taskId = helper.buildTaskId();
-    CreateTaskResponse response = helper.creatTask(plan, taskId);
-    if (response.getStatus().getCode() != Status.Code.OK) {
+    RpcExecutor rpcExecutor = context.getRpcExecutor();
+    CreateTaskRequest createTaskRequest = rpcExecutor.buildCreateTaskRequest(plan.serialize());
+    CreateTaskResponse createTaskResponse = rpcExecutor.createTask(createTaskRequest);
+    if (createTaskResponse.getStatus().getCode() != Status.Code.OK) {
       throw new PgException(PgErrorCode.INTERNAL_ERROR, "Creat Task failed");
     }
-
-    Iterator<TaskData> taskDataIterator = helper.getData(taskId);
+    TaskSinkId taskSinkId = rpcExecutor.buildTaskSinkId(createTaskRequest.getTaskId());
+    Iterator<TaskData> taskDataIterator = rpcExecutor.getData(taskSinkId);
 
     // Convert task data to list to iterate it multiple times.
     // FIXME: use Iterator<TaskData>
