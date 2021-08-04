@@ -18,6 +18,7 @@ import com.risingwave.proto.expr.ExprNode;
 import com.risingwave.proto.plan.InsertValueNode;
 import com.risingwave.proto.plan.PlanNode;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.stream.Collectors;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptUtil;
@@ -93,20 +94,49 @@ public class BatchInsertValues extends AbstractRelNode implements RisingWaveBatc
   private static byte[] getBytesRepresentation(RexLiteral val, DataType dataType) {
     ByteBuffer bb;
     switch (dataType.getTypeName()) {
+      case INT16:
+        {
+          bb = ByteBuffer.allocate(2).order(ByteOrder.BIG_ENDIAN);
+          bb.putShort(
+              requireNonNull(
+                  val.getValueAs(Short.class),
+                  "RexLiteral return a null value in byte array serialization!"));
+          break;
+        }
       case INT32:
         {
-          bb = ByteBuffer.allocate(4);
-          Integer v = val.getValueAs(Integer.class);
-          requireNonNull(v, "RexLiteral return a null value in byte array serialization!");
-          bb.putInt(val.getValueAs(Integer.class));
+          bb = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN);
+          bb.putInt(
+              requireNonNull(
+                  val.getValueAs(Integer.class),
+                  "RexLiteral return a null value in byte array serialization!"));
+          break;
+        }
+      case INT64:
+        {
+          bb = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN);
+          bb.putLong(
+              requireNonNull(
+                  val.getValueAs(Long.class),
+                  "RexLiteral return a null value in byte array serialization!"));
           break;
         }
       case FLOAT:
         {
-          bb = ByteBuffer.allocate(4);
-          Float v = val.getValueAs(Float.class);
-          requireNonNull(v, "RexLiteral return a null value in byte array serialization!");
-          bb.putFloat(val.getValueAs(Float.class));
+          bb = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN);
+          bb.putFloat(
+              requireNonNull(
+                  val.getValueAs(Float.class),
+                  "RexLiteral return a null value in byte array serialization!"));
+          break;
+        }
+      case DOUBLE:
+        {
+          bb = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN);
+          bb.putDouble(
+              requireNonNull(
+                  val.getValueAs(Double.class),
+                  "RexLiteral return a null value in byte array serialization!"));
           break;
         }
       default:

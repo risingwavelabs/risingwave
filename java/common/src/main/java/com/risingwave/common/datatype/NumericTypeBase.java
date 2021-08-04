@@ -53,12 +53,22 @@ public class NumericTypeBase extends PrimitiveTypeBase {
   @Override
   public DataType getProtobufType() {
     switch (getSqlTypeName()) {
+      case SMALLINT:
+        return buildProtobufType(TypeName.INT16);
       case INTEGER:
-        return DataType.newBuilder().setTypeName(TypeName.INT32).build();
+        return buildProtobufType(TypeName.INT32);
+      case BIGINT:
+        return buildProtobufType(TypeName.INT64);
       case FLOAT:
-        return DataType.newBuilder().setTypeName(TypeName.FLOAT).build();
+        return buildProtobufType(TypeName.FLOAT);
+      case DOUBLE:
+        return buildProtobufType(TypeName.DOUBLE);
       default:
         throw new PgException(PgErrorCode.INTERNAL_ERROR, "unsupported type: %s", getSqlTypeName());
     }
+  }
+
+  private static DataType buildProtobufType(TypeName typeName) {
+    return DataType.newBuilder().setTypeName(typeName).build();
   }
 }
