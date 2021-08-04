@@ -46,7 +46,7 @@ public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCata
           MetaServiceError.TABLE_ALREADY_EXISTS, tableName, getDatabaseName(), getSchemaName());
     }
 
-    TableCatalog.TableId tableId = new TableCatalog.TableId(nextTableId.incrementAndGet(), getId());
+    TableCatalog.TableId tableId = new TableCatalog.TableId(nextTableId.getAndIncrement(), getId());
 
     TableCatalog table =
         new TableCatalog(

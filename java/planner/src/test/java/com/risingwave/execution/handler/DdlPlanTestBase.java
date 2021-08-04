@@ -28,8 +28,7 @@ public class DdlPlanTestBase {
 
   private void initCatalog() {
     catalogService = new SimpleCatalogService();
-    catalogService.createDatabase(TEST_DB_NAME);
-    catalogService.createSchema(TEST_DB_NAME, TEST_SCHEMA_NAME);
+    catalogService.createDatabase(TEST_DB_NAME, TEST_SCHEMA_NAME);
   }
 
   protected void init() {

@@ -39,7 +39,7 @@ public class DatabaseCatalog
     }
 
     SchemaCatalog.SchemaId schemaId =
-        new SchemaCatalog.SchemaId(nextSchemaId.incrementAndGet(), getId());
+        new SchemaCatalog.SchemaId(nextSchemaId.getAndIncrement(), getId());
     SchemaCatalog schema = new SchemaCatalog(schemaId, schemaName);
     registerSchema(schema);
   }

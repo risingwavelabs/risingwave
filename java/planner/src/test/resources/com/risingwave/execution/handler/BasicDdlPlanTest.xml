@@ -7,7 +7,7 @@ create table t(v1 int not null, v2 int not null, v3 float not null)
         </Resource>
         <Resource name="json">
             <![CDATA[
-  {
+{
   "root": {
     "nodeType": "CREATE_TABLE",
     "body": {
@@ -15,11 +15,8 @@ create table t(v1 int not null, v2 int not null, v3 float not null)
       "tableRefId": {
         "schemaRefId": {
           "databaseRefId": {
-            "databaseId": 1
-          },
-          "schemaId": 2
-        },
-        "tableId": 1
+          }
+        }
       },
       "columnDescs": [{
         "columnType": {

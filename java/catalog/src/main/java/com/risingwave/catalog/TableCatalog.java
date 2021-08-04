@@ -137,7 +137,7 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
     }
 
     ColumnCatalog.ColumnId columnId =
-        new ColumnCatalog.ColumnId(nextColumnId.incrementAndGet(), getId());
+        new ColumnCatalog.ColumnId(nextColumnId.getAndIncrement(), getId());
 
     ColumnCatalog column = new ColumnCatalog(columnId, columnName, columnDesc);
     registerColumn(column);

@@ -14,11 +14,18 @@ public interface CatalogService {
   String DEFAULT_DATABASE_NAME = "dev";
   String DEFAULT_SCHEMA_NAME = "main";
 
-  default DatabaseCatalog createDatabase(String name) {
-    return createDatabase(DatabaseCatalog.DatabaseName.of(name));
+  /**
+   * Create a database will also create a default schema. Specify schema name parameter if do not
+   * want to create default schema.
+   *
+   * @param databaseName Can be default db name or test db name
+   * @return database catalog (include schema)
+   */
+  default DatabaseCatalog createDatabase(String databaseName) {
+    return createDatabase(databaseName, DEFAULT_SCHEMA_NAME);
   }
 
-  DatabaseCatalog createDatabase(DatabaseCatalog.DatabaseName databaseName);
+  DatabaseCatalog createDatabase(String databaseName, String schemaName);
 
   @Nullable
   DatabaseCatalog getDatabase(DatabaseCatalog.DatabaseName databaseName);

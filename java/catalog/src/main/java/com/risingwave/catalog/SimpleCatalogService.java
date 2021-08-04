@@ -19,19 +19,19 @@ public class SimpleCatalogService implements CatalogService {
       new ConcurrentHashMap<>();
 
   @Override
-  public synchronized DatabaseCatalog createDatabase(DatabaseCatalog.DatabaseName databaseName) {
+  public synchronized DatabaseCatalog createDatabase(String dbName, String schemaName) {
+    DatabaseCatalog.DatabaseName databaseName = DatabaseCatalog.DatabaseName.of(dbName);
     checkNotNull(databaseName, "database name can't be null!");
     if (databaseByName.containsKey(databaseName)) {
       throw RisingWaveException.from(MetaServiceError.DATABASE_ALREADY_EXISTS, databaseName);
     }
 
-    int nextDatabaseId = this.nextDatabaseId.incrementAndGet();
-
     DatabaseCatalog database =
-        new DatabaseCatalog(new DatabaseCatalog.DatabaseId(nextDatabaseId), databaseName);
+        new DatabaseCatalog(
+            new DatabaseCatalog.DatabaseId(nextDatabaseId.getAndIncrement()), databaseName);
     registerDatabase(database);
 
-    database.createSchema(DEFAULT_SCHEMA_NAME);
+    database.createSchema(schemaName);
 
     return database;
   }

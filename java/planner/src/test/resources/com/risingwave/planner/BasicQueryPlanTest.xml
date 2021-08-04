@@ -20,10 +20,9 @@ BatchFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])
       "schemaRefId": {
         "databaseRefId": {
         }
-      },
-      "tableId": 1
+      }
     },
-    "columnIds": [1, 2, 3]
+    "columnIds": [0, 1, 2]
   }
 }
             ]]>
@@ -50,13 +49,10 @@ BatchInsertValues(table=[t], values=[((1,4,2:FLOAT),(2,3,3:FLOAT),(3,4,4:FLOAT),
     "tableRefId": {
       "schemaRefId": {
         "databaseRefId": {
-          "databaseId": 1
-        },
-        "schemaId": 2
-      },
-      "tableId": 1
+        }
+      }
     },
-    "columnIds": [1, 2, 3],
+    "columnIds": [0, 1, 2],
     "insertTuples": [{
       "cells": [{
         "exprType": "CONSTANT_VALUE",
