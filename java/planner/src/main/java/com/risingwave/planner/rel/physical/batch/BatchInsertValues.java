@@ -19,6 +19,7 @@ import com.risingwave.proto.plan.InsertValueNode;
 import com.risingwave.proto.plan.PlanNode;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
 import java.util.stream.Collectors;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptUtil;
@@ -137,6 +138,19 @@ public class BatchInsertValues extends AbstractRelNode implements RisingWaveBatc
               requireNonNull(
                   val.getValueAs(Double.class),
                   "RexLiteral return a null value in byte array serialization!"));
+          break;
+        }
+      case CHAR:
+      case VARCHAR:
+        {
+          // FIXME: No overflow detection here.
+          byte[] str =
+              requireNonNull(
+                      val.getValueAs(String.class),
+                      "RexLiteral return a null value in byte array serialization!")
+                  .getBytes(StandardCharsets.UTF_8);
+          bb = ByteBuffer.allocate(str.length).order(ByteOrder.BIG_ENDIAN);
+          bb.put(str);
           break;
         }
       default:

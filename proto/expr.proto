@@ -57,7 +57,7 @@ message InputRefExpr {
 }
 
 message ConstantValue {
-    // bool: one byte, 0 for false, non-zero for true
+    // bool array/bitmap: one byte, 0 for false (null), non-zero for true (non-null)
     // integer, float,  double: big-endianness
     // char, varchar: encoded accorded to encoding, currently only utf8 is supported.
     bytes body = 1;

@@ -11,6 +11,8 @@ public class RisingWaveTypeFactory extends JavaTypeFactoryImpl {
 
   public RelDataType createSqlType(SqlTypeName sqlType) {
     switch (sqlType) {
+      case SMALLINT:
+        return new NumericTypeBase(SqlTypeName.SMALLINT, 2);
       case INTEGER:
         return new NumericTypeBase(SqlTypeName.INTEGER, 4);
       case BIGINT:
