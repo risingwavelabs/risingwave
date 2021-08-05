@@ -35,19 +35,15 @@ public class ChainedOptimizerProgram implements OptimizerProgram {
     for (OptimizerPhase phase : phases) {
       OptimizerProgram program = optimizers.get(phase);
       RelNode current = result;
-      LOGGER.atDebug().addArgument(phase).log("Begin to optimize in {} phase.");
+      LOGGER.debug("Begin to optimize in {} phase.", phase);
       try {
         result =
             Utils.runWithTime(
                 () -> program.optimize(current, context),
                 nanoSeconds ->
-                    LOGGER
-                        .atDebug()
-                        .addArgument(phase)
-                        .addArgument(nanoSeconds)
-                        .log("Optimizer phase {} took {} nanoseconds."));
+                    LOGGER.debug("Optimizer phase {} took {} nanoseconds.", phase, nanoSeconds));
       } catch (Exception e) {
-        LOGGER.atError().addArgument(phase).log("Failed to optimize plan at phase {}.", e);
+        LOGGER.error("Failed to optimize plan at phase {}.", phase, e);
         throw RisingWaveException.from(PlannerError.INTERNAL, e);
       }
     }

@@ -5,7 +5,6 @@ import static java.util.Objects.requireNonNull;
 import com.risingwave.proto.plan.PlanFragment;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.proto.plan.ShuffleInfo;
-import org.apache.calcite.rel.RelNode;
 
 /**
  * Plan for adhoc query execution. The counterpart is streaming plan, which is designed for
@@ -18,7 +17,7 @@ public class BatchPlan {
     this.root = requireNonNull(root, "Root can't be null!");
   }
 
-  public RelNode getRoot() {
+  public RisingWaveBatchPhyRel getRoot() {
     return root;
   }
 

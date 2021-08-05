@@ -46,11 +46,7 @@ public class SqlHandlerFactory {
     try {
       return constructor.newInstance();
     } catch (Exception e) {
-      LOGGER
-          .atError()
-          .addArgument(ast.getKind())
-          .addArgument(e)
-          .log("Failed to create handler for {}");
+      LOGGER.error("Failed to create handler for {}.", ast.getKind(), e);
       throw RisingWaveException.from(ExecutionError.INTERNAL, e);
     }
   }
@@ -71,11 +67,7 @@ public class SqlHandlerFactory {
           Arrays.stream(handlerSignature.sqlKinds())
               .forEachOrdered(sqlKind -> builder.put(sqlKind, emptyConstructor));
         } catch (Exception e) {
-          LOGGER
-              .atError()
-              .addArgument(klass.getName())
-              .addArgument(e)
-              .log("Failed to find no arg constructor for {}");
+          LOGGER.error("Failed to find no arg constructor for {}", klass.getName(), e);
           throw RisingWaveException.from(ExecutionError.INTERNAL, e);
         }
       }

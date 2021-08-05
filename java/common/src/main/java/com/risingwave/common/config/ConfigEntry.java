@@ -13,7 +13,7 @@ public class ConfigEntry<T> {
   private final T defaultValue;
   private final boolean optional;
   private final Validator<T> validator;
-  private final Converter<T> converter;
+  private final Parser<T> parser;
 
   private ConfigEntry(Builder<T> builder) {
     this.key = requireNonNull(builder.key, "Key can't be null!");
@@ -21,7 +21,7 @@ public class ConfigEntry<T> {
     this.defaultValue = builder.defaultValue;
     this.optional = builder.optional;
     this.validator = requireNonNull(builder.validator, "Validator can't be null!");
-    this.converter = requireNonNull(builder.converter, "Converter can't be null!");
+    this.parser = requireNonNull(builder.parser, "Converter can't be null!");
   }
 
   public T getDefaultValue() {
@@ -44,7 +44,7 @@ public class ConfigEntry<T> {
   public T getValue(Properties config) {
     String value = config.getProperty(key);
     if (value != null) {
-      T configValue = converter.convert(value);
+      T configValue = parser.convert(value);
       validator.validate(configValue);
       return configValue;
     } else {
@@ -67,7 +67,7 @@ public class ConfigEntry<T> {
     private T defaultValue = null;
     private boolean optional = true;
     private Validator<T> validator = new EmptyValidator<T>();
-    private Converter<T> converter;
+    private Parser<T> parser;
 
     public Builder(String key) {
       this.key = key;
@@ -93,8 +93,8 @@ public class ConfigEntry<T> {
       return this;
     }
 
-    public Builder<T> withConverter(Converter<T> converter) {
-      this.converter = converter;
+    public Builder<T> withConverter(Parser<T> parser) {
+      this.parser = parser;
       return this;
     }
 

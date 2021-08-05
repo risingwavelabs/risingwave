@@ -29,12 +29,12 @@ public class FrontendServer {
     CatalogService catalogService = createCatalogService();
     DatabaseManager databaseManager = createDatabaseManager(catalogService, config);
 
-    LOGGER.atInfo().log("Creating pg server.");
+    LOGGER.info("Creating pg server.");
     PgServer server =
         new PgServer(config.get(FrontendServerConfigurations.PG_WIRE_PORT), databaseManager);
 
     new Thread(server::serve, "PG Server").start();
-    LOGGER.atInfo().log("Frontend server started..");
+    LOGGER.info("Frontend server started..");
   }
 
   private static void printUsage(OptionsParser parser) {
@@ -44,17 +44,14 @@ public class FrontendServer {
   }
 
   private static Configuration loadConfig(FrontendServerOptions options) {
-    LOGGER.atInfo().addArgument(options.configFile).log("Loading server configuration at {}");
+    LOGGER.info("Loading server configuration at {}", options.configFile);
     return Configuration.load(options.configFile, FrontendServerConfigurations.class);
   }
 
   private static CatalogService createCatalogService() {
-    LOGGER.atInfo().log("Creating catalog service.");
+    LOGGER.info("Creating catalog service.");
     SimpleCatalogService catalogService = new SimpleCatalogService();
-    LOGGER
-        .atInfo()
-        .addArgument(CatalogService.DEFAULT_DATABASE_NAME)
-        .log("Creating default database: {}.", CatalogService.DEFAULT_DATABASE_NAME);
+    LOGGER.info("Creating default database: {}.", CatalogService.DEFAULT_DATABASE_NAME);
 
     catalogService.createDatabase(CatalogService.DEFAULT_DATABASE_NAME);
     return catalogService;
@@ -62,7 +59,7 @@ public class FrontendServer {
 
   private static DatabaseManager createDatabaseManager(
       CatalogService catalogService, Configuration configuration) {
-    LOGGER.atInfo().log("Creating database manager.");
+    LOGGER.info("Creating database manager.");
     DatabaseManager manager = new RisingWaveDatabaseManager(configuration, catalogService);
     Databases.setDatabaseManager(manager);
     return manager;

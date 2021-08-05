@@ -78,7 +78,7 @@ public class Configuration {
   private static List<ConfigEntry<?>> loadConfigEntries(Class<?> klass) {
     return Arrays.stream(klass.getDeclaredFields())
         .filter(f -> f.getAnnotation(Config.class) != null)
-        .filter(f -> f.getDeclaringClass() == ConfigEntry.class)
+        .filter(f -> f.getType() == ConfigEntry.class)
         .filter(
             f ->
                 isPublic(f.getModifiers())
