@@ -7,8 +7,10 @@ import com.risingwave.common.exception.RisingWaveException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import javax.inject.Singleton;
 
 /** A naive in memory implementation of {@link CatalogService}. */
+@Singleton
 public class SimpleCatalogService implements CatalogService {
 
   private final AtomicInteger nextDatabaseId = new AtomicInteger(0);

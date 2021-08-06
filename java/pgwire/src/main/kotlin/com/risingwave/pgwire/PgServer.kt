@@ -1,18 +1,15 @@
 package com.risingwave.pgwire
 
 import com.risingwave.pgwire.database.DatabaseManager
-import io.ktor.network.selector.ActorSelectorManager
-import io.ktor.network.sockets.ServerSocket
-import io.ktor.network.sockets.Socket
-import io.ktor.network.sockets.aSocket
-import io.ktor.network.sockets.isClosed
-import java.net.InetSocketAddress
+import io.ktor.network.selector.*
+import io.ktor.network.sockets.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.slf4j.LoggerFactory
+import java.net.InetSocketAddress
 
-class PgServer(private val port: Int, private val databaseManager: DatabaseManager) {
+class PgServer (private val port: Int, private val dbManager: DatabaseManager) {
   companion object {
     private val log = LoggerFactory.getLogger(PgServer::class.java)
   }
@@ -29,7 +26,7 @@ class PgServer(private val port: Int, private val databaseManager: DatabaseManag
       // Single connection failure won't break it.
       while (!acceptor.isClosed) {
         val socket: Socket = acceptor.accept()
-        val conn = PgServerConn(socket)
+        val conn = PgServerConn(socket, dbManager)
         launch { // Spawn a separate coroutine handling this connection.
           conn.serve()
         }

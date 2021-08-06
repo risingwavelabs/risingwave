@@ -9,7 +9,7 @@ import io.ktor.utils.io.ByteWriteChannel
 import org.slf4j.LoggerFactory
 
 /** A tcp server-side connection. */
-class PgServerConn(private val socket: Socket) {
+class PgServerConn(private val socket: Socket, private val dbManager: DatabaseManager) {
   companion object {
     private val log = LoggerFactory.getLogger(PgServerConn::class.java)
   }
@@ -20,7 +20,7 @@ class PgServerConn(private val socket: Socket) {
     try {
       val input: ByteReadChannel = socket.openReadChannel()
       val output: ByteWriteChannel = socket.openWriteChannel(autoFlush = true)
-      val proto = PgProtocol(input, output)
+      val proto = PgProtocol(input, output, dbManager)
       while (true) {
         val terminate = proto.process()
         if (terminate) {

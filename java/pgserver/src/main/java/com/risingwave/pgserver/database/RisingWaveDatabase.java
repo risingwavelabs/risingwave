@@ -5,6 +5,7 @@ import com.risingwave.common.config.Configuration;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.execution.context.ExecutionContext;
+import com.risingwave.execution.handler.SqlHandlerFactory;
 import com.risingwave.pgwire.database.Database;
 import com.risingwave.pgwire.database.PgResult;
 
@@ -13,14 +14,20 @@ public class RisingWaveDatabase implements Database {
   private final CatalogService catalogService;
   private final String database;
   private final String user;
+  private final SqlHandlerFactory sqlHandlerFactory;
   private String schema = CatalogService.DEFAULT_SCHEMA_NAME;
 
   RisingWaveDatabase(
-      Configuration sessionConf, CatalogService catalogService, String database, String user) {
+      Configuration sessionConf,
+      CatalogService catalogService,
+      String database,
+      String user,
+      SqlHandlerFactory sqlHandlerFactory) {
     this.sessionConf = sessionConf;
     this.catalogService = catalogService;
     this.database = database;
     this.user = user;
+    this.sqlHandlerFactory = sqlHandlerFactory;
   }
 
   @Override
@@ -31,6 +38,7 @@ public class RisingWaveDatabase implements Database {
             .withSchema(schema)
             .withCatalogService(catalogService)
             .withConfiguration(sessionConf)
+            .withSqlHandlerFactory(sqlHandlerFactory)
             .build();
 
     try {

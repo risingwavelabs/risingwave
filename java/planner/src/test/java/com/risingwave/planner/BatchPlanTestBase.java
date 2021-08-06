@@ -11,6 +11,7 @@ import com.risingwave.catalog.CatalogService;
 import com.risingwave.catalog.SimpleCatalogService;
 import com.risingwave.common.config.Configuration;
 import com.risingwave.execution.context.ExecutionContext;
+import com.risingwave.execution.handler.DefaultSqlHandlerFactory;
 import com.risingwave.execution.handler.SqlHandlerFactory;
 import com.risingwave.planner.planner.batch.BatchPlanner;
 import com.risingwave.planner.rel.physical.batch.BatchPlan;
@@ -37,6 +38,7 @@ public abstract class BatchPlanTestBase {
   protected BatchPlanner batchPlanner;
   protected CatalogService catalogService;
   protected ExecutionContext executionContext;
+  protected SqlHandlerFactory sqlHandlerFactory;
 
   private void initCatalog() {
     catalogService = new SimpleCatalogService();
@@ -45,6 +47,7 @@ public abstract class BatchPlanTestBase {
 
   protected void init() {
     initCatalog();
+    sqlHandlerFactory = new DefaultSqlHandlerFactory();
 
     executionContext =
         ExecutionContext.builder()
@@ -52,6 +55,7 @@ public abstract class BatchPlanTestBase {
             .withDatabase(TEST_DB_NAME)
             .withSchema(TEST_SCHEMA_NAME)
             .withConfiguration(new Configuration())
+            .withSqlHandlerFactory(sqlHandlerFactory)
             .build();
 
     initTables();
@@ -64,7 +68,7 @@ public abstract class BatchPlanTestBase {
     for (String ddl : ddls) {
       System.out.println("sql: " + ddl);
       SqlNode ddlSql = parseDdl(ddl);
-      SqlHandlerFactory.create(ddlSql, executionContext).handle(ddlSql, executionContext);
+      sqlHandlerFactory.create(ddlSql, executionContext).handle(ddlSql, executionContext);
     }
   }
 

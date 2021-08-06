@@ -1,0 +1,57 @@
+package com.risingwave.pgserver;
+
+import com.google.inject.AbstractModule;
+import com.google.inject.Provides;
+import com.risingwave.catalog.CatalogService;
+import com.risingwave.catalog.SimpleCatalogService;
+import com.risingwave.common.config.Configuration;
+import com.risingwave.common.config.FrontendServerConfigurations;
+import com.risingwave.execution.handler.DefaultSqlHandlerFactory;
+import com.risingwave.execution.handler.SqlHandlerFactory;
+import com.risingwave.pgserver.database.RisingWaveDatabaseManager;
+import com.risingwave.pgwire.PgServer;
+import com.risingwave.pgwire.database.DatabaseManager;
+import javax.inject.Singleton;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class FrontendServerModule extends AbstractModule {
+  private static final Logger LOGGER = LoggerFactory.getLogger(FrontendServerModule.class);
+  private final FrontendServerOptions options;
+
+  public FrontendServerModule(FrontendServerOptions options) {
+    this.options = options;
+  }
+
+  @Override
+  protected void configure() {
+    bind(DatabaseManager.class).to(RisingWaveDatabaseManager.class).in(Singleton.class);
+    bind(SqlHandlerFactory.class).to(DefaultSqlHandlerFactory.class).in(Singleton.class);
+  }
+
+  @Provides
+  @Singleton
+  Configuration systemConfig() {
+    LOGGER.info("Loading server configuration at {}", options.configFile);
+    return Configuration.load(options.configFile, FrontendServerConfigurations.class);
+  }
+
+  @Provides
+  @Singleton
+  static PgServer createPgServer(Configuration config, DatabaseManager dbManager) {
+    LOGGER.info("Creating pg server.");
+    int port = config.get(FrontendServerConfigurations.PG_WIRE_PORT);
+    return new PgServer(port, dbManager);
+  }
+
+  @Provides
+  @Singleton
+  static CatalogService createCatalogService() {
+    LOGGER.info("Creating catalog service.");
+    SimpleCatalogService catalogService = new SimpleCatalogService();
+    LOGGER.info("Creating default database: {}.", CatalogService.DEFAULT_DATABASE_NAME);
+
+    catalogService.createDatabase(CatalogService.DEFAULT_DATABASE_NAME);
+    return catalogService;
+  }
+}

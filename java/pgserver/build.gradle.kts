@@ -6,6 +6,7 @@ dependencies {
     implementation(project(":catalog"))
     implementation(project(":planner"))
     implementation("com.github.pcj:google-options")
+    implementation("com.google.inject:guice")
 
     testImplementation("org.junit.jupiter:junit-jupiter-api")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")

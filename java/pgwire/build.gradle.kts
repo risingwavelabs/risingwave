@@ -15,6 +15,7 @@ dependencies {
     implementation("io.ktor:ktor-network")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")
     implementation("io.netty:netty-buffer")
+    implementation("com.google.inject:guice")
 
     testImplementation("org.duckdb:duckdb_jdbc")
     testRuntimeOnly("ch.qos.logback:logback-classic")

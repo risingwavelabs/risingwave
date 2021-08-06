@@ -5,7 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.risingwave.common.exception.PgException;
 import com.risingwave.pgwire.database.Database;
-import com.risingwave.pgwire.database.Databases;
+import com.risingwave.pgwire.database.DatabaseManager;
 import com.risingwave.pgwire.database.PgResult;
 import com.risingwave.pgwire.types.PgValue;
 import java.util.ArrayList;
@@ -14,9 +14,11 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 class DuckDbTest {
+  private static DatabaseManager dbManager;
+
   @BeforeAll
   static void setup() {
-    Databases.setDatabaseManager(new DuckDbManager());
+    dbManager = new DuckDbManager();
   }
 
   static List<List<PgValue>> mustGetAllRows(PgResult res) {
@@ -33,7 +35,7 @@ class DuckDbTest {
 
   @Test
   void runStatementTest() throws PgException {
-    Database db = Databases.connect("", "");
+    Database db = dbManager.connect("", "");
     PgResult res = db.runStatement("SELECT 1");
     List<List<PgValue>> rows = mustGetAllRows(res);
     assertEquals(rows.size(), 1);

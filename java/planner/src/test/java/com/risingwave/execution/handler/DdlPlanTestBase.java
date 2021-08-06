@@ -25,6 +25,7 @@ public class DdlPlanTestBase {
 
   protected CatalogService catalogService;
   protected ExecutionContext executionContext;
+  protected SqlHandlerFactory sqlHandlerFactory;
 
   private void initCatalog() {
     catalogService = new SimpleCatalogService();
@@ -33,6 +34,7 @@ public class DdlPlanTestBase {
 
   protected void init() {
     initCatalog();
+    sqlHandlerFactory = new DefaultSqlHandlerFactory();
 
     executionContext =
         ExecutionContext.builder()
@@ -40,6 +42,7 @@ public class DdlPlanTestBase {
             .withDatabase(TEST_DB_NAME)
             .withSchema(TEST_SCHEMA_NAME)
             .withConfiguration(new Configuration())
+            .withSqlHandlerFactory(sqlHandlerFactory)
             .build();
     // Ddl test base do not init tables.
     // initTables();
@@ -53,7 +56,7 @@ public class DdlPlanTestBase {
     String sql = testCase.getSql();
     SqlNode ast = parseSql(sql);
     PlanFragment ret =
-        ((CreateTableHandler) SqlHandlerFactory.create(ast, executionContext))
+        ((CreateTableHandler) sqlHandlerFactory.create(ast, executionContext))
             .executeDdl(ast, executionContext);
 
     String serializedJsonPlan = serializePlanToJson(ret);

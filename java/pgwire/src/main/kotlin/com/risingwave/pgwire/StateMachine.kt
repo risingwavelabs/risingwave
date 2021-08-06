@@ -18,7 +18,7 @@ import org.slf4j.LoggerFactory
  * StateMachine handles the message flow from a client connection. The entire message handling is
  * single-threaded.
  */
-internal class StateMachine(private val out: ByteWriteChannel) {
+internal class StateMachine(private val out: ByteWriteChannel, private val dbManager: DatabaseManager) {
   companion object {
     private val log = LoggerFactory.getLogger(StateMachine::class.java)
   }
@@ -65,7 +65,7 @@ internal class StateMachine(private val out: ByteWriteChannel) {
   private fun processStartupMessage(msg: StartupMessage) {
     Messages.writeAuthenticationOk(wBuf)
     // TODO(wutao): Implement the authentication phase.
-    db = Databases.connect(msg.user, msg.database)
+    db = dbManager.connect(msg.user, msg.database)
     Messages.writeParameterStatus("client_encoding", db!!.getServerEncoding(), wBuf)
     // In order to support simple protocol.
     Messages.writeParameterStatus("standard_conforming_strings", "on", wBuf)
@@ -82,8 +82,8 @@ internal class StateMachine(private val out: ByteWriteChannel) {
     log.info("receive query: {}", msg.sql)
     if (db == null) {
       throw PgException(
-              PgErrorCode.PROTOCOL_VIOLATION,
-              "database has not been set up before query"
+          PgErrorCode.PROTOCOL_VIOLATION,
+          "database has not been set up before query"
       )
     }
     val res = db!!.runStatement(msg.sql)

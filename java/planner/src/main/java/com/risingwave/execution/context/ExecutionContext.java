@@ -8,6 +8,7 @@ import com.risingwave.common.config.Configuration;
 import com.risingwave.execution.handler.RpcExecutor;
 import com.risingwave.execution.handler.RpcExecutorEmpty;
 import com.risingwave.execution.handler.RpcExecutorImpl;
+import com.risingwave.execution.handler.SqlHandlerFactory;
 import org.apache.calcite.plan.Context;
 import org.apache.calcite.schema.SchemaPlus;
 import org.checkerframework.checker.nullness.qual.Nullable;
@@ -17,6 +18,7 @@ public class ExecutionContext implements Context {
   private final String database;
   private final String schema;
   private final CatalogService catalogService;
+  private final SqlHandlerFactory sqlHandlerFactory;
   private final RpcExecutor rpcExecutor;
 
   private ExecutionContext(Builder builder) {
@@ -24,6 +26,7 @@ public class ExecutionContext implements Context {
     this.schema = requireNonNull(builder.schema, "Current schema can't be null!");
     this.catalogService = requireNonNull(builder.catalogService, "Catalog service can't be null!");
     this.conf = requireNonNull(builder.conf, "Configuration can't be null!");
+    this.sqlHandlerFactory = requireNonNull(builder.sqlHandlerFactory, "sqlHandlerFactory");
     if (builder.rpcExecutor == null) {
       this.rpcExecutor = new RpcExecutorEmpty();
     } else {
@@ -55,6 +58,10 @@ public class ExecutionContext implements Context {
     return SchemaCatalog.SchemaName.of(database, schema);
   }
 
+  public SqlHandlerFactory getSqlHandlerFactory() {
+    return sqlHandlerFactory;
+  }
+
   public Configuration getConf() {
     return conf;
   }
@@ -83,6 +90,7 @@ public class ExecutionContext implements Context {
     private String database;
     private String schema;
     private RpcExecutor rpcExecutor;
+    private SqlHandlerFactory sqlHandlerFactory;
 
     private Builder() {}
 
@@ -108,6 +116,11 @@ public class ExecutionContext implements Context {
 
     public Builder withRpcExecutor(RpcExecutor executor) {
       this.rpcExecutor = executor;
+      return this;
+    }
+
+    public Builder withSqlHandlerFactory(SqlHandlerFactory sqlHandlerFactory) {
+      this.sqlHandlerFactory = sqlHandlerFactory;
       return this;
     }
 

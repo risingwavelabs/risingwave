@@ -2,6 +2,7 @@ package com.risingwave.pgwire
 
 import com.risingwave.common.exception.PgException
 import com.risingwave.common.exception.PgErrorCode
+import com.risingwave.pgwire.database.DatabaseManager
 import com.risingwave.pgwire.msg.Messages
 import com.risingwave.pgwire.msg.PgMessage
 import com.risingwave.pgwire.msg.PgMsgType
@@ -11,13 +12,14 @@ import java.io.IOException
 import java.nio.ByteBuffer
 import org.slf4j.LoggerFactory
 
-class PgProtocol(private val input: ByteReadChannel, private val output: ByteWriteChannel) {
+class PgProtocol(private val input: ByteReadChannel, private val output: ByteWriteChannel,
+                 private val dbManager: DatabaseManager) {
   companion object {
     private val log = LoggerFactory.getLogger(PgServerConn::class.java)
   }
 
   private var startedUp: Boolean = false
-  private var stm: StateMachine = StateMachine(output)
+  private var stm: StateMachine = StateMachine(output, dbManager)
 
   /** Process one client message and reply with response if any. */
   suspend fun process(): Boolean {
