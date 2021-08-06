@@ -27,6 +27,7 @@ class PgProtocol(private val input: ByteReadChannel, private val output: ByteWri
       doProcess()
       return stm.willTerminate
     } catch (err: PgException) {
+      log.error("Failed to process.", err)
       stm.processPgError(err)
       return false
     }

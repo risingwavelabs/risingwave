@@ -15,7 +15,9 @@ public final class Query extends PgMessage {
   public void decodeFrom(byte[] buf) {
     // TODO(TaoWu): Support customizable client encoding.
     //              https://www.postgresql.org/docs/13/multibyte.html
-    sqlStatement = new String(buf, StandardCharsets.US_ASCII);
+
+    // For queries, pg client will send a \0 at the end of query, so we should ignore the last byte
+    sqlStatement = new String(buf, StandardCharsets.US_ASCII).trim();
   }
 
   public String getSql() {
