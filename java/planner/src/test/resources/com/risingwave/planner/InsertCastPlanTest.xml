@@ -1,14 +1,14 @@
 <Root>
-    <TestCase name="select all columns from table">
+    <TestCase name="insert cast (time)">
         <Resource name="sql">
             <![CDATA[
-insert into t values (1, 2, '04:05:06')
+insert into t values ('1970-01-01', '04:05:06', '1970-01-01 04:05:06')
             ]]>
         </Resource>
         <Resource name="plan">
             <![CDATA[
-BatchInsertValues(table=[t], values=[((1,2,04:05:06))])
-]]>
+BatchInsertValues(table=[t], values=[((1970-01-01,04:05:06,1970-01-01 04:05:06))])
+            ]]>
         </Resource>
         <Resource name="json">
             <![CDATA[
@@ -25,22 +25,23 @@ BatchInsertValues(table=[t], values=[((1,2,04:05:06))])
     "columnIds": [0, 1, 2],
     "insertTuples": [{
       "cells": [{
-        "exprType": "CONSTANT_VALUE",
+        "exprType": "CAST",
         "body": {
-          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
-          "body": "AAAAAQ=="
+          "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+          "children": [{
+            "exprType": "CONSTANT_VALUE",
+            "body": {
+              "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+              "body": "MTk3MC0wMS0wMQ=="
+            },
+            "returnType": {
+              "typeName": "CHAR",
+              "precision": 10
+            }
+          }]
         },
         "returnType": {
-          "typeName": "INT32"
-        }
-      }, {
-        "exprType": "CONSTANT_VALUE",
-        "body": {
-          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
-          "body": "AAAAAg=="
-        },
-        "returnType": {
-          "typeName": "INT32"
+          "typeName": "DATE"
         }
       }, {
         "exprType": "CAST",
@@ -60,6 +61,25 @@ BatchInsertValues(table=[t], values=[((1,2,04:05:06))])
         },
         "returnType": {
           "typeName": "TIME"
+        }
+      }, {
+        "exprType": "CAST",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+          "children": [{
+            "exprType": "CONSTANT_VALUE",
+            "body": {
+              "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+              "body": "MTk3MC0wMS0wMSAwNDowNTowNg=="
+            },
+            "returnType": {
+              "typeName": "CHAR",
+              "precision": 19
+            }
+          }]
+        },
+        "returnType": {
+          "typeName": "TIMESTAMP"
         }
       }]
     }]

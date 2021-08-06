@@ -25,8 +25,10 @@ import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexVisitorImpl;
 import org.apache.calcite.sql.SqlCollation;
 import org.apache.calcite.sql.SqlKind;
+import org.apache.calcite.util.DateString;
 import org.apache.calcite.util.NlsString;
 import org.apache.calcite.util.TimeString;
+import org.apache.calcite.util.TimestampString;
 
 public class BatchInsertValues extends AbstractRelNode implements RisingWaveBatchPhyRel {
   private final TableCatalog table;
@@ -114,6 +116,10 @@ public class BatchInsertValues extends AbstractRelNode implements RisingWaveBatc
     @Override
     public RexNode visitLiteral(RexLiteral literal) {
       switch (literal.getType().getSqlTypeName()) {
+        case DATE:
+          return addCastToDate(literal);
+        case TIMESTAMP:
+          return addCastToTimestamp(literal);
         case TIME:
           return addCastToTime(literal);
         default:
@@ -121,8 +127,30 @@ public class BatchInsertValues extends AbstractRelNode implements RisingWaveBatc
       }
     }
 
+    private RexNode addCastToDate(RexLiteral literal) {
+      DateString value = requireNonNull(literal.getValueAs(DateString.class), "value");
+      RexLiteral newLiteral =
+          rexBuilder.makeCharLiteral(
+              new NlsString(
+                  value.toString(), StandardCharsets.UTF_8.name(), SqlCollation.IMPLICIT));
+
+      RexNode castNode = rexBuilder.makeAbstractCast(literal.getType(), newLiteral);
+      return castNode;
+    }
+
     private RexNode addCastToTime(RexLiteral literal) {
       TimeString value = requireNonNull(literal.getValueAs(TimeString.class), "value");
+      RexLiteral newLiteral =
+          rexBuilder.makeCharLiteral(
+              new NlsString(
+                  value.toString(), StandardCharsets.UTF_8.name(), SqlCollation.IMPLICIT));
+
+      RexNode castNode = rexBuilder.makeAbstractCast(literal.getType(), newLiteral);
+      return castNode;
+    }
+
+    private RexNode addCastToTimestamp(RexLiteral literal) {
+      TimestampString value = requireNonNull(literal.getValueAs(TimestampString.class), "value");
       RexLiteral newLiteral =
           rexBuilder.makeCharLiteral(
               new NlsString(
