@@ -3,8 +3,8 @@ package com.risingwave.pgserver.database;
 import static java.util.Objects.requireNonNull;
 
 import com.risingwave.execution.context.ExecutionContext;
-import com.risingwave.parser.SqlParser;
 import com.risingwave.pgwire.database.PgResult;
+import com.risingwave.sql.parser.SqlParser;
 import java.util.concurrent.Callable;
 import org.apache.calcite.sql.SqlNode;
 
@@ -19,7 +19,7 @@ public class QueryExecution implements Callable<PgResult> {
 
   @Override
   public PgResult call() throws Exception {
-    SqlNode ast = SqlParser.createStatement(sql);
+    SqlNode ast = SqlParser.createCalciteStatement(sql);
     return context.getSqlHandlerFactory().create(ast, context).handle(ast, context);
   }
 }
