@@ -317,6 +317,8 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
       case "DOUBLE":
       case "DOUBLE PRECISION":
         return new SqlBasicTypeNameSpec(SqlTypeName.DOUBLE, SqlParserPos.ZERO);
+      case "TIME":
+        return new SqlBasicTypeNameSpec(SqlTypeName.TIME, SqlParserPos.ZERO);
       default:
         throw new PgException(PgErrorCode.SYNTAX_ERROR, "Unsupported type name: %s", typeName);
     }

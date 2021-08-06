@@ -1,0 +1,71 @@
+<Root>
+    <TestCase name="select all columns from table">
+        <Resource name="sql">
+            <![CDATA[
+insert into t values (1, 2, '04:05:06')
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+BatchInsertValues(table=[t], values=[((1,2,04:05:06))])
+]]>
+        </Resource>
+        <Resource name="json">
+            <![CDATA[
+{
+  "nodeType": "INSERT_VALUE",
+  "body": {
+    "@type": "type.googleapis.com/risingwave.executor.proto.InsertValueNode",
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      }
+    },
+    "columnIds": [0, 1, 2],
+    "insertTuples": [{
+      "cells": [{
+        "exprType": "CONSTANT_VALUE",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+          "body": "AAAAAQ=="
+        },
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }, {
+        "exprType": "CONSTANT_VALUE",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+          "body": "AAAAAg=="
+        },
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }, {
+        "exprType": "CAST",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+          "children": [{
+            "exprType": "CONSTANT_VALUE",
+            "body": {
+              "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+              "body": "MDQ6MDU6MDY="
+            },
+            "returnType": {
+              "typeName": "CHAR",
+              "precision": 8
+            }
+          }]
+        },
+        "returnType": {
+          "typeName": "TIME"
+        }
+      }]
+    }]
+  }
+}
+            ]]>
+        </Resource>
+    </TestCase>
+</Root>

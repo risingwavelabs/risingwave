@@ -18,6 +18,23 @@ message Buffer {
 }
 
 message DataType {
+    enum IntervalType {
+        INVALID = 0;
+        YEAR = 1;
+        MONTH = 2;
+        DAY = 3;
+        HOUR = 4;
+        MINUTE = 5;
+        SECOND = 6;
+        YEAR_TO_MONTH = 7;
+        DAY_TO_HOUR = 8;
+        DAY_TO_MINUTE = 9;
+        DAY_TO_SECOND = 10;
+        HOUR_TO_MINUTE = 11;
+        HOUR_TO_SECOND = 12;
+        MINUTE_TO_SECOND = 13;
+    }
+
     enum TypeName {
         UNKNOWN = 0;
         INT16 = 1;
@@ -28,10 +45,22 @@ message DataType {
         BOOLEAN = 6;
         CHAR = 7;
         VARCHAR = 8;
+        DECIMAL = 9;
+        TIME = 10;
+        TIMESTAMP = 11;
+        INTERVAL = 12;
+        DATE = 13;
+        NULL = 14;
     }
     TypeName type_name = 1;
+    // data length for char,
+    // max data length for varchar
+    // precision for time, decimal
     uint32 precision = 2;
-    bool is_nullable = 3;
+    // scale for decimal
+    uint32 scale = 3;
+    bool is_nullable = 4;
+    IntervalType interval_type = 5;
 }
 
 message ColumnCommon {

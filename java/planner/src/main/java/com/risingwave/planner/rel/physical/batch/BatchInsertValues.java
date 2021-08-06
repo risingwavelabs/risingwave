@@ -5,20 +5,12 @@ import static java.util.Objects.requireNonNull;
 
 import com.google.common.collect.ImmutableList;
 import com.google.protobuf.Any;
-import com.google.protobuf.ByteString;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
-import com.risingwave.common.datatype.RisingWaveDataType;
-import com.risingwave.common.exception.PgErrorCode;
-import com.risingwave.common.exception.PgException;
 import com.risingwave.execution.handler.RpcExecutor;
-import com.risingwave.proto.data.DataType;
-import com.risingwave.proto.expr.ConstantValue;
-import com.risingwave.proto.expr.ExprNode;
+import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
 import com.risingwave.proto.plan.InsertValueNode;
 import com.risingwave.proto.plan.PlanNode;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.stream.Collectors;
 import org.apache.calcite.plan.RelOptCluster;
@@ -27,8 +19,14 @@ import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.AbstractRelNode;
 import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexLiteral;
+import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.rex.RexVisitorImpl;
+import org.apache.calcite.sql.SqlCollation;
 import org.apache.calcite.sql.SqlKind;
+import org.apache.calcite.util.NlsString;
+import org.apache.calcite.util.TimeString;
 
 public class BatchInsertValues extends AbstractRelNode implements RisingWaveBatchPhyRel {
   private final TableCatalog table;
@@ -61,22 +59,13 @@ public class BatchInsertValues extends AbstractRelNode implements RisingWaveBatc
       ImmutableList<RexLiteral> tuple = tuples.get(i);
       InsertValueNode.ExprTuple.Builder exprTupleBuilder = InsertValueNode.ExprTuple.newBuilder();
       for (int j = 0; j < tuple.size(); ++j) {
-        RexLiteral value = tuples.get(i).get(j);
-        DataType dataType = ((RisingWaveDataType) value.getType()).getProtobufType();
+        AddCastVisitor addCastVisitor = new AddCastVisitor(getCluster().getRexBuilder());
+        RexNode value = tuples.get(i).get(j).accept(addCastVisitor);
 
-        // Build Expr Node.
-        ExprNode.Builder exprNodeBuilder =
-            ExprNode.newBuilder()
-                .setExprType(ExprNode.ExprNodeType.CONSTANT_VALUE)
-                .setBody(
-                    Any.pack(
-                        ConstantValue.newBuilder()
-                            .setBody(ByteString.copyFrom(getBytesRepresentation(value, dataType)))
-                            .build()))
-                .setReturnType(dataType);
+        RexToProtoSerializer rexToProtoSerializer = new RexToProtoSerializer();
 
         // Add to Expr tuple.
-        exprTupleBuilder.addCells(exprNodeBuilder);
+        exprTupleBuilder.addCells(value.accept(rexToProtoSerializer));
       }
       insertValueNodeBuilder.addInsertTuples(exprTupleBuilder.build());
     }
@@ -90,73 +79,6 @@ public class BatchInsertValues extends AbstractRelNode implements RisingWaveBatc
   @Override
   protected RelDataType deriveRowType() {
     return RelOptUtil.createDmlRowType(SqlKind.INSERT, getCluster().getTypeFactory());
-  }
-
-  private static byte[] getBytesRepresentation(RexLiteral val, DataType dataType) {
-    ByteBuffer bb;
-    switch (dataType.getTypeName()) {
-      case INT16:
-        {
-          bb = ByteBuffer.allocate(2).order(ByteOrder.BIG_ENDIAN);
-          bb.putShort(
-              requireNonNull(
-                  val.getValueAs(Short.class),
-                  "RexLiteral return a null value in byte array serialization!"));
-          break;
-        }
-      case INT32:
-        {
-          bb = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN);
-          bb.putInt(
-              requireNonNull(
-                  val.getValueAs(Integer.class),
-                  "RexLiteral return a null value in byte array serialization!"));
-          break;
-        }
-      case INT64:
-        {
-          bb = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN);
-          bb.putLong(
-              requireNonNull(
-                  val.getValueAs(Long.class),
-                  "RexLiteral return a null value in byte array serialization!"));
-          break;
-        }
-      case FLOAT:
-        {
-          bb = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN);
-          bb.putFloat(
-              requireNonNull(
-                  val.getValueAs(Float.class),
-                  "RexLiteral return a null value in byte array serialization!"));
-          break;
-        }
-      case DOUBLE:
-        {
-          bb = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN);
-          bb.putDouble(
-              requireNonNull(
-                  val.getValueAs(Double.class),
-                  "RexLiteral return a null value in byte array serialization!"));
-          break;
-        }
-      case CHAR:
-      case VARCHAR:
-        {
-          // FIXME: No overflow detection here.
-          byte[] str =
-              requireNonNull(
-                      val.getValueAs(String.class),
-                      "RexLiteral return a null value in byte array serialization!")
-                  .getBytes(StandardCharsets.UTF_8);
-          bb = ByteBuffer.allocate(str.length).order(ByteOrder.BIG_ENDIAN);
-          bb.put(str);
-          break;
-        }
-      default:
-        throw new PgException(PgErrorCode.INTERNAL_ERROR, "Unsupported type: %s", dataType);
-    }
-    return bb.array();
   }
 
   @Override
@@ -179,5 +101,35 @@ public class BatchInsertValues extends AbstractRelNode implements RisingWaveBatc
   private static String toString(ImmutableList<RexLiteral> row) {
     requireNonNull(row, "row");
     return row.stream().map(RexLiteral::toString).collect(Collectors.joining(",", "(", ")"));
+  }
+
+  private static class AddCastVisitor extends RexVisitorImpl<RexNode> {
+    private final RexBuilder rexBuilder;
+
+    private AddCastVisitor(RexBuilder rexBuilder) {
+      super(true);
+      this.rexBuilder = rexBuilder;
+    }
+
+    @Override
+    public RexNode visitLiteral(RexLiteral literal) {
+      switch (literal.getType().getSqlTypeName()) {
+        case TIME:
+          return addCastToTime(literal);
+        default:
+          return literal;
+      }
+    }
+
+    private RexNode addCastToTime(RexLiteral literal) {
+      TimeString value = requireNonNull(literal.getValueAs(TimeString.class), "value");
+      RexLiteral newLiteral =
+          rexBuilder.makeCharLiteral(
+              new NlsString(
+                  value.toString(), StandardCharsets.UTF_8.name(), SqlCollation.IMPLICIT));
+
+      RexNode castNode = rexBuilder.makeAbstractCast(literal.getType(), newLiteral);
+      return castNode;
+    }
   }
 }
