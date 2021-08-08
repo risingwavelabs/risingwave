@@ -6,6 +6,7 @@ import com.risingwave.catalog.CatalogService;
 import com.risingwave.catalog.SchemaCatalog;
 import com.risingwave.common.config.Configuration;
 import com.risingwave.execution.handler.RpcExecutor;
+import com.risingwave.execution.handler.RpcExecutorEmpty;
 import com.risingwave.execution.handler.RpcExecutorImpl;
 import com.risingwave.execution.handler.SqlHandlerFactory;
 import org.apache.calcite.plan.Context;
@@ -26,7 +27,11 @@ public class ExecutionContext implements Context {
     this.catalogService = requireNonNull(builder.catalogService, "Catalog service can't be null!");
     this.conf = requireNonNull(builder.conf, "Configuration can't be null!");
     this.sqlHandlerFactory = requireNonNull(builder.sqlHandlerFactory, "sqlHandlerFactory");
-    this.rpcExecutor = new RpcExecutorImpl(this.conf);
+    if (builder.rpcExecutor == null) {
+      this.rpcExecutor = new RpcExecutorEmpty();
+    } else {
+      this.rpcExecutor = builder.rpcExecutor;
+    }
   }
 
   public static Builder builder() {
@@ -109,8 +114,8 @@ public class ExecutionContext implements Context {
       return this;
     }
 
-    public Builder withRpcExecutor(RpcExecutor executor) {
-      this.rpcExecutor = executor;
+    public Builder withRpcExecutor() {
+      this.rpcExecutor = new RpcExecutorImpl(this.conf);
       return this;
     }
 

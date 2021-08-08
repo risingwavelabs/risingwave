@@ -28,10 +28,6 @@ public class CreateTableHandler implements SqlHandler {
   @Override
   public DdlResult handle(SqlNode ast, ExecutionContext context) {
     executeDdl(ast, context);
-    // FIXME: refactor using Rpc Executor interface.
-    //    RpcHelper helper = new RpcHelper(context);
-    //    CreateTaskResponse response =
-    //        helper.createTaskFromFragment(ddlSerializer(table, tableInfo), helper.buildTaskId());
 
     return new DdlResult(StatementType.CREATE_TABLE, 0);
   }

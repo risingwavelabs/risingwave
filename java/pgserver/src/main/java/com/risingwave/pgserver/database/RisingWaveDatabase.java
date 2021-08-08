@@ -39,6 +39,7 @@ public class RisingWaveDatabase implements Database {
             .withCatalogService(catalogService)
             .withConfiguration(sessionConf)
             .withSqlHandlerFactory(sqlHandlerFactory)
+            .withRpcExecutor()
             .build();
 
     try {
