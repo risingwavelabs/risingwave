@@ -55,7 +55,7 @@ public interface CatalogService {
   default SchemaCatalog getSchemaChecked(SchemaCatalog.SchemaName schemaName) {
     SchemaCatalog schema = getSchema(schemaName);
     if (schema == null) {
-      throw RisingWaveException.from(MetaServiceError.SCHEMA_NOT_EXISTS, schemaName);
+      throw RisingWaveException.from(MetaServiceError.SCHEMA_NOT_EXISTS, schemaName.getValue());
     }
     return schema;
   }

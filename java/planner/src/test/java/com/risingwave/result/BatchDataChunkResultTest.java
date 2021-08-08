@@ -12,7 +12,7 @@ import com.risingwave.proto.data.Buffer;
 import com.risingwave.proto.data.ColumnCommon;
 import com.risingwave.proto.data.DataChunk;
 import com.risingwave.proto.data.DataType;
-import com.risingwave.proto.data.FixedWidthNumericColumn;
+import com.risingwave.proto.data.FixedWidthColumn;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
@@ -59,7 +59,7 @@ public class BatchDataChunkResultTest {
                   DataChunk.newBuilder()
                       .addColumns(
                           Any.pack(
-                              FixedWidthNumericColumn.newBuilder()
+                              FixedWidthColumn.newBuilder()
                                   .setCommonParts(
                                       ColumnCommon.newBuilder()
                                           .setColumnType(
@@ -73,7 +73,7 @@ public class BatchDataChunkResultTest {
                                   .build()))
                       .addColumns(
                           Any.pack(
-                              FixedWidthNumericColumn.newBuilder()
+                              FixedWidthColumn.newBuilder()
                                   .setCommonParts(
                                       ColumnCommon.newBuilder()
                                           .setColumnType(

@@ -68,9 +68,15 @@ message ColumnCommon {
     Buffer null_bitmap = 2;
 }
 
-message FixedWidthNumericColumn {
+// FixedWidthColumn is a subtype of column where types are fixed-width,
+// including:
+//  - Numeric types, INT/FLOAT, etc.
+//  - Time types, timestamp/time/interval.
+//  - CHAR.
+message FixedWidthColumn {
     ColumnCommon common_parts = 1;
     Buffer values = 2;
+    uint64 value_width = 3;
 }
 
 message DataChunk {
@@ -78,5 +84,3 @@ message DataChunk {
 
     repeated google.protobuf.Any columns = 2;
 }
-
-

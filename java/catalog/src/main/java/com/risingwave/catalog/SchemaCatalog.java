@@ -43,7 +43,10 @@ public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCata
 
     if (tableByName.containsKey(tableName)) {
       throw RisingWaveException.from(
-          MetaServiceError.TABLE_ALREADY_EXISTS, tableName, getDatabaseName(), getSchemaName());
+          MetaServiceError.TABLE_ALREADY_EXISTS,
+          tableName.getValue(),
+          getDatabaseName(),
+          getSchemaName());
     }
 
     TableCatalog.TableId tableId = new TableCatalog.TableId(nextTableId.getAndIncrement(), getId());

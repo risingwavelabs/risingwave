@@ -14,15 +14,15 @@ import com.risingwave.execution.result.rpc.primitive.LongBufferReader;
 import com.risingwave.execution.result.rpc.primitive.ShortBufferReader;
 import com.risingwave.pgwire.types.Values;
 import com.risingwave.proto.data.ColumnCommon;
-import com.risingwave.proto.data.FixedWidthNumericColumn;
+import com.risingwave.proto.data.FixedWidthColumn;
 import java.io.InputStream;
 import javax.annotation.Nullable;
 
 public class PgValueReaders {
   public static PgValueReader create(Any column) {
     try {
-      if (column.is(FixedWidthNumericColumn.class)) {
-        return createPrimitiveReader(column.unpack(FixedWidthNumericColumn.class));
+      if (column.is(FixedWidthColumn.class)) {
+        return createPrimitiveReader(column.unpack(FixedWidthColumn.class));
       }
 
       throw new PgException(
@@ -32,7 +32,7 @@ public class PgValueReaders {
     }
   }
 
-  private static PgValueReader createPrimitiveReader(FixedWidthNumericColumn column) {
+  private static PgValueReader createPrimitiveReader(FixedWidthColumn column) {
     ColumnCommon columnCommon = column.getCommonParts();
     BooleanBufferReader nullBitmap = getNullBitmap(columnCommon);
     InputStream valuesStream = BufferReaders.decode(column.getValues());

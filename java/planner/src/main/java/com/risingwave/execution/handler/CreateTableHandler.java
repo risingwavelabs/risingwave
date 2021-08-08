@@ -33,7 +33,7 @@ public class CreateTableHandler implements SqlHandler {
     //    CreateTaskResponse response =
     //        helper.createTaskFromFragment(ddlSerializer(table, tableInfo), helper.buildTaskId());
 
-    return new DdlResult(StatementType.OTHER, 0);
+    return new DdlResult(StatementType.CREATE_TABLE, 0);
   }
 
   private static PlanFragment ddlSerializer(TableCatalog table) {

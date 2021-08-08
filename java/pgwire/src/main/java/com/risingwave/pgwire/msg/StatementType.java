@@ -8,5 +8,6 @@ public enum StatementType {
   MOVE,
   FETCH,
   COPY,
+  CREATE_TABLE,
   OTHER
 }

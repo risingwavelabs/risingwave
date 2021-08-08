@@ -30,7 +30,7 @@ public class QueryHandler implements SqlHandler {
     CreateTaskRequest createTaskRequest = rpcExecutor.buildCreateTaskRequest(plan.serialize());
     CreateTaskResponse createTaskResponse = rpcExecutor.createTask(createTaskRequest);
     if (createTaskResponse.getStatus().getCode() != Status.Code.OK) {
-      throw new PgException(PgErrorCode.INTERNAL_ERROR, "Creat Task failed");
+      throw new PgException(PgErrorCode.INTERNAL_ERROR, "Create Task failed");
     }
     TaskSinkId taskSinkId = rpcExecutor.buildTaskSinkId(createTaskRequest.getTaskId());
     Iterator<TaskData> taskDataIterator = rpcExecutor.getData(taskSinkId);
