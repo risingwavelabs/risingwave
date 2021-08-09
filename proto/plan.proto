@@ -50,6 +50,10 @@ message ProjectNode {
     repeated risingwave.expr.proto.ExprNode select_list = 1;
 }
 
+message FilterNode {
+    repeated risingwave.expr.proto.ExprNode search_conditions = 1;
+}
+
 message FilterScanNode {
     TableRefId table_ref_id = 1;
     repeated int32 column_ids = 2;
@@ -78,6 +82,10 @@ message HashAggNode {
     repeated risingwave.expr.proto.ExprNode aggregations = 2;
 }
 
+message SimpleAggNode {
+    // When there is no group_by_key, we use SimpleAggNode 
+    repeated risingwave.expr.proto.ExprNode aggregations = 1;
+}
 
 message PlanNode {
     enum PlanNodeType {
