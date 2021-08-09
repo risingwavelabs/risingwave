@@ -51,7 +51,7 @@ message ProjectNode {
 }
 
 message FilterNode {
-    repeated risingwave.expr.proto.ExprNode search_conditions = 1;
+    risingwave.expr.proto.ExprNode search_condition = 1;
 }
 
 message FilterScanNode {
