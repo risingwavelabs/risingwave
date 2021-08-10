@@ -13,6 +13,7 @@ import com.risingwave.proto.plan.PlanFragment;
 import com.risingwave.proto.plan.SchemaRefId;
 import com.risingwave.proto.plan.TableRefId;
 import java.util.Iterator;
+import java.util.Random;
 import java.util.UUID;
 
 public interface RpcExecutor {
@@ -24,6 +25,7 @@ public interface RpcExecutor {
   default CreateTaskRequest buildCreateTaskRequest(PlanFragment planFragment) {
     TaskId taskId =
         TaskId.newBuilder()
+            .setTaskId(new Random().nextInt(1000000000))
             .setStageId(
                 StageId.newBuilder()
                     .setQueryId(QueryId.newBuilder().setTraceId(UUID.randomUUID().toString())))

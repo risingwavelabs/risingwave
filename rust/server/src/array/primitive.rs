@@ -4,6 +4,6 @@ use std::marker::PhantomData;
 
 /// A primitive array contains only one value buffer, and an optional bitmap buffer
 pub(crate) struct PrimitiveArray<T: PrimitiveDataType> {
-  data: ArrayData,
-  _phantom: PhantomData<T>,
+    data: ArrayData,
+    _phantom: PhantomData<T>,
 }

@@ -116,12 +116,15 @@ public class BatchDataChunkResult extends AbstractResult {
     }
 
     private void resetDataIter() {
-      DataChunk curData = data.get(index).getRecordBatch();
-      List<PgValueReader> readers =
-          curData.getColumnsList().stream()
-              .map(PgValueReaders::create)
-              .collect(ImmutableList.toImmutableList());
-      this.internalIter = new DataChunkIter(readers, curData.getCardinality());
+      // Currently our insert return 0 results so check to avoid out of bound error.
+      if (data.size() != 0) {
+        DataChunk curData = data.get(index).getRecordBatch();
+        List<PgValueReader> readers =
+            curData.getColumnsList().stream()
+                .map(PgValueReaders::create)
+                .collect(ImmutableList.toImmutableList());
+        this.internalIter = new DataChunkIter(readers, curData.getCardinality());
+      }
     }
   }
 

@@ -9,10 +9,16 @@ import com.risingwave.catalog.CreateTableInfo;
 import com.risingwave.catalog.SchemaCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.common.datatype.RisingWaveDataType;
+import com.risingwave.common.exception.PgErrorCode;
+import com.risingwave.common.exception.PgException;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.execution.result.DdlResult;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.planner.sql.SqlConverter;
+import com.risingwave.proto.common.Status;
+import com.risingwave.proto.computenode.CreateTaskRequest;
+import com.risingwave.proto.computenode.CreateTaskResponse;
+import com.risingwave.proto.computenode.TaskSinkId;
 import com.risingwave.proto.plan.CreateTableNode;
 import com.risingwave.proto.plan.PlanFragment;
 import com.risingwave.proto.plan.PlanNode;
@@ -27,7 +33,17 @@ import org.apache.calcite.sql.validate.SqlValidator;
 public class CreateTableHandler implements SqlHandler {
   @Override
   public DdlResult handle(SqlNode ast, ExecutionContext context) {
-    executeDdl(ast, context);
+    PlanFragment planFragment = executeDdl(ast, context);
+    RpcExecutor rpcExecutor = context.getRpcExecutor();
+    CreateTaskRequest createTaskRequest = rpcExecutor.buildCreateTaskRequest(planFragment);
+    CreateTaskResponse createTaskResponse = rpcExecutor.createTask(createTaskRequest);
+
+    TaskSinkId taskSinkId = rpcExecutor.buildTaskSinkId(createTaskRequest.getTaskId());
+    rpcExecutor.getData(taskSinkId);
+
+    if (createTaskResponse.getStatus().getCode() != Status.Code.OK) {
+      throw new PgException(PgErrorCode.INTERNAL_ERROR, "Create Task failed");
+    }
 
     return new DdlResult(StatementType.CREATE_TABLE, 0);
   }

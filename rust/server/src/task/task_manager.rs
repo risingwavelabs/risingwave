@@ -9,12 +9,12 @@ use risingwave_proto::task_service::CreateTaskRequest;
 use risingwave_proto::task_service::TaskId;
 
 pub(crate) struct TaskManager {
-  query_task_pool: ThreadPool,
-  task_executions: Mutex<HashMap<TaskId, TaskExecutionRef>>,
+    query_task_pool: ThreadPool,
+    task_executions: Mutex<HashMap<TaskId, TaskExecutionRef>>,
 }
 
 impl TaskManager {
-  pub(crate) fn create_task(_request: &CreateTaskRequest) -> Result<()> {
-    unimplemented!()
-  }
+    pub(crate) fn create_task(_request: &CreateTaskRequest) -> Result<()> {
+        unimplemented!()
+    }
 }

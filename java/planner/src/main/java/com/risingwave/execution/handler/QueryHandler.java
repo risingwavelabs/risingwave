@@ -18,7 +18,7 @@ import java.util.Iterator;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
 
-@HandlerSignature(sqlKinds = {SqlKind.SELECT})
+@HandlerSignature(sqlKinds = {SqlKind.SELECT, SqlKind.INSERT})
 public class QueryHandler implements SqlHandler {
 
   @Override
@@ -42,7 +42,7 @@ public class QueryHandler implements SqlHandler {
       taskDataList.add(taskDataIterator.next());
     }
     return new BatchDataChunkResult(
-        getStatementType(ast), false, taskDataList, plan.getRoot().getRowType());
+        getStatementType(ast), true, taskDataList, plan.getRoot().getRowType());
   }
 
   // Helpers.

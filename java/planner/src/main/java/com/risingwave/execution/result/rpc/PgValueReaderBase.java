@@ -14,7 +14,7 @@ public abstract class PgValueReaderBase implements PgValueReader {
   @Override
   public PgValue next() {
     PgValue value = nextValue();
-    boolean isNull = (nullBitmapReader != null) && nullBitmapReader.next();
+    boolean isNull = (nullBitmapReader != null) && !nullBitmapReader.next();
     return isNull ? null : value;
   }
 
