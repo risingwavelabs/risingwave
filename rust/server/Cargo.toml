@@ -1,0 +1,18 @@
+[package]
+name = "risingwave"
+version = "0.0.1-SNAPSHOT"
+edition = "2018"
+
+[dependencies]
+grpcio = "0.9.0"
+protobuf = "2.24.1"
+futures = "0.3.16"
+tokio = { version = "1.9.0", features = ["rt", "rt-multi-thread", "sync"]}
+rayon = "1.5.1"
+thiserror = "1.0"
+backtrace = "0.3.61"
+log = "0.4"
+risingwave-proto = {path = "../proto"}
+
+[build-dependencies]
+protoc-grpcio = "3.0.0"

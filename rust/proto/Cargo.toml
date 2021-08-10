@@ -1,0 +1,13 @@
+[package]
+name = "risingwave-proto"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+grpcio = "0.9.0"
+protobuf = "2.24.1"
+futures = "0.3.16"
+
+[build-dependencies]
+protoc-grpcio = "3.0.0"
+
