@@ -150,4 +150,9 @@ public abstract class PrimitiveTypeBase extends RisingWaveTypeBase {
   public int hashCode() {
     return Objects.hashCode(nullable, sqlTypeName);
   }
+
+  @Override
+  public String toString() {
+    return digest;
+  }
 }
