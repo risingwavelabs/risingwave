@@ -12,6 +12,7 @@ import com.risingwave.proto.data.DataType;
 import com.risingwave.proto.expr.ConstantValue;
 import com.risingwave.proto.expr.ExprNode;
 import com.risingwave.proto.expr.FunctionCall;
+import com.risingwave.proto.expr.InputRefExpr;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
@@ -19,6 +20,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import org.apache.calcite.rex.RexCall;
+import org.apache.calcite.rex.RexInputRef;
 import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexVisitorImpl;
 import org.apache.calcite.sql.SqlKind;
@@ -28,6 +30,24 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
   private static final ImmutableMap<SqlKind, ExprNode.ExprNodeType> SQL_TO_FUNC_MAPPING =
       ImmutableMap.<SqlKind, ExprNode.ExprNodeType>builder()
           .put(SqlKind.CAST, ExprNode.ExprNodeType.CAST)
+          .put(SqlKind.PLUS, ExprNode.ExprNodeType.ADD)
+          .put(SqlKind.MINUS, ExprNode.ExprNodeType.SUBTRACT)
+          .put(SqlKind.TIMES, ExprNode.ExprNodeType.MULTIPLY)
+          .put(SqlKind.DIVIDE, ExprNode.ExprNodeType.DIVIDE)
+          .put(SqlKind.EQUALS, ExprNode.ExprNodeType.EQUAL)
+          .put(SqlKind.NOT_EQUALS, ExprNode.ExprNodeType.NOT_EQUAL)
+          .put(SqlKind.LESS_THAN, ExprNode.ExprNodeType.LESS_THAN)
+          .put(SqlKind.LESS_THAN_OR_EQUAL, ExprNode.ExprNodeType.LESS_THAN_OR_EQUAL)
+          .put(SqlKind.GREATER_THAN, ExprNode.ExprNodeType.GREATER_THAN)
+          .put(SqlKind.GREATER_THAN_OR_EQUAL, ExprNode.ExprNodeType.GREATER_THAN_OR_EQUAL)
+          .put(SqlKind.AND, ExprNode.ExprNodeType.AND)
+          .put(SqlKind.OR, ExprNode.ExprNodeType.OR)
+          .put(SqlKind.NOT, ExprNode.ExprNodeType.NOT)
+          .put(SqlKind.SUM, ExprNode.ExprNodeType.SUM)
+          .put(SqlKind.AVG, ExprNode.ExprNodeType.AVG)
+          .put(SqlKind.COUNT, ExprNode.ExprNodeType.COUNT)
+          .put(SqlKind.MIN, ExprNode.ExprNodeType.MIN)
+          .put(SqlKind.MAX, ExprNode.ExprNodeType.MAX)
           .build();
 
   public RexToProtoSerializer() {
@@ -111,6 +131,18 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
                             RexToProtoSerializer.getBytesRepresentation(literal, protoDataType)))
                     .build()))
         .setReturnType(protoDataType)
+        .build();
+  }
+
+  @Override
+  public ExprNode visitInputRef(RexInputRef inputRef) {
+    int columnIdx = inputRef.getIndex();
+    DataType dataType = ((RisingWaveDataType) inputRef.getType()).getProtobufType();
+    InputRefExpr inputRefExpr = InputRefExpr.newBuilder().setColumnIdx(columnIdx).build();
+    return ExprNode.newBuilder()
+        .setExprType(ExprNode.ExprNodeType.INPUT_REF)
+        .setBody(Any.pack(inputRefExpr))
+        .setReturnType(dataType)
         .build();
   }
 
