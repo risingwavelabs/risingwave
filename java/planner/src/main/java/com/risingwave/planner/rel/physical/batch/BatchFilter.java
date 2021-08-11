@@ -3,7 +3,10 @@ package com.risingwave.planner.rel.physical.batch;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
+import com.google.protobuf.Any;
 import com.risingwave.planner.rel.logical.RwFilter;
+import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
+import com.risingwave.proto.plan.FilterNode;
 import com.risingwave.proto.plan.PlanNode;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptRule;
@@ -24,7 +27,13 @@ public class BatchFilter extends Filter implements RisingWaveBatchPhyRel {
 
   @Override
   public PlanNode serialize() {
-    throw new UnsupportedOperationException("");
+    RexToProtoSerializer rexVisitor = new RexToProtoSerializer();
+    FilterNode filter =
+        FilterNode.newBuilder().setSearchCondition(condition.accept(rexVisitor)).build();
+    return PlanNode.newBuilder()
+        .setBody(Any.pack(filter))
+        .addChildren(((RisingWaveBatchPhyRel) input).serialize())
+        .build();
   }
 
   @Override

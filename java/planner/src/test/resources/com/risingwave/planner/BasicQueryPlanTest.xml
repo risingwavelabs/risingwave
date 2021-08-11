@@ -338,6 +338,86 @@ BatchProject(v1=[$0], v2=[$1], v3=[$2])
     BatchFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])
             ]]>
         </Resource>
+        <Resource name="json">
+{
+  "nodeType": "PROJECT",
+  "body": {
+    "@type": "type.googleapis.com/risingwave.executor.proto.ProjectNode",
+    "selectList": [{
+      "exprType": "INPUT_REF",
+      "body": {
+        "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+      },
+      "returnType": {
+        "typeName": "INT32"
+      }
+    }, {
+      "exprType": "INPUT_REF",
+      "body": {
+        "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+        "columnIdx": 1
+      },
+      "returnType": {
+        "typeName": "INT32"
+      }
+    }, {
+      "exprType": "INPUT_REF",
+      "body": {
+        "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+        "columnIdx": 2
+      },
+      "returnType": {
+        "typeName": "FLOAT"
+      }
+    }]
+  },
+  "children": [{
+    "body": {
+      "@type": "type.googleapis.com/risingwave.executor.proto.FilterNode",
+      "searchCondition": {
+        "exprType": "GREATER_THAN",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+          "children": [{
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+            },
+            "returnType": {
+              "typeName": "INT32"
+            }
+          }, {
+            "exprType": "CONSTANT_VALUE",
+            "body": {
+              "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+              "body": "AAAAAQ=="
+            },
+            "returnType": {
+              "typeName": "INT32"
+            }
+          }]
+        },
+        "returnType": {
+          "typeName": "BOOLEAN"
+        }
+      }
+    },
+    "children": [{
+      "nodeType": "SEQ_SCAN",
+      "body": {
+        "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",
+        "tableRefId": {
+          "schemaRefId": {
+            "databaseRefId": {
+            }
+          }
+        },
+        "columnIds": [0, 1, 2]
+      }
+    }]
+  }]
+}
+        </Resource>
     </TestCase>
 
     <TestCase name="select with non-key sum 1">
