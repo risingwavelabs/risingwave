@@ -42,4 +42,32 @@ create table t(v1 int not null, v2 int not null, v3 float not null)
             ]]>
         </Resource>
     </TestCase>
+
+    <TestCase name="drop table">
+        <Resource name="sql">
+            <![CDATA[
+drop table t
+        ]]>
+        </Resource>
+        <Resource name="json">
+            <![CDATA[
+{
+  "root": {
+    "nodeType": "DROP_TABLE",
+    "body": {
+      "@type": "type.googleapis.com/risingwave.executor.proto.DropTableNode",
+      "tableRefId": {
+        "schemaRefId": {
+          "databaseRefId": {
+          }
+        }
+      }
+    }
+  },
+  "shuffleInfo": {
+  }
+}
+            ]]>
+        </Resource>
+    </TestCase>
 </Root>

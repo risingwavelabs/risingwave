@@ -13,6 +13,7 @@ import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.planner.util.PlannerTestCase;
 import com.risingwave.proto.plan.PlanFragment;
 import com.risingwave.sql.parser.SqlParser;
+import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
 import org.reflections.Reflections;
 import org.reflections.util.ConfigurationBuilder;
@@ -55,9 +56,18 @@ public class DdlPlanTestBase {
   protected void runTestCase(PlannerTestCase testCase) {
     String sql = testCase.getSql();
     SqlNode ast = parseSql(sql);
-    PlanFragment ret =
-        ((CreateTableHandler) sqlHandlerFactory.create(ast, executionContext))
-            .executeDdl(ast, executionContext);
+    PlanFragment ret;
+    if (ast.getKind() == SqlKind.CREATE_TABLE) {
+      ret =
+          ((CreateTableHandler) sqlHandlerFactory.create(ast, executionContext))
+              .executeDdl(ast, executionContext);
+    } else if (ast.getKind() == SqlKind.DROP_TABLE) {
+      ret =
+          ((DropTableHandler) sqlHandlerFactory.create(ast, executionContext))
+              .executeDdl(ast, executionContext);
+    } else {
+      throw new UnsupportedOperationException("unsupported ddl in test");
+    }
 
     String serializedJsonPlan = serializePlanToJson(ret);
     assertEquals(testCase.getJson(), serializedJsonPlan, "Plan not match!");
