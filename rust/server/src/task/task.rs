@@ -6,11 +6,11 @@ use risingwave_proto::task_service::TaskId;
 pub(in crate::task) type TaskExecutionRef = Arc<TaskExecution>;
 
 pub(in crate) enum TaskState {
-    PENDING,
-    RUNNING,
-    BLOCKING,
-    FINISHED,
-    FAILED,
+    Pending,
+    Running,
+    Blocking,
+    Finished,
+    Failed,
 }
 
 struct TaskExecutionInner {

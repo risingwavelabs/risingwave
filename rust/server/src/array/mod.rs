@@ -1,3 +1,4 @@
+#![allow(clippy::module_inception)]
 mod array;
 mod array_data;
 mod data_chunk;
