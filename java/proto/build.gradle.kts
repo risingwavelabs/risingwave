@@ -12,6 +12,7 @@ dependencies {
     api("io.grpc:grpc-netty-shaded")
     api("io.grpc:grpc-protobuf")
     api("io.grpc:grpc-stub")
+    api("javax.annotation:javax.annotation-api")
 }
 
 sourceSets {

@@ -17,10 +17,14 @@ repositories {
 
 plugins {
     java
+    checkstyle
+    jacoco
+    id("com.diffplug.spotless") version "5.14.1"
 }
 
-if (JavaVersion.current() != JavaVersion.VERSION_1_8) {
-    throw GradleException("Only java 8 is supported!")
+var javaVersion = JavaVersion.VERSION_16
+if (JavaVersion.current() != javaVersion) {
+    throw GradleException("Only $javaVersion is supported!")
 }
 
 val bomProject = "bom"
@@ -46,8 +50,8 @@ subprojects {
         }
 
         java {
-            sourceCompatibility = JavaVersion.VERSION_1_8
-            targetCompatibility = JavaVersion.VERSION_1_8
+            sourceCompatibility = javaVersion
+            targetCompatibility = javaVersion
         }
 
         apply<com.diffplug.gradle.spotless.SpotlessPlugin>()
@@ -66,6 +70,17 @@ subprojects {
 
         tasks.named<Test>("test") {
             useJUnitPlatform()
+        }
+
+        apply(plugin = "jacoco")
+        tasks.jacocoTestReport {
+            dependsOn(tasks.test) // tests are required to run before generating the report
+            reports {
+                xml.required.set(false)
+                csv.required.set(false)
+                html.required.set(true)
+            }
+            onlyIf {true}
         }
     }
 

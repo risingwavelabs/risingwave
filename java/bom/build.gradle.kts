@@ -5,6 +5,8 @@ plugins {
 val junit5Version = "5.7.2"
 val calciteVersion = "1.27.0"
 val grpcVersion = "1.39.0"
+val annotationVersion = "1.3.2"
+var guiceVersion = "5.0.1"
 val protobufVersion = "3.17.2"
 val akkaVersion = "2.6.15"
 val scalaBinaryVersion = "2.13"
@@ -34,8 +36,9 @@ dependencies {
         api("io.grpc:grpc-netty-shaded:${grpcVersion}")
         api("io.grpc:grpc-protobuf:${grpcVersion}")
         api("io.grpc:grpc-stub:${grpcVersion}")
+        api("com.google.inject:guice:$guiceVersion")
+        api("javax.annotation:javax.annotation-api:$annotationVersion")
         api("com.google.protobuf:protobuf-java-util:${protobufVersion}")
-        api("com.google.inject:guice:5.0.1")
         api("org.mockito:mockito-core:${mockitoVersion}")
         runtime("ch.qos.logback:logback-classic:1.2.3")
         runtime("org.junit.jupiter:junit-jupiter-engine:$junit5Version")
