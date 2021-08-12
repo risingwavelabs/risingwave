@@ -1,4 +1,4 @@
-use crate::task::task_manager::TaskManager;
+use crate::task::TaskManager;
 use grpcio::{RpcContext, RpcStatus, RpcStatusCode, UnarySink};
 use risingwave_proto::task_service::{
     AbortTaskRequest, AbortTaskResponse, CreateTaskRequest, CreateTaskResponse, GetTaskInfoRequest,

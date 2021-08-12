@@ -13,6 +13,9 @@ thiserror = "1.0"
 backtrace = "0.3.61"
 log = "0.4"
 risingwave-proto = {path = "../proto"}
+protobuf-convert = "0.4.0"
+anyhow = "1.0.42"
+typed-builder = "0.9.0"
 ctrlc = { version = "3.0", features = ["termination"] }
 
 [[bin]]

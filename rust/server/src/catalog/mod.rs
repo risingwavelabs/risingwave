@@ -1,16 +1,22 @@
-#[derive(Copy, Clone, Debug, Hash, PartialOrd, PartialEq)]
+use crate::util::ProtobufConvert;
+use protobuf_convert::ProtobufConvert;
+
+#[derive(Clone, Debug, Hash, PartialOrd, PartialEq, Eq, ProtobufConvert)]
+#[protobuf_convert(source = "risingwave_proto::plan::DatabaseRefId")]
 pub(crate) struct DatabaseId {
-    id: i32,
+    database_id: i32,
 }
 
-#[derive(Copy, Clone, Debug, Hash, PartialOrd, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialOrd, PartialEq, Eq, ProtobufConvert)]
+#[protobuf_convert(source = "risingwave_proto::plan::SchemaRefId")]
 pub(crate) struct SchemaId {
-    db_id: DatabaseId,
-    id: i32,
+    database_ref_id: DatabaseId,
+    schema_id: i32,
 }
 
-#[derive(Copy, Clone, Debug, Hash, PartialOrd, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialOrd, PartialEq, Eq, ProtobufConvert)]
+#[protobuf_convert(source = "risingwave_proto::plan::TableRefId")]
 pub(crate) struct TableId {
-    schema_id: SchemaId,
-    id: i32,
+    schema_ref_id: SchemaId,
+    table_id: i32,
 }

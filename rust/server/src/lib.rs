@@ -1,14 +1,18 @@
 #![allow(dead_code)]
 
+extern crate anyhow;
 extern crate backtrace;
 extern crate futures;
 extern crate grpcio;
+#[macro_use]
 extern crate log;
 extern crate protobuf;
+extern crate protobuf_convert;
 extern crate rayon;
 extern crate risingwave_proto;
 extern crate thiserror;
 extern crate tokio;
+extern crate typed_builder;
 
 mod task;
 #[macro_use]
@@ -19,6 +23,7 @@ mod buffer;
 mod catalog;
 mod execution;
 mod executor;
+mod expr;
 mod storage;
 mod types;
 mod util;

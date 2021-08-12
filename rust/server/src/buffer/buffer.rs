@@ -9,6 +9,8 @@ use crate::alloc::alloc_aligned;
 use crate::alloc::free_aligned;
 use crate::error::ErrorCode;
 use crate::error::Result;
+use crate::types::NativeType;
+use std::mem::{size_of, transmute};
 
 #[derive(Debug)]
 pub(crate) struct Buffer {
@@ -27,6 +29,18 @@ impl Buffer {
         alloc_aligned(size).map(|ptr| Buffer { ptr, len: size })
     }
 
+    pub(crate) fn from_slice<T: NativeType, S: AsRef<[T]>>(data: S) -> Result<Buffer> {
+        let buffer = Buffer::new(data.as_ref().len() & size_of::<T>())?;
+        unsafe {
+            let dest_slice =
+                from_raw_parts_mut::<T>(transmute(buffer.ptr.as_ptr()), data.as_ref().len());
+            dest_slice.copy_from_slice(data.as_ref());
+        }
+
+        Ok(buffer)
+    }
+
+    // TODO: We should remove this, a buffer should be immutable
     pub(crate) fn as_slice_mut(&mut self) -> &mut [u8] {
         unsafe { from_raw_parts_mut(self.ptr.as_ptr(), self.len) }
     }
@@ -82,6 +96,9 @@ impl Buffer {
         self
     }
 }
+
+unsafe impl Sync for Buffer {}
+unsafe impl Send for Buffer {}
 
 impl<'a, 'b> BitAnd<&'b Buffer> for &'a Buffer {
     type Output = Result<Buffer>;

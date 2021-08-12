@@ -1,5 +1,7 @@
 use std::sync::Mutex;
 
+use crate::storage::{StorageManager, StorageManagerRef};
+
 use crate::error::RwError;
 use crate::executor::{transform_plan_tree, BoxedExecutor};
 use risingwave_proto::plan::PlanFragment;
@@ -59,5 +61,20 @@ impl TaskExecution {
     pub fn execute(&mut self) {
         let mut state = self.state.lock().unwrap();
         *state = TaskStatus::RUNNING;
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct TaskContext {
+    storage_manager: StorageManagerRef,
+}
+
+impl TaskContext {
+    pub(crate) fn storage_manager(&self) -> &dyn StorageManager {
+        &*self.storage_manager
+    }
+
+    pub(crate) fn storage_manager_ref(&self) -> StorageManagerRef {
+        self.storage_manager.clone()
     }
 }

@@ -1,5 +1,5 @@
 use crate::service::task_service::TaskServiceImpl;
-use crate::task::task_manager::TaskManager;
+use crate::task::TaskManager;
 use grpcio::{Environment, Result, ServerBuilder, ShutdownFuture};
 use risingwave_proto::task_service_grpc::create_task_service;
 use std::sync::{Arc, Mutex};

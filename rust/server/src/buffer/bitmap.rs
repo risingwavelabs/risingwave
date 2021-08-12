@@ -34,16 +34,34 @@ pub(crate) struct Bitmap {
 
 impl Bitmap {
     pub fn new(num_bits: usize) -> Result<Self> {
-        let num_bytes = num_bits / 8 + if num_bits % 8 > 0 { 1 } else { 0 };
-        let r = num_bytes % 64;
-        let len = if r == 0 {
-            num_bytes
-        } else {
-            num_bytes + 64 - r
-        };
+        let len = Bitmap::num_of_bytes(num_bits);
         Ok(Bitmap {
             bits: Buffer::try_from(&vec![0xFF; len])?,
         })
+    }
+
+    pub fn from_vec(bools: Vec<bool>) -> Result<Self> {
+        let mut buffer = Buffer::new(Bitmap::num_of_bytes(bools.len()))?;
+        let data = buffer.as_slice_mut();
+        (0..bools.len()).for_each(|idx| {
+            if bools[idx] {
+                bit_util::set_bit(data, idx);
+            } else {
+                bit_util::unset_bit(data, idx);
+            }
+        });
+
+        Ok(Self { bits: buffer })
+    }
+
+    fn num_of_bytes(num_bits: usize) -> usize {
+        let num_bytes = num_bits / 8 + if num_bits % 8 > 0 { 1 } else { 0 };
+        let r = num_bytes % 64;
+        if r == 0 {
+            num_bytes
+        } else {
+            num_bytes + 64 - r
+        }
     }
 
     pub fn len(&self) -> usize {

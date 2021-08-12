@@ -2,7 +2,7 @@ use crate::array::array_data::ArrayData;
 use crate::types::DataType;
 use std::sync::Arc;
 
-pub(crate) trait Array {
+pub(crate) trait Array: Send + Sync {
     fn data_type(&self) -> &dyn DataType;
     fn array_data(&self) -> &ArrayData;
     fn len(&self) -> usize {
