@@ -16,6 +16,8 @@ pub(crate) enum ErrorCode {
     MemoryError { layout: Layout },
     #[error("internal error: {0}")]
     InternalError(String),
+    #[error("Feature is not yet implemented: {0}")]
+    NotImplementedError(String),
 }
 
 #[derive(Clone)]
@@ -63,6 +65,7 @@ impl ErrorCode {
             ErrorCode::OK => 0,
             ErrorCode::InternalError(_) => 1,
             ErrorCode::MemoryError { .. } => 2,
+            ErrorCode::NotImplementedError(_) => 3,
         }
     }
 }

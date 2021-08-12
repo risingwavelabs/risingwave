@@ -13,6 +13,11 @@ thiserror = "1.0"
 backtrace = "0.3.61"
 log = "0.4"
 risingwave-proto = {path = "../proto"}
+ctrlc = { version = "3.0", features = ["termination"] }
+
+[[bin]]
+name = "compute-node"
+path = "src/bin/compute_node.rs"
 
 [build-dependencies]
 protoc-grpcio = "3.0.0"
