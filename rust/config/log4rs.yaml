@@ -1,0 +1,42 @@
+refresh_rate: 30 seconds
+appenders:
+  stdout:
+    kind: console
+
+  rolling:
+    kind: rolling_file
+
+    # The path of the log file. Required.
+    # The path can contain environment variables of the form $ENV{name_here},
+    # where 'name_here' will be the name of the environment variable that
+    # will be resolved. Note that if the variable fails to resolve,
+    # $ENV{name_here} will NOT be replaced in the path.
+    path: log/debug.log
+
+    # Specifies if the appender should append to or truncate the log file if it
+    # already exists. Defaults to `true`.
+    append: true
+
+    # The encoder to use to format output. Defaults to `kind: pattern`.
+    encoder:
+      kind: pattern
+
+    # The policy which handles rotation of the log file. Required.
+    policy:
+      # Identifies which policy is to be used. If no kind is specified, it will
+      # default to "compound".
+      kind: compound
+
+      # The remainder of the configuration is passed along to the policy's
+      # deserializer, and will vary based on the kind of policy.
+      trigger:
+        kind: size
+        limit: 10 mb
+
+      roller:
+        kind: delete
+
+root:
+  level: info
+  appenders:
+    - stdout # change to 'rolling' if want rooling files appender

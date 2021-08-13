@@ -4,6 +4,7 @@ version = "0.0.1-SNAPSHOT"
 edition = "2018"
 
 [dependencies]
+log4rs = "1.0.0"
 grpcio = "0.9.0"
 protobuf = "2.24.1"
 futures = "0.3.16"

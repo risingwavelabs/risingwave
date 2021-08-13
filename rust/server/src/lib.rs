@@ -6,6 +6,7 @@ extern crate futures;
 extern crate grpcio;
 #[macro_use]
 extern crate log;
+extern crate log4rs;
 extern crate protobuf;
 extern crate protobuf_convert;
 extern crate rayon;
