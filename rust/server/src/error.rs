@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use backtrace::Backtrace;
 use protobuf::ProtobufError;
+use std::io::Error as IoError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -21,6 +22,8 @@ pub(crate) enum ErrorCode {
     ProtobufError(ProtobufError),
     #[error("Feature is not yet implemented: {0}")]
     NotImplementedError(String),
+    #[error(transparent)]
+    IoError(IoError),
 }
 
 #[derive(Clone)]
@@ -70,6 +73,7 @@ impl ErrorCode {
             ErrorCode::MemoryError { .. } => 2,
             ErrorCode::ProtobufError(_) => 3,
             ErrorCode::NotImplementedError(_) => 4,
+            ErrorCode::IoError(_) => 5,
         }
     }
 }

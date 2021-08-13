@@ -1,10 +1,19 @@
 use crate::array::array_data::ArrayData;
 use crate::array::{Array, ArrayBuilder, ArrayRef};
 use crate::buffer::{Bitmap, Buffer};
+use crate::error::ErrorCode::ProtobufError;
 use crate::error::Result;
+use crate::error::RwError;
 use crate::expr::Datum;
 use crate::types::{DataType, DataTypeRef, NativeType, PrimitiveDataType};
+use protobuf::well_known_types::Any;
+use risingwave_proto::data::Buffer as BufferProto;
+use risingwave_proto::data::{Buffer_CompressionType, ColumnCommon, FixedWidthColumn};
+use std::convert::TryFrom;
 use std::marker::PhantomData;
+use std::mem::transmute;
+use std::mem::{align_of, size_of};
+use std::slice::from_raw_parts;
 use std::sync::Arc;
 
 /// A primitive array contains only one value buffer, and an optional bitmap buffer
@@ -20,11 +29,33 @@ pub(crate) struct PrimitiveArrayBuilder<T: PrimitiveDataType> {
 }
 
 impl<T: PrimitiveDataType> PrimitiveArray<T> {
-    fn new(data: ArrayData) -> Self {
-        Self {
+    fn as_slice(&self) -> &[T::N] {
+        unsafe {
+            from_raw_parts(
+                transmute(self.data.buffers()[0].as_ptr()),
+                self.data.cardinality(),
+            )
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.data.cardinality()
+    }
+}
+
+impl<T: PrimitiveDataType> TryFrom<ArrayData> for PrimitiveArray<T> {
+    type Error = RwError;
+
+    fn try_from(data: ArrayData) -> Result<Self> {
+        ensure!(T::DATA_TYPE_KIND == data.data_type().data_type_kind());
+        ensure!(data.buffers().len() == 1);
+        ensure!(data.buffers()[0].as_ptr().align_offset(align_of::<T::N>()) == 0);
+        ensure!(data.buffers()[0].len() >= (size_of::<T::N>() * data.cardinality()));
+
+        Ok(Self {
             data,
             _phantom: PhantomData,
-        }
+        })
     }
 }
 
@@ -35,6 +66,36 @@ impl<T: PrimitiveDataType> Array for PrimitiveArray<T> {
 
     fn array_data(&self) -> &ArrayData {
         &self.data
+    }
+
+    fn to_protobuf(&self) -> Result<Any> {
+        let proto_data_type = self.data.data_type().to_protobuf()?;
+        let mut column_common = ColumnCommon::new();
+        column_common.set_column_type(proto_data_type);
+        if let Some(null_bitmap) = self.data.null_bitmap() {
+            column_common.set_null_bitmap(null_bitmap.to_protobuf()?);
+        }
+
+        let mut column = FixedWidthColumn::new();
+        column.set_common_parts(column_common);
+
+        let values = {
+            let mut output_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<T::N>());
+
+            for v in self.as_slice() {
+                v.to_protobuf(&mut output_buffer)?;
+            }
+
+            let mut b = BufferProto::new();
+            b.set_compression(Buffer_CompressionType::NONE);
+            b.set_body(output_buffer);
+            b
+        };
+
+        column.set_value_width(size_of::<T::N>() as u64);
+        column.set_values(values);
+
+        Any::pack(&column).map_err(|e| RwError::from(ProtobufError(e)))
     }
 }
 
@@ -57,8 +118,7 @@ impl<T: PrimitiveDataType> ArrayBuilder for PrimitiveArrayBuilder<T> {
             .null_bitmap(null_bitmap)
             .build();
 
-        let array = PrimitiveArray::<T>::new(array_data);
-        Ok(Arc::new(array) as ArrayRef)
+        PrimitiveArray::<T>::try_from(array_data).map(|arr| Arc::new(arr) as ArrayRef)
     }
 }
 

@@ -16,7 +16,7 @@ pub(super) struct SeqScanExecutor {
     table: TableRef,
     column_idxes: Vec<usize>,
     data: Vec<DataChunkRef>,
-    row_idx: usize,
+    chunk_idx: usize,
 }
 
 impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for SeqScanExecutor {
@@ -45,7 +45,7 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for SeqScanExecutor {
         Ok(Self {
             table: table_ref,
             column_idxes,
-            row_idx: 0,
+            chunk_idx: 0,
             data: Vec::new(),
         })
     }
@@ -58,11 +58,11 @@ impl Executor for SeqScanExecutor {
     }
 
     fn execute(&mut self) -> Result<ExecutorResult> {
-        if self.row_idx >= self.data.len() {
+        if self.chunk_idx >= self.data.len() {
             return Ok(Done);
         }
 
-        let cur_chunk = &self.data[self.row_idx];
+        let cur_chunk = &self.data[self.chunk_idx];
 
         let arrays = self
             .column_idxes
@@ -76,7 +76,7 @@ impl Executor for SeqScanExecutor {
             .arrays(arrays)
             .build();
 
-        self.row_idx += 1;
+        self.chunk_idx += 1;
         Ok(ExecutorResult::Batch(Arc::new(ret)))
     }
 

@@ -26,6 +26,7 @@ use std::ops::BitOr;
 use crate::buffer::Buffer;
 use crate::error::Result;
 use crate::util::bit_util;
+use risingwave_proto::data::Buffer as BufferProto;
 
 #[derive(Debug)]
 pub(crate) struct Bitmap {
@@ -93,6 +94,10 @@ impl Bitmap {
     /// Returns the total number of bytes of memory occupied physically by this [Bitmap].
     pub fn get_array_memory_size(&self) -> usize {
         self.bits.capacity() + mem::size_of_val(self)
+    }
+
+    pub(crate) fn to_protobuf(&self) -> Result<BufferProto> {
+        todo!()
     }
 }
 

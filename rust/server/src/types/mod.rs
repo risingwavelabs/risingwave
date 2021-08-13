@@ -34,6 +34,7 @@ pub(crate) trait DataType: Sync + Send + 'static {
     fn data_type_kind(&self) -> DataTypeKind;
     fn is_nullable(&self) -> bool;
     fn create_array_builder(self: Arc<Self>, capacity: usize) -> Result<BoxedArrayBuilder>;
+    fn to_protobuf(&self) -> Result<DataTypeProto>;
 }
 
 pub(crate) type DataTypeRef = Arc<dyn DataType>;

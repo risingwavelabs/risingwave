@@ -2,6 +2,7 @@ use crate::array::array::ArrayRef;
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
+use risingwave_proto::data::DataChunk as DataChunkProto;
 use std::sync::Arc;
 use typed_builder::TypedBuilder;
 
@@ -28,6 +29,17 @@ impl DataChunk {
             ))
             .into()
         })
+    }
+
+    pub(crate) fn to_protobuf(&self) -> Result<DataChunkProto> {
+        ensure!(self.visibility.is_none());
+        let mut proto = DataChunkProto::new();
+        proto.set_cardinality(self.cardinality as u32);
+        for arr in &self.arrays {
+            proto.mut_columns().push(arr.to_protobuf()?);
+        }
+
+        Ok(proto)
     }
 }
 

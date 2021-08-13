@@ -1,5 +1,7 @@
 use crate::array::BoxedArrayBuilder;
+use crate::error::Result;
 use crate::types::{DataType, DataTypeKind};
+use risingwave_proto::data::DataType as DataTypeProto;
 use std::sync::Arc;
 
 /// [BoolType] is not a primitive type because we use a bit for each bool value, not a [bool].
@@ -16,10 +18,11 @@ impl DataType for BoolType {
         self.nullable
     }
 
-    fn create_array_builder(
-        self: Arc<Self>,
-        _capacity: usize,
-    ) -> crate::error::Result<BoxedArrayBuilder> {
+    fn create_array_builder(self: Arc<Self>, _capacity: usize) -> Result<BoxedArrayBuilder> {
+        todo!()
+    }
+
+    fn to_protobuf(&self) -> Result<DataTypeProto> {
         todo!()
     }
 }

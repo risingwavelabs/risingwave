@@ -21,4 +21,12 @@ impl ArrayData {
     pub(crate) fn data_type(&self) -> &dyn DataType {
         &*self.data_type
     }
+
+    pub(crate) fn null_bitmap(&self) -> Option<&Bitmap> {
+        self.null_bitmap.as_ref()
+    }
+
+    pub(crate) fn buffers(&self) -> &[Buffer] {
+        &self.buffers
+    }
 }

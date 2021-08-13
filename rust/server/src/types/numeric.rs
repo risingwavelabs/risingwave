@@ -35,9 +35,17 @@ macro_rules! make_numeric_type {
             fn create_array_builder(self: Arc<Self>, capacity: usize) -> Result<BoxedArrayBuilder> {
                 Ok(Box::new(PrimitiveArrayBuilder::<Self>::new(self, capacity)))
             }
+
+            fn to_protobuf(&self) -> Result<DataTypeProto> {
+                let mut proto = DataTypeProto::new();
+                proto.set_type_name($proto_ty);
+                proto.set_is_nullable(self.nullable);
+                Ok(proto)
+            }
         }
 
         impl PrimitiveDataType for $name {
+            const DATA_TYPE_KIND: DataTypeKind = $data_ty;
             type N = $native_ty;
         }
 
