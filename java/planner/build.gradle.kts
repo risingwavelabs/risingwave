@@ -27,7 +27,8 @@ dependencies {
     testImplementation("com.google.protobuf:protobuf-java-util")
     testImplementation("org.mockito:mockito-core")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")
-
+    testImplementation("com.pholser:junit-quickcheck-core")
+    testImplementation("org.hamcrest:hamcrest-all")
     // TODO: Manage all dependency versions in one place.
     antlr("org.antlr:antlr4:4.9.2")
 }

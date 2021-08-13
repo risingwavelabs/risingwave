@@ -11,7 +11,8 @@ val protobufVersion = "3.17.2"
 val akkaVersion = "2.6.15"
 val scalaBinaryVersion = "2.13"
 val mockitoVersion = "3.11.2"
-
+var hamcrestVersion = "1.3"
+var quickcheckVersion = "1.0"
 
 javaPlatform {
     allowDependencies()
@@ -40,6 +41,8 @@ dependencies {
         api("javax.annotation:javax.annotation-api:$annotationVersion")
         api("com.google.protobuf:protobuf-java-util:${protobufVersion}")
         api("org.mockito:mockito-core:${mockitoVersion}")
+        api("com.pholser:junit-quickcheck-core:$quickcheckVersion")
+        api("org.hamcrest:hamcrest-all:$hamcrestVersion")
         runtime("ch.qos.logback:logback-classic:1.2.3")
         runtime("org.junit.jupiter:junit-jupiter-engine:$junit5Version")
         runtime("org.junit.jupiter:junit-jupiter-params:$junit5Version")
