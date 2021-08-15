@@ -18,6 +18,7 @@ protobuf-convert = "0.4.0"
 anyhow = "1.0.42"
 typed-builder = "0.9.0"
 ctrlc = { version = "3.0", features = ["termination"] }
+async-trait = "0.1.51"
 
 [[bin]]
 name = "compute-node"

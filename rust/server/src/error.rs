@@ -5,6 +5,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
+use crate::grpcio::{RpcStatus, RpcStatusCode};
 use backtrace::Backtrace;
 use protobuf::ProtobufError;
 use std::io::Error as IoError;
@@ -24,12 +25,21 @@ pub(crate) enum ErrorCode {
     NotImplementedError(String),
     #[error(transparent)]
     IoError(IoError),
+    #[error("Grpc failure: {0} {:?}")]
+    GrpcError(String, grpcio::Error),
 }
 
 #[derive(Clone)]
 pub(crate) struct RwError {
     inner: Arc<ErrorCode>,
     backtrace: Arc<Backtrace>,
+}
+
+impl RwError {
+    /// Turns a crate-wide RwError into grpc error.
+    pub(crate) fn to_grpc_error(&self) -> RpcStatus {
+        RpcStatus::with_message(RpcStatusCode::INTERNAL, self.to_string())
+    }
 }
 
 impl From<ErrorCode> for RwError {
@@ -74,6 +84,7 @@ impl ErrorCode {
             ErrorCode::ProtobufError(_) => 3,
             ErrorCode::NotImplementedError(_) => 4,
             ErrorCode::IoError(_) => 5,
+            ErrorCode::GrpcError(_, _) => 6,
         }
     }
 }
