@@ -9,9 +9,11 @@ import org.apache.calcite.rel.type.RelDataTypeComparability;
 import org.apache.calcite.sql.type.SqlTypeName;
 
 public class DecimalType extends PrimitiveTypeBase {
-  // TODO: Change this to correct value
-  private static final int DEFAULT_PRECISION = 100;
-  private static final int DEFAULT_SCALE = 0;
+  // Default value for decimal type if do not specify precision or scale.
+  // 147455 = 16383 + 131072 (From postgresql doc:
+  // https://www.postgresql.org/docs/13/datatype-numeric.html)
+  private static final int DEFAULT_PRECISION = 147455;
+  private static final int DEFAULT_SCALE = 16383;
   private final int precision;
   private final int scale;
 

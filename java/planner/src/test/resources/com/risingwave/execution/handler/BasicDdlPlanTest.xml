@@ -70,4 +70,82 @@ drop table t
             ]]>
         </Resource>
     </TestCase>
+
+    <TestCase name="create tpch create query">
+        <Resource name="sql">
+            <![CDATA[
+CREATE TABLE supplier (
+        s_suppkey  INTEGER,
+        s_name CHAR(25),
+        s_address VARCHAR(40),
+        s_nationkey INTEGER,
+        s_phone CHAR(15),
+        s_acctbal NUMERIC,
+        s_comment VARCHAR(101));
+        ]]>
+        </Resource>
+        <Resource name="json">
+            <![CDATA[
+            {
+  "root": {
+    "nodeType": "CREATE_TABLE",
+    "body": {
+      "@type": "type.googleapis.com/risingwave.executor.proto.CreateTableNode",
+      "tableRefId": {
+        "schemaRefId": {
+          "databaseRefId": {
+          }
+        },
+        "tableId": 1
+      },
+      "columnDescs": [{
+        "columnType": {
+          "typeName": "INT32"
+        },
+        "encoding": "RAW"
+      }, {
+        "columnType": {
+          "typeName": "CHAR",
+          "precision": 25
+        },
+        "encoding": "RAW"
+      }, {
+        "columnType": {
+          "typeName": "VARCHAR",
+          "precision": 40
+        },
+        "encoding": "RAW"
+      }, {
+        "columnType": {
+          "typeName": "INT32"
+        },
+        "encoding": "RAW"
+      }, {
+        "columnType": {
+          "typeName": "CHAR",
+          "precision": 15
+        },
+        "encoding": "RAW"
+      }, {
+        "columnType": {
+          "typeName": "DECIMAL",
+          "precision": 147455,
+          "scale": 16383
+        },
+        "encoding": "RAW"
+      }, {
+        "columnType": {
+          "typeName": "VARCHAR",
+          "precision": 101
+        },
+        "encoding": "RAW"
+      }]
+    }
+  },
+  "shuffleInfo": {
+  }
+}
+            ]]>
+        </Resource>
+    </TestCase>
 </Root>

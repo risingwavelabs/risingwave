@@ -3,6 +3,7 @@ package com.risingwave.sql;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Verify.verify;
 
+import com.google.common.base.Verify;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.planner.sql.RisingWaveOperatorTable;
@@ -323,6 +324,43 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
         return new SqlBasicTypeNameSpec(SqlTypeName.TIME, SqlParserPos.ZERO);
       case "TIMESTAMP":
         return new SqlBasicTypeNameSpec(SqlTypeName.TIMESTAMP, SqlParserPos.ZERO);
+      case "CHAR":
+        {
+          var parameters = columnType.parameters();
+          Verify.verify(parameters.size() <= 1, "The parameter list of CHAR is too long");
+          if (parameters.size() == 0) {
+            // If user do not specify length, the default limit is 1.
+            return new SqlBasicTypeNameSpec(SqlTypeName.CHAR, 1, SqlParserPos.ZERO);
+          } else {
+            return new SqlBasicTypeNameSpec(SqlTypeName.CHAR, parameters.get(0), SqlParserPos.ZERO);
+          }
+        }
+      case "VARCHAR":
+        {
+          var parameters = columnType.parameters();
+          Verify.verify(parameters.size() <= 1, "The parameter list of VARCHAR is too long");
+          if (parameters.size() == 0) {
+            // If user do not specify length, there is no limit. Use -1 here.
+            return new SqlBasicTypeNameSpec(SqlTypeName.VARCHAR, -1, SqlParserPos.ZERO);
+          } else {
+            return new SqlBasicTypeNameSpec(
+                SqlTypeName.VARCHAR, parameters.get(0), SqlParserPos.ZERO);
+          }
+        }
+      case "NUMERIC":
+        {
+          var parameters = columnType.parameters();
+          if (parameters.size() == 0) {
+            return new SqlBasicTypeNameSpec(SqlTypeName.DECIMAL, SqlParserPos.ZERO);
+          } else if (parameters.size() == 1) {
+            return new SqlBasicTypeNameSpec(
+                SqlTypeName.DECIMAL, parameters.get(0), SqlParserPos.ZERO);
+          } else {
+            return new SqlBasicTypeNameSpec(
+                SqlTypeName.DECIMAL, parameters.get(0), parameters.get(1), SqlParserPos.ZERO);
+          }
+        }
+
       default:
         throw new PgException(PgErrorCode.SYNTAX_ERROR, "Unsupported type name: %s", typeName);
     }
