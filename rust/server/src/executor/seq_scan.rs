@@ -33,7 +33,7 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for SeqScanExecutor {
             .map_err(|e| InternalError(format!("failed to deserialize table id: {:?}", e)))?;
 
         let table_ref = source
-            .task_context()
+            .global_task_env()
             .storage_manager()
             .get_table(&table_id)?;
         let column_idxes = seq_scan_node

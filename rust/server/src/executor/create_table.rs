@@ -32,7 +32,7 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for CreateTableExecutor {
         Ok(Self {
             table_id,
             column_count,
-            storage_manager: source.task_context().storage_manager_ref(),
+            storage_manager: source.global_task_env().storage_manager_ref(),
         })
     }
 }

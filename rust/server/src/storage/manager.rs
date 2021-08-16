@@ -45,6 +45,12 @@ impl StorageManager for MemStorageManager {
 }
 
 impl MemStorageManager {
+    pub(crate) fn new() -> Self {
+        MemStorageManager {
+            tables: Mutex::new(HashMap::new()),
+        }
+    }
+
     fn get_tables(&self) -> Result<MutexGuard<HashMap<TableId, TableRef>>> {
         self.tables.lock().map_err(|e| {
             RwError::from(ErrorCode::InternalError(format!(

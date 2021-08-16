@@ -1,12 +1,10 @@
 use std::sync::Mutex;
 
 use crate::error::{ErrorCode, Result, RwError};
-use crate::executor::{transform_plan_tree, BoxedExecutor, ExecutorResult};
-use crate::service::ExchangeWriteStream;
-use crate::storage::{StorageManager, StorageManagerRef};
+use crate::executor::{BoxedExecutor, ExecutorBuilder, ExecutorResult};
+use crate::service::ExchangeWriter;
 use crate::task::channel::{create_output_channel, BoxChanReceiver, BoxChanSender};
-use futures::SinkExt;
-use grpcio::WriteFlags;
+use crate::task::GlobalTaskEnv;
 use rayon::ThreadPool;
 use risingwave_proto::common::Status;
 use risingwave_proto::plan::PlanFragment;
@@ -43,18 +41,20 @@ pub(crate) struct TaskExecution {
     plan: PlanFragment,
     state: Mutex<TaskStatus>,
     receiver: Option<BoxChanReceiver>,
+    env: GlobalTaskEnv,
 
     // The execution failure.
     failure: Mutex<Option<RwError>>,
 }
 
 impl TaskExecution {
-    pub fn new(proto_tid: &ProtoTaskId, plan: PlanFragment) -> Self {
+    pub fn new(proto_tid: &ProtoTaskId, plan: PlanFragment, env: GlobalTaskEnv) -> Self {
         TaskExecution {
             task_id: TaskId::from(proto_tid),
             plan,
             state: Mutex::new(TaskStatus::PENDING),
             receiver: Option::None,
+            env,
             failure: Mutex::new(Option::None),
         }
     }
@@ -69,7 +69,7 @@ impl TaskExecution {
             let mut state = self.state.lock().unwrap();
             *state = TaskStatus::RUNNING;
         }
-        let exec = transform_plan_tree(&self.plan)?;
+        let exec = ExecutorBuilder::new(self.plan.get_root(), self.env.clone()).build()?;
         let (sender, receiver) = create_output_channel(self.plan.get_shuffle_info())?;
         self.receiver = Some(receiver);
         worker_pool.install(|| {
@@ -102,11 +102,7 @@ impl TaskExecution {
     }
 
     // Completely drain out of the data from executor.
-    pub async fn take_data(
-        &mut self,
-        sink_id: u32,
-        stream: &mut ExchangeWriteStream,
-    ) -> Result<()> {
+    pub async fn take_data(&mut self, sink_id: u32, writer: &mut dyn ExchangeWriter) -> Result<()> {
         {
             let state = self.state.lock().unwrap();
             if *state != TaskStatus::RUNNING {
@@ -129,33 +125,12 @@ impl TaskExecution {
             let mut task_data = TaskData::new();
             task_data.set_status(Status::default());
             task_data.set_record_batch(pb);
-            let res = stream.send((task_data, WriteFlags::default())).await;
-            res.map_err(|e| {
-                RwError::from(ErrorCode::GrpcError(
-                    "failed to send TaskData".to_string(),
-                    e,
-                ))
-            })?;
+            writer.write(task_data).await?;
         }
         let possible_err = self.failure.lock().unwrap().clone();
         if let Some(err) = possible_err {
             return Err(err);
         }
         Ok(())
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct TaskContext {
-    storage_manager: StorageManagerRef,
-}
-
-impl TaskContext {
-    pub(crate) fn storage_manager(&self) -> &dyn StorageManager {
-        &*self.storage_manager
-    }
-
-    pub(crate) fn storage_manager_ref(&self) -> StorageManagerRef {
-        self.storage_manager.clone()
     }
 }

@@ -7,11 +7,9 @@ use seq_scan::*;
 
 use crate::array::DataChunkRef;
 use crate::error::ErrorCode::InternalError;
-use crate::error::Result;
-use crate::error::RwError;
-use crate::task::TaskContext;
-use risingwave_proto::plan::PlanNode_PlanNodeType;
-use risingwave_proto::plan::{PlanFragment, PlanNode};
+use crate::error::{Result, RwError};
+use crate::task::GlobalTaskEnv;
+use risingwave_proto::plan::{PlanNode, PlanNode_PlanNodeType};
 use std::convert::TryFrom;
 
 pub(crate) enum ExecutorResult {
@@ -29,7 +27,7 @@ pub(crate) type BoxedExecutor = Box<dyn Executor>;
 
 pub(crate) struct ExecutorBuilder<'a> {
     plan_node: &'a PlanNode,
-    task_context: TaskContext,
+    env: GlobalTaskEnv,
 }
 
 macro_rules! build_executor {
@@ -45,19 +43,16 @@ macro_rules! build_executor {
   }
 }
 
-pub(crate) fn create_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-    build_executor! { source,
-      PlanNode_PlanNodeType::CREATE_TABLE => CreateTableExecutor,
-      PlanNode_PlanNodeType::SEQ_SCAN => SeqScanExecutor,
-      PlanNode_PlanNodeType::INSERT_VALUE => InsertValuesExecutor
-    }
-}
-
 impl<'a> ExecutorBuilder<'a> {
-    pub(crate) fn new(plan_node: &'a PlanNode, task_context: TaskContext) -> Self {
-        Self {
-            plan_node,
-            task_context,
+    pub(crate) fn new(plan_node: &'a PlanNode, env: GlobalTaskEnv) -> Self {
+        Self { plan_node, env }
+    }
+
+    pub(crate) fn build(&self) -> Result<BoxedExecutor> {
+        build_executor! { self,
+          PlanNode_PlanNodeType::CREATE_TABLE => CreateTableExecutor,
+          PlanNode_PlanNodeType::SEQ_SCAN => SeqScanExecutor,
+          PlanNode_PlanNodeType::INSERT_VALUE => InsertValuesExecutor
         }
     }
 
@@ -65,27 +60,7 @@ impl<'a> ExecutorBuilder<'a> {
         self.plan_node
     }
 
-    pub(crate) fn task_context(&self) -> &TaskContext {
-        &self.task_context
+    pub(crate) fn global_task_env(&self) -> &GlobalTaskEnv {
+        &self.env
     }
-}
-
-/// Transform the PlanFragment into a tree of executors.
-/// Each executor represents a physical operator, e.g. FilterScan, SeqScan.
-pub(crate) fn transform_plan_tree(plan: &PlanFragment) -> Result<BoxedExecutor> {
-    return transform_plan_node(plan.get_root());
-}
-
-fn transform_plan_node(_root: &PlanNode) -> Result<BoxedExecutor> {
-    // match root.get_node_type() {
-    //   PlanNodeType::SEQ_SCAN => SeqScanExecutor::try_from(root),
-    //   _ => Err(
-    //     ErrorCode::NotImplementedError(format!(
-    //       "unsupported plan node type {:?}",
-    //       root.get_node_type()
-    //     ))
-    //     .into(),
-    //   ),
-    // }
-    todo!()
 }

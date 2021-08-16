@@ -106,7 +106,7 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for InsertValuesExecutor {
         let table_id = TableId::from_pb(insert_value_node.get_table_ref_id().clone())
             .map_err(|e| InternalError(format!("Failed to parser table id, reaseon: {:?}", e)))?;
 
-        let storage_manager = source.task_context().storage_manager_ref();
+        let storage_manager = source.global_task_env().storage_manager_ref();
 
         let mut exprs: Vec<Vec<BoxedExpression>> =
             Vec::with_capacity(insert_value_node.get_insert_tuples().len());
