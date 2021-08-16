@@ -1,5 +1,6 @@
 mod input_ref;
 mod literal;
+mod type_cast;
 pub(crate) use literal::*;
 
 use crate::array::ArrayRef;
@@ -7,18 +8,22 @@ use crate::array::DataChunk;
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 use crate::expr::input_ref::InputRefExpression;
+use crate::expr::type_cast::TypeCastExpression;
 use crate::types::{DataType, DataTypeRef};
 use risingwave_proto::expr::{
     ExprNode,
-    ExprNode_ExprNodeType::{CONSTANT_VALUE, INPUT_REF},
+    ExprNode_ExprNodeType::{CAST, CONSTANT_VALUE, INPUT_REF},
 };
 use std::convert::TryFrom;
+use std::sync::Arc;
 
 pub(crate) enum ExpressionOutput<'a> {
     /// Returned by literal expression
     Literal(&'a Datum),
     Array(ArrayRef),
 }
+
+pub(crate) type ExpressionRef = Arc<dyn Expression>;
 
 pub(crate) trait Expression: Sync + Send {
     fn return_type(&self) -> &dyn DataType;
@@ -44,6 +49,7 @@ macro_rules! build_expression {
 pub(crate) fn build_from_proto(proto: &ExprNode) -> Result<BoxedExpression> {
     build_expression! {proto,
       CONSTANT_VALUE => LiteralExpression,
-      INPUT_REF => InputRefExpression
+      INPUT_REF => InputRefExpression,
+      CAST => TypeCastExpression
     }
 }
