@@ -4,7 +4,7 @@ use crate::error::Result;
 use crate::error::RwError;
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::storage::StorageManagerRef;
-use crate::util::ProtobufConvert;
+use pb_convert::FromProtobuf;
 use protobuf::Message;
 use risingwave_proto::plan::{CreateTableNode, PlanNode_PlanNodeType};
 use std::convert::TryFrom;
@@ -24,8 +24,8 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for CreateTableExecutor {
         let node = CreateTableNode::parse_from_bytes(source.plan_node().get_body().get_value())
             .map_err(ProtobufError)?;
 
-        let table_id = TableId::from_pb(node.get_table_ref_id().clone())
-            .map_err(|e| InternalError(format!("failed to deserialize table id, reason: {}", e)))?;
+        let table_id = TableId::from_protobuf(node.get_table_ref_id())
+            .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
         let column_count = node.get_column_descs().len();
 

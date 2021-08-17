@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+message SubMessageProto {
+  uint32 inner_id = 1;
+  string inner_name = 2;
+}
+
+enum OuterEnumProto {
+  INVALID = 0;
+  OK = 1;
+  ERROR = 2;
+}
+
+message OuterMessageProto {
+  double float64_data = 1;
+  float  float32_data = 2;
+  int32  int32_data = 3;
+  int64  int64_data = 4;
+  uint32  uint32_data = 5;
+  uint64  uint64_data = 6;
+  bool    bool_data = 11;
+  string string_data = 12;
+  bytes bytes_data = 13;
+  SubMessageProto message_data = 14;
+  OuterEnumProto enum_data = 15;
+}

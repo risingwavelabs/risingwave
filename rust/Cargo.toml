@@ -2,4 +2,6 @@
 members = [
     "server",
     "proto",
+    "utils/pb-convert-derive",
+    "utils/pb-convert",
 ]

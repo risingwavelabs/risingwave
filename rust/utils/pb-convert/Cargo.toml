@@ -1,0 +1,10 @@
+[package]
+name = "pb-convert"
+version = "0.1.0"
+edition = "2018"
+
+[lib]
+name = "pb_convert"
+
+[dependencies]
+anyhow = "1.0"

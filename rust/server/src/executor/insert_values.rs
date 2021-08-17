@@ -7,7 +7,7 @@ use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::expr::{build_from_proto, BoxedExpression, Datum};
 use crate::storage::StorageManagerRef;
 use crate::types::{DataType, Int32Type};
-use crate::util::ProtobufConvert;
+use pb_convert::FromProtobuf;
 use protobuf::Message;
 use risingwave_proto::plan::{InsertValueNode, PlanNode_PlanNodeType};
 use std::convert::TryFrom;
@@ -103,8 +103,8 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for InsertValuesExecutor {
             InsertValueNode::parse_from_bytes(source.plan_node().get_body().get_value())
                 .map_err(ProtobufError)?;
 
-        let table_id = TableId::from_pb(insert_value_node.get_table_ref_id().clone())
-            .map_err(|e| InternalError(format!("Failed to parser table id, reaseon: {:?}", e)))?;
+        let table_id = TableId::from_protobuf(insert_value_node.get_table_ref_id())
+            .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
         let storage_manager = source.global_task_env().storage_manager_ref();
 

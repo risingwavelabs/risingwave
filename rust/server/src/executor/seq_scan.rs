@@ -6,7 +6,7 @@ use crate::error::{Result, RwError};
 use crate::executor::ExecutorResult::Done;
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::storage::TableRef;
-use crate::util::ProtobufConvert;
+use pb_convert::FromProtobuf;
 use protobuf::Message;
 use risingwave_proto::plan::{PlanNode_PlanNodeType, SeqScanNode};
 use std::convert::TryFrom;
@@ -29,8 +29,8 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for SeqScanExecutor {
             SeqScanNode::parse_from_bytes(source.plan_node().get_body().get_value())
                 .map_err(|e| RwError::from(ProtobufError(e)))?;
 
-        let table_id = TableId::from_pb(seq_scan_node.get_table_ref_id().clone())
-            .map_err(|e| InternalError(format!("failed to deserialize table id: {:?}", e)))?;
+        let table_id = TableId::from_protobuf(seq_scan_node.get_table_ref_id())
+            .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
         let table_ref = source
             .global_task_env()
