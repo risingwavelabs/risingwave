@@ -72,4 +72,9 @@ public class DecimalType extends PrimitiveTypeBase {
   public int hashCode() {
     return Objects.hashCode(super.hashCode(), precision, scale);
   }
+
+  @Override
+  protected PrimitiveTypeBase copyWithNullability(boolean nullable) {
+    return new DecimalType(nullable, this.precision, this.scale);
+  }
 }

@@ -85,11 +85,14 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
     boolean notNull =
         columnDefinition.constraints().stream().anyMatch(c -> c instanceof NotNullColumnConstraint);
 
+    ColumnStrategy columnStrategy;
     if (notNull) {
       dataTypeSpec = dataTypeSpec.withNullable(Boolean.FALSE);
+      columnStrategy = ColumnStrategy.NOT_NULLABLE;
+    } else {
+      dataTypeSpec = dataTypeSpec.withNullable(Boolean.TRUE);
+      columnStrategy = ColumnStrategy.NULLABLE;
     }
-
-    ColumnStrategy columnStrategy = notNull ? ColumnStrategy.NOT_NULLABLE : ColumnStrategy.NULLABLE;
 
     return SqlDdlNodes.column(SqlParserPos.ZERO, name, dataTypeSpec, null, columnStrategy);
   }
@@ -309,9 +312,13 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
   private static SqlBasicTypeNameSpec toBasicTypeNameSpec(ColumnType<?> columnType) {
     String typeName = columnType.name().toUpperCase();
     switch (typeName) {
+      case "SMALLINT":
+        return new SqlBasicTypeNameSpec(SqlTypeName.SMALLINT, SqlParserPos.ZERO);
       case "INT":
       case "INTEGER":
         return new SqlBasicTypeNameSpec(SqlTypeName.INTEGER, SqlParserPos.ZERO);
+      case "BIGINT":
+        return new SqlBasicTypeNameSpec(SqlTypeName.BIGINT, SqlParserPos.ZERO);
       case "FLOAT":
       case "REAL":
         return new SqlBasicTypeNameSpec(SqlTypeName.FLOAT, SqlParserPos.ZERO);

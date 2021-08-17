@@ -86,7 +86,7 @@ CREATE TABLE supplier (
         </Resource>
         <Resource name="json">
             <![CDATA[
-            {
+{
   "root": {
     "nodeType": "CREATE_TABLE",
     "body": {
@@ -106,13 +106,15 @@ CREATE TABLE supplier (
       }, {
         "columnType": {
           "typeName": "CHAR",
-          "precision": 25
+          "precision": 25,
+          "isNullable": true
         },
         "encoding": "RAW"
       }, {
         "columnType": {
           "typeName": "VARCHAR",
-          "precision": 40
+          "precision": 40,
+          "isNullable": true
         },
         "encoding": "RAW"
       }, {
@@ -123,20 +125,23 @@ CREATE TABLE supplier (
       }, {
         "columnType": {
           "typeName": "CHAR",
-          "precision": 15
+          "precision": 15,
+          "isNullable": true
         },
         "encoding": "RAW"
       }, {
         "columnType": {
           "typeName": "DECIMAL",
           "precision": 147455,
-          "scale": 16383
+          "scale": 16383,
+          "isNullable": true
         },
         "encoding": "RAW"
       }, {
         "columnType": {
           "typeName": "VARCHAR",
-          "precision": 101
+          "precision": 101,
+          "isNullable": true
         },
         "encoding": "RAW"
       }]

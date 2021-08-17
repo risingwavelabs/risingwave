@@ -30,4 +30,9 @@ public class BooleanType extends PrimitiveTypeBase {
   public RelDataTypeComparability getComparability() {
     return RelDataTypeComparability.ALL;
   }
+
+  @Override
+  protected PrimitiveTypeBase copyWithNullability(boolean nullable) {
+    return new BooleanType(nullable);
+  }
 }

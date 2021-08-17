@@ -46,6 +46,11 @@ public class NumericTypeBase extends PrimitiveTypeBase {
   }
 
   @Override
+  protected PrimitiveTypeBase copyWithNullability(boolean nullable) {
+    return new NumericTypeBase(nullable, getSqlTypeName(), this.dataSize);
+  }
+
+  @Override
   public RelDataTypeComparability getComparability() {
     return RelDataTypeComparability.ALL;
   }

@@ -122,4 +122,9 @@ public class StringType extends PrimitiveTypeBase {
   public int hashCode() {
     return Objects.hashCode(super.hashCode(), maxSize, fixedSize);
   }
+
+  @Override
+  protected PrimitiveTypeBase copyWithNullability(boolean nullable) {
+    return new StringType(nullable, getSqlTypeName(), this.maxSize, this.charset, this.collation);
+  }
 }

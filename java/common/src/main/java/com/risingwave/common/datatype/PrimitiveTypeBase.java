@@ -155,4 +155,14 @@ public abstract class PrimitiveTypeBase extends RisingWaveTypeBase {
   public String toString() {
     return digest;
   }
+
+  @Override
+  public RisingWaveDataType withNullability(boolean nullable) {
+    if (this.nullable == nullable) {
+      return this;
+    }
+    return copyWithNullability(nullable);
+  }
+
+  protected abstract PrimitiveTypeBase copyWithNullability(boolean nullable);
 }

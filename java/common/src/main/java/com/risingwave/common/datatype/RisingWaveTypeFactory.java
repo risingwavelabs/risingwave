@@ -2,18 +2,86 @@ package com.risingwave.common.datatype;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
+import com.google.common.collect.ImmutableList;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import java.nio.charset.Charset;
+import java.util.AbstractList;
+import java.util.List;
 import java.util.OptionalInt;
+import java.util.stream.IntStream;
 import org.apache.calcite.jdbc.JavaTypeFactoryImpl;
 import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.rel.type.RelDataTypeField;
+import org.apache.calcite.rel.type.RelDataTypeFieldImpl;
+import org.apache.calcite.rel.type.StructKind;
 import org.apache.calcite.sql.SqlCollation;
 import org.apache.calcite.sql.type.SqlTypeName;
 
 public class RisingWaveTypeFactory extends JavaTypeFactoryImpl {
   public RisingWaveTypeFactory() {
     super(new RisingWaveDataTypeSystem());
+  }
+
+  @Override
+  public RelDataType createTypeWithNullability(RelDataType type, boolean nullable) {
+    checkArgument(type instanceof RisingWaveDataType, "Type is: %s", type.getClass());
+    return ((RisingWaveDataType) type).withNullability(nullable);
+  }
+
+  @Override
+  public RelDataType createStructType(Class type) {
+    throw new UnsupportedOperationException("Create struct type from class!");
+  }
+
+  @Override
+  public RelDataType createStructType(List<RelDataType> typeList, List<String> fieldNameList) {
+    return createStructType(StructKind.FULLY_QUALIFIED, fieldNameList, typeList, false);
+  }
+
+  @Override
+  public RelDataType createStructType(
+      StructKind kind, List<RelDataType> typeList, List<String> fieldNameList) {
+    return createStructType(kind, fieldNameList, typeList, false);
+  }
+
+  @SuppressWarnings("deprecation")
+  @Override
+  public RelDataType createStructType(FieldInfo fieldInfo) {
+    return createStructType(
+        StructKind.FULLY_QUALIFIED,
+        new AbstractList<>() {
+          @Override
+          public String get(int index) {
+            return fieldInfo.getFieldName(index);
+          }
+
+          @Override
+          public int size() {
+            return fieldInfo.getFieldCount();
+          }
+        },
+        new AbstractList<>() {
+          @Override
+          public RelDataType get(int index) {
+            return fieldInfo.getFieldType(index);
+          }
+
+          @Override
+          public int size() {
+            return fieldInfo.getFieldCount();
+          }
+        },
+        false);
+  }
+
+  private StructType createStructType(
+      StructKind kind, List<String> names, List<RelDataType> types, boolean nullable) {
+    List<RelDataTypeField> fields =
+        IntStream.range(0, types.size())
+            .mapToObj(idx -> new RelDataTypeFieldImpl(names.get(idx), idx, types.get(idx)))
+            .collect(ImmutableList.toImmutableList());
+    return new StructType(kind, nullable, fields);
   }
 
   @Override

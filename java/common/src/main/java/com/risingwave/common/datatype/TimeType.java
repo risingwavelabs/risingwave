@@ -64,4 +64,9 @@ public class TimeType extends PrimitiveTypeBase {
   public int hashCode() {
     return Objects.hashCode(super.hashCode(), precision);
   }
+
+  @Override
+  protected PrimitiveTypeBase copyWithNullability(boolean nullable) {
+    return new TimeType(nullable, this.precision);
+  }
 }

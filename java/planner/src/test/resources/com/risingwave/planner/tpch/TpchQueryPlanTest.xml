@@ -1,0 +1,13 @@
+<Root>
+    <TestCase name="select all columns from table">
+        <Resource name="sql">
+            <![CDATA[
+select * from supplier
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+BatchFilterScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_name,s_address,s_nationkey,s_phone,s_acctbal,s_comment])            ]]>
+        </Resource>
+    </TestCase>
+</Root>

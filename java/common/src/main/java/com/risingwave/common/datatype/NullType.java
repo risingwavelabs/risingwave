@@ -28,4 +28,9 @@ public class NullType extends PrimitiveTypeBase {
   public RelDataTypeComparability getComparability() {
     return RelDataTypeComparability.NONE;
   }
+
+  @Override
+  protected PrimitiveTypeBase copyWithNullability(boolean nullable) {
+    return this;
+  }
 }

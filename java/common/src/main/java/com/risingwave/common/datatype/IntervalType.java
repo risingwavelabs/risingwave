@@ -112,4 +112,9 @@ public class IntervalType extends PrimitiveTypeBase {
   public int hashCode() {
     return Objects.hashCode(super.hashCode(), precision);
   }
+
+  @Override
+  protected PrimitiveTypeBase copyWithNullability(boolean nullable) {
+    return new IntervalType(nullable, this.getSqlTypeName(), this.precision);
+  }
 }

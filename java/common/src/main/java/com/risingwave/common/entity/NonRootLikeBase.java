@@ -38,4 +38,9 @@ public abstract class NonRootLikeBase<T, P extends PathLike<T>> implements PathL
   public int hashCode() {
     return Objects.hashCode(value, parent);
   }
+
+  @Override
+  public String toString() {
+    return parent.toString() + "." + value.toString();
+  }
 }
