@@ -16,7 +16,10 @@ use std::sync::Arc;
 pub(super) struct InsertValuesExecutor {
     table_id: TableId,
     storage_manager: StorageManagerRef,
-    exprs: Vec<Vec<BoxedExpression>>,
+
+    // The rows to be inserted. Each row is composed of multiple values,
+    // each value is represented by an expression.
+    rows: Vec<Vec<BoxedExpression>>,
     executed: bool,
 }
 
@@ -31,21 +34,20 @@ impl Executor for InsertValuesExecutor {
             return Ok(Done);
         }
 
-        let capacity = self.exprs.len();
-        ensure!(capacity > 0);
+        let cardinality = self.rows.len();
+        ensure!(cardinality > 0);
 
         let mut array_builders = self
-            .exprs
+            .rows
             .first()
             .ok_or_else(|| RwError::from(InternalError("Can't insert empty values!".to_string())))?
-            .iter()
-            .map(|e| e.return_type_ref())
-            .map(|data_type_ref| DataType::create_array_builder(data_type_ref, capacity))
+            .iter() // for each column
+            .map(|col| DataType::create_array_builder(col.return_type_ref(), cardinality))
             .collect::<Result<Vec<BoxedArrayBuilder>>>()?;
 
         let empty_chunk = DataChunk::default();
 
-        for row in &mut self.exprs {
+        for row in &mut self.rows {
             row.iter_mut()
                 .zip(&mut array_builders)
                 .map(|(expr, builder)| {
@@ -62,7 +64,7 @@ impl Executor for InsertValuesExecutor {
             .collect::<Result<Vec<ArrayRef>>>()?;
 
         let chunk = DataChunk::builder()
-            .cardinality(capacity)
+            .cardinality(cardinality)
             .arrays(arrays)
             .build();
 
@@ -79,7 +81,7 @@ impl Executor for InsertValuesExecutor {
 
             let array = array_builder.finish()?;
             let ret_chunk = DataChunk::builder()
-                .cardinality(capacity)
+                .cardinality(cardinality)
                 .arrays(vec![array])
                 .build();
 
@@ -108,7 +110,7 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for InsertValuesExecutor {
 
         let storage_manager = source.global_task_env().storage_manager_ref();
 
-        let mut exprs: Vec<Vec<BoxedExpression>> =
+        let mut rows: Vec<Vec<BoxedExpression>> =
             Vec::with_capacity(insert_value_node.get_insert_tuples().len());
         for row in insert_value_node.get_insert_tuples() {
             let expr_row = row
@@ -116,13 +118,13 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for InsertValuesExecutor {
                 .iter()
                 .map(|c| build_from_proto(c))
                 .collect::<Result<Vec<BoxedExpression>>>()?;
-            exprs.push(expr_row);
+            rows.push(expr_row);
         }
 
         Ok(Self {
             table_id,
             storage_manager,
-            exprs,
+            rows,
             executed: false,
         })
     }

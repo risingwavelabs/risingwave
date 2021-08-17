@@ -49,6 +49,17 @@ impl<'a> ExecutorBuilder<'a> {
     }
 
     pub(crate) fn build(&self) -> Result<BoxedExecutor> {
+        self.try_build().map_err(|e| {
+            InternalError(format!(
+                "[PlanNodeType: {:?}] Failed to build executor: {}",
+                self.plan_node.get_node_type(),
+                e,
+            ))
+            .into()
+        })
+    }
+
+    fn try_build(&self) -> Result<BoxedExecutor> {
         build_executor! { self,
           PlanNode_PlanNodeType::CREATE_TABLE => CreateTableExecutor,
           PlanNode_PlanNodeType::SEQ_SCAN => SeqScanExecutor,

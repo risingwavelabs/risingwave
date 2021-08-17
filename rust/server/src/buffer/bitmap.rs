@@ -97,7 +97,19 @@ impl Bitmap {
     }
 
     pub(crate) fn to_protobuf(&self) -> Result<BufferProto> {
-        todo!()
+        let mut buf = BufferProto::default();
+        for b in self.iter() {
+            buf.body.push(b as u8);
+        }
+        Ok(buf)
+    }
+
+    pub(crate) fn iter(&self) -> BitmapIter<'_> {
+        BitmapIter {
+            bits: self,
+            idx: 0,
+            num_bits: (self.len() << 3),
+        }
     }
 }
 
@@ -133,6 +145,25 @@ impl PartialEq for Bitmap {
             return false;
         }
         self.bits.as_slice()[..self_len] == other.bits.as_slice()[..self_len]
+    }
+}
+
+pub(crate) struct BitmapIter<'a> {
+    bits: &'a Bitmap,
+    idx: usize,
+    num_bits: usize,
+}
+
+impl<'a> std::iter::Iterator for BitmapIter<'a> {
+    type Item = bool;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.idx >= self.num_bits {
+            return None;
+        }
+        let b = self.bits.is_set(self.idx);
+        self.idx += 1;
+        Some(b)
     }
 }
 
@@ -178,5 +209,18 @@ mod tests {
         assert!(!bitmap.is_set(5));
         assert!(bitmap.is_set(6));
         assert!(!bitmap.is_set(7));
+    }
+
+    #[test]
+    fn test_bitmap_iter() -> Result<()> {
+        {
+            let bitmap = Bitmap::from(Buffer::try_from([0b01001010]).unwrap());
+            let mut booleans = vec![];
+            for b in bitmap.iter() {
+                booleans.push(b as u8);
+            }
+            assert_eq!(booleans, vec![0u8, 1, 0, 1, 0, 0, 1, 0]);
+        }
+        Ok(())
     }
 }

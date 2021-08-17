@@ -30,7 +30,7 @@ impl Buffer {
     }
 
     pub(crate) fn from_slice<T: NativeType, S: AsRef<[T]>>(data: S) -> Result<Buffer> {
-        let buffer = Buffer::new(data.as_ref().len() & size_of::<T>())?;
+        let buffer = Buffer::new(data.as_ref().len() * size_of::<T>())?;
         unsafe {
             let dest_slice =
                 from_raw_parts_mut::<T>(transmute(buffer.ptr.as_ptr()), data.as_ref().len());
@@ -135,5 +135,25 @@ impl Not for Buffer {
 
     fn not(self) -> Buffer {
         self.unary_op(|a| !a)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::Result;
+
+    #[test]
+    fn test_buffer_from_slice() -> Result<()> {
+        let buf = Buffer::from_slice(vec![1i32])?;
+        assert_eq!(buf.len(), 4);
+        Ok(())
+    }
+
+    #[test]
+    fn test_buffer_new() -> Result<()> {
+        let buf = Buffer::new(1)?;
+        assert_eq!(buf.len(), 1);
+        Ok(())
     }
 }

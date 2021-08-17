@@ -20,11 +20,10 @@ impl ExchangeServiceImpl {
 async fn pull_from_task(
     tsk_res: Result<Box<TaskExecution>>,
     tsid: &TaskSinkId,
-    mut sink: &mut ServerStreamingSink<TaskData>,
+    writer: &mut GrpcExchangeWriter<'_>,
 ) -> Result<()> {
     let mut tsk = tsk_res?;
-    let mut writer = GrpcExchangeWriter::new(&mut sink);
-    tsk.take_data(tsid.get_sink_id(), &mut writer).await?;
+    tsk.take_data(tsid.get_sink_id(), writer).await?;
     Ok(())
 }
 
@@ -37,7 +36,8 @@ impl ExchangeService for ExchangeServiceImpl {
     ) {
         let task_result = self.mgr.lock().unwrap().take_task(&tsid);
         ctx.spawn(async move {
-            let res = pull_from_task(task_result, &tsid, &mut sink)
+            let mut writer = GrpcExchangeWriter::new(&mut sink);
+            let res = pull_from_task(task_result, &tsid, &mut writer)
                 .await
                 .map_err(|e| e.to_grpc_error());
             match res {
@@ -45,6 +45,11 @@ impl ExchangeService for ExchangeServiceImpl {
                     sink.fail(e).await.unwrap();
                 }
                 Ok(()) => {
+                    info!(
+                        "Exchanged {} chunks from sink {:?}",
+                        writer.written_chunks(),
+                        tsid,
+                    );
                     sink.close().await.unwrap();
                 }
             };
@@ -59,17 +64,26 @@ pub(crate) trait ExchangeWriter: Send {
 
 struct GrpcExchangeWriter<'a> {
     sink: &'a mut ServerStreamingSink<TaskData>,
+    written_chunks: usize,
 }
 
 impl<'a> GrpcExchangeWriter<'a> {
     fn new(sink: &'a mut ServerStreamingSink<TaskData>) -> Self {
-        Self { sink }
+        Self {
+            sink,
+            written_chunks: 0,
+        }
+    }
+
+    fn written_chunks(&self) -> usize {
+        self.written_chunks
     }
 }
 
 #[async_trait::async_trait]
 impl<'a> ExchangeWriter for GrpcExchangeWriter<'a> {
     async fn write(&mut self, data: TaskData) -> Result<()> {
+        self.written_chunks += 1;
         self.sink
             .send((data, WriteFlags::default()))
             .await

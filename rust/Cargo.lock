@@ -1010,6 +1010,7 @@ dependencies = [
  "protoc-grpcio",
  "rayon",
  "risingwave-proto",
+ "serde_json",
  "thiserror",
  "tokio",
  "typed-builder",

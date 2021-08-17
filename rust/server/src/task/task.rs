@@ -5,6 +5,7 @@ use crate::executor::{BoxedExecutor, ExecutorBuilder, ExecutorResult};
 use crate::service::ExchangeWriter;
 use crate::task::channel::{create_output_channel, BoxChanReceiver, BoxChanSender};
 use crate::task::GlobalTaskEnv;
+use crate::util::JsonFormatter;
 use rayon::ThreadPool;
 use risingwave_proto::common::Status;
 use risingwave_proto::plan::PlanFragment;
@@ -69,6 +70,7 @@ impl TaskExecution {
             let mut state = self.state.lock().unwrap();
             *state = TaskStatus::RUNNING;
         }
+        debug!("Executing plan: {}", self.plan.to_json()?.to_string());
         let exec = ExecutorBuilder::new(self.plan.get_root(), self.env.clone()).build()?;
         let (sender, receiver) = create_output_channel(self.plan.get_shuffle_info())?;
         self.receiver = Some(receiver);
@@ -80,6 +82,7 @@ impl TaskExecution {
 
     async fn execute(&mut self, root: BoxedExecutor, sender: BoxChanSender) {
         if let Err(e) = TaskExecution::try_execute(root, sender).await {
+            error!("Execution failed: {}", &e);
             let mut failure = self.failure.lock().unwrap();
             *failure = Some(e);
         }

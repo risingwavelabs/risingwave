@@ -37,6 +37,6 @@ appenders:
         kind: delete
 
 root:
-  level: info
+  level: debug
   appenders:
     - stdout # change to 'rolling' if want rooling files appender
