@@ -1,14 +1,16 @@
-use crate::array::DataChunk;
-use crate::error::ErrorCode::{InternalError, ProtobufError};
-use crate::error::{Result, RwError};
-use crate::expr::ExpressionOutput::Literal;
-use crate::expr::{Expression, ExpressionOutput};
-use crate::types::{build_from_proto, DataType, DataTypeRef};
-use protobuf::Message;
-use risingwave_proto::data::DataType_TypeName;
-use risingwave_proto::expr::{ConstantValue, ExprNode, ExprNode_ExprNodeType};
 use std::convert::TryFrom;
 use std::convert::TryInto;
+
+use protobuf::Message;
+
+use risingwave_proto::data::DataType_TypeName;
+use risingwave_proto::expr::{ConstantValue, ExprNode, ExprNode_ExprNodeType};
+
+use crate::array::{ArrayRef, DataChunk};
+use crate::error::ErrorCode::{InternalError, ProtobufError};
+use crate::error::{Result, RwError};
+use crate::expr::Expression;
+use crate::types::{build_from_proto, DataType, DataTypeRef};
 
 #[derive(Clone, Debug)]
 pub(crate) enum Datum {
@@ -33,8 +35,13 @@ impl Expression for LiteralExpression {
         self.return_type.clone()
     }
 
-    fn eval(&mut self, _input: &DataChunk) -> Result<ExpressionOutput> {
-        Ok(Literal(&self.literal))
+    fn eval(&mut self, _input: &DataChunk) -> Result<ArrayRef> {
+        let mut array_builder =
+            DataType::create_array_builder(self.return_type.clone(), _input.cardinality())?;
+        for _ in 0.._input.cardinality() {
+            array_builder.append(&self.literal)?;
+        }
+        array_builder.finish()
     }
 }
 

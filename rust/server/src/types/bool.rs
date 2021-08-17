@@ -5,6 +5,7 @@ use risingwave_proto::data::DataType as DataTypeProto;
 use std::sync::Arc;
 
 /// [BoolType] is not a primitive type because we use a bit for each bool value, not a [bool].
+#[derive(Debug)]
 pub(crate) struct BoolType {
     nullable: bool,
 }

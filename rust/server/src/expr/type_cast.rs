@@ -1,15 +1,16 @@
-use crate::array::DataChunk;
+use std::convert::TryFrom;
+
+use protobuf::Message;
+
+use risingwave_proto::expr::{ExprNode, ExprNode_ExprNodeType, FunctionCall};
+
+use crate::array::{ArrayRef, DataChunk};
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::expr::build_from_proto as expr_build_from_proto;
 use crate::expr::BoxedExpression;
-use crate::expr::{Expression, ExpressionOutput};
-use crate::types::{
-    build_from_proto as type_build_from_proto, DataType, DataTypeKind, DataTypeRef,
-};
-use protobuf::Message;
-use risingwave_proto::expr::{ExprNode, ExprNode_ExprNodeType, FunctionCall};
-use std::convert::TryFrom;
+use crate::expr::Expression;
+use crate::types::{build_from_proto as type_build_from_proto, DataType, DataTypeRef};
 
 pub(super) struct TypeCastExpression {
     return_type: DataTypeRef,
@@ -25,24 +26,25 @@ impl Expression for TypeCastExpression {
         self.return_type.clone()
     }
 
-    fn eval(&mut self, input: &DataChunk) -> Result<ExpressionOutput> {
-        let child_data_type = self.child.return_type_ref();
-        let child_expr = self.child.eval(input)?;
-        // Build a array from the child expression.
-        let mut array_builder = DataType::create_array_builder(child_data_type, 1)?;
-        array_builder.append_expr_output(child_expr)?;
-        let _array = array_builder.finish()?;
-        match (
-            self.return_type.data_type_kind(),
-            self.child.return_type_ref().data_type_kind(),
-        ) {
-            (DataTypeKind::Date, _) => {
-                unimplemented!()
-            }
-
-            _ => unimplemented!(),
-        };
+    fn eval(&mut self, _input: &DataChunk) -> Result<ArrayRef> {
+        // let child_data_type = self.child.return_type_ref();
+        // let child_expr = self.child.eval(input)?;
+        // // Build a array from the child expression.
+        // let mut array_builder = DataType::create_array_builder(child_data_type, 1)?;
+        // array_builder.append_expr_output(child_expr)?;
+        // let _array = array_builder.finish()?;
+        // match (
+        //   self.return_type.data_type_kind(),
+        //   self.child.return_type_ref().data_type_kind(),
+        // ) {
+        //   (DataTypeKind::Date, _) => {
+        //     unimplemented!()
+        //   }
+        //
+        //   _ => unimplemented!(),
+        // };
         // Finish the casting and correctly return the result.
+        todo!()
     }
 }
 

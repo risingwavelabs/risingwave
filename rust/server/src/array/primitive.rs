@@ -1,14 +1,15 @@
 use crate::array::array_data::ArrayData;
 use crate::array::{Array, ArrayBuilder, ArrayRef};
 use crate::buffer::{Bitmap, Buffer};
-use crate::error::ErrorCode::ProtobufError;
+use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::Result;
 use crate::error::RwError;
 use crate::expr::Datum;
 use crate::types::{DataType, DataTypeRef, NativeType, PrimitiveDataType};
-use protobuf::well_known_types::Any;
+use protobuf::well_known_types::Any as AnyProto;
 use risingwave_proto::data::Buffer as BufferProto;
 use risingwave_proto::data::{Buffer_CompressionType, ColumnCommon, FixedWidthColumn};
+use std::any::Any;
 use std::convert::TryFrom;
 use std::marker::PhantomData;
 use std::mem::transmute;
@@ -41,6 +42,31 @@ impl<T: PrimitiveDataType> PrimitiveArray<T> {
     fn len(&self) -> usize {
         self.data.cardinality()
     }
+
+    pub(crate) fn from_slice<S>(input: S) -> Result<ArrayRef>
+    where
+        S: AsRef<[T::N]>,
+    {
+        let data_type = Arc::new(T::default());
+        let mut array_builder = DataType::create_array_builder(data_type, input.as_ref().len())?;
+        {
+            let array_builder = array_builder
+                .as_any_mut()
+                .downcast_mut::<PrimitiveArrayBuilder<T>>()
+                .ok_or_else(|| {
+                    InternalError(format!(
+                        "Failed to downcast input array builder: {:?}",
+                        T::DATA_TYPE_KIND
+                    ))
+                })?;
+
+            for v in input.as_ref() {
+                array_builder.append_value(*v)?;
+            }
+        }
+
+        array_builder.finish()
+    }
 }
 
 impl<T: PrimitiveDataType> TryFrom<ArrayData> for PrimitiveArray<T> {
@@ -68,7 +94,11 @@ impl<T: PrimitiveDataType> Array for PrimitiveArray<T> {
         &self.data
     }
 
-    fn to_protobuf(&self) -> Result<Any> {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self as &dyn std::any::Any
+    }
+
+    fn to_protobuf(&self) -> Result<AnyProto> {
         let proto_data_type = self.data.data_type().to_protobuf()?;
         let mut column_common = ColumnCommon::new();
         column_common.set_column_type(proto_data_type);
@@ -95,7 +125,7 @@ impl<T: PrimitiveDataType> Array for PrimitiveArray<T> {
         column.set_value_width(size_of::<T::N>() as u64);
         column.set_values(values);
 
-        Any::pack(&column).map_err(|e| RwError::from(ProtobufError(e)))
+        AnyProto::pack(&column).map_err(|e| RwError::from(ProtobufError(e)))
     }
 }
 
@@ -104,6 +134,38 @@ impl<T: PrimitiveDataType> ArrayBuilder for PrimitiveArrayBuilder<T> {
         self.buffer.push(T::N::from_datum(datum)?);
         self.null_bitmap_buffer.push(true);
         Ok(())
+    }
+
+    fn append_array(&mut self, source: &dyn Array) -> Result<()> {
+        let input = source
+            .as_any()
+            .downcast_ref::<PrimitiveArray<T>>()
+            .ok_or_else(|| {
+                InternalError(format!(
+                    "Can't append array {:?} into array builder {:?}",
+                    &*self.data_type,
+                    source.data_type()
+                ))
+            })?;
+
+        self.buffer.extend_from_slice(input.as_slice());
+        if let Some(null_bitmap) = input.array_data().null_bitmap() {
+            self.null_bitmap_buffer.extend(null_bitmap.iter());
+        } else {
+            for _ in 0..input.len() {
+                self.null_bitmap_buffer.push(true);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self as &dyn Any
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self as &mut dyn Any
     }
 
     fn finish(self: Box<Self>) -> Result<ArrayRef> {
@@ -129,5 +191,11 @@ impl<T: PrimitiveDataType> PrimitiveArrayBuilder<T> {
             buffer: Vec::with_capacity(capacity),
             null_bitmap_buffer: Vec::with_capacity(capacity),
         }
+    }
+
+    fn append_value(&mut self, value: T::N) -> Result<()> {
+        self.buffer.push(value);
+        self.null_bitmap_buffer.push(true);
+        Ok(())
     }
 }

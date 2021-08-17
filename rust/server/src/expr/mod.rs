@@ -17,18 +17,12 @@ use risingwave_proto::expr::{
 use std::convert::TryFrom;
 use std::sync::Arc;
 
-pub(crate) enum ExpressionOutput<'a> {
-    /// Returned by literal expression
-    Literal(&'a Datum),
-    Array(ArrayRef),
-}
-
 pub(crate) type ExpressionRef = Arc<dyn Expression>;
 
 pub(crate) trait Expression: Sync + Send {
     fn return_type(&self) -> &dyn DataType;
     fn return_type_ref(&self) -> DataTypeRef;
-    fn eval(&mut self, input: &DataChunk) -> Result<ExpressionOutput>;
+    fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef>;
 }
 
 pub(crate) type BoxedExpression = Box<dyn Expression>;

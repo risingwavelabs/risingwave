@@ -11,6 +11,8 @@ pub(crate) trait Array: Send + Sync {
         self.array_data().cardinality()
     }
 
+    fn as_any(&self) -> &dyn std::any::Any;
+
     fn to_protobuf(&self) -> Result<Any>;
 }
 

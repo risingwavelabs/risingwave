@@ -1,15 +1,13 @@
-use crate::array::ArrayRef;
+use crate::array::{Array, ArrayRef};
 use crate::error::Result;
-use crate::expr::{Datum, ExpressionOutput};
+use crate::expr::Datum;
+use std::any::Any;
 
 pub(crate) trait ArrayBuilder {
     fn append(&mut self, datum: &Datum) -> Result<()>;
-    fn append_expr_output(&mut self, output: ExpressionOutput) -> Result<()> {
-        match output {
-            ExpressionOutput::Array(_) => todo!(),
-            ExpressionOutput::Literal(datum) => self.append(datum),
-        }
-    }
+    fn append_array(&mut self, source: &dyn Array) -> Result<()>;
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
     fn finish(self: Box<Self>) -> Result<ArrayRef>;
 }
 
@@ -17,11 +15,12 @@ pub(crate) type BoxedArrayBuilder = Box<dyn ArrayBuilder>;
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use crate::array::{ArrayBuilder, PrimitiveArrayBuilder};
     use crate::error::Result;
     use crate::expr::Datum;
     use crate::types::Int32Type;
-    use std::sync::Arc;
 
     #[test]
     fn test_array_builder_i32() -> Result<()> {

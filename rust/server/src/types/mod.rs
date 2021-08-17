@@ -17,6 +17,7 @@ use risingwave_proto::data::DataType_TypeName::INT16;
 use risingwave_proto::data::DataType_TypeName::INT32;
 use risingwave_proto::data::DataType_TypeName::INT64;
 use std::convert::TryFrom;
+use std::fmt::Debug;
 
 mod bool;
 
@@ -32,7 +33,7 @@ pub(crate) enum DataTypeKind {
     Date,
 }
 
-pub(crate) trait DataType: Sync + Send + 'static {
+pub(crate) trait DataType: Debug + Sync + Send + 'static {
     fn data_type_kind(&self) -> DataTypeKind;
     fn is_nullable(&self) -> bool;
     fn create_array_builder(self: Arc<Self>, capacity: usize) -> Result<BoxedArrayBuilder>;

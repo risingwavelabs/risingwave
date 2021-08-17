@@ -1,12 +1,14 @@
-use crate::array::DataChunk;
+use std::convert::TryFrom;
+
+use protobuf::Message;
+
+use risingwave_proto::expr::{ExprNode, ExprNode_ExprNodeType, InputRefExpr};
+
+use crate::array::{ArrayRef, DataChunk};
 use crate::error::ErrorCode::ProtobufError;
 use crate::error::{Result, RwError};
-use crate::expr::ExpressionOutput::Array;
-use crate::expr::{Expression, ExpressionOutput};
+use crate::expr::Expression;
 use crate::types::{build_from_proto, DataType, DataTypeRef};
-use protobuf::Message;
-use risingwave_proto::expr::{ExprNode, ExprNode_ExprNodeType, InputRefExpr};
-use std::convert::TryFrom;
 
 pub(super) struct InputRefExpression {
     return_type: DataTypeRef,
@@ -22,8 +24,8 @@ impl Expression for InputRefExpression {
         self.return_type.clone()
     }
 
-    fn eval(&mut self, input: &DataChunk) -> Result<ExpressionOutput> {
-        input.array_at(self.idx).map(|arr| Array(arr))
+    fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef> {
+        input.array_at(self.idx)
     }
 }
 

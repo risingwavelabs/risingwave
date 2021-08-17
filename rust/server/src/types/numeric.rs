@@ -8,6 +8,7 @@ use crate::types::PrimitiveDataType;
 use risingwave_proto::data::DataType as DataTypeProto;
 use risingwave_proto::data::DataType_TypeName;
 use std::convert::TryFrom;
+use std::default::Default;
 use std::sync::Arc;
 
 macro_rules! make_numeric_type {
@@ -20,6 +21,12 @@ macro_rules! make_numeric_type {
         impl $name {
             pub(crate) fn new(nullable: bool) -> Self {
                 Self { nullable }
+            }
+        }
+
+        impl Default for $name {
+            fn default() -> Self {
+                Self { nullable: false }
             }
         }
 

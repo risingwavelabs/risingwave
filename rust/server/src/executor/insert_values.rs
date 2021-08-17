@@ -1,4 +1,4 @@
-use crate::array::{ArrayRef, BoxedArrayBuilder, DataChunk};
+use crate::array::{ArrayRef, BoxedArrayBuilder, DataChunk, PrimitiveArray};
 use crate::catalog::TableId;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
@@ -45,14 +45,20 @@ impl Executor for InsertValuesExecutor {
             .map(|col| DataType::create_array_builder(col.return_type_ref(), cardinality))
             .collect::<Result<Vec<BoxedArrayBuilder>>>()?;
 
-        let empty_chunk = DataChunk::default();
+        let one_row_array = PrimitiveArray::<Int32Type>::from_slice(vec![1])?;
+        // We need a one row chunk rather than an empty chunk because constant expression's eval result
+        // is same size as input chunk cardinality.
+        let one_row_chunk = DataChunk::builder()
+            .cardinality(1)
+            .arrays(vec![one_row_array])
+            .build();
 
         for row in &mut self.rows {
             row.iter_mut()
                 .zip(&mut array_builders)
                 .map(|(expr, builder)| {
-                    expr.eval(&empty_chunk)
-                        .map(|out| builder.append_expr_output(out))
+                    expr.eval(&one_row_chunk)
+                        .and_then(|out| builder.append_array(&*out))
                         .map(|_| 1)
                 })
                 .collect::<Result<Vec<usize>>>()?;
