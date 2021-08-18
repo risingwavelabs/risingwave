@@ -30,7 +30,7 @@ pub(crate) struct PrimitiveArrayBuilder<T: PrimitiveDataType> {
 }
 
 impl<T: PrimitiveDataType> PrimitiveArray<T> {
-    fn as_slice(&self) -> &[T::N] {
+    pub fn as_slice(&self) -> &[T::N] {
         unsafe {
             from_raw_parts(
                 transmute(self.data.buffers()[0].as_ptr()),
@@ -94,10 +94,6 @@ impl<T: PrimitiveDataType> Array for PrimitiveArray<T> {
         &self.data
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
-        self as &dyn std::any::Any
-    }
-
     fn to_protobuf(&self) -> Result<AnyProto> {
         let proto_data_type = self.data.data_type().to_protobuf()?;
         let mut column_common = ColumnCommon::new();
@@ -126,6 +122,10 @@ impl<T: PrimitiveDataType> Array for PrimitiveArray<T> {
         column.set_values(values);
 
         AnyProto::pack(&column).map_err(|e| RwError::from(ProtobufError(e)))
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 

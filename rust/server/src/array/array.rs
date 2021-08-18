@@ -1,7 +1,8 @@
 use crate::array::array_data::ArrayData;
 use crate::error::Result;
 use crate::types::DataType;
-use protobuf::well_known_types::Any;
+use protobuf::well_known_types::Any as AnyProto;
+use std::any::Any;
 use std::sync::Arc;
 
 pub(crate) trait Array: Send + Sync {
@@ -11,9 +12,9 @@ pub(crate) trait Array: Send + Sync {
         self.array_data().cardinality()
     }
 
-    fn as_any(&self) -> &dyn std::any::Any;
+    fn to_protobuf(&self) -> Result<AnyProto>;
 
-    fn to_protobuf(&self) -> Result<Any>;
+    fn as_any(&self) -> &dyn Any;
 }
 
 pub(crate) type ArrayRef = Arc<dyn Array>;

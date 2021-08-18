@@ -31,6 +31,7 @@ pub(crate) enum DataTypeKind {
     Float64,
     Decimal,
     Date,
+    Char,
 }
 
 pub(crate) trait DataType: Debug + Sync + Send + 'static {

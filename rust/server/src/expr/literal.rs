@@ -1,3 +1,9 @@
+use crate::array::{ArrayRef, DataChunk};
+use crate::error::ErrorCode::{InternalError, ProtobufError};
+use crate::error::{Result, RwError};
+
+use crate::expr::Expression;
+use crate::types::{build_from_proto, DataType, DataTypeRef};
 use std::convert::TryFrom;
 use std::convert::TryInto;
 
@@ -5,12 +11,6 @@ use protobuf::Message;
 
 use risingwave_proto::data::DataType_TypeName;
 use risingwave_proto::expr::{ConstantValue, ExprNode, ExprNode_ExprNodeType};
-
-use crate::array::{ArrayRef, DataChunk};
-use crate::error::ErrorCode::{InternalError, ProtobufError};
-use crate::error::{Result, RwError};
-use crate::expr::Expression;
-use crate::types::{build_from_proto, DataType, DataTypeRef};
 
 #[derive(Clone, Debug)]
 pub(crate) enum Datum {

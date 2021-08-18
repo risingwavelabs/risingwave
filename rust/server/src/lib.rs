@@ -25,10 +25,10 @@ mod catalog;
 mod execution;
 mod executor;
 mod expr;
+pub(crate) mod service;
 mod storage;
 mod types;
 mod util;
-
-pub(crate) mod service;
+mod vector_op;
 
 pub mod server;
