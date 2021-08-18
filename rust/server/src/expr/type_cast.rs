@@ -11,7 +11,7 @@ use crate::expr::build_from_proto as expr_build_from_proto;
 use crate::expr::BoxedExpression;
 use crate::expr::Expression;
 use crate::types::{build_from_proto as type_build_from_proto, DataType, DataTypeRef};
-use crate::vector_op::vector_cast;
+use crate::vector_op::cast;
 
 pub(super) struct TypeCastExpression {
     return_type: DataTypeRef,
@@ -30,7 +30,7 @@ impl Expression for TypeCastExpression {
     fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef> {
         let child_data_type = self.child.return_type_ref();
         let child_expr = self.child.eval(input)?;
-        vector_cast(child_expr, child_data_type, self.return_type.clone())
+        cast::vec_cast(child_expr, child_data_type, self.return_type.clone())
     }
 }
 

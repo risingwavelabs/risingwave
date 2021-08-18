@@ -21,6 +21,7 @@ pb-convert-derive = {path = "../utils/pb-convert-derive" }
 pb-convert = {path = "../utils/pb-convert" }
 async-trait = "0.1.51"
 serde_json = "1.0"
+chrono = "0.4.19"
 
 [[bin]]
 name = "compute-node"

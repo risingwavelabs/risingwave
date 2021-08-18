@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use crate::grpcio::{RpcStatus, RpcStatusCode};
 use backtrace::Backtrace;
+use chrono::format::ParseError;
 use protobuf::ProtobufError;
 use std::io::Error as IoError;
 use thiserror::Error;
@@ -27,6 +28,8 @@ pub(crate) enum ErrorCode {
     IoError(IoError),
     #[error("Grpc failure: {0} {:?}")]
     GrpcError(String, grpcio::Error),
+    #[error("Parse string error: {0}")]
+    ParseError(chrono::format::ParseError),
 }
 
 #[derive(Clone)]
@@ -46,6 +49,15 @@ impl From<ErrorCode> for RwError {
     fn from(code: ErrorCode) -> Self {
         Self {
             inner: Arc::new(code),
+            backtrace: Arc::new(Backtrace::new()),
+        }
+    }
+}
+
+impl From<ParseError> for RwError {
+    fn from(err: ParseError) -> Self {
+        Self {
+            inner: Arc::new(ErrorCode::ParseError(err)),
             backtrace: Arc::new(Backtrace::new()),
         }
     }
@@ -85,6 +97,7 @@ impl ErrorCode {
             ErrorCode::NotImplementedError(_) => 4,
             ErrorCode::IoError(_) => 5,
             ErrorCode::GrpcError(_, _) => 6,
+            ErrorCode::ParseError(_) => 7,
         }
     }
 }
