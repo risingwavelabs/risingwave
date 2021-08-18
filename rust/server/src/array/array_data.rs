@@ -1,5 +1,6 @@
 use crate::buffer::Bitmap;
 use crate::buffer::Buffer;
+use crate::error::Result;
 use crate::types::{DataType, DataTypeRef};
 use typed_builder::TypedBuilder;
 
@@ -28,5 +29,40 @@ impl ArrayData {
 
     pub(crate) fn buffers(&self) -> &[Buffer] {
         &self.buffers
+    }
+
+    pub(crate) fn buffer_at(&self, idx: usize) -> Result<&Buffer> {
+        self.check_buffer_idx(idx)?;
+        // Justification:
+        // We already checked idx before.
+        Ok(unsafe { self.buffer_at_unchecked(idx) })
+    }
+
+    pub(crate) unsafe fn buffer_at_unchecked(&self, idx: usize) -> &Buffer {
+        self.buffers.get_unchecked(idx)
+    }
+
+    pub(crate) fn is_null(&self, idx: usize) -> Result<bool> {
+        self.null_bitmap
+            .as_ref()
+            .map(|b| b.is_set(idx).map(|v| !v))
+            .unwrap_or(Ok(false))
+    }
+
+    pub(crate) unsafe fn is_null_unchecked(&self, idx: usize) -> bool {
+        self.null_bitmap
+            .as_ref()
+            .map(|b| !b.is_set_unchecked(idx))
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn check_idx(&self, idx: usize) -> Result<()> {
+        ensure!(idx < self.cardinality);
+        Ok(())
+    }
+
+    pub(crate) fn check_buffer_idx(&self, idx: usize) -> Result<()> {
+        ensure!(idx < self.buffers.len());
+        Ok(())
     }
 }

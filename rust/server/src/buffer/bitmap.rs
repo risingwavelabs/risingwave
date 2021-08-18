@@ -55,7 +55,7 @@ impl Bitmap {
         Ok(Self { bits: buffer })
     }
 
-    fn num_of_bytes(num_bits: usize) -> usize {
+    pub(crate) fn num_of_bytes(num_bits: usize) -> usize {
         let num_bytes = num_bits / 8 + if num_bits % 8 > 0 { 1 } else { 0 };
         let r = num_bytes % 64;
         if r == 0 {
@@ -65,7 +65,11 @@ impl Bitmap {
         }
     }
 
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
+        self.num_of_buffer_bytes() << 3
+    }
+
+    fn num_of_buffer_bytes(&self) -> usize {
         self.bits.len()
     }
 
@@ -73,9 +77,16 @@ impl Bitmap {
         self.bits.is_empty()
     }
 
-    pub fn is_set(&self, i: usize) -> bool {
-        assert!(i < (self.bits.len() << 3));
-        unsafe { bit_util::get_bit_raw(self.bits.as_ptr(), i) }
+    pub unsafe fn is_set_unchecked(&self, idx: usize) -> bool {
+        bit_util::get_bit_raw(self.bits.as_ptr(), idx)
+    }
+
+    pub fn is_set(&self, idx: usize) -> Result<bool> {
+        self.check_idx(idx)?;
+
+        // Justification
+        // We've already checked index here, so it's ok to use unsafe.
+        Ok(unsafe { self.is_set_unchecked(idx) })
     }
 
     pub fn buffer_ref(&self) -> &Buffer {
@@ -106,10 +117,15 @@ impl Bitmap {
 
     pub(crate) fn iter(&self) -> BitmapIter<'_> {
         BitmapIter {
-            bits: self,
+            bits: &self.bits,
             idx: 0,
-            num_bits: (self.len() << 3),
+            num_bits: (self.num_of_buffer_bytes() << 3),
         }
+    }
+
+    fn check_idx(&self, idx: usize) -> Result<()> {
+        ensure!(idx < self.len());
+        Ok(())
     }
 }
 
@@ -149,9 +165,20 @@ impl PartialEq for Bitmap {
 }
 
 pub(crate) struct BitmapIter<'a> {
-    bits: &'a Bitmap,
+    bits: &'a Buffer,
     idx: usize,
     num_bits: usize,
+}
+
+impl<'a> BitmapIter<'a> {
+    pub(crate) fn try_from(value: &'a Buffer, num_bits: usize) -> Result<Self> {
+        ensure!(value.len() >= Bitmap::num_of_bytes(num_bits));
+        Ok(Self {
+            bits: value,
+            idx: 0,
+            num_bits,
+        })
+    }
 }
 
 impl<'a> std::iter::Iterator for BitmapIter<'a> {
@@ -161,7 +188,7 @@ impl<'a> std::iter::Iterator for BitmapIter<'a> {
         if self.idx >= self.num_bits {
             return None;
         }
-        let b = self.bits.is_set(self.idx);
+        let b = unsafe { bit_util::get_bit_raw(self.bits.as_ptr(), self.idx) };
         self.idx += 1;
         Some(b)
     }
@@ -173,9 +200,9 @@ mod tests {
 
     #[test]
     fn test_bitmap_length() {
-        assert_eq!(64, Bitmap::new(63 * 8).unwrap().len());
-        assert_eq!(64, Bitmap::new(64 * 8).unwrap().len());
-        assert_eq!(128, Bitmap::new(65 * 8).unwrap().len());
+        assert_eq!(64, Bitmap::new(63 * 8).unwrap().num_of_buffer_bytes());
+        assert_eq!(64, Bitmap::new(64 * 8).unwrap().num_of_buffer_bytes());
+        assert_eq!(128, Bitmap::new(65 * 8).unwrap().num_of_buffer_bytes());
     }
 
     #[test]
@@ -201,14 +228,14 @@ mod tests {
     #[test]
     fn test_bitmap_is_set() {
         let bitmap = Bitmap::from(Buffer::try_from([0b01001010]).unwrap());
-        assert!(!bitmap.is_set(0));
-        assert!(bitmap.is_set(1));
-        assert!(!bitmap.is_set(2));
-        assert!(bitmap.is_set(3));
-        assert!(!bitmap.is_set(4));
-        assert!(!bitmap.is_set(5));
-        assert!(bitmap.is_set(6));
-        assert!(!bitmap.is_set(7));
+        assert!(!bitmap.is_set(0).unwrap());
+        assert!(bitmap.is_set(1).unwrap());
+        assert!(!bitmap.is_set(2).unwrap());
+        assert!(bitmap.is_set(3).unwrap());
+        assert!(!bitmap.is_set(4).unwrap());
+        assert!(!bitmap.is_set(5).unwrap());
+        assert!(bitmap.is_set(6).unwrap());
+        assert!(!bitmap.is_set(7).unwrap());
     }
 
     #[test]

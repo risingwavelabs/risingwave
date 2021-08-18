@@ -1,14 +1,3 @@
-use crate::array::array_data::ArrayData;
-use crate::array::{Array, ArrayBuilder, ArrayRef};
-use crate::buffer::{Bitmap, Buffer};
-use crate::error::ErrorCode::{InternalError, ProtobufError};
-use crate::error::Result;
-use crate::error::RwError;
-use crate::expr::Datum;
-use crate::types::{DataType, DataTypeRef, NativeType, PrimitiveDataType};
-use protobuf::well_known_types::Any as AnyProto;
-use risingwave_proto::data::Buffer as BufferProto;
-use risingwave_proto::data::{Buffer_CompressionType, ColumnCommon, FixedWidthColumn};
 use std::any::Any;
 use std::convert::TryFrom;
 use std::marker::PhantomData;
@@ -16,6 +5,21 @@ use std::mem::transmute;
 use std::mem::{align_of, size_of};
 use std::slice::from_raw_parts;
 use std::sync::Arc;
+
+use protobuf::well_known_types::Any as AnyProto;
+
+use risingwave_proto::data::Buffer as BufferProto;
+use risingwave_proto::data::{Buffer_CompressionType, ColumnCommon, FixedWidthColumn};
+
+use crate::array::array_data::ArrayData;
+use crate::array::{Array, ArrayBuilder, ArrayRef};
+use crate::buffer::{Bitmap, Buffer};
+use crate::error::ErrorCode::ProtobufError;
+use crate::error::Result;
+use crate::error::RwError;
+use crate::expr::Datum;
+use crate::types::{DataType, DataTypeRef, NativeType, PrimitiveDataType};
+use crate::util::{downcast_mut, downcast_ref};
 
 /// A primitive array contains only one value buffer, and an optional bitmap buffer
 pub(crate) struct PrimitiveArray<T: PrimitiveDataType> {
@@ -48,24 +52,18 @@ impl<T: PrimitiveDataType> PrimitiveArray<T> {
         S: AsRef<[T::N]>,
     {
         let data_type = Arc::new(T::default());
-        let mut array_builder = DataType::create_array_builder(data_type, input.as_ref().len())?;
+        let mut boxed_array_builder =
+            DataType::create_array_builder(data_type, input.as_ref().len())?;
         {
-            let array_builder = array_builder
-                .as_any_mut()
-                .downcast_mut::<PrimitiveArrayBuilder<T>>()
-                .ok_or_else(|| {
-                    InternalError(format!(
-                        "Failed to downcast input array builder: {:?}",
-                        T::DATA_TYPE_KIND
-                    ))
-                })?;
+            let array_builder: &mut PrimitiveArrayBuilder<T> =
+                downcast_mut(boxed_array_builder.as_mut())?;
 
             for v in input.as_ref() {
                 array_builder.append_value(*v)?;
             }
         }
 
-        array_builder.finish()
+        boxed_array_builder.finish()
     }
 }
 
@@ -82,6 +80,18 @@ impl<T: PrimitiveDataType> TryFrom<ArrayData> for PrimitiveArray<T> {
             data,
             _phantom: PhantomData,
         })
+    }
+}
+
+impl<T: PrimitiveDataType> AsRef<dyn Any> for PrimitiveArray<T> {
+    fn as_ref(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl<T: PrimitiveDataType> AsMut<dyn Any> for PrimitiveArray<T> {
+    fn as_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }
 
@@ -123,8 +133,16 @@ impl<T: PrimitiveDataType> Array for PrimitiveArray<T> {
 
         AnyProto::pack(&column).map_err(|e| RwError::from(ProtobufError(e)))
     }
+}
 
-    fn as_any(&self) -> &dyn std::any::Any {
+impl<T: PrimitiveDataType> AsRef<dyn Any> for PrimitiveArrayBuilder<T> {
+    fn as_ref(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl<T: PrimitiveDataType> AsMut<dyn Any> for PrimitiveArrayBuilder<T> {
+    fn as_mut(&mut self) -> &mut dyn Any {
         self
     }
 }
@@ -137,16 +155,7 @@ impl<T: PrimitiveDataType> ArrayBuilder for PrimitiveArrayBuilder<T> {
     }
 
     fn append_array(&mut self, source: &dyn Array) -> Result<()> {
-        let input = source
-            .as_any()
-            .downcast_ref::<PrimitiveArray<T>>()
-            .ok_or_else(|| {
-                InternalError(format!(
-                    "Can't append array {:?} into array builder {:?}",
-                    &*self.data_type,
-                    source.data_type()
-                ))
-            })?;
+        let input: &PrimitiveArray<T> = downcast_ref(source)?;
 
         self.buffer.extend_from_slice(input.as_slice());
         if let Some(null_bitmap) = input.array_data().null_bitmap() {
@@ -158,14 +167,6 @@ impl<T: PrimitiveDataType> ArrayBuilder for PrimitiveArrayBuilder<T> {
         }
 
         Ok(())
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self as &dyn Any
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self as &mut dyn Any
     }
 
     fn finish(self: Box<Self>) -> Result<ArrayRef> {

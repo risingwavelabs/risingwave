@@ -19,7 +19,8 @@ use risingwave_proto::data::DataType_TypeName::INT64;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 
-mod bool;
+mod bool_type;
+pub(crate) use bool_type::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub(crate) enum DataTypeKind {

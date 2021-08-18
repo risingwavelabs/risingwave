@@ -14,6 +14,8 @@ use risingwave_proto::expr::{ConstantValue, ExprNode, ExprNode_ExprNodeType};
 
 #[derive(Clone, Debug)]
 pub(crate) enum Datum {
+    Bool(bool),
+    Int8(i8),
     Int16(i16),
     Int32(i32),
     Int64(i64),

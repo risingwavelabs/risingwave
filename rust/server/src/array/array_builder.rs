@@ -3,11 +3,9 @@ use crate::error::Result;
 use crate::expr::Datum;
 use std::any::Any;
 
-pub(crate) trait ArrayBuilder {
+pub(crate) trait ArrayBuilder: AsRef<dyn Any> + AsMut<dyn Any> {
     fn append(&mut self, datum: &Datum) -> Result<()>;
     fn append_array(&mut self, source: &dyn Array) -> Result<()>;
-    fn as_any(&self) -> &dyn Any;
-    fn as_any_mut(&mut self) -> &mut dyn Any;
     fn finish(self: Box<Self>) -> Result<ArrayRef>;
 }
 
