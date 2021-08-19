@@ -10,17 +10,22 @@ mod native;
 use crate::array::BoxedArrayBuilder;
 use crate::error::ErrorCode::InternalError;
 pub(crate) use native::*;
+use risingwave_proto::data::DataType_TypeName::CHAR;
 use risingwave_proto::data::DataType_TypeName::DATE;
 use risingwave_proto::data::DataType_TypeName::DOUBLE;
 use risingwave_proto::data::DataType_TypeName::FLOAT;
 use risingwave_proto::data::DataType_TypeName::INT16;
 use risingwave_proto::data::DataType_TypeName::INT32;
 use risingwave_proto::data::DataType_TypeName::INT64;
+use risingwave_proto::data::DataType_TypeName::VARCHAR;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 
 mod bool_type;
+mod string_type;
+
 pub(crate) use bool_type::*;
+pub(crate) use string_type::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub(crate) enum DataTypeKind {
@@ -33,6 +38,7 @@ pub(crate) enum DataTypeKind {
     Decimal,
     Date,
     Char,
+    Varchar,
 }
 
 pub(crate) trait DataType: Debug + Sync + Send + 'static {
@@ -65,6 +71,8 @@ pub(crate) fn build_from_proto(proto: &DataTypeProto) -> Result<DataTypeRef> {
       INT64 => Int64Type,
       FLOAT => Float32Type,
       DOUBLE => Float64Type,
-      DATE => DateType
+      DATE => DateType,
+      CHAR => StringType,
+      VARCHAR => StringType
     }
 }
