@@ -42,7 +42,9 @@ impl ExchangeService for ExchangeServiceImpl {
                 .map_err(|e| e.to_grpc_error());
             match res {
                 Err(e) => {
-                    sink.fail(e).await.unwrap();
+                    if let Err(io_err) = sink.fail(e).await {
+                        error!("Failed to fail RPC: {}", io_err);
+                    }
                 }
                 Ok(()) => {
                     info!(
@@ -50,7 +52,9 @@ impl ExchangeService for ExchangeServiceImpl {
                         writer.written_chunks(),
                         tsid,
                     );
-                    sink.close().await.unwrap();
+                    if let Err(io_err) = sink.close().await {
+                        error!("Failed to close sink: {}", io_err);
+                    }
                 }
             };
         })

@@ -11,7 +11,7 @@ pub(crate) struct ArrayData {
     null_count: usize,
     buffers: Vec<Buffer>,
     #[builder(default, setter(strip_option))]
-    null_bitmap: Option<Bitmap>,
+    null_bitmap: Option<Bitmap>, // TODO: remove Option, since null_bitmap always exists.
 }
 
 impl ArrayData {

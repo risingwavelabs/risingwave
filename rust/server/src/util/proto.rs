@@ -3,7 +3,6 @@ use protobuf::Message;
 use risingwave_proto::plan;
 use serde_json::{json, Value};
 
-#[macro_export]
 macro_rules! unpack_from_any {
     ($source:expr, $node_type:ty) => {
         <$node_type>::parse_from_bytes($source.get_value()).map_err(ErrorCode::ProtobufError)?

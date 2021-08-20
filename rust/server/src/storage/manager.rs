@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 pub(crate) trait StorageManager: Sync + Send {
     fn create_table(&self, table_id: &TableId, column_count: usize) -> Result<()>;
     fn get_table(&self, table_id: &TableId) -> Result<TableRef>;
+    fn drop_table(&self, table_id: &TableId) -> Result<()>;
 }
 
 pub(crate) type StorageManagerRef = Arc<dyn StorageManager>;
@@ -41,6 +42,17 @@ impl StorageManager for MemStorageManager {
             .get(table_id)
             .cloned()
             .ok_or_else(|| InternalError(format!("Table id not exists: {:?}", table_id)).into())
+    }
+
+    fn drop_table(&self, table_id: &TableId) -> Result<()> {
+        let mut tables = self.get_tables()?;
+        ensure!(
+            tables.contains_key(table_id),
+            "Table does not exist: {:?}",
+            table_id
+        );
+        tables.remove(table_id);
+        Ok(())
     }
 }
 

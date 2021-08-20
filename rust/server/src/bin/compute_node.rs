@@ -1,10 +1,20 @@
+use clap::{AppSettings, Clap};
 use futures::executor::block_on;
 use log::info;
 use risingwave::server::Server;
 use std::sync::mpsc::channel;
 
+#[derive(Clap)]
+#[clap(setting = AppSettings::ColoredHelp)]
+struct Opts {
+    // The custom log4rs config file.
+    #[clap(long, default_value = "config/log4rs.yaml")]
+    log4rs_config: String,
+}
+
 fn main() {
-    log4rs::init_file("config/log4rs.yaml", Default::default()).unwrap();
+    let opts: Opts = Opts::parse();
+    log4rs::init_file(opts.log4rs_config, Default::default()).unwrap();
     info!("Starting");
     let mut srv = Server::new().unwrap();
     srv.start();

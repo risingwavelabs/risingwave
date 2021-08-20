@@ -13,8 +13,6 @@ import com.risingwave.pgwire.database.TypeOid;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.pgwire.types.PgValue;
 import com.risingwave.proto.computenode.TaskData;
-import com.risingwave.proto.data.Buffer;
-import com.risingwave.proto.data.ColumnCommon;
 import com.risingwave.proto.data.DataChunk;
 import java.util.ArrayList;
 import java.util.List;
@@ -26,6 +24,8 @@ public class BatchDataChunkResult extends AbstractResult {
   private final List<TaskData> data;
   private final ImmutableList<PgFieldDescriptor> fields;
 
+  // A row in calcite is represented by a struct, and each column in the row
+  // is represented by the field in the struct.
   public BatchDataChunkResult(
       StatementType statementType, boolean query, List<TaskData> data, RelDataType resultType) {
     super(statementType, totalRowCount(data), query);
@@ -44,11 +44,11 @@ public class BatchDataChunkResult extends AbstractResult {
     }
 
     return resultType.getFieldList().stream()
-        .map(BatchDataChunkResult::createPgFiledDesc)
+        .map(BatchDataChunkResult::createPgFieldDesc)
         .collect(ImmutableList.toImmutableList());
   }
 
-  private static PgFieldDescriptor createPgFiledDesc(RelDataTypeField field) {
+  private static PgFieldDescriptor createPgFieldDesc(RelDataTypeField field) {
     return new PgFieldDescriptor(field.getName(), typeOidOf(field.getType()));
   }
 
@@ -162,9 +162,5 @@ public class BatchDataChunkResult extends AbstractResult {
       }
       return ret;
     }
-  }
-
-  private static PgValue createPgValue(ColumnCommon columnType, Buffer buffer, int rowIndex) {
-    throw new UnsupportedOperationException("");
   }
 }

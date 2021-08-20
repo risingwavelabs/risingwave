@@ -7,6 +7,8 @@ use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 
 pub(crate) mod bit_util;
+
+#[macro_use]
 pub(crate) mod proto;
 
 pub(crate) fn downcast_ref<S, T>(source: &S) -> Result<&T>

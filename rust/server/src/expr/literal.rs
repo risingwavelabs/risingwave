@@ -61,17 +61,27 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
         let value = match proto.get_return_type().get_type_name() {
             DataType_TypeName::INT16 => Datum::Int16(i16::from_be_bytes(
                 proto_value.get_body().try_into().map_err(|e| {
-                    InternalError(format!("Failed to deserialize i16, reaseon: {:?}", e))
+                    InternalError(format!("Failed to deserialize i16, reason: {:?}", e))
                 })?,
             )),
             DataType_TypeName::INT32 => Datum::Int32(i32::from_be_bytes(
                 proto_value.get_body().try_into().map_err(|e| {
-                    InternalError(format!("Failed to deserialize i32, reaseon: {:?}", e))
+                    InternalError(format!("Failed to deserialize i32, reason: {:?}", e))
                 })?,
             )),
             DataType_TypeName::INT64 => Datum::Int64(i64::from_be_bytes(
                 proto_value.get_body().try_into().map_err(|e| {
-                    InternalError(format!("Failed to deserialize i64, reaseon: {:?}", e))
+                    InternalError(format!("Failed to deserialize i64, reason: {:?}", e))
+                })?,
+            )),
+            DataType_TypeName::FLOAT => Datum::Float32(f32::from_be_bytes(
+                proto_value.get_body().try_into().map_err(|e| {
+                    InternalError(format!("Failed to deserialize f32, reason: {:?}", e))
+                })?,
+            )),
+            DataType_TypeName::DOUBLE => Datum::Float64(f64::from_be_bytes(
+                proto_value.get_body().try_into().map_err(|e| {
+                    InternalError(format!("Failed to deserialize f64, reason: {:?}", e))
                 })?,
             )),
             _ => {

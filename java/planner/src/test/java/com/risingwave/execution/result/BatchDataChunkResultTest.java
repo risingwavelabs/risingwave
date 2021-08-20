@@ -1,9 +1,9 @@
-package com.risingwave.result;
+package com.risingwave.execution.result;
 
+import com.google.common.collect.Lists;
 import com.google.protobuf.Any;
 import com.google.protobuf.ByteString;
 import com.risingwave.common.datatype.RisingWaveTypeFactory;
-import com.risingwave.execution.result.BatchDataChunkResult;
 import com.risingwave.pgwire.database.PgResult;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.pgwire.types.PgValue;
@@ -16,7 +16,6 @@ import com.risingwave.proto.data.FixedWidthColumn;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
-import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -27,13 +26,11 @@ public class BatchDataChunkResultTest {
   public void testEmptyRemoteBatchPlanResult() {
     ArrayList<TaskData> taskDataList = new ArrayList<TaskData>();
     RisingWaveTypeFactory typeFactory = new RisingWaveTypeFactory();
-    ArrayList<RelDataType> relDataTypes = new ArrayList<RelDataType>();
-    ArrayList<String> fieldNames = new ArrayList<String>();
-    fieldNames.add("abc");
+    var relDataTypes = Lists.newArrayList(typeFactory.createSqlType(SqlTypeName.INTEGER));
+    var fieldNames = Lists.newArrayList("abc");
     for (int i = 0; i < 4; ++i) {
       taskDataList.add(TaskData.newBuilder().build());
     }
-    relDataTypes.add(typeFactory.createSqlType(SqlTypeName.INTEGER));
     BatchDataChunkResult ret =
         new BatchDataChunkResult(
             StatementType.SELECT,
@@ -41,17 +38,29 @@ public class BatchDataChunkResultTest {
             taskDataList,
             typeFactory.createStructType(relDataTypes, fieldNames));
     PgResult.PgIter iter = ret.createIterator();
-    Assertions.assertTrue(iter.next() == false);
-    Assertions.assertTrue(iter.next() == false);
+    Assertions.assertFalse(iter.next());
+    Assertions.assertFalse(iter.next());
+  }
+
+  @Test
+  public void testEmptyQueryResult() {
+    RisingWaveTypeFactory typeFactory = new RisingWaveTypeFactory();
+    // No column.
+    var rowType = typeFactory.createStructType(Lists.newArrayList(), Lists.newArrayList());
+    BatchDataChunkResult ret =
+        new BatchDataChunkResult(
+            StatementType.INSERT, false, Lists.newArrayList() /*empty result*/, rowType);
+    PgResult.PgIter iter = ret.createIterator();
+    Assertions.assertFalse(iter.next());
+    Assertions.assertFalse(iter.next());
   }
 
   @Test
   public void testSimpleRemoteBatchPlanResult() {
     ArrayList<TaskData> taskDataList = new ArrayList<TaskData>();
     RisingWaveTypeFactory typeFactory = new RisingWaveTypeFactory();
-    ArrayList<RelDataType> relDataTypes = new ArrayList<RelDataType>();
-    ArrayList<String> fieldNames = new ArrayList<String>();
-    fieldNames.add("abc");
+    var relDataTypes = Lists.newArrayList(typeFactory.createSqlType(SqlTypeName.INTEGER));
+    var fieldNames = Lists.newArrayList("abc");
     for (int i = 0; i < 4; ++i) {
       TaskData data =
           TaskData.newBuilder()
@@ -91,7 +100,6 @@ public class BatchDataChunkResultTest {
               .build();
       taskDataList.add(data);
     }
-    relDataTypes.add(typeFactory.createSqlType(SqlTypeName.INTEGER));
     BatchDataChunkResult ret =
         new BatchDataChunkResult(
             StatementType.SELECT,
@@ -99,22 +107,22 @@ public class BatchDataChunkResultTest {
             taskDataList,
             typeFactory.createStructType(relDataTypes, fieldNames));
     PgResult.PgIter iter = ret.createIterator();
-    Assertions.assertTrue(iter.next() == true);
+    Assertions.assertTrue(iter.next());
     List<PgValue> row = iter.getRow();
-    Assertions.assertTrue(row.get(0).encodeInText().equals("0"));
-    Assertions.assertTrue(row.get(1).encodeInText().equals("false"));
-    Assertions.assertTrue(iter.next() == true);
+    Assertions.assertEquals("0", row.get(0).encodeInText());
+    Assertions.assertEquals("false", row.get(1).encodeInText());
+    Assertions.assertTrue(iter.next());
     row = iter.getRow();
-    Assertions.assertTrue(row.get(0).encodeInText().equals("1"));
-    Assertions.assertTrue(row.get(1).encodeInText().equals("true"));
-    Assertions.assertTrue(iter.next() == true);
+    Assertions.assertEquals("1", row.get(0).encodeInText());
+    Assertions.assertEquals("true", row.get(1).encodeInText());
+    Assertions.assertTrue(iter.next());
     row = iter.getRow();
-    Assertions.assertTrue(row.get(0).encodeInText().equals("2"));
-    Assertions.assertTrue(row.get(1).encodeInText().equals("false"));
-    Assertions.assertTrue(iter.next() == true);
+    Assertions.assertEquals("2", row.get(0).encodeInText());
+    Assertions.assertEquals("false", row.get(1).encodeInText());
+    Assertions.assertTrue(iter.next());
     row = iter.getRow();
-    Assertions.assertTrue(row.get(0).encodeInText().equals("3"));
-    Assertions.assertTrue(row.get(1).encodeInText().equals("true"));
-    Assertions.assertTrue(iter.next() == false);
+    Assertions.assertEquals("3", row.get(0).encodeInText());
+    Assertions.assertEquals("true", row.get(1).encodeInText());
+    Assertions.assertFalse(iter.next());
   }
 }

@@ -87,7 +87,7 @@ impl Executor for InsertValuesExecutor {
 
             let array = array_builder.finish()?;
             let ret_chunk = DataChunk::builder()
-                .cardinality(cardinality)
+                .cardinality(array.len())
                 .arrays(vec![array])
                 .build();
 

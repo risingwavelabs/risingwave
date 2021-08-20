@@ -31,4 +31,22 @@ mod tests {
         assert_eq!(arr.len(), 1);
         Ok(())
     }
+
+    #[test]
+    fn test_array_null_bitmap() -> Result<()> {
+        let mut i32_builder = Box::new(PrimitiveArrayBuilder::<Int32Type>::new(
+            Arc::new(Int32Type::new(false)),
+            5,
+        ));
+        for i in 0..5 {
+            i32_builder.append(&Datum::Int32(i))?;
+        }
+        let arr = i32_builder.finish()?;
+        assert_eq!(arr.len(), 5);
+        let bm = arr.array_data().null_bitmap().unwrap();
+        for b in bm.iter() {
+            assert_eq!(b, true);
+        }
+        Ok(())
+    }
 }

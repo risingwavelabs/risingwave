@@ -31,6 +31,10 @@ use risingwave_proto::data::Buffer as BufferProto;
 #[derive(Debug)]
 pub(crate) struct Bitmap {
     pub(crate) bits: Buffer,
+
+    // The useful bits in the bitmap. The total number of bits will usually
+    // be larger than the useful bits due to byte-padding.
+    num_bits: usize,
 }
 
 impl Bitmap {
@@ -38,6 +42,7 @@ impl Bitmap {
         let len = Bitmap::num_of_bytes(num_bits);
         Ok(Bitmap {
             bits: Buffer::try_from(&vec![0xFF; len])?,
+            num_bits,
         })
     }
 
@@ -52,7 +57,10 @@ impl Bitmap {
             }
         });
 
-        Ok(Self { bits: buffer })
+        Ok(Self {
+            bits: buffer,
+            num_bits: bools.len(),
+        })
     }
 
     pub(crate) fn num_of_bytes(num_bits: usize) -> usize {
@@ -119,7 +127,7 @@ impl Bitmap {
         BitmapIter {
             bits: &self.bits,
             idx: 0,
-            num_bits: (self.num_of_buffer_bytes() << 3),
+            num_bits: self.num_bits,
         }
     }
 
@@ -147,7 +155,10 @@ impl<'a, 'b> BitOr<&'b Bitmap> for &'a Bitmap {
 
 impl From<Buffer> for Bitmap {
     fn from(buf: Buffer) -> Self {
-        Self { bits: buf }
+        Self {
+            num_bits: buf.len() << 3,
+            bits: buf,
+        }
     }
 }
 
@@ -247,6 +258,16 @@ mod tests {
                 booleans.push(b as u8);
             }
             assert_eq!(booleans, vec![0u8, 1, 0, 1, 0, 0, 1, 0]);
+        }
+        {
+            let mut booleans = vec![];
+            for _ in 0..5 {
+                booleans.push(true);
+            }
+            let bitmap = Bitmap::from_vec(booleans)?;
+            for b in bitmap.iter() {
+                assert_eq!(b, true);
+            }
         }
         Ok(())
     }

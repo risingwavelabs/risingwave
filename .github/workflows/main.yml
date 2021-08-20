@@ -1,0 +1,217 @@
+# This is a basic workflow to help you get started with Actions
+
+name: CI
+
+defaults:
+  run:
+    shell: bash
+
+# Controls when the action will run. 
+on:
+  # Triggers the workflow on push or pull request events but only for the master branch
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+concurrency:
+  group: environment-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  java-check:
+    name: Java Check
+    needs: start-runner # required to start the main job when the runner is ready
+    runs-on: ${{ needs.start-runner.outputs.label }} # run the job on the newly created runner
+    container:
+      image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.WUTAO_PAT }}
+          submodules: 'recursive'
+
+      - name: Set up JDK 16
+        uses: actions/setup-java@v2
+        with:
+          java-version: '16'
+          distribution: 'adopt'
+      
+      - name: Validate gradle wrapper
+        uses: gradle/wrapper-validation-action@v1
+      
+      - name: Cache Gradle packages
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Run java style check and tests
+        run: |
+          make java_check
+
+  end-to-end:
+    name: End-to-End Testing
+    needs:
+      - start-runner # required to start the main job when the runner is ready
+      - java-check
+      - rust-check
+    runs-on: ${{ needs.start-runner.outputs.label }} # run the job on the newly created runner
+    container:
+      image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.WUTAO_PAT }}
+          submodules: 'recursive'
+
+      - name: Set up JDK 16
+        uses: actions/setup-java@v2
+        with:
+          java-version: '16'
+          distribution: 'adopt'
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Build sqllogictest
+        # sqllogictest involves some cgo libraries, the compilation will fail on ccache.
+        env:
+          CC: gcc
+          CXX: g++
+        run: |
+          make sqllogictest
+
+      - uses: actions/download-artifact@v2
+        with:
+          name: compute-node
+
+      - name: Build java frontend
+        run: make java_build
+
+      - name: Run end-to-end tests
+        run: |
+          ls
+          chmod +x ./compute-node
+          cd java && ./gradlew -p pgserver run & sleep 10
+          RUST_BACKTRACE=1 ./compute-node --log4rs-config rust/config/log4rs.yaml & sleep 10
+
+          python3 ./scripts/sqllogictest_java.py
+
+  start-runner:
+    name: Start self-hosted EC2 runner
+    runs-on: ubuntu-latest
+    outputs:
+      label: ${{ steps.start-ec2-runner.outputs.label }}
+      ec2-instance-id: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
+      - name: Start EC2 runner
+        id: start-ec2-runner
+        uses: machulav/ec2-github-runner@v2
+        with:
+          mode: start
+          github-token: ${{ secrets.WUTAO_PAT }}
+          ec2-image-id: ami-0e704ffdb6669cf91 # github-actions
+          ec2-instance-type: c5.2xlarge # 8 vCPU, 16GB Memory, EBS
+          subnet-id: subnet-59743123 # default
+          security-group-id: sg-9ec32bfe # default (could have security issues)
+
+  rust-check:
+    needs: start-runner # required to start the main job when the runner is ready
+    runs-on: ${{ needs.start-runner.outputs.label }} # run the job on the newly created runner
+    container:
+      image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v1
+        with:
+          version: '3.x'
+
+      - name: Cache Cargo home
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            rust/target/   
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      
+      - name: Run rust format check
+        run: |
+          make rust_fmt
+      
+      - name: Run rust clippy check
+        run: |
+          make rust_check
+      
+      - name: Run rust test
+        run: |
+          make rust_test
+
+      - name: Build compute-node
+        run: make rust_build
+      - uses: actions/upload-artifact@v2
+        with:
+          name: compute-node
+          if-no-files-found: error # 'warn' or 'ignore' are also available, defaults to `warn`
+          path: |
+            rust/target/debug/compute-node
+
+  stop-runner:
+    name: Stop self-hosted EC2 runner
+    needs:
+      - start-runner # required to get output from the start-runner job
+      - rust-check # required to wait when the main job is done
+      - java-check
+      - end-to-end
+    runs-on: ubuntu-latest
+    if: ${{ always() }} # required to stop the runner even if the error happened in the previous jobs
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
+      - name: Stop EC2 runner
+        uses: machulav/ec2-github-runner@v2
+        with:
+          mode: stop
+          github-token: ${{ secrets.WUTAO_PAT }}
+          label: ${{ needs.start-runner.outputs.label }}
+          ec2-instance-id: ${{ needs.start-runner.outputs.ec2-instance-id }}

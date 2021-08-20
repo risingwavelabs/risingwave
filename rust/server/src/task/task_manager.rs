@@ -49,90 +49,34 @@ impl TaskManager {
         };
         Ok(tsk)
     }
+
+    #[cfg(test)]
+    pub(crate) fn get_global_env(&self) -> &GlobalTaskEnv {
+        &self.env
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::service::ExchangeWriter;
-    use protobuf::well_known_types::Any;
-    use risingwave_proto::data::{DataType, DataType_TypeName};
-    use risingwave_proto::expr::{ConstantValue, ExprNode, ExprNode_ExprNodeType};
-    use risingwave_proto::plan::{
-        ColumnDesc, CreateTableNode, InsertValueNode, InsertValueNode_ExprTuple,
-        PlanNode_PlanNodeType as PlanNodeType,
-    };
-    use risingwave_proto::task_service::{TaskData, TaskSinkId};
-
-    struct FakeExchangeWriter {
-        messages: Vec<TaskData>,
-    }
-
-    #[async_trait::async_trait]
-    impl ExchangeWriter for FakeExchangeWriter {
-        async fn write(&mut self, data: TaskData) -> Result<()> {
-            self.messages.push(data);
-            Ok(())
-        }
-    }
-
-    // create table t(v1 int not null);
-    fn create_table_v1_int32() -> PlanFragment {
-        let mut plan = PlanFragment::default();
-
-        let mut create = CreateTableNode::default();
-        let mut typ = DataType::new();
-        typ.set_type_name(DataType_TypeName::INT32);
-        let mut col = ColumnDesc::default();
-        col.set_column_type(typ);
-        create.mut_column_descs().push(col);
-
-        plan.mut_root().set_body(Any::pack(&create).unwrap());
-        plan.mut_root().set_node_type(PlanNodeType::CREATE_TABLE);
-        plan
-    }
-
-    // insert into t values(1);
-    fn insert_values_v1() -> PlanFragment {
-        let mut plan = PlanFragment::default();
-
-        let mut insert = InsertValueNode::default();
-        insert.mut_column_ids().push(0);
-        let mut tuple = InsertValueNode_ExprTuple::default();
-        let mut cell = ExprNode::default();
-        cell.set_expr_type(ExprNode_ExprNodeType::CONSTANT_VALUE);
-        let mut typ = DataType::new();
-        typ.set_type_name(DataType_TypeName::INT32);
-        cell.set_return_type(typ);
-        let mut constant = ConstantValue::default();
-        constant.set_body(Vec::from(1i32.to_be_bytes()));
-        cell.set_body(Any::pack(&constant).unwrap());
-        tuple.mut_cells().push(cell);
-        insert.insert_tuples.push(tuple);
-
-        plan.mut_root().set_body(Any::pack(&insert).unwrap());
-        plan.mut_root().set_node_type(PlanNodeType::INSERT_VALUE);
-        plan
-    }
+    use crate::task::test_utils::{ResultChecker, TestRunner};
 
     #[test]
-    fn test_task_manager() -> Result<()> {
-        let mut mgr = TaskManager::new(GlobalTaskEnv::for_test());
-        let tid = ProtoTaskId::default();
-        let mut tsid = TaskSinkId::default();
-        tsid.set_task_id(tid.clone());
-        {
-            mgr.fire_task(&tid, create_table_v1_int32())?;
-            let mut task = mgr.take_task(&tsid)?;
-            let mut writer = FakeExchangeWriter { messages: vec![] };
-            futures::executor::block_on(async move { task.take_data(0, &mut writer).await })?;
-        }
-        {
-            mgr.fire_task(&tid, insert_values_v1())?;
-            let mut task = mgr.take_task(&tsid)?;
-            let mut writer = FakeExchangeWriter { messages: vec![] };
-            futures::executor::block_on(async move { task.take_data(0, &mut writer).await })?;
-        }
-        Ok(())
+    fn test_select_all() {
+        let mut runner = TestRunner::new();
+        runner
+            .prepare_table()
+            .create_table_int32s(3)
+            .insert_i32s(&[1, 4, 2])
+            .insert_i32s(&[2, 3, 3])
+            .insert_i32s(&[3, 4, 4])
+            .insert_i32s(&[4, 3, 5])
+            .run();
+
+        let res = runner.prepare_scan().scan_all().run();
+        ResultChecker::new()
+            .add_i32_column(false, &[1, 2, 3, 4])
+            .add_i32_column(false, &[4, 3, 4, 3])
+            .add_i32_column(false, &[2, 3, 4, 5])
+            .check_result(res);
     }
 }

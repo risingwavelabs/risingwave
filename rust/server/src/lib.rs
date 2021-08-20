@@ -15,9 +15,10 @@ extern crate thiserror;
 extern crate tokio;
 extern crate typed_builder;
 
-mod task;
 #[macro_use]
 mod error;
+#[macro_use]
+mod util;
 mod alloc;
 mod array;
 mod buffer;
@@ -27,8 +28,8 @@ mod executor;
 mod expr;
 pub(crate) mod service;
 mod storage;
+mod task;
 mod types;
-mod util;
 mod vector_op;
 
 pub mod server;
