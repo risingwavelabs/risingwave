@@ -13,16 +13,15 @@ import com.risingwave.execution.result.rpc.primitive.IntBufferReader;
 import com.risingwave.execution.result.rpc.primitive.LongBufferReader;
 import com.risingwave.execution.result.rpc.primitive.ShortBufferReader;
 import com.risingwave.pgwire.types.Values;
-import com.risingwave.proto.data.ColumnCommon;
-import com.risingwave.proto.data.FixedWidthColumn;
+import com.risingwave.proto.data.Column;
 import java.io.InputStream;
 import javax.annotation.Nullable;
 
 public class PgValueReaders {
   public static PgValueReader create(Any column) {
     try {
-      if (column.is(FixedWidthColumn.class)) {
-        return createPrimitiveReader(column.unpack(FixedWidthColumn.class));
+      if (column.is(Column.class)) {
+        return createPrimitiveReader(column.unpack(Column.class));
       }
 
       throw new PgException(
@@ -32,12 +31,13 @@ public class PgValueReaders {
     }
   }
 
-  private static PgValueReader createPrimitiveReader(FixedWidthColumn column) {
-    ColumnCommon columnCommon = column.getCommonParts();
-    BooleanBufferReader nullBitmap = getNullBitmap(columnCommon);
-    InputStream valuesStream = BufferReaders.decode(column.getValues());
+  private static PgValueReader createPrimitiveReader(Column column) {
+    BooleanBufferReader nullBitmap = getNullBitmap(column);
+    // FIXME: currently the length of buffer size is 1 so directly get from it.
+    //  Should fix here when handle other types like char/varchar.
+    InputStream valuesStream = BufferReaders.decode(column.getValues(0));
 
-    switch (columnCommon.getColumnType().getTypeName()) {
+    switch (column.getColumnType().getTypeName()) {
       case INT16:
         return createValueReader(
             Values::createSmallInt, new ShortBufferReader(valuesStream), nullBitmap);
@@ -57,14 +57,12 @@ public class PgValueReaders {
             Values::createBoolean, new BooleanBufferReader(valuesStream), nullBitmap);
       default:
         throw new PgException(
-            PgErrorCode.INTERNAL_ERROR,
-            "Unsupported column type: %s",
-            columnCommon.getColumnType());
+            PgErrorCode.INTERNAL_ERROR, "Unsupported column type: %s", column.getColumnType());
     }
   }
 
   @Nullable
-  protected static BooleanBufferReader getNullBitmap(ColumnCommon columnCommon) {
+  protected static BooleanBufferReader getNullBitmap(Column columnCommon) {
     BooleanBufferReader nullBitmap = null;
     if (columnCommon.hasNullBitmap()) {
       nullBitmap = new BooleanBufferReader(BufferReaders.decode(columnCommon.getNullBitmap()));

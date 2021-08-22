@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use protobuf::well_known_types::Any as AnyProto;
 
-use risingwave_proto::data::Buffer as BufferProto;
-use risingwave_proto::data::{Buffer_CompressionType, ColumnCommon, FixedWidthColumn};
+use risingwave_proto::data::Buffer_CompressionType;
+use risingwave_proto::data::{Buffer as BufferProto, Column};
 
 use crate::array::array_data::ArrayData;
 use crate::array::{Array, ArrayBuilder, ArrayRef};
@@ -107,16 +107,12 @@ impl Array for BoolArray {
     }
 
     fn to_protobuf(&self) -> Result<AnyProto> {
+        let mut column = Column::new();
         let proto_data_type = self.data.data_type().to_protobuf()?;
-        let mut column_common = ColumnCommon::new();
-        column_common.set_column_type(proto_data_type);
+        column.set_column_type(proto_data_type);
         if let Some(null_bitmap) = self.data.null_bitmap() {
-            column_common.set_null_bitmap(null_bitmap.to_protobuf()?);
+            column.set_null_bitmap(null_bitmap.to_protobuf()?);
         }
-
-        let mut column = FixedWidthColumn::new();
-        column.set_common_parts(column_common);
-
         let values = {
             let mut output_buffer = Vec::<u8>::with_capacity(self.len());
 
@@ -138,8 +134,7 @@ impl Array for BoolArray {
             values
         };
 
-        column.set_value_width(1);
-        column.set_values(values);
+        column.mut_values().push(values);
 
         AnyProto::pack(&column).map_err(|e| RwError::from(ProtobufError(e)))
     }
@@ -257,7 +252,7 @@ impl<'a> BoolIter<'a> {
 mod tests {
     use std::iter::Iterator;
 
-    use risingwave_proto::data::{Buffer_CompressionType, DataType_TypeName, FixedWidthColumn};
+    use risingwave_proto::data::{Buffer_CompressionType, Column, DataType_TypeName};
 
     use crate::array::BoolArray;
     use crate::util::downcast_ref;
@@ -303,39 +298,29 @@ mod tests {
             .to_protobuf()
             .expect("Failed to convert to protobuf");
 
-        let result_proto: FixedWidthColumn = result_proto
+        let result_proto: Column = result_proto
             .unpack()
             .expect("Failed to unpack")
             .expect("Failed to unwrap option");
 
         assert_eq!(
             DataType_TypeName::BOOLEAN,
-            result_proto
-                .get_common_parts()
-                .get_column_type()
-                .get_type_name()
+            result_proto.get_column_type().get_type_name()
         );
 
-        assert_eq!(
-            true,
-            result_proto
-                .get_common_parts()
-                .get_column_type()
-                .get_is_nullable()
-        );
+        assert_eq!(true, result_proto.get_column_type().get_is_nullable());
         assert_eq!(
             vec![1u8, 0u8, 1u8, 1u8, 1u8, 0u8],
-            result_proto.get_common_parts().get_null_bitmap().get_body()[0..input.len()]
+            result_proto.get_null_bitmap().get_body()[0..input.len()]
         );
 
-        assert_eq!(1, result_proto.get_value_width());
         assert_eq!(
             vec![1u8, 0u8, 0u8, 0u8, 1u8, 0u8],
-            result_proto.get_values().get_body()[0..input.len()]
+            result_proto.get_values()[0].get_body()[0..input.len()]
         );
         assert_eq!(
             Buffer_CompressionType::NONE,
-            result_proto.get_values().get_compression()
+            result_proto.get_values()[0].get_compression()
         );
     }
 }

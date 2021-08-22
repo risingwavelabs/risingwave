@@ -7,7 +7,7 @@ use crate::task::TaskManager;
 use pb_convert::FromProtobuf;
 use protobuf::well_known_types::Any;
 use protobuf::Message;
-use risingwave_proto::data::{ColumnCommon, DataType, DataType_TypeName, FixedWidthColumn};
+use risingwave_proto::data::{Column, DataType, DataType_TypeName};
 use risingwave_proto::expr::{ConstantValue, ExprNode, ExprNode_ExprNodeType};
 use risingwave_proto::plan::{
     ColumnDesc, CreateTableNode, InsertValueNode, InsertValueNode_ExprTuple, PlanFragment,
@@ -289,14 +289,15 @@ impl ResultChecker {
         assert_eq!(chunk.get_columns().len(), self.col_types.len());
 
         for i in 0..chunk.get_columns().len() {
-            let col = unpack_from_any!(chunk.get_columns()[i], FixedWidthColumn);
-            self.check_column_meta(i, col.get_common_parts());
-            self.check_column_null_bitmap(col.get_common_parts());
+            let col = unpack_from_any!(chunk.get_columns()[i], Column);
+            self.check_column_meta(i, &col);
+            self.check_column_null_bitmap(&col);
 
             // TODO: Write an iterator for FixedWidthColumn
-            let value_width = col.get_value_width() as usize;
+            // let value_width = col.get_value_width() as usize;
+            let value_width = Self::get_value_width(&col);
             assert_eq!(value_width, 4); // Temporarily hard-coded.
-            let column_bytes = col.get_values().get_body();
+            let column_bytes = col.get_values()[0].get_body();
             for j in 0..self.cardinality() {
                 let actual_value = &column_bytes[j * value_width..(j + 1) * value_width];
                 let expected_value = self.columns[i][j].get_body();
@@ -307,20 +308,26 @@ impl ResultChecker {
         Ok(())
     }
 
-    fn check_column_meta(&self, col_idx: usize, col_common: &ColumnCommon) {
+    fn get_value_width(col: &Column) -> usize {
+        match col.get_column_type().get_type_name() {
+            DataType_TypeName::INT32 => 4,
+            _ => 0,
+        }
+    }
+    fn check_column_meta(&self, col_idx: usize, column: &Column) {
         assert_eq!(
-            col_common.get_column_type().get_type_name(),
+            column.get_column_type().get_type_name(),
             self.col_types[col_idx].get_type_name()
         );
         assert_eq!(
-            col_common.get_column_type().get_is_nullable(),
+            column.get_column_type().get_is_nullable(),
             self.col_types[col_idx].get_is_nullable()
         );
     }
 
     // We assume that currently no column is nullable.
-    fn check_column_null_bitmap(&self, col_common: &ColumnCommon) {
-        let null_bytes = col_common.get_null_bitmap().get_body();
+    fn check_column_null_bitmap(&self, col: &Column) {
+        let null_bytes = col.get_null_bitmap().get_body();
         assert_eq!(null_bytes.len(), self.cardinality());
         for b in null_bytes {
             // 0 for null. 1 for non-null.

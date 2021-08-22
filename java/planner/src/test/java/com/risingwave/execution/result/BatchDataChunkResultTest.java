@@ -9,10 +9,9 @@ import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.pgwire.types.PgValue;
 import com.risingwave.proto.computenode.TaskData;
 import com.risingwave.proto.data.Buffer;
-import com.risingwave.proto.data.ColumnCommon;
+import com.risingwave.proto.data.Column;
 import com.risingwave.proto.data.DataChunk;
 import com.risingwave.proto.data.DataType;
-import com.risingwave.proto.data.FixedWidthColumn;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
@@ -68,13 +67,10 @@ public class BatchDataChunkResultTest {
                   DataChunk.newBuilder()
                       .addColumns(
                           Any.pack(
-                              FixedWidthColumn.newBuilder()
-                                  .setCommonParts(
-                                      ColumnCommon.newBuilder()
-                                          .setColumnType(
-                                              DataType.newBuilder()
-                                                  .setTypeName(DataType.TypeName.INT32)))
-                                  .setValues(
+                              Column.newBuilder()
+                                  .setColumnType(
+                                      DataType.newBuilder().setTypeName(DataType.TypeName.INT32))
+                                  .addValues(
                                       Buffer.newBuilder()
                                           .setBody(
                                               ByteString.copyFrom(
@@ -82,13 +78,10 @@ public class BatchDataChunkResultTest {
                                   .build()))
                       .addColumns(
                           Any.pack(
-                              FixedWidthColumn.newBuilder()
-                                  .setCommonParts(
-                                      ColumnCommon.newBuilder()
-                                          .setColumnType(
-                                              DataType.newBuilder()
-                                                  .setTypeName(DataType.TypeName.BOOLEAN)))
-                                  .setValues(
+                              Column.newBuilder()
+                                  .setColumnType(
+                                      DataType.newBuilder().setTypeName(DataType.TypeName.BOOLEAN))
+                                  .addValues(
                                       Buffer.newBuilder()
                                           .setBody(
                                               ByteString.copyFrom(

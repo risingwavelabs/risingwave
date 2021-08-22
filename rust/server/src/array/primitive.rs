@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use protobuf::well_known_types::Any as AnyProto;
 
-use risingwave_proto::data::Buffer as BufferProto;
-use risingwave_proto::data::{Buffer_CompressionType, ColumnCommon, FixedWidthColumn};
+use risingwave_proto::data::Buffer_CompressionType;
+use risingwave_proto::data::{Buffer as BufferProto, Column};
 
 use crate::array::array_data::ArrayData;
 use crate::array::{Array, ArrayBuilder, ArrayRef};
@@ -105,16 +105,12 @@ impl<T: PrimitiveDataType> Array for PrimitiveArray<T> {
     }
 
     fn to_protobuf(&self) -> Result<AnyProto> {
+        let mut column = Column::new();
         let proto_data_type = self.data.data_type().to_protobuf()?;
-        let mut column_common = ColumnCommon::new();
-        column_common.set_column_type(proto_data_type);
+        column.set_column_type(proto_data_type);
         if let Some(null_bitmap) = self.data.null_bitmap() {
-            column_common.set_null_bitmap(null_bitmap.to_protobuf()?);
+            column.set_null_bitmap(null_bitmap.to_protobuf()?);
         }
-
-        let mut column = FixedWidthColumn::new();
-        column.set_common_parts(column_common);
-
         let values = {
             let mut output_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<T::N>());
 
@@ -128,8 +124,7 @@ impl<T: PrimitiveDataType> Array for PrimitiveArray<T> {
             b
         };
 
-        column.set_value_width(size_of::<T::N>() as u64);
-        column.set_values(values);
+        column.mut_values().push(values);
 
         AnyProto::pack(&column).map_err(|e| RwError::from(ProtobufError(e)))
     }
