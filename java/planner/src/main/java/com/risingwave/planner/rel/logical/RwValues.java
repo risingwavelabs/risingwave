@@ -1,7 +1,5 @@
 package com.risingwave.planner.rel.logical;
 
-import static com.google.common.base.Preconditions.checkArgument;
-
 import com.google.common.collect.ImmutableList;
 import org.apache.calcite.plan.Convention;
 import org.apache.calcite.plan.RelOptCluster;
@@ -21,7 +19,7 @@ public class RwValues extends Values implements RisingWaveLogicalRel {
       ImmutableList<ImmutableList<RexLiteral>> tuples,
       RelTraitSet traits) {
     super(cluster, rowType, tuples, traits);
-    checkArgument(traitSet.contains(RisingWaveLogicalRel.LOGICAL), "Not logical convention.");
+    checkConvention();
   }
 
   public static class RwValuesConverterRule extends ConverterRule {

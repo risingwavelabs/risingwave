@@ -1,7 +1,5 @@
 package com.risingwave.planner.rel.physical.batch;
 
-import static com.google.common.base.Preconditions.checkArgument;
-
 import com.risingwave.proto.plan.PlanNode;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
@@ -19,7 +17,7 @@ public class PhysicalCalc extends Calc implements RisingWaveBatchPhyRel {
       RelNode child,
       RexProgram program) {
     super(cluster, traits, hints, child, program);
-    checkArgument(traitSet.contains(RisingWaveBatchPhyRel.BATCH_PHYSICAL));
+    checkConvention();
   }
 
   @Override

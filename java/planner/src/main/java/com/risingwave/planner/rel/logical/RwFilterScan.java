@@ -1,6 +1,5 @@
 package com.risingwave.planner.rel.logical;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
@@ -22,8 +21,7 @@ public class RwFilterScan extends FilterScanBase implements RisingWaveLogicalRel
       TableCatalog.TableId tableId,
       ImmutableList<ColumnCatalog.ColumnId> columnIds) {
     super(cluster, traitSet, hints, table, tableId, columnIds);
-    Preconditions.checkArgument(
-        traitSet.contains(RisingWaveLogicalRel.LOGICAL), "Not logical convention.");
+    checkConvention();
   }
 
   public RwFilterScan copy(ImmutableList<ColumnCatalog.ColumnId> columnIds) {
@@ -34,7 +32,8 @@ public class RwFilterScan extends FilterScanBase implements RisingWaveLogicalRel
   public static RwFilterScan create(
       RelOptCluster cluster, RelTraitSet traitSet, RelOptTable table) {
     TableCatalog tableCatalog = table.unwrapOrThrow(TableCatalog.class);
-    RelTraitSet newTraitSet = traitSet.replace(RisingWaveLogicalRel.LOGICAL);
+
+    RelTraitSet newTraitSet = traitSet.plus(RisingWaveLogicalRel.LOGICAL);
 
     return new RwFilterScan(
         cluster,

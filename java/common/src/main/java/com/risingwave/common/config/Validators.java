@@ -5,7 +5,7 @@ import com.google.common.base.Verify;
 public class Validators {
   private Validators() {}
 
-  public static final Validator<Integer> intRangeValidator(int minimum, int maximum) {
+  public static Validator<Integer> intRangeValidator(int minimum, int maximum) {
     return value ->
         Verify.verify(
             value >= minimum && value < maximum,

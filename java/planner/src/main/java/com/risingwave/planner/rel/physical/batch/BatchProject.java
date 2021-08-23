@@ -1,6 +1,5 @@
 package com.risingwave.planner.rel.physical.batch;
 
-import static com.google.common.base.Preconditions.checkArgument;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
 import com.google.protobuf.Any;
@@ -29,7 +28,7 @@ public class BatchProject extends Project implements RisingWaveBatchPhyRel {
       List<? extends RexNode> projects,
       RelDataType rowType) {
     super(cluster, traits, hints, input, projects, rowType);
-    checkArgument(traitSet.contains(RisingWaveBatchPhyRel.BATCH_PHYSICAL));
+    checkConvention();
   }
 
   @Override

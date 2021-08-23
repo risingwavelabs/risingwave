@@ -1,7 +1,5 @@
 package com.risingwave.planner.rel.logical;
 
-import static com.google.common.base.Preconditions.checkArgument;
-
 import java.util.List;
 import org.apache.calcite.plan.Convention;
 import org.apache.calcite.plan.RelOptCluster;
@@ -17,7 +15,7 @@ import org.apache.calcite.util.ImmutableBitSet;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 public class RwAggregate extends Aggregate implements RisingWaveLogicalRel {
-  protected RwAggregate(
+  private RwAggregate(
       RelOptCluster cluster,
       RelTraitSet traitSet,
       List<RelHint> hints,
@@ -26,7 +24,7 @@ public class RwAggregate extends Aggregate implements RisingWaveLogicalRel {
       @Nullable List<ImmutableBitSet> groupSets,
       List<AggregateCall> aggCalls) {
     super(cluster, traitSet, hints, input, groupSet, groupSets, aggCalls);
-    checkArgument(traitSet.contains(RisingWaveLogicalRel.LOGICAL));
+    checkConvention();
   }
 
   @Override
@@ -38,6 +36,10 @@ public class RwAggregate extends Aggregate implements RisingWaveLogicalRel {
       List<AggregateCall> aggCalls) {
     return new RwAggregate(
         getCluster(), traitSet, getHints(), input, groupSet, groupSets, aggCalls);
+  }
+
+  public boolean isSimpleAgg() {
+    return groupSet.isEmpty();
   }
 
   public static class RwAggregateConverterRule extends ConverterRule {

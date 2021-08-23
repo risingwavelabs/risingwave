@@ -10,6 +10,9 @@ import com.risingwave.execution.handler.RpcExecutorEmpty;
 import com.risingwave.execution.handler.RpcExecutorImpl;
 import com.risingwave.execution.handler.SqlHandlerFactory;
 import org.apache.calcite.plan.Context;
+import org.apache.calcite.plan.RelOptCluster;
+import org.apache.calcite.plan.RelOptPlanner;
+import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.schema.SchemaPlus;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
@@ -64,6 +67,18 @@ public class ExecutionContext implements Context {
 
   public Configuration getConf() {
     return conf;
+  }
+
+  public static ExecutionContext contextOf(RelOptCluster optCluster) {
+    return contextOf(optCluster.getPlanner());
+  }
+
+  public static ExecutionContext contextOf(RelOptRuleCall call) {
+    return contextOf(call.getPlanner());
+  }
+
+  public static ExecutionContext contextOf(RelOptPlanner planner) {
+    return planner.getContext().unwrapOrThrow(ExecutionContext.class);
   }
 
   /**

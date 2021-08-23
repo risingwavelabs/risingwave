@@ -1,7 +1,5 @@
 package com.risingwave.planner.rel.logical;
 
-import static com.google.common.base.Preconditions.checkArgument;
-
 import java.util.List;
 import org.apache.calcite.plan.Convention;
 import org.apache.calcite.plan.RelOptCluster;
@@ -32,7 +30,7 @@ public class RwInsert extends TableModify implements RisingWaveLogicalRel {
         updateColumnList,
         null,
         false);
-    checkArgument(traitSet.contains(RisingWaveLogicalRel.LOGICAL), "Not logical convention.");
+    checkConvention();
   }
 
   @Override

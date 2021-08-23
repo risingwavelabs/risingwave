@@ -1,5 +1,7 @@
 package com.risingwave.planner.rel.physical.batch;
 
+import static com.google.common.base.Verify.verify;
+
 import com.risingwave.planner.rel.physical.RisingWavePhysicalRel;
 import org.apache.calcite.plan.Convention;
 import org.apache.calcite.plan.RelTraitSet;
@@ -18,4 +20,12 @@ public interface RisingWaveBatchPhyRel extends RisingWavePhysicalRel {
           return true;
         }
       };
+
+  @Override
+  default void checkConvention() {
+    verify(
+        getTraitSet().contains(BATCH_PHYSICAL),
+        "Not batch physical plan: %s",
+        getClass().getName());
+  }
 }

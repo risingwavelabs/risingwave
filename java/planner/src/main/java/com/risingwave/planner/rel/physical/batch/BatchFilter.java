@@ -1,6 +1,5 @@
 package com.risingwave.planner.rel.physical.batch;
 
-import static com.google.common.base.Preconditions.checkArgument;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
 import com.google.protobuf.Any;
@@ -22,7 +21,7 @@ public class BatchFilter extends Filter implements RisingWaveBatchPhyRel {
   protected BatchFilter(
       RelOptCluster cluster, RelTraitSet traits, RelNode child, RexNode condition) {
     super(cluster, traits, child, condition);
-    checkArgument(traitSet.contains(RisingWaveBatchPhyRel.BATCH_PHYSICAL));
+    checkConvention();
   }
 
   @Override

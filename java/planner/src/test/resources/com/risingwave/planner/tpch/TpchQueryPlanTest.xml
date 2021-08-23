@@ -7,7 +7,31 @@ select * from supplier
         </Resource>
         <Resource name="plan">
             <![CDATA[
-BatchFilterScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_name,s_address,s_nationkey,s_phone,s_acctbal,s_comment])            ]]>
+BatchFilterScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_name,s_address,s_nationkey,s_phone,s_acctbal,s_comment])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="q6">
+        <Resource name="sql">
+            <![CDATA[
+select
+	sum(l_extendedprice * l_discount) as revenue
+from
+	lineitem
+where
+	l_shipdate >= date '1994-01-01'
+	and l_shipdate < date '1994-01-01' + interval '1' year
+	and l_discount between 0.08 - 0.01 and 0.08 + 0.01
+	and l_quantity < 24;
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+BatchHashAgg(group=[{}], revenue=[SUM($0)])
+  BatchProject($f0=[*($1, $2)])
+    BatchFilter(condition=[AND(>=($3, 1994-01-01), <($3, +(1994-01-01, 12:INTERVAL YEAR)), OR(AND(>=($2, -(8E-2:DOUBLE, 1E-2:DOUBLE)), <=($2, +(8E-2:DOUBLE, 1E-2:DOUBLE))), AND(>=($2, +(8E-2:DOUBLE, 1E-2:DOUBLE)), <=($2, -(8E-2:DOUBLE, 1E-2:DOUBLE)))), <($0, 24))])
+      BatchFilterScan(table=[[test_schema, lineitem]], columns=[l_quantity,l_extendedprice,l_discount,l_shipdate])
+]]>
         </Resource>
     </TestCase>
 </Root>

@@ -9,6 +9,7 @@ import com.risingwave.planner.rel.physical.batch.BatchFilter;
 import com.risingwave.planner.rel.physical.batch.BatchHashAgg;
 import com.risingwave.planner.rel.physical.batch.BatchProject;
 import com.risingwave.planner.rel.physical.batch.BatchValues;
+import com.risingwave.planner.rel.physical.batch.RwBatchGather;
 import com.risingwave.planner.rules.logical.BatchFilterScanRule;
 import com.risingwave.planner.rules.logical.ProjectToTableScanRule;
 import com.risingwave.planner.rules.physical.batch.BatchPhysicalFilterScanRule;
@@ -44,5 +45,6 @@ public class BatchRuleSets {
           BatchHashAgg.BatchHashAggConverterRule.INSTANCE,
           BatchValues.BatchValuesConverterRule.INSTANCE,
           BatchPhysicalInsertValuesRule.Config.DEFAULT.toRule(),
-          BatchPhysicalFilterScanRule.Config.DEFAULT.toRule());
+          BatchPhysicalFilterScanRule.Config.DEFAULT.toRule(),
+          RwBatchGather.RwBatchGatherConverterRule.INSTANCE);
 }

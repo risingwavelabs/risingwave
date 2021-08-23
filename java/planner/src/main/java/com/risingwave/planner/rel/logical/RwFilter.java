@@ -1,7 +1,5 @@
 package com.risingwave.planner.rel.logical;
 
-import static com.google.common.base.Preconditions.checkArgument;
-
 import org.apache.calcite.plan.Convention;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelTraitSet;
@@ -15,7 +13,7 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 public class RwFilter extends Filter implements RisingWaveLogicalRel {
   protected RwFilter(RelOptCluster cluster, RelTraitSet traits, RelNode child, RexNode condition) {
     super(cluster, traits, child, condition);
-    checkArgument(traitSet.contains(RisingWaveLogicalRel.LOGICAL), "Not logical convention.");
+    checkConvention();
   }
 
   @Override

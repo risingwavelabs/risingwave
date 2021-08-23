@@ -11,6 +11,7 @@ public class DateType extends PrimitiveTypeBase {
 
   public DateType(boolean nullable) {
     super(nullable, SqlTypeName.DATE);
+    resetDigest();
   }
 
   @Override

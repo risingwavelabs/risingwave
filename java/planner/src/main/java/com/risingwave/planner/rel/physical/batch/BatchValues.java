@@ -1,6 +1,5 @@
 package com.risingwave.planner.rel.physical.batch;
 
-import static com.google.common.base.Preconditions.checkArgument;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
 import com.google.common.collect.ImmutableList;
@@ -22,7 +21,7 @@ public class BatchValues extends Values implements RisingWaveBatchPhyRel {
       ImmutableList<ImmutableList<RexLiteral>> tuples,
       RelTraitSet traits) {
     super(cluster, rowType, tuples, traits);
-    checkArgument(traitSet.contains(RisingWaveBatchPhyRel.BATCH_PHYSICAL));
+    checkConvention();
   }
 
   @Override

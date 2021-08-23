@@ -1,6 +1,5 @@
 package com.risingwave.planner.rel.physical.batch;
 
-import static com.google.common.base.Preconditions.checkArgument;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
 import com.risingwave.planner.rel.logical.RwInsert;
@@ -33,7 +32,7 @@ public class PhysicalInsert extends TableModify implements RisingWaveBatchPhyRel
         updateColumnList,
         null,
         false);
-    checkArgument(traitSet.contains(RisingWaveBatchPhyRel.BATCH_PHYSICAL));
+    checkConvention();
   }
 
   @Override

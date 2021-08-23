@@ -54,6 +54,16 @@ public class DecimalType extends PrimitiveTypeBase {
   }
 
   @Override
+  public int getPrecision() {
+    return precision;
+  }
+
+  @Override
+  public int getScale() {
+    return scale;
+  }
+
+  @Override
   public boolean equals(Object o) {
     if (this == o) {
       return true;

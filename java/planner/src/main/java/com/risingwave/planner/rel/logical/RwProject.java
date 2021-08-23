@@ -1,6 +1,5 @@
 package com.risingwave.planner.rel.logical;
 
-import static com.google.common.base.Preconditions.checkArgument;
 import static java.util.Collections.emptyList;
 
 import java.util.List;
@@ -25,7 +24,7 @@ public class RwProject extends Project implements RisingWaveLogicalRel {
       List<? extends RexNode> projects,
       RelDataType rowType) {
     super(cluster, traits, hints, input, projects, rowType);
-    checkArgument(traitSet.contains(RisingWaveLogicalRel.LOGICAL), "Not logical convention.");
+    checkConvention();
   }
 
   @Override

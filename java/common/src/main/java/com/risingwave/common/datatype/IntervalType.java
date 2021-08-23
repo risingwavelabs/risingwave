@@ -30,7 +30,13 @@ import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableMap;
 import com.risingwave.proto.data.DataType;
 import org.apache.calcite.rel.type.RelDataTypeComparability;
+import org.apache.calcite.sql.SqlDialect;
+import org.apache.calcite.sql.SqlIntervalQualifier;
+import org.apache.calcite.sql.SqlWriterConfig;
+import org.apache.calcite.sql.dialect.PostgresqlSqlDialect;
+import org.apache.calcite.sql.pretty.SqlPrettyWriter;
 import org.apache.calcite.sql.type.SqlTypeName;
+import org.apache.calcite.sql.util.SqlString;
 
 public class IntervalType extends PrimitiveTypeBase {
   private static final ImmutableMap<SqlTypeName, DataType.IntervalType> INTERVAL_TYPE_MAPPING =
@@ -49,20 +55,19 @@ public class IntervalType extends PrimitiveTypeBase {
           .put(INTERVAL_MINUTE_SECOND, MINUTE_TO_SECOND)
           .build();
 
-  private final int precision;
+  private final SqlIntervalQualifier intervalQualifier;
 
-  public IntervalType(SqlTypeName sqlTypeName) {
-    this(false, sqlTypeName, 0);
+  public IntervalType(SqlIntervalQualifier qualifier) {
+    this(false, qualifier);
   }
 
-  public IntervalType(boolean nullable, SqlTypeName sqlTypeName, int precision) {
-    super(nullable, sqlTypeName);
+  public IntervalType(boolean nullable, SqlIntervalQualifier qualifier) {
+    super(nullable, qualifier.typeName());
     checkArgument(
         INTERVAL_TYPE_MAPPING.containsKey(sqlTypeName),
         "Invalid interval sql type: " + "{}",
         sqlTypeName);
-    checkArgument(precision >= 0, "precision is negative: {}", precision);
-    this.precision = precision;
+    this.intervalQualifier = qualifier;
     resetDigest();
   }
 
@@ -71,17 +76,25 @@ public class IntervalType extends PrimitiveTypeBase {
     return DataType.newBuilder()
         .setTypeName(DataType.TypeName.INTERVAL)
         .setIntervalType(INTERVAL_TYPE_MAPPING.get(sqlTypeName))
-        .setPrecision(precision)
         .setIsNullable(nullable)
         .build();
   }
 
   @Override
   protected void generateTypeString(StringBuilder sb, boolean withDetail) {
-    sb.append(sqlTypeName);
-    if (withDetail) {
-      sb.append("(").append(precision).append(")");
-    }
+    sb.append("INTERVAL ");
+    final SqlDialect dialect = PostgresqlSqlDialect.DEFAULT;
+    final SqlWriterConfig config =
+        SqlPrettyWriter.config()
+            .withAlwaysUseParentheses(false)
+            .withSelectListItemsOnSeparateLines(false)
+            .withIndentation(0)
+            .withDialect(dialect);
+    final SqlPrettyWriter writer = new SqlPrettyWriter(config);
+
+    intervalQualifier.unparse(writer, 0, 0);
+    final String sql = writer.toString();
+    sb.append(new SqlString(dialect, sql).getSql());
   }
 
   @Override
@@ -105,16 +118,16 @@ public class IntervalType extends PrimitiveTypeBase {
       return false;
     }
     IntervalType that = (IntervalType) o;
-    return precision == that.precision;
+    return Objects.equal(intervalQualifier, that.intervalQualifier);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hashCode(super.hashCode(), precision);
+    return Objects.hashCode(super.hashCode(), intervalQualifier);
   }
 
   @Override
   protected PrimitiveTypeBase copyWithNullability(boolean nullable) {
-    return new IntervalType(nullable, this.getSqlTypeName(), this.precision);
+    return new IntervalType(nullable, intervalQualifier);
   }
 }

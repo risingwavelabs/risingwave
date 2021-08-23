@@ -1,5 +1,6 @@
 package com.risingwave.planner.planner.batch;
 
+import static com.risingwave.planner.planner.PlannerUtils.isSingleMode;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.CALCITE_LOGICAL_OPTIMIZATION;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.LOGICAL_CONVERSION;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.LOGICAL_OPTIMIZATION;
@@ -12,6 +13,7 @@ import com.risingwave.planner.program.ChainedOptimizerProgram;
 import com.risingwave.planner.program.HepOptimizerProgram;
 import com.risingwave.planner.program.OptimizerProgram;
 import com.risingwave.planner.program.VolcanoOptimizerProgram;
+import com.risingwave.planner.rel.logical.RwLogicalGather;
 import com.risingwave.planner.rel.physical.batch.BatchPlan;
 import com.risingwave.planner.rel.physical.batch.RisingWaveBatchPhyRel;
 import com.risingwave.planner.rules.BatchRuleSets;
@@ -23,14 +25,20 @@ import org.apache.calcite.sql.SqlNode;
 public class BatchPlanner implements Planner<BatchPlan> {
   public BatchPlanner() {}
 
-  private static RelNode toRel(SqlConverter sqlConverter, SqlNode sqlNode) {
-    return sqlConverter.toRel(sqlNode).rel;
+  private static RelNode toRel(
+      SqlConverter sqlConverter, SqlNode sqlNode, ExecutionContext context) {
+    RelNode root = sqlConverter.toRel(sqlNode).rel;
+    if (!isSingleMode(context)) {
+      root = RwLogicalGather.create(root);
+    }
+
+    return root;
   }
 
   @Override
   public BatchPlan plan(SqlNode ast, ExecutionContext context) {
     SqlConverter sqlConverter = SqlConverter.builder(context).build();
-    RelNode rawPlan = toRel(sqlConverter, ast);
+    RelNode rawPlan = toRel(sqlConverter, ast, context);
     OptimizerProgram optimizerProgram = buildOptimizerProgram();
 
     RelNode result = optimizerProgram.optimize(rawPlan, context);

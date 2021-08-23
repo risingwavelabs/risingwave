@@ -1,7 +1,5 @@
 package com.risingwave.planner.rel.logical;
 
-import static com.google.common.base.Preconditions.checkArgument;
-
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelTraitSet;
@@ -19,7 +17,7 @@ public class LogicalCalc extends Calc implements RisingWaveLogicalRel {
       RelNode child,
       RexProgram program) {
     super(cluster, traits, hints, child, program);
-    checkArgument(traitSet.contains(RisingWaveLogicalRel.LOGICAL), "Not logical convention.");
+    checkConvention();
   }
 
   @Override

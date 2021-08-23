@@ -1,6 +1,5 @@
 package com.risingwave.planner.rel.physical.batch;
 
-import static com.google.common.base.Preconditions.checkArgument;
 import static java.util.Objects.requireNonNull;
 
 import com.google.common.collect.ImmutableList;
@@ -45,7 +44,7 @@ public class BatchInsertValues extends AbstractRelNode implements RisingWaveBatc
     this.table = requireNonNull(table, "Table can't be null!");
     this.columnIds = requireNonNull(columnIds, "columnIds can't be null!");
     this.tuples = requireNonNull(tuples, "tuples can't be null!");
-    checkArgument(traitSet.contains(RisingWaveBatchPhyRel.BATCH_PHYSICAL));
+    checkConvention();
   }
 
   @Override

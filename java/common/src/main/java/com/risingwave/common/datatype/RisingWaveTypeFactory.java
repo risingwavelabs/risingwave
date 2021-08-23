@@ -16,6 +16,7 @@ import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rel.type.RelDataTypeFieldImpl;
 import org.apache.calcite.rel.type.StructKind;
 import org.apache.calcite.sql.SqlCollation;
+import org.apache.calcite.sql.SqlIntervalQualifier;
 import org.apache.calcite.sql.type.SqlTypeName;
 
 public class RisingWaveTypeFactory extends JavaTypeFactoryImpl {
@@ -129,9 +130,6 @@ public class RisingWaveTypeFactory extends JavaTypeFactoryImpl {
       case NULL:
         return NullType.SINGLETON;
       default:
-        if (IntervalType.isIntervalType(sqlType)) {
-          return new IntervalType(sqlType);
-        }
         throw new PgException(PgErrorCode.INTERNAL_ERROR, "Unrecognized sql type: %s", sqlType);
     }
   }
@@ -141,5 +139,10 @@ public class RisingWaveTypeFactory extends JavaTypeFactoryImpl {
       RelDataType type, Charset charset, SqlCollation collation) {
     checkArgument(type instanceof StringType, "Invalid type: %s", type.getClass());
     return ((StringType) type).withCharsetAndCollation(charset, collation);
+  }
+
+  @Override
+  public RelDataType createSqlIntervalType(SqlIntervalQualifier intervalQualifier) {
+    return new IntervalType(intervalQualifier);
   }
 }

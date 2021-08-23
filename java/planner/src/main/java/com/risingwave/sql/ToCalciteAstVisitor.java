@@ -10,6 +10,7 @@ import com.risingwave.planner.sql.RisingWaveOperatorTable;
 import com.risingwave.sql.tree.AllColumns;
 import com.risingwave.sql.tree.ArithmeticExpression;
 import com.risingwave.sql.tree.AstVisitor;
+import com.risingwave.sql.tree.BetweenPredicate;
 import com.risingwave.sql.tree.Cast;
 import com.risingwave.sql.tree.ColumnDefinition;
 import com.risingwave.sql.tree.ColumnType;
@@ -20,6 +21,8 @@ import com.risingwave.sql.tree.DropTable;
 import com.risingwave.sql.tree.FunctionCall;
 import com.risingwave.sql.tree.Insert;
 import com.risingwave.sql.tree.IntegerLiteral;
+import com.risingwave.sql.tree.IntervalLiteral;
+import com.risingwave.sql.tree.LogicalBinaryExpression;
 import com.risingwave.sql.tree.LongLiteral;
 import com.risingwave.sql.tree.Node;
 import com.risingwave.sql.tree.NotNullColumnConstraint;
@@ -36,13 +39,16 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
+import org.apache.calcite.avatica.util.TimeUnit;
 import org.apache.calcite.schema.ColumnStrategy;
 import org.apache.calcite.sql.SqlBasicCall;
 import org.apache.calcite.sql.SqlBasicTypeNameSpec;
 import org.apache.calcite.sql.SqlDataTypeSpec;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlInsert;
+import org.apache.calcite.sql.SqlIntervalQualifier;
 import org.apache.calcite.sql.SqlLiteral;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlNodeList;
@@ -233,8 +239,8 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
   @Override
   protected SqlNode visitFunctionCall(FunctionCall node, Void context) {
     checkArgument(!node.isDistinct(), "Distinct not supported yet!");
-    checkArgument(!node.filter().isPresent(), "Filter in function call not supported!");
-    checkArgument(!node.getWindow().isPresent(), "Window in function call not supported!");
+    checkArgument(node.filter().isEmpty(), "Filter in function call not supported!");
+    checkArgument(node.getWindow().isEmpty(), "Window in function call not supported!");
 
     SqlIdentifier functionName = identifierOf(node.getName());
     SqlOperator operator = lookupOperator(functionName, SqlSyntax.FUNCTION);
@@ -275,6 +281,32 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
   }
 
   @Override
+  public SqlNode visitIntervalLiteral(IntervalLiteral node, Void context) {
+    checkArgument(node.getEndField() == null, "Doesn't support end field now!");
+    int sign;
+    switch (node.getSign()) {
+      case PLUS:
+        sign = 1;
+        break;
+      case MINUS:
+        sign = -1;
+        break;
+      default:
+        throw new PgException(
+            PgErrorCode.INTERNAL_ERROR, "Unsupported type sign: %s", node.getSign());
+    }
+
+    var startUnit = TimeUnit.valueOf(node.getStartField().name());
+    var endUnit =
+        Optional.ofNullable(node.getEndField())
+            .map(IntervalLiteral.IntervalField::name)
+            .map(TimeUnit::valueOf)
+            .orElse(null);
+    var intervalQualifier = new SqlIntervalQualifier(startUnit, endUnit, SqlParserPos.ZERO);
+    return SqlLiteral.createInterval(sign, node.getValue(), intervalQualifier, SqlParserPos.ZERO);
+  }
+
+  @Override
   public SqlNode visitValuesList(ValuesList node, Void context) {
     SqlNode[] operands =
         node.values().stream().map(expr -> expr.accept(this, context)).toArray(SqlNode[]::new);
@@ -294,8 +326,14 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
 
   @Override
   protected SqlNode visitSingleColumn(SingleColumn node, Void context) {
-    checkArgument(node.getAlias() == null, "Alias not supported yet!");
-    return node.getExpression().accept(this, context);
+    SqlNode sqlNode = node.getExpression().accept(this, context);
+    if (node.getAlias() != null) {
+      SqlOperator asCall = lookupOperator(identifierOf("AS"), SqlSyntax.SPECIAL);
+      SqlNode[] operands = new SqlNode[] {sqlNode, identifierOf(node.getAlias())};
+      sqlNode = new SqlBasicCall(asCall, operands, SqlParserPos.ZERO);
+    }
+
+    return sqlNode;
   }
 
   @Override
@@ -307,6 +345,42 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
         new SqlDataTypeSpec(toBasicTypeNameSpec(node.getType()), SqlParserPos.ZERO);
 
     return new SqlBasicCall(operator, new SqlNode[] {operand, targetType}, SqlParserPos.ZERO);
+  }
+
+  @Override
+  protected SqlNode visitLogicalBinaryExpression(LogicalBinaryExpression node, Void context) {
+    SqlIdentifier operatorIdentifier;
+    switch (node.getType()) {
+      case AND:
+        operatorIdentifier = identifierOf("AND");
+        break;
+      case OR:
+        operatorIdentifier = identifierOf("OR");
+        break;
+      default:
+        throw new PgException(
+            PgErrorCode.INTERNAL_ERROR, "Unsupported logical expression type: %s", node.getType());
+    }
+
+    SqlOperator operator = lookupOperator(operatorIdentifier, SqlSyntax.BINARY);
+    SqlNode[] operands =
+        new SqlNode[] {node.getLeft().accept(this, context), node.getRight().accept(this, context)};
+
+    return new SqlBasicCall(operator, operands, SqlParserPos.ZERO);
+  }
+
+  @Override
+  protected SqlNode visitBetweenPredicate(BetweenPredicate node, Void context) {
+    System.out.println(SqlStdOperatorTable.BETWEEN.getNameAsId());
+    var operator = lookupOperator(identifierOf("BETWEEN SYMMETRIC"), SqlSyntax.SPECIAL);
+    var operands =
+        new SqlNode[] {
+          node.getValue().accept(this, context),
+          node.getMin().accept(this, context),
+          node.getMax().accept(this, context)
+        };
+
+    return new SqlBasicCall(operator, operands, SqlParserPos.ZERO);
   }
 
   private static SqlBasicTypeNameSpec toBasicTypeNameSpec(ColumnType<?> columnType) {
@@ -377,6 +451,10 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
     return new SqlIdentifier(name.getParts(), SqlParserPos.ZERO);
   }
 
+  private static SqlIdentifier identifierOf(String name) {
+    return new SqlIdentifier(name, SqlParserPos.ZERO);
+  }
+
   private SqlOperator lookupOperator(SqlIdentifier functionName, SqlSyntax syntax) {
     List<SqlOperator> result = new ArrayList<>();
     SqlNameMatcher nameMatcher = SqlNameMatchers.withCaseSensitive(false);
@@ -393,15 +471,14 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
   }
 
   // Don't remove this, it's useful for debugging.
-  //  public static void main(String[] args) throws SqlParseException {
-  //    SqlParser.Config parserConfig = SqlParser.Config.DEFAULT
-  //        .withCaseSensitive(false)
-  //        .withLex(Lex.SQL_SERVER);
+  //  public static void main(String[] args) throws Exception {
+  //    SqlParser.Config parserConfig =
+  //        SqlParser.Config.DEFAULT.withCaseSensitive(false).withLex(Lex.SQL_SERVER);
   //
-  //    String sql = "SELECT CAST(25.65 AS int)";
-  ////    String sql = "select 100.0::DOUBLE/8.0::DOUBLE";
-  //    SqlNode sqlNode = SqlParser.create(sql, parserConfig)
-  //        .parseQuery();
+  //    String sql = "select a as a1 from t";
+  //    //    String sql = "SELECT * FROM t WHERE a between 1 and 2";
+  //    //    String sql = "select 100.0::DOUBLE/8.0::DOUBLE";
+  //    SqlNode sqlNode = SqlParser.create(sql, parserConfig).parseQuery();
   //    System.out.println(sqlNode.toString());
   //  }
 }

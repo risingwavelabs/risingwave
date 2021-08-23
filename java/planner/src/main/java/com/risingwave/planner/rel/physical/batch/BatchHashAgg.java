@@ -1,6 +1,10 @@
 package com.risingwave.planner.rel.physical.batch;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static com.risingwave.execution.context.ExecutionContext.contextOf;
+import static com.risingwave.planner.planner.PlannerUtils.isSingleMode;
+import static com.risingwave.planner.rel.common.dist.RwDistributions.ANY;
+import static com.risingwave.planner.rel.common.dist.RwDistributions.SINGLETON;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
 import com.google.protobuf.Any;
@@ -35,7 +39,7 @@ public class BatchHashAgg extends Aggregate implements RisingWaveBatchPhyRel {
       @Nullable List<ImmutableBitSet> groupSets,
       List<AggregateCall> aggCalls) {
     super(cluster, traitSet, hints, input, groupSet, groupSets, aggCalls);
-    checkArgument(traitSet.contains(RisingWaveBatchPhyRel.BATCH_PHYSICAL));
+    checkConvention();
   }
 
   private ExprNode serializeAggCall(AggregateCall aggCall) {
@@ -119,8 +123,39 @@ public class BatchHashAgg extends Aggregate implements RisingWaveBatchPhyRel {
     @Override
     public @Nullable RelNode convert(RelNode rel) {
       RwAggregate rwAggregate = (RwAggregate) rel;
-      RelTraitSet newTraitSet = rwAggregate.getTraitSet().replace(BATCH_PHYSICAL);
-      RelNode newInput = RelOptRule.convert(rwAggregate.getInput(), BATCH_PHYSICAL);
+
+      RelTraitSet newTraitSet = rwAggregate.getTraitSet().plus(BATCH_PHYSICAL);
+
+      boolean singleMode = isSingleMode(contextOf(rel.getCluster()));
+
+      RelNode newInput;
+      if (singleMode) {
+        newInput = RelOptRule.convert(rwAggregate.getInput(), newTraitSet);
+      } else {
+        if (rwAggregate.isSimpleAgg()) {
+          // TODO: Make this more robust
+          newTraitSet = newTraitSet.plus(ANY);
+          newInput = RelOptRule.convert(rwAggregate.getInput(), newTraitSet);
+
+          // Partial agg
+          var partialAgg =
+              new BatchHashAgg(
+                  rwAggregate.getCluster(),
+                  newTraitSet,
+                  rwAggregate.getHints(),
+                  newInput,
+                  rwAggregate.getGroupSet(),
+                  rwAggregate.getGroupSets(),
+                  rwAggregate.getAggCallList());
+
+          // Add exchange
+          newInput = RwBatchExchange.create(partialAgg, SINGLETON);
+          newTraitSet = newTraitSet.plus(SINGLETON);
+
+        } else {
+          throw new UnsupportedOperationException("Grouped hash agg not supported yet!");
+        }
+      }
 
       return new BatchHashAgg(
           rwAggregate.getCluster(),

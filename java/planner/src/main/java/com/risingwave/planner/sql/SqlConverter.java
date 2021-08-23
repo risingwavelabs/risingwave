@@ -5,6 +5,7 @@ import static java.util.Objects.requireNonNull;
 import com.risingwave.common.datatype.RisingWaveTypeFactory;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.planner.cost.RisingWaveCostFactory;
+import com.risingwave.planner.rel.common.dist.RwDistributionTraitDef;
 import java.util.Collections;
 import java.util.List;
 import org.apache.calcite.plan.ConventionTraitDef;
@@ -98,6 +99,7 @@ public class SqlConverter {
         planner.clearRelTraitDefs();
         planner.addRelTraitDef(ConventionTraitDef.INSTANCE);
         planner.addRelTraitDef(RelCollationTraitDef.INSTANCE);
+        planner.addRelTraitDef(RwDistributionTraitDef.getInstance());
       }
     }
 
