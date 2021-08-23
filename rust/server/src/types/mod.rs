@@ -2,8 +2,8 @@ use crate::error::Result;
 use risingwave_proto::data::DataType as DataTypeProto;
 use std::sync::Arc;
 
-mod numeric;
-pub(crate) use numeric::*;
+mod numeric_type;
+pub(crate) use numeric_type::*;
 mod primitive;
 pub(crate) use primitive::*;
 mod native;
