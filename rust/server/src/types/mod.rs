@@ -22,6 +22,7 @@ use std::convert::TryFrom;
 use std::fmt::Debug;
 
 mod bool_type;
+mod interval_type;
 mod string_type;
 
 pub(crate) use bool_type::*;
@@ -39,6 +40,7 @@ pub(crate) enum DataTypeKind {
     Date,
     Char,
     Varchar,
+    Interval,
 }
 
 pub(crate) trait DataType: Debug + Sync + Send + 'static {
