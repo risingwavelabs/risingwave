@@ -44,7 +44,6 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
           .put(SqlKind.OR, ExprNode.ExprNodeType.OR)
           .put(SqlKind.NOT, ExprNode.ExprNodeType.NOT)
           .put(SqlKind.SUM, ExprNode.ExprNodeType.SUM)
-          .put(SqlKind.AVG, ExprNode.ExprNodeType.AVG)
           .put(SqlKind.COUNT, ExprNode.ExprNodeType.COUNT)
           .put(SqlKind.MIN, ExprNode.ExprNodeType.MIN)
           .put(SqlKind.MAX, ExprNode.ExprNodeType.MAX)

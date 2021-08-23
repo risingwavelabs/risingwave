@@ -101,6 +101,8 @@ message PlanNode {
         CREATE_TABLE = 5;
         DROP_TABLE = 6;
         HASH_AGG = 7;
+        SIMPLE_AGG = 8;
+        FILTER = 9;
     }
     PlanNodeType node_type = 1;
     google.protobuf.Any body = 2;

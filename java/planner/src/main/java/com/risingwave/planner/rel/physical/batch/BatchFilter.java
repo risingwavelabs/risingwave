@@ -31,6 +31,7 @@ public class BatchFilter extends Filter implements RisingWaveBatchPhyRel {
     FilterNode filter =
         FilterNode.newBuilder().setSearchCondition(condition.accept(rexVisitor)).build();
     return PlanNode.newBuilder()
+        .setNodeType(PlanNode.PlanNodeType.FILTER)
         .setBody(Any.pack(filter))
         .addChildren(((RisingWaveBatchPhyRel) input).serialize())
         .build();

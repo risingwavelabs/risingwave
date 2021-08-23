@@ -40,140 +40,6 @@ insert into t values(1,4,2), (2,3,3), (3,4,4), (4,3,5)
 BatchInsertValues(table=[t], values=[((1,4,2:FLOAT),(2,3,3:FLOAT),(3,4,4:FLOAT),(4,3,5:FLOAT))])
 ]]>
         </Resource>
-        <Resource name="json">
-            <![CDATA[
-{
-  "nodeType": "INSERT_VALUE",
-  "body": {
-    "@type": "type.googleapis.com/risingwave.executor.proto.InsertValueNode",
-    "tableRefId": {
-      "schemaRefId": {
-        "databaseRefId": {
-        }
-      }
-    },
-    "columnIds": [0, 1, 2],
-    "insertTuples": [{
-      "cells": [{
-        "exprType": "CONSTANT_VALUE",
-        "body": {
-          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
-          "body": "AAAAAQ=="
-        },
-        "returnType": {
-          "typeName": "INT32"
-        }
-      }, {
-        "exprType": "CONSTANT_VALUE",
-        "body": {
-          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
-          "body": "AAAABA=="
-        },
-        "returnType": {
-          "typeName": "INT32"
-        }
-      }, {
-        "exprType": "CONSTANT_VALUE",
-        "body": {
-          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
-          "body": "QAAAAA=="
-        },
-        "returnType": {
-          "typeName": "FLOAT"
-        }
-      }]
-    }, {
-      "cells": [{
-        "exprType": "CONSTANT_VALUE",
-        "body": {
-          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
-          "body": "AAAAAg=="
-        },
-        "returnType": {
-          "typeName": "INT32"
-        }
-      }, {
-        "exprType": "CONSTANT_VALUE",
-        "body": {
-          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
-          "body": "AAAAAw=="
-        },
-        "returnType": {
-          "typeName": "INT32"
-        }
-      }, {
-        "exprType": "CONSTANT_VALUE",
-        "body": {
-          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
-          "body": "QEAAAA=="
-        },
-        "returnType": {
-          "typeName": "FLOAT"
-        }
-      }]
-    }, {
-      "cells": [{
-        "exprType": "CONSTANT_VALUE",
-        "body": {
-          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
-          "body": "AAAAAw=="
-        },
-        "returnType": {
-          "typeName": "INT32"
-        }
-      }, {
-        "exprType": "CONSTANT_VALUE",
-        "body": {
-          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
-          "body": "AAAABA=="
-        },
-        "returnType": {
-          "typeName": "INT32"
-        }
-      }, {
-        "exprType": "CONSTANT_VALUE",
-        "body": {
-          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
-          "body": "QIAAAA=="
-        },
-        "returnType": {
-          "typeName": "FLOAT"
-        }
-      }]
-    }, {
-      "cells": [{
-        "exprType": "CONSTANT_VALUE",
-        "body": {
-          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
-          "body": "AAAABA=="
-        },
-        "returnType": {
-          "typeName": "INT32"
-        }
-      }, {
-        "exprType": "CONSTANT_VALUE",
-        "body": {
-          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
-          "body": "AAAAAw=="
-        },
-        "returnType": {
-          "typeName": "INT32"
-        }
-      }, {
-        "exprType": "CONSTANT_VALUE",
-        "body": {
-          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
-          "body": "QKAAAA=="
-        },
-        "returnType": {
-          "typeName": "FLOAT"
-        }
-      }]
-    }]
-  }
-}
-            ]]>
-        </Resource>
     </TestCase>
 
     <TestCase name="select with project">
@@ -187,141 +53,6 @@ select v3, v1+v2, v1-v2, v1*v2, v1/v2 from t
 BatchProject(v3=[$2], EXPR$1=[+($0, $1)], EXPR$2=[-($0, $1)], EXPR$3=[*($0, $1)], EXPR$4=[/($0, $1)])
   BatchFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])
             ]]>
-        </Resource>
-        <Resource name="json">
-{
-  "nodeType": "PROJECT",
-  "body": {
-    "@type": "type.googleapis.com/risingwave.executor.proto.ProjectNode",
-    "selectList": [{
-      "exprType": "INPUT_REF",
-      "body": {
-        "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
-        "columnIdx": 2
-      },
-      "returnType": {
-        "typeName": "FLOAT"
-      }
-    }, {
-      "exprType": "ADD",
-      "body": {
-        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
-        "children": [{
-          "exprType": "INPUT_REF",
-          "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
-          },
-          "returnType": {
-            "typeName": "INT32"
-          }
-        }, {
-          "exprType": "INPUT_REF",
-          "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
-            "columnIdx": 1
-          },
-          "returnType": {
-            "typeName": "INT32"
-          }
-        }]
-      },
-      "returnType": {
-        "typeName": "INT32"
-      }
-    }, {
-      "exprType": "SUBTRACT",
-      "body": {
-        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
-        "children": [{
-          "exprType": "INPUT_REF",
-          "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
-          },
-          "returnType": {
-            "typeName": "INT32"
-          }
-        }, {
-          "exprType": "INPUT_REF",
-          "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
-            "columnIdx": 1
-          },
-          "returnType": {
-            "typeName": "INT32"
-          }
-        }]
-      },
-      "returnType": {
-        "typeName": "INT32"
-      }
-    }, {
-      "exprType": "MULTIPLY",
-      "body": {
-        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
-        "children": [{
-          "exprType": "INPUT_REF",
-          "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
-          },
-          "returnType": {
-            "typeName": "INT32"
-          }
-        }, {
-          "exprType": "INPUT_REF",
-          "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
-            "columnIdx": 1
-          },
-          "returnType": {
-            "typeName": "INT32"
-          }
-        }]
-      },
-      "returnType": {
-        "typeName": "INT32"
-      }
-    }, {
-      "exprType": "DIVIDE",
-      "body": {
-        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
-        "children": [{
-          "exprType": "INPUT_REF",
-          "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
-          },
-          "returnType": {
-            "typeName": "INT32"
-          }
-        }, {
-          "exprType": "INPUT_REF",
-          "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
-            "columnIdx": 1
-          },
-          "returnType": {
-            "typeName": "INT32"
-          }
-        }]
-      },
-      "returnType": {
-        "typeName": "INT32"
-      }
-    }]
-  },
-  "children": [{
-    "nodeType": "SEQ_SCAN",
-    "body": {
-      "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",
-      "tableRefId": {
-        "schemaRefId": {
-          "databaseRefId": {
-          }
-        }
-      },
-      "columnIds": [0, 1, 2]
-    }
-  }]
-}
         </Resource>
     </TestCase>
 
@@ -338,20 +69,182 @@ BatchProject(v1=[$0], v2=[$1], v3=[$2])
     BatchFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])
             ]]>
         </Resource>
+    </TestCase>
+    <TestCase name="simple agg">
+        <Resource name="sql">
+            <![CDATA[
+select sum(v3) from t
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+BatchHashAgg(group=[{}], EXPR$0=[SUM($0)])
+  BatchFilterScan(table=[[test_schema, t]], columns=[v3])            ]]>
+        </Resource>
+        <Resource name="json">
+{
+  "nodeType": "SIMPLE_AGG",
+  "body": {
+    "@type": "type.googleapis.com/risingwave.executor.proto.SimpleAggNode",
+    "aggregations": [{
+      "exprType": "SUM",
+      "body": {
+        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+        "children": [{
+          "exprType": "INPUT_REF",
+          "body": {
+            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+          },
+          "returnType": {
+            "typeName": "FLOAT"
+          }
+        }]
+      },
+      "returnType": {
+        "typeName": "FLOAT"
+      }
+    }]
+  },
+  "children": [{
+    "nodeType": "SEQ_SCAN",
+    "body": {
+      "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",
+      "tableRefId": {
+        "schemaRefId": {
+          "databaseRefId": {
+          }
+        }
+      },
+      "columnIds": [2]
+    }
+  }]
+}
+        </Resource>
+    </TestCase>
+
+        <TestCase name="simple agg with 2 sum, max, min">
+        <Resource name="sql">
+            <![CDATA[
+select sum(v3), sum(v2), max(v1), min(v3) from t
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+BatchHashAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)], EXPR$2=[MAX($2)], EXPR$3=[MIN($0)])
+  BatchFilterScan(table=[[test_schema, t]], columns=[v3,v2,v1])            ]]>
+        </Resource>
+        <Resource name="json">
+{
+  "nodeType": "SIMPLE_AGG",
+  "body": {
+    "@type": "type.googleapis.com/risingwave.executor.proto.SimpleAggNode",
+    "aggregations": [{
+      "exprType": "SUM",
+      "body": {
+        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+        "children": [{
+          "exprType": "INPUT_REF",
+          "body": {
+            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+          },
+          "returnType": {
+            "typeName": "FLOAT"
+          }
+        }]
+      },
+      "returnType": {
+        "typeName": "FLOAT"
+      }
+    }, {
+      "exprType": "SUM",
+      "body": {
+        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+        "children": [{
+          "exprType": "INPUT_REF",
+          "body": {
+            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+            "columnIdx": 1
+          },
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }]
+      },
+      "returnType": {
+        "typeName": "INT32"
+      }
+    }, {
+      "exprType": "MAX",
+      "body": {
+        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+        "children": [{
+          "exprType": "INPUT_REF",
+          "body": {
+            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+            "columnIdx": 2
+          },
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }]
+      },
+      "returnType": {
+        "typeName": "INT32"
+      }
+    }, {
+      "exprType": "MIN",
+      "body": {
+        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+        "children": [{
+          "exprType": "INPUT_REF",
+          "body": {
+            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+          },
+          "returnType": {
+            "typeName": "FLOAT"
+          }
+        }]
+      },
+      "returnType": {
+        "typeName": "FLOAT"
+      }
+    }]
+  },
+  "children": [{
+    "nodeType": "SEQ_SCAN",
+    "body": {
+      "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",
+      "tableRefId": {
+        "schemaRefId": {
+          "databaseRefId": {
+          }
+        }
+      },
+      "columnIds": [2, 1, 0]
+    }
+  }]
+}
+        </Resource>
+    </TestCase>
+
+    <TestCase name="hash agg with 2 sum">
+        <Resource name="sql">
+            <![CDATA[
+select sum(v1), sum(v2) from t group by v1
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+BatchProject(EXPR$0=[$1], EXPR$1=[$2])
+  BatchHashAgg(group=[{0}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
+    BatchFilterScan(table=[[test_schema, t]], columns=[v1,v2])            ]]>
+        </Resource>
         <Resource name="json">
 {
   "nodeType": "PROJECT",
   "body": {
     "@type": "type.googleapis.com/risingwave.executor.proto.ProjectNode",
     "selectList": [{
-      "exprType": "INPUT_REF",
-      "body": {
-        "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
-      },
-      "returnType": {
-        "typeName": "INT32"
-      }
-    }, {
       "exprType": "INPUT_REF",
       "body": {
         "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
@@ -367,15 +260,25 @@ BatchProject(v1=[$0], v2=[$1], v3=[$2])
         "columnIdx": 2
       },
       "returnType": {
-        "typeName": "FLOAT"
+        "typeName": "INT32"
       }
     }]
   },
   "children": [{
+    "nodeType": "HASH_AGG",
     "body": {
-      "@type": "type.googleapis.com/risingwave.executor.proto.FilterNode",
-      "searchCondition": {
-        "exprType": "GREATER_THAN",
+      "@type": "type.googleapis.com/risingwave.executor.proto.HashAggNode",
+      "groupByKeys": [{
+        "exprType": "INPUT_REF",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+        },
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }],
+      "aggregations": [{
+        "exprType": "SUM",
         "body": {
           "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
           "children": [{
@@ -386,11 +289,20 @@ BatchProject(v1=[$0], v2=[$1], v3=[$2])
             "returnType": {
               "typeName": "INT32"
             }
-          }, {
-            "exprType": "CONSTANT_VALUE",
+          }]
+        },
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }, {
+        "exprType": "SUM",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+          "children": [{
+            "exprType": "INPUT_REF",
             "body": {
-              "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
-              "body": "AAAAAQ=="
+              "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+              "columnIdx": 1
             },
             "returnType": {
               "typeName": "INT32"
@@ -398,9 +310,9 @@ BatchProject(v1=[$0], v2=[$1], v3=[$2])
           }]
         },
         "returnType": {
-          "typeName": "BOOLEAN"
+          "typeName": "INT32"
         }
-      }
+      }]
     },
     "children": [{
       "nodeType": "SEQ_SCAN",
@@ -412,7 +324,7 @@ BatchProject(v1=[$0], v2=[$1], v3=[$2])
             }
           }
         },
-        "columnIds": [0, 1, 2]
+        "columnIds": [0, 1]
       }
     }]
   }]
