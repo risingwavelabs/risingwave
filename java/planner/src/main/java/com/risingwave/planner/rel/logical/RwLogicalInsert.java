@@ -12,8 +12,8 @@ import org.apache.calcite.rel.core.TableModify;
 import org.apache.calcite.rel.logical.LogicalTableModify;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-public class RwInsert extends TableModify implements RisingWaveLogicalRel {
-  protected RwInsert(
+public class RwLogicalInsert extends TableModify implements RisingWaveLogicalRel {
+  protected RwLogicalInsert(
       RelOptCluster cluster,
       RelTraitSet traitSet,
       RelOptTable table,
@@ -35,7 +35,7 @@ public class RwInsert extends TableModify implements RisingWaveLogicalRel {
 
   @Override
   public RelNode copy(RelTraitSet traitSet, List<RelNode> inputs) {
-    return new RwInsert(
+    return new RwLogicalInsert(
         getCluster(),
         traitSet,
         getTable(),
@@ -68,7 +68,7 @@ public class RwInsert extends TableModify implements RisingWaveLogicalRel {
       LogicalTableModify tableModify = (LogicalTableModify) rel;
 
       RelTraitSet newTraitSet = tableModify.getTraitSet().replace(RisingWaveLogicalRel.LOGICAL);
-      return new RwInsert(
+      return new RwLogicalInsert(
           tableModify.getCluster(),
           newTraitSet,
           tableModify.getTable(),

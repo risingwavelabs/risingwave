@@ -3,7 +3,7 @@ package com.risingwave.planner.rel.physical.batch;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
 import com.google.common.collect.ImmutableList;
-import com.risingwave.planner.rel.logical.RwValues;
+import com.risingwave.planner.rel.logical.RwLogicalValues;
 import com.risingwave.proto.plan.PlanNode;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelTraitSet;
@@ -14,8 +14,8 @@ import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rex.RexLiteral;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-public class BatchValues extends Values implements RisingWaveBatchPhyRel {
-  protected BatchValues(
+public class RwBatchValues extends Values implements RisingWaveBatchPhyRel {
+  protected RwBatchValues(
       RelOptCluster cluster,
       RelDataType rowType,
       ImmutableList<ImmutableList<RexLiteral>> tuples,
@@ -35,7 +35,7 @@ public class BatchValues extends Values implements RisingWaveBatchPhyRel {
             .withInTrait(LOGICAL)
             .withOutTrait(BATCH_PHYSICAL)
             .withRuleFactory(BatchValuesConverterRule::new)
-            .withOperandSupplier(t -> t.operand(RwValues.class).noInputs())
+            .withOperandSupplier(t -> t.operand(RwLogicalValues.class).noInputs())
             .withDescription("Converting batch values")
             .as(Config.class)
             .toRule(BatchValuesConverterRule.class);
@@ -46,12 +46,12 @@ public class BatchValues extends Values implements RisingWaveBatchPhyRel {
 
     @Override
     public @Nullable RelNode convert(RelNode rel) {
-      RwValues rwValues = (RwValues) rel;
-      return new BatchValues(
-          rwValues.getCluster(),
-          rwValues.getRowType(),
-          rwValues.getTuples(),
-          rwValues.getTraitSet().replace(BATCH_PHYSICAL));
+      RwLogicalValues rwLogicalValues = (RwLogicalValues) rel;
+      return new RwBatchValues(
+          rwLogicalValues.getCluster(),
+          rwLogicalValues.getRowType(),
+          rwLogicalValues.getTuples(),
+          rwLogicalValues.getTraitSet().replace(BATCH_PHYSICAL));
     }
   }
 }

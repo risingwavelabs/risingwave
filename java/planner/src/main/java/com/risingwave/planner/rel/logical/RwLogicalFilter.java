@@ -10,15 +10,16 @@ import org.apache.calcite.rel.logical.LogicalFilter;
 import org.apache.calcite.rex.RexNode;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-public class RwFilter extends Filter implements RisingWaveLogicalRel {
-  protected RwFilter(RelOptCluster cluster, RelTraitSet traits, RelNode child, RexNode condition) {
+public class RwLogicalFilter extends Filter implements RisingWaveLogicalRel {
+  protected RwLogicalFilter(
+      RelOptCluster cluster, RelTraitSet traits, RelNode child, RexNode condition) {
     super(cluster, traits, child, condition);
     checkConvention();
   }
 
   @Override
   public Filter copy(RelTraitSet traitSet, RelNode input, RexNode condition) {
-    return new RwFilter(getCluster(), traitSet, input, condition);
+    return new RwLogicalFilter(getCluster(), traitSet, input, condition);
   }
 
   public static class RwFilterConverterRule extends ConverterRule {
@@ -38,7 +39,7 @@ public class RwFilter extends Filter implements RisingWaveLogicalRel {
 
     @Override
     public @Nullable RelNode convert(RelNode rel) {
-      return new RwFilter(
+      return new RwLogicalFilter(
           rel.getCluster(),
           rel.getTraitSet().replace(LOGICAL),
           rel.getInput(0),

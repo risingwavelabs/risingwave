@@ -15,8 +15,8 @@ import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rex.RexNode;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-public class RwProject extends Project implements RisingWaveLogicalRel {
-  protected RwProject(
+public class RwLogicalProject extends Project implements RisingWaveLogicalRel {
+  protected RwLogicalProject(
       RelOptCluster cluster,
       RelTraitSet traits,
       List<RelHint> hints,
@@ -28,13 +28,13 @@ public class RwProject extends Project implements RisingWaveLogicalRel {
   }
 
   @Override
-  public RwProject copy(
+  public RwLogicalProject copy(
       RelTraitSet traitSet, RelNode input, List<RexNode> projects, RelDataType rowType) {
-    return new RwProject(getCluster(), traitSet, emptyList(), input, projects, rowType);
+    return new RwLogicalProject(getCluster(), traitSet, emptyList(), input, projects, rowType);
   }
 
   public static class RwProjectConverterRule extends ConverterRule {
-    public static final RwProject.RwProjectConverterRule INSTANCE =
+    public static final RwLogicalProject.RwProjectConverterRule INSTANCE =
         Config.INSTANCE
             .withInTrait(Convention.NONE)
             .withOutTrait(LOGICAL)
@@ -51,7 +51,7 @@ public class RwProject extends Project implements RisingWaveLogicalRel {
     @Override
     public @Nullable RelNode convert(RelNode rel) {
       LogicalProject logicalProject = (LogicalProject) rel;
-      return new RwProject(
+      return new RwLogicalProject(
           rel.getCluster(),
           rel.getTraitSet().replace(LOGICAL),
           logicalProject.getHints(),

@@ -3,7 +3,7 @@ package com.risingwave.planner.rel.physical.batch;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
 import com.google.protobuf.Any;
-import com.risingwave.planner.rel.logical.RwProject;
+import com.risingwave.planner.rel.logical.RwLogicalProject;
 import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.proto.plan.ProjectNode;
@@ -19,8 +19,8 @@ import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rex.RexNode;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-public class BatchProject extends Project implements RisingWaveBatchPhyRel {
-  protected BatchProject(
+public class RwBatchProject extends Project implements RisingWaveBatchPhyRel {
+  protected RwBatchProject(
       RelOptCluster cluster,
       RelTraitSet traits,
       List<RelHint> hints,
@@ -34,7 +34,7 @@ public class BatchProject extends Project implements RisingWaveBatchPhyRel {
   @Override
   public Project copy(
       RelTraitSet traitSet, RelNode input, List<RexNode> projects, RelDataType rowType) {
-    return new BatchProject(getCluster(), traitSet, getHints(), input, projects, rowType);
+    return new RwBatchProject(getCluster(), traitSet, getHints(), input, projects, rowType);
   }
 
   @Override
@@ -57,7 +57,7 @@ public class BatchProject extends Project implements RisingWaveBatchPhyRel {
             .withInTrait(LOGICAL)
             .withOutTrait(BATCH_PHYSICAL)
             .withRuleFactory(BatchProjectConverterRule::new)
-            .withOperandSupplier(t -> t.operand(RwProject.class).anyInputs())
+            .withOperandSupplier(t -> t.operand(RwLogicalProject.class).anyInputs())
             .withDescription("Converting logical project to batch physical.")
             .as(Config.class)
             .toRule(BatchProjectConverterRule.class);
@@ -68,16 +68,16 @@ public class BatchProject extends Project implements RisingWaveBatchPhyRel {
 
     @Override
     public @Nullable RelNode convert(RelNode rel) {
-      RwProject rwProject = (RwProject) rel;
-      RelTraitSet newTraitSet = rwProject.getTraitSet().replace(BATCH_PHYSICAL);
-      RelNode newInput = RelOptRule.convert(rwProject.getInput(), BATCH_PHYSICAL);
-      return new BatchProject(
+      RwLogicalProject rwLogicalProject = (RwLogicalProject) rel;
+      RelTraitSet newTraitSet = rwLogicalProject.getTraitSet().replace(BATCH_PHYSICAL);
+      RelNode newInput = RelOptRule.convert(rwLogicalProject.getInput(), BATCH_PHYSICAL);
+      return new RwBatchProject(
           rel.getCluster(),
           newTraitSet,
-          rwProject.getHints(),
+          rwLogicalProject.getHints(),
           newInput,
-          rwProject.getProjects(),
-          rwProject.getRowType());
+          rwLogicalProject.getProjects(),
+          rwLogicalProject.getRowType());
     }
   }
 }

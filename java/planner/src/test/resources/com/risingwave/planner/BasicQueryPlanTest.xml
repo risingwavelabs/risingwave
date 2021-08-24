@@ -7,8 +7,8 @@ select * from t
         </Resource>
         <Resource name="plan">
             <![CDATA[
-BatchFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])
-            ]]>
+RwBatchFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])
+]]>
         </Resource>
         <Resource name="json">
             <![CDATA[
@@ -37,7 +37,7 @@ insert into t values(1,4,2), (2,3,3), (3,4,4), (4,3,5)
         </Resource>
         <Resource name="plan">
             <![CDATA[
-BatchInsertValues(table=[t], values=[((1,4,2:FLOAT),(2,3,3:FLOAT),(3,4,4:FLOAT),(4,3,5:FLOAT))])
+RwBatchInsertValues(table=[t], values=[((1,4,2:FLOAT),(2,3,3:FLOAT),(3,4,4:FLOAT),(4,3,5:FLOAT))])
 ]]>
         </Resource>
     </TestCase>
@@ -50,8 +50,8 @@ select v3, v1+v2, v1-v2, v1*v2, v1/v2 from t
         </Resource>
         <Resource name="plan">
             <![CDATA[
-BatchProject(v3=[$2], EXPR$1=[+($0, $1)], EXPR$2=[-($0, $1)], EXPR$3=[*($0, $1)], EXPR$4=[/($0, $1)])
-  BatchFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])
+RwBatchProject(v3=[$2], EXPR$1=[+($0, $1)], EXPR$2=[-($0, $1)], EXPR$3=[*($0, $1)], EXPR$4=[/($0, $1)])
+  RwBatchFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])
             ]]>
         </Resource>
     </TestCase>
@@ -64,9 +64,9 @@ select * from t where v1 > 1
         </Resource>
         <Resource name="plan">
             <![CDATA[
-BatchProject(v1=[$0], v2=[$1], v3=[$2])
-  BatchFilter(condition=[>($0, 1)])
-    BatchFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])
+RwBatchProject(v1=[$0], v2=[$1], v3=[$2])
+  RwBatchFilter(condition=[>($0, 1)])
+    RwBatchFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])
             ]]>
         </Resource>
     </TestCase>
@@ -78,8 +78,9 @@ select sum(v3) from t
         </Resource>
         <Resource name="plan">
             <![CDATA[
-BatchHashAgg(group=[{}], EXPR$0=[SUM($0)])
-  BatchFilterScan(table=[[test_schema, t]], columns=[v3])            ]]>
+RwBatchHashAgg(group=[{}], EXPR$0=[SUM($0)])
+  RwBatchFilterScan(table=[[test_schema, t]], columns=[v3])
+]]>
         </Resource>
         <Resource name="json">
 {
@@ -130,8 +131,9 @@ select sum(v3), sum(v2), max(v1), min(v3) from t
         </Resource>
         <Resource name="plan">
             <![CDATA[
-BatchHashAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)], EXPR$2=[MAX($2)], EXPR$3=[MIN($0)])
-  BatchFilterScan(table=[[test_schema, t]], columns=[v3,v2,v1])            ]]>
+RwBatchHashAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)], EXPR$2=[MAX($2)], EXPR$3=[MIN($0)])
+  RwBatchFilterScan(table=[[test_schema, t]], columns=[v3,v2,v1])
+]]>
         </Resource>
         <Resource name="json">
 {
@@ -235,9 +237,10 @@ select sum(v1), sum(v2) from t group by v1
         </Resource>
         <Resource name="plan">
             <![CDATA[
-BatchProject(EXPR$0=[$1], EXPR$1=[$2])
-  BatchHashAgg(group=[{0}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
-    BatchFilterScan(table=[[test_schema, t]], columns=[v1,v2])            ]]>
+RwBatchProject(EXPR$0=[$1], EXPR$1=[$2])
+  RwBatchHashAgg(group=[{0}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
+    RwBatchFilterScan(table=[[test_schema, t]], columns=[v1,v2])
+]]>
         </Resource>
         <Resource name="json">
 {
@@ -340,9 +343,10 @@ select sum(v1+v2),sum(v1+v3) from t
         </Resource>
         <Resource name="plan">
             <![CDATA[
-BatchHashAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
-  BatchProject($f0=[+($0, $1)], $f1=[+($0, $2)])
-    BatchFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])            ]]>
+RwBatchHashAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
+  RwBatchProject($f0=[+($0, $1)], $f1=[+($0, $2)])
+    RwBatchFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])
+]]>
         </Resource>
         <!--        <Resource name="json">-->
         <!--            fas-->
@@ -357,8 +361,8 @@ select sum(v1), sum(v3) from t
         </Resource>
         <Resource name="plan">
             <![CDATA[
-BatchHashAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
-  BatchFilterScan(table=[[test_schema, t]], columns=[v1,v3])
+RwBatchHashAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
+  RwBatchFilterScan(table=[[test_schema, t]], columns=[v1,v3])
 ]]>
         </Resource>
         <!--        <Resource name="json">-->
@@ -374,8 +378,8 @@ select min(v1) from t
         </Resource>
         <Resource name="plan">
             <![CDATA[
-BatchHashAgg(group=[{}], EXPR$0=[MIN($0)])
-  BatchFilterScan(table=[[test_schema, t]], columns=[v1])
+RwBatchHashAgg(group=[{}], EXPR$0=[MIN($0)])
+  RwBatchFilterScan(table=[[test_schema, t]], columns=[v1])
 ]]>
         </Resource>
         <!--        <Resource name="json">-->
@@ -391,8 +395,8 @@ select max(v1) from t
         </Resource>
         <Resource name="plan">
             <![CDATA[
-BatchHashAgg(group=[{}], EXPR$0=[MAX($0)])
-  BatchFilterScan(table=[[test_schema, t]], columns=[v1])
+RwBatchHashAgg(group=[{}], EXPR$0=[MAX($0)])
+  RwBatchFilterScan(table=[[test_schema, t]], columns=[v1])
 ]]>
         </Resource>
         <!--        <Resource name="json">-->
@@ -408,10 +412,10 @@ select max(v1) from t where v2>3
         </Resource>
         <Resource name="plan">
             <![CDATA[
-BatchHashAgg(group=[{}], EXPR$0=[MAX($0)])
-  BatchProject(v1=[$0])
-    BatchFilter(condition=[>($1, 3)])
-      BatchFilterScan(table=[[test_schema, t]], columns=[v1,v2])
+RwBatchHashAgg(group=[{}], EXPR$0=[MAX($0)])
+  RwBatchProject(v1=[$0])
+    RwBatchFilter(condition=[>($1, 3)])
+      RwBatchFilterScan(table=[[test_schema, t]], columns=[v1,v2])
             ]]>
         </Resource>
         <!--        <Resource name="json">-->
@@ -427,8 +431,8 @@ select avg(v2) from t
         </Resource>
         <Resource name="plan">
             <![CDATA[
-BatchHashAgg(group=[{}], EXPR$0=[AVG($0)])
-  BatchFilterScan(table=[[test_schema, t]], columns=[v2])
+RwBatchHashAgg(group=[{}], EXPR$0=[AVG($0)])
+  RwBatchFilterScan(table=[[test_schema, t]], columns=[v2])
 ]]>
         </Resource>
         <!--        <Resource name="json">-->
@@ -444,9 +448,9 @@ select sum(v1), v2 from t group by v2
         </Resource>
         <Resource name="plan">
             <![CDATA[
-BatchProject(EXPR$0=[$1], v2=[$0])
-  BatchHashAgg(group=[{0}], EXPR$0=[SUM($1)])
-    BatchFilterScan(table=[[test_schema, t]], columns=[v2,v1])
+RwBatchProject(EXPR$0=[$1], v2=[$0])
+  RwBatchHashAgg(group=[{0}], EXPR$0=[SUM($1)])
+    RwBatchFilterScan(table=[[test_schema, t]], columns=[v2,v1])
 ]]>
         </Resource>
         <!--        <Resource name="json">-->
@@ -462,8 +466,8 @@ select 100.0::DOUBLE/8.0::DOUBLE
         </Resource>
         <Resource name="plan">
             <![CDATA[
-BatchProject(EXPR$0=[/(1.000E2:DOUBLE, 8.0E0:DOUBLE)])
-  BatchValues(tuples=[[{ 0 }]])
+RwBatchProject(EXPR$0=[/(1.000E2:DOUBLE, 8.0E0:DOUBLE)])
+  RwBatchValues(tuples=[[{ 0 }]])
 ]]>
         </Resource>
         <!--        <Resource name="json">-->

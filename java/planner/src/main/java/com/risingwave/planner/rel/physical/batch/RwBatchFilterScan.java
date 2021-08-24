@@ -3,6 +3,7 @@ package com.risingwave.planner.rel.physical.batch;
 import static com.risingwave.execution.context.ExecutionContext.contextOf;
 import static com.risingwave.execution.handler.RpcExecutor.getTableRefId;
 import static com.risingwave.planner.planner.PlannerUtils.isSingleMode;
+import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
 import com.google.common.collect.ImmutableList;
 import com.google.protobuf.Any;
@@ -10,6 +11,7 @@ import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.planner.rel.common.FilterScanBase;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
+import com.risingwave.planner.rel.logical.RwLogicalFilterScan;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.proto.plan.SeqScanNode;
 import com.risingwave.proto.plan.TableRefId;
@@ -19,10 +21,13 @@ import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelDistribution;
+import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.convert.ConverterRule;
 import org.apache.calcite.rel.hint.RelHint;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
-public class BatchFilterScan extends FilterScanBase implements RisingWaveBatchPhyRel {
-  protected BatchFilterScan(
+public class RwBatchFilterScan extends FilterScanBase implements RisingWaveBatchPhyRel {
+  protected RwBatchFilterScan(
       RelOptCluster cluster,
       RelTraitSet traitSet,
       List<RelHint> hints,
@@ -33,7 +38,7 @@ public class BatchFilterScan extends FilterScanBase implements RisingWaveBatchPh
     checkConvention();
   }
 
-  public static BatchFilterScan create(
+  public static RwBatchFilterScan create(
       RelOptCluster cluster,
       RelTraitSet traitSet,
       RelOptTable table,
@@ -47,7 +52,7 @@ public class BatchFilterScan extends FilterScanBase implements RisingWaveBatchPh
 
     RelTraitSet newTraitSet = traitSet.plus(RisingWaveBatchPhyRel.BATCH_PHYSICAL).plus(distTrait);
 
-    return new BatchFilterScan(
+    return new RwBatchFilterScan(
         cluster, newTraitSet, Collections.emptyList(), table, tableCatalog.getId(), columnIds);
   }
 
@@ -60,5 +65,29 @@ public class BatchFilterScan extends FilterScanBase implements RisingWaveBatchPh
         .setNodeType(PlanNode.PlanNodeType.SEQ_SCAN)
         .setBody(Any.pack(seqScanNodeBuilder.build()))
         .build();
+  }
+
+  public static class BatchFilterScanConverterRule extends ConverterRule {
+    public static final BatchFilterScanConverterRule INSTANCE =
+        Config.INSTANCE
+            .withInTrait(LOGICAL)
+            .withOutTrait(BATCH_PHYSICAL)
+            .withRuleFactory(BatchFilterScanConverterRule::new)
+            .withOperandSupplier(t -> t.operand(RwLogicalFilterScan.class).anyInputs())
+            .withDescription("Converting logical filter scan to batch filter scan.")
+            .as(Config.class)
+            .toRule(BatchFilterScanConverterRule.class);
+
+    protected BatchFilterScanConverterRule(Config config) {
+      super(config);
+    }
+
+    @Override
+    public @Nullable RelNode convert(RelNode rel) {
+      RwLogicalFilterScan source = (RwLogicalFilterScan) rel;
+
+      return RwBatchFilterScan.create(
+          source.getCluster(), source.getTraitSet(), source.getTable(), source.getColumnIds());
+    }
   }
 }

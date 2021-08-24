@@ -7,7 +7,7 @@ insert into t values ('1970-01-01', '04:05:06', '1970-01-01 04:05:06')
         </Resource>
         <Resource name="plan">
             <![CDATA[
-BatchInsertValues(table=[t], values=[((1970-01-01,04:05:06,1970-01-01 04:05:06))])
+RwBatchInsertValues(table=[t], values=[((1970-01-01,04:05:06,1970-01-01 04:05:06))])
             ]]>
         </Resource>
         <Resource name="json">

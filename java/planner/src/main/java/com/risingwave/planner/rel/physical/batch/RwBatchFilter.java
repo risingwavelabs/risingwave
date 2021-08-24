@@ -3,7 +3,7 @@ package com.risingwave.planner.rel.physical.batch;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
 import com.google.protobuf.Any;
-import com.risingwave.planner.rel.logical.RwFilter;
+import com.risingwave.planner.rel.logical.RwLogicalFilter;
 import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
 import com.risingwave.proto.plan.FilterNode;
 import com.risingwave.proto.plan.PlanNode;
@@ -17,8 +17,8 @@ import org.apache.calcite.rel.core.Filter;
 import org.apache.calcite.rex.RexNode;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-public class BatchFilter extends Filter implements RisingWaveBatchPhyRel {
-  protected BatchFilter(
+public class RwBatchFilter extends Filter implements RisingWaveBatchPhyRel {
+  protected RwBatchFilter(
       RelOptCluster cluster, RelTraitSet traits, RelNode child, RexNode condition) {
     super(cluster, traits, child, condition);
     checkConvention();
@@ -38,7 +38,7 @@ public class BatchFilter extends Filter implements RisingWaveBatchPhyRel {
 
   @Override
   public Filter copy(RelTraitSet traitSet, RelNode input, RexNode condition) {
-    return new BatchFilter(getCluster(), traitSet, input, condition);
+    return new RwBatchFilter(getCluster(), traitSet, input, condition);
   }
 
   @Override
@@ -52,7 +52,7 @@ public class BatchFilter extends Filter implements RisingWaveBatchPhyRel {
             .withInTrait(LOGICAL)
             .withOutTrait(BATCH_PHYSICAL)
             .withRuleFactory(BatchFilterConverterRule::new)
-            .withOperandSupplier(t -> t.operand(RwFilter.class).anyInputs())
+            .withOperandSupplier(t -> t.operand(RwLogicalFilter.class).anyInputs())
             .withDescription("Converting logical filter to batch physical.")
             .as(Config.class)
             .toRule(BatchFilterConverterRule.class);
@@ -63,10 +63,11 @@ public class BatchFilter extends Filter implements RisingWaveBatchPhyRel {
 
     @Override
     public @Nullable RelNode convert(RelNode rel) {
-      RwFilter rwFilter = (RwFilter) rel;
-      RelTraitSet newTraitSet = rwFilter.getTraitSet().replace(BATCH_PHYSICAL);
-      RelNode newInput = RelOptRule.convert(rwFilter.getInput(), BATCH_PHYSICAL);
-      return new BatchFilter(rel.getCluster(), newTraitSet, newInput, rwFilter.getCondition());
+      RwLogicalFilter rwLogicalFilter = (RwLogicalFilter) rel;
+      RelTraitSet newTraitSet = rwLogicalFilter.getTraitSet().replace(BATCH_PHYSICAL);
+      RelNode newInput = RelOptRule.convert(rwLogicalFilter.getInput(), BATCH_PHYSICAL);
+      return new RwBatchFilter(
+          rel.getCluster(), newTraitSet, newInput, rwLogicalFilter.getCondition());
     }
   }
 }

@@ -14,8 +14,8 @@ import org.apache.calcite.rel.logical.LogicalAggregate;
 import org.apache.calcite.util.ImmutableBitSet;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-public class RwAggregate extends Aggregate implements RisingWaveLogicalRel {
-  private RwAggregate(
+public class RwLogicalAggregate extends Aggregate implements RisingWaveLogicalRel {
+  private RwLogicalAggregate(
       RelOptCluster cluster,
       RelTraitSet traitSet,
       List<RelHint> hints,
@@ -34,7 +34,7 @@ public class RwAggregate extends Aggregate implements RisingWaveLogicalRel {
       ImmutableBitSet groupSet,
       @Nullable List<ImmutableBitSet> groupSets,
       List<AggregateCall> aggCalls) {
-    return new RwAggregate(
+    return new RwLogicalAggregate(
         getCluster(), traitSet, getHints(), input, groupSet, groupSets, aggCalls);
   }
 
@@ -63,7 +63,7 @@ public class RwAggregate extends Aggregate implements RisingWaveLogicalRel {
 
       RelTraitSet newTraitSet = rel.getTraitSet().replace(LOGICAL);
       RelNode newInput = RelOptRule.convert(logicalAgg.getInput(), LOGICAL);
-      return new RwAggregate(
+      return new RwLogicalAggregate(
           logicalAgg.getCluster(),
           newTraitSet,
           logicalAgg.getHints(),

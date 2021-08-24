@@ -12,8 +12,8 @@ import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rex.RexLiteral;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-public class RwValues extends Values implements RisingWaveLogicalRel {
-  protected RwValues(
+public class RwLogicalValues extends Values implements RisingWaveLogicalRel {
+  protected RwLogicalValues(
       RelOptCluster cluster,
       RelDataType rowType,
       ImmutableList<ImmutableList<RexLiteral>> tuples,
@@ -40,7 +40,7 @@ public class RwValues extends Values implements RisingWaveLogicalRel {
     @Override
     public @Nullable RelNode convert(RelNode rel) {
       LogicalValues logicalValues = (LogicalValues) rel;
-      return new RwValues(
+      return new RwLogicalValues(
           logicalValues.getCluster(),
           logicalValues.getRowType(),
           logicalValues.getTuples(),

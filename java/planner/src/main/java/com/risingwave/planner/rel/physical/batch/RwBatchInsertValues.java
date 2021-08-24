@@ -29,12 +29,12 @@ import org.apache.calcite.util.NlsString;
 import org.apache.calcite.util.TimeString;
 import org.apache.calcite.util.TimestampString;
 
-public class BatchInsertValues extends AbstractRelNode implements RisingWaveBatchPhyRel {
+public class RwBatchInsertValues extends AbstractRelNode implements RisingWaveBatchPhyRel {
   private final TableCatalog table;
   private final ImmutableList<ColumnCatalog.ColumnId> columnIds;
   private final ImmutableList<ImmutableList<RexLiteral>> tuples;
 
-  public BatchInsertValues(
+  public RwBatchInsertValues(
       RelOptCluster cluster,
       RelTraitSet traitSet,
       TableCatalog table,
@@ -94,7 +94,9 @@ public class BatchInsertValues extends AbstractRelNode implements RisingWaveBatc
     }
 
     String values =
-        tuples.stream().map(BatchInsertValues::toString).collect(Collectors.joining(",", "(", ")"));
+        tuples.stream()
+            .map(RwBatchInsertValues::toString)
+            .collect(Collectors.joining(",", "(", ")"));
     pw.item("values", values);
     return pw;
   }

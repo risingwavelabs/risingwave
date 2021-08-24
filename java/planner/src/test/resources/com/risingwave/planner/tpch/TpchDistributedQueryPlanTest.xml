@@ -9,7 +9,7 @@ select * from supplier
             <![CDATA[
 RwBatchGather
   RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}])
-    BatchFilterScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_name,s_address,s_nationkey,s_phone,s_acctbal,s_comment])
+    RwBatchFilterScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_name,s_address,s_nationkey,s_phone,s_acctbal,s_comment])
 ]]>
         </Resource>
     </TestCase>
@@ -30,12 +30,12 @@ where
         <Resource name="plan">
             <![CDATA[
 RwBatchGather
-  BatchHashAgg(group=[{}], revenue=[SUM($0)])
+  RwBatchHashAgg(group=[{}], revenue=[SUM($0)])
     RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}])
-      BatchHashAgg(group=[{}], revenue=[SUM($0)])
-        BatchProject($f0=[*($1, $2)])
-          BatchFilter(condition=[AND(>=($3, 1994-01-01), <($3, +(1994-01-01, 12:INTERVAL YEAR)), OR(AND(>=($2, -(8E-2:DOUBLE, 1E-2:DOUBLE)), <=($2, +(8E-2:DOUBLE, 1E-2:DOUBLE))), AND(>=($2, +(8E-2:DOUBLE, 1E-2:DOUBLE)), <=($2, -(8E-2:DOUBLE, 1E-2:DOUBLE)))), <($0, 24))])
-            BatchFilterScan(table=[[test_schema, lineitem]], columns=[l_quantity,l_extendedprice,l_discount,l_shipdate])
+      RwBatchHashAgg(group=[{}], revenue=[SUM($0)])
+        RwBatchProject($f0=[*($1, $2)])
+          RwBatchFilter(condition=[AND(>=($3, 1994-01-01), <($3, +(1994-01-01, 12:INTERVAL YEAR)), OR(AND(>=($2, -(8E-2:DOUBLE, 1E-2:DOUBLE)), <=($2, +(8E-2:DOUBLE, 1E-2:DOUBLE))), AND(>=($2, +(8E-2:DOUBLE, 1E-2:DOUBLE)), <=($2, -(8E-2:DOUBLE, 1E-2:DOUBLE)))), <($0, 24))])
+            RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_quantity,l_extendedprice,l_discount,l_shipdate])
 ]]>
         </Resource>
     </TestCase>

@@ -2,8 +2,8 @@ package com.risingwave.planner.rules.logical;
 
 import com.google.common.collect.ImmutableList;
 import com.risingwave.catalog.ColumnCatalog;
-import com.risingwave.planner.rel.logical.RwFilterScan;
-import com.risingwave.planner.rel.logical.RwProject;
+import com.risingwave.planner.rel.logical.RwLogicalFilterScan;
+import com.risingwave.planner.rel.logical.RwLogicalProject;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -24,8 +24,8 @@ public class ProjectToTableScanRule extends RelRule<ProjectToTableScanRule.Confi
 
   @Override
   public void onMatch(RelOptRuleCall call) {
-    RwProject project = call.rel(0);
-    RwFilterScan scan = call.rel(1);
+    RwLogicalProject project = call.rel(0);
+    RwLogicalFilterScan scan = call.rel(1);
 
     SortedSet<Integer> inputIndexes = new TreeSet<>();
     new RexVisitorImpl<Void>(true) {
@@ -69,11 +69,11 @@ public class ProjectToTableScanRule extends RelRule<ProjectToTableScanRule.Confi
               .map(rex -> newColumnIds.get(((RexInputRef) rex).getIndex()))
               .collect(ImmutableList.toImmutableList());
 
-      RwFilterScan newScan = scan.copy(projectColumnIds);
+      RwLogicalFilterScan newScan = scan.copy(projectColumnIds);
       call.transformTo(newScan);
     } else {
-      RwFilterScan newScan = scan.copy(newColumnIds);
-      RwProject newProject =
+      RwLogicalFilterScan newScan = scan.copy(newColumnIds);
+      RwLogicalProject newProject =
           project.copy(project.getTraitSet(), newScan, newProjects, project.getRowType());
 
       call.transformTo(newProject);
@@ -86,8 +86,8 @@ public class ProjectToTableScanRule extends RelRule<ProjectToTableScanRule.Confi
             .withDescription("Push project to table scan")
             .withOperandSupplier(
                 t ->
-                    t.operand(RwProject.class)
-                        .oneInput(t1 -> t1.operand(RwFilterScan.class).noInputs()))
+                    t.operand(RwLogicalProject.class)
+                        .oneInput(t1 -> t1.operand(RwLogicalFilterScan.class).noInputs()))
             .as(Config.class);
 
     default ProjectToTableScanRule toRule() {
