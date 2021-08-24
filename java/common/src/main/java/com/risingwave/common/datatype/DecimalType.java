@@ -17,7 +17,7 @@ public class DecimalType extends PrimitiveTypeBase {
   private final int precision;
   private final int scale;
 
-  public DecimalType(boolean nullable, int precision, int scale) {
+  private DecimalType(boolean nullable, int precision, int scale) {
     super(nullable, SqlTypeName.DECIMAL);
     checkArgument(precision > 0, "precision must be positive: {}", precision);
     checkArgument(scale >= 0, "scale must not be negative: {}", scale);

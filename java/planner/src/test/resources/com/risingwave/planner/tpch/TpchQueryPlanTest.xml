@@ -1,4 +1,116 @@
 <Root>
+    <TestCase name="insert customer values">
+        <Resource name="sql">
+            <![CDATA[
+insert into customer values (149601, 'Customer#000149601', 'rsARKllazC', 18, '28-585-834-9749', 3932.16, 'BUILDING', 'arefully special deposits. silent deposits haggle. special, final deposits about the carefully unusual packa')
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+BatchInsertValues(table=[customer], values=[((149601,'Customer#000149601':CHAR(18),'rsARKllazC':CHAR(10),18,'28-585-834-9749':CHAR(15),3.93216E3:DECIMAL(147455,16383),'BUILDING':CHAR(8),'arefully special deposits. silent deposits haggle. special, final deposits about the carefully unusual packa':CHAR(108)))])
+]]>
+        </Resource>
+        <Resource name="json">
+            <![CDATA[
+{
+  "nodeType": "INSERT_VALUE",
+  "body": {
+    "@type": "type.googleapis.com/risingwave.executor.proto.InsertValueNode",
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      },
+      "tableId": 3
+    },
+    "columnIds": [0, 1, 2, 3, 4, 5, 6, 7],
+    "insertTuples": [{
+      "cells": [{
+        "exprType": "CONSTANT_VALUE",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+          "body": "AAJIYQ=="
+        },
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }, {
+        "exprType": "CONSTANT_VALUE",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+          "body": "Q3VzdG9tZXIjMDAwMTQ5NjAx"
+        },
+        "returnType": {
+          "typeName": "CHAR",
+          "precision": 18
+        }
+      }, {
+        "exprType": "CONSTANT_VALUE",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+          "body": "cnNBUktsbGF6Qw=="
+        },
+        "returnType": {
+          "typeName": "CHAR",
+          "precision": 10
+        }
+      }, {
+        "exprType": "CONSTANT_VALUE",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+          "body": "AAAAEg=="
+        },
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }, {
+        "exprType": "CONSTANT_VALUE",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+          "body": "MjgtNTg1LTgzNC05NzQ5"
+        },
+        "returnType": {
+          "typeName": "CHAR",
+          "precision": 15
+        }
+      }, {
+        "exprType": "CONSTANT_VALUE",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+          "body": "QK64UeuFHrg="
+        },
+        "returnType": {
+          "typeName": "DECIMAL",
+          "precision": 147455,
+          "scale": 16383
+        }
+      }, {
+        "exprType": "CONSTANT_VALUE",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+          "body": "QlVJTERJTkc="
+        },
+        "returnType": {
+          "typeName": "CHAR",
+          "precision": 8
+        }
+      }, {
+        "exprType": "CONSTANT_VALUE",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+          "body": "YXJlZnVsbHkgc3BlY2lhbCBkZXBvc2l0cy4gc2lsZW50IGRlcG9zaXRzIGhhZ2dsZS4gc3BlY2lhbCwgZmluYWwgZGVwb3NpdHMgYWJvdXQgdGhlIGNhcmVmdWxseSB1bnVzdWFsIHBhY2th"
+        },
+        "returnType": {
+          "typeName": "CHAR",
+          "precision": 108
+        }
+      }]
+    }]
+  }
+}
+]]>
+        </Resource>
+    </TestCase>
     <TestCase name="select all columns from table">
         <Resource name="sql">
             <![CDATA[

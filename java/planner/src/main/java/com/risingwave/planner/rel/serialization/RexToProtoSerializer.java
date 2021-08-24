@@ -93,6 +93,8 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
                   "RexLiteral return a null value in byte array serialization!"));
           break;
         }
+        // FIXME: Currently decimal use the same layout as double.
+      case DECIMAL:
       case DOUBLE:
         {
           bb = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN);
