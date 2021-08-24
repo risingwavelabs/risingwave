@@ -195,3 +195,51 @@ impl<T: PrimitiveDataType> PrimitiveArrayBuilder<T> {
         Ok(())
     }
 }
+
+struct PrimitiveIter<'a, T: PrimitiveDataType> {
+    array: &'a PrimitiveArray<T>,
+    cur_pos: usize,
+    end_pos: usize,
+}
+
+impl<'a, T: PrimitiveDataType> Iterator for PrimitiveIter<'a, T> {
+    type Item = Option<T::N>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.cur_pos >= self.end_pos {
+            None
+        } else {
+            let old_pos = self.cur_pos;
+            self.cur_pos += 1;
+
+            // Justification
+            // We've already checked pos.
+            unsafe { Some(self.array.value_at_unchecked(old_pos)) }
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.end_pos - self.cur_pos;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<'a, T: PrimitiveDataType> PrimitiveIter<'a, T> {
+    fn new(array: &'a PrimitiveArray<T>) -> Result<Self> {
+        Ok(Self {
+            array,
+            cur_pos: 0,
+            end_pos: array.len(),
+        })
+    }
+}
+
+impl<T: PrimitiveDataType> PrimitiveArray<T> {
+    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<T::N> {
+        if self.is_null_unchecked(idx) {
+            None
+        } else {
+            Some(self.as_slice()[idx])
+        }
+    }
+}
