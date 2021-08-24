@@ -36,10 +36,10 @@ jobs:
           token: ${{ secrets.WUTAO_PAT }}
           submodules: 'recursive'
 
-      - name: Set up JDK 16
+      - name: Set up JDK 11
         uses: actions/setup-java@v2
         with:
-          java-version: '16'
+          java-version: '11'
           distribution: 'adopt'
       
       - name: Validate gradle wrapper
@@ -76,10 +76,10 @@ jobs:
           token: ${{ secrets.WUTAO_PAT }}
           submodules: 'recursive'
 
-      - name: Set up JDK 16
+      - name: Set up JDK 11
         uses: actions/setup-java@v2
         with:
-          java-version: '16'
+          java-version: '11'
           distribution: 'adopt'
 
       - name: Cache Gradle packages

@@ -22,7 +22,7 @@ plugins {
     id("com.diffplug.spotless") version "5.14.1"
 }
 
-var javaVersion = JavaVersion.VERSION_16
+var javaVersion = JavaVersion.VERSION_11
 if (JavaVersion.current() != javaVersion) {
     throw GradleException("Only $javaVersion is supported!")
 }
