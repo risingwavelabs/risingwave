@@ -5,10 +5,14 @@ use protobuf::well_known_types::Any as AnyProto;
 
 use crate::array::array_data::ArrayData;
 use crate::error::Result;
-use crate::types::DataType;
+use crate::types::{DataType, DataTypeRef};
 
 pub(crate) trait Array: Send + Sync + AsRef<dyn Any> + AsMut<dyn Any> {
     fn data_type(&self) -> &dyn DataType;
+    fn data_type_ref(&self) -> DataTypeRef {
+        self.array_data().data_type_ref()
+    }
+
     fn array_data(&self) -> &ArrayData;
     fn len(&self) -> usize {
         self.array_data().cardinality()

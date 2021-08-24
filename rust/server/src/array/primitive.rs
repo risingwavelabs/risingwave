@@ -59,11 +59,52 @@ impl<T: PrimitiveDataType> PrimitiveArray<T> {
                 downcast_mut(boxed_array_builder.as_mut())?;
 
             for v in input.as_ref() {
-                array_builder.append_value(*v)?;
+                array_builder.append_value(Some(*v))?;
             }
         }
 
         boxed_array_builder.finish()
+    }
+
+    pub(crate) fn from_values<I>(input: I) -> Result<ArrayRef>
+    where
+        I: IntoIterator<Item = Option<T::N>>,
+    {
+        let data_type = Arc::new(T::default());
+        let input = input.into_iter();
+
+        let mut boxed_array_builder =
+            DataType::create_array_builder(data_type, input.size_hint().0)?;
+        {
+            let array_builder: &mut PrimitiveArrayBuilder<T> =
+                downcast_mut(boxed_array_builder.as_mut())?;
+
+            for v in input {
+                array_builder.append_value(v)?;
+            }
+        }
+
+        boxed_array_builder.finish()
+    }
+
+    fn value_at(&self, idx: usize) -> Result<Option<T::N>> {
+        self.check_idx(idx)?;
+
+        // Justification
+        // Already checked index.
+        unsafe { Ok(self.value_at_unchecked(idx)) }
+    }
+
+    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<T::N> {
+        if self.is_null_unchecked(idx) {
+            None
+        } else {
+            Some(self.as_slice()[idx])
+        }
+    }
+
+    pub(crate) fn as_iter(&self) -> Result<impl Iterator<Item = Option<T::N>> + '_> {
+        PrimitiveIter::new(self)
     }
 }
 
@@ -189,9 +230,24 @@ impl<T: PrimitiveDataType> PrimitiveArrayBuilder<T> {
         }
     }
 
-    fn append_value(&mut self, value: T::N) -> Result<()> {
+    fn append_value_opt2(&mut self, value: T::N) -> Result<()> {
         self.buffer.push(value);
         self.null_bitmap_buffer.push(true);
+        Ok(())
+    }
+
+    fn append_value(&mut self, value: Option<T::N>) -> Result<()> {
+        match value {
+            Some(v) => {
+                self.buffer.push(v);
+                self.null_bitmap_buffer.push(true);
+            }
+            None => {
+                self.buffer.push(T::N::default());
+                self.null_bitmap_buffer.push(false);
+            }
+        }
+
         Ok(())
     }
 }
@@ -234,12 +290,4 @@ impl<'a, T: PrimitiveDataType> PrimitiveIter<'a, T> {
     }
 }
 
-impl<T: PrimitiveDataType> PrimitiveArray<T> {
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<T::N> {
-        if self.is_null_unchecked(idx) {
-            None
-        } else {
-            Some(self.as_slice()[idx])
-        }
-    }
-}
+impl<T: PrimitiveDataType> PrimitiveArray<T> {}

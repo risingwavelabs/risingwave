@@ -8,17 +8,17 @@ log4rs = "1.0.0"
 grpcio = "0.9.0"
 protobuf = "2.24.1"
 futures = "0.3.16"
-tokio = { version = "1.9.0", features = ["rt", "rt-multi-thread", "sync"]}
+tokio = { version = "1.9.0", features = ["rt", "rt-multi-thread", "sync"] }
 rayon = "1.5.1"
 thiserror = "1.0"
 backtrace = "0.3.61"
 log = "0.4"
-risingwave-proto = {path = "../proto"}
+risingwave-proto = { path = "../proto" }
 anyhow = "1.0.42"
 typed-builder = "0.9.0"
 ctrlc = { version = "3.0", features = ["termination"] }
-pb-convert-derive = {path = "../utils/pb-convert-derive" }
-pb-convert = {path = "../utils/pb-convert" }
+pb-convert-derive = { path = "../utils/pb-convert-derive" }
+pb-convert = { path = "../utils/pb-convert" }
 async-trait = "0.1.51"
 serde_json = "1.0"
 chrono = "0.4.19"

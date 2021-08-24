@@ -30,6 +30,8 @@ pub(crate) enum ErrorCode {
     GrpcError(String, grpcio::Error),
     #[error("Parse string error: {0}")]
     ParseError(chrono::format::ParseError),
+    #[error("Out of range")]
+    NumericValueOutOfRange,
 }
 
 #[derive(Clone)]
@@ -98,6 +100,7 @@ impl ErrorCode {
             ErrorCode::IoError(_) => 5,
             ErrorCode::GrpcError(_, _) => 6,
             ErrorCode::ParseError(_) => 7,
+            ErrorCode::NumericValueOutOfRange => 8,
         }
     }
 }

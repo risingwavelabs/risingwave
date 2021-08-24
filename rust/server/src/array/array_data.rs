@@ -23,6 +23,10 @@ impl ArrayData {
         &*self.data_type
     }
 
+    pub(crate) fn data_type_ref(&self) -> DataTypeRef {
+        self.data_type.clone()
+    }
+
     pub(crate) fn null_bitmap(&self) -> Option<&Bitmap> {
         self.null_bitmap.as_ref()
     }

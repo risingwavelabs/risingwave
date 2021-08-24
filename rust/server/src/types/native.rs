@@ -2,9 +2,12 @@ use crate::error::ErrorCode::{InternalError, IoError};
 use crate::error::Result;
 use crate::error::RwError;
 use crate::expr::Datum;
+use std::fmt::Debug;
 use std::io::Write;
 
-pub(crate) trait NativeType: Copy + Send + Sync + Sized + 'static {
+pub(crate) trait NativeType:
+    PartialEq + Debug + Copy + Send + Sync + Sized + Default + 'static
+{
     fn from_datum(datum: &Datum) -> Result<Self>;
     fn to_protobuf(self, output: &mut dyn Write) -> Result<usize>;
 }
