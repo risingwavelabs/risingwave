@@ -432,7 +432,7 @@ public class TestSqlParser {
   public void testStackOverflowExpression() {
     assertThrows(
         ParsingException.class,
-        () -> SqlParser.createExpression(Lists2.joinOn(" OR ", nCopies(4000, "x = y"), x -> x)),
+        () -> SqlParser.createExpression(Lists2.joinOn(" OR ", nCopies(40000, "x = y"), x -> x)),
         "line 1:1: expression is too large (stack overflow while parsing)");
   }
 
@@ -442,7 +442,7 @@ public class TestSqlParser {
         ParsingException.class,
         () ->
             SqlParser.createStatement(
-                "SELECT " + Lists2.joinOn(" OR ", nCopies(4000, "x = y"), x -> x)),
+                "SELECT " + Lists2.joinOn(" OR ", nCopies(40000, "x = y"), x -> x)),
         "line 1:1: statement is too large (stack overflow while parsing)");
   }
 

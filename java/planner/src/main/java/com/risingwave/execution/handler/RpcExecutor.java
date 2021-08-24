@@ -25,6 +25,7 @@ public interface RpcExecutor {
   default CreateTaskRequest buildCreateTaskRequest(PlanFragment planFragment) {
     TaskId taskId =
         TaskId.newBuilder()
+            // FIXME: replace random number with a better .
             .setTaskId(new Random().nextInt(1000000000))
             .setStageId(
                 StageId.newBuilder()
