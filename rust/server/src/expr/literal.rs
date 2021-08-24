@@ -21,6 +21,11 @@ pub(crate) enum Datum {
     Int64(i64),
     Float32(f32),
     Float64(f64),
+    UInt8(u8),
+    UInt16(u16),
+    UInt32(u32),
+    UInt64(u64),
+    UTF8String(String),
 }
 
 pub(super) struct LiteralExpression {
@@ -84,6 +89,20 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
                     InternalError(format!("Failed to deserialize f64, reason: {:?}", e))
                 })?,
             )),
+            DataType_TypeName::CHAR => Datum::UTF8String(
+                std::str::from_utf8(proto_value.get_body())
+                    .map_err(|e| {
+                        InternalError(format!("Failed to deserialize char, reason: {:?}", e))
+                    })?
+                    .to_string(),
+            ),
+            DataType_TypeName::VARCHAR => Datum::UTF8String(
+                std::str::from_utf8(proto_value.get_body())
+                    .map_err(|e| {
+                        InternalError(format!("Failed to deserialize varchar, reason: {:?}", e))
+                    })?
+                    .to_string(),
+            ),
             _ => {
                 return Err(InternalError(format!(
                     "Unrecognized type name: {:?}",

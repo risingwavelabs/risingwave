@@ -1,4 +1,4 @@
-use crate::array::BoxedArrayBuilder;
+use crate::array::{BoxedArrayBuilder, UTF8ArrayBuilder};
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 use crate::types::{DataType, DataTypeKind, DataTypeRef};
@@ -23,14 +23,15 @@ impl DataType for StringType {
         self.nullable
     }
 
-    fn create_array_builder(self: Arc<Self>, _: usize) -> Result<BoxedArrayBuilder> {
-        todo!()
+    fn create_array_builder(self: Arc<Self>, capacity: usize) -> Result<BoxedArrayBuilder> {
+        let width = self.width;
+        UTF8ArrayBuilder::new(self, width, capacity)
+            .map(|builder| Box::new(builder) as BoxedArrayBuilder)
     }
 
     fn to_protobuf(&self) -> Result<DataTypeProto> {
         let mut proto = DataTypeProto::new();
 
-        proto.set_type_name(DataType_TypeName::CHAR);
         proto.set_is_nullable(self.nullable);
         proto.set_precision(self.width as u32);
 

@@ -79,3 +79,63 @@ impl NativeType for f64 {
             .map_err(|e| RwError::from(IoError(e)))
     }
 }
+
+impl NativeType for u8 {
+    fn from_datum(datum: &Datum) -> Result<Self> {
+        match datum {
+            Datum::UInt8(v) => Ok(*v),
+            _ => Err(InternalError(format!("Incorrect datum for u8: {:?}", datum)).into()),
+        }
+    }
+
+    fn to_protobuf(self, output: &mut dyn Write) -> Result<usize> {
+        output
+            .write(&self.to_be_bytes())
+            .map_err(|e| RwError::from(IoError(e)))
+    }
+}
+
+impl NativeType for u16 {
+    fn from_datum(datum: &Datum) -> Result<Self> {
+        match datum {
+            Datum::UInt16(v) => Ok(*v),
+            _ => Err(InternalError(format!("Incorrect datum for u16: {:?}", datum)).into()),
+        }
+    }
+
+    fn to_protobuf(self, output: &mut dyn Write) -> Result<usize> {
+        output
+            .write(&self.to_be_bytes())
+            .map_err(|e| RwError::from(IoError(e)))
+    }
+}
+
+impl NativeType for u32 {
+    fn from_datum(datum: &Datum) -> Result<Self> {
+        match datum {
+            Datum::UInt32(v) => Ok(*v),
+            _ => Err(InternalError(format!("Incorrect datum for u32: {:?}", datum)).into()),
+        }
+    }
+
+    fn to_protobuf(self, output: &mut dyn Write) -> Result<usize> {
+        output
+            .write(&self.to_be_bytes())
+            .map_err(|e| RwError::from(IoError(e)))
+    }
+}
+
+impl NativeType for u64 {
+    fn from_datum(datum: &Datum) -> Result<Self> {
+        match datum {
+            Datum::UInt64(v) => Ok(*v),
+            _ => Err(InternalError(format!("Incorrect datum for u64: {:?}", datum)).into()),
+        }
+    }
+
+    fn to_protobuf(self, output: &mut dyn Write) -> Result<usize> {
+        output
+            .write(&self.to_be_bytes())
+            .map_err(|e| RwError::from(IoError(e)))
+    }
+}

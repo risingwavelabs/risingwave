@@ -8,5 +8,8 @@ mod primitive;
 pub(crate) use primitive::*;
 mod array_builder;
 mod bool_array;
+mod utf8_array;
+
 pub(crate) use array_builder::*;
 pub(crate) use bool_array::*;
+pub(crate) use utf8_array::*;
