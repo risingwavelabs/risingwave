@@ -2,6 +2,7 @@ use crate::array::{BoolArrayBuilder, BoxedArrayBuilder};
 use crate::error::Result;
 use crate::types::{DataType, DataTypeKind, DataTypeRef};
 use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};
+use std::any::Any;
 use std::sync::Arc;
 
 /// [BoolType] is not a primitive type because we use a bit for each bool value, not a [bool].
@@ -29,6 +30,10 @@ impl DataType for BoolType {
         proto.set_is_nullable(self.nullable);
 
         Ok(proto)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 

@@ -3,6 +3,7 @@ use crate::error::{Result, RwError};
 use crate::types::numeric_type::*;
 use crate::types::{DataType, DataTypeKind};
 use risingwave_proto::data::{DataType as DataTypeProto, DataType_IntervalType, DataType_TypeName};
+use std::any::Any;
 use std::convert::TryFrom;
 use std::sync::Arc;
 #[derive(Debug)]
@@ -53,6 +54,10 @@ impl DataType for IntervalType {
         proto.set_is_nullable(self.nullable);
         proto.set_precision(self.precision);
         Ok(proto)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 

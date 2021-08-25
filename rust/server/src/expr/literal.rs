@@ -12,6 +12,8 @@ use protobuf::Message;
 use risingwave_proto::data::DataType_TypeName;
 use risingwave_proto::expr::{ConstantValue, ExprNode, ExprNode_ExprNodeType};
 
+use rust_decimal::Decimal;
+
 #[derive(Clone, Debug)]
 pub(crate) enum Datum {
     Bool(bool),
@@ -21,6 +23,7 @@ pub(crate) enum Datum {
     Int64(i64),
     Float32(f32),
     Float64(f64),
+    Decimal(Decimal),
     UInt8(u8),
     UInt16(u16),
     UInt32(u32),

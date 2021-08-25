@@ -38,6 +38,9 @@ build/
 .DS_Store
 .devcontainer/
 
+# ctags
+**/tags
+
 # CLion
 cmake-build-debug/
 .idea/

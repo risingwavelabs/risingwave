@@ -6,6 +6,8 @@ mod data_chunk;
 pub(crate) use data_chunk::*;
 mod primitive;
 pub(crate) use primitive::*;
+mod decimal;
+pub(crate) use decimal::*;
 mod array_builder;
 mod bool_array;
 mod utf8_array;

@@ -1,5 +1,6 @@
 use crate::error::Result;
 use risingwave_proto::data::DataType as DataTypeProto;
+use std::any::Any;
 use std::sync::Arc;
 
 mod numeric_type;
@@ -22,10 +23,12 @@ use std::convert::TryFrom;
 use std::fmt::Debug;
 
 mod bool_type;
+mod decimal_type;
 mod interval_type;
 mod string_type;
 
 pub(crate) use bool_type::*;
+pub(crate) use decimal_type::*;
 pub(crate) use string_type::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
@@ -48,6 +51,7 @@ pub(crate) trait DataType: Debug + Sync + Send + 'static {
     fn is_nullable(&self) -> bool;
     fn create_array_builder(self: Arc<Self>, capacity: usize) -> Result<BoxedArrayBuilder>;
     fn to_protobuf(&self) -> Result<DataTypeProto>;
+    fn as_any(&self) -> &dyn Any;
 }
 
 pub(crate) type DataTypeRef = Arc<dyn DataType>;

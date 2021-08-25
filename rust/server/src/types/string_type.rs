@@ -3,6 +3,7 @@ use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 use crate::types::{DataType, DataTypeKind, DataTypeRef};
 use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};
+use std::any::Any;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -50,6 +51,10 @@ impl DataType for StringType {
             ))
             .into()),
         }
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 

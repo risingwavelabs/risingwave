@@ -7,6 +7,7 @@ use crate::types::DataTypeKind;
 use crate::types::PrimitiveDataType;
 use risingwave_proto::data::DataType as DataTypeProto;
 use risingwave_proto::data::DataType_TypeName;
+use std::any::Any;
 use std::convert::TryFrom;
 use std::default::Default;
 use std::sync::Arc;
@@ -48,6 +49,10 @@ macro_rules! make_numeric_type {
                 proto.set_type_name($proto_ty);
                 proto.set_is_nullable(self.nullable);
                 Ok(proto)
+            }
+
+            fn as_any(&self) -> &dyn Any {
+                self
             }
         }
 
