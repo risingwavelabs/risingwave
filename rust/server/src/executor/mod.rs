@@ -6,6 +6,8 @@ mod drop_table;
 use drop_table::*;
 mod seq_scan;
 use seq_scan::*;
+mod filter;
+use filter::*;
 
 use crate::array::DataChunkRef;
 use crate::error::ErrorCode::InternalError;
@@ -66,7 +68,8 @@ impl<'a> ExecutorBuilder<'a> {
           PlanNode_PlanNodeType::CREATE_TABLE => CreateTableExecutor,
           PlanNode_PlanNodeType::SEQ_SCAN => SeqScanExecutor,
           PlanNode_PlanNodeType::INSERT_VALUE => InsertValuesExecutor,
-          PlanNode_PlanNodeType::DROP_TABLE => DropTableExecutor
+          PlanNode_PlanNodeType::DROP_TABLE => DropTableExecutor,
+          PlanNode_PlanNodeType::FILTER => FilterExecutor
         }
     }
 

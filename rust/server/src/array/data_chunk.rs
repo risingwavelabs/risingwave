@@ -20,6 +20,18 @@ impl DataChunk {
         self.cardinality
     }
 
+    pub(crate) fn visibility(&self) -> &Option<Bitmap> {
+        &self.visibility
+    }
+
+    pub(crate) fn with_visibility(&self, visibility: Bitmap) -> Self {
+        DataChunk {
+            arrays: self.arrays.clone(),
+            cardinality: self.cardinality,
+            visibility: Some(visibility),
+        }
+    }
+
     pub(crate) fn array_at(&self, idx: usize) -> Result<ArrayRef> {
         self.arrays.get(idx).cloned().ok_or_else(|| {
             InternalError(format!(
