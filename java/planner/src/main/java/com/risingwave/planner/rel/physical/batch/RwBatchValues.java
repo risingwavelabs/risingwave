@@ -26,7 +26,7 @@ public class RwBatchValues extends Values implements RisingWaveBatchPhyRel {
 
   @Override
   public PlanNode serialize() {
-    throw new UnsupportedOperationException();
+    throw new UnsupportedOperationException("RwBatchValues#serialize is not supported");
   }
 
   public static class BatchValuesConverterRule extends ConverterRule {

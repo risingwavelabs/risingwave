@@ -1,7 +1,7 @@
 package com.risingwave.execution.handler;
 
 import com.risingwave.common.config.Configuration;
-import com.risingwave.common.config.FrontendServerConfigurations;
+import com.risingwave.common.config.LeaderServerConfigurations;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.proto.computenode.CreateTaskRequest;
@@ -21,14 +21,12 @@ public class RpcExecutorImpl implements RpcExecutor {
   private static final Logger LOGGER = LoggerFactory.getLogger(QueryHandler.class);
   private Channel channel;
 
-  public RpcExecutorImpl(Configuration configuration) {
+  public RpcExecutorImpl(Configuration cfg) {
+    // TODO: Choose a random gather node.
+    String gatherNodeAddress = cfg.get(LeaderServerConfigurations.COMPUTE_NODES).get(0);
+
     // Prepare channel. FIXME: No TLS Support Yet.
-    channel =
-        ManagedChannelBuilder.forAddress(
-                "localhost",
-                configuration.get(FrontendServerConfigurations.COMPUTE_NODE_SERVER_PORT))
-            .usePlaintext()
-            .build();
+    channel = ManagedChannelBuilder.forTarget(gatherNodeAddress).usePlaintext().build();
   }
 
   @Override

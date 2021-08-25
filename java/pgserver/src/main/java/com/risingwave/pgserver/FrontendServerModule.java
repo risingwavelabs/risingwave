@@ -6,6 +6,7 @@ import com.risingwave.catalog.CatalogService;
 import com.risingwave.catalog.SimpleCatalogService;
 import com.risingwave.common.config.Configuration;
 import com.risingwave.common.config.FrontendServerConfigurations;
+import com.risingwave.common.config.LeaderServerConfigurations;
 import com.risingwave.execution.handler.DefaultSqlHandlerFactory;
 import com.risingwave.execution.handler.SqlHandlerFactory;
 import com.risingwave.pgserver.database.RisingWaveDatabaseManager;
@@ -15,6 +16,10 @@ import javax.inject.Singleton;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * This module produces server-level singletons, which can be referenced by other classes via
+ * com.google.inject.Inject annotated methods.
+ */
 public class FrontendServerModule extends AbstractModule {
   private static final Logger LOGGER = LoggerFactory.getLogger(FrontendServerModule.class);
   private final FrontendServerOptions options;
@@ -33,7 +38,11 @@ public class FrontendServerModule extends AbstractModule {
   @Singleton
   Configuration systemConfig() {
     LOGGER.info("Loading server configuration at {}", options.configFile);
-    return Configuration.load(options.configFile, FrontendServerConfigurations.class);
+    if (!options.combineLeader) {
+      return Configuration.load(options.configFile, FrontendServerConfigurations.class);
+    }
+    return Configuration.load(
+        options.configFile, FrontendServerConfigurations.class, LeaderServerConfigurations.class);
   }
 
   @Provides

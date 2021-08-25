@@ -15,14 +15,4 @@ public class FrontendServerConfigurations {
           .withConverter(INT_PARSER)
           .withValidator(intRangeValidator(2000, 9000))
           .build();
-
-  @Config
-  public static final ConfigEntry<Integer> COMPUTE_NODE_SERVER_PORT =
-      ConfigEntry.<Integer>builder("risingwave.computenode.port")
-          .setOptional(true)
-          .withDefaultValue(5433)
-          .withDoc("Compute node server port")
-          .withConverter(INT_PARSER)
-          .withValidator(intRangeValidator(2000, 9000))
-          .build();
 }

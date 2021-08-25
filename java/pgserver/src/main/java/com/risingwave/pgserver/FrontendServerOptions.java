@@ -15,6 +15,13 @@ public class FrontendServerOptions extends OptionsBase {
       defaultValue = "")
   public String configFile;
 
+  @Option(
+      name = "combine-leader",
+      help = "Whether to combine the leader's functionalities into the frontend server",
+      category = "startup",
+      defaultValue = "true")
+  public boolean combineLeader;
+
   public boolean isValid() {
     return configFile != null && !configFile.isEmpty();
   }

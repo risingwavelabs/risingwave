@@ -6,6 +6,7 @@ import static java.lang.reflect.Modifier.isFinal;
 import static java.lang.reflect.Modifier.isPublic;
 import static java.lang.reflect.Modifier.isStatic;
 
+import com.google.common.base.MoreObjects;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import java.io.FileInputStream;
@@ -31,6 +32,15 @@ public class Configuration {
     setRawValue(key, value);
   }
 
+  @Override
+  public String toString() {
+    var helper = MoreObjects.toStringHelper("Configuration");
+    for (var entry : confData.entrySet()) {
+      helper.add(entry.getKey(), entry.getValue());
+    }
+    return helper.toString();
+  }
+
   private Object getRawValue(ConfigEntry<?> entry) {
     Object rawValue = confData.getOrDefault(entry.getKey(), entry.getDefaultValue());
     if (rawValue == null) {
@@ -52,22 +62,25 @@ public class Configuration {
     confData.put(key.getKey(), value);
   }
 
-  public static Configuration load(String filename, Class<?> klass) {
+  public static Configuration load(String filename, Class<?>... classes) {
     try (FileInputStream fin = new FileInputStream(filename)) {
-      return load(fin, klass);
+      return load(fin, classes);
     } catch (Exception e) {
       throw new PgException(INTERNAL_ERROR, e);
     }
   }
 
-  public static Configuration load(InputStream in, Class<?> klass) {
+  // Integrate configuration classes and load the corresponding values.
+  public static Configuration load(InputStream in, Class<?>... classes) {
     try {
       Properties props = new Properties();
       props.load(in);
 
       Configuration configuration = new Configuration();
-      List<ConfigEntry<?>> configEntries = loadConfigEntries(klass);
-      configEntries.forEach(entry -> configuration.setRawValue(entry, entry.getValue(props)));
+      for (var klass : classes) {
+        List<ConfigEntry<?>> configEntries = loadConfigEntries(klass);
+        configEntries.forEach(entry -> configuration.setRawValue(entry, entry.getValue(props)));
+      }
 
       return configuration;
     } catch (IOException e) {

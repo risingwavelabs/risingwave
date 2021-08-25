@@ -6,4 +6,7 @@ dependencies {
 
     // Add dependencies
     api("org.apache.calcite:calcite-core")
+
+    testImplementation("org.junit.jupiter:junit-jupiter-api")
+    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")
 }

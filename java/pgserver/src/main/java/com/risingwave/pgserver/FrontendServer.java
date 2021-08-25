@@ -20,11 +20,12 @@ public class FrontendServer {
       return;
     }
 
-    Injector injector = Guice.createInjector(new FrontendServerModule(options));
+    var frontendMod = new FrontendServerModule(options);
+    Injector injector = Guice.createInjector(frontendMod);
 
     PgServer server = injector.getInstance(PgServer.class);
     new Thread(server::serve, "PG Server").start();
-    LOGGER.info("Frontend server started..");
+    LOGGER.info("Frontend server started: {}", frontendMod.systemConfig().toString());
   }
 
   private static void printUsage(OptionsParser parser) {
