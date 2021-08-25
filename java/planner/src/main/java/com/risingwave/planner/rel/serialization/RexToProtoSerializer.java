@@ -6,6 +6,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.protobuf.Any;
 import com.google.protobuf.ByteString;
 import com.risingwave.common.datatype.RisingWaveDataType;
+import com.risingwave.common.datatype.RisingWaveTypeFactory;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.proto.data.DataType;
@@ -13,6 +14,7 @@ import com.risingwave.proto.expr.ConstantValue;
 import com.risingwave.proto.expr.ExprNode;
 import com.risingwave.proto.expr.FunctionCall;
 import com.risingwave.proto.expr.InputRefExpr;
+import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
@@ -24,6 +26,7 @@ import org.apache.calcite.rex.RexInputRef;
 import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexVisitorImpl;
 import org.apache.calcite.sql.SqlKind;
+import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.util.NlsString;
 
 public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
@@ -93,8 +96,6 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
                   "RexLiteral return a null value in byte array serialization!"));
           break;
         }
-        // FIXME: Currently decimal use the same layout as double.
-      case DECIMAL:
       case DOUBLE:
         {
           bb = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN);
@@ -102,6 +103,13 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
               requireNonNull(
                   val.getValueAs(Double.class),
                   "RexLiteral return a null value in byte array serialization!"));
+          break;
+        }
+      case DECIMAL:
+        {
+          bb =
+              ByteBuffer.wrap(
+                  val.getValueAs(BigDecimal.class).toString().getBytes(StandardCharsets.UTF_8));
           break;
         }
       case CHAR:
@@ -120,8 +128,17 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
 
   @Override
   public ExprNode visitLiteral(RexLiteral literal) {
-    DataType protoDataType = ((RisingWaveDataType) literal.getType()).getProtobufType();
-
+    RisingWaveDataType dataType = (RisingWaveDataType) literal.getType();
+    if (dataType.getSqlTypeName() == SqlTypeName.DECIMAL) {
+      // Note that the BigDecimal seems to define negative scale value in the doc, which is
+      // inconsistent with PG. Currently we do not allow scale to be negative.
+      var decimalLiteral = literal.getValueAs(BigDecimal.class);
+      dataType =
+          new RisingWaveTypeFactory()
+              .createSqlType(
+                  SqlTypeName.DECIMAL, decimalLiteral.precision(), decimalLiteral.scale());
+    }
+    DataType protoDataType = dataType.getProtobufType();
     return ExprNode.newBuilder()
         .setExprType(ExprNode.ExprNodeType.CONSTANT_VALUE)
         .setBody(

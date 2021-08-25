@@ -77,12 +77,12 @@ RwBatchInsertValues(table=[customer], values=[((149601,'Customer#000149601':CHAR
         "exprType": "CONSTANT_VALUE",
         "body": {
           "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
-          "body": "QK64UeuFHrg="
+          "body": "MzkzMi4xNg=="
         },
         "returnType": {
           "typeName": "DECIMAL",
-          "precision": 147455,
-          "scale": 16383
+          "precision": 6,
+          "scale": 2
         }
       }, {
         "exprType": "CONSTANT_VALUE",

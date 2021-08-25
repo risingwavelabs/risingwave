@@ -61,7 +61,7 @@ public class RwBatchInsertValues extends AbstractRelNode implements RisingWaveBa
       InsertValueNode.ExprTuple.Builder exprTupleBuilder = InsertValueNode.ExprTuple.newBuilder();
       for (int j = 0; j < tuple.size(); ++j) {
         AddCastVisitor addCastVisitor = new AddCastVisitor(getCluster().getRexBuilder());
-        RexNode value = tuples.get(i).get(j).accept(addCastVisitor);
+        RexNode value = tuple.get(j).accept(addCastVisitor);
 
         RexToProtoSerializer rexToProtoSerializer = new RexToProtoSerializer();
 
