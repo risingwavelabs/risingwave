@@ -236,7 +236,7 @@ impl<T: PrimitiveDataType> PrimitiveArrayBuilder<T> {
         Ok(())
     }
 
-    fn append_value(&mut self, value: Option<T::N>) -> Result<()> {
+    pub(crate) fn append_value(&mut self, value: Option<T::N>) -> Result<()> {
         match value {
             Some(v) => {
                 self.buffer.push(v);

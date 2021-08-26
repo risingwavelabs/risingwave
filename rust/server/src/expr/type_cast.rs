@@ -28,9 +28,8 @@ impl Expression for TypeCastExpression {
     }
 
     fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef> {
-        let child_data_type = self.child.return_type_ref();
         let child_expr = self.child.eval(input)?;
-        cast::vec_cast(child_expr, child_data_type, self.return_type.clone())
+        cast::vec_cast(child_expr, self.return_type.clone())
     }
 }
 

@@ -123,6 +123,12 @@ public class Values {
     };
   }
 
+  public static PgValue createDate(int v) {
+    // Note: v represents number of days since 1970-01-01.
+    // Convert it to miliseconds by multiply 86400_000.
+    return createDate(new Date(((long) v) * 86400_000));
+  }
+
   public static PgValue createTimestamp(Timestamp v) {
     return new TimestampValue(v);
   }

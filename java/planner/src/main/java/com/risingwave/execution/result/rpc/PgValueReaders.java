@@ -55,6 +55,8 @@ public class PgValueReaders {
       case BOOLEAN:
         return createValueReader(
             Values::createBoolean, new BooleanBufferReader(valuesStream), nullBitmap);
+      case DATE:
+        return createValueReader(Values::createDate, new IntBufferReader(valuesStream), nullBitmap);
       default:
         throw new PgException(
             PgErrorCode.INTERNAL_ERROR, "Unsupported column type: %s", column.getColumnType());
