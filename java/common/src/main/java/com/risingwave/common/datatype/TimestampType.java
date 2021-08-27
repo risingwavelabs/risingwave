@@ -19,6 +19,7 @@ public class TimestampType extends PrimitiveTypeBase {
     super(nullable, SqlTypeName.TIMESTAMP);
     checkArgument(precision >= 0, "precision can't be negative: {}", precision);
     this.precision = precision;
+    resetDigest();
   }
 
   @Override

@@ -27,6 +27,7 @@ import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexVisitorImpl;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.type.SqlTypeName;
+import org.apache.calcite.util.DateString;
 import org.apache.calcite.util.NlsString;
 
 public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
@@ -118,6 +119,30 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
           bb =
               ByteBuffer.wrap(
                   val.getValueAs(NlsString.class).getValue().getBytes(StandardCharsets.UTF_8));
+          break;
+        }
+      case DATE:
+        {
+          bb =
+              ByteBuffer.wrap(
+                  val.getValueAs(DateString.class).toString().getBytes(StandardCharsets.UTF_8));
+          break;
+        }
+      case INTERVAL:
+        {
+          switch (dataType.getIntervalType()) {
+            case YEAR:
+              {
+                bb = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN);
+                bb.putInt(
+                    requireNonNull(
+                        val.getValueAs(Integer.class),
+                        "RexLiteral return a null value in byte array serialization!"));
+                break;
+              }
+            default:
+              throw new PgException(PgErrorCode.INTERNAL_ERROR, "Unsupported type: %s", dataType);
+          }
           break;
         }
       default:

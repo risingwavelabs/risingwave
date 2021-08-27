@@ -34,7 +34,7 @@ RwBatchGather
     RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}])
       RwBatchHashAgg(group=[{}], revenue=[SUM($0)])
         RwBatchProject($f0=[*($1, $2)])
-          RwBatchFilter(condition=[AND(>=($3, 1994-01-01), <($3, +(1994-01-01, 12:INTERVAL YEAR)), OR(AND(>=($2, -(8E-2:DOUBLE, 1E-2:DOUBLE)), <=($2, +(8E-2:DOUBLE, 1E-2:DOUBLE))), AND(>=($2, +(8E-2:DOUBLE, 1E-2:DOUBLE)), <=($2, -(8E-2:DOUBLE, 1E-2:DOUBLE)))), <($0, 24))])
+          RwBatchFilter(condition=[AND(>=($3, 1994-01-01), <(CAST($3):TIMESTAMP(0), +(1994-01-01, 12:INTERVAL YEAR)), OR(AND(>=($2, -(8E-2:DOUBLE, 1E-2:DOUBLE)), <=($2, +(8E-2:DOUBLE, 1E-2:DOUBLE))), AND(>=($2, +(8E-2:DOUBLE, 1E-2:DOUBLE)), <=($2, -(8E-2:DOUBLE, 1E-2:DOUBLE)))), <($0, 24))])
             RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_quantity,l_extendedprice,l_discount,l_shipdate])
 ]]>
         </Resource>

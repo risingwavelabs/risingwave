@@ -141,8 +141,459 @@ where
             <![CDATA[
 RwBatchHashAgg(group=[{}], revenue=[SUM($0)])
   RwBatchProject($f0=[*($1, $2)])
-    RwBatchFilter(condition=[AND(>=($3, 1994-01-01), <($3, +(1994-01-01, 12:INTERVAL YEAR)), OR(AND(>=($2, -(8E-2:DOUBLE, 1E-2:DOUBLE)), <=($2, +(8E-2:DOUBLE, 1E-2:DOUBLE))), AND(>=($2, +(8E-2:DOUBLE, 1E-2:DOUBLE)), <=($2, -(8E-2:DOUBLE, 1E-2:DOUBLE)))), <($0, 24))])
+    RwBatchFilter(condition=[AND(>=($3, 1994-01-01), <(CAST($3):TIMESTAMP(0), +(1994-01-01, 12:INTERVAL YEAR)), OR(AND(>=($2, -(8E-2:DOUBLE, 1E-2:DOUBLE)), <=($2, +(8E-2:DOUBLE, 1E-2:DOUBLE))), AND(>=($2, +(8E-2:DOUBLE, 1E-2:DOUBLE)), <=($2, -(8E-2:DOUBLE, 1E-2:DOUBLE)))), <($0, 24))])
       RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_quantity,l_extendedprice,l_discount,l_shipdate])
+]]>
+        </Resource>
+        <Resource name="json">
+            <![CDATA[
+{
+  "nodeType": "SIMPLE_AGG",
+  "body": {
+    "@type": "type.googleapis.com/risingwave.executor.proto.SimpleAggNode",
+    "aggregations": [{
+      "exprType": "SUM",
+      "body": {
+        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+        "children": [{
+          "exprType": "INPUT_REF",
+          "body": {
+            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+          },
+          "returnType": {
+            "typeName": "DECIMAL",
+            "precision": 19,
+            "scale": 19,
+            "isNullable": true
+          }
+        }]
+      },
+      "returnType": {
+        "typeName": "DECIMAL",
+        "precision": 19,
+        "scale": 19,
+        "isNullable": true
+      }
+    }]
+  },
+  "children": [{
+    "nodeType": "PROJECT",
+    "body": {
+      "@type": "type.googleapis.com/risingwave.executor.proto.ProjectNode",
+      "selectList": [{
+        "exprType": "MULTIPLY",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+          "children": [{
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+              "columnIdx": 1
+            },
+            "returnType": {
+              "typeName": "DECIMAL",
+              "precision": 147455,
+              "scale": 16383,
+              "isNullable": true
+            }
+          }, {
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+              "columnIdx": 2
+            },
+            "returnType": {
+              "typeName": "DECIMAL",
+              "precision": 147455,
+              "scale": 16383,
+              "isNullable": true
+            }
+          }]
+        },
+        "returnType": {
+          "typeName": "DECIMAL",
+          "precision": 19,
+          "scale": 19,
+          "isNullable": true
+        }
+      }]
+    },
+    "children": [{
+      "nodeType": "FILTER",
+      "body": {
+        "@type": "type.googleapis.com/risingwave.executor.proto.FilterNode",
+        "searchCondition": {
+          "exprType": "AND",
+          "body": {
+            "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+            "children": [{
+              "exprType": "GREATER_THAN_OR_EQUAL",
+              "body": {
+                "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+                "children": [{
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+                    "columnIdx": 3
+                  },
+                  "returnType": {
+                    "typeName": "DATE",
+                    "isNullable": true
+                  }
+                }, {
+                  "exprType": "CONSTANT_VALUE",
+                  "body": {
+                    "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+                    "body": "MTk5NC0wMS0wMQ=="
+                  },
+                  "returnType": {
+                    "typeName": "DATE"
+                  }
+                }]
+              },
+              "returnType": {
+                "typeName": "BOOLEAN",
+                "isNullable": true
+              }
+            }, {
+              "exprType": "LESS_THAN",
+              "body": {
+                "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+                "children": [{
+                  "exprType": "CAST",
+                  "body": {
+                    "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+                    "children": [{
+                      "exprType": "INPUT_REF",
+                      "body": {
+                        "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+                        "columnIdx": 3
+                      },
+                      "returnType": {
+                        "typeName": "DATE",
+                        "isNullable": true
+                      }
+                    }]
+                  },
+                  "returnType": {
+                    "typeName": "TIMESTAMP",
+                    "isNullable": true
+                  }
+                }, {
+                  "exprType": "ADD",
+                  "body": {
+                    "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+                    "children": [{
+                      "exprType": "CONSTANT_VALUE",
+                      "body": {
+                        "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+                        "body": "MTk5NC0wMS0wMQ=="
+                      },
+                      "returnType": {
+                        "typeName": "DATE"
+                      }
+                    }, {
+                      "exprType": "CONSTANT_VALUE",
+                      "body": {
+                        "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+                        "body": "AAAADA=="
+                      },
+                      "returnType": {
+                        "typeName": "INTERVAL",
+                        "intervalType": "YEAR"
+                      }
+                    }]
+                  },
+                  "returnType": {
+                    "typeName": "TIMESTAMP"
+                  }
+                }]
+              },
+              "returnType": {
+                "typeName": "BOOLEAN",
+                "isNullable": true
+              }
+            }, {
+              "exprType": "OR",
+              "body": {
+                "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+                "children": [{
+                  "exprType": "AND",
+                  "body": {
+                    "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+                    "children": [{
+                      "exprType": "GREATER_THAN_OR_EQUAL",
+                      "body": {
+                        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+                        "children": [{
+                          "exprType": "INPUT_REF",
+                          "body": {
+                            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+                            "columnIdx": 2
+                          },
+                          "returnType": {
+                            "typeName": "DECIMAL",
+                            "precision": 147455,
+                            "scale": 16383,
+                            "isNullable": true
+                          }
+                        }, {
+                          "exprType": "SUBTRACT",
+                          "body": {
+                            "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+                            "children": [{
+                              "exprType": "CONSTANT_VALUE",
+                              "body": {
+                                "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+                                "body": "P7R64UeuFHs="
+                              },
+                              "returnType": {
+                                "typeName": "DOUBLE"
+                              }
+                            }, {
+                              "exprType": "CONSTANT_VALUE",
+                              "body": {
+                                "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+                                "body": "P4R64UeuFHs="
+                              },
+                              "returnType": {
+                                "typeName": "DOUBLE"
+                              }
+                            }]
+                          },
+                          "returnType": {
+                            "typeName": "DOUBLE"
+                          }
+                        }]
+                      },
+                      "returnType": {
+                        "typeName": "BOOLEAN",
+                        "isNullable": true
+                      }
+                    }, {
+                      "exprType": "LESS_THAN_OR_EQUAL",
+                      "body": {
+                        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+                        "children": [{
+                          "exprType": "INPUT_REF",
+                          "body": {
+                            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+                            "columnIdx": 2
+                          },
+                          "returnType": {
+                            "typeName": "DECIMAL",
+                            "precision": 147455,
+                            "scale": 16383,
+                            "isNullable": true
+                          }
+                        }, {
+                          "exprType": "ADD",
+                          "body": {
+                            "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+                            "children": [{
+                              "exprType": "CONSTANT_VALUE",
+                              "body": {
+                                "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+                                "body": "P7R64UeuFHs="
+                              },
+                              "returnType": {
+                                "typeName": "DOUBLE"
+                              }
+                            }, {
+                              "exprType": "CONSTANT_VALUE",
+                              "body": {
+                                "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+                                "body": "P4R64UeuFHs="
+                              },
+                              "returnType": {
+                                "typeName": "DOUBLE"
+                              }
+                            }]
+                          },
+                          "returnType": {
+                            "typeName": "DOUBLE"
+                          }
+                        }]
+                      },
+                      "returnType": {
+                        "typeName": "BOOLEAN",
+                        "isNullable": true
+                      }
+                    }]
+                  },
+                  "returnType": {
+                    "typeName": "BOOLEAN",
+                    "isNullable": true
+                  }
+                }, {
+                  "exprType": "AND",
+                  "body": {
+                    "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+                    "children": [{
+                      "exprType": "GREATER_THAN_OR_EQUAL",
+                      "body": {
+                        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+                        "children": [{
+                          "exprType": "INPUT_REF",
+                          "body": {
+                            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+                            "columnIdx": 2
+                          },
+                          "returnType": {
+                            "typeName": "DECIMAL",
+                            "precision": 147455,
+                            "scale": 16383,
+                            "isNullable": true
+                          }
+                        }, {
+                          "exprType": "ADD",
+                          "body": {
+                            "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+                            "children": [{
+                              "exprType": "CONSTANT_VALUE",
+                              "body": {
+                                "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+                                "body": "P7R64UeuFHs="
+                              },
+                              "returnType": {
+                                "typeName": "DOUBLE"
+                              }
+                            }, {
+                              "exprType": "CONSTANT_VALUE",
+                              "body": {
+                                "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+                                "body": "P4R64UeuFHs="
+                              },
+                              "returnType": {
+                                "typeName": "DOUBLE"
+                              }
+                            }]
+                          },
+                          "returnType": {
+                            "typeName": "DOUBLE"
+                          }
+                        }]
+                      },
+                      "returnType": {
+                        "typeName": "BOOLEAN",
+                        "isNullable": true
+                      }
+                    }, {
+                      "exprType": "LESS_THAN_OR_EQUAL",
+                      "body": {
+                        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+                        "children": [{
+                          "exprType": "INPUT_REF",
+                          "body": {
+                            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+                            "columnIdx": 2
+                          },
+                          "returnType": {
+                            "typeName": "DECIMAL",
+                            "precision": 147455,
+                            "scale": 16383,
+                            "isNullable": true
+                          }
+                        }, {
+                          "exprType": "SUBTRACT",
+                          "body": {
+                            "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+                            "children": [{
+                              "exprType": "CONSTANT_VALUE",
+                              "body": {
+                                "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+                                "body": "P7R64UeuFHs="
+                              },
+                              "returnType": {
+                                "typeName": "DOUBLE"
+                              }
+                            }, {
+                              "exprType": "CONSTANT_VALUE",
+                              "body": {
+                                "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+                                "body": "P4R64UeuFHs="
+                              },
+                              "returnType": {
+                                "typeName": "DOUBLE"
+                              }
+                            }]
+                          },
+                          "returnType": {
+                            "typeName": "DOUBLE"
+                          }
+                        }]
+                      },
+                      "returnType": {
+                        "typeName": "BOOLEAN",
+                        "isNullable": true
+                      }
+                    }]
+                  },
+                  "returnType": {
+                    "typeName": "BOOLEAN",
+                    "isNullable": true
+                  }
+                }]
+              },
+              "returnType": {
+                "typeName": "BOOLEAN",
+                "isNullable": true
+              }
+            }, {
+              "exprType": "LESS_THAN",
+              "body": {
+                "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+                "children": [{
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+                  },
+                  "returnType": {
+                    "typeName": "DECIMAL",
+                    "precision": 147455,
+                    "scale": 16383,
+                    "isNullable": true
+                  }
+                }, {
+                  "exprType": "CONSTANT_VALUE",
+                  "body": {
+                    "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+                    "body": "AAAAGA=="
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  }
+                }]
+              },
+              "returnType": {
+                "typeName": "BOOLEAN",
+                "isNullable": true
+              }
+            }]
+          },
+          "returnType": {
+            "typeName": "BOOLEAN",
+            "isNullable": true
+          }
+        }
+      },
+      "children": [{
+        "nodeType": "SEQ_SCAN",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",
+          "tableRefId": {
+            "schemaRefId": {
+              "databaseRefId": {
+              }
+            },
+            "tableId": 5
+          },
+          "columnIds": [4, 5, 6, 10]
+        }
+      }]
+    }]
+  }]
+}
 ]]>
         </Resource>
     </TestCase>
