@@ -1,5 +1,5 @@
 use std::any::Any;
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 
 use protobuf::well_known_types::Any as AnyProto;
@@ -70,11 +70,18 @@ impl UTF8Array {
         } else {
             let offset_buffer_data = data.buffers()[0].as_slice();
             ensure!(offset_buffer_data.len() >= size_of::<u32>());
-            ensure!(
-                as_u32_le(
-                    offset_buffer_data[offset_buffer_data.len() - size_of::<u32>()..].as_ref()
-                ) == data.buffers()[1].len() as u32
+
+            let data_offset_len = u32::from_be_bytes(
+                offset_buffer_data[offset_buffer_data.len() - size_of::<u32>()..]
+                    .try_into()
+                    .map_err(|_| {
+                        RwError::from(InternalError(
+                            "could not convert offset buffer slice to array".into(),
+                        ))
+                    })?,
             );
+
+            ensure!(data_offset_len == data.buffers()[1].len() as u32);
         }
 
         Ok(Self { data })
@@ -123,7 +130,8 @@ impl UTF8ArrayBuilder {
     fn append_str(&mut self, value: Option<&str>) -> Result<()> {
         match value {
             Some(v) => {
-                ensure!(v.len() <= self.width);
+                // TODO (peng) for now we don't care about column description for char(n)
+                // ensure!(v.len() <= self.width);
                 self.data_buffer.extend_from_slice(v.as_bytes());
                 self.offset_buffer.push(self.data_buffer.len() as u32);
                 self.null_bitmap_buffer.push(true);
@@ -159,7 +167,17 @@ impl ArrayBuilder for UTF8ArrayBuilder {
     fn finish(self: Box<Self>) -> Result<ArrayRef> {
         let cardinality = self.offset_buffer.len() - 1;
 
-        let offset_buffer = Buffer::from_slice(self.offset_buffer)?;
+        let offset_buffer = Buffer::from_slice(
+            self.offset_buffer
+                .iter()
+                .map(|x| x.to_be_bytes())
+                .collect::<Vec<[u8; size_of::<u32>()]>>()
+                .iter()
+                .flat_map(|e| e.iter())
+                .cloned()
+                .collect::<Vec<u8>>(),
+        )?;
+
         let data_buffer = Buffer::from_slice(self.data_buffer)?;
         let null_bitmap = Bitmap::from_vec(self.null_bitmap_buffer)?;
 
@@ -217,6 +235,7 @@ impl Array for UTF8Array {
             .collect();
 
         column.set_values(values);
+        column.set_cardinality(self.data.cardinality() as u32);
 
         AnyProto::pack(&column).map_err(|e| RwError::from(ProtobufError(e)))
     }
@@ -226,14 +245,6 @@ struct UTF8ArrayIter<'a> {
     array: &'a UTF8Array,
     cur_pos: usize,
     end_pos: usize,
-}
-
-// TODO: use u32::from_le_bytes
-fn as_u32_le(array: &[u8]) -> u32 {
-    (array[0] as u32)
-        + ((array[1] as u32) << 8)
-        + ((array[2] as u32) << 16)
-        + ((array[3] as u32) << 24)
 }
 
 impl<'a> Iterator for UTF8ArrayIter<'a> {
@@ -260,11 +271,17 @@ impl<'a> Iterator for UTF8ArrayIter<'a> {
         let offset_buffer = unsafe { self.array.data.buffer_at_unchecked(0) };
         let data_buffer = unsafe { self.array.data.buffer_at_unchecked(1) };
 
-        let start_pos_range = offset_start_pos..offset_start_pos + offset_size;
-        let end_pos_range = offset_end_pos..offset_end_pos + offset_size;
+        let buf_start_pos = u32::from_be_bytes(
+            offset_buffer.as_slice()[offset_start_pos..offset_start_pos + offset_size]
+                .try_into()
+                .expect("slice with incorrect length"),
+        ) as usize;
 
-        let buf_start_pos = as_u32_le(offset_buffer.as_slice()[start_pos_range].as_ref()) as usize;
-        let buf_end_pos = as_u32_le(offset_buffer.as_slice()[end_pos_range].as_ref()) as usize;
+        let buf_end_pos = u32::from_be_bytes(
+            offset_buffer.as_slice()[offset_end_pos..offset_end_pos + offset_size]
+                .try_into()
+                .expect("slice with incorrect length"),
+        ) as usize;
 
         let data_buf = &data_buffer.as_slice()[buf_start_pos..buf_end_pos];
 
@@ -361,10 +378,7 @@ mod tests {
         assert!(offset_buffer_data.len() >= (size_of::<u32>() * 1));
         let array = offset_buffer_data[offset_buffer_data.len() - size_of::<u32>()..].as_ref();
         assert_eq!(
-            (array[0] as u32)
-                + ((array[1] as u32) << 8)
-                + ((array[2] as u32) << 16)
-                + ((array[3] as u32) << 24),
+            as_u32_be(array),
             result_array.data.buffers()[1].len() as u32
         );
 
@@ -375,6 +389,13 @@ mod tests {
                 .expect("Failed to create string iterator")
                 .collect::<Vec<Option<&str>>>()
         );
+    }
+
+    fn as_u32_be(array: &[u8]) -> u32 {
+        (array[3] as u32)
+            + ((array[2] as u32) << 8)
+            + ((array[1] as u32) << 16)
+            + ((array[0] as u32) << 24)
     }
 
     #[test]
@@ -434,6 +455,8 @@ mod tests {
         assert_eq!(
             vec![1u8, 0u8, 1u8, 0u8],
             result_proto.get_null_bitmap().get_body()[0..input.len()]
-        )
+        );
+
+        assert_eq!(input.len(), result_proto.get_cardinality() as usize);
     }
 }

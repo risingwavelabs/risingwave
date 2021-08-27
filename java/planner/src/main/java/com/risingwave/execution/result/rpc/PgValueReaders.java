@@ -1,7 +1,5 @@
 package com.risingwave.execution.result.rpc;
 
-import static com.risingwave.execution.result.rpc.PrimitiveValueReader.createValueReader;
-
 import com.google.protobuf.Any;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
@@ -12,22 +10,63 @@ import com.risingwave.execution.result.rpc.primitive.FloatBufferReader;
 import com.risingwave.execution.result.rpc.primitive.IntBufferReader;
 import com.risingwave.execution.result.rpc.primitive.LongBufferReader;
 import com.risingwave.execution.result.rpc.primitive.ShortBufferReader;
+import com.risingwave.execution.result.rpc.string.StringValueReader;
 import com.risingwave.pgwire.types.Values;
+import com.risingwave.proto.data.Buffer;
 import com.risingwave.proto.data.Column;
 import java.io.InputStream;
+import java.util.List;
 import javax.annotation.Nullable;
 
 public class PgValueReaders {
   public static PgValueReader create(Any column) {
     try {
       if (column.is(Column.class)) {
-        return createPrimitiveReader(column.unpack(Column.class));
+        Column unpackedColumn = column.unpack(Column.class);
+
+        switch (unpackedColumn.getColumnType().getTypeName()) {
+          case INT16:
+          case INT32:
+          case INT64:
+          case FLOAT:
+          case DOUBLE:
+          case BOOLEAN:
+          case DATE:
+            return createPrimitiveReader(unpackedColumn);
+          case CHAR:
+          case VARCHAR:
+            return createStringReader(unpackedColumn);
+          default:
+            break;
+        }
       }
 
       throw new PgException(
           PgErrorCode.INTERNAL_ERROR, "Unsupported column type: %s", column.getTypeUrl());
     } catch (Exception e) {
       throw new PgException(PgErrorCode.INTERNAL_ERROR, e);
+    }
+  }
+
+  private static PgValueReader createStringReader(Column column) {
+    BooleanBufferReader nullBitmap = getNullBitmap(column);
+    List<Buffer> bufferList = column.getValuesList();
+
+    if (bufferList.size() < 2) {
+      throw new PgException(PgErrorCode.INTERNAL_ERROR, "Column buffer illegal");
+    }
+
+    InputStream offsetStream = BufferReaders.decode(column.getValues(0));
+    InputStream dataStream = BufferReaders.decode(column.getValues(1));
+
+    switch (column.getColumnType().getTypeName()) {
+      case CHAR:
+      case VARCHAR:
+        return StringValueReader.createValueReader(
+            Values::createString, new IntBufferReader(offsetStream), dataStream, nullBitmap);
+      default:
+        throw new PgException(
+            PgErrorCode.INTERNAL_ERROR, "Unsupported column type: %s", column.getColumnType());
     }
   }
 
@@ -39,24 +78,27 @@ public class PgValueReaders {
 
     switch (column.getColumnType().getTypeName()) {
       case INT16:
-        return createValueReader(
+        return PrimitiveValueReader.createValueReader(
             Values::createSmallInt, new ShortBufferReader(valuesStream), nullBitmap);
       case INT32:
-        return createValueReader(Values::createInt, new IntBufferReader(valuesStream), nullBitmap);
+        return PrimitiveValueReader.createValueReader(
+            Values::createInt, new IntBufferReader(valuesStream), nullBitmap);
       case INT64:
-        return createValueReader(
+        return PrimitiveValueReader.createValueReader(
             Values::createBigInt, new LongBufferReader(valuesStream), nullBitmap);
       case FLOAT:
-        return createValueReader(
+        return PrimitiveValueReader.createValueReader(
             Values::createFloat, new FloatBufferReader(valuesStream), nullBitmap);
       case DOUBLE:
-        return createValueReader(
+        return PrimitiveValueReader.createValueReader(
             Values::createDouble, new DoubleBufferReader(valuesStream), nullBitmap);
       case BOOLEAN:
-        return createValueReader(
+        return PrimitiveValueReader.createValueReader(
             Values::createBoolean, new BooleanBufferReader(valuesStream), nullBitmap);
       case DATE:
-        return createValueReader(Values::createDate, new IntBufferReader(valuesStream), nullBitmap);
+        return PrimitiveValueReader.createValueReader(
+            Values::createDate, new IntBufferReader(valuesStream), nullBitmap);
+
       default:
         throw new PgException(
             PgErrorCode.INTERNAL_ERROR, "Unsupported column type: %s", column.getColumnType());
