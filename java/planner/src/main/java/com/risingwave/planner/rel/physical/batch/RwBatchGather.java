@@ -52,12 +52,14 @@ public class RwBatchGather extends SingleRel implements RisingWaveBatchPhyRel {
 
     @Override
     public @Nullable RelNode convert(RelNode rel) {
-      RwLogicalGather logical = (RwLogicalGather) rel;
-      RelTraitSet newTraitSet =
-          logical.getTraitSet().plus(BATCH_PHYSICAL).plus(RwDistributions.SINGLETON);
-      RelNode newInput = RelOptRule.convert(logical.getInput(), newTraitSet);
+      var logical = (RwLogicalGather) rel;
+      var inputRequiredTraits =
+          logical.getInput().getTraitSet().plus(BATCH_PHYSICAL).plus(RwDistributions.SINGLETON);
+      var newInput = RelOptRule.convert(logical.getInput(), inputRequiredTraits);
 
-      return new RwBatchGather(logical.getCluster(), newTraitSet, newInput);
+      var newTraits = logical.getTraitSet().plus(BATCH_PHYSICAL);
+
+      return new RwBatchGather(logical.getCluster(), newTraits, newInput);
     }
   }
 }

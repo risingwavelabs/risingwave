@@ -1,19 +1,5 @@
 <Root>
-    <TestCase name="select all columns from table">
-        <Resource name="sql">
-            <![CDATA[
-select * from supplier
-            ]]>
-        </Resource>
-        <Resource name="plan">
-            <![CDATA[
-RwBatchGather
-  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
-    RwBatchFilterScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_name,s_address,s_nationkey,s_phone,s_acctbal,s_comment])
-]]>
-        </Resource>
-    </TestCase>
-    <TestCase name="q1">
+    <TestCase name="tpch q1">
         <Resource name="sql">
             <![CDATA[
 select
@@ -53,33 +39,6 @@ RwBatchGather
                   RwBatchFilter(condition=[<=($6, -(1998-12-01, 6134400000:INTERVAL DAY))])
                     RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate])
             ]]>
-        </Resource>
-    </TestCase>
-    <TestCase name="q6">
-        <Resource name="sql">
-            <![CDATA[
-select
-	sum(l_extendedprice * l_discount) as revenue
-from
-	lineitem
-where
-	l_shipdate >= date '1994-01-01'
-	and l_shipdate < date '1994-01-01' + interval '1' year
-	and l_discount between 0.08 - 0.01 and 0.08 + 0.01
-	and l_quantity < 24;
-            ]]>
-        </Resource>
-        <Resource name="plan">
-            <![CDATA[
-RwBatchGather
-  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
-    RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
-      RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
-        RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
-          RwBatchProject($f0=[*($1, $2)])
-            RwBatchFilter(condition=[AND(>=($3, 1994-01-01), <(CAST($3):TIMESTAMP(0), +(1994-01-01, 12:INTERVAL YEAR)), OR(AND(>=($2, -(0.08:DECIMAL(3,2), 0.01:DECIMAL(3,2))), <=($2, +(0.08:DECIMAL(3,2), 0.01:DECIMAL(3,2)))), AND(>=($2, +(0.08:DECIMAL(3,2), 0.01:DECIMAL(3,2))), <=($2, -(0.08:DECIMAL(3,2), 0.01:DECIMAL(3,2))))), <($0, 24))])
-              RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_quantity,l_extendedprice,l_discount,l_shipdate])
-              ]]>
         </Resource>
     </TestCase>
 </Root>

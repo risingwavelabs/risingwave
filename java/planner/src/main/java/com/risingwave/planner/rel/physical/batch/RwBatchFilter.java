@@ -63,11 +63,14 @@ public class RwBatchFilter extends Filter implements RisingWaveBatchPhyRel {
 
     @Override
     public @Nullable RelNode convert(RelNode rel) {
-      RwLogicalFilter rwLogicalFilter = (RwLogicalFilter) rel;
-      RelTraitSet newTraitSet = rwLogicalFilter.getTraitSet().replace(BATCH_PHYSICAL);
-      RelNode newInput = RelOptRule.convert(rwLogicalFilter.getInput(), BATCH_PHYSICAL);
+      var rwLogicalFilter = (RwLogicalFilter) rel;
+      var requiredInputTrait = rwLogicalFilter.getInput().getTraitSet().plus(BATCH_PHYSICAL);
+      var newInput = RelOptRule.convert(rwLogicalFilter.getInput(), requiredInputTrait);
       return new RwBatchFilter(
-          rel.getCluster(), newTraitSet, newInput, rwLogicalFilter.getCondition());
+          rel.getCluster(),
+          rwLogicalFilter.getTraitSet().plus(BATCH_PHYSICAL),
+          newInput,
+          rwLogicalFilter.getCondition());
     }
   }
 }

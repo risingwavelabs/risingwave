@@ -1,14 +1,8 @@
 package com.risingwave.planner.rel.physical.batch;
 
 import static com.google.common.base.Preconditions.checkArgument;
-import static com.risingwave.execution.context.ExecutionContext.contextOf;
-import static com.risingwave.planner.planner.PlannerUtils.isSingleMode;
-import static com.risingwave.planner.rel.common.dist.RwDistributions.ANY;
-import static com.risingwave.planner.rel.common.dist.RwDistributions.SINGLETON;
-import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
 import com.google.protobuf.Any;
-import com.risingwave.planner.rel.logical.RwLogicalAggregate;
 import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
 import com.risingwave.proto.expr.ExprNode;
 import com.risingwave.proto.plan.HashAggNode;
@@ -17,10 +11,8 @@ import com.risingwave.proto.plan.SimpleAggNode;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
-import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelNode;
-import org.apache.calcite.rel.convert.ConverterRule;
 import org.apache.calcite.rel.core.Aggregate;
 import org.apache.calcite.rel.core.AggregateCall;
 import org.apache.calcite.rel.hint.RelHint;
@@ -30,7 +22,7 @@ import org.apache.calcite.util.ImmutableBitSet;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 public class RwBatchHashAgg extends Aggregate implements RisingWaveBatchPhyRel {
-  protected RwBatchHashAgg(
+  public RwBatchHashAgg(
       RelOptCluster cluster,
       RelTraitSet traitSet,
       List<RelHint> hints,
@@ -103,68 +95,5 @@ public class RwBatchHashAgg extends Aggregate implements RisingWaveBatchPhyRel {
       List<AggregateCall> aggCalls) {
     return new RwBatchHashAgg(
         getCluster(), traitSet, getHints(), input, groupSet, getGroupSets(), aggCalls);
-  }
-
-  public static class BatchHashAggConverterRule extends ConverterRule {
-    public static final BatchHashAggConverterRule INSTANCE =
-        Config.INSTANCE
-            .withInTrait(LOGICAL)
-            .withOutTrait(BATCH_PHYSICAL)
-            .withDescription("Logical aggregate to hash agg")
-            .withOperandSupplier(t -> t.operand(RwLogicalAggregate.class).anyInputs())
-            .as(Config.class)
-            .withRuleFactory(BatchHashAggConverterRule::new)
-            .toRule(BatchHashAggConverterRule.class);
-
-    protected BatchHashAggConverterRule(Config config) {
-      super(config);
-    }
-
-    @Override
-    public @Nullable RelNode convert(RelNode rel) {
-      RwLogicalAggregate rwLogicalAggregate = (RwLogicalAggregate) rel;
-
-      RelTraitSet newTraitSet = rwLogicalAggregate.getTraitSet().plus(BATCH_PHYSICAL);
-
-      boolean singleMode = isSingleMode(contextOf(rel.getCluster()));
-
-      RelNode newInput;
-      if (singleMode) {
-        newInput = RelOptRule.convert(rwLogicalAggregate.getInput(), newTraitSet);
-      } else {
-        if (rwLogicalAggregate.isSimpleAgg()) {
-          // TODO: Make this more robust
-          newTraitSet = newTraitSet.plus(ANY);
-          newInput = RelOptRule.convert(rwLogicalAggregate.getInput(), newTraitSet);
-
-          // Partial agg
-          var partialAgg =
-              new RwBatchHashAgg(
-                  rwLogicalAggregate.getCluster(),
-                  newTraitSet,
-                  rwLogicalAggregate.getHints(),
-                  newInput,
-                  rwLogicalAggregate.getGroupSet(),
-                  rwLogicalAggregate.getGroupSets(),
-                  rwLogicalAggregate.getAggCallList());
-
-          // Add exchange
-          newInput = RwBatchExchange.create(partialAgg, SINGLETON);
-          newTraitSet = newTraitSet.plus(SINGLETON);
-
-        } else {
-          throw new UnsupportedOperationException("Grouped hash agg not supported yet!");
-        }
-      }
-
-      return new RwBatchHashAgg(
-          rwLogicalAggregate.getCluster(),
-          newTraitSet,
-          rwLogicalAggregate.getHints(),
-          newInput,
-          rwLogicalAggregate.getGroupSet(),
-          rwLogicalAggregate.getGroupSets(),
-          rwLogicalAggregate.getAggCallList());
-    }
   }
 }

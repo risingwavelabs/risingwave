@@ -9,11 +9,9 @@ import org.apache.calcite.rel.type.RelDataTypeComparability;
 import org.apache.calcite.sql.type.SqlTypeName;
 
 public class DecimalType extends PrimitiveTypeBase {
-  // Default value for decimal type if do not specify precision or scale.
-  // 147455 = 16383 + 131072 (From postgresql doc:
-  // https://www.postgresql.org/docs/13/datatype-numeric.html)
-  private static final int DEFAULT_PRECISION = 147455;
-  private static final int DEFAULT_SCALE = 16383;
+  // Align with backend
+  public static final int MAX_PRECISION = 28;
+  public static final int MAX_SCALE = 27;
   private final int precision;
   private final int scale;
 
@@ -21,13 +19,27 @@ public class DecimalType extends PrimitiveTypeBase {
     super(nullable, SqlTypeName.DECIMAL);
     checkArgument(precision > 0, "precision must be positive: {}", precision);
     checkArgument(scale >= 0, "scale must not be negative: {}", scale);
+    checkArgument(precision > scale, "Scale %s is larger than precision %s", scale, precision);
     this.precision = precision;
     this.scale = scale;
     resetDigest();
   }
 
   public DecimalType(OptionalInt precision, OptionalInt scale) {
-    this(false, precision.orElse(DEFAULT_PRECISION), scale.orElse(DEFAULT_SCALE));
+    // According to
+    // https://www.postgresql.org/docs/current/datatype-numeric.html#DATATYPE-NUMERIC-DECIMAL,
+    // if precision is present, scale should be zero, otherwise max scale.
+    this(
+        false,
+        precision.orElse(MAX_PRECISION),
+        scale.orElseGet(
+            () -> {
+              if (precision.isPresent()) {
+                return 0;
+              } else {
+                return MAX_SCALE;
+              }
+            }));
   }
 
   @Override

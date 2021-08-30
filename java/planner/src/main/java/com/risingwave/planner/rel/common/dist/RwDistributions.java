@@ -1,5 +1,7 @@
 package com.risingwave.planner.rel.common.dist;
 
+import static java.util.Objects.requireNonNull;
+
 import org.apache.calcite.rel.RelDistribution;
 import org.apache.calcite.util.ImmutableIntList;
 
@@ -20,6 +22,15 @@ public class RwDistributions {
 
   public static final RwDistributionTrait ANY =
       new RwDistributionTrait(RelDistribution.Type.ANY, EMPTY);
+
+  public static RwDistributionTrait hash(ImmutableIntList keys) {
+    return new RwDistributionTrait(RelDistribution.Type.HASH_DISTRIBUTED, keys);
+  }
+
+  public static RwDistributionTrait hash(int[] fields) {
+    requireNonNull(fields, "fields");
+    return hash(ImmutableIntList.of(fields));
+  }
 
   private RwDistributions() {}
 }

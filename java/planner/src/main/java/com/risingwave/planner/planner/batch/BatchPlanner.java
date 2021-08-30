@@ -5,7 +5,8 @@ import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPh
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.LOGICAL_CONVERSION;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.LOGICAL_OPTIMIZATION;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.PHYSICAL;
-import static com.risingwave.planner.rules.BatchRuleSets.PHYSICAL_RULES;
+import static com.risingwave.planner.rules.BatchRuleSets.PHYSICAL_AGG_RULES;
+import static com.risingwave.planner.rules.BatchRuleSets.PHYSICAL_CONVERTER_RULES;
 
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.planner.planner.Planner;
@@ -62,7 +63,7 @@ public class BatchPlanner implements Planner<BatchPlan> {
         HepOptimizerProgram.builder()
             .withMatchOrder(HepMatchOrder.BOTTOM_UP)
             .withMatchLimit(10)
-            .addRules(BatchRuleSets.LOGICAL_CONVERSION_RULES)
+            .addRules(BatchRuleSets.LOGICAL_CONVERTER_RULES)
             .build());
 
     builder.addLast(
@@ -75,7 +76,8 @@ public class BatchPlanner implements Planner<BatchPlan> {
     builder.addLast(
         PHYSICAL,
         VolcanoOptimizerProgram.builder()
-            .addRules(PHYSICAL_RULES)
+            .addRules(PHYSICAL_CONVERTER_RULES)
+            .addRules(PHYSICAL_AGG_RULES)
             .addRequiredOutputTraits(RisingWaveBatchPhyRel.BATCH_PHYSICAL)
             .build());
 

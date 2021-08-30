@@ -38,6 +38,7 @@ public class StructType extends RisingWaveTypeBase {
     this.kind = requireNonNull(kind, "kind");
     this.nullable = nullable;
     this.fields = ImmutableList.copyOf(fields);
+    resetDigest();
   }
 
   @Override
@@ -252,6 +253,11 @@ public class StructType extends RisingWaveTypeBase {
   @Override
   public boolean isDynamicStruct() {
     return false;
+  }
+
+  @Override
+  public String toString() {
+    return digest;
   }
 
   private static class Slot {

@@ -20,7 +20,7 @@ import org.apache.calcite.rex.RexNode;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 public class RwBatchProject extends Project implements RisingWaveBatchPhyRel {
-  protected RwBatchProject(
+  public RwBatchProject(
       RelOptCluster cluster,
       RelTraitSet traits,
       List<RelHint> hints,
@@ -69,11 +69,12 @@ public class RwBatchProject extends Project implements RisingWaveBatchPhyRel {
     @Override
     public @Nullable RelNode convert(RelNode rel) {
       RwLogicalProject rwLogicalProject = (RwLogicalProject) rel;
-      RelTraitSet newTraitSet = rwLogicalProject.getTraitSet().replace(BATCH_PHYSICAL);
-      RelNode newInput = RelOptRule.convert(rwLogicalProject.getInput(), BATCH_PHYSICAL);
+      RelTraitSet requiredInputTraits =
+          rwLogicalProject.getInput().getTraitSet().replace(BATCH_PHYSICAL);
+      RelNode newInput = RelOptRule.convert(rwLogicalProject.getInput(), requiredInputTraits);
       return new RwBatchProject(
           rel.getCluster(),
-          newTraitSet,
+          rwLogicalProject.getTraitSet().plus(BATCH_PHYSICAL),
           rwLogicalProject.getHints(),
           newInput,
           rwLogicalProject.getProjects(),

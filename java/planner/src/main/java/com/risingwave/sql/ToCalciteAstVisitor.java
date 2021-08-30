@@ -2,6 +2,7 @@ package com.risingwave.sql;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Verify.verify;
+import static com.risingwave.sql.AstUtils.identifierOf;
 
 import com.google.common.base.Verify;
 import com.risingwave.common.exception.PgErrorCode;
@@ -26,22 +27,22 @@ import com.risingwave.sql.tree.LogicalBinaryExpression;
 import com.risingwave.sql.tree.LongLiteral;
 import com.risingwave.sql.tree.Node;
 import com.risingwave.sql.tree.NotNullColumnConstraint;
-import com.risingwave.sql.tree.QualifiedName;
 import com.risingwave.sql.tree.QualifiedNameReference;
 import com.risingwave.sql.tree.Query;
 import com.risingwave.sql.tree.QuerySpecification;
 import com.risingwave.sql.tree.SingleColumn;
+import com.risingwave.sql.tree.SortItem;
 import com.risingwave.sql.tree.StringLiteral;
 import com.risingwave.sql.tree.Table;
 import com.risingwave.sql.tree.Values;
 import com.risingwave.sql.tree.ValuesList;
 import java.math.BigDecimal;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import org.apache.calcite.avatica.util.TimeUnit;
+import org.apache.calcite.config.Lex;
 import org.apache.calcite.schema.ColumnStrategy;
 import org.apache.calcite.sql.SqlBasicCall;
 import org.apache.calcite.sql.SqlBasicTypeNameSpec;
@@ -49,18 +50,19 @@ import org.apache.calcite.sql.SqlDataTypeSpec;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlInsert;
 import org.apache.calcite.sql.SqlIntervalQualifier;
+import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlLiteral;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlNodeList;
 import org.apache.calcite.sql.SqlOperator;
+import org.apache.calcite.sql.SqlOrderBy;
 import org.apache.calcite.sql.SqlSelect;
 import org.apache.calcite.sql.SqlSyntax;
 import org.apache.calcite.sql.ddl.SqlDdlNodes;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
+import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.type.SqlTypeName;
-import org.apache.calcite.sql.validate.SqlNameMatcher;
-import org.apache.calcite.sql.validate.SqlNameMatchers;
 
 public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
   private final RisingWaveOperatorTable operatorTable = new RisingWaveOperatorTable();
@@ -129,9 +131,6 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
   public SqlNode visitQuerySpecification(QuerySpecification node, Void context) {
     checkArgument(!node.getHaving().isPresent(), "Having not supported yet!");
     checkArgument(node.getWindows().isEmpty(), "Window not supported yet!");
-    checkArgument(node.getOrderBy().isEmpty(), "Order by not supported yet!");
-    checkArgument(!node.getLimit().isPresent(), "Limit not supported yet!");
-    checkArgument(!node.getOffset().isPresent(), "Offset not supported yet!");
 
     SqlNodeList selectList =
         SqlNodeList.of(
@@ -157,19 +156,55 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
                   .collect(Collectors.toList()));
     }
 
-    return new SqlSelect(
-        SqlParserPos.ZERO,
-        null,
-        selectList,
-        from,
-        where,
-        groupBy,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null);
+    var selectNode =
+        new SqlSelect(
+            SqlParserPos.ZERO,
+            null,
+            selectList,
+            from,
+            where,
+            groupBy,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null);
+
+    SqlNode ret = selectNode;
+
+    if (!node.getOrderBy().isEmpty()) {
+      var orderList =
+          SqlNodeList.of(
+              SqlParserPos.ZERO,
+              node.getOrderBy().stream()
+                  .map(orderByItem -> orderByItem.accept(this, context))
+                  .collect(Collectors.toList()));
+      var offset = node.getOffset().map(off -> off.accept(this, context)).orElse(null);
+      var limit = node.getLimit().map(lim -> lim.accept(this, context)).orElse(null);
+
+      ret = new SqlOrderBy(SqlParserPos.ZERO, selectNode, orderList, offset, limit);
+    }
+
+    return ret;
+  }
+
+  @Override
+  protected SqlNode visitSortItem(SortItem node, Void context) {
+    checkArgument(
+        node.getNullOrdering() == SortItem.NullOrdering.UNDEFINED,
+        "Null ordering not supported now!");
+
+    var sortKey = node.getSortKey().accept(this, context);
+
+    var ret = sortKey;
+    // If ordering is null or asc, it's treated asc in calcite.
+    if (node.getOrdering() == SortItem.Ordering.DESCENDING) {
+      var operator = operatorTable.lookupOneOperator(identifierOf("DESC"), SqlSyntax.POSTFIX);
+      ret = new SqlBasicCall(operator, new SqlNode[] {sortKey}, SqlParserPos.ZERO);
+    }
+
+    return ret;
   }
 
   @Override
@@ -247,6 +282,11 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
 
     SqlNode[] operands =
         node.getArguments().stream().map(exp -> exp.accept(this, context)).toArray(SqlNode[]::new);
+
+    // Cases for count(*)
+    if (operator.getKind() == SqlKind.COUNT && operands.length == 0) {
+      operands = new SqlNode[] {SqlIdentifier.star(SqlParserPos.ZERO)};
+    }
     return new SqlBasicCall(operator, operands, SqlParserPos.ZERO);
   }
 
@@ -272,7 +312,7 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
   protected SqlNode visitDoubleLiteral(DoubleLiteral node, Void context) {
     // TODO: Optimize this
     String value = BigDecimal.valueOf(node.getValue()).toString();
-    return SqlLiteral.createApproxNumeric(value, SqlParserPos.ZERO);
+    return SqlLiteral.createExactNumeric(value, SqlParserPos.ZERO);
   }
 
   @Override
@@ -441,44 +481,25 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
                 SqlTypeName.DECIMAL, parameters.get(0), parameters.get(1), SqlParserPos.ZERO);
           }
         }
-
       default:
         throw new PgException(PgErrorCode.SYNTAX_ERROR, "Unsupported type name: %s", typeName);
     }
   }
 
-  private static SqlIdentifier identifierOf(QualifiedName name) {
-    return new SqlIdentifier(name.getParts(), SqlParserPos.ZERO);
-  }
-
-  private static SqlIdentifier identifierOf(String name) {
-    return new SqlIdentifier(name, SqlParserPos.ZERO);
-  }
-
   private SqlOperator lookupOperator(SqlIdentifier functionName, SqlSyntax syntax) {
-    List<SqlOperator> result = new ArrayList<>();
-    SqlNameMatcher nameMatcher = SqlNameMatchers.withCaseSensitive(false);
-
-    operatorTable.lookupOperatorOverloads(functionName, null, syntax, result, nameMatcher);
-    if (result.size() < 1) {
-      throw new PgException(PgErrorCode.SYNTAX_ERROR, "Function not found: %s", functionName);
-    } else if (result.size() > 1) {
-      throw new PgException(
-          PgErrorCode.SYNTAX_ERROR, "Too many function not found: %s", functionName);
-    }
-
-    return result.get(0);
+    return operatorTable.lookupOneOperator(functionName, syntax);
   }
 
-  // Don't remove this, it's useful for debugging.
-  //  public static void main(String[] args) throws Exception {
-  //    SqlParser.Config parserConfig =
-  //        SqlParser.Config.DEFAULT.withCaseSensitive(false).withLex(Lex.SQL_SERVER);
-  //
-  //    String sql = "select a as a1 from t";
-  //    //    String sql = "SELECT * FROM t WHERE a between 1 and 2";
-  //    //    String sql = "select 100.0::DOUBLE/8.0::DOUBLE";
-  //    SqlNode sqlNode = SqlParser.create(sql, parserConfig).parseQuery();
-  //    System.out.println(sqlNode.toString());
-  //  }
+  //   Don't remove this, it's useful for debugging.
+  public static void main(String[] args) throws Exception {
+    SqlParser.Config parserConfig =
+        SqlParser.Config.DEFAULT.withCaseSensitive(false).withLex(Lex.SQL_SERVER);
+
+    //    String sql = "select a, b, sum(c) from t group by a, b order by a asc, b desc";
+    String sql = "select count(*) days from t";
+    //    String sql = "SELECT * FROM t WHERE a between 1 and 2";
+    //    String sql = "select 100.0::DOUBLE/8.0::DOUBLE";
+    SqlNode sqlNode = SqlParser.create(sql, parserConfig).parseQuery();
+    System.out.println(sqlNode.toString());
+  }
 }

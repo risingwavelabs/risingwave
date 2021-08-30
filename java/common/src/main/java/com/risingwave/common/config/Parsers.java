@@ -10,6 +10,8 @@ public class Parsers {
 
   public static final Parser<Integer> INT_PARSER = Integer::parseInt;
 
+  public static final Parser<Boolean> BOOLEAN_PARSER = Boolean::parseBoolean;
+
   /**
    * A simple address converter. The addresses should have the following format:
    * "localhost:1234,10.7.1.2:4567".

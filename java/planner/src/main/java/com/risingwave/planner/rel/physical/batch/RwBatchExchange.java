@@ -8,6 +8,7 @@ import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelDistribution;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.core.Exchange;
 
 public class RwBatchExchange extends Exchange implements RisingWaveBatchPhyRel {
@@ -25,13 +26,24 @@ public class RwBatchExchange extends Exchange implements RisingWaveBatchPhyRel {
   }
 
   @Override
+  public RelWriter explainTerms(RelWriter pw) {
+    var writer = super.explainTerms(pw);
+    var collation = getTraitSet().getCollation();
+    if (collation != null) {
+      writer.item("collation", collation);
+    }
+
+    return writer;
+  }
+
+  @Override
   public PlanNode serialize() {
     throw new UnsupportedOperationException("RwBatchExchange#serialize is not supported");
   }
 
   public static RwBatchExchange create(RelNode input, RwDistributionTrait distribution) {
     RelOptCluster cluster = input.getCluster();
-    RelTraitSet traitSet = input.getTraitSet().replace(BATCH_PHYSICAL).replace(distribution);
+    RelTraitSet traitSet = input.getTraitSet().plus(BATCH_PHYSICAL).plus(distribution);
     return new RwBatchExchange(cluster, traitSet, input, distribution);
   }
 }

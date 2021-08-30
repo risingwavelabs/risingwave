@@ -67,7 +67,7 @@ public class RwLogicalInsert extends TableModify implements RisingWaveLogicalRel
     public @Nullable RelNode convert(RelNode rel) {
       LogicalTableModify tableModify = (LogicalTableModify) rel;
 
-      RelTraitSet newTraitSet = tableModify.getTraitSet().replace(RisingWaveLogicalRel.LOGICAL);
+      RelTraitSet newTraitSet = tableModify.getTraitSet().plus(RisingWaveLogicalRel.LOGICAL);
       return new RwLogicalInsert(
           tableModify.getCluster(),
           newTraitSet,

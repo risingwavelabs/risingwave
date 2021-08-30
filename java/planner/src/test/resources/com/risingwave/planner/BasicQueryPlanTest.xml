@@ -78,49 +78,49 @@ select sum(v3) from t
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwBatchHashAgg(group=[{}], EXPR$0=[SUM($0)])
+RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)])
   RwBatchFilterScan(table=[[test_schema, t]], columns=[v3])
 ]]>
         </Resource>
-        <Resource name="json">
-{
-  "nodeType": "SIMPLE_AGG",
-  "body": {
-    "@type": "type.googleapis.com/risingwave.executor.proto.SimpleAggNode",
-    "aggregations": [{
-      "exprType": "SUM",
-      "body": {
-        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
-        "children": [{
-          "exprType": "INPUT_REF",
-          "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
-          },
-          "returnType": {
-            "typeName": "FLOAT"
-          }
-        }]
-      },
-      "returnType": {
-        "typeName": "FLOAT"
-      }
-    }]
-  },
-  "children": [{
-    "nodeType": "SEQ_SCAN",
-    "body": {
-      "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",
-      "tableRefId": {
-        "schemaRefId": {
-          "databaseRefId": {
-          }
-        }
-      },
-      "columnIds": [2]
-    }
-  }]
-}
-        </Resource>
+<!--        <Resource name="json">-->
+<!--{-->
+<!--  "nodeType": "SIMPLE_AGG",-->
+<!--  "body": {-->
+<!--    "@type": "type.googleapis.com/risingwave.executor.proto.SimpleAggNode",-->
+<!--    "aggregations": [{-->
+<!--      "exprType": "SUM",-->
+<!--      "body": {-->
+<!--        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",-->
+<!--        "children": [{-->
+<!--          "exprType": "INPUT_REF",-->
+<!--          "body": {-->
+<!--            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"-->
+<!--          },-->
+<!--          "returnType": {-->
+<!--            "typeName": "FLOAT"-->
+<!--          }-->
+<!--        }]-->
+<!--      },-->
+<!--      "returnType": {-->
+<!--        "typeName": "FLOAT"-->
+<!--      }-->
+<!--    }]-->
+<!--  },-->
+<!--  "children": [{-->
+<!--    "nodeType": "SEQ_SCAN",-->
+<!--    "body": {-->
+<!--      "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",-->
+<!--      "tableRefId": {-->
+<!--        "schemaRefId": {-->
+<!--          "databaseRefId": {-->
+<!--          }-->
+<!--        }-->
+<!--      },-->
+<!--      "columnIds": [2]-->
+<!--    }-->
+<!--  }]-->
+<!--}-->
+<!--        </Resource>-->
     </TestCase>
 
         <TestCase name="simple agg with 2 sum, max, min">
@@ -131,102 +131,102 @@ select sum(v3), sum(v2), max(v1), min(v3) from t
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwBatchHashAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)], EXPR$2=[MAX($2)], EXPR$3=[MIN($0)])
+RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)], EXPR$2=[MAX($2)], EXPR$3=[MIN($0)])
   RwBatchFilterScan(table=[[test_schema, t]], columns=[v3,v2,v1])
 ]]>
         </Resource>
-        <Resource name="json">
-{
-  "nodeType": "SIMPLE_AGG",
-  "body": {
-    "@type": "type.googleapis.com/risingwave.executor.proto.SimpleAggNode",
-    "aggregations": [{
-      "exprType": "SUM",
-      "body": {
-        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
-        "children": [{
-          "exprType": "INPUT_REF",
-          "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
-          },
-          "returnType": {
-            "typeName": "FLOAT"
-          }
-        }]
-      },
-      "returnType": {
-        "typeName": "FLOAT"
-      }
-    }, {
-      "exprType": "SUM",
-      "body": {
-        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
-        "children": [{
-          "exprType": "INPUT_REF",
-          "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
-            "columnIdx": 1
-          },
-          "returnType": {
-            "typeName": "INT32"
-          }
-        }]
-      },
-      "returnType": {
-        "typeName": "INT32"
-      }
-    }, {
-      "exprType": "MAX",
-      "body": {
-        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
-        "children": [{
-          "exprType": "INPUT_REF",
-          "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
-            "columnIdx": 2
-          },
-          "returnType": {
-            "typeName": "INT32"
-          }
-        }]
-      },
-      "returnType": {
-        "typeName": "INT32"
-      }
-    }, {
-      "exprType": "MIN",
-      "body": {
-        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
-        "children": [{
-          "exprType": "INPUT_REF",
-          "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
-          },
-          "returnType": {
-            "typeName": "FLOAT"
-          }
-        }]
-      },
-      "returnType": {
-        "typeName": "FLOAT"
-      }
-    }]
-  },
-  "children": [{
-    "nodeType": "SEQ_SCAN",
-    "body": {
-      "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",
-      "tableRefId": {
-        "schemaRefId": {
-          "databaseRefId": {
-          }
-        }
-      },
-      "columnIds": [2, 1, 0]
-    }
-  }]
-}
-        </Resource>
+<!--        <Resource name="json">-->
+<!--{-->
+<!--  "nodeType": "SIMPLE_AGG",-->
+<!--  "body": {-->
+<!--    "@type": "type.googleapis.com/risingwave.executor.proto.SimpleAggNode",-->
+<!--    "aggregations": [{-->
+<!--      "exprType": "SUM",-->
+<!--      "body": {-->
+<!--        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",-->
+<!--        "children": [{-->
+<!--          "exprType": "INPUT_REF",-->
+<!--          "body": {-->
+<!--            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"-->
+<!--          },-->
+<!--          "returnType": {-->
+<!--            "typeName": "FLOAT"-->
+<!--          }-->
+<!--        }]-->
+<!--      },-->
+<!--      "returnType": {-->
+<!--        "typeName": "FLOAT"-->
+<!--      }-->
+<!--    }, {-->
+<!--      "exprType": "SUM",-->
+<!--      "body": {-->
+<!--        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",-->
+<!--        "children": [{-->
+<!--          "exprType": "INPUT_REF",-->
+<!--          "body": {-->
+<!--            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",-->
+<!--            "columnIdx": 1-->
+<!--          },-->
+<!--          "returnType": {-->
+<!--            "typeName": "INT32"-->
+<!--          }-->
+<!--        }]-->
+<!--      },-->
+<!--      "returnType": {-->
+<!--        "typeName": "INT32"-->
+<!--      }-->
+<!--    }, {-->
+<!--      "exprType": "MAX",-->
+<!--      "body": {-->
+<!--        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",-->
+<!--        "children": [{-->
+<!--          "exprType": "INPUT_REF",-->
+<!--          "body": {-->
+<!--            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",-->
+<!--            "columnIdx": 2-->
+<!--          },-->
+<!--          "returnType": {-->
+<!--            "typeName": "INT32"-->
+<!--          }-->
+<!--        }]-->
+<!--      },-->
+<!--      "returnType": {-->
+<!--        "typeName": "INT32"-->
+<!--      }-->
+<!--    }, {-->
+<!--      "exprType": "MIN",-->
+<!--      "body": {-->
+<!--        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",-->
+<!--        "children": [{-->
+<!--          "exprType": "INPUT_REF",-->
+<!--          "body": {-->
+<!--            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"-->
+<!--          },-->
+<!--          "returnType": {-->
+<!--            "typeName": "FLOAT"-->
+<!--          }-->
+<!--        }]-->
+<!--      },-->
+<!--      "returnType": {-->
+<!--        "typeName": "FLOAT"-->
+<!--      }-->
+<!--    }]-->
+<!--  },-->
+<!--  "children": [{-->
+<!--    "nodeType": "SEQ_SCAN",-->
+<!--    "body": {-->
+<!--      "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",-->
+<!--      "tableRefId": {-->
+<!--        "schemaRefId": {-->
+<!--          "databaseRefId": {-->
+<!--          }-->
+<!--        }-->
+<!--      },-->
+<!--      "columnIds": [2, 1, 0]-->
+<!--    }-->
+<!--  }]-->
+<!--}-->
+<!--        </Resource>-->
     </TestCase>
 
     <TestCase name="hash agg with 2 sum">
@@ -343,7 +343,7 @@ select sum(v1+v2),sum(v1+v3) from t
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwBatchHashAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
+RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
   RwBatchProject($f0=[+($0, $1)], $f1=[+($0, $2)])
     RwBatchFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])
 ]]>
@@ -361,7 +361,7 @@ select sum(v1), sum(v3) from t
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwBatchHashAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
+RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
   RwBatchFilterScan(table=[[test_schema, t]], columns=[v1,v3])
 ]]>
         </Resource>
@@ -378,7 +378,7 @@ select min(v1) from t
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwBatchHashAgg(group=[{}], EXPR$0=[MIN($0)])
+RwBatchSortAgg(group=[{}], EXPR$0=[MIN($0)])
   RwBatchFilterScan(table=[[test_schema, t]], columns=[v1])
 ]]>
         </Resource>
@@ -395,7 +395,7 @@ select max(v1) from t
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwBatchHashAgg(group=[{}], EXPR$0=[MAX($0)])
+RwBatchSortAgg(group=[{}], EXPR$0=[MAX($0)])
   RwBatchFilterScan(table=[[test_schema, t]], columns=[v1])
 ]]>
         </Resource>
@@ -412,7 +412,7 @@ select max(v1) from t where v2>3
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwBatchHashAgg(group=[{}], EXPR$0=[MAX($0)])
+RwBatchSortAgg(group=[{}], EXPR$0=[MAX($0)])
   RwBatchProject(v1=[$0])
     RwBatchFilter(condition=[>($1, 3)])
       RwBatchFilterScan(table=[[test_schema, t]], columns=[v1,v2])
@@ -431,7 +431,7 @@ select avg(v2) from t
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwBatchHashAgg(group=[{}], EXPR$0=[AVG($0)])
+RwBatchSortAgg(group=[{}], EXPR$0=[AVG($0)])
   RwBatchFilterScan(table=[[test_schema, t]], columns=[v2])
 ]]>
         </Resource>
@@ -466,7 +466,7 @@ select 100.0::DOUBLE/8.0::DOUBLE
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwBatchProject(EXPR$0=[/(1.000E2:DOUBLE, 8.0E0:DOUBLE)])
+RwBatchProject(EXPR$0=[/(100.0:DOUBLE, 8.0:DOUBLE)])
   RwBatchValues(tuples=[[{ 0 }]])
 ]]>
         </Resource>

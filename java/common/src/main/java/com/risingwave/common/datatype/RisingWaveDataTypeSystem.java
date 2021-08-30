@@ -16,4 +16,14 @@ public class RisingWaveDataTypeSystem extends RelDataTypeSystemImpl {
       return null;
     }
   }
+
+  @Override
+  public int getMaxNumericScale() {
+    return DecimalType.MAX_SCALE;
+  }
+
+  @Override
+  public int getMaxNumericPrecision() {
+    return DecimalType.MAX_PRECISION;
+  }
 }

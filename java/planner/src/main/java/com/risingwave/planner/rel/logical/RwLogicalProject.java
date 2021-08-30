@@ -53,7 +53,7 @@ public class RwLogicalProject extends Project implements RisingWaveLogicalRel {
       LogicalProject logicalProject = (LogicalProject) rel;
       return new RwLogicalProject(
           rel.getCluster(),
-          rel.getTraitSet().replace(LOGICAL),
+          rel.getTraitSet().plus(LOGICAL),
           logicalProject.getHints(),
           logicalProject.getInput(),
           logicalProject.getProjects(),

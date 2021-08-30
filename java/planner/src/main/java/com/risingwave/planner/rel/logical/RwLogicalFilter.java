@@ -41,7 +41,7 @@ public class RwLogicalFilter extends Filter implements RisingWaveLogicalRel {
     public @Nullable RelNode convert(RelNode rel) {
       return new RwLogicalFilter(
           rel.getCluster(),
-          rel.getTraitSet().replace(LOGICAL),
+          rel.getTraitSet().plus(LOGICAL),
           rel.getInput(0),
           ((LogicalFilter) rel).getCondition());
     }

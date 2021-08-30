@@ -32,14 +32,15 @@ import org.apache.calcite.util.TimestampString;
 public class RwBatchInsertValues extends AbstractRelNode implements RisingWaveBatchPhyRel {
   private final TableCatalog table;
   private final ImmutableList<ColumnCatalog.ColumnId> columnIds;
-  private final ImmutableList<ImmutableList<RexLiteral>> tuples;
+  // We change this to rex node here since we may have cast expression.
+  private final ImmutableList<ImmutableList<RexNode>> tuples;
 
   public RwBatchInsertValues(
       RelOptCluster cluster,
       RelTraitSet traitSet,
       TableCatalog table,
       ImmutableList<ColumnCatalog.ColumnId> columnIds,
-      ImmutableList<ImmutableList<RexLiteral>> tuples) {
+      ImmutableList<ImmutableList<RexNode>> tuples) {
     super(cluster, traitSet);
     this.table = requireNonNull(table, "Table can't be null!");
     this.columnIds = requireNonNull(columnIds, "columnIds can't be null!");
@@ -57,7 +58,7 @@ public class RwBatchInsertValues extends AbstractRelNode implements RisingWaveBa
     }
 
     for (int i = 0; i < tuples.size(); ++i) {
-      ImmutableList<RexLiteral> tuple = tuples.get(i);
+      ImmutableList<RexNode> tuple = tuples.get(i);
       InsertValueNode.ExprTuple.Builder exprTupleBuilder = InsertValueNode.ExprTuple.newBuilder();
       for (int j = 0; j < tuple.size(); ++j) {
         AddCastVisitor addCastVisitor = new AddCastVisitor(getCluster().getRexBuilder());
@@ -101,9 +102,9 @@ public class RwBatchInsertValues extends AbstractRelNode implements RisingWaveBa
     return pw;
   }
 
-  private static String toString(ImmutableList<RexLiteral> row) {
+  private static String toString(ImmutableList<RexNode> row) {
     requireNonNull(row, "row");
-    return row.stream().map(RexLiteral::toString).collect(Collectors.joining(",", "(", ")"));
+    return row.stream().map(RexNode::toString).collect(Collectors.joining(",", "(", ")"));
   }
 
   private static class AddCastVisitor extends RexVisitorImpl<RexNode> {
