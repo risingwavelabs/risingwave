@@ -168,7 +168,7 @@ jobs:
       - name: Install rust toolchain
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
+          toolchain: nightly-2021-07-28
           components: rustfmt, clippy
       
       - name: Run rust format check
