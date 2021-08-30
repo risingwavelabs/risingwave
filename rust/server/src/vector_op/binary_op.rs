@@ -19,7 +19,7 @@ where
         .collect::<Result<Vec<Option<R>>>>()
 }
 
-pub(crate) fn vec_binary_op_primitive_array<A, B, F>(
+pub(crate) fn vec_binary_op_primitive_array<A, B, C, F>(
     left_array: &dyn Array,
     right_array: &dyn Array,
     op: F,
@@ -27,11 +27,12 @@ pub(crate) fn vec_binary_op_primitive_array<A, B, F>(
 where
     A: PrimitiveDataType,
     B: PrimitiveDataType,
-    F: FnMut(Option<A::N>, Option<B::N>) -> Result<Option<B::N>>,
+    C: PrimitiveDataType,
+    F: FnMut(Option<A::N>, Option<B::N>) -> Result<Option<C::N>>,
 {
     let left_array: &PrimitiveArray<A> = downcast_ref(left_array)?;
     let right_array: &PrimitiveArray<B> = downcast_ref(right_array)?;
 
     let ret = vec_binary_op(left_array.as_iter()?, right_array.as_iter()?, op)?;
-    PrimitiveArray::<B>::from_values(ret)
+    PrimitiveArray::<C>::from_values(ret)
 }

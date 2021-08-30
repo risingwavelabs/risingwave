@@ -48,9 +48,12 @@ mod tests {
         let right_array =
             PrimitiveArray::<B>::from_values(right).expect("Failed to build right values!");
 
-        let ret =
-            vec_binary_op_primitive_array::<A, B, F>(left_array.as_ref(), right_array.as_ref(), op)
-                .expect("Failed to get result");
+        let ret = vec_binary_op_primitive_array::<A, B, B, F>(
+            left_array.as_ref(),
+            right_array.as_ref(),
+            op,
+        )
+        .expect("Failed to get result");
 
         let ret: &PrimitiveArray<B> = downcast_ref(ret.as_ref()).expect("Failed to downcast");
 

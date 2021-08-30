@@ -27,6 +27,7 @@ mod bool_type;
 mod decimal_type;
 mod interval_type;
 mod string_type;
+mod timestamp_type;
 
 pub(crate) use bool_type::*;
 pub(crate) use decimal_type::*;
@@ -45,6 +46,7 @@ pub(crate) enum DataTypeKind {
     Char,
     Varchar,
     Interval,
+    Timestamp,
 }
 
 pub(crate) trait DataType: Debug + Sync + Send + 'static {
