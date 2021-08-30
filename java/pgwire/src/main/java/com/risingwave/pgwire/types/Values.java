@@ -105,6 +105,20 @@ public class Values {
     };
   }
 
+  public static PgValue createDecimal(String v) {
+    return new PgValue() {
+      @Override
+      public byte[] encodeInBinary() {
+        return v.getBytes();
+      }
+
+      @Override
+      public String encodeInText() {
+        return v;
+      }
+    };
+  }
+
   public static PgValue createDate(Date v) {
     return new PgValue() {
       @Override

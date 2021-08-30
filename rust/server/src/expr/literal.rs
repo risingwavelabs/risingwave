@@ -12,6 +12,7 @@ use protobuf::Message;
 use risingwave_proto::data::DataType_TypeName;
 use risingwave_proto::expr::{ConstantValue, ExprNode, ExprNode_ExprNodeType};
 
+use rust_decimal::prelude::*;
 use rust_decimal::Decimal;
 
 #[derive(Clone, Debug)]
@@ -105,6 +106,11 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
                         InternalError(format!("Failed to deserialize varchar, reason: {:?}", e))
                     })?
                     .to_string(),
+            ),
+            DataType_TypeName::DECIMAL => Datum::Decimal(
+                Decimal::from_str(std::str::from_utf8(proto_value.get_body()).unwrap()).map_err(
+                    |e| InternalError(format!("Failed to deserialize decimal, reason: {:?}", e)),
+                )?,
             ),
             _ => {
                 return Err(InternalError(format!(

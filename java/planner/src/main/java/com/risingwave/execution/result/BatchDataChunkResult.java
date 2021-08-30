@@ -70,6 +70,8 @@ public class BatchDataChunkResult extends AbstractResult {
         return TypeOid.DATE;
       case CHAR:
         return TypeOid.CHAR_ARRAY;
+      case DECIMAL:
+        return TypeOid.DECIMAL;
       default:
         throw new PgException(
             PgErrorCode.INTERNAL_ERROR, "Unsupported sql type: %s", type.getSqlTypeName());

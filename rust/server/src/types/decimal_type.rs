@@ -1,9 +1,10 @@
 use crate::array::{BoxedArrayBuilder, DecimalArrayBuilder};
-use crate::error::Result;
+use crate::error::{Result, RwError};
 use crate::types::{DataType, DataTypeKind, DataTypeRef};
 use risingwave_proto::data::DataType as DataTypeProto;
 use risingwave_proto::data::DataType_TypeName;
 use std::any::Any;
+use std::convert::TryFrom;
 use std::sync::Arc;
 
 pub(crate) const MAX_PRECISION: u32 = 28;
@@ -69,6 +70,19 @@ impl DataType for DecimalType {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+}
+
+impl<'a> TryFrom<&'a DataTypeProto> for DecimalType {
+    type Error = RwError;
+
+    fn try_from(proto: &'a DataTypeProto) -> Result<Self> {
+        ensure!(proto.get_type_name() == DataType_TypeName::DECIMAL);
+        DecimalType::new(
+            proto.get_is_nullable(),
+            proto.get_precision(),
+            proto.get_scale(),
+        )
     }
 }
 

@@ -44,6 +44,7 @@ public class PgFieldDescriptor {
         break;
       case CHAR_ARRAY:
       case VARCHAR:
+      case DECIMAL:
         this.typeLen = -1; /*maxlength*/
         break;
       default:

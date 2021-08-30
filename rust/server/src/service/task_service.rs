@@ -30,10 +30,13 @@ impl TaskService for TaskServiceImpl {
         let plan = req.get_plan().clone();
         let mut mgr = self.mgr.lock().unwrap();
         match mgr.fire_task(req.get_task_id(), plan) {
-            Err(e) => resp_sink.fail(RpcStatus::with_message(
-                RpcStatusCode::INTERNAL,
-                e.to_string(),
-            )),
+            Err(e) => {
+                info!("{}", e);
+                resp_sink.fail(RpcStatus::with_message(
+                    RpcStatusCode::INTERNAL,
+                    e.to_string(),
+                ))
+            }
             Ok(()) => resp_sink.success(CreateTaskResponse::default()),
         };
     }

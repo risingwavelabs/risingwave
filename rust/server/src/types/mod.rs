@@ -13,6 +13,7 @@ use crate::error::ErrorCode::InternalError;
 pub(crate) use native::*;
 use risingwave_proto::data::DataType_TypeName::CHAR;
 use risingwave_proto::data::DataType_TypeName::DATE;
+use risingwave_proto::data::DataType_TypeName::DECIMAL;
 use risingwave_proto::data::DataType_TypeName::DOUBLE;
 use risingwave_proto::data::DataType_TypeName::FLOAT;
 use risingwave_proto::data::DataType_TypeName::INT16;
@@ -77,6 +78,7 @@ pub(crate) fn build_from_proto(proto: &DataTypeProto) -> Result<DataTypeRef> {
       INT64 => Int64Type,
       FLOAT => Float32Type,
       DOUBLE => Float64Type,
+      DECIMAL => DecimalType,
       DATE => DateType,
       CHAR => StringType,
       VARCHAR => StringType

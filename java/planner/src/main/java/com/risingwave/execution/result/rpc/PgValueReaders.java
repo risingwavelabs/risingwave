@@ -35,6 +35,7 @@ public class PgValueReaders {
             return createPrimitiveReader(unpackedColumn);
           case CHAR:
           case VARCHAR:
+          case DECIMAL:
             return createStringReader(unpackedColumn);
           default:
             break;
@@ -64,6 +65,9 @@ public class PgValueReaders {
       case VARCHAR:
         return StringValueReader.createValueReader(
             Values::createString, new IntBufferReader(offsetStream), dataStream, nullBitmap);
+      case DECIMAL:
+        return StringValueReader.createValueReader(
+            Values::createDecimal, new IntBufferReader(offsetStream), dataStream, nullBitmap);
       default:
         throw new PgException(
             PgErrorCode.INTERNAL_ERROR, "Unsupported column type: %s", column.getColumnType());

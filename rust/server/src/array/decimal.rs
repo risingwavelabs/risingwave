@@ -1,6 +1,7 @@
 use std::any::Any;
 use std::convert::{TryFrom, TryInto};
 use std::iter::Iterator;
+use std::mem::size_of;
 use std::sync::Arc;
 
 use protobuf::well_known_types::Any as AnyProto;
@@ -171,26 +172,43 @@ impl Array for DecimalArray {
             column.set_null_bitmap(null_bitmap.to_protobuf()?);
         }
 
-        let values = {
-            let mut output_buffer = Vec::<u8>::new();
+        let (offset_value, data_value) = {
+            let mut data_buffer = Vec::<u8>::new();
+            let mut offset_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<u32>());
+            let mut offset = 0u32;
 
             for v in self.as_iter()? {
                 match v {
-                    Some(b) => output_buffer.extend_from_slice(b.to_string().as_bytes()),
+                    Some(b) => {
+                        let decimal_str = b.to_string();
+                        data_buffer.extend_from_slice(decimal_str.as_bytes());
+                        offset_buffer.extend_from_slice(&offset.to_be_bytes());
+                        offset += decimal_str.len() as u32;
+                    }
                     None => {
-                        output_buffer.extend_from_slice("0".to_string().as_bytes());
+                        offset_buffer.extend_from_slice(&offset.to_be_bytes());
                     }
                 }
             }
+            offset_buffer.extend_from_slice(&offset.to_be_bytes());
 
-            let mut values = BufferProto::new();
-            values.set_compression(Buffer_CompressionType::NONE);
-            values.set_body(output_buffer);
+            let mut data_value = BufferProto::new();
+            data_value.set_compression(Buffer_CompressionType::NONE);
+            data_value.set_body(data_buffer);
 
-            values
+            let mut offset_value = BufferProto::new();
+            offset_value.set_compression(Buffer_CompressionType::NONE);
+            offset_value.set_body(offset_buffer);
+
+            (offset_value, data_value)
         };
 
-        column.mut_values().push(values);
+        column.set_values(
+            protobuf::RepeatedField::<risingwave_proto::data::Buffer>::from_vec(vec![
+                offset_value,
+                data_value,
+            ]),
+        );
 
         AnyProto::pack(&column).map_err(|e| RwError::from(ProtobufError(e)))
     }
@@ -346,9 +364,21 @@ mod tests {
         );
 
         assert_eq!(
-            ["1.23".as_bytes(), "0".as_bytes(), "3.21".as_bytes(),].concat(),
+            [
+                0u32.to_be_bytes(),
+                4u32.to_be_bytes(),
+                4u32.to_be_bytes(),
+                8u32.to_be_bytes()
+            ]
+            .concat(),
             result_proto.get_values()[0].get_body(),
         );
+
+        assert_eq!(
+            ["1.23".as_bytes(), "3.21".as_bytes(),].concat(),
+            result_proto.get_values()[1].get_body(),
+        );
+
         assert_eq!(
             Buffer_CompressionType::NONE,
             result_proto.get_values()[0].get_compression()

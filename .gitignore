@@ -41,6 +41,9 @@ build/
 # ctags
 **/tags
 
+# runtime log
+rust/log/*
+
 # CLion
 cmake-build-debug/
 .idea/
