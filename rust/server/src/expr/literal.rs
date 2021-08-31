@@ -1,9 +1,8 @@
 use crate::array::{ArrayRef, DataChunk};
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
-
 use crate::expr::Expression;
-use crate::types::{build_from_proto, DataType, DataTypeRef};
+use crate::types::{build_from_proto, DataType, DataTypeKind, DataTypeRef};
 use std::convert::TryFrom;
 use std::convert::TryInto;
 
@@ -14,6 +13,7 @@ use risingwave_proto::expr::{ConstantValue, ExprNode, ExprNode_ExprNodeType};
 
 use rust_decimal::prelude::*;
 use rust_decimal::Decimal;
+use std::ops::Deref;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Datum {
@@ -53,6 +53,36 @@ impl Expression for LiteralExpression {
             array_builder.append(&self.literal)?;
         }
         array_builder.finish()
+    }
+}
+
+fn literal_type_match(return_type: DataTypeKind, literal: Datum) -> bool {
+    matches!(
+        (return_type, literal),
+        (DataTypeKind::Boolean, Datum::Bool(_))
+            | (DataTypeKind::Int16, Datum::Int16(_))
+            | (DataTypeKind::Int32, Datum::Int32(_))
+            | (DataTypeKind::Int64, Datum::Int64(_))
+            | (DataTypeKind::Float32, Datum::Float32(_))
+            | (DataTypeKind::Float64, Datum::Float64(_))
+            | (DataTypeKind::Decimal, Datum::Decimal(_))
+            | (DataTypeKind::Date, Datum::Int32(_))
+            | (DataTypeKind::Char, Datum::UTF8String(_))
+            | (DataTypeKind::Varchar, Datum::UTF8String(_))
+            | (DataTypeKind::Interval, Datum::Int32(_))
+    )
+}
+
+impl LiteralExpression {
+    pub(crate) fn new(return_type: DataTypeRef, literal: Datum) -> Self {
+        assert!(literal_type_match(
+            return_type.deref().data_type_kind(),
+            literal.clone()
+        ));
+        LiteralExpression {
+            return_type,
+            literal,
+        }
     }
 }
 

@@ -29,6 +29,12 @@ impl Expression for InputRefExpression {
     }
 }
 
+impl InputRefExpression {
+    pub(crate) fn new(return_type: DataTypeRef, idx: usize) -> Self {
+        InputRefExpression { return_type, idx }
+    }
+}
+
 impl<'a> TryFrom<&'a ExprNode> for InputRefExpression {
     type Error = RwError;
 

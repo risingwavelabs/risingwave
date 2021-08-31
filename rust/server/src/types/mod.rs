@@ -1,4 +1,4 @@
-use crate::error::Result;
+use crate::error::{Result, RwError};
 use risingwave_proto::data::DataType as DataTypeProto;
 use std::any::Any;
 use std::sync::Arc;
@@ -32,6 +32,13 @@ mod timestamp_type;
 pub(crate) use bool_type::*;
 pub(crate) use decimal_type::*;
 pub(crate) use string_type::*;
+
+use risingwave_proto::expr::ExprNode_ExprNodeType;
+use risingwave_proto::expr::ExprNode_ExprNodeType::ADD;
+use risingwave_proto::expr::ExprNode_ExprNodeType::DIVIDE;
+use risingwave_proto::expr::ExprNode_ExprNodeType::MODULUS;
+use risingwave_proto::expr::ExprNode_ExprNodeType::MULTIPLY;
+use risingwave_proto::expr::ExprNode_ExprNodeType::SUBTRACT;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub(crate) enum DataTypeKind {
@@ -84,5 +91,32 @@ pub(crate) fn build_from_proto(proto: &DataTypeProto) -> Result<DataTypeRef> {
       DATE => DateType,
       CHAR => StringType,
       VARCHAR => StringType
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
+pub(crate) enum ArithmeticOperatorKind {
+    Plus,
+    Subtract,
+    Multiply,
+    Divide,
+    Mod,
+}
+
+pub(crate) fn is_arithmetic_operator(expr_type: &ExprNode_ExprNodeType) -> bool {
+    matches!(expr_type, ADD | SUBTRACT | MULTIPLY | DIVIDE | MODULUS)
+}
+
+impl TryFrom<&ExprNode_ExprNodeType> for ArithmeticOperatorKind {
+    type Error = RwError;
+    fn try_from(value: &ExprNode_ExprNodeType) -> Result<ArithmeticOperatorKind> {
+        match value {
+            ADD => Ok(ArithmeticOperatorKind::Plus),
+            SUBTRACT => Ok(ArithmeticOperatorKind::Subtract),
+            MULTIPLY => Ok(ArithmeticOperatorKind::Multiply),
+            DIVIDE => Ok(ArithmeticOperatorKind::Divide),
+            MODULUS => Ok(ArithmeticOperatorKind::Mod),
+            _ => Err(InternalError("Not arithmetic operator.".to_string()).into()),
+        }
     }
 }
