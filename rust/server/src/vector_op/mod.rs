@@ -1,4 +1,5 @@
 mod add_op;
+pub(crate) mod agg;
 mod binary_op;
 pub(crate) mod cast;
 mod div_op;

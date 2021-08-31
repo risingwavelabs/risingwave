@@ -127,7 +127,7 @@ impl UTF8ArrayBuilder {
 }
 
 impl UTF8ArrayBuilder {
-    fn append_str(&mut self, value: Option<&str>) -> Result<()> {
+    pub(crate) fn append_str(&mut self, value: Option<&str>) -> Result<()> {
         match value {
             Some(v) => {
                 // TODO (peng) for now we don't care about column description for char(n)

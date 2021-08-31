@@ -272,7 +272,7 @@ impl DecimalArrayBuilder {
         }
     }
 
-    fn append_value(&mut self, value: Option<Decimal>) -> Result<()> {
+    pub(crate) fn append_value(&mut self, value: Option<Decimal>) -> Result<()> {
         match value {
             Some(v) => {
                 self.buffer.push(v);
