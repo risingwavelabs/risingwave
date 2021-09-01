@@ -6,9 +6,8 @@ import com.risingwave.catalog.CatalogService;
 import com.risingwave.catalog.SchemaCatalog;
 import com.risingwave.common.config.Configuration;
 import com.risingwave.execution.handler.RpcExecutor;
-import com.risingwave.execution.handler.RpcExecutorEmpty;
-import com.risingwave.execution.handler.RpcExecutorImpl;
 import com.risingwave.execution.handler.SqlHandlerFactory;
+import com.risingwave.node.WorkerNodeManager;
 import org.apache.calcite.plan.Context;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptPlanner;
@@ -17,24 +16,14 @@ import org.apache.calcite.schema.SchemaPlus;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 public class ExecutionContext implements Context {
-  private final Configuration conf;
   private final String database;
   private final String schema;
-  private final CatalogService catalogService;
-  private final SqlHandlerFactory sqlHandlerFactory;
-  private final RpcExecutor rpcExecutor;
+  private final FrontendEnv frontendEnv;
 
   private ExecutionContext(Builder builder) {
     this.database = requireNonNull(builder.database, "Current database can't be null!");
     this.schema = requireNonNull(builder.schema, "Current schema can't be null!");
-    this.catalogService = requireNonNull(builder.catalogService, "Catalog service can't be null!");
-    this.conf = requireNonNull(builder.conf, "Configuration can't be null!");
-    this.sqlHandlerFactory = requireNonNull(builder.sqlHandlerFactory, "sqlHandlerFactory");
-    if (builder.rpcExecutor == null) {
-      this.rpcExecutor = new RpcExecutorEmpty();
-    } else {
-      this.rpcExecutor = builder.rpcExecutor;
-    }
+    this.frontendEnv = requireNonNull(builder.frontendEnv, "frontendEnv");
   }
 
   public static Builder builder() {
@@ -42,11 +31,15 @@ public class ExecutionContext implements Context {
   }
 
   public CatalogService getCatalogService() {
-    return catalogService;
+    return frontendEnv.getCatalogService();
+  }
+
+  public WorkerNodeManager getWorkerNodeManager() {
+    return frontendEnv.getWorkerNodeManager();
   }
 
   public RpcExecutor getRpcExecutor() {
-    return rpcExecutor;
+    return frontendEnv.getRpcExecutor();
   }
 
   public String getDatabase() {
@@ -62,11 +55,11 @@ public class ExecutionContext implements Context {
   }
 
   public SqlHandlerFactory getSqlHandlerFactory() {
-    return sqlHandlerFactory;
+    return frontendEnv.getSqlHandlerFactory();
   }
 
   public Configuration getConf() {
-    return conf;
+    return frontendEnv.getConfiguration();
   }
 
   public static ExecutionContext contextOf(RelOptCluster optCluster) {
@@ -87,7 +80,7 @@ public class ExecutionContext implements Context {
    * @return Current root schema.
    */
   public SchemaPlus getCalciteRootSchema() {
-    return catalogService.getSchemaChecked(getCurrentSchema()).plus();
+    return frontendEnv.getCatalogService().getSchemaChecked(getCurrentSchema()).plus();
   }
 
   @Override
@@ -100,19 +93,11 @@ public class ExecutionContext implements Context {
   }
 
   public static class Builder {
-    private Configuration conf;
-    private CatalogService catalogService;
     private String database;
     private String schema;
-    private RpcExecutor rpcExecutor;
-    private SqlHandlerFactory sqlHandlerFactory;
+    private FrontendEnv frontendEnv;
 
     private Builder() {}
-
-    public Builder withCatalogService(CatalogService catalogService) {
-      this.catalogService = catalogService;
-      return this;
-    }
 
     public Builder withDatabase(String database) {
       this.database = database;
@@ -124,18 +109,8 @@ public class ExecutionContext implements Context {
       return this;
     }
 
-    public Builder withConfiguration(Configuration conf) {
-      this.conf = conf;
-      return this;
-    }
-
-    public Builder withRpcExecutor() {
-      this.rpcExecutor = new RpcExecutorImpl(this.conf);
-      return this;
-    }
-
-    public Builder withSqlHandlerFactory(SqlHandlerFactory sqlHandlerFactory) {
-      this.sqlHandlerFactory = sqlHandlerFactory;
+    public Builder withFrontendEnv(FrontendEnv frontendEnv) {
+      this.frontendEnv = frontendEnv;
       return this;
     }
 

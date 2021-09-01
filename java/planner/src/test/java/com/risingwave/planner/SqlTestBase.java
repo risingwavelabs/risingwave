@@ -7,6 +7,7 @@ import com.risingwave.catalog.CatalogService;
 import com.risingwave.catalog.SimpleCatalogService;
 import com.risingwave.common.config.Configuration;
 import com.risingwave.execution.context.ExecutionContext;
+import com.risingwave.execution.context.FrontendEnv;
 import com.risingwave.execution.handler.DefaultSqlHandlerFactory;
 import com.risingwave.execution.handler.SqlHandlerFactory;
 import com.risingwave.sql.parser.SqlParser;
@@ -51,13 +52,13 @@ public abstract class SqlTestBase {
     initCatalog();
     sqlHandlerFactory = new DefaultSqlHandlerFactory();
 
+    var cfg = new Configuration();
+    var frontendEnv = new FrontendEnv(catalogService, sqlHandlerFactory, null, null, cfg);
     executionContext =
         ExecutionContext.builder()
-            .withCatalogService(catalogService)
             .withDatabase(TEST_DB_NAME)
             .withSchema(TEST_SCHEMA_NAME)
-            .withConfiguration(new Configuration())
-            .withSqlHandlerFactory(sqlHandlerFactory)
+            .withFrontendEnv(frontendEnv)
             .build();
   }
 

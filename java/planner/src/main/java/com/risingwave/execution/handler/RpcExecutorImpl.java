@@ -1,5 +1,7 @@
 package com.risingwave.execution.handler;
 
+import com.google.inject.Inject;
+import com.google.inject.Singleton;
 import com.risingwave.common.config.Configuration;
 import com.risingwave.common.config.LeaderServerConfigurations;
 import com.risingwave.common.exception.PgErrorCode;
@@ -17,10 +19,12 @@ import java.util.Iterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+@Singleton
 public class RpcExecutorImpl implements RpcExecutor {
   private static final Logger LOGGER = LoggerFactory.getLogger(QueryHandler.class);
   private Channel channel;
 
+  @Inject
   public RpcExecutorImpl(Configuration cfg) {
     // TODO: Choose a random gather node.
     String gatherNodeAddress = cfg.get(LeaderServerConfigurations.COMPUTE_NODES).get(0);
