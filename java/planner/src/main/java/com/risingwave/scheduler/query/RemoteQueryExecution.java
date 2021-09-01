@@ -21,7 +21,7 @@ public class RemoteQueryExecution implements QueryExecution, EventListener<Stage
       TaskManager taskManager,
       CompletableFuture<QueryResultLocation> resultFuture) {
     this.query = requireNonNull(query, "query");
-    CompletableFuture<QueryResultLocation> resultFuture1 = requireNonNull(resultFuture, "notifier");
+    requireNonNull(resultFuture, "notifier");
 
     this.actor =
         actorFactory.createActor(

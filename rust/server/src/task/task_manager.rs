@@ -35,8 +35,9 @@ impl TaskManager {
     }
 
     // NOTE: For now, draining out data from the task will block the grpc thread.
-    // By design, `take_data` is an future, but since it's unsafe to mix other
-    // future runtimes (tokio, eg.) with grpc-rs reactor, we
+    // By design, `take_data` is an future, but for the safe of the unsafety to mix other
+    // future runtimes (tokio, eg.) with grpc-rs reactor, we still implement it
+    // in an blocking way.
     pub(crate) fn take_task(&mut self, sid: &ProtoSinkId) -> Result<Box<TaskExecution>> {
         let task_id = TaskId::from(sid.get_task_id());
         let tsk = match self.tasks.lock().unwrap().remove(&task_id) {
@@ -59,6 +60,9 @@ impl TaskManager {
 #[cfg(test)]
 mod tests {
     use crate::task::test_utils::{ResultChecker, TestRunner};
+    use crate::task::{GlobalTaskEnv, TaskManager};
+    use risingwave_proto::plan::{PlanFragment, PlanNode_PlanNodeType};
+    use risingwave_proto::task_service::TaskId as ProtoTaskId;
 
     #[test]
     fn test_select_all() {
@@ -78,5 +82,14 @@ mod tests {
             .add_i32_column(false, &[4, 3, 4, 3])
             .add_i32_column(false, &[2, 3, 4, 5])
             .check_result(res);
+    }
+
+    #[test]
+    fn test_bad_node_type() {
+        let mut manager = TaskManager::new(GlobalTaskEnv::for_test());
+        let mut plan = PlanFragment::default();
+        plan.mut_root()
+            .set_node_type(PlanNode_PlanNodeType::INVALID);
+        assert!(manager.fire_task(&ProtoTaskId::default(), plan).is_err());
     }
 }

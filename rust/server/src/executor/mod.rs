@@ -9,6 +9,9 @@ use seq_scan::*;
 mod filter;
 use filter::*;
 
+#[cfg(test)]
+mod test_utils;
+
 use crate::array::DataChunkRef;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
@@ -19,6 +22,18 @@ use std::convert::TryFrom;
 pub(crate) enum ExecutorResult {
     Batch(DataChunkRef),
     Done,
+}
+
+impl ExecutorResult {
+    #[cfg(test)] // Remove when this is useful in non-test code.
+    fn batch_or(&self) -> Result<DataChunkRef> {
+        match self {
+            ExecutorResult::Batch(chunk) => Ok(chunk.clone()),
+            ExecutorResult::Done => {
+                Err(InternalError("result is Done, not Batch".to_string()).into())
+            }
+        }
+    }
 }
 
 pub(crate) trait Executor: Send {

@@ -12,11 +12,8 @@ import com.risingwave.node.WorkerNodeManager;
 import com.risingwave.proto.common.Status;
 import com.risingwave.proto.computenode.CreateTaskRequest;
 import com.risingwave.proto.computenode.CreateTaskResponse;
-import com.risingwave.proto.computenode.TaskServiceGrpc;
 import com.risingwave.rpc.RpcClientFactory;
 import com.risingwave.rpc.TaskService;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -26,9 +23,6 @@ class TaskManagerActor extends AbstractBehavior<TaskManagerEvent> {
 
   private final ConcurrentMap<TaskId, QueryTaskExecution> taskExecutions =
       new ConcurrentHashMap<>();
-
-  private final Map<WorkerNode, TaskServiceGrpc.TaskServiceFutureStub> taskServiceClients =
-      new HashMap<>();
 
   public TaskManagerActor(
       ActorContext<TaskManagerEvent> context,
@@ -50,7 +44,6 @@ class TaskManagerActor extends AbstractBehavior<TaskManagerEvent> {
     QueryTaskExecution taskExecution = createTaskExecution(event);
 
     TaskId taskId = event.getTask().getTaskId();
-    ;
     getContext().getLog().info("Creating query execution task: {}", taskId);
     WorkerNode node = nodeManager.nextRandom();
     CreateTaskResponse response = sendCreateTaskRequest(event, node);

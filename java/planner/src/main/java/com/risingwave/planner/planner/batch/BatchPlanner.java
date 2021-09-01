@@ -17,13 +17,18 @@ import com.risingwave.planner.program.VolcanoOptimizerProgram;
 import com.risingwave.planner.rel.logical.RwLogicalGather;
 import com.risingwave.planner.rel.physical.batch.BatchPlan;
 import com.risingwave.planner.rel.physical.batch.RisingWaveBatchPhyRel;
+import com.risingwave.planner.rel.serialization.ExplainWriter;
 import com.risingwave.planner.rules.BatchRuleSets;
 import com.risingwave.planner.sql.SqlConverter;
 import org.apache.calcite.plan.hep.HepMatchOrder;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.sql.SqlNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class BatchPlanner implements Planner<BatchPlan> {
+  private static final Logger log = LoggerFactory.getLogger(BatchPlanner.class);
+
   public BatchPlanner() {}
 
   private static RelNode toRel(
@@ -43,8 +48,10 @@ public class BatchPlanner implements Planner<BatchPlan> {
     OptimizerProgram optimizerProgram = buildOptimizerProgram();
 
     RelNode result = optimizerProgram.optimize(rawPlan, context);
+    RisingWaveBatchPhyRel root = (RisingWaveBatchPhyRel) result;
+    log.info("Create physical plan: {}", ExplainWriter.explainToString(root));
 
-    return new BatchPlan((RisingWaveBatchPhyRel) result);
+    return new BatchPlan(root);
   }
 
   private static OptimizerProgram buildOptimizerProgram() {

@@ -39,7 +39,7 @@ public class RpcExecutorImpl implements RpcExecutor {
       response = blockingTaskStub.create(request);
     } catch (StatusRuntimeException e) {
       LOGGER.warn("RPC failed: {}", e.getStatus());
-      throw new PgException(PgErrorCode.INTERNAL_ERROR, "Create task RPC failed");
+      throw rpcException("createTask", e);
     }
     return response;
   }
@@ -54,8 +54,12 @@ public class RpcExecutorImpl implements RpcExecutor {
       taskDataIterator = blockingExchangeStub.getData(taskSinkId);
     } catch (StatusRuntimeException e) {
       LOGGER.warn("RPC failed: {}", e.getStatus());
-      throw new PgException(PgErrorCode.INTERNAL_ERROR, "Get data RPC failed");
+      throw rpcException("getData", e);
     }
     return taskDataIterator;
+  }
+
+  private static PgException rpcException(String rpcName, StatusRuntimeException e) {
+    throw new PgException(PgErrorCode.INTERNAL_ERROR, "%s RPC failed: %s", rpcName, e.toString());
   }
 }

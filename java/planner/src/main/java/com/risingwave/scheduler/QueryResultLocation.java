@@ -5,6 +5,7 @@ import static java.util.Objects.requireNonNull;
 import com.risingwave.node.EndPoint;
 import com.risingwave.scheduler.task.TaskId;
 
+/** Where the query root (gather node) is assigned. */
 public class QueryResultLocation {
   private final TaskId taskId;
   private final EndPoint nodeEndPoint;

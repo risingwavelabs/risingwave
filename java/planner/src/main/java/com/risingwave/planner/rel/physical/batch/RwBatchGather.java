@@ -15,7 +15,7 @@ import org.apache.calcite.rel.convert.ConverterRule;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 /**
- * Physical version console operator.
+ * Physical version gather operator.
  *
  * @see RwLogicalGather
  */

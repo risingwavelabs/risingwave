@@ -53,17 +53,16 @@ impl TestRunner {
         SelectBuilder::new(self)
     }
 
-    pub(crate) fn run(&mut self, plan: PlanFragment) -> Vec<TaskData> {
+    pub(crate) fn run(&mut self, plan: PlanFragment) -> Result<Vec<TaskData>> {
         self.task_mgr
-            .fire_task(self.tsid.get_task_id(), plan.clone())
-            .unwrap();
+            .fire_task(self.tsid.get_task_id(), plan.clone())?;
         let mut task = self.task_mgr.take_task(&self.tsid).unwrap();
         let mut writer = FakeExchangeWriter { messages: vec![] };
         let messages = futures::executor::block_on(async move {
             task.take_data(0, &mut writer).await.unwrap();
             writer.messages
         });
-        messages
+        Ok(messages)
     }
 
     fn validate_insert_result(result: Vec<TaskData>, inserted_rows: usize) {
@@ -129,8 +128,8 @@ impl<'a> TableBuilder<'a> {
         let inserted_rows = self.tuples.len();
         let create = self.build_create_table_plan();
         let insert = self.build_insert_values_plan();
-        assert_eq!(self.runner.run(create).len(), 0);
-        TestRunner::validate_insert_result(self.runner.run(insert), inserted_rows);
+        assert_eq!(self.runner.run(create).unwrap().len(), 0);
+        TestRunner::validate_insert_result(self.runner.run(insert).unwrap(), inserted_rows);
     }
 
     fn build_create_table_plan(&self) -> PlanFragment {
@@ -237,7 +236,7 @@ impl<'a> SelectBuilder<'a> {
     }
 
     pub(crate) fn run(self) -> Vec<TaskData> {
-        self.runner.run(self.plan)
+        self.runner.run(self.plan).unwrap()
     }
 }
 
