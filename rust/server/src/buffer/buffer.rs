@@ -39,10 +39,17 @@ impl Buffer {
 
         Ok(buffer)
     }
-
     // TODO: We should remove this, a buffer should be immutable
     pub(crate) fn as_slice_mut(&mut self) -> &mut [u8] {
         unsafe { from_raw_parts_mut(self.ptr.as_ptr(), self.len) }
+    }
+
+    pub(crate) fn typed_data<T: NativeType>(&self) -> &[T] {
+        unsafe {
+            let (prefix, offsets, suffix) = self.as_slice().align_to::<T>();
+            assert!(prefix.is_empty() && suffix.is_empty());
+            offsets
+        }
     }
 
     pub(crate) fn as_slice(&self) -> &[u8] {

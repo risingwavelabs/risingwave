@@ -10,6 +10,7 @@ mod decimal;
 pub(crate) use decimal::*;
 mod array_builder;
 mod bool_array;
+pub(crate) mod interval_array;
 mod utf8_array;
 
 pub(crate) use array_builder::*;

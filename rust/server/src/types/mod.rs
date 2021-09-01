@@ -25,7 +25,7 @@ use std::fmt::Debug;
 
 mod bool_type;
 mod decimal_type;
-mod interval_type;
+pub(crate) mod interval_type;
 mod string_type;
 mod timestamp_type;
 

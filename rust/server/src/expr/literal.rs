@@ -11,6 +11,7 @@ use protobuf::Message;
 use risingwave_proto::data::DataType_TypeName;
 use risingwave_proto::expr::{ConstantValue, ExprNode, ExprNode_ExprNodeType};
 
+use crate::array::interval_array::IntervalValue;
 use rust_decimal::prelude::*;
 use rust_decimal::Decimal;
 use std::ops::Deref;
@@ -30,6 +31,7 @@ pub(crate) enum Datum {
     UInt32(u32),
     UInt64(u64),
     UTF8String(String),
+    Interval(IntervalValue),
 }
 
 pub(super) struct LiteralExpression {

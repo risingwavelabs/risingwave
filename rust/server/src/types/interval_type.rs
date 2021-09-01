@@ -1,21 +1,43 @@
-use crate::array::{BoxedArrayBuilder, PrimitiveArrayBuilder};
+use crate::array::interval_array::IntervalArrayBuilder;
+use crate::array::BoxedArrayBuilder;
 use crate::error::{Result, RwError};
-use crate::types::numeric_type::*;
-use crate::types::{DataType, DataTypeKind};
+use crate::types::{DataType, DataTypeKind, DataTypeRef};
 use risingwave_proto::data::{DataType as DataTypeProto, DataType_IntervalType, DataType_TypeName};
 use std::any::Any;
 use std::convert::TryFrom;
 use std::sync::Arc;
+
+/// If want to define a interval holds all kinds of time interval, now the frontend Java plan's Interval Type should be marked as Interval.
 #[derive(Debug)]
-struct IntervalType {
+pub(crate) struct IntervalType {
     nullable: bool,
-    inner_type: IntervalUnit,
     // Used for precision of seconds.
     precision: u32,
+    // None: the column can be hold any interval (microseconds/days/months/years)
+    // Some(): If Interval Unit is set to YEAR, insert values except years/month will be recorded as 00::00::00.
+    inner_type: Option<IntervalUnit>,
+}
+
+impl IntervalType {
+    fn new(nullable: bool, precision: u32, inner_type: Option<IntervalUnit>) -> Self {
+        IntervalType {
+            nullable,
+            precision,
+            inner_type,
+        }
+    }
+
+    pub(crate) fn create(
+        nullable: bool,
+        precision: u32,
+        inner_type: Option<IntervalUnit>,
+    ) -> DataTypeRef {
+        Arc::new(Self::new(nullable, precision, inner_type)) as DataTypeRef
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
-enum IntervalUnit {
+pub(crate) enum IntervalUnit {
     Year,
     Day,
     // TODO: other fileds in https://www.postgresql.org/docs/current/datatype-datetime.html
@@ -34,17 +56,21 @@ impl DataType for IntervalType {
         self: Arc<Self>,
         capacity: usize,
     ) -> crate::error::Result<BoxedArrayBuilder> {
-        Ok(Box::new(match self.inner_type {
+        match self.inner_type {
             // FIXME: change signed integer to unsigned.
-            IntervalUnit::Year => PrimitiveArrayBuilder::<Int32Type>::new(
-                Arc::new(Int32Type::new(self.nullable)),
+            Some(IntervalUnit::Year) => IntervalArrayBuilder::new(
+                Arc::new(IntervalType::new(
+                    self.nullable,
+                    self.precision,
+                    self.inner_type,
+                )),
                 capacity,
-            ),
-            IntervalUnit::Day => PrimitiveArrayBuilder::<Int32Type>::new(
-                Arc::new(Int32Type::new(self.nullable)),
-                capacity,
-            ),
-        }))
+            )
+            .map(|elem| Box::new(elem) as BoxedArrayBuilder),
+            _ => {
+                todo!()
+            }
+        }
     }
 
     fn to_protobuf(&self) -> crate::error::Result<DataTypeProto> {
@@ -62,17 +88,18 @@ impl DataType for IntervalType {
 }
 
 impl IntervalType {
-    fn as_proto_interval_type(interval_type: IntervalUnit) -> DataType_IntervalType {
+    fn as_proto_interval_type(interval_type: Option<IntervalUnit>) -> DataType_IntervalType {
         match interval_type {
-            IntervalUnit::Day => DataType_IntervalType::DAY,
-            IntervalUnit::Year => DataType_IntervalType::YEAR,
+            Some(IntervalUnit::Year) => DataType_IntervalType::YEAR,
+            Some(IntervalUnit::Day) => DataType_IntervalType::DAY,
+            None => unimplemented!(),
         }
     }
 
-    fn from_proto_interval_type(proto_interval: DataType_IntervalType) -> IntervalUnit {
+    fn from_proto_interval_type(proto_interval: DataType_IntervalType) -> Option<IntervalUnit> {
         match proto_interval {
-            DataType_IntervalType::YEAR => IntervalUnit::Year,
-            DataType_IntervalType::DAY => IntervalUnit::Day,
+            DataType_IntervalType::YEAR => Some(IntervalUnit::Year),
+            DataType_IntervalType::DAY => Some(IntervalUnit::Day),
             _ => unimplemented!(),
         }
     }

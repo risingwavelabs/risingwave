@@ -16,8 +16,6 @@ jobs:
     - uses: actions/stale@v4
       with:
         repo-token: ${{ secrets.WUTAO_PAT }}
-        stale-issue-message: 'Stale issue message'
-        stale-pr-message: 'Stale pull request message'
         stale-issue-label: 'no-issue-activity'
         stale-pr-label: 'no-pr-activity'
         days-before-close: -1
