@@ -26,6 +26,13 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
+/**
+ * Schedules a query. <br>
+ * The stages scheduling goes from bottom (leaf stages) to top (root stage). <br>
+ * To start a stage, all its dependencies must have been scheduled, because their physical
+ * properties, like node assignment information, are required. For example, Exchange requires the
+ * children's ExchangeSource, which couldn't be known unless scheduled.
+ */
 public class QueryExecutionActor extends AbstractBehavior<QueryExecutionEvent> {
   private final Query query;
   private final TaskManager taskManager;
@@ -62,7 +69,9 @@ public class QueryExecutionActor extends AbstractBehavior<QueryExecutionEvent> {
   }
 
   private Behavior<QueryExecutionEvent> onStart(QueryExecutionEvent.StartEvent event) {
-    query.getLeafStages().map(this::createOrGetStageExecution).forEach(StageExecution::start);
+    query.getLeafStages().stream()
+        .map(this::createOrGetStageExecution)
+        .forEach(StageExecution::start);
     return this;
   }
 
@@ -83,11 +92,13 @@ public class QueryExecutionActor extends AbstractBehavior<QueryExecutionEvent> {
   private void onStageScheduled(StageEvent.StageScheduledEvent event) {
     scheduledStages.add(event.getStageId());
 
-    query.getStageLinkageChecked(event.getStageId()).getParents().stream()
+    // Start the stages that have all the dependencies scheduled.
+    query.getParentsChecked(event.getStageId()).stream()
         .filter(this::allDependenciesScheduled)
         .map(this::createOrGetStageExecution)
         .forEach(StageExecution::start);
 
+    // Now the entire DAG is scheduled.
     if (event.getStageId().equals(query.getRootStageId())) {
       verify(event.getAssignments().size() == 1, "Root stage assignment size must be 1");
       Map.Entry<TaskId, WorkerNode> entry = event.getAssignments().entrySet().iterator().next();
@@ -109,7 +120,8 @@ public class QueryExecutionActor extends AbstractBehavior<QueryExecutionEvent> {
                 stageEventListener));
   }
 
+  // Whether all children of the stage has been scheduled.
   private boolean allDependenciesScheduled(StageId stageId) {
-    return scheduledStages.containsAll(query.getStageLinkageChecked(stageId).getChildren());
+    return scheduledStages.containsAll(query.getChildrenChecked(stageId));
   }
 }

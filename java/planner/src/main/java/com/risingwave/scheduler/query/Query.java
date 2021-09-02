@@ -1,65 +1,40 @@
 package com.risingwave.scheduler.query;
 
-import com.google.common.collect.ImmutableMap;
-import com.risingwave.common.exception.PgErrorCode;
-import com.risingwave.common.exception.PgException;
 import com.risingwave.scheduler.stage.QueryStage;
 import com.risingwave.scheduler.stage.StageId;
-import java.util.Optional;
-import java.util.stream.Stream;
+import java.util.List;
+import java.util.Set;
 
 public class Query {
   private final QueryId queryId;
-  private final ImmutableMap<StageId, QueryStage> stages;
-  private final ImmutableMap<StageId, StageLinkage> stageLinkages;
-  private final StageId rootStageId;
+  private final StageGraph graph;
 
-  public Query(
-      QueryId queryId,
-      ImmutableMap<StageId, QueryStage> stages,
-      ImmutableMap<StageId, StageLinkage> stageLinkages,
-      StageId rootStageId) {
+  public Query(QueryId queryId, StageGraph graph) {
     this.queryId = queryId;
-    this.stages = stages;
-    this.stageLinkages = stageLinkages;
-    this.rootStageId = rootStageId;
+    this.graph = graph;
   }
 
-  public Optional<QueryStage> getQueryStage(StageId stageId) {
-    return Optional.ofNullable(stages.get(stageId));
+  public Set<StageId> getParentsChecked(StageId stageId) {
+    return graph.getParentsChecked(stageId);
+  }
+
+  public Set<StageId> getChildrenChecked(StageId stageId) {
+    return graph.getChildrenChecked(stageId);
   }
 
   public QueryStage getQueryStageChecked(StageId stageId) {
-    return getQueryStage(stageId)
-        .orElseThrow(
-            () -> new PgException(PgErrorCode.INTERNAL_ERROR, "Unknown stage id: %s", stageId));
+    return graph.getQueryStageChecked(stageId);
   }
 
-  public Optional<StageLinkage> getStageLinkage(StageId stageId) {
-    return Optional.ofNullable(stageLinkages.get(stageId));
+  public List<StageId> getLeafStages() {
+    return graph.getLeafStages();
   }
 
-  public StageLinkage getStageLinkageChecked(StageId stageId) {
-    return getStageLinkage(stageId)
-        .orElseThrow(
-            () -> new PgException(PgErrorCode.INTERNAL_ERROR, "Unknown stage id: %s", stageId));
-  }
-
-  /**
-   * Find stages without dependencies.
-   *
-   * @return Stages without dependencies.
-   */
-  public Stream<StageId> getLeafStages() {
-    return stageLinkages.keySet().stream()
-        .filter(stageId -> stageLinkages.get(stageId).getChildren().isEmpty());
+  public StageId getRootStageId() {
+    return graph.getRootStageId();
   }
 
   public QueryId getQueryId() {
     return queryId;
-  }
-
-  public StageId getRootStageId() {
-    return rootStageId;
   }
 }

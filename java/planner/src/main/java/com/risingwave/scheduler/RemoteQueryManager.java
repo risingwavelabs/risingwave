@@ -38,8 +38,7 @@ public class RemoteQueryManager implements QueryManager {
 
   private void createQueryExecution(
       BatchPlan plan, CompletableFuture<QueryResultLocation> resultFuture) {
-    PlanFragmenter fragmenter = new PlanFragmenter(plan);
-    Query query = fragmenter.planDistribution();
+    Query query = PlanFragmenter.planDistribution(plan);
 
     QueryExecution queryExecution =
         new RemoteQueryExecution(query, actorFactory, taskManager, resultFuture);

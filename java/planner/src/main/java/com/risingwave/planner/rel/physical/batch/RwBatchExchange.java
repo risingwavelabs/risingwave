@@ -38,7 +38,8 @@ public class RwBatchExchange extends Exchange implements RisingWaveBatchPhyRel {
 
   @Override
   public PlanNode serialize() {
-    throw new UnsupportedOperationException("RwBatchExchange#serialize is not supported");
+    // Exchange is a pipeline breaker, we do not serialize its children.
+    return PlanNode.newBuilder().setNodeType(PlanNode.PlanNodeType.EXCHANGE).build();
   }
 
   public static RwBatchExchange create(RelNode input, RwDistributionTrait distribution) {

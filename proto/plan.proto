@@ -103,6 +103,7 @@ message PlanNode {
         HASH_AGG = 7;
         SIMPLE_AGG = 8;
         FILTER = 9;
+        EXCHANGE = 10;
     }
     PlanNodeType node_type = 1;
     google.protobuf.Any body = 2;

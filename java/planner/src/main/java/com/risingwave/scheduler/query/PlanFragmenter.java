@@ -2,47 +2,64 @@ package com.risingwave.scheduler.query;
 
 import static java.util.Objects.requireNonNull;
 
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
 import com.risingwave.planner.rel.physical.batch.BatchPlan;
+import com.risingwave.planner.rel.physical.batch.RisingWaveBatchPhyRel;
+import com.risingwave.planner.rel.physical.batch.RwBatchExchange;
 import com.risingwave.scheduler.shuffle.SinglePartitionSchema;
 import com.risingwave.scheduler.stage.QueryStage;
 import com.risingwave.scheduler.stage.StageId;
 import com.risingwave.scheduler.stage.StagePlanInfo;
-import java.util.HashMap;
-import java.util.Map;
+import org.apache.calcite.rel.RelNode;
 
 public class PlanFragmenter {
-  private final BatchPlan plan;
-
   private final QueryId queryId = QueryId.next();
-  private final Map<StageId, QueryStage> stages = new HashMap<>();
-  private final Map<StageId, StageLinkage> stageLinkages = new HashMap<>();
+
   private int nextStageId = 0;
 
-  public PlanFragmenter(BatchPlan plan) {
-    this.plan = requireNonNull(plan, "plan");
+  private final StageGraph.Builder graphBuilder;
+
+  private PlanFragmenter() {
+    this.graphBuilder = StageGraph.newBuilder();
   }
 
-  public Query planDistribution() {
-    QueryStage rootStage = createRootStage();
+  // Break the query plan into fragments.
+  public static Query planDistribution(BatchPlan plan) {
+    requireNonNull(plan, "plan");
+    var fragmenter = new PlanFragmenter();
 
-    StageLinkage linkage =
-        new StageLinkage(rootStage.getStageId(), ImmutableSet.of(), ImmutableSet.of());
-    stageLinkages.put(linkage.getStageId(), linkage);
-
-    return new Query(
-        queryId,
-        ImmutableMap.copyOf(stages),
-        ImmutableMap.copyOf(stageLinkages),
-        rootStage.getStageId());
+    var rootStage = fragmenter.newQueryStage(plan.getRoot());
+    fragmenter.buildStage(rootStage, plan.getRoot());
+    return new Query(fragmenter.queryId, fragmenter.graphBuilder.build(rootStage.getStageId()));
   }
 
-  private QueryStage createRootStage() {
-    StagePlanInfo stagePlanInfo = new StagePlanInfo(plan.getRoot(), new SinglePartitionSchema(), 1);
-    QueryStage queryStage = new QueryStage(getNextStageId(), stagePlanInfo, ImmutableSet.of());
-    stages.put(queryStage.getStageId(), queryStage);
-    return queryStage;
+  // Recursively build the plan DAG.
+  private void buildStage(QueryStage curStage, RisingWaveBatchPhyRel node) {
+    // Children under pipeline-breaker separately forms a stage (aka plan fragment).
+
+    // NOTE: The breaker's children will not be logically removed after plan slicing,
+    // but their serialized plan will ignore the children. Therefore, the compute-node
+    // will eventually only receive the sliced part.
+    if (node instanceof RwBatchExchange) {
+      for (RelNode rn : node.getInputs()) {
+        RisingWaveBatchPhyRel child = (RisingWaveBatchPhyRel) rn;
+        QueryStage childStage = newQueryStage(child);
+        graphBuilder.linkToChild(curStage.getStageId(), childStage.getStageId());
+
+        buildStage(childStage, child);
+      }
+    } else {
+      for (RelNode rn : node.getInputs()) {
+        buildStage(curStage, (RisingWaveBatchPhyRel) rn);
+      }
+    }
+  }
+
+  private QueryStage newQueryStage(RisingWaveBatchPhyRel node) {
+    StageId stageId = getNextStageId();
+    StagePlanInfo stagePlanInfo = new StagePlanInfo(node, new SinglePartitionSchema(), 1);
+    var stage = new QueryStage(stageId, stagePlanInfo);
+    graphBuilder.addNode(stage);
+    return stage;
   }
 
   private StageId getNextStageId() {
