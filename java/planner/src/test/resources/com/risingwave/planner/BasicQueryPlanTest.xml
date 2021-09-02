@@ -64,9 +64,8 @@ select * from t where v1 > 1
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwBatchProject(v1=[$0], v2=[$1], v3=[$2])
-  RwBatchFilter(condition=[>($0, 1)])
-    RwBatchFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])
+RwBatchFilter(condition=[>($0, 1)])
+  RwBatchFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])
             ]]>
         </Resource>
     </TestCase>
@@ -458,7 +457,7 @@ RwBatchProject(EXPR$0=[$1], v2=[$0])
         <!--        </Resource>-->
     </TestCase>
 
-    <TestCase name="select with sum and group by">
+    <TestCase name="select only">
         <Resource name="sql">
             <![CDATA[
 select 100.0::DOUBLE/8.0::DOUBLE

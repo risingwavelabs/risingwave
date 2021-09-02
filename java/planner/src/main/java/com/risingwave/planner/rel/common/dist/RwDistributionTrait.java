@@ -6,6 +6,7 @@ import static org.apache.calcite.rel.RelDistributions.ANY;
 
 import com.google.common.base.Objects;
 import com.google.common.collect.Ordering;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import org.apache.calcite.plan.RelMultipleTrait;
@@ -28,14 +29,19 @@ public class RwDistributionTrait implements RelDistribution {
   public RwDistributionTrait(Type type, ImmutableIntList keys) {
     checkArgs(type, keys);
     this.type = type;
-    this.keys = ImmutableIntList.copyOf(keys);
+    this.keys = sort(keys);
+  }
+
+  private static ImmutableIntList sort(ImmutableIntList keys) {
+    var array = keys.toIntArray();
+    Arrays.sort(array);
+    return ImmutableIntList.of(array);
   }
 
   private static void checkArgs(Type type, ImmutableIntList keys) {
     requireNonNull(type, "type");
     requireNonNull(keys, "keys");
     if (Type.HASH_DISTRIBUTED == type) {
-      verify(Ordering.natural().isOrdered(keys), "Hash distribution keys must be ordered!");
       verify(!keys.isEmpty(), "Hash distribution keys can't be empty!");
     } else if (Type.RANDOM_DISTRIBUTED != type) {
       verify(keys.isEmpty(), "Distribution key of type %s must be empty!", type);

@@ -3,6 +3,7 @@ package com.risingwave.planner.rel.logical;
 import java.util.List;
 import org.apache.calcite.plan.Convention;
 import org.apache.calcite.plan.RelOptCluster;
+import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.prepare.Prepare;
@@ -65,7 +66,9 @@ public class RwLogicalInsert extends TableModify implements RisingWaveLogicalRel
 
     @Override
     public @Nullable RelNode convert(RelNode rel) {
-      LogicalTableModify tableModify = (LogicalTableModify) rel;
+      var tableModify = (LogicalTableModify) rel;
+      var input = tableModify.getInput();
+      var newInput = RelOptRule.convert(input, input.getTraitSet().plus(LOGICAL));
 
       RelTraitSet newTraitSet = tableModify.getTraitSet().plus(RisingWaveLogicalRel.LOGICAL);
       return new RwLogicalInsert(
@@ -73,7 +76,7 @@ public class RwLogicalInsert extends TableModify implements RisingWaveLogicalRel
           newTraitSet,
           tableModify.getTable(),
           tableModify.getCatalogReader(),
-          tableModify.getInput(),
+          newInput,
           tableModify.getUpdateColumnList());
     }
   }

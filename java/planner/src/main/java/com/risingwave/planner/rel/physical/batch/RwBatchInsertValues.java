@@ -1,5 +1,6 @@
 package com.risingwave.planner.rel.physical.batch;
 
+import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 import static java.util.Objects.requireNonNull;
 
 import com.google.common.collect.ImmutableList;
@@ -7,6 +8,7 @@ import com.google.protobuf.Any;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.execution.handler.RpcExecutor;
+import com.risingwave.planner.rel.logical.RwLogicalInsertValues;
 import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
 import com.risingwave.proto.plan.InsertValueNode;
 import com.risingwave.proto.plan.PlanNode;
@@ -16,7 +18,9 @@ import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.AbstractRelNode;
+import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelWriter;
+import org.apache.calcite.rel.convert.ConverterRule;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexLiteral;
@@ -28,6 +32,7 @@ import org.apache.calcite.util.DateString;
 import org.apache.calcite.util.NlsString;
 import org.apache.calcite.util.TimeString;
 import org.apache.calcite.util.TimestampString;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 public class RwBatchInsertValues extends AbstractRelNode implements RisingWaveBatchPhyRel {
   private final TableCatalog table;
@@ -105,6 +110,33 @@ public class RwBatchInsertValues extends AbstractRelNode implements RisingWaveBa
   private static String toString(ImmutableList<RexNode> row) {
     requireNonNull(row, "row");
     return row.stream().map(RexNode::toString).collect(Collectors.joining(",", "(", ")"));
+  }
+
+  public static class BatchInsertValuesConverterRule extends ConverterRule {
+    public static final BatchInsertValuesConverterRule INSTANCE =
+        Config.INSTANCE
+            .withInTrait(LOGICAL)
+            .withOutTrait(BATCH_PHYSICAL)
+            .withRuleFactory(BatchInsertValuesConverterRule::new)
+            .withOperandSupplier(t -> t.operand(RwLogicalInsertValues.class).noInputs())
+            .withDescription("Converting insert values to batch physical.")
+            .as(Config.class)
+            .toRule(BatchInsertValuesConverterRule.class);
+
+    protected BatchInsertValuesConverterRule(Config config) {
+      super(config);
+    }
+
+    @Override
+    public @Nullable RelNode convert(RelNode rel) {
+      var logicalInsertValues = (RwLogicalInsertValues) rel;
+      return new RwBatchInsertValues(
+          rel.getCluster(),
+          rel.getTraitSet().plus(BATCH_PHYSICAL),
+          logicalInsertValues.getTableCatalog(),
+          logicalInsertValues.getColumnIds(),
+          logicalInsertValues.getTuples());
+    }
   }
 
   private static class AddCastVisitor extends RexVisitorImpl<RexNode> {

@@ -4,20 +4,26 @@ import com.risingwave.planner.rel.logical.RwLogicalAggregate;
 import com.risingwave.planner.rel.logical.RwLogicalFilter;
 import com.risingwave.planner.rel.logical.RwLogicalFilterScan;
 import com.risingwave.planner.rel.logical.RwLogicalInsert;
+import com.risingwave.planner.rel.logical.RwLogicalJoin;
 import com.risingwave.planner.rel.logical.RwLogicalProject;
 import com.risingwave.planner.rel.logical.RwLogicalSort;
 import com.risingwave.planner.rel.logical.RwLogicalValues;
 import com.risingwave.planner.rel.physical.batch.RwBatchFilter;
 import com.risingwave.planner.rel.physical.batch.RwBatchFilterScan;
 import com.risingwave.planner.rel.physical.batch.RwBatchGather;
+import com.risingwave.planner.rel.physical.batch.RwBatchInsertValues;
 import com.risingwave.planner.rel.physical.batch.RwBatchProject;
 import com.risingwave.planner.rel.physical.batch.RwBatchSort;
 import com.risingwave.planner.rel.physical.batch.RwBatchValues;
+import com.risingwave.planner.rules.logical.GatherConversionRule;
 import com.risingwave.planner.rules.logical.ProjectToTableScanRule;
 import com.risingwave.planner.rules.physical.batch.BatchExpandConverterRule;
-import com.risingwave.planner.rules.physical.batch.BatchInsertValuesRule;
+import com.risingwave.planner.rules.physical.batch.InsertValuesRule;
 import com.risingwave.planner.rules.physical.batch.aggregate.BatchHashAggRule;
 import com.risingwave.planner.rules.physical.batch.aggregate.BatchSortAggRule;
+import com.risingwave.planner.rules.physical.batch.join.BatchHashJoinRule;
+import java.util.List;
+import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.rel.rules.CoreRules;
 import org.apache.calcite.rel.rules.PruneEmptyRules;
 import org.apache.calcite.tools.RuleSet;
@@ -26,9 +32,32 @@ import org.apache.calcite.tools.RuleSets;
 public class BatchRuleSets {
   private BatchRuleSets() {}
 
-  public static final RuleSet CALCITE_LOGICAL_OPTIMIZE_RULES =
+  public static final RuleSet SUB_QUERY_REWRITE_RULES =
       RuleSets.ofList(
+          CoreRules.FILTER_SUB_QUERY_TO_CORRELATE,
+          CoreRules.PROJECT_SUB_QUERY_TO_CORRELATE,
+          CoreRules.JOIN_SUB_QUERY_TO_CORRELATE);
+
+  public static final RuleSet BASIC_LOGICAL_OPTIMIZE_RULES =
+      RuleSets.ofList(
+          CoreRules.UNION_TO_DISTINCT,
+          CoreRules.FILTER_INTO_JOIN,
+          CoreRules.JOIN_CONDITION_PUSH,
+          CoreRules.JOIN_PUSH_EXPRESSIONS,
+          CoreRules.JOIN_REDUCE_EXPRESSIONS,
+          CoreRules.JOIN_PUSH_TRANSITIVE_PREDICATES,
+          CoreRules.FILTER_REDUCE_EXPRESSIONS,
+          CoreRules.PROJECT_REDUCE_EXPRESSIONS,
+          CoreRules.FILTER_AGGREGATE_TRANSPOSE,
+          CoreRules.FILTER_PROJECT_TRANSPOSE,
+          CoreRules.FILTER_SET_OP_TRANSPOSE,
+          CoreRules.FILTER_MERGE,
           CoreRules.PROJECT_FILTER_TRANSPOSE,
+          CoreRules.PROJECT_MERGE,
+          CoreRules.PROJECT_REMOVE,
+          CoreRules.AGGREGATE_PROJECT_PULL_UP_CONSTANTS,
+          CoreRules.SORT_REMOVE,
+          CoreRules.FILTER_EXPAND_IS_NOT_DISTINCT_FROM,
           PruneEmptyRules.UNION_INSTANCE,
           PruneEmptyRules.INTERSECT_INSTANCE,
           PruneEmptyRules.MINUS_INSTANCE,
@@ -40,6 +69,12 @@ public class BatchRuleSets {
           PruneEmptyRules.JOIN_RIGHT_INSTANCE,
           PruneEmptyRules.SORT_FETCH_ZERO_INSTANCE);
 
+  public static final List<RelOptRule> JOIN_REORDER_PREPARE_RULES =
+      List.of(
+          CoreRules.JOIN_TO_MULTI_JOIN,
+          CoreRules.PROJECT_MULTI_JOIN_MERGE,
+          CoreRules.FILTER_MULTI_JOIN_MERGE);
+
   public static final RuleSet LOGICAL_CONVERTER_RULES =
       RuleSets.ofList(
           RwLogicalInsert.LogicalInsertConverterRule.INSTANCE,
@@ -48,25 +83,31 @@ public class BatchRuleSets {
           RwLogicalAggregate.RwAggregateConverterRule.INSTANCE,
           RwLogicalValues.RwValuesConverterRule.INSTANCE,
           RwLogicalFilterScan.RwLogicalFilterScanConverterRule.INSTANCE,
-          RwLogicalSort.RwLogicalSortConverterRule.INSTANCE);
+          RwLogicalSort.RwLogicalSortConverterRule.INSTANCE,
+          RwLogicalJoin.RwLogicalJoinConverterRule.INSTANCE,
+          GatherConversionRule.Config.DEFAULT.toRule());
 
   public static final RuleSet LOGICAL_OPTIMIZATION_RULES =
-      RuleSets.ofList(ProjectToTableScanRule.Config.INSTANCE.toRule());
+      RuleSets.ofList(
+          ProjectToTableScanRule.Config.INSTANCE.toRule(),
+          InsertValuesRule.Config.VALUES.toRule(),
+          InsertValuesRule.Config.PROJECT_VALUES.toRule());
 
   public static final RuleSet PHYSICAL_CONVERTER_RULES =
       RuleSets.ofList(
-          //          AbstractConverter.ExpandConversionRule.Config.DEFAULT.toRule(),
           BatchExpandConverterRule.Config.DEFAULT.toRule(),
           RwBatchFilter.BatchFilterConverterRule.INSTANCE,
           RwBatchProject.BatchProjectConverterRule.INSTANCE,
           RwBatchValues.BatchValuesConverterRule.INSTANCE,
-          BatchInsertValuesRule.Config.VALUES.toRule(),
-          BatchInsertValuesRule.Config.PROJECT_VALUES.toRule(),
           RwBatchFilterScan.BatchFilterScanConverterRule.INSTANCE,
           RwBatchGather.RwBatchGatherConverterRule.INSTANCE,
-          RwBatchSort.RwBatchSortConverterRule.INSTANCE);
+          RwBatchSort.RwBatchSortConverterRule.INSTANCE,
+          RwBatchInsertValues.BatchInsertValuesConverterRule.INSTANCE);
 
   public static final RuleSet PHYSICAL_AGG_RULES =
       RuleSets.ofList(
           BatchHashAggRule.Config.DEFAULT.toRule(), BatchSortAggRule.Config.DEFAULT.toRule());
+
+  public static final RuleSet PHYSICAL_JOIN_RULES =
+      RuleSets.ofList(BatchHashJoinRule.Config.DEFAULT.toRule());
 }

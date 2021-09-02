@@ -11,9 +11,6 @@ import com.risingwave.planner.rel.physical.batch.RisingWaveBatchPhyRel;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
 import com.risingwave.planner.util.PlannerTestCase;
 import com.risingwave.planner.util.PlannerTestDdlLoader;
-import java.io.IOException;
-import java.io.PrintWriter;
-import java.io.StringWriter;
 import java.util.List;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.sql.SqlNode;
@@ -45,24 +42,13 @@ public abstract class BatchPlanTestBase extends SqlTestBase {
     SqlNode ast = parseSql(sql);
     BatchPlan plan = batchPlanner.plan(ast, executionContext);
 
-    String explainedPlan = explainBatchPlan(plan.getRoot());
+    String explainedPlan = ExplainWriter.explainPlan(plan.getRoot());
     assertEquals(testCase.getPlan(), explainedPlan, "Plan not match!");
 
     // Comment out this to wait for all plan serializaton to be ready
     if (testCase.getJson() != null) {
       String serializedJsonPlan = serializePlanToJson(plan.getRoot());
       assertEquals(testCase.getJson(), serializedJsonPlan, "Json not match!");
-    }
-  }
-
-  private static String explainBatchPlan(RelNode relNode) {
-    try (StringWriter sw = new StringWriter();
-        PrintWriter printer = new PrintWriter(sw); ) {
-      ExplainWriter writer = new ExplainWriter(printer);
-      relNode.explain(writer);
-      return sw.toString().trim();
-    } catch (IOException e) {
-      throw new RuntimeException(e);
     }
   }
 

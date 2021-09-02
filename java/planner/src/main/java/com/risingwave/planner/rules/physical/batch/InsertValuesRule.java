@@ -1,49 +1,29 @@
 package com.risingwave.planner.rules.physical.batch;
 
-import static com.risingwave.execution.context.ExecutionContext.contextOf;
-import static com.risingwave.planner.planner.PlannerUtils.isSingleMode;
-import static com.risingwave.planner.rel.physical.batch.RisingWaveBatchPhyRel.BATCH_PHYSICAL;
+import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
 import com.google.common.collect.ImmutableList;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
-import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.logical.RwLogicalInsert;
+import com.risingwave.planner.rel.logical.RwLogicalInsertValues;
 import com.risingwave.planner.rel.logical.RwLogicalProject;
 import com.risingwave.planner.rel.logical.RwLogicalValues;
-import com.risingwave.planner.rel.physical.batch.RwBatchInsertValues;
 import java.util.Optional;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.plan.RelRule;
 import org.apache.calcite.plan.RelTraitSet;
-import org.apache.calcite.rel.RelDistribution;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rex.RexNode;
 
-public class BatchInsertValuesRule extends RelRule<RelRule.Config> {
+public class InsertValuesRule extends RelRule<RelRule.Config> {
 
-  private BatchInsertValuesRule(Config config) {
+  private InsertValuesRule(Config config) {
     super(config);
   }
-
-  //  @Override
-  //  public boolean matches(RelOptRuleCall call) {
-  //    var input = call.rel(1);
-  //    if (input instanceof RwLogicalProject) {
-  //      var project = (RwLogicalProject) input;
-  //      if (!(project.getInput() instanceof RwLogicalValues)) {
-  //        return false;
-  //      }
-  //      var values = (RwLogicalValues) ((RwLogicalProject) input).getInput();
-  //      return values.getTuples().size() == 1 &&
-  //          values.getTuples().get(0).size() == 1 &&
-  //          BigDecimal.ZERO.equals(values.getTuples().get(0).get(0).getValue());
-  //    }
-  //    return true;
-  //  }
 
   @Override
   public void onMatch(RelOptRuleCall call) {
@@ -61,14 +41,11 @@ public class BatchInsertValuesRule extends RelRule<RelRule.Config> {
                         .collect(ImmutableList.toImmutableList()))
             .orElseGet(ImmutableList::of);
 
-    RelDistribution distTrait =
-        isSingleMode(contextOf(call))
-            ? RwDistributions.SINGLETON
-            : RwDistributions.RANDOM_DISTRIBUTED;
-    RelTraitSet newTraitSet = insert.getTraitSet().plus(BATCH_PHYSICAL).plus(distTrait);
+    RelTraitSet newTraitSet = insert.getTraitSet().plus(LOGICAL);
 
     call.transformTo(
-        new RwBatchInsertValues(insert.getCluster(), newTraitSet, tableCatalog, columnIds, tuples));
+        new RwLogicalInsertValues(
+            insert.getCluster(), newTraitSet, tableCatalog, columnIds, tuples));
   }
 
   private static ImmutableList<ImmutableList<RexNode>> getTuples(RelNode input) {
@@ -117,7 +94,7 @@ public class BatchInsertValuesRule extends RelRule<RelRule.Config> {
 
     @Override
     default RelOptRule toRule() {
-      return new BatchInsertValuesRule(this);
+      return new InsertValuesRule(this);
     }
   }
 }

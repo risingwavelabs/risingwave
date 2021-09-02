@@ -8,6 +8,7 @@ import com.risingwave.common.error.PlannerError;
 import com.risingwave.common.exception.RisingWaveException;
 import com.risingwave.common.util.Utils;
 import com.risingwave.execution.context.ExecutionContext;
+import com.risingwave.planner.rel.serialization.ExplainWriter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -42,6 +43,7 @@ public class ChainedOptimizerProgram implements OptimizerProgram {
                 () -> program.optimize(current, context),
                 nanoSeconds ->
                     LOGGER.debug("Optimizer phase {} took {} nanoseconds.", phase, nanoSeconds));
+        LOGGER.debug("Plan after phase {}: \n{}", phase, ExplainWriter.explainPlan(result));
       } catch (Exception e) {
         LOGGER.error("Failed to optimize plan at phase {}.", phase, e);
         throw RisingWaveException.from(PlannerError.INTERNAL, e);
@@ -56,7 +58,9 @@ public class ChainedOptimizerProgram implements OptimizerProgram {
   }
 
   public enum OptimizerPhase {
-    CALCITE_LOGICAL_OPTIMIZATION("Logical optimization rules from calcite"),
+    SUBQUERY_REWRITE("Subquery rewrite"),
+    BASIC_LOGICAL_OPTIMIZATION("Basic optimization rules"),
+    JOIN_REORDER("Join reorder"),
     LOGICAL_CONVERSION("Converting calcite logical plan to rising wave logical plan."),
     LOGICAL_OPTIMIZATION("Optimising logical plan"),
     PHYSICAL("Physical planning");

@@ -1,5 +1,6 @@
 package com.risingwave.planner.rel.serialization;
 
+import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import org.apache.calcite.rel.RelNode;
@@ -11,11 +12,14 @@ public class ExplainWriter extends RelWriterImpl {
     super(printWriter, SqlExplainLevel.EXPPLAN_ATTRIBUTES, false);
   }
 
-  public static String explainToString(RelNode relNode) {
-    StringWriter sw = new StringWriter();
-    PrintWriter printer = new PrintWriter(sw);
-    ExplainWriter writer = new ExplainWriter(printer);
-    relNode.explain(writer);
-    return sw.toString().trim();
+  public static String explainPlan(RelNode relNode) {
+    try (StringWriter sw = new StringWriter();
+        PrintWriter printer = new PrintWriter(sw); ) {
+      ExplainWriter writer = new ExplainWriter(printer);
+      relNode.explain(writer);
+      return sw.toString().trim();
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
   }
 }

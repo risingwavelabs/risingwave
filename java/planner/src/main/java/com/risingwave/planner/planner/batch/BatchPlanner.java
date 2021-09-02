@@ -1,18 +1,23 @@
 package com.risingwave.planner.planner.batch;
 
 import static com.risingwave.planner.planner.PlannerUtils.isSingleMode;
-import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.CALCITE_LOGICAL_OPTIMIZATION;
-import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.LOGICAL_CONVERSION;
-import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.LOGICAL_OPTIMIZATION;
+import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.BASIC_LOGICAL_OPTIMIZATION;
+import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.JOIN_REORDER;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.PHYSICAL;
+import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.SUBQUERY_REWRITE;
+import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
+import static com.risingwave.planner.rules.BatchRuleSets.LOGICAL_CONVERTER_RULES;
+import static com.risingwave.planner.rules.BatchRuleSets.LOGICAL_OPTIMIZATION_RULES;
 import static com.risingwave.planner.rules.BatchRuleSets.PHYSICAL_AGG_RULES;
 import static com.risingwave.planner.rules.BatchRuleSets.PHYSICAL_CONVERTER_RULES;
+import static com.risingwave.planner.rules.BatchRuleSets.PHYSICAL_JOIN_RULES;
 
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.planner.planner.Planner;
 import com.risingwave.planner.program.ChainedOptimizerProgram;
-import com.risingwave.planner.program.HepOptimizerProgram;
+import com.risingwave.planner.program.JoinReorderProgram;
 import com.risingwave.planner.program.OptimizerProgram;
+import com.risingwave.planner.program.SubQueryRewriteProgram;
 import com.risingwave.planner.program.VolcanoOptimizerProgram;
 import com.risingwave.planner.rel.logical.RwLogicalGather;
 import com.risingwave.planner.rel.physical.batch.BatchPlan;
@@ -20,7 +25,6 @@ import com.risingwave.planner.rel.physical.batch.RisingWaveBatchPhyRel;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
 import com.risingwave.planner.rules.BatchRuleSets;
 import com.risingwave.planner.sql.SqlConverter;
-import org.apache.calcite.plan.hep.HepMatchOrder;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.sql.SqlNode;
 import org.slf4j.Logger;
@@ -49,7 +53,7 @@ public class BatchPlanner implements Planner<BatchPlan> {
 
     RelNode result = optimizerProgram.optimize(rawPlan, context);
     RisingWaveBatchPhyRel root = (RisingWaveBatchPhyRel) result;
-    log.info("Create physical plan: {}", ExplainWriter.explainToString(root));
+    log.info("Create physical plan: {}", ExplainWriter.explainPlan(root));
 
     return new BatchPlan(root);
   }
@@ -57,27 +61,17 @@ public class BatchPlanner implements Planner<BatchPlan> {
   private static OptimizerProgram buildOptimizerProgram() {
     ChainedOptimizerProgram.Builder builder = ChainedOptimizerProgram.builder();
 
-    builder.addLast(
-        CALCITE_LOGICAL_OPTIMIZATION,
-        HepOptimizerProgram.builder()
-            .withMatchOrder(HepMatchOrder.BOTTOM_UP)
-            .withMatchLimit(10)
-            .addRules(BatchRuleSets.CALCITE_LOGICAL_OPTIMIZE_RULES)
-            .build());
+    builder.addLast(SUBQUERY_REWRITE, SubQueryRewriteProgram.INSTANCE);
+
+    builder.addLast(JOIN_REORDER, JoinReorderProgram.INSTANCE);
 
     builder.addLast(
-        LOGICAL_CONVERSION,
-        HepOptimizerProgram.builder()
-            .withMatchOrder(HepMatchOrder.BOTTOM_UP)
-            .withMatchLimit(10)
-            .addRules(BatchRuleSets.LOGICAL_CONVERTER_RULES)
-            .build());
-
-    builder.addLast(
-        LOGICAL_OPTIMIZATION,
-        HepOptimizerProgram.builder()
-            .withMatchLimit(10)
-            .addRules(BatchRuleSets.LOGICAL_OPTIMIZATION_RULES)
+        BASIC_LOGICAL_OPTIMIZATION,
+        VolcanoOptimizerProgram.builder()
+            .addRules(BatchRuleSets.BASIC_LOGICAL_OPTIMIZE_RULES)
+            .addRules(LOGICAL_CONVERTER_RULES)
+            .addRules(LOGICAL_OPTIMIZATION_RULES)
+            .addRequiredOutputTraits(LOGICAL)
             .build());
 
     builder.addLast(
@@ -85,6 +79,7 @@ public class BatchPlanner implements Planner<BatchPlan> {
         VolcanoOptimizerProgram.builder()
             .addRules(PHYSICAL_CONVERTER_RULES)
             .addRules(PHYSICAL_AGG_RULES)
+            .addRules(PHYSICAL_JOIN_RULES)
             .addRequiredOutputTraits(RisingWaveBatchPhyRel.BATCH_PHYSICAL)
             .build());
 

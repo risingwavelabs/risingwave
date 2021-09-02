@@ -2,6 +2,7 @@ package com.risingwave.planner.rel.logical;
 
 import org.apache.calcite.plan.Convention;
 import org.apache.calcite.plan.RelOptCluster;
+import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelCollation;
 import org.apache.calcite.rel.RelCollationTraitDef;
@@ -52,13 +53,15 @@ public class RwLogicalSort extends Sort implements RisingWaveLogicalRel {
     @Override
     public @Nullable RelNode convert(RelNode rel) {
       var logicalSort = (LogicalSort) rel;
+      var input = logicalSort.getInput();
+      var newInput = RelOptRule.convert(input, input.getTraitSet().plus(LOGICAL));
       var collationTraits = RelCollationTraitDef.INSTANCE.canonize(logicalSort.getCollation());
       var newTraits = logicalSort.getTraitSet().plus(LOGICAL).plus(collationTraits);
 
       return new RwLogicalSort(
           rel.getCluster(),
           newTraits,
-          logicalSort.getInput(),
+          newInput,
           logicalSort.getCollation(),
           logicalSort.offset,
           logicalSort.fetch);

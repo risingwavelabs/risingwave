@@ -14,12 +14,12 @@ public class NumericTypeBase extends PrimitiveTypeBase {
 
   public NumericTypeBase(SqlTypeName sqlTypeName, int dataSize) {
     this(false, sqlTypeName, dataSize);
-    resetDigest();
   }
 
   public NumericTypeBase(boolean nullable, SqlTypeName sqlTypeName, int dataSize) {
     super(nullable, sqlTypeName);
     this.dataSize = dataSize;
+    resetDigest();
   }
 
   @Override
