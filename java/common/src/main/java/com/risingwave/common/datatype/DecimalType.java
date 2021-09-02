@@ -11,7 +11,8 @@ import org.apache.calcite.sql.type.SqlTypeName;
 public class DecimalType extends PrimitiveTypeBase {
   // Align with backend
   public static final int MAX_PRECISION = 28;
-  public static final int MAX_SCALE = 27;
+  // FIXME: MAX_SCALE should not be too large since it's the default scale in CREATE_TABLE
+  public static final int MAX_SCALE = 10;
   private final int precision;
   private final int scale;
 

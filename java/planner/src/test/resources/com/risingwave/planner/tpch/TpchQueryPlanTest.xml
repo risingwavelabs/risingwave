@@ -7,7 +7,7 @@ insert into customer values (149601, 'Customer#000149601', 'rsARKllazC', 18, '28
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwBatchInsertValues(table=[customer], values=[((149601,'Customer#000149601':CHAR(18),'rsARKllazC':CHAR(10),18,'28-585-834-9749':CHAR(15),CAST(3932.16:DECIMAL(6,2)):DECIMAL(28,27) NOT NULL,'BUILDING':CHAR(8),'arefully special deposits. silent deposits haggle. special, final deposits about the carefully unusual packa':CHAR(108)))])
+RwBatchInsertValues(table=[customer], values=[((149601,'Customer#000149601':CHAR(18),'rsARKllazC':CHAR(10),18,'28-585-834-9749':CHAR(15),3932.16:DECIMAL(28,10),'BUILDING':CHAR(8),'arefully special deposits. silent deposits haggle. special, final deposits about the carefully unusual packa':CHAR(108)))])
 ]]>
         </Resource>
         <Resource name="json">

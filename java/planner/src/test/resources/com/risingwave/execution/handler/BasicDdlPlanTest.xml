@@ -133,7 +133,7 @@ CREATE TABLE supplier (
         "columnType": {
           "typeName": "DECIMAL",
           "precision": 28,
-          "scale": 27,
+          "scale": 10,
           "isNullable": true
         },
         "encoding": "RAW"
