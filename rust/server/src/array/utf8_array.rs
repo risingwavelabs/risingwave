@@ -1,5 +1,5 @@
 use std::any::Any;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::sync::Arc;
 
 use protobuf::well_known_types::Any as AnyProto;
@@ -15,6 +15,7 @@ use crate::error::{Result, RwError};
 use crate::expr::Datum;
 use crate::types::{DataType, DataTypeKind, DataTypeRef, StringType};
 use crate::util::{downcast_mut, downcast_ref};
+
 use std::mem::{align_of, size_of};
 
 pub(crate) struct UTF8Array {
@@ -58,30 +59,23 @@ impl UTF8Array {
         // offset buffer and data buffer
         ensure!(data.buffers().len() == 2);
 
+        let offset_buffer = data.buffer_at(0)?;
+        let data_buffer = data.buffer_at(1)?;
+
         // offset buffer align check
-        ensure!(data.buffers()[0].as_ptr().align_offset(align_of::<u32>()) == 0);
+        ensure!(offset_buffer.as_ptr().align_offset(align_of::<u32>()) == 0);
 
         // offset buffer size check
-        ensure!(data.buffers()[0].len() >= (size_of::<u32>() * data.cardinality()));
+        ensure!(offset_buffer.len() >= (size_of::<u32>() * data.cardinality()));
 
         if data.cardinality() == 0 {
-            ensure!(data.buffers()[0].len() == size_of::<u32>());
-            ensure!(data.buffers()[1].is_empty());
+            ensure!(offset_buffer.len() == size_of::<u32>());
+            ensure!(data_buffer.is_empty());
         } else {
-            let offset_buffer_data = data.buffers()[0].as_slice();
-            ensure!(offset_buffer_data.len() >= size_of::<u32>());
-
-            let data_offset_len = u32::from_be_bytes(
-                offset_buffer_data[offset_buffer_data.len() - size_of::<u32>()..]
-                    .try_into()
-                    .map_err(|_| {
-                        RwError::from(InternalError(
-                            "could not convert offset buffer slice to array".into(),
-                        ))
-                    })?,
-            );
-
-            ensure!(data_offset_len == data.buffers()[1].len() as u32);
+            let offsets = offset_buffer.typed_data::<u32>();
+            ensure!(!offsets.is_empty());
+            let last_offset = *offsets.last().unwrap();
+            ensure!(last_offset == data_buffer.len() as u32);
         }
 
         Ok(Self { data })
@@ -167,17 +161,7 @@ impl ArrayBuilder for UTF8ArrayBuilder {
     fn finish(self: Box<Self>) -> Result<ArrayRef> {
         let cardinality = self.offset_buffer.len() - 1;
 
-        let offset_buffer = Buffer::from_slice(
-            self.offset_buffer
-                .iter()
-                .map(|x| x.to_be_bytes())
-                .collect::<Vec<[u8; size_of::<u32>()]>>()
-                .iter()
-                .flat_map(|e| e.iter())
-                .cloned()
-                .collect::<Vec<u8>>(),
-        )?;
-
+        let offset_buffer = Buffer::from_slice(self.offset_buffer)?;
         let data_buffer = Buffer::from_slice(self.data_buffer)?;
         let null_bitmap = Bitmap::from_vec(self.null_bitmap_buffer)?;
 
@@ -205,6 +189,37 @@ impl AsMut<dyn Any> for UTF8Array {
     }
 }
 
+impl UTF8Array {
+    pub fn value_at(&self, i: usize) -> Result<&str> {
+        let offset_buffer = self.data.buffer_at(0)?;
+        let data_buffer = self.data.buffer_at(1)?;
+        let offsets = offset_buffer.typed_data::<u32>();
+
+        let offset_start = *offsets
+            .get(i)
+            .ok_or_else(|| InternalError(format!("Index: {} overflow", i)))?;
+
+        let offset_end = *offsets
+            .get(i + 1)
+            .ok_or_else(|| InternalError(format!("Index: {} overflow", i + 1)))?;
+
+        let slice = &data_buffer.as_slice()[offset_start as usize..offset_end as usize];
+
+        std::str::from_utf8(slice)
+            .map_err(|e| InternalError(format!("Restore from utf8 string failed: {}", e)).into())
+    }
+
+    pub unsafe fn value_at_unchecked(&self, i: usize) -> &str {
+        let offset_buffer = self.data.buffer_at_unchecked(0);
+        let data_buffer = self.data.buffer_at_unchecked(1);
+        let offsets = offset_buffer.typed_data::<u32>();
+        let offset_start = *offsets.get_unchecked(i);
+        let offset_end = *offsets.get_unchecked(i + 1);
+        let slice = &data_buffer.as_slice()[offset_start as usize..offset_end as usize];
+        std::str::from_utf8_unchecked(slice)
+    }
+}
+
 impl Array for UTF8Array {
     fn data_type(&self) -> &dyn DataType {
         self.data.data_type()
@@ -222,9 +237,21 @@ impl Array for UTF8Array {
             column.set_null_bitmap(null_bitmap.to_protobuf()?);
         }
 
-        let values = self
-            .data
-            .buffers()
+        let mut offset_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<u32>());
+        let mut data_buffer = Vec::<u8>::with_capacity(self.data.buffer_at(1)?.len());
+
+        offset_buffer.extend_from_slice(0_u32.to_be_bytes().as_ref());
+
+        for v in self.as_iter()? {
+            if let Some(s) = v {
+                data_buffer.extend_from_slice(s.as_bytes());
+            }
+
+            let curr_len = data_buffer.len() as u32;
+            offset_buffer.extend_from_slice(curr_len.to_be_bytes().as_ref());
+        }
+
+        let values = [offset_buffer, data_buffer]
             .iter()
             .map(|b| {
                 let mut values = BufferProto::new();
@@ -262,32 +289,8 @@ impl<'a> Iterator for UTF8ArrayIter<'a> {
             if self.array.data.is_null_unchecked(prev_pos) {
                 return Some(None);
             }
-        }
 
-        let offset_size = size_of::<u32>();
-        let offset_start_pos = prev_pos * offset_size;
-        let offset_end_pos = (prev_pos + 1) * offset_size;
-
-        let offset_buffer = unsafe { self.array.data.buffer_at_unchecked(0) };
-        let data_buffer = unsafe { self.array.data.buffer_at_unchecked(1) };
-
-        let buf_start_pos = u32::from_be_bytes(
-            offset_buffer.as_slice()[offset_start_pos..offset_start_pos + offset_size]
-                .try_into()
-                .expect("slice with incorrect length"),
-        ) as usize;
-
-        let buf_end_pos = u32::from_be_bytes(
-            offset_buffer.as_slice()[offset_end_pos..offset_end_pos + offset_size]
-                .try_into()
-                .expect("slice with incorrect length"),
-        ) as usize;
-
-        let data_buf = &data_buffer.as_slice()[buf_start_pos..buf_end_pos];
-
-        match std::str::from_utf8(data_buf) {
-            Ok(s) => Some(Some(s)),
-            Err(e) => panic!("Could not recover string from data_buf: {}", e),
+            Some(Some(self.array.value_at_unchecked(prev_pos)))
         }
     }
 
@@ -338,7 +341,7 @@ mod tests {
 
     #[test]
     fn test_build_utf8_array() {
-        let input = vec![Some("abc"), Some("jkl"), Some("xyz")];
+        let input = vec![Some("abc"), Some("jkl"), None, Some("xyz")];
 
         let width = 8;
         let result_array = UTF8Array::from_values(&input, width, DataTypeKind::Varchar)
@@ -347,75 +350,22 @@ mod tests {
         let result_array: &UTF8Array = downcast_ref(&*result_array).expect("Not string array");
 
         assert_eq!(result_array.len(), input.len());
-        assert_eq!(result_array.data.buffers().len(), 2);
+        assert_eq!(result_array.array_data().buffers().len(), 2);
 
-        assert_eq!(
-            result_array.data.buffers()[0]
-                .as_ptr()
-                .align_offset(align_of::<u32>()),
-            0
-        );
+        let offset_buffer = unsafe { result_array.data.buffer_at_unchecked(0) };
+        let data_buffer = unsafe { result_array.data.buffer_at_unchecked(1) };
 
+        assert_eq!(offset_buffer.as_ptr().align_offset(align_of::<u32>()), 0);
         assert!(
-            result_array.data.buffers()[0].len()
-                >= (size_of::<u32>() * result_array.data.cardinality())
+            offset_buffer.len() >= (size_of::<u32>() * result_array.array_data().cardinality())
+        );
+        assert_eq!(
+            offset_buffer.len(),
+            size_of::<u32>() * (result_array.array_data().cardinality() + 1)
         );
 
         assert_eq!(
-            result_array.data.buffers()[0].len(),
-            size_of::<u32>() * (result_array.len() + 1)
-        );
-        assert_eq!(
-            result_array.data.buffers()[1].len(),
-            size_of::<u8>()
-                * input
-                    .iter()
-                    .map(|s| s.as_ref().unwrap().len())
-                    .sum::<usize>()
-        );
-
-        let offset_buffer_data = result_array.data.buffers()[0].as_slice();
-        assert!(offset_buffer_data.len() >= (size_of::<u32>() * 1));
-        let array = offset_buffer_data[offset_buffer_data.len() - size_of::<u32>()..].as_ref();
-        assert_eq!(
-            as_u32_be(array),
-            result_array.data.buffers()[1].len() as u32
-        );
-
-        assert_eq!(
-            input,
-            result_array
-                .as_iter()
-                .expect("Failed to create string iterator")
-                .collect::<Vec<Option<&str>>>()
-        );
-    }
-
-    fn as_u32_be(array: &[u8]) -> u32 {
-        (array[3] as u32)
-            + ((array[2] as u32) << 8)
-            + ((array[1] as u32) << 16)
-            + ((array[0] as u32) << 24)
-    }
-
-    #[test]
-    fn test_build_utf8_array_with_none() {
-        let input = vec![Some("abc"), None, Some("xyz"), None];
-
-        let width = 8;
-        let result_array = UTF8Array::from_values(&input, width, DataTypeKind::Varchar)
-            .expect("Failed to build string array from vec");
-
-        let result_array: &UTF8Array = downcast_ref(&*result_array).expect("Not string array");
-
-        assert_eq!(result_array.len(), input.len(),);
-        assert_eq!(result_array.data.buffers().len(), 2);
-        assert_eq!(
-            result_array.data.buffers()[0].len(),
-            size_of::<u32>() * (result_array.len() + 1)
-        );
-        assert_eq!(
-            result_array.data.buffers()[1].len(),
+            data_buffer.len(),
             size_of::<u8>()
                 * input
                     .iter()
@@ -423,12 +373,17 @@ mod tests {
                     .sum::<usize>()
         );
 
+        let offsets = offset_buffer.typed_data::<u32>();
+        assert!(offsets.len() >= 1);
+        let last_offset = *offsets.last().unwrap();
+
+        assert_eq!(last_offset, data_buffer.len() as u32);
+
         assert_eq!(
             input,
             result_array
                 .as_iter()
-                .unwrap()
-                .into_iter()
+                .expect("Failed to create string iterator")
                 .collect::<Vec<Option<&str>>>()
         );
     }
