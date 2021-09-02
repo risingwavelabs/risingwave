@@ -9,7 +9,7 @@ pub(crate) trait NativeType:
     PartialEq + Debug + Copy + Send + Sync + Sized + Default + 'static
 {
     fn from_datum(datum: &Datum) -> Result<Self>;
-    fn to_protobuf(self, output: &mut dyn Write) -> Result<usize>;
+    fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize>;
 }
 
 impl NativeType for i16 {
@@ -20,12 +20,13 @@ impl NativeType for i16 {
         }
     }
 
-    fn to_protobuf(self, output: &mut dyn Write) -> Result<usize> {
+    fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
         output
             .write(&self.to_be_bytes())
             .map_err(|e| RwError::from(IoError(e)))
     }
 }
+
 impl NativeType for i32 {
     fn from_datum(datum: &Datum) -> Result<Self> {
         match datum {
@@ -34,12 +35,13 @@ impl NativeType for i32 {
         }
     }
 
-    fn to_protobuf(self, output: &mut dyn Write) -> Result<usize> {
+    fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
         output
             .write(&self.to_be_bytes())
             .map_err(|e| RwError::from(IoError(e)))
     }
 }
+
 impl NativeType for i64 {
     fn from_datum(datum: &Datum) -> Result<Self> {
         match datum {
@@ -48,12 +50,13 @@ impl NativeType for i64 {
         }
     }
 
-    fn to_protobuf(self, output: &mut dyn Write) -> Result<usize> {
+    fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
         output
             .write(&self.to_be_bytes())
             .map_err(|e| RwError::from(IoError(e)))
     }
 }
+
 impl NativeType for f32 {
     fn from_datum(datum: &Datum) -> Result<Self> {
         match datum {
@@ -62,12 +65,13 @@ impl NativeType for f32 {
         }
     }
 
-    fn to_protobuf(self, output: &mut dyn Write) -> Result<usize> {
+    fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
         output
             .write(&self.to_be_bytes())
             .map_err(|e| RwError::from(IoError(e)))
     }
 }
+
 impl NativeType for f64 {
     fn from_datum(datum: &Datum) -> Result<Self> {
         match datum {
@@ -76,7 +80,7 @@ impl NativeType for f64 {
         }
     }
 
-    fn to_protobuf(self, output: &mut dyn Write) -> Result<usize> {
+    fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
         output
             .write(&self.to_be_bytes())
             .map_err(|e| RwError::from(IoError(e)))
@@ -91,7 +95,7 @@ impl NativeType for u8 {
         }
     }
 
-    fn to_protobuf(self, output: &mut dyn Write) -> Result<usize> {
+    fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
         output
             .write(&self.to_be_bytes())
             .map_err(|e| RwError::from(IoError(e)))
@@ -106,7 +110,7 @@ impl NativeType for u16 {
         }
     }
 
-    fn to_protobuf(self, output: &mut dyn Write) -> Result<usize> {
+    fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
         output
             .write(&self.to_be_bytes())
             .map_err(|e| RwError::from(IoError(e)))
@@ -121,7 +125,7 @@ impl NativeType for u32 {
         }
     }
 
-    fn to_protobuf(self, output: &mut dyn Write) -> Result<usize> {
+    fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
         output
             .write(&self.to_be_bytes())
             .map_err(|e| RwError::from(IoError(e)))
@@ -136,7 +140,7 @@ impl NativeType for u64 {
         }
     }
 
-    fn to_protobuf(self, output: &mut dyn Write) -> Result<usize> {
+    fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
         output
             .write(&self.to_be_bytes())
             .map_err(|e| RwError::from(IoError(e)))
