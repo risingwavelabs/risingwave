@@ -12,25 +12,31 @@ import com.risingwave.node.WorkerNodeManager;
 import com.risingwave.proto.common.Status;
 import com.risingwave.proto.computenode.CreateTaskRequest;
 import com.risingwave.proto.computenode.CreateTaskResponse;
-import com.risingwave.rpc.RpcClientFactory;
-import com.risingwave.rpc.TaskService;
+import com.risingwave.proto.computenode.TaskServiceGrpc;
+import com.risingwave.rpc.ComputeClient;
+import com.risingwave.rpc.ComputeClientManager;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 class TaskManagerActor extends AbstractBehavior<TaskManagerEvent> {
   private final WorkerNodeManager nodeManager;
-  private final RpcClientFactory rpcClientFactory;
+  private final ComputeClientManager clientManager;
 
   private final ConcurrentMap<TaskId, QueryTaskExecution> taskExecutions =
       new ConcurrentHashMap<>();
 
+  private final Map<WorkerNode, TaskServiceGrpc.TaskServiceFutureStub> taskServiceClients =
+      new HashMap<>();
+
   public TaskManagerActor(
       ActorContext<TaskManagerEvent> context,
       WorkerNodeManager nodeManager,
-      RpcClientFactory rpcClientFactory) {
+      ComputeClientManager clientManager) {
     super(context);
     this.nodeManager = requireNonNull(nodeManager, "nodeManager");
-    this.rpcClientFactory = requireNonNull(rpcClientFactory, "rpcClientFactory");
+    this.clientManager = requireNonNull(clientManager, "clientManager");
   }
 
   @Override
@@ -79,7 +85,7 @@ class TaskManagerActor extends AbstractBehavior<TaskManagerEvent> {
 
   private CreateTaskResponse sendCreateTaskRequest(
       TaskManagerEvent.ScheduleTaskEvent event, WorkerNode node) {
-    TaskService taskServiceClient = rpcClientFactory.createTaskServiceClient(node);
+    ComputeClient client = clientManager.getOrCreate(node);
 
     CreateTaskRequest request =
         CreateTaskRequest.newBuilder()
@@ -87,6 +93,6 @@ class TaskManagerActor extends AbstractBehavior<TaskManagerEvent> {
             .setPlan(event.getTask().getPlanFragment().toPlanFragmentProto())
             .build();
 
-    return taskServiceClient.create(request);
+    return client.createTask(request);
   }
 }

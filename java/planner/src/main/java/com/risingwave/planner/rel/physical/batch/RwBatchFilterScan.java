@@ -1,7 +1,6 @@
 package com.risingwave.planner.rel.physical.batch;
 
 import static com.risingwave.execution.context.ExecutionContext.contextOf;
-import static com.risingwave.execution.handler.RpcExecutor.getTableRefId;
 import static com.risingwave.planner.planner.PlannerUtils.isSingleMode;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
@@ -15,6 +14,7 @@ import com.risingwave.planner.rel.logical.RwLogicalFilterScan;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.proto.plan.SeqScanNode;
 import com.risingwave.proto.plan.TableRefId;
+import com.risingwave.rpc.Messages;
 import java.util.Collections;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
@@ -58,7 +58,7 @@ public class RwBatchFilterScan extends FilterScanBase implements RisingWaveBatch
 
   @Override
   public PlanNode serialize() {
-    TableRefId tableRefId = getTableRefId(tableId);
+    TableRefId tableRefId = Messages.getTableRefId(tableId);
     SeqScanNode.Builder seqScanNodeBuilder = SeqScanNode.newBuilder().setTableRefId(tableRefId);
     columnIds.forEach(c -> seqScanNodeBuilder.addColumnIds(c.getValue()));
     return PlanNode.newBuilder()

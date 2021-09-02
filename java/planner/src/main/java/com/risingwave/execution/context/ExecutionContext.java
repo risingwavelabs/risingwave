@@ -5,9 +5,9 @@ import static java.util.Objects.requireNonNull;
 import com.risingwave.catalog.CatalogService;
 import com.risingwave.catalog.SchemaCatalog;
 import com.risingwave.common.config.Configuration;
-import com.risingwave.execution.handler.RpcExecutor;
 import com.risingwave.execution.handler.SqlHandlerFactory;
 import com.risingwave.node.WorkerNodeManager;
+import com.risingwave.rpc.ComputeClientManager;
 import org.apache.calcite.plan.Context;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptPlanner;
@@ -38,8 +38,8 @@ public class ExecutionContext implements Context {
     return frontendEnv.getWorkerNodeManager();
   }
 
-  public RpcExecutor getRpcExecutor() {
-    return frontendEnv.getRpcExecutor();
+  public ComputeClientManager getComputeClientManager() {
+    return frontendEnv.getComputeClientManager();
   }
 
   public String getDatabase() {

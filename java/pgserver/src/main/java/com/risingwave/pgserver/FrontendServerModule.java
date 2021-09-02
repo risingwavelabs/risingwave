@@ -11,16 +11,14 @@ import com.risingwave.common.config.Configuration;
 import com.risingwave.common.config.FrontendServerConfigurations;
 import com.risingwave.common.config.LeaderServerConfigurations;
 import com.risingwave.execution.handler.DefaultSqlHandlerFactory;
-import com.risingwave.execution.handler.RpcExecutor;
-import com.risingwave.execution.handler.RpcExecutorImpl;
 import com.risingwave.execution.handler.SqlHandlerFactory;
 import com.risingwave.node.DefaultWorkerNodeManager;
 import com.risingwave.node.WorkerNodeManager;
 import com.risingwave.pgserver.database.RisingWaveDatabaseManager;
 import com.risingwave.pgwire.PgServer;
 import com.risingwave.pgwire.database.DatabaseManager;
-import com.risingwave.rpc.ManagedRpcClientFactory;
-import com.risingwave.rpc.RpcClientFactory;
+import com.risingwave.rpc.ComputeClientManager;
+import com.risingwave.rpc.ComputeClientManagerImpl;
 import com.risingwave.scheduler.QueryManager;
 import com.risingwave.scheduler.RemoteQueryManager;
 import com.risingwave.scheduler.actor.ActorFactory;
@@ -46,13 +44,12 @@ public class FrontendServerModule extends AbstractModule {
   protected void configure() {
     bind(DatabaseManager.class).to(RisingWaveDatabaseManager.class).in(Singleton.class);
     bind(SqlHandlerFactory.class).to(DefaultSqlHandlerFactory.class).in(Singleton.class);
-    bind(RpcExecutor.class).to(RpcExecutorImpl.class).in(Singleton.class);
+    bind(ComputeClientManager.class).to(ComputeClientManagerImpl.class).in(Singleton.class);
     bind(WorkerNodeManager.class).to(DefaultWorkerNodeManager.class).in(Singleton.class);
     if (options.combineLeader) {
       bind(ActorFactory.class).to(DefaultActorFactory.class).in(Singleton.class);
       bind(TaskManager.class).to(RemoteTaskManager.class).in(Singleton.class);
       bind(QueryManager.class).to(RemoteQueryManager.class).in(Singleton.class);
-      bind(RpcClientFactory.class).to(ManagedRpcClientFactory.class).in(Singleton.class);
     }
   }
 

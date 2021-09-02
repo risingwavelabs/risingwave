@@ -4,6 +4,7 @@ import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.execution.result.BatchDataChunkResult;
+import com.risingwave.node.WorkerNode;
 import com.risingwave.pgwire.database.PgResult;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.planner.planner.batch.BatchPlanner;
@@ -13,6 +14,9 @@ import com.risingwave.proto.computenode.CreateTaskRequest;
 import com.risingwave.proto.computenode.CreateTaskResponse;
 import com.risingwave.proto.computenode.TaskData;
 import com.risingwave.proto.computenode.TaskSinkId;
+import com.risingwave.rpc.ComputeClient;
+import com.risingwave.rpc.ComputeClientManager;
+import com.risingwave.rpc.Messages;
 import java.util.ArrayList;
 import java.util.Iterator;
 import org.apache.calcite.sql.SqlKind;
@@ -26,14 +30,16 @@ public class QueryHandler implements SqlHandler {
     BatchPlanner planner = new BatchPlanner();
     BatchPlan plan = planner.plan(ast, context);
 
-    RpcExecutor rpcExecutor = context.getRpcExecutor();
-    CreateTaskRequest createTaskRequest = rpcExecutor.buildCreateTaskRequest(plan.serialize());
-    CreateTaskResponse createTaskResponse = rpcExecutor.createTask(createTaskRequest);
+    ComputeClientManager clientManager = context.getComputeClientManager();
+    WorkerNode node = context.getWorkerNodeManager().nextRandom();
+    ComputeClient client = clientManager.getOrCreate(node);
+    CreateTaskRequest createTaskRequest = Messages.buildCreateTaskRequest(plan.serialize());
+    CreateTaskResponse createTaskResponse = client.createTask(createTaskRequest);
     if (createTaskResponse.getStatus().getCode() != Status.Code.OK) {
       throw new PgException(PgErrorCode.INTERNAL_ERROR, "Create Task failed");
     }
-    TaskSinkId taskSinkId = rpcExecutor.buildTaskSinkId(createTaskRequest.getTaskId());
-    Iterator<TaskData> taskDataIterator = rpcExecutor.getData(taskSinkId);
+    TaskSinkId taskSinkId = Messages.buildTaskSinkId(createTaskRequest.getTaskId());
+    Iterator<TaskData> taskDataIterator = client.getData(taskSinkId);
 
     // Convert task data to list to iterate it multiple times.
     // FIXME: use Iterator<TaskData>

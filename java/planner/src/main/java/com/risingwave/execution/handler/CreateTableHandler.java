@@ -13,6 +13,7 @@ import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.execution.result.DdlResult;
+import com.risingwave.node.WorkerNode;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.planner.sql.SqlConverter;
 import com.risingwave.proto.common.Status;
@@ -23,6 +24,9 @@ import com.risingwave.proto.plan.CreateTableNode;
 import com.risingwave.proto.plan.PlanFragment;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.proto.plan.ShuffleInfo;
+import com.risingwave.rpc.ComputeClient;
+import com.risingwave.rpc.ComputeClientManager;
+import com.risingwave.rpc.Messages;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlColumnDeclaration;
@@ -34,16 +38,17 @@ public class CreateTableHandler implements SqlHandler {
   @Override
   public DdlResult handle(SqlNode ast, ExecutionContext context) {
     PlanFragment planFragment = executeDdl(ast, context);
-    RpcExecutor rpcExecutor = context.getRpcExecutor();
-    CreateTaskRequest createTaskRequest = rpcExecutor.buildCreateTaskRequest(planFragment);
-    CreateTaskResponse createTaskResponse = rpcExecutor.createTask(createTaskRequest);
+    ComputeClientManager clientManager = context.getComputeClientManager();
 
-    TaskSinkId taskSinkId = rpcExecutor.buildTaskSinkId(createTaskRequest.getTaskId());
-    rpcExecutor.getData(taskSinkId);
-
+    WorkerNode node = context.getWorkerNodeManager().nextRandom();
+    ComputeClient client = clientManager.getOrCreate(node);
+    CreateTaskRequest createTaskRequest = Messages.buildCreateTaskRequest(planFragment);
+    CreateTaskResponse createTaskResponse = client.createTask(createTaskRequest);
     if (createTaskResponse.getStatus().getCode() != Status.Code.OK) {
       throw new PgException(PgErrorCode.INTERNAL_ERROR, "Create Task failed");
     }
+    TaskSinkId taskSinkId = Messages.buildTaskSinkId(createTaskRequest.getTaskId());
+    client.getData(taskSinkId);
 
     return new DdlResult(StatementType.CREATE_TABLE, 0);
   }
@@ -61,7 +66,7 @@ public class CreateTableHandler implements SqlHandler {
       createTableNodeBuilder.addColumnDescs(columnDescBuilder);
     }
     CreateTableNode creatTableNode =
-        createTableNodeBuilder.setTableRefId(RpcExecutor.getTableRefId(tableId)).build();
+        createTableNodeBuilder.setTableRefId(Messages.getTableRefId(tableId)).build();
 
     ShuffleInfo shuffleInfo =
         ShuffleInfo.newBuilder().setPartitionMode(ShuffleInfo.PartitionMode.SINGLE).build();

@@ -1,15 +1,19 @@
 package com.risingwave.planner;
 
+import com.google.common.collect.Lists;
 import com.google.protobuf.Descriptors;
 import com.google.protobuf.GeneratedMessageV3;
 import com.google.protobuf.util.JsonFormat;
 import com.risingwave.catalog.CatalogService;
 import com.risingwave.catalog.SimpleCatalogService;
 import com.risingwave.common.config.Configuration;
+import com.risingwave.common.config.LeaderServerConfigurations;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.execution.context.FrontendEnv;
 import com.risingwave.execution.handler.DefaultSqlHandlerFactory;
 import com.risingwave.execution.handler.SqlHandlerFactory;
+import com.risingwave.node.DefaultWorkerNodeManager;
+import com.risingwave.rpc.TestComputeClientManager;
 import com.risingwave.sql.parser.SqlParser;
 import org.apache.calcite.sql.SqlNode;
 import org.reflections.Reflections;
@@ -53,7 +57,14 @@ public abstract class SqlTestBase {
     sqlHandlerFactory = new DefaultSqlHandlerFactory();
 
     var cfg = new Configuration();
-    var frontendEnv = new FrontendEnv(catalogService, sqlHandlerFactory, null, null, cfg);
+    cfg.set(LeaderServerConfigurations.COMPUTE_NODES, Lists.newArrayList("127.0.0.1:1234"));
+    var frontendEnv =
+        new FrontendEnv(
+            catalogService,
+            sqlHandlerFactory,
+            new TestComputeClientManager(),
+            new DefaultWorkerNodeManager(cfg),
+            cfg);
     executionContext =
         ExecutionContext.builder()
             .withDatabase(TEST_DB_NAME)

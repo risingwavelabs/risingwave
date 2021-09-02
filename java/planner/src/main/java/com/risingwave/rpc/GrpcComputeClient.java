@@ -1,11 +1,8 @@
-package com.risingwave.execution.handler;
+package com.risingwave.rpc;
 
-import com.google.inject.Inject;
-import com.google.inject.Singleton;
-import com.risingwave.common.config.Configuration;
-import com.risingwave.common.config.LeaderServerConfigurations;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
+import com.risingwave.execution.handler.QueryHandler;
 import com.risingwave.proto.computenode.CreateTaskRequest;
 import com.risingwave.proto.computenode.CreateTaskResponse;
 import com.risingwave.proto.computenode.ExchangeServiceGrpc;
@@ -13,24 +10,18 @@ import com.risingwave.proto.computenode.TaskData;
 import com.risingwave.proto.computenode.TaskServiceGrpc;
 import com.risingwave.proto.computenode.TaskSinkId;
 import io.grpc.Channel;
-import io.grpc.ManagedChannelBuilder;
 import io.grpc.StatusRuntimeException;
 import java.util.Iterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-@Singleton
-public class RpcExecutorImpl implements RpcExecutor {
+public class GrpcComputeClient implements ComputeClient {
   private static final Logger LOGGER = LoggerFactory.getLogger(QueryHandler.class);
+
   private Channel channel;
 
-  @Inject
-  public RpcExecutorImpl(Configuration cfg) {
-    // TODO: Choose a random gather node.
-    String gatherNodeAddress = cfg.get(LeaderServerConfigurations.COMPUTE_NODES).get(0);
-
-    // Prepare channel. FIXME: No TLS Support Yet.
-    channel = ManagedChannelBuilder.forTarget(gatherNodeAddress).usePlaintext().build();
+  public GrpcComputeClient(Channel channel) {
+    this.channel = channel;
   }
 
   @Override

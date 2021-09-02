@@ -8,8 +8,8 @@ import com.google.inject.Singleton;
 import com.risingwave.common.config.Configuration;
 import com.risingwave.node.DefaultWorkerNodeManager;
 import com.risingwave.node.WorkerNodeManager;
-import com.risingwave.rpc.ManagedRpcClientFactory;
-import com.risingwave.rpc.RpcClientFactory;
+import com.risingwave.rpc.ComputeClientManager;
+import com.risingwave.rpc.ComputeClientManagerImpl;
 import com.risingwave.scheduler.QueryManager;
 import com.risingwave.scheduler.RemoteQueryManager;
 import com.risingwave.scheduler.actor.ActorFactory;
@@ -30,7 +30,7 @@ public class LeaderServerModule extends AbstractModule {
     bind(ActorFactory.class).to(DefaultActorFactory.class).in(Singleton.class);
     bind(TaskManager.class).to(RemoteTaskManager.class).in(Singleton.class);
     bind(QueryManager.class).to(RemoteQueryManager.class).in(Singleton.class);
-    bind(RpcClientFactory.class).to(ManagedRpcClientFactory.class).in(Singleton.class);
+    bind(ComputeClientManager.class).to(ComputeClientManagerImpl.class).in(Singleton.class);
   }
 
   @Provides

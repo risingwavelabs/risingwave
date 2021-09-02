@@ -7,11 +7,11 @@ import com.google.common.collect.ImmutableList;
 import com.google.protobuf.Any;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
-import com.risingwave.execution.handler.RpcExecutor;
 import com.risingwave.planner.rel.logical.RwLogicalInsertValues;
 import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
 import com.risingwave.proto.plan.InsertValueNode;
 import com.risingwave.proto.plan.PlanNode;
+import com.risingwave.rpc.Messages;
 import java.nio.charset.StandardCharsets;
 import java.util.stream.Collectors;
 import org.apache.calcite.plan.RelOptCluster;
@@ -56,7 +56,7 @@ public class RwBatchInsertValues extends AbstractRelNode implements RisingWaveBa
   @Override
   public PlanNode serialize() {
     InsertValueNode.Builder insertValueNodeBuilder =
-        InsertValueNode.newBuilder().setTableRefId(RpcExecutor.getTableRefId(table.getId()));
+        InsertValueNode.newBuilder().setTableRefId(Messages.getTableRefId(table.getId()));
     // TODO: Only consider constant values (no casting) for now.
     for (ColumnCatalog columnCatalog : table.getAllColumnCatalogs()) {
       insertValueNodeBuilder.addColumnIds(columnCatalog.getId().getValue());
