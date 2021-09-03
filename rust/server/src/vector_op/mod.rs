@@ -3,6 +3,7 @@ pub(crate) mod agg;
 mod binary_op;
 pub(crate) mod cast;
 pub(crate) mod cmp;
+pub(crate) mod conjunction;
 mod div_op;
 mod mod_op;
 mod mul_op;
