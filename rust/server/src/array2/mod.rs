@@ -1,6 +1,10 @@
+//! `array2` defines all in-memory representations of vectorized execution framework.
+
+mod compact_v1;
 mod iterator;
 mod primitive_array;
 mod utf8_array;
+
 pub use iterator::ArrayIterator;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder};
 pub use utf8_array::{UTF8Array, UTF8ArrayBuilder};
@@ -65,6 +69,16 @@ pub trait Array {
 
     /// Get iterator of current array.
     fn iter(&self) -> Self::Iter<'_>;
+}
+
+/// `ArrayCollection` embeds all possible array in `arary2` module.
+pub enum ArrayImpl {
+    Int16(PrimitiveArray<i16>),
+    Int32(PrimitiveArray<i32>),
+    Int64(PrimitiveArray<i64>),
+    Float32(PrimitiveArray<f32>),
+    Float64(PrimitiveArray<f64>),
+    UTF8(UTF8Array),
 }
 
 #[cfg(test)]
