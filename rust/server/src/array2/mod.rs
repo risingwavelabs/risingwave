@@ -71,6 +71,16 @@ pub trait Array {
     fn iter(&self) -> Self::Iter<'_>;
 }
 
+macro_rules! impl_into {
+    ($x:ty, $y:ident) => {
+        impl From<$x> for ArrayImpl {
+            fn from(array: $x) -> Self {
+                Self::$y(array)
+            }
+        }
+    };
+}
+
 /// `ArrayCollection` embeds all possible array in `arary2` module.
 pub enum ArrayImpl {
     Int16(PrimitiveArray<i16>),
@@ -80,6 +90,13 @@ pub enum ArrayImpl {
     Float64(PrimitiveArray<f64>),
     UTF8(UTF8Array),
 }
+
+impl_into! { PrimitiveArray<i16>, Int16 }
+impl_into! { PrimitiveArray<i32>, Int32 }
+impl_into! { PrimitiveArray<i64>, Int64 }
+impl_into! { PrimitiveArray<f32>, Float32 }
+impl_into! { PrimitiveArray<f64>, Float64 }
+impl_into! { UTF8Array, UTF8 }
 
 #[cfg(test)]
 mod tests {
