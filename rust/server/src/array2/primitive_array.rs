@@ -7,6 +7,16 @@ pub struct PrimitiveArray<T: NativeType> {
     data: Vec<T>,
 }
 
+impl<T: NativeType> PrimitiveArray<T> {
+    pub fn from_slice(data: &[Option<T>]) -> Self {
+        let mut builder = <Self as Array>::Builder::new(data.len());
+        for i in data {
+            builder.append(*i);
+        }
+        builder.finish()
+    }
+}
+
 impl<T: NativeType> Array for PrimitiveArray<T> {
     type Builder = PrimitiveArrayBuilder<T>;
     type RefItem<'a> = T;
