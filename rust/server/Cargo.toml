@@ -24,6 +24,7 @@ risingwave-proto = {path = "../proto"}
 rust_decimal = "1"
 rust_decimal_macros = "1"
 serde_json = "1"
+smallvec = "1"
 thiserror = "1"
 tokio = {version = "1", features = ["rt", "rt-multi-thread", "sync"]}
 typed-builder = "0.9"

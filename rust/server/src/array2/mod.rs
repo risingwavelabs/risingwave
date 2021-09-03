@@ -1,10 +1,12 @@
 //! `array2` defines all in-memory representations of vectorized execution framework.
 
 mod compact_v1;
+mod data_chunk;
 mod iterator;
 mod primitive_array;
 mod utf8_array;
 
+pub use data_chunk::{DataChunk, DataChunkRef};
 pub use iterator::ArrayIterator;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder};
 pub use utf8_array::{UTF8Array, UTF8ArrayBuilder};
