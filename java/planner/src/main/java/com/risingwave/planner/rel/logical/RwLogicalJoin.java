@@ -2,12 +2,14 @@ package com.risingwave.planner.rel.logical;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import org.apache.calcite.plan.Convention;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.convert.ConverterRule;
+import org.apache.calcite.rel.core.CorrelationId;
 import org.apache.calcite.rel.core.Join;
 import org.apache.calcite.rel.core.JoinRelType;
 import org.apache.calcite.rel.hint.RelHint;
@@ -38,6 +40,24 @@ public class RwLogicalJoin extends Join implements RisingWaveLogicalRel {
       boolean semiJoinDone) {
     return new RwLogicalJoin(
         getCluster(), traitSet, getHints(), left, right, conditionExpr, joinType);
+  }
+
+  public static RwLogicalJoin create(
+      RelNode left,
+      RelNode right,
+      List<RelHint> hints,
+      RexNode condition,
+      Set<CorrelationId> variablesSet,
+      JoinRelType joinType,
+      boolean semiJoinDon) {
+    return new RwLogicalJoin(
+        left.getCluster(),
+        left.getTraitSet().plus(LOGICAL),
+        hints,
+        left,
+        right,
+        condition,
+        joinType);
   }
 
   public static class RwLogicalJoinConverterRule extends ConverterRule {

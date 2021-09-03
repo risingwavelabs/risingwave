@@ -59,10 +59,9 @@ public class ChainedOptimizerProgram implements OptimizerProgram {
 
   public enum OptimizerPhase {
     SUBQUERY_REWRITE("Subquery rewrite"),
-    BASIC_LOGICAL_OPTIMIZATION("Basic optimization rules"),
+    LOGICAL_REWRITE("Logical rewrite"),
     JOIN_REORDER("Join reorder"),
-    LOGICAL_CONVERSION("Converting calcite logical plan to rising wave logical plan."),
-    LOGICAL_OPTIMIZATION("Optimising logical plan"),
+    LOGICAL_CBO("CBO for logical optimization"),
     PHYSICAL("Physical planning");
 
     private final String description;

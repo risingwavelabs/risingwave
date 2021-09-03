@@ -1,13 +1,15 @@
 package com.risingwave.planner.planner.batch;
 
 import static com.risingwave.planner.planner.PlannerUtils.isSingleMode;
-import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.BASIC_LOGICAL_OPTIMIZATION;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.JOIN_REORDER;
+import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.LOGICAL_CBO;
+import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.LOGICAL_REWRITE;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.PHYSICAL;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.SUBQUERY_REWRITE;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 import static com.risingwave.planner.rules.BatchRuleSets.LOGICAL_CONVERTER_RULES;
 import static com.risingwave.planner.rules.BatchRuleSets.LOGICAL_OPTIMIZATION_RULES;
+import static com.risingwave.planner.rules.BatchRuleSets.LOGICAL_REWRITE_RULES;
 import static com.risingwave.planner.rules.BatchRuleSets.PHYSICAL_AGG_RULES;
 import static com.risingwave.planner.rules.BatchRuleSets.PHYSICAL_CONVERTER_RULES;
 import static com.risingwave.planner.rules.BatchRuleSets.PHYSICAL_JOIN_RULES;
@@ -15,6 +17,7 @@ import static com.risingwave.planner.rules.BatchRuleSets.PHYSICAL_JOIN_RULES;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.planner.planner.Planner;
 import com.risingwave.planner.program.ChainedOptimizerProgram;
+import com.risingwave.planner.program.HepOptimizerProgram;
 import com.risingwave.planner.program.JoinReorderProgram;
 import com.risingwave.planner.program.OptimizerProgram;
 import com.risingwave.planner.program.SubQueryRewriteProgram;
@@ -63,12 +66,15 @@ public class BatchPlanner implements Planner<BatchPlan> {
 
     builder.addLast(SUBQUERY_REWRITE, SubQueryRewriteProgram.INSTANCE);
 
+    builder.addLast(
+        LOGICAL_REWRITE, HepOptimizerProgram.builder().addRules(LOGICAL_REWRITE_RULES).build());
+
     builder.addLast(JOIN_REORDER, JoinReorderProgram.INSTANCE);
 
     builder.addLast(
-        BASIC_LOGICAL_OPTIMIZATION,
+        LOGICAL_CBO,
         VolcanoOptimizerProgram.builder()
-            .addRules(BatchRuleSets.BASIC_LOGICAL_OPTIMIZE_RULES)
+            .addRules(BatchRuleSets.LOGICAL_OPTIMIZE_RULES)
             .addRules(LOGICAL_CONVERTER_RULES)
             .addRules(LOGICAL_OPTIMIZATION_RULES)
             .addRequiredOutputTraits(LOGICAL)

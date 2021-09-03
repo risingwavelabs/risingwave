@@ -5,6 +5,7 @@ import static java.util.Objects.requireNonNull;
 import com.risingwave.common.datatype.RisingWaveTypeFactory;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.planner.cost.RisingWaveCostFactory;
+import com.risingwave.planner.metadata.RisingWaveRelMetadataProvider;
 import com.risingwave.planner.rel.common.dist.RwDistributionTraitDef;
 import java.util.Collections;
 import java.util.List;
@@ -106,9 +107,7 @@ public class SqlConverter {
     private void initCluster() {
       if (cluster == null) {
         cluster = RelOptCluster.create(planner, new RexBuilder(typeFactory));
-        //        JaninoRelMetadataProvider relMetadataProvider =
-        // Utilities.registerJaninoRelMetadataProvider();
-        //        cluster.setMetadataProvider(relMetadataProvider);
+        cluster.setMetadataProvider(RisingWaveRelMetadataProvider.getMetadataProvider());
       }
     }
   }

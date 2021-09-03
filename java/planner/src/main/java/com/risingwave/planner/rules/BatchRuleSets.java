@@ -22,8 +22,6 @@ import com.risingwave.planner.rules.physical.batch.InsertValuesRule;
 import com.risingwave.planner.rules.physical.batch.aggregate.BatchHashAggRule;
 import com.risingwave.planner.rules.physical.batch.aggregate.BatchSortAggRule;
 import com.risingwave.planner.rules.physical.batch.join.BatchHashJoinRule;
-import java.util.List;
-import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.rel.rules.CoreRules;
 import org.apache.calcite.rel.rules.PruneEmptyRules;
 import org.apache.calcite.tools.RuleSet;
@@ -38,7 +36,34 @@ public class BatchRuleSets {
           CoreRules.PROJECT_SUB_QUERY_TO_CORRELATE,
           CoreRules.JOIN_SUB_QUERY_TO_CORRELATE);
 
-  public static final RuleSet BASIC_LOGICAL_OPTIMIZE_RULES =
+  public static final RuleSet LOGICAL_REWRITE_RULES =
+      RuleSets.ofList(
+          CoreRules.UNION_TO_DISTINCT,
+          CoreRules.FILTER_INTO_JOIN,
+          CoreRules.JOIN_CONDITION_PUSH,
+          CoreRules.JOIN_PUSH_EXPRESSIONS,
+          CoreRules.JOIN_PUSH_TRANSITIVE_PREDICATES,
+          CoreRules.FILTER_REDUCE_EXPRESSIONS,
+          CoreRules.PROJECT_REDUCE_EXPRESSIONS,
+          CoreRules.JOIN_REDUCE_EXPRESSIONS,
+          CoreRules.FILTER_MERGE,
+          CoreRules.PROJECT_MERGE,
+          CoreRules.PROJECT_REMOVE,
+          CoreRules.AGGREGATE_PROJECT_PULL_UP_CONSTANTS,
+          CoreRules.SORT_REMOVE,
+          CoreRules.FILTER_EXPAND_IS_NOT_DISTINCT_FROM,
+          PruneEmptyRules.UNION_INSTANCE,
+          PruneEmptyRules.INTERSECT_INSTANCE,
+          PruneEmptyRules.MINUS_INSTANCE,
+          PruneEmptyRules.PROJECT_INSTANCE,
+          PruneEmptyRules.FILTER_INSTANCE,
+          PruneEmptyRules.SORT_INSTANCE,
+          PruneEmptyRules.AGGREGATE_INSTANCE,
+          PruneEmptyRules.JOIN_LEFT_INSTANCE,
+          PruneEmptyRules.JOIN_RIGHT_INSTANCE,
+          PruneEmptyRules.SORT_FETCH_ZERO_INSTANCE);
+
+  public static final RuleSet LOGICAL_OPTIMIZE_RULES =
       RuleSets.ofList(
           CoreRules.UNION_TO_DISTINCT,
           CoreRules.FILTER_INTO_JOIN,
@@ -68,12 +93,6 @@ public class BatchRuleSets {
           PruneEmptyRules.JOIN_LEFT_INSTANCE,
           PruneEmptyRules.JOIN_RIGHT_INSTANCE,
           PruneEmptyRules.SORT_FETCH_ZERO_INSTANCE);
-
-  public static final List<RelOptRule> JOIN_REORDER_PREPARE_RULES =
-      List.of(
-          CoreRules.JOIN_TO_MULTI_JOIN,
-          CoreRules.PROJECT_MULTI_JOIN_MERGE,
-          CoreRules.FILTER_MULTI_JOIN_MERGE);
 
   public static final RuleSet LOGICAL_CONVERTER_RULES =
       RuleSets.ofList(

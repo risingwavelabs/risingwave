@@ -1,11 +1,13 @@
 package com.risingwave.planner.rel.logical;
 
+import java.util.Set;
 import org.apache.calcite.plan.Convention;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.convert.ConverterRule;
+import org.apache.calcite.rel.core.CorrelationId;
 import org.apache.calcite.rel.core.Filter;
 import org.apache.calcite.rel.logical.LogicalFilter;
 import org.apache.calcite.rex.RexNode;
@@ -21,6 +23,12 @@ public class RwLogicalFilter extends Filter implements RisingWaveLogicalRel {
   @Override
   public Filter copy(RelTraitSet traitSet, RelNode input, RexNode condition) {
     return new RwLogicalFilter(getCluster(), traitSet, input, condition);
+  }
+
+  public static RwLogicalFilter create(
+      RelNode input, RexNode condition, Set<CorrelationId> variablesSet) {
+    return new RwLogicalFilter(
+        input.getCluster(), input.getTraitSet().plus(LOGICAL), input, condition);
   }
 
   public static class RwFilterConverterRule extends ConverterRule {
