@@ -1,7 +1,9 @@
+mod agg;
 mod arithmetic_expr;
 mod input_ref;
 mod literal;
 mod type_cast;
+pub(crate) use agg::{AggExpression, AggKind};
 pub(crate) use literal::*;
 
 use crate::array::ArrayRef;

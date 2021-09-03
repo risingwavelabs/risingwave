@@ -1,5 +1,6 @@
 use crate::array::*;
 use crate::error::{ErrorCode, Result, RwError};
+use crate::expr::AggKind;
 use crate::types::*;
 use crate::util::{downcast_mut, downcast_ref};
 use rust_decimal::Decimal;
@@ -7,23 +8,17 @@ use std::marker::PhantomData;
 
 // Part 1: Public types and functions.
 
-pub(crate) enum AggKind {
-    Min,
-    Max,
-    Sum,
-    Count,
-}
-
-pub(crate) trait AggState {
+pub(crate) trait AggState: Send {
     fn update(&mut self, input: ArrayRef) -> Result<()>;
     fn output(&self, builder: &mut dyn ArrayBuilder) -> Result<()>;
 }
+pub(crate) type BoxedAggState = Box<dyn AggState>;
 
 pub(crate) fn create_agg_state(
     input_type: DataTypeRef,
     agg_type: &AggKind,
     return_type: DataTypeRef,
-) -> Result<Box<dyn AggState>> {
+) -> Result<BoxedAggState> {
     match (
         input_type.data_type_kind(),
         agg_type,
@@ -78,7 +73,7 @@ pub(crate) fn create_agg_state(
 struct PrimitiveAgg<T, F, R>
 where
     T: PrimitiveDataType,
-    F: FnMut(Option<R::N>, Option<T::N>) -> Option<R::N>,
+    F: Send + FnMut(Option<R::N>, Option<T::N>) -> Option<R::N>,
     R: PrimitiveDataType,
 {
     result: Option<R::N>,
@@ -88,7 +83,7 @@ where
 impl<T, F, R> AggState for PrimitiveAgg<T, F, R>
 where
     T: PrimitiveDataType,
-    F: FnMut(Option<R::N>, Option<T::N>) -> Option<R::N>,
+    F: Send + FnMut(Option<R::N>, Option<T::N>) -> Option<R::N>,
     R: PrimitiveDataType,
 {
     fn update(&mut self, input: ArrayRef) -> Result<()> {
@@ -105,7 +100,7 @@ where
 impl<T, F, R> PrimitiveAgg<T, F, R>
 where
     T: PrimitiveDataType,
-    F: FnMut(Option<R::N>, Option<T::N>) -> Option<R::N>,
+    F: Send + FnMut(Option<R::N>, Option<T::N>) -> Option<R::N>,
     R: PrimitiveDataType,
 {
     fn new(f: F) -> Box<Self> {
@@ -120,14 +115,14 @@ where
 // DecimalAgg reads from DecimalArray and outputs to DecimalArrayBuilder.
 struct DecimalAgg<F>
 where
-    F: FnMut(Option<Decimal>, Option<Decimal>) -> Option<Decimal>,
+    F: Send + FnMut(Option<Decimal>, Option<Decimal>) -> Option<Decimal>,
 {
     result: Option<Decimal>,
     f: F,
 }
 impl<F> AggState for DecimalAgg<F>
 where
-    F: FnMut(Option<Decimal>, Option<Decimal>) -> Option<Decimal>,
+    F: Send + FnMut(Option<Decimal>, Option<Decimal>) -> Option<Decimal>,
 {
     fn update(&mut self, input: ArrayRef) -> Result<()> {
         let input: &DecimalArray = downcast_ref(input.as_ref())?;
@@ -142,7 +137,7 @@ where
 }
 impl<F> DecimalAgg<F>
 where
-    F: FnMut(Option<Decimal>, Option<Decimal>) -> Option<Decimal>,
+    F: Send + FnMut(Option<Decimal>, Option<Decimal>) -> Option<Decimal>,
 {
     fn new(f: F) -> Box<Self> {
         Box::new(Self { result: None, f })
@@ -175,14 +170,14 @@ impl SumI64 {
 // UTF8Agg reads from UTF8Array and outputs to UTF8ArrayBuilder.
 struct UTF8Agg<F>
 where
-    F: for<'a> FnMut(Option<&'a str>, Option<&'a str>) -> Option<&'a str>,
+    F: Send + for<'a> FnMut(Option<&'a str>, Option<&'a str>) -> Option<&'a str>,
 {
     result: Option<String>,
     f: F,
 }
 impl<F> AggState for UTF8Agg<F>
 where
-    F: for<'a> FnMut(Option<&'a str>, Option<&'a str>) -> Option<&'a str>,
+    F: Send + for<'a> FnMut(Option<&'a str>, Option<&'a str>) -> Option<&'a str>,
 {
     fn update(&mut self, input: ArrayRef) -> Result<()> {
         let input: &UTF8Array = downcast_ref(input.as_ref())?;
@@ -201,7 +196,7 @@ where
 }
 impl<F> UTF8Agg<F>
 where
-    F: for<'a> FnMut(Option<&'a str>, Option<&'a str>) -> Option<&'a str>,
+    F: Send + for<'a> FnMut(Option<&'a str>, Option<&'a str>) -> Option<&'a str>,
 {
     fn new(f: F) -> Box<Self> {
         Box::new(Self { result: None, f })

@@ -1,3 +1,5 @@
+mod simple_agg;
+use simple_agg::*;
 mod create_table;
 use create_table::*;
 mod insert_values;
@@ -84,7 +86,8 @@ impl<'a> ExecutorBuilder<'a> {
           PlanNode_PlanNodeType::SEQ_SCAN => SeqScanExecutor,
           PlanNode_PlanNodeType::INSERT_VALUE => InsertValuesExecutor,
           PlanNode_PlanNodeType::DROP_TABLE => DropTableExecutor,
-          PlanNode_PlanNodeType::FILTER => FilterExecutor
+          PlanNode_PlanNodeType::FILTER => FilterExecutor,
+          PlanNode_PlanNodeType::SIMPLE_AGG => SimpleAggExecutor
         }
     }
 

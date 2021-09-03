@@ -17,6 +17,7 @@ risingwave-proto = { path = "../proto" }
 anyhow = "1"
 typed-builder = "0.9"
 ctrlc = { version = "3.0", features = ["termination"] }
+pb-construct = { path = "../utils/pb-construct" }
 pb-convert-derive = { path = "../utils/pb-convert-derive" }
 pb-convert = { path = "../utils/pb-convert" }
 async-trait = "0.1"
