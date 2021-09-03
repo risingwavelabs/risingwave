@@ -1,4 +1,4 @@
-use crate::array::{Array, ArrayRef, PrimitiveArray};
+use crate::array::{Array, ArrayRef, BoolArray, PrimitiveArray};
 use crate::error::Result;
 use crate::types::PrimitiveDataType;
 use crate::util::downcast_ref;
@@ -40,6 +40,22 @@ where
         op,
     )?;
     PrimitiveArray::<TR>::from_values(ret)
+}
+
+pub(crate) fn vec_cmp_primitive_array<T, F>(
+    left_array: &dyn Array,
+    right_array: &dyn Array,
+    op: F,
+) -> Result<ArrayRef>
+where
+    T: PrimitiveDataType,
+    F: FnMut(Option<T::N>, Option<T::N>) -> Result<Option<bool>>,
+{
+    let left_array: &PrimitiveArray<T> = downcast_ref(left_array)?;
+    let right_array: &PrimitiveArray<T> = downcast_ref(right_array)?;
+
+    let ret = vec_binary_op(left_array.as_iter()?, right_array.as_iter()?, op)?;
+    BoolArray::from_values(ret)
 }
 
 #[cfg(test)]

@@ -11,6 +11,7 @@ mod native;
 use crate::array::BoxedArrayBuilder;
 use crate::error::ErrorCode::InternalError;
 pub(crate) use native::*;
+use risingwave_proto::data::DataType_TypeName::BOOLEAN;
 use risingwave_proto::data::DataType_TypeName::CHAR;
 use risingwave_proto::data::DataType_TypeName::DATE;
 use risingwave_proto::data::DataType_TypeName::DECIMAL;
@@ -90,7 +91,8 @@ pub(crate) fn build_from_proto(proto: &DataTypeProto) -> Result<DataTypeRef> {
       DECIMAL => DecimalType,
       DATE => DateType,
       CHAR => StringType,
-      VARCHAR => StringType
+      VARCHAR => StringType,
+      BOOLEAN => BoolType
     }
 }
 

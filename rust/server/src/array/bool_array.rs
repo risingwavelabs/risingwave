@@ -4,8 +4,9 @@ use std::iter::Iterator;
 use std::sync::Arc;
 
 use protobuf::well_known_types::Any as AnyProto;
-
 use risingwave_proto::data::Buffer_CompressionType;
+use risingwave_proto::data::DataType as DataTypeProto;
+use risingwave_proto::data::DataType_TypeName;
 use risingwave_proto::data::{Buffer as BufferProto, Column};
 
 use crate::array::array_data::ArrayData;
@@ -245,6 +246,15 @@ impl<'a> BoolIter<'a> {
             cur_pos: 0,
             end_pos: array.len(),
         })
+    }
+}
+
+impl<'a> TryFrom<&'a DataTypeProto> for BoolType {
+    type Error = RwError;
+
+    fn try_from(proto: &'a DataTypeProto) -> Result<Self> {
+        ensure!(proto.get_type_name() == DataType_TypeName::BOOLEAN);
+        Ok(BoolType::new(proto.get_is_nullable()))
     }
 }
 

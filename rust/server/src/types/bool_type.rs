@@ -38,7 +38,11 @@ impl DataType for BoolType {
 }
 
 impl BoolType {
+    pub(crate) fn new(nullable: bool) -> Self {
+        Self { nullable }
+    }
+
     pub(crate) fn create(nullable: bool) -> DataTypeRef {
-        Arc::new(Self { nullable }) as DataTypeRef
+        Arc::new(BoolType::new(nullable)) as DataTypeRef
     }
 }
