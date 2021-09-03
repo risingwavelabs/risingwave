@@ -8,6 +8,7 @@ import com.risingwave.common.config.Configuration;
 import com.risingwave.execution.handler.SqlHandlerFactory;
 import com.risingwave.node.WorkerNodeManager;
 import com.risingwave.rpc.ComputeClientManager;
+import com.risingwave.scheduler.QueryManager;
 import java.util.Objects;
 
 public class FrontendEnv {
@@ -16,6 +17,7 @@ public class FrontendEnv {
   private final ComputeClientManager clientManager;
   private final WorkerNodeManager nodeManager;
   private final Configuration conf;
+  private final QueryManager queryManager;
 
   @Inject
   public FrontendEnv(
@@ -23,13 +25,15 @@ public class FrontendEnv {
       SqlHandlerFactory sqlHandlerFactory,
       ComputeClientManager clientManager,
       WorkerNodeManager nodeManager,
-      Configuration conf) {
+      Configuration conf,
+      QueryManager queryManager) {
     this.catalogService = requireNonNull(catalogService, "catalogService");
     this.sqlHandlerFactory = requireNonNull(sqlHandlerFactory, "sqlHandlerFactory");
     this.clientManager = Objects.requireNonNull(clientManager);
     // TODO: add null-check
     this.nodeManager = nodeManager;
     this.conf = requireNonNull(conf, "conf");
+    this.queryManager = requireNonNull(queryManager, "queryManager");
   }
 
   public CatalogService getCatalogService() {
@@ -50,5 +54,9 @@ public class FrontendEnv {
 
   public Configuration getConfiguration() {
     return conf;
+  }
+
+  public QueryManager getQueryManager() {
+    return queryManager;
   }
 }

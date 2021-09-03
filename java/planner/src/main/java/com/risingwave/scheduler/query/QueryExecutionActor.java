@@ -104,7 +104,7 @@ public class QueryExecutionActor extends AbstractBehavior<QueryExecutionEvent> {
       Map.Entry<TaskId, WorkerNode> entry = event.getAssignments().entrySet().iterator().next();
 
       QueryResultLocation resultLocation =
-          new QueryResultLocation(entry.getKey(), entry.getValue().getRpcEndPoint());
+          new QueryResultLocation(entry.getKey(), entry.getValue());
       resultFuture.complete(resultLocation);
     }
   }

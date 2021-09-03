@@ -16,6 +16,7 @@ import java.util.concurrent.ConcurrentMap;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 
+// TODO: Rename it to LocalQueryManager or QueryManagerImpl
 @Singleton
 public class RemoteQueryManager implements QueryManager {
   private final TaskManager taskManager;

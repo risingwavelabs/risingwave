@@ -6,7 +6,7 @@ import static org.mockito.Mockito.when;
 
 import com.google.inject.Guice;
 import com.google.inject.Injector;
-import com.risingwave.node.EndPoint;
+import com.risingwave.node.DefaultWorkerNode;
 import com.risingwave.planner.rel.physical.batch.BatchPlan;
 import com.risingwave.planner.rel.physical.batch.RisingWaveBatchPhyRel;
 import com.risingwave.proto.plan.PlanNode;
@@ -36,8 +36,8 @@ public class QueryManagerTest {
         queryManager.schedule(newSingleNodePlan()).get(10, TimeUnit.SECONDS);
 
     assertEquals(
-        new EndPoint("localhost", 1234),
-        resultLocation.getNodeEndPoint(),
+        new DefaultWorkerNode("localhost", 1234).getRpcEndPoint(),
+        resultLocation.getNode().getRpcEndPoint(),
         "Result endpoint not match!");
   }
 

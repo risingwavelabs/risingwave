@@ -20,11 +20,11 @@ dependencies {
     api("com.typesafe.akka:akka-actor-typed_${scalaBinaryVersion}")
     api("com.google.inject:guice")
     runtimeOnly("ch.qos.logback:logback-classic")
+    api("com.google.protobuf:protobuf-java-util")
 
     testImplementation("org.junit.jupiter:junit-jupiter-api")
     testImplementation("org.junit.jupiter:junit-jupiter-params")
     testImplementation("org.apache.calcite:calcite-server")
-    testImplementation("com.google.protobuf:protobuf-java-util")
     testImplementation("org.mockito:mockito-core")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")
     testImplementation("com.pholser:junit-quickcheck-core")

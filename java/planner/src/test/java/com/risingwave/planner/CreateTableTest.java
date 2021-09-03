@@ -22,7 +22,8 @@ public class CreateTableTest extends SqlTestBase {
     executeSql(sql);
 
     assertTrue(
-        catalogService
+        executionContext
+            .getCatalogService()
             .getTableChecked(TableCatalog.TableName.of(TEST_DB_NAME, TEST_SCHEMA_NAME, "t1"))
             .getColumnChecked("v1")
             .getDesc()
@@ -37,7 +38,8 @@ public class CreateTableTest extends SqlTestBase {
     executeSql(sql);
 
     assertFalse(
-        catalogService
+        executionContext
+            .getCatalogService()
             .getTableChecked(TableCatalog.TableName.of(TEST_DB_NAME, TEST_SCHEMA_NAME, "t1"))
             .getColumnChecked("v1")
             .getDesc()

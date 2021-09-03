@@ -8,6 +8,7 @@ import com.risingwave.pgwire.msg.PgMessage
 import com.risingwave.pgwire.msg.PgMsgType
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.ByteWriteChannel
+import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import java.io.IOException
 import java.nio.ByteBuffer
 import org.slf4j.LoggerFactory
@@ -24,7 +25,9 @@ class PgProtocol(private val input: ByteReadChannel, private val output: ByteWri
   /** Process one client message and reply with response if any. */
   suspend fun process(): Boolean {
     try {
-      doProcess()
+      if (!doProcess()) {
+        return false
+      }
       return stm.willTerminate
     } catch (err: PgException) {
       log.error("Failed to process.", err)
@@ -34,7 +37,7 @@ class PgProtocol(private val input: ByteReadChannel, private val output: ByteWri
   }
 
   @Throws(PgException::class)
-  private suspend fun doProcess() {
+  private suspend fun doProcess(): Boolean {
     try {
       val msg = readMessage()
       stm.process(msg)
@@ -45,9 +48,12 @@ class PgProtocol(private val input: ByteReadChannel, private val output: ByteWri
       throw PgException(PgErrorCode.CONNECTION_EXCEPTION, exp)
     } catch (exp: PgException) {
       throw exp
+    } catch (exp: ClosedReceiveChannelException) {
+      return false
     } catch (exp: Throwable) {
       throw PgException(PgErrorCode.INTERNAL_ERROR, exp)
     }
+    return true
   }
 
   private suspend fun readMessage(): PgMessage {

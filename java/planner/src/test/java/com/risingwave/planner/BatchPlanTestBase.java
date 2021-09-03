@@ -1,18 +1,14 @@
 package com.risingwave.planner;
 
-import static com.google.common.base.Preconditions.checkArgument;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import com.google.protobuf.InvalidProtocolBufferException;
-import com.google.protobuf.util.JsonFormat;
 import com.risingwave.planner.planner.batch.BatchPlanner;
 import com.risingwave.planner.rel.physical.batch.BatchPlan;
-import com.risingwave.planner.rel.physical.batch.RisingWaveBatchPhyRel;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
 import com.risingwave.planner.util.PlannerTestCase;
 import com.risingwave.planner.util.PlannerTestDdlLoader;
+import com.risingwave.rpc.Messages;
 import java.util.List;
-import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.sql.SqlNode;
 
 public abstract class BatchPlanTestBase extends SqlTestBase {
@@ -32,7 +28,10 @@ public abstract class BatchPlanTestBase extends SqlTestBase {
     for (String ddl : ddls) {
       System.out.println("sql: " + ddl);
       SqlNode ddlSql = parseDdl(ddl);
-      sqlHandlerFactory.create(ddlSql, executionContext).handle(ddlSql, executionContext);
+      executionContext
+          .getSqlHandlerFactory()
+          .create(ddlSql, executionContext)
+          .handle(ddlSql, executionContext);
     }
   }
 
@@ -47,21 +46,8 @@ public abstract class BatchPlanTestBase extends SqlTestBase {
 
     // Comment out this to wait for all plan serializaton to be ready
     if (testCase.getJson() != null) {
-      String serializedJsonPlan = serializePlanToJson(plan.getRoot());
+      String serializedJsonPlan = Messages.jsonFormat(plan.getRoot().serialize());
       assertEquals(testCase.getJson(), serializedJsonPlan, "Json not match!");
-    }
-  }
-
-  private static String serializePlanToJson(RelNode relNode) {
-    checkArgument(relNode instanceof RisingWaveBatchPhyRel, "relNode is not batch physical plan!");
-    RisingWaveBatchPhyRel batchPhyRel = (RisingWaveBatchPhyRel) relNode;
-
-    try {
-      return JsonFormat.printer()
-          .usingTypeRegistry(PROTOBUF_JSON_TYPE_REGISTRY)
-          .print(batchPhyRel.serialize());
-    } catch (InvalidProtocolBufferException e) {
-      throw new RuntimeException("Failed to serialize pan to json.", e);
     }
   }
 }

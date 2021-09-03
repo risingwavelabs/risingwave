@@ -8,6 +8,7 @@ import com.risingwave.common.config.Configuration;
 import com.risingwave.execution.handler.SqlHandlerFactory;
 import com.risingwave.node.WorkerNodeManager;
 import com.risingwave.rpc.ComputeClientManager;
+import com.risingwave.scheduler.QueryManager;
 import org.apache.calcite.plan.Context;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptPlanner;
@@ -60,6 +61,10 @@ public class ExecutionContext implements Context {
 
   public Configuration getConf() {
     return frontendEnv.getConfiguration();
+  }
+
+  public QueryManager getQueryManager() {
+    return frontendEnv.getQueryManager();
   }
 
   public static ExecutionContext contextOf(RelOptCluster optCluster) {

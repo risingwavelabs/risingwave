@@ -1,22 +1,17 @@
 package com.risingwave.execution.handler;
 
-import com.risingwave.common.exception.PgErrorCode;
-import com.risingwave.common.exception.PgException;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.execution.result.BatchDataChunkResult;
-import com.risingwave.node.WorkerNode;
 import com.risingwave.pgwire.database.PgResult;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.planner.planner.batch.BatchPlanner;
 import com.risingwave.planner.rel.physical.batch.BatchPlan;
-import com.risingwave.proto.common.Status;
-import com.risingwave.proto.computenode.CreateTaskRequest;
-import com.risingwave.proto.computenode.CreateTaskResponse;
 import com.risingwave.proto.computenode.TaskData;
 import com.risingwave.proto.computenode.TaskSinkId;
 import com.risingwave.rpc.ComputeClient;
-import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.Messages;
+import com.risingwave.scheduler.QueryManager;
+import com.risingwave.scheduler.QueryResultLocation;
 import java.util.ArrayList;
 import java.util.Iterator;
 import org.apache.calcite.sql.SqlKind;
@@ -30,15 +25,16 @@ public class QueryHandler implements SqlHandler {
     BatchPlanner planner = new BatchPlanner();
     BatchPlan plan = planner.plan(ast, context);
 
-    ComputeClientManager clientManager = context.getComputeClientManager();
-    WorkerNode node = context.getWorkerNodeManager().nextRandom();
-    ComputeClient client = clientManager.getOrCreate(node);
-    CreateTaskRequest createTaskRequest = Messages.buildCreateTaskRequest(plan.serialize());
-    CreateTaskResponse createTaskResponse = client.createTask(createTaskRequest);
-    if (createTaskResponse.getStatus().getCode() != Status.Code.OK) {
-      throw new PgException(PgErrorCode.INTERNAL_ERROR, "Create Task failed");
+    QueryResultLocation resultLocation;
+    try {
+      QueryManager queryManager = context.getQueryManager();
+      resultLocation = queryManager.schedule(plan).get();
+    } catch (Exception exp) {
+      throw new RuntimeException(exp);
     }
-    TaskSinkId taskSinkId = Messages.buildTaskSinkId(createTaskRequest.getTaskId());
+
+    TaskSinkId taskSinkId = Messages.buildTaskSinkId(resultLocation.getTaskId().toTaskIdProto());
+    ComputeClient client = context.getComputeClientManager().getOrCreate(resultLocation.getNode());
     Iterator<TaskData> taskDataIterator = client.getData(taskSinkId);
 
     // Convert task data to list to iterate it multiple times.
