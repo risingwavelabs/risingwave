@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![feature(generic_associated_types)]
 
 extern crate anyhow;
 extern crate backtrace;
@@ -21,6 +22,7 @@ mod error;
 mod util;
 mod alloc;
 mod array;
+mod array2;
 mod buffer;
 mod catalog;
 mod execution;

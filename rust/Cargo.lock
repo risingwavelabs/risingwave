@@ -1124,6 +1124,7 @@ dependencies = [
  "grpcio",
  "log",
  "log4rs",
+ "num-traits",
  "pb-construct",
  "pb-convert",
  "pb-convert-derive",
