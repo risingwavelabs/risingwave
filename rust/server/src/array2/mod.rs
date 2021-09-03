@@ -2,7 +2,7 @@ mod iterator;
 mod primitive_array;
 mod utf8_array;
 pub use iterator::ArrayIterator;
-pub use primitive_array::{Primitive, PrimitiveArray, PrimitiveArrayBuilder};
+pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder};
 pub use utf8_array::{UTF8Array, UTF8ArrayBuilder};
 
 /// A trait over all array builders.
@@ -95,14 +95,15 @@ mod tests {
         assert_eq!(array.iter().collect::<Vec<Option<i32>>>(), vec![Some(60)]);
     }
 
+    use crate::types::NativeType;
     use num_traits::cast::AsPrimitive;
     use num_traits::ops::checked::CheckedAdd;
 
     fn vec_add<T1, T2, T3>(a: &PrimitiveArray<T1>, b: &PrimitiveArray<T2>) -> PrimitiveArray<T3>
     where
-        T1: Primitive + AsPrimitive<T3>,
-        T2: Primitive + AsPrimitive<T3>,
-        T3: Primitive + CheckedAdd,
+        T1: NativeType + AsPrimitive<T3>,
+        T2: NativeType + AsPrimitive<T3>,
+        T3: NativeType + CheckedAdd,
     {
         assert_eq!(a.len(), b.len());
         let mut builder = PrimitiveArrayBuilder::<T3>::new(a.len());

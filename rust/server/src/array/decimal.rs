@@ -21,13 +21,13 @@ use crate::expr::Datum;
 use crate::types::{DataType, DataTypeKind, DataTypeRef, DecimalType, MAX_PRECISION};
 use crate::util::{downcast_mut, downcast_ref};
 
-pub(crate) const DECIMAL_BYTES: usize = 16;
+pub const DECIMAL_BYTES: usize = 16;
 
-pub(crate) struct DecimalArray {
+pub struct DecimalArray {
     data: ArrayData,
 }
 
-pub(crate) struct DecimalArrayBuilder {
+pub struct DecimalArrayBuilder {
     data_type: DataTypeRef,
     buffer: Vec<Decimal>,
     null_bitmap_buffer: Vec<bool>,
@@ -54,11 +54,11 @@ impl DecimalArray {
         (precision, scale)
     }
 
-    pub(crate) fn as_iter(&self) -> Result<impl Iterator<Item = Option<Decimal>> + '_> {
+    pub fn as_iter(&self) -> Result<impl Iterator<Item = Option<Decimal>> + '_> {
         DecimalIter::new(self)
     }
 
-    pub(crate) fn from_values<T>(input: T) -> Result<ArrayRef>
+    pub fn from_values<T>(input: T) -> Result<ArrayRef>
     where
         T: AsRef<[Option<Decimal>]>,
     {
@@ -264,7 +264,7 @@ impl ArrayBuilder for DecimalArrayBuilder {
 }
 
 impl DecimalArrayBuilder {
-    pub(crate) fn new(data_type: Arc<DecimalType>, capacity: usize) -> Self {
+    pub fn new(data_type: Arc<DecimalType>, capacity: usize) -> Self {
         Self {
             data_type,
             buffer: Vec::with_capacity(capacity),
@@ -272,7 +272,7 @@ impl DecimalArrayBuilder {
         }
     }
 
-    pub(crate) fn append_value(&mut self, value: Option<Decimal>) -> Result<()> {
+    pub fn append_value(&mut self, value: Option<Decimal>) -> Result<()> {
         match value {
             Some(v) => {
                 self.buffer.push(v);

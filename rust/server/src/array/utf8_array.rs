@@ -18,12 +18,12 @@ use crate::util::{downcast_mut, downcast_ref};
 
 use std::mem::{align_of, size_of};
 
-pub(crate) struct UTF8Array {
+pub struct UTF8Array {
     data: ArrayData,
 }
 
 impl UTF8Array {
-    pub(crate) fn from_values<'a, T>(input: T, width: usize, kind: DataTypeKind) -> Result<ArrayRef>
+    pub fn from_values<'a, T>(input: T, width: usize, kind: DataTypeKind) -> Result<ArrayRef>
     where
         T: AsRef<[Option<&'a str>]>,
     {
@@ -82,7 +82,7 @@ impl UTF8Array {
     }
 }
 
-pub(crate) struct UTF8ArrayBuilder {
+pub struct UTF8ArrayBuilder {
     width: usize,
     data_type: DataTypeRef,
     data_buffer: Vec<u8>,
@@ -104,7 +104,7 @@ impl AsMut<dyn Any> for UTF8ArrayBuilder {
 }
 
 impl UTF8ArrayBuilder {
-    pub(crate) fn new(data_type: DataTypeRef, width: usize, capacity: usize) -> Result<Self> {
+    pub fn new(data_type: DataTypeRef, width: usize, capacity: usize) -> Result<Self> {
         let mut builder = Self {
             width,
             data_type,
@@ -121,7 +121,7 @@ impl UTF8ArrayBuilder {
 }
 
 impl UTF8ArrayBuilder {
-    pub(crate) fn append_str(&mut self, value: Option<&str>) -> Result<()> {
+    pub fn append_str(&mut self, value: Option<&str>) -> Result<()> {
         match value {
             Some(v) => {
                 // TODO (peng) for now we don't care about column description for char(n)
@@ -301,7 +301,7 @@ impl<'a> Iterator for UTF8ArrayIter<'a> {
 }
 
 impl UTF8Array {
-    pub(crate) fn as_iter(&self) -> Result<impl Iterator<Item = Option<&str>> + '_> {
+    pub fn as_iter(&self) -> Result<impl Iterator<Item = Option<&str>> + '_> {
         UTF8ArrayIter::new(self)
     }
 }

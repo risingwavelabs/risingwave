@@ -4,13 +4,13 @@ use std::any::Any;
 use std::sync::Arc;
 
 mod numeric_type;
-pub(crate) use numeric_type::*;
+pub use numeric_type::*;
 mod primitive;
-pub(crate) use primitive::*;
+pub use primitive::*;
 mod native;
 use crate::array::BoxedArrayBuilder;
 use crate::error::ErrorCode::InternalError;
-pub(crate) use native::*;
+pub use native::*;
 use risingwave_proto::data::DataType_TypeName::BOOLEAN;
 use risingwave_proto::data::DataType_TypeName::CHAR;
 use risingwave_proto::data::DataType_TypeName::DATE;
@@ -26,13 +26,13 @@ use std::fmt::Debug;
 
 mod bool_type;
 mod decimal_type;
-pub(crate) mod interval_type;
+pub mod interval_type;
 mod string_type;
 mod timestamp_type;
 
-pub(crate) use bool_type::*;
-pub(crate) use decimal_type::*;
-pub(crate) use string_type::*;
+pub use bool_type::*;
+pub use decimal_type::*;
+pub use string_type::*;
 
 use risingwave_proto::expr::ExprNode_ExprNodeType;
 use risingwave_proto::expr::ExprNode_ExprNodeType::ADD;
@@ -42,7 +42,7 @@ use risingwave_proto::expr::ExprNode_ExprNodeType::MULTIPLY;
 use risingwave_proto::expr::ExprNode_ExprNodeType::SUBTRACT;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
-pub(crate) enum DataTypeKind {
+pub enum DataTypeKind {
     Boolean,
     Int16,
     Int32,
@@ -57,7 +57,7 @@ pub(crate) enum DataTypeKind {
     Timestamp,
 }
 
-pub(crate) trait DataType: Debug + Sync + Send + 'static {
+pub trait DataType: Debug + Sync + Send + 'static {
     fn data_type_kind(&self) -> DataTypeKind;
     fn is_nullable(&self) -> bool;
     fn create_array_builder(self: Arc<Self>, capacity: usize) -> Result<BoxedArrayBuilder>;
@@ -65,7 +65,7 @@ pub(crate) trait DataType: Debug + Sync + Send + 'static {
     fn as_any(&self) -> &dyn Any;
 }
 
-pub(crate) type DataTypeRef = Arc<dyn DataType>;
+pub type DataTypeRef = Arc<dyn DataType>;
 
 macro_rules! build_data_type {
   ($proto: expr, $($proto_type_name:path => $data_type:ty),*) => {
@@ -80,7 +80,7 @@ macro_rules! build_data_type {
   }
 }
 
-pub(crate) fn build_from_proto(proto: &DataTypeProto) -> Result<DataTypeRef> {
+pub fn build_from_proto(proto: &DataTypeProto) -> Result<DataTypeRef> {
     build_data_type! {
       proto,
       INT16 => Int16Type,
@@ -97,7 +97,7 @@ pub(crate) fn build_from_proto(proto: &DataTypeProto) -> Result<DataTypeRef> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
-pub(crate) enum ArithmeticOperatorKind {
+pub enum ArithmeticOperatorKind {
     Plus,
     Subtract,
     Multiply,
@@ -105,7 +105,7 @@ pub(crate) enum ArithmeticOperatorKind {
     Mod,
 }
 
-pub(crate) fn is_arithmetic_operator(expr_type: &ExprNode_ExprNodeType) -> bool {
+pub fn is_arithmetic_operator(expr_type: &ExprNode_ExprNodeType) -> bool {
     matches!(expr_type, ADD | SUBTRACT | MULTIPLY | DIVIDE | MODULUS)
 }
 

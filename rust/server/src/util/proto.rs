@@ -9,7 +9,7 @@ macro_rules! unpack_from_any {
     };
 }
 
-pub(crate) trait JsonFormatter {
+pub trait JsonFormatter {
     fn to_json(&self) -> Result<Value>;
 }
 

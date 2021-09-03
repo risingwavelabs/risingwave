@@ -2,20 +2,20 @@ use pb_convert_derive::FromProtobuf;
 
 #[derive(Clone, Debug, Hash, PartialOrd, PartialEq, Eq, FromProtobuf)]
 #[pb_convert(pb_type = "risingwave_proto::plan::DatabaseRefId")]
-pub(crate) struct DatabaseId {
+pub struct DatabaseId {
     database_id: i32,
 }
 
 #[derive(Clone, Debug, Hash, PartialOrd, PartialEq, Eq, FromProtobuf)]
 #[pb_convert(pb_type = "risingwave_proto::plan::SchemaRefId")]
-pub(crate) struct SchemaId {
+pub struct SchemaId {
     database_ref_id: DatabaseId,
     schema_id: i32,
 }
 
 #[derive(Clone, Debug, Hash, PartialOrd, PartialEq, Eq, FromProtobuf)]
 #[pb_convert(pb_type = "risingwave_proto::plan::TableRefId")]
-pub(crate) struct TableId {
+pub struct TableId {
     schema_ref_id: SchemaId,
     table_id: i32,
 }

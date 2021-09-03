@@ -4,11 +4,11 @@ use crate::task::channel::{BoxChanReceiver, BoxChanSender, ChanReceiver, ChanSen
 use std::option::Option;
 use std::sync::mpsc;
 
-pub(crate) struct FifoSender {
+pub struct FifoSender {
     sender: mpsc::Sender<DataChunkRef>,
 }
 
-pub(crate) struct FifoReceiver {
+pub struct FifoReceiver {
     receiver: mpsc::Receiver<DataChunkRef>,
 }
 
@@ -31,7 +31,7 @@ impl ChanReceiver for FifoReceiver {
     }
 }
 
-pub(crate) fn new_fifo_channel() -> (BoxChanSender, BoxChanReceiver) {
+pub fn new_fifo_channel() -> (BoxChanSender, BoxChanReceiver) {
     let (s, r) = mpsc::channel();
     (
         Box::new(FifoSender { sender: s }),

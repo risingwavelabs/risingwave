@@ -1,4 +1,4 @@
 mod manager;
-pub(crate) use manager::*;
+pub use manager::*;
 mod table;
-pub(crate) use table::*;
+pub use table::*;

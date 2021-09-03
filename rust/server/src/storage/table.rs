@@ -9,12 +9,12 @@ struct MemTableInner {
     column_ids: Arc<Vec<i32>>,
 }
 
-pub(crate) struct MemTable {
+pub struct MemTable {
     table_id: TableId,
     inner: RwLock<MemTableInner>,
 }
 
-pub(crate) type TableRef = Arc<MemTable>;
+pub type TableRef = Arc<MemTable>;
 
 impl MemTableInner {
     fn new(column_count: usize) -> Self {
@@ -26,14 +26,14 @@ impl MemTableInner {
 }
 
 impl MemTable {
-    pub(crate) fn new(table_id: &TableId, column_count: usize) -> TableRef {
+    pub fn new(table_id: &TableId, column_count: usize) -> TableRef {
         Arc::new(Self {
             table_id: table_id.clone(),
             inner: RwLock::new(MemTableInner::new(column_count)),
         })
     }
 
-    pub(crate) fn append(&self, data: DataChunk) -> Result<usize> {
+    pub fn append(&self, data: DataChunk) -> Result<usize> {
         let mut write_guard = self.inner.write().map_err(|e| {
             RwError::from(ErrorCode::InternalError(format!(
                 "failed to acquire write lock for table {:?}, reason: {}",
@@ -45,15 +45,15 @@ impl MemTable {
         Ok(cardinality)
     }
 
-    pub(crate) fn get_data(&self) -> Result<Vec<DataChunkRef>> {
+    pub fn get_data(&self) -> Result<Vec<DataChunkRef>> {
         self.get_reader().map(|r| r.data.clone())
     }
 
-    pub(crate) fn get_column_ids(&self) -> Result<Arc<Vec<i32>>> {
+    pub fn get_column_ids(&self) -> Result<Arc<Vec<i32>>> {
         self.get_reader().map(|r| r.column_ids.clone())
     }
 
-    pub(crate) fn index_of_column_id(&self, column_id: i32) -> Result<usize> {
+    pub fn index_of_column_id(&self, column_id: i32) -> Result<usize> {
         self.get_reader()
             .map(|r| r.column_ids.iter().position(|c| *c == column_id))
             .and_then(|pos| {

@@ -5,7 +5,7 @@ use crate::error::{Result, RwError};
 // The larger type among LHS and RHS has to be manually specified.
 macro_rules! sub_integer_types {
     ($fn_name: ident, $left_type: ty, $right_type: ty, $max_type: ty) => {
-        pub(crate) fn $fn_name(
+        pub fn $fn_name(
             v1: Option<$left_type>,
             v2: Option<$right_type>,
         ) -> Result<Option<$max_type>> {
@@ -32,7 +32,7 @@ sub_integer_types!(sub_i64_i64, i64, i64, i64);
 
 macro_rules! sub_float_types {
     ($fn_name: ident, $left_type: ty, $right_type: ty, $max_type: ty) => {
-        pub(crate) fn $fn_name(
+        pub fn $fn_name(
             v1: Option<$left_type>,
             v2: Option<$right_type>,
         ) -> Result<Option<$max_type>> {

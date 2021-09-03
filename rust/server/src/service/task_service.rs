@@ -8,7 +8,7 @@ use risingwave_proto::task_service_grpc::TaskService;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
-pub(crate) struct TaskServiceImpl {
+pub struct TaskServiceImpl {
     mgr: Arc<Mutex<TaskManager>>,
 }
 

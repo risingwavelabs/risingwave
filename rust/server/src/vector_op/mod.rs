@@ -1,11 +1,11 @@
 mod add_op;
-pub(crate) mod agg;
+pub mod agg;
 mod binary_op;
-pub(crate) mod cast;
-pub(crate) mod cmp;
-pub(crate) mod conjunction;
+pub mod cast;
+pub mod cmp;
+pub mod conjunction;
 mod div_op;
 mod mod_op;
 mod mul_op;
 mod sub_op;
-pub(crate) mod vec_arithmetic;
+pub mod vec_arithmetic;

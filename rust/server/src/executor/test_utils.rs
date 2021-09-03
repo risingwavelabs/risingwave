@@ -8,18 +8,18 @@ use std::sync::Arc;
 // MockExecutor is to mock the input of executor.
 // You can bind one or more MockExecutor as the children of the executor to test,
 // (HashAgg, e.g), so that allow testing without instantiating real SeqScans and real storage.
-pub(crate) struct MockExecutor {
+pub struct MockExecutor {
     chunks: VecDeque<DataChunkRef>,
 }
 
 impl MockExecutor {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             chunks: VecDeque::new(),
         }
     }
 
-    pub(crate) fn add(&mut self, chunk: DataChunk) {
+    pub fn add(&mut self, chunk: DataChunk) {
         self.chunks.push_back(Arc::new(chunk));
     }
 }

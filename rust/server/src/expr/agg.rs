@@ -8,14 +8,14 @@ use protobuf::Message as _;
 use risingwave_proto::expr::{ExprNode, ExprNode_ExprNodeType, FunctionCall};
 use std::convert::TryFrom;
 
-pub(crate) enum AggKind {
+pub enum AggKind {
     Min,
     Max,
     Sum,
     Count,
 }
 
-pub(crate) struct AggExpression {
+pub struct AggExpression {
     return_type: DataTypeRef,
     agg_kind: AggKind,
     child: BoxedExpression,
@@ -38,14 +38,14 @@ impl Expression for AggExpression {
     }
 }
 impl AggExpression {
-    pub(crate) fn create_agg_state(&self) -> Result<BoxedAggState> {
+    pub fn create_agg_state(&self) -> Result<BoxedAggState> {
         agg::create_agg_state(
             self.child.return_type_ref(),
             &self.agg_kind,
             self.return_type_ref(),
         )
     }
-    pub(crate) fn eval_child(&mut self, input: &DataChunk) -> Result<ArrayRef> {
+    pub fn eval_child(&mut self, input: &DataChunk) -> Result<ArrayRef> {
         let child_output = self.child.eval(input)?;
         ensure!(
             self.child.return_type().data_type_kind() == child_output.data_type().data_type_kind()

@@ -3,13 +3,13 @@ use crate::error::Result;
 use crate::expr::Datum;
 use std::any::Any;
 
-pub(crate) trait ArrayBuilder: AsRef<dyn Any> + AsMut<dyn Any> {
+pub trait ArrayBuilder: AsRef<dyn Any> + AsMut<dyn Any> {
     fn append(&mut self, datum: &Datum) -> Result<()>;
     fn append_array(&mut self, source: &dyn Array) -> Result<()>;
     fn finish(self: Box<Self>) -> Result<ArrayRef>;
 }
 
-pub(crate) type BoxedArrayBuilder = Box<dyn ArrayBuilder>;
+pub type BoxedArrayBuilder = Box<dyn ArrayBuilder>;
 
 #[cfg(test)]
 mod tests {

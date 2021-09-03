@@ -5,7 +5,7 @@ use crate::util::{downcast_mut, downcast_ref};
 use chrono::{Datelike, NaiveDate};
 use std::sync::Arc;
 
-pub(crate) fn vec_cast(un_casted_array: ArrayRef, dst_type: DataTypeRef) -> Result<ArrayRef> {
+pub fn vec_cast(un_casted_array: ArrayRef, dst_type: DataTypeRef) -> Result<ArrayRef> {
     match (
         un_casted_array.data_type().data_type_kind(),
         dst_type.data_type_kind(),

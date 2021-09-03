@@ -4,7 +4,7 @@ use crate::types::PrimitiveDataType;
 use crate::util::downcast_ref;
 
 // Again, assuming vector binary ops are over arrays with the same type.
-pub(crate) fn vec_binary_op<TA, IA, TB, IB, TR, F>(
+pub fn vec_binary_op<TA, IA, TB, IB, TR, F>(
     left: IA,
     right: IB,
     mut op: F,
@@ -20,7 +20,7 @@ where
         .collect::<Result<Vec<Option<TR>>>>()
 }
 
-pub(crate) fn vec_binary_op_primitive_array<TA, TB, TR, F>(
+pub fn vec_binary_op_primitive_array<TA, TB, TR, F>(
     left_array: &dyn Array,
     right_array: &dyn Array,
     op: F,
@@ -42,7 +42,7 @@ where
     PrimitiveArray::<TR>::from_values(ret)
 }
 
-pub(crate) fn vec_cmp_primitive_array<T, F>(
+pub fn vec_cmp_primitive_array<T, F>(
     left_array: &dyn Array,
     right_array: &dyn Array,
     op: F,

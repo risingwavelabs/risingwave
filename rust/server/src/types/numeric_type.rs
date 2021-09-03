@@ -15,12 +15,12 @@ use std::sync::Arc;
 macro_rules! make_numeric_type {
     ($name:ident, $native_ty:ty, $data_ty:expr, $proto_ty: expr) => {
         #[derive(Debug)]
-        pub(crate) struct $name {
+        pub struct $name {
             nullable: bool,
         }
 
         impl $name {
-            pub(crate) fn new(nullable: bool) -> Self {
+            pub fn new(nullable: bool) -> Self {
                 Self { nullable }
             }
         }

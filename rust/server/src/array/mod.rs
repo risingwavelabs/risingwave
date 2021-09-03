@@ -1,18 +1,18 @@
 #![allow(clippy::module_inception)]
 mod array;
-pub(crate) use array::*;
+pub use array::*;
 mod array_data;
 mod data_chunk;
-pub(crate) use data_chunk::*;
+pub use data_chunk::*;
 mod primitive;
-pub(crate) use primitive::*;
+pub use primitive::*;
 mod decimal;
-pub(crate) use decimal::*;
+pub use decimal::*;
 mod array_builder;
 mod bool_array;
-pub(crate) mod interval_array;
+pub mod interval_array;
 mod utf8_array;
 
-pub(crate) use array_builder::*;
-pub(crate) use bool_array::*;
-pub(crate) use utf8_array::*;
+pub use array_builder::*;
+pub use bool_array::*;
+pub use utf8_array::*;

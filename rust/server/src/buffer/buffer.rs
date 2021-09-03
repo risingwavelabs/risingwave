@@ -13,7 +13,7 @@ use crate::types::NativeType;
 use std::mem::{size_of, transmute};
 
 #[derive(Debug)]
-pub(crate) struct Buffer {
+pub struct Buffer {
     ptr: NonNull<u8>,
     len: usize,
 }
@@ -25,11 +25,11 @@ impl Drop for Buffer {
 }
 
 impl Buffer {
-    pub(crate) fn new(size: usize) -> Result<Buffer> {
+    pub fn new(size: usize) -> Result<Buffer> {
         alloc_aligned(size).map(|ptr| Buffer { ptr, len: size })
     }
 
-    pub(crate) fn from_slice<T: NativeType, S: AsRef<[T]>>(data: S) -> Result<Buffer> {
+    pub fn from_slice<T: NativeType, S: AsRef<[T]>>(data: S) -> Result<Buffer> {
         let buffer = Buffer::new(data.as_ref().len() * size_of::<T>())?;
         unsafe {
             let dest_slice =
@@ -40,11 +40,11 @@ impl Buffer {
         Ok(buffer)
     }
     // TODO: We should remove this, a buffer should be immutable
-    pub(crate) fn as_slice_mut(&mut self) -> &mut [u8] {
+    pub fn as_slice_mut(&mut self) -> &mut [u8] {
         unsafe { from_raw_parts_mut(self.ptr.as_ptr(), self.len) }
     }
 
-    pub(crate) fn typed_data<T: NativeType>(&self) -> &[T] {
+    pub fn typed_data<T: NativeType>(&self) -> &[T] {
         unsafe {
             let (prefix, offsets, suffix) = self.as_slice().align_to::<T>();
             assert!(prefix.is_empty() && suffix.is_empty());
@@ -52,27 +52,27 @@ impl Buffer {
         }
     }
 
-    pub(crate) fn as_slice(&self) -> &[u8] {
+    pub fn as_slice(&self) -> &[u8] {
         unsafe { from_raw_parts(self.ptr.as_ptr(), self.len) }
     }
 
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.len
     }
 
-    pub(crate) fn capacity(&self) -> usize {
+    pub fn capacity(&self) -> usize {
         self.len
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.len == 0
     }
 
-    pub(crate) fn as_ptr(&self) -> *const u8 {
+    pub fn as_ptr(&self) -> *const u8 {
         self.ptr.as_ptr()
     }
 
-    pub(crate) fn try_from<T: AsRef<[u8]>>(src: T) -> Result<Self> {
+    pub fn try_from<T: AsRef<[u8]>>(src: T) -> Result<Self> {
         let mut buffer = Buffer::new(src.as_ref().len())?;
         let to_slice = buffer.as_slice_mut();
         to_slice.copy_from_slice(src.as_ref());

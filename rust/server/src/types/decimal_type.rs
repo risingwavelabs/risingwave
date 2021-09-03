@@ -7,25 +7,25 @@ use std::any::Any;
 use std::convert::TryFrom;
 use std::sync::Arc;
 
-pub(crate) const MAX_PRECISION: u32 = 28;
+pub const MAX_PRECISION: u32 = 28;
 
 #[derive(Debug)]
-pub(crate) struct DecimalType {
+pub struct DecimalType {
     nullable: bool,
     precision: u32,
     scale: u32,
 }
 
 impl DecimalType {
-    pub(crate) fn get_precision(&self) -> u32 {
+    pub fn get_precision(&self) -> u32 {
         self.precision
     }
 
-    pub(crate) fn get_scale(&self) -> u32 {
+    pub fn get_scale(&self) -> u32 {
         self.scale
     }
 
-    pub(crate) fn new(nullable: bool, precision: u32, scale: u32) -> Result<Self> {
+    pub fn new(nullable: bool, precision: u32, scale: u32) -> Result<Self> {
         ensure!(precision <= MAX_PRECISION);
         ensure!(scale <= precision);
         Ok(Self {
@@ -35,7 +35,7 @@ impl DecimalType {
         })
     }
 
-    pub(crate) fn create(nullable: bool, precision: u32, scale: u32) -> Result<DataTypeRef> {
+    pub fn create(nullable: bool, precision: u32, scale: u32) -> Result<DataTypeRef> {
         ensure!(precision <= MAX_PRECISION);
         ensure!(scale <= precision);
         Ok(Arc::new(Self {

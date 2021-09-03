@@ -4,7 +4,7 @@ use crate::error::{Result, RwError};
 // Add is a symmetric operation, so we assume the left type is always "larger" than the right type.
 macro_rules! add_integer_types {
     ($fn_name: ident, $left_type: ty, $right_type: ty) => {
-        pub(crate) fn $fn_name(
+        pub fn $fn_name(
             v1: Option<$left_type>,
             v2: Option<$right_type>,
         ) -> Result<Option<$left_type>> {
@@ -28,7 +28,7 @@ add_integer_types!(add_i64_i64, i64, i64);
 
 macro_rules! add_float_types {
     ($fn_name: ident, $left_type: ty, $right_type: ty) => {
-        pub(crate) fn $fn_name(
+        pub fn $fn_name(
             v1: Option<$left_type>,
             v2: Option<$right_type>,
         ) -> Result<Option<$left_type>> {

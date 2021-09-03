@@ -3,7 +3,7 @@ use crate::error::{Result, RwError};
 
 macro_rules! div_integer_types {
     ($fn_name: ident, $left_type: ty, $right_type: ty, $max_type: ty) => {
-        pub(crate) fn $fn_name(
+        pub fn $fn_name(
             v1: Option<$left_type>,
             v2: Option<$right_type>,
         ) -> Result<Option<$max_type>> {
@@ -30,7 +30,7 @@ div_integer_types!(div_i64_i64, i64, i64, i64);
 
 macro_rules! div_float_types {
     ($fn_name: ident, $left_type: ty, $right_type: ty, $max_type: ty) => {
-        pub(crate) fn $fn_name(
+        pub fn $fn_name(
             v1: Option<$left_type>,
             v2: Option<$right_type>,
         ) -> Result<Option<$max_type>> {

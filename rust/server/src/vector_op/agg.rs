@@ -8,13 +8,13 @@ use std::marker::PhantomData;
 
 // Part 1: Public types and functions.
 
-pub(crate) trait AggState: Send {
+pub trait AggState: Send {
     fn update(&mut self, input: ArrayRef) -> Result<()>;
     fn output(&self, builder: &mut dyn ArrayBuilder) -> Result<()>;
 }
-pub(crate) type BoxedAggState = Box<dyn AggState>;
+pub type BoxedAggState = Box<dyn AggState>;
 
-pub(crate) fn create_agg_state(
+pub fn create_agg_state(
     input_type: DataTypeRef,
     agg_type: &AggKind,
     return_type: DataTypeRef,

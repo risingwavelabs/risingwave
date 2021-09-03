@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 /// If want to define a interval holds all kinds of time interval, now the frontend Java plan's Interval Type should be marked as Interval.
 #[derive(Debug)]
-pub(crate) struct IntervalType {
+pub struct IntervalType {
     nullable: bool,
     // Used for precision of seconds.
     precision: u32,
@@ -27,17 +27,13 @@ impl IntervalType {
         }
     }
 
-    pub(crate) fn create(
-        nullable: bool,
-        precision: u32,
-        inner_type: Option<IntervalUnit>,
-    ) -> DataTypeRef {
+    pub fn create(nullable: bool, precision: u32, inner_type: Option<IntervalUnit>) -> DataTypeRef {
         Arc::new(Self::new(nullable, precision, inner_type)) as DataTypeRef
     }
 }
 
 #[derive(Copy, Clone, Debug)]
-pub(crate) enum IntervalUnit {
+pub enum IntervalUnit {
     Year,
     Day,
     // TODO: other fileds in https://www.postgresql.org/docs/current/datatype-datetime.html

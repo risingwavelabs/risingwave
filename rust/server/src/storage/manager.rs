@@ -5,15 +5,15 @@ use crate::storage::table::{MemTable, TableRef};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-pub(crate) trait StorageManager: Sync + Send {
+pub trait StorageManager: Sync + Send {
     fn create_table(&self, table_id: &TableId, column_count: usize) -> Result<()>;
     fn get_table(&self, table_id: &TableId) -> Result<TableRef>;
     fn drop_table(&self, table_id: &TableId) -> Result<()>;
 }
 
-pub(crate) type StorageManagerRef = Arc<dyn StorageManager>;
+pub type StorageManagerRef = Arc<dyn StorageManager>;
 
-pub(crate) struct MemStorageManager {
+pub struct MemStorageManager {
     tables: Mutex<HashMap<TableId, TableRef>>,
 }
 
@@ -57,7 +57,7 @@ impl StorageManager for MemStorageManager {
 }
 
 impl MemStorageManager {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         MemStorageManager {
             tables: Mutex::new(HashMap::new()),
         }

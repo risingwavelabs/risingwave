@@ -29,13 +29,13 @@ impl ExchangeWriter for FakeExchangeWriter {
     }
 }
 
-pub(crate) struct TestRunner {
+pub struct TestRunner {
     task_mgr: TaskManager,
     tsid: TaskSinkId,
 }
 
 impl TestRunner {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         let tid = ProtoTaskId::default();
         let mut tsid = TaskSinkId::default();
         tsid.set_task_id(tid.clone());
@@ -45,15 +45,15 @@ impl TestRunner {
         }
     }
 
-    pub(crate) fn prepare_table(&mut self) -> TableBuilder {
+    pub fn prepare_table(&mut self) -> TableBuilder {
         TableBuilder::new(self)
     }
 
-    pub(crate) fn prepare_scan(&mut self) -> SelectBuilder {
+    pub fn prepare_scan(&mut self) -> SelectBuilder {
         SelectBuilder::new(self)
     }
 
-    pub(crate) fn run(&mut self, plan: PlanFragment) -> Result<Vec<TaskData>> {
+    pub fn run(&mut self, plan: PlanFragment) -> Result<Vec<TaskData>> {
         self.task_mgr
             .fire_task(self.tsid.get_task_id(), plan.clone())?;
         let mut task = self.task_mgr.take_task(&self.tsid).unwrap();
@@ -72,7 +72,7 @@ impl TestRunner {
     }
 }
 
-pub(crate) struct TableBuilder<'a> {
+pub struct TableBuilder<'a> {
     runner: &'a mut TestRunner,
 
     col_types: Vec<DataType>,
@@ -80,7 +80,7 @@ pub(crate) struct TableBuilder<'a> {
 }
 
 impl<'a> TableBuilder<'a> {
-    pub(crate) fn new(runner: &'a mut TestRunner) -> Self {
+    pub fn new(runner: &'a mut TestRunner) -> Self {
         Self {
             runner,
             col_types: vec![],
@@ -88,7 +88,7 @@ impl<'a> TableBuilder<'a> {
         }
     }
 
-    pub(crate) fn create_table(mut self, col_types: &[DataType_TypeName]) -> Self {
+    pub fn create_table(mut self, col_types: &[DataType_TypeName]) -> Self {
         for type_name in col_types {
             let mut typ = DataType::new();
             typ.set_type_name(type_name.clone());
@@ -98,7 +98,7 @@ impl<'a> TableBuilder<'a> {
         self
     }
 
-    pub(crate) fn create_table_int32s(self, col_num: usize) -> Self {
+    pub fn create_table_int32s(self, col_num: usize) -> Self {
         let mut col_types = vec![];
         for _ in 0..col_num {
             col_types.push(DataType_TypeName::INT32);
@@ -106,7 +106,7 @@ impl<'a> TableBuilder<'a> {
         self.create_table(col_types.as_slice())
     }
 
-    pub(crate) fn set_nullable(&mut self, col_idx: usize) -> &mut Self {
+    pub fn set_nullable(&mut self, col_idx: usize) -> &mut Self {
         self.col_types
             .get_mut(col_idx)
             .unwrap()
@@ -114,7 +114,7 @@ impl<'a> TableBuilder<'a> {
         self
     }
 
-    pub(crate) fn insert_i32s(mut self, i32s: &[i32]) -> Self {
+    pub fn insert_i32s(mut self, i32s: &[i32]) -> Self {
         assert_eq!(i32s.len(), self.col_types.len());
         let mut tuple = ConstantBuilder::new();
         for v in i32s {
@@ -124,7 +124,7 @@ impl<'a> TableBuilder<'a> {
         self
     }
 
-    pub(crate) fn run(self) {
+    pub fn run(self) {
         let inserted_rows = self.tuples.len();
         let create = self.build_create_table_plan();
         let insert = self.build_insert_values_plan();
@@ -181,7 +181,7 @@ impl<'a> TableBuilder<'a> {
     }
 }
 
-pub(crate) struct ConstantBuilder {
+pub struct ConstantBuilder {
     values: Vec<ConstantValue>,
 }
 
@@ -202,7 +202,7 @@ impl ConstantBuilder {
     }
 }
 
-pub(crate) struct SelectBuilder<'a> {
+pub struct SelectBuilder<'a> {
     runner: &'a mut TestRunner,
     plan: PlanFragment,
 }
@@ -216,7 +216,7 @@ impl<'a> SelectBuilder<'a> {
     }
 
     // select * from t;
-    pub(crate) fn scan_all(mut self) -> Self {
+    pub fn scan_all(mut self) -> Self {
         let mut scan = SeqScanNode::default();
         let column_ids = self
             .runner
@@ -235,18 +235,18 @@ impl<'a> SelectBuilder<'a> {
         self
     }
 
-    pub(crate) fn run(self) -> Vec<TaskData> {
+    pub fn run(self) -> Vec<TaskData> {
         self.runner.run(self.plan).unwrap()
     }
 }
 
-pub(crate) struct ResultChecker {
+pub struct ResultChecker {
     col_types: Vec<DataType>,
     columns: Vec<Vec<ConstantValue>>,
 }
 
 impl ResultChecker {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             col_types: vec![],
             columns: vec![],
@@ -255,7 +255,7 @@ impl ResultChecker {
 
     // We still do not support nullable testing very well.
     // TODO: vals &[i32] => vals &[Option<i32>]
-    pub(crate) fn add_i32_column(mut self, is_nullable: bool, vals: &[i32]) -> ResultChecker {
+    pub fn add_i32_column(mut self, is_nullable: bool, vals: &[i32]) -> ResultChecker {
         let mut typ = DataType::default();
         typ.set_type_name(DataType_TypeName::INT32);
         typ.set_is_nullable(is_nullable);
@@ -268,7 +268,7 @@ impl ResultChecker {
         self
     }
 
-    pub(crate) fn check_result(self, actual: Vec<TaskData>) {
+    pub fn check_result(self, actual: Vec<TaskData>) {
         // Ensure the testing data itself is correct.
         assert_eq!(self.columns.len(), self.col_types.len());
         for col in self.columns.iter() {

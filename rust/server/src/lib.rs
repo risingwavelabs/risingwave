@@ -28,7 +28,7 @@ mod catalog;
 mod execution;
 mod executor;
 mod expr;
-pub(crate) mod service;
+pub mod service;
 mod storage;
 mod task;
 mod types;

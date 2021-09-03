@@ -11,7 +11,7 @@ use std::any::Any;
 use std::convert::TryFrom;
 use std::sync::Arc;
 
-pub(crate) struct IntervalArrayBuilder {
+pub struct IntervalArrayBuilder {
     data_type: DataTypeRef,
     month_buffer: Vec<i32>,
     day_buffer: Vec<i32>,
@@ -69,7 +69,7 @@ impl ArrayBuilder for IntervalArrayBuilder {
 }
 
 impl IntervalArrayBuilder {
-    pub(crate) fn new(data_type: DataTypeRef, capacity: usize) -> Result<Self> {
+    pub fn new(data_type: DataTypeRef, capacity: usize) -> Result<Self> {
         Ok(Self {
             data_type,
             month_buffer: Vec::with_capacity(capacity),
@@ -104,7 +104,7 @@ impl IntervalArrayBuilder {
 
 /// The layout of Interval Array:
 /// 3 data buffers: one for number of month, one for number of days, one for number of microseconds.
-pub(crate) struct IntervalArray {
+pub struct IntervalArray {
     data: ArrayData,
 }
 
@@ -176,7 +176,7 @@ impl Array for IntervalArray {
 
 // Every interval value can be represented by a Interval Value.
 #[derive(Debug, Clone)]
-pub(crate) struct IntervalValue {
+pub struct IntervalValue {
     month: i32,
     days: i32,
     ms: i64,

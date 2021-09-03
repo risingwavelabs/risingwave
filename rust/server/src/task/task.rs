@@ -13,7 +13,7 @@ use risingwave_proto::task_service::TaskInfo_TaskStatus as TaskStatus;
 use risingwave_proto::task_service::{TaskData, TaskId as ProtoTaskId};
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
-pub(crate) struct TaskId {
+pub struct TaskId {
     pub task_id: u32,
     pub stage_id: u32,
     pub query_id: String,
@@ -37,7 +37,7 @@ impl From<&ProtoTaskId> for TaskId {
     }
 }
 
-pub(crate) struct TaskExecution {
+pub struct TaskExecution {
     task_id: TaskId,
     plan: PlanFragment,
     state: Mutex<TaskStatus>,

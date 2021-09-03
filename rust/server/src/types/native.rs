@@ -5,7 +5,7 @@ use crate::expr::Datum;
 use std::fmt::Debug;
 use std::io::Write;
 
-pub(crate) trait NativeType:
+pub trait NativeType:
     PartialOrd + PartialEq + Debug + Copy + Send + Sync + Sized + Default + 'static
 {
     fn from_datum(datum: &Datum) -> Result<Self>;

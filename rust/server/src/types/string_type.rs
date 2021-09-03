@@ -9,7 +9,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 #[derive(Debug)]
-pub(crate) struct StringType {
+pub struct StringType {
     nullable: bool,
     width: usize,
     kind: DataTypeKind,
@@ -83,7 +83,7 @@ impl<'a> TryFrom<&'a DataTypeProto> for StringType {
 }
 
 impl StringType {
-    pub(crate) fn create(nullable: bool, width: usize, kind: DataTypeKind) -> DataTypeRef {
+    pub fn create(nullable: bool, width: usize, kind: DataTypeKind) -> DataTypeRef {
         Arc::new(Self {
             nullable,
             width,

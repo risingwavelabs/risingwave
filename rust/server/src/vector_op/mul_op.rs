@@ -3,7 +3,7 @@ use crate::error::{Result, RwError};
 
 macro_rules! mul_integer_types {
     ($fn_name: ident, $left_type: ty, $right_type: ty) => {
-        pub(crate) fn $fn_name(
+        pub fn $fn_name(
             v1: Option<$left_type>,
             v2: Option<$right_type>,
         ) -> Result<Option<$left_type>> {
@@ -27,7 +27,7 @@ mul_integer_types!(mul_i64_i64, i64, i16);
 
 macro_rules! mul_float_types {
     ($fn_name: ident, $left_type: ty, $right_type: ty) => {
-        pub(crate) fn $fn_name(
+        pub fn $fn_name(
             v1: Option<$left_type>,
             v2: Option<$right_type>,
         ) -> Result<Option<$left_type>> {

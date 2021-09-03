@@ -19,11 +19,11 @@ use crate::expr::Datum;
 use crate::types::{BoolType, DataType, DataTypeKind, DataTypeRef};
 use crate::util::{bit_util, downcast_mut, downcast_ref};
 
-pub(crate) struct BoolArray {
+pub struct BoolArray {
     data: ArrayData,
 }
 
-pub(crate) struct BoolArrayBuilder {
+pub struct BoolArrayBuilder {
     data_type: DataTypeRef,
     buffer: Vec<bool>,
     null_bitmap_buffer: Vec<bool>,
@@ -53,11 +53,11 @@ impl BoolArray {
         Ok(Self { data })
     }
 
-    pub(crate) fn as_iter(&self) -> Result<impl Iterator<Item = Option<bool>> + '_> {
+    pub fn as_iter(&self) -> Result<impl Iterator<Item = Option<bool>> + '_> {
         BoolIter::new(self)
     }
 
-    pub(crate) fn from_values<T>(input: T) -> Result<ArrayRef>
+    pub fn from_values<T>(input: T) -> Result<ArrayRef>
     where
         T: AsRef<[Option<bool>]>,
     {
@@ -142,7 +142,7 @@ impl Array for BoolArray {
 }
 
 impl BoolArrayBuilder {
-    pub(crate) fn new(data_type: DataTypeRef, capacity: usize) -> Result<Self> {
+    pub fn new(data_type: DataTypeRef, capacity: usize) -> Result<Self> {
         Ok(Self {
             data_type,
             buffer: Vec::with_capacity(capacity),
@@ -150,7 +150,7 @@ impl BoolArrayBuilder {
         })
     }
 
-    pub(crate) fn append_value(&mut self, value: Option<bool>) -> Result<()> {
+    pub fn append_value(&mut self, value: Option<bool>) -> Result<()> {
         match value {
             Some(v) => {
                 self.buffer.push(v);

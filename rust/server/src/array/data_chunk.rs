@@ -7,7 +7,7 @@ use std::sync::Arc;
 use typed_builder::TypedBuilder;
 
 #[derive(TypedBuilder)]
-pub(crate) struct DataChunk {
+pub struct DataChunk {
     #[builder(default)]
     arrays: Vec<ArrayRef>,
     cardinality: usize,
@@ -16,15 +16,15 @@ pub(crate) struct DataChunk {
 }
 
 impl DataChunk {
-    pub(crate) fn cardinality(&self) -> usize {
+    pub fn cardinality(&self) -> usize {
         self.cardinality
     }
 
-    pub(crate) fn visibility(&self) -> &Option<Bitmap> {
+    pub fn visibility(&self) -> &Option<Bitmap> {
         &self.visibility
     }
 
-    pub(crate) fn with_visibility(&self, visibility: Bitmap) -> Self {
+    pub fn with_visibility(&self, visibility: Bitmap) -> Self {
         DataChunk {
             arrays: self.arrays.clone(),
             cardinality: self.cardinality,
@@ -32,7 +32,7 @@ impl DataChunk {
         }
     }
 
-    pub(crate) fn array_at(&self, idx: usize) -> Result<ArrayRef> {
+    pub fn array_at(&self, idx: usize) -> Result<ArrayRef> {
         self.arrays.get(idx).cloned().ok_or_else(|| {
             InternalError(format!(
                 "Invalid array index: {}, chunk array count: {}",
@@ -43,7 +43,7 @@ impl DataChunk {
         })
     }
 
-    pub(crate) fn to_protobuf(&self) -> Result<DataChunkProto> {
+    pub fn to_protobuf(&self) -> Result<DataChunkProto> {
         ensure!(self.visibility.is_none());
         let mut proto = DataChunkProto::new();
         proto.set_cardinality(self.cardinality as u32);
@@ -66,4 +66,4 @@ impl Default for DataChunk {
     }
 }
 
-pub(crate) type DataChunkRef = Arc<DataChunk>;
+pub type DataChunkRef = Arc<DataChunk>;

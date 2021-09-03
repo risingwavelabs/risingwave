@@ -1,21 +1,13 @@
 use super::{Array, ArrayBuilder, ArrayIterator};
-
-/// `Primitive` covers all signed integer and all float types.
-pub trait Primitive: Send + Sync + 'static + Copy + Clone + Default + std::fmt::Debug {}
-
-impl Primitive for i16 {}
-impl Primitive for i32 {}
-impl Primitive for i64 {}
-impl Primitive for f32 {}
-impl Primitive for f64 {}
+use crate::types::NativeType;
 
 /// `PrimitiveArray` is a collection of primitive types, such as `i32`, `f32`.
-pub struct PrimitiveArray<T: Primitive> {
+pub struct PrimitiveArray<T: NativeType> {
     bitmap: Vec<bool>,
     data: Vec<T>,
 }
 
-impl<T: Primitive> Array for PrimitiveArray<T> {
+impl<T: NativeType> Array for PrimitiveArray<T> {
     type Builder = PrimitiveArrayBuilder<T>;
     type RefItem<'a> = T;
     type Iter<'a> = ArrayIterator<'a, Self>;
@@ -38,12 +30,12 @@ impl<T: Primitive> Array for PrimitiveArray<T> {
 }
 
 /// `PrimitiveArrayBuilder` constructs a `PrimitiveArray` from `Option<Primitive>`.
-pub struct PrimitiveArrayBuilder<T: Primitive> {
+pub struct PrimitiveArrayBuilder<T: NativeType> {
     bitmap: Vec<bool>,
     data: Vec<T>,
 }
 
-impl<T: Primitive> ArrayBuilder for PrimitiveArrayBuilder<T> {
+impl<T: NativeType> ArrayBuilder for PrimitiveArrayBuilder<T> {
     type ArrayType = PrimitiveArray<T>;
 
     fn new(capacity: usize) -> Self {
@@ -83,7 +75,7 @@ impl<T: Primitive> ArrayBuilder for PrimitiveArrayBuilder<T> {
 mod tests {
     use super::*;
 
-    fn helper_test_builder<T: Primitive>(data: Vec<Option<T>>) -> PrimitiveArray<T> {
+    fn helper_test_builder<T: NativeType>(data: Vec<Option<T>>) -> PrimitiveArray<T> {
         let mut builder = PrimitiveArrayBuilder::<T>::new(data.len());
         for d in data {
             builder.append(d);

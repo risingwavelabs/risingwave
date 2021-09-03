@@ -30,7 +30,7 @@ impl Expression for InputRefExpression {
 }
 
 impl InputRefExpression {
-    pub(crate) fn new(return_type: DataTypeRef, idx: usize) -> Self {
+    pub fn new(return_type: DataTypeRef, idx: usize) -> Self {
         InputRefExpression { return_type, idx }
     }
 }

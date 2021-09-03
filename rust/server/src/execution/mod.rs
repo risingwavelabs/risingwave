@@ -1,1 +1,1 @@
-pub(crate) mod shuffle;
+pub mod shuffle;

@@ -7,7 +7,7 @@ use crate::array::array_data::ArrayData;
 use crate::error::Result;
 use crate::types::{DataType, DataTypeRef};
 
-pub(crate) trait Array: Send + Sync + AsRef<dyn Any> + AsMut<dyn Any> {
+pub trait Array: Send + Sync + AsRef<dyn Any> + AsMut<dyn Any> {
     fn data_type(&self) -> &dyn DataType;
     fn data_type_ref(&self) -> DataTypeRef {
         self.array_data().data_type_ref()
@@ -34,4 +34,4 @@ pub(crate) trait Array: Send + Sync + AsRef<dyn Any> + AsMut<dyn Any> {
     }
 }
 
-pub(crate) type ArrayRef = Arc<dyn Array>;
+pub type ArrayRef = Arc<dyn Array>;

@@ -36,7 +36,7 @@ impl Expression for ArithmeticExpression {
 }
 
 impl ArithmeticExpression {
-    pub(crate) fn new(
+    pub fn new(
         return_type: DataTypeRef,
         operator_type: ArithmeticOperatorKind,
         left_child: BoxedExpression,

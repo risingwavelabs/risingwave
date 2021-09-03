@@ -3,7 +3,7 @@ use crate::error::Result;
 // Rust allows only mod between same type.
 macro_rules! mod_primitive_types {
     ($fn_name: ident, $left_type: ty, $right_type: ty, $max_type: ty) => {
-        pub(crate) fn $fn_name(
+        pub fn $fn_name(
             v1: Option<$left_type>,
             v2: Option<$right_type>,
         ) -> Result<Option<$max_type>> {

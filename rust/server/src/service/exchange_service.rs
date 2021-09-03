@@ -7,7 +7,7 @@ use risingwave_proto::task_service_grpc::ExchangeService;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
-pub(crate) struct ExchangeServiceImpl {
+pub struct ExchangeServiceImpl {
     mgr: Arc<Mutex<TaskManager>>,
 }
 
@@ -62,7 +62,7 @@ impl ExchangeService for ExchangeServiceImpl {
 }
 
 #[async_trait::async_trait]
-pub(crate) trait ExchangeWriter: Send {
+pub trait ExchangeWriter: Send {
     async fn write(&mut self, data: TaskData) -> Result<()>;
 }
 

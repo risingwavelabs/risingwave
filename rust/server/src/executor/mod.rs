@@ -21,7 +21,7 @@ use crate::task::GlobalTaskEnv;
 use risingwave_proto::plan::{PlanNode, PlanNode_PlanNodeType};
 use std::convert::TryFrom;
 
-pub(crate) enum ExecutorResult {
+pub enum ExecutorResult {
     Batch(DataChunkRef),
     Done,
 }
@@ -38,15 +38,15 @@ impl ExecutorResult {
     }
 }
 
-pub(crate) trait Executor: Send {
+pub trait Executor: Send {
     fn init(&mut self) -> Result<()>;
     fn execute(&mut self) -> Result<ExecutorResult>;
     fn clean(&mut self) -> Result<()>;
 }
 
-pub(crate) type BoxedExecutor = Box<dyn Executor>;
+pub type BoxedExecutor = Box<dyn Executor>;
 
-pub(crate) struct ExecutorBuilder<'a> {
+pub struct ExecutorBuilder<'a> {
     plan_node: &'a PlanNode,
     env: GlobalTaskEnv,
 }
@@ -65,11 +65,11 @@ macro_rules! build_executor {
 }
 
 impl<'a> ExecutorBuilder<'a> {
-    pub(crate) fn new(plan_node: &'a PlanNode, env: GlobalTaskEnv) -> Self {
+    pub fn new(plan_node: &'a PlanNode, env: GlobalTaskEnv) -> Self {
         Self { plan_node, env }
     }
 
-    pub(crate) fn build(&self) -> Result<BoxedExecutor> {
+    pub fn build(&self) -> Result<BoxedExecutor> {
         self.try_build().map_err(|e| {
             InternalError(format!(
                 "[PlanNodeType: {:?}] Failed to build executor: {}",
@@ -91,11 +91,11 @@ impl<'a> ExecutorBuilder<'a> {
         }
     }
 
-    pub(crate) fn plan_node(&self) -> &PlanNode {
+    pub fn plan_node(&self) -> &PlanNode {
         self.plan_node
     }
 
-    pub(crate) fn global_task_env(&self) -> &GlobalTaskEnv {
+    pub fn global_task_env(&self) -> &GlobalTaskEnv {
         &self.env
     }
 }

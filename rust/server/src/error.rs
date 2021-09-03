@@ -13,7 +13,7 @@ use std::io::Error as IoError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub(crate) enum ErrorCode {
+pub enum ErrorCode {
     #[error("ok")]
     OK,
     #[error("Failed to alloc memory for layout: {layout:?}")]
@@ -35,14 +35,14 @@ pub(crate) enum ErrorCode {
 }
 
 #[derive(Clone)]
-pub(crate) struct RwError {
+pub struct RwError {
     inner: Arc<ErrorCode>,
     backtrace: Arc<Backtrace>,
 }
 
 impl RwError {
     /// Turns a crate-wide RwError into grpc error.
-    pub(crate) fn to_grpc_error(&self) -> RpcStatus {
+    pub fn to_grpc_error(&self) -> RpcStatus {
         RpcStatus::with_message(RpcStatusCode::INTERNAL, self.to_string())
     }
 }
@@ -120,7 +120,7 @@ impl PartialEq for ErrorCode {
     }
 }
 
-pub(crate) type Result<T> = std::result::Result<T, RwError>;
+pub type Result<T> = std::result::Result<T, RwError>;
 
 macro_rules! gen_error {
     ($error_code: expr) => {

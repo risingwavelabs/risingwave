@@ -17,7 +17,7 @@ use rust_decimal::Decimal;
 use std::ops::Deref;
 
 #[derive(Clone, Debug)]
-pub(crate) enum Datum {
+pub enum Datum {
     Bool(bool),
     Int8(i8),
     Int16(i16),
@@ -76,7 +76,7 @@ fn literal_type_match(return_type: DataTypeKind, literal: Datum) -> bool {
 }
 
 impl LiteralExpression {
-    pub(crate) fn new(return_type: DataTypeRef, literal: Datum) -> Self {
+    pub fn new(return_type: DataTypeRef, literal: Datum) -> Self {
         assert!(literal_type_match(
             return_type.deref().data_type_kind(),
             literal.clone()

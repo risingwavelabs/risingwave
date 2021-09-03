@@ -5,28 +5,26 @@ use risingwave_proto::plan::{ShuffleInfo, ShuffleInfo_PartitionMode as ShufflePa
 use std::option::Option;
 
 #[async_trait::async_trait]
-pub(crate) trait ChanSender: Send {
+pub trait ChanSender: Send {
     // `send` will block until there's enough resource to process the chunk.
     // Currently, `send` will only be called from single thread.
     async fn send(&mut self, chunk: DataChunkRef) -> Result<()>;
 }
 
 #[async_trait::async_trait]
-pub(crate) trait ChanReceiver: Send {
+pub trait ChanReceiver: Send {
     // Returns `None` if there's no more data to read.
     // Otherwise it will wait until there's data.
     async fn recv(&mut self, sink_id: u32) -> Option<DataChunkRef>;
 }
 
-pub(crate) type BoxChanSender = Box<dyn ChanSender>;
-pub(crate) type BoxChanReceiver = Box<dyn ChanReceiver>;
+pub type BoxChanSender = Box<dyn ChanSender>;
+pub type BoxChanReceiver = Box<dyn ChanReceiver>;
 
 // Output-channel is a synchronous, bounded single-producer-multiple-consumer queue.
 // The producer is the local task executor, the consumer is ExchangeService.
 // The implementation depends on the shuffling strategy.
-pub(crate) fn create_output_channel(
-    shuffle: &ShuffleInfo,
-) -> Result<(BoxChanSender, BoxChanReceiver)> {
+pub fn create_output_channel(shuffle: &ShuffleInfo) -> Result<(BoxChanSender, BoxChanReceiver)> {
     match shuffle.get_partition_mode() {
         ShufflePartitionMode::SINGLE => Ok(new_fifo_channel()),
         _ => Err(ErrorCode::NotImplementedError(format!(

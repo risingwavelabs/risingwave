@@ -8,7 +8,7 @@ use std::any::Any;
 use std::sync::Arc;
 
 #[derive(Debug)]
-pub(crate) struct TimestampType {
+pub struct TimestampType {
     nullable: bool,
     // precision is bound to 0 ~ 6 for timestamp
     precision: u32,

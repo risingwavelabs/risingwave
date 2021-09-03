@@ -22,12 +22,12 @@ use crate::types::{DataType, DataTypeRef, NativeType, PrimitiveDataType};
 use crate::util::{downcast_mut, downcast_ref};
 
 /// A primitive array contains only one value buffer, and an optional bitmap buffer
-pub(crate) struct PrimitiveArray<T: PrimitiveDataType> {
+pub struct PrimitiveArray<T: PrimitiveDataType> {
     data: ArrayData,
     _phantom: PhantomData<T>,
 }
 
-pub(crate) struct PrimitiveArrayBuilder<T: PrimitiveDataType> {
+pub struct PrimitiveArrayBuilder<T: PrimitiveDataType> {
     data_type: DataTypeRef,
     buffer: Vec<T::N>,
     null_bitmap_buffer: Vec<bool>,
@@ -47,7 +47,7 @@ impl<T: PrimitiveDataType> PrimitiveArray<T> {
         self.data.cardinality()
     }
 
-    pub(crate) fn from_slice<S>(input: S) -> Result<ArrayRef>
+    pub fn from_slice<S>(input: S) -> Result<ArrayRef>
     where
         S: AsRef<[T::N]>,
     {
@@ -66,7 +66,7 @@ impl<T: PrimitiveDataType> PrimitiveArray<T> {
         boxed_array_builder.finish()
     }
 
-    pub(crate) fn from_values<I>(input: I) -> Result<ArrayRef>
+    pub fn from_values<I>(input: I) -> Result<ArrayRef>
     where
         I: IntoIterator<Item = Option<T::N>>,
     {
@@ -103,7 +103,7 @@ impl<T: PrimitiveDataType> PrimitiveArray<T> {
         }
     }
 
-    pub(crate) fn as_iter(&self) -> Result<impl Iterator<Item = Option<T::N>> + '_> {
+    pub fn as_iter(&self) -> Result<impl Iterator<Item = Option<T::N>> + '_> {
         PrimitiveIter::new(self)
     }
 }
@@ -222,7 +222,7 @@ impl<T: PrimitiveDataType> ArrayBuilder for PrimitiveArrayBuilder<T> {
 }
 
 impl<T: PrimitiveDataType> PrimitiveArrayBuilder<T> {
-    pub(crate) fn new(data_type: Arc<T>, capacity: usize) -> Self {
+    pub fn new(data_type: Arc<T>, capacity: usize) -> Self {
         Self {
             data_type,
             buffer: Vec::with_capacity(capacity),
@@ -236,7 +236,7 @@ impl<T: PrimitiveDataType> PrimitiveArrayBuilder<T> {
         Ok(())
     }
 
-    pub(crate) fn append_value(&mut self, value: Option<T::N>) -> Result<()> {
+    pub fn append_value(&mut self, value: Option<T::N>) -> Result<()> {
         match value {
             Some(v) => {
                 self.buffer.push(v);

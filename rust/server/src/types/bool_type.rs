@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 /// [BoolType] is not a primitive type because we use a bit for each bool value, not a [bool].
 #[derive(Debug)]
-pub(crate) struct BoolType {
+pub struct BoolType {
     nullable: bool,
 }
 
@@ -38,11 +38,11 @@ impl DataType for BoolType {
 }
 
 impl BoolType {
-    pub(crate) fn new(nullable: bool) -> Self {
+    pub fn new(nullable: bool) -> Self {
         Self { nullable }
     }
 
-    pub(crate) fn create(nullable: bool) -> DataTypeRef {
+    pub fn create(nullable: bool) -> DataTypeRef {
         Arc::new(BoolType::new(nullable)) as DataTypeRef
     }
 }

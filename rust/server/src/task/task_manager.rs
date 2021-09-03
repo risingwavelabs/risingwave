@@ -7,14 +7,14 @@ use risingwave_proto::task_service::{TaskId as ProtoTaskId, TaskSinkId as ProtoS
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-pub(crate) struct TaskManager {
+pub struct TaskManager {
     worker_pool: ThreadPool,
     tasks: Mutex<HashMap<TaskId, Box<TaskExecution>>>,
     env: GlobalTaskEnv,
 }
 
 impl TaskManager {
-    pub(crate) fn new(env: GlobalTaskEnv) -> Self {
+    pub fn new(env: GlobalTaskEnv) -> Self {
         let worker_pool = ThreadPoolBuilder::default().num_threads(2).build().unwrap();
         TaskManager {
             worker_pool,
@@ -23,7 +23,7 @@ impl TaskManager {
         }
     }
 
-    pub(crate) fn fire_task(&mut self, tid: &ProtoTaskId, plan: PlanFragment) -> Result<()> {
+    pub fn fire_task(&mut self, tid: &ProtoTaskId, plan: PlanFragment) -> Result<()> {
         let tsk = TaskExecution::new(tid, plan, self.env.clone());
         self.tasks
             .lock()
@@ -38,7 +38,7 @@ impl TaskManager {
     // By design, `take_data` is an future, but for the safe of the unsafety to mix other
     // future runtimes (tokio, eg.) with grpc-rs reactor, we still implement it
     // in an blocking way.
-    pub(crate) fn take_task(&mut self, sid: &ProtoSinkId) -> Result<Box<TaskExecution>> {
+    pub fn take_task(&mut self, sid: &ProtoSinkId) -> Result<Box<TaskExecution>> {
         let task_id = TaskId::from(sid.get_task_id());
         let tsk = match self.tasks.lock().unwrap().remove(&task_id) {
             Some(t) => t,
@@ -52,7 +52,7 @@ impl TaskManager {
     }
 
     #[cfg(test)]
-    pub(crate) fn get_global_env(&self) -> &GlobalTaskEnv {
+    pub fn get_global_env(&self) -> &GlobalTaskEnv {
         &self.env
     }
 }

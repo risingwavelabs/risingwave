@@ -69,32 +69,32 @@ fn scalar_leq<T: PartialEq + PartialOrd>(l: Option<T>, r: Option<T>) -> Result<O
     }
 }
 
-pub(crate) fn vec_eq(lhs: ArrayRef, rhs: ArrayRef) -> Result<ArrayRef> {
+pub fn vec_eq(lhs: ArrayRef, rhs: ArrayRef) -> Result<ArrayRef> {
     ensure!(lhs.len() == rhs.len());
     vec_cmp!(lhs.as_ref(), rhs.as_ref(), scalar_eq)
 }
 
-pub(crate) fn vec_neq(lhs: ArrayRef, rhs: ArrayRef) -> Result<ArrayRef> {
+pub fn vec_neq(lhs: ArrayRef, rhs: ArrayRef) -> Result<ArrayRef> {
     ensure!(lhs.len() == rhs.len());
     vec_cmp!(lhs.as_ref(), rhs.as_ref(), scalar_neq)
 }
 
-pub(crate) fn vec_lt(lhs: ArrayRef, rhs: ArrayRef) -> Result<ArrayRef> {
+pub fn vec_lt(lhs: ArrayRef, rhs: ArrayRef) -> Result<ArrayRef> {
     ensure!(lhs.len() == rhs.len());
     vec_cmp!(lhs.as_ref(), rhs.as_ref(), scalar_lt)
 }
 
-pub(crate) fn vec_leq(lhs: ArrayRef, rhs: ArrayRef) -> Result<ArrayRef> {
+pub fn vec_leq(lhs: ArrayRef, rhs: ArrayRef) -> Result<ArrayRef> {
     ensure!(lhs.len() == rhs.len());
     vec_cmp!(lhs.as_ref(), rhs.as_ref(), scalar_leq)
 }
 
-pub(crate) fn vec_gt(lhs: ArrayRef, rhs: ArrayRef) -> Result<ArrayRef> {
+pub fn vec_gt(lhs: ArrayRef, rhs: ArrayRef) -> Result<ArrayRef> {
     ensure!(lhs.len() == rhs.len());
     vec_cmp!(lhs.as_ref(), rhs.as_ref(), scalar_gt)
 }
 
-pub(crate) fn vec_geq(lhs: ArrayRef, rhs: ArrayRef) -> Result<ArrayRef> {
+pub fn vec_geq(lhs: ArrayRef, rhs: ArrayRef) -> Result<ArrayRef> {
     ensure!(lhs.len() == rhs.len());
     vec_cmp!(lhs.as_ref(), rhs.as_ref(), scalar_geq)
 }

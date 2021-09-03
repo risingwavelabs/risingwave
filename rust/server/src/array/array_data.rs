@@ -5,7 +5,7 @@ use crate::types::{DataType, DataTypeRef};
 use typed_builder::TypedBuilder;
 
 #[derive(TypedBuilder)]
-pub(crate) struct ArrayData {
+pub struct ArrayData {
     data_type: DataTypeRef,
     cardinality: usize,
     null_count: usize,
@@ -15,57 +15,57 @@ pub(crate) struct ArrayData {
 }
 
 impl ArrayData {
-    pub(crate) fn cardinality(&self) -> usize {
+    pub fn cardinality(&self) -> usize {
         self.cardinality
     }
 
-    pub(crate) fn data_type(&self) -> &dyn DataType {
+    pub fn data_type(&self) -> &dyn DataType {
         &*self.data_type
     }
 
-    pub(crate) fn data_type_ref(&self) -> DataTypeRef {
+    pub fn data_type_ref(&self) -> DataTypeRef {
         self.data_type.clone()
     }
 
-    pub(crate) fn null_bitmap(&self) -> Option<&Bitmap> {
+    pub fn null_bitmap(&self) -> Option<&Bitmap> {
         self.null_bitmap.as_ref()
     }
 
-    pub(crate) fn buffers(&self) -> &[Buffer] {
+    pub fn buffers(&self) -> &[Buffer] {
         &self.buffers
     }
 
-    pub(crate) fn buffer_at(&self, idx: usize) -> Result<&Buffer> {
+    pub fn buffer_at(&self, idx: usize) -> Result<&Buffer> {
         self.check_buffer_idx(idx)?;
         // Justification:
         // We already checked idx before.
         Ok(unsafe { self.buffer_at_unchecked(idx) })
     }
 
-    pub(crate) unsafe fn buffer_at_unchecked(&self, idx: usize) -> &Buffer {
+    pub unsafe fn buffer_at_unchecked(&self, idx: usize) -> &Buffer {
         self.buffers.get_unchecked(idx)
     }
 
-    pub(crate) fn is_null(&self, idx: usize) -> Result<bool> {
+    pub fn is_null(&self, idx: usize) -> Result<bool> {
         self.null_bitmap
             .as_ref()
             .map(|b| b.is_set(idx).map(|v| !v))
             .unwrap_or(Ok(false))
     }
 
-    pub(crate) unsafe fn is_null_unchecked(&self, idx: usize) -> bool {
+    pub unsafe fn is_null_unchecked(&self, idx: usize) -> bool {
         self.null_bitmap
             .as_ref()
             .map(|b| !b.is_set_unchecked(idx))
             .unwrap_or(false)
     }
 
-    pub(crate) fn check_idx(&self, idx: usize) -> Result<()> {
+    pub fn check_idx(&self, idx: usize) -> Result<()> {
         ensure!(idx < self.cardinality);
         Ok(())
     }
 
-    pub(crate) fn check_buffer_idx(&self, idx: usize) -> Result<()> {
+    pub fn check_buffer_idx(&self, idx: usize) -> Result<()> {
         ensure!(idx < self.buffers.len());
         Ok(())
     }

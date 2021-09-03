@@ -31,8 +31,8 @@ use crate::util::bit_util;
 use risingwave_proto::data::Buffer as BufferProto;
 
 #[derive(Debug)]
-pub(crate) struct Bitmap {
-    pub(crate) bits: Buffer,
+pub struct Bitmap {
+    pub bits: Buffer,
 
     // The useful bits in the bitmap. The total number of bits will usually
     // be larger than the useful bits due to byte-padding.
@@ -81,7 +81,7 @@ impl Bitmap {
         })
     }
 
-    pub(crate) fn num_of_bytes(num_bits: usize) -> usize {
+    pub fn num_of_bytes(num_bits: usize) -> usize {
         let num_bytes = num_bits / 8 + if num_bits % 8 > 0 { 1 } else { 0 };
         let r = num_bytes % 64;
         if r == 0 {
@@ -91,7 +91,7 @@ impl Bitmap {
         }
     }
 
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.num_of_buffer_bytes() << 3
     }
 
@@ -133,7 +133,7 @@ impl Bitmap {
         self.bits.capacity() + mem::size_of_val(self)
     }
 
-    pub(crate) fn to_protobuf(&self) -> Result<BufferProto> {
+    pub fn to_protobuf(&self) -> Result<BufferProto> {
         let mut buf = BufferProto::default();
         for b in self.iter() {
             buf.body.push(b as u8);
@@ -141,7 +141,7 @@ impl Bitmap {
         Ok(buf)
     }
 
-    pub(crate) fn iter(&self) -> BitmapIter<'_> {
+    pub fn iter(&self) -> BitmapIter<'_> {
         BitmapIter {
             bits: &self.bits,
             idx: 0,
@@ -193,14 +193,14 @@ impl PartialEq for Bitmap {
     }
 }
 
-pub(crate) struct BitmapIter<'a> {
+pub struct BitmapIter<'a> {
     bits: &'a Buffer,
     idx: usize,
     num_bits: usize,
 }
 
 impl<'a> BitmapIter<'a> {
-    pub(crate) fn try_from(value: &'a Buffer, num_bits: usize) -> Result<Self> {
+    pub fn try_from(value: &'a Buffer, num_bits: usize) -> Result<Self> {
         ensure!(value.len() >= Bitmap::num_of_bytes(num_bits));
         Ok(Self {
             bits: value,

@@ -7,7 +7,7 @@ use crate::vector_op::add_op::*;
 use crate::vector_op::binary_op::vec_binary_op_primitive_array;
 use std::ops::Deref;
 
-pub(crate) fn vector_arithmetic_impl(
+pub fn vector_arithmetic_impl(
     operator_type: ArithmeticOperatorKind,
     left_array: ArrayRef,
     right_array: ArrayRef,
