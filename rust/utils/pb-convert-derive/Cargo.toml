@@ -1,21 +1,21 @@
 [package]
+edition = "2018"
 name = "pb-convert-derive"
 version = "0.1.0"
-edition = "2018"
 
 [lib]
 name = "pb_convert_derive"
 proc-macro = true
 
 [dependencies]
-quote = "1"
-syn = { version = "1", features = ["full"] }
-proc-macro2 = "1"
-thiserror = "1"
 anyhow = "1"
-phf = { version = "0.10", features = ["macros"] }
 darling = "0.13"
-pb-convert = { path = "../pb-convert" }
+pb-convert = {path = "../pb-convert"}
+phf = {version = "0.10", features = ["macros"]}
+proc-macro2 = "1"
+quote = "1"
+syn = {version = "1", features = ["full"]}
+thiserror = "1"
 
 [dev-dependencies]
 protobuf = "2"

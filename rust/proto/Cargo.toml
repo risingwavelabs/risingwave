@@ -1,12 +1,12 @@
 [package]
+edition = "2018"
 name = "risingwave-proto"
 version = "0.1.0"
-edition = "2018"
 
 [dependencies]
+futures = "0.3"
 grpcio = "0.9"
 protobuf = "2"
-futures = "0.3"
 
 [build-dependencies]
 protoc-grpcio = "3"
