@@ -20,6 +20,10 @@ impl DataChunk {
         self.cardinality
     }
 
+    pub(crate) fn dimension(&self) -> usize {
+        self.arrays.len()
+    }
+
     pub fn visibility(&self) -> &Option<Bitmap> {
         &self.visibility
     }

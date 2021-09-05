@@ -83,7 +83,6 @@ mod tests {
             .add_i32_column(false, &[2, 3, 4, 5])
             .check_result(res);
     }
-
     #[test]
     fn test_bad_node_type() {
         let mut manager = TaskManager::new(GlobalTaskEnv::for_test());
