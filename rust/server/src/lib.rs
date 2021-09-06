@@ -30,6 +30,7 @@ mod executor;
 mod expr;
 pub mod service;
 mod storage;
+mod stream_op;
 mod task;
 mod types;
 mod vector_op;

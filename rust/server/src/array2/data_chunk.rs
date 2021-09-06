@@ -3,7 +3,6 @@ use super::ArrayImpl;
 use crate::buffer::Bitmap;
 use crate::error::Result;
 use risingwave_proto::data::DataChunk as DataChunkProto;
-use smallvec::{smallvec, SmallVec};
 use std::sync::Arc;
 use typed_builder::TypedBuilder;
 
@@ -11,10 +10,10 @@ use typed_builder::TypedBuilder;
 #[derive(TypedBuilder)]
 pub struct DataChunk {
     #[builder(default)]
-    arrays: SmallVec<[ArrayImpl; 16]>,
-    cardinality: usize,
+    pub(crate) arrays: Vec<ArrayImpl>,
+    pub(crate) cardinality: usize,
     #[builder(default, setter(strip_option))]
-    visibility: Option<Bitmap>,
+    pub(crate) visibility: Option<Bitmap>,
 }
 
 impl DataChunk {
@@ -43,7 +42,7 @@ impl DataChunk {
 impl Default for DataChunk {
     fn default() -> Self {
         DataChunk {
-            arrays: smallvec![],
+            arrays: vec![],
             cardinality: 0,
             visibility: None,
         }
