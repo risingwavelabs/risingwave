@@ -202,3 +202,13 @@ impl<T: NativeType> ScalarPartialOrd for T {
         self.partial_cmp(&other)
     }
 }
+
+/// `ScalarImpl` embeds all possible scalars in RisingWave.
+pub enum ScalarImpl {
+    Int16(i16),
+    Int32(i32),
+    Int64(i64),
+    Float32(f32),
+    Float64(f64),
+    UTF8(String),
+}

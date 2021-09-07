@@ -162,20 +162,29 @@ pub enum ArrayBuilderImpl {
     UTF8(UTF8ArrayBuilder),
 }
 
+macro_rules! impl_all_variants {
+  ($self:ident, $func:ident, [ $( $variant:ident ),* ]) => {
+    match $self {
+      $(
+        Self::$variant(inner) => inner.$func().into(),
+      )*
+    }
+  };
+}
+
 impl ArrayBuilderImpl {
     pub fn append_array(&mut self, _other: &ArrayImpl) {
         unimplemented!()
     }
 
     pub fn finish(self) -> ArrayImpl {
-        match self {
-            ArrayBuilderImpl::Int16(inner) => inner.finish().into(),
-            ArrayBuilderImpl::Int32(inner) => inner.finish().into(),
-            ArrayBuilderImpl::Int64(inner) => inner.finish().into(),
-            ArrayBuilderImpl::Float32(inner) => inner.finish().into(),
-            ArrayBuilderImpl::Float64(inner) => inner.finish().into(),
-            ArrayBuilderImpl::UTF8(inner) => inner.finish().into(),
-        }
+        impl_all_variants! { self, finish, [Int16, Int32, Int64, Float32, Float64, UTF8] }
+    }
+}
+
+impl ArrayImpl {
+    pub fn len(self) -> usize {
+        impl_all_variants! { self, len, [Int16, Int32, Int64, Float32, Float64, UTF8] }
     }
 }
 

@@ -1,6 +1,7 @@
-use crate::{array2::ArrayImpl, buffer::Bitmap, error::RwError};
+use crate::{array2::ArrayImpl, buffer::Bitmap, error::Result};
 
-type Result<T> = std::result::Result<T, RwError>;
+mod agg;
+pub use agg::*;
 
 mod filter_operator;
 pub use filter_operator::FilterOperator;
