@@ -87,7 +87,7 @@ message HashAggNode {
 }
 
 message SimpleAggNode {
-    // When there is no group_by_key, we use SimpleAggNode 
+    // When there is no group_by_key, we use SimpleAggNode
     repeated risingwave.expr.proto.ExprNode aggregations = 1;
 }
 
@@ -104,6 +104,7 @@ message PlanNode {
         SIMPLE_AGG = 8;
         FILTER = 9;
         EXCHANGE = 10;
+        GATHER = 11;
     }
     PlanNodeType node_type = 1;
     google.protobuf.Any body = 2;

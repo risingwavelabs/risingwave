@@ -4,7 +4,6 @@ import "plan.proto";
 import "data.proto";
 import "common.proto";
 
-
 package risingwave.executor.proto;
 option java_package = "com.risingwave.proto.computenode";
 option java_multiple_files = true;
@@ -42,6 +41,23 @@ message TaskInfo {
 
     TaskId task_id = 1;
     TaskStatus task_status = 2;
+}
+
+message HostAddress {
+    string host = 1;
+    int32 port = 2;
+}
+
+message ExchangeSource {
+    TaskSinkId sink_id = 1;
+    HostAddress host = 2;
+}
+
+message ExchangeNode {
+    repeated ExchangeSource sources = 1;
+    // An exchange only links to one stage, but a stage could be
+    // linked by multiple exchanges.
+    StageId source_stage_id = 2;
 }
 
 message CreateTaskRequest {

@@ -47,7 +47,7 @@ public class QueryManagerTest {
     Query query = PlanFragmenter.planDistribution(plan);
 
     QueryStage rootStage = query.getQueryStageChecked(query.getRootStageId());
-    PlanNode protoPlan = rootStage.getPlanInfo().getRoot().serialize();
+    PlanNode protoPlan = rootStage.getRoot().serialize();
     assertEquals(protoPlan.getNodeType(), PlanNode.PlanNodeType.CREATE_TABLE);
 
     List<StageId> leafStages = query.getLeafStages();

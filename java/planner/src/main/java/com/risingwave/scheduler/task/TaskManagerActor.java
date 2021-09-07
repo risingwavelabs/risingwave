@@ -84,7 +84,7 @@ class TaskManagerActor extends AbstractBehavior<TaskManagerEvent> {
     CreateTaskRequest request =
         CreateTaskRequest.newBuilder()
             .setTaskId(event.getTask().getTaskId().toTaskIdProto())
-            .setPlan(event.getTask().getPlanFragment().toPlanFragmentProto())
+            .setPlan(event.getTask().getQueryStage().toPlanFragmentProto())
             .build();
 
     getContext()

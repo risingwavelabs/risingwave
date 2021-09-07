@@ -27,7 +27,7 @@ public class RwBatchGather extends SingleRel implements RisingWaveBatchPhyRel {
 
   @Override
   public PlanNode serialize() {
-    throw new UnsupportedOperationException("RwBatchGather#serialize is not supported");
+    return PlanNode.newBuilder().setNodeType(PlanNode.PlanNodeType.GATHER).build();
   }
 
   @Override

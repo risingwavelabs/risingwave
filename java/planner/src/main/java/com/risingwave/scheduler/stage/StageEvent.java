@@ -1,11 +1,5 @@
 package com.risingwave.scheduler.stage;
 
-import static java.util.Objects.requireNonNull;
-
-import com.google.common.collect.ImmutableMap;
-import com.risingwave.node.WorkerNode;
-import com.risingwave.scheduler.task.TaskId;
-
 public interface StageEvent {
   StageId getStageId();
 
@@ -23,15 +17,15 @@ public interface StageEvent {
   }
 
   class StageScheduledEvent extends StageEventBase {
-    private final ImmutableMap<TaskId, WorkerNode> assignments;
+    private final ScheduledStage stageInfo;
 
-    protected StageScheduledEvent(StageId stageId, ImmutableMap<TaskId, WorkerNode> assignments) {
+    protected StageScheduledEvent(StageId stageId, ScheduledStage stage) {
       super(stageId);
-      this.assignments = requireNonNull(assignments, "assignments");
+      this.stageInfo = stage;
     }
 
-    public ImmutableMap<TaskId, WorkerNode> getAssignments() {
-      return assignments;
+    public ScheduledStage getStageInfo() {
+      return stageInfo;
     }
   }
 }

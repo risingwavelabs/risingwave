@@ -8,7 +8,6 @@ import com.risingwave.planner.rel.physical.batch.RwBatchExchange;
 import com.risingwave.scheduler.shuffle.SinglePartitionSchema;
 import com.risingwave.scheduler.stage.QueryStage;
 import com.risingwave.scheduler.stage.StageId;
-import com.risingwave.scheduler.stage.StagePlanInfo;
 import org.apache.calcite.rel.RelNode;
 
 public class PlanFragmenter {
@@ -43,7 +42,8 @@ public class PlanFragmenter {
       for (RelNode rn : node.getInputs()) {
         RisingWaveBatchPhyRel child = (RisingWaveBatchPhyRel) rn;
         QueryStage childStage = newQueryStage(child);
-        graphBuilder.linkToChild(curStage.getStageId(), childStage.getStageId());
+        int exchangeId = ((RwBatchExchange) node).getUniqueId();
+        graphBuilder.linkToChild(curStage.getStageId(), exchangeId, childStage.getStageId());
 
         buildStage(childStage, child);
       }
@@ -56,8 +56,7 @@ public class PlanFragmenter {
 
   private QueryStage newQueryStage(RisingWaveBatchPhyRel node) {
     StageId stageId = getNextStageId();
-    StagePlanInfo stagePlanInfo = new StagePlanInfo(node, new SinglePartitionSchema(), 1);
-    var stage = new QueryStage(stageId, stagePlanInfo);
+    var stage = new QueryStage(stageId, node, new SinglePartitionSchema(), 1);
     graphBuilder.addNode(stage);
     return stage;
   }

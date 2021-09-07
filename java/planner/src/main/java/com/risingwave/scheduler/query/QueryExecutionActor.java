@@ -7,21 +7,24 @@ import akka.actor.typed.Behavior;
 import akka.actor.typed.javadsl.AbstractBehavior;
 import akka.actor.typed.javadsl.ActorContext;
 import akka.actor.typed.javadsl.Receive;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Maps;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.node.WorkerNode;
 import com.risingwave.scheduler.EventListener;
 import com.risingwave.scheduler.QueryResultLocation;
 import com.risingwave.scheduler.actor.ActorFactory;
+import com.risingwave.scheduler.stage.QueryStage;
 import com.risingwave.scheduler.stage.RemoteStageExecution;
+import com.risingwave.scheduler.stage.ScheduledStage;
 import com.risingwave.scheduler.stage.StageEvent;
 import com.risingwave.scheduler.stage.StageExecution;
 import com.risingwave.scheduler.stage.StageId;
 import com.risingwave.scheduler.task.TaskId;
 import com.risingwave.scheduler.task.TaskManager;
-import java.util.HashSet;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -43,7 +46,7 @@ public class QueryExecutionActor extends AbstractBehavior<QueryExecutionEvent> {
   /** Only modified by message handler. */
   private final ConcurrentMap<StageId, StageExecution> stageExecutions = new ConcurrentHashMap<>();
 
-  private final Set<StageId> scheduledStages = new HashSet<>();
+  private final Map<StageId, ScheduledStage> scheduledStages = Maps.newHashMap();
 
   public QueryExecutionActor(
       ActorContext<QueryExecutionEvent> context,
@@ -90,7 +93,8 @@ public class QueryExecutionActor extends AbstractBehavior<QueryExecutionEvent> {
   }
 
   private void onStageScheduled(StageEvent.StageScheduledEvent event) {
-    scheduledStages.add(event.getStageId());
+    ScheduledStage stage = event.getStageInfo();
+    scheduledStages.put(event.getStageId(), stage);
 
     // Start the stages that have all the dependencies scheduled.
     query.getParentsChecked(event.getStageId()).stream()
@@ -100,8 +104,8 @@ public class QueryExecutionActor extends AbstractBehavior<QueryExecutionEvent> {
 
     // Now the entire DAG is scheduled.
     if (event.getStageId().equals(query.getRootStageId())) {
-      verify(event.getAssignments().size() == 1, "Root stage assignment size must be 1");
-      Map.Entry<TaskId, WorkerNode> entry = event.getAssignments().entrySet().iterator().next();
+      verify(stage.getAssignments().size() == 1, "Root stage assignment size must be 1");
+      Map.Entry<TaskId, WorkerNode> entry = stage.getAssignments().entrySet().iterator().next();
 
       QueryResultLocation resultLocation =
           new QueryResultLocation(entry.getKey(), entry.getValue());
@@ -110,18 +114,29 @@ public class QueryExecutionActor extends AbstractBehavior<QueryExecutionEvent> {
   }
 
   private StageExecution createOrGetStageExecution(StageId stageId) {
+    QueryStage augmentedStage =
+        query.getQueryStageChecked(stageId).augmentScheduledInfo(query, getStageChildren(stageId));
     return stageExecutions.computeIfAbsent(
         stageId,
         id ->
             new RemoteStageExecution(
-                taskManager,
-                actorFactory,
-                query.getQueryStageChecked(stageId),
-                stageEventListener));
+                taskManager, actorFactory, augmentedStage, stageEventListener));
+  }
+
+  private ImmutableMap<StageId, ScheduledStage> getStageChildren(StageId stageId) {
+    ImmutableSet<StageId> childIds = query.getChildrenChecked(stageId);
+    var builder = new ImmutableMap.Builder<StageId, ScheduledStage>();
+    childIds.forEach(
+        id -> {
+          ScheduledStage stage = scheduledStages.get(id);
+          requireNonNull(stage, "child must have been scheduled!");
+          builder.put(stage.getStageId(), stage);
+        });
+    return builder.build();
   }
 
   // Whether all children of the stage has been scheduled.
   private boolean allDependenciesScheduled(StageId stageId) {
-    return scheduledStages.containsAll(query.getChildrenChecked(stageId));
+    return scheduledStages.keySet().containsAll(query.getChildrenChecked(stageId));
   }
 }

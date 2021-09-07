@@ -6,6 +6,7 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
+import com.risingwave.planner.rel.physical.batch.RwBatchExchange;
 import com.risingwave.scheduler.stage.QueryStage;
 import com.risingwave.scheduler.stage.StageId;
 import java.util.HashMap;
@@ -21,14 +22,21 @@ class StageGraph {
   private final ImmutableMap<StageId, ImmutableSet<StageId>> childEdges;
   private final ImmutableMap<StageId, ImmutableSet<StageId>> parentEdges;
 
+  // Used to find the child stage linked to an exchange node.
+  // String is the exchange node's unique ID.
+  // StageId is the child stage.
+  private final ImmutableMap<Integer, StageId> exchangeIdToStage;
+
   private StageGraph(
       Map<StageId, QueryStage> stages,
       Map<StageId, Set<StageId>> childEdges,
       Map<StageId, Set<StageId>> parentEdges,
+      Map<Integer, StageId> exchangeIdToStage,
       StageId rootId) {
     this.stages = ImmutableMap.copyOf(stages);
     this.childEdges = immutableEdgesOf(childEdges);
     this.parentEdges = immutableEdgesOf(parentEdges);
+    this.exchangeIdToStage = ImmutableMap.copyOf(exchangeIdToStage);
     this.rootId = rootId;
   }
 
@@ -76,15 +84,23 @@ class StageGraph {
     return builder.build();
   }
 
+  StageId getExchangeSource(RwBatchExchange node) {
+    Optional<StageId> stage = Optional.ofNullable(exchangeIdToStage.get(node.getUniqueId()));
+    return stage.orElseThrow(
+        () -> new PgException(PgErrorCode.INTERNAL_ERROR, "Unable to find stage by exchange node"));
+  }
+
   static class Builder {
     private final Map<StageId, QueryStage> stages = new HashMap<>();
     private final Map<StageId, Set<StageId>> childEdges = new HashMap<>();
     private final Map<StageId, Set<StageId>> parentEdges = new HashMap<>();
+    private final Map<Integer, StageId> exchangeIdToStage = new HashMap<>();
 
-    void linkToChild(StageId parentId, StageId childId) {
+    void linkToChild(StageId parentId, int exchangeId, StageId childId) {
       Set<StageId> childIds = this.childEdges.getOrDefault(parentId, Sets.newHashSet());
       childIds.add(childId);
       this.childEdges.put(parentId, childIds);
+      this.exchangeIdToStage.put(exchangeId, childId);
     }
 
     void addNode(QueryStage stage) {
@@ -107,7 +123,7 @@ class StageGraph {
                     parentEdges.put(to, parentSet);
                   }));
 
-      return new StageGraph(stages, childEdges, parentEdges, rootId);
+      return new StageGraph(stages, childEdges, parentEdges, exchangeIdToStage, rootId);
     }
   }
 }

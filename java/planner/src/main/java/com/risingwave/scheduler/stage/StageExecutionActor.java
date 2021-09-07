@@ -4,14 +4,17 @@ import akka.actor.typed.Behavior;
 import akka.actor.typed.javadsl.AbstractBehavior;
 import akka.actor.typed.javadsl.ActorContext;
 import akka.actor.typed.javadsl.Receive;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.risingwave.node.WorkerNode;
 import com.risingwave.scheduler.EventListener;
+import com.risingwave.scheduler.task.QueryTask;
 import com.risingwave.scheduler.task.TaskEvent;
 import com.risingwave.scheduler.task.TaskId;
 import com.risingwave.scheduler.task.TaskManager;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.stream.IntStream;
 
 class StageExecutionActor extends AbstractBehavior<StageExecutionEvent> {
   private final TaskManager taskManager;
@@ -32,7 +35,7 @@ class StageExecutionActor extends AbstractBehavior<StageExecutionEvent> {
     this.stage = stage;
     this.taskEventListener = taskEventListener;
 
-    this.scheduleTasks = new HashMap<>(stage.getPlanInfo().getParallelism());
+    this.scheduleTasks = new HashMap<>(stage.getParallelism());
     this.stageEventListener = stageEventListener;
   }
 
@@ -45,7 +48,13 @@ class StageExecutionActor extends AbstractBehavior<StageExecutionEvent> {
   }
 
   private Behavior<StageExecutionEvent> onStart(StageExecutionEvent.StartEvent event) {
-    stage.getTasks().forEach(task -> taskManager.schedule(task, taskEventListener));
+    QueryStage stage = event.getQueryStage();
+
+    ImmutableList<QueryTask> tasks =
+        IntStream.range(0, stage.getParallelism())
+            .mapToObj(idx -> new QueryTask(new TaskId(stage.getStageId(), idx), stage))
+            .collect(ImmutableList.toImmutableList());
+    tasks.forEach(task -> taskManager.schedule(task, taskEventListener));
     return this;
   }
 
@@ -66,11 +75,12 @@ class StageExecutionActor extends AbstractBehavior<StageExecutionEvent> {
 
     scheduleTasks.put(taskCreatedEvent.getTaskId(), taskCreatedEvent.getNode());
 
-    if (scheduleTasks.size() == stage.getPlanInfo().getParallelism()) {
+    if (scheduleTasks.size() == stage.getParallelism()) {
       getContext().getLog().info("All tasks in stage {} scheduled.", stage.getStageId());
+
+      var scheduledInfo = new ScheduledStage(stage, ImmutableMap.copyOf(scheduleTasks));
       stageEventListener.onEvent(
-          new StageEvent.StageScheduledEvent(
-              stage.getStageId(), ImmutableMap.copyOf(scheduleTasks)));
+          new StageEvent.StageScheduledEvent(stage.getStageId(), scheduledInfo));
     }
   }
 }

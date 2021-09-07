@@ -2,22 +2,22 @@ package com.risingwave.scheduler.task;
 
 import static java.util.Objects.requireNonNull;
 
-import com.risingwave.scheduler.stage.StagePlanInfo;
+import com.risingwave.scheduler.stage.QueryStage;
 
 public class QueryTask {
   private final TaskId taskId;
-  private final StagePlanInfo stagePlanInfo;
+  private final QueryStage stage;
 
-  public QueryTask(TaskId taskId, StagePlanInfo stagePlanInfo) {
+  public QueryTask(TaskId taskId, QueryStage stage) {
     this.taskId = requireNonNull(taskId, "taskId");
-    this.stagePlanInfo = requireNonNull(stagePlanInfo, "planFragment");
+    this.stage = requireNonNull(stage, "stage");
   }
 
   public TaskId getTaskId() {
     return taskId;
   }
 
-  public StagePlanInfo getPlanFragment() {
-    return stagePlanInfo;
+  public QueryStage getQueryStage() {
+    return stage;
   }
 }

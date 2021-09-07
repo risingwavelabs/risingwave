@@ -12,12 +12,16 @@ import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.core.Exchange;
 
 public class RwBatchExchange extends Exchange implements RisingWaveBatchPhyRel {
+  private final int uniqueId;
+
   private RwBatchExchange(
       RelOptCluster cluster, RelTraitSet traitSet, RelNode input, RelDistribution distribution) {
     super(cluster, traitSet, input, distribution);
     checkConvention();
     verify(
         traitSet.contains(distribution), "Trait set: %s, distribution: %s", traitSet, distribution);
+
+    this.uniqueId = super.getId();
   }
 
   @Override
@@ -46,5 +50,10 @@ public class RwBatchExchange extends Exchange implements RisingWaveBatchPhyRel {
     RelOptCluster cluster = input.getCluster();
     RelTraitSet traitSet = input.getTraitSet().plus(BATCH_PHYSICAL).plus(distribution);
     return new RwBatchExchange(cluster, traitSet, input, distribution);
+  }
+
+  // Every call will return the same id.
+  public int getUniqueId() {
+    return uniqueId;
   }
 }
