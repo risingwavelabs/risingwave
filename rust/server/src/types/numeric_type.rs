@@ -1,5 +1,4 @@
-use crate::array::BoxedArrayBuilder;
-use crate::array::PrimitiveArrayBuilder;
+use crate::array2::{ArrayBuilder, ArrayBuilderImpl, PrimitiveArrayBuilder};
 use crate::error::Result;
 use crate::error::RwError;
 use crate::types::DataType;
@@ -40,8 +39,8 @@ macro_rules! make_numeric_type {
                 self.nullable
             }
 
-            fn create_array_builder(self: Arc<Self>, capacity: usize) -> Result<BoxedArrayBuilder> {
-                Ok(Box::new(PrimitiveArrayBuilder::<Self>::new(self, capacity)))
+            fn create_array_builder(self: Arc<Self>, capacity: usize) -> Result<ArrayBuilderImpl> {
+                Ok(PrimitiveArrayBuilder::<$native_ty>::new(capacity)?.into())
             }
 
             fn to_protobuf(&self) -> Result<DataTypeProto> {
@@ -104,4 +103,4 @@ make_numeric_type!(
     DataTypeKind::Float64,
     DataType_TypeName::DOUBLE
 );
-make_numeric_type!(DateType, i32, DataTypeKind::Date, DataType_TypeName::DATE);
+// make_numeric_type!(DateType, i32, DataTypeKind::Date, DataType_TypeName::DATE);

@@ -19,7 +19,7 @@ use crate::error::Result;
 use crate::error::RwError;
 use crate::expr::Datum;
 use crate::types::{DataType, DataTypeKind, DataTypeRef, DecimalType, MAX_PRECISION};
-use crate::util::{downcast_mut, downcast_ref};
+use crate::util::downcast_ref;
 
 pub const DECIMAL_BYTES: usize = 16;
 
@@ -58,22 +58,22 @@ impl DecimalArray {
         DecimalIter::new(self)
     }
 
-    pub fn from_values<T>(input: T) -> Result<ArrayRef>
-    where
-        T: AsRef<[Option<Decimal>]>,
-    {
-        let (precision, scale) = DecimalArray::inferred_from_values(&input);
-        let data_type = DecimalType::create(true, precision, scale)?;
-        let mut boxed_builder =
-            DataType::create_array_builder(data_type.clone(), input.as_ref().len())?;
-        let builder: &mut DecimalArrayBuilder = downcast_mut(boxed_builder.as_mut())?;
-
-        for v in input.as_ref() {
-            builder.append_value(*v)?;
-        }
-
-        boxed_builder.finish()
-    }
+    // pub fn from_values<T>(input: T) -> Result<ArrayRef>
+    // where
+    //   T: AsRef<[Option<Decimal>]>,
+    // {
+    //   let (precision, scale) = DecimalArray::inferred_from_values(&input);
+    //   let data_type = DecimalType::create(true, precision, scale)?;
+    //   let mut boxed_builder =
+    //     DataType::create_array_builder(data_type.clone(), input.as_ref().len())?;
+    //   let builder: &mut DecimalArrayBuilder = downcast_mut(boxed_builder.as_mut())?;
+    //
+    //   for v in input.as_ref() {
+    //     builder.append_value(*v)?;
+    //   }
+    //
+    //   boxed_builder.finish()
+    // }
 
     fn value_at(&self, idx: usize) -> Result<Option<Decimal>> {
         self.check_idx(idx)?;
@@ -290,98 +290,90 @@ impl DecimalArrayBuilder {
 
 #[cfg(test)]
 mod tests {
-    use crate::array::DecimalArray;
-    use crate::types::DecimalType;
 
-    use rust_decimal::Decimal;
-
-    use risingwave_proto::data::{Buffer_CompressionType, Column, DataType_TypeName};
-
-    use crate::util::downcast_ref;
-
-    #[test]
-    fn test_build_decimal_array() {
-        let input = vec![Some(Decimal::new(123, 2)), None, Some(Decimal::new(321, 2))];
-
-        let result_array =
-            DecimalArray::from_values(&input).expect("Failed to build decimal array from vec");
-        let result_array: &DecimalArray = downcast_ref(&*result_array).expect("Not decimal array");
-
-        assert_eq!(
-            input,
-            result_array
-                .as_iter()
-                .expect("Failed to create decimal iterator")
-                .collect::<Vec<Option<Decimal>>>()
-        );
-    }
-
-    #[test]
-    fn test_auto_infer_scale_from_values() {
-        let input = vec![
-            Some(Decimal::new(123, 2)),
-            Some(Decimal::new(1234, 3)),
-            Some(Decimal::new(12345, 4)),
-        ];
-        let result_array =
-            DecimalArray::from_values(&input).expect("Failed to build decimal array from vec");
-        let result_array: &DecimalArray = downcast_ref(&*result_array).expect("Not decimal array");
-
-        let data_type: &DecimalType = result_array
-            .data
-            .data_type()
-            .as_any()
-            .downcast_ref::<DecimalType>()
-            .expect("Not decimal type");
-
-        assert_eq!(data_type.get_scale(), 4u32);
-    }
-
-    #[test]
-    fn test_to_proto() {
-        let input = vec![Some(Decimal::new(123, 2)), None, Some(Decimal::new(321, 2))];
-
-        let result_array =
-            DecimalArray::from_values(&input).expect("Failed to build decimal array from vec");
-        let result_proto = result_array
-            .to_protobuf()
-            .expect("Failed to convert to protobuf");
-
-        let result_proto: Column = result_proto
-            .unpack()
-            .expect("Failed to unpack")
-            .expect("Failed to unwrap option");
-
-        assert_eq!(
-            DataType_TypeName::DECIMAL,
-            result_proto.get_column_type().get_type_name()
-        );
-
-        assert_eq!(true, result_proto.get_column_type().get_is_nullable());
-        assert_eq!(
-            vec![1u8, 0u8, 1u8],
-            result_proto.get_null_bitmap().get_body()[0..input.len()]
-        );
-
-        assert_eq!(
-            [
-                0u32.to_be_bytes(),
-                4u32.to_be_bytes(),
-                4u32.to_be_bytes(),
-                8u32.to_be_bytes()
-            ]
-            .concat(),
-            result_proto.get_values()[0].get_body(),
-        );
-
-        assert_eq!(
-            ["1.23".as_bytes(), "3.21".as_bytes(),].concat(),
-            result_proto.get_values()[1].get_body(),
-        );
-
-        assert_eq!(
-            Buffer_CompressionType::NONE,
-            result_proto.get_values()[0].get_compression()
-        );
-    }
+    // #[test]
+    // fn test_build_decimal_array() {
+    //   let input = vec![Some(Decimal::new(123, 2)), None, Some(Decimal::new(321, 2))];
+    //
+    //   let result_array =
+    //     DecimalArray::from_values(&input).expect("Failed to build decimal array from vec");
+    //   let result_array: &DecimalArray = downcast_ref(&*result_array).expect("Not decimal array");
+    //
+    //   assert_eq!(
+    //     input,
+    //     result_array
+    //       .as_iter()
+    //       .expect("Failed to create decimal iterator")
+    //       .collect::<Vec<Option<Decimal>>>()
+    //   );
+    // }
+    //
+    // #[test]
+    // fn test_auto_infer_scale_from_values() {
+    //   let input = vec![
+    //     Some(Decimal::new(123, 2)),
+    //     Some(Decimal::new(1234, 3)),
+    //     Some(Decimal::new(12345, 4)),
+    //   ];
+    //   let result_array =
+    //     DecimalArray::from_values(&input).expect("Failed to build decimal array from vec");
+    //   let result_array: &DecimalArray = downcast_ref(&*result_array).expect("Not decimal array");
+    //
+    //   let data_type: &DecimalType = result_array
+    //     .data
+    //     .data_type()
+    //     .as_any()
+    //     .downcast_ref::<DecimalType>()
+    //     .expect("Not decimal type");
+    //
+    //   assert_eq!(data_type.get_scale(), 4u32);
+    // }
+    //
+    // #[test]
+    // fn test_to_proto() {
+    //   let input = vec![Some(Decimal::new(123, 2)), None, Some(Decimal::new(321, 2))];
+    //
+    //   let result_array =
+    //     DecimalArray::from_values(&input).expect("Failed to build decimal array from vec");
+    //   let result_proto = result_array
+    //     .to_protobuf()
+    //     .expect("Failed to convert to protobuf");
+    //
+    //   let result_proto: Column = result_proto
+    //     .unpack()
+    //     .expect("Failed to unpack")
+    //     .expect("Failed to unwrap option");
+    //
+    //   assert_eq!(
+    //     DataType_TypeName::DECIMAL,
+    //     result_proto.get_column_type().get_type_name()
+    //   );
+    //
+    //   assert_eq!(true, result_proto.get_column_type().get_is_nullable());
+    //   assert_eq!(
+    //     vec![1u8, 0u8, 1u8],
+    //     result_proto.get_null_bitmap().get_body()[0..input.len()]
+    //   );
+    //
+    //   assert_eq!(
+    //     [
+    //       0u32.to_be_bytes(),
+    //       4u32.to_be_bytes(),
+    //       4u32.to_be_bytes(),
+    //       8u32.to_be_bytes()
+    //     ]
+    //     .concat(),
+    //     result_proto.get_values()[0].get_body(),
+    //   );
+    //
+    //   assert_eq!(
+    //     ["1.23".as_bytes(), "3.21".as_bytes(),].concat(),
+    //     result_proto.get_values()[1].get_body(),
+    //   );
+    //
+    //   assert_eq!(
+    //     Buffer_CompressionType::NONE,
+    //     result_proto.get_values()[0].get_compression()
+    //   );
+    // }
 }

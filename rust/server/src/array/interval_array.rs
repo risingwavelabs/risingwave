@@ -242,36 +242,35 @@ impl Iterator for IntervalArrayIter<'_> {
 
 #[cfg(test)]
 mod tests {
-    use crate::array::interval_array::{IntervalArray, IntervalValue};
-    use crate::expr::Datum;
-    use crate::types::interval_type::IntervalType;
-    use crate::types::interval_type::IntervalUnit;
-    use crate::types::DataType;
-    use crate::util::downcast_ref;
+    // use crate::array::interval_array::{IntervalArray, IntervalValue};
+    // use crate::expr::Datum;
+    // use crate::types::interval_type::IntervalType;
+    // use crate::types::interval_type::IntervalUnit;
+    // use crate::types::DataType;
+    // use crate::util::downcast_ref;
 
-    #[test]
-    fn test_interval_array() {
-        let data_type = IntervalType::create(false, 0, Some(IntervalUnit::Year));
-        let cardinality = 5;
-        let mut array_builder =
-            DataType::create_array_builder(data_type.clone(), cardinality).unwrap();
-        for _ in 0..cardinality {
-            let v = IntervalValue::from_ymd(1, 0, 0);
-            array_builder.append(&Datum::Interval(v)).unwrap();
-        }
-        let ret_arr = array_builder.finish().unwrap();
-        let casted_arr: &IntervalArray = downcast_ref(ret_arr.as_ref()).unwrap();
-        casted_arr
-            .as_iter()
-            .map(|mut elem| {
-                if let Some(next) = elem.next() {
-                    if let Some(v) = next {
-                        assert_eq!(v.get_years(), 1);
-                        assert_eq!(v.get_months(), 12);
-                        assert_eq!(v.get_days(), 0);
-                    };
-                };
-            })
-            .unwrap();
-    }
+    // #[test]
+    // fn test_interval_array() {
+    //   let data_type = IntervalType::create(false, 0, Some(IntervalUnit::Year));
+    //   let cardinality = 5;
+    //   let mut array_builder = DataType::create_array_builder(data_type.clone(), cardinality).unwrap();
+    //   for _ in 0..cardinality {
+    //     let v = IntervalValue::from_ymd(1, 0, 0);
+    //     array_builder.append(&Datum::Interval(v)).unwrap();
+    //   }
+    //   let ret_arr = array_builder.finish().unwrap();
+    //   let casted_arr: &IntervalArray = downcast_ref(ret_arr.as_ref()).unwrap();
+    //   casted_arr
+    //     .as_iter()
+    //     .map(|mut elem| {
+    //       if let Some(next) = elem.next() {
+    //         if let Some(v) = next {
+    //           assert_eq!(v.get_years(), 1);
+    //           assert_eq!(v.get_months(), 12);
+    //           assert_eq!(v.get_days(), 0);
+    //         };
+    //       };
+    //     })
+    //     .unwrap();
+    // }
 }

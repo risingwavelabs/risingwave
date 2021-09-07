@@ -13,8 +13,8 @@ use crate::buffer::{Bitmap, Buffer};
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::expr::Datum;
-use crate::types::{DataType, DataTypeKind, DataTypeRef, StringType};
-use crate::util::{downcast_mut, downcast_ref};
+use crate::types::{DataType, DataTypeKind, DataTypeRef};
+use crate::util::downcast_ref;
 
 use std::mem::{align_of, size_of};
 
@@ -23,22 +23,22 @@ pub struct UTF8Array {
 }
 
 impl UTF8Array {
-    pub fn from_values<'a, T>(input: T, width: usize, kind: DataTypeKind) -> Result<ArrayRef>
-    where
-        T: AsRef<[Option<&'a str>]>,
-    {
-        let data_type = StringType::create(true, width, kind);
-
-        let mut boxed_builder =
-            DataType::create_array_builder(data_type.clone(), input.as_ref().len())?;
-        let builder: &mut UTF8ArrayBuilder = downcast_mut(boxed_builder.as_mut())?;
-
-        for v in input.as_ref() {
-            builder.append_str(*v)?;
-        }
-
-        boxed_builder.finish()
-    }
+    // pub fn from_values<'a, T>(input: T, width: usize, kind: DataTypeKind) -> Result<ArrayRef>
+    // where
+    //   T: AsRef<[Option<&'a str>]>,
+    // {
+    //   let data_type = StringType::create(true, width, kind);
+    //
+    //   let mut boxed_builder =
+    //     DataType::create_array_builder(data_type.clone(), input.as_ref().len())?;
+    //   let builder: &mut UTF8ArrayBuilder = downcast_mut(boxed_builder.as_mut())?;
+    //
+    //   for v in input.as_ref() {
+    //     builder.append_str(*v)?;
+    //   }
+    //
+    //   boxed_builder.finish()
+    // }
 }
 
 impl TryFrom<ArrayData> for UTF8Array {
@@ -318,100 +318,93 @@ impl<'a> UTF8ArrayIter<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::array::{Array, UTF8Array};
-    use crate::types::DataTypeKind;
-    use crate::util::downcast_ref;
-    use risingwave_proto::data::Column;
-    use std::mem::{align_of, size_of};
 
-    #[test]
-    fn test_empty_utf8_array() {
-        let input: Vec<Option<&str>> = vec![];
-
-        let result_array = UTF8Array::from_values(&input, 10, DataTypeKind::Varchar)
-            .expect("Failed to build string array from vec");
-
-        let result_array: &UTF8Array = downcast_ref(&*result_array).expect("Not string array");
-
-        assert_eq!(result_array.len(), 0);
-        assert_eq!(result_array.data.buffers().len(), 2);
-        assert_eq!(result_array.data.buffers()[0].len(), (size_of::<u32>() * 1));
-        assert_eq!(result_array.data.buffers()[1].len(), 0);
-    }
-
-    #[test]
-    fn test_build_utf8_array() {
-        let input = vec![Some("abc"), Some("jkl"), None, Some("xyz")];
-
-        let width = 8;
-        let result_array = UTF8Array::from_values(&input, width, DataTypeKind::Varchar)
-            .expect("Failed to build string array from vec");
-
-        let result_array: &UTF8Array = downcast_ref(&*result_array).expect("Not string array");
-
-        assert_eq!(result_array.len(), input.len());
-        assert_eq!(result_array.array_data().buffers().len(), 2);
-
-        let offset_buffer = unsafe { result_array.data.buffer_at_unchecked(0) };
-        let data_buffer = unsafe { result_array.data.buffer_at_unchecked(1) };
-
-        assert_eq!(offset_buffer.as_ptr().align_offset(align_of::<u32>()), 0);
-        assert!(
-            offset_buffer.len() >= (size_of::<u32>() * result_array.array_data().cardinality())
-        );
-        assert_eq!(
-            offset_buffer.len(),
-            size_of::<u32>() * (result_array.array_data().cardinality() + 1)
-        );
-
-        assert_eq!(
-            data_buffer.len(),
-            size_of::<u8>()
-                * input
-                    .iter()
-                    .map(|s| s.as_ref().unwrap_or(&"").len())
-                    .sum::<usize>()
-        );
-
-        let offsets = offset_buffer.typed_data::<u32>();
-        assert!(offsets.len() >= 1);
-        let last_offset = *offsets.last().unwrap();
-
-        assert_eq!(last_offset, data_buffer.len() as u32);
-
-        assert_eq!(
-            input,
-            result_array
-                .as_iter()
-                .expect("Failed to create string iterator")
-                .collect::<Vec<Option<&str>>>()
-        );
-    }
-
-    #[test]
-    fn test_restore_utf8_array_from_proto() {
-        let input = vec![Some("abc"), None, Some("xyz"), None];
-
-        let width = 8;
-        let result_array = UTF8Array::from_values(&input, width, DataTypeKind::Varchar)
-            .expect("Failed to build string array from vec");
-
-        let result_array: &UTF8Array = downcast_ref(&*result_array).expect("Not string array");
-
-        let result_proto = result_array
-            .to_protobuf()
-            .expect("Failed to convert to protobuf");
-
-        let result_proto: Column = result_proto
-            .unpack()
-            .expect("Failed to unpack")
-            .expect("Failed to unwrap option");
-
-        assert_eq!(
-            vec![1u8, 0u8, 1u8, 0u8],
-            result_proto.get_null_bitmap().get_body()[0..input.len()]
-        );
-
-        assert_eq!(input.len(), result_proto.get_cardinality() as usize);
-    }
+    // #[test]
+    // fn test_empty_utf8_array() {
+    //   let input: Vec<Option<&str>> = vec![];
+    //
+    //   let result_array = UTF8Array::from_values(&input, 10, DataTypeKind::Varchar)
+    //     .expect("Failed to build string array from vec");
+    //
+    //   let result_array: &UTF8Array = downcast_ref(&*result_array).expect("Not string array");
+    //
+    //   assert_eq!(result_array.len(), 0);
+    //   assert_eq!(result_array.data.buffers().len(), 2);
+    //   assert_eq!(result_array.data.buffers()[0].len(), (size_of::<u32>() * 1));
+    //   assert_eq!(result_array.data.buffers()[1].len(), 0);
+    // }
+    //
+    // #[test]
+    // fn test_build_utf8_array() {
+    //   let input = vec![Some("abc"), Some("jkl"), None, Some("xyz")];
+    //
+    //   let width = 8;
+    //   let result_array = UTF8Array::from_values(&input, width, DataTypeKind::Varchar)
+    //     .expect("Failed to build string array from vec");
+    //
+    //   let result_array: &UTF8Array = downcast_ref(&*result_array).expect("Not string array");
+    //
+    //   assert_eq!(result_array.len(), input.len());
+    //   assert_eq!(result_array.array_data().buffers().len(), 2);
+    //
+    //   let offset_buffer = unsafe { result_array.data.buffer_at_unchecked(0) };
+    //   let data_buffer = unsafe { result_array.data.buffer_at_unchecked(1) };
+    //
+    //   assert_eq!(offset_buffer.as_ptr().align_offset(align_of::<u32>()), 0);
+    //   assert!(offset_buffer.len() >= (size_of::<u32>() * result_array.array_data().cardinality()));
+    //   assert_eq!(
+    //     offset_buffer.len(),
+    //     size_of::<u32>() * (result_array.array_data().cardinality() + 1)
+    //   );
+    //
+    //   assert_eq!(
+    //     data_buffer.len(),
+    //     size_of::<u8>()
+    //       * input
+    //         .iter()
+    //         .map(|s| s.as_ref().unwrap_or(&"").len())
+    //         .sum::<usize>()
+    //   );
+    //
+    //   let offsets = offset_buffer.typed_data::<u32>();
+    //   assert!(offsets.len() >= 1);
+    //   let last_offset = *offsets.last().unwrap();
+    //
+    //   assert_eq!(last_offset, data_buffer.len() as u32);
+    //
+    //   assert_eq!(
+    //     input,
+    //     result_array
+    //       .as_iter()
+    //       .expect("Failed to create string iterator")
+    //       .collect::<Vec<Option<&str>>>()
+    //   );
+    // }
+    //
+    // #[test]
+    // fn test_restore_utf8_array_from_proto() {
+    //   let input = vec![Some("abc"), None, Some("xyz"), None];
+    //
+    //   let width = 8;
+    //   let result_array = UTF8Array::from_values(&input, width, DataTypeKind::Varchar)
+    //     .expect("Failed to build string array from vec");
+    //
+    //   let result_array: &UTF8Array = downcast_ref(&*result_array).expect("Not string array");
+    //
+    //   let result_proto = result_array
+    //     .to_protobuf()
+    //     .expect("Failed to convert to protobuf");
+    //
+    //   let result_proto: Column = result_proto
+    //     .unpack()
+    //     .expect("Failed to unpack")
+    //     .expect("Failed to unwrap option");
+    //
+    //   assert_eq!(
+    //     vec![1u8, 0u8, 1u8, 0u8],
+    //     result_proto.get_null_bitmap().get_body()[0..input.len()]
+    //   );
+    //
+    //   assert_eq!(input.len(), result_proto.get_cardinality() as usize);
+    // }
 }

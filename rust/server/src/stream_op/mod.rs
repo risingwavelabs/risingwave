@@ -8,6 +8,7 @@ pub use filter_operator::FilterOperator;
 
 mod local_output;
 pub use local_output::LocalOutput;
+use std::sync::Arc;
 
 mod processor;
 pub use processor::Processor;
@@ -33,7 +34,7 @@ pub enum Op {
 pub struct StreamChunk {
     // TODO: Optimize using bitmap
     ops: Vec<Op>,
-    arrays: Vec<ArrayImpl>,
+    arrays: Vec<Arc<ArrayImpl>>,
     visibility: Option<Bitmap>,
     cardinality: usize,
 }

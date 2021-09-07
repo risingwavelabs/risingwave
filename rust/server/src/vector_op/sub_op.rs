@@ -17,7 +17,7 @@ where
     T2: NativeType + AsPrimitive<T3>,
     T3: NativeType + CheckedSub,
 {
-    let mut builder = PrimitiveArrayBuilder::<T3>::new(a.len());
+    let mut builder = PrimitiveArrayBuilder::<T3>::new(a.len())?;
     for (a, b) in a.iter().zip(b.iter()) {
         let item = match (a, b) {
             (Some(a), Some(b)) => match a.as_().checked_sub(&b.as_()) {
@@ -26,9 +26,9 @@ where
             },
             _ => None,
         };
-        builder.append(item);
+        builder.append(item)?;
     }
-    Ok(builder.finish())
+    builder.finish()
 }
 
 /// Checked subtract two `PrimitiveArray` for floats. Both array must have the same size.
@@ -41,7 +41,7 @@ where
     T2: NativeType + AsPrimitive<T3>,
     T3: NativeType + std::ops::Add + Float,
 {
-    let mut builder = PrimitiveArrayBuilder::<T3>::new(a.len());
+    let mut builder = PrimitiveArrayBuilder::<T3>::new(a.len())?;
     for (a, b) in a.iter().zip(b.iter()) {
         let item = match (a, b) {
             (Some(a), Some(b)) => {
@@ -54,7 +54,7 @@ where
             }
             _ => None,
         };
-        builder.append(item);
+        builder.append(item)?;
     }
-    Ok(builder.finish())
+    builder.finish()
 }

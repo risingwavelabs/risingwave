@@ -4,7 +4,7 @@ use protobuf::Message;
 
 use risingwave_proto::expr::{ExprNode, ExprNode_ExprNodeType, InputRefExpr};
 
-use crate::array::{ArrayRef, DataChunk};
+use crate::array2::{ArrayRef, DataChunk};
 use crate::error::ErrorCode::ProtobufError;
 use crate::error::{Result, RwError};
 use crate::expr::Expression;

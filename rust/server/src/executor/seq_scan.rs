@@ -1,5 +1,4 @@
-use crate::array::ArrayRef;
-use crate::array::{DataChunk, DataChunkRef};
+use crate::array2::{ArrayRef, DataChunk, DataChunkRef};
 use crate::catalog::TableId;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};

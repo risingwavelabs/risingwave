@@ -1,4 +1,5 @@
-use crate::array::{ArrayBuilder as ArrayBuilderV1, ArrayRef};
+use crate::array::{ArrayBuilder as ArrayBuilderV1, ArrayRef as ArrayRefV1};
+
 use crate::array2::*;
 use crate::error::Result;
 use crate::expr::AggKind;
@@ -36,14 +37,14 @@ pub struct BoxedAggState(Box<dyn Aggregator>);
 /// `BoxedAggState` is a wrapper for array v1 compactible layer.
 /// TODO: remove this
 impl BoxedAggState {
-    pub fn update(&mut self, input: ArrayRef) -> Result<()> {
+    pub fn update(&mut self, input: ArrayRefV1) -> Result<()> {
         self.0.update(&ArrayImpl::from(input))
     }
     pub fn output(&self, builder: &mut dyn ArrayBuilderV1) -> Result<()> {
-        let mut my_builder = ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0));
+        let mut my_builder = ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)?);
         self.0.output(&mut my_builder)?;
-        let array = my_builder.finish();
-        let array = ArrayRef::from(array);
+        let array = my_builder.finish()?;
+        let array = ArrayRefV1::from(array);
         builder.append_array(&*array)?;
         Ok(())
     }
@@ -129,12 +130,12 @@ mod tests {
         let mut agg_state = create_agg_state_v2(input_type, agg_type, return_type.clone())?;
         agg_state.update(input)?;
         agg_state.output(&mut builder)?;
-        Ok(builder.finish())
+        builder.finish()
     }
 
     #[test]
     fn vec_sum_int32() -> Result<()> {
-        let input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]);
+        let input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]).unwrap();
         let agg_type = AggKind::Sum;
         let input_type = Arc::new(Int32Type::new(true));
         let return_type = Arc::new(Int64Type::new(true));
@@ -143,7 +144,7 @@ mod tests {
             &input.into(),
             &agg_type,
             return_type,
-            ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)),
+            ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)?),
         )?;
         let actual = actual.as_int64();
         let actual = actual.iter().collect::<Vec<_>>();
@@ -165,7 +166,7 @@ mod tests {
 
     #[test]
     fn vec_min_float32() -> Result<()> {
-        let input = F32Array::from_slice(&[Some(1.), Some(2.), Some(3.)]);
+        let input = F32Array::from_slice(&[Some(1.), Some(2.), Some(3.)]).unwrap();
         let agg_type = AggKind::Min;
         let input_type = Arc::new(Float32Type::new(true));
         let return_type = Arc::new(Float32Type::new(true));
@@ -174,7 +175,7 @@ mod tests {
             &input.into(),
             &agg_type,
             return_type,
-            ArrayBuilderImpl::Float32(F32ArrayBuilder::new(0)),
+            ArrayBuilderImpl::Float32(F32ArrayBuilder::new(0)?),
         )?;
         let actual = actual.as_float32();
         let actual = actual.iter().collect::<Vec<_>>();
@@ -184,7 +185,7 @@ mod tests {
 
     #[test]
     fn vec_min_char() -> Result<()> {
-        let input = UTF8Array::from_slice(&[Some("b"), Some("aa")]);
+        let input = UTF8Array::from_slice(&[Some("b"), Some("aa")])?;
         let agg_type = AggKind::Min;
         let input_type = StringType::create(true, 5, DataTypeKind::Char);
         let return_type = StringType::create(true, 5, DataTypeKind::Char);
@@ -193,7 +194,7 @@ mod tests {
             &input.into(),
             &agg_type,
             return_type,
-            ArrayBuilderImpl::UTF8(UTF8ArrayBuilder::new(0)),
+            ArrayBuilderImpl::UTF8(UTF8ArrayBuilder::new(0)?),
         )?;
         let actual = actual.as_utf8();
         let actual = actual.iter().collect::<Vec<_>>();
@@ -203,7 +204,7 @@ mod tests {
 
     #[test]
     fn vec_count_int32() -> Result<()> {
-        let input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]);
+        let input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]).unwrap();
         let agg_type = AggKind::Count;
         let input_type = Arc::new(Int32Type::new(true));
         let return_type = Arc::new(Int64Type::new(true));
@@ -212,7 +213,7 @@ mod tests {
             &input.into(),
             &agg_type,
             return_type,
-            ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)),
+            ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)?),
         )?;
         let actual = actual.as_int64();
         let actual = actual.iter().collect::<Vec<_>>();

@@ -116,6 +116,6 @@ where
     }
 
     fn new_builder(&self) -> ArrayBuilderImpl {
-        ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0))
+        ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0).unwrap())
     }
 }

@@ -1,4 +1,4 @@
-use crate::array::{ArrayRef, DataChunk};
+use crate::array2::{ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk};
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::expr::Expression;
@@ -15,6 +15,7 @@ use crate::array::interval_array::IntervalValue;
 use rust_decimal::prelude::*;
 use rust_decimal::Decimal;
 use std::ops::Deref;
+use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 pub enum Datum {
@@ -52,9 +53,19 @@ impl Expression for LiteralExpression {
         let mut array_builder =
             DataType::create_array_builder(self.return_type.clone(), _input.cardinality())?;
         for _ in 0.._input.cardinality() {
-            array_builder.append(&self.literal)?;
+            match &mut array_builder {
+                ArrayBuilderImpl::Int32(inner) => {
+                    let v = match &self.literal {
+                        Datum::Int32(v) => *v,
+                        _ => unimplemented!(),
+                    };
+                    inner.append(Some(v))?;
+                }
+
+                _ => unimplemented!(),
+            }
         }
-        array_builder.finish()
+        Ok(Arc::new(array_builder.finish()?))
     }
 }
 

@@ -57,8 +57,8 @@ mod tests {
         F: Fn(PrimitiveArray<T1>, PrimitiveArray<T2>) -> Result<PrimitiveArray<T3>>,
     {
         let ret = func(
-            PrimitiveArray::<T1>::from_slice(&left),
-            PrimitiveArray::<T2>::from_slice(&right),
+            PrimitiveArray::<T1>::from_slice(&left).unwrap(),
+            PrimitiveArray::<T2>::from_slice(&right).unwrap(),
         );
         if should_error {
             assert!(ret.is_err());

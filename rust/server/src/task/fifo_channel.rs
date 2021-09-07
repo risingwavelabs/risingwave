@@ -1,4 +1,4 @@
-use crate::array::DataChunkRef;
+use crate::array2::DataChunkRef;
 use crate::error::{ErrorCode, Result};
 use crate::task::channel::{BoxChanReceiver, BoxChanSender, ChanReceiver, ChanSender};
 use std::option::Option;

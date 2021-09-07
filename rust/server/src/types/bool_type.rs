@@ -1,4 +1,4 @@
-use crate::array::{BoolArrayBuilder, BoxedArrayBuilder};
+use crate::array2::ArrayBuilderImpl;
 use crate::error::Result;
 use crate::types::{DataType, DataTypeKind, DataTypeRef};
 use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};
@@ -20,8 +20,9 @@ impl DataType for BoolType {
         self.nullable
     }
 
-    fn create_array_builder(self: Arc<Self>, _capacity: usize) -> Result<BoxedArrayBuilder> {
-        BoolArrayBuilder::new(self, _capacity).map(|builder| Box::new(builder) as BoxedArrayBuilder)
+    fn create_array_builder(self: Arc<Self>, _capacity: usize) -> Result<ArrayBuilderImpl> {
+        // BoolArrayBuilder::new(self, _capacity).map(|builder| Box::new(builder) as BoxedArrayBuilder)
+        unimplemented!()
     }
 
     fn to_protobuf(&self) -> Result<DataTypeProto> {

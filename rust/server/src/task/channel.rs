@@ -1,4 +1,4 @@
-use crate::array::DataChunkRef;
+use crate::array2::DataChunkRef;
 use crate::error::{ErrorCode, Result};
 use crate::task::fifo_channel::new_fifo_channel;
 use risingwave_proto::plan::{ShuffleInfo, ShuffleInfo_PartitionMode as ShufflePartitionMode};

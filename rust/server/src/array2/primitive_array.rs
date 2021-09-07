@@ -1,6 +1,13 @@
 use super::{Array, ArrayBuilder, ArrayIterator};
-use crate::types::NativeType;
 
+use crate::buffer::Bitmap;
+use crate::error::ErrorCode::ProtobufError;
+use crate::error::Result;
+use crate::error::RwError;
+use crate::types::{DataType, Int16Type, Int32Type, Int64Type, NativeType};
+use protobuf::well_known_types::Any as AnyProto;
+use risingwave_proto::data::{Buffer as BufferProto, Buffer_CompressionType, Column};
+use std::mem::size_of;
 /// `PrimitiveArray` is a collection of primitive types, such as `i32`, `f32`.
 #[derive(Debug)]
 pub struct PrimitiveArray<T: NativeType> {
@@ -9,10 +16,10 @@ pub struct PrimitiveArray<T: NativeType> {
 }
 
 impl<T: NativeType> PrimitiveArray<T> {
-    pub fn from_slice(data: &[Option<T>]) -> Self {
-        let mut builder = <Self as Array>::Builder::new(data.len());
+    pub fn from_slice(data: &[Option<T>]) -> Result<Self> {
+        let mut builder = <Self as Array>::Builder::new(data.len())?;
         for i in data {
-            builder.append(*i);
+            builder.append(*i)?;
         }
         builder.finish()
     }
@@ -39,6 +46,36 @@ impl<T: NativeType> Array for PrimitiveArray<T> {
     fn iter(&self) -> Self::Iter<'_> {
         ArrayIterator::new(self)
     }
+
+    fn to_protobuf(&self) -> crate::error::Result<AnyProto> {
+        let mut column = Column::new();
+        // FIXME: remove this hack
+        let proto_data_type = match std::mem::size_of::<T>() {
+            2 => Int16Type::new(false).to_protobuf()?,
+            4 => Int32Type::new(false).to_protobuf()?,
+            8 => Int64Type::new(false).to_protobuf()?,
+            _ => unimplemented!(),
+        };
+        column.set_column_type(proto_data_type);
+        // FIXME: remove Bitmap or made it into array.
+        column.set_null_bitmap(Bitmap::from_vec(self.bitmap.clone())?.to_protobuf()?);
+        let values = {
+            let mut output_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<T>());
+
+            for v in self.iter() {
+                v.map(|node| node.to_protobuf(&mut output_buffer));
+            }
+
+            let mut b = BufferProto::new();
+            b.set_compression(Buffer_CompressionType::NONE);
+            b.set_body(output_buffer);
+            b
+        };
+
+        column.mut_values().push(values);
+
+        AnyProto::pack(&column).map_err(|e| RwError::from(ProtobufError(e)))
+    }
 }
 
 /// `PrimitiveArrayBuilder` constructs a `PrimitiveArray` from `Option<Primitive>`.
@@ -50,14 +87,14 @@ pub struct PrimitiveArrayBuilder<T: NativeType> {
 impl<T: NativeType> ArrayBuilder for PrimitiveArrayBuilder<T> {
     type ArrayType = PrimitiveArray<T>;
 
-    fn new(capacity: usize) -> Self {
-        Self {
+    fn new(capacity: usize) -> Result<Self> {
+        Ok(Self {
             bitmap: Vec::with_capacity(capacity),
             data: Vec::with_capacity(capacity),
-        }
+        })
     }
 
-    fn append(&mut self, value: Option<T>) {
+    fn append(&mut self, value: Option<T>) -> Result<()> {
         match value {
             Some(x) => {
                 self.bitmap.push(true);
@@ -68,18 +105,20 @@ impl<T: NativeType> ArrayBuilder for PrimitiveArrayBuilder<T> {
                 self.data.push(T::default());
             }
         }
+        Ok(())
     }
 
-    fn append_array(&mut self, other: &PrimitiveArray<T>) {
+    fn append_array(&mut self, other: &PrimitiveArray<T>) -> Result<()> {
         self.bitmap.extend_from_slice(&other.bitmap);
         self.data.extend_from_slice(&other.data);
+        Ok(())
     }
 
-    fn finish(self) -> PrimitiveArray<T> {
-        PrimitiveArray {
+    fn finish(self) -> Result<PrimitiveArray<T>> {
+        Ok(PrimitiveArray {
             bitmap: self.bitmap,
             data: self.data,
-        }
+        })
     }
 }
 
@@ -87,10 +126,10 @@ impl<T: NativeType> ArrayBuilder for PrimitiveArrayBuilder<T> {
 mod tests {
     use super::*;
 
-    fn helper_test_builder<T: NativeType>(data: Vec<Option<T>>) -> PrimitiveArray<T> {
-        let mut builder = PrimitiveArrayBuilder::<T>::new(data.len());
+    fn helper_test_builder<T: NativeType>(data: Vec<Option<T>>) -> Result<PrimitiveArray<T>> {
+        let mut builder = PrimitiveArrayBuilder::<T>::new(data.len())?;
         for d in data {
-            builder.append(d);
+            builder.append(d)?;
         }
         builder.finish()
     }
@@ -101,7 +140,8 @@ mod tests {
             (0..1000)
                 .map(|x| if x % 2 == 0 { None } else { Some(x) })
                 .collect(),
-        );
+        )
+        .unwrap();
     }
 
     #[test]
@@ -110,7 +150,8 @@ mod tests {
             (0..1000)
                 .map(|x| if x % 2 == 0 { None } else { Some(x) })
                 .collect(),
-        );
+        )
+        .unwrap();
     }
 
     #[test]
@@ -119,7 +160,8 @@ mod tests {
             (0..1000)
                 .map(|x| if x % 2 == 0 { None } else { Some(x) })
                 .collect(),
-        );
+        )
+        .unwrap();
     }
 
     #[test]
@@ -128,7 +170,8 @@ mod tests {
             (0..1000)
                 .map(|x| if x % 2 == 0 { None } else { Some(x as f32) })
                 .collect(),
-        );
+        )
+        .unwrap();
     }
 
     #[test]
@@ -137,6 +180,7 @@ mod tests {
             (0..1000)
                 .map(|x| if x % 2 == 0 { None } else { Some(x as f64) })
                 .collect(),
-        );
+        )
+        .unwrap();
     }
 }

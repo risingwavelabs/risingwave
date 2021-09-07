@@ -49,16 +49,16 @@ mod test {
                 if !core.is_running {
                     break;
                 }
-                let mut col1 = PrimitiveArrayBuilder::<i64>::new(N);
+                let mut col1 = PrimitiveArrayBuilder::<i64>::new(N)?;
                 for _ in 0..N {
                     match core.inner.next() {
                         Some(i) => {
-                            col1.append(Some(i));
+                            col1.append(Some(i))?;
                         }
                         None => break,
                     }
                 }
-                let col1 = ArrayImpl::Int64(col1.finish());
+                let col1 = Arc::new(ArrayImpl::Int64(col1.finish()?));
                 let cols = vec![col1];
                 let chunk = StreamChunk {
                     cardinality: N,
@@ -113,7 +113,7 @@ mod test {
         let mut expected = start;
         for chunk in data.iter() {
             assert!(chunk.arrays.len() == 1);
-            let arr = &chunk.arrays[0];
+            let arr = &*chunk.arrays[0];
             if let ArrayImpl::Int64(arr) = arr {
                 for i in 0..arr.len() {
                     let v = arr.value_at(i).expect("arr[i] exists");

@@ -64,7 +64,7 @@ where
     C: Comparer<A::OwnedItem>,
 {
     fn output_concrete(&self, builder: &mut A::Builder) -> Result<()> {
-        builder.append(self.result.as_ref().map(|x| x.as_scalar_ref()));
+        builder.append(self.result.as_ref().map(|x| x.as_scalar_ref()))?;
         Ok(())
     }
 }

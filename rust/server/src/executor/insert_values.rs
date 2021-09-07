@@ -1,12 +1,14 @@
-use crate::array::{ArrayRef, BoxedArrayBuilder, DataChunk, PrimitiveArray};
+use crate::array2::{
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk, PrimitiveArrayBuilder,
+};
 use crate::catalog::TableId;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::executor::ExecutorResult::Done;
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
-use crate::expr::{build_from_proto, BoxedExpression, Datum};
+use crate::expr::{build_from_proto, BoxedExpression};
 use crate::storage::StorageManagerRef;
-use crate::types::{DataType, Int32Type};
+use crate::types::DataType;
 use pb_convert::FromProtobuf;
 use protobuf::Message;
 use risingwave_proto::plan::{InsertValueNode, PlanNode_PlanNodeType};
@@ -42,15 +44,22 @@ impl Executor for InsertValuesExecutor {
             .first()
             .ok_or_else(|| RwError::from(InternalError("Can't insert empty values!".to_string())))?
             .iter() // for each column
-            .map(|col| DataType::create_array_builder(col.return_type_ref(), cardinality))
-            .collect::<Result<Vec<BoxedArrayBuilder>>>()?;
+            .map(|col| {
+                DataType::create_array_builder(col.return_type_ref(), cardinality).map_err(|_| {
+                    RwError::from(InternalError(
+                        "Creat array builder failed when insert values".to_string(),
+                    ))
+                })
+            })
+            .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
 
-        let one_row_array = PrimitiveArray::<Int32Type>::from_slice(vec![1])?;
+        // let one_row_array = PrimitiveArray::<Int32Type>::from_slice(vec![1])?;
+        let one_row_array = PrimitiveArrayBuilder::<i32>::new(1)?.finish()?;
         // We need a one row chunk rather than an empty chunk because constant expression's eval result
         // is same size as input chunk cardinality.
         let one_row_chunk = DataChunk::builder()
             .cardinality(1)
-            .arrays(vec![one_row_array])
+            .arrays(vec![Arc::new(one_row_array.into())])
             .build();
 
         for row in &mut self.rows {
@@ -58,16 +67,19 @@ impl Executor for InsertValuesExecutor {
                 .zip(&mut array_builders)
                 .map(|(expr, builder)| {
                     expr.eval(&one_row_chunk)
-                        .and_then(|out| builder.append_array(&*out))
+                        .and_then(|out| builder.append_array(&out))
                         .map(|_| 1)
                 })
                 .collect::<Result<Vec<usize>>>()?;
         }
 
-        let arrays = array_builders
-            .into_iter()
-            .map(|b| b.finish())
-            .collect::<Result<Vec<ArrayRef>>>()?;
+        let arrays = array_builders.into_iter().try_fold(
+            Vec::new(),
+            |mut vec, b| -> Result<Vec<ArrayRef>> {
+                b.finish().map(|arr| vec.push(Arc::new(arr)))?;
+                Ok(vec)
+            },
+        )?;
 
         let chunk = DataChunk::builder()
             .cardinality(cardinality)
@@ -81,14 +93,14 @@ impl Executor for InsertValuesExecutor {
 
         // create ret value
         {
-            let data_type = Arc::new(Int32Type::new(false));
-            let mut array_builder = DataType::create_array_builder(data_type, 1)?;
-            array_builder.append(&Datum::Int32(rows_inserted as i32))?;
+            // let data_type = Arc::new(Int32Type::new(false));
+            let mut array_builder = PrimitiveArrayBuilder::<i32>::new(1)?;
+            array_builder.append(Some(rows_inserted as i32))?;
 
             let array = array_builder.finish()?;
             let ret_chunk = DataChunk::builder()
                 .cardinality(array.len())
-                .arrays(vec![array])
+                .arrays(vec![Arc::new(array.into())])
                 .build();
 
             self.executed = true;

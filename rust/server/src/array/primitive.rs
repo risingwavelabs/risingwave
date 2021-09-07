@@ -19,7 +19,7 @@ use crate::error::Result;
 use crate::error::RwError;
 use crate::expr::Datum;
 use crate::types::{DataType, DataTypeRef, NativeType, PrimitiveDataType};
-use crate::util::{downcast_mut, downcast_ref};
+use crate::util::downcast_ref;
 
 /// A primitive array contains only one value buffer, and an optional bitmap buffer
 pub struct PrimitiveArray<T: PrimitiveDataType> {
@@ -47,44 +47,40 @@ impl<T: PrimitiveDataType> PrimitiveArray<T> {
         self.data.cardinality()
     }
 
-    pub fn from_slice<S>(input: S) -> Result<ArrayRef>
-    where
-        S: AsRef<[T::N]>,
-    {
-        let data_type = Arc::new(T::default());
-        let mut boxed_array_builder =
-            DataType::create_array_builder(data_type, input.as_ref().len())?;
-        {
-            let array_builder: &mut PrimitiveArrayBuilder<T> =
-                downcast_mut(boxed_array_builder.as_mut())?;
-
-            for v in input.as_ref() {
-                array_builder.append_value(Some(*v))?;
-            }
-        }
-
-        boxed_array_builder.finish()
-    }
+    // pub fn from_slice<S>(input: S) -> Result<ArrayRef>
+    // where
+    //   S: AsRef<[T::N]>,
+    // {
+    //   let data_type = Arc::new(T::default());
+    //   let mut boxed_array_builder = DataType::create_array_builder(data_type, input.as_ref().len())?;
+    //   {
+    //     let array_builder: &mut PrimitiveArrayBuilder<T> =
+    //       downcast_mut(boxed_array_builder.as_mut())?;
+    //
+    //     for v in input.as_ref() {
+    //       array_builder.append_value(Some(*v))?;
+    //     }
+    //   }
+    //
+    //   boxed_array_builder.finish()
+    // }
 
     pub fn from_values<I>(input: I) -> Result<ArrayRef>
     where
         I: IntoIterator<Item = Option<T::N>>,
     {
-        let data_type = Arc::new(T::default());
+        let data_type = T::default();
         let input = input.into_iter();
 
-        let mut boxed_array_builder =
-            DataType::create_array_builder(data_type, input.size_hint().0)?;
-        {
-            let array_builder: &mut PrimitiveArrayBuilder<T> =
-                downcast_mut(boxed_array_builder.as_mut())?;
+        // let mut boxed_array_builder = DataType::create_array_builder(data_type, input.size_hint().0)?;
+        let mut array_builder =
+            PrimitiveArrayBuilder::<T>::new(Arc::new(data_type), input.size_hint().0);
 
-            for v in input {
-                array_builder.append_value(v)?;
-            }
+        for v in input {
+            array_builder.append_value(v)?;
         }
 
-        boxed_array_builder.finish()
+        Box::new(array_builder).finish()
     }
 
     fn value_at(&self, idx: usize) -> Result<Option<T::N>> {

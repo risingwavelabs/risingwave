@@ -1,5 +1,6 @@
 use super::{Array, ArrayBuilder, ArrayIterator};
-
+use crate::error::Result;
+use protobuf::well_known_types::Any as AnyProto;
 /// `UTF8Array` is a collection of Rust UTF8 `String`s.
 #[derive(Debug)]
 pub struct UTF8Array {
@@ -30,13 +31,17 @@ impl Array for UTF8Array {
     fn iter(&self) -> ArrayIterator<'_, Self> {
         ArrayIterator::new(self)
     }
+
+    fn to_protobuf(&self) -> crate::error::Result<AnyProto> {
+        todo!()
+    }
 }
 
 impl UTF8Array {
-    pub fn from_slice(data: &[Option<&str>]) -> Self {
-        let mut builder = <Self as Array>::Builder::new(data.len());
+    pub fn from_slice(data: &[Option<&str>]) -> Result<Self> {
+        let mut builder = <Self as Array>::Builder::new(data.len())?;
         for i in data {
-            builder.append(*i);
+            builder.append(*i)?;
         }
         builder.finish()
     }
@@ -52,17 +57,17 @@ pub struct UTF8ArrayBuilder {
 impl ArrayBuilder for UTF8ArrayBuilder {
     type ArrayType = UTF8Array;
 
-    fn new(capacity: usize) -> Self {
+    fn new(capacity: usize) -> Result<Self> {
         let mut offset = Vec::with_capacity(capacity + 1);
         offset.push(0);
-        Self {
+        Ok(Self {
             offset,
             data: Vec::with_capacity(capacity),
             bitmap: Vec::with_capacity(capacity),
-        }
+        })
     }
 
-    fn append<'a>(&'a mut self, value: Option<&'a str>) {
+    fn append<'a>(&'a mut self, value: Option<&'a str>) -> Result<()> {
         match value {
             Some(x) => {
                 self.bitmap.push(true);
@@ -74,23 +79,25 @@ impl ArrayBuilder for UTF8ArrayBuilder {
                 self.offset.push(self.data.len())
             }
         }
+        Ok(())
     }
 
-    fn append_array(&mut self, other: &UTF8Array) {
+    fn append_array(&mut self, other: &UTF8Array) -> Result<()> {
         self.bitmap.extend_from_slice(&other.bitmap);
         self.data.extend_from_slice(&other.data);
         let start = *self.offset.last().unwrap();
         for other_offset in &other.offset[1..] {
             self.offset.push(*other_offset + start);
         }
+        Ok(())
     }
 
-    fn finish(self) -> UTF8Array {
-        UTF8Array {
+    fn finish(self) -> Result<UTF8Array> {
+        Ok(UTF8Array {
             bitmap: self.bitmap,
             data: self.data,
             offset: self.offset,
-        }
+        })
     }
 }
 
@@ -99,14 +106,14 @@ mod tests {
     use super::*;
     #[test]
     fn test_utf8_builder() {
-        let mut builder = UTF8ArrayBuilder::new(0);
+        let mut builder = UTF8ArrayBuilder::new(0).unwrap();
         for i in 0..100 {
             if i % 2 == 0 {
-                builder.append(Some(&format!("{}", i)));
+                builder.append(Some(&format!("{}", i))).unwrap();
             } else {
-                builder.append(None);
+                builder.append(None).unwrap();
             }
         }
-        builder.finish();
+        builder.finish().unwrap();
     }
 }

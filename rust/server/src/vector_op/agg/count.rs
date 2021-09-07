@@ -19,7 +19,7 @@ where
 
 impl AggFunctionConcrete<PrimitiveArrayBuilder<i64>> for AggCount {
     fn output_concrete(&self, builder: &mut PrimitiveArrayBuilder<i64>) -> Result<()> {
-        builder.append(Some(self.result as i64));
+        builder.append(Some(self.result as i64))?;
         Ok(())
     }
 }
