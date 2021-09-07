@@ -122,3 +122,83 @@ impl TryFrom<&ExprNode_ExprNodeType> for ArithmeticOperatorKind {
         }
     }
 }
+
+/// `Scalar` is a trait over all possible owned types in RisingWave.
+///
+/// `Scalar` is reciprocal to `ScalarRef`. Use `as_scalar_ref` to get a
+/// reference which has the same lifetime as `self`.
+pub trait Scalar: Send + Sync + 'static + Clone + std::fmt::Debug {
+    /// Type for reference of `Scalar`
+    type ScalarRefType<'a>: ScalarRef<ScalarType = Self>
+    where
+        Self: 'a;
+
+    fn as_scalar_ref(&self) -> Self::ScalarRefType<'_>;
+}
+
+/// `ScalarRef` is a trait over all possible references in RisingWave.
+///
+/// `ScalarRef` is reciprocal to `Scalar`. Use `to_owned_scalar` to get an
+/// owned scalar.
+pub trait ScalarRef: Copy + std::fmt::Debug {
+    type ScalarType;
+
+    fn to_owned_scalar(&self) -> Self::ScalarType;
+}
+
+/// `ScalarPartialOrd` allows comparison between `Scalar` and `ScalarRef`.
+///
+/// TODO: see if it is possible to implement this trait directly on `ScalarRef`.
+pub trait ScalarPartialOrd: Scalar {
+    fn scalar_cmp(&self, other: Self::ScalarRefType<'_>) -> Option<std::cmp::Ordering>;
+}
+
+// Implement `Scalar` and `ScalarRef` for `NativeType`.
+// For native type, clone is trivial, so `T` is both `Scalar` and `ScalarRef`.
+
+impl<T: NativeType> Scalar for T {
+    type ScalarRefType<'a> = T;
+
+    fn as_scalar_ref(&self) -> T {
+        *self
+    }
+}
+
+impl<T: NativeType> ScalarRef for T {
+    type ScalarType = T;
+
+    fn to_owned_scalar(&self) -> T {
+        *self
+    }
+}
+
+// Implement `Scalar` and `ScalarRef` for `String`.
+// `String` could be converted to `&str`.
+
+impl Scalar for String {
+    type ScalarRefType<'a> = &'a str;
+
+    fn as_scalar_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl ScalarRef for &str {
+    type ScalarType = String;
+
+    fn to_owned_scalar(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl ScalarPartialOrd for String {
+    fn scalar_cmp(&self, other: &str) -> Option<std::cmp::Ordering> {
+        self.as_str().partial_cmp(other)
+    }
+}
+
+impl<T: NativeType> ScalarPartialOrd for T {
+    fn scalar_cmp(&self, other: Self) -> Option<std::cmp::Ordering> {
+        self.partial_cmp(&other)
+    }
+}

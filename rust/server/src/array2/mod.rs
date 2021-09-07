@@ -6,10 +6,24 @@ mod iterator;
 mod primitive_array;
 mod utf8_array;
 
+use crate::types::{Scalar, ScalarRef};
 pub use data_chunk::{DataChunk, DataChunkRef};
 pub use iterator::ArrayIterator;
+use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder};
 pub use utf8_array::{UTF8Array, UTF8ArrayBuilder};
+
+pub type I64Array = PrimitiveArray<i64>;
+pub type I32Array = PrimitiveArray<i32>;
+pub type I16Array = PrimitiveArray<i16>;
+pub type F64Array = PrimitiveArray<f64>;
+pub type F32Array = PrimitiveArray<f32>;
+
+pub type I64ArrayBuilder = PrimitiveArrayBuilder<i64>;
+pub type I32ArrayBuilder = PrimitiveArrayBuilder<i32>;
+pub type I16ArrayBuilder = PrimitiveArrayBuilder<i16>;
+pub type F64ArrayBuilder = PrimitiveArrayBuilder<f64>;
+pub type F32ArrayBuilder = PrimitiveArrayBuilder<f32>;
 
 /// A trait over all array builders.
 ///
@@ -49,11 +63,20 @@ pub trait ArrayBuilder {
 ///
 /// For example, `PrimitiveArray` could return an `Option<u32>`, and `UTF8Array` will
 /// return an `Option<&str>`.
+///
+/// In some cases, we will need to store owned data. For example, when aggregating min
+/// and max, we need to store current maximum in the aggregator. In this case, we
+/// could use `A::OwnedItem` in aggregator struct.
 pub trait Array {
     /// A reference to item in array, as well as return type of `value_at`.
-    type RefItem<'a>
+    type RefItem<'a>: ScalarRef<ScalarType = Self::OwnedItem>
     where
         Self: 'a;
+
+    /// Owned type of item in array.
+  #[rustfmt::skip]
+  // rustfmt will incorrectly remove GAT lifetime
+  type OwnedItem: for<'a> Scalar<ScalarRefType<'a> = Self::RefItem<'a>>;
 
     /// Corresponding builder of this array.
     type Builder: ArrayBuilder<ArrayType = Self>;
@@ -100,6 +123,61 @@ impl_into! { PrimitiveArray<i64>, Int64 }
 impl_into! { PrimitiveArray<f32>, Float32 }
 impl_into! { PrimitiveArray<f64>, Float64 }
 impl_into! { UTF8Array, UTF8 }
+
+macro_rules! impl_as_to {
+    ($x:ident, $y:ident, $z:ty) => {
+        paste! {
+          impl ArrayImpl {
+            pub fn [<as_ $y>](&self) -> &$z {
+              match self {
+                Self::$x(ref array) => array,
+                _ => unimplemented!(),
+              }
+            }
+
+            pub fn [<into_ $y>](self) -> $z {
+              match self {
+                Self::$x(array) => array,
+                _ => unimplemented!(),
+              }
+            }
+          }
+        }
+    };
+}
+
+impl_as_to! { Int16, int16, I16Array }
+impl_as_to! { Int32, int32, I32Array }
+impl_as_to! { Int64, int64, I64Array }
+impl_as_to! { Float32, float32, F32Array }
+impl_as_to! { Float64, float64, F64Array }
+impl_as_to! { UTF8, utf8, UTF8Array }
+
+pub enum ArrayBuilderImpl {
+    Int16(PrimitiveArrayBuilder<i16>),
+    Int32(PrimitiveArrayBuilder<i32>),
+    Int64(PrimitiveArrayBuilder<i64>),
+    Float32(PrimitiveArrayBuilder<f32>),
+    Float64(PrimitiveArrayBuilder<f64>),
+    UTF8(UTF8ArrayBuilder),
+}
+
+impl ArrayBuilderImpl {
+    pub fn append_array(&mut self, _other: &ArrayImpl) {
+        unimplemented!()
+    }
+
+    pub fn finish(self) -> ArrayImpl {
+        match self {
+            ArrayBuilderImpl::Int16(inner) => inner.finish().into(),
+            ArrayBuilderImpl::Int32(inner) => inner.finish().into(),
+            ArrayBuilderImpl::Int64(inner) => inner.finish().into(),
+            ArrayBuilderImpl::Float32(inner) => inner.finish().into(),
+            ArrayBuilderImpl::Float64(inner) => inner.finish().into(),
+            ArrayBuilderImpl::UTF8(inner) => inner.finish().into(),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

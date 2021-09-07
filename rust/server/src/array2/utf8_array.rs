@@ -11,6 +11,7 @@ pub struct UTF8Array {
 impl Array for UTF8Array {
     type Builder = UTF8ArrayBuilder;
     type RefItem<'a> = &'a str;
+    type OwnedItem = String;
     type Iter<'a> = ArrayIterator<'a, Self>;
 
     fn value_at(&self, idx: usize) -> Option<&str> {
@@ -28,6 +29,16 @@ impl Array for UTF8Array {
 
     fn iter(&self) -> ArrayIterator<'_, Self> {
         ArrayIterator::new(self)
+    }
+}
+
+impl UTF8Array {
+    pub fn from_slice(data: &[Option<&str>]) -> Self {
+        let mut builder = <Self as Array>::Builder::new(data.len());
+        for i in data {
+            builder.append(*i);
+        }
+        builder.finish()
     }
 }
 

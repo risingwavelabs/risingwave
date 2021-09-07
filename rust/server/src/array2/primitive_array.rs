@@ -21,6 +21,7 @@ impl<T: NativeType> PrimitiveArray<T> {
 impl<T: NativeType> Array for PrimitiveArray<T> {
     type Builder = PrimitiveArrayBuilder<T>;
     type RefItem<'a> = T;
+    type OwnedItem = T;
     type Iter<'a> = ArrayIterator<'a, Self>;
 
     fn value_at(&self, idx: usize) -> Option<T> {

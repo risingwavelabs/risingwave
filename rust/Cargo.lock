@@ -1125,6 +1125,7 @@ dependencies = [
  "log",
  "log4rs",
  "num-traits",
+ "paste",
  "pb-construct",
  "pb-convert",
  "pb-convert-derive",
