@@ -8,8 +8,18 @@ pub use filter_operator::FilterOperator;
 mod local_output;
 pub use local_output::LocalOutput;
 
+mod processor;
+pub use processor::Processor;
+
+mod actor;
+pub use actor::Actor;
+
+mod data_source;
+pub use data_source::DataSource;
+
 /// `Op` represents three operations in StreamChunk.
 /// `UpdateDelete` and `UpdateInsert` always appear in pairs.
+#[derive(Clone, Copy, Debug)]
 pub enum Op {
     Insert,
     Delete,
@@ -18,7 +28,7 @@ pub enum Op {
 }
 
 /// `StreamChunk` is used to pass data between operators.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct StreamChunk {
     // TODO: Optimize using bitmap
     ops: Vec<Op>,

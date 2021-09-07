@@ -84,6 +84,7 @@ macro_rules! impl_into {
 }
 
 /// `ArrayCollection` embeds all possible array in `arary2` module.
+#[derive(Debug)]
 pub enum ArrayImpl {
     Int16(PrimitiveArray<i16>),
     Int32(PrimitiveArray<i32>),

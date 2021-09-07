@@ -1,6 +1,7 @@
 use super::{Array, ArrayBuilder, ArrayIterator};
 
 /// `UTF8Array` is a collection of Rust UTF8 `String`s.
+#[derive(Debug)]
 pub struct UTF8Array {
     offset: Vec<usize>,
     bitmap: Vec<bool>,

@@ -2,6 +2,7 @@ use super::{Array, ArrayBuilder, ArrayIterator};
 use crate::types::NativeType;
 
 /// `PrimitiveArray` is a collection of primitive types, such as `i32`, `f32`.
+#[derive(Debug)]
 pub struct PrimitiveArray<T: NativeType> {
     bitmap: Vec<bool>,
     data: Vec<T>,
