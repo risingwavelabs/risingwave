@@ -171,6 +171,25 @@ impl<T: NativeType> ScalarRef for T {
     }
 }
 
+// Implement `Scalar` and `ScalarRef` for `bool`.
+// For bool, clone is trivial, so it is both `Scalar` and `ScalarRef`.
+
+impl Scalar for bool {
+    type ScalarRefType<'a> = bool;
+
+    fn as_scalar_ref(&self) -> bool {
+        *self
+    }
+}
+
+impl ScalarRef for bool {
+    type ScalarType = bool;
+
+    fn to_owned_scalar(&self) -> bool {
+        *self
+    }
+}
+
 // Implement `Scalar` and `ScalarRef` for `String`.
 // `String` could be converted to `&str`.
 

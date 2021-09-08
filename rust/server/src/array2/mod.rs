@@ -1,5 +1,6 @@
 //! `array2` defines all in-memory representations of vectorized execution framework.
 
+mod bool_array;
 mod compact_v1;
 mod data_chunk;
 mod iterator;
@@ -8,6 +9,7 @@ mod utf8_array;
 
 use crate::error::Result;
 use crate::types::{Scalar, ScalarRef};
+pub use bool_array::{BoolArray, BoolArrayBuilder};
 pub use data_chunk::{DataChunk, DataChunkRef};
 pub use iterator::ArrayIterator;
 use paste::paste;
@@ -134,6 +136,7 @@ impl_downcast! { PrimitiveArray<i64>, Int64 }
 impl_downcast! { PrimitiveArray<f32>, Float32 }
 impl_downcast! { PrimitiveArray<f64>, Float64 }
 impl_downcast! { UTF8Array, UTF8 }
+impl_downcast! { BoolArray, Bool }
 
 /// `ArrayCollection` embeds all possible array in `arary2` module.
 #[derive(Debug)]
@@ -144,6 +147,7 @@ pub enum ArrayImpl {
     Float32(PrimitiveArray<f32>),
     Float64(PrimitiveArray<f64>),
     UTF8(UTF8Array),
+    Bool(BoolArray),
 }
 
 impl_into! { PrimitiveArray<i16>, Int16 }
@@ -152,6 +156,7 @@ impl_into! { PrimitiveArray<i64>, Int64 }
 impl_into! { PrimitiveArray<f32>, Float32 }
 impl_into! { PrimitiveArray<f64>, Float64 }
 impl_into! { UTF8Array, UTF8 }
+impl_into! { BoolArray, Bool }
 
 macro_rules! impl_as_to {
     ($x:ident, $y:ident, $z:ty) => {
@@ -181,6 +186,7 @@ impl_as_to! { Int64, int64, I64Array }
 impl_as_to! { Float32, float32, F32Array }
 impl_as_to! { Float64, float64, F64Array }
 impl_as_to! { UTF8, utf8, UTF8Array }
+impl_as_to! { Bool, bool, BoolArray}
 
 pub enum ArrayBuilderImpl {
     Int16(PrimitiveArrayBuilder<i16>),
@@ -189,6 +195,7 @@ pub enum ArrayBuilderImpl {
     Float32(PrimitiveArrayBuilder<f32>),
     Float64(PrimitiveArrayBuilder<f64>),
     UTF8(UTF8ArrayBuilder),
+    Bool(BoolArrayBuilder),
 }
 
 macro_rules! impl_all_variants {
@@ -210,6 +217,7 @@ impl ArrayBuilderImpl {
             ArrayBuilderImpl::Float32(inner) => inner.append_array(other.into()),
             ArrayBuilderImpl::Float64(inner) => inner.append_array(other.into()),
             ArrayBuilderImpl::UTF8(inner) => inner.append_array(other.into()),
+            ArrayBuilderImpl::Bool(inner) => inner.append_array(other.into()),
         }
     }
 
@@ -221,13 +229,14 @@ impl ArrayBuilderImpl {
             ArrayBuilderImpl::Float32(inner) => inner.finish()?.into(),
             ArrayBuilderImpl::Float64(inner) => inner.finish()?.into(),
             ArrayBuilderImpl::UTF8(inner) => inner.finish()?.into(),
+            ArrayBuilderImpl::Bool(inner) => inner.finish()?.into(),
         })
     }
 }
 
 impl ArrayImpl {
     pub fn len(self) -> usize {
-        impl_all_variants! { self, len, [Int16, Int32, Int64, Float32, Float64, UTF8] }
+        impl_all_variants! { self, len, [Int16, Int32, Int64, Float32, Float64, UTF8, Bool] }
     }
 
     pub fn to_protobuf(&self) -> Result<AnyProto> {
@@ -238,6 +247,7 @@ impl ArrayImpl {
             ArrayImpl::Float32(inner) => inner.to_protobuf(),
             ArrayImpl::Float64(inner) => inner.to_protobuf(),
             ArrayImpl::UTF8(inner) => inner.to_protobuf(),
+            ArrayImpl::Bool(inner) => inner.to_protobuf(),
         }
     }
 }

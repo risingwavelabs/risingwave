@@ -39,6 +39,7 @@ impl Aggregator for AggCount {
             ArrayImpl::Float32(i) => self.update_concrete(i),
             ArrayImpl::Float64(i) => self.update_concrete(i),
             ArrayImpl::UTF8(i) => self.update_concrete(i),
+            ArrayImpl::Bool(i) => self.update_concrete(i),
         }
     }
 
