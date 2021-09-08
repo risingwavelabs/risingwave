@@ -1,4 +1,4 @@
-//! Streaming Aggregators of RisingWave
+//! Streaming Aggregators
 
 mod sum;
 pub use sum::*;
@@ -38,7 +38,7 @@ pub trait StreamingAggStateImpl {
 /// To create an aggregation operator, a state should be passed along the
 /// constructor.
 ///
-/// As RisingWave processes data in chunks, it is possible that multiple update
+/// As the engine processes data in chunks, it is possible that multiple update
 /// messages could consolidate to a single row update. For example, our source
 /// emits 1000 inserts in one chunk, and we aggregates count function on that.
 /// Current `AggregationOperator` will only emit one row for a whole chunk.

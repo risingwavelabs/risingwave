@@ -122,26 +122,33 @@ impl TryFrom<&ExprNode_ExprNodeType> for ArithmeticOperatorKind {
     }
 }
 
-/// `Scalar` is a trait over all possible owned types in RisingWave.
+/// `Scalar` is a trait over all possible owned types in the evaluation
+/// framework.
 ///
 /// `Scalar` is reciprocal to `ScalarRef`. Use `as_scalar_ref` to get a
 /// reference which has the same lifetime as `self`.
 pub trait Scalar: Send + Sync + 'static + Clone + std::fmt::Debug {
     /// Type for reference of `Scalar`
-    type ScalarRefType<'a>: ScalarRef<ScalarType = Self>
+    type ScalarRefType<'a>: ScalarRef<'a, ScalarType = Self>
     where
         Self: 'a;
 
+    /// Get a reference to current scalar.
     fn as_scalar_ref(&self) -> Self::ScalarRefType<'_>;
 }
 
-/// `ScalarRef` is a trait over all possible references in RisingWave.
+/// `ScalarRef` is a trait over all possible references in the evaluation
+/// framework.
 ///
 /// `ScalarRef` is reciprocal to `Scalar`. Use `to_owned_scalar` to get an
 /// owned scalar.
-pub trait ScalarRef: Copy + std::fmt::Debug {
-    type ScalarType;
+pub trait ScalarRef<'a>: Copy + std::fmt::Debug {
+    /// `ScalarType` is the owned type of current `ScalarRef`.
+  #[rustfmt::skip]
+  // rustfmt will incorrectly remove GAT lifetime.
+  type ScalarType: Scalar<ScalarRefType<'a> = Self>;
 
+    /// Convert `ScalarRef` to an owned scalar.
     fn to_owned_scalar(&self) -> Self::ScalarType;
 }
 
@@ -152,9 +159,8 @@ pub trait ScalarPartialOrd: Scalar {
     fn scalar_cmp(&self, other: Self::ScalarRefType<'_>) -> Option<std::cmp::Ordering>;
 }
 
-// Implement `Scalar` and `ScalarRef` for `NativeType`.
-// For native type, clone is trivial, so `T` is both `Scalar` and `ScalarRef`.
-
+/// Implement `Scalar` for `NativeType`.
+/// For native type, clone is trivial, so `T` is both `Scalar` and `ScalarRef`.
 impl<T: NativeType> Scalar for T {
     type ScalarRefType<'a> = T;
 
@@ -163,7 +169,9 @@ impl<T: NativeType> Scalar for T {
     }
 }
 
-impl<T: NativeType> ScalarRef for T {
+/// Implement `ScalarRef` for `NativeType`.
+/// For native type, clone is trivial, so `T` is both `Scalar` and `ScalarRef`.
+impl<'a, T: NativeType> ScalarRef<'a> for T {
     type ScalarType = T;
 
     fn to_owned_scalar(&self) -> T {
@@ -171,28 +179,8 @@ impl<T: NativeType> ScalarRef for T {
     }
 }
 
-// Implement `Scalar` and `ScalarRef` for `bool`.
-// For bool, clone is trivial, so it is both `Scalar` and `ScalarRef`.
-
-impl Scalar for bool {
-    type ScalarRefType<'a> = bool;
-
-    fn as_scalar_ref(&self) -> bool {
-        *self
-    }
-}
-
-impl ScalarRef for bool {
-    type ScalarType = bool;
-
-    fn to_owned_scalar(&self) -> bool {
-        *self
-    }
-}
-
-// Implement `Scalar` and `ScalarRef` for `String`.
-// `String` could be converted to `&str`.
-
+/// Implement `Scalar` for `String`.
+/// `String` could be converted to `&str`.
 impl Scalar for String {
     type ScalarRefType<'a> = &'a str;
 
@@ -201,7 +189,9 @@ impl Scalar for String {
     }
 }
 
-impl ScalarRef for &str {
+/// Implement `ScalarRef` for `String`.
+/// `String` could be converted to `&str`.
+impl<'a> ScalarRef<'a> for &'a str {
     type ScalarType = String;
 
     fn to_owned_scalar(&self) -> String {
@@ -221,7 +211,26 @@ impl<T: NativeType> ScalarPartialOrd for T {
     }
 }
 
-/// `ScalarImpl` embeds all possible scalars in RisingWave.
+/// Implement `Scalar` for `bool`.
+impl Scalar for bool {
+    type ScalarRefType<'a> = bool;
+
+    fn as_scalar_ref(&self) -> bool {
+        *self
+    }
+}
+
+/// Implement `Scalar` and `ScalarRef` for `String`.
+/// `String` could be converted to `&str`.
+impl<'a> ScalarRef<'a> for bool {
+    type ScalarType = bool;
+
+    fn to_owned_scalar(&self) -> bool {
+        *self
+    }
+}
+
+/// `ScalarImpl` embeds all possible scalars in the evaluation framework.
 pub enum ScalarImpl {
     Int16(i16),
     Int32(i32),
@@ -229,4 +238,17 @@ pub enum ScalarImpl {
     Float32(f32),
     Float64(f64),
     UTF8(String),
+    Bool(bool),
+}
+
+/// `ScalarRefImpl` embeds all possible scalar references in the evaluation
+/// framework.
+pub enum ScalarRefImpl<'a> {
+    Int16(i16),
+    Int32(i32),
+    Int64(i64),
+    Float32(f32),
+    Float64(f64),
+    UTF8(&'a str),
+    Bool(bool),
 }

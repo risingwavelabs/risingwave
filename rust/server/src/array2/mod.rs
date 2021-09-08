@@ -41,7 +41,7 @@ pub type F32ArrayBuilder = PrimitiveArrayBuilder<f32>;
 /// The associated type `ArrayType` is the type of the corresponding array. It is the
 /// return type of `finish`.
 pub trait ArrayBuilder: Sized {
-    /// Corresponding `Array` of this builder
+    /// Corresponding `Array` of this builder, which is reciprocal to `ArrayBuilder.
     type ArrayType: Array<Builder = Self>;
 
     /// Create a new builder with `capacity`.
@@ -76,17 +76,18 @@ pub trait ArrayBuilder: Sized {
 /// and max, we need to store current maximum in the aggregator. In this case, we
 /// could use `A::OwnedItem` in aggregator struct.
 pub trait Array {
-    /// A reference to item in array, as well as return type of `value_at`.
-    type RefItem<'a>: ScalarRef<ScalarType = Self::OwnedItem>
+    /// A reference to item in array, as well as return type of `value_at`, which is
+    /// reciprocal to `Self::OwnedItem`.
+    type RefItem<'a>: ScalarRef<'a, ScalarType = Self::OwnedItem>
     where
         Self: 'a;
 
-    /// Owned type of item in array.
+    /// Owned type of item in array, which is reciprocal to `Self::RefItem`.
   #[rustfmt::skip]
-  // rustfmt will incorrectly remove GAT lifetime
+  // rustfmt will incorrectly remove GAT lifetime.
   type OwnedItem: for<'a> Scalar<ScalarRefType<'a> = Self::RefItem<'a>>;
 
-    /// Corresponding builder of this array.
+    /// Corresponding builder of this array, which is reciprocal to `Array`.
     type Builder: ArrayBuilder<ArrayType = Self>;
 
     /// Iterator type of this array.
@@ -107,38 +108,9 @@ pub trait Array {
     fn to_protobuf(&self) -> Result<AnyProto>;
 }
 
-macro_rules! impl_into {
-    ($x:ty, $y:ident) => {
-        impl From<$x> for ArrayImpl {
-            fn from(array: $x) -> Self {
-                Self::$y(array)
-            }
-        }
-    };
-}
-
-macro_rules! impl_downcast {
-    ($x:ty, $y:ident) => {
-        impl<'a> From<&'a ArrayImpl> for &'a $x {
-            fn from(array: &'a ArrayImpl) -> Self {
-                match array {
-                    ArrayImpl::$y(inner) => inner,
-                    _ => unimplemented!(),
-                }
-            }
-        }
-    };
-}
-
-impl_downcast! { PrimitiveArray<i16>, Int16 }
-impl_downcast! { PrimitiveArray<i32>, Int32 }
-impl_downcast! { PrimitiveArray<i64>, Int64 }
-impl_downcast! { PrimitiveArray<f32>, Float32 }
-impl_downcast! { PrimitiveArray<f64>, Float64 }
-impl_downcast! { UTF8Array, UTF8 }
-impl_downcast! { BoolArray, Bool }
-
-/// `ArrayCollection` embeds all possible array in `arary2` module.
+/// `ArrayImpl` embeds all possible array in `arary2` module.
+///
+/// Please add new array implementations to this enum.
 #[derive(Debug)]
 pub enum ArrayImpl {
     Int16(PrimitiveArray<i16>),
@@ -150,15 +122,12 @@ pub enum ArrayImpl {
     Bool(BoolArray),
 }
 
-impl_into! { PrimitiveArray<i16>, Int16 }
-impl_into! { PrimitiveArray<i32>, Int32 }
-impl_into! { PrimitiveArray<i64>, Int64 }
-impl_into! { PrimitiveArray<f32>, Float32 }
-impl_into! { PrimitiveArray<f64>, Float64 }
-impl_into! { UTF8Array, UTF8 }
-impl_into! { BoolArray, Bool }
-
-macro_rules! impl_as_to {
+/// `impl_convert` implements 4 conversions for `Array`.
+/// * `ArrayImpl -> &Array` with `impl.as_int16()`.
+/// * `ArrayImpl -> Array` with `impl.into_int16()`.
+/// * `Array -> ArrayImpl` with `From` trait.
+/// * `&ArrayImpl -> &Array` with `From` trait.
+macro_rules! impl_convert {
     ($x:ident, $y:ident, $z:ty) => {
         paste! {
           impl ArrayImpl {
@@ -176,18 +145,36 @@ macro_rules! impl_as_to {
               }
             }
           }
+
+          impl From<$z> for ArrayImpl {
+            fn from(array: $z) -> Self {
+              Self::$x(array)
+            }
+          }
+
+          impl <'a> From<&'a ArrayImpl> for &'a $z {
+            fn from(array: &'a ArrayImpl) -> Self {
+              match array {
+                ArrayImpl::$x(inner) => inner,
+                _ => unimplemented!(),
+              }
+            }
+          }
         }
     };
 }
 
-impl_as_to! { Int16, int16, I16Array }
-impl_as_to! { Int32, int32, I32Array }
-impl_as_to! { Int64, int64, I64Array }
-impl_as_to! { Float32, float32, F32Array }
-impl_as_to! { Float64, float64, F64Array }
-impl_as_to! { UTF8, utf8, UTF8Array }
-impl_as_to! { Bool, bool, BoolArray}
+impl_convert! { Int16, int16, I16Array }
+impl_convert! { Int32, int32, I32Array }
+impl_convert! { Int64, int64, I64Array }
+impl_convert! { Float32, float32, F32Array }
+impl_convert! { Float64, float64, F64Array }
+impl_convert! { UTF8, utf8, UTF8Array }
+impl_convert! { Bool, bool, BoolArray }
 
+/// `ArrayBuilderImpl` embeds all possible array in `arary2` module.
+///
+/// Please add new array builder implementations to this enum.
 pub enum ArrayBuilderImpl {
     Int16(PrimitiveArrayBuilder<i16>),
     Int32(PrimitiveArrayBuilder<i32>),
@@ -262,11 +249,11 @@ macro_rules! impl_into_builders {
     };
 }
 
-impl_into_builders! { PrimitiveArrayBuilder<i16>, Int16 }
-impl_into_builders! { PrimitiveArrayBuilder<i32>, Int32 }
-impl_into_builders! { PrimitiveArrayBuilder<i64>, Int64 }
-impl_into_builders! { PrimitiveArrayBuilder<f32>, Float32 }
-impl_into_builders! { PrimitiveArrayBuilder<f64>, Float64 }
+impl_into_builders! { I16ArrayBuilder, Int16 }
+impl_into_builders! { I32ArrayBuilder, Int32 }
+impl_into_builders! { I64ArrayBuilder, Int64 }
+impl_into_builders! { F32ArrayBuilder, Float32 }
+impl_into_builders! { F64ArrayBuilder, Float64 }
 impl_into_builders! { UTF8ArrayBuilder, UTF8 }
 
 pub type ArrayRef = Arc<ArrayImpl>;
