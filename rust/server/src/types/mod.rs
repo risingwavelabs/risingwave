@@ -142,7 +142,7 @@ pub trait Scalar: Send + Sync + 'static + Clone + std::fmt::Debug {
 ///
 /// `ScalarRef` is reciprocal to `Scalar`. Use `to_owned_scalar` to get an
 /// owned scalar.
-pub trait ScalarRef<'a>: Copy + std::fmt::Debug {
+pub trait ScalarRef<'a>: Copy + std::fmt::Debug + 'a {
     /// `ScalarType` is the owned type of current `ScalarRef`.
   #[rustfmt::skip]
   // rustfmt will incorrectly remove GAT lifetime.

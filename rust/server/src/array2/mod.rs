@@ -75,7 +75,7 @@ pub trait ArrayBuilder: Sized {
 /// In some cases, we will need to store owned data. For example, when aggregating min
 /// and max, we need to store current maximum in the aggregator. In this case, we
 /// could use `A::OwnedItem` in aggregator struct.
-pub trait Array {
+pub trait Array: 'static {
     /// A reference to item in array, as well as return type of `value_at`, which is
     /// reciprocal to `Self::OwnedItem`.
     type RefItem<'a>: ScalarRef<'a, ScalarType = Self::OwnedItem>

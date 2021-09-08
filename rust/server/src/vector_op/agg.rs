@@ -1,27 +1,10 @@
 use crate::array::{ArrayBuilder as ArrayBuilderV1, ArrayRef as ArrayRefV1};
 
 use crate::array2::*;
-use crate::error::Result;
+use crate::error::{ErrorCode, Result};
 use crate::expr::AggKind;
 use crate::types::*;
-mod compare;
-use compare::*;
-mod count;
-use count::*;
-mod sum;
-use sum::*;
-
-/// `AggState` is the typed primitive for aggragation on array.
-pub trait AggStateConcrete<I: Array> {
-    /// `update` the aggragator with `Array` with input.
-    fn update_concrete(&mut self, input: &I) -> Result<()>;
-}
-
-/// `AggFunction` pushes the result into an array builder.
-pub trait AggFunctionConcrete<O: ArrayBuilder> {
-    /// `output` the current result to an array builder.
-    fn output_concrete(&self, builder: &mut O) -> Result<()>;
-}
+use std::marker::PhantomData;
 
 /// An `Aggregator` supports `update` data and `output` result.
 pub trait Aggregator: Send + 'static {
@@ -60,47 +43,210 @@ pub fn create_agg_state_v2(
         agg_type,
         return_type.data_type_kind(),
     ) {
-        (_, AggKind::Count, DataTypeKind::Int64) => Box::new(AggCount::new()),
+        // TODO(xiangjin): Ideally count non-null on Array without checking its type.
+        (DataTypeKind::Int16, AggKind::Count, DataTypeKind::Int64) => {
+            Box::new(GeneralAgg::<I16Array, _, _>::new(count))
+        }
+        (DataTypeKind::Int32, AggKind::Count, DataTypeKind::Int64) => {
+            Box::new(GeneralAgg::<I32Array, _, _>::new(count))
+        }
+        (DataTypeKind::Int64, AggKind::Count, DataTypeKind::Int64) => {
+            Box::new(GeneralAgg::<I64Array, _, _>::new(count))
+        }
+        (DataTypeKind::Float32, AggKind::Count, DataTypeKind::Int64) => {
+            Box::new(GeneralAgg::<F32Array, _, _>::new(count))
+        }
+        (DataTypeKind::Float64, AggKind::Count, DataTypeKind::Int64) => {
+            Box::new(GeneralAgg::<F64Array, _, _>::new(count))
+        }
+        (DataTypeKind::Char, AggKind::Count, DataTypeKind::Int64) => {
+            Box::new(GeneralAgg::<UTF8Array, _, _>::new(count_str))
+        }
+        (DataTypeKind::Boolean, AggKind::Count, DataTypeKind::Int64) => {
+            Box::new(GeneralAgg::<BoolArray, _, _>::new(count))
+        }
         (DataTypeKind::Int16, AggKind::Sum, DataTypeKind::Int64) => {
-            Box::new(AggSum::<I64Array, I16Array, PrimitiveSum<_, _>>::new())
+            Box::new(GeneralAgg::<I16Array, _, I64Array>::new(sum))
         }
         (DataTypeKind::Int32, AggKind::Sum, DataTypeKind::Int64) => {
-            Box::new(AggSum::<I64Array, I32Array, PrimitiveSum<_, _>>::new())
+            Box::new(GeneralAgg::<I32Array, _, I64Array>::new(sum))
         }
-        // (DataTypeKind::Int64, AggKind::Sum, DataTypeKind::Decimal) => Ok(SumI64Array::new()),
+        // (DataTypeKind::Int64, AggKind::Sum, DataTypeKind::Decimal) => todo!(),
         (DataTypeKind::Float32, AggKind::Sum, DataTypeKind::Float32) => {
-            Box::new(AggSum::<F32Array, F32Array, PrimitiveSum<_, _>>::new())
+            Box::new(GeneralAgg::<F32Array, _, F32Array>::new(sum))
         }
         (DataTypeKind::Float64, AggKind::Sum, DataTypeKind::Float64) => {
-            Box::new(AggSum::<F64Array, F64Array, PrimitiveSum<_, _>>::new())
+            Box::new(GeneralAgg::<F64Array, _, F64Array>::new(sum))
         }
         // (DataTypeKind::Decimal, AggKind::Sum, DataTypeKind::Decimal) => {
-        //   Ok(DecimalAgg::new(sum_decimal))
+        //   todo!()
         // }
         (DataTypeKind::Int16, AggKind::Min, DataTypeKind::Int16) => {
-            Box::new(AggCompare::<I16Array, SimpleCompareMin<_>>::new())
+            Box::new(GeneralAgg::<I16Array, _, I16Array>::new(min))
         }
         (DataTypeKind::Int32, AggKind::Min, DataTypeKind::Int32) => {
-            Box::new(AggCompare::<I32Array, SimpleCompareMin<_>>::new())
+            Box::new(GeneralAgg::<I32Array, _, I32Array>::new(min))
         }
         (DataTypeKind::Int64, AggKind::Min, DataTypeKind::Int64) => {
-            Box::new(AggCompare::<I64Array, SimpleCompareMin<_>>::new())
+            Box::new(GeneralAgg::<I64Array, _, I64Array>::new(min))
         }
         (DataTypeKind::Float32, AggKind::Min, DataTypeKind::Float32) => {
-            Box::new(AggCompare::<F32Array, SimpleCompareMin<_>>::new())
+            Box::new(GeneralAgg::<F32Array, _, F32Array>::new(min))
         }
         (DataTypeKind::Float64, AggKind::Min, DataTypeKind::Float64) => {
-            Box::new(AggCompare::<F64Array, SimpleCompareMin<_>>::new())
+            Box::new(GeneralAgg::<F64Array, _, F64Array>::new(min))
         }
         // (DataTypeKind::Decimal, AggKind::Min, DataTypeKind::Decimal) => {
-        //   Ok(DecimalAgg::new(min_decimal))
+        //   todo!()
         // }
         (DataTypeKind::Char, AggKind::Min, DataTypeKind::Char) => {
-            Box::new(AggCompare::<UTF8Array, SimpleCompareMin<_>>::new())
+            Box::new(GeneralAgg::<UTF8Array, _, UTF8Array>::new(min_str))
         }
         _ => unimplemented!(),
     };
     Ok(state)
+}
+
+struct GeneralAgg<T, F, R>
+where
+    T: Array,
+    F: Send + for<'a> RTFn<'a, T, R>,
+    R: Array,
+{
+    result: Option<R::OwnedItem>,
+    f: F,
+    _phantom: PhantomData<T>,
+}
+impl<T, F, R> GeneralAgg<T, F, R>
+where
+    T: Array,
+    F: Send + for<'a> RTFn<'a, T, R>,
+    R: Array,
+{
+    fn new(f: F) -> Self {
+        Self {
+            result: None,
+            f,
+            _phantom: PhantomData,
+        }
+    }
+    fn update_concrete(&mut self, input: &T) -> Result<()> {
+        let r = input
+            .iter()
+            .fold(self.result.as_ref().map(|x| x.as_scalar_ref()), &mut self.f)
+            .map(|x| x.to_owned_scalar());
+        self.result = r;
+        Ok(())
+    }
+    fn output_concrete(&self, builder: &mut R::Builder) -> Result<()> {
+        builder.append(self.result.as_ref().map(|x| x.as_scalar_ref()))
+    }
+}
+/// Essentially `RTFn` is an alias of the specific Fn. It was aliased not to
+/// shorten the `where` clause of `GeneralAgg`, but to workaround an compiler
+/// error[E0582]: binding for associated type `Output` references lifetime `'a`,
+/// which does not appear in the trait input types.
+trait RTFn<'a, T, R>:
+    Fn(Option<R::RefItem<'a>>, Option<T::RefItem<'a>>) -> Option<R::RefItem<'a>>
+where
+    T: Array,
+    R: Array,
+{
+}
+
+impl<'a, T, R, Z> RTFn<'a, T, R> for Z
+where
+    T: Array,
+    R: Array,
+    Z: Fn(Option<R::RefItem<'a>>, Option<T::RefItem<'a>>) -> Option<R::RefItem<'a>>,
+{
+}
+
+macro_rules! impl_aggregator {
+    ($input:ty, $input_variant:ident, $result:ty, $result_variant:ident) => {
+        impl<F> Aggregator for GeneralAgg<$input, F, $result>
+        where
+            F: 'static + Send + for<'a> RTFn<'a, $input, $result>,
+        {
+            fn update(&mut self, input: &ArrayImpl) -> Result<()> {
+                if let ArrayImpl::$input_variant(i) = input {
+                    self.update_concrete(i)
+                } else {
+                    Err(ErrorCode::InternalError(format!(
+                        "Input fail to match {}.",
+                        stringify!($input_variant)
+                    ))
+                    .into())
+                }
+            }
+            fn output(&self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+                if let ArrayBuilderImpl::$result_variant(b) = builder {
+                    self.output_concrete(b)
+                } else {
+                    Err(ErrorCode::InternalError(format!(
+                        "Builder fail to match {}.",
+                        stringify!($result_variant)
+                    ))
+                    .into())
+                }
+            }
+        }
+    };
+}
+impl_aggregator! { I16Array, Int16, I16Array, Int16 }
+impl_aggregator! { I32Array, Int32, I32Array, Int32 }
+impl_aggregator! { I64Array, Int64, I64Array, Int64 }
+impl_aggregator! { F32Array, Float32, F32Array, Float32 }
+impl_aggregator! { F64Array, Float64, F64Array, Float64 }
+impl_aggregator! { UTF8Array, UTF8, UTF8Array, UTF8 }
+impl_aggregator! { I16Array, Int16, I64Array, Int64 }
+impl_aggregator! { I32Array, Int32, I64Array, Int64 }
+impl_aggregator! { F32Array, Float32, I64Array, Int64 }
+impl_aggregator! { F64Array, Float64, I64Array, Int64 }
+impl_aggregator! { UTF8Array, UTF8, I64Array, Int64 }
+impl_aggregator! { BoolArray, Bool, I64Array, Int64 }
+
+use std::convert::From;
+use std::ops::Add;
+
+fn sum<R, T>(result: Option<R>, input: Option<T>) -> Option<R>
+where
+    R: From<T> + Add<Output = R> + Copy,
+{
+    match (result, input) {
+        (_, None) => result,
+        (None, Some(i)) => Some(R::from(i)),
+        (Some(r), Some(i)) => Some(r + R::from(i)),
+    }
+}
+
+use std::cmp::PartialOrd;
+
+fn min<'a, T>(result: Option<T>, input: Option<T>) -> Option<T>
+where
+    T: ScalarRef<'a> + PartialOrd,
+{
+    match (result, input) {
+        (None, _) => input,
+        (_, None) => result,
+        (Some(r), Some(i)) => Some(if r < i { r } else { i }),
+    }
+}
+
+fn min_str<'a>(r: Option<&'a str>, i: Option<&'a str>) -> Option<&'a str> {
+    min(r, i)
+}
+
+fn count<T>(result: Option<i64>, input: Option<T>) -> Option<i64> {
+    match (result, input) {
+        (_, None) => result,
+        (None, Some(_)) => Some(1),
+        (Some(r), Some(_)) => Some(r + 1),
+    }
+}
+
+fn count_str(r: Option<i64>, i: Option<&str>) -> Option<i64> {
+    count(r, i)
 }
 
 pub fn create_agg_state(
