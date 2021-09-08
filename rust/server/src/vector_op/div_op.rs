@@ -1,68 +1,57 @@
+use crate::array2::{Array, ArrayBuilder, PrimitiveArray, PrimitiveArrayBuilder};
 use crate::error::ErrorCode::NumericValueOutOfRange;
 use crate::error::{Result, RwError};
 
-macro_rules! div_integer_types {
-    ($fn_name: ident, $left_type: ty, $right_type: ty, $max_type: ty) => {
-        pub fn $fn_name(
-            v1: Option<$left_type>,
-            v2: Option<$right_type>,
-        ) -> Result<Option<$max_type>> {
-            match (v1, v2) {
-                (Some(l1), Some(l2)) => match (l1 as $max_type).checked_div(l2 as $max_type) {
-                    Some(v) => Ok(Some(v)),
-                    None => Err(RwError::from(NumericValueOutOfRange)),
-                },
-                _ => Ok(None),
-            }
-        }
-    };
+use crate::types::NativeType;
+
+/// Checked divide two `PrimitiveArray` for integers. Both array must have the same size.
+pub fn vector_div_primitive_integer<T1, T2, T3>(
+    a: &PrimitiveArray<T1>,
+    b: &PrimitiveArray<T2>,
+) -> Result<PrimitiveArray<T3>>
+where
+    T1: NativeType + num_traits::AsPrimitive<T3>,
+    T2: NativeType + num_traits::AsPrimitive<T3>,
+    T3: NativeType + num_traits::CheckedDiv,
+{
+    let mut builder = PrimitiveArrayBuilder::<T3>::new(a.len())?;
+    for (a, b) in a.iter().zip(b.iter()) {
+        let item = match (a, b) {
+            (Some(a), Some(b)) => match a.as_().checked_div(&b.as_()) {
+                Some(c) => Some(c),
+                None => return Err(RwError::from(NumericValueOutOfRange)),
+            },
+            _ => None,
+        };
+        builder.append(item)?;
+    }
+    builder.finish()
 }
 
-div_integer_types!(div_i16_i16, i16, i16, i16);
-div_integer_types!(div_i32_i16, i32, i16, i32);
-div_integer_types!(div_i64_i16, i64, i16, i64);
-div_integer_types!(div_i16_i32, i16, i32, i32);
-div_integer_types!(div_i32_i32, i32, i32, i32);
-div_integer_types!(div_i64_i32, i64, i32, i64);
-div_integer_types!(div_i16_i64, i16, i64, i64);
-div_integer_types!(div_i32_i64, i32, i64, i64);
-div_integer_types!(div_i64_i64, i64, i64, i64);
-
-macro_rules! div_float_types {
-    ($fn_name: ident, $left_type: ty, $right_type: ty, $max_type: ty) => {
-        pub fn $fn_name(
-            v1: Option<$left_type>,
-            v2: Option<$right_type>,
-        ) -> Result<Option<$max_type>> {
-            match (v1, v2) {
-                (Some(l1), Some(l2)) => {
-                    let v = (l1 as $max_type) / (l2 as $max_type);
-                    let check = (v.is_finite() && !v.is_nan());
-                    match check {
-                        true => Ok(Some(v)),
-                        false => Err(RwError::from(NumericValueOutOfRange)),
-                    }
+/// Checked divide two `PrimitiveArray` for floats. Both array must have the same size.
+pub fn vector_div_primitive_float<T1, T2, T3>(
+    a: &PrimitiveArray<T1>,
+    b: &PrimitiveArray<T2>,
+) -> Result<PrimitiveArray<T3>>
+where
+    T1: NativeType + num_traits::AsPrimitive<T3>,
+    T2: NativeType + num_traits::AsPrimitive<T3>,
+    T3: NativeType + std::ops::Div + num_traits::Float,
+{
+    let mut builder = PrimitiveArrayBuilder::<T3>::new(a.len())?;
+    for (a, b) in a.iter().zip(b.iter()) {
+        let item = match (a, b) {
+            (Some(a), Some(b)) => {
+                let v = a.as_() / b.as_();
+                let check = v.is_finite() && !v.is_nan();
+                match check {
+                    true => Some(v),
+                    false => return Err(RwError::from(NumericValueOutOfRange)),
                 }
-                _ => Ok(None),
             }
-        }
-    };
+            _ => None,
+        };
+        builder.append(item)?;
+    }
+    builder.finish()
 }
-
-div_float_types!(div_i16_f32, i16, f32, f32);
-div_float_types!(div_i32_f32, i32, f32, f32);
-div_float_types!(div_i64_f32, i64, f32, f32);
-div_float_types!(div_f32_f32, f32, f32, f32);
-div_float_types!(div_f32_i16, f32, i16, f32);
-div_float_types!(div_f32_i32, f32, i32, f32);
-div_float_types!(div_f32_i64, f32, i64, f32);
-
-div_float_types!(div_i16_f64, i16, f64, f64);
-div_float_types!(div_i32_f64, i32, f64, f64);
-div_float_types!(div_i64_f64, i64, f64, f64);
-div_float_types!(div_f32_f64, f32, f64, f64);
-div_float_types!(div_f64_f64, f64, f64, f64);
-div_float_types!(div_f64_i16, f64, i16, f64);
-div_float_types!(div_f64_i32, f64, i32, f64);
-div_float_types!(div_f64_i64, f64, i64, f64);
-div_float_types!(div_f64_f32, f64, f32, f64);

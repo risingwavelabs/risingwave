@@ -32,7 +32,7 @@ fn vector_add(left_array: ArrayRef, right_array: ArrayRef) -> Result<ArrayRef> {
 
     use ArrayImpl::*;
 
-    let result: ArrayImpl = match (left, right) {
+    let result: ArrayImpl = match (&left, &right) {
         // Int16, Int32, Int64
         (Int16(l), Int16(r)) => vector_add_primitive_integer::<_, _, i16>(l, r)?.into(),
         (Int16(l), Int32(r)) => vector_add_primitive_integer::<_, _, i32>(l, r)?.into(),
