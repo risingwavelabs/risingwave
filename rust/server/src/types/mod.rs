@@ -137,6 +137,16 @@ pub trait Scalar: Send + Sync + 'static + Clone + std::fmt::Debug {
     fn as_scalar_ref(&self) -> Self::ScalarRefType<'_>;
 }
 
+/// Convert an `Option<Scalar>` to corresponding `Option<ScalarRef>`.
+pub fn option_as_scalar_ref<S: Scalar>(scalar: &Option<S>) -> Option<S::ScalarRefType<'_>> {
+    scalar.as_ref().map(|x| x.as_scalar_ref())
+}
+
+/// Convert an `Option<ScalarRef>` to corresponding `Option<Scalar>`.
+pub fn option_to_owned_scalar<S: Scalar>(scalar: &Option<S::ScalarRefType<'_>>) -> Option<S> {
+    scalar.map(|x| x.to_owned_scalar())
+}
+
 /// `ScalarRef` is a trait over all possible references in the evaluation
 /// framework.
 ///

@@ -4,6 +4,7 @@ mod bool_array;
 mod compact_v1;
 mod data_chunk;
 mod iterator;
+mod macros;
 pub mod primitive_array;
 mod utf8_array;
 
