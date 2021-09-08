@@ -1,6 +1,5 @@
-use crate::array2::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk, PrimitiveArrayBuilder,
-};
+use crate::array2::column::Column;
+use crate::array2::{Array, ArrayBuilder, ArrayBuilderImpl, DataChunk, PrimitiveArrayBuilder};
 use crate::catalog::TableId;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
@@ -8,7 +7,8 @@ use crate::executor::ExecutorResult::Done;
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::expr::{build_from_proto, BoxedExpression};
 use crate::storage::StorageManagerRef;
-use crate::types::DataType;
+
+use crate::types::{DataType, Int32Type};
 use pb_convert::FromProtobuf;
 use protobuf::Message;
 use risingwave_proto::plan::{InsertValueNode, PlanNode_PlanNodeType};
@@ -59,7 +59,10 @@ impl Executor for InsertValuesExecutor {
         // is same size as input chunk cardinality.
         let one_row_chunk = DataChunk::builder()
             .cardinality(1)
-            .arrays(vec![Arc::new(one_row_array.into())])
+            .columns(vec![Column {
+                array: Arc::new(one_row_array.into()),
+                data_type: Arc::new(Int32Type::new(false)),
+            }])
             .build();
 
         for row in &mut self.rows {
@@ -73,17 +76,21 @@ impl Executor for InsertValuesExecutor {
                 .collect::<Result<Vec<usize>>>()?;
         }
 
-        let arrays = array_builders.into_iter().try_fold(
-            Vec::new(),
-            |mut vec, b| -> Result<Vec<ArrayRef>> {
-                b.finish().map(|arr| vec.push(Arc::new(arr)))?;
-                Ok(vec)
-            },
-        )?;
+        let columns = array_builders
+            .into_iter()
+            .zip(self.rows[0].iter())
+            .map(|(builder, expr)| {
+                builder.finish().map(|arr| Column {
+                    array: Arc::new(arr),
+                    data_type: expr.return_type_ref(),
+                })
+                // Column {array: Arc::new(builder.finish().map_err(|_| InternalError(format!("Failed to parse table id: {:?}", )))), data_type: expr[0].return_type_ref()}
+            })
+            .collect::<Result<Vec<Column>>>()?;
 
         let chunk = DataChunk::builder()
             .cardinality(cardinality)
-            .arrays(arrays)
+            .columns(columns)
             .build();
 
         let rows_inserted = self
@@ -100,7 +107,10 @@ impl Executor for InsertValuesExecutor {
             let array = array_builder.finish()?;
             let ret_chunk = DataChunk::builder()
                 .cardinality(array.len())
-                .arrays(vec![Arc::new(array.into())])
+                .columns(vec![Column {
+                    array: Arc::new(array.into()),
+                    data_type: Arc::new(Int32Type::new(false)),
+                }])
                 .build();
 
             self.executed = true;

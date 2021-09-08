@@ -1,5 +1,6 @@
 use super::BoxedExecutor;
-use crate::array2::{ArrayRef, DataChunk};
+use crate::array2::column::Column;
+use crate::array2::DataChunk;
 use crate::error::ErrorCode::ProtobufError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::executor::ExecutorResult::{Batch, Done};
@@ -27,14 +28,19 @@ impl Executor for ProjectionExecutor {
         match child_output {
             Batch(child_chunk) => {
                 let cardinality = child_chunk.cardinality();
-                let arrays: Vec<ArrayRef> = self
+                let arrays: Vec<Column> = self
                     .expr
                     .iter_mut()
-                    .map(|expr| expr.eval(&child_chunk))
-                    .collect::<Result<Vec<ArrayRef>>>()?;
+                    .map(|expr| {
+                        expr.eval(&child_chunk).map(|arr| Column {
+                            array: arr,
+                            data_type: expr.return_type_ref(),
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?;
                 let ret = DataChunk::builder()
                     .cardinality(cardinality)
-                    .arrays(arrays)
+                    .columns(arrays)
                     .build();
                 Ok(Batch(Arc::new(ret)))
             }

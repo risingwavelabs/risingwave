@@ -1,6 +1,7 @@
 //! `array2` defines all in-memory representations of vectorized execution framework.
 
 mod bool_array;
+pub(crate) mod column;
 mod compact_v1;
 mod data_chunk;
 mod iterator;
@@ -8,6 +9,7 @@ mod macros;
 pub mod primitive_array;
 mod utf8_array;
 
+use crate::buffer::Bitmap;
 use crate::error::Result;
 use crate::types::{Scalar, ScalarRef};
 pub use bool_array::{BoolArray, BoolArrayBuilder};
@@ -15,7 +17,8 @@ pub use data_chunk::{DataChunk, DataChunkRef};
 pub use iterator::ArrayIterator;
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder};
-use protobuf::well_known_types::Any as AnyProto;
+
+use risingwave_proto::data::Buffer;
 use std::sync::Arc;
 pub use utf8_array::{UTF8Array, UTF8ArrayBuilder};
 
@@ -106,7 +109,13 @@ pub trait Array: 'static {
     fn iter(&self) -> Self::Iter<'_>;
 
     // TODO: to_proto trait
-    fn to_protobuf(&self) -> Result<AnyProto>;
+    fn to_protobuf(&self) -> Result<Vec<Buffer>>;
+
+    fn null_bitmap(&self) -> &Bitmap;
+
+    fn is_null(&self, idx: usize) -> bool {
+        self.null_bitmap().is_set(idx).map(|v| !v).unwrap()
+    }
 }
 
 /// `ArrayImpl` embeds all possible array in `arary2` module.
@@ -224,10 +233,23 @@ impl ArrayBuilderImpl {
 
 impl ArrayImpl {
     pub fn len(self) -> usize {
+        // FIXME: now the concrete array use data to get len(). It should be compute from bitmap.
         impl_all_variants! { self, len, [Int16, Int32, Int64, Float32, Float64, UTF8, Bool] }
     }
 
-    pub fn to_protobuf(&self) -> Result<AnyProto> {
+    pub fn null_bitmap(&self) -> &Bitmap {
+        match self {
+            ArrayImpl::Int16(inner) => inner.null_bitmap(),
+            ArrayImpl::Int32(inner) => inner.null_bitmap(),
+            ArrayImpl::Int64(inner) => inner.null_bitmap(),
+            ArrayImpl::Float32(inner) => inner.null_bitmap(),
+            ArrayImpl::Float64(inner) => inner.null_bitmap(),
+            ArrayImpl::UTF8(inner) => inner.null_bitmap(),
+            ArrayImpl::Bool(inner) => inner.null_bitmap(),
+        }
+    }
+
+    pub fn to_protobuf(&self) -> Result<Vec<Buffer>> {
         match self {
             ArrayImpl::Int16(inner) => inner.to_protobuf(),
             ArrayImpl::Int32(inner) => inner.to_protobuf(),

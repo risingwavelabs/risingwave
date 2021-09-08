@@ -7,7 +7,6 @@ use super::{Op, Output, StreamChunk, StreamOperator, UnaryStreamOperator};
 use crate::array2::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl};
 use crate::buffer::Bitmap;
 use crate::error::Result;
-use std::sync::Arc;
 
 pub type Ops<'a> = &'a [Op];
 
@@ -68,7 +67,7 @@ impl UnaryStreamOperator for AggregationOperator {
     fn consume(&mut self, chunk: StreamChunk) -> Result<()> {
         let StreamChunk {
             ops,
-            arrays,
+            columns: arrays,
             visibility,
             cardinality: _,
         } = chunk;
@@ -79,28 +78,28 @@ impl UnaryStreamOperator for AggregationOperator {
             self.state.get_output(&mut builder)?;
         }
         self.state
-            .apply_batch(&ops, visibility.as_ref(), &arrays[0])?;
+            .apply_batch(&ops, visibility.as_ref(), &arrays[0].array)?;
         self.state.get_output(&mut builder)?;
 
-        let chunk;
-        if self.first_data {
-            chunk = StreamChunk {
-                ops: vec![Op::Insert],
-                visibility: None,
-                cardinality: 1,
-                arrays: vec![Arc::new(builder.finish()?)],
-            };
-        } else {
-            chunk = StreamChunk {
-                ops: vec![Op::UpdateDelete, Op::UpdateInsert],
-                visibility: None,
-                cardinality: 2,
-                arrays: vec![Arc::new(builder.finish()?)],
-            };
-        }
-        assert_eq!(chunk.arrays.len(), chunk.cardinality);
-
-        self.output.collect(chunk)?;
+        // let chunk;
+        // if self.first_data {
+        //   chunk = StreamChunk {
+        //     ops: vec![Op::Insert],
+        //     visibility: None,
+        //     cardinality: 1,
+        //     arrays: vec![Column {array: Arc::new(builder.finish()?), data}],
+        //   };
+        // } else {
+        //   chunk = StreamChunk {
+        //     ops: vec![Op::UpdateDelete, Op::UpdateInsert],
+        //     visibility: None,
+        //     cardinality: 2,
+        //     arrays: vec![Arc::new(builder.finish()?)],
+        //   };
+        // }
+        // assert_eq!(chunk.arrays.len(), chunk.cardinality);
+        //
+        // self.output.collect(chunk)?;
         Ok(())
     }
 }

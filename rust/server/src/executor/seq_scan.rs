@@ -1,4 +1,5 @@
-use crate::array2::{ArrayRef, DataChunk, DataChunkRef};
+use crate::array2::column::Column;
+use crate::array2::{DataChunk, DataChunkRef};
 use crate::catalog::TableId;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
@@ -66,13 +67,13 @@ impl Executor for SeqScanExecutor {
         let arrays = self
             .column_idxes
             .iter()
-            .map(|idx| cur_chunk.array_at(*idx))
-            .collect::<Result<Vec<ArrayRef>>>()?;
+            .map(|idx| cur_chunk.column_at(*idx))
+            .collect::<Result<Vec<Column>>>()?;
 
         // TODO: visibility map here
         let ret = DataChunk::builder()
             .cardinality(cur_chunk.cardinality())
-            .arrays(arrays)
+            .columns(arrays)
             .build();
 
         self.chunk_idx += 1;

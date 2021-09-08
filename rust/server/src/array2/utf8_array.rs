@@ -1,11 +1,14 @@
 use super::{Array, ArrayBuilder, ArrayIterator};
+use crate::buffer::Bitmap;
 use crate::error::Result;
-use protobuf::well_known_types::Any as AnyProto;
+
+use risingwave_proto::data::Buffer;
+
 /// `UTF8Array` is a collection of Rust UTF8 `String`s.
 #[derive(Debug)]
 pub struct UTF8Array {
     offset: Vec<usize>,
-    bitmap: Vec<bool>,
+    bitmap: Bitmap,
     data: Vec<u8>,
 }
 
@@ -16,7 +19,7 @@ impl Array for UTF8Array {
     type Iter<'a> = ArrayIterator<'a, Self>;
 
     fn value_at(&self, idx: usize) -> Option<&str> {
-        if self.bitmap[idx] {
+        if !self.is_null(idx) {
             let data_slice = &self.data[self.offset[idx]..self.offset[idx + 1]];
             Some(unsafe { std::str::from_utf8_unchecked(data_slice) })
         } else {
@@ -25,15 +28,19 @@ impl Array for UTF8Array {
     }
 
     fn len(&self) -> usize {
-        self.bitmap.len()
+        self.offset.len() - 1
     }
 
     fn iter(&self) -> ArrayIterator<'_, Self> {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> crate::error::Result<AnyProto> {
+    fn to_protobuf(&self) -> crate::error::Result<Vec<Buffer>> {
         todo!()
+    }
+
+    fn null_bitmap(&self) -> &Bitmap {
+        &self.bitmap
     }
 }
 
@@ -83,7 +90,7 @@ impl ArrayBuilder for UTF8ArrayBuilder {
     }
 
     fn append_array(&mut self, other: &UTF8Array) -> Result<()> {
-        self.bitmap.extend_from_slice(&other.bitmap);
+        self.bitmap.extend(other.bitmap.iter());
         self.data.extend_from_slice(&other.data);
         let start = *self.offset.last().unwrap();
         for other_offset in &other.offset[1..] {
@@ -94,7 +101,7 @@ impl ArrayBuilder for UTF8ArrayBuilder {
 
     fn finish(self) -> Result<UTF8Array> {
         Ok(UTF8Array {
-            bitmap: self.bitmap,
+            bitmap: Bitmap::from_vec(self.bitmap)?,
             data: self.data,
             offset: self.offset,
         })

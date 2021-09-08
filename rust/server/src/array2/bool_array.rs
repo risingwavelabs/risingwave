@@ -1,10 +1,11 @@
 use super::{Array, ArrayBuilder, ArrayIterator};
+use crate::buffer::Bitmap;
 use crate::error::Result;
-use protobuf::well_known_types::Any as AnyProto;
 
+use risingwave_proto::data::Buffer;
 #[derive(Debug)]
 pub struct BoolArray {
-    bitmap: Vec<bool>,
+    bitmap: Bitmap,
     data: Vec<bool>,
 }
 
@@ -25,7 +26,7 @@ impl Array for BoolArray {
     type Iter<'a> = ArrayIterator<'a, Self>;
 
     fn value_at(&self, idx: usize) -> Option<bool> {
-        if self.bitmap[idx] {
+        if !self.is_null(idx) {
             Some(self.data[idx])
         } else {
             None
@@ -33,15 +34,19 @@ impl Array for BoolArray {
     }
 
     fn len(&self) -> usize {
-        self.bitmap.len()
+        self.data.len()
     }
 
     fn iter(&self) -> Self::Iter<'_> {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> Result<AnyProto> {
+    fn to_protobuf(&self) -> Result<Vec<Buffer>> {
         todo!()
+    }
+
+    fn null_bitmap(&self) -> &Bitmap {
+        &self.bitmap
     }
 }
 
@@ -76,14 +81,14 @@ impl ArrayBuilder for BoolArrayBuilder {
     }
 
     fn append_array(&mut self, other: &BoolArray) -> Result<()> {
-        self.bitmap.extend_from_slice(&other.bitmap);
+        self.bitmap.extend(other.bitmap.iter());
         self.data.extend_from_slice(&other.data);
         Ok(())
     }
 
     fn finish(self) -> Result<BoolArray> {
         Ok(BoolArray {
-            bitmap: self.bitmap,
+            bitmap: Bitmap::from_vec(self.bitmap)?,
             data: self.data,
         })
     }

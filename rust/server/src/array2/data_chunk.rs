@@ -1,9 +1,9 @@
-use super::ArrayImpl;
+use crate::array2::column::Column;
 
-use crate::array2::ArrayRef;
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
+
 use risingwave_proto::data::DataChunk as DataChunkProto;
 use std::sync::Arc;
 use typed_builder::TypedBuilder;
@@ -13,7 +13,8 @@ use typed_builder::TypedBuilder;
 pub struct DataChunk {
     /// Use Vec to be consistent with previous array::DataChunk
     #[builder(default)]
-    pub(crate) arrays: Vec<Arc<ArrayImpl>>,
+    pub(crate) columns: Vec<Column>,
+    // pub(crate) arrays: Vec<Arc<ArrayImpl>>,
     pub(crate) cardinality: usize,
     #[builder(default, setter(strip_option))]
     pub(crate) visibility: Option<Bitmap>,
@@ -30,7 +31,7 @@ impl DataChunk {
 
     pub fn with_visibility(self, visibility: Bitmap) -> Self {
         DataChunk {
-            arrays: self.arrays,
+            columns: self.columns,
             cardinality: self.cardinality,
             visibility: Some(visibility),
         }
@@ -40,11 +41,11 @@ impl DataChunk {
         self.visibility = Some(visibility);
     }
 
-    pub fn array_at(&self, idx: usize) -> Result<ArrayRef> {
-        self.arrays.get(idx).cloned().ok_or_else(|| {
+    pub fn column_at(&self, idx: usize) -> Result<Column> {
+        self.columns.get(idx).cloned().ok_or_else(|| {
             InternalError(format!(
                 "Invalid array index: {}, chunk array count: {}",
-                self.arrays.len(),
+                self.columns.len(),
                 idx
             ))
             .into()
@@ -55,7 +56,7 @@ impl DataChunk {
         ensure!(self.visibility.is_none());
         let mut proto = DataChunkProto::new();
         proto.set_cardinality(self.cardinality as u32);
-        for arr in self.arrays.clone() {
+        for arr in &self.columns {
             proto.mut_columns().push(arr.to_protobuf()?);
         }
 
@@ -67,7 +68,7 @@ impl DataChunk {
 impl Default for DataChunk {
     fn default() -> Self {
         DataChunk {
-            arrays: vec![],
+            columns: vec![],
             cardinality: 0,
             visibility: None,
         }

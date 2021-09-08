@@ -1,17 +1,17 @@
 use super::{Array, ArrayBuilder, ArrayIterator};
 
 use crate::buffer::Bitmap;
-use crate::error::ErrorCode::ProtobufError;
+
 use crate::error::Result;
-use crate::error::RwError;
-use crate::types::{DataType, Int16Type, Int32Type, Int64Type, NativeType};
-use protobuf::well_known_types::Any as AnyProto;
-use risingwave_proto::data::{Buffer as BufferProto, Buffer_CompressionType, Column};
+
+use crate::types::NativeType;
+
+use risingwave_proto::data::{Buffer as BufferProto, Buffer, Buffer_CompressionType};
 use std::mem::size_of;
 /// `PrimitiveArray` is a collection of primitive types, such as `i32`, `f32`.
 #[derive(Debug)]
 pub struct PrimitiveArray<T: NativeType> {
-    bitmap: Vec<bool>,
+    bitmap: Bitmap,
     data: Vec<T>,
 }
 
@@ -32,7 +32,7 @@ impl<T: NativeType> Array for PrimitiveArray<T> {
     type Iter<'a> = ArrayIterator<'a, Self>;
 
     fn value_at(&self, idx: usize) -> Option<T> {
-        if self.bitmap[idx] {
+        if !self.is_null(idx) {
             Some(self.data[idx])
         } else {
             None
@@ -40,25 +40,14 @@ impl<T: NativeType> Array for PrimitiveArray<T> {
     }
 
     fn len(&self) -> usize {
-        self.bitmap.len()
+        self.data.len()
     }
 
     fn iter(&self) -> Self::Iter<'_> {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> crate::error::Result<AnyProto> {
-        let mut column = Column::new();
-        // FIXME: remove this hack
-        let proto_data_type = match std::mem::size_of::<T>() {
-            2 => Int16Type::new(false).to_protobuf()?,
-            4 => Int32Type::new(false).to_protobuf()?,
-            8 => Int64Type::new(false).to_protobuf()?,
-            _ => unimplemented!(),
-        };
-        column.set_column_type(proto_data_type);
-        // FIXME: remove Bitmap or made it into array.
-        column.set_null_bitmap(Bitmap::from_vec(self.bitmap.clone())?.to_protobuf()?);
+    fn to_protobuf(&self) -> crate::error::Result<Vec<Buffer>> {
         let values = {
             let mut output_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<T>());
 
@@ -71,10 +60,11 @@ impl<T: NativeType> Array for PrimitiveArray<T> {
             b.set_body(output_buffer);
             b
         };
+        Ok(vec![values])
+    }
 
-        column.mut_values().push(values);
-
-        AnyProto::pack(&column).map_err(|e| RwError::from(ProtobufError(e)))
+    fn null_bitmap(&self) -> &Bitmap {
+        &self.bitmap
     }
 }
 
@@ -109,14 +99,14 @@ impl<T: NativeType> ArrayBuilder for PrimitiveArrayBuilder<T> {
     }
 
     fn append_array(&mut self, other: &PrimitiveArray<T>) -> Result<()> {
-        self.bitmap.extend_from_slice(&other.bitmap);
+        self.bitmap.extend(other.bitmap.iter());
         self.data.extend_from_slice(&other.data);
         Ok(())
     }
 
     fn finish(self) -> Result<PrimitiveArray<T>> {
         Ok(PrimitiveArray {
-            bitmap: self.bitmap,
+            bitmap: Bitmap::from_vec(self.bitmap)?,
             data: self.data,
         })
     }

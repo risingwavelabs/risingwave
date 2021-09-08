@@ -24,13 +24,15 @@ impl UnaryStreamOperator for FilterOperator {
     fn consume(&mut self, chunk: StreamChunk) -> Result<()> {
         let StreamChunk {
             ops,
-            arrays,
+            columns: arrays,
             visibility,
             cardinality,
         } = chunk;
 
         let data_chunk = {
-            let data_chunk_builder = DataChunk::builder().arrays(arrays).cardinality(cardinality);
+            let data_chunk_builder = DataChunk::builder()
+                .columns(arrays)
+                .cardinality(cardinality);
             if let Some(visibility) = visibility {
                 data_chunk_builder.visibility(visibility).build()
             } else {
@@ -41,7 +43,9 @@ impl UnaryStreamOperator for FilterOperator {
         let pred_output = (self.expr)(&data_chunk)?;
 
         let DataChunk {
-            arrays, visibility, ..
+            columns: arrays,
+            visibility,
+            ..
         } = data_chunk;
 
         let n = ops.len();
@@ -111,7 +115,7 @@ impl UnaryStreamOperator for FilterOperator {
         }
 
         let new_chunk = StreamChunk {
-            arrays,
+            columns: arrays,
             visibility: Some(Bitmap::from_vec(new_visibility)?),
             cardinality: new_cardinality,
             ops: new_ops,

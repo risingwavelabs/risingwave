@@ -1,4 +1,4 @@
-use crate::{array2::ArrayImpl, buffer::Bitmap, error::Result};
+use crate::{buffer::Bitmap, error::Result};
 
 mod agg;
 pub use agg::*;
@@ -8,7 +8,6 @@ pub use filter_operator::FilterOperator;
 
 mod local_output;
 pub use local_output::LocalOutput;
-use std::sync::Arc;
 
 mod processor;
 pub use processor::Processor;
@@ -18,6 +17,8 @@ pub use actor::Actor;
 
 mod data_source;
 pub use data_source::DataSource;
+
+use crate::array2::column::Column;
 
 /// `Op` represents three operations in StreamChunk.
 /// `UpdateDelete` and `UpdateInsert` always appear in pairs.
@@ -34,7 +35,7 @@ pub enum Op {
 pub struct StreamChunk {
     // TODO: Optimize using bitmap
     ops: Vec<Op>,
-    arrays: Vec<Arc<ArrayImpl>>,
+    columns: Vec<Column>,
     visibility: Option<Bitmap>,
     cardinality: usize,
 }

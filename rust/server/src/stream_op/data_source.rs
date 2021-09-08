@@ -12,8 +12,9 @@ mod test {
 
     use super::super::{Op, Output, Result, StreamChunk};
     use super::DataSource;
+    use crate::array2::column::Column;
     use crate::array2::{Array, ArrayBuilder, ArrayImpl, PrimitiveArrayBuilder};
-
+    use crate::types::Int64Type;
     struct MockDataSourceCore<I: std::iter::Iterator<Item = i64>> {
         inner: I,
         is_running: bool,
@@ -59,12 +60,15 @@ mod test {
                     }
                 }
                 let col1 = Arc::new(ArrayImpl::Int64(col1.finish()?));
-                let cols = vec![col1];
+                let cols = vec![Column {
+                    array: col1,
+                    data_type: Arc::new(Int64Type::new(false)),
+                }];
                 let chunk = StreamChunk {
                     cardinality: N,
                     visibility: None,
                     ops: vec![Op::Insert; N],
-                    arrays: cols,
+                    columns: cols,
                 };
                 output.collect(chunk)?;
             }
@@ -112,8 +116,8 @@ mod test {
         let data = data.lock().unwrap();
         let mut expected = start;
         for chunk in data.iter() {
-            assert!(chunk.arrays.len() == 1);
-            let arr = &*chunk.arrays[0];
+            assert!(chunk.columns.len() == 1);
+            let arr = &*chunk.columns[0].array;
             if let ArrayImpl::Int64(arr) = arr {
                 for i in 0..arr.len() {
                     let v = arr.value_at(i).expect("arr[i] exists");
