@@ -62,6 +62,31 @@ impl DataChunk {
 
         Ok(proto)
     }
+
+    /// `compact` will convert the chunk to compact format.
+    /// Compact format means that `visibility == None`.
+    pub fn compact(self) -> Result<Self> {
+        let cardinality = self.cardinality;
+        match &self.visibility {
+            None => Ok(self),
+            Some(visibility) => {
+                let columns = self
+                    .columns
+                    .into_iter()
+                    .map(|Column { array, data_type }| {
+                        array.compact(visibility, cardinality).map(|array| Column {
+                            array: Arc::new(array),
+                            data_type,
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(Self::builder()
+                    .cardinality(cardinality)
+                    .columns(columns)
+                    .build())
+            }
+        }
+    }
 }
 
 /// Create an empty data chunk

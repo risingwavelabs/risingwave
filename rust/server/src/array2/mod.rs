@@ -79,7 +79,7 @@ pub trait ArrayBuilder: Sized {
 /// In some cases, we will need to store owned data. For example, when aggregating min
 /// and max, we need to store current maximum in the aggregator. In this case, we
 /// could use `A::OwnedItem` in aggregator struct.
-pub trait Array: 'static {
+pub trait Array: Sized + 'static {
     /// A reference to item in array, as well as return type of `value_at`, which is
     /// reciprocal to `Self::OwnedItem`.
     type RefItem<'a>: ScalarRef<'a, ScalarType = Self::OwnedItem>
@@ -115,6 +115,22 @@ pub trait Array: 'static {
 
     fn is_null(&self, idx: usize) -> bool {
         self.null_bitmap().is_set(idx).map(|v| !v).unwrap()
+    }
+}
+
+trait CompactableArray: Array {
+    fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Result<Self>;
+}
+
+impl<A: Array> CompactableArray for A {
+    fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Result<Self> {
+        let mut builder = A::Builder::new(cardinality)?;
+        for (elem, visible) in self.iter().zip(visibility.iter()) {
+            if visible {
+                builder.append(elem)?;
+            }
+        }
+        builder.finish()
     }
 }
 
@@ -258,6 +274,18 @@ impl ArrayImpl {
             ArrayImpl::Float64(inner) => inner.to_protobuf(),
             ArrayImpl::UTF8(inner) => inner.to_protobuf(),
             ArrayImpl::Bool(inner) => inner.to_protobuf(),
+        }
+    }
+
+    pub fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Result<Self> {
+        match self {
+            ArrayImpl::Int16(inner) => inner.compact(visibility, cardinality).map(Into::into),
+            ArrayImpl::Int32(inner) => inner.compact(visibility, cardinality).map(Into::into),
+            ArrayImpl::Int64(inner) => inner.compact(visibility, cardinality).map(Into::into),
+            ArrayImpl::Float32(inner) => inner.compact(visibility, cardinality).map(Into::into),
+            ArrayImpl::Float64(inner) => inner.compact(visibility, cardinality).map(Into::into),
+            ArrayImpl::UTF8(inner) => inner.compact(visibility, cardinality).map(Into::into),
+            ArrayImpl::Bool(inner) => inner.compact(visibility, cardinality).map(Into::into),
         }
     }
 }
