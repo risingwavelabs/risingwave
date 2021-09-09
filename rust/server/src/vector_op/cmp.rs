@@ -1,153 +1,182 @@
-use super::tests::vec_cmp_primitive_array;
-use crate::array::ArrayRef;
+use num_traits::AsPrimitive;
+
+use crate::array2::ArrayImpl::{Float32, Float64, Int16, Int32, Int64};
+use crate::array2::{Array, ArrayBuilder, ArrayImpl, BoolArray, BoolArrayBuilder, PrimitiveArray};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
-use crate::types::{DataTypeKind, Float32Type, Float64Type, Int16Type, Int32Type, Int64Type};
+use crate::types::NativeType;
+
+pub fn vec_cmp_primitive<T1, T2, T3, F>(
+    left: &PrimitiveArray<T1>,
+    right: &PrimitiveArray<T2>,
+    mut op: F,
+) -> Result<BoolArray>
+where
+    T1: NativeType + AsPrimitive<T3>,
+    T2: NativeType + AsPrimitive<T3>,
+    T3: NativeType,
+    F: FnMut(T3, T3) -> bool,
+{
+    ensure!(left.len() == right.len());
+    let mut builder = BoolArrayBuilder::new(left.len())?;
+    for (l, r) in left.iter().zip(right.iter()) {
+        let item = match (l, r) {
+            (Some(l), Some(r)) => Some(op(l.as_(), r.as_())),
+            _ => None,
+        };
+        builder.append(item)?;
+    }
+    builder.finish()
+}
 
 macro_rules! vec_cmp {
-  ($lhs:expr, $rhs:expr, $cmp:ident) => {
-    match $lhs.data_type().data_type_kind() {
-      DataTypeKind::Int16 => vec_cmp_primitive_array::<Int16Type, _>($lhs, $rhs, $cmp::<i16>),
-      DataTypeKind::Int32 => vec_cmp_primitive_array::<Int32Type, _>($lhs, $rhs, $cmp::<i32>),
-      DataTypeKind::Int64 => vec_cmp_primitive_array::<Int64Type, _>($lhs, $rhs, $cmp::<i64>),
-      DataTypeKind::Float32 => vec_cmp_primitive_array::<Float32Type, _>($lhs, $rhs, $cmp::<f32>),
-      DataTypeKind::Float64 => vec_cmp_primitive_array::<Float64Type, _>($lhs, $rhs, $cmp::<f64>),
-      _ => Err(InternalError("Unsupported proto type".to_string()).into()),
-    }
-  };
+    ($lhs:expr, $rhs:expr, $f:ident) => {
+        match ($lhs, $rhs) {
+            // integer
+            (Int16(l), Int16(r)) => vec_cmp_primitive::<i16, i16, i16, _>(l, r, $f::<i16>),
+            (Int16(l), Int32(r)) => vec_cmp_primitive::<i16, i32, i32, _>(l, r, $f::<i32>),
+            (Int16(l), Int64(r)) => vec_cmp_primitive::<i16, i64, i64, _>(l, r, $f::<i64>),
+            (Int32(l), Int16(r)) => vec_cmp_primitive::<i32, i16, i32, _>(l, r, $f::<i32>),
+            (Int32(l), Int32(r)) => vec_cmp_primitive::<i32, i32, i32, _>(l, r, $f::<i32>),
+            (Int32(l), Int64(r)) => vec_cmp_primitive::<i32, i64, i64, _>(l, r, $f::<i64>),
+            (Int64(l), Int16(r)) => vec_cmp_primitive::<i64, i16, i64, _>(l, r, $f::<i64>),
+            (Int64(l), Int32(r)) => vec_cmp_primitive::<i64, i32, i64, _>(l, r, $f::<i64>),
+            (Int64(l), Int64(r)) => vec_cmp_primitive::<i64, i64, i64, _>(l, r, $f::<i64>),
+            // float
+            (Float32(l), Float32(r)) => vec_cmp_primitive::<f32, f32, f32, _>(l, r, $f::<f32>),
+            (Float32(l), Float64(r)) => vec_cmp_primitive::<f32, f64, f64, _>(l, r, $f::<f64>),
+            (Float64(l), Float32(r)) => vec_cmp_primitive::<f64, f32, f64, _>(l, r, $f::<f64>),
+            (Float64(l), Float64(r)) => vec_cmp_primitive::<f64, f64, f64, _>(l, r, $f::<f64>),
+            _ => Err(InternalError("Unsupported proto type".to_string()).into()),
+        }
+    };
 }
 
 #[inline(always)]
-fn scalar_eq<T: PartialEq>(l: Option<T>, r: Option<T>) -> Result<Option<bool>> {
-  match (l, r) {
-    (Some(l), Some(r)) => Ok(Some((l) == (r))),
-    _ => Ok(None),
-  }
+fn scalar_eq<T: PartialEq>(l: T, r: T) -> bool {
+    l == r
 }
 
 #[inline(always)]
-fn scalar_neq<T: PartialEq>(l: Option<T>, r: Option<T>) -> Result<Option<bool>> {
-  match (l, r) {
-    (Some(l), Some(r)) => Ok(Some((l) != (r))),
-    _ => Ok(None),
-  }
+fn scalar_neq<T: PartialEq>(l: T, r: T) -> bool {
+    l != r
 }
 
 #[inline(always)]
-fn scalar_gt<T: PartialEq + PartialOrd>(l: Option<T>, r: Option<T>) -> Result<Option<bool>> {
-  match (l, r) {
-    (Some(l), Some(r)) => Ok(Some((l) > (r))),
-    _ => Ok(None),
-  }
+fn scalar_gt<T: PartialEq + PartialOrd>(l: T, r: T) -> bool {
+    l > r
 }
 
 #[inline(always)]
-fn scalar_geq<T: PartialEq + PartialOrd>(l: Option<T>, r: Option<T>) -> Result<Option<bool>> {
-  match (l, r) {
-    (Some(l), Some(r)) => Ok(Some((l) >= (r))),
-    _ => Ok(None),
-  }
+fn scalar_geq<T: PartialEq + PartialOrd>(l: T, r: T) -> bool {
+    l >= r
 }
 
 #[inline(always)]
-fn scalar_lt<T: PartialEq + PartialOrd>(l: Option<T>, r: Option<T>) -> Result<Option<bool>> {
-  match (l, r) {
-    (Some(l), Some(r)) => Ok(Some((l) < (r))),
-    _ => Ok(None),
-  }
+fn scalar_lt<T: PartialEq + PartialOrd>(l: T, r: T) -> bool {
+    l < r
 }
 
 #[inline(always)]
-fn scalar_leq<T: PartialEq + PartialOrd>(l: Option<T>, r: Option<T>) -> Result<Option<bool>> {
-  match (l, r) {
-    (Some(l), Some(r)) => Ok(Some((l) <= (r))),
-    _ => Ok(None),
-  }
+fn scalar_leq<T: PartialEq + PartialOrd>(l: T, r: T) -> bool {
+    l <= r
 }
 
-pub fn vec_eq(lhs: ArrayRef, rhs: ArrayRef) -> Result<ArrayRef> {
-  ensure!(lhs.len() == rhs.len());
-  vec_cmp!(lhs.as_ref(), rhs.as_ref(), scalar_eq)
+pub fn vec_eq(lhs: &ArrayImpl, rhs: &ArrayImpl) -> Result<BoolArray> {
+    vec_cmp!(lhs, rhs, scalar_eq)
 }
 
-pub fn vec_neq(lhs: ArrayRef, rhs: ArrayRef) -> Result<ArrayRef> {
-  ensure!(lhs.len() == rhs.len());
-  vec_cmp!(lhs.as_ref(), rhs.as_ref(), scalar_neq)
+pub fn vec_neq(lhs: &ArrayImpl, rhs: &ArrayImpl) -> Result<BoolArray> {
+    vec_cmp!(lhs, rhs, scalar_neq)
 }
 
-pub fn vec_lt(lhs: ArrayRef, rhs: ArrayRef) -> Result<ArrayRef> {
-  ensure!(lhs.len() == rhs.len());
-  vec_cmp!(lhs.as_ref(), rhs.as_ref(), scalar_lt)
+pub fn vec_lt(lhs: &ArrayImpl, rhs: &ArrayImpl) -> Result<BoolArray> {
+    vec_cmp!(lhs, rhs, scalar_lt)
 }
 
-pub fn vec_leq(lhs: ArrayRef, rhs: ArrayRef) -> Result<ArrayRef> {
-  ensure!(lhs.len() == rhs.len());
-  vec_cmp!(lhs.as_ref(), rhs.as_ref(), scalar_leq)
+pub fn vec_leq(lhs: &ArrayImpl, rhs: &ArrayImpl) -> Result<BoolArray> {
+    vec_cmp!(lhs, rhs, scalar_leq)
 }
 
-pub fn vec_gt(lhs: ArrayRef, rhs: ArrayRef) -> Result<ArrayRef> {
-  ensure!(lhs.len() == rhs.len());
-  vec_cmp!(lhs.as_ref(), rhs.as_ref(), scalar_gt)
+pub fn vec_gt(lhs: &ArrayImpl, rhs: &ArrayImpl) -> Result<BoolArray> {
+    vec_cmp!(lhs, rhs, scalar_gt)
 }
 
-pub fn vec_geq(lhs: ArrayRef, rhs: ArrayRef) -> Result<ArrayRef> {
-  ensure!(lhs.len() == rhs.len());
-  vec_cmp!(lhs.as_ref(), rhs.as_ref(), scalar_geq)
+pub fn vec_geq(lhs: &ArrayImpl, rhs: &ArrayImpl) -> Result<BoolArray> {
+    vec_cmp!(lhs, rhs, scalar_geq)
 }
 
 #[cfg(test)]
 mod tests {
-  use super::*;
-  use crate::array::{ArrayRef, BoolArray, PrimitiveArray};
-  use crate::error::Result;
-  use crate::types::{Int32Type, PrimitiveDataType};
-  use crate::util::downcast_ref;
-  #[test]
-  fn test_cmp() {
-    mock_execute::<Int32Type, _, _>(
-      [Some(1), Some(3), None].to_vec(),
-      [Some(1), Some(2), Some(3)].to_vec(),
-      scalar_eq,
-      vec_eq,
-    );
-    mock_execute::<Float32Type, _, _>(
-      [Some(1.1), Some(3.1), None].to_vec(),
-      [Some(1.2), Some(2.4), Some(3.0)].to_vec(),
-      scalar_neq,
-      vec_neq,
-    );
-    mock_execute::<Int32Type, _, _>(
-      [Some(1), Some(3), None].to_vec(),
-      [Some(1), Some(2), Some(3)].to_vec(),
-      scalar_lt,
-      vec_lt,
-    );
-    mock_execute::<Float32Type, _, _>(
-      [Some(1.1), Some(3.1), None].to_vec(),
-      [Some(1.2), Some(2.4), Some(3.0)].to_vec(),
-      scalar_geq,
-      vec_geq,
-    );
-  }
+    use super::*;
+    use crate::error::Result;
+    #[test]
+    fn test_cmp() {
+        mock_execute::<i32, i64, i64, _, _>(
+            [Some(1), Some(3), None].to_vec(),
+            [Some(1i64), Some(2i64), Some(3i64)].to_vec(),
+            scalar_eq,
+            vec_eq,
+        );
+        mock_execute::<i32, i64, i64, _, _>(
+            [Some(1), Some(3), None].to_vec(),
+            [Some(1i64), Some(2i64), Some(3i64)].to_vec(),
+            scalar_lt,
+            vec_lt,
+        );
 
-  fn mock_execute<T, F1, F2>(
-    v1: Vec<Option<T::N>>,
-    v2: Vec<Option<T::N>>,
-    mut scalar_cmp: F1,
-    mut vec_cmp: F2,
-  ) where
-    T: PrimitiveDataType,
-    F1: FnMut(Option<T::N>, Option<T::N>) -> Result<Option<bool>>,
-    F2: FnMut(ArrayRef, ArrayRef) -> Result<ArrayRef>,
-  {
-    let lhs = PrimitiveArray::<T>::from_values(v1.clone()).unwrap();
-    let rhs = PrimitiveArray::<T>::from_values(v2.clone()).unwrap();
-    let sel = vec_cmp(lhs, rhs).unwrap();
-    let sel = downcast_ref(sel.as_ref()).unwrap() as &BoolArray;
-    let sel_iter = sel.as_iter().unwrap();
-    let res = sel_iter
-      .enumerate()
-      .all(|(idx, target)| target == scalar_cmp(v1[idx], v2[idx]).unwrap());
-    assert_eq!(res, true);
-  }
+        mock_execute::<i32, i64, i64, _, _>(
+            [Some(1), Some(3), None].to_vec(),
+            [Some(1i64), Some(2i64), Some(3i64)].to_vec(),
+            scalar_leq,
+            vec_leq,
+        );
+        mock_execute::<f32, f64, f64, _, _>(
+            [Some(1f32), Some(3f32), None].to_vec(),
+            [Some(1f64), Some(2f64), Some(3f64)].to_vec(),
+            scalar_neq,
+            vec_neq,
+        );
+        mock_execute::<f32, f64, f64, _, _>(
+            [Some(1f32), Some(3f32), None].to_vec(),
+            [Some(1f64), Some(2f64), Some(3f64)].to_vec(),
+            scalar_gt,
+            vec_gt,
+        );
+        mock_execute::<f32, f64, f64, _, _>(
+            [Some(1f32), Some(3f32), None].to_vec(),
+            [Some(1f64), Some(2f64), Some(3f64)].to_vec(),
+            scalar_geq,
+            vec_geq,
+        );
+    }
+
+    fn mock_execute<T1, T2, T3, F1, F2>(
+        v1: Vec<Option<T1>>,
+        v2: Vec<Option<T2>>,
+        mut scalar_cmp: F1,
+        mut vec_cmp: F2,
+    ) where
+        T1: NativeType + AsPrimitive<T3>,
+        T2: NativeType + AsPrimitive<T3>,
+        T3: NativeType,
+        ArrayImpl: From<PrimitiveArray<T1>>,
+        ArrayImpl: From<PrimitiveArray<T2>>,
+        F1: FnMut(T3, T3) -> bool,
+        F2: FnMut(&ArrayImpl, &ArrayImpl) -> Result<BoolArray>,
+    {
+        let lhs = PrimitiveArray::from_slice(&v1).unwrap();
+        let rhs = PrimitiveArray::from_slice(&v2).unwrap();
+        let sel = vec_cmp(&(lhs.into()), &(rhs.into())).unwrap();
+        let res = sel.iter().enumerate().all(|(idx, s)| {
+            s == {
+                if let (Some(l), Some(r)) = (v1[idx], v2[idx]) {
+                    Some(scalar_cmp(l.as_(), r.as_()))
+                } else {
+                    None
+                }
+            }
+        });
+        assert_eq!(res, true);
+    }
 }
