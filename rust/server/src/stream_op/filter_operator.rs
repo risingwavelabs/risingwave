@@ -1,5 +1,6 @@
-use super::{Op, Output, StreamChunk, StreamOperator, UnaryStreamOperator};
+use super::{ExprFn, Op, Output, StreamChunk, StreamOperator, UnaryStreamOperator};
 use crate::{array2::DataChunk, buffer::Bitmap, error::Result};
+use async_trait::async_trait;
 
 /// `FilterOperator` filters data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a boolean array on whether each item should be retained. And then,
@@ -9,19 +10,20 @@ pub struct FilterOperator {
     /// The output of the current operator
     output: Box<dyn Output>,
     /// Expression of the current filter, note that the filter must always have the same output for the same input.
-    expr: Box<dyn Fn(&DataChunk) -> Result<Bitmap>>,
+    expr: Box<dyn ExprFn>,
 }
 
 impl FilterOperator {
-    pub fn new(output: Box<dyn Output>, expr: Box<dyn Fn(&DataChunk) -> Result<Bitmap>>) -> Self {
+    pub fn new(output: Box<dyn Output>, expr: Box<dyn ExprFn>) -> Self {
         Self { output, expr }
     }
 }
 
 impl StreamOperator for FilterOperator {}
 
+#[async_trait]
 impl UnaryStreamOperator for FilterOperator {
-    fn consume(&mut self, chunk: StreamChunk) -> Result<()> {
+    async fn consume(&mut self, chunk: StreamChunk) -> Result<()> {
         let StreamChunk {
             ops,
             columns: arrays,
@@ -121,6 +123,6 @@ impl UnaryStreamOperator for FilterOperator {
             ops: new_ops,
         };
 
-        self.output.collect(new_chunk)
+        self.output.collect(new_chunk).await
     }
 }

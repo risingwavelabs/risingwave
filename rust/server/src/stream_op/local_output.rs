@@ -1,4 +1,5 @@
 use super::{Output, Result, StreamChunk, UnaryStreamOperator};
+use async_trait::async_trait;
 
 pub struct LocalOutput {
     next: Box<dyn UnaryStreamOperator>,
@@ -10,8 +11,9 @@ impl LocalOutput {
     }
 }
 
+#[async_trait]
 impl Output for LocalOutput {
-    fn collect(&mut self, chunk: StreamChunk) -> Result<()> {
-        self.next.consume(chunk)
+    async fn collect(&mut self, chunk: StreamChunk) -> Result<()> {
+        self.next.consume(chunk).await
     }
 }

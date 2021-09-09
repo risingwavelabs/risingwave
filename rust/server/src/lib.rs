@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![feature(trait_alias)]
 #![feature(generic_associated_types)]
 
 extern crate anyhow;

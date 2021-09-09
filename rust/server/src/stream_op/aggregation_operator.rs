@@ -7,6 +7,7 @@ use super::{Op, Output, StreamChunk, StreamOperator, UnaryStreamOperator};
 use crate::array2::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl};
 use crate::buffer::Bitmap;
 use crate::error::Result;
+use async_trait::async_trait;
 
 pub type Ops<'a> = &'a [Op];
 
@@ -25,7 +26,7 @@ pub trait StreamingAggFunction<B: ArrayBuilder> {
 /// `StreamingAggStateImpl` erases the associated type information of
 /// `StreamingAggState` and `StreamingAggFunction`. You should manually
 /// implement this trait for necessary types.
-pub trait StreamingAggStateImpl {
+pub trait StreamingAggStateImpl: Send + Sync + 'static {
     fn apply_batch(&mut self, ops: Ops<'_>, skip: Option<&Bitmap>, data: &ArrayImpl) -> Result<()>;
 
     fn get_output(&self, builder: &mut ArrayBuilderImpl) -> Result<()>;
@@ -61,10 +62,12 @@ impl AggregationOperator {
         }
     }
 }
+
 impl StreamOperator for AggregationOperator {}
 
+#[async_trait]
 impl UnaryStreamOperator for AggregationOperator {
-    fn consume(&mut self, chunk: StreamChunk) -> Result<()> {
+    async fn consume(&mut self, chunk: StreamChunk) -> Result<()> {
         let StreamChunk {
             ops,
             columns: arrays,

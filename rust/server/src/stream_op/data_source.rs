@@ -1,19 +1,23 @@
 use super::{Output, Result};
 
-pub trait DataSource: Sync {
-    fn run(&self, output: Box<dyn Output>) -> Result<()>;
-    fn cancel(&self) -> Result<()>;
+use async_trait::async_trait;
+
+#[async_trait]
+pub trait DataSource: Send + Sync + 'static {
+    async fn run(&self, output: Box<dyn Output>) -> Result<()>;
+    async fn cancel(&self) -> Result<()>;
 }
 
 #[cfg(test)]
 mod test {
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
     use std::time;
+    use tokio::sync::Mutex;
 
     use super::super::{Op, Output, Result, StreamChunk};
-    use super::DataSource;
+    use super::*;
     use crate::array2::column::Column;
-    use crate::array2::{Array, ArrayBuilder, ArrayImpl, PrimitiveArrayBuilder};
+    use crate::array2::{Array, ArrayBuilder, ArrayImpl, I64ArrayBuilder};
     use crate::types::Int64Type;
     struct MockDataSourceCore<I: std::iter::Iterator<Item = i64>> {
         inner: I,
@@ -39,18 +43,19 @@ mod test {
         }
     }
 
+    #[async_trait]
     impl<I> DataSource for MockDataSource<I>
     where
-        I: std::iter::Iterator<Item = i64> + Send,
+        I: std::iter::Iterator<Item = i64> + Sync + Send + 'static,
     {
-        fn run(&self, mut output: Box<dyn Output>) -> Result<()> {
+        async fn run(&self, mut output: Box<dyn Output>) -> Result<()> {
             const N: usize = 10;
             loop {
-                let mut core = self.core.lock().unwrap();
+                let mut core = self.core.lock().await;
                 if !core.is_running {
                     break;
                 }
-                let mut col1 = PrimitiveArrayBuilder::<i64>::new(N)?;
+                let mut col1 = I64ArrayBuilder::new(N)?;
                 for _ in 0..N {
                     match core.inner.next() {
                         Some(i) => {
@@ -70,14 +75,14 @@ mod test {
                     ops: vec![Op::Insert; N],
                     columns: cols,
                 };
-                output.collect(chunk)?;
+                output.collect(chunk).await?;
             }
 
             Ok(())
         }
 
-        fn cancel(&self) -> Result<()> {
-            let mut core = self.core.lock().unwrap();
+        async fn cancel(&self) -> Result<()> {
+            let mut core = self.core.lock().await;
             core.is_running = false;
 
             Ok(())
@@ -88,32 +93,33 @@ mod test {
         data: Arc<Mutex<Vec<StreamChunk>>>,
     }
 
+    #[async_trait]
     impl Output for MockOutput {
-        fn collect(&mut self, chunk: StreamChunk) -> Result<()> {
-            self.data.lock().unwrap().push(chunk);
+        async fn collect(&mut self, chunk: StreamChunk) -> Result<()> {
+            self.data.lock().await.push(chunk);
             Ok(())
         }
     }
 
-    #[test]
-    fn test_read() -> Result<()> {
+    #[tokio::test]
+    async fn test_read() -> Result<()> {
         let start: i64 = 114514;
         let source = Arc::new(MockDataSource::new(start..));
         let data = Arc::new(Mutex::new(vec![]));
         let output = MockOutput { data: data.clone() };
         let source2 = source.clone();
 
-        let handle = std::thread::spawn(move || {
-            std::thread::sleep(time::Duration::from_millis(10));
-            source.cancel().expect("cancel without error");
+        let handle = tokio::spawn(async move {
+            tokio::time::sleep(time::Duration::from_millis(10)).await;
+            source.cancel().await.expect("cancel without error");
         });
 
         let output = Box::new(output);
-        source2.run(output).expect("run without error");
+        source2.run(output).await.expect("run without error");
 
-        handle.join().unwrap();
+        handle.await.unwrap();
 
-        let data = data.lock().unwrap();
+        let data = data.lock().await;
         let mut expected = start;
         for chunk in data.iter() {
             assert!(chunk.columns.len() == 1);

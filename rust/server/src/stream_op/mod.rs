@@ -1,7 +1,8 @@
+use crate::array2::DataChunk;
 use crate::{buffer::Bitmap, error::Result};
 
-mod agg;
-pub use agg::*;
+mod aggregation_operator;
+pub use aggregation_operator::*;
 
 mod filter_operator;
 pub use filter_operator::FilterOperator;
@@ -19,6 +20,9 @@ mod data_source;
 pub use data_source::DataSource;
 
 use crate::array2::column::Column;
+use async_trait::async_trait;
+
+pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
 
 /// `Op` represents three operations in StreamChunk.
 /// `UpdateDelete` and `UpdateInsert` always appear in pairs.
@@ -47,19 +51,22 @@ pub enum Message {
     // TODO: Watermark
 }
 
-pub trait StreamOperator {
+pub trait StreamOperator: Send + Sync + 'static {
     // TODO: watermark and state management
 }
 
+#[async_trait]
 pub trait UnaryStreamOperator: StreamOperator {
-    fn consume(&mut self, chunk: StreamChunk) -> Result<()>;
+    async fn consume(&mut self, chunk: StreamChunk) -> Result<()>;
 }
 
+#[async_trait]
 pub trait BinaryStreamOperator: StreamOperator {
-    fn consume_first(&mut self, chunk: StreamChunk) -> Result<()>;
-    fn consume_second(&mut self, chunk: StreamChunk) -> Result<()>;
+    async fn consume_first(&mut self, chunk: StreamChunk) -> Result<()>;
+    async fn consume_second(&mut self, chunk: StreamChunk) -> Result<()>;
 }
 
-pub trait Output {
-    fn collect(&mut self, chunk: StreamChunk) -> Result<()>;
+#[async_trait]
+pub trait Output: Send + Sync + 'static {
+    async fn collect(&mut self, chunk: StreamChunk) -> Result<()>;
 }

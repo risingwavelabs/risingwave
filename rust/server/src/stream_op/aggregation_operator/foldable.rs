@@ -13,7 +13,7 @@ use super::{Op, StreamingAggFunction, StreamingAggState, StreamingAggStateImpl};
 ///
 /// `R`: Result (or output, stored) type.
 /// `I`: Input type.
-pub trait StreamingFoldable<R: Scalar, I: Scalar> {
+pub trait StreamingFoldable<R: Scalar, I: Scalar>: Send + Sync + 'static {
     /// Called on `Insert` or `UpdateInsert`.
     fn accumulate(
         result: Option<R::ScalarRefType<'_>>,
