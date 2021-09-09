@@ -1,5 +1,7 @@
 use crate::array2::column::Column;
-use crate::array2::{Array, ArrayBuilder, ArrayBuilderImpl, DataChunk, PrimitiveArrayBuilder};
+use crate::array2::{
+    Array, ArrayBuilder, ArrayBuilderImpl, DataChunk, I32Array, PrimitiveArrayBuilder,
+};
 use crate::catalog::TableId;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
@@ -53,8 +55,7 @@ impl Executor for InsertValuesExecutor {
             })
             .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
 
-        // let one_row_array = PrimitiveArray::<Int32Type>::from_slice(vec![1])?;
-        let one_row_array = PrimitiveArrayBuilder::<i32>::new(1)?.finish()?;
+        let one_row_array = I32Array::from_slice(&[Some(1)])?;
         // We need a one row chunk rather than an empty chunk because constant expression's eval result
         // is same size as input chunk cardinality.
         let one_row_chunk = DataChunk::builder()
@@ -84,7 +85,6 @@ impl Executor for InsertValuesExecutor {
                     array: Arc::new(arr),
                     data_type: expr.return_type_ref(),
                 })
-                // Column {array: Arc::new(builder.finish().map_err(|_| InternalError(format!("Failed to parse table id: {:?}", )))), data_type: expr[0].return_type_ref()}
             })
             .collect::<Result<Vec<Column>>>()?;
 
@@ -100,7 +100,6 @@ impl Executor for InsertValuesExecutor {
 
         // create ret value
         {
-            // let data_type = Arc::new(Int32Type::new(false));
             let mut array_builder = PrimitiveArrayBuilder::<i32>::new(1)?;
             array_builder.append(Some(rows_inserted as i32))?;
 

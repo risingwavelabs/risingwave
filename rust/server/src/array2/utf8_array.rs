@@ -13,9 +13,9 @@ pub struct UTF8Array {
 }
 
 impl Array for UTF8Array {
-    type Builder = UTF8ArrayBuilder;
     type RefItem<'a> = &'a str;
     type OwnedItem = String;
+    type Builder = UTF8ArrayBuilder;
     type Iter<'a> = ArrayIterator<'a, Self>;
 
     fn value_at(&self, idx: usize) -> Option<&str> {

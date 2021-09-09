@@ -109,7 +109,6 @@ pub trait Array: Sized + 'static {
     /// Get iterator of current array.
     fn iter(&self) -> Self::Iter<'_>;
 
-    // TODO: to_proto trait
     fn to_protobuf(&self) -> Result<Vec<Buffer>>;
 
     fn null_bitmap(&self) -> &Bitmap;

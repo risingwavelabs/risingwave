@@ -16,12 +16,12 @@ use crate::error::Result;
 // use crate::expr::cmp::CompareExpression;
 // use crate::expr::conjunction::ConjunctionExpression;
 use crate::expr::input_ref::InputRefExpression;
-// use crate::expr::type_cast::TypeCastExpression;
+use crate::expr::type_cast::TypeCastExpression;
 
 use crate::types::{DataType, DataTypeRef};
 use risingwave_proto::expr::{
     ExprNode,
-    ExprNode_ExprNodeType::{CONSTANT_VALUE, INPUT_REF},
+    ExprNode_ExprNodeType::{CAST, CONSTANT_VALUE, INPUT_REF},
 };
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -52,8 +52,8 @@ macro_rules! build_expression {
 pub fn build_from_proto(proto: &ExprNode) -> Result<BoxedExpression> {
     build_expression! {proto,
       CONSTANT_VALUE => LiteralExpression,
-      INPUT_REF => InputRefExpression
-      // CAST => TypeCastExpression,
+      INPUT_REF => InputRefExpression,
+      CAST => TypeCastExpression
       // AND => ConjunctionExpression,
       // OR => ConjunctionExpression,
       // NOT => ConjunctionExpression,

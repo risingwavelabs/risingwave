@@ -103,4 +103,4 @@ make_numeric_type!(
     DataTypeKind::Float64,
     DataType_TypeName::DOUBLE
 );
-// make_numeric_type!(DateType, i32, DataTypeKind::Date, DataType_TypeName::DATE);
+make_numeric_type!(DateType, i32, DataTypeKind::Date, DataType_TypeName::DATE);

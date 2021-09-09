@@ -14,6 +14,8 @@ use crate::error::ErrorCode::InternalError;
 pub use native::*;
 use risingwave_proto::data::DataType_TypeName::BOOLEAN;
 use risingwave_proto::data::DataType_TypeName::CHAR;
+
+use risingwave_proto::data::DataType_TypeName::DATE;
 use risingwave_proto::data::DataType_TypeName::DOUBLE;
 use risingwave_proto::data::DataType_TypeName::FLOAT;
 use risingwave_proto::data::DataType_TypeName::INT16;
@@ -88,7 +90,7 @@ pub fn build_from_proto(proto: &DataTypeProto) -> Result<DataTypeRef> {
       FLOAT => Float32Type,
       DOUBLE => Float64Type,
       // DECIMAL => DecimalType,
-      // DATE => DateType,
+      DATE => DateType,
       CHAR => StringType,
       VARCHAR => StringType,
       BOOLEAN => BoolType

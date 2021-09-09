@@ -54,9 +54,17 @@ impl Expression for LiteralExpression {
             DataType::create_array_builder(self.return_type.clone(), _input.cardinality())?;
         for _ in 0.._input.cardinality() {
             match &mut array_builder {
+                // FIXME: refactor in a generic/macro way
                 ArrayBuilderImpl::Int32(inner) => {
                     let v = match &self.literal {
                         Datum::Int32(v) => *v,
+                        _ => unimplemented!(),
+                    };
+                    inner.append(Some(v))?;
+                }
+                ArrayBuilderImpl::UTF8(inner) => {
+                    let v = match &self.literal {
+                        Datum::UTF8String(ref v) => v,
                         _ => unimplemented!(),
                     };
                     inner.append(Some(v))?;
@@ -65,7 +73,7 @@ impl Expression for LiteralExpression {
                 _ => unimplemented!(),
             }
         }
-        Ok(Arc::new(array_builder.finish()?))
+        array_builder.finish().map(Arc::new)
     }
 }
 
