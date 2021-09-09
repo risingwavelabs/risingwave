@@ -7,6 +7,9 @@ pub use aggregation_operator::*;
 mod filter_operator;
 pub use filter_operator::FilterOperator;
 
+mod projection_operator;
+pub use projection_operator::ProjectionOperator;
+
 mod local_output;
 pub use local_output::LocalOutput;
 
