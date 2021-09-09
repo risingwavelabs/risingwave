@@ -325,6 +325,24 @@ impl ArrayImpl {
             ArrayImpl::Decimal(_) => "Decimal",
         }
     }
+
+    pub fn get_sub_array(&self, indices: &[usize]) -> ArrayImpl {
+        let capacity = indices.len();
+        macro_rules! impl_all_get_sub_array {
+      ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        match $self {
+          $( Self::$variant_name(inner) => {
+            let mut builder = <$builder>::new(capacity).unwrap();
+            indices.iter().for_each(|idx| {
+              builder.append(inner.value_at(*idx)).unwrap();
+            });
+            builder.finish().unwrap().into()
+          }, )*
+        }
+      };
+    }
+        for_all_variants! { impl_all_get_sub_array, self }
+    }
 }
 
 macro_rules! impl_into_builders {
@@ -359,6 +377,23 @@ mod tests {
             }
         }
         builder.finish()
+    }
+
+    #[test]
+    fn test_get_sub_array() {
+        let i32vec = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        let indices = vec![0, 2, 4, 6, 8];
+        let mut builder = PrimitiveArrayBuilder::<i32>::new(0).unwrap();
+        for i in &i32vec {
+            builder.append(Some(*i)).unwrap();
+        }
+        let array = builder.finish().unwrap();
+        let array_impl = ArrayImpl::Int32(array);
+        let sub_array = array_impl.get_sub_array(&indices[..]);
+        let inner = sub_array.as_int32();
+        for (i, idx) in indices.iter().enumerate() {
+            assert_eq!(inner.value_at(i).unwrap(), i32vec[*idx]);
+        }
     }
 
     #[test]
