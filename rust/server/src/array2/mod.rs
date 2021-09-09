@@ -118,6 +118,7 @@ pub trait Array: Sized + 'static {
     }
 }
 
+/// Implement `compact` on array, which removes element according to `visibility`.
 trait CompactableArray: Array {
     fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Result<Self>;
 }
@@ -134,20 +135,42 @@ impl<A: Array> CompactableArray for A {
     }
 }
 
-/// `ArrayImpl` embeds all possible array in `arary2` module.
+/// `for_all_variants` includes all variants of our array types. If you added a new array
+/// type inside the project, be sure to add a variant here.
 ///
-/// Please add new array implementations to this enum.
-#[derive(Debug)]
-pub enum ArrayImpl {
-    Int16(PrimitiveArray<i16>),
-    Int32(PrimitiveArray<i32>),
-    Int64(PrimitiveArray<i64>),
-    Float32(PrimitiveArray<f32>),
-    Float64(PrimitiveArray<f64>),
-    UTF8(UTF8Array),
-    Bool(BoolArray),
-    Decimal(DecimalArray),
+/// Every tuple has four elements, where
+/// `{ enum variant name, function suffix name, array type, builder type }`
+///
+/// There are typically two ways of using this macro, pass token or pass no token.
+/// See the following implementations for example.
+macro_rules! for_all_variants {
+  ($macro:tt $(, $x:tt)*) => {
+    $macro! {
+      [$($x),*],
+      { Int16, int16, I16Array, I16ArrayBuilder },
+      { Int32, int32, I32Array, I32ArrayBuilder },
+      { Int64, int64, I64Array, I64ArrayBuilder },
+      { Float32, float32, F32Array, F32ArrayBuilder },
+      { Float64, float64, F64Array, F64ArrayBuilder },
+      { UTF8, utf8, UTF8Array, UTF8ArrayBuilder },
+      { Bool, bool, BoolArray, BoolArrayBuilder },
+      { Decimal, decimal, DecimalArray, DecimalArrayBuilder }
+    }
+  };
 }
+
+/// Define `ArrayImpl` with macro.
+macro_rules! array_impl_enum {
+  ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+    /// `ArrayImpl` embeds all possible array in `arary2` module.
+    #[derive(Debug)]
+    pub enum ArrayImpl {
+      $( $variant_name($array) ),*
+    }
+  };
+}
+
+for_all_variants! { array_impl_enum }
 
 /// `impl_convert` implements 4 conversions for `Array`.
 /// * `ArrayImpl -> &Array` with `impl.as_int16()`.
@@ -155,100 +178,79 @@ pub enum ArrayImpl {
 /// * `Array -> ArrayImpl` with `From` trait.
 /// * `&ArrayImpl -> &Array` with `From` trait.
 macro_rules! impl_convert {
-  ($x:ident, $y:ident, $z:ty) => {
-    paste! {
-      impl ArrayImpl {
-        pub fn [<as_ $y>](&self) -> &$z {
-          match self {
-            Self::$x(ref array) => array,
-            other_array => panic!("cannot covert ArrayImpl::{} to concrete type", other_array.get_ident())
+  ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+    $(
+      paste! {
+        impl ArrayImpl {
+          pub fn [<as_ $suffix_name>](&self) -> &$array {
+            match self {
+              Self::$variant_name(ref array) => array,
+              other_array => panic!("cannot covert ArrayImpl::{} to concrete type", other_array.get_ident())
+            }
+          }
+
+          pub fn [<into_ $suffix_name>](self) -> $array {
+            match self {
+              Self::$variant_name(array) => array,
+              other_array =>  panic!("cannot covert ArrayImpl::{} to concrete type", other_array.get_ident())
+            }
           }
         }
 
-        pub fn [<into_ $y>](self) -> $z {
-          match self {
-            Self::$x(array) => array,
-            other_array => panic!("cannot covert ArrayImpl::{} to concrete type", other_array.get_ident())
+        impl From<$array> for ArrayImpl {
+          fn from(array: $array) -> Self {
+            Self::$variant_name(array)
+          }
+        }
+
+        impl <'a> From<&'a ArrayImpl> for &'a $array {
+          fn from(array: &'a ArrayImpl) -> Self {
+            match array {
+              ArrayImpl::$variant_name(inner) => inner,
+              other_array => panic!("cannot covert ArrayImpl::{} to concrete type", other_array.get_ident())
+            }
           }
         }
       }
+    )*
+  };
+}
 
-      impl From<$z> for ArrayImpl {
-        fn from(array: $z) -> Self {
-          Self::$x(array)
-        }
-      }
+for_all_variants! { impl_convert }
 
-      impl <'a> From<&'a ArrayImpl> for &'a $z {
-        fn from(array: &'a ArrayImpl) -> Self {
-          match array {
-            ArrayImpl::$x(inner) => inner,
-            other_array => panic!("cannot covert ArrayImpl::{} to concrete type", other_array.get_ident())
-          }
-        }
-      }
+/// Define `ArrayImplBuilder` with macro.
+macro_rules! array_builder_impl_enum {
+  ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+    /// `ArrayBuilderImpl` embeds all possible array in `arary2` module.
+    pub enum ArrayBuilderImpl {
+      $( $variant_name($builder) ),*
     }
   };
 }
 
-impl_convert! { Int16, int16, I16Array }
-impl_convert! { Int32, int32, I32Array }
-impl_convert! { Int64, int64, I64Array }
-impl_convert! { Float32, float32, F32Array }
-impl_convert! { Float64, float64, F64Array }
-impl_convert! { UTF8, utf8, UTF8Array }
-impl_convert! { Bool, bool, BoolArray }
-impl_convert! { Decimal, decimal, DecimalArray }
-
-/// `ArrayBuilderImpl` embeds all possible array in `arary2` module.
-///
-/// Please add new array builder implementations to this enum.
-pub enum ArrayBuilderImpl {
-    Int16(PrimitiveArrayBuilder<i16>),
-    Int32(PrimitiveArrayBuilder<i32>),
-    Int64(PrimitiveArrayBuilder<i64>),
-    Float32(PrimitiveArrayBuilder<f32>),
-    Float64(PrimitiveArrayBuilder<f64>),
-    UTF8(UTF8ArrayBuilder),
-    Bool(BoolArrayBuilder),
-    Decimal(DecimalArrayBuilder),
-}
-
-macro_rules! impl_all_variants {
-  ($self:ident, $func:ident, [ $( $variant:ident ),* ]) => {
-    match $self {
-      $(
-        Self::$variant(inner) => inner.$func().into(),
-      )*
-    }
-  };
-}
+for_all_variants! { array_builder_impl_enum }
 
 impl ArrayBuilderImpl {
     pub fn append_array(&mut self, other: &ArrayImpl) -> Result<()> {
-        match self {
-            ArrayBuilderImpl::Int16(inner) => inner.append_array(other.into()),
-            ArrayBuilderImpl::Int32(inner) => inner.append_array(other.into()),
-            ArrayBuilderImpl::Int64(inner) => inner.append_array(other.into()),
-            ArrayBuilderImpl::Float32(inner) => inner.append_array(other.into()),
-            ArrayBuilderImpl::Float64(inner) => inner.append_array(other.into()),
-            ArrayBuilderImpl::UTF8(inner) => inner.append_array(other.into()),
-            ArrayBuilderImpl::Bool(inner) => inner.append_array(other.into()),
-            ArrayBuilderImpl::Decimal(inner) => inner.append_array(other.into()),
+        macro_rules! impl_all_append_array {
+      ([$self:ident, $other:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        match $self {
+          $( Self::$variant_name(inner) => inner.append_array($other.into()), )*
         }
+      };
+    }
+        for_all_variants! { impl_all_append_array, self, other }
     }
 
     pub fn finish(self) -> Result<ArrayImpl> {
-        Ok(match self {
-            ArrayBuilderImpl::Int16(inner) => inner.finish()?.into(),
-            ArrayBuilderImpl::Int32(inner) => inner.finish()?.into(),
-            ArrayBuilderImpl::Int64(inner) => inner.finish()?.into(),
-            ArrayBuilderImpl::Float32(inner) => inner.finish()?.into(),
-            ArrayBuilderImpl::Float64(inner) => inner.finish()?.into(),
-            ArrayBuilderImpl::UTF8(inner) => inner.finish()?.into(),
-            ArrayBuilderImpl::Bool(inner) => inner.finish()?.into(),
-            ArrayBuilderImpl::Decimal(inner) => inner.finish()?.into(),
-        })
+        macro_rules! impl_all_finish {
+      ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        match $self {
+          $( Self::$variant_name(inner) => inner.finish()?.into(), )*
+        }
+      };
+    }
+        Ok(for_all_variants! { impl_all_finish, self })
     }
 
     pub fn get_ident(&self) -> &'static str {
@@ -268,46 +270,47 @@ impl ArrayBuilderImpl {
 impl ArrayImpl {
     pub fn len(self) -> usize {
         // FIXME: now the concrete array use data to get len(). It should be compute from bitmap.
-        impl_all_variants! { self, len, [Int16, Int32, Int64, Float32, Float64, UTF8, Bool, Decimal] }
+        macro_rules! impl_all_len {
+      ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        match $self {
+          $( Self::$variant_name(inner) => inner.len(), )*
+        }
+      };
+    }
+        for_all_variants! { impl_all_len, self }
     }
 
     pub fn null_bitmap(&self) -> &Bitmap {
-        match self {
-            ArrayImpl::Int16(inner) => inner.null_bitmap(),
-            ArrayImpl::Int32(inner) => inner.null_bitmap(),
-            ArrayImpl::Int64(inner) => inner.null_bitmap(),
-            ArrayImpl::Float32(inner) => inner.null_bitmap(),
-            ArrayImpl::Float64(inner) => inner.null_bitmap(),
-            ArrayImpl::UTF8(inner) => inner.null_bitmap(),
-            ArrayImpl::Bool(inner) => inner.null_bitmap(),
-            ArrayImpl::Decimal(inner) => inner.null_bitmap(),
+        macro_rules! impl_all_null_bitmap {
+      ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        match $self {
+          $( Self::$variant_name(inner) => inner.null_bitmap(), )*
         }
+      };
+    }
+        for_all_variants! { impl_all_null_bitmap, self }
     }
 
     pub fn to_protobuf(&self) -> Result<Vec<Buffer>> {
-        match self {
-            ArrayImpl::Int16(inner) => inner.to_protobuf(),
-            ArrayImpl::Int32(inner) => inner.to_protobuf(),
-            ArrayImpl::Int64(inner) => inner.to_protobuf(),
-            ArrayImpl::Float32(inner) => inner.to_protobuf(),
-            ArrayImpl::Float64(inner) => inner.to_protobuf(),
-            ArrayImpl::UTF8(inner) => inner.to_protobuf(),
-            ArrayImpl::Bool(inner) => inner.to_protobuf(),
-            ArrayImpl::Decimal(inner) => inner.to_protobuf(),
+        macro_rules! impl_all_to_protobuf {
+      ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        match $self {
+          $( Self::$variant_name(inner) => inner.to_protobuf(), )*
         }
+      };
+    }
+        for_all_variants! { impl_all_to_protobuf, self }
     }
 
     pub fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Result<Self> {
-        match self {
-            ArrayImpl::Int16(inner) => inner.compact(visibility, cardinality).map(Into::into),
-            ArrayImpl::Int32(inner) => inner.compact(visibility, cardinality).map(Into::into),
-            ArrayImpl::Int64(inner) => inner.compact(visibility, cardinality).map(Into::into),
-            ArrayImpl::Float32(inner) => inner.compact(visibility, cardinality).map(Into::into),
-            ArrayImpl::Float64(inner) => inner.compact(visibility, cardinality).map(Into::into),
-            ArrayImpl::UTF8(inner) => inner.compact(visibility, cardinality).map(Into::into),
-            ArrayImpl::Bool(inner) => inner.compact(visibility, cardinality).map(Into::into),
-            ArrayImpl::Decimal(inner) => inner.compact(visibility, cardinality).map(Into::into),
+        macro_rules! impl_all_compact {
+      ([$self:ident, $visibility:ident, $cardinality:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        match $self {
+          $( Self::$variant_name(inner) => inner.compact(visibility, cardinality)?.into(), )*
         }
+      };
+    }
+        Ok(for_all_variants! { impl_all_compact, self, visibility, cardinality })
     }
 
     pub fn get_ident(&self) -> &'static str {
@@ -325,23 +328,18 @@ impl ArrayImpl {
 }
 
 macro_rules! impl_into_builders {
-    ($x:ty, $y:ident) => {
-        impl From<$x> for ArrayBuilderImpl {
-            fn from(array: $x) -> Self {
-                Self::$y(array)
-            }
+  ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+    $(
+      impl From<$builder> for ArrayBuilderImpl {
+        fn from(builder: $builder) -> Self {
+          Self::$variant_name(builder)
         }
-    };
+      }
+    )*
+  };
 }
 
-impl_into_builders! { I16ArrayBuilder, Int16 }
-impl_into_builders! { I32ArrayBuilder, Int32 }
-impl_into_builders! { I64ArrayBuilder, Int64 }
-impl_into_builders! { F32ArrayBuilder, Float32 }
-impl_into_builders! { F64ArrayBuilder, Float64 }
-impl_into_builders! { UTF8ArrayBuilder, UTF8 }
-impl_into_builders! { BoolArrayBuilder, Bool }
-impl_into_builders! { DecimalArrayBuilder, Decimal }
+for_all_variants! { impl_into_builders }
 
 pub type ArrayRef = Arc<ArrayImpl>;
 
