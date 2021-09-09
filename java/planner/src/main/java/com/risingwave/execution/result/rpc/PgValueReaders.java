@@ -64,10 +64,10 @@ public class PgValueReaders {
       case CHAR:
       case VARCHAR:
         return StringValueReader.createValueReader(
-            Values::createString, new IntBufferReader(offsetStream), dataStream, nullBitmap);
+            Values::createString, new LongBufferReader(offsetStream), dataStream, nullBitmap);
       case DECIMAL:
         return StringValueReader.createValueReader(
-            Values::createDecimal, new IntBufferReader(offsetStream), dataStream, nullBitmap);
+            Values::createDecimal, new LongBufferReader(offsetStream), dataStream, nullBitmap);
       default:
         throw new PgException(
             PgErrorCode.INTERNAL_ERROR, "Unsupported column type: %s", column.getColumnType());

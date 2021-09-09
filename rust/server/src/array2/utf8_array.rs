@@ -1,8 +1,9 @@
 use super::{Array, ArrayBuilder, ArrayIterator};
 use crate::buffer::Bitmap;
 use crate::error::Result;
-
 use risingwave_proto::data::Buffer;
+use risingwave_proto::data::Buffer_CompressionType;
+use std::mem::size_of;
 
 /// `UTF8Array` is a collection of Rust UTF8 `String`s.
 #[derive(Debug)]
@@ -35,8 +36,28 @@ impl Array for UTF8Array {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> crate::error::Result<Vec<Buffer>> {
-        todo!()
+    fn to_protobuf(&self) -> Result<Vec<Buffer>> {
+        let offset_buffer = self.offset.iter().fold(
+            Vec::<u8>::with_capacity(self.offset.len() * size_of::<usize>()),
+            |mut buffer, offset| {
+                // TODO: force convert usize to u64, frontend will treat this offset buffer as u64
+                let offset = *offset as u64;
+                buffer.extend_from_slice(&offset.to_be_bytes());
+                buffer
+            },
+        );
+
+        let data_buffer = self.data.clone();
+
+        Ok(vec![offset_buffer, data_buffer]
+            .into_iter()
+            .map(|buffer| {
+                let mut b = Buffer::new();
+                b.set_compression(Buffer_CompressionType::NONE);
+                b.set_body(buffer);
+                b
+            })
+            .collect::<Vec<Buffer>>())
     }
 
     fn null_bitmap(&self) -> &Bitmap {
@@ -122,5 +143,52 @@ mod tests {
             }
         }
         builder.finish().unwrap();
+    }
+
+    #[test]
+    fn test_utf8_array() {
+        let input = vec![
+            Some("1"),
+            Some("22"),
+            None,
+            Some("4444"),
+            None,
+            Some("666666"),
+        ];
+
+        let result_array = UTF8Array::from_slice(&input);
+
+        assert!(result_array.is_ok());
+        let array = result_array.unwrap();
+
+        assert_eq!(array.len(), input.len());
+
+        assert_eq!(
+            array.data.len(),
+            input.iter().map(|s| s.unwrap_or("").len()).sum::<usize>()
+        );
+
+        assert_eq!(input, array.iter().collect::<Vec<Option<&str>>>());
+    }
+
+    #[test]
+    fn test_utf8_array_to_protobuf() {
+        let input = vec![
+            Some("1"),
+            Some("22"),
+            None,
+            Some("4444"),
+            None,
+            Some("666666"),
+        ];
+
+        let result_array = UTF8Array::from_slice(&input);
+
+        assert!(result_array.is_ok());
+        let array = result_array.unwrap();
+        let result_buffers = array.to_protobuf();
+        assert!(result_buffers.is_ok());
+        let buffers = result_buffers.unwrap();
+        assert!(buffers.len() >= 2);
     }
 }

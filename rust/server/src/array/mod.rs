@@ -11,8 +11,6 @@ pub use decimal::*;
 mod array_builder;
 mod bool_array;
 pub mod interval_array;
-mod utf8_array;
 
 pub use array_builder::*;
 pub use bool_array::*;
-pub use utf8_array::*;
