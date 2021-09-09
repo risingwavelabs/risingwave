@@ -4,9 +4,10 @@ mod bool_array;
 pub(crate) mod column;
 mod compact_v1;
 mod data_chunk;
+mod decimal_array;
 mod iterator;
 mod macros;
-pub mod primitive_array;
+mod primitive_array;
 mod utf8_array;
 
 use crate::buffer::Bitmap;
@@ -14,10 +15,10 @@ use crate::error::Result;
 use crate::types::{Scalar, ScalarRef};
 pub use bool_array::{BoolArray, BoolArrayBuilder};
 pub use data_chunk::{DataChunk, DataChunkRef};
+pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use iterator::ArrayIterator;
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder};
-
 use risingwave_proto::data::Buffer;
 use std::sync::Arc;
 pub use utf8_array::{UTF8Array, UTF8ArrayBuilder};
@@ -146,6 +147,7 @@ pub enum ArrayImpl {
     Float64(PrimitiveArray<f64>),
     UTF8(UTF8Array),
     Bool(BoolArray),
+    Decimal(DecimalArray),
 }
 
 /// `impl_convert` implements 4 conversions for `Array`.
@@ -197,6 +199,7 @@ impl_convert! { Float32, float32, F32Array }
 impl_convert! { Float64, float64, F64Array }
 impl_convert! { UTF8, utf8, UTF8Array }
 impl_convert! { Bool, bool, BoolArray }
+impl_convert! { Decimal, decimal, DecimalArray }
 
 /// `ArrayBuilderImpl` embeds all possible array in `arary2` module.
 ///
@@ -209,6 +212,7 @@ pub enum ArrayBuilderImpl {
     Float64(PrimitiveArrayBuilder<f64>),
     UTF8(UTF8ArrayBuilder),
     Bool(BoolArrayBuilder),
+    Decimal(DecimalArrayBuilder),
 }
 
 macro_rules! impl_all_variants {
@@ -231,6 +235,7 @@ impl ArrayBuilderImpl {
             ArrayBuilderImpl::Float64(inner) => inner.append_array(other.into()),
             ArrayBuilderImpl::UTF8(inner) => inner.append_array(other.into()),
             ArrayBuilderImpl::Bool(inner) => inner.append_array(other.into()),
+            ArrayBuilderImpl::Decimal(inner) => inner.append_array(other.into()),
         }
     }
 
@@ -243,6 +248,7 @@ impl ArrayBuilderImpl {
             ArrayBuilderImpl::Float64(inner) => inner.finish()?.into(),
             ArrayBuilderImpl::UTF8(inner) => inner.finish()?.into(),
             ArrayBuilderImpl::Bool(inner) => inner.finish()?.into(),
+            ArrayBuilderImpl::Decimal(inner) => inner.finish()?.into(),
         })
     }
 }
@@ -250,7 +256,7 @@ impl ArrayBuilderImpl {
 impl ArrayImpl {
     pub fn len(self) -> usize {
         // FIXME: now the concrete array use data to get len(). It should be compute from bitmap.
-        impl_all_variants! { self, len, [Int16, Int32, Int64, Float32, Float64, UTF8, Bool] }
+        impl_all_variants! { self, len, [Int16, Int32, Int64, Float32, Float64, UTF8, Bool, Decimal] }
     }
 
     pub fn null_bitmap(&self) -> &Bitmap {
@@ -262,6 +268,7 @@ impl ArrayImpl {
             ArrayImpl::Float64(inner) => inner.null_bitmap(),
             ArrayImpl::UTF8(inner) => inner.null_bitmap(),
             ArrayImpl::Bool(inner) => inner.null_bitmap(),
+            ArrayImpl::Decimal(inner) => inner.null_bitmap(),
         }
     }
 
@@ -274,6 +281,7 @@ impl ArrayImpl {
             ArrayImpl::Float64(inner) => inner.to_protobuf(),
             ArrayImpl::UTF8(inner) => inner.to_protobuf(),
             ArrayImpl::Bool(inner) => inner.to_protobuf(),
+            ArrayImpl::Decimal(inner) => inner.to_protobuf(),
         }
     }
 
@@ -286,6 +294,7 @@ impl ArrayImpl {
             ArrayImpl::Float64(inner) => inner.compact(visibility, cardinality).map(Into::into),
             ArrayImpl::UTF8(inner) => inner.compact(visibility, cardinality).map(Into::into),
             ArrayImpl::Bool(inner) => inner.compact(visibility, cardinality).map(Into::into),
+            ArrayImpl::Decimal(inner) => inner.compact(visibility, cardinality).map(Into::into),
         }
     }
 }
@@ -306,6 +315,8 @@ impl_into_builders! { I64ArrayBuilder, Int64 }
 impl_into_builders! { F32ArrayBuilder, Float32 }
 impl_into_builders! { F64ArrayBuilder, Float64 }
 impl_into_builders! { UTF8ArrayBuilder, UTF8 }
+impl_into_builders! { BoolArrayBuilder, Bool }
+impl_into_builders! { DecimalArrayBuilder, Decimal }
 
 pub type ArrayRef = Arc<ArrayImpl>;
 

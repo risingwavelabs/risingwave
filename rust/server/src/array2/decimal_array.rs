@@ -1,16 +1,18 @@
 use super::{Array, ArrayBuilder, ArrayIterator};
 use crate::buffer::Bitmap;
 use crate::error::Result;
+
 use risingwave_proto::data::Buffer;
+use rust_decimal::Decimal;
 
 #[derive(Debug)]
-pub struct BoolArray {
+pub struct DecimalArray {
     bitmap: Bitmap,
-    data: Vec<bool>,
+    data: Vec<Decimal>,
 }
 
-impl BoolArray {
-    pub fn from_slice(data: &[Option<bool>]) -> Result<Self> {
+impl DecimalArray {
+    pub fn from_slice(data: &[Option<Decimal>]) -> Result<Self> {
         let mut builder = <Self as Array>::Builder::new(data.len())?;
         for i in data {
             builder.append(*i)?;
@@ -19,13 +21,13 @@ impl BoolArray {
     }
 }
 
-impl Array for BoolArray {
-    type Builder = BoolArrayBuilder;
-    type RefItem<'a> = bool;
-    type OwnedItem = bool;
+impl Array for DecimalArray {
+    type Builder = DecimalArrayBuilder;
+    type RefItem<'a> = Decimal;
+    type OwnedItem = Decimal;
     type Iter<'a> = ArrayIterator<'a, Self>;
 
-    fn value_at(&self, idx: usize) -> Option<bool> {
+    fn value_at(&self, idx: usize) -> Option<Decimal> {
         if !self.is_null(idx) {
             Some(self.data[idx])
         } else {
@@ -50,14 +52,14 @@ impl Array for BoolArray {
     }
 }
 
-/// `BoolArrayBuilder` constructs a `BoolArray` from `Option<Bool>`.
-pub struct BoolArrayBuilder {
+/// `DecimalArrayBuilder` constructs a `DecimalArray` from `Option<Decimal>`.
+pub struct DecimalArrayBuilder {
     bitmap: Vec<bool>,
-    data: Vec<bool>,
+    data: Vec<Decimal>,
 }
 
-impl ArrayBuilder for BoolArrayBuilder {
-    type ArrayType = BoolArray;
+impl ArrayBuilder for DecimalArrayBuilder {
+    type ArrayType = DecimalArray;
 
     fn new(capacity: usize) -> Result<Self> {
         Ok(Self {
@@ -66,7 +68,7 @@ impl ArrayBuilder for BoolArrayBuilder {
         })
     }
 
-    fn append(&mut self, value: Option<bool>) -> Result<()> {
+    fn append(&mut self, value: Option<Decimal>) -> Result<()> {
         match value {
             Some(x) => {
                 self.bitmap.push(true);
@@ -74,20 +76,20 @@ impl ArrayBuilder for BoolArrayBuilder {
             }
             None => {
                 self.bitmap.push(false);
-                self.data.push(bool::default());
+                self.data.push(Decimal::default());
             }
         }
         Ok(())
     }
 
-    fn append_array(&mut self, other: &BoolArray) -> Result<()> {
+    fn append_array(&mut self, other: &DecimalArray) -> Result<()> {
         self.bitmap.extend(other.bitmap.iter());
         self.data.extend_from_slice(&other.data);
         Ok(())
     }
 
-    fn finish(self) -> Result<BoolArray> {
-        Ok(BoolArray {
+    fn finish(self) -> Result<DecimalArray> {
+        Ok(DecimalArray {
             bitmap: Bitmap::from_vec(self.bitmap)?,
             data: self.data,
         })
@@ -97,29 +99,19 @@ impl ArrayBuilder for BoolArrayBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn helper_test_builder(data: Vec<Option<bool>>) -> BoolArray {
-        let mut builder = BoolArrayBuilder::new(data.len()).unwrap();
-        for d in data {
-            builder.append(d).unwrap();
-        }
-        builder.finish().unwrap()
-    }
+    use num_traits::FromPrimitive;
 
     #[test]
-    fn test_bool_builder() {
+    fn test_decimal_builder() {
         let v = (0..1000)
-            .map(|x| {
-                if x % 2 == 0 {
-                    None
-                } else if x % 3 == 0 {
-                    Some(true)
-                } else {
-                    Some(false)
-                }
-            })
-            .collect::<Vec<Option<bool>>>();
-        let array = helper_test_builder(v.clone());
-        let res = v.iter().zip(array.iter()).all(|(a, b)| *a == b);
+            .map(Decimal::from_i64)
+            .collect::<Vec<Option<Decimal>>>();
+        let mut builder = DecimalArrayBuilder::new(0).unwrap();
+        for i in &v {
+            builder.append(*i).unwrap();
+        }
+        let a = builder.finish().unwrap();
+        let res = v.iter().zip(a.iter()).all(|(a, b)| *a == b);
         assert_eq!(res, true);
     }
 }

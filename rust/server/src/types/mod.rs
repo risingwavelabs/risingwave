@@ -1,5 +1,6 @@
 use crate::error::{Result, RwError};
 use risingwave_proto::data::DataType as DataTypeProto;
+use rust_decimal::Decimal;
 use std::any::Any;
 use std::sync::Arc;
 
@@ -13,7 +14,6 @@ use crate::error::ErrorCode::InternalError;
 pub use native::*;
 use risingwave_proto::data::DataType_TypeName::BOOLEAN;
 use risingwave_proto::data::DataType_TypeName::CHAR;
-
 use risingwave_proto::data::DataType_TypeName::DOUBLE;
 use risingwave_proto::data::DataType_TypeName::FLOAT;
 use risingwave_proto::data::DataType_TypeName::INT16;
@@ -236,6 +236,24 @@ impl<'a> ScalarRef<'a> for bool {
     type ScalarType = bool;
 
     fn to_owned_scalar(&self) -> bool {
+        *self
+    }
+}
+
+/// Implement `Scalar` for `Decimal`.
+impl Scalar for Decimal {
+    type ScalarRefType<'a> = Decimal;
+
+    fn as_scalar_ref(&self) -> Decimal {
+        *self
+    }
+}
+
+/// Implement `Scalar` for `Decimal`.
+impl<'a> ScalarRef<'a> for Decimal {
+    type ScalarType = Decimal;
+
+    fn to_owned_scalar(&self) -> Decimal {
         *self
     }
 }
