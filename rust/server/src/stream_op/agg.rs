@@ -1,7 +1,7 @@
 //! Streaming Aggregators
 
-mod sum;
-pub use sum::*;
+mod foldable;
+pub use foldable::*;
 
 use super::{Op, Output, StreamChunk, StreamOperator, UnaryStreamOperator};
 use crate::array2::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl};

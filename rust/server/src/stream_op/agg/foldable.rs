@@ -1,4 +1,4 @@
-//! Implementation of `StreamingSumAgg`
+//! Implementation of `StreamingFoldAgg`, which includes sum and count.
 
 use std::marker::PhantomData;
 
@@ -9,19 +9,27 @@ use crate::types::{option_as_scalar_ref, Scalar, ScalarRef};
 
 use super::{Op, StreamingAggFunction, StreamingAggState, StreamingAggStateImpl};
 
-/// A trait over all sum functions.
+/// A trait over all fold functions.
 ///
 /// `R`: Result (or output, stored) type.
 /// `I`: Input type.
-pub trait StreamingSummable<R: Scalar, I: Scalar> {
+pub trait StreamingFoldable<R: Scalar, I: Scalar> {
+    /// Called on `Insert` or `UpdateInsert`.
     fn accumulate(
         result: Option<R::ScalarRefType<'_>>,
         input: Option<I::ScalarRefType<'_>>,
     ) -> Result<Option<R>>;
+
+    /// Called on `Delete` or `UpdateDelete`.
     fn retract(
         result: Option<R::ScalarRefType<'_>>,
         input: Option<I::ScalarRefType<'_>>,
     ) -> Result<Option<R>>;
+
+    /// Get initial value of this foldable function.
+    fn initial() -> Option<R> {
+        None
+    }
 }
 
 /// `StreamingSumAgg` wraps a streaming summing function `S` into an aggregator.
@@ -29,11 +37,11 @@ pub trait StreamingSummable<R: Scalar, I: Scalar> {
 /// `R`: Result (or output, stored) type.
 /// `I`: Input type.
 /// `S`: Sum function.
-pub struct StreamingSumAgg<R, I, S>
+pub struct StreamingFoldAgg<R, I, S>
 where
     R: Array,
     I: Array,
-    S: StreamingSummable<R::OwnedItem, I::OwnedItem>,
+    S: StreamingFoldable<R::OwnedItem, I::OwnedItem>,
 {
     result: Option<R::OwnedItem>,
     _phantom: PhantomData<(I, S, R)>,
@@ -48,7 +56,7 @@ where
     _phantom: PhantomData<S>,
 }
 
-impl<S> StreamingSummable<S, S> for PrimitiveSummable<S>
+impl<S> StreamingFoldable<S, S> for PrimitiveSummable<S>
 where
     S: Scalar + num_traits::CheckedAdd<Output = S> + num_traits::CheckedSub<Output = S>,
 {
@@ -85,11 +93,48 @@ where
     }
 }
 
-impl<R, I, S> StreamingAggState<I> for StreamingSumAgg<R, I, S>
+/// `Countable` do counts. The behavior of `Countable` is somehow counterintuitive.
+/// In SQL logic, if there is no item in aggregation, count will return `null`.
+/// However, this `Countable` will always return 0 if there is no item.
+pub struct Countable<S>
+where
+    S: Scalar,
+{
+    _phantom: PhantomData<S>,
+}
+
+impl<S> StreamingFoldable<i64, S> for Countable<S>
+where
+    S: Scalar,
+{
+    fn accumulate(result: Option<i64>, input: Option<S::ScalarRefType<'_>>) -> Result<Option<i64>> {
+        Ok(match (result, input) {
+            (Some(x), Some(_)) => Some(x + 1),
+            (Some(x), None) => Some(x),
+            // this is not possible, as initial value of countable is `0`.
+            _ => unreachable!(),
+        })
+    }
+
+    fn retract(result: Option<i64>, input: Option<S::ScalarRefType<'_>>) -> Result<Option<i64>> {
+        Ok(match (result, input) {
+            (Some(x), Some(_)) => Some(x - 1),
+            (Some(x), None) => Some(x),
+            // this is not possible, as initial value of countable is `0`.
+            _ => unreachable!(),
+        })
+    }
+
+    fn initial() -> Option<i64> {
+        Some(0)
+    }
+}
+
+impl<R, I, S> StreamingAggState<I> for StreamingFoldAgg<R, I, S>
 where
     R: Array,
     I: Array,
-    S: StreamingSummable<R::OwnedItem, I::OwnedItem>,
+    S: StreamingFoldable<R::OwnedItem, I::OwnedItem>,
 {
     fn apply_batch_concrete(
         &mut self,
@@ -119,36 +164,36 @@ where
     }
 }
 
-impl<R, I, S> StreamingAggFunction<R::Builder> for StreamingSumAgg<R, I, S>
+impl<R, I, S> StreamingAggFunction<R::Builder> for StreamingFoldAgg<R, I, S>
 where
     R: Array,
     I: Array,
-    S: StreamingSummable<R::OwnedItem, I::OwnedItem>,
+    S: StreamingFoldable<R::OwnedItem, I::OwnedItem>,
 {
     fn get_output_concrete(&self, builder: &mut R::Builder) -> Result<()> {
         builder.append(option_as_scalar_ref(&self.result))
     }
 }
 
-impl<R, I, S> StreamingSumAgg<R, I, S>
+impl<R, I, S> StreamingFoldAgg<R, I, S>
 where
     R: Array,
     I: Array,
-    S: StreamingSummable<R::OwnedItem, I::OwnedItem>,
+    S: StreamingFoldable<R::OwnedItem, I::OwnedItem>,
 {
     pub fn new() -> Self {
         Self {
-            result: None,
+            result: S::initial(),
             _phantom: PhantomData,
         }
     }
 }
 
 macro_rules! impl_agg {
-    ($aggregator:tt, $result:tt, $result_variant:tt, $input:tt) => {
-        impl<S> StreamingAggStateImpl for $aggregator<$result, $input, S>
+    ($result:tt, $result_variant:tt, $input:tt) => {
+        impl<S> StreamingAggStateImpl for StreamingFoldAgg<$result, $input, S>
         where
-            S: StreamingSummable<<$result as Array>::OwnedItem, <$input as Array>::OwnedItem>,
+            S: StreamingFoldable<<$result as Array>::OwnedItem, <$input as Array>::OwnedItem>,
         {
             fn apply_batch(
                 &mut self,
@@ -173,27 +218,48 @@ macro_rules! impl_agg {
     };
 }
 
-impl_agg! { StreamingSumAgg, I64Array, Int64, I64Array }
+impl_agg! { I64Array, Int64, I64Array }
+
+/// `StreamingSumAgg` sums data of the same type.
+type StreamingSumAgg<R> = StreamingFoldAgg<R, R, PrimitiveSummable<<R as Array>::OwnedItem>>;
+
+/// `StreamingCountAgg` counts data of any type.
+type StreamingCountAgg<R> = StreamingFoldAgg<R, R, Countable<<R as Array>::OwnedItem>>;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::array2::I64Array;
-    use crate::array_nonnull;
+    use crate::{array, array_nonnull};
 
     #[test]
     fn test_primitive_sum() {
-        let mut agg: Box<dyn StreamingAggStateImpl> =
-            Box::new(StreamingSumAgg::<I64Array, I64Array, PrimitiveSummable<_>>::new());
+        let mut agg: Box<dyn StreamingAggStateImpl> = Box::new(StreamingSumAgg::<I64Array>::new());
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
-            &array_nonnull!(I64Array, [1, 2, 3, 4]).into(),
+            &array_nonnull!(I64Array, [1, 2, 3, 3]).into(),
         )
         .unwrap();
         let mut builder = agg.new_builder();
         agg.get_output(&mut builder).unwrap();
         let array = builder.finish().unwrap();
-        assert_eq!(array.as_int64().value_at(0), Some(2));
+        assert_eq!(array.as_int64().value_at(0), Some(3));
+    }
+
+    #[test]
+    fn test_primitive_count() {
+        let mut agg: Box<dyn StreamingAggStateImpl> =
+            Box::new(StreamingCountAgg::<I64Array>::new());
+        agg.apply_batch(
+            &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
+            None,
+            &array!(I64Array, [Some(1), None, Some(3), Some(1)]).into(),
+        )
+        .unwrap();
+        let mut builder = agg.new_builder();
+        agg.get_output(&mut builder).unwrap();
+        let array = builder.finish().unwrap();
+        assert_eq!(array.as_int64().value_at(0), Some(1));
     }
 }
