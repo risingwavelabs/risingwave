@@ -129,7 +129,7 @@ impl TryFrom<&ExprNode_ExprNodeType> for ArithmeticOperatorKind {
 /// reference which has the same lifetime as `self`.
 pub trait Scalar: Send + Sync + 'static + Clone + std::fmt::Debug {
     /// Type for reference of `Scalar`
-    type ScalarRefType<'a>: ScalarRef<'a, ScalarType = Self>
+    type ScalarRefType<'a>: ScalarRef<'a, ScalarType = Self> + 'a
     where
         Self: 'a;
 
