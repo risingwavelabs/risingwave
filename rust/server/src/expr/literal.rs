@@ -1,4 +1,4 @@
-use crate::array2::{ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk};
+use crate::array2::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk};
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::expr::Expression;
@@ -49,32 +49,35 @@ impl Expression for LiteralExpression {
         self.return_type.clone()
     }
 
-    fn eval(&mut self, _input: &DataChunk) -> Result<ArrayRef> {
+    fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef> {
         let mut array_builder =
-            DataType::create_array_builder(self.return_type.clone(), _input.cardinality())?;
-        for _ in 0.._input.cardinality() {
-            match &mut array_builder {
-                // FIXME: refactor in a generic/macro way
-                ArrayBuilderImpl::Int32(inner) => {
-                    let v = match &self.literal {
-                        Datum::Int32(v) => *v,
-                        _ => unimplemented!(),
-                    };
-                    inner.append(Some(v))?;
-                }
-                ArrayBuilderImpl::UTF8(inner) => {
-                    let v = match &self.literal {
-                        Datum::UTF8String(ref v) => v,
-                        _ => unimplemented!(),
-                    };
-                    inner.append(Some(v))?;
-                }
-
-                _ => unimplemented!(),
+            DataType::create_array_builder(self.return_type.clone(), input.cardinality())?;
+        let cardinality = input.cardinality;
+        match (&mut array_builder, &self.literal) {
+            (ArrayBuilderImpl::Int32(inner), Datum::Int32(v)) => {
+                append_literal_to_arr(inner, Some(*v), cardinality)?;
             }
-        }
+            (ArrayBuilderImpl::UTF8(inner), Datum::UTF8String(v)) => {
+                append_literal_to_arr(inner, Some(v), cardinality)?;
+            }
+            (_, _) => unimplemented!("Do not support values in insert values executor"),
+        };
         array_builder.finish().map(Arc::new)
     }
+}
+
+fn append_literal_to_arr<'a, A1>(
+    a: &'a mut A1,
+    v: Option<<<A1 as ArrayBuilder>::ArrayType as Array>::RefItem<'a>>,
+    cardinality: usize,
+) -> Result<()>
+where
+    A1: ArrayBuilder,
+{
+    for _ in 0..cardinality {
+        a.append(v)?
+    }
+    Ok(())
 }
 
 fn literal_type_match(return_type: DataTypeKind, literal: Datum) -> bool {
