@@ -1,10 +1,8 @@
-use std::sync::Arc;
-
 use super::{Output, StreamChunk, StreamOperator, UnaryStreamOperator};
 use crate::{
-    array2::{column::Column, ArrayRef, DataChunk},
+    array2::{column::Column, DataChunk},
     error::Result,
-    types::Int64Type,
+    expr::BoxedExpression,
 };
 use async_trait::async_trait;
 
@@ -15,14 +13,11 @@ pub struct ProjectionOperator {
     /// The output of the current operator
     output: Box<dyn Output>,
     /// Expression of the current filter, note that the filter must always have the same output for the same input.
-    exprs: Vec<Box<dyn Fn(&DataChunk) -> Result<ArrayRef> + 'static + Send + Sync>>,
+    exprs: Vec<BoxedExpression>,
 }
 
 impl ProjectionOperator {
-    pub fn new(
-        output: Box<dyn Output>,
-        exprs: Vec<Box<dyn Fn(&DataChunk) -> Result<ArrayRef> + 'static + Send + Sync>>,
-    ) -> Self {
+    pub fn new(output: Box<dyn Output>, exprs: Vec<BoxedExpression>) -> Self {
         Self { output, exprs }
     }
 }
@@ -56,12 +51,12 @@ impl UnaryStreamOperator for ProjectionOperator {
 
         let projected_columns = self
             .exprs
-            .iter()
+            .iter_mut()
             .map(|expr| {
-                expr(&data_chunk).map(|array| Column {
+                expr.eval(&data_chunk).map(|array| Column {
                     array,
                     // FIXME: this is just a place holder, we should use expr.return_type_ref.
-                    data_type: Arc::new(Int64Type::default()),
+                    data_type: expr.return_type_ref(),
                 })
             })
             .collect::<Result<Vec<Column>>>()?;
