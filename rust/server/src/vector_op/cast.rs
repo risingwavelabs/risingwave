@@ -13,7 +13,11 @@ pub fn vec_cast(
             vector_cast_str_to_date(un_casted_arr.as_utf8())
         }
 
-        _ => unimplemented!(),
+        (other_src_type, other_dst_type) => todo!(
+            "cast from {:?} to {:?} is not implemented",
+            other_src_type,
+            other_dst_type
+        ),
     }
     .map(|arr| arr.into())
 }

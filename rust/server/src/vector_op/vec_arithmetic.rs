@@ -18,10 +18,10 @@ pub fn vector_arithmetic_impl(
     ensure!(left_type.data_type_kind() == right_type.data_type_kind());
     match operator_type {
         ArithmeticOperatorKind::Plus => vector_add(left_array, right_array),
-        ArithmeticOperatorKind::Subtract => unimplemented!(),
-        ArithmeticOperatorKind::Multiply => unimplemented!(),
-        ArithmeticOperatorKind::Divide => unimplemented!(),
-        _ => unimplemented!(),
+        ArithmeticOperatorKind::Subtract => todo!(),
+        ArithmeticOperatorKind::Multiply => todo!(),
+        ArithmeticOperatorKind::Divide => todo!(),
+        ArithmeticOperatorKind::Mod => todo!(),
     }
 }
 

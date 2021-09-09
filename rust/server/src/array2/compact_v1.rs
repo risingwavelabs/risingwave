@@ -96,7 +96,10 @@ impl From<ArrayRef> for ArrayImpl {
             DataTypeKind::Float64 => ArrayImpl::Float64(
                 (downcast_ref(&*data).unwrap() as &PrimitiveArrayV1<Float64Type>).into(),
             ),
-            _ => unimplemented!(),
+            unimpl_ty => todo!(
+                "ArrayRef (v1) -> ArrayImpl (v2) for {:?} is not implemented",
+                unimpl_ty
+            ),
         }
     }
 }
@@ -110,7 +113,10 @@ impl From<ArrayImpl> for ArrayRef {
             Int64(x) => x.into(),
             Float32(x) => x.into(),
             Float64(x) => x.into(),
-            _ => unimplemented!(),
+            unimpl_ty => todo!(
+                "ArrayImpl (v2) -> ArrayRef (v1) for {:?} is not implemented",
+                unimpl_ty
+            ),
         }
     }
 }
@@ -124,7 +130,10 @@ impl From<&ArrayImpl> for ArrayRef {
             Int64(x) => x.into(),
             Float32(x) => x.into(),
             Float64(x) => x.into(),
-            _ => unimplemented!(),
+            unimpl_ty => todo!(
+                "&ArrayImpl (v2) -> ArrayRef (v1) for {:?} is not implemented",
+                unimpl_ty
+            ),
         }
     }
 }

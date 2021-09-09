@@ -9,6 +9,8 @@
 // use std::convert::TryFrom;
 // use crate::array2::ArrayImpl;
 // use crate::array2::DataChunk;
+
+#[derive(Debug)]
 pub enum AggKind {
     Min,
     Max,

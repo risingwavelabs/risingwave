@@ -190,32 +190,36 @@ where
 }
 
 macro_rules! impl_agg {
-    ($result:tt, $result_variant:tt, $input:tt) => {
-        impl<S> StreamingAggStateImpl for StreamingFoldAgg<$result, $input, S>
-        where
-            S: StreamingFoldable<<$result as Array>::OwnedItem, <$input as Array>::OwnedItem>,
-        {
-            fn apply_batch(
-                &mut self,
-                ops: super::Ops<'_>,
-                skip: Option<&Bitmap>,
-                data: &ArrayImpl,
-            ) -> Result<()> {
-                self.apply_batch_concrete(ops, skip, data.into())
-            }
+  ($result:tt, $result_variant:tt, $input:tt) => {
+    impl<S> StreamingAggStateImpl for StreamingFoldAgg<$result, $input, S>
+    where
+      S: StreamingFoldable<<$result as Array>::OwnedItem, <$input as Array>::OwnedItem>,
+    {
+      fn apply_batch(
+        &mut self,
+        ops: super::Ops<'_>,
+        skip: Option<&Bitmap>,
+        data: &ArrayImpl,
+      ) -> Result<()> {
+        self.apply_batch_concrete(ops, skip, data.into())
+      }
 
-            fn get_output(&self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-                match builder {
-                    ArrayBuilderImpl::$result_variant(builder) => self.get_output_concrete(builder),
-                    _ => unimplemented!(),
-                }
-            }
-
-            fn new_builder(&self) -> ArrayBuilderImpl {
-                ArrayBuilderImpl::$result_variant(<$result as Array>::Builder::new(0).unwrap())
-            }
+      fn get_output(&self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+        match builder {
+          ArrayBuilderImpl::$result_variant(builder) => self.get_output_concrete(builder),
+          other_variant => panic!(
+            "type mismatch in streaming aggregator StreamingFoldAgg output: expected {}, get {}",
+            stringify!($result),
+            other_variant.get_ident()
+          ),
         }
-    };
+      }
+
+      fn new_builder(&self) -> ArrayBuilderImpl {
+        ArrayBuilderImpl::$result_variant(<$result as Array>::Builder::new(0).unwrap())
+      }
+    }
+  };
 }
 
 impl_agg! { I64Array, Int64, I64Array }

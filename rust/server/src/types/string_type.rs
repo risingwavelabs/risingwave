@@ -25,10 +25,6 @@ impl DataType for StringType {
     }
 
     fn create_array_builder(self: Arc<Self>, capacity: usize) -> Result<ArrayBuilderImpl> {
-        // let width = self.width;
-        // UTF8ArrayBuilder::new(self, width, capacity)
-        //   .map(|builder| Box::new(builder) as BoxedArrayBuilder)
-        // unimplemented!()
         Ok(UTF8ArrayBuilder::new(capacity)?.into())
     }
 

@@ -1,4 +1,4 @@
-use crate::array2::ArrayBuilderImpl;
+use crate::array2::{ArrayBuilder, ArrayBuilderImpl, DecimalArrayBuilder};
 use crate::error::{Result, RwError};
 use crate::types::{DataType, DataTypeKind, DataTypeRef};
 use risingwave_proto::data::DataType as DataTypeProto;
@@ -55,9 +55,8 @@ impl DataType for DecimalType {
         self.nullable
     }
 
-    fn create_array_builder(self: Arc<Self>, _capacity: usize) -> Result<ArrayBuilderImpl> {
-        // Ok(Box::new(DecimalArrayBuilder::new(self, _capacity)))
-        unimplemented!()
+    fn create_array_builder(self: Arc<Self>, capacity: usize) -> Result<ArrayBuilderImpl> {
+        DecimalArrayBuilder::new(capacity).map(|x| x.into())
     }
 
     fn to_protobuf(&self) -> Result<DataTypeProto> {

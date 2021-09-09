@@ -102,7 +102,12 @@ pub fn create_agg_state_v2(
         (DataTypeKind::Char, AggKind::Min, DataTypeKind::Char) => {
             Box::new(GeneralAgg::<UTF8Array, _, UTF8Array>::new(min_str))
         }
-        _ => unimplemented!(),
+        (unimpl_input, unimpl_agg, unimpl_ret) => todo!(
+            "unsupported aggregator: type={:?} input={:?} output={:?}",
+            unimpl_agg,
+            unimpl_input,
+            unimpl_ret
+        ),
     };
     Ok(state)
 }

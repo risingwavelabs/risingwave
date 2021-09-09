@@ -155,40 +155,40 @@ pub enum ArrayImpl {
 /// * `Array -> ArrayImpl` with `From` trait.
 /// * `&ArrayImpl -> &Array` with `From` trait.
 macro_rules! impl_convert {
-    ($x:ident, $y:ident, $z:ty) => {
-        paste! {
-          impl ArrayImpl {
-            pub fn [<as_ $y>](&self) -> &$z {
-              match self {
-                Self::$x(ref array) => array,
-                _ => unimplemented!(),
-              }
-            }
-
-            pub fn [<into_ $y>](self) -> $z {
-              match self {
-                Self::$x(array) => array,
-                _ => unimplemented!(),
-              }
-            }
-          }
-
-          impl From<$z> for ArrayImpl {
-            fn from(array: $z) -> Self {
-              Self::$x(array)
-            }
-          }
-
-          impl <'a> From<&'a ArrayImpl> for &'a $z {
-            fn from(array: &'a ArrayImpl) -> Self {
-              match array {
-                ArrayImpl::$x(inner) => inner,
-                _ => unimplemented!(),
-              }
-            }
+  ($x:ident, $y:ident, $z:ty) => {
+    paste! {
+      impl ArrayImpl {
+        pub fn [<as_ $y>](&self) -> &$z {
+          match self {
+            Self::$x(ref array) => array,
+            other_array => panic!("cannot covert ArrayImpl::{} to concrete type", other_array.get_ident())
           }
         }
-    };
+
+        pub fn [<into_ $y>](self) -> $z {
+          match self {
+            Self::$x(array) => array,
+            other_array => panic!("cannot covert ArrayImpl::{} to concrete type", other_array.get_ident())
+          }
+        }
+      }
+
+      impl From<$z> for ArrayImpl {
+        fn from(array: $z) -> Self {
+          Self::$x(array)
+        }
+      }
+
+      impl <'a> From<&'a ArrayImpl> for &'a $z {
+        fn from(array: &'a ArrayImpl) -> Self {
+          match array {
+            ArrayImpl::$x(inner) => inner,
+            other_array => panic!("cannot covert ArrayImpl::{} to concrete type", other_array.get_ident())
+          }
+        }
+      }
+    }
+  };
 }
 
 impl_convert! { Int16, int16, I16Array }
@@ -250,6 +250,19 @@ impl ArrayBuilderImpl {
             ArrayBuilderImpl::Decimal(inner) => inner.finish()?.into(),
         })
     }
+
+    pub fn get_ident(&self) -> &'static str {
+        match self {
+            ArrayBuilderImpl::Int16(_) => "Int16",
+            ArrayBuilderImpl::Int32(_) => "Int32",
+            ArrayBuilderImpl::Int64(_) => "Int64",
+            ArrayBuilderImpl::Float32(_) => "Float32",
+            ArrayBuilderImpl::Float64(_) => "Float64",
+            ArrayBuilderImpl::UTF8(_) => "UTF8",
+            ArrayBuilderImpl::Bool(_) => "Bool",
+            ArrayBuilderImpl::Decimal(_) => "Decimal",
+        }
+    }
 }
 
 impl ArrayImpl {
@@ -294,6 +307,19 @@ impl ArrayImpl {
             ArrayImpl::UTF8(inner) => inner.compact(visibility, cardinality).map(Into::into),
             ArrayImpl::Bool(inner) => inner.compact(visibility, cardinality).map(Into::into),
             ArrayImpl::Decimal(inner) => inner.compact(visibility, cardinality).map(Into::into),
+        }
+    }
+
+    pub fn get_ident(&self) -> &'static str {
+        match self {
+            ArrayImpl::Int16(_) => "Int16",
+            ArrayImpl::Int32(_) => "Int32",
+            ArrayImpl::Int64(_) => "Int64",
+            ArrayImpl::Float32(_) => "Float32",
+            ArrayImpl::Float64(_) => "Float64",
+            ArrayImpl::UTF8(_) => "UTF8",
+            ArrayImpl::Bool(_) => "Bool",
+            ArrayImpl::Decimal(_) => "Decimal",
         }
     }
 }
