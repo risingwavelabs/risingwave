@@ -5,7 +5,7 @@ mod conjunction;
 mod input_ref;
 mod literal;
 mod type_cast;
-pub use agg::AggKind;
+pub use agg::{AggExpression, AggKind};
 pub use literal::*;
 
 use crate::array2::ArrayRef;

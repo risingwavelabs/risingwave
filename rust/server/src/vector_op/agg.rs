@@ -1,5 +1,3 @@
-use crate::array::{ArrayBuilder as ArrayBuilderV1, ArrayRef as ArrayRefV1};
-
 use crate::array2::*;
 use crate::error::{ErrorCode, Result};
 use crate::expr::AggKind;
@@ -15,25 +13,9 @@ pub trait Aggregator: Send + 'static {
     fn output(&self, builder: &mut ArrayBuilderImpl) -> Result<()>;
 }
 
-pub struct BoxedAggState(Box<dyn Aggregator>);
+pub type BoxedAggState = Box<dyn Aggregator>;
 
-/// `BoxedAggState` is a wrapper for array v1 compactible layer.
-/// TODO: remove this
-impl BoxedAggState {
-    pub fn update(&mut self, input: ArrayRefV1) -> Result<()> {
-        self.0.update(&ArrayImpl::from(input))
-    }
-    pub fn output(&self, builder: &mut dyn ArrayBuilderV1) -> Result<()> {
-        let mut my_builder = ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)?);
-        self.0.output(&mut my_builder)?;
-        let array = my_builder.finish()?;
-        let array = ArrayRefV1::from(array);
-        builder.append_array(&*array)?;
-        Ok(())
-    }
-}
-
-pub fn create_agg_state_v2(
+pub fn create_agg_state(
     input_type: DataTypeRef,
     agg_type: &AggKind,
     return_type: DataTypeRef,
@@ -254,18 +236,6 @@ fn count_str(r: Option<i64>, i: Option<&str>) -> Option<i64> {
     count(r, i)
 }
 
-pub fn create_agg_state(
-    input_type: DataTypeRef,
-    agg_type: &AggKind,
-    return_type: DataTypeRef,
-) -> Result<BoxedAggState> {
-    Ok(BoxedAggState(create_agg_state_v2(
-        input_type,
-        agg_type,
-        return_type,
-    )?))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -278,7 +248,7 @@ mod tests {
         return_type: DataTypeRef,
         mut builder: ArrayBuilderImpl,
     ) -> Result<ArrayImpl> {
-        let mut agg_state = create_agg_state_v2(input_type, agg_type, return_type.clone())?;
+        let mut agg_state = create_agg_state(input_type, agg_type, return_type.clone())?;
         agg_state.update(input)?;
         agg_state.output(&mut builder)?;
         builder.finish()
