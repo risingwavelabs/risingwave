@@ -29,6 +29,7 @@ smallvec = "1"
 thiserror = "1"
 tokio = {version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time"]}
 typed-builder = "0.9"
+byteorder = "1"
 
 [[bin]]
 name = "compute-node"

@@ -1,10 +1,12 @@
 use num_traits::AsPrimitive;
 
 use crate::array2::ArrayImpl::{Float32, Float64, Int16, Int32, Int64};
-use crate::array2::{Array, ArrayBuilder, ArrayImpl, BoolArray, BoolArrayBuilder, PrimitiveArray};
+use crate::array2::{
+    Array, ArrayBuilder, ArrayImpl, BoolArray, BoolArrayBuilder, PrimitiveArray,
+    PrimitiveArrayItemType,
+};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
-use crate::types::NativeType;
 
 pub fn vec_cmp_primitive<T1, T2, T3, F>(
     left: &PrimitiveArray<T1>,
@@ -12,9 +14,9 @@ pub fn vec_cmp_primitive<T1, T2, T3, F>(
     mut op: F,
 ) -> Result<BoolArray>
 where
-    T1: NativeType + AsPrimitive<T3>,
-    T2: NativeType + AsPrimitive<T3>,
-    T3: NativeType,
+    T1: PrimitiveArrayItemType + AsPrimitive<T3>,
+    T2: PrimitiveArrayItemType + AsPrimitive<T3>,
+    T3: PrimitiveArrayItemType,
     F: FnMut(T3, T3) -> bool,
 {
     ensure!(left.len() == right.len());
@@ -157,11 +159,9 @@ mod tests {
         mut scalar_cmp: F1,
         mut vec_cmp: F2,
     ) where
-        T1: NativeType + AsPrimitive<T3>,
-        T2: NativeType + AsPrimitive<T3>,
-        T3: NativeType,
-        ArrayImpl: From<PrimitiveArray<T1>>,
-        ArrayImpl: From<PrimitiveArray<T2>>,
+        T1: PrimitiveArrayItemType + AsPrimitive<T3>,
+        T2: PrimitiveArrayItemType + AsPrimitive<T3>,
+        T3: PrimitiveArrayItemType,
         F1: FnMut(T3, T3) -> bool,
         F2: FnMut(&ArrayImpl, &ArrayImpl) -> Result<BoolArray>,
     {

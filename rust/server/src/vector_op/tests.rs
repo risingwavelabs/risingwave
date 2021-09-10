@@ -1,6 +1,5 @@
-use crate::array2::{Array, PrimitiveArray};
+use crate::array2::{Array, PrimitiveArray, PrimitiveArrayItemType};
 use crate::error::Result;
-use crate::types::*;
 use crate::vector_op::add_op::*;
 use crate::vector_op::div_op::*;
 use crate::vector_op::mod_op::*;
@@ -14,9 +13,9 @@ fn test_primitive_type<T1, T2, T3, F>(
     func: F,
     should_error: bool,
 ) where
-    T1: NativeType,
-    T2: NativeType,
-    T3: NativeType,
+    T1: PrimitiveArrayItemType,
+    T2: PrimitiveArrayItemType,
+    T3: PrimitiveArrayItemType,
     F: Fn(&PrimitiveArray<T1>, &PrimitiveArray<T2>) -> Result<PrimitiveArray<T3>>,
 {
     let ret = func(

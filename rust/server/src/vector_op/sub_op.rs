@@ -1,8 +1,7 @@
+use crate::array2::PrimitiveArrayItemType;
 use crate::array2::{Array, ArrayBuilder, PrimitiveArray, PrimitiveArrayBuilder};
 use crate::error::ErrorCode::NumericValueOutOfRange;
 use crate::error::{Result, RwError};
-
-use crate::types::NativeType;
 
 /// Checked subtract two `PrimitiveArray` for integers. Both array must have the same size.
 pub fn vector_sub_primitive_integer<T1, T2, T3>(
@@ -10,9 +9,9 @@ pub fn vector_sub_primitive_integer<T1, T2, T3>(
     b: &PrimitiveArray<T2>,
 ) -> Result<PrimitiveArray<T3>>
 where
-    T1: NativeType + num_traits::AsPrimitive<T3>,
-    T2: NativeType + num_traits::AsPrimitive<T3>,
-    T3: NativeType + num_traits::CheckedSub,
+    T1: PrimitiveArrayItemType + num_traits::AsPrimitive<T3>,
+    T2: PrimitiveArrayItemType + num_traits::AsPrimitive<T3>,
+    T3: PrimitiveArrayItemType + num_traits::CheckedSub,
 {
     let mut builder = PrimitiveArrayBuilder::<T3>::new(a.len())?;
     for (a, b) in a.iter().zip(b.iter()) {
@@ -34,9 +33,9 @@ pub fn vector_sub_primitive_float<T1, T2, T3>(
     b: &PrimitiveArray<T2>,
 ) -> Result<PrimitiveArray<T3>>
 where
-    T1: NativeType + num_traits::AsPrimitive<T3>,
-    T2: NativeType + num_traits::AsPrimitive<T3>,
-    T3: NativeType + std::ops::Sub + num_traits::Float,
+    T1: PrimitiveArrayItemType + num_traits::AsPrimitive<T3>,
+    T2: PrimitiveArrayItemType + num_traits::AsPrimitive<T3>,
+    T3: PrimitiveArrayItemType + std::ops::Sub + num_traits::Float,
 {
     let mut builder = PrimitiveArrayBuilder::<T3>::new(a.len())?;
     for (a, b) in a.iter().zip(b.iter()) {

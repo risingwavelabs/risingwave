@@ -9,6 +9,7 @@ mod iterator;
 mod macros;
 mod primitive_array;
 mod utf8_array;
+mod value_reader;
 
 use crate::buffer::Bitmap;
 use crate::error::Result;
@@ -18,7 +19,7 @@ pub use data_chunk::{DataChunk, DataChunkRef};
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use iterator::ArrayIterator;
 use paste::paste;
-pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder};
+pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
 use risingwave_proto::data::Buffer;
 use std::sync::Arc;
 pub use utf8_array::{UTF8Array, UTF8ArrayBuilder};
@@ -80,7 +81,7 @@ pub trait ArrayBuilder: Sized {
 /// In some cases, we will need to store owned data. For example, when aggregating min
 /// and max, we need to store current maximum in the aggregator. In this case, we
 /// could use `A::OwnedItem` in aggregator struct.
-pub trait Array: Sized + 'static {
+pub trait Array: Sized + 'static + Into<ArrayImpl> {
     /// A reference to item in array, as well as return type of `value_at`, which is
     /// reciprocal to `Self::OwnedItem`.
     type RefItem<'a>: ScalarRef<'a, ScalarType = Self::OwnedItem>
@@ -170,6 +171,30 @@ macro_rules! array_impl_enum {
   };
 }
 
+impl<T: PrimitiveArrayItemType> From<PrimitiveArray<T>> for ArrayImpl {
+    fn from(arr: PrimitiveArray<T>) -> Self {
+        T::erase_array_type(arr)
+    }
+}
+
+impl From<BoolArray> for ArrayImpl {
+    fn from(arr: BoolArray) -> Self {
+        Self::Bool(arr)
+    }
+}
+
+impl From<DecimalArray> for ArrayImpl {
+    fn from(arr: DecimalArray) -> Self {
+        Self::Decimal(arr)
+    }
+}
+
+impl From<UTF8Array> for ArrayImpl {
+    fn from(arr: UTF8Array) -> Self {
+        Self::UTF8(arr)
+    }
+}
+
 for_all_variants! { array_impl_enum }
 
 /// `impl_convert` implements 4 conversions for `Array`.
@@ -194,12 +219,6 @@ macro_rules! impl_convert {
               Self::$variant_name(array) => array,
               other_array =>  panic!("cannot covert ArrayImpl::{} to concrete type", other_array.get_ident())
             }
-          }
-        }
-
-        impl From<$array> for ArrayImpl {
-          fn from(array: $array) -> Self {
-            Self::$variant_name(array)
           }
         }
 
@@ -405,7 +424,6 @@ mod tests {
         assert_eq!(array.iter().collect::<Vec<Option<i32>>>(), vec![Some(60)]);
     }
 
-    use crate::types::NativeType;
     use num_traits::cast::AsPrimitive;
     use num_traits::ops::checked::CheckedAdd;
 
@@ -414,9 +432,9 @@ mod tests {
         b: &PrimitiveArray<T2>,
     ) -> Result<PrimitiveArray<T3>>
     where
-        T1: NativeType + AsPrimitive<T3>,
-        T2: NativeType + AsPrimitive<T3>,
-        T3: NativeType + CheckedAdd,
+        T1: PrimitiveArrayItemType + AsPrimitive<T3>,
+        T2: PrimitiveArrayItemType + AsPrimitive<T3>,
+        T3: PrimitiveArrayItemType + CheckedAdd,
     {
         assert_eq!(a.len(), b.len());
         let mut builder = PrimitiveArrayBuilder::<T3>::new(a.len())?;

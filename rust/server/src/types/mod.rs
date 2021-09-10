@@ -34,7 +34,7 @@ pub use bool_type::*;
 pub use decimal_type::*;
 pub use string_type::*;
 
-use crate::array2::ArrayBuilderImpl;
+use crate::array2::{ArrayBuilderImpl, PrimitiveArrayItemType};
 use risingwave_proto::expr::ExprNode_ExprNodeType;
 use risingwave_proto::expr::ExprNode_ExprNodeType::ADD;
 use risingwave_proto::expr::ExprNode_ExprNodeType::DIVIDE;
@@ -171,9 +171,9 @@ pub trait ScalarPartialOrd: Scalar {
     fn scalar_cmp(&self, other: Self::ScalarRefType<'_>) -> Option<std::cmp::Ordering>;
 }
 
-/// Implement `Scalar` for `NativeType`.
-/// For native type, clone is trivial, so `T` is both `Scalar` and `ScalarRef`.
-impl<T: NativeType> Scalar for T {
+/// Implement `Scalar` for `PrimitiveArrayItemType`.
+/// For PrimitiveArrayItemType, clone is trivial, so `T` is both `Scalar` and `ScalarRef`.
+impl<T: PrimitiveArrayItemType> Scalar for T {
     type ScalarRefType<'a> = T;
 
     fn as_scalar_ref(&self) -> T {
@@ -181,9 +181,9 @@ impl<T: NativeType> Scalar for T {
     }
 }
 
-/// Implement `ScalarRef` for `NativeType`.
-/// For native type, clone is trivial, so `T` is both `Scalar` and `ScalarRef`.
-impl<'a, T: NativeType> ScalarRef<'a> for T {
+/// Implement `ScalarRef` for `PrimitiveArrayItemType`.
+/// For PrimitiveArrayItemType, clone is trivial, so `T` is both `Scalar` and `ScalarRef`.
+impl<'a, T: PrimitiveArrayItemType> ScalarRef<'a> for T {
     type ScalarType = T;
 
     fn to_owned_scalar(&self) -> T {
@@ -217,7 +217,7 @@ impl ScalarPartialOrd for String {
     }
 }
 
-impl<T: NativeType> ScalarPartialOrd for T {
+impl<T: PrimitiveArrayItemType> ScalarPartialOrd for T {
     fn scalar_cmp(&self, other: Self) -> Option<std::cmp::Ordering> {
         self.partial_cmp(&other)
     }

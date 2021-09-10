@@ -6,16 +6,52 @@ use crate::error::Result;
 
 use crate::types::NativeType;
 
+use crate::array2::ArrayImpl;
 use risingwave_proto::data::{Buffer as BufferProto, Buffer, Buffer_CompressionType};
+use std::fmt::Debug;
 use std::mem::size_of;
+
+/// Physical type of array items. It differs from NativeType with more limited type set.
+/// Specifically, it doesn't support u8/u16/u32/u64.
+pub trait PrimitiveArrayItemType: NativeType {
+    /// A helper to convert a primitive array to ArrayImpl.
+    fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl;
+}
+
+impl PrimitiveArrayItemType for i16 {
+    fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl {
+        ArrayImpl::Int16(arr)
+    }
+}
+impl PrimitiveArrayItemType for i32 {
+    fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl {
+        ArrayImpl::Int32(arr)
+    }
+}
+impl PrimitiveArrayItemType for i64 {
+    fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl {
+        ArrayImpl::Int64(arr)
+    }
+}
+impl PrimitiveArrayItemType for f32 {
+    fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl {
+        ArrayImpl::Float32(arr)
+    }
+}
+impl PrimitiveArrayItemType for f64 {
+    fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl {
+        ArrayImpl::Float64(arr)
+    }
+}
+
 /// `PrimitiveArray` is a collection of primitive types, such as `i32`, `f32`.
 #[derive(Debug)]
-pub struct PrimitiveArray<T: NativeType> {
+pub struct PrimitiveArray<T: PrimitiveArrayItemType> {
     bitmap: Bitmap,
     data: Vec<T>,
 }
 
-impl<T: NativeType> PrimitiveArray<T> {
+impl<T: PrimitiveArrayItemType> PrimitiveArray<T> {
     pub fn from_slice(data: &[Option<T>]) -> Result<Self> {
         let mut builder = <Self as Array>::Builder::new(data.len())?;
         for i in data {
@@ -25,7 +61,7 @@ impl<T: NativeType> PrimitiveArray<T> {
     }
 }
 
-impl<T: NativeType> Array for PrimitiveArray<T> {
+impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
     type Builder = PrimitiveArrayBuilder<T>;
     type RefItem<'a> = T;
     type OwnedItem = T;
@@ -69,12 +105,12 @@ impl<T: NativeType> Array for PrimitiveArray<T> {
 }
 
 /// `PrimitiveArrayBuilder` constructs a `PrimitiveArray` from `Option<Primitive>`.
-pub struct PrimitiveArrayBuilder<T: NativeType> {
+pub struct PrimitiveArrayBuilder<T: PrimitiveArrayItemType> {
     bitmap: Vec<bool>,
     data: Vec<T>,
 }
 
-impl<T: NativeType> ArrayBuilder for PrimitiveArrayBuilder<T> {
+impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
     type ArrayType = PrimitiveArray<T>;
 
     fn new(capacity: usize) -> Result<Self> {
@@ -116,7 +152,9 @@ impl<T: NativeType> ArrayBuilder for PrimitiveArrayBuilder<T> {
 mod tests {
     use super::*;
 
-    fn helper_test_builder<T: NativeType>(data: Vec<Option<T>>) -> Result<PrimitiveArray<T>> {
+    fn helper_test_builder<T: PrimitiveArrayItemType>(
+        data: Vec<Option<T>>,
+    ) -> Result<PrimitiveArray<T>> {
         let mut builder = PrimitiveArrayBuilder::<T>::new(data.len())?;
         for d in data {
             builder.append(d)?;
@@ -126,51 +164,66 @@ mod tests {
 
     #[test]
     fn test_i16_builder() {
-        helper_test_builder::<i16>(
+        let arr = helper_test_builder::<i16>(
             (0..1000)
                 .map(|x| if x % 2 == 0 { None } else { Some(x) })
                 .collect(),
         )
         .unwrap();
+        if !matches!(ArrayImpl::from(arr), ArrayImpl::Int16(_)) {
+            assert!(false)
+        }
     }
 
     #[test]
     fn test_i32_builder() {
-        helper_test_builder::<i32>(
+        let arr = helper_test_builder::<i32>(
             (0..1000)
                 .map(|x| if x % 2 == 0 { None } else { Some(x) })
                 .collect(),
         )
         .unwrap();
+        if !matches!(ArrayImpl::from(arr), ArrayImpl::Int32(_)) {
+            assert!(false)
+        }
     }
 
     #[test]
     fn test_i64_builder() {
-        helper_test_builder::<i64>(
+        let arr = helper_test_builder::<i64>(
             (0..1000)
                 .map(|x| if x % 2 == 0 { None } else { Some(x) })
                 .collect(),
         )
         .unwrap();
+        if !matches!(ArrayImpl::from(arr), ArrayImpl::Int64(_)) {
+            assert!(false)
+        }
     }
 
     #[test]
     fn test_f32_builder() {
-        helper_test_builder::<f32>(
+        let arr = helper_test_builder::<f32>(
             (0..1000)
                 .map(|x| if x % 2 == 0 { None } else { Some(x as f32) })
                 .collect(),
         )
         .unwrap();
+        if !matches!(ArrayImpl::from(arr), ArrayImpl::Float32(_)) {
+            assert!(false)
+        }
     }
 
     #[test]
     fn test_f64_builder() {
-        helper_test_builder::<f64>(
+        let arr = helper_test_builder::<f64>(
             (0..1000)
                 .map(|x| if x % 2 == 0 { None } else { Some(x as f64) })
                 .collect(),
         )
         .unwrap();
+        if !matches!(ArrayImpl::from(arr), ArrayImpl::Float64(_)) {
+            assert!(false)
+        }
     }
 }

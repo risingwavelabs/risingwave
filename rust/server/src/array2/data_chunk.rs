@@ -2,9 +2,9 @@ use crate::array2::column::Column;
 
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
-use crate::error::Result;
-
-use risingwave_proto::data::DataChunk as DataChunkProto;
+use crate::error::{ErrorCode, Result};
+use protobuf::Message;
+use risingwave_proto::data::{Column as ColumnProto, DataChunk as DataChunkProto};
 use std::sync::Arc;
 use typed_builder::TypedBuilder;
 
@@ -86,6 +86,22 @@ impl DataChunk {
                     .build())
             }
         }
+    }
+
+    pub fn from_protobuf(proto: &DataChunkProto) -> Result<Self> {
+        let mut chunk = DataChunk {
+            columns: vec![],
+            cardinality: proto.get_cardinality() as usize,
+            visibility: None,
+        };
+
+        for any_col in proto.get_columns() {
+            let col = unpack_from_any!(any_col, ColumnProto);
+            chunk
+                .columns
+                .push(Column::from_protobuf(col, chunk.cardinality)?);
+        }
+        Ok(chunk)
     }
 }
 

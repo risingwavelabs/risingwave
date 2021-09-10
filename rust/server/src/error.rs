@@ -26,7 +26,7 @@ pub enum ErrorCode {
     NotImplementedError(String),
     #[error(transparent)]
     IoError(IoError),
-    #[error("Grpc failure: {0} {:?}")]
+    #[error("Grpc failure: {0}: {1}")]
     GrpcError(String, grpcio::Error),
     #[error("Parse string error: {0}")]
     ParseError(chrono::format::ParseError),
