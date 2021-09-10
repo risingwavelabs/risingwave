@@ -9,7 +9,7 @@ use std::sync::Arc;
 use typed_builder::TypedBuilder;
 
 /// `DataChunk` is a collection of arrays with visibility mask.
-#[derive(TypedBuilder)]
+#[derive(Default, TypedBuilder)]
 pub struct DataChunk {
     /// Use Vec to be consistent with previous array::DataChunk
     #[builder(default)]
@@ -85,17 +85,6 @@ impl DataChunk {
                     .columns(columns)
                     .build())
             }
-        }
-    }
-}
-
-/// Create an empty data chunk
-impl Default for DataChunk {
-    fn default() -> Self {
-        DataChunk {
-            columns: vec![],
-            cardinality: 0,
-            visibility: None,
         }
     }
 }

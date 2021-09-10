@@ -6,7 +6,7 @@ use risingwave_proto::data::DataChunk as DataChunkProto;
 use std::sync::Arc;
 use typed_builder::TypedBuilder;
 
-#[derive(TypedBuilder)]
+#[derive(Default, TypedBuilder)]
 pub struct DataChunk {
     #[builder(default)]
     arrays: Vec<ArrayRef>,
@@ -56,17 +56,6 @@ impl DataChunk {
         }
 
         Ok(proto)
-    }
-}
-
-/// Create an empty data chunk
-impl Default for DataChunk {
-    fn default() -> Self {
-        DataChunk {
-            arrays: Vec::new(),
-            cardinality: 0,
-            visibility: None,
-        }
     }
 }
 
