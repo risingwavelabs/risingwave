@@ -268,8 +268,7 @@ impl ArrayBuilderImpl {
 }
 
 impl ArrayImpl {
-    pub fn len(self) -> usize {
-        // FIXME: now the concrete array use data to get len(). It should be compute from bitmap.
+    pub fn len(&self) -> usize {
         macro_rules! impl_all_len {
       ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
         match $self {
