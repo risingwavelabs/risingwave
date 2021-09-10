@@ -37,7 +37,7 @@ pub enum Datum {
 
 pub(super) struct LiteralExpression {
     return_type: DataTypeRef,
-    literal: Datum,
+    literal: Option<Datum>,
 }
 
 impl Expression for LiteralExpression {
@@ -53,12 +53,19 @@ impl Expression for LiteralExpression {
         let mut array_builder =
             DataType::create_array_builder(self.return_type.clone(), input.cardinality())?;
         let cardinality = input.cardinality;
+        // FIXME: use marco
         match (&mut array_builder, &self.literal) {
-            (ArrayBuilderImpl::Int32(inner), Datum::Int32(v)) => {
+            (ArrayBuilderImpl::Int32(inner), Some(Datum::Int32(v))) => {
                 append_literal_to_arr(inner, Some(*v), cardinality)?;
             }
-            (ArrayBuilderImpl::UTF8(inner), Datum::UTF8String(v)) => {
+            (ArrayBuilderImpl::UTF8(inner), Some(Datum::UTF8String(v))) => {
                 append_literal_to_arr(inner, Some(v), cardinality)?;
+            }
+            (ArrayBuilderImpl::Int32(inner), None) => {
+                append_literal_to_arr(inner, None, cardinality)?;
+            }
+            (ArrayBuilderImpl::UTF8(inner), None) => {
+                append_literal_to_arr(inner, None, cardinality)?;
             }
             (_, _) => unimplemented!("Do not support values in insert values executor"),
         };
@@ -80,25 +87,31 @@ where
     Ok(())
 }
 
-fn literal_type_match(return_type: DataTypeKind, literal: Datum) -> bool {
-    matches!(
-        (return_type, literal),
-        (DataTypeKind::Boolean, Datum::Bool(_))
-            | (DataTypeKind::Int16, Datum::Int16(_))
-            | (DataTypeKind::Int32, Datum::Int32(_))
-            | (DataTypeKind::Int64, Datum::Int64(_))
-            | (DataTypeKind::Float32, Datum::Float32(_))
-            | (DataTypeKind::Float64, Datum::Float64(_))
-            | (DataTypeKind::Decimal, Datum::Decimal(_))
-            | (DataTypeKind::Date, Datum::Int32(_))
-            | (DataTypeKind::Char, Datum::UTF8String(_))
-            | (DataTypeKind::Varchar, Datum::UTF8String(_))
-            | (DataTypeKind::Interval, Datum::Int32(_))
-    )
+fn literal_type_match(return_type: DataTypeKind, literal: Option<Datum>) -> bool {
+    match literal {
+        Some(datum) => {
+            matches!(
+                (return_type, datum),
+                (DataTypeKind::Boolean, Datum::Bool(_))
+                    | (DataTypeKind::Int16, Datum::Int16(_))
+                    | (DataTypeKind::Int32, Datum::Int32(_))
+                    | (DataTypeKind::Int64, Datum::Int64(_))
+                    | (DataTypeKind::Float32, Datum::Float32(_))
+                    | (DataTypeKind::Float64, Datum::Float64(_))
+                    | (DataTypeKind::Decimal, Datum::Decimal(_))
+                    | (DataTypeKind::Date, Datum::Int32(_))
+                    | (DataTypeKind::Char, Datum::UTF8String(_))
+                    | (DataTypeKind::Varchar, Datum::UTF8String(_))
+                    | (DataTypeKind::Interval, Datum::Interval(_))
+            )
+        }
+
+        None => true,
+    }
 }
 
 impl LiteralExpression {
-    pub fn new(return_type: DataTypeRef, literal: Datum) -> Self {
+    pub fn new(return_type: DataTypeRef, literal: Option<Datum>) -> Self {
         assert!(literal_type_match(
             return_type.deref().data_type_kind(),
             literal.clone()
@@ -121,6 +134,7 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
             ConstantValue::parse_from_bytes(proto.get_body().get_value()).map_err(ProtobufError)?;
 
         // TODO: We need to unify these
+        // TODO: Add insert NULL
         let value = match proto.get_return_type().get_type_name() {
             DataType_TypeName::INT16 => Datum::Int16(i16::from_be_bytes(
                 proto_value.get_body().try_into().map_err(|e| {
@@ -177,7 +191,8 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
 
         Ok(Self {
             return_type: data_type,
-            literal: value,
+            // FIXME: add NULL value
+            literal: Some(value),
         })
     }
 }
