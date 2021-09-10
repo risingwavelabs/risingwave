@@ -62,8 +62,9 @@ subprojects {
                 removeUnusedImports()
                 googleJavaFormat()
 
-                // This file fails spotlessApply, which can only be fixed when upgraded to java 11+
-                targetExclude("src/main/java/com/risingwave/sql/SqlFormatter.java")
+                targetExclude("src/main/java/com/risingwave/sql/SqlFormatter.java",
+                    "src/main/java/org/apache/calcite/**"
+                )
             }
         }
 

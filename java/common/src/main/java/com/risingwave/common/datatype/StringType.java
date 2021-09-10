@@ -114,8 +114,11 @@ public class StringType extends PrimitiveTypeBase {
     if (!super.equals(o)) {
       return false;
     }
-    StringType that = (StringType) o;
-    return maxSize == that.maxSize && fixedSize == that.fixedSize;
+
+    // TODO: We should check collation
+    var other = (StringType) o;
+    return Objects.equal(getCharset(), other.getCharset())
+        && Objects.equal(getCollation(), other.getCollation());
   }
 
   @Override

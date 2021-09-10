@@ -67,7 +67,7 @@ public class RwLogicalJoin extends Join implements RisingWaveLogicalRel {
             .withOutTrait(LOGICAL)
             .withRuleFactory(RwLogicalJoinConverterRule::new)
             .withOperandSupplier(t -> t.operand(LogicalJoin.class).anyInputs())
-            .withDescription("Converting logical join to risingwave version.")
+            .withDescription("RisingWaveLogicalJoinConverter")
             .as(Config.class)
             .toRule(RwLogicalJoinConverterRule.class);
 

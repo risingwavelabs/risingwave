@@ -19,8 +19,7 @@ public class BatchHashJoinRule extends RelRule<BatchHashJoinRule.Config> {
   @Override
   public boolean matches(RelOptRuleCall call) {
     RwLogicalJoin logicalJoin = call.rel(0);
-    var joinInfo = logicalJoin.analyzeCondition();
-    return joinInfo.isEqui();
+    return BatchJoinRules.isEquiJoin(logicalJoin.analyzeCondition());
   }
 
   @Override
@@ -52,7 +51,7 @@ public class BatchHashJoinRule extends RelRule<BatchHashJoinRule.Config> {
   public interface Config extends RelRule.Config {
     Config DEFAULT =
         Config.EMPTY
-            .withDescription("Converting logical join to batch hash join")
+            .withDescription("RisingWaveBatchHashJoinRule")
             .withOperandSupplier(t -> t.operand(RwLogicalJoin.class).anyInputs())
             .as(Config.class);
 

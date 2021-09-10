@@ -4,7 +4,6 @@ import com.google.common.collect.ImmutableList;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.planner.rel.common.FilterScanBase;
-import java.util.Collections;
 import java.util.List;
 import org.apache.calcite.plan.Convention;
 import org.apache.calcite.plan.RelOptCluster;
@@ -45,29 +44,14 @@ public class RwLogicalFilterScan extends FilterScanBase implements RisingWaveLog
     return planner.getCostFactory().makeCost(valueCount, cpu, io);
   }
 
-  public static RwLogicalFilterScan create(
-      RelOptCluster cluster, RelTraitSet traitSet, RelOptTable table) {
-    TableCatalog tableCatalog = table.unwrapOrThrow(TableCatalog.class);
-
-    RelTraitSet newTraitSet = traitSet.plus(RisingWaveLogicalRel.LOGICAL);
-
-    return new RwLogicalFilterScan(
-        cluster,
-        newTraitSet,
-        Collections.emptyList(),
-        table,
-        tableCatalog.getId(),
-        tableCatalog.getAllColumnIdsSorted());
-  }
-
   public static class RwLogicalFilterScanConverterRule extends ConverterRule {
     public static final RwLogicalFilterScanConverterRule INSTANCE =
         Config.INSTANCE
             .withInTrait(Convention.NONE)
             .withOutTrait(LOGICAL)
             .withRuleFactory(RwLogicalFilterScanConverterRule::new)
-            .withOperandSupplier(t -> t.operand(LogicalTableScan.class).anyInputs())
-            .withDescription("Converting logical table scan to risingwave version.")
+            .withOperandSupplier(t -> t.operand(LogicalTableScan.class).noInputs())
+            .withDescription("RisingWaveLogicalFilterScanConverter")
             .as(Config.class)
             .toRule(RwLogicalFilterScanConverterRule.class);
 
@@ -79,8 +63,15 @@ public class RwLogicalFilterScan extends FilterScanBase implements RisingWaveLog
     public @Nullable RelNode convert(RelNode rel) {
       LogicalTableScan source = (LogicalTableScan) rel;
 
-      return RwLogicalFilterScan.create(
-          source.getCluster(), source.getTraitSet(), source.getTable());
+      TableCatalog tableCatalog = source.getTable().unwrapOrThrow(TableCatalog.class);
+
+      return new RwLogicalFilterScan(
+          source.getCluster(),
+          source.getTraitSet().plus(LOGICAL),
+          source.getHints(),
+          source.getTable(),
+          tableCatalog.getId(),
+          tableCatalog.getAllColumnIdsSorted());
     }
   }
 }

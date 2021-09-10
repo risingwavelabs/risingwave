@@ -1,13 +1,19 @@
 package com.risingwave.sql;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.collect.Iterators.singletonIterator;
+import static com.google.common.collect.Iterators.toArray;
 import static com.risingwave.sql.AstUtils.identifierOf;
+import static com.risingwave.sql.AstUtils.sqlNodeListOf;
+import static java.util.Collections.singletonList;
 import static java.util.Objects.requireNonNull;
 
 import com.google.common.base.Verify;
+import com.google.common.collect.Iterators;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.planner.sql.RisingWaveOperatorTable;
+import com.risingwave.sql.tree.AliasedRelation;
 import com.risingwave.sql.tree.AllColumns;
 import com.risingwave.sql.tree.ArithmeticExpression;
 import com.risingwave.sql.tree.AstVisitor;
@@ -19,29 +25,40 @@ import com.risingwave.sql.tree.ComparisonExpression;
 import com.risingwave.sql.tree.CreateTable;
 import com.risingwave.sql.tree.DoubleLiteral;
 import com.risingwave.sql.tree.DropTable;
+import com.risingwave.sql.tree.ExistsPredicate;
+import com.risingwave.sql.tree.Extract;
 import com.risingwave.sql.tree.FunctionCall;
+import com.risingwave.sql.tree.InListExpression;
+import com.risingwave.sql.tree.InPredicate;
 import com.risingwave.sql.tree.Insert;
 import com.risingwave.sql.tree.IntegerLiteral;
 import com.risingwave.sql.tree.IntervalLiteral;
 import com.risingwave.sql.tree.Join;
+import com.risingwave.sql.tree.JoinCriteria;
+import com.risingwave.sql.tree.JoinOn;
+import com.risingwave.sql.tree.JoinUsing;
 import com.risingwave.sql.tree.LikePredicate;
 import com.risingwave.sql.tree.LogicalBinaryExpression;
 import com.risingwave.sql.tree.LongLiteral;
 import com.risingwave.sql.tree.NaturalJoin;
 import com.risingwave.sql.tree.Node;
+import com.risingwave.sql.tree.NotExpression;
 import com.risingwave.sql.tree.NotNullColumnConstraint;
+import com.risingwave.sql.tree.QualifiedName;
 import com.risingwave.sql.tree.QualifiedNameReference;
 import com.risingwave.sql.tree.Query;
 import com.risingwave.sql.tree.QuerySpecification;
+import com.risingwave.sql.tree.SearchedCaseExpression;
 import com.risingwave.sql.tree.SingleColumn;
 import com.risingwave.sql.tree.SortItem;
 import com.risingwave.sql.tree.StringLiteral;
 import com.risingwave.sql.tree.SubqueryExpression;
 import com.risingwave.sql.tree.Table;
+import com.risingwave.sql.tree.TableSubquery;
 import com.risingwave.sql.tree.Values;
 import com.risingwave.sql.tree.ValuesList;
+import com.risingwave.sql.tree.WhenClause;
 import java.math.BigDecimal;
-import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -64,12 +81,16 @@ import org.apache.calcite.sql.SqlNodeList;
 import org.apache.calcite.sql.SqlOperator;
 import org.apache.calcite.sql.SqlOrderBy;
 import org.apache.calcite.sql.SqlSelect;
+import org.apache.calcite.sql.SqlSelectKeyword;
 import org.apache.calcite.sql.SqlSyntax;
 import org.apache.calcite.sql.ddl.SqlDdlNodes;
+import org.apache.calcite.sql.fun.SqlCase;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.type.SqlTypeName;
+import org.apache.calcite.util.Pair;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
   private final RisingWaveOperatorTable operatorTable = new RisingWaveOperatorTable();
@@ -79,8 +100,7 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
     boolean ifNotExists = node.ifNotExists();
     SqlIdentifier name = visitTable(node.name(), context);
     SqlNodeList columnList =
-        SqlNodeList.of(
-            SqlParserPos.ZERO,
+        sqlNodeListOf(
             node.tableElements().stream()
                 .map(column -> column.accept(this, context))
                 .collect(Collectors.toList()));
@@ -136,12 +156,10 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
 
   @Override
   public SqlNode visitQuerySpecification(QuerySpecification node, Void context) {
-    checkArgument(node.getHaving().isEmpty(), "Having not supported yet!");
     checkArgument(node.getWindows().isEmpty(), "Window not supported yet!");
 
     SqlNodeList selectList =
-        SqlNodeList.of(
-            SqlParserPos.ZERO,
+        sqlNodeListOf(
             node.getSelect().getSelectItems().stream()
                 .map(item -> item.accept(this, context))
                 .collect(Collectors.toList()));
@@ -155,12 +173,13 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
     SqlNodeList groupBy = null;
     if (!node.getGroupBy().isEmpty()) {
       groupBy =
-          SqlNodeList.of(
-              SqlParserPos.ZERO,
+          sqlNodeListOf(
               node.getGroupBy().stream()
                   .map(exp -> exp.accept(this, context))
                   .collect(Collectors.toList()));
     }
+
+    var having = node.getHaving().map(exp -> exp.accept(this, context)).orElse(null);
 
     var selectNode =
         new SqlSelect(
@@ -170,7 +189,7 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
             from,
             where,
             groupBy,
-            null,
+            having,
             null,
             null,
             null,
@@ -181,8 +200,7 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
 
     if (!node.getOrderBy().isEmpty()) {
       var orderList =
-          SqlNodeList.of(
-              SqlParserPos.ZERO,
+          sqlNodeListOf(
               node.getOrderBy().stream()
                   .map(orderByItem -> orderByItem.accept(this, context))
                   .collect(Collectors.toList()));
@@ -281,10 +299,9 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
     SqlNodeList columnList = null;
     if (!node.columns().isEmpty()) {
       columnList =
-          SqlNodeList.of(
-              SqlParserPos.ZERO,
+          sqlNodeListOf(
               node.columns().stream()
-                  .map(c -> new SqlIdentifier(Collections.singletonList(c), SqlParserPos.ZERO))
+                  .map(c -> new SqlIdentifier(singletonList(c), SqlParserPos.ZERO))
                   .collect(Collectors.toList()));
     }
 
@@ -293,11 +310,16 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
 
   @Override
   protected SqlNode visitFunctionCall(FunctionCall node, Void context) {
-    checkArgument(!node.isDistinct(), "Distinct not supported yet!");
     checkArgument(node.filter().isEmpty(), "Filter in function call not supported!");
     checkArgument(node.getWindow().isEmpty(), "Window in function call not supported!");
 
-    SqlIdentifier functionName = identifierOf(node.getName());
+    var functionNameStr = node.getName();
+    if (functionNameStr.toString().equals("substr")) {
+      // Be compatible with calcite
+      functionNameStr = new QualifiedName("SUBSTRING");
+    }
+
+    SqlIdentifier functionName = identifierOf(functionNameStr);
     SqlOperator operator = lookupOperator(functionName, SqlSyntax.FUNCTION);
 
     SqlNode[] operands =
@@ -307,7 +329,12 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
     if (operator.getKind() == SqlKind.COUNT && operands.length == 0) {
       operands = new SqlNode[] {SqlIdentifier.star(SqlParserPos.ZERO)};
     }
-    return new SqlBasicCall(operator, operands, SqlParserPos.ZERO);
+
+    SqlLiteral quantifier = null;
+    if (node.isDistinct()) {
+      quantifier = SqlSelectKeyword.DISTINCT.symbol(SqlParserPos.ZERO);
+    }
+    return new SqlBasicCall(operator, operands, SqlParserPos.ZERO, false, quantifier);
   }
 
   @Override
@@ -475,21 +502,13 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
             PgErrorCode.INTERNAL_ERROR, "Unrecognized join type: %s", node.getType());
     }
 
-    SqlLiteral conditionType;
+    SqlLiteral conditionType = null;
     SqlNode joinCondition = null;
 
     if (node.getCriteria().isPresent()) {
-      joinCondition = null;
-      conditionType = JoinConditionType.NONE.symbol(SqlParserPos.ZERO);
-    } else {
-      var criteria = node.getCriteria().get();
-      if (criteria instanceof NaturalJoin) {
-        joinCondition = null;
-        conditionType = JoinConditionType.NONE.symbol(SqlParserPos.ZERO);
-      } else {
-        throw new PgException(
-            PgErrorCode.INTERNAL_ERROR, "Unsupported join criteria now: %s", criteria);
-      }
+      var ret = joinConditionOf(node.getCriteria().get(), context);
+      joinCondition = ret.left;
+      conditionType = ret.right.symbol(SqlParserPos.ZERO);
     }
 
     return new SqlJoin(
@@ -502,8 +521,25 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
         joinCondition);
   }
 
+  private Pair<@Nullable SqlNode, JoinConditionType> joinConditionOf(
+      JoinCriteria condition, Void context) {
+    if (condition instanceof JoinUsing) {
+      var columns =
+          ((JoinUsing) condition)
+              .getColumns().stream().map(AstUtils::identifierOf).collect(Collectors.toList());
+      return Pair.of(new SqlNodeList(columns, SqlParserPos.ZERO), JoinConditionType.USING);
+    } else if (condition instanceof JoinOn) {
+      return Pair.of(
+          ((JoinOn) condition).getExpression().accept(this, context), JoinConditionType.ON);
+    } else if (condition instanceof NaturalJoin) {
+      return Pair.of(null, JoinConditionType.NONE);
+    } else {
+      throw new UnsupportedOperationException("Unknown join criteria: " + condition);
+    }
+  }
+
   @Override
-  protected SqlNode visitLikePredicate(LikePredicate node, Void context) {
+  protected SqlBasicCall visitLikePredicate(LikePredicate node, Void context) {
     checkArgument(node.getEscape() == null, "Escape not supported now!");
     checkArgument(!node.ignoreCase(), "Ignore not supported now");
     var operator = lookupOperator("LIKE", SqlSyntax.SPECIAL);
@@ -516,6 +552,100 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
   @Override
   protected SqlNode visitSubqueryExpression(SubqueryExpression node, Void context) {
     return node.getQuery().accept(this, context);
+  }
+
+  @Override
+  protected SqlNode visitExists(ExistsPredicate node, Void context) {
+    var existsCall = lookupOperator("EXISTS", SqlSyntax.PREFIX);
+    var query = node.getSubquery().accept(this, context);
+    return new SqlBasicCall(existsCall, new SqlNode[] {query}, SqlParserPos.ZERO);
+  }
+
+  @Override
+  protected SqlNode visitAliasedRelation(AliasedRelation node, Void context) {
+    var asCall = lookupOperator("AS", SqlSyntax.SPECIAL);
+    var query = node.getRelation().accept(this, context);
+    var alias = identifierOf(node.getAlias());
+    var aliasColumns =
+        node.getColumnNames().stream().map(AstUtils::identifierOf).collect(Collectors.toList());
+
+    var operands =
+        toArray(
+            Iterators.concat(
+                singletonIterator(query), singletonIterator(alias), aliasColumns.iterator()),
+            SqlNode.class);
+    return new SqlBasicCall(asCall, operands, SqlParserPos.ZERO);
+  }
+
+  @Override
+  protected SqlNode visitTableSubquery(TableSubquery node, Void context) {
+    return node.getQuery().accept(this, context);
+  }
+
+  @Override
+  protected SqlNode visitExtract(Extract node, Void context) {
+    var function = lookupOperator("EXTRACT", SqlSyntax.FUNCTION);
+    var qualifier =
+        new SqlIntervalQualifier(TimeUnit.valueOf(node.getField().name()), null, SqlParserPos.ZERO);
+    var expression = node.getExpression().accept(this, context);
+    return new SqlBasicCall(function, new SqlNode[] {qualifier, expression}, SqlParserPos.ZERO);
+  }
+
+  @Override
+  protected SqlNode visitSearchedCaseExpression(SearchedCaseExpression node, Void context) {
+    var whens =
+        node.getWhenClauses().stream()
+            .map(WhenClause::getOperand)
+            .map(exp -> exp.accept(this, context))
+            .collect(Collectors.toList());
+    var thens =
+        node.getWhenClauses().stream()
+            .map(WhenClause::getResult)
+            .map(exp -> exp.accept(this, context))
+            .collect(Collectors.toList());
+
+    var elseValue = node.getDefaultValue().accept(this, context);
+
+    return SqlCase.createSwitched(
+        SqlParserPos.ZERO,
+        null,
+        new SqlNodeList(whens, SqlParserPos.ZERO),
+        new SqlNodeList(thens, SqlParserPos.ZERO),
+        elseValue);
+  }
+
+  @Override
+  protected SqlBasicCall visitInPredicate(InPredicate node, Void context) {
+    var inOperator = lookupOperator("IN", SqlSyntax.BINARY);
+    var left = node.getValue().accept(this, context);
+    var right = node.getValueList().accept(this, context);
+    return new SqlBasicCall(inOperator, new SqlNode[] {left, right}, SqlParserPos.ZERO);
+  }
+
+  @Override
+  protected SqlNode visitInListExpression(InListExpression node, Void context) {
+    var values =
+        node.getValues().stream().map(v -> v.accept(this, context)).collect(Collectors.toList());
+    return new SqlNodeList(values, SqlParserPos.ZERO);
+  }
+
+  @Override
+  protected SqlNode visitNotExpression(NotExpression node, Void context) {
+    var inner = node.getValue();
+    if (inner instanceof LikePredicate) {
+      var notLikeOperator = lookupOperator("NOT LIKE", SqlSyntax.SPECIAL);
+      var likeCall = visitLikePredicate((LikePredicate) inner, context);
+      return new SqlBasicCall(notLikeOperator, likeCall.getOperands(), SqlParserPos.ZERO);
+    } else if (inner instanceof InPredicate) {
+      var notInOperator = lookupOperator("NOT IN", SqlSyntax.BINARY);
+      var inCall = visitInPredicate((InPredicate) inner, context);
+      return new SqlBasicCall(notInOperator, inCall.getOperands(), SqlParserPos.ZERO);
+    } else if (inner instanceof ExistsPredicate) {
+      var notOperator = lookupOperator("NOT", SqlSyntax.PREFIX);
+      var existsOperator = visitExists((ExistsPredicate) inner, context);
+      return new SqlBasicCall(notOperator, new SqlNode[] {existsOperator}, SqlParserPos.ZERO);
+    }
+    return super.visitNotExpression(node, context);
   }
 
   private static SqlBasicTypeNameSpec toBasicTypeNameSpec(ColumnType<?> columnType) {
@@ -582,7 +712,7 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
   }
 
   private SqlOperator lookupOperator(String functionName, SqlSyntax syntax) {
-    return lookupOperator(new SqlIdentifier("LIKE", SqlParserPos.ZERO), syntax);
+    return lookupOperator(new SqlIdentifier(functionName, SqlParserPos.ZERO), syntax);
   }
 
   private SqlOperator lookupOperator(SqlIdentifier functionName, SqlSyntax syntax) {
@@ -595,7 +725,7 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
         SqlParser.Config.DEFAULT.withCaseSensitive(false).withLex(Lex.SQL_SERVER);
 
     //    String sql = "select a, b, sum(c) from t group by a, b order by a asc, b desc";
-    String sql = "select * from t1 where a = (select min(b) from t2)";
+    String sql = "select * from t1 where  not exists (select * from t2)";
     //    String sql = "SELECT * FROM t WHERE a between 1 and 2";
     //    String sql = "select 100.0::DOUBLE/8.0::DOUBLE";
     SqlNode sqlNode = SqlParser.create(sql, parserConfig).parseQuery();

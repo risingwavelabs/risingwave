@@ -22,6 +22,7 @@ import com.risingwave.planner.rules.physical.batch.InsertValuesRule;
 import com.risingwave.planner.rules.physical.batch.aggregate.BatchHashAggRule;
 import com.risingwave.planner.rules.physical.batch.aggregate.BatchSortAggRule;
 import com.risingwave.planner.rules.physical.batch.join.BatchHashJoinRule;
+import com.risingwave.planner.rules.physical.batch.join.BatchNestedLoopJoinRule;
 import org.apache.calcite.rel.rules.CoreRules;
 import org.apache.calcite.rel.rules.PruneEmptyRules;
 import org.apache.calcite.tools.RuleSet;
@@ -43,6 +44,9 @@ public class BatchRuleSets {
           CoreRules.JOIN_CONDITION_PUSH,
           CoreRules.JOIN_PUSH_EXPRESSIONS,
           CoreRules.JOIN_PUSH_TRANSITIVE_PREDICATES,
+
+          // Don't put these three reduce rules in cbo, since they prunes matched rel nodes
+          // in planner and disable further optimization.
           CoreRules.FILTER_REDUCE_EXPRESSIONS,
           CoreRules.PROJECT_REDUCE_EXPRESSIONS,
           CoreRules.JOIN_REDUCE_EXPRESSIONS,
@@ -69,10 +73,7 @@ public class BatchRuleSets {
           CoreRules.FILTER_INTO_JOIN,
           CoreRules.JOIN_CONDITION_PUSH,
           CoreRules.JOIN_PUSH_EXPRESSIONS,
-          CoreRules.JOIN_REDUCE_EXPRESSIONS,
           CoreRules.JOIN_PUSH_TRANSITIVE_PREDICATES,
-          CoreRules.FILTER_REDUCE_EXPRESSIONS,
-          CoreRules.PROJECT_REDUCE_EXPRESSIONS,
           CoreRules.FILTER_AGGREGATE_TRANSPOSE,
           CoreRules.FILTER_PROJECT_TRANSPOSE,
           CoreRules.FILTER_SET_OP_TRANSPOSE,
@@ -128,5 +129,7 @@ public class BatchRuleSets {
           BatchHashAggRule.Config.DEFAULT.toRule(), BatchSortAggRule.Config.DEFAULT.toRule());
 
   public static final RuleSet PHYSICAL_JOIN_RULES =
-      RuleSets.ofList(BatchHashJoinRule.Config.DEFAULT.toRule());
+      RuleSets.ofList(
+          BatchHashJoinRule.Config.DEFAULT.toRule(),
+          BatchNestedLoopJoinRule.Config.DEFAULT.toRule());
 }

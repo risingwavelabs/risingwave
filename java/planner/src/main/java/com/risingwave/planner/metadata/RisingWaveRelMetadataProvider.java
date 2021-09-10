@@ -14,6 +14,8 @@ public class RisingWaveRelMetadataProvider {
   public static RelMetadataProvider getMetadataProvider() {
     var provider = JaninoRelMetadataProvider.of(INSTANCE);
     RelMetadataQuery.THREAD_PROVIDERS.set(provider);
+    //    Consumer<Holder<Boolean>> c = h -> h.set(false);
+    //    Hook.REL_BUILDER_SIMPLIFY.addThread(c);
     return provider;
   }
 }

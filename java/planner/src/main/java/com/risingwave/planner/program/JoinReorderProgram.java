@@ -1,10 +1,11 @@
 package com.risingwave.planner.program;
 
-import static org.apache.calcite.rel.rules.CoreRules.MULTI_JOIN_OPTIMIZE_BUSHY;
+import static org.apache.calcite.rel.rules.CoreRules.MULTI_JOIN_OPTIMIZE;
 
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
 import java.util.List;
+import org.apache.calcite.plan.RelOptCostImpl;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.hep.HepMatchOrder;
 import org.apache.calcite.plan.hep.HepPlanner;
@@ -31,12 +32,16 @@ public class JoinReorderProgram implements OptimizerProgram {
   public RelNode optimize(RelNode root, ExecutionContext context) {
     var preparedNode = runProgram(PREPARE_PROGRAM, root, context);
 
-    LOG.debug("Plan after preparing join reorder: {}", ExplainWriter.explainPlan(preparedNode));
-    return runProgram(REORDER_PROGRAM, preparedNode, context);
+    LOG.debug("Plan after preparing join reorder: \n{}", ExplainWriter.explainPlan(preparedNode));
+    var joinReorderedPlan = runProgram(REORDER_PROGRAM, preparedNode, context);
+    LOG.debug(
+        "Plan after running join reorder program: \n{}",
+        ExplainWriter.explainPlan(joinReorderedPlan));
+    return joinReorderedPlan;
   }
 
   private static RelNode runProgram(HepProgram program, RelNode root, ExecutionContext context) {
-    var planner = new HepPlanner(program, context);
+    var planner = new HepPlanner(program, context, true, null, RelOptCostImpl.FACTORY);
     planner.setRoot(root);
 
     return planner.findBestExp();
@@ -52,7 +57,7 @@ public class JoinReorderProgram implements OptimizerProgram {
   private static HepProgram createReorderProgram() {
     var builder = HepProgram.builder().addMatchOrder(HepMatchOrder.BOTTOM_UP);
 
-    builder.addRuleInstance(MULTI_JOIN_OPTIMIZE_BUSHY);
+    builder.addRuleInstance(MULTI_JOIN_OPTIMIZE);
     return builder.build();
   }
 }

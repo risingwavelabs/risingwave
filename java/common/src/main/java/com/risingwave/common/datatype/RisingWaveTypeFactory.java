@@ -17,6 +17,7 @@ import org.apache.calcite.jdbc.JavaTypeFactoryImpl;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rel.type.RelDataTypeFieldImpl;
+import org.apache.calcite.rel.type.RelRecordType;
 import org.apache.calcite.rel.type.StructKind;
 import org.apache.calcite.runtime.Geometries;
 import org.apache.calcite.sql.SqlCollation;
@@ -30,8 +31,21 @@ public class RisingWaveTypeFactory extends JavaTypeFactoryImpl {
 
   @Override
   public RelDataType createTypeWithNullability(RelDataType type, boolean nullable) {
-    checkArgument(type instanceof RisingWaveDataType, "Type is: %s", type.getClass());
-    return ((RisingWaveDataType) type).withNullability(nullable);
+    // Why we may have RelRecordType? Because RelDataTypeFactoryImpl(super class),
+    // marks following method:
+    // createStructType(final List<? extends Map.Entry<String, RelDataType>> fieldList)
+    // as final and always returns RelRecordType.
+    // We leave it to be fixed later.
+    checkArgument(
+        (type instanceof RisingWaveDataType) || (type instanceof RelRecordType),
+        "Type is: %s",
+        type.getClass(),
+        type);
+    if (type instanceof RisingWaveDataType) {
+      return ((RisingWaveDataType) type).withNullability(nullable);
+    } else {
+      return super.createTypeWithNullability(type, nullable);
+    }
   }
 
   @Override
@@ -128,6 +142,8 @@ public class RisingWaveTypeFactory extends JavaTypeFactoryImpl {
         return new DateType();
       case NULL:
         return NullType.SINGLETON;
+      case SYMBOL:
+        return new SymbolType();
       default:
         throw new PgException(PgErrorCode.INTERNAL_ERROR, "Unrecognized sql type: %s", sqlType);
     }
@@ -222,5 +238,10 @@ public class RisingWaveTypeFactory extends JavaTypeFactoryImpl {
   @Override
   public RelDataType createUnknownType() {
     return UnknownType.INSTANCE;
+  }
+
+  @Override
+  public RelDataType createJoinType(RelDataType... types) {
+    return super.createJoinType(types);
   }
 }

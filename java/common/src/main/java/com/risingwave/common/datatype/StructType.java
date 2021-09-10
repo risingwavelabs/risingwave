@@ -48,10 +48,24 @@ public class StructType extends RisingWaveTypeBase {
 
   @Override
   public StructType withNullability(boolean nullable) {
-    if (this.nullable == nullable) {
-      return this;
+    if (nullable) {
+      var newFields =
+          this.fields.stream()
+              .map(
+                  field ->
+                      new RelDataTypeFieldImpl(
+                          field.getName(),
+                          field.getIndex(),
+                          ((RisingWaveDataType) field.getType()).withNullability(nullable)))
+              .map(f -> (RelDataTypeField) f)
+              .collect(ImmutableList.toImmutableList());
+      return new StructType(this.kind, true, newFields);
+    } else {
+      if (!this.nullable) {
+        return this;
+      }
+      return new StructType(this.kind, false, this.fields);
     }
-    return new StructType(this.kind, nullable, this.fields);
   }
 
   @Override

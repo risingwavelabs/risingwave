@@ -49,7 +49,7 @@ public class RwLogicalAggregate extends Aggregate implements RisingWaveLogicalRe
             .withOutTrait(LOGICAL)
             .withRuleFactory(RwAggregateConverterRule::new)
             .withOperandSupplier(t -> t.operand(LogicalAggregate.class).anyInputs())
-            .withDescription("Converting logical aggregate")
+            .withDescription("RisingWaveLogicalAggregateConverter")
             .as(Config.class)
             .toRule(RwAggregateConverterRule.class);
 
@@ -61,7 +61,7 @@ public class RwLogicalAggregate extends Aggregate implements RisingWaveLogicalRe
     public @Nullable RelNode convert(RelNode rel) {
       LogicalAggregate logicalAgg = (LogicalAggregate) rel;
 
-      RelTraitSet newTraitSet = rel.getTraitSet().replace(LOGICAL);
+      RelTraitSet newTraitSet = rel.getTraitSet().plus(LOGICAL);
       RelNode newInput = RelOptRule.convert(logicalAgg.getInput(), LOGICAL);
       return new RwLogicalAggregate(
           logicalAgg.getCluster(),

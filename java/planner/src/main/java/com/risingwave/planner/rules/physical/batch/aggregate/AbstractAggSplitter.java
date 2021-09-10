@@ -74,7 +74,10 @@ public abstract class AbstractAggSplitter implements AggSplitter {
   }
 
   protected ImmutableList<AggregateCall> doMakeGlobalAggCall(SplitterArgs args) {
-    return ImmutableList.of(originalAggCall);
+    var newAggCall =
+        originalAggCall.adaptTo(
+            args.getInput(), prevStageIndexes, originalAggCall.filterArg, groupCount, groupCount);
+    return ImmutableList.of(newAggCall);
   }
 
   @Override

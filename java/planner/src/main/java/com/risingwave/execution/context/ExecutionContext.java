@@ -14,6 +14,7 @@ import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptPlanner;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.schema.SchemaPlus;
+import org.apache.calcite.tools.RelBuilder;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 public class ExecutionContext implements Context {
@@ -92,6 +93,8 @@ public class ExecutionContext implements Context {
   public <C> @Nullable C unwrap(Class<C> klass) {
     if (klass.isInstance(this)) {
       return klass.cast(this);
+    } else if (klass == RelBuilder.Config.class) {
+      return klass.cast(RelBuilder.Config.DEFAULT.withSimplify(false));
     } else {
       return null;
     }

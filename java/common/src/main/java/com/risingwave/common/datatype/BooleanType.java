@@ -11,6 +11,7 @@ public class BooleanType extends PrimitiveTypeBase {
 
   public BooleanType(boolean nullable) {
     super(nullable, SqlTypeName.BOOLEAN);
+    resetDigest();
   }
 
   @Override

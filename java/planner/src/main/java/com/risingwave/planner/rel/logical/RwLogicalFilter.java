@@ -38,7 +38,7 @@ public class RwLogicalFilter extends Filter implements RisingWaveLogicalRel {
             .withOutTrait(LOGICAL)
             .withRuleFactory(RwFilterConverterRule::new)
             .withOperandSupplier(t -> t.operand(LogicalFilter.class).anyInputs())
-            .withDescription("Converting logical filter to risingwave version.")
+            .withDescription("RisingWaveLogicalFilterConverter")
             .as(Config.class)
             .toRule(RwFilterConverterRule.class);
 
@@ -49,7 +49,7 @@ public class RwLogicalFilter extends Filter implements RisingWaveLogicalRel {
     @Override
     public @Nullable RelNode convert(RelNode rel) {
       var input = ((LogicalFilter) rel).getInput();
-      var newInput = RelOptRule.convert(input, input.getTraitSet().plus(LOGICAL));
+      var newInput = RelOptRule.convert(input, input.getTraitSet().plus(LOGICAL).simplify());
       return new RwLogicalFilter(
           rel.getCluster(),
           rel.getTraitSet().plus(LOGICAL),

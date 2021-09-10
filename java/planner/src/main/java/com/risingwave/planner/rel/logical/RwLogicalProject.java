@@ -1,7 +1,5 @@
 package com.risingwave.planner.rel.logical;
 
-import static java.util.Collections.emptyList;
-
 import java.util.List;
 import org.apache.calcite.plan.Convention;
 import org.apache.calcite.plan.RelOptCluster;
@@ -14,7 +12,6 @@ import org.apache.calcite.rel.hint.RelHint;
 import org.apache.calcite.rel.logical.LogicalProject;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rex.RexNode;
-import org.apache.calcite.rex.RexUtil;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 public class RwLogicalProject extends Project implements RisingWaveLogicalRel {
@@ -32,18 +29,7 @@ public class RwLogicalProject extends Project implements RisingWaveLogicalRel {
   @Override
   public RwLogicalProject copy(
       RelTraitSet traitSet, RelNode input, List<RexNode> projects, RelDataType rowType) {
-    return new RwLogicalProject(getCluster(), traitSet, emptyList(), input, projects, rowType);
-  }
-
-  public static RwLogicalProject create(
-      RelNode input,
-      List<RelHint> hints,
-      List<? extends RexNode> projects,
-      @Nullable List<? extends @Nullable String> fieldName) {
-    var cluster = input.getCluster();
-    var rowType = RexUtil.createStructType(cluster.getTypeFactory(), projects, fieldName, null);
-    return new RwLogicalProject(
-        input.getCluster(), input.getTraitSet().plus(LOGICAL), hints, input, projects, rowType);
+    return new RwLogicalProject(getCluster(), traitSet, getHints(), input, projects, rowType);
   }
 
   public static class RwProjectConverterRule extends ConverterRule {
@@ -53,7 +39,7 @@ public class RwLogicalProject extends Project implements RisingWaveLogicalRel {
             .withOutTrait(LOGICAL)
             .withRuleFactory(RwProjectConverterRule::new)
             .withOperandSupplier(t -> t.operand(LogicalProject.class).anyInputs())
-            .withDescription("Converting logical project to risingwave version.")
+            .withDescription("RisingWaveLogicalProject")
             .as(Config.class)
             .toRule(RwProjectConverterRule.class);
 

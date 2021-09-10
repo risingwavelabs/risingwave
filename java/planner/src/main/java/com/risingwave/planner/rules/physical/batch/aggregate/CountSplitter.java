@@ -24,14 +24,16 @@ class CountSplitter extends AbstractAggSplitter {
   @Override
   protected ImmutableList<AggregateCall> doMakeGlobalAggCall(SplitterArgs args) {
     var call = originalAggCall;
+    var argList = ImmutableIntList.of(prevStageIndexes.get(0));
+    var aggFunction = SqlStdOperatorTable.SUM0;
 
     return ImmutableList.of(
         AggregateCall.create(
-            SqlStdOperatorTable.SUM,
+            aggFunction,
             call.isDistinct(),
             call.isApproximate(),
             call.ignoreNulls(),
-            ImmutableIntList.of(prevStageIndexes.get(0)),
+            argList,
             call.filterArg,
             call.distinctKeys,
             call.getCollation(),

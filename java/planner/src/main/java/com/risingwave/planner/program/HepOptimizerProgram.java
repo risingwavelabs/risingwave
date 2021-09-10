@@ -1,6 +1,7 @@
 package com.risingwave.planner.program;
 
 import com.risingwave.execution.context.ExecutionContext;
+import com.risingwave.planner.metadata.RisingWaveRelMetadataProvider;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.calcite.plan.RelOptRule;
@@ -22,6 +23,8 @@ public class HepOptimizerProgram implements OptimizerProgram {
   public RelNode optimize(RelNode root, ExecutionContext context) {
     HepPlanner optimizer = new HepPlanner(hepProgram, context);
     optimizer.setRoot(root);
+
+    RisingWaveRelMetadataProvider.getMetadataProvider();
 
     return optimizer.findBestExp();
   }

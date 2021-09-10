@@ -46,7 +46,7 @@ RwBatchGather
     RwBatchSort(sort0=[$0], sort1=[$1], dir0=[ASC], dir1=[ASC])
       RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
         RwBatchProject(l_returnflag=[$0], l_linestatus=[$1], sum_qty=[$2], sum_base_price=[$3], sum_disc_price=[$4], sum_charge=[$5], avg_qty=[/($6, $7)], avg_price=[/($8, $9)], avg_disc=[/($10, $11)], count_order=[$12])
-          RwBatchHashAgg(group=[{0, 1}], sum_qty=[SUM($2)], sum_base_price=[SUM($3)], sum_disc_price=[SUM($4)], sum_charge=[SUM($5)], agg#4=[SUM($6)], agg#5=[SUM($7)], agg#6=[SUM($8)], agg#7=[SUM($9)], agg#8=[SUM($10)], agg#9=[SUM($11)], agg#10=[SUM($12)])
+          RwBatchHashAgg(group=[{0, 1}], sum_qty=[SUM($2)], sum_base_price=[SUM($3)], sum_disc_price=[SUM($4)], sum_charge=[SUM($5)], agg#4=[SUM($6)], agg#5=[SUM($7)], agg#6=[SUM($8)], agg#7=[SUM($9)], agg#8=[SUM($10)], agg#9=[SUM($11)], agg#10=[$SUM0($12)])
             RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
               RwBatchHashAgg(group=[{0, 1}], sum_qty=[SUM($2)], sum_base_price=[SUM($3)], sum_disc_price=[SUM($4)], sum_charge=[SUM($5)], agg#4=[SUM($2)], agg#5=[COUNT($2)], agg#6=[SUM($3)], agg#7=[COUNT($3)], agg#8=[SUM($6)], agg#9=[COUNT($6)], count_order=[COUNT()])
                 RwBatchProject(l_returnflag=[$4], l_linestatus=[$5], l_quantity=[$0], l_extendedprice=[$1], $f4=[*($1, -(1, $2))], $f5=[*(*($1, -(1, $2)), +(1, $3))], l_discount=[$2])
@@ -110,49 +110,49 @@ RwBatchGather
   RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0 DESC, 2, 1, 3]])
     RwBatchSort(sort0=[$0], sort1=[$2], sort2=[$1], sort3=[$3], dir0=[DESC], dir1=[ASC], dir2=[ASC], dir3=[ASC], fetch=[100])
       RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1, 2, 3]}], collation=[[]])
-        RwBatchProject(s_acctbal=[$24], s_name=[$20], n_name=[$27], p_partkey=[$5], p_mfgr=[$7], s_address=[$21], s_phone=[$23], s_comment=[$25])
-          RwBatchHashJoin(condition=[=($28, $0)], joinType=[inner])
-            RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-              RwBatchFilter(condition=[=(CAST($1):CHAR(0), 'MIDDLE EAST':CHAR(11))])
-                RwBatchFilterScan(table=[[test_schema, region]], columns=[r_regionkey,r_name,r_comment])
+        RwBatchProject(s_acctbal=[$21], s_name=[$17], n_name=[$24], p_partkey=[$2], p_mfgr=[$4], s_address=[$18], s_phone=[$20], s_comment=[$22])
+          RwBatchHashJoin(condition=[=($25, $27)], joinType=[inner])
             RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[25]}], collation=[[]])
-              RwBatchHashJoin(condition=[AND(=($2, $0), =($14, $1))], joinType=[inner])
-                RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
-                  RwBatchHashAgg(group=[{0}], EXPR$0=[MIN($1)])
-                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-                      RwBatchHashAgg(group=[{0}], EXPR$0=[MIN($1)])
-                        RwBatchProject(ps_partkey=[$3], ps_supplycost=[$6])
-                          RwBatchHashJoin(condition=[=($17, $0)], joinType=[inner])
+              RwBatchHashJoin(condition=[=($19, $23)], joinType=[inner])
+                RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[19]}], collation=[[]])
+                  RwBatchHashJoin(condition=[=($16, $12)], joinType=[inner])
+                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[12]}], collation=[[]])
+                      RwBatchHashJoin(condition=[AND(=($14, $1), =($2, $11))], joinType=[inner])
+                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1, 2]}], collation=[[]])
+                          RwBatchHashJoin(condition=[=($2, $0)], joinType=[inner])
                             RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-                              RwBatchFilter(condition=[=(CAST($1):CHAR(0), 'MIDDLE EAST':CHAR(11))])
-                                RwBatchFilterScan(table=[[test_schema, region]], columns=[r_regionkey,r_name,r_comment])
-                            RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[14]}], collation=[[]])
-                              RwBatchHashJoin(condition=[=($5, $1)], joinType=[inner])
-                                RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
-                                  RwBatchFilter(condition=[IS NOT NULL($0)])
-                                    RwBatchFilterScan(table=[[test_schema, partsupp]], columns=[ps_partkey,ps_suppkey,ps_availqty,ps_supplycost,ps_comment])
+                              RwBatchHashAgg(group=[{0}], EXPR$0=[MIN($1)])
                                 RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-                                  RwBatchHashJoin(condition=[=($3, $7)], joinType=[inner])
-                                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[3]}], collation=[[]])
-                                      RwBatchFilterScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_name,s_address,s_nationkey,s_phone,s_acctbal,s_comment])
-                                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-                                      RwBatchFilterScan(table=[[test_schema, nation]], columns=[n_nationkey,n_name,n_regionkey,n_comment])
-                RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 12]}], collation=[[]])
-                  RwBatchHashJoin(condition=[=($14, $10)], joinType=[inner])
-                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[10]}], collation=[[]])
-                      RwBatchHashJoin(condition=[=($0, $9)], joinType=[inner])
-                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-                          RwBatchFilter(condition=[AND(=($5, 38), LIKE($4, '%TIN':CHAR(4)), IS NOT NULL($0))])
-                            RwBatchFilterScan(table=[[test_schema, part]], columns=[p_partkey,p_name,p_mfgr,p_brand,p_type,p_size,p_container,p_retailprice,p_comment])
-                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                                  RwBatchHashAgg(group=[{0}], EXPR$0=[MIN($1)])
+                                    RwBatchProject(ps_partkey=[$7], ps_supplycost=[$10])
+                                      RwBatchHashJoin(condition=[=($14, $16)], joinType=[inner])
+                                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[14]}], collation=[[]])
+                                          RwBatchHashJoin(condition=[=($3, $12)], joinType=[inner])
+                                            RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[3]}], collation=[[]])
+                                              RwBatchHashJoin(condition=[=($0, $8)], joinType=[inner])
+                                                RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                                                  RwBatchFilterScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_name,s_address,s_nationkey,s_phone,s_acctbal,s_comment])
+                                                RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
+                                                  RwBatchFilter(condition=[IS NOT NULL($0)])
+                                                    RwBatchFilterScan(table=[[test_schema, partsupp]], columns=[ps_partkey,ps_suppkey,ps_availqty,ps_supplycost,ps_comment])
+                                            RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                                              RwBatchFilterScan(table=[[test_schema, nation]], columns=[n_nationkey,n_name,n_regionkey,n_comment])
+                                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                                          RwBatchFilter(condition=[=($1, 'MIDDLE EAST':CHAR(11))])
+                                            RwBatchFilterScan(table=[[test_schema, region]], columns=[r_regionkey,r_name,r_comment])
+                            RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                              RwBatchFilter(condition=[AND(=($5, 38), LIKE($4, '%TIN':CHAR(4)), IS NOT NULL($0))])
+                                RwBatchFilterScan(table=[[test_schema, part]], columns=[p_partkey,p_name,p_mfgr,p_brand,p_type,p_size,p_container,p_retailprice,p_comment])
+                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 3]}], collation=[[]])
                           RwBatchFilter(condition=[IS NOT NULL($0)])
                             RwBatchFilterScan(table=[[test_schema, partsupp]], columns=[ps_partkey,ps_suppkey,ps_availqty,ps_supplycost,ps_comment])
                     RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-                      RwBatchHashJoin(condition=[=($3, $7)], joinType=[inner])
-                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[3]}], collation=[[]])
-                          RwBatchFilterScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_name,s_address,s_nationkey,s_phone,s_acctbal,s_comment])
-                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-                          RwBatchFilterScan(table=[[test_schema, nation]], columns=[n_nationkey,n_name,n_regionkey,n_comment])
+                      RwBatchFilterScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_name,s_address,s_nationkey,s_phone,s_acctbal,s_comment])
+                RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                  RwBatchFilterScan(table=[[test_schema, nation]], columns=[n_nationkey,n_name,n_regionkey,n_comment])
+            RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+              RwBatchFilter(condition=[=($1, 'MIDDLE EAST':CHAR(11))])
+                RwBatchFilterScan(table=[[test_schema, region]], columns=[r_regionkey,r_name,r_comment])
             ]]>
         </Resource>
     </TestCase>
@@ -194,19 +194,134 @@ RwBatchGather
           RwBatchHashAgg(group=[{0, 1, 2}], revenue=[SUM($3)])
             RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1, 2]}], collation=[[]])
               RwBatchHashAgg(group=[{0, 1, 2}], revenue=[SUM($3)])
-                RwBatchProject(l_orderkey=[$17], o_orderdate=[$12], o_shippriority=[$15], $f3=[*($22, -(1, $23))])
-                  RwBatchHashJoin(condition=[=($0, $9)], joinType=[inner])
+                RwBatchProject(l_orderkey=[$17], o_orderdate=[$4], o_shippriority=[$7], $f3=[*($22, -(1, $23))])
+                  RwBatchHashJoin(condition=[=($17, $0)], joinType=[inner])
                     RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-                      RwBatchFilter(condition=[=(CAST($6):CHAR(0), 'FURNITURE':CHAR(9))])
-                        RwBatchFilterScan(table=[[test_schema, customer]], columns=[c_custkey,c_name,c_address,c_nationkey,c_phone,c_acctbal,c_mktsegment,c_comment])
-                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
-                      RwBatchHashJoin(condition=[=($9, $0)], joinType=[inner])
-                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                      RwBatchHashJoin(condition=[=($9, $1)], joinType=[inner])
+                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
                           RwBatchFilter(condition=[<($4, 1995-03-29)])
                             RwBatchFilterScan(table=[[test_schema, orders]], columns=[o_orderkey,o_custkey,o_orderstatus,o_totalprice,o_orderdate,o_orderpriority,o_clerk,o_shippriority,o_comment])
                         RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-                          RwBatchFilter(condition=[>($10, 1995-03-29)])
-                            RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_partkey,l_suppkey,l_linenumber,l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate,l_commitdate,l_receiptdate,l_shipinstruct,l_shipmode,l_comment])
+                          RwBatchFilter(condition=[=($6, 'FURNITURE':CHAR(9))])
+                            RwBatchFilterScan(table=[[test_schema, customer]], columns=[c_custkey,c_name,c_address,c_nationkey,c_phone,c_acctbal,c_mktsegment,c_comment])
+                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                      RwBatchFilter(condition=[>($10, 1995-03-29)])
+                        RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_partkey,l_suppkey,l_linenumber,l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate,l_commitdate,l_receiptdate,l_shipinstruct,l_shipmode,l_comment])
+            ]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="q4">
+        <Resource name="sql">
+            <![CDATA[
+select
+	o_orderpriority,
+	count(*) as order_count
+from
+	orders
+where
+	o_orderdate >= date '1997-07-01'
+	and o_orderdate < date '1997-07-01' + interval '3' month
+	and exists (
+		select
+			*
+		from
+			lineitem
+		where
+			l_orderkey = o_orderkey
+			and l_commitdate < l_receiptdate
+	)
+group by
+	o_orderpriority
+order by
+	o_orderpriority;
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchGather
+  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0]])
+    RwBatchSort(sort0=[$0], dir0=[ASC])
+      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+        RwBatchHashAgg(group=[{0}], agg#0=[$SUM0($1)])
+          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+            RwBatchHashAgg(group=[{0}], order_count=[COUNT()])
+              RwBatchProject(o_orderpriority=[$5])
+                RwBatchHashJoin(condition=[=($0, $9)], joinType=[inner])
+                  RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                    RwBatchFilter(condition=[AND(>=($4, 1997-07-01), <($4, +(1997-07-01, 3:INTERVAL MONTH)), IS NOT NULL($0))])
+                      RwBatchFilterScan(table=[[test_schema, orders]], columns=[o_orderkey,o_custkey,o_orderstatus,o_totalprice,o_orderdate,o_orderpriority,o_clerk,o_shippriority,o_comment])
+                  RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                    RwBatchHashAgg(group=[{0}], agg#0=[MIN($1)])
+                      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                        RwBatchHashAgg(group=[{0}], agg#0=[MIN($1)])
+                          RwBatchProject(l_orderkey=[$0], $f0=[true])
+                            RwBatchFilter(condition=[AND(<($1, $2), IS NOT NULL($0))])
+                              RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_commitdate,l_receiptdate])
+            ]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="q5">
+        <Resource name="sql">
+            <![CDATA[
+select
+	n_name,
+	sum(l_extendedprice * (1 - l_discount)) as revenue
+from
+	customer,
+	orders,
+	lineitem,
+	supplier,
+	nation,
+	region
+where
+	c_custkey = o_custkey
+	and l_orderkey = o_orderkey
+	and l_suppkey = s_suppkey
+	and c_nationkey = s_nationkey
+	and s_nationkey = n_nationkey
+	and n_regionkey = r_regionkey
+	and r_name = 'MIDDLE EAST'
+	and o_orderdate >= date '1994-01-01'
+	and o_orderdate < date '1994-01-01' + interval '1' year
+group by
+	n_name
+order by
+	revenue desc;
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchGather
+  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[1 DESC]])
+    RwBatchSort(sort0=[$1], dir0=[DESC])
+      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
+        RwBatchHashAgg(group=[{0}], revenue=[SUM($1)])
+          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+            RwBatchHashAgg(group=[{0}], revenue=[SUM($1)])
+              RwBatchProject(n_name=[$8], $f1=[*($27, -(1, $28))])
+                RwBatchHashJoin(condition=[AND(=($22, $38), =($11, $39))], joinType=[inner])
+                  RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[11, 22]}], collation=[[]])
+                    RwBatchHashJoin(condition=[=($24, $0)], joinType=[inner])
+                      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                        RwBatchHashJoin(condition=[=($9, $19)], joinType=[inner])
+                          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[9]}], collation=[[]])
+                            RwBatchHashJoin(condition=[=($14, $3)], joinType=[inner])
+                              RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[3]}], collation=[[]])
+                                RwBatchHashJoin(condition=[=($3, $7)], joinType=[inner])
+                                  RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[3]}], collation=[[]])
+                                    RwBatchFilterScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_name,s_address,s_nationkey,s_phone,s_acctbal,s_comment])
+                                  RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                                    RwBatchFilterScan(table=[[test_schema, nation]], columns=[n_nationkey,n_name,n_regionkey,n_comment])
+                              RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[3]}], collation=[[]])
+                                RwBatchFilterScan(table=[[test_schema, customer]], columns=[c_custkey,c_name,c_address,c_nationkey,c_phone,c_acctbal,c_mktsegment,c_comment])
+                          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                            RwBatchFilter(condition=[=($1, 'MIDDLE EAST':CHAR(11))])
+                              RwBatchFilterScan(table=[[test_schema, region]], columns=[r_regionkey,r_name,r_comment])
+                      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[2]}], collation=[[]])
+                        RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_partkey,l_suppkey,l_linenumber,l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate,l_commitdate,l_receiptdate,l_shipinstruct,l_shipmode,l_comment])
+                  RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+                    RwBatchFilter(condition=[AND(>=($4, 1994-01-01), <(CAST($4):TIMESTAMP(0), +(1994-01-01, 12:INTERVAL YEAR)))])
+                      RwBatchFilterScan(table=[[test_schema, orders]], columns=[o_orderkey,o_custkey,o_orderstatus,o_totalprice,o_orderdate,o_orderpriority,o_clerk,o_shippriority,o_comment])
             ]]>
         </Resource>
     </TestCase>
@@ -235,6 +350,1145 @@ RwBatchGather
             RwBatchFilter(condition=[AND(>=($3, 1994-01-01), <(CAST($3):TIMESTAMP(0), +(1994-01-01, 12:INTERVAL YEAR)), OR(AND(>=($2, -(0.08:DECIMAL(3,2), 0.01:DECIMAL(3,2))), <=($2, +(0.08:DECIMAL(3,2), 0.01:DECIMAL(3,2)))), AND(>=($2, +(0.08:DECIMAL(3,2), 0.01:DECIMAL(3,2))), <=($2, -(0.08:DECIMAL(3,2), 0.01:DECIMAL(3,2))))), <($0, 24))])
               RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_quantity,l_extendedprice,l_discount,l_shipdate])
               ]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="q7">
+        <Resource name="sql">
+            <![CDATA[
+select
+	supp_nation,
+	cust_nation,
+	l_year,
+	sum(volume) as revenue
+from
+	(
+		select
+			n1.n_name as supp_nation,
+			n2.n_name as cust_nation,
+			extract(year from l_shipdate) as l_year,
+			l_extendedprice * (1 - l_discount) as volume
+		from
+			supplier,
+			lineitem,
+			orders,
+			customer,
+			nation n1,
+			nation n2
+		where
+			s_suppkey = l_suppkey
+			and o_orderkey = l_orderkey
+			and c_custkey = o_custkey
+			and s_nationkey = n1.n_nationkey
+			and c_nationkey = n2.n_nationkey
+			and (
+				(n1.n_name = 'ROMANIA' and n2.n_name = 'INDIA')
+				or (n1.n_name = 'INDIA' and n2.n_name = 'ROMANIA')
+			)
+			and l_shipdate between date '1995-01-01' and date '1996-12-31'
+	) as shipping
+group by
+	supp_nation,
+	cust_nation,
+	l_year
+order by
+	supp_nation,
+	cust_nation,
+	l_year;
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchGather
+  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0, 1, 2]])
+    RwBatchSort(sort0=[$0], sort1=[$1], sort2=[$2], dir0=[ASC], dir1=[ASC], dir2=[ASC])
+      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1, 2]}], collation=[[]])
+        RwBatchHashAgg(group=[{0, 1, 2}], revenue=[SUM($3)])
+          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1, 2]}], collation=[[]])
+            RwBatchHashAgg(group=[{0, 1, 2}], revenue=[SUM($3)])
+              RwBatchProject(supp_nation=[$8], cust_nation=[$45], l_year=[EXTRACT(FLAG(YEAR), $21)], volume=[*($16, -(1, $17))])
+                RwBatchNestLoopJoin(condition=[AND(=($39, $44), OR(AND(=($8, 'ROMANIA':CHAR(7)), =($45, 'INDIA':CHAR(5))), AND(=($8, 'INDIA':CHAR(5)), =($45, 'ROMANIA':CHAR(7)))))], joinType=[inner])
+                  RwBatchHashJoin(condition=[=($36, $28)], joinType=[inner])
+                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[28]}], collation=[[]])
+                      RwBatchHashJoin(condition=[=($27, $11)], joinType=[inner])
+                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[11]}], collation=[[]])
+                          RwBatchHashJoin(condition=[=($0, $13)], joinType=[inner])
+                            RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                              RwBatchHashJoin(condition=[=($3, $7)], joinType=[inner])
+                                RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[3]}], collation=[[]])
+                                  RwBatchFilterScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_name,s_address,s_nationkey,s_phone,s_acctbal,s_comment])
+                                RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                                  RwBatchFilterScan(table=[[test_schema, nation]], columns=[n_nationkey,n_name,n_regionkey,n_comment])
+                            RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[2]}], collation=[[]])
+                              RwBatchFilter(condition=[SEARCH($10, Sarg[[1995-01-01..1996-12-31]])])
+                                RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_partkey,l_suppkey,l_linenumber,l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate,l_commitdate,l_receiptdate,l_shipinstruct,l_shipmode,l_comment])
+                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                          RwBatchFilterScan(table=[[test_schema, orders]], columns=[o_orderkey,o_custkey,o_orderstatus,o_totalprice,o_orderdate,o_orderpriority,o_clerk,o_shippriority,o_comment])
+                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                      RwBatchFilterScan(table=[[test_schema, customer]], columns=[c_custkey,c_name,c_address,c_nationkey,c_phone,c_acctbal,c_mktsegment,c_comment])
+                  RwBatchFilterScan(table=[[test_schema, nation]], columns=[n_nationkey,n_name,n_regionkey,n_comment])
+            ]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="q8">
+        <Resource name="sql">
+            <![CDATA[
+select
+	o_year,
+	sum(case
+		when nation = 'INDIA' then volume
+		else 0
+	end) / sum(volume) as mkt_share
+from
+	(
+		select
+			extract(year from o_orderdate) as o_year,
+			l_extendedprice * (1 - l_discount) as volume,
+			n2.n_name as nation
+		from
+			part,
+			supplier,
+			lineitem,
+			orders,
+			customer,
+			nation n1,
+			nation n2,
+			region
+		where
+			p_partkey = l_partkey
+			and s_suppkey = l_suppkey
+			and l_orderkey = o_orderkey
+			and o_custkey = c_custkey
+			and c_nationkey = n1.n_nationkey
+			and n1.n_regionkey = r_regionkey
+			and r_name = 'ASIA'
+			and s_nationkey = n2.n_nationkey
+			and o_orderdate between date '1995-01-01' and date '1996-12-31'
+			and p_type = 'PROMO BRUSHED COPPER'
+	) as all_nations
+group by
+	o_year
+order by
+	o_year;
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchGather
+  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0]])
+    RwBatchSort(sort0=[$0], dir0=[ASC])
+      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+        RwBatchProject(o_year=[$0], mkt_share=[/($1, $2)])
+          RwBatchHashAgg(group=[{0}], agg#0=[SUM($1)], agg#1=[SUM($2)])
+            RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+              RwBatchHashAgg(group=[{0}], agg#0=[SUM($1)], agg#1=[SUM($2)])
+                RwBatchProject(o_year=[EXTRACT(FLAG(YEAR), $29)], $f1=[CASE(=($57, 'INDIA':CHAR(5)), *($5, -(1, $6)), 0:DECIMAL(28,10))], volume=[*($5, -(1, $6))])
+                  RwBatchHashJoin(condition=[=($52, $56)], joinType=[inner])
+                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[52]}], collation=[[]])
+                      RwBatchHashJoin(condition=[=($49, $2)], joinType=[inner])
+                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[2]}], collation=[[]])
+                          RwBatchHashJoin(condition=[=($44, $46)], joinType=[inner])
+                            RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[44]}], collation=[[]])
+                              RwBatchHashJoin(condition=[=($37, $42)], joinType=[inner])
+                                RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[37]}], collation=[[]])
+                                  RwBatchHashJoin(condition=[=($26, $34)], joinType=[inner])
+                                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[26]}], collation=[[]])
+                                      RwBatchHashJoin(condition=[=($0, $25)], joinType=[inner])
+                                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                                          RwBatchHashJoin(condition=[=($16, $1)], joinType=[inner])
+                                            RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
+                                              RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_partkey,l_suppkey,l_linenumber,l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate,l_commitdate,l_receiptdate,l_shipinstruct,l_shipmode,l_comment])
+                                            RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                                              RwBatchFilter(condition=[=($4, CAST('PROMO BRUSHED COPPER':CHAR(20)):VARCHAR(0) NOT NULL)])
+                                                RwBatchFilterScan(table=[[test_schema, part]], columns=[p_partkey,p_name,p_mfgr,p_brand,p_type,p_size,p_container,p_retailprice,p_comment])
+                                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                                          RwBatchFilter(condition=[SEARCH($4, Sarg[[1995-01-01..1996-12-31]])])
+                                            RwBatchFilterScan(table=[[test_schema, orders]], columns=[o_orderkey,o_custkey,o_orderstatus,o_totalprice,o_orderdate,o_orderpriority,o_clerk,o_shippriority,o_comment])
+                                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                                      RwBatchFilterScan(table=[[test_schema, customer]], columns=[c_custkey,c_name,c_address,c_nationkey,c_phone,c_acctbal,c_mktsegment,c_comment])
+                                RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                                  RwBatchFilterScan(table=[[test_schema, nation]], columns=[n_nationkey,n_name,n_regionkey,n_comment])
+                            RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                              RwBatchFilter(condition=[=($1, 'ASIA':CHAR(4))])
+                                RwBatchFilterScan(table=[[test_schema, region]], columns=[r_regionkey,r_name,r_comment])
+                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                          RwBatchFilterScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_name,s_address,s_nationkey,s_phone,s_acctbal,s_comment])
+                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                      RwBatchFilterScan(table=[[test_schema, nation]], columns=[n_nationkey,n_name,n_regionkey,n_comment])
+            ]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="q9">
+        <Resource name="sql">
+            <![CDATA[
+select
+	nation,
+	o_year,
+	sum(amount) as sum_profit
+from
+	(
+		select
+			n_name as nation,
+			extract(year from o_orderdate) as o_year,
+			l_extendedprice * (1 - l_discount) - ps_supplycost * l_quantity as amount
+		from
+			part,
+			supplier,
+			lineitem,
+			partsupp,
+			orders,
+			nation
+		where
+			s_suppkey = l_suppkey
+			and ps_suppkey = l_suppkey
+			and ps_partkey = l_partkey
+			and p_partkey = l_partkey
+			and o_orderkey = l_orderkey
+			and s_nationkey = n_nationkey
+			and p_name like '%yellow%'
+	) as profit
+group by
+	nation,
+	o_year
+order by
+	nation,
+	o_year desc;
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchGather
+  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0, 1 DESC]])
+    RwBatchSort(sort0=[$0], sort1=[$1], dir0=[ASC], dir1=[DESC])
+      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+        RwBatchHashAgg(group=[{0, 1}], sum_profit=[SUM($2)])
+          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+            RwBatchHashAgg(group=[{0, 1}], sum_profit=[SUM($2)])
+              RwBatchProject(nation=[$47], o_year=[EXTRACT(FLAG(YEAR), $29)], amount=[-(*($5, -(1, $6)), *($37, $4))])
+                RwBatchHashJoin(condition=[=($42, $46)], joinType=[inner])
+                  RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[42]}], collation=[[]])
+                    RwBatchHashJoin(condition=[=($39, $2)], joinType=[inner])
+                      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[2]}], collation=[[]])
+                        RwBatchHashJoin(condition=[AND(=($35, $2), =($34, $1))], joinType=[inner])
+                          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1, 2]}], collation=[[]])
+                            RwBatchHashJoin(condition=[=($25, $0)], joinType=[inner])
+                              RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                                RwBatchHashJoin(condition=[=($16, $1)], joinType=[inner])
+                                  RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
+                                    RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_partkey,l_suppkey,l_linenumber,l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate,l_commitdate,l_receiptdate,l_shipinstruct,l_shipmode,l_comment])
+                                  RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                                    RwBatchFilter(condition=[LIKE($1, '%yellow%':CHAR(8))])
+                                      RwBatchFilterScan(table=[[test_schema, part]], columns=[p_partkey,p_name,p_mfgr,p_brand,p_type,p_size,p_container,p_retailprice,p_comment])
+                              RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                                RwBatchFilterScan(table=[[test_schema, orders]], columns=[o_orderkey,o_custkey,o_orderstatus,o_totalprice,o_orderdate,o_orderpriority,o_clerk,o_shippriority,o_comment])
+                          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+                            RwBatchFilterScan(table=[[test_schema, partsupp]], columns=[ps_partkey,ps_suppkey,ps_availqty,ps_supplycost,ps_comment])
+                      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                        RwBatchFilterScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_name,s_address,s_nationkey,s_phone,s_acctbal,s_comment])
+                  RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                    RwBatchFilterScan(table=[[test_schema, nation]], columns=[n_nationkey,n_name,n_regionkey,n_comment])
+            ]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="q10">
+        <Resource name="sql">
+            <![CDATA[
+select
+	c_custkey,
+	c_name,
+	sum(l_extendedprice * (1 - l_discount)) as revenue,
+	c_acctbal,
+	n_name,
+	c_address,
+	c_phone,
+	c_comment
+from
+	customer,
+	orders,
+	lineitem,
+	nation
+where
+	c_custkey = o_custkey
+	and l_orderkey = o_orderkey
+	and o_orderdate >= date '1994-01-01'
+	and o_orderdate < date '1994-01-01' + interval '3' month
+	and l_returnflag = 'R'
+	and c_nationkey = n_nationkey
+group by
+	c_custkey,
+	c_name,
+	c_acctbal,
+	c_phone,
+	n_name,
+	c_address,
+	c_comment
+order by
+	revenue desc
+LIMIT 20;
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchGather
+  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[2 DESC]])
+    RwBatchSort(sort0=[$2], dir0=[DESC], fetch=[20])
+      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[2]}], collation=[[]])
+        RwBatchProject(c_custkey=[$0], c_name=[$1], revenue=[$7], c_acctbal=[$2], n_name=[$4], c_address=[$5], c_phone=[$3], c_comment=[$6])
+          RwBatchHashAgg(group=[{0, 1, 2, 3, 4, 5, 6}], revenue=[SUM($7)])
+            RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1, 2, 3, 4, 5, 6]}], collation=[[]])
+              RwBatchHashAgg(group=[{0, 1, 2, 3, 4, 5, 6}], revenue=[SUM($7)])
+                RwBatchProject(c_custkey=[$0], c_name=[$1], c_acctbal=[$5], c_phone=[$4], n_name=[$9], c_address=[$2], c_comment=[$7], $f7=[*($26, -(1, $27))])
+                  RwBatchHashJoin(condition=[=($21, $12)], joinType=[inner])
+                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[12]}], collation=[[]])
+                      RwBatchHashJoin(condition=[=($0, $13)], joinType=[inner])
+                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                          RwBatchHashJoin(condition=[=($3, $8)], joinType=[inner])
+                            RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[3]}], collation=[[]])
+                              RwBatchFilterScan(table=[[test_schema, customer]], columns=[c_custkey,c_name,c_address,c_nationkey,c_phone,c_acctbal,c_mktsegment,c_comment])
+                            RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                              RwBatchFilterScan(table=[[test_schema, nation]], columns=[n_nationkey,n_name,n_regionkey,n_comment])
+                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
+                          RwBatchFilter(condition=[AND(>=($4, 1994-01-01), <($4, +(1994-01-01, 3:INTERVAL MONTH)))])
+                            RwBatchFilterScan(table=[[test_schema, orders]], columns=[o_orderkey,o_custkey,o_orderstatus,o_totalprice,o_orderdate,o_orderpriority,o_clerk,o_shippriority,o_comment])
+                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                      RwBatchFilter(condition=[=($8, 'R')])
+                        RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_partkey,l_suppkey,l_linenumber,l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate,l_commitdate,l_receiptdate,l_shipinstruct,l_shipmode,l_comment])
+            ]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="q11">
+        <Resource name="sql">
+            <![CDATA[
+select
+	ps_partkey,
+	sum(ps_supplycost * ps_availqty) as value
+from
+	partsupp,
+	supplier,
+	nation
+where
+	ps_suppkey = s_suppkey
+	and s_nationkey = n_nationkey
+	and n_name = 'ARGENTINA'
+group by
+	ps_partkey having
+		sum(ps_supplycost * ps_availqty) > (
+			select
+				sum(ps_supplycost * ps_availqty) * 0.0001000000
+			from
+				partsupp,
+				supplier,
+				nation
+			where
+				ps_suppkey = s_suppkey
+				and s_nationkey = n_nationkey
+				and n_name = 'ARGENTINA'
+		)
+order by
+	value desc;
+
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchGather
+  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[1 DESC]])
+    RwBatchSort(sort0=[$1], dir0=[DESC])
+      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
+        RwBatchProject(ps_partkey=[$0], value=[$1])
+          RwBatchNestLoopJoin(condition=[>($1, $2)], joinType=[inner])
+            RwBatchHashAgg(group=[{0}], value=[SUM($1)])
+              RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                RwBatchHashAgg(group=[{0}], value=[SUM($1)])
+                  RwBatchProject(ps_partkey=[$7], $f1=[*($10, $9)])
+                    RwBatchHashJoin(condition=[=($3, $12)], joinType=[inner])
+                      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[3]}], collation=[[]])
+                        RwBatchHashJoin(condition=[=($8, $0)], joinType=[inner])
+                          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                            RwBatchFilterScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_name,s_address,s_nationkey,s_phone,s_acctbal,s_comment])
+                          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
+                            RwBatchFilterScan(table=[[test_schema, partsupp]], columns=[ps_partkey,ps_suppkey,ps_availqty,ps_supplycost,ps_comment])
+                      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                        RwBatchFilter(condition=[=($1, 'ARGENTINA':CHAR(9))])
+                          RwBatchFilterScan(table=[[test_schema, nation]], columns=[n_nationkey,n_name,n_regionkey,n_comment])
+            RwBatchProject(EXPR$0=[*($0, 0.00010:DECIMAL(6,5))])
+              RwBatchSortAgg(group=[{}], agg#0=[SUM($0)])
+                RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
+                  RwBatchSortAgg(group=[{}], agg#0=[SUM($0)])
+                    RwBatchProject($f0=[*($10, $9)])
+                      RwBatchHashJoin(condition=[=($3, $12)], joinType=[inner])
+                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[3]}], collation=[[]])
+                          RwBatchHashJoin(condition=[=($8, $0)], joinType=[inner])
+                            RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                              RwBatchFilterScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_name,s_address,s_nationkey,s_phone,s_acctbal,s_comment])
+                            RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
+                              RwBatchFilterScan(table=[[test_schema, partsupp]], columns=[ps_partkey,ps_suppkey,ps_availqty,ps_supplycost,ps_comment])
+                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                          RwBatchFilter(condition=[=($1, 'ARGENTINA':CHAR(9))])
+                            RwBatchFilterScan(table=[[test_schema, nation]], columns=[n_nationkey,n_name,n_regionkey,n_comment])
+            ]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="q12">
+        <Resource name="sql">
+            <![CDATA[
+select
+	l_shipmode,
+	sum(case
+		when o_orderpriority = '1-URGENT'
+			or o_orderpriority = '2-HIGH'
+			then 1
+		else 0
+	end) as high_line_count,
+	sum(case
+		when o_orderpriority <> '1-URGENT'
+			and o_orderpriority <> '2-HIGH'
+			then 1
+		else 0
+	end) as low_line_count
+from
+	orders,
+	lineitem
+where
+	o_orderkey = l_orderkey
+	and l_shipmode in ('FOB', 'SHIP')
+	and l_commitdate < l_receiptdate
+	and l_shipdate < l_commitdate
+	and l_receiptdate >= date '1994-01-01'
+	and l_receiptdate < date '1994-01-01' + interval '1' year
+group by
+	l_shipmode
+order by
+	l_shipmode;
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchGather
+  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0]])
+    RwBatchSort(sort0=[$0], dir0=[ASC])
+      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+        RwBatchHashAgg(group=[{0}], high_line_count=[SUM($1)], low_line_count=[SUM($2)])
+          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+            RwBatchHashAgg(group=[{0}], high_line_count=[SUM($1)], low_line_count=[SUM($2)])
+              RwBatchProject(l_shipmode=[$23], $f1=[CASE(SEARCH($5, Sarg['1-URGENT':CHAR(0), '2-HIGH':CHAR(0)]:CHAR(0)), 1, 0)], $f2=[CASE(SEARCH($5, Sarg[(-∞..'1-URGENT':CHAR(0)), ('1-URGENT':CHAR(0)..'2-HIGH':CHAR(0)), ('2-HIGH':CHAR(0)..+∞)]:CHAR(0)), 1, 0)])
+                RwBatchHashJoin(condition=[=($0, $9)], joinType=[inner])
+                  RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                    RwBatchFilterScan(table=[[test_schema, orders]], columns=[o_orderkey,o_custkey,o_orderstatus,o_totalprice,o_orderdate,o_orderpriority,o_clerk,o_shippriority,o_comment])
+                  RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                    RwBatchFilter(condition=[AND(SEARCH($14, Sarg['FOB':CHAR(0), 'SHIP':CHAR(0)]:CHAR(0)), <($11, $12), <($10, $11), >=($12, 1994-01-01), <(CAST($12):TIMESTAMP(0), +(1994-01-01, 12:INTERVAL YEAR)))])
+                      RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_partkey,l_suppkey,l_linenumber,l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate,l_commitdate,l_receiptdate,l_shipinstruct,l_shipmode,l_comment])
+            ]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="q13">
+        <Resource name="sql">
+            <![CDATA[
+select
+	c_count,
+	count(*) as custdist
+from
+	(
+		select
+			c_custkey,
+			count(o_orderkey)
+		from
+			customer left outer join orders on
+				c_custkey = o_custkey
+				and o_comment not like '%express%packages%'
+		group by
+			c_custkey
+	) as c_orders (c_custkey, c_count)
+group by
+	c_count
+order by
+	custdist desc,
+	c_count desc;
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchGather
+  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[1 DESC, 0 DESC]])
+    RwBatchSort(sort0=[$1], sort1=[$0], dir0=[DESC], dir1=[DESC])
+      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+        RwBatchHashAgg(group=[{0}], agg#0=[$SUM0($1)])
+          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+            RwBatchHashAgg(group=[{0}], custdist=[COUNT()])
+              RwBatchProject(c_count=[$1])
+                RwBatchHashAgg(group=[{0}], agg#0=[$SUM0($1)])
+                  RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                    RwBatchHashAgg(group=[{0}], EXPR$1=[COUNT($1)])
+                      RwBatchProject(c_custkey=[$0], o_orderkey=[$8])
+                        RwBatchHashJoin(condition=[=($0, $9)], joinType=[left])
+                          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                            RwBatchFilterScan(table=[[test_schema, customer]], columns=[c_custkey,c_name,c_address,c_nationkey,c_phone,c_acctbal,c_mktsegment,c_comment])
+                          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
+                            RwBatchFilter(condition=[NOT(LIKE($8, '%express%packages%':CHAR(18)))])
+                              RwBatchFilterScan(table=[[test_schema, orders]], columns=[o_orderkey,o_custkey,o_orderstatus,o_totalprice,o_orderdate,o_orderpriority,o_clerk,o_shippriority,o_comment])
+            ]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="q14">
+        <Resource name="sql">
+            <![CDATA[
+select
+	100.00 * sum(case
+		when p_type like 'PROMO%'
+			then l_extendedprice * (1 - l_discount)
+		else 0
+	end) / sum(l_extendedprice * (1 - l_discount)) as promo_revenue
+from
+	lineitem,
+	part
+where
+	l_partkey = p_partkey
+	and l_shipdate >= date '1994-03-01'
+	and l_shipdate < date '1994-03-01' + interval '1' month;
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchGather
+  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
+    RwBatchProject(promo_revenue=[/(*(100.0:DECIMAL(4,1), $0), $1)])
+      RwBatchSortAgg(group=[{}], agg#0=[SUM($0)], agg#1=[SUM($1)])
+        RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
+          RwBatchSortAgg(group=[{}], agg#0=[SUM($0)], agg#1=[SUM($1)])
+            RwBatchProject($f0=[CASE(LIKE($4, 'PROMO%':CHAR(6)), *($14, -(1, $15)), 0:DECIMAL(28,10))], $f1=[*($14, -(1, $15))])
+              RwBatchHashJoin(condition=[=($10, $0)], joinType=[inner])
+                RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                  RwBatchFilterScan(table=[[test_schema, part]], columns=[p_partkey,p_name,p_mfgr,p_brand,p_type,p_size,p_container,p_retailprice,p_comment])
+                RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
+                  RwBatchFilter(condition=[AND(>=($10, 1994-03-01), <($10, +(1994-03-01, 1:INTERVAL MONTH)))])
+                    RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_partkey,l_suppkey,l_linenumber,l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate,l_commitdate,l_receiptdate,l_shipinstruct,l_shipmode,l_comment])
+            ]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="q15">
+        <Resource name="sql">
+            <![CDATA[
+select
+	s_suppkey,
+	s_name,
+	s_address,
+	s_phone,
+	total_revenue
+from
+	supplier,
+	(
+		select
+		l_suppkey,
+		sum(l_extendedprice * (1 - l_discount))
+	from
+		lineitem
+	where
+		l_shipdate >= date '1993-01-01'
+		and l_shipdate < date '1993-01-01' + interval '3' month
+	group by
+		l_suppkey
+	) as revenue0 (supplier_no, total_revenue)
+where
+	s_suppkey = supplier_no
+	and total_revenue = (
+		select
+			max(total_revenue)
+		from
+			(
+				select
+				l_suppkey,
+				sum(l_extendedprice * (1 - l_discount))
+			from
+				lineitem
+			where
+				l_shipdate >= date '1993-01-01'
+				and l_shipdate < date '1993-01-01' + interval '3' month
+			group by
+				l_suppkey
+			) as revenue0 (supplier_no, total_revenue)
+	)
+order by
+	s_suppkey;
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchGather
+  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0]])
+    RwBatchSort(sort0=[$0], dir0=[ASC])
+      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+        RwBatchProject(s_suppkey=[$0], s_name=[$1], s_address=[$2], s_phone=[$4], total_revenue=[$8])
+          RwBatchHashJoin(condition=[=($8, $9)], joinType=[inner])
+            RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[8]}], collation=[[]])
+              RwBatchHashJoin(condition=[=($0, $7)], joinType=[inner])
+                RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                  RwBatchFilterScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_name,s_address,s_nationkey,s_phone,s_acctbal,s_comment])
+                RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                  RwBatchHashAgg(group=[{0}], EXPR$1=[SUM($1)])
+                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                      RwBatchHashAgg(group=[{0}], EXPR$1=[SUM($1)])
+                        RwBatchProject(l_suppkey=[$0], $f1=[*($1, -(1, $2))])
+                          RwBatchFilter(condition=[AND(>=($3, 1993-01-01), <($3, +(1993-01-01, 3:INTERVAL MONTH)))])
+                            RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_suppkey,l_extendedprice,l_discount,l_shipdate])
+            RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+              RwBatchSortAgg(group=[{}], EXPR$0=[MAX($0)])
+                RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
+                  RwBatchSortAgg(group=[{}], EXPR$0=[MAX($0)])
+                    RwBatchProject(EXPR$1=[$1])
+                      RwBatchHashAgg(group=[{0}], EXPR$1=[SUM($1)])
+                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                          RwBatchHashAgg(group=[{0}], EXPR$1=[SUM($1)])
+                            RwBatchProject(l_suppkey=[$0], $f1=[*($1, -(1, $2))])
+                              RwBatchFilter(condition=[AND(>=($3, 1993-01-01), <($3, +(1993-01-01, 3:INTERVAL MONTH)))])
+                                RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_suppkey,l_extendedprice,l_discount,l_shipdate])
+            ]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="q16">
+        <Resource name="sql">
+            <![CDATA[
+select
+	p_brand,
+	p_type,
+	p_size,
+	count(distinct ps_suppkey) as supplier_cnt
+from
+	partsupp,
+	part
+where
+	p_partkey = ps_partkey
+	and p_brand <> 'Brand#45'
+	and p_type not like 'SMALL PLATED%'
+	and p_size in (19, 17, 16, 23, 10, 4, 38, 11)
+	and ps_suppkey not in (
+		select
+			s_suppkey
+		from
+			supplier
+		where
+			s_comment like '%Customer%Complaints%'
+	)
+group by
+	p_brand,
+	p_type,
+	p_size
+order by
+	supplier_cnt desc,
+	p_brand,
+	p_type,
+	p_size;
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchGather
+  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[3 DESC, 0, 1, 2]])
+    RwBatchSort(sort0=[$3], sort1=[$0], sort2=[$1], sort3=[$2], dir0=[DESC], dir1=[ASC], dir2=[ASC], dir3=[ASC])
+      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1, 2, 3]}], collation=[[]])
+        RwBatchHashAgg(group=[{0, 1, 2}], agg#0=[$SUM0(DISTINCT $3)])
+          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1, 2]}], collation=[[]])
+            RwBatchHashAgg(group=[{0, 1, 2}], supplier_cnt=[COUNT(DISTINCT $3)])
+              RwBatchProject(p_brand=[$8], p_type=[$9], p_size=[$10], ps_suppkey=[$1])
+                RwBatchFilter(condition=[OR(=($14, 0), AND(IS NULL($18), >=($15, $14), IS NOT NULL($16)))])
+                  RwBatchHashJoin(condition=[=($16, $17)], joinType=[left])
+                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[16]}], collation=[[]])
+                      RwBatchProject(ps_partkey=[$0], ps_suppkey=[$1], ps_availqty=[$2], ps_supplycost=[$3], ps_comment=[$4], p_partkey=[$7], p_name=[$8], p_mfgr=[$9], p_brand=[$10], p_type=[$11], p_size=[$12], p_container=[$13], p_retailprice=[$14], p_comment=[$15], $f0=[$5], $f1=[$6], ps_suppkey0=[$1])
+                        RwBatchHashJoin(condition=[=($7, $0)], joinType=[inner])
+                          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                            RwBatchNestLoopJoin(condition=[true], joinType=[inner])
+                              RwBatchFilterScan(table=[[test_schema, partsupp]], columns=[ps_partkey,ps_suppkey,ps_availqty,ps_supplycost,ps_comment])
+                              RwBatchSortAgg(group=[{}], agg#0=[$SUM0($0)], agg#1=[$SUM0($1)])
+                                RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
+                                  RwBatchSortAgg(group=[{}], agg#0=[COUNT()], agg#1=[COUNT($0)])
+                                    RwBatchProject(s_suppkey=[$0], $f1=[true])
+                                      RwBatchFilter(condition=[LIKE($1, '%Customer%Complaints%':CHAR(21))])
+                                        RwBatchFilterScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_comment])
+                          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                            RwBatchFilter(condition=[AND(SEARCH($3, Sarg[(-∞..'Brand#45':CHAR(0)), ('Brand#45':CHAR(0)..+∞)]:CHAR(0)), SEARCH($5, Sarg[4, 10, 11, 16, 17, 19, 23, 38]), NOT(LIKE($4, 'SMALL PLATED%':CHAR(13))))])
+                              RwBatchFilterScan(table=[[test_schema, part]], columns=[p_partkey,p_name,p_mfgr,p_brand,p_type,p_size,p_container,p_retailprice,p_comment])
+                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                      RwBatchHashAgg(group=[{0}], agg#0=[MIN($1)])
+                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                          RwBatchHashAgg(group=[{0}], agg#0=[MIN($1)])
+                            RwBatchProject(s_suppkey=[$0], $f1=[true])
+                              RwBatchFilter(condition=[LIKE($1, '%Customer%Complaints%':CHAR(21))])
+                                RwBatchFilterScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_comment])
+            ]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="q17">
+        <Resource name="sql">
+            <![CDATA[
+select
+	sum(l_extendedprice) / 7.0 as avg_yearly
+from
+	lineitem,
+	part
+where
+	p_partkey = l_partkey
+	and p_brand = 'Brand#52'
+	and p_container = 'LG CAN'
+	and l_quantity < (
+		select
+			'0.2'::numeric * avg(l_quantity)
+		from
+			lineitem
+		where
+			l_partkey = p_partkey
+	);
+        ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchGather
+  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
+    RwBatchProject(avg_yearly=[/($0, 7.0:DECIMAL(2,1))])
+      RwBatchSortAgg(group=[{}], agg#0=[SUM($0)])
+        RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
+          RwBatchSortAgg(group=[{}], agg#0=[SUM($0)])
+            RwBatchProject(l_extendedprice=[$5])
+              RwBatchNestLoopJoin(condition=[AND(=($16, $25), <($4, *(0.2, $26)))], joinType=[inner])
+                RwBatchHashJoin(condition=[=($16, $1)], joinType=[inner])
+                  RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
+                    RwBatchFilter(condition=[IS NOT NULL($1)])
+                      RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_partkey,l_suppkey,l_linenumber,l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate,l_commitdate,l_receiptdate,l_shipinstruct,l_shipmode,l_comment])
+                  RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                    RwBatchFilter(condition=[AND(=($3, 'Brand#52':CHAR(8)), =($6, 'LG CAN':CHAR(6)), IS NOT NULL($0))])
+                      RwBatchFilterScan(table=[[test_schema, part]], columns=[p_partkey,p_name,p_mfgr,p_brand,p_type,p_size,p_container,p_retailprice,p_comment])
+                RwBatchProject(l_partkey=[$0], $f1=[/($1, $2)])
+                  RwBatchHashAgg(group=[{0}], agg#0=[SUM($1)], agg#1=[SUM($2)])
+                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                      RwBatchHashAgg(group=[{0}], agg#0=[SUM($1)], agg#1=[COUNT($1)])
+                        RwBatchFilter(condition=[IS NOT NULL($0)])
+                          RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_partkey,l_quantity])
+            ]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="q18">
+        <Resource name="sql">
+            <![CDATA[
+select
+	c_name,
+	c_custkey,
+	o_orderkey,
+	o_orderdate,
+	o_totalprice,
+	sum(l_quantity)
+from
+	customer,
+	orders,
+	lineitem
+where
+	o_orderkey in (
+		select
+			l_orderkey
+		from
+			lineitem
+		group by
+			l_orderkey having
+				sum(l_quantity) > 313
+	)
+	and c_custkey = o_custkey
+	and o_orderkey = l_orderkey
+group by
+	c_name,
+	c_custkey,
+	o_orderkey,
+	o_orderdate,
+	o_totalprice
+order by
+	o_totalprice desc,
+	o_orderdate
+LIMIT 100;
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchGather
+  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[4 DESC, 3]])
+    RwBatchSort(sort0=[$4], sort1=[$3], dir0=[DESC], dir1=[ASC], fetch=[100])
+      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[3, 4]}], collation=[[]])
+        RwBatchHashAgg(group=[{0, 1, 2, 3, 4}], EXPR$5=[SUM($5)])
+          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1, 2, 3, 4]}], collation=[[]])
+            RwBatchHashAgg(group=[{0, 1, 2, 3, 4}], EXPR$5=[SUM($5)])
+              RwBatchProject(c_name=[$10], c_custkey=[$9], o_orderkey=[$0], o_orderdate=[$4], o_totalprice=[$3], l_quantity=[$22])
+                RwBatchHashJoin(condition=[=($0, $18)], joinType=[inner])
+                  RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                    RwBatchHashJoin(condition=[=($0, $17)], joinType=[inner])
+                      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                        RwBatchHashJoin(condition=[=($9, $1)], joinType=[inner])
+                          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
+                            RwBatchFilterScan(table=[[test_schema, orders]], columns=[o_orderkey,o_custkey,o_orderstatus,o_totalprice,o_orderdate,o_orderpriority,o_clerk,o_shippriority,o_comment])
+                          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                            RwBatchFilterScan(table=[[test_schema, customer]], columns=[c_custkey,c_name,c_address,c_nationkey,c_phone,c_acctbal,c_mktsegment,c_comment])
+                      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                        RwBatchHashAgg(group=[{0}])
+                          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                            RwBatchHashAgg(group=[{0}])
+                              RwBatchProject(l_orderkey=[$0])
+                                RwBatchFilter(condition=[>($1, 313)])
+                                  RwBatchHashAgg(group=[{0}], agg#0=[SUM($1)])
+                                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                                      RwBatchHashAgg(group=[{0}], agg#0=[SUM($1)])
+                                        RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_quantity])
+                  RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                    RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_partkey,l_suppkey,l_linenumber,l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate,l_commitdate,l_receiptdate,l_shipinstruct,l_shipmode,l_comment])
+            ]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="q19">
+        <Resource name="sql">
+            <![CDATA[
+select
+	sum(l_extendedprice* (1 - l_discount)) as revenue
+from
+	lineitem,
+	part
+where
+	(
+		p_partkey = l_partkey
+		and p_brand = 'Brand#22'
+		and p_container in ('SM CASE', 'SM BOX', 'SM PACK', 'SM PKG')
+		and l_quantity >= 8 and l_quantity <= 8 + 10
+		and p_size between 1 and 5
+		and l_shipmode in ('AIR', 'AIR REG')
+		and l_shipinstruct = 'DELIVER IN PERSON'
+	)
+	or
+	(
+		p_partkey = l_partkey
+		and p_brand = 'Brand#23'
+		and p_container in ('MED BAG', 'MED BOX', 'MED PKG', 'MED PACK')
+		and l_quantity >= 10 and l_quantity <= 10 + 10
+		and p_size between 1 and 10
+		and l_shipmode in ('AIR', 'AIR REG')
+		and l_shipinstruct = 'DELIVER IN PERSON'
+	)
+	or
+	(
+		p_partkey = l_partkey
+		and p_brand = 'Brand#12'
+		and p_container in ('LG CASE', 'LG BOX', 'LG PACK', 'LG PKG')
+		and l_quantity >= 24 and l_quantity <= 24 + 10
+		and p_size between 1 and 15
+		and l_shipmode in ('AIR', 'AIR REG')
+		and l_shipinstruct = 'DELIVER IN PERSON'
+	);
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchGather
+  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
+    RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
+      RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
+        RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
+          RwBatchProject($f0=[*($5, -(1, $6))])
+            RwBatchNestLoopJoin(condition=[OR(AND(=($16, $1), =($19, 'Brand#22':CHAR(8)), SEARCH($22, Sarg['SM BOX':CHAR(0), 'SM CASE':CHAR(0), 'SM PACK':CHAR(0), 'SM PKG':CHAR(0)]:CHAR(0)), >=($4, 8), <=($4, +(8, 10)), SEARCH($21, Sarg[[1..5]]), SEARCH($14, Sarg['AIR':CHAR(0), 'AIR REG':CHAR(0)]:CHAR(0)), =($13, 'DELIVER IN PERSON':CHAR(17))), AND(=($16, $1), =($19, 'Brand#23':CHAR(8)), SEARCH($22, Sarg['MED BAG':CHAR(0), 'MED BOX':CHAR(0), 'MED PACK':CHAR(0), 'MED PKG':CHAR(0)]:CHAR(0)), >=($4, 10), <=($4, +(10, 10)), SEARCH($21, Sarg[[1..10]]), SEARCH($14, Sarg['AIR':CHAR(0), 'AIR REG':CHAR(0)]:CHAR(0)), =($13, 'DELIVER IN PERSON':CHAR(17))), AND(=($16, $1), =($19, 'Brand#12':CHAR(8)), SEARCH($22, Sarg['LG BOX':CHAR(0), 'LG CASE':CHAR(0), 'LG PACK':CHAR(0), 'LG PKG':CHAR(0)]:CHAR(0)), >=($4, 24), <=($4, +(24, 10)), SEARCH($21, Sarg[[1..15]]), SEARCH($14, Sarg['AIR':CHAR(0), 'AIR REG':CHAR(0)]:CHAR(0)), =($13, 'DELIVER IN PERSON':CHAR(17))))], joinType=[inner])
+              RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_partkey,l_suppkey,l_linenumber,l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate,l_commitdate,l_receiptdate,l_shipinstruct,l_shipmode,l_comment])
+              RwBatchFilterScan(table=[[test_schema, part]], columns=[p_partkey,p_name,p_mfgr,p_brand,p_type,p_size,p_container,p_retailprice,p_comment])
+            ]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="q20">
+        <Resource name="sql">
+            <![CDATA[
+select
+	s_name,
+	s_address
+from
+	supplier,
+	nation
+where
+	s_suppkey in (
+		select
+			ps_suppkey
+		from
+			partsupp
+		where
+			ps_partkey in (
+				select
+					p_partkey
+				from
+					part
+				where
+					p_name like 'frosted%'
+			)
+			and ps_availqty > (
+				select
+					0.5::numeric * sum(l_quantity)
+				from
+					lineitem
+				where
+					l_partkey = ps_partkey
+					and l_suppkey = ps_suppkey
+					and l_shipdate >= date '1994-01-01'
+					and l_shipdate < date '1994-01-01' + interval '1' year
+			)
+	)
+	and s_nationkey = n_nationkey
+	and n_name = 'IRAN'
+order by
+	s_name;
+
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchGather
+  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0]])
+    RwBatchSort(sort0=[$0], dir0=[ASC])
+      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+        RwBatchProject(s_name=[$1], s_address=[$2])
+          RwBatchHashJoin(condition=[=($0, $11)], joinType=[inner])
+            RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+              RwBatchHashJoin(condition=[=($3, $7)], joinType=[inner])
+                RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[3]}], collation=[[]])
+                  RwBatchFilter(condition=[IS NOT NULL($0)])
+                    RwBatchFilterScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_name,s_address,s_nationkey,s_phone,s_acctbal,s_comment])
+                RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                  RwBatchFilter(condition=[=($1, 'IRAN':CHAR(4))])
+                    RwBatchFilterScan(table=[[test_schema, nation]], columns=[n_nationkey,n_name,n_regionkey,n_comment])
+            RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+              RwBatchHashAgg(group=[{0}])
+                RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                  RwBatchHashAgg(group=[{0}])
+                    RwBatchProject(ps_suppkey=[$1])
+                      RwBatchNestLoopJoin(condition=[AND(=($0, $6), =($1, $7), >($2, *(0.5, $8)))], joinType=[inner])
+                        RwBatchHashJoin(condition=[=($0, $5)], joinType=[inner])
+                          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                            RwBatchFilter(condition=[AND(IS NOT NULL($0), IS NOT NULL($1))])
+                              RwBatchFilterScan(table=[[test_schema, partsupp]], columns=[ps_partkey,ps_suppkey,ps_availqty,ps_supplycost,ps_comment])
+                          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                            RwBatchHashAgg(group=[{0}])
+                              RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                                RwBatchHashAgg(group=[{0}])
+                                  RwBatchProject(p_partkey=[$0])
+                                    RwBatchFilter(condition=[AND(LIKE($1, 'frosted%':CHAR(8)), IS NOT NULL($0))])
+                                      RwBatchFilterScan(table=[[test_schema, part]], columns=[p_partkey,p_name])
+                        RwBatchHashAgg(group=[{0, 1}], agg#0=[SUM($2)])
+                          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+                            RwBatchHashAgg(group=[{0, 1}], agg#0=[SUM($2)])
+                              RwBatchProject(l_partkey=[$0], l_suppkey=[$1], l_quantity=[$2])
+                                RwBatchFilter(condition=[AND(>=($3, 1994-01-01), <(CAST($3):TIMESTAMP(0), +(1994-01-01, 12:INTERVAL YEAR)), IS NOT NULL($0), IS NOT NULL($1))])
+                                  RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_partkey,l_suppkey,l_quantity,l_shipdate])
+            ]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="q21">
+        <Resource name="sql">
+            <![CDATA[
+select
+	s_name,
+	count(*) as numwait
+from
+	supplier,
+	lineitem l1,
+	orders,
+	nation
+where
+	s_suppkey = l1.l_suppkey
+	and o_orderkey = l1.l_orderkey
+	and o_orderstatus = 'F'
+	and l1.l_receiptdate > l1.l_commitdate
+	and exists (
+		select
+			*
+		from
+			lineitem l2
+		where
+			l2.l_orderkey = l1.l_orderkey
+			and l2.l_suppkey <> l1.l_suppkey
+	)
+	and not exists (
+		select
+			*
+		from
+			lineitem l3
+		where
+			l3.l_orderkey = l1.l_orderkey
+			and l3.l_suppkey <> l1.l_suppkey
+			and l3.l_receiptdate > l3.l_commitdate
+	)
+	and s_nationkey = n_nationkey
+	and n_name = 'GERMANY'
+group by
+	s_name
+order by
+	numwait desc,
+	s_name
+LIMIT 100;
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchGather
+  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[1 DESC, 0]])
+    RwBatchSort(sort0=[$1], sort1=[$0], dir0=[DESC], dir1=[ASC], fetch=[100])
+      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+        RwBatchHashAgg(group=[{0}], agg#0=[$SUM0($1)])
+          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+            RwBatchHashAgg(group=[{0}], numwait=[COUNT()])
+              RwBatchProject(s_name=[$1])
+                RwBatchFilter(condition=[IS NULL($39)])
+                  RwBatchHashJoin(condition=[AND(=($7, $37), =($9, $38))], joinType=[left])
+                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[7, 9]}], collation=[[]])
+                      RwBatchProject(s_suppkey=[$0], s_name=[$1], s_address=[$2], s_nationkey=[$3], s_phone=[$4], s_acctbal=[$5], s_comment=[$6], l_orderkey=[$20], l_partkey=[$21], l_suppkey=[$22], l_linenumber=[$23], l_quantity=[$24], l_extendedprice=[$25], l_discount=[$26], l_tax=[$27], l_returnflag=[$28], l_linestatus=[$29], l_shipdate=[$30], l_commitdate=[$31], l_receiptdate=[$32], l_shipinstruct=[$33], l_shipmode=[$34], l_comment=[$35], o_orderkey=[$11], o_custkey=[$12], o_orderstatus=[$13], o_totalprice=[$14], o_orderdate=[$15], o_orderpriority=[$16], o_clerk=[$17], o_shippriority=[$18], o_comment=[$19], n_nationkey=[$7], n_name=[$8], n_regionkey=[$9], n_comment=[$10], $f0=[CAST($38):BOOLEAN])
+                        RwBatchHashJoin(condition=[AND(=($20, $36), =($22, $37))], joinType=[inner])
+                          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[20, 22]}], collation=[[]])
+                            RwBatchHashJoin(condition=[AND(=($0, $22), =($11, $20))], joinType=[inner])
+                              RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 11]}], collation=[[]])
+                                RwBatchNestLoopJoin(condition=[true], joinType=[inner])
+                                  RwBatchHashJoin(condition=[=($3, $7)], joinType=[inner])
+                                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[3]}], collation=[[]])
+                                      RwBatchFilterScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_name,s_address,s_nationkey,s_phone,s_acctbal,s_comment])
+                                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                                      RwBatchFilter(condition=[=($1, 'GERMANY':CHAR(7))])
+                                        RwBatchFilterScan(table=[[test_schema, nation]], columns=[n_nationkey,n_name,n_regionkey,n_comment])
+                                  RwBatchFilter(condition=[=($2, 'F')])
+                                    RwBatchFilterScan(table=[[test_schema, orders]], columns=[o_orderkey,o_custkey,o_orderstatus,o_totalprice,o_orderdate,o_orderpriority,o_clerk,o_shippriority,o_comment])
+                              RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 2]}], collation=[[]])
+                                RwBatchFilter(condition=[>($12, $11)])
+                                  RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_partkey,l_suppkey,l_linenumber,l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate,l_commitdate,l_receiptdate,l_shipinstruct,l_shipmode,l_comment])
+                          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+                            RwBatchHashAgg(group=[{0, 1}], agg#0=[MIN($2)])
+                              RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+                                RwBatchHashAgg(group=[{0, 1}], agg#0=[MIN($2)])
+                                  RwBatchProject(l_orderkey0=[$0], l_suppkey0=[$1], $f0=[true])
+                                    RwBatchNestLoopJoin(condition=[AND(=($2, $0), <>($4, $1))], joinType=[inner])
+                                      RwBatchHashAgg(group=[{0, 1}])
+                                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+                                          RwBatchHashAgg(group=[{0, 1}])
+                                            RwBatchProject(l_orderkey=[$20], l_suppkey=[$22])
+                                              RwBatchNestLoopJoin(condition=[true], joinType=[inner])
+                                                RwBatchNestLoopJoin(condition=[true], joinType=[inner])
+                                                  RwBatchNestLoopJoin(condition=[true], joinType=[inner])
+                                                    RwBatchFilterScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_name,s_address,s_nationkey,s_phone,s_acctbal,s_comment])
+                                                    RwBatchFilterScan(table=[[test_schema, nation]], columns=[n_nationkey,n_name,n_regionkey,n_comment])
+                                                  RwBatchFilterScan(table=[[test_schema, orders]], columns=[o_orderkey,o_custkey,o_orderstatus,o_totalprice,o_orderdate,o_orderpriority,o_clerk,o_shippriority,o_comment])
+                                                RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_partkey,l_suppkey,l_linenumber,l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate,l_commitdate,l_receiptdate,l_shipinstruct,l_shipmode,l_comment])
+                                      RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_partkey,l_suppkey,l_linenumber,l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate,l_commitdate,l_receiptdate,l_shipinstruct,l_shipmode,l_comment])
+                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+                      RwBatchHashAgg(group=[{0, 1}], agg#0=[MIN($2)])
+                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+                          RwBatchHashAgg(group=[{0, 1}], agg#0=[MIN($2)])
+                            RwBatchProject(l_orderkey0=[$0], l_suppkey0=[$1], $f0=[true])
+                              RwBatchNestLoopJoin(condition=[AND(=($2, $0), <>($4, $1))], joinType=[inner])
+                                RwBatchHashAgg(group=[{0, 1}])
+                                  RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+                                    RwBatchHashAgg(group=[{0, 1}])
+                                      RwBatchProject(l_orderkey=[$20], l_suppkey=[$22])
+                                        RwBatchHashJoin(condition=[AND(=($20, $36), =($22, $37))], joinType=[inner])
+                                          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[20, 22]}], collation=[[]])
+                                            RwBatchHashJoin(condition=[AND(=($0, $22), =($11, $20))], joinType=[inner])
+                                              RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 11]}], collation=[[]])
+                                                RwBatchNestLoopJoin(condition=[true], joinType=[inner])
+                                                  RwBatchHashJoin(condition=[=($3, $7)], joinType=[inner])
+                                                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[3]}], collation=[[]])
+                                                      RwBatchFilterScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_name,s_address,s_nationkey,s_phone,s_acctbal,s_comment])
+                                                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                                                      RwBatchFilter(condition=[=($1, 'GERMANY':CHAR(7))])
+                                                        RwBatchFilterScan(table=[[test_schema, nation]], columns=[n_nationkey,n_name,n_regionkey,n_comment])
+                                                  RwBatchFilter(condition=[=($2, 'F')])
+                                                    RwBatchFilterScan(table=[[test_schema, orders]], columns=[o_orderkey,o_custkey,o_orderstatus,o_totalprice,o_orderdate,o_orderpriority,o_clerk,o_shippriority,o_comment])
+                                              RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 2]}], collation=[[]])
+                                                RwBatchFilter(condition=[>($12, $11)])
+                                                  RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_partkey,l_suppkey,l_linenumber,l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate,l_commitdate,l_receiptdate,l_shipinstruct,l_shipmode,l_comment])
+                                          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+                                            RwBatchHashAgg(group=[{0, 1}], agg#0=[MIN($2)])
+                                              RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+                                                RwBatchHashAgg(group=[{0, 1}], agg#0=[MIN($2)])
+                                                  RwBatchProject(l_orderkey0=[$0], l_suppkey0=[$1], $f0=[true])
+                                                    RwBatchNestLoopJoin(condition=[AND(=($2, $0), <>($4, $1))], joinType=[inner])
+                                                      RwBatchHashAgg(group=[{0, 1}])
+                                                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+                                                          RwBatchHashAgg(group=[{0, 1}])
+                                                            RwBatchProject(l_orderkey=[$20], l_suppkey=[$22])
+                                                              RwBatchNestLoopJoin(condition=[true], joinType=[inner])
+                                                                RwBatchNestLoopJoin(condition=[true], joinType=[inner])
+                                                                  RwBatchNestLoopJoin(condition=[true], joinType=[inner])
+                                                                    RwBatchFilterScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_name,s_address,s_nationkey,s_phone,s_acctbal,s_comment])
+                                                                    RwBatchFilterScan(table=[[test_schema, nation]], columns=[n_nationkey,n_name,n_regionkey,n_comment])
+                                                                  RwBatchFilterScan(table=[[test_schema, orders]], columns=[o_orderkey,o_custkey,o_orderstatus,o_totalprice,o_orderdate,o_orderpriority,o_clerk,o_shippriority,o_comment])
+                                                                RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_partkey,l_suppkey,l_linenumber,l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate,l_commitdate,l_receiptdate,l_shipinstruct,l_shipmode,l_comment])
+                                                      RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_partkey,l_suppkey,l_linenumber,l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate,l_commitdate,l_receiptdate,l_shipinstruct,l_shipmode,l_comment])
+                                RwBatchFilter(condition=[AND(>($12, $11), IS NOT NULL($0))])
+                                  RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_partkey,l_suppkey,l_linenumber,l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate,l_commitdate,l_receiptdate,l_shipinstruct,l_shipmode,l_comment])
+            ]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="q22">
+        <Resource name="sql">
+            <![CDATA[
+select
+	cntrycode,
+	count(*) as numcust,
+	sum(c_acctbal) as totacctbal
+from
+	(
+		select
+			substring(c_phone from 1 for 2) as cntrycode,
+			c_acctbal
+		from
+			customer
+		where
+			substring(c_phone from 1 for 2) in
+				('30', '24', '31', '38', '25', '34', '37')
+			and c_acctbal > (
+				select
+					avg(c_acctbal)
+				from
+					customer
+				where
+					c_acctbal > 0.00::numeric
+					and substring(c_phone from 1 for 2) in
+						('30', '24', '31', '38', '25', '34', '37')
+			)
+			and not exists (
+				select
+					*
+				from
+					orders
+				where
+					o_custkey = c_custkey
+			)
+	) as custsale
+group by
+	cntrycode
+order by
+	cntrycode;
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchGather
+  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0]])
+    RwBatchSort(sort0=[$0], dir0=[ASC])
+      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+        RwBatchHashAgg(group=[{0}], agg#0=[$SUM0($1)], totacctbal=[SUM($2)])
+          RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+            RwBatchHashAgg(group=[{0}], numcust=[COUNT()], totacctbal=[SUM($1)])
+              RwBatchProject(cntrycode=[SUBSTRING($4, 1, 2)], c_acctbal=[$5])
+                RwBatchFilter(condition=[IS NULL($10)])
+                  RwBatchHashJoin(condition=[=($0, $9)], joinType=[left])
+                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                      RwBatchNestLoopJoin(condition=[>($5, $8)], joinType=[inner])
+                        RwBatchFilter(condition=[OR(=(SUBSTRING($4, 1, 2), '30':CHAR(2)), =(SUBSTRING($4, 1, 2), '24':CHAR(2)), =(SUBSTRING($4, 1, 2), '31':CHAR(2)), =(SUBSTRING($4, 1, 2), '38':CHAR(2)), =(SUBSTRING($4, 1, 2), '25':CHAR(2)), =(SUBSTRING($4, 1, 2), '34':CHAR(2)), =(SUBSTRING($4, 1, 2), '37':CHAR(2)))])
+                          RwBatchFilterScan(table=[[test_schema, customer]], columns=[c_custkey,c_name,c_address,c_nationkey,c_phone,c_acctbal,c_mktsegment,c_comment])
+                        RwBatchProject(EXPR$0=[/($0, $1)])
+                          RwBatchSortAgg(group=[{}], agg#0=[SUM($0)], agg#1=[SUM($1)])
+                            RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
+                              RwBatchSortAgg(group=[{}], agg#0=[SUM($0)], agg#1=[COUNT($0)])
+                                RwBatchProject(c_acctbal=[$1])
+                                  RwBatchFilter(condition=[AND(>($1, 0.0), OR(=(SUBSTRING($0, 1, 2), '30':CHAR(2)), =(SUBSTRING($0, 1, 2), '24':CHAR(2)), =(SUBSTRING($0, 1, 2), '31':CHAR(2)), =(SUBSTRING($0, 1, 2), '38':CHAR(2)), =(SUBSTRING($0, 1, 2), '25':CHAR(2)), =(SUBSTRING($0, 1, 2), '34':CHAR(2)), =(SUBSTRING($0, 1, 2), '37':CHAR(2))))])
+                                    RwBatchFilterScan(table=[[test_schema, customer]], columns=[c_phone,c_acctbal])
+                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                      RwBatchHashAgg(group=[{0}], agg#0=[MIN($1)])
+                        RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                          RwBatchHashAgg(group=[{0}], agg#0=[MIN($1)])
+                            RwBatchProject(o_custkey=[$0], $f0=[true])
+                              RwBatchFilter(condition=[IS NOT NULL($0)])
+                                RwBatchFilterScan(table=[[test_schema, orders]], columns=[o_custkey])
+            ]]>
         </Resource>
     </TestCase>
 </Root>
