@@ -13,8 +13,8 @@ pub use projection_operator::ProjectionOperator;
 mod local_output;
 pub use local_output::LocalOutput;
 
-mod processor;
-pub use processor::Processor;
+mod merger;
+pub use merger::{Merger, UnaryMerger};
 
 mod actor;
 pub use actor::Actor;
@@ -49,7 +49,7 @@ pub struct StreamChunk {
 
 pub enum Message {
     Chunk(StreamChunk),
-    Barrier,
+    Barrier(u64),
     Terminate,
     // TODO: Watermark
 }

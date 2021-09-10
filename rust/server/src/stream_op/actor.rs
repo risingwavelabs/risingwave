@@ -1,5 +1,4 @@
-use super::Processor;
-
+use super::Merger;
 pub struct Actor {
-    head: Box<dyn Processor>,
+    merger: Box<dyn Merger>,
 }
