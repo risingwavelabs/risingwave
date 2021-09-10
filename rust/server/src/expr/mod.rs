@@ -13,15 +13,19 @@ use crate::array2::DataChunk;
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 // use crate::expr::arithmetic_expr::ArithmeticExpression;
-// use crate::expr::cmp::CompareExpression;
-// use crate::expr::conjunction::ConjunctionExpression;
+use crate::expr::cmp::CompareExpression;
+use crate::expr::conjunction::ConjunctionExpression;
 use crate::expr::input_ref::InputRefExpression;
 use crate::expr::type_cast::TypeCastExpression;
 
 use crate::types::{DataType, DataTypeRef};
 use risingwave_proto::expr::{
     ExprNode,
+    ExprNode_ExprNodeType::{AND, NOT, OR},
     ExprNode_ExprNodeType::{CAST, CONSTANT_VALUE, INPUT_REF},
+    ExprNode_ExprNodeType::{
+        EQUAL, GREATER_THAN, GREATER_THAN_OR_EQUAL, LESS_THAN, LESS_THAN_OR_EQUAL, NOT_EQUAL,
+    },
 };
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -53,16 +57,16 @@ pub fn build_from_proto(proto: &ExprNode) -> Result<BoxedExpression> {
     build_expression! {proto,
       CONSTANT_VALUE => LiteralExpression,
       INPUT_REF => InputRefExpression,
-      CAST => TypeCastExpression
-      // AND => ConjunctionExpression,
-      // OR => ConjunctionExpression,
-      // NOT => ConjunctionExpression,
-      // EQUAL => CompareExpression,
-      // NOT_EQUAL => CompareExpression,
-      // LESS_THAN => CompareExpression,
-      // LESS_THAN_OR_EQUAL => CompareExpression,
-      // GREATER_THAN => CompareExpression,
-      // GREATER_THAN_OR_EQUAL => CompareExpression,
+      CAST => TypeCastExpression,
+      AND => ConjunctionExpression,
+      OR => ConjunctionExpression,
+      NOT => ConjunctionExpression,
+      EQUAL => CompareExpression,
+      NOT_EQUAL => CompareExpression,
+      LESS_THAN => CompareExpression,
+      LESS_THAN_OR_EQUAL => CompareExpression,
+      GREATER_THAN => CompareExpression,
+      GREATER_THAN_OR_EQUAL => CompareExpression
       // ADD => ArithmeticExpression,
       // SUBTRACT => ArithmeticExpression,
       // MULTIPLY => ArithmeticExpression,
