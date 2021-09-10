@@ -23,6 +23,7 @@ mod error;
 mod util;
 mod alloc;
 mod array;
+#[macro_use]
 mod array2;
 mod buffer;
 mod catalog;

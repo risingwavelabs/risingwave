@@ -269,6 +269,7 @@ pub enum ScalarImpl {
     Float64(f64),
     UTF8(String),
     Bool(bool),
+    Decimal(Decimal),
 }
 
 /// `ScalarRefImpl` embeds all possible scalar references in the evaluation

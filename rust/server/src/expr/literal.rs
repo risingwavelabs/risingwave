@@ -2,7 +2,7 @@ use crate::array2::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk};
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::expr::Expression;
-use crate::types::{build_from_proto, DataType, DataTypeKind, DataTypeRef};
+use crate::types::{build_from_proto, DataType, DataTypeKind, DataTypeRef, ScalarImpl};
 use std::convert::TryFrom;
 use std::convert::TryInto;
 
@@ -12,11 +12,13 @@ use risingwave_proto::data::DataType_TypeName;
 use risingwave_proto::expr::{ConstantValue, ExprNode, ExprNode_ExprNodeType};
 
 use crate::array::interval_array::IntervalValue;
-use rust_decimal::prelude::*;
 use rust_decimal::Decimal;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use crate::types::Scalar;
+use std::str::FromStr;
+// FIXME: delete it with array1
 #[derive(Clone, Debug)]
 pub enum Datum {
     Bool(bool),
@@ -35,9 +37,25 @@ pub enum Datum {
     Interval(IntervalValue),
 }
 
+macro_rules! array_impl_literal_append {
+  ([$arr_builder: ident, $literal: ident, $cardinality: ident], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+    match ($arr_builder, $literal) {
+      $(
+      (ArrayBuilderImpl::$variant_name(inner), Some(ScalarImpl::$variant_name(v))) => {
+       append_literal_to_arr(inner, Some(v.as_scalar_ref()), $cardinality)?;
+      }
+      (ArrayBuilderImpl::$variant_name(inner), None) => {
+       append_literal_to_arr(inner, None, $cardinality)?;
+      }
+      )*
+      (_, _) => unimplemented!("Do not support values in insert values executor"),
+    }
+  };
+}
+
 pub(super) struct LiteralExpression {
     return_type: DataTypeRef,
-    literal: Option<Datum>,
+    literal: Option<ScalarImpl>,
 }
 
 impl Expression for LiteralExpression {
@@ -53,22 +71,9 @@ impl Expression for LiteralExpression {
         let mut array_builder =
             DataType::create_array_builder(self.return_type.clone(), input.cardinality())?;
         let cardinality = input.cardinality;
-        // FIXME: use marco
-        match (&mut array_builder, &self.literal) {
-            (ArrayBuilderImpl::Int32(inner), Some(Datum::Int32(v))) => {
-                append_literal_to_arr(inner, Some(*v), cardinality)?;
-            }
-            (ArrayBuilderImpl::UTF8(inner), Some(Datum::UTF8String(v))) => {
-                append_literal_to_arr(inner, Some(v), cardinality)?;
-            }
-            (ArrayBuilderImpl::Int32(inner), None) => {
-                append_literal_to_arr(inner, None, cardinality)?;
-            }
-            (ArrayBuilderImpl::UTF8(inner), None) => {
-                append_literal_to_arr(inner, None, cardinality)?;
-            }
-            (_, _) => unimplemented!("Do not support values in insert values executor"),
-        };
+        let builder = &mut array_builder;
+        let literal = &self.literal;
+        for_all_variants! {array_impl_literal_append, builder, literal, cardinality}
         array_builder.finish().map(Arc::new)
     }
 }
@@ -87,22 +92,20 @@ where
     Ok(())
 }
 
-fn literal_type_match(return_type: DataTypeKind, literal: Option<Datum>) -> bool {
+fn literal_type_match(return_type: DataTypeKind, literal: Option<&ScalarImpl>) -> bool {
     match literal {
         Some(datum) => {
             matches!(
                 (return_type, datum),
-                (DataTypeKind::Boolean, Datum::Bool(_))
-                    | (DataTypeKind::Int16, Datum::Int16(_))
-                    | (DataTypeKind::Int32, Datum::Int32(_))
-                    | (DataTypeKind::Int64, Datum::Int64(_))
-                    | (DataTypeKind::Float32, Datum::Float32(_))
-                    | (DataTypeKind::Float64, Datum::Float64(_))
-                    | (DataTypeKind::Decimal, Datum::Decimal(_))
-                    | (DataTypeKind::Date, Datum::Int32(_))
-                    | (DataTypeKind::Char, Datum::UTF8String(_))
-                    | (DataTypeKind::Varchar, Datum::UTF8String(_))
-                    | (DataTypeKind::Interval, Datum::Interval(_))
+                (DataTypeKind::Boolean, ScalarImpl::Bool(_))
+                    | (DataTypeKind::Int16, ScalarImpl::Int16(_))
+                    | (DataTypeKind::Int32, ScalarImpl::Int32(_))
+                    | (DataTypeKind::Int64, ScalarImpl::Int64(_))
+                    | (DataTypeKind::Float32, ScalarImpl::Float32(_))
+                    | (DataTypeKind::Float64, ScalarImpl::Float64(_))
+                    | (DataTypeKind::Date, ScalarImpl::Int32(_))
+                    | (DataTypeKind::Char, ScalarImpl::UTF8(_))
+                    | (DataTypeKind::Varchar, ScalarImpl::UTF8(_))
             )
         }
 
@@ -111,10 +114,10 @@ fn literal_type_match(return_type: DataTypeKind, literal: Option<Datum>) -> bool
 }
 
 impl LiteralExpression {
-    pub fn new(return_type: DataTypeRef, literal: Option<Datum>) -> Self {
+    pub fn new(return_type: DataTypeRef, literal: Option<ScalarImpl>) -> Self {
         assert!(literal_type_match(
             return_type.deref().data_type_kind(),
-            literal.clone()
+            literal.as_ref()
         ));
         LiteralExpression {
             return_type,
@@ -136,46 +139,46 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
         // TODO: We need to unify these
         // TODO: Add insert NULL
         let value = match proto.get_return_type().get_type_name() {
-            DataType_TypeName::INT16 => Datum::Int16(i16::from_be_bytes(
+            DataType_TypeName::INT16 => ScalarImpl::Int16(i16::from_be_bytes(
                 proto_value.get_body().try_into().map_err(|e| {
                     InternalError(format!("Failed to deserialize i16, reason: {:?}", e))
                 })?,
             )),
-            DataType_TypeName::INT32 => Datum::Int32(i32::from_be_bytes(
+            DataType_TypeName::INT32 => ScalarImpl::Int32(i32::from_be_bytes(
                 proto_value.get_body().try_into().map_err(|e| {
                     InternalError(format!("Failed to deserialize i32, reason: {:?}", e))
                 })?,
             )),
-            DataType_TypeName::INT64 => Datum::Int64(i64::from_be_bytes(
+            DataType_TypeName::INT64 => ScalarImpl::Int64(i64::from_be_bytes(
                 proto_value.get_body().try_into().map_err(|e| {
                     InternalError(format!("Failed to deserialize i64, reason: {:?}", e))
                 })?,
             )),
-            DataType_TypeName::FLOAT => Datum::Float32(f32::from_be_bytes(
+            DataType_TypeName::FLOAT => ScalarImpl::Float32(f32::from_be_bytes(
                 proto_value.get_body().try_into().map_err(|e| {
                     InternalError(format!("Failed to deserialize f32, reason: {:?}", e))
                 })?,
             )),
-            DataType_TypeName::DOUBLE => Datum::Float64(f64::from_be_bytes(
+            DataType_TypeName::DOUBLE => ScalarImpl::Float64(f64::from_be_bytes(
                 proto_value.get_body().try_into().map_err(|e| {
                     InternalError(format!("Failed to deserialize f64, reason: {:?}", e))
                 })?,
             )),
-            DataType_TypeName::CHAR => Datum::UTF8String(
+            DataType_TypeName::CHAR => ScalarImpl::UTF8(
                 std::str::from_utf8(proto_value.get_body())
                     .map_err(|e| {
                         InternalError(format!("Failed to deserialize char, reason: {:?}", e))
                     })?
                     .to_string(),
             ),
-            DataType_TypeName::VARCHAR => Datum::UTF8String(
+            DataType_TypeName::VARCHAR => ScalarImpl::UTF8(
                 std::str::from_utf8(proto_value.get_body())
                     .map_err(|e| {
                         InternalError(format!("Failed to deserialize varchar, reason: {:?}", e))
                     })?
                     .to_string(),
             ),
-            DataType_TypeName::DECIMAL => Datum::Decimal(
+            DataType_TypeName::DECIMAL => ScalarImpl::Decimal(
                 Decimal::from_str(std::str::from_utf8(proto_value.get_body()).unwrap()).map_err(
                     |e| InternalError(format!("Failed to deserialize decimal, reason: {:?}", e)),
                 )?,
