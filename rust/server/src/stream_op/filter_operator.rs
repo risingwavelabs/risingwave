@@ -44,11 +44,7 @@ impl UnaryStreamOperator for FilterOperator {
 
         let pred_output = (self.expr)(&data_chunk)?;
 
-        let DataChunk {
-            columns: arrays,
-            visibility,
-            ..
-        } = data_chunk;
+        let (arrays, visibility) = data_chunk.destruct();
 
         let n = ops.len();
 

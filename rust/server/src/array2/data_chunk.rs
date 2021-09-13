@@ -13,14 +13,26 @@ use typed_builder::TypedBuilder;
 pub struct DataChunk {
     /// Use Vec to be consistent with previous array::DataChunk
     #[builder(default)]
-    pub(crate) columns: Vec<Column>,
+    columns: Vec<Column>,
     // pub(crate) arrays: Vec<Arc<ArrayImpl>>,
-    pub(crate) cardinality: usize,
+    cardinality: usize,
     #[builder(default, setter(strip_option))]
-    pub(crate) visibility: Option<Bitmap>,
+    visibility: Option<Bitmap>,
 }
 
 impl DataChunk {
+    pub fn new(columns: Vec<Column>, cardinality: usize, visibility: Option<Bitmap>) -> Self {
+        DataChunk {
+            columns,
+            cardinality,
+            visibility,
+        }
+    }
+
+    pub fn destruct(self) -> (Vec<Column>, Option<Bitmap>) {
+        (self.columns, self.visibility)
+    }
+
     pub fn cardinality(&self) -> usize {
         self.cardinality
     }
