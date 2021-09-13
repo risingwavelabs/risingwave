@@ -1,5 +1,10 @@
-use super::{ExprFn, Op, Output, StreamChunk, StreamOperator, UnaryStreamOperator};
-use crate::{array2::DataChunk, buffer::Bitmap, error::Result};
+use super::{Op, Output, StreamChunk, StreamOperator, UnaryStreamOperator};
+use crate::{
+    array2::{Array, ArrayImpl, DataChunk},
+    buffer::Bitmap,
+    error::Result,
+    expr::BoxedExpression,
+};
 use async_trait::async_trait;
 
 /// `FilterOperator` filters data with the `expr`. The `expr` takes a chunk of data,
@@ -10,11 +15,11 @@ pub struct FilterOperator {
     /// The output of the current operator
     output: Box<dyn Output>,
     /// Expression of the current filter, note that the filter must always have the same output for the same input.
-    expr: Box<dyn ExprFn>,
+    expr: BoxedExpression,
 }
 
 impl FilterOperator {
-    pub fn new(output: Box<dyn Output>, expr: Box<dyn ExprFn>) -> Self {
+    pub fn new(output: Box<dyn Output>, expr: BoxedExpression) -> Self {
         Self { output, expr }
     }
 }
@@ -42,7 +47,11 @@ impl UnaryStreamOperator for FilterOperator {
             }
         };
 
-        let pred_output = (self.expr)(&data_chunk)?;
+        // FIXME: unnecessary compact.
+        // See https://github.com/singularity-data/risingwave/issues/704
+        let data_chunk = data_chunk.compact()?;
+
+        let pred_output = self.expr.eval(&data_chunk)?;
 
         let (arrays, visibility) = data_chunk.destruct();
 
@@ -54,15 +63,16 @@ impl UnaryStreamOperator for FilterOperator {
         let mut new_cardinality = 0usize;
         let mut last_res = false;
 
-        assert_eq!(pred_output.len(), n);
         assert!(match visibility {
             None => true,
             Some(ref m) => m.len() == n,
         });
+        assert!(matches!(&*pred_output, ArrayImpl::Bool(_)));
 
-        for (i, (op, res)) in ops.into_iter().zip(pred_output.iter()).enumerate() {
-            // SAFETY: ops.len() == pred_output.len() == visibility.len()
-            if let Some(true) = unsafe { visibility.as_ref().map(|m| m.is_set_unchecked(i)) } {
+        if let ArrayImpl::Bool(bool_array) = &*pred_output {
+            for (op, res) in ops.into_iter().zip(bool_array.iter()) {
+                // SAFETY: ops.len() == pred_output.len() == visibility.len()
+                let res = res.unwrap_or(false);
                 match op {
                     Op::Insert | Op::Delete => {
                         new_ops.push(op);
@@ -106,9 +116,6 @@ impl UnaryStreamOperator for FilterOperator {
                         }
                     },
                 }
-            } else {
-                new_ops.push(op);
-                new_visibility.push(false);
             }
         }
 
