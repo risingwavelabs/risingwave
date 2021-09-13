@@ -7,7 +7,6 @@ use std::sync::Arc;
 
 use crate::grpcio::{RpcStatus, RpcStatusCode};
 use backtrace::Backtrace;
-use chrono::format::ParseError;
 use protobuf::ProtobufError;
 use std::io::Error as IoError;
 use thiserror::Error;
@@ -55,16 +54,6 @@ impl From<ErrorCode> for RwError {
         }
     }
 }
-
-impl From<ParseError> for RwError {
-    fn from(err: ParseError) -> Self {
-        Self {
-            inner: Arc::new(ErrorCode::ParseError(err)),
-            backtrace: Arc::new(Backtrace::new()),
-        }
-    }
-}
-
 impl Debug for RwError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}, backtrace: {:?}", self.inner, self.backtrace)
