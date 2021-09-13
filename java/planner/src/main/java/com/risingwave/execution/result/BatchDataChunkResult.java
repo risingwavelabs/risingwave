@@ -66,12 +66,18 @@ public class BatchDataChunkResult extends AbstractResult {
         return TypeOid.FLOAT4;
       case DOUBLE:
         return TypeOid.FLOAT8;
-      case DATE:
-        return TypeOid.DATE;
       case CHAR:
         return TypeOid.CHAR_ARRAY;
       case DECIMAL:
         return TypeOid.DECIMAL;
+      case DATE:
+        return TypeOid.DATE;
+      case TIME:
+        return TypeOid.TIME;
+      case TIMESTAMP:
+        return TypeOid.TIMESTAMP;
+      case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+        return TypeOid.TIMESTAMPZ;
       default:
         throw new PgException(
             PgErrorCode.INTERNAL_ERROR, "Unsupported sql type: %s", type.getSqlTypeName());

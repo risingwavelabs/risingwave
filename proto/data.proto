@@ -51,6 +51,8 @@ message DataType {
         INTERVAL = 12;
         DATE = 13;
         NULL = 14;
+        // Timestamp type with timezone
+        TIMESTAMPZ = 15;
     }
     TypeName type_name = 1;
     // data length for char,

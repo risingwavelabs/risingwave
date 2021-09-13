@@ -6,12 +6,12 @@ use std::sync::Arc;
 
 mod numeric_type;
 pub use numeric_type::*;
-mod primitive;
-pub use primitive::*;
-mod native;
+mod primitive_data_type;
+pub use primitive_data_type::*;
+mod native_type;
 
 use crate::error::ErrorCode::InternalError;
-pub use native::*;
+pub use native_type::*;
 use risingwave_proto::data::DataType_TypeName::BOOLEAN;
 use risingwave_proto::data::DataType_TypeName::CHAR;
 
@@ -21,16 +21,21 @@ use risingwave_proto::data::DataType_TypeName::FLOAT;
 use risingwave_proto::data::DataType_TypeName::INT16;
 use risingwave_proto::data::DataType_TypeName::INT32;
 use risingwave_proto::data::DataType_TypeName::INT64;
+use risingwave_proto::data::DataType_TypeName::TIME;
+use risingwave_proto::data::DataType_TypeName::TIMESTAMP;
+use risingwave_proto::data::DataType_TypeName::TIMESTAMPZ;
 use risingwave_proto::data::DataType_TypeName::VARCHAR;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 
 mod bool_type;
+mod datetime_type;
 mod decimal_type;
 pub mod interval_type;
 mod string_type;
 
 pub use bool_type::*;
+pub use datetime_type::*;
 pub use decimal_type::*;
 pub use string_type::*;
 
@@ -54,8 +59,10 @@ pub enum DataTypeKind {
     Date,
     Char,
     Varchar,
-    Interval,
+    Time,
     Timestamp,
+    Timestampz,
+    Interval,
 }
 
 pub trait DataType: Debug + Sync + Send + 'static {
@@ -89,11 +96,13 @@ pub fn build_from_proto(proto: &DataTypeProto) -> Result<DataTypeRef> {
       INT64 => Int64Type,
       FLOAT => Float32Type,
       DOUBLE => Float64Type,
-      // DECIMAL => DecimalType,
-      DATE => DateType,
+      BOOLEAN => BoolType,
       CHAR => StringType,
       VARCHAR => StringType,
-      BOOLEAN => BoolType
+      DATE => DateType,
+      TIME => TimeType,
+      TIMESTAMP => TimestampType,
+      TIMESTAMPZ => TimestampWithTimeZoneType
     }
 }
 

@@ -732,6 +732,9 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
                 SqlTypeName.DECIMAL, parameters.get(0), parameters.get(1), SqlParserPos.ZERO);
           }
         }
+      case "TIMESTAMPZ":
+        return new SqlBasicTypeNameSpec(
+            SqlTypeName.TIMESTAMP_WITH_LOCAL_TIME_ZONE, SqlParserPos.ZERO);
       default:
         throw new PgException(PgErrorCode.SYNTAX_ERROR, "Unsupported type name: %s", typeName);
     }

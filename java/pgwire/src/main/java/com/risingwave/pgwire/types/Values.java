@@ -4,6 +4,11 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.sql.Date;
 import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 
 public class Values {
   public static PgValue createBoolean(boolean v) {
@@ -143,7 +148,77 @@ public class Values {
     return createDate(new Date(((long) v) * 86400_000));
   }
 
+  public static PgValue createTime(long v) {
+    return createTime(Instant.ofEpochMilli(v / 1_000).atZone(ZoneId.of("Z")));
+  }
+
+  private static PgValue createTime(ZonedDateTime v) {
+    return new PgValue() {
+      @Override
+      public byte[] encodeInBinary() {
+        long epochMs = v.toInstant().toEpochMilli();
+        return ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(epochMs).array();
+      }
+
+      @Override
+      public String encodeInText() {
+        return v.format(DateTimeFormatter.ofPattern("HH:mm:ss"));
+      }
+    };
+  }
+
+  public static PgValue createTimestamp(long v) {
+    return createTimestamp(Instant.ofEpochMilli(v / 1000).atZone(ZoneId.of("Z")));
+  }
+
   public static PgValue createTimestamp(Timestamp v) {
-    return new TimestampValue(v);
+    return new PgValue() {
+      @Override
+      public byte[] encodeInBinary() {
+        long epochMs = v.getTime();
+        return ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(epochMs).array();
+      }
+
+      @Override
+      public String encodeInText() {
+        return v.toInstant().atZone(ZoneId.of("Z")).toOffsetDateTime().toString();
+      }
+    };
+  }
+
+  private static PgValue createTimestamp(ZonedDateTime v) {
+    return new PgValue() {
+      @Override
+      public byte[] encodeInBinary() {
+        long epochMs = v.toInstant().toEpochMilli();
+        return ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(epochMs).array();
+      }
+
+      @Override
+      public String encodeInText() {
+        return v.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+      }
+    };
+  }
+
+  public static PgValue createTimestampz(long v) {
+    var dateTimeWithOffset =
+        Instant.ofEpochMilli(v / 1_000).atZone(ZoneId.systemDefault()).toOffsetDateTime();
+    return createTimestampz(dateTimeWithOffset);
+  }
+
+  private static PgValue createTimestampz(OffsetDateTime v) {
+    return new PgValue() {
+      @Override
+      public byte[] encodeInBinary() {
+        long epochMs = v.toEpochSecond();
+        return ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(epochMs).array();
+      }
+
+      @Override
+      public String encodeInText() {
+        return v.toString();
+      }
+    };
   }
 }

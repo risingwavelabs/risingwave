@@ -137,7 +137,9 @@ public class RisingWaveTypeFactory extends JavaTypeFactoryImpl {
       case TIME:
         return new TimeType(precision);
       case TIMESTAMP:
-        return new TimestampType(precision);
+        return new TimestampType(precision, SqlTypeName.TIMESTAMP);
+      case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+        return new TimestampType(precision, SqlTypeName.TIMESTAMP_WITH_LOCAL_TIME_ZONE);
       case DATE:
         return new DateType();
       case NULL:

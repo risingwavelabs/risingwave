@@ -70,7 +70,6 @@ drop table t
             ]]>
         </Resource>
     </TestCase>
-
     <TestCase name="create tpch create query">
         <Resource name="sql">
             <![CDATA[

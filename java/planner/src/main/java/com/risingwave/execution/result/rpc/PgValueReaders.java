@@ -32,6 +32,9 @@ public class PgValueReaders {
           case DOUBLE:
           case BOOLEAN:
           case DATE:
+          case TIME:
+          case TIMESTAMP:
+          case TIMESTAMPZ:
             return createPrimitiveReader(unpackedColumn);
           case CHAR:
           case VARCHAR:
@@ -70,7 +73,9 @@ public class PgValueReaders {
             Values::createDecimal, new LongBufferReader(offsetStream), dataStream, nullBitmap);
       default:
         throw new PgException(
-            PgErrorCode.INTERNAL_ERROR, "Unsupported column type: %s", column.getColumnType());
+            PgErrorCode.INTERNAL_ERROR,
+            "Unsupported string column type: %s",
+            column.getColumnType());
     }
   }
 
@@ -102,6 +107,15 @@ public class PgValueReaders {
       case DATE:
         return PrimitiveValueReader.createValueReader(
             Values::createDate, new IntBufferReader(valuesStream), nullBitmap);
+      case TIME:
+        return PrimitiveValueReader.createValueReader(
+            Values::createTime, new LongBufferReader(valuesStream), nullBitmap);
+      case TIMESTAMP:
+        return PrimitiveValueReader.createValueReader(
+            Values::createTimestamp, new LongBufferReader(valuesStream), nullBitmap);
+      case TIMESTAMPZ:
+        return PrimitiveValueReader.createValueReader(
+            Values::createTimestampz, new LongBufferReader(valuesStream), nullBitmap);
 
       default:
         throw new PgException(

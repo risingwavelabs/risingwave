@@ -10,7 +10,9 @@ public enum TypeOid {
   CHAR_ARRAY(1002),
   VARCHAR(1043),
   DATE(1082),
+  TIME(1083),
   TIMESTAMP(1114),
+  TIMESTAMPZ(1184),
   DECIMAL(1231);
 
   TypeOid(int i) {

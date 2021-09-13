@@ -36,6 +36,8 @@ public class PgFieldDescriptor {
         break;
       case BIGINT:
       case FLOAT8:
+      case TIME:
+      case TIMESTAMPZ:
       case TIMESTAMP:
         this.typeLen = 8;
         break;

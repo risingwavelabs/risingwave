@@ -3,6 +3,7 @@ package com.risingwave.common.datatype;
 import static com.google.common.base.Preconditions.checkArgument;
 
 import com.google.common.base.Objects;
+import com.google.common.base.Verify;
 import com.risingwave.proto.data.DataType;
 import java.util.OptionalInt;
 import org.apache.calcite.rel.type.RelDataTypeComparability;
@@ -11,12 +12,16 @@ import org.apache.calcite.sql.type.SqlTypeName;
 public class TimestampType extends PrimitiveTypeBase {
   private final int precision;
 
-  public TimestampType(OptionalInt precision) {
-    this(false, precision.orElse(0));
+  public TimestampType(OptionalInt precision, SqlTypeName typeName) {
+    this(false, precision.orElse(0), typeName);
   }
 
-  public TimestampType(boolean nullable, int precision) {
-    super(nullable, SqlTypeName.TIMESTAMP);
+  private TimestampType(boolean nullable, int precision, SqlTypeName typeName) {
+    super(nullable, typeName);
+    Verify.verify(
+        typeName == SqlTypeName.TIMESTAMP || typeName == SqlTypeName.TIMESTAMP_WITH_LOCAL_TIME_ZONE,
+        "{} type can not be used for timestamp type",
+        typeName);
     checkArgument(precision >= 0, "precision can't be negative: {}", precision);
     this.precision = precision;
     resetDigest();
@@ -24,8 +29,12 @@ public class TimestampType extends PrimitiveTypeBase {
 
   @Override
   public DataType getProtobufType() {
+    var typeName =
+        this.sqlTypeName == SqlTypeName.TIMESTAMP
+            ? DataType.TypeName.TIMESTAMP
+            : DataType.TypeName.TIMESTAMPZ;
     return DataType.newBuilder()
-        .setTypeName(DataType.TypeName.TIMESTAMP)
+        .setTypeName(typeName)
         .setPrecision(precision)
         .setIsNullable(nullable)
         .build();
@@ -66,6 +75,6 @@ public class TimestampType extends PrimitiveTypeBase {
 
   @Override
   protected PrimitiveTypeBase copyWithNullability(boolean nullable) {
-    return new TimestampType(nullable, this.precision);
+    return new TimestampType(nullable, this.precision, this.sqlTypeName);
   }
 }

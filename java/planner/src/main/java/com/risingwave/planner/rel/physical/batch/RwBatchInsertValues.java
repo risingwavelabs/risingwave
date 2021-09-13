@@ -23,6 +23,7 @@ import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.convert.ConverterRule;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rex.RexBuilder;
+import org.apache.calcite.rex.RexCall;
 import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexVisitorImpl;
@@ -159,6 +160,11 @@ public class RwBatchInsertValues extends AbstractRelNode implements RisingWaveBa
         default:
           return literal;
       }
+    }
+
+    @Override
+    public RexNode visitCall(RexCall call) {
+      return call;
     }
 
     private RexNode addCastToDate(RexLiteral literal) {

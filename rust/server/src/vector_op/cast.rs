@@ -1,7 +1,7 @@
-use crate::array2::{Array, ArrayBuilder, ArrayImpl, ArrayRef, I32Array, UTF8Array};
+use crate::array2::{Array, ArrayBuilder, ArrayImpl, ArrayRef, I32Array, I64Array};
 use crate::error::{Result, RwError};
 use crate::types::{DataTypeKind, DataTypeRef, Scalar};
-use chrono::{Datelike, NaiveDate};
+use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 
 pub fn vec_cast(
     un_casted_arr: ArrayRef,
@@ -10,7 +10,18 @@ pub fn vec_cast(
 ) -> Result<ArrayImpl> {
     match (src_type.data_type_kind(), dst_type.data_type_kind()) {
         (DataTypeKind::Char, DataTypeKind::Date) => {
-            vector_cast_str_to_date(un_casted_arr.as_utf8())
+            vector_cast_op(un_casted_arr.as_utf8(), str_to_date).map(|arr: I32Array| arr.into())
+        }
+        (DataTypeKind::Char, DataTypeKind::Time) => {
+            vector_cast_op(un_casted_arr.as_utf8(), str_to_time).map(|arr: I64Array| arr.into())
+        }
+        (DataTypeKind::Char, DataTypeKind::Timestamp) => {
+            vector_cast_op(un_casted_arr.as_utf8(), str_to_timestamp)
+                .map(|arr: I64Array| arr.into())
+        }
+        (DataTypeKind::Char, DataTypeKind::Timestampz) => {
+            vector_cast_op(un_casted_arr.as_utf8(), str_to_timestampz)
+                .map(|arr: I64Array| arr.into())
         }
 
         (other_src_type, other_dst_type) => todo!(
@@ -19,7 +30,6 @@ pub fn vec_cast(
             other_dst_type
         ),
     }
-    .map(|arr| arr.into())
 }
 
 // The same as NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce().
@@ -33,11 +43,29 @@ fn str_to_date(elem: &str) -> Result<i32> {
         .map_err(RwError::from)
 }
 
-pub fn vector_cast_str_to_date(arr: &UTF8Array) -> Result<I32Array> {
-    vector_cast_op(arr, str_to_date)
+#[inline(always)]
+fn str_to_time(elem: &str) -> Result<i64> {
+    NaiveTime::parse_from_str(elem, "%H:%M:%S")
+        // FIXME: add support for precision in microseconds.
+        .map(|ret| ret.num_seconds_from_midnight() as i64 * 1000 * 1000)
+        .map_err(RwError::from)
 }
 
-pub fn vector_cast_op<'a, A1, A2, F>(a: &'a A1, f: F) -> Result<A2>
+#[inline(always)]
+fn str_to_timestamp(elem: &str) -> Result<i64> {
+    NaiveDateTime::parse_from_str(elem, "%Y-%m-%d %H:%M:%S")
+        .map(|ret| ret.timestamp_nanos() / 1000)
+        .map_err(RwError::from)
+}
+
+#[inline(always)]
+fn str_to_timestampz(elem: &str) -> Result<i64> {
+    DateTime::parse_from_str(elem, "%Y-%m-%d %H:%M:%S %:z")
+        .map(|ret| ret.timestamp_nanos() / 1000)
+        .map_err(RwError::from)
+}
+
+fn vector_cast_op<'a, A1, A2, F>(a: &'a A1, f: F) -> Result<A2>
 where
     A1: Array,
     A2: Array,
