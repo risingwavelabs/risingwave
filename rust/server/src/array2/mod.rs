@@ -5,6 +5,7 @@ pub(crate) mod column;
 mod compact_v1;
 mod data_chunk;
 mod decimal_array;
+pub(crate) mod interval_array;
 mod iterator;
 mod macros;
 mod primitive_array;
@@ -17,6 +18,7 @@ use crate::types::{Scalar, ScalarRef};
 pub use bool_array::{BoolArray, BoolArrayBuilder};
 pub use data_chunk::{DataChunk, DataChunkRef};
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
+use interval_array::{IntervalArray, IntervalArrayBuilder};
 pub use iterator::ArrayIterator;
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
@@ -155,7 +157,8 @@ macro_rules! for_all_variants {
       { Float64, float64, F64Array, F64ArrayBuilder },
       { UTF8, utf8, UTF8Array, UTF8ArrayBuilder },
       { Bool, bool, BoolArray, BoolArrayBuilder },
-      { Decimal, decimal, DecimalArray, DecimalArrayBuilder }
+      { Decimal, decimal, DecimalArray, DecimalArrayBuilder },
+      { Interval, interval, IntervalArray, IntervalArrayBuilder }
     }
   };
 }
@@ -192,6 +195,12 @@ impl From<DecimalArray> for ArrayImpl {
 impl From<UTF8Array> for ArrayImpl {
     fn from(arr: UTF8Array) -> Self {
         Self::UTF8(arr)
+    }
+}
+
+impl From<IntervalArray> for ArrayImpl {
+    fn from(arr: IntervalArray) -> Self {
+        Self::Interval(arr)
     }
 }
 
@@ -282,6 +291,7 @@ impl ArrayBuilderImpl {
             ArrayBuilderImpl::UTF8(_) => "UTF8",
             ArrayBuilderImpl::Bool(_) => "Bool",
             ArrayBuilderImpl::Decimal(_) => "Decimal",
+            ArrayBuilderImpl::Interval(_) => "Interval",
         }
     }
 }
@@ -341,6 +351,7 @@ impl ArrayImpl {
             ArrayImpl::UTF8(_) => "UTF8",
             ArrayImpl::Bool(_) => "Bool",
             ArrayImpl::Decimal(_) => "Decimal",
+            ArrayImpl::Interval(_) => "Interval",
         }
     }
 
