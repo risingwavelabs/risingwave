@@ -26,11 +26,14 @@ public final class CreateView extends Statement {
   private final QualifiedName name;
   private final Query query;
   private final boolean replaceExisting;
+  private final boolean materialized;
 
-  public CreateView(QualifiedName name, Query query, boolean replaceExisting) {
+  public CreateView(
+      QualifiedName name, Query query, boolean replaceExisting, boolean materialized) {
     this.name = name;
     this.query = query;
     this.replaceExisting = replaceExisting;
+    this.materialized = materialized;
   }
 
   public QualifiedName name() {
@@ -43,6 +46,10 @@ public final class CreateView extends Statement {
 
   public boolean replaceExisting() {
     return replaceExisting;
+  }
+
+  public boolean isMaterialized() {
+    return materialized;
   }
 
   @Override

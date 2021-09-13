@@ -381,7 +381,10 @@ class AstBuilder extends SqlBaseBaseVisitor<Node> {
   @Override
   public Node visitCreateView(SqlBaseParser.CreateViewContext ctx) {
     return new CreateView(
-        getQualifiedName(ctx.qname()), (Query) visit(ctx.query()), ctx.REPLACE() != null);
+        getQualifiedName(ctx.qname()),
+        (Query) visit(ctx.query()),
+        ctx.REPLACE() != null,
+        ctx.MATERIALIZED() != null);
   }
 
   @Override

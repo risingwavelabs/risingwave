@@ -9,5 +9,6 @@ public enum StatementType {
   FETCH,
   COPY,
   CREATE_TABLE,
+  CREATE_MATERIALIZED_VIEW,
   OTHER
 }

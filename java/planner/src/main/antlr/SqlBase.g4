@@ -501,7 +501,7 @@ createStmt
         LANGUAGE language=parameterOrIdent
         AS body=parameterOrString                                                    #createFunction
     | CREATE USER name=ident withProperties?                                         #createUser
-    | CREATE ( OR REPLACE )? VIEW name=qname AS query                                #createView
+    | CREATE ( OR REPLACE )? (MATERIALIZED)? VIEW name=qname AS query                #createView
     ;
 
 functionArgument

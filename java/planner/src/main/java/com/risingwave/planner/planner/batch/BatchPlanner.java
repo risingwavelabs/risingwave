@@ -56,7 +56,7 @@ public class BatchPlanner implements Planner<BatchPlan> {
 
     RelNode result = optimizerProgram.optimize(rawPlan, context);
     RisingWaveBatchPhyRel root = (RisingWaveBatchPhyRel) result;
-    log.info("Create physical plan: {}", ExplainWriter.explainPlan(root));
+    log.info("Create physical plan:\n {}", ExplainWriter.explainPlan(root));
 
     return new BatchPlan(root);
   }

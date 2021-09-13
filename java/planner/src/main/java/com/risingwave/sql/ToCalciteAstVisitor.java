@@ -23,6 +23,7 @@ import com.risingwave.sql.tree.ColumnDefinition;
 import com.risingwave.sql.tree.ColumnType;
 import com.risingwave.sql.tree.ComparisonExpression;
 import com.risingwave.sql.tree.CreateTable;
+import com.risingwave.sql.tree.CreateView;
 import com.risingwave.sql.tree.DoubleLiteral;
 import com.risingwave.sql.tree.DropTable;
 import com.risingwave.sql.tree.ExistsPredicate;
@@ -106,6 +107,31 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
                 .collect(Collectors.toList()));
 
     return SqlDdlNodes.createTable(SqlParserPos.ZERO, false, ifNotExists, name, columnList, null);
+  }
+
+  @Override
+  public SqlNode visitCreateView(CreateView createView, Void context) {
+    SqlIdentifier name = new SqlIdentifier(createView.name().getParts(), SqlParserPos.ZERO);
+    Query query = createView.query();
+    checkArgument(
+        query.getQueryBody() instanceof QuerySpecification, "Must create view from a query");
+    QuerySpecification specification = ((QuerySpecification) query.getQueryBody());
+
+    SqlNode queryNode = visitQuery(query, context);
+
+    SqlNodeList selectList =
+        SqlNodeList.of(
+            SqlParserPos.ZERO,
+            specification.getSelect().getSelectItems().stream()
+                .map(item -> item.accept(this, context))
+                .collect(Collectors.toList()));
+
+    if (createView.isMaterialized()) {
+      return SqlDdlNodes.createMaterializedView(
+          SqlParserPos.ZERO, false, false, name, selectList, queryNode);
+    } else {
+      return SqlDdlNodes.createView(SqlParserPos.ZERO, false, name, selectList, queryNode);
+    }
   }
 
   @Override
