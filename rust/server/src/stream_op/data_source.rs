@@ -65,10 +65,7 @@ mod test {
                     }
                 }
                 let col1 = Arc::new(ArrayImpl::Int64(col1.finish()?));
-                let cols = vec![Column {
-                    array: col1,
-                    data_type: Arc::new(Int64Type::new(false)),
-                }];
+                let cols = vec![Column::new(col1, Arc::new(Int64Type::new(false)))];
                 let chunk = StreamChunk {
                     cardinality: N,
                     visibility: None,
@@ -123,7 +120,7 @@ mod test {
         let mut expected = start;
         for chunk in data.iter() {
             assert!(chunk.columns.len() == 1);
-            let arr = &*chunk.columns[0].array;
+            let arr = chunk.columns[0].array_ref();
             if let ArrayImpl::Int64(arr) = arr {
                 for i in 0..arr.len() {
                     let v = arr.value_at(i).expect("arr[i] exists");

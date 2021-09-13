@@ -53,11 +53,8 @@ impl UnaryStreamOperator for ProjectionOperator {
             .exprs
             .iter_mut()
             .map(|expr| {
-                expr.eval(&data_chunk).map(|array| Column {
-                    array,
-                    // FIXME: this is just a place holder, we should use expr.return_type_ref.
-                    data_type: expr.return_type_ref(),
-                })
+                expr.eval(&data_chunk)
+                    .map(|array| Column::new(array, expr.return_type_ref()))
             })
             .collect::<Result<Vec<Column>>>()?;
 

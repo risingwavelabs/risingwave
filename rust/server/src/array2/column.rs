@@ -1,18 +1,20 @@
 use crate::array2::value_reader::*;
-use crate::array2::{ArrayBuilder, ArrayRef, PrimitiveArrayBuilder, PrimitiveArrayItemType};
+use crate::array2::{
+    ArrayBuilder, ArrayImpl, ArrayRef, PrimitiveArrayBuilder, PrimitiveArrayItemType,
+};
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
-use crate::types::{build_from_proto, DataTypeRef};
+use crate::types::{build_from_proto, DataType, DataTypeRef};
 
 use protobuf::well_known_types::Any as AnyProto;
 use risingwave_proto::data::{Column as ColumnProto, DataType_TypeName};
 use std::sync::Arc;
-use typed_builder::TypedBuilder;
 
-#[derive(TypedBuilder, Clone, Debug)]
+/// Column is owned by DataChunk. It consists of logic data type and physical array implementation.
+#[derive(Clone, Debug)]
 pub struct Column {
-    pub(crate) array: ArrayRef,
-    pub(crate) data_type: DataTypeRef,
+    array: ArrayRef,
+    data_type: DataTypeRef,
 }
 
 fn read_numeric_column<T: PrimitiveArrayItemType, R: ValueReader<T>>(
@@ -29,6 +31,10 @@ fn read_numeric_column<T: PrimitiveArrayItemType, R: ValueReader<T>>(
 }
 
 impl Column {
+    pub fn new(array: ArrayRef, data_type: DataTypeRef) -> Column {
+        Column { array, data_type }
+    }
+
     pub fn to_protobuf(&self) -> Result<AnyProto> {
         let mut column = ColumnProto::new();
         let proto_data_type = self.data_type.to_protobuf()?;
@@ -68,5 +74,21 @@ impl Column {
         };
         let data_type = build_from_proto(col.get_column_type())?;
         Ok(Self { array, data_type })
+    }
+
+    pub fn array(&self) -> ArrayRef {
+        self.array.clone()
+    }
+
+    pub fn array_ref(&self) -> &ArrayImpl {
+        &*self.array
+    }
+
+    pub fn data_type(&self) -> DataTypeRef {
+        self.data_type.clone()
+    }
+
+    pub fn data_type_ref(&self) -> &dyn DataType {
+        &*self.data_type
     }
 }

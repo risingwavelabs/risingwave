@@ -73,11 +73,12 @@ impl DataChunk {
                 let columns = self
                     .columns
                     .into_iter()
-                    .map(|Column { array, data_type }| {
-                        array.compact(visibility, cardinality).map(|array| Column {
-                            array: Arc::new(array),
-                            data_type,
-                        })
+                    .map(|col| {
+                        let array = col.array();
+                        let data_type = col.data_type();
+                        array
+                            .compact(visibility, cardinality)
+                            .map(|array| Column::new(Arc::new(array), data_type))
                     })
                     .collect::<Result<Vec<_>>>()?;
                 Ok(Self::builder()

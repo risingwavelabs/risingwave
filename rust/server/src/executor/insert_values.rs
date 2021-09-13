@@ -60,10 +60,10 @@ impl Executor for InsertValuesExecutor {
         // is same size as input chunk cardinality.
         let one_row_chunk = DataChunk::builder()
             .cardinality(1)
-            .columns(vec![Column {
-                array: Arc::new(one_row_array.into()),
-                data_type: Arc::new(Int32Type::new(false)),
-            }])
+            .columns(vec![Column::new(
+                Arc::new(one_row_array.into()),
+                Arc::new(Int32Type::new(false)),
+            )])
             .build();
 
         for row in &mut self.rows {
@@ -81,10 +81,9 @@ impl Executor for InsertValuesExecutor {
             .into_iter()
             .zip(self.rows[0].iter())
             .map(|(builder, expr)| {
-                builder.finish().map(|arr| Column {
-                    array: Arc::new(arr),
-                    data_type: expr.return_type_ref(),
-                })
+                builder
+                    .finish()
+                    .map(|arr| Column::new(Arc::new(arr), expr.return_type_ref()))
             })
             .collect::<Result<Vec<Column>>>()?;
 
@@ -106,10 +105,10 @@ impl Executor for InsertValuesExecutor {
             let array = array_builder.finish()?;
             let ret_chunk = DataChunk::builder()
                 .cardinality(array.len())
-                .columns(vec![Column {
-                    array: Arc::new(array.into()),
-                    data_type: Arc::new(Int32Type::new(false)),
-                }])
+                .columns(vec![Column::new(
+                    Arc::new(array.into()),
+                    Arc::new(Int32Type::new(false)),
+                )])
                 .build();
 
             self.executed = true;

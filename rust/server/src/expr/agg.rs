@@ -122,10 +122,7 @@ mod tests {
         let a = Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into());
         let chunk = DataChunk::builder()
             .cardinality(3)
-            .columns(vec![Column {
-                array: a,
-                data_type: t32.clone(),
-            }])
+            .columns(vec![Column::new(a, t32.clone())])
             .build();
         let mut s = e.create_agg_state()?;
         s.update(e.eval_child(&chunk)?.as_ref())?;

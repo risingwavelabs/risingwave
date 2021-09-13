@@ -224,6 +224,6 @@ mod tests {
     fn create_column(vec: &[Option<bool>]) -> Result<Column> {
         let array = BoolArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
         let data_type = BoolType::create(false);
-        Ok(Column { array, data_type })
+        Ok(Column::new(array, data_type))
     }
 }

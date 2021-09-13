@@ -2,7 +2,7 @@ use crate::array2::{column::Column, DataChunk};
 use crate::error::ErrorCode::ProtobufError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::executor::{BoxedExecutor, Executor, ExecutorBuilder, ExecutorResult};
-use crate::expr::{AggExpression, Expression as _};
+use crate::expr::{AggExpression, Expression};
 use crate::types::DataType;
 use crate::vector_op::agg::BoxedAggState;
 use protobuf::Message as _;
@@ -91,12 +91,7 @@ impl Executor for SimpleAggExecutor {
             .agg_exprs
             .iter()
             .zip(array_builders)
-            .map(|(e, b)| {
-                Ok(Column {
-                    array: Arc::new(b.finish()?),
-                    data_type: e.return_type_ref(),
-                })
-            })
+            .map(|(e, b)| Ok(Column::new(Arc::new(b.finish()?), e.return_type_ref())))
             .collect::<Result<Vec<_>>>()?;
 
         let ret = DataChunk::builder()
@@ -130,10 +125,7 @@ mod tests {
         let t32 = Arc::new(Int32Type::new(false));
         let chunk = DataChunk::builder()
             .cardinality(3)
-            .columns(vec![Column {
-                array: a,
-                data_type: t32.clone(),
-            }])
+            .columns(vec![Column::new(a, t32.clone())])
             .build();
         let mut child = MockExecutor::new();
         child.add(chunk);
@@ -171,7 +163,7 @@ mod tests {
         }
         executor.clean()?;
 
-        let actual = o.column_at(0)?.array;
+        let actual = o.column_at(0)?.array();
         let actual: &I64Array = actual.as_ref().into();
         let v = actual.iter().collect::<Vec<Option<i64>>>();
         assert_eq!(v, vec![Some(6)]);

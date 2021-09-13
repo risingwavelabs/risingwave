@@ -81,7 +81,7 @@ impl UnaryStreamOperator for AggregationOperator {
             self.state.get_output(&mut builder)?;
         }
         self.state
-            .apply_batch(&ops, visibility.as_ref(), &arrays[0].array)?;
+            .apply_batch(&ops, visibility.as_ref(), arrays[0].array_ref())?;
         self.state.get_output(&mut builder)?;
 
         // let chunk;
