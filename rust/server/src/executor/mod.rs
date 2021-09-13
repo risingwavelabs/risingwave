@@ -9,6 +9,7 @@ use drop_table::*;
 mod seq_scan;
 use seq_scan::*;
 mod filter;
+use filter::*;
 
 mod projection;
 use projection::*;
@@ -88,7 +89,7 @@ impl<'a> ExecutorBuilder<'a> {
           PlanNode_PlanNodeType::SEQ_SCAN => SeqScanExecutor,
           PlanNode_PlanNodeType::INSERT_VALUE => InsertValuesExecutor,
           PlanNode_PlanNodeType::DROP_TABLE => DropTableExecutor,
-          // PlanNode_PlanNodeType::FILTER => FilterExecutor,
+          PlanNode_PlanNodeType::FILTER => FilterExecutor,
           PlanNode_PlanNodeType::PROJECT => ProjectionExecutor,
           PlanNode_PlanNodeType::SIMPLE_AGG => SimpleAggExecutor
         }

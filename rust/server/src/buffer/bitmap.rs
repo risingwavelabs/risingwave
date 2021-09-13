@@ -23,8 +23,8 @@ use std::mem;
 use std::ops::BitAnd;
 use std::ops::BitOr;
 
-use crate::array::Array;
-use crate::array::BoolArray;
+use crate::array2::Array;
+use crate::array2::BoolArray;
 use crate::buffer::Buffer;
 use crate::error::Result;
 use crate::util::bit_util;
@@ -51,7 +51,7 @@ impl Bitmap {
     pub fn from_bool_array(bools: &BoolArray) -> Result<Self> {
         let mut buffer = Buffer::new(Bitmap::num_of_bytes(bools.len()))?;
         let data = buffer.as_slice_mut();
-        for (idx, value) in (bools.as_iter()?).enumerate() {
+        for (idx, value) in (bools.iter()).enumerate() {
             if let Some(true) = value {
                 bit_util::set_bit(data, idx);
             } else {

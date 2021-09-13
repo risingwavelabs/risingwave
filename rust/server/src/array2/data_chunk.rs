@@ -41,9 +41,9 @@ impl DataChunk {
         &self.visibility
     }
 
-    pub fn with_visibility(self, visibility: Bitmap) -> Self {
+    pub fn with_visibility(&self, visibility: Bitmap) -> Self {
         DataChunk {
-            columns: self.columns,
+            columns: self.columns.clone(),
             cardinality: self.cardinality,
             visibility: Some(visibility),
         }
@@ -78,10 +78,12 @@ impl DataChunk {
     /// `compact` will convert the chunk to compact format.
     /// Compact format means that `visibility == None`.
     pub fn compact(self) -> Result<Self> {
-        let cardinality = self.cardinality;
         match &self.visibility {
             None => Ok(self),
             Some(visibility) => {
+                let cardinality = visibility
+                    .iter()
+                    .fold(0, |vis_cnt, vis| vis_cnt + vis as usize);
                 let columns = self
                     .columns
                     .into_iter()
