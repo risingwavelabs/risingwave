@@ -5,8 +5,10 @@ version = "0.0.1-SNAPSHOT"
 
 [dependencies]
 anyhow = "1"
+async-stream = "0.3"
 async-trait = "0.1"
 backtrace = "0.3"
+byteorder = "1"
 chrono = "0.4"
 clap = "3.0.0-beta.4"
 ctrlc = {version = "3.0", features = ["termination"]}
@@ -29,7 +31,6 @@ smallvec = "1"
 thiserror = "1"
 tokio = {version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time"]}
 typed-builder = "0.9"
-byteorder = "1"
 
 [[bin]]
 name = "compute-node"
