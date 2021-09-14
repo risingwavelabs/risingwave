@@ -232,6 +232,12 @@ impl<T: PrimitiveArrayItemType> ScalarPartialOrd for T {
     }
 }
 
+impl ScalarPartialOrd for bool {
+    fn scalar_cmp(&self, other: Self) -> Option<std::cmp::Ordering> {
+        self.partial_cmp(&other)
+    }
+}
+
 /// Implement `Scalar` for `bool`.
 impl Scalar for bool {
     type ScalarRefType<'a> = bool;

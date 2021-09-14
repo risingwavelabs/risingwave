@@ -6,6 +6,7 @@ mod input_ref;
 mod literal;
 mod type_cast;
 pub use agg::{AggExpression, AggKind};
+pub use input_ref::InputRefExpression;
 pub use literal::*;
 
 use crate::array2::ArrayRef;
@@ -15,7 +16,6 @@ use crate::error::Result;
 // use crate::expr::arithmetic_expr::ArithmeticExpression;
 use crate::expr::cmp::CompareExpression;
 use crate::expr::conjunction::ConjunctionExpression;
-use crate::expr::input_ref::InputRefExpression;
 use crate::expr::type_cast::TypeCastExpression;
 
 use crate::types::{DataType, DataTypeRef};

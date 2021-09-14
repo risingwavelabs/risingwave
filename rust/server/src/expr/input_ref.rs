@@ -10,7 +10,7 @@ use crate::error::{Result, RwError};
 use crate::expr::Expression;
 use crate::types::{build_from_proto, DataType, DataTypeRef};
 
-pub(super) struct InputRefExpression {
+pub struct InputRefExpression {
     return_type: DataTypeRef,
     idx: usize,
 }
@@ -32,6 +32,10 @@ impl Expression for InputRefExpression {
 impl InputRefExpression {
     pub fn new(return_type: DataTypeRef, idx: usize) -> Self {
         InputRefExpression { return_type, idx }
+    }
+
+    pub fn eval_immut(&self, input: &DataChunk) -> Result<ArrayRef> {
+        Ok(input.column_at(self.idx)?.array())
     }
 }
 

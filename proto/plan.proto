@@ -77,6 +77,16 @@ message CreateTableNode {
     // primarykey_col_ids, dist_type, distkey_col_id, append_only
 }
 
+message OrderByNode {
+    enum OrderType {
+        INVALID = 0;
+        ASCENDING = 1;
+        DESCENDING = 2;
+    }
+    repeated OrderType order_types = 1;
+    repeated risingwave.expr.proto.ExprNode orders = 2;
+}
+
 message DropTableNode {
     TableRefId table_ref_id = 1;
 }
@@ -105,6 +115,7 @@ message PlanNode {
         FILTER = 9;
         EXCHANGE = 10;
         GATHER = 11;
+        ORDER_BY = 12;
     }
     PlanNodeType node_type = 1;
     google.protobuf.Any body = 2;

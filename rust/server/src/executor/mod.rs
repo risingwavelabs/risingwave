@@ -10,9 +10,10 @@ mod seq_scan;
 use seq_scan::*;
 mod filter;
 use filter::*;
-
 mod projection;
 use projection::*;
+mod order_by;
+//use order_by::*;
 
 #[cfg(test)]
 mod test_utils;

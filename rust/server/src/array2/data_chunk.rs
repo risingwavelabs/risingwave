@@ -33,6 +33,10 @@ impl DataChunk {
         (self.columns, self.visibility)
     }
 
+    pub fn dimension(&self) -> usize {
+        self.columns.len()
+    }
+
     pub fn cardinality(&self) -> usize {
         self.cardinality
     }
