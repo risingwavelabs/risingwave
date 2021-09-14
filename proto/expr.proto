@@ -46,6 +46,7 @@ message ExprNode {
 
         // other functions
         CAST = 201;
+        SUBSTR = 202;
     }
     ExprNodeType expr_type = 1;
     google.protobuf.Any body = 2;

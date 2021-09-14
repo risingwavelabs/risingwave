@@ -4,6 +4,7 @@ mod cmp;
 mod conjunction;
 mod input_ref;
 mod literal;
+mod substr;
 mod type_cast;
 pub use agg::{AggExpression, AggKind};
 pub use input_ref::InputRefExpression;
@@ -16,6 +17,7 @@ use crate::error::Result;
 use crate::expr::arithmetic_expr::ArithmeticExpression;
 use crate::expr::cmp::CompareExpression;
 use crate::expr::conjunction::ConjunctionExpression;
+use crate::expr::substr::SubStrExpression;
 use crate::expr::type_cast::TypeCastExpression;
 
 use crate::types::{DataType, DataTypeRef};
@@ -23,7 +25,7 @@ use risingwave_proto::expr::{
     ExprNode,
     ExprNode_ExprNodeType::{ADD, DIVIDE, MODULUS, MULTIPLY, SUBTRACT},
     ExprNode_ExprNodeType::{AND, NOT, OR},
-    ExprNode_ExprNodeType::{CAST, CONSTANT_VALUE, INPUT_REF},
+    ExprNode_ExprNodeType::{CAST, CONSTANT_VALUE, INPUT_REF, SUBSTR},
     ExprNode_ExprNodeType::{
         EQUAL, GREATER_THAN, GREATER_THAN_OR_EQUAL, LESS_THAN, LESS_THAN_OR_EQUAL, NOT_EQUAL,
     },
@@ -72,7 +74,8 @@ pub fn build_from_proto(proto: &ExprNode) -> Result<BoxedExpression> {
       SUBTRACT => ArithmeticExpression,
       MULTIPLY => ArithmeticExpression,
       DIVIDE => ArithmeticExpression,
-      MODULUS => ArithmeticExpression
+      MODULUS => ArithmeticExpression,
+      SUBSTR => SubStrExpression
     }
 }
 

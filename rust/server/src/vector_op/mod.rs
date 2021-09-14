@@ -10,6 +10,8 @@ mod div_op;
 mod mod_op;
 mod mul_op;
 mod sub_op;
+pub mod substr;
+
 #[cfg(test)]
 mod tests;
 pub mod vec_arithmetic;

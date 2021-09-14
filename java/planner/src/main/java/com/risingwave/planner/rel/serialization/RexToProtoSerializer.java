@@ -52,6 +52,10 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
           .put(SqlKind.MIN, ExprNode.ExprNodeType.MIN)
           .put(SqlKind.MAX, ExprNode.ExprNodeType.MAX)
           .build();
+  private static final ImmutableMap<String, ExprNode.ExprNodeType> STRING_TO_FUNC_MAPPING =
+      ImmutableMap.<String, ExprNode.ExprNodeType>builder()
+          .put("SUBSTRING", ExprNode.ExprNodeType.SUBSTR)
+          .build();
 
   public RexToProtoSerializer() {
     super(true);
@@ -200,13 +204,20 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
     FunctionCall body = FunctionCall.newBuilder().addAllChildren(children).build();
 
     return ExprNode.newBuilder()
-        .setExprType(funcCallOf(call.getKind()))
+        .setExprType(funcCallOf(call.getKind(), call.getOperator().getName()))
         .setReturnType(protoDataType)
         .setBody(Any.pack(body))
         .build();
   }
 
-  private static ExprNode.ExprNodeType funcCallOf(SqlKind kind) {
+  private static ExprNode.ExprNodeType funcCallOf(SqlKind kind, String name) {
+    if (kind == SqlKind.OTHER_FUNCTION) {
+      return Optional.of(STRING_TO_FUNC_MAPPING.get(name))
+          .orElseThrow(
+              () ->
+                  new PgException(
+                      PgErrorCode.INTERNAL_ERROR, "Unmappable function call:" + " %s", name));
+    }
     return Optional.of(SQL_TO_FUNC_MAPPING.get(kind))
         .orElseThrow(
             () ->
