@@ -79,6 +79,7 @@ import com.risingwave.sql.tree.CreateBlobTable;
 import com.risingwave.sql.tree.CreateFunction;
 import com.risingwave.sql.tree.CreateRepository;
 import com.risingwave.sql.tree.CreateSnapshot;
+import com.risingwave.sql.tree.CreateStream;
 import com.risingwave.sql.tree.CreateTable;
 import com.risingwave.sql.tree.CreateTableAs;
 import com.risingwave.sql.tree.CreateUser;
@@ -350,6 +351,16 @@ class AstBuilder extends SqlBaseBaseVisitor<Node> {
         clusteredBy,
         extractGenericProperties(context.withProperties()),
         notExists);
+  }
+
+  @Override
+  public Node visitCreateStream(SqlBaseParser.CreateStreamContext context) {
+    List<Node> tableElements = Lists2.map(context.tableElement(), this::visit);
+    return new CreateStream(
+        context.name.getText(),
+        tableElements,
+        extractGenericProperties(context.withProperties()),
+        context.rowFormat.getText());
   }
 
   @Override

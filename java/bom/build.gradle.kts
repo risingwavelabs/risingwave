@@ -43,6 +43,7 @@ dependencies {
         api("org.mockito:mockito-core:${mockitoVersion}")
         api("com.pholser:junit-quickcheck-core:$quickcheckVersion")
         api("org.hamcrest:hamcrest-all:$hamcrestVersion")
+        api("org.apache.commons:commons-lang3:3.0")
         runtime("ch.qos.logback:logback-classic:1.2.3")
         runtime("org.junit.jupiter:junit-jupiter-engine:$junit5Version")
         runtime("org.junit.jupiter:junit-jupiter-params:$junit5Version")

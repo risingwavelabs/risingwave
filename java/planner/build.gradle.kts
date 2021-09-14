@@ -21,6 +21,7 @@ dependencies {
     api("com.google.inject:guice")
     runtimeOnly("ch.qos.logback:logback-classic")
     api("com.google.protobuf:protobuf-java-util")
+    api("org.apache.commons:commons-lang3")
 
     testImplementation("org.junit.jupiter:junit-jupiter-api")
     testImplementation("org.junit.jupiter:junit-jupiter-params")

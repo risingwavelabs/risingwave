@@ -10,5 +10,6 @@ public enum StatementType {
   COPY,
   CREATE_TABLE,
   CREATE_MATERIALIZED_VIEW,
+  CREATE_STREAM,
   OTHER
 }

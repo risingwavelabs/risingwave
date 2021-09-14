@@ -4,6 +4,7 @@ import com.google.common.collect.ImmutableMap;
 import com.risingwave.common.error.ExecutionError;
 import com.risingwave.common.exception.RisingWaveException;
 import com.risingwave.execution.context.ExecutionContext;
+import com.risingwave.sql.node.SqlCreateStream;
 import java.lang.reflect.Constructor;
 import java.util.Arrays;
 import javax.inject.Singleton;
@@ -40,8 +41,12 @@ public class DefaultSqlHandlerFactory implements SqlHandlerFactory {
 
   @Override
   public SqlHandler create(SqlNode ast, ExecutionContext context) {
-    Constructor<? extends SqlHandler> constructor = SQL_HANDLER_FACTORY.get(ast.getKind());
+    // TODO(TaoWu): Use operator name to find the handler.
+    if (ast instanceof SqlCreateStream) {
+      return new CreateStreamHandler();
+    }
 
+    Constructor<? extends SqlHandler> constructor = SQL_HANDLER_FACTORY.get(ast.getKind());
     if (constructor == null) {
       throw RisingWaveException.from(ExecutionError.NOT_IMPLEMENTED, ast.getKind());
     }

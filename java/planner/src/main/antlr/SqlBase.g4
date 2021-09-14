@@ -502,6 +502,9 @@ createStmt
         AS body=parameterOrString                                                    #createFunction
     | CREATE USER name=ident withProperties?                                         #createUser
     | CREATE ( OR REPLACE )? (MATERIALIZED)? VIEW name=qname AS query                #createView
+    | CREATE ( OR REPLACE )? STREAM (IF NOT EXISTS)? name=ident
+        '(' tableElement (',' tableElement)* ')'
+        withProperties? ROW FORMAT rowFormat=ident                                   #createStream
     ;
 
 functionArgument
@@ -694,6 +697,7 @@ nonReserved
     | REPLACE | RETURNING | SWAP | GC | DANGLING | ARTIFACTS | DECOMMISSION | LEADING | TRAILING | BOTH | TRIM
     | CURRENT_SCHEMA | PROMOTE | CHARACTER | VARYING
     | DISCARD | PLANS | SEQUENCES | TEMPORARY | TEMP | METADATA
+    | STREAM
     ;
 
 AUTHORIZATION: 'AUTHORIZATION';
@@ -788,6 +792,7 @@ RECURSIVE: 'RECURSIVE';
 CREATE: 'CREATE';
 BLOB: 'BLOB';
 TABLE: 'TABLE';
+STREAM: 'STREAM';
 SWAP: 'SWAP';
 GC: 'GC';
 DANGLING: 'DANGLING';

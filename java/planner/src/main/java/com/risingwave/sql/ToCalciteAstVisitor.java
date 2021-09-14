@@ -13,6 +13,8 @@ import com.google.common.collect.Iterators;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.planner.sql.RisingWaveOperatorTable;
+import com.risingwave.sql.node.SqlCreateStream;
+import com.risingwave.sql.node.SqlTableOption;
 import com.risingwave.sql.tree.AliasedRelation;
 import com.risingwave.sql.tree.AllColumns;
 import com.risingwave.sql.tree.ArithmeticExpression;
@@ -22,13 +24,16 @@ import com.risingwave.sql.tree.Cast;
 import com.risingwave.sql.tree.ColumnDefinition;
 import com.risingwave.sql.tree.ColumnType;
 import com.risingwave.sql.tree.ComparisonExpression;
+import com.risingwave.sql.tree.CreateStream;
 import com.risingwave.sql.tree.CreateTable;
 import com.risingwave.sql.tree.CreateView;
 import com.risingwave.sql.tree.DoubleLiteral;
 import com.risingwave.sql.tree.DropTable;
 import com.risingwave.sql.tree.ExistsPredicate;
+import com.risingwave.sql.tree.Expression;
 import com.risingwave.sql.tree.Extract;
 import com.risingwave.sql.tree.FunctionCall;
+import com.risingwave.sql.tree.GenericProperties;
 import com.risingwave.sql.tree.InListExpression;
 import com.risingwave.sql.tree.InPredicate;
 import com.risingwave.sql.tree.Insert;
@@ -70,6 +75,7 @@ import org.apache.calcite.sql.JoinConditionType;
 import org.apache.calcite.sql.JoinType;
 import org.apache.calcite.sql.SqlBasicCall;
 import org.apache.calcite.sql.SqlBasicTypeNameSpec;
+import org.apache.calcite.sql.SqlCharStringLiteral;
 import org.apache.calcite.sql.SqlDataTypeSpec;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlInsert;
@@ -135,8 +141,37 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
   }
 
   @Override
+  public SqlNode visitCreateStream(CreateStream node, Void context) {
+    var pos = SqlParserPos.ZERO;
+
+    SqlIdentifier name = new SqlIdentifier(node.getName(), pos);
+    SqlNodeList columnList =
+        sqlNodeListOf(
+            node.getTableElements().stream()
+                .map(column -> column.accept(this, context))
+                .collect(Collectors.toList()));
+    SqlNodeList properties = visitGenericProperties(node.getProperties(), context);
+    SqlCharStringLiteral rowFormat = SqlLiteral.createCharString(node.getRowFormat(), pos);
+    return new SqlCreateStream(pos, name, columnList, properties, rowFormat);
+  }
+
+  @Override
   public SqlIdentifier visitTable(Table<?> table, Void context) {
     return new SqlIdentifier(table.getName().getParts(), SqlParserPos.ZERO);
+  }
+
+  @Override
+  public SqlNodeList visitGenericProperties(GenericProperties<?> node, Void context) {
+    var pos = SqlParserPos.ZERO;
+    return sqlNodeListOf(
+        node.properties().entrySet().stream()
+            .map(
+                prop -> {
+                  var name = SqlLiteral.createCharString(prop.getKey(), pos);
+                  var value = visitExpression((Expression) prop.getValue(), context);
+                  return new SqlTableOption(name, value, pos);
+                })
+            .collect(Collectors.toList()));
   }
 
   @Override
