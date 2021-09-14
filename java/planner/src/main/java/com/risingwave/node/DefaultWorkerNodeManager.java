@@ -26,4 +26,9 @@ public class DefaultWorkerNodeManager implements WorkerNodeManager {
   public WorkerNode nextRandom() {
     return workerNodes.get(random.nextInt(workerNodes.size()));
   }
+
+  @Override
+  public ImmutableList<WorkerNode> allNodes() {
+    return workerNodes;
+  }
 }

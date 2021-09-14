@@ -23,7 +23,7 @@ class StageGraph {
   private final ImmutableMap<StageId, ImmutableSet<StageId>> parentEdges;
 
   // Used to find the child stage linked to an exchange node.
-  // String is the exchange node's unique ID.
+  // Integer is the exchange node's unique ID.
   // StageId is the child stage.
   private final ImmutableMap<Integer, StageId> exchangeIdToStage;
 

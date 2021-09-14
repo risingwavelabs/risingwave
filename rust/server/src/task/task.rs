@@ -1,11 +1,12 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
+use crate::array2::DataChunkRef;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::executor::{BoxedExecutor, ExecutorBuilder, ExecutorResult};
 use crate::service::ExchangeWriter;
 use crate::task::channel::{create_output_channel, BoxChanReceiver, BoxChanSender};
 use crate::task::GlobalTaskEnv;
-use crate::util::JsonFormatter;
+use crate::util::{json_to_pretty_string, JsonFormatter};
 use rayon::ThreadPool;
 use risingwave_proto::common::Status;
 use risingwave_proto::plan::PlanFragment;
@@ -65,24 +66,29 @@ impl TaskExecution {
     }
 
     /// `get_data` consumes the data produced by `async_execute`.
-    pub fn async_execute(&mut self, worker_pool: &mut ThreadPool) -> Result<()> {
+    pub fn async_execute(&mut self, worker_pool: Arc<ThreadPool>) -> Result<()> {
         {
             let mut state = self.state.lock().unwrap();
             *state = TaskStatus::RUNNING;
         }
-        debug!("Executing plan: {}", self.plan.to_json()?.to_string());
+        debug!(
+            "Prepare executing plan [{:?}]: {}",
+            self.task_id,
+            json_to_pretty_string(&self.plan.to_json()?)?
+        );
         let exec = ExecutorBuilder::new(self.plan.get_root(), self.env.clone()).build()?;
         let (sender, receiver) = create_output_channel(self.plan.get_shuffle_info())?;
         self.receiver = Some(receiver);
         worker_pool.install(|| {
-            futures::executor::block_on(self.execute(exec, sender));
+            debug!("Executing plan [{:?}]", self.task_id);
+            async_std::task::block_on(self.execute(exec, sender));
         });
         Ok(())
     }
 
     async fn execute(&mut self, root: BoxedExecutor, sender: BoxChanSender) {
         if let Err(e) = TaskExecution::try_execute(root, sender).await {
-            error!("Execution failed: {}", &e);
+            error!("Execution failed: {} [task_id={:?}]", &e, &self.task_id);
             let mut failure = self.failure.lock().unwrap();
             *failure = Some(e);
         }
@@ -106,16 +112,7 @@ impl TaskExecution {
 
     // Completely drain out of the data from executor.
     pub async fn take_data(&mut self, sink_id: u32, writer: &mut dyn ExchangeWriter) -> Result<()> {
-        {
-            let state = self.state.lock().unwrap();
-            if *state != TaskStatus::RUNNING {
-                return Err(ErrorCode::InternalError(format!(
-                    "task {:?} is not running",
-                    self.get_task_id()
-                ))
-                .into());
-            }
-        }
+        self.check_if_running()?;
         let mut receiver = self.receiver.take().unwrap();
         loop {
             let chunk = match receiver.recv(sink_id).await {
@@ -133,6 +130,26 @@ impl TaskExecution {
         let possible_err = self.failure.lock().unwrap().clone();
         if let Some(err) = possible_err {
             return Err(err);
+        }
+        Ok(())
+    }
+
+    pub async fn direct_take_data(&mut self, sink_id: u32) -> Result<Option<DataChunkRef>> {
+        self.check_if_running()?;
+        let mut receiver = self.receiver.take().unwrap();
+        let res = receiver.recv(sink_id).await;
+        self.receiver = Some(receiver);
+        Ok(res)
+    }
+
+    fn check_if_running(&self) -> Result<()> {
+        let state = self.state.lock().unwrap();
+        if *state != TaskStatus::RUNNING {
+            return Err(ErrorCode::InternalError(format!(
+                "task {:?} is not running",
+                self.get_task_id()
+            ))
+            .into());
         }
         Ok(())
     }

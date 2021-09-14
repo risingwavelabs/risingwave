@@ -4,15 +4,15 @@ use futures::SinkExt;
 use grpcio::{RpcContext, ServerStreamingSink, WriteFlags};
 use risingwave_proto::task_service::{TaskData, TaskSinkId};
 use risingwave_proto::task_service_grpc::ExchangeService;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct ExchangeServiceImpl {
-    mgr: Arc<Mutex<TaskManager>>,
+    mgr: Arc<TaskManager>,
 }
 
 impl ExchangeServiceImpl {
-    pub fn new(mgr: Arc<Mutex<TaskManager>>) -> Self {
+    pub fn new(mgr: Arc<TaskManager>) -> Self {
         ExchangeServiceImpl { mgr }
     }
 }
@@ -34,7 +34,7 @@ impl ExchangeService for ExchangeServiceImpl {
         tsid: TaskSinkId,
         mut sink: ServerStreamingSink<TaskData>,
     ) {
-        let task_result = self.mgr.lock().unwrap().take_task(&tsid);
+        let task_result = self.mgr.take_task(&tsid);
         ctx.spawn(async move {
             let mut writer = GrpcExchangeWriter::new(&mut sink);
             let res = pull_from_task(task_result, &tsid, &mut writer)
@@ -66,7 +66,7 @@ pub trait ExchangeWriter: Send {
     async fn write(&mut self, data: TaskData) -> Result<()>;
 }
 
-struct GrpcExchangeWriter<'a> {
+pub struct GrpcExchangeWriter<'a> {
     sink: &'a mut ServerStreamingSink<TaskData>,
     written_chunks: usize,
 }

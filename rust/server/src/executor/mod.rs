@@ -12,6 +12,9 @@ mod filter;
 use filter::*;
 mod projection;
 use projection::*;
+mod exchange;
+mod gather;
+use exchange::*;
 mod order_by;
 //use order_by::*;
 
@@ -21,6 +24,7 @@ mod test_utils;
 use crate::array2::DataChunkRef;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
+use crate::executor::gather::GatherExecutor;
 use crate::task::GlobalTaskEnv;
 use risingwave_proto::plan::{PlanNode, PlanNode_PlanNodeType};
 use std::convert::TryFrom;
@@ -90,6 +94,8 @@ impl<'a> ExecutorBuilder<'a> {
           PlanNode_PlanNodeType::SEQ_SCAN => SeqScanExecutor,
           PlanNode_PlanNodeType::INSERT_VALUE => InsertValuesExecutor,
           PlanNode_PlanNodeType::DROP_TABLE => DropTableExecutor,
+          PlanNode_PlanNodeType::GATHER => GatherExecutor,
+          PlanNode_PlanNodeType::EXCHANGE => ExchangeExecutor,
           PlanNode_PlanNodeType::FILTER => FilterExecutor,
           PlanNode_PlanNodeType::PROJECT => ProjectionExecutor,
           PlanNode_PlanNodeType::SIMPLE_AGG => SimpleAggExecutor

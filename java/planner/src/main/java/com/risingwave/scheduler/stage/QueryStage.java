@@ -14,6 +14,7 @@ import com.risingwave.proto.plan.PlanFragment;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.scheduler.query.Query;
 import com.risingwave.scheduler.shuffle.PartitionSchema;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 
 public class QueryStage {
@@ -81,14 +82,20 @@ public class QueryStage {
     PlanNode node = relNode.serialize();
     PlanNode.Builder builder = node.toBuilder();
     builder.clearChildren();
-    for (var child : relNode.getInputs()) {
-      builder.addChildren(rewriteIfExchange((RisingWaveBatchPhyRel) child));
-    }
     if (node.getNodeType().equals(PlanNode.PlanNodeType.EXCHANGE)) {
       assert node.getChildrenCount() == 0;
       StageId stageId = query.getExchangeSource((RwBatchExchange) relNode);
-      ScheduledStage stage = Optional.ofNullable(stages.get(stageId)).orElseThrow();
+      ScheduledStage stage =
+          Optional.ofNullable(stages.get(stageId))
+              .orElseThrow(
+                  () ->
+                      new NoSuchElementException(
+                          String.format("stage %s has not been scheduled", stageId.toString())));
       builder.setBody(Any.pack(createExchange(stage)));
+    } else {
+      for (var child : relNode.getInputs()) {
+        builder.addChildren(rewriteIfExchange((RisingWaveBatchPhyRel) child));
+      }
     }
     return builder.build();
   }

@@ -32,6 +32,7 @@ impl ExchangeWriter for FakeExchangeWriter {
 pub struct TestRunner {
     task_mgr: TaskManager,
     tsid: TaskSinkId,
+    env: GlobalTaskEnv,
 }
 
 impl TestRunner {
@@ -40,7 +41,8 @@ impl TestRunner {
         let mut tsid = TaskSinkId::default();
         tsid.set_task_id(tid.clone());
         Self {
-            task_mgr: TaskManager::new(GlobalTaskEnv::for_test()),
+            env: GlobalTaskEnv::for_test(),
+            task_mgr: TaskManager::new(),
             tsid,
         }
     }
@@ -55,7 +57,7 @@ impl TestRunner {
 
     pub fn run(&mut self, plan: PlanFragment) -> Result<Vec<TaskData>> {
         self.task_mgr
-            .fire_task(self.tsid.get_task_id(), plan.clone())?;
+            .fire_task(self.env.clone(), self.tsid.get_task_id(), plan.clone())?;
         let mut task = self.task_mgr.take_task(&self.tsid).unwrap();
         let mut writer = FakeExchangeWriter { messages: vec![] };
         let messages = futures::executor::block_on(async move {
@@ -63,6 +65,10 @@ impl TestRunner {
             writer.messages
         });
         Ok(messages)
+    }
+
+    fn get_global_env(&self) -> GlobalTaskEnv {
+        self.env.clone()
     }
 
     fn validate_insert_result(result: Vec<TaskData>, inserted_rows: usize) {
@@ -220,7 +226,6 @@ impl<'a> SelectBuilder<'a> {
         let mut scan = SeqScanNode::default();
         let column_ids = self
             .runner
-            .task_mgr
             .get_global_env()
             .storage_manager_ref()
             .get_table(&TableId::from_protobuf(&TableRefId::default()).unwrap())

@@ -4,22 +4,23 @@ use crate::storage::MemStorageManager;
 use crate::task::{GlobalTaskEnv, TaskManager};
 use grpcio::{Environment, Result, ServerBuilder, ShutdownFuture};
 use risingwave_proto::task_service_grpc::{create_exchange_service, create_task_service};
-use std::sync::{Arc, Mutex};
+use std::net::SocketAddr;
+use std::sync::Arc;
 
 pub struct Server {
     rpc_srv: grpcio::Server,
 }
 
 impl Server {
-    pub fn new() -> Result<Server> {
+    pub fn new(addr: SocketAddr) -> Result<Server> {
         let store_mgr = Arc::new(MemStorageManager::new());
-        let env = GlobalTaskEnv::new(store_mgr);
+        let task_mgr = Arc::new(TaskManager::new());
+        let env = GlobalTaskEnv::new(store_mgr, task_mgr.clone(), addr);
 
-        let task_mgr = Arc::new(Mutex::new(TaskManager::new(env)));
-        let task_srv = TaskServiceImpl::new(task_mgr.clone());
+        let task_srv = TaskServiceImpl::new(task_mgr.clone(), env);
         let exchange_srv = ExchangeServiceImpl::new(task_mgr);
-        let grpc_srv = ServerBuilder::new(Arc::new(Environment::new(1)))
-            .bind("0.0.0.0", 5688)
+        let grpc_srv = ServerBuilder::new(Arc::new(Environment::new(2)))
+            .bind(addr.ip().to_string().as_str(), addr.port())
             .register_service(create_task_service(task_srv))
             .register_service(create_exchange_service(exchange_srv))
             .build()?;

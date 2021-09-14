@@ -5,32 +5,36 @@ use rayon::{ThreadPool, ThreadPoolBuilder};
 use risingwave_proto::plan::PlanFragment;
 use risingwave_proto::task_service::{TaskId as ProtoTaskId, TaskSinkId as ProtoSinkId};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
+#[derive(Clone)]
 pub struct TaskManager {
-    worker_pool: ThreadPool,
-    tasks: Mutex<HashMap<TaskId, Box<TaskExecution>>>,
-    env: GlobalTaskEnv,
+    worker_pool: Arc<ThreadPool>,
+    tasks: Arc<Mutex<HashMap<TaskId, Box<TaskExecution>>>>,
 }
 
 impl TaskManager {
-    pub fn new(env: GlobalTaskEnv) -> Self {
-        let worker_pool = ThreadPoolBuilder::default().num_threads(2).build().unwrap();
+    pub fn new() -> Self {
+        let worker_pool = Arc::new(ThreadPoolBuilder::default().num_threads(4).build().unwrap());
         TaskManager {
             worker_pool,
-            tasks: Mutex::new(HashMap::new()),
-            env,
+            tasks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    pub fn fire_task(&mut self, tid: &ProtoTaskId, plan: PlanFragment) -> Result<()> {
-        let tsk = TaskExecution::new(tid, plan, self.env.clone());
+    pub fn fire_task(
+        &self,
+        env: GlobalTaskEnv,
+        tid: &ProtoTaskId,
+        plan: PlanFragment,
+    ) -> Result<()> {
+        let mut tsk = TaskExecution::new(tid, plan, env);
+        tsk.async_execute(self.worker_pool.clone())?;
         self.tasks
             .lock()
             .unwrap()
             .entry(tsk.get_task_id().clone())
-            .or_insert_with(|| Box::new(tsk))
-            .async_execute(&mut self.worker_pool)?;
+            .or_insert_with(|| Box::new(tsk));
         Ok(())
     }
 
@@ -38,7 +42,7 @@ impl TaskManager {
     // By design, `take_data` is an future, but for the safe of the unsafety to mix other
     // future runtimes (tokio, eg.) with grpc-rs reactor, we still implement it
     // in an blocking way.
-    pub fn take_task(&mut self, sid: &ProtoSinkId) -> Result<Box<TaskExecution>> {
+    pub fn take_task(&self, sid: &ProtoSinkId) -> Result<Box<TaskExecution>> {
         let task_id = TaskId::from(sid.get_task_id());
         let tsk = match self.tasks.lock().unwrap().remove(&task_id) {
             Some(t) => t,
@@ -50,10 +54,11 @@ impl TaskManager {
         };
         Ok(tsk)
     }
+}
 
-    #[cfg(test)]
-    pub fn get_global_env(&self) -> &GlobalTaskEnv {
-        &self.env
+impl Default for TaskManager {
+    fn default() -> Self {
+        TaskManager::new()
     }
 }
 
@@ -85,10 +90,13 @@ mod tests {
     }
     #[test]
     fn test_bad_node_type() {
-        let mut manager = TaskManager::new(GlobalTaskEnv::for_test());
+        let env = GlobalTaskEnv::for_test();
+        let manager = TaskManager::new();
         let mut plan = PlanFragment::default();
         plan.mut_root()
             .set_node_type(PlanNode_PlanNodeType::INVALID);
-        assert!(manager.fire_task(&ProtoTaskId::default(), plan).is_err());
+        assert!(manager
+            .fire_task(env, &ProtoTaskId::default(), plan)
+            .is_err());
     }
 }

@@ -1,11 +1,12 @@
-use crate::array2::value_reader::*;
+use crate::array2::value_reader::{
+    F32ValueReader, F64ValueReader, I16ValueReader, I32ValueReader, I64ValueReader, ValueReader,
+};
 use crate::array2::{
     ArrayBuilder, ArrayImpl, ArrayRef, PrimitiveArrayBuilder, PrimitiveArrayItemType,
 };
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::types::{build_from_proto, DataType, DataTypeRef};
-
 use protobuf::well_known_types::Any as AnyProto;
 use risingwave_proto::data::{Column as ColumnProto, DataType_TypeName};
 use std::sync::Arc;

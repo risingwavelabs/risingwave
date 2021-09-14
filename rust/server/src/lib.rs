@@ -20,7 +20,7 @@ extern crate typed_builder;
 #[macro_use]
 mod error;
 #[macro_use]
-mod util;
+pub mod util;
 mod alloc;
 #[macro_use]
 mod array2;

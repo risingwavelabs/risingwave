@@ -7,7 +7,6 @@ import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.execution.result.DdlResult;
-import com.risingwave.node.WorkerNode;
 import com.risingwave.pgwire.database.PgResult;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.proto.common.Status;
@@ -32,15 +31,16 @@ public class DropTableHandler implements SqlHandler {
     PlanFragment planFragment = executeDdl(ast, context);
     ComputeClientManager clientManager = context.getComputeClientManager();
 
-    WorkerNode node = context.getWorkerNodeManager().nextRandom();
-    ComputeClient client = clientManager.getOrCreate(node);
-    CreateTaskRequest createTaskRequest = Messages.buildCreateTaskRequest(planFragment);
-    CreateTaskResponse createTaskResponse = client.createTask(createTaskRequest);
-    if (createTaskResponse.getStatus().getCode() != Status.Code.OK) {
-      throw new PgException(PgErrorCode.INTERNAL_ERROR, "Create Task failed");
+    for (var node : context.getWorkerNodeManager().allNodes()) {
+      ComputeClient client = clientManager.getOrCreate(node);
+      CreateTaskRequest createTaskRequest = Messages.buildCreateTaskRequest(planFragment);
+      CreateTaskResponse createTaskResponse = client.createTask(createTaskRequest);
+      if (createTaskResponse.getStatus().getCode() != Status.Code.OK) {
+        throw new PgException(PgErrorCode.INTERNAL_ERROR, "Create Task failed");
+      }
+      TaskSinkId taskSinkId = Messages.buildTaskSinkId(createTaskRequest.getTaskId());
+      client.getData(taskSinkId);
     }
-    TaskSinkId taskSinkId = Messages.buildTaskSinkId(createTaskRequest.getTaskId());
-    client.getData(taskSinkId);
 
     return new DdlResult(StatementType.OTHER, 0);
   }
