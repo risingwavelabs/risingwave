@@ -13,7 +13,7 @@ use crate::array2::ArrayRef;
 use crate::array2::DataChunk;
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
-// use crate::expr::arithmetic_expr::ArithmeticExpression;
+use crate::expr::arithmetic_expr::ArithmeticExpression;
 use crate::expr::cmp::CompareExpression;
 use crate::expr::conjunction::ConjunctionExpression;
 use crate::expr::type_cast::TypeCastExpression;
@@ -21,6 +21,7 @@ use crate::expr::type_cast::TypeCastExpression;
 use crate::types::{DataType, DataTypeRef};
 use risingwave_proto::expr::{
     ExprNode,
+    ExprNode_ExprNodeType::{ADD, DIVIDE, MODULUS, MULTIPLY, SUBTRACT},
     ExprNode_ExprNodeType::{AND, NOT, OR},
     ExprNode_ExprNodeType::{CAST, CONSTANT_VALUE, INPUT_REF},
     ExprNode_ExprNodeType::{
@@ -66,12 +67,12 @@ pub fn build_from_proto(proto: &ExprNode) -> Result<BoxedExpression> {
       LESS_THAN => CompareExpression,
       LESS_THAN_OR_EQUAL => CompareExpression,
       GREATER_THAN => CompareExpression,
-      GREATER_THAN_OR_EQUAL => CompareExpression
-      // ADD => ArithmeticExpression,
-      // SUBTRACT => ArithmeticExpression,
-      // MULTIPLY => ArithmeticExpression,
-      // DIVIDE => ArithmeticExpression,
-      // MODULUS => ArithmeticExpression
+      GREATER_THAN_OR_EQUAL => CompareExpression,
+      ADD => ArithmeticExpression,
+      SUBTRACT => ArithmeticExpression,
+      MULTIPLY => ArithmeticExpression,
+      DIVIDE => ArithmeticExpression,
+      MODULUS => ArithmeticExpression
     }
 }
 
