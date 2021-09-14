@@ -22,6 +22,9 @@ pub use actor::Actor;
 mod data_source;
 pub use data_source::DataSource;
 
+mod dispatcher;
+pub use dispatcher::*;
+
 use crate::array2::column::Column;
 use async_trait::async_trait;
 
@@ -47,6 +50,7 @@ pub struct StreamChunk {
     cardinality: usize,
 }
 
+#[derive(Debug)]
 pub enum Message {
     Chunk(StreamChunk),
     Barrier(u64),
