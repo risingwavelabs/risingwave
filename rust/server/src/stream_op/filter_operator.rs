@@ -1,4 +1,4 @@
-use super::{Op, Output, StreamChunk, StreamOperator, UnaryStreamOperator};
+use super::{Message, Op, Output, StreamChunk, StreamOperator, UnaryStreamOperator};
 use crate::{
     array2::{Array, ArrayImpl, DataChunk},
     buffer::Bitmap,
@@ -24,11 +24,13 @@ impl FilterOperator {
     }
 }
 
-impl StreamOperator for FilterOperator {}
+use crate::impl_consume_barrier_default;
+
+impl_consume_barrier_default!(FilterOperator, StreamOperator);
 
 #[async_trait]
 impl UnaryStreamOperator for FilterOperator {
-    async fn consume(&mut self, chunk: StreamChunk) -> Result<()> {
+    async fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
         let StreamChunk {
             ops,
             columns: arrays,
@@ -126,6 +128,6 @@ impl UnaryStreamOperator for FilterOperator {
             ops: new_ops,
         };
 
-        self.output.collect(new_chunk).await
+        self.output.collect(Message::Chunk(new_chunk)).await
     }
 }

@@ -83,7 +83,7 @@ impl Merger for UnaryMerger {
         while let Some(msg) = stream.next().await {
             match msg {
                 (_id, Message::Chunk(chunk)) => {
-                    self.operator_head.consume(chunk).await?;
+                    self.operator_head.consume_chunk(chunk).await?;
                 }
                 (_id, Message::Terminate) => {
                     terminate_count -= 1;
@@ -123,14 +123,19 @@ mod tests {
 
     #[async_trait]
     impl UnaryStreamOperator for TestConsumer {
-        async fn consume(&mut self, chunk: StreamChunk) -> Result<()> {
+        async fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
             let mut items = self.items.lock().unwrap();
             items.push(chunk);
             Ok(())
         }
     }
 
-    impl StreamOperator for TestConsumer {}
+    #[async_trait]
+    impl StreamOperator for TestConsumer {
+        async fn consume_barrier(&mut self, _epoch: u64) -> Result<()> {
+            unreachable!()
+        }
+    }
 
     fn build_test_chunk(epoch: u64) -> StreamChunk {
         let mut chunk = StreamChunk::default();

@@ -1,4 +1,5 @@
-use super::{Output, StreamChunk, StreamOperator, UnaryStreamOperator};
+use super::{Message, Output, StreamChunk, StreamOperator, UnaryStreamOperator};
+use crate::impl_consume_barrier_default;
 use crate::{
     array2::{column::Column, DataChunk},
     error::Result,
@@ -22,11 +23,11 @@ impl ProjectionOperator {
     }
 }
 
-impl StreamOperator for ProjectionOperator {}
+impl_consume_barrier_default!(ProjectionOperator, StreamOperator);
 
 #[async_trait]
 impl UnaryStreamOperator for ProjectionOperator {
-    async fn consume(&mut self, chunk: StreamChunk) -> Result<()> {
+    async fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
         let StreamChunk {
             ops,
             columns,
@@ -67,6 +68,6 @@ impl UnaryStreamOperator for ProjectionOperator {
             cardinality,
         };
 
-        self.output.collect(new_chunk).await
+        self.output.collect(Message::Chunk(new_chunk)).await
     }
 }

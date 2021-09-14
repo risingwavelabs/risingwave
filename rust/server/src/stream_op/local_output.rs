@@ -1,4 +1,4 @@
-use super::{Output, Result, StreamChunk, UnaryStreamOperator};
+use super::{Message, Output, Result, UnaryStreamOperator};
 use async_trait::async_trait;
 
 pub struct LocalOutput {
@@ -13,7 +13,11 @@ impl LocalOutput {
 
 #[async_trait]
 impl Output for LocalOutput {
-    async fn collect(&mut self, chunk: StreamChunk) -> Result<()> {
-        self.next.consume(chunk).await
+    async fn collect(&mut self, msg: Message) -> Result<()> {
+        match msg {
+            Message::Chunk(chunk) => self.next.consume_chunk(chunk).await,
+            Message::Barrier(epoch) => self.next.consume_barrier(epoch).await,
+            _ => todo!(),
+        }
     }
 }

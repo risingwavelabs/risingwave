@@ -5,11 +5,12 @@ use std::sync::Arc;
 
 pub use foldable::*;
 
-use super::{Op, Output, StreamChunk, StreamOperator, UnaryStreamOperator};
+use super::{Message, Op, Output, StreamChunk, StreamOperator, UnaryStreamOperator};
 use crate::array2::column::Column;
 use crate::array2::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl};
 use crate::buffer::Bitmap;
 use crate::error::Result;
+use crate::impl_consume_barrier_default;
 use crate::types::DataTypeRef;
 use async_trait::async_trait;
 
@@ -74,11 +75,11 @@ impl AggregationOperator {
     }
 }
 
-impl StreamOperator for AggregationOperator {}
+impl_consume_barrier_default!(AggregationOperator, StreamOperator);
 
 #[async_trait]
 impl UnaryStreamOperator for AggregationOperator {
-    async fn consume(&mut self, chunk: StreamChunk) -> Result<()> {
+    async fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
         let StreamChunk {
             ops,
             columns: arrays,
@@ -121,7 +122,7 @@ impl UnaryStreamOperator for AggregationOperator {
             };
         }
 
-        self.output.collect(chunk).await?;
+        self.output.collect(Message::Chunk(chunk)).await?;
         Ok(())
     }
 }

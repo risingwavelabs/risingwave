@@ -14,7 +14,7 @@ mod test {
     use std::time;
     use tokio::sync::Mutex;
 
-    use super::super::{Op, Output, Result, StreamChunk};
+    use super::super::{Message, Op, Output, Result, StreamChunk};
     use super::*;
     use crate::array2::column::Column;
     use crate::array2::{Array, ArrayBuilder, ArrayImpl, I64ArrayBuilder};
@@ -72,7 +72,7 @@ mod test {
                     ops: vec![Op::Insert; N],
                     columns: cols,
                 };
-                output.collect(chunk).await?;
+                output.collect(Message::Chunk(chunk)).await?;
             }
 
             Ok(())
@@ -92,8 +92,11 @@ mod test {
 
     #[async_trait]
     impl Output for MockOutput {
-        async fn collect(&mut self, chunk: StreamChunk) -> Result<()> {
-            self.data.lock().await.push(chunk);
+        async fn collect(&mut self, msg: Message) -> Result<()> {
+            match msg {
+                Message::Chunk(chunk) => self.data.lock().await.push(chunk),
+                _ => unreachable!(),
+            }
             Ok(())
         }
     }

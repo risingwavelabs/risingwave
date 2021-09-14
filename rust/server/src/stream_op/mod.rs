@@ -54,22 +54,36 @@ pub enum Message {
     // TODO: Watermark
 }
 
+#[async_trait]
 pub trait StreamOperator: Send + Sync + 'static {
+    async fn consume_barrier(&mut self, epoch: u64) -> Result<()>;
     // TODO: watermark and state management
 }
 
 #[async_trait]
 pub trait UnaryStreamOperator: StreamOperator {
-    async fn consume(&mut self, chunk: StreamChunk) -> Result<()>;
+    async fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<()>;
+}
+
+#[macro_export]
+macro_rules! impl_consume_barrier_default {
+    ($type:ident, $trait: ident) => {
+        #[async_trait]
+        impl $trait for $type {
+            async fn consume_barrier(&mut self, epoch: u64) -> Result<()> {
+                self.output.collect(Message::Barrier(epoch)).await
+            }
+        }
+    };
 }
 
 #[async_trait]
 pub trait BinaryStreamOperator: StreamOperator {
-    async fn consume_first(&mut self, chunk: StreamChunk) -> Result<()>;
-    async fn consume_second(&mut self, chunk: StreamChunk) -> Result<()>;
+    async fn consume_chunk_first(&mut self, chunk: StreamChunk) -> Result<()>;
+    async fn consume_chunk_second(&mut self, chunk: StreamChunk) -> Result<()>;
 }
 
 #[async_trait]
 pub trait Output: Send + Sync + 'static {
-    async fn collect(&mut self, chunk: StreamChunk) -> Result<()>;
+    async fn collect(&mut self, msg: Message) -> Result<()>;
 }
