@@ -118,6 +118,121 @@ impl DataChunk {
         }
         Ok(chunk)
     }
+
+    /// `rechunk` creates a new vector of data chunk whose size is `each_size_limit`.
+    /// When the total cardinality of all the chunks is not evenly divided by the `each_size_limit`,
+    /// the last new chunk will be the remainder.
+    /// TODO: All data are copied twice now. We could save this optimization for the future.
+    pub fn rechunk(chunks: &[DataChunk], each_size_limit: usize) -> Result<Vec<DataChunk>> {
+        assert!(each_size_limit > 0);
+        if chunks.is_empty() {
+            return Ok(Vec::new());
+        }
+        assert!(!chunks[0].columns.is_empty());
+
+        let total_cardinality = chunks
+            .iter()
+            .map(|chunk| chunk.cardinality())
+            .reduce(|x, y| x + y)
+            .unwrap();
+        let num_chunks = (total_cardinality + each_size_limit - 1) / each_size_limit;
+        // for each of the column in all the data chunks, merge them together into one single column
+        let mut new_arrays = Vec::with_capacity(chunks[0].columns.len());
+        for (col_idx, column) in chunks[0].columns.iter().enumerate() {
+            let mut array_builder = column
+                .data_type()
+                .create_array_builder(total_cardinality)
+                .unwrap();
+            for each_chunk in chunks.iter() {
+                array_builder
+                    .append_array(each_chunk.column_at(col_idx).unwrap().array_ref())
+                    .unwrap();
+            }
+            new_arrays.push(array_builder.finish().unwrap());
+        }
+
+        let mut new_chunks = Vec::with_capacity(num_chunks);
+        for chunk_idx in 0..num_chunks {
+            let mut new_columns = Vec::with_capacity(chunks[0].columns.len());
+            let start_idx = each_size_limit * chunk_idx;
+            let end_idx = std::cmp::min(
+                each_size_limit * (chunk_idx + 1) - 1,
+                new_arrays[0].len() - 1,
+            );
+            for (new_array, col) in new_arrays.iter().zip(chunks[0].columns.iter()) {
+                let column = Column::new(
+                    Arc::new(new_array.get_continuous_sub_array(start_idx, end_idx)),
+                    col.data_type(),
+                );
+                new_columns.push(column);
+            }
+            let cardinality = end_idx - start_idx + 1;
+            let new_chunk = DataChunk::builder()
+                .cardinality(cardinality)
+                .columns(new_columns)
+                .build();
+            new_chunks.push(new_chunk);
+        }
+        Ok(new_chunks)
+    }
 }
 
 pub type DataChunkRef = Arc<DataChunk>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::array2::*;
+    use crate::types::Int32Type;
+
+    #[test]
+    fn test_rechunk() {
+        let num_chunks = 10;
+        let chunk_size = 60;
+        let mut chunks = vec![];
+        for chunk_idx in 0..num_chunks {
+            let mut builder = PrimitiveArrayBuilder::<i32>::new(0).unwrap();
+            for i in chunk_size * chunk_idx..chunk_size * (chunk_idx + 1) {
+                builder.append(Some(i as i32)).unwrap();
+            }
+            let chunk = DataChunk::builder()
+                .cardinality(chunk_size)
+                .columns(vec![Column::new(
+                    Arc::new(builder.finish().unwrap().into()),
+                    Arc::new(Int32Type::new(false)),
+                )])
+                .build();
+            chunks.push(chunk);
+        }
+
+        let total_card = num_chunks * chunk_size;
+        let new_chunk_size = 80;
+        let chunk_sizes = vec![80, 80, 80, 80, 80, 80, 80, 40];
+        let new_chunks = DataChunk::rechunk(&chunks, new_chunk_size).unwrap();
+        assert_eq!(new_chunks.len(), chunk_sizes.len());
+        // check cardinality
+        for (idx, chunk_size) in chunk_sizes.iter().enumerate() {
+            assert_eq!(*chunk_size, new_chunks[idx].cardinality());
+        }
+
+        let mut chunk_idx = 0;
+        let mut cur_idx = 0;
+        for val in 0..total_card {
+            if cur_idx >= chunk_sizes[chunk_idx] {
+                cur_idx = 0;
+                chunk_idx += 1;
+            }
+            assert_eq!(
+                new_chunks[chunk_idx]
+                    .column_at(0)
+                    .unwrap()
+                    .array()
+                    .as_int32()
+                    .value_at(cur_idx)
+                    .unwrap(),
+                val as i32
+            );
+            cur_idx += 1;
+        }
+    }
+}

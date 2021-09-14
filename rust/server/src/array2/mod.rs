@@ -372,6 +372,25 @@ impl ArrayImpl {
     }
         for_all_variants! { impl_all_get_sub_array, self }
     }
+
+    pub fn get_continuous_sub_array(&self, start_idx: usize, end_idx: usize) -> ArrayImpl {
+        let capacity = end_idx - start_idx + 1;
+        macro_rules! impl_all_get_continuous_sub_array {
+      ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        match $self {
+          // TODO: for UTF8Array, we could select start and end offset and directly call copy_to_slice instead of accessing them one index by one index.
+          $( Self::$variant_name(inner) => {
+            let mut builder = <$builder>::new(capacity).unwrap();
+            (start_idx..=end_idx).for_each(|idx| {
+              builder.append(inner.value_at(idx)).unwrap();
+            });
+            builder.finish().unwrap().into()
+          }, )*
+        }
+      };
+    }
+        for_all_variants! { impl_all_get_continuous_sub_array, self }
+    }
 }
 
 macro_rules! impl_into_builders {
