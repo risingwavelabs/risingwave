@@ -1,8 +1,9 @@
 use crate::array2::{ArrayBuilder, ArrayBuilderImpl, BoolArrayBuilder};
-use crate::error::Result;
+use crate::error::{Result, RwError};
 use crate::types::{DataType, DataTypeKind, DataTypeRef};
 use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};
 use std::any::Any;
+use std::convert::TryFrom;
 use std::sync::Arc;
 
 /// [BoolType] is not a primitive type because we use a bit for each bool value, not a [bool].
@@ -44,5 +45,14 @@ impl BoolType {
 
     pub fn create(nullable: bool) -> DataTypeRef {
         Arc::new(BoolType::new(nullable)) as DataTypeRef
+    }
+}
+
+impl<'a> TryFrom<&'a DataTypeProto> for BoolType {
+    type Error = RwError;
+
+    fn try_from(proto: &'a DataTypeProto) -> Result<Self> {
+        ensure!(proto.get_type_name() == DataType_TypeName::BOOLEAN);
+        Ok(BoolType::new(proto.get_is_nullable()))
     }
 }

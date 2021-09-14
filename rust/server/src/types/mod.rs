@@ -14,7 +14,6 @@ use crate::error::ErrorCode::InternalError;
 pub use native_type::*;
 use risingwave_proto::data::DataType_TypeName::BOOLEAN;
 use risingwave_proto::data::DataType_TypeName::CHAR;
-
 use risingwave_proto::data::DataType_TypeName::DATE;
 use risingwave_proto::data::DataType_TypeName::DOUBLE;
 use risingwave_proto::data::DataType_TypeName::FLOAT;

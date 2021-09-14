@@ -2,7 +2,6 @@
 
 mod bool_array;
 pub(crate) mod column;
-mod compact_v1;
 mod data_chunk;
 mod decimal_array;
 pub(crate) mod interval_array;
