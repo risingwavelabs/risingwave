@@ -1,43 +1,21 @@
 //! Streaming Aggregators
 
-mod foldable;
 use std::sync::Arc;
 
-pub use foldable::*;
-
+use super::aggregation::*;
 use super::{Message, Op, Output, StreamChunk, StreamOperator, UnaryStreamOperator};
 use crate::array2::column::Column;
-use crate::array2::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl};
-use crate::buffer::Bitmap;
+use crate::array2::Array;
 use crate::error::Result;
 use crate::impl_consume_barrier_default;
 use crate::types::DataTypeRef;
 use async_trait::async_trait;
 
-pub type Ops<'a> = &'a [Op];
+/// `StreamingSumAgg` sums data of the same type.
+pub type StreamingSumAgg<R> = StreamingFoldAgg<R, R, PrimitiveSummable<<R as Array>::OwnedItem>>;
 
-/// `StreamingAggState` records a state of streaming expression. For example,
-/// there will be `StreamingAggCompare` and `StreamingAggSum`.
-pub trait StreamingAggState<A: Array> {
-    fn apply_batch_concrete(&mut self, ops: Ops<'_>, skip: Option<&Bitmap>, data: &A)
-        -> Result<()>;
-}
-
-/// `StreamingAggFunction` allows us to get output from a streaming state.
-pub trait StreamingAggFunction<B: ArrayBuilder> {
-    fn get_output_concrete(&self, builder: &mut B) -> Result<()>;
-}
-
-/// `StreamingAggStateImpl` erases the associated type information of
-/// `StreamingAggState` and `StreamingAggFunction`. You should manually
-/// implement this trait for necessary types.
-pub trait StreamingAggStateImpl: Send + Sync + 'static {
-    fn apply_batch(&mut self, ops: Ops<'_>, skip: Option<&Bitmap>, data: &ArrayImpl) -> Result<()>;
-
-    fn get_output(&self, builder: &mut ArrayBuilderImpl) -> Result<()>;
-
-    fn new_builder(&self) -> ArrayBuilderImpl;
-}
+/// `StreamingCountAgg` counts data of any type.
+pub type StreamingCountAgg<R> = StreamingFoldAgg<R, R, Countable<<R as Array>::OwnedItem>>;
 
 /// `AggregationOperator` is the aggregation operator for streaming system.
 /// To create an aggregation operator, a state should be passed along the

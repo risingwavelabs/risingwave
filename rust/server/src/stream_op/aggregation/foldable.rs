@@ -7,7 +7,7 @@ use crate::buffer::Bitmap;
 use crate::error::{ErrorCode::NumericValueOutOfRange, Result, RwError};
 use crate::types::{option_as_scalar_ref, Scalar, ScalarRef};
 
-use super::{Op, StreamingAggFunction, StreamingAggState, StreamingAggStateImpl};
+use super::{Op, Ops, StreamingAggFunction, StreamingAggState, StreamingAggStateImpl};
 
 /// A trait over all fold functions.
 ///
@@ -138,7 +138,7 @@ where
 {
     fn apply_batch_concrete(
         &mut self,
-        ops: super::Ops<'_>,
+        ops: Ops<'_>,
         skip: Option<&Bitmap>,
         data: &I,
     ) -> Result<()> {
@@ -197,7 +197,7 @@ macro_rules! impl_agg {
     {
       fn apply_batch(
         &mut self,
-        ops: super::Ops<'_>,
+        ops: Ops<'_>,
         skip: Option<&Bitmap>,
         data: &ArrayImpl,
       ) -> Result<()> {
@@ -224,21 +224,21 @@ macro_rules! impl_agg {
 
 impl_agg! { I64Array, Int64, I64Array }
 
-/// `StreamingSumAgg` sums data of the same type.
-type StreamingSumAgg<R> = StreamingFoldAgg<R, R, PrimitiveSummable<<R as Array>::OwnedItem>>;
-
-/// `StreamingCountAgg` counts data of any type.
-type StreamingCountAgg<R> = StreamingFoldAgg<R, R, Countable<<R as Array>::OwnedItem>>;
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::array2::I64Array;
     use crate::{array, array_nonnull};
 
+    type TestStreamingSumAgg<R> =
+        StreamingFoldAgg<R, R, PrimitiveSummable<<R as Array>::OwnedItem>>;
+
+    type TestStreamingCountAgg<R> = StreamingFoldAgg<R, R, Countable<<R as Array>::OwnedItem>>;
+
     #[test]
     fn test_primitive_sum() {
-        let mut agg: Box<dyn StreamingAggStateImpl> = Box::new(StreamingSumAgg::<I64Array>::new());
+        let mut agg: Box<dyn StreamingAggStateImpl> =
+            Box::new(TestStreamingSumAgg::<I64Array>::new());
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
@@ -254,7 +254,7 @@ mod tests {
     #[test]
     fn test_primitive_count() {
         let mut agg: Box<dyn StreamingAggStateImpl> =
-            Box::new(StreamingCountAgg::<I64Array>::new());
+            Box::new(TestStreamingCountAgg::<I64Array>::new());
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,

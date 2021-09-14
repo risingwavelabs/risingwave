@@ -4,6 +4,9 @@ use crate::{buffer::Bitmap, error::Result};
 mod aggregation_operator;
 pub use aggregation_operator::*;
 
+mod global_aggregation_operator;
+pub use global_aggregation_operator::*;
+
 mod filter_operator;
 pub use filter_operator::FilterOperator;
 
@@ -22,6 +25,8 @@ pub use actor::Actor;
 mod data_source;
 pub use data_source::DataSource;
 
+mod aggregation;
+
 mod dispatcher;
 pub use dispatcher::*;
 
@@ -39,6 +44,8 @@ pub enum Op {
     UpdateDelete,
     UpdateInsert,
 }
+
+pub type Ops<'a> = &'a [Op];
 
 /// `StreamChunk` is used to pass data between operators.
 #[derive(Default, Debug)]
