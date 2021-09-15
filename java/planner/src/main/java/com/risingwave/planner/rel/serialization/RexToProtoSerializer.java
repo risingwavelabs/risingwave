@@ -6,7 +6,6 @@ import com.google.common.collect.ImmutableMap;
 import com.google.protobuf.Any;
 import com.google.protobuf.ByteString;
 import com.risingwave.common.datatype.RisingWaveDataType;
-import com.risingwave.common.datatype.RisingWaveTypeFactory;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.proto.data.DataType;
@@ -179,18 +178,7 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
   public ExprNode visitLiteral(RexLiteral literal) {
     RisingWaveDataType dataType = (RisingWaveDataType) literal.getType();
     var sqlTypeName = dataType.getSqlTypeName();
-    if (sqlTypeName == SqlTypeName.DECIMAL) {
-      // Note that the BigDecimal seems to define negative scale value in the doc, which is
-      // inconsistent with PG. Currently we do not allow scale to be negative.
-      var decimalLiteral = literal.getValueAs(BigDecimal.class);
-      dataType =
-          new RisingWaveTypeFactory()
-              .createSqlType(
-                  SqlTypeName.DECIMAL, decimalLiteral.precision(), decimalLiteral.scale());
-    }
-
     DataType protoDataType = dataType.getProtobufType();
-    var retExpr = makeConstantExpr(literal, protoDataType, protoDataType);
 
     // Hack here. It's not elegant. FIXME: Should remove this after Constant Folding.
     // It is directly creating a cast expression instead of constant value expression
@@ -213,6 +201,7 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
       var callExpr = makeFunctionCallExpr(children, protoDataType, ExprNode.ExprNodeType.CAST);
       return callExpr;
     }
+    var retExpr = makeConstantExpr(literal, protoDataType, protoDataType);
     return retExpr;
   }
 

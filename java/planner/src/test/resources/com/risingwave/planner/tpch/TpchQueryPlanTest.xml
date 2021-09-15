@@ -81,8 +81,8 @@ RwBatchInsertValues(table=[customer], values=[((149601,'Customer#000149601':CHAR
         },
         "returnType": {
           "typeName": "DECIMAL",
-          "precision": 6,
-          "scale": 2
+          "precision": 28,
+          "scale": 10
         }
       }, {
         "exprType": "CONSTANT_VALUE",
@@ -198,16 +198,16 @@ RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
 <!--          },-->
 <!--          "returnType": {-->
 <!--            "typeName": "DECIMAL",-->
-<!--            "precision": 19,-->
-<!--            "scale": 19,-->
+<!--            "precision": 28,-->
+<!--            "scale": 10,-->
 <!--            "isNullable": true-->
 <!--          }-->
 <!--        }]-->
 <!--      },-->
 <!--      "returnType": {-->
 <!--        "typeName": "DECIMAL",-->
-<!--        "precision": 19,-->
-<!--        "scale": 19,-->
+<!--        "precision": 28,-->
+<!--        "scale": 10,-->
 <!--        "isNullable": true-->
 <!--      }-->
 <!--    }]-->
@@ -228,8 +228,8 @@ RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
 <!--            },-->
 <!--            "returnType": {-->
 <!--              "typeName": "DECIMAL",-->
-<!--              "precision": 147455,-->
-<!--              "scale": 16383,-->
+<!--              "precision": 28,-->
+<!--              "scale": 10,-->
 <!--              "isNullable": true-->
 <!--            }-->
 <!--          }, {-->
@@ -240,16 +240,16 @@ RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
 <!--            },-->
 <!--            "returnType": {-->
 <!--              "typeName": "DECIMAL",-->
-<!--              "precision": 147455,-->
-<!--              "scale": 16383,-->
+<!--              "precision": 28,-->
+<!--              "scale": 10,-->
 <!--              "isNullable": true-->
 <!--            }-->
 <!--          }]-->
 <!--        },-->
 <!--        "returnType": {-->
 <!--          "typeName": "DECIMAL",-->
-<!--          "precision": 19,-->
-<!--          "scale": 19,-->
+<!--          "precision": 28,-->
+<!--          "scale": 10,-->
 <!--          "isNullable": true-->
 <!--        }-->
 <!--      }]-->
@@ -277,10 +277,20 @@ RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
 <!--                    "isNullable": true-->
 <!--                  }-->
 <!--                }, {-->
-<!--                  "exprType": "CONSTANT_VALUE",-->
+<!--                  "exprType": "CAST",-->
 <!--                  "body": {-->
-<!--                    "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",-->
-<!--                    "body": "MTk5NC0wMS0wMQ=="-->
+<!--                    "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",-->
+<!--                    "children": [{-->
+<!--                      "exprType": "CONSTANT_VALUE",-->
+<!--                      "body": {-->
+<!--                        "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",-->
+<!--                        "body": "MTk5NC0wMS0wMQ=="-->
+<!--                      },-->
+<!--                      "returnType": {-->
+<!--                        "typeName": "CHAR",-->
+<!--                        "precision": 10-->
+<!--                      }-->
+<!--                    }]-->
 <!--                  },-->
 <!--                  "returnType": {-->
 <!--                    "typeName": "DATE"-->
@@ -320,10 +330,20 @@ RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
 <!--                  "body": {-->
 <!--                    "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",-->
 <!--                    "children": [{-->
-<!--                      "exprType": "CONSTANT_VALUE",-->
+<!--                      "exprType": "CAST",-->
 <!--                      "body": {-->
-<!--                        "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",-->
-<!--                        "body": "MTk5NC0wMS0wMQ=="-->
+<!--                        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",-->
+<!--                        "children": [{-->
+<!--                          "exprType": "CONSTANT_VALUE",-->
+<!--                          "body": {-->
+<!--                            "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",-->
+<!--                            "body": "MTk5NC0wMS0wMQ=="-->
+<!--                          },-->
+<!--                          "returnType": {-->
+<!--                            "typeName": "CHAR",-->
+<!--                            "precision": 10-->
+<!--                          }-->
+<!--                        }]-->
 <!--                      },-->
 <!--                      "returnType": {-->
 <!--                        "typeName": "DATE"-->
@@ -369,8 +389,8 @@ RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
 <!--                          },-->
 <!--                          "returnType": {-->
 <!--                            "typeName": "DECIMAL",-->
-<!--                            "precision": 147455,-->
-<!--                            "scale": 16383,-->
+<!--                            "precision": 28,-->
+<!--                            "scale": 10,-->
 <!--                            "isNullable": true-->
 <!--                          }-->
 <!--                        }, {-->
@@ -381,24 +401,30 @@ RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
 <!--                              "exprType": "CONSTANT_VALUE",-->
 <!--                              "body": {-->
 <!--                                "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",-->
-<!--                                "body": "P7R64UeuFHs="-->
+<!--                                "body": "MC4wOA=="-->
 <!--                              },-->
 <!--                              "returnType": {-->
-<!--                                "typeName": "DOUBLE"-->
+<!--                                "typeName": "DECIMAL",-->
+<!--                                "precision": 3,-->
+<!--                                "scale": 2-->
 <!--                              }-->
 <!--                            }, {-->
 <!--                              "exprType": "CONSTANT_VALUE",-->
 <!--                              "body": {-->
 <!--                                "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",-->
-<!--                                "body": "P4R64UeuFHs="-->
+<!--                                "body": "MC4wMQ=="-->
 <!--                              },-->
 <!--                              "returnType": {-->
-<!--                                "typeName": "DOUBLE"-->
+<!--                                "typeName": "DECIMAL",-->
+<!--                                "precision": 3,-->
+<!--                                "scale": 2-->
 <!--                              }-->
 <!--                            }]-->
 <!--                          },-->
 <!--                          "returnType": {-->
-<!--                            "typeName": "DOUBLE"-->
+<!--                            "typeName": "DECIMAL",-->
+<!--                            "precision": 4,-->
+<!--                            "scale": 2-->
 <!--                          }-->
 <!--                        }]-->
 <!--                      },-->
@@ -418,8 +444,8 @@ RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
 <!--                          },-->
 <!--                          "returnType": {-->
 <!--                            "typeName": "DECIMAL",-->
-<!--                            "precision": 147455,-->
-<!--                            "scale": 16383,-->
+<!--                            "precision": 28,-->
+<!--                            "scale": 10,-->
 <!--                            "isNullable": true-->
 <!--                          }-->
 <!--                        }, {-->
@@ -430,24 +456,30 @@ RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
 <!--                              "exprType": "CONSTANT_VALUE",-->
 <!--                              "body": {-->
 <!--                                "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",-->
-<!--                                "body": "P7R64UeuFHs="-->
+<!--                                "body": "MC4wOA=="-->
 <!--                              },-->
 <!--                              "returnType": {-->
-<!--                                "typeName": "DOUBLE"-->
+<!--                                "typeName": "DECIMAL",-->
+<!--                                "precision": 3,-->
+<!--                                "scale": 2-->
 <!--                              }-->
 <!--                            }, {-->
 <!--                              "exprType": "CONSTANT_VALUE",-->
 <!--                              "body": {-->
 <!--                                "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",-->
-<!--                                "body": "P4R64UeuFHs="-->
+<!--                                "body": "MC4wMQ=="-->
 <!--                              },-->
 <!--                              "returnType": {-->
-<!--                                "typeName": "DOUBLE"-->
+<!--                                "typeName": "DECIMAL",-->
+<!--                                "precision": 3,-->
+<!--                                "scale": 2-->
 <!--                              }-->
 <!--                            }]-->
 <!--                          },-->
 <!--                          "returnType": {-->
-<!--                            "typeName": "DOUBLE"-->
+<!--                            "typeName": "DECIMAL",-->
+<!--                            "precision": 4,-->
+<!--                            "scale": 2-->
 <!--                          }-->
 <!--                        }]-->
 <!--                      },-->
@@ -477,8 +509,8 @@ RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
 <!--                          },-->
 <!--                          "returnType": {-->
 <!--                            "typeName": "DECIMAL",-->
-<!--                            "precision": 147455,-->
-<!--                            "scale": 16383,-->
+<!--                            "precision": 28,-->
+<!--                            "scale": 10,-->
 <!--                            "isNullable": true-->
 <!--                          }-->
 <!--                        }, {-->
@@ -489,24 +521,30 @@ RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
 <!--                              "exprType": "CONSTANT_VALUE",-->
 <!--                              "body": {-->
 <!--                                "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",-->
-<!--                                "body": "P7R64UeuFHs="-->
+<!--                                "body": "MC4wOA=="-->
 <!--                              },-->
 <!--                              "returnType": {-->
-<!--                                "typeName": "DOUBLE"-->
+<!--                                "typeName": "DECIMAL",-->
+<!--                                "precision": 3,-->
+<!--                                "scale": 2-->
 <!--                              }-->
 <!--                            }, {-->
 <!--                              "exprType": "CONSTANT_VALUE",-->
 <!--                              "body": {-->
 <!--                                "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",-->
-<!--                                "body": "P4R64UeuFHs="-->
+<!--                                "body": "MC4wMQ=="-->
 <!--                              },-->
 <!--                              "returnType": {-->
-<!--                                "typeName": "DOUBLE"-->
+<!--                                "typeName": "DECIMAL",-->
+<!--                                "precision": 3,-->
+<!--                                "scale": 2-->
 <!--                              }-->
 <!--                            }]-->
 <!--                          },-->
 <!--                          "returnType": {-->
-<!--                            "typeName": "DOUBLE"-->
+<!--                            "typeName": "DECIMAL",-->
+<!--                            "precision": 4,-->
+<!--                            "scale": 2-->
 <!--                          }-->
 <!--                        }]-->
 <!--                      },-->
@@ -526,8 +564,8 @@ RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
 <!--                          },-->
 <!--                          "returnType": {-->
 <!--                            "typeName": "DECIMAL",-->
-<!--                            "precision": 147455,-->
-<!--                            "scale": 16383,-->
+<!--                            "precision": 28,-->
+<!--                            "scale": 10,-->
 <!--                            "isNullable": true-->
 <!--                          }-->
 <!--                        }, {-->
@@ -538,24 +576,30 @@ RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
 <!--                              "exprType": "CONSTANT_VALUE",-->
 <!--                              "body": {-->
 <!--                                "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",-->
-<!--                                "body": "P7R64UeuFHs="-->
+<!--                                "body": "MC4wOA=="-->
 <!--                              },-->
 <!--                              "returnType": {-->
-<!--                                "typeName": "DOUBLE"-->
+<!--                                "typeName": "DECIMAL",-->
+<!--                                "precision": 3,-->
+<!--                                "scale": 2-->
 <!--                              }-->
 <!--                            }, {-->
 <!--                              "exprType": "CONSTANT_VALUE",-->
 <!--                              "body": {-->
 <!--                                "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",-->
-<!--                                "body": "P4R64UeuFHs="-->
+<!--                                "body": "MC4wMQ=="-->
 <!--                              },-->
 <!--                              "returnType": {-->
-<!--                                "typeName": "DOUBLE"-->
+<!--                                "typeName": "DECIMAL",-->
+<!--                                "precision": 3,-->
+<!--                                "scale": 2-->
 <!--                              }-->
 <!--                            }]-->
 <!--                          },-->
 <!--                          "returnType": {-->
-<!--                            "typeName": "DOUBLE"-->
+<!--                            "typeName": "DECIMAL",-->
+<!--                            "precision": 4,-->
+<!--                            "scale": 2-->
 <!--                          }-->
 <!--                        }]-->
 <!--                      },-->
@@ -586,8 +630,8 @@ RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
 <!--                  },-->
 <!--                  "returnType": {-->
 <!--                    "typeName": "DECIMAL",-->
-<!--                    "precision": 147455,-->
-<!--                    "scale": 16383,-->
+<!--                    "precision": 28,-->
+<!--                    "scale": 10,-->
 <!--                    "isNullable": true-->
 <!--                  }-->
 <!--                }, {-->
