@@ -2,6 +2,9 @@ extern crate protoc_grpcio;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let proto_dir = "../../proto";
+
+    println!("cargo:rerun-if-changed={}", proto_dir);
+
     let proto_files = vec![
         "common.proto",
         "data.proto",
