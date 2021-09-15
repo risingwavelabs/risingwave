@@ -12,7 +12,6 @@ import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
 import com.risingwave.proto.plan.InsertValueNode;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.rpc.Messages;
-import java.nio.charset.StandardCharsets;
 import java.util.stream.Collectors;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptUtil;
@@ -22,17 +21,8 @@ import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.convert.ConverterRule;
 import org.apache.calcite.rel.type.RelDataType;
-import org.apache.calcite.rex.RexBuilder;
-import org.apache.calcite.rex.RexCall;
-import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
-import org.apache.calcite.rex.RexVisitorImpl;
-import org.apache.calcite.sql.SqlCollation;
 import org.apache.calcite.sql.SqlKind;
-import org.apache.calcite.util.DateString;
-import org.apache.calcite.util.NlsString;
-import org.apache.calcite.util.TimeString;
-import org.apache.calcite.util.TimestampString;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 public class RwBatchInsertValues extends AbstractRelNode implements RisingWaveBatchPhyRel {
@@ -67,8 +57,7 @@ public class RwBatchInsertValues extends AbstractRelNode implements RisingWaveBa
       ImmutableList<RexNode> tuple = tuples.get(i);
       InsertValueNode.ExprTuple.Builder exprTupleBuilder = InsertValueNode.ExprTuple.newBuilder();
       for (int j = 0; j < tuple.size(); ++j) {
-        AddCastVisitor addCastVisitor = new AddCastVisitor(getCluster().getRexBuilder());
-        RexNode value = tuple.get(j).accept(addCastVisitor);
+        RexNode value = tuple.get(j);
 
         RexToProtoSerializer rexToProtoSerializer = new RexToProtoSerializer();
 
@@ -137,67 +126,6 @@ public class RwBatchInsertValues extends AbstractRelNode implements RisingWaveBa
           logicalInsertValues.getTableCatalog(),
           logicalInsertValues.getColumnIds(),
           logicalInsertValues.getTuples());
-    }
-  }
-
-  private static class AddCastVisitor extends RexVisitorImpl<RexNode> {
-    private final RexBuilder rexBuilder;
-
-    private AddCastVisitor(RexBuilder rexBuilder) {
-      super(true);
-      this.rexBuilder = rexBuilder;
-    }
-
-    @Override
-    public RexNode visitLiteral(RexLiteral literal) {
-      switch (literal.getType().getSqlTypeName()) {
-        case DATE:
-          return addCastToDate(literal);
-        case TIMESTAMP:
-          return addCastToTimestamp(literal);
-        case TIME:
-          return addCastToTime(literal);
-        default:
-          return literal;
-      }
-    }
-
-    @Override
-    public RexNode visitCall(RexCall call) {
-      return call;
-    }
-
-    private RexNode addCastToDate(RexLiteral literal) {
-      DateString value = requireNonNull(literal.getValueAs(DateString.class), "value");
-      RexLiteral newLiteral =
-          rexBuilder.makeCharLiteral(
-              new NlsString(
-                  value.toString(), StandardCharsets.UTF_8.name(), SqlCollation.IMPLICIT));
-
-      RexNode castNode = rexBuilder.makeAbstractCast(literal.getType(), newLiteral);
-      return castNode;
-    }
-
-    private RexNode addCastToTime(RexLiteral literal) {
-      TimeString value = requireNonNull(literal.getValueAs(TimeString.class), "value");
-      RexLiteral newLiteral =
-          rexBuilder.makeCharLiteral(
-              new NlsString(
-                  value.toString(), StandardCharsets.UTF_8.name(), SqlCollation.IMPLICIT));
-
-      RexNode castNode = rexBuilder.makeAbstractCast(literal.getType(), newLiteral);
-      return castNode;
-    }
-
-    private RexNode addCastToTimestamp(RexLiteral literal) {
-      TimestampString value = requireNonNull(literal.getValueAs(TimestampString.class), "value");
-      RexLiteral newLiteral =
-          rexBuilder.makeCharLiteral(
-              new NlsString(
-                  value.toString(), StandardCharsets.UTF_8.name(), SqlCollation.IMPLICIT));
-
-      RexNode castNode = rexBuilder.makeAbstractCast(literal.getType(), newLiteral);
-      return castNode;
     }
   }
 }

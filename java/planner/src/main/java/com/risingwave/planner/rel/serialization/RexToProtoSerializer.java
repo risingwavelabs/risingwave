@@ -18,6 +18,7 @@ import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -29,6 +30,9 @@ import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.util.DateString;
 import org.apache.calcite.util.NlsString;
+import org.apache.calcite.util.TimeString;
+import org.apache.calcite.util.TimestampString;
+import org.apache.calcite.util.TimestampWithTimeZoneString;
 
 public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
   private static final ImmutableMap<SqlKind, ExprNode.ExprNodeType> SQL_TO_FUNC_MAPPING =
@@ -132,6 +136,22 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
                   val.getValueAs(DateString.class).toString().getBytes(StandardCharsets.UTF_8));
           break;
         }
+      case TIME:
+        {
+          bb =
+              ByteBuffer.wrap(
+                  val.getValueAs(TimeString.class).toString().getBytes(StandardCharsets.UTF_8));
+          break;
+        }
+      case TIMESTAMP:
+        {
+          bb =
+              ByteBuffer.wrap(
+                  val.getValueAs(TimestampString.class)
+                      .toString()
+                      .getBytes(StandardCharsets.UTF_8));
+          break;
+        }
       case INTERVAL:
         {
           switch (dataType.getIntervalType()) {
@@ -158,7 +178,8 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
   @Override
   public ExprNode visitLiteral(RexLiteral literal) {
     RisingWaveDataType dataType = (RisingWaveDataType) literal.getType();
-    if (dataType.getSqlTypeName() == SqlTypeName.DECIMAL) {
+    var sqlTypeName = dataType.getSqlTypeName();
+    if (sqlTypeName == SqlTypeName.DECIMAL) {
       // Note that the BigDecimal seems to define negative scale value in the doc, which is
       // inconsistent with PG. Currently we do not allow scale to be negative.
       var decimalLiteral = literal.getValueAs(BigDecimal.class);
@@ -167,18 +188,32 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
               .createSqlType(
                   SqlTypeName.DECIMAL, decimalLiteral.precision(), decimalLiteral.scale());
     }
+
     DataType protoDataType = dataType.getProtobufType();
-    return ExprNode.newBuilder()
-        .setExprType(ExprNode.ExprNodeType.CONSTANT_VALUE)
-        .setBody(
-            Any.pack(
-                ConstantValue.newBuilder()
-                    .setBody(
-                        ByteString.copyFrom(
-                            RexToProtoSerializer.getBytesRepresentation(literal, protoDataType)))
-                    .build()))
-        .setReturnType(protoDataType)
-        .build();
+    var retExpr = makeConstantExpr(literal, protoDataType, protoDataType);
+
+    // Hack here. It's not elegant. FIXME: Should remove this after Constant Folding.
+    // It is directly creating a cast expression instead of constant value expression
+    // for literal like time/timestamp/date.
+    if (sqlTypeName == SqlTypeName.DATE
+        || sqlTypeName == SqlTypeName.TIME
+        || sqlTypeName == SqlTypeName.TIMESTAMP
+        || sqlTypeName == SqlTypeName.TIMESTAMP_WITH_LOCAL_TIME_ZONE) {
+      var constExpr =
+          makeConstantExpr(
+              literal,
+              DataType.newBuilder()
+                  .setIsNullable(false)
+                  .setTypeName(DataType.TypeName.CHAR)
+                  .setPrecision(getPrecision(literal))
+                  .build(),
+              dataType.getProtobufType());
+      var children = new ArrayList<ExprNode>();
+      children.add(constExpr);
+      var callExpr = makeFunctionCallExpr(children, protoDataType, ExprNode.ExprNodeType.CAST);
+      return callExpr;
+    }
+    return retExpr;
   }
 
   @Override
@@ -200,14 +235,8 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
         call.getOperands().stream()
             .map(rexNode -> rexNode.accept(this))
             .collect(Collectors.toList());
-
-    FunctionCall body = FunctionCall.newBuilder().addAllChildren(children).build();
-
-    return ExprNode.newBuilder()
-        .setExprType(funcCallOf(call.getKind(), call.getOperator().getName()))
-        .setReturnType(protoDataType)
-        .setBody(Any.pack(body))
-        .build();
+    return makeFunctionCallExpr(
+        children, protoDataType, funcCallOf(call.getKind(), call.getOperator().getName()));
   }
 
   private static ExprNode.ExprNodeType funcCallOf(SqlKind kind, String name) {
@@ -223,5 +252,55 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
             () ->
                 new PgException(
                     PgErrorCode.INTERNAL_ERROR, "Unmappable function call:" + " %s", kind));
+  }
+
+  /**
+   * Make a constant expression. Regularly, `returnProtoDataType` are the same with `protoDataType`.
+   * But For type like date/time/timestamp/timestampz, in order to wrap a type cast here, use normal
+   * type for get bytes representation and set return type to be `CHAR`.
+   */
+  private static ExprNode makeConstantExpr(
+      RexLiteral literal, DataType returnProtoDataType, DataType protoDataType) {
+    return ExprNode.newBuilder()
+        .setExprType(ExprNode.ExprNodeType.CONSTANT_VALUE)
+        .setBody(
+            Any.pack(
+                ConstantValue.newBuilder()
+                    .setBody(
+                        ByteString.copyFrom(
+                            RexToProtoSerializer.getBytesRepresentation(literal, protoDataType)))
+                    .build()))
+        .setReturnType(returnProtoDataType)
+        .build();
+  }
+
+  private static ExprNode makeFunctionCallExpr(
+      List<ExprNode> children, DataType protoDataType, ExprNode.ExprNodeType exprType) {
+    FunctionCall body = FunctionCall.newBuilder().addAllChildren(children).build();
+
+    return ExprNode.newBuilder()
+        .setExprType(exprType)
+        .setReturnType(protoDataType)
+        .setBody(Any.pack(body))
+        .build();
+  }
+
+  private static int getPrecision(RexLiteral literal) {
+    RisingWaveDataType type = (RisingWaveDataType) literal.getType();
+    var sqlTypeName = type.getSqlTypeName();
+    if (sqlTypeName == SqlTypeName.DATE) {
+      return requireNonNull(literal.getValueAs(DateString.class), "value").toString().length();
+    } else if (sqlTypeName == SqlTypeName.TIME) {
+      return requireNonNull(literal.getValueAs(TimeString.class), "value").toString().length();
+    } else if (sqlTypeName == SqlTypeName.TIMESTAMP) {
+      return requireNonNull(literal.getValueAs(TimestampString.class), "value").toString().length();
+    } else if (sqlTypeName == SqlTypeName.TIMESTAMP_WITH_LOCAL_TIME_ZONE) {
+      return requireNonNull(literal.getValueAs(TimestampWithTimeZoneString.class), "value")
+          .toString()
+          .length();
+    } else {
+      throw new RuntimeException(
+          "Only support cast date/time/timestamp/timestampz " + "type in RexToProtoSerializer");
+    }
   }
 }

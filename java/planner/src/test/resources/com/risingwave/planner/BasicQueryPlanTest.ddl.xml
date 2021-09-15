@@ -5,4 +5,10 @@ create table t(v1 int not null, v2 int not null, v3 float not null)
         ]]>
     </Resource>
 
+    <Resource>
+        <![CDATA[
+create table t2(v1 date not null)
+        ]]>
+    </Resource>
+
 </Root>

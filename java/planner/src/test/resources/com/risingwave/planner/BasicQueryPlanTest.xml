@@ -473,4 +473,78 @@ RwBatchProject(EXPR$0=[/(100.0:DOUBLE, 8.0:DOUBLE)])
         <!--            fdsa-->
         <!--        </Resource>-->
     </TestCase>
+    <TestCase name="filter expression for date">
+        <Resource name="sql">
+            <![CDATA[
+            select v1 from t2 where v1 >= '1970-01-01'
+]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchFilter(condition=[>=($0, 1970-01-01)])
+  RwBatchFilterScan(table=[[test_schema, t2]], columns=[v1])
+            ]]>
+        </Resource>
+        <Resource name="json">
+<![CDATA[
+{
+  "nodeType": "FILTER",
+  "body": {
+    "@type": "type.googleapis.com/risingwave.executor.proto.FilterNode",
+    "searchCondition": {
+      "exprType": "GREATER_THAN_OR_EQUAL",
+      "body": {
+        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+        "children": [{
+          "exprType": "INPUT_REF",
+          "body": {
+            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+          },
+          "returnType": {
+            "typeName": "DATE"
+          }
+        }, {
+          "exprType": "CAST",
+          "body": {
+            "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+            "children": [{
+              "exprType": "CONSTANT_VALUE",
+              "body": {
+                "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+                "body": "MTk3MC0wMS0wMQ=="
+              },
+              "returnType": {
+                "typeName": "CHAR",
+                "precision": 10
+              }
+            }]
+          },
+          "returnType": {
+            "typeName": "DATE"
+          }
+        }]
+      },
+      "returnType": {
+        "typeName": "BOOLEAN"
+      }
+    }
+  },
+  "children": [{
+    "nodeType": "SEQ_SCAN",
+    "body": {
+      "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",
+      "tableRefId": {
+        "schemaRefId": {
+          "databaseRefId": {
+          }
+        },
+        "tableId": 1
+      },
+      "columnIds": [0]
+    }
+  }]
+}
+]]>
+        </Resource>
+    </TestCase>
 </Root>
