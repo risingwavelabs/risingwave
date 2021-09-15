@@ -112,30 +112,11 @@ impl Merger for UnaryMerger {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stream_op::{Op, StreamChunk, StreamOperator};
+    use crate::stream_op::tests::TestConsumer;
+    use crate::stream_op::{Op, StreamChunk};
     use futures::SinkExt;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
-
-    pub struct TestConsumer {
-        items: Arc<Mutex<Vec<StreamChunk>>>,
-    }
-
-    #[async_trait]
-    impl UnaryStreamOperator for TestConsumer {
-        async fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
-            let mut items = self.items.lock().unwrap();
-            items.push(chunk);
-            Ok(())
-        }
-    }
-
-    #[async_trait]
-    impl StreamOperator for TestConsumer {
-        async fn consume_barrier(&mut self, _epoch: u64) -> Result<()> {
-            unreachable!()
-        }
-    }
 
     fn build_test_chunk(epoch: u64) -> StreamChunk {
         let mut chunk = StreamChunk::default();
@@ -152,9 +133,7 @@ mod tests {
         let mut txs = Vec::with_capacity(CHANNEL_NUMBER);
         let mut rxs = Vec::with_capacity(CHANNEL_NUMBER);
         let msgs = Arc::new(Mutex::new(vec![]));
-        let consumer = TestConsumer {
-            items: msgs.clone(),
-        };
+        let consumer = TestConsumer::new(msgs.clone());
         for _i in 0..CHANNEL_NUMBER {
             let (tx, rx) = futures::channel::mpsc::channel(16);
             txs.push(tx);

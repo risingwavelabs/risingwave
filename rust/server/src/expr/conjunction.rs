@@ -19,11 +19,27 @@ pub enum ConjunctionOperatorKind {
     Not,
 }
 
-pub(super) struct ConjunctionExpression {
+pub struct ConjunctionExpression {
     return_type: DataTypeRef,
     kind: ConjunctionOperatorKind,
     lhs: BoxedExpression,
     rhs: Option<BoxedExpression>,
+}
+
+impl ConjunctionExpression {
+    pub fn new(
+        return_type: DataTypeRef,
+        kind: ConjunctionOperatorKind,
+        lhs: BoxedExpression,
+        rhs: Option<BoxedExpression>,
+    ) -> Self {
+        Self {
+            return_type,
+            kind,
+            lhs,
+            rhs,
+        }
+    }
 }
 
 impl Expression for ConjunctionExpression {

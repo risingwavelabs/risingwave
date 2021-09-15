@@ -14,9 +14,15 @@ use crate::types::{build_from_proto as type_build_from_proto, DataType, DataType
 use crate::vector_op::cast;
 use std::sync::Arc;
 
-pub(super) struct TypeCastExpression {
+pub struct TypeCastExpression {
     return_type: DataTypeRef,
     child: BoxedExpression,
+}
+
+impl TypeCastExpression {
+    pub fn new(return_type: DataTypeRef, child: BoxedExpression) -> Self {
+        Self { return_type, child }
+    }
 }
 
 impl Expression for TypeCastExpression {

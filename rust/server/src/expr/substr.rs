@@ -16,7 +16,7 @@ use crate::expr::Expression;
 use crate::types::{build_from_proto as type_build_from_proto, DataType, DataTypeRef};
 use crate::vector_op::substr::{vector_substr_end, vector_substr_start, vector_substr_start_end};
 
-pub(super) struct SubStrExpression {
+pub struct SubStrExpression {
     return_type: DataTypeRef,
     child: BoxedExpression,
     off: Option<BoxedExpression>,

@@ -14,6 +14,10 @@ use async_trait::async_trait;
 /// `StreamingSumAgg` sums data of the same type.
 pub type StreamingSumAgg<R> = StreamingFoldAgg<R, R, PrimitiveSummable<<R as Array>::OwnedItem>>;
 
+/// `StreamingFloatSumAgg` sums data of the same float type.
+pub type StreamingFloatSumAgg<R> =
+    StreamingFoldAgg<R, R, FloatPrimitiveSummable<<R as Array>::OwnedItem>>;
+
 /// `StreamingCountAgg` counts data of any type.
 pub type StreamingCountAgg<R> = StreamingFoldAgg<R, R, Countable<<R as Array>::OwnedItem>>;
 
@@ -47,7 +51,7 @@ impl AggregationOperator {
         Self {
             state,
             output,
-            first_data: false,
+            first_data: true,
             return_type,
         }
     }
@@ -71,6 +75,7 @@ impl UnaryStreamOperator for AggregationOperator {
             // record the last state into builder
             self.state.get_output(&mut builder)?;
         }
+
         self.state
             .apply_batch(&ops, visibility.as_ref(), arrays[0].array_ref())?;
         // output the current state into builder
@@ -99,6 +104,8 @@ impl UnaryStreamOperator for AggregationOperator {
                 columns,
             };
         }
+
+        self.first_data = false;
 
         self.output.collect(Message::Chunk(chunk)).await?;
         Ok(())

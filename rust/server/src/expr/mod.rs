@@ -14,11 +14,14 @@ use crate::array2::ArrayRef;
 use crate::array2::DataChunk;
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
-use crate::expr::arithmetic_expr::ArithmeticExpression;
-use crate::expr::cmp::CompareExpression;
-use crate::expr::conjunction::ConjunctionExpression;
-use crate::expr::substr::SubStrExpression;
-use crate::expr::type_cast::TypeCastExpression;
+pub use arithmetic_expr::ArithmeticExpression;
+pub use cmp::CompareExpression;
+pub use conjunction::ConjunctionExpression;
+pub use substr::SubStrExpression;
+pub use type_cast::TypeCastExpression;
+
+pub use cmp::CompareOperatorKind;
+pub use conjunction::ConjunctionOperatorKind;
 
 use crate::types::{DataType, DataTypeRef};
 use risingwave_proto::expr::{

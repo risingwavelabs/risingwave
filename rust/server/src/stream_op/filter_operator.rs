@@ -119,6 +119,8 @@ impl UnaryStreamOperator for FilterOperator {
                     },
                 }
             }
+        } else {
+            panic!("unmatched type: filter expr returns a non-null array");
         }
 
         let new_chunk = StreamChunk {

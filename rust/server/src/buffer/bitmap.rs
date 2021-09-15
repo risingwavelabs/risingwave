@@ -30,13 +30,28 @@ use crate::error::Result;
 use crate::util::bit_util;
 use risingwave_proto::data::Buffer as BufferProto;
 
-#[derive(Debug)]
 pub struct Bitmap {
     pub bits: Buffer,
 
     // The useful bits in the bitmap. The total number of bits will usually
     // be larger than the useful bits due to byte-padding.
     num_bits: usize,
+}
+
+impl std::fmt::Debug for Bitmap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[")?;
+        let mut is_first = true;
+        for data in self.iter() {
+            if is_first {
+                write!(f, "{}", data)?;
+            } else {
+                write!(f, ", {}", data)?;
+            }
+            is_first = false;
+        }
+        write!(f, "]")
+    }
 }
 
 impl Bitmap {

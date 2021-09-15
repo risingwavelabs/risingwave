@@ -53,7 +53,7 @@ macro_rules! array_impl_literal_append {
   };
 }
 
-pub(super) struct LiteralExpression {
+pub struct LiteralExpression {
     return_type: DataTypeRef,
     literal: Option<ScalarImpl>,
 }

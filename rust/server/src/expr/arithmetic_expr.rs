@@ -12,12 +12,13 @@ use risingwave_proto::expr::ExprNode;
 use risingwave_proto::expr::FunctionCall;
 use std::convert::TryFrom;
 
-pub(super) struct ArithmeticExpression {
+pub struct ArithmeticExpression {
     return_type: DataTypeRef,
     operator_type: ArithmeticOperatorKind,
     left_child: BoxedExpression,
     right_child: BoxedExpression,
 }
+
 impl Expression for ArithmeticExpression {
     fn return_type(&self) -> &dyn DataType {
         &*self.return_type
@@ -41,7 +42,7 @@ impl ArithmeticExpression {
         left_child: BoxedExpression,
         right_child: BoxedExpression,
     ) -> Self {
-        ArithmeticExpression {
+        Self {
             return_type,
             operator_type,
             left_child,

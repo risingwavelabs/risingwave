@@ -2,7 +2,7 @@
 
 use std::marker::PhantomData;
 
-use crate::array2::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, I64Array};
+use crate::array2::*;
 use crate::buffer::Bitmap;
 use crate::error::{ErrorCode::NumericValueOutOfRange, Result, RwError};
 use crate::types::{option_as_scalar_ref, Scalar, ScalarRef};
@@ -51,7 +51,7 @@ where
 /// It produces the same type of output as input `S`.
 pub struct PrimitiveSummable<S>
 where
-    S: Scalar + std::ops::Add<Output = S> + std::ops::Sub<Output = S>,
+    S: Scalar + num_traits::CheckedAdd<Output = S> + num_traits::CheckedSub<Output = S>,
 {
     _phantom: PhantomData<S>,
 }
@@ -86,6 +86,58 @@ where
                     .checked_sub(&y.to_owned_scalar())
                     .ok_or_else(|| RwError::from(NumericValueOutOfRange))?,
             ),
+            (Some(x), None) => Some(x.to_owned_scalar()),
+            (None, Some(y)) => Some(y.to_owned_scalar()),
+            (None, None) => None,
+        })
+    }
+}
+
+/// `FloatPrimitiveSummable` sums two primitives by `accumulate` and `retract` functions.
+/// It produces the same type of output as input `S`.
+pub struct FloatPrimitiveSummable<S>
+where
+    S: Scalar + std::ops::Add<Output = S> + std::ops::Sub<Output = S> + num_traits::Float,
+{
+    _phantom: PhantomData<S>,
+}
+
+impl<S> StreamingFoldable<S, S> for FloatPrimitiveSummable<S>
+where
+    S: Scalar + std::ops::Add<Output = S> + std::ops::Sub<Output = S> + num_traits::Float,
+{
+    fn accumulate(
+        result: Option<S::ScalarRefType<'_>>,
+        input: Option<S::ScalarRefType<'_>>,
+    ) -> Result<Option<S>> {
+        Ok(match (result, input) {
+            (Some(x), Some(y)) => {
+                let v = x.to_owned_scalar() + y.to_owned_scalar();
+                if v.is_finite() && !v.is_nan() {
+                    Some(v)
+                } else {
+                    return Err(RwError::from(NumericValueOutOfRange));
+                }
+            }
+            (Some(x), None) => Some(x.to_owned_scalar()),
+            (None, Some(y)) => Some(y.to_owned_scalar()),
+            (None, None) => None,
+        })
+    }
+
+    fn retract(
+        result: Option<S::ScalarRefType<'_>>,
+        input: Option<S::ScalarRefType<'_>>,
+    ) -> Result<Option<S>> {
+        Ok(match (result, input) {
+            (Some(x), Some(y)) => {
+                let v = x.to_owned_scalar() - y.to_owned_scalar();
+                if v.is_finite() && !v.is_nan() {
+                    Some(v)
+                } else {
+                    return Err(RwError::from(NumericValueOutOfRange));
+                }
+            }
             (Some(x), None) => Some(x.to_owned_scalar()),
             (None, Some(y)) => Some(y.to_owned_scalar()),
             (None, None) => None,
@@ -222,7 +274,11 @@ macro_rules! impl_agg {
   };
 }
 
+impl_agg! { I16Array, Int16, I16Array }
+impl_agg! { I32Array, Int32, I32Array }
 impl_agg! { I64Array, Int64, I64Array }
+impl_agg! { F32Array, Float32, F32Array }
+impl_agg! { F64Array, Float64, F64Array }
 
 #[cfg(test)]
 mod tests {

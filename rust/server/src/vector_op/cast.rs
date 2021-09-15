@@ -52,7 +52,7 @@ fn str_to_time(elem: &str) -> Result<i64> {
 }
 
 #[inline(always)]
-fn str_to_timestamp(elem: &str) -> Result<i64> {
+pub fn str_to_timestamp(elem: &str) -> Result<i64> {
     NaiveDateTime::parse_from_str(elem, "%Y-%m-%d %H:%M:%S")
         .map(|ret| ret.timestamp_nanos() / 1000)
         .map_err(|e| RwError::from(ParseError(e)))

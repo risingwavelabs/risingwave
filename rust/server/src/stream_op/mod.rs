@@ -33,11 +33,14 @@ pub use dispatcher::*;
 use crate::array2::column::Column;
 use async_trait::async_trait;
 
+#[cfg(test)]
+mod tests;
+
 pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
 
 /// `Op` represents three operations in StreamChunk.
 /// `UpdateDelete` and `UpdateInsert` always appear in pairs.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Op {
     Insert,
     Delete,

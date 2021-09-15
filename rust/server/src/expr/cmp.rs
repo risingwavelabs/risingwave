@@ -26,11 +26,27 @@ pub enum CompareOperatorKind {
     LessThan,
     LessThanOrEqual,
 }
-pub(super) struct CompareExpression {
+pub struct CompareExpression {
     return_type: DataTypeRef,
     kind: CompareOperatorKind,
     lhs: BoxedExpression,
     rhs: BoxedExpression,
+}
+
+impl CompareExpression {
+    pub fn new(
+        return_type: DataTypeRef,
+        kind: CompareOperatorKind,
+        lhs: BoxedExpression,
+        rhs: BoxedExpression,
+    ) -> Self {
+        Self {
+            return_type,
+            kind,
+            lhs,
+            rhs,
+        }
+    }
 }
 
 impl Expression for CompareExpression {
