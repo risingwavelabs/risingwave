@@ -1,4 +1,4 @@
-use super::{Result, UnaryStreamOperator};
+use super::{OperatorHead, Result, UnaryStreamOperator};
 use async_stream::stream;
 use async_trait::async_trait;
 use futures::channel::mpsc::{unbounded, Receiver, UnboundedReceiver};
@@ -6,14 +6,26 @@ use futures::{SinkExt, Stream, StreamExt};
 
 use super::Message;
 
-#[async_trait]
-pub trait Merger {
-    async fn run(self) -> Result<()>;
-}
+/// `Merger` merges multiple inputs into one single output.
+pub trait Merger: OperatorHead {}
 
+/// `UnaryMerger` merges data from multiple channels. Dataflow from one channel
+/// will be stopped on barrier.
 pub struct UnaryMerger {
     inputs: Vec<Receiver<Message>>,
     operator_head: Box<dyn UnaryStreamOperator>,
+}
+
+impl UnaryMerger {
+    pub fn new(
+        inputs: Vec<Receiver<Message>>,
+        operator_head: Box<dyn UnaryStreamOperator>,
+    ) -> Self {
+        Self {
+            inputs,
+            operator_head,
+        }
+    }
 }
 
 /// `barrier_receiver` converts a message stream to a barrier stream.
@@ -56,7 +68,7 @@ fn barrier_receiver(
 }
 
 #[async_trait]
-impl Merger for UnaryMerger {
+impl OperatorHead for UnaryMerger {
     async fn run(mut self) -> Result<()> {
         let mut txs = vec![];
         let mut streams = vec![];
@@ -86,12 +98,14 @@ impl Merger for UnaryMerger {
                     self.operator_head.consume_chunk(chunk).await?;
                 }
                 (_id, Message::Terminate) => {
+                    // TODO: pass terminate to downstream
                     terminate_count -= 1;
                     if terminate_count == 0 {
                         return Ok(());
                     }
                 }
                 (_id, Message::Barrier(epoch)) => {
+                    // TODO: pass barrier to downstream
                     assert_eq!(epoch, next_epoch);
                     barrier_count -= 1;
                     if barrier_count == 0 {
@@ -108,6 +122,8 @@ impl Merger for UnaryMerger {
         unreachable!()
     }
 }
+
+impl Merger for UnaryMerger {}
 
 #[cfg(test)]
 mod tests {

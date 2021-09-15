@@ -17,7 +17,7 @@ impl Output for LocalOutput {
         match msg {
             Message::Chunk(chunk) => self.next.consume_chunk(chunk).await,
             Message::Barrier(epoch) => self.next.consume_barrier(epoch).await,
-            _ => todo!(),
+            Message::Terminate => self.next.consume_terminate().await,
         }
     }
 }

@@ -1,11 +1,15 @@
 use super::{Message, Output, Result, StreamChunk};
 use async_trait::async_trait;
 
-struct Dispatcher<Inner: DataDispatcher> {
+pub struct Dispatcher<Inner: DataDispatcher> {
     inner: Inner,
 }
 
 impl<Inner: DataDispatcher> Dispatcher<Inner> {
+    pub fn new(inner: Inner) -> Self {
+        Self { inner }
+    }
+
     pub async fn dispatch(&mut self, msg: Message) -> Result<()> {
         if let Message::Chunk(chunk) = msg {
             self.inner.dispatch_data(chunk).await
@@ -27,7 +31,7 @@ impl<Inner: DataDispatcher> Dispatcher<Inner> {
 }
 
 #[async_trait]
-trait DataDispatcher {
+pub trait DataDispatcher {
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()>;
     fn get_outputs(&mut self) -> &mut [Box<dyn Output>];
 }

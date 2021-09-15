@@ -16,6 +16,9 @@ pub use projection_operator::ProjectionOperator;
 mod local_output;
 pub use local_output::LocalOutput;
 
+mod channel_output;
+pub use channel_output::ChannelOutput;
+
 mod merger;
 pub use merger::{Merger, UnaryMerger};
 
@@ -68,17 +71,23 @@ pub enum Message {
     // TODO: Watermark
 }
 
+/// `StreamOperator` is an operator which supports handling of control messages.
 #[async_trait]
 pub trait StreamOperator: Send + Sync + 'static {
     async fn consume_barrier(&mut self, epoch: u64) -> Result<()>;
+    async fn consume_terminate(&mut self) -> Result<()>;
     // TODO: watermark and state management
 }
 
+/// `UnaryStreamOperator` accepts a single chunk as input.
 #[async_trait]
 pub trait UnaryStreamOperator: StreamOperator {
     async fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<()>;
 }
 
+/// Most operators don't care about the control messages, and therefore
+/// this macro provides a default implementation for them. The operator
+/// must have a field named `output`, so as to pass along messages.
 #[macro_export]
 macro_rules! impl_consume_barrier_default {
     ($type:ident, $trait: ident) => {
@@ -87,17 +96,30 @@ macro_rules! impl_consume_barrier_default {
             async fn consume_barrier(&mut self, epoch: u64) -> Result<()> {
                 self.output.collect(Message::Barrier(epoch)).await
             }
+
+            async fn consume_terminate(&mut self) -> Result<()> {
+                self.output.collect(Message::Terminate).await
+            }
         }
     };
 }
 
+/// `BinaryStreamOperator` accepts two chunks as input.
 #[async_trait]
 pub trait BinaryStreamOperator: StreamOperator {
     async fn consume_chunk_first(&mut self, chunk: StreamChunk) -> Result<()>;
     async fn consume_chunk_second(&mut self, chunk: StreamChunk) -> Result<()>;
 }
 
+/// Output message could be written into a `Output`.
 #[async_trait]
 pub trait Output: Send + Sync + 'static {
     async fn collect(&mut self, msg: Message) -> Result<()>;
+}
+
+/// `OperatorHead` is the head of operators. Generally, the `OperatorHead` needs
+/// to run in the background, so as to poll data from channels.
+#[async_trait]
+pub trait OperatorHead: Send + Sync + 'static {
+    async fn run(self) -> Result<()>;
 }

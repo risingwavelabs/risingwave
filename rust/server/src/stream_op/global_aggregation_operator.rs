@@ -22,4 +22,4 @@ pub type GlobalStreamingCountAgg<R> =
 /// `GlobalAggregationOperator` shares the sample implementation as
 /// `AggregationOperator` for now. It collects data from all upstream local
 /// aggregators and sum them up.
-type GlobalAggregationOperator = super::AggregationOperator;
+pub type GlobalAggregationOperator = super::AggregationOperator;
