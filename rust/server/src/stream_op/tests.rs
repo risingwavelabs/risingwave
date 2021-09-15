@@ -246,9 +246,7 @@ async fn test_tpch_q6() {
         let chunk = &data[0];
         assert_eq!(chunk.ops, vec![Insert]);
         assert_eq!(chunk.columns.len(), 1);
-        assert_eq!(
-            chunk.columns[0].array_ref().as_float32().value_at(0),
-            Some(1.1)
-        );
+        let array = chunk.columns[0].array_ref().as_float32();
+        assert_eq!(array.value_at(array.len() - 1), Some(1.1));
     }
 }

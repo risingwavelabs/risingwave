@@ -51,14 +51,20 @@ where
 /// It produces the same type of output as input `S`.
 pub struct PrimitiveSummable<S>
 where
-    S: Scalar + num_traits::CheckedAdd<Output = S> + num_traits::CheckedSub<Output = S>,
+    S: Scalar
+        + num_traits::CheckedAdd<Output = S>
+        + num_traits::CheckedSub<Output = S>
+        + std::ops::Neg<Output = S>,
 {
     _phantom: PhantomData<S>,
 }
 
 impl<S> StreamingFoldable<S, S> for PrimitiveSummable<S>
 where
-    S: Scalar + num_traits::CheckedAdd<Output = S> + num_traits::CheckedSub<Output = S>,
+    S: Scalar
+        + num_traits::CheckedAdd<Output = S>
+        + num_traits::CheckedSub<Output = S>
+        + std::ops::Neg<Output = S>,
 {
     fn accumulate(
         result: Option<S::ScalarRefType<'_>>,
@@ -87,7 +93,7 @@ where
                     .ok_or_else(|| RwError::from(NumericValueOutOfRange))?,
             ),
             (Some(x), None) => Some(x.to_owned_scalar()),
-            (None, Some(y)) => Some(y.to_owned_scalar()),
+            (None, Some(y)) => Some(-y.to_owned_scalar()),
             (None, None) => None,
         })
     }
@@ -97,14 +103,22 @@ where
 /// It produces the same type of output as input `S`.
 pub struct FloatPrimitiveSummable<S>
 where
-    S: Scalar + std::ops::Add<Output = S> + std::ops::Sub<Output = S> + num_traits::Float,
+    S: Scalar
+        + std::ops::Add<Output = S>
+        + std::ops::Sub<Output = S>
+        + num_traits::Float
+        + std::ops::Neg<Output = S>,
 {
     _phantom: PhantomData<S>,
 }
 
 impl<S> StreamingFoldable<S, S> for FloatPrimitiveSummable<S>
 where
-    S: Scalar + std::ops::Add<Output = S> + std::ops::Sub<Output = S> + num_traits::Float,
+    S: Scalar
+        + std::ops::Add<Output = S>
+        + std::ops::Sub<Output = S>
+        + num_traits::Float
+        + std::ops::Neg<Output = S>,
 {
     fn accumulate(
         result: Option<S::ScalarRefType<'_>>,
@@ -139,7 +153,7 @@ where
                 }
             }
             (Some(x), None) => Some(x.to_owned_scalar()),
-            (None, Some(y)) => Some(y.to_owned_scalar()),
+            (None, Some(y)) => Some(-y.to_owned_scalar()),
             (None, None) => None,
         })
     }
@@ -305,6 +319,22 @@ mod tests {
         agg.get_output(&mut builder).unwrap();
         let array = builder.finish().unwrap();
         assert_eq!(array.as_int64().value_at(0), Some(3));
+    }
+
+    #[test]
+    fn test_primitive_sum_first_deletion() {
+        let mut agg: Box<dyn StreamingAggStateImpl> =
+            Box::new(TestStreamingSumAgg::<I64Array>::new());
+        agg.apply_batch(
+            &[Op::Delete, Op::Insert, Op::Insert, Op::Insert, Op::Delete],
+            None,
+            &array_nonnull!(I64Array, [10, 1, 2, 3, 3]).into(),
+        )
+        .unwrap();
+        let mut builder = agg.new_builder();
+        agg.get_output(&mut builder).unwrap();
+        let array = builder.finish().unwrap();
+        assert_eq!(array.as_int64().value_at(0), Some(-7));
     }
 
     #[test]
