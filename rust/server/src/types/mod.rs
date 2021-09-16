@@ -15,6 +15,7 @@ pub use native_type::*;
 use risingwave_proto::data::DataType_TypeName::BOOLEAN;
 use risingwave_proto::data::DataType_TypeName::CHAR;
 use risingwave_proto::data::DataType_TypeName::DATE;
+use risingwave_proto::data::DataType_TypeName::DECIMAL;
 use risingwave_proto::data::DataType_TypeName::DOUBLE;
 use risingwave_proto::data::DataType_TypeName::FLOAT;
 use risingwave_proto::data::DataType_TypeName::INT16;
@@ -101,7 +102,8 @@ pub fn build_from_proto(proto: &DataTypeProto) -> Result<DataTypeRef> {
       DATE => DateType,
       TIME => TimeType,
       TIMESTAMP => TimestampType,
-      TIMESTAMPZ => TimestampWithTimeZoneType
+      TIMESTAMPZ => TimestampWithTimeZoneType,
+      DECIMAL => DecimalType
     }
 }
 

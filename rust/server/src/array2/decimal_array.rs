@@ -4,7 +4,9 @@ use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
 use crate::buffer::Bitmap;
 use crate::error::Result;
 
-use risingwave_proto::data::Buffer;
+use std::mem::size_of;
+
+use risingwave_proto::data::{Buffer, Buffer_CompressionType};
 use rust_decimal::Decimal;
 
 #[derive(Debug)]
@@ -46,7 +48,26 @@ impl Array for DecimalArray {
     }
 
     fn to_protobuf(&self) -> Result<Vec<Buffer>> {
-        todo!()
+        let mut offset_buffer = Vec::<u8>::with_capacity(self.data.len() * size_of::<usize>());
+        let mut data_buffer = Vec::<u8>::new();
+        let mut offset = 0usize;
+        for d in self.data.iter() {
+            let s = d.to_string();
+            let b = s.as_bytes();
+            offset_buffer.extend_from_slice(&offset.to_be_bytes());
+            data_buffer.extend_from_slice(b);
+            offset += b.len();
+        }
+        offset_buffer.extend_from_slice(&offset.to_be_bytes());
+        Ok(vec![offset_buffer, data_buffer]
+            .into_iter()
+            .map(|buffer| {
+                let mut b = Buffer::new();
+                b.set_compression(Buffer_CompressionType::NONE);
+                b.set_body(buffer);
+                b
+            })
+            .collect::<Vec<Buffer>>())
     }
 
     fn null_bitmap(&self) -> &Bitmap {
@@ -112,6 +133,7 @@ mod tests {
     use super::*;
     use itertools::Itertools;
     use num_traits::FromPrimitive;
+    use rust_decimal::prelude::*;
 
     #[test]
     fn test_decimal_builder() {
@@ -123,6 +145,50 @@ mod tests {
         let a = builder.finish().unwrap();
         let res = v.iter().zip(a.iter()).all(|(a, b)| *a == b);
         assert_eq!(res, true);
+    }
+
+    #[test]
+    fn test_decimal_array_to_protobuf() {
+        let input = vec![
+            Some(Decimal::from_str("1.01").unwrap()),
+            Some(Decimal::from_str("2.02").unwrap()),
+            None,
+            Some(Decimal::from_str("4.04").unwrap()),
+        ];
+
+        let array = DecimalArray::from_slice(&input).unwrap();
+        let buffers = array.to_protobuf().unwrap();
+
+        assert_eq!(buffers.len(), 2);
+
+        let (offset, mut offset_buffer) =
+            input
+                .iter()
+                .fold((0usize, Vec::new()), |(o, mut v), d| match d {
+                    Some(d) => {
+                        v.extend_from_slice(&o.to_be_bytes());
+                        (o + d.to_string().as_bytes().len(), v)
+                    }
+                    None => {
+                        v.extend_from_slice(&o.to_be_bytes());
+                        (o + Decimal::default().to_string().as_bytes().len(), v)
+                    }
+                });
+        offset_buffer.extend_from_slice(&offset.to_be_bytes());
+
+        let data_buffer = input.iter().fold(Vec::new(), |mut v, d| match d {
+            Some(d) => {
+                v.extend_from_slice(d.to_string().as_bytes());
+                v
+            }
+            None => {
+                v.extend_from_slice(Decimal::default().to_string().as_bytes());
+                v
+            }
+        });
+
+        assert_eq!(buffers[0].get_body(), offset_buffer);
+        assert_eq!(buffers[1].get_body(), data_buffer);
     }
 
     #[test]
