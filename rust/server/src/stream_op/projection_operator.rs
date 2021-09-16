@@ -13,7 +13,7 @@ use async_trait::async_trait;
 pub struct ProjectionOperator {
     /// The output of the current operator
     output: Box<dyn Output>,
-    /// Expression of the current filter, note that the filter must always have the same output for the same input.
+    /// Expressions of the current projection.
     exprs: Vec<BoxedExpression>,
 }
 

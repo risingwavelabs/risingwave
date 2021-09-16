@@ -26,7 +26,6 @@ mod actor;
 pub use actor::Actor;
 
 mod data_source;
-pub use data_source::DataSource;
 
 mod aggregation;
 
@@ -38,6 +37,9 @@ use async_trait::async_trait;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod unit_test;
 
 pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
 
