@@ -117,6 +117,7 @@ internal class StateMachine(private val out: ByteWriteChannel, private val dbMan
   }
 
   private fun processTerminate() {
+    log.info("Received termination")
     this.willTerminate = true
   }
 }

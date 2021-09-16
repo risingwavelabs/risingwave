@@ -22,11 +22,13 @@ class PgProtocol(private val input: ByteReadChannel, private val output: ByteWri
   private var startedUp: Boolean = false
   private var stm: StateMachine = StateMachine(output, dbManager)
 
-  /** Process one client message and reply with response if any. */
+  /** Process one client message and reply with response if any.
+   *  @return true if to terminate the connection.
+   */
   suspend fun process(): Boolean {
     try {
-      if (!doProcess()) {
-        return false
+      if (doProcess()) {
+        return true
       }
       return stm.willTerminate
     } catch (err: PgException) {
@@ -49,11 +51,11 @@ class PgProtocol(private val input: ByteReadChannel, private val output: ByteWri
     } catch (exp: PgException) {
       throw exp
     } catch (exp: ClosedReceiveChannelException) {
-      return false
+      return true
     } catch (exp: Throwable) {
       throw PgException(PgErrorCode.INTERNAL_ERROR, exp)
     }
-    return true
+    return false
   }
 
   private suspend fun readMessage(): PgMessage {
