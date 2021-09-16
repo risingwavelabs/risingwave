@@ -1,4 +1,4 @@
-use super::{Array, ArrayBuilder, ArrayIterator};
+use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
 
 use crate::buffer::Bitmap;
 
@@ -9,7 +9,10 @@ use crate::types::NativeType;
 use crate::array2::ArrayImpl;
 use risingwave_proto::data::{Buffer as BufferProto, Buffer, Buffer_CompressionType};
 use std::fmt::Debug;
-use std::mem::size_of;
+use std::{
+    hash::{Hash, Hasher},
+    mem::size_of,
+};
 
 /// Physical type of array items. It differs from NativeType with more limited type set.
 /// Specifically, it doesn't support u8/u16/u32/u64.
@@ -101,6 +104,15 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
 
     fn null_bitmap(&self) -> &Bitmap {
         &self.bitmap
+    }
+
+    #[inline(always)]
+    fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
+        if !self.is_null(idx) {
+            self.data[idx].hash_wrapper(state);
+        } else {
+            NULL_VAL_FOR_HASH.hash(state);
+        }
     }
 }
 

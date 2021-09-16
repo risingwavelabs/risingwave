@@ -3,8 +3,10 @@ use crate::array2::column::Column;
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{ErrorCode, Result};
+use crate::util::hash_util::finalize_hashers;
 use protobuf::Message;
 use risingwave_proto::data::{Column as ColumnProto, DataChunk as DataChunkProto};
+use std::hash::BuildHasher;
 use std::sync::Arc;
 use typed_builder::TypedBuilder;
 
@@ -178,6 +180,19 @@ impl DataChunk {
             new_chunks.push(new_chunk);
         }
         Ok(new_chunks)
+    }
+    pub fn get_hash_values<H: BuildHasher>(
+        &self,
+        keys: &[usize],
+        hasher_builder: H,
+    ) -> Result<Vec<u64>> {
+        let mut states = Vec::with_capacity(self.cardinality());
+        states.resize_with(self.cardinality(), || hasher_builder.build_hasher());
+        for key in keys {
+            let array = self.column_at(*key)?.array();
+            array.hash_vec(&mut states);
+        }
+        Ok(finalize_hashers(&mut states))
     }
 }
 

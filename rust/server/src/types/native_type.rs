@@ -3,6 +3,7 @@ use crate::error::Result;
 use crate::error::RwError;
 use crate::expr::Datum;
 use std::fmt::Debug;
+use std::hash::{Hash, Hasher};
 use std::io::Write;
 
 pub trait NativeType:
@@ -10,6 +11,7 @@ pub trait NativeType:
 {
     fn from_datum(datum: &Datum) -> Result<Self>;
     fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize>;
+    fn hash_wrapper<H: Hasher>(&self, state: &mut H);
 }
 
 impl NativeType for i16 {
@@ -24,6 +26,10 @@ impl NativeType for i16 {
         output
             .write(&self.to_be_bytes())
             .map_err(|e| RwError::from(IoError(e)))
+    }
+
+    fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
+        self.hash(state);
     }
 }
 
@@ -40,6 +46,10 @@ impl NativeType for i32 {
             .write(&self.to_be_bytes())
             .map_err(|e| RwError::from(IoError(e)))
     }
+
+    fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
+        self.hash(state);
+    }
 }
 
 impl NativeType for i64 {
@@ -54,6 +64,10 @@ impl NativeType for i64 {
         output
             .write(&self.to_be_bytes())
             .map_err(|e| RwError::from(IoError(e)))
+    }
+
+    fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
+        self.hash(state);
     }
 }
 
@@ -70,6 +84,10 @@ impl NativeType for f32 {
             .write(&self.to_be_bytes())
             .map_err(|e| RwError::from(IoError(e)))
     }
+
+    fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
+        state.write_i32(*self as i32);
+    }
 }
 
 impl NativeType for f64 {
@@ -84,6 +102,10 @@ impl NativeType for f64 {
         output
             .write(&self.to_be_bytes())
             .map_err(|e| RwError::from(IoError(e)))
+    }
+
+    fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
+        state.write_i64(*self as i64);
     }
 }
 
@@ -100,6 +122,10 @@ impl NativeType for u8 {
             .write(&self.to_be_bytes())
             .map_err(|e| RwError::from(IoError(e)))
     }
+
+    fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
+        self.hash(state);
+    }
 }
 
 impl NativeType for u16 {
@@ -114,6 +140,10 @@ impl NativeType for u16 {
         output
             .write(&self.to_be_bytes())
             .map_err(|e| RwError::from(IoError(e)))
+    }
+
+    fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
+        self.hash(state);
     }
 }
 
@@ -130,6 +160,10 @@ impl NativeType for u32 {
             .write(&self.to_be_bytes())
             .map_err(|e| RwError::from(IoError(e)))
     }
+
+    fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
+        self.hash(state);
+    }
 }
 
 impl NativeType for u64 {
@@ -144,5 +178,9 @@ impl NativeType for u64 {
         output
             .write(&self.to_be_bytes())
             .map_err(|e| RwError::from(IoError(e)))
+    }
+
+    fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
+        self.hash(state);
     }
 }

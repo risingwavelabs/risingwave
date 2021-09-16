@@ -1,8 +1,10 @@
+use super::NULL_VAL_FOR_HASH;
 use super::{Array, ArrayBuilder, ArrayIterator};
 use crate::buffer::Bitmap;
 use crate::error::Result;
 use risingwave_proto::data::Buffer;
 use risingwave_proto::data::Buffer_CompressionType;
+use std::hash::{Hash, Hasher};
 use std::mem::size_of;
 
 /// `UTF8Array` is a collection of Rust UTF8 `String`s.
@@ -62,6 +64,16 @@ impl Array for UTF8Array {
 
     fn null_bitmap(&self) -> &Bitmap {
         &self.bitmap
+    }
+
+    #[inline(always)]
+    fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
+        if !self.is_null(idx) {
+            let data_slice = &self.data[self.offset[idx]..self.offset[idx + 1]];
+            state.write(data_slice);
+        } else {
+            NULL_VAL_FOR_HASH.hash(state);
+        }
     }
 }
 
@@ -132,6 +144,8 @@ impl ArrayBuilder for UTF8ArrayBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use itertools::Itertools;
+
     #[test]
     fn test_utf8_builder() {
         let mut builder = UTF8ArrayBuilder::new(0).unwrap();
@@ -168,7 +182,7 @@ mod tests {
             input.iter().map(|s| s.unwrap_or("").len()).sum::<usize>()
         );
 
-        assert_eq!(input, array.iter().collect::<Vec<Option<&str>>>());
+        assert_eq!(input, array.iter().collect_vec());
     }
 
     #[test]
@@ -190,5 +204,62 @@ mod tests {
         assert!(result_buffers.is_ok());
         let buffers = result_buffers.unwrap();
         assert!(buffers.len() >= 2);
+    }
+
+    #[test]
+    fn test_utf8_array_hash() {
+        use super::super::test_util::{hash_finish, test_hash};
+        use std::hash::BuildHasher;
+        use twox_hash::RandomXxHashBuilder64;
+
+        const ARR_NUM: usize = 3;
+        const ARR_LEN: usize = 90;
+        let vecs: [Vec<Option<&str>>; ARR_NUM] = [
+            (0..ARR_LEN)
+                .map(|x| match x % 2 {
+                    0 => Some("1"),
+                    1 => None,
+                    _ => unreachable!(),
+                })
+                .collect_vec(),
+            (0..ARR_LEN)
+                .map(|x| match x % 3 {
+                    0 => Some("1"),
+                    1 => Some("abc"),
+                    2 => None,
+                    _ => unreachable!(),
+                })
+                .collect_vec(),
+            (0..ARR_LEN)
+                .map(|x| match x % 5 {
+                    0 => Some("1"),
+                    1 => Some("abc"),
+                    2 => None,
+                    3 => Some("ABCDEF"),
+                    4 => Some("666666"),
+                    _ => unreachable!(),
+                })
+                .collect_vec(),
+        ];
+
+        let arrs = vecs
+            .iter()
+            .map(|v| UTF8Array::from_slice(v).unwrap())
+            .collect_vec();
+
+        let hasher_builder = RandomXxHashBuilder64::default();
+        let mut states = vec![hasher_builder.build_hasher(); ARR_LEN];
+        vecs.iter().for_each(|v| {
+            v.iter().zip(&mut states).for_each(|(x, state)| match x {
+                Some(inner) => inner.hash(state),
+                None => NULL_VAL_FOR_HASH.hash(state),
+            })
+        });
+        let hashes = hash_finish(&mut states);
+
+        let count = hashes.iter().counts().len();
+        assert_eq!(count, 30);
+
+        test_hash(arrs, hashes, hasher_builder);
     }
 }

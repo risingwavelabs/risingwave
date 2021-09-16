@@ -22,6 +22,7 @@ pub use iterator::ArrayIterator;
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
 use risingwave_proto::data::Buffer;
+use std::hash::Hasher;
 use std::sync::Arc;
 pub use utf8_array::{UTF8Array, UTF8ArrayBuilder};
 
@@ -37,6 +38,7 @@ pub type I16ArrayBuilder = PrimitiveArrayBuilder<i16>;
 pub type F64ArrayBuilder = PrimitiveArrayBuilder<f64>;
 pub type F32ArrayBuilder = PrimitiveArrayBuilder<f32>;
 
+static NULL_VAL_FOR_HASH: u32 = 0xfffffff0;
 /// A trait over all array builders.
 ///
 /// `ArrayBuilder` is a trait over all builders. You could build an array with
@@ -117,6 +119,15 @@ pub trait Array: Sized + 'static + Into<ArrayImpl> {
 
     fn is_null(&self, idx: usize) -> bool {
         self.null_bitmap().is_set(idx).map(|v| !v).unwrap()
+    }
+
+    fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H);
+
+    fn hash_vec<H: Hasher>(&self, hashers: &mut Vec<H>) {
+        assert_eq!(hashers.len(), self.len());
+        for (idx, state) in hashers.iter_mut().enumerate() {
+            self.hash_at(idx, state);
+        }
     }
 }
 
@@ -329,6 +340,28 @@ impl ArrayImpl {
         for_all_variants! { impl_all_to_protobuf, self }
     }
 
+    pub fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
+        macro_rules! impl_all_hash_at {
+      ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        match $self {
+          $( Self::$variant_name(inner) => inner.hash_at(idx, state), )*
+        }
+      };
+    }
+        for_all_variants! { impl_all_hash_at, self }
+    }
+
+    fn hash_vec<H: Hasher>(&self, hashers: &mut Vec<H>) {
+        macro_rules! impl_all_hash_vec {
+      ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        match $self {
+          $( Self::$variant_name(inner) => inner.hash_vec( hashers), )*
+        }
+      };
+    }
+        for_all_variants! { impl_all_hash_vec, self }
+    }
+
     pub fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Result<Self> {
         macro_rules! impl_all_compact {
       ([$self:ident, $visibility:ident, $cardinality:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
@@ -497,5 +530,44 @@ mod tests {
         for (idx, data) in final_array.iter().enumerate() {
             assert_eq!(data, Some(idx as i64 * 2));
         }
+    }
+}
+#[cfg(test)]
+mod test_util {
+    use super::Array;
+    use itertools::Itertools;
+    use std::hash::{BuildHasher, Hasher};
+
+    pub(crate) fn hash_finish<H: Hasher>(hashers: &mut Vec<H>) -> Vec<u64> {
+        return hashers
+            .iter()
+            .map(|hasher| hasher.finish())
+            .collect::<Vec<u64>>();
+    }
+
+    pub(crate) fn test_hash<H: BuildHasher, A: Array>(
+        arrs: Vec<A>,
+        expects: Vec<u64>,
+        hasher_builder: H,
+    ) {
+        let len = expects.len();
+        let mut states_scalar = Vec::with_capacity(len);
+        states_scalar.resize_with(len, || hasher_builder.build_hasher());
+        let mut states_vec = Vec::with_capacity(len);
+        states_vec.resize_with(len, || hasher_builder.build_hasher());
+
+        arrs.iter().for_each(|arr| {
+            for i in 0..arr.len() {
+                arr.hash_at(i, &mut states_scalar[i])
+            }
+        });
+        arrs.iter().for_each(|arr| arr.hash_vec(&mut states_vec));
+        itertools::cons_tuples(
+            expects
+                .iter()
+                .zip_eq(hash_finish(&mut states_scalar))
+                .zip_eq(hash_finish(&mut states_vec)),
+        )
+        .all(|(a, b, c)| *a == b && b == c);
     }
 }

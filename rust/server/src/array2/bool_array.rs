@@ -1,4 +1,6 @@
-use super::{Array, ArrayBuilder, ArrayIterator};
+use std::hash::{Hash, Hasher};
+
+use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
 use crate::buffer::Bitmap;
 use crate::error::Result;
 use risingwave_proto::data::Buffer;
@@ -47,6 +49,15 @@ impl Array for BoolArray {
 
     fn null_bitmap(&self) -> &Bitmap {
         &self.bitmap
+    }
+
+    #[inline(always)]
+    fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
+        if !self.is_null(idx) {
+            self.data[idx].hash(state);
+        } else {
+            NULL_VAL_FOR_HASH.hash(state);
+        }
     }
 }
 
@@ -97,6 +108,8 @@ impl ArrayBuilder for BoolArrayBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use itertools::Itertools;
+
     fn helper_test_builder(data: Vec<Option<bool>>) -> BoolArray {
         let mut builder = BoolArrayBuilder::new(data.len()).unwrap();
         for d in data {
@@ -117,9 +130,56 @@ mod tests {
                     Some(false)
                 }
             })
-            .collect::<Vec<Option<bool>>>();
+            .collect_vec();
         let array = helper_test_builder(v.clone());
         let res = v.iter().zip(array.iter()).all(|(a, b)| *a == b);
         assert_eq!(res, true);
+    }
+
+    #[test]
+    fn test_bool_array_hash() {
+        use super::super::test_util::{hash_finish, test_hash};
+        use std::hash::BuildHasher;
+        use twox_hash::RandomXxHashBuilder64;
+
+        const ARR_NUM: usize = 2;
+        const ARR_LEN: usize = 48;
+        let vecs: [Vec<Option<bool>>; ARR_NUM] = [
+            (0..ARR_LEN)
+                .map(|x| match x % 2 {
+                    0 => Some(true),
+                    1 => Some(false),
+                    _ => unreachable!(),
+                })
+                .collect_vec(),
+            (0..ARR_LEN)
+                .map(|x| match x % 3 {
+                    0 => Some(true),
+                    1 => Some(false),
+                    2 => None,
+                    _ => unreachable!(),
+                })
+                .collect_vec(),
+        ];
+
+        let arrs = vecs
+            .iter()
+            .map(|v| helper_test_builder(v.clone()))
+            .collect_vec();
+
+        let hasher_builder = RandomXxHashBuilder64::default();
+        let mut states = vec![hasher_builder.build_hasher(); ARR_LEN];
+        vecs.iter().for_each(|v| {
+            v.iter().zip(&mut states).for_each(|(x, state)| match x {
+                Some(inner) => inner.hash(state),
+                None => NULL_VAL_FOR_HASH.hash(state),
+            })
+        });
+        let hashes = hash_finish(&mut states);
+
+        let count = hashes.iter().counts().len();
+        assert_eq!(count, 6);
+
+        test_hash(arrs, hashes, hasher_builder);
     }
 }

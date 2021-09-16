@@ -1,8 +1,12 @@
+use std::hash::Hash;
+
 use crate::array2::{Array, ArrayBuilder, ArrayIterator};
 use crate::buffer::Bitmap;
 use crate::error::Result;
 use crate::types::IntervalUnit;
 use risingwave_proto::data::Buffer;
+
+use super::NULL_VAL_FOR_HASH;
 
 #[derive(Debug)]
 pub struct IntervalArray {
@@ -51,6 +55,16 @@ impl Array for IntervalArray {
 
     fn null_bitmap(&self) -> &Bitmap {
         &self.bitmap
+    }
+
+    fn hash_at<H: std::hash::Hasher>(&self, idx: usize, state: &mut H) {
+        if !self.is_null(idx) {
+            self.months_buffer[idx].hash(state);
+            self.days_buffer[idx].hash(state);
+            self.ms_buffer[idx].hash(state);
+        } else {
+            NULL_VAL_FOR_HASH.hash(state);
+        }
     }
 }
 

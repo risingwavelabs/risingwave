@@ -11,6 +11,7 @@ pub mod bit_util;
 #[macro_use]
 pub mod proto;
 pub mod addr;
+pub mod hash_util;
 
 pub fn downcast_ref<S, T>(source: &S) -> Result<&T>
 where

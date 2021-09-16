@@ -1,4 +1,6 @@
-use super::{Array, ArrayBuilder, ArrayIterator};
+use std::hash::{Hash, Hasher};
+
+use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
 use crate::buffer::Bitmap;
 use crate::error::Result;
 
@@ -50,6 +52,15 @@ impl Array for DecimalArray {
     fn null_bitmap(&self) -> &Bitmap {
         &self.bitmap
     }
+
+    #[inline(always)]
+    fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
+        if !self.is_null(idx) {
+            self.data[idx].hash(state);
+        } else {
+            NULL_VAL_FOR_HASH.hash(state);
+        }
+    }
 }
 
 /// `DecimalArrayBuilder` constructs a `DecimalArray` from `Option<Decimal>`.
@@ -99,13 +110,12 @@ impl ArrayBuilder for DecimalArrayBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use itertools::Itertools;
     use num_traits::FromPrimitive;
 
     #[test]
     fn test_decimal_builder() {
-        let v = (0..1000)
-            .map(Decimal::from_i64)
-            .collect::<Vec<Option<Decimal>>>();
+        let v = (0..1000).map(Decimal::from_i64).collect_vec();
         let mut builder = DecimalArrayBuilder::new(0).unwrap();
         for i in &v {
             builder.append(*i).unwrap();
@@ -113,5 +123,68 @@ mod tests {
         let a = builder.finish().unwrap();
         let res = v.iter().zip(a.iter()).all(|(a, b)| *a == b);
         assert_eq!(res, true);
+    }
+
+    #[test]
+    fn test_decimal_array_hash() {
+        use super::super::test_util::{hash_finish, test_hash};
+        use std::hash::BuildHasher;
+        use twox_hash::RandomXxHashBuilder64;
+
+        const ARR_NUM: usize = 3;
+        const ARR_LEN: usize = 270;
+        let vecs: [Vec<Option<Decimal>>; ARR_NUM] = [
+            (0..ARR_LEN)
+                .map(|x| match x % 2 {
+                    0 => Decimal::from_u32(0),
+                    1 => None,
+                    _ => unreachable!(),
+                })
+                .collect_vec(),
+            (0..ARR_LEN)
+                .map(|x| match x % 3 {
+                    0 => Decimal::from_u32(0),
+                    1 => Decimal::from_f32(3.14),
+                    2 => None,
+                    _ => unreachable!(),
+                })
+                .collect_vec(),
+            (0..ARR_LEN)
+                .map(|x| match x % 5 {
+                    0 => Decimal::from_u32(0),
+                    1 => Decimal::from_u8(123),
+                    2 => Decimal::from_f64(3.1415926),
+                    3 => Decimal::from_f32(3.14),
+                    4 => None,
+                    _ => unreachable!(),
+                })
+                .collect_vec(),
+        ];
+
+        let arrs = vecs
+            .iter()
+            .map(|v| {
+                let mut builder = DecimalArrayBuilder::new(0).unwrap();
+                for i in v {
+                    builder.append(*i).unwrap();
+                }
+                builder.finish().unwrap()
+            })
+            .collect_vec();
+
+        let hasher_builder = RandomXxHashBuilder64::default();
+        let mut states = vec![hasher_builder.build_hasher(); ARR_LEN];
+        vecs.iter().for_each(|v| {
+            v.iter().zip(&mut states).for_each(|(x, state)| match x {
+                Some(inner) => inner.hash(state),
+                None => NULL_VAL_FOR_HASH.hash(state),
+            })
+        });
+        let hashes = hash_finish(&mut states);
+
+        let count = hashes.iter().counts().len();
+        assert_eq!(count, 30);
+
+        test_hash(arrs, hashes, hasher_builder);
     }
 }
