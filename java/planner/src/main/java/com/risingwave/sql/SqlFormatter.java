@@ -47,9 +47,7 @@ import com.risingwave.sql.tree.CreateUser;
 import com.risingwave.sql.tree.DecommissionNodeStatement;
 import com.risingwave.sql.tree.DenyPrivilege;
 import com.risingwave.sql.tree.DropAnalyzer;
-import com.risingwave.sql.tree.DropBlobTable;
 import com.risingwave.sql.tree.DropFunction;
-import com.risingwave.sql.tree.DropRepository;
 import com.risingwave.sql.tree.DropSnapshot;
 import com.risingwave.sql.tree.DropTable;
 import com.risingwave.sql.tree.DropUser;
@@ -924,13 +922,6 @@ public final class SqlFormatter {
     }
 
     @Override
-    public Void visitDropRepository(DropRepository node, Integer indent) {
-      builder.append("DROP REPOSITORY ")
-          .append(quoteIdentifierIfNeeded(node.name()));
-      return null;
-    }
-
-    @Override
     public Void visitCreateSnapshot(CreateSnapshot<?> node, Integer indent) {
       builder.append("CREATE SNAPSHOT ")
           .append(formatQualifiedName(node.name()));
@@ -958,16 +949,6 @@ public final class SqlFormatter {
     public Void visitDropTable(DropTable<?> node, Integer indent) {
       builder.append("DROP TABLE ");
       if (node.dropIfExists()) {
-        builder.append("IF EXISTS ");
-      }
-      node.table().accept(this, indent);
-      return null;
-    }
-
-    @Override
-    public Void visitDropBlobTable(DropBlobTable<?> node, Integer indent) {
-      builder.append("DROP BLOB TABLE ");
-      if (node.ignoreNonExistentTable()) {
         builder.append("IF EXISTS ");
       }
       node.table().accept(this, indent);

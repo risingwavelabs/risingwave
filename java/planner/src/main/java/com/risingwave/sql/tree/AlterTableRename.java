@@ -26,12 +26,10 @@ import java.util.Objects;
 public class AlterTableRename<T> extends Statement {
 
   private final Table<T> table;
-  private final boolean blob;
   private final QualifiedName newName;
 
-  public AlterTableRename(Table<T> table, boolean blob, QualifiedName newName) {
+  public AlterTableRename(Table<T> table, QualifiedName newName) {
     this.table = table;
-    this.blob = blob;
     this.newName = newName;
   }
 
@@ -42,10 +40,6 @@ public class AlterTableRename<T> extends Statement {
 
   public Table<T> table() {
     return table;
-  }
-
-  public boolean blob() {
-    return blob;
   }
 
   public QualifiedName newName() {
@@ -61,25 +55,16 @@ public class AlterTableRename<T> extends Statement {
       return false;
     }
     AlterTableRename<?> that = (AlterTableRename<?>) o;
-    return blob == that.blob
-        && Objects.equals(table, that.table)
-        && Objects.equals(newName, that.newName);
+    return Objects.equals(table, that.table) && Objects.equals(newName, that.newName);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(table, blob, newName);
+    return Objects.hash(table, newName);
   }
 
   @Override
   public String toString() {
-    return "AlterTableRename{"
-        + "table="
-        + table
-        + ", blob="
-        + blob
-        + ", new name="
-        + newName
-        + '}';
+    return "AlterTableRename{" + "table=" + table + ", new name=" + newName + '}';
   }
 }

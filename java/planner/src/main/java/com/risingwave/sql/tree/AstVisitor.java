@@ -415,14 +415,6 @@ public abstract class AstVisitor<R, C> {
     return visitNode(node, context);
   }
 
-  public R visitCreateBlobTable(CreateBlobTable<?> node, C context) {
-    return visitNode(node, context);
-  }
-
-  public R visitDropBlobTable(DropBlobTable<?> node, C context) {
-    return visitNode(node, context);
-  }
-
   public R visitRefreshStatement(RefreshStatement<?> node, C context) {
     return visitStatement(node, context);
   }
@@ -444,10 +436,6 @@ public abstract class AstVisitor<R, C> {
   }
 
   public R visitAlterTableReroute(AlterTableReroute<?> node, C context) {
-    return visitStatement(node, context);
-  }
-
-  public R visitAlterBlobTable(AlterBlobTable<?> node, C context) {
     return visitStatement(node, context);
   }
 
@@ -536,14 +524,6 @@ public abstract class AstVisitor<R, C> {
   }
 
   public R visitDeallocateStatement(DeallocateStatement node, C context) {
-    return visitStatement(node, context);
-  }
-
-  public R visitDropRepository(DropRepository node, C context) {
-    return visitStatement(node, context);
-  }
-
-  public R visitCreateRepository(CreateRepository<?> node, C context) {
     return visitStatement(node, context);
   }
 

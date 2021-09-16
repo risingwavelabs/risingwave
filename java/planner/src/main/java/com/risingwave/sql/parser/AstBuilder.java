@@ -40,7 +40,6 @@ import com.risingwave.sql.parser.antlr.v4.SqlBaseParser.TransactionModeContext;
 import com.risingwave.sql.tree.AddColumnDefinition;
 import com.risingwave.sql.tree.AliasedRelation;
 import com.risingwave.sql.tree.AllColumns;
-import com.risingwave.sql.tree.AlterBlobTable;
 import com.risingwave.sql.tree.AlterClusterRerouteRetryFailed;
 import com.risingwave.sql.tree.AlterTable;
 import com.risingwave.sql.tree.AlterTableAddColumn;
@@ -75,9 +74,7 @@ import com.risingwave.sql.tree.ComparisonExpression;
 import com.risingwave.sql.tree.CopyFrom;
 import com.risingwave.sql.tree.CopyTo;
 import com.risingwave.sql.tree.CreateAnalyzer;
-import com.risingwave.sql.tree.CreateBlobTable;
 import com.risingwave.sql.tree.CreateFunction;
-import com.risingwave.sql.tree.CreateRepository;
 import com.risingwave.sql.tree.CreateSnapshot;
 import com.risingwave.sql.tree.CreateStream;
 import com.risingwave.sql.tree.CreateTable;
@@ -92,10 +89,8 @@ import com.risingwave.sql.tree.DenyPrivilege;
 import com.risingwave.sql.tree.DiscardStatement;
 import com.risingwave.sql.tree.DoubleLiteral;
 import com.risingwave.sql.tree.DropAnalyzer;
-import com.risingwave.sql.tree.DropBlobTable;
 import com.risingwave.sql.tree.DropCheckConstraint;
 import com.risingwave.sql.tree.DropFunction;
-import com.risingwave.sql.tree.DropRepository;
 import com.risingwave.sql.tree.DropSnapshot;
 import com.risingwave.sql.tree.DropTable;
 import com.risingwave.sql.tree.DropUser;
@@ -404,22 +399,6 @@ class AstBuilder extends SqlBaseBaseVisitor<Node> {
   }
 
   @Override
-  public Node visitCreateBlobTable(SqlBaseParser.CreateBlobTableContext context) {
-    return new CreateBlobTable(
-        (Table) visit(context.table()),
-        visitIfPresent(context.numShards, ClusteredBy.class),
-        extractGenericProperties(context.withProperties()));
-  }
-
-  @Override
-  public Node visitCreateRepository(SqlBaseParser.CreateRepositoryContext context) {
-    return new CreateRepository(
-        getIdentText(context.name),
-        getIdentText(context.type),
-        extractGenericProperties(context.withProperties()));
-  }
-
-  @Override
   public Node visitCreateSnapshot(SqlBaseParser.CreateSnapshotContext context) {
     if (context.ALL() != null) {
       return new CreateSnapshot(
@@ -569,16 +548,6 @@ class AstBuilder extends SqlBaseBaseVisitor<Node> {
   @Override
   public Node visitDropTable(SqlBaseParser.DropTableContext context) {
     return new DropTable((Table) visit(context.table()), context.EXISTS() != null);
-  }
-
-  @Override
-  public Node visitDropRepository(SqlBaseParser.DropRepositoryContext context) {
-    return new DropRepository(getIdentText(context.ident()));
-  }
-
-  @Override
-  public Node visitDropBlobTable(SqlBaseParser.DropBlobTableContext context) {
-    return new DropBlobTable((Table) visit(context.table()), context.EXISTS() != null);
   }
 
   @Override
@@ -964,11 +933,6 @@ class AstBuilder extends SqlBaseBaseVisitor<Node> {
   }
 
   @Override
-  public Node visitBlobClusteredInto(SqlBaseParser.BlobClusteredIntoContext ctx) {
-    return new ClusteredBy<>(Optional.empty(), visitIfPresent(ctx.numShards, Expression.class));
-  }
-
-  @Override
   public Node visitFunctionArgument(SqlBaseParser.FunctionArgumentContext context) {
     return new FunctionArgument(
         getIdentText(context.ident()), (ColumnType) visit(context.dataType()));
@@ -1035,15 +999,6 @@ class AstBuilder extends SqlBaseBaseVisitor<Node> {
   }
 
   @Override
-  public Node visitAlterBlobTableProperties(SqlBaseParser.AlterBlobTablePropertiesContext context) {
-    Table name = (Table) visit(context.alterTableDefinition());
-    if (context.SET() != null) {
-      return new AlterBlobTable(name, extractGenericProperties(context.genericProperties()));
-    }
-    return new AlterBlobTable(name, identsToStrings(context.ident()));
-  }
-
-  @Override
   public Node visitAddColumn(SqlBaseParser.AddColumnContext context) {
     return new AlterTableAddColumn(
         (Table) visit(context.alterTableDefinition()),
@@ -1062,24 +1017,19 @@ class AstBuilder extends SqlBaseBaseVisitor<Node> {
   @Override
   public Node visitAlterTableOpenClose(SqlBaseParser.AlterTableOpenCloseContext context) {
     return new AlterTableOpenClose(
-        (Table) visit(context.alterTableDefinition()),
-        context.BLOB() != null,
-        context.OPEN() != null);
+        (Table) visit(context.alterTableDefinition()), context.OPEN() != null);
   }
 
   @Override
   public Node visitAlterTableRename(SqlBaseParser.AlterTableRenameContext context) {
     return new AlterTableRename(
-        (Table) visit(context.alterTableDefinition()),
-        context.BLOB() != null,
-        getQualifiedName(context.qname()));
+        (Table) visit(context.alterTableDefinition()), getQualifiedName(context.qname()));
   }
 
   @Override
   public Node visitAlterTableReroute(SqlBaseParser.AlterTableRerouteContext context) {
     return new AlterTableReroute<>(
         (Table) visit(context.alterTableDefinition()),
-        context.BLOB() != null,
         (RerouteOption) visit(context.rerouteOption()));
   }
 

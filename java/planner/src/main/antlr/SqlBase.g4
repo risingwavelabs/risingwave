@@ -57,11 +57,9 @@ statement
     | ALTER TABLE alterTableDefinition DROP CONSTRAINT ident                         #dropCheckConstraint
     | ALTER TABLE alterTableDefinition
         (SET '(' genericProperties ')' | RESET ('(' ident (',' ident)* ')')?)        #alterTableProperties
-    | ALTER BLOB TABLE alterTableDefinition
-        (SET '(' genericProperties ')' | RESET ('(' ident (',' ident)* ')')?)        #alterBlobTableProperties
-    | ALTER (BLOB)? TABLE alterTableDefinition (OPEN | CLOSE)                        #alterTableOpenClose
-    | ALTER (BLOB)? TABLE alterTableDefinition RENAME TO qname                       #alterTableRename
-    | ALTER (BLOB)? TABLE alterTableDefinition REROUTE rerouteOption                 #alterTableReroute
+    | ALTER TABLE alterTableDefinition (OPEN | CLOSE)                        #alterTableOpenClose
+    | ALTER TABLE alterTableDefinition RENAME TO qname                       #alterTableRename
+    | ALTER TABLE alterTableDefinition REROUTE rerouteOption                 #alterTableReroute
     | ALTER CLUSTER REROUTE RETRY FAILED                                             #alterClusterRerouteRetryFailed
     | ALTER CLUSTER SWAP TABLE source=qname TO target=qname withProperties?          #alterClusterSwapTable
     | ALTER CLUSTER DECOMMISSION node=expr                                           #alterClusterDecommissionNode
@@ -88,10 +86,8 @@ statement
     | COPY tableWithPartition FROM path=expr withProperties? (RETURN SUMMARY)?       #copyFrom
     | COPY tableWithPartition columns? where?
         TO DIRECTORY? path=expr withProperties?                                      #copyTo
-    | DROP BLOB TABLE (IF EXISTS)? table                                             #dropBlobTable
     | DROP TABLE (IF EXISTS)? table                                                  #dropTable
     | DROP ALIAS qname                                                               #dropAlias
-    | DROP REPOSITORY ident                                                          #dropRepository
     | DROP SNAPSHOT qname                                                            #dropSnapshot
     | DROP FUNCTION (IF EXISTS)? name=qname
         '(' (functionArgument (',' functionArgument)*)? ')'                          #dropFunction
@@ -490,8 +486,6 @@ createStmt
         '(' tableElement (',' tableElement)* ')'
          partitionedByOrClusteredInto withProperties?                                #createTable
     | CREATE TABLE table AS insertSource                                             #createTableAs
-    | CREATE BLOB TABLE table numShards=blobClusteredInto? withProperties?           #createBlobTable
-    | CREATE REPOSITORY name=ident TYPE type=ident withProperties?                   #createRepository
     | CREATE SNAPSHOT qname (ALL | TABLE tableWithPartitions) withProperties?        #createSnapshot
     | CREATE ANALYZER name=ident (EXTENDS extendedName=ident)?
         WITH? '(' analyzerElement ( ',' analyzerElement )* ')'                       #createAnalyzer
@@ -528,10 +522,6 @@ partitionedBy
 clusteredBy
     : CLUSTERED (BY '(' routing=primaryExpression ')')?
         (INTO numShards=parameterOrInteger SHARDS)?
-    ;
-
-blobClusteredInto
-    : CLUSTERED INTO numShards=parameterOrInteger SHARDS
     ;
 
 tableElement
@@ -679,7 +669,7 @@ isolationLevel
     ;
 
 nonReserved
-    : ALIAS | ANALYZE | ANALYZER | AT | AUTHORIZATION | BERNOULLI | BLOB | CATALOGS | CHAR_FILTERS | CHECK | CLUSTERED
+    : ALIAS | ANALYZE | ANALYZER | AT | AUTHORIZATION | BERNOULLI | CATALOGS | CHAR_FILTERS | CHECK | CLUSTERED
     | COLUMNS | COPY | CURRENT |  DAY | DEALLOCATE | DISTRIBUTED | DUPLICATE | DYNAMIC | EXPLAIN
     | EXTENDS | FOLLOWING | FORMAT | FULLTEXT | FUNCTIONS | GEO_POINT | GEO_SHAPE | GLOBAL
     | GRAPHVIZ | HOUR | IGNORED | ILIKE | INTERVAL | KEY | KILL | LICENSE | LOGICAL | LOCAL
@@ -687,7 +677,7 @@ nonReserved
     | PARTITIONS | PLAIN | PRECEDING | RANGE | REFRESH | ROW | ROWS | SCHEMAS | SECOND | SESSION
     | SHARDS | SHOW | STORAGE | STRICT | SYSTEM | TABLES | TABLESAMPLE | TEXT | TIME | ZONE | WITHOUT
     | TIMESTAMP | TO | TOKENIZER | TOKEN_FILTERS | TYPE | VALUES | VIEW | YEAR
-    | REPOSITORY | SNAPSHOT | RESTORE | GENERATED | ALWAYS | BEGIN | START | COMMIT
+    | SNAPSHOT | RESTORE | GENERATED | ALWAYS | BEGIN | START | COMMIT
     | ISOLATION | TRANSACTION | CHARACTERISTICS | LEVEL | LANGUAGE | OPEN | CLOSE | RENAME
     | PRIVILEGES | SCHEMA | PREPARE
     | REROUTE | MOVE | SHARD | ALLOCATE | REPLICA | CANCEL | CLUSTER | RETRY | FAILED | FILTER
@@ -790,7 +780,6 @@ WITH: 'WITH';
 WITHOUT: 'WITHOUT';
 RECURSIVE: 'RECURSIVE';
 CREATE: 'CREATE';
-BLOB: 'BLOB';
 TABLE: 'TABLE';
 STREAM: 'STREAM';
 SWAP: 'SWAP';
@@ -799,7 +788,6 @@ DANGLING: 'DANGLING';
 ARTIFACTS: 'ARTIFACTS';
 DECOMMISSION: 'DECOMMISSION';
 CLUSTER: 'CLUSTER';
-REPOSITORY: 'REPOSITORY';
 SNAPSHOT: 'SNAPSHOT';
 ALTER: 'ALTER';
 KILL: 'KILL';

@@ -27,20 +27,14 @@ public class AlterTableReroute<T> extends Statement {
 
   private final Table<T> table;
   private final RerouteOption<T> rerouteOption;
-  private final boolean blob;
 
-  public AlterTableReroute(Table<T> table, boolean blob, RerouteOption<T> rerouteOption) {
+  public AlterTableReroute(Table<T> table, RerouteOption<T> rerouteOption) {
     this.table = table;
-    this.blob = blob;
     this.rerouteOption = rerouteOption;
   }
 
   public Table<T> table() {
     return table;
-  }
-
-  public boolean blob() {
-    return blob;
   }
 
   public RerouteOption<T> rerouteOption() {
@@ -56,26 +50,17 @@ public class AlterTableReroute<T> extends Statement {
       return false;
     }
     AlterTableReroute<?> that = (AlterTableReroute<?>) o;
-    return blob == that.blob
-        && Objects.equals(table, that.table)
-        && Objects.equals(rerouteOption, that.rerouteOption);
+    return Objects.equals(table, that.table) && Objects.equals(rerouteOption, that.rerouteOption);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(table, rerouteOption, blob);
+    return Objects.hash(table, rerouteOption);
   }
 
   @Override
   public String toString() {
-    return "AlterTableReroute{"
-        + "table="
-        + table
-        + ", blob="
-        + blob
-        + ", reroute option="
-        + rerouteOption
-        + '}';
+    return "AlterTableReroute{" + "table=" + table + ", reroute option=" + rerouteOption + '}';
   }
 
   @Override

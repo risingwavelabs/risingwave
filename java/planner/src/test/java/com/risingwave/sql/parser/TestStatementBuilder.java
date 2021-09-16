@@ -48,9 +48,7 @@ import com.risingwave.sql.tree.DeallocateStatement;
 import com.risingwave.sql.tree.DefaultTraversalVisitor;
 import com.risingwave.sql.tree.DenyPrivilege;
 import com.risingwave.sql.tree.DropAnalyzer;
-import com.risingwave.sql.tree.DropBlobTable;
 import com.risingwave.sql.tree.DropFunction;
-import com.risingwave.sql.tree.DropRepository;
 import com.risingwave.sql.tree.DropSnapshot;
 import com.risingwave.sql.tree.DropTable;
 import com.risingwave.sql.tree.DropUser;
@@ -110,9 +108,7 @@ public class TestStatementBuilder {
         || statement instanceof DropAnalyzer
         || statement instanceof DropFunction
         || statement instanceof DropTable
-        || statement instanceof DropBlobTable
         || statement instanceof DropView
-        || statement instanceof DropRepository
         || statement instanceof DropSnapshot
         || statement instanceof Update
         || statement instanceof Insert
@@ -774,22 +770,6 @@ public class TestStatementBuilder {
   }
 
   @Test
-  public void testBlobTable() {
-    printStatement("drop blob table screenshots");
-
-    printStatement("create blob table screenshots");
-    printStatement("create blob table screenshots clustered into 5 shards");
-    printStatement("create blob table screenshots with (number_of_replicas=3)");
-    printStatement("create blob table screenshots with (number_of_replicas='0-all')");
-    printStatement(
-        "create blob table screenshots clustered into 5 shards with (number_of_replicas=3)");
-
-    printStatement("alter blob table screenshots set (number_of_replicas=3)");
-    printStatement("alter blob table screenshots set (number_of_replicas='0-all')");
-    printStatement("alter blob table screenshots reset (number_of_replicas)");
-  }
-
-  @Test
   public void testCreateAnalyzerStmtBuilder() {
     printStatement("create analyzer myAnalyzer ( tokenizer german )");
     printStatement(
@@ -1280,29 +1260,6 @@ public class TestStatementBuilder {
         "select * from foo where match ((a 1, b 2.0), 'abc') "
             + "using best_fields with (prop=val, foo=1)");
     printStatement("select * from foo where match (a, (select shape from countries limit 1))");
-  }
-
-  @Test
-  public void testRepositoryStmtBuilder() {
-    printStatement("create repository my_repo type hdfs");
-    printStatement("CREATE REPOSITORY \"myRepo\" TYPE \"fs\"");
-    printStatement(
-        "CREATE REPOSITORY \"myRepo\" TYPE \"fs\" "
-            + "with (location='/mount/backups/my_backup', compress=True)");
-    Statement statement =
-        SqlParser.createStatement(
-            "CREATE REPOSITORY my_repo type hdfs with (location='/mount/backups/my_backup')");
-    assertThat(
-        statement.toString(),
-        is(
-            "CreateRepository{"
-                + "repository=my_repo, "
-                + "type=hdfs, "
-                + "properties={location='/mount/backups/my_backup'}}"));
-
-    printStatement("DROP REPOSITORY my_repo");
-    statement = SqlParser.createStatement("DROP REPOSITORY \"myRepo\"");
-    assertThat(statement.toString(), is("DropRepository{" + "repository=myRepo}"));
   }
 
   @Test

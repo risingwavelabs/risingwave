@@ -26,12 +26,10 @@ import java.util.Objects;
 public class AlterTableOpenClose<T> extends Statement {
 
   private final Table<T> table;
-  private final boolean blob;
   private final boolean openTable;
 
-  public AlterTableOpenClose(Table<T> table, boolean blob, boolean openTable) {
+  public AlterTableOpenClose(Table<T> table, boolean openTable) {
     this.table = table;
-    this.blob = blob;
     this.openTable = openTable;
   }
 
@@ -42,10 +40,6 @@ public class AlterTableOpenClose<T> extends Statement {
 
   public Table<T> table() {
     return table;
-  }
-
-  public boolean blob() {
-    return blob;
   }
 
   public boolean openTable() {
@@ -61,23 +55,16 @@ public class AlterTableOpenClose<T> extends Statement {
       return false;
     }
     AlterTableOpenClose<?> that = (AlterTableOpenClose<?>) o;
-    return blob == that.blob && openTable == that.openTable && Objects.equals(table, that.table);
+    return openTable == that.openTable && Objects.equals(table, that.table);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(table, blob, openTable);
+    return Objects.hash(table, openTable);
   }
 
   @Override
   public String toString() {
-    return "AlterTableOpenClose{"
-        + "table="
-        + table
-        + ", blob="
-        + blob
-        + ", open table="
-        + openTable
-        + '}';
+    return "AlterTableOpenClose{" + "table=" + table + ", open table=" + openTable + '}';
   }
 }
