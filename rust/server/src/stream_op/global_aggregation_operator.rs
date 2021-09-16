@@ -6,13 +6,19 @@ use super::aggregation::*;
 
 /// `GlobalStreamingSumAgg` sums data of the same type. It sums values from
 /// `StreamingSumAgg`.
-pub type GlobalStreamingSumAgg<R> =
-    StreamingFoldAgg<R, R, PrimitiveSummable<<R as Array>::OwnedItem>>;
+pub type GlobalStreamingSumAgg<R> = NullableAgg<
+    R,
+    <R as Array>::Builder,
+    StreamingFoldAgg<R, R, PrimitiveSummable<<R as Array>::OwnedItem>>,
+>;
 
 /// `GloabalStreamingFloatSumAgg` sums data of the same float type. It sums
 /// values from `StreamingFloatSumAgg`.
-pub type GlobalStreamingFloatSumAgg<R> =
-    StreamingFoldAgg<R, R, FloatPrimitiveSummable<<R as Array>::OwnedItem>>;
+pub type GlobalStreamingFloatSumAgg<R> = NullableAgg<
+    R,
+    <R as Array>::Builder,
+    StreamingFoldAgg<R, R, FloatPrimitiveSummable<<R as Array>::OwnedItem>>,
+>;
 
 /// `GlobalStreamingCountAgg` counts data of any type. It sums values from
 /// `StreamingCountAgg`.

@@ -296,6 +296,7 @@ impl_agg! { F64Array, Float64, F64Array }
 
 #[cfg(test)]
 mod tests {
+    use super::super::tests::get_output_from_state;
     use super::*;
     use crate::array2::I64Array;
     use crate::{array, array_nonnull};
@@ -306,7 +307,8 @@ mod tests {
     type TestStreamingCountAgg<R> = StreamingFoldAgg<R, R, Countable<<R as Array>::OwnedItem>>;
 
     #[test]
-    fn test_primitive_sum() {
+    /// This test uses `Box<dyn StreamingAggStateImpl>` to test a state.
+    fn test_primitive_sum_boxed() {
         let mut agg: Box<dyn StreamingAggStateImpl> =
             Box::new(TestStreamingSumAgg::<I64Array>::new());
         agg.apply_batch(
@@ -322,34 +324,62 @@ mod tests {
     }
 
     #[test]
+    fn test_primitive_sum() {
+        let mut agg = TestStreamingSumAgg::<I64Array>::new();
+        agg.apply_batch(
+            &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
+            None,
+            &array_nonnull!(I64Array, [1, 2, 3, 3]).into(),
+        )
+        .unwrap();
+        let array = get_output_from_state(&mut agg);
+        assert_eq!(array.value_at(0), Some(3));
+    }
+
+    #[test]
     fn test_primitive_sum_first_deletion() {
-        let mut agg: Box<dyn StreamingAggStateImpl> =
-            Box::new(TestStreamingSumAgg::<I64Array>::new());
+        let mut agg = TestStreamingSumAgg::<I64Array>::new();
         agg.apply_batch(
             &[Op::Delete, Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
             &array_nonnull!(I64Array, [10, 1, 2, 3, 3]).into(),
         )
         .unwrap();
-        let mut builder = agg.new_builder();
-        agg.get_output(&mut builder).unwrap();
-        let array = builder.finish().unwrap();
-        assert_eq!(array.as_int64().value_at(0), Some(-7));
+        let array = get_output_from_state(&mut agg);
+        assert_eq!(array.value_at(0), Some(-7));
+    }
+
+    #[test]
+    /// Even if there is no element after some insertions and equal number of deletion opertaions,
+    /// `PrimitiveSummable` should output `0` instead of `None`.
+    fn test_primitive_sum_no_none() {
+        let mut agg = TestStreamingSumAgg::<I64Array>::new();
+
+        // When no operation has been applied, output should be `None`.
+        let array = get_output_from_state(&mut agg);
+        assert_eq!(array.value_at(0), None);
+
+        agg.apply_batch(
+            &[Op::Delete, Op::Insert, Op::Insert, Op::Delete],
+            None,
+            &array_nonnull!(I64Array, [1, 2, 1, 2]).into(),
+        )
+        .unwrap();
+        let array = get_output_from_state(&mut agg);
+        assert_eq!(array.value_at(0), Some(0));
     }
 
     #[test]
     fn test_primitive_count() {
-        let mut agg: Box<dyn StreamingAggStateImpl> =
-            Box::new(TestStreamingCountAgg::<I64Array>::new());
+        let mut agg = TestStreamingCountAgg::<I64Array>::new();
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
             &array!(I64Array, [Some(1), None, Some(3), Some(1)]).into(),
         )
         .unwrap();
-        let mut builder = agg.new_builder();
-        agg.get_output(&mut builder).unwrap();
-        let array = builder.finish().unwrap();
-        assert_eq!(array.as_int64().value_at(0), Some(1));
+
+        let array = get_output_from_state(&mut agg);
+        assert_eq!(array.value_at(0), Some(1));
     }
 }

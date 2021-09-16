@@ -49,7 +49,7 @@ static NULL_VAL_FOR_HASH: u32 = 0xfffffff0;
 ///
 /// The associated type `ArrayType` is the type of the corresponding array. It is the
 /// return type of `finish`.
-pub trait ArrayBuilder: Sized {
+pub trait ArrayBuilder: Send + Sync + Sized + 'static {
     /// Corresponding `Array` of this builder, which is reciprocal to `ArrayBuilder.
     type ArrayType: Array<Builder = Self>;
 
@@ -84,7 +84,7 @@ pub trait ArrayBuilder: Sized {
 /// In some cases, we will need to store owned data. For example, when aggregating min
 /// and max, we need to store current maximum in the aggregator. In this case, we
 /// could use `A::OwnedItem` in aggregator struct.
-pub trait Array: Sized + 'static + Into<ArrayImpl> {
+pub trait Array: Send + Sync + Sized + 'static + Into<ArrayImpl> {
     /// A reference to item in array, as well as return type of `value_at`, which is
     /// reciprocal to `Self::OwnedItem`.
     type RefItem<'a>: ScalarRef<'a, ScalarType = Self::OwnedItem>
@@ -440,6 +440,16 @@ macro_rules! impl_into_builders {
 for_all_variants! { impl_into_builders }
 
 pub type ArrayRef = Arc<ArrayImpl>;
+
+pub fn from_builder<A, F>(f: F) -> Result<A>
+where
+    A: Array,
+    F: FnOnce(&mut A::Builder) -> Result<()>,
+{
+    let mut builder = A::Builder::new(0)?;
+    f(&mut builder)?;
+    builder.finish()
+}
 
 #[cfg(test)]
 mod tests {
