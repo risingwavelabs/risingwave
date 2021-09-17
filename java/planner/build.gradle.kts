@@ -36,5 +36,5 @@ dependencies {
 
 tasks.generateGrammarSource {
     arguments = arguments + listOf("-visitor")
-    outputDirectory = File("build/generated-src/antlr/main/com/risingwave/parser/antlr/v4")
+    outputDirectory = File("build/generated-src/antlr/main/com/risingwave/sql/parser/antlr/v4")
 }

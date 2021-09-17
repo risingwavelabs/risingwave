@@ -87,7 +87,7 @@ subprojects {
 
     apply<CheckstylePlugin>()
     configure<CheckstyleExtension> {
-        val configLoc = File(rootDir, "src/main/resources/checkstyle")
+        val configLoc = File(rootDir, "codestyle")
         configDirectory.set(configLoc)
         isShowViolations = true
         toolVersion = "8.44"
