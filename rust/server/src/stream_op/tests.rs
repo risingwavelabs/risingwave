@@ -4,7 +4,7 @@ use crate::types::*;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use super::channel_output::ChannelConsumer;
+use super::UnarySimpleProcessor;
 use super::*;
 
 use approx::assert_relative_eq;
@@ -57,7 +57,7 @@ async fn test_merger_sum_aggr() {
         let (tx, rx) = channel(16);
         let output = ChannelOutput::new(tx);
         (
-            ChannelConsumer::new(rx, Box::new(aggregator)),
+            UnarySimpleProcessor::new(rx, Box::new(aggregator)),
             Box::new(output) as Box<dyn Output>,
         )
     };
@@ -91,7 +91,7 @@ async fn test_merger_sum_aggr() {
     );
 
     // use a merger to collect data from dispatchers before sending them to aggregator
-    let merger = UnaryMerger::new(rxs, Box::new(aggregator));
+    let merger = UnaryMergeProcessor::new(rxs, Box::new(aggregator));
 
     // start merger thread
     let join_handle = tokio::spawn(merger.run());
@@ -311,7 +311,7 @@ async fn test_tpch_q6() {
         let (tx, rx) = channel(16);
         let output = ChannelOutput::new(tx);
         (
-            ChannelConsumer::new(rx, Box::new(filter)),
+            UnarySimpleProcessor::new(rx, Box::new(filter)),
             Box::new(output) as Box<dyn Output>,
         )
     };
@@ -345,7 +345,7 @@ async fn test_tpch_q6() {
     );
 
     // use a merger to collect data from dispatchers before sending them to aggregator
-    let merger = UnaryMerger::new(rxs, Box::new(aggregator));
+    let merger = UnaryMergeProcessor::new(rxs, Box::new(aggregator));
 
     // start merger thread
     let join_handle = tokio::spawn(merger.run());
@@ -431,7 +431,7 @@ async fn test_tpch_q6() {
     // wait for `Merger`
     join_handle.await.unwrap().unwrap();
 
-    // wait for `ChannelConsumer`s
+    // wait for `Processor`s
     for handle in join_handles {
         handle.await.unwrap().unwrap();
     }

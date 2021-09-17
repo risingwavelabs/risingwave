@@ -1,4 +1,4 @@
-use super::{OperatorHead, Result, UnaryStreamOperator};
+use super::{Processor, Result, UnaryStreamOperator};
 use async_stream::stream;
 use async_trait::async_trait;
 use futures::channel::mpsc::{unbounded, Receiver, UnboundedReceiver};
@@ -6,17 +6,14 @@ use futures::{SinkExt, Stream, StreamExt};
 
 use super::Message;
 
-/// `Merger` merges multiple inputs into one single output.
-pub trait Merger: OperatorHead {}
-
-/// `UnaryMerger` merges data from multiple channels. Dataflow from one channel
+/// `UnaryMergeProcessor` merges data from multiple channels. Dataflow from one channel
 /// will be stopped on barrier.
-pub struct UnaryMerger {
+pub struct UnaryMergeProcessor {
     inputs: Vec<Receiver<Message>>,
     operator_head: Box<dyn UnaryStreamOperator>,
 }
 
-impl UnaryMerger {
+impl UnaryMergeProcessor {
     pub fn new(
         inputs: Vec<Receiver<Message>>,
         operator_head: Box<dyn UnaryStreamOperator>,
@@ -68,7 +65,7 @@ fn barrier_receiver(
 }
 
 #[async_trait]
-impl OperatorHead for UnaryMerger {
+impl Processor for UnaryMergeProcessor {
     async fn run(mut self) -> Result<()> {
         let mut txs = vec![];
         let mut streams = vec![];
@@ -123,8 +120,6 @@ impl OperatorHead for UnaryMerger {
     }
 }
 
-impl Merger for UnaryMerger {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,7 +150,7 @@ mod tests {
             txs.push(tx);
             rxs.push(rx);
         }
-        let merger = UnaryMerger {
+        let merger = UnaryMergeProcessor {
             inputs: rxs,
             operator_head: Box::new(consumer),
         };

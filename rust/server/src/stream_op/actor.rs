@@ -1,4 +1,5 @@
-use super::Merger;
+use super::Processor;
+/// `Actor` is the basic execution unit in the streaming framework.
 pub struct Actor {
-    merger: Box<dyn Merger>,
+    processor: Box<dyn Processor>,
 }

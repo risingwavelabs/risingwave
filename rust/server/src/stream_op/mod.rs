@@ -25,10 +25,6 @@ mod channel_output;
 
 pub use channel_output::ChannelOutput;
 
-mod merger;
-
-pub use merger::{Merger, UnaryMerger};
-
 mod actor;
 
 pub use actor::Actor;
@@ -42,6 +38,18 @@ mod aggregation;
 mod dispatcher;
 
 pub use dispatcher::*;
+
+mod processor;
+
+use processor::*;
+
+mod simple_processor;
+
+pub use simple_processor::*;
+
+mod merge_processor;
+
+pub use merge_processor::*;
 
 use crate::array2::column::Column;
 use async_trait::async_trait;
@@ -128,11 +136,4 @@ pub trait BinaryStreamOperator: StreamOperator {
 #[async_trait]
 pub trait Output: Send + Sync + 'static {
     async fn collect(&mut self, msg: Message) -> Result<()>;
-}
-
-/// `OperatorHead` is the head of operators. Generally, the `OperatorHead` needs
-/// to run in the background, so as to poll data from channels.
-#[async_trait]
-pub trait OperatorHead: Send + Sync + 'static {
-    async fn run(self) -> Result<()>;
 }
