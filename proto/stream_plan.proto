@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+import "google/protobuf/any.proto";
+
+package risingwave.streaming.proto;
+option java_package = "com.risingwave.proto.streaming.plan";
+option java_multiple_files = true;
+option optimize_for = SPEED;
+
+
+message StreamNode {
+  enum StreamNodeType {
+    TABLE_INGRESS = 0;
+    KAFKA_INGRESS = 1;
+    PROJECTION = 2;
+    FILTER = 3;
+    SIMPLE_AGG = 4;
+    GLOBAL_SIMPLE_AGG = 5;
+    HASH_AGG = 6;
+    GLOBAL_HASH_AGG = 7;
+    HASH_JOIN = 8;
+  }
+  StreamNodeType node_type = 1;
+  // Some nodes we can reuse plan nodes from plan.proto.
+  // TODO: should we enforce strong typed body on nodes?
+  google.protobuf.Any body = 2;
+  // We assume that StreamNodes always appear in fragments,
+  // and each fragment encode a chain of nodes.
+  // Hence each StreamNode has only one downstream.
+  StreamNode downstream_node = 3;
+}
+
+// A dispatcher redistribute messages.
+// We encode both the type and other usage information in the proto.
+message Dispatcher{
+  enum DispatcherType {
+    SIMPLE = 0;
+    ROUND_ROBIN = 1;
+    HASH = 2;
+  }
+  DispatcherType type = 1;
+  int32 column_idx = 2;
+}
+
+// A StreamFragment is a subgraph of the overall stream graph,
+// we assume a fragment is always a chain for simplicity.
+// That is, a fragment has exactly one head node and one sink node.
+// We define the head node in the proto, and the upstream fragments in id
+// as multiple fragments may share the same upstream fragment.
+message StreamFragment {
+  uint32 fragment_id = 1;
+  StreamNode nodes = 2;
+  // We assume the given upstream fragment are always previously defined,
+  // i.e, the create stream requests must arrive in order.
+  repeated uint32 upstream_fragment_id = 3;
+  Dispatcher dispatcher = 4;
+}
+
+// Remark: we do not explicitly encode mergers in the proto as it is not necessary.
+// A fragment with multiple upstreams will automatically attach a merger in the front.
