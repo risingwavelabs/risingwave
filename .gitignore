@@ -17,7 +17,6 @@
 *.dll
 
 # Fortran module files
-*.mod
 *.smod
 
 # Compiled Static libraries
@@ -62,3 +61,5 @@ rust/proto/src/*.rs
 !rust/proto/src/lib.rs
 *.iml
 rust/log/
+
+go/bin/

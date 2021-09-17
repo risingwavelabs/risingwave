@@ -33,8 +33,6 @@ jobs:
         uses: actions/checkout@v2
         with:
           fetch-depth: 0
-          token: ${{ secrets.WUTAO_PAT }}
-          submodules: 'recursive'
 
       - name: Set up JDK 11
         uses: actions/setup-java@v2
@@ -73,8 +71,6 @@ jobs:
         uses: actions/checkout@v2
         with:
           fetch-depth: 0
-          token: ${{ secrets.WUTAO_PAT }}
-          submodules: 'recursive'
 
       - name: Set up JDK 11
         uses: actions/setup-java@v2
@@ -148,6 +144,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
 
       - name: Install Protoc
         uses: arduino/setup-protoc@v1
