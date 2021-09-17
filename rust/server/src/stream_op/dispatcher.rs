@@ -1,4 +1,7 @@
 use super::{Message, Output, Result, StreamChunk};
+use crate::array2::DataChunk;
+use crate::buffer::Bitmap;
+use crate::util::hash_util::CRC32FastBuilder;
 use async_trait::async_trait;
 
 pub struct Dispatcher<Inner: DataDispatcher> {
@@ -59,6 +62,81 @@ impl DataDispatcher for RoundRobinDataDispatcher {
             .await?;
         self.cur += 1;
         self.cur %= self.outputs.len();
+        Ok(())
+    }
+}
+
+pub struct HashDataDispatcher {
+    outputs: Vec<Box<dyn Output>>,
+    keys: Vec<usize>,
+}
+
+impl HashDataDispatcher {
+    pub fn new(outputs: Vec<Box<dyn Output>>, keys: Vec<usize>) -> Self {
+        Self { outputs, keys }
+    }
+}
+
+#[async_trait]
+impl DataDispatcher for HashDataDispatcher {
+    fn get_outputs(&mut self) -> &mut [Box<dyn Output>] {
+        &mut self.outputs
+    }
+
+    async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()> {
+        let num_outputs = self.outputs.len();
+        let StreamChunk {
+            ops,
+            columns: arrays,
+            visibility,
+            cardinality,
+        } = chunk;
+
+        let data_chunk = {
+            let data_chunk_builder = DataChunk::builder()
+                .columns(arrays.clone())
+                .cardinality(cardinality);
+            if let Some(visibility) = visibility {
+                data_chunk_builder.visibility(visibility).build()
+            } else {
+                data_chunk_builder.build()
+            }
+        };
+        let hash_builder = CRC32FastBuilder {};
+        let hash_values = data_chunk
+            .get_hash_values(&self.keys, hash_builder)
+            .unwrap()
+            .iter()
+            .map(|hash| *hash as usize % num_outputs)
+            .collect::<Vec<_>>();
+
+        let mut vis_maps = vec![vec![]; num_outputs];
+        let mut cardinalities = vec![0; num_outputs];
+        hash_values.iter().for_each(|hash| {
+            for (output_idx, vis_map) in vis_maps.iter_mut().enumerate() {
+                if *hash == output_idx {
+                    vis_map.push(true);
+                    cardinalities[output_idx] += 1;
+                } else {
+                    vis_map.push(false);
+                }
+            }
+        });
+
+        for ((vis_map, cardinality), output) in vis_maps
+            .into_iter()
+            .zip(cardinalities.into_iter())
+            .zip(self.outputs.iter_mut())
+        {
+            let vis_map = Bitmap::from_vec(vis_map).unwrap();
+            let new_stream_chunk = StreamChunk {
+                ops: ops.clone(),
+                columns: arrays.clone(),
+                visibility: Some(vis_map),
+                cardinality,
+            };
+            output.collect(Message::Chunk(new_stream_chunk)).await?;
+        }
         Ok(())
     }
 }

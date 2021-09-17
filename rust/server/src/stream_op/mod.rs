@@ -2,34 +2,45 @@ use crate::array2::DataChunk;
 use crate::{buffer::Bitmap, error::Result};
 
 mod aggregation_operator;
+
 pub use aggregation_operator::*;
 
 mod global_aggregation_operator;
+
 pub use global_aggregation_operator::*;
 
 mod filter_operator;
+
 pub use filter_operator::FilterOperator;
 
 mod projection_operator;
+
 pub use projection_operator::ProjectionOperator;
 
 mod local_output;
+
 pub use local_output::LocalOutput;
 
 mod channel_output;
+
 pub use channel_output::ChannelOutput;
 
 mod merger;
+
 pub use merger::{Merger, UnaryMerger};
 
 mod actor;
+
 pub use actor::Actor;
 
 mod data_source;
 
+pub use data_source::DataSource;
+
 mod aggregation;
 
 mod dispatcher;
+
 pub use dispatcher::*;
 
 use crate::array2::column::Column;

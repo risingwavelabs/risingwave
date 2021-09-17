@@ -351,7 +351,7 @@ impl ArrayImpl {
         for_all_variants! { impl_all_hash_at, self }
     }
 
-    fn hash_vec<H: Hasher>(&self, hashers: &mut Vec<H>) {
+    pub fn hash_vec<H: Hasher>(&self, hashers: &mut Vec<H>) {
         macro_rules! impl_all_hash_vec {
       ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
         match $self {
