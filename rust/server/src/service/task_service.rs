@@ -29,8 +29,9 @@ impl TaskService for TaskServiceImpl {
         // NOTE: Due to the limitation of the generated grpc api, we cannot borrow the mutable data inside.
         // So here, we have to accept this copy overhead.
         let plan = req.get_plan().clone();
-        let mgr = self.mgr.clone();
-        let res = mgr.fire_task(self.env.clone(), req.get_task_id(), plan);
+        let res = self
+            .mgr
+            .fire_task(self.env.clone(), req.get_task_id(), plan);
         ctx.spawn(async move {
             match res {
                 Err(e) => {
