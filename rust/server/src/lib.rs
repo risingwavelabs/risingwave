@@ -31,6 +31,7 @@ mod executor;
 mod expr;
 pub mod service;
 mod storage;
+mod stream;
 mod stream_op;
 mod task;
 mod types;

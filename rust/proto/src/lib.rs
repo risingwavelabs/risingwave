@@ -10,3 +10,9 @@ pub mod plan;
 pub mod task_service;
 #[rustfmt::skip]
 pub mod task_service_grpc;
+#[rustfmt::skip]
+pub mod stream_plan;
+#[rustfmt::skip]
+pub mod stream_service;
+#[rustfmt::skip]
+pub mod stream_service_grpc;

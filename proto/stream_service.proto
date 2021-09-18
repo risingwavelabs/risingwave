@@ -10,21 +10,21 @@ option java_multiple_files = true;
 option optimize_for = SPEED;
 
 // Assuming only one compute node for streaming now.
-message CreateStreamFragmentRequest {
+message CreateActorRequest {
   uint32 request_id = 1;
   risingwave.streaming.proto.StreamFragment fragment = 2;
 }
 
-message CreateStreamFragmentResponse {
+message CreateActorResponse {
   risingwave.proto.common.Status status = 1;
 }
 
-message DropStreamFragmentRequest{
+message DropActorRequest{
   uint32 request_id = 1;
   repeated uint32 fragment_id = 2;
 }
 
-message DropStreamFragmentResponse{
+message DropActorResponse{
   risingwave.proto.common.Status status = 1;
 }
 
@@ -44,8 +44,8 @@ message BroadcastActorInfoTableResponse{
 }
 
 service StreamService {
-  rpc CreateStreamFragment(CreateStreamFragmentRequest) returns (CreateStreamFragmentResponse);
-  rpc DropStreamFragment(DropStreamFragmentRequest) returns (DropStreamFragmentResponse);
+  rpc CreateActor(CreateActorRequest) returns (CreateActorResponse);
+  rpc DropActor(DropActorRequest) returns (DropActorResponse);
   rpc BroadcastActorInfoTable(ActorInfoTable) returns (BroadcastActorInfoTableResponse);
 }
 
