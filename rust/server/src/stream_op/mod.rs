@@ -41,7 +41,7 @@ pub use dispatcher::*;
 
 mod processor;
 
-use processor::*;
+pub use processor::*;
 
 mod simple_processor;
 

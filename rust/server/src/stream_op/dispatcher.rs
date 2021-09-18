@@ -8,7 +8,7 @@ pub struct Dispatcher<Inner: DataDispatcher> {
     inner: Inner,
 }
 
-impl<Inner: DataDispatcher> Dispatcher<Inner> {
+impl<Inner: DataDispatcher + Send> Dispatcher<Inner> {
     pub fn new(inner: Inner) -> Self {
         Self { inner }
     }
@@ -30,6 +30,13 @@ impl<Inner: DataDispatcher> Dispatcher<Inner> {
             }
             Ok(())
         }
+    }
+}
+
+#[async_trait]
+impl<Inner: DataDispatcher + Send + Sync + 'static> Output for Dispatcher<Inner> {
+    async fn collect(&mut self, msg: Message) -> Result<()> {
+        self.dispatch(msg).await
     }
 }
 
