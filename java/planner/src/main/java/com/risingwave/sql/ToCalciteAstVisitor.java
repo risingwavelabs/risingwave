@@ -30,6 +30,7 @@ import com.risingwave.sql.tree.CreateView;
 import com.risingwave.sql.tree.DoubleLiteral;
 import com.risingwave.sql.tree.DropTable;
 import com.risingwave.sql.tree.ExistsPredicate;
+import com.risingwave.sql.tree.Explain;
 import com.risingwave.sql.tree.Expression;
 import com.risingwave.sql.tree.Extract;
 import com.risingwave.sql.tree.FunctionCall;
@@ -57,6 +58,7 @@ import com.risingwave.sql.tree.QuerySpecification;
 import com.risingwave.sql.tree.SearchedCaseExpression;
 import com.risingwave.sql.tree.SingleColumn;
 import com.risingwave.sql.tree.SortItem;
+import com.risingwave.sql.tree.Statement;
 import com.risingwave.sql.tree.StringLiteral;
 import com.risingwave.sql.tree.SubqueryExpression;
 import com.risingwave.sql.tree.Table;
@@ -77,6 +79,9 @@ import org.apache.calcite.sql.SqlBasicCall;
 import org.apache.calcite.sql.SqlBasicTypeNameSpec;
 import org.apache.calcite.sql.SqlCharStringLiteral;
 import org.apache.calcite.sql.SqlDataTypeSpec;
+import org.apache.calcite.sql.SqlExplain;
+import org.apache.calcite.sql.SqlExplainFormat;
+import org.apache.calcite.sql.SqlExplainLevel;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlInsert;
 import org.apache.calcite.sql.SqlIntervalQualifier;
@@ -350,6 +355,29 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
   @Override
   protected SqlNode visitNode(Node node, Void context) {
     throw new UnsupportedOperationException("Unknown node: " + node);
+  }
+
+  @Override
+  protected SqlNode visitExplain(Explain node, Void context) {
+    SqlNode statement = visitStatement(node.getStatement(), context);
+
+    // Currently, we only support default behavior of EXPLAIN as below
+    final SqlExplainLevel detailLevel = SqlExplainLevel.EXPPLAN_ATTRIBUTES;
+    final SqlExplain.Depth depth = SqlExplain.Depth.PHYSICAL;
+    final SqlExplainFormat format = SqlExplainFormat.TEXT;
+
+    return new SqlExplain(
+        SqlParserPos.ZERO,
+        statement,
+        detailLevel.symbol(SqlParserPos.ZERO),
+        depth.symbol(SqlParserPos.ZERO),
+        format.symbol(SqlParserPos.ZERO),
+        0);
+  }
+
+  @Override
+  protected SqlNode visitStatement(Statement node, Void context) {
+    return node.accept(this, context);
   }
 
   @Override

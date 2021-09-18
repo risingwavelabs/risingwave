@@ -2,7 +2,6 @@ package com.risingwave.rpc;
 
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
-import com.risingwave.execution.handler.QueryHandler;
 import com.risingwave.proto.computenode.CreateTaskRequest;
 import com.risingwave.proto.computenode.CreateTaskResponse;
 import com.risingwave.proto.computenode.ExchangeServiceGrpc;
@@ -16,9 +15,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class GrpcComputeClient implements ComputeClient {
-  private static final Logger LOGGER = LoggerFactory.getLogger(QueryHandler.class);
+  private static final Logger LOGGER = LoggerFactory.getLogger(GrpcComputeClient.class);
 
-  private Channel channel;
+  private final Channel channel;
 
   public GrpcComputeClient(Channel channel) {
     this.channel = channel;

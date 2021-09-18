@@ -6,9 +6,10 @@ import com.risingwave.common.exception.PgException;
 import com.risingwave.pgwire.database.PgResult;
 import com.risingwave.pgwire.msg.StatementType;
 
-public abstract class AbstractResult implements PgResult {
+abstract class AbstractResult implements PgResult {
+
   private final StatementType statementType;
-  private final int rowCount;
+  final int rowCount;
   private final boolean query;
 
   protected AbstractResult(StatementType statementType, int rowCount, boolean query) {

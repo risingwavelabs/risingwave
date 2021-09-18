@@ -44,7 +44,7 @@ public class QueryHandler implements SqlHandler {
       taskDataList.add(taskDataIterator.next());
     }
     return new BatchDataChunkResult(
-        getStatementType(ast), true, taskDataList, plan.getRoot().getRowType());
+        getStatementType(ast), taskDataList, plan.getRoot().getRowType());
   }
 
   // Helpers.

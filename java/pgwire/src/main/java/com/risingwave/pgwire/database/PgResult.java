@@ -4,7 +4,7 @@ import com.risingwave.common.exception.PgException;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.pgwire.types.PgValue;
 import java.util.List;
-import org.jetbrains.annotations.NotNull;
+import javax.annotation.Nonnull;
 
 /** The result of a statement. */
 public interface PgResult {
@@ -12,7 +12,7 @@ public interface PgResult {
   StatementType getStatementType();
 
   interface PgIter {
-    @NotNull
+    @Nonnull
     List<PgFieldDescriptor> getRowDesc() throws PgException;
 
     /**
@@ -31,7 +31,7 @@ public interface PgResult {
    */
   boolean isQuery();
 
-  @NotNull
+  @Nonnull
   PgIter createIterator() throws PgException;
 
   int getEffectedRowsCnt() throws PgException;

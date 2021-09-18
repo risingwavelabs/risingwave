@@ -23,7 +23,7 @@ public class BatchDataChunkResultTest {
 
   @Test
   public void testEmptyRemoteBatchPlanResult() {
-    ArrayList<TaskData> taskDataList = new ArrayList<TaskData>();
+    ArrayList<TaskData> taskDataList = new ArrayList<>();
     RisingWaveTypeFactory typeFactory = new RisingWaveTypeFactory();
     var relDataTypes = Lists.newArrayList(typeFactory.createSqlType(SqlTypeName.INTEGER));
     var fieldNames = Lists.newArrayList("abc");
@@ -33,7 +33,6 @@ public class BatchDataChunkResultTest {
     BatchDataChunkResult ret =
         new BatchDataChunkResult(
             StatementType.SELECT,
-            false,
             taskDataList,
             typeFactory.createStructType(relDataTypes, fieldNames));
     PgResult.PgIter iter = ret.createIterator();
@@ -48,7 +47,7 @@ public class BatchDataChunkResultTest {
     var rowType = typeFactory.createStructType(Lists.newArrayList(), Lists.newArrayList());
     BatchDataChunkResult ret =
         new BatchDataChunkResult(
-            StatementType.INSERT, false, Lists.newArrayList() /*empty result*/, rowType);
+            StatementType.INSERT, Lists.newArrayList() /*empty result*/, rowType);
     PgResult.PgIter iter = ret.createIterator();
     Assertions.assertFalse(iter.next());
     Assertions.assertFalse(iter.next());
@@ -96,7 +95,6 @@ public class BatchDataChunkResultTest {
     BatchDataChunkResult ret =
         new BatchDataChunkResult(
             StatementType.SELECT,
-            false,
             taskDataList,
             typeFactory.createStructType(relDataTypes, fieldNames));
     PgResult.PgIter iter = ret.createIterator();

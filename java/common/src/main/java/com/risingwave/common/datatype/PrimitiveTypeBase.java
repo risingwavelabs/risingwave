@@ -164,5 +164,5 @@ public abstract class PrimitiveTypeBase extends RisingWaveTypeBase {
     return copyWithNullability(nullable);
   }
 
-  protected abstract PrimitiveTypeBase copyWithNullability(boolean nullable);
+  abstract PrimitiveTypeBase copyWithNullability(boolean nullable);
 }

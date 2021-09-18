@@ -42,7 +42,7 @@ public class DropTableHandler implements SqlHandler {
       client.getData(taskSinkId);
     }
 
-    return new DdlResult(StatementType.OTHER, 0);
+    return new DdlResult(StatementType.DROP_TABLE, 0);
   }
 
   private static PlanFragment ddlSerializer(TableCatalog table) {

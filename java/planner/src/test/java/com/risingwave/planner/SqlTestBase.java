@@ -5,6 +5,7 @@ import com.google.inject.Injector;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.execution.context.FrontendEnv;
 import com.risingwave.execution.handler.SqlHandlerFactory;
+import com.risingwave.pgwire.database.PgResult;
 import com.risingwave.scheduler.TestPlannerModule;
 import com.risingwave.sql.parser.SqlParser;
 import org.apache.calcite.sql.SqlNode;
@@ -35,9 +36,9 @@ public abstract class SqlTestBase {
     return SqlParser.createCalciteStatement(sql);
   }
 
-  protected void executeSql(String sql) {
+  protected PgResult executeSql(String sql) {
     SqlNode ast = parseSql(sql);
-    executionContext
+    return executionContext
         .getSqlHandlerFactory()
         .create(ast, executionContext)
         .handle(ast, executionContext);
