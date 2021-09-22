@@ -208,24 +208,18 @@ where
         skip: Option<&Bitmap>,
         data: &I,
     ) -> Result<()> {
-        match skip {
-            Some(_) => {
-                panic!("apply batch with visibility map is not supported yet")
-            }
-            None => {
-                for (op, data) in ops.iter().zip(data.iter()) {
-                    match op {
-                        Op::Insert | Op::UpdateInsert => {
-                            self.result = S::accumulate(option_as_scalar_ref(&self.result), data)?
-                        }
-                        Op::Delete | Op::UpdateDelete => {
-                            self.result = S::retract(option_as_scalar_ref(&self.result), data)?
-                        }
+        for (row_idx, (op, data)) in ops.iter().zip(data.iter()).enumerate() {
+            if skip == None || skip.unwrap().is_set(row_idx).unwrap() {
+                match op {
+                    Op::Insert | Op::UpdateInsert => {
+                        self.result = S::accumulate(option_as_scalar_ref(&self.result), data)?
+                    }
+                    Op::Delete | Op::UpdateDelete => {
+                        self.result = S::retract(option_as_scalar_ref(&self.result), data)?
                     }
                 }
             }
         }
-
         Ok(())
     }
 }
@@ -321,6 +315,17 @@ mod tests {
         agg.get_output(&mut builder).unwrap();
         let array = builder.finish().unwrap();
         assert_eq!(array.as_int64().value_at(0), Some(3));
+
+        agg.apply_batch(
+            &[Op::Insert, Op::Delete, Op::Delete, Op::Insert],
+            Some(&Bitmap::from_vec(vec![true, true, false, false]).unwrap()),
+            &array_nonnull!(I64Array, [3, 1, 3, 1]).into(),
+        )
+        .unwrap();
+        let mut builder = agg.new_builder();
+        agg.get_output(&mut builder).unwrap();
+        let array = builder.finish().unwrap();
+        assert_eq!(array.as_int64().value_at(0), Some(5));
     }
 
     #[test]
@@ -334,6 +339,17 @@ mod tests {
         .unwrap();
         let array = get_output_from_state(&mut agg);
         assert_eq!(array.value_at(0), Some(3));
+
+        agg.apply_batch(
+            &[Op::Insert, Op::Delete, Op::Delete, Op::Insert],
+            Some(&Bitmap::from_vec(vec![true, true, false, false]).unwrap()),
+            &array_nonnull!(I64Array, [3, 1, 3, 1]).into(),
+        )
+        .unwrap();
+        let mut builder = agg.new_builder();
+        agg.get_output(&mut builder).unwrap();
+        let array = builder.finish().unwrap();
+        assert_eq!(array.as_int64().value_at(0), Some(5));
     }
 
     #[test]
@@ -347,6 +363,17 @@ mod tests {
         .unwrap();
         let array = get_output_from_state(&mut agg);
         assert_eq!(array.value_at(0), Some(-7));
+
+        agg.apply_batch(
+            &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
+            Some(&Bitmap::from_vec(vec![false, true, false, false]).unwrap()),
+            &array_nonnull!(I64Array, [3, 1, 3, 1]).into(),
+        )
+        .unwrap();
+        let mut builder = agg.new_builder();
+        agg.get_output(&mut builder).unwrap();
+        let array = builder.finish().unwrap();
+        assert_eq!(array.as_int64().value_at(0), Some(-8));
     }
 
     #[test]
@@ -367,6 +394,17 @@ mod tests {
         .unwrap();
         let array = get_output_from_state(&mut agg);
         assert_eq!(array.value_at(0), Some(0));
+
+        agg.apply_batch(
+            &[Op::Delete, Op::Delete, Op::Delete, Op::Insert],
+            Some(&Bitmap::from_vec(vec![false, true, false, true]).unwrap()),
+            &array_nonnull!(I64Array, [3, 1, 3, 1]).into(),
+        )
+        .unwrap();
+        let mut builder = agg.new_builder();
+        agg.get_output(&mut builder).unwrap();
+        let array = builder.finish().unwrap();
+        assert_eq!(array.as_int64().value_at(0), Some(0));
     }
 
     #[test]
@@ -381,5 +419,16 @@ mod tests {
 
         let array = get_output_from_state(&mut agg);
         assert_eq!(array.value_at(0), Some(1));
+
+        agg.apply_batch(
+            &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
+            Some(&Bitmap::from_vec(vec![false, true, false, false]).unwrap()),
+            &array!(I64Array, [Some(1), None, Some(3), Some(1)]).into(),
+        )
+        .unwrap();
+        let mut builder = agg.new_builder();
+        agg.get_output(&mut builder).unwrap();
+        let array = builder.finish().unwrap();
+        assert_eq!(array.as_int64().value_at(0), Some(1));
     }
 }

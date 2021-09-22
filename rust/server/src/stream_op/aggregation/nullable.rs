@@ -53,10 +53,12 @@ where
         skip: Option<&Bitmap>,
         data: &I,
     ) -> Result<()> {
-        for op in ops {
-            match op {
-                Op::Insert | Op::UpdateInsert => self.row_cnt += 1,
-                Op::Delete | Op::UpdateDelete => self.row_cnt -= 1,
+        for (row_idx, op) in ops.iter().enumerate() {
+            if skip == None || skip.unwrap().is_set(row_idx).unwrap() {
+                match op {
+                    Op::Insert | Op::UpdateInsert => self.row_cnt += 1,
+                    Op::Delete | Op::UpdateDelete => self.row_cnt -= 1,
+                }
             }
         }
         self.inner.apply_batch_concrete(ops, skip, data)?;
@@ -184,6 +186,36 @@ mod tests {
             .unwrap();
 
         // should be the same as `TestState`'s output
+        assert_eq!(
+            get_output_from_state(&mut state).iter().collect::<Vec<_>>(),
+            [Some(233)]
+        );
+
+        // one more insert, so we are having `0` elements inside.
+        state
+            .apply_batch_concrete(
+                &[Op::Delete, Op::Insert],
+                Some(&Bitmap::from_vec(vec![false, true]).unwrap()),
+                &I64Array::from_slice(&[None, None]).unwrap(),
+            )
+            .unwrap();
+
+        // should be `None`
+        assert_eq!(
+            get_output_from_state(&mut state).iter().collect::<Vec<_>>(),
+            [None]
+        );
+
+        // one more deletion, so we are having `-1` elements inside.
+        state
+            .apply_batch_concrete(
+                &[Op::Delete, Op::Insert],
+                Some(&Bitmap::from_vec(vec![true, false]).unwrap()),
+                &I64Array::from_slice(&[None, None]).unwrap(),
+            )
+            .unwrap();
+
+        // should be `None`
         assert_eq!(
             get_output_from_state(&mut state).iter().collect::<Vec<_>>(),
             [Some(233)]
