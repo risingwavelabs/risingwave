@@ -254,7 +254,7 @@ impl OrderByExecutor {
 
 impl Executor for OrderByExecutor {
     fn init(&mut self) -> Result<()> {
-        self.first_execution = false;
+        self.first_execution = true;
         self.child.init()?;
         Ok(())
     }

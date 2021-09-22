@@ -3,7 +3,6 @@ package com.risingwave.execution.handler;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.execution.result.BatchDataChunkResult;
 import com.risingwave.pgwire.database.PgResult;
-import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.planner.planner.batch.BatchPlanner;
 import com.risingwave.planner.rel.physical.batch.BatchPlan;
 import com.risingwave.proto.computenode.TaskData;
@@ -17,7 +16,7 @@ import java.util.Iterator;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
 
-@HandlerSignature(sqlKinds = {SqlKind.SELECT, SqlKind.INSERT})
+@HandlerSignature(sqlKinds = {SqlKind.SELECT, SqlKind.INSERT, SqlKind.ORDER_BY})
 public class QueryHandler implements SqlHandler {
 
   @Override
@@ -44,24 +43,6 @@ public class QueryHandler implements SqlHandler {
       taskDataList.add(taskDataIterator.next());
     }
     return new BatchDataChunkResult(
-        getStatementType(ast), taskDataList, plan.getRoot().getRowType());
-  }
-
-  // Helpers.
-  private static StatementType getStatementType(SqlNode ast) {
-    switch (ast.getKind()) {
-      case INSERT:
-        return StatementType.INSERT;
-      case DELETE:
-        return StatementType.DELETE;
-      case UPDATE:
-        return StatementType.UPDATE;
-      case SELECT:
-        return StatementType.SELECT;
-      case OTHER:
-        return StatementType.OTHER;
-      default:
-        throw new UnsupportedOperationException("Unsupported statement type");
-    }
+        SqlHandler.getStatementType(ast), taskDataList, plan.getRoot().getRowType());
   }
 }

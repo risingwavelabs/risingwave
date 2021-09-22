@@ -16,7 +16,7 @@ mod exchange;
 mod gather;
 use exchange::*;
 mod order_by;
-//use order_by::*;
+use order_by::*;
 
 #[cfg(test)]
 mod test_utils;
@@ -98,7 +98,8 @@ impl<'a> ExecutorBuilder<'a> {
           PlanNode_PlanNodeType::EXCHANGE => ExchangeExecutor,
           PlanNode_PlanNodeType::FILTER => FilterExecutor,
           PlanNode_PlanNodeType::PROJECT => ProjectionExecutor,
-          PlanNode_PlanNodeType::SIMPLE_AGG => SortAggExecutor
+          PlanNode_PlanNodeType::SIMPLE_AGG => SortAggExecutor,
+          PlanNode_PlanNodeType::ORDER_BY => OrderByExecutor
         }
     }
 

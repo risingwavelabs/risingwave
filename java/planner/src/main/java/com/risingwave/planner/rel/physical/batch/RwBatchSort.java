@@ -4,9 +4,14 @@ import static com.risingwave.execution.context.ExecutionContext.contextOf;
 import static com.risingwave.planner.planner.PlannerUtils.isSingleMode;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
+import com.google.protobuf.Any;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.logical.RwLogicalSort;
+import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
+import com.risingwave.proto.expr.ExprNode;
+import com.risingwave.proto.plan.OrderByNode;
 import com.risingwave.proto.plan.PlanNode;
+import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelTraitSet;
@@ -15,7 +20,9 @@ import org.apache.calcite.rel.RelFieldCollation;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.convert.ConverterRule;
 import org.apache.calcite.rel.core.Sort;
+import org.apache.calcite.rex.RexInputRef;
 import org.apache.calcite.rex.RexNode;
+import org.apache.commons.lang3.SerializationException;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 public class RwBatchSort extends Sort implements RisingWaveBatchPhyRel {
@@ -36,7 +43,28 @@ public class RwBatchSort extends Sort implements RisingWaveBatchPhyRel {
 
   @Override
   public PlanNode serialize() {
-    throw new UnsupportedOperationException("Serialize batch sort");
+    OrderByNode.Builder orderByNodeBuilder = OrderByNode.newBuilder();
+    List<RelFieldCollation> rfc = collation.getFieldCollations();
+    for (RelFieldCollation relFieldCollation : rfc) {
+      RexInputRef inputRef =
+          getCluster().getRexBuilder().makeInputRef(input, relFieldCollation.getFieldIndex());
+      ExprNode order = new RexToProtoSerializer().visitInputRef(inputRef);
+      RelFieldCollation.Direction dir = relFieldCollation.getDirection();
+      OrderByNode.OrderType orderType;
+      if (dir == RelFieldCollation.Direction.ASCENDING) {
+        orderType = OrderByNode.OrderType.ASCENDING;
+      } else if (dir == RelFieldCollation.Direction.DESCENDING) {
+        orderType = OrderByNode.OrderType.DESCENDING;
+      } else {
+        throw new SerializationException(String.format("%s direction not supported", dir));
+      }
+      orderByNodeBuilder.addOrders(order).addOrderTypes(orderType);
+    }
+    return PlanNode.newBuilder()
+        .setNodeType(PlanNode.PlanNodeType.ORDER_BY)
+        .setBody(Any.pack(orderByNodeBuilder.build()))
+        .addChildren(((RisingWaveBatchPhyRel) input).serialize())
+        .build();
   }
 
   @Override
