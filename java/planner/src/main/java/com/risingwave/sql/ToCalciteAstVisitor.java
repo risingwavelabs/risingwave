@@ -10,6 +10,7 @@ import static java.util.Objects.requireNonNull;
 
 import com.google.common.base.Verify;
 import com.google.common.collect.Iterators;
+import com.risingwave.common.collections.Lists2;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.planner.sql.RisingWaveOperatorTable;
@@ -71,7 +72,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import org.apache.calcite.avatica.util.TimeUnit;
-import org.apache.calcite.config.Lex;
 import org.apache.calcite.schema.ColumnStrategy;
 import org.apache.calcite.sql.JoinConditionType;
 import org.apache.calcite.sql.JoinType;
@@ -98,7 +98,6 @@ import org.apache.calcite.sql.SqlSyntax;
 import org.apache.calcite.sql.ddl.SqlDdlNodes;
 import org.apache.calcite.sql.fun.SqlCase;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
-import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.util.Pair;
@@ -112,10 +111,7 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
     boolean ifNotExists = node.ifNotExists();
     SqlIdentifier name = visitTable(node.name(), context);
     SqlNodeList columnList =
-        sqlNodeListOf(
-            node.tableElements().stream()
-                .map(column -> column.accept(this, context))
-                .collect(Collectors.toList()));
+        sqlNodeListOf(Lists2.map(node.tableElements(), column -> column.accept(this, context)));
 
     return SqlDdlNodes.createTable(SqlParserPos.ZERO, false, ifNotExists, name, columnList, null);
   }
@@ -169,14 +165,13 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
   public SqlNodeList visitGenericProperties(GenericProperties<?> node, Void context) {
     var pos = SqlParserPos.ZERO;
     return sqlNodeListOf(
-        node.properties().entrySet().stream()
-            .map(
-                prop -> {
-                  var name = SqlLiteral.createCharString(prop.getKey(), pos);
-                  var value = visitExpression((Expression) prop.getValue(), context);
-                  return new SqlTableOption(name, value, pos);
-                })
-            .collect(Collectors.toList()));
+        Lists2.map(
+            node.properties().entrySet(),
+            prop -> {
+              var name = SqlLiteral.createCharString(prop.getKey(), pos);
+              var value = ((Expression) prop.getValue()).accept(this, context);
+              return new SqlTableOption(name, value, pos);
+            }));
   }
 
   @Override
@@ -809,18 +804,5 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
 
   private SqlOperator lookupOperator(SqlIdentifier functionName, SqlSyntax syntax) {
     return operatorTable.lookupOneOperator(functionName, syntax);
-  }
-
-  //   Don't remove this, it's useful for debugging.
-  public static void main(String[] args) throws Exception {
-    SqlParser.Config parserConfig =
-        SqlParser.Config.DEFAULT.withCaseSensitive(false).withLex(Lex.SQL_SERVER);
-
-    //    String sql = "select a, b, sum(c) from t group by a, b order by a asc, b desc";
-    String sql = "select * from t1 where  not exists (select * from t2)";
-    //    String sql = "SELECT * FROM t WHERE a between 1 and 2";
-    //    String sql = "select 100.0::DOUBLE/8.0::DOUBLE";
-    SqlNode sqlNode = SqlParser.create(sql, parserConfig).parseQuery();
-    System.out.println(sqlNode.toString());
   }
 }
