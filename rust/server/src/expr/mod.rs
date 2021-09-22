@@ -2,10 +2,13 @@ mod agg;
 mod arithmetic_expr;
 mod cmp;
 mod conjunction;
+pub mod expr_factory;
 mod input_ref;
 mod literal;
 mod substr;
 mod type_cast;
+mod unary_expr;
+
 pub use agg::{AggExpression, AggKind};
 pub use input_ref::InputRefExpression;
 pub use literal::*;
@@ -20,6 +23,7 @@ pub use conjunction::ConjunctionExpression;
 pub use substr::SubStrExpression;
 pub use type_cast::TypeCastExpression;
 
+use crate::expr::expr_factory::new_expr;
 pub use cmp::CompareOperatorKind;
 pub use conjunction::ConjunctionOperatorKind;
 
@@ -60,10 +64,13 @@ macro_rules! build_expression {
 }
 
 pub fn build_from_proto(proto: &ExprNode) -> Result<BoxedExpression> {
+    // TODO: Read from proto in a consistent way.
+    if proto.get_expr_type() == CAST {
+        return new_expr(proto);
+    }
     build_expression! {proto,
       CONSTANT_VALUE => LiteralExpression,
       INPUT_REF => InputRefExpression,
-      CAST => TypeCastExpression,
       AND => ConjunctionExpression,
       OR => ConjunctionExpression,
       NOT => ConjunctionExpression,

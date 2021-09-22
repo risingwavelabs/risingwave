@@ -55,6 +55,10 @@ impl DataChunk {
         }
     }
 
+    pub fn get_visibility_ref(&self) -> Option<&Bitmap> {
+        self.visibility.as_ref()
+    }
+
     pub fn set_visibility(&mut self, visibility: Bitmap) {
         self.visibility = Some(visibility);
     }
