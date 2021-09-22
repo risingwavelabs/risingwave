@@ -37,7 +37,7 @@ message StreamNode {
 
 // A dispatcher redistribute messages.
 // We encode both the type and other usage information in the proto.
-message Dispatcher{
+message Dispatcher {
   enum DispatcherType {
     SIMPLE = 0;
     ROUND_ROBIN = 1;
@@ -59,6 +59,8 @@ message StreamFragment {
   // i.e, the create stream requests must arrive in order.
   repeated uint32 upstream_fragment_id = 3;
   Dispatcher dispatcher = 4;
+  // Number of downstreams decides how many endpoints a dispatcher should dispatch.
+  repeated uint32 downstream_fragment_id = 5;
 }
 
 // Remark: we do not explicitly encode mergers in the proto as it is not necessary.
