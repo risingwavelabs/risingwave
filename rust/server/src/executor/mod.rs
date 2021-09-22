@@ -1,5 +1,5 @@
-mod simple_agg;
-use simple_agg::*;
+mod sort_agg;
+use sort_agg::*;
 mod create_table;
 use create_table::*;
 mod insert_values;
@@ -98,7 +98,7 @@ impl<'a> ExecutorBuilder<'a> {
           PlanNode_PlanNodeType::EXCHANGE => ExchangeExecutor,
           PlanNode_PlanNodeType::FILTER => FilterExecutor,
           PlanNode_PlanNodeType::PROJECT => ProjectionExecutor,
-          PlanNode_PlanNodeType::SIMPLE_AGG => SimpleAggExecutor
+          PlanNode_PlanNodeType::SIMPLE_AGG => SortAggExecutor
         }
     }
 
