@@ -82,10 +82,6 @@ pub fn build_from_proto(proto: &ExprNode) -> Result<BoxedExpression> {
     }
 }
 
-pub(crate) fn new_input_ref(return_type: DataTypeRef, idx: usize) -> BoxedExpression {
-    Box::new(InputRefExpression::new(return_type, idx))
-}
-
 pub fn build_from_proto_option(proto: Option<&ExprNode>) -> Result<BoxedExpression> {
     match proto {
         Some(expr_node) => build_from_proto(expr_node),
