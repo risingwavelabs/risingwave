@@ -1,9 +1,11 @@
 use std::sync::Mutex;
 
-use crate::error::Result;
+use crate::error::{ErrorCode, Result};
+use crate::expr::build_from_proto;
 use crate::stream_op::*;
 use futures::channel::mpsc::channel;
-use risingwave_proto::stream_plan;
+use protobuf::Message;
+use risingwave_proto::stream_plan::{self, ProjectNode};
 use tokio::task::JoinHandle;
 
 /// `StreamManager` manages all stream operators in this project.
@@ -21,12 +23,12 @@ impl StreamManager {
     fn create_nodes(
         node: &stream_plan::StreamNode,
         dispatcher: &stream_plan::Dispatcher,
-    ) -> Box<dyn UnaryStreamOperator> {
+    ) -> Result<Box<dyn UnaryStreamOperator>> {
         let downstream_node: Box<dyn Output> = if node.has_downstream_node() {
             Box::new(LocalOutput::new(Self::create_nodes(
                 node.get_downstream_node(),
                 dispatcher,
-            )))
+            )?))
         } else {
             use stream_plan::Dispatcher_DispatcherType::*;
             match dispatcher.field_type {
@@ -47,8 +49,17 @@ impl StreamManager {
         use stream_plan::StreamNode_StreamNodeType::*;
 
         let operator: Box<dyn UnaryStreamOperator> = match node.get_node_type() {
+            PROJECTION => {
+                let project_node = ProjectNode::parse_from_bytes(node.get_body().get_value())
+                    .map_err(ErrorCode::ProtobufError)?;
+                let project_exprs = project_node
+                    .get_select_list()
+                    .iter()
+                    .map(build_from_proto)
+                    .collect::<Result<Vec<_>>>()?;
+                Box::new(ProjectionOperator::new(downstream_node, project_exprs))
+            }
             // TODO: get configuration body of each operator
-            PROJECTION => Box::new(ProjectionOperator::new(downstream_node, vec![])),
             FILTER => todo!(),
             SIMPLE_AGG => todo!(),
             GLOBAL_SIMPLE_AGG => todo!(),
@@ -56,13 +67,13 @@ impl StreamManager {
             GLOBAL_HASH_AGG => todo!(),
             others => todo!("unsupported StreamNodeType: {:?}", others),
         };
-        operator
+        Ok(operator)
     }
 
     pub fn create_fragment(&self, fragment: stream_plan::StreamFragment) -> Result<()> {
         // TODO: receive real message
         let (_, rx) = channel(16);
-        let operator_head = Self::create_nodes(fragment.get_nodes(), fragment.get_dispatcher());
+        let operator_head = Self::create_nodes(fragment.get_nodes(), fragment.get_dispatcher())?;
         let processor = UnarySimpleProcessor::new(rx, operator_head);
         let join_handle = tokio::spawn(processor.run());
         let mut handles = self.handles.lock().unwrap();
