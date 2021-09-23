@@ -11,6 +11,7 @@ import org.apache.calcite.rel.core.CorrelationId;
 import org.apache.calcite.rel.core.Filter;
 import org.apache.calcite.rel.logical.LogicalFilter;
 import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.rex.RexUtil;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 public class RwLogicalFilter extends Filter implements RisingWaveLogicalRel {
@@ -54,7 +55,9 @@ public class RwLogicalFilter extends Filter implements RisingWaveLogicalRel {
           rel.getCluster(),
           rel.getTraitSet().plus(LOGICAL),
           newInput,
-          ((LogicalFilter) rel).getCondition());
+          // Hack here to remove Sarg optimization of Calcite.
+          RexUtil.expandSearch(
+              rel.getCluster().getRexBuilder(), null, ((LogicalFilter) rel).getCondition()));
     }
   }
 }
