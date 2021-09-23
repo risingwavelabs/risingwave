@@ -7,7 +7,7 @@ use crate::protobuf::Message as _;
 use crate::stream_op::*;
 use futures::channel::mpsc::{channel, Receiver, Sender};
 use risingwave_proto::stream_plan;
-use risingwave_proto::stream_service::{self, ActorInfoTable};
+use risingwave_proto::stream_service;
 use tokio::task::JoinHandle;
 
 /// Default capacity of channel if two fragments are on the same node
@@ -20,11 +20,26 @@ pub struct StreamManagerCore {
     /// `handles` store join handles of these futures, and therefore we could wait their
     /// termination.
     handles: Vec<JoinHandle<Result<()>>>,
+
     /// `channels` store the senders and receivers for later `Processor`'s use. When `StreamManager`
-    /// receives an `update_actor_info` request, the manager will create sender receiver pairs.
-    /// And when `create_nodes` is called, the manager will take channels out of the `channels` and
-    /// create a `Processor`.
-    channels: HashMap<u32, ConsumableChannelPair>,
+    ///
+    /// When `create_nodes` is called,
+    /// 1. The manager will take receivers out and create `Processor`.
+    /// 2. The manager will add downstream receivers.
+    ///
+    /// For example, when we create `1 -> 2, 3 -> 4`,
+    /// * Client should first send creating `1` request. The manager will add `2 => rx` and `3 => rx` to `receivers`.
+    /// * Then the client send creating `2`, and the manager will take `2 => rx` to create processor, and add `4 => rx`.
+    /// * Then the client send creating `3`, and the manager will take `3 => rx` to create processor, and add `4 => rx`.
+    /// * Finally the client send creating `4`, and the manager will take `4 => [rx, rx]` to create new processor.
+    receivers: HashMap<u32, Vec<Receiver<Message>>>,
+
+    /// Stores all actor information
+    info: HashMap<u32, stream_service::ActorInfo>,
+
+    /// Mock source, `fragment_id = 0`
+    /// TODO: remove this
+    mock_source: ConsumableChannelPair,
 }
 
 /// `StreamManager` manages all stream operators in this project.
@@ -54,13 +69,28 @@ impl StreamManager {
         let mut core = self.core.lock().unwrap();
         core.update_actor_info(table)
     }
+
+    #[cfg(test)]
+    pub fn take_source(&self) -> Sender<Message> {
+        let mut core = self.core.lock().unwrap();
+        core.mock_source.0.take().unwrap()
+    }
+
+    #[cfg(test)]
+    pub fn take_sink(&self) -> Receiver<Message> {
+        let mut core = self.core.lock().unwrap();
+        core.receivers.remove(&233).unwrap().remove(0)
+    }
 }
 
 impl StreamManagerCore {
     fn new() -> Self {
+        let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
         Self {
             handles: vec![],
-            channels: HashMap::new(),
+            receivers: HashMap::new(),
+            info: HashMap::new(),
+            mock_source: (Some(tx), Some(rx)),
         }
     }
 
@@ -70,17 +100,16 @@ impl StreamManagerCore {
         dispatcher: &stream_plan::Dispatcher,
         downstreams: &[u32],
     ) -> Box<dyn Output> {
+        // create downstream receivers
         let outputs = downstreams
             .iter()
             .map(|downstream| {
-                Box::new(ChannelOutput::new(
-                    self.channels
-                        .get_mut(downstream)
-                        .expect("downstream not registered")
-                        .0
-                        .take()
-                        .expect("sender has already been used"),
-                )) as Box<dyn Output>
+                let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+                self.receivers
+                    .entry(*downstream)
+                    .or_insert_with(Vec::new)
+                    .push(rx);
+                Box::new(ChannelOutput::new(tx)) as Box<dyn Output>
             })
             .collect::<Vec<_>>();
 
@@ -155,36 +184,48 @@ impl StreamManagerCore {
             fragment.get_dispatcher(),
             fragment.get_downstream_fragment_id(),
         )?;
+        let fragment_id = fragment.get_fragment_id();
 
         let upstreams = fragment.get_upstream_fragment_id();
         assert!(!upstreams.is_empty());
 
+        let mut rxs = self.receivers.remove(&fragment_id).unwrap_or_else(Vec::new);
+
+        for upstream in upstreams {
+            // TODO: remove this
+            if *upstream == 0 {
+                // `fragment_id = 0` is used as mock input
+                rxs.push(self.mock_source.1.take().unwrap());
+                continue;
+            }
+
+            let actor = self
+                .info
+                .get(upstream)
+                .expect("upstream actor not found in info table");
+            // FIXME: use `is_local_address` from `ExchangeExecutor`.
+            if actor.get_host().get_host() == "127.0.0.1" {
+                continue;
+            } else {
+                todo!("remote node is not supported in streaming engine");
+            }
+        }
+
+        assert_eq!(
+            rxs.len(),
+            upstreams.len(),
+            "upstreams are not fully available: {} registered while {} required, fragment_id={}",
+            rxs.len(),
+            upstreams.len(),
+            fragment_id
+        );
+
         let join_handle = if upstreams.len() == 1 {
             // Only one upstream, use `UnarySimpleProcessor`.
-            let rx = self
-                .channels
-                .get_mut(&upstreams[0])
-                .expect("upstream not registered")
-                .1
-                .take()
-                .expect("receiver has already been used");
-            let processor = UnarySimpleProcessor::new(rx, operator_head);
+            let processor = UnarySimpleProcessor::new(rxs.remove(0), operator_head);
             // Create processor
             tokio::spawn(processor.run())
         } else {
-            // There are multiple upstreams, so use `UnaryMergeProcessor`.
-            // Get all upstream channels from `receivers`.
-            let rxs = upstreams
-                .iter()
-                .map(|upstream| {
-                    self.channels
-                        .get_mut(upstream)
-                        .expect("upstream not registered")
-                        .1
-                        .take()
-                        .expect("receiver has already been used")
-                })
-                .collect::<Vec<_>>();
             // Create processor
             let processor = UnaryMergeProcessor::new(rxs, operator_head);
             // Store join handle
@@ -203,21 +244,16 @@ impl StreamManagerCore {
         Ok(())
     }
 
-    fn update_actor_info(&mut self, table: ActorInfoTable) -> Result<()> {
+    fn update_actor_info(&mut self, table: stream_service::ActorInfoTable) -> Result<()> {
+        self.info.clear();
         for actor in table.get_info() {
-            let fragment_id = actor.get_fragment_id();
-            let addr = actor.get_host();
-            // FIXME: use `is_local_address` from `ExchangeExecutor`.
-            if addr.get_host() == "127.0.0.1" {
-                // actor is on local node, create a sender / receiver pair for it
-                let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                assert!(self
-                    .channels
-                    .insert(fragment_id, (Some(tx), Some(rx)))
-                    .is_none());
-            } else {
-                todo!("remote node is not supported in streaming engine");
-            }
+            assert!(
+                self.info
+                    .insert(actor.get_fragment_id(), actor.clone())
+                    .is_none(),
+                "error when creating actor: duplicated actor {}",
+                actor.get_fragment_id()
+            );
         }
         Ok(())
     }
