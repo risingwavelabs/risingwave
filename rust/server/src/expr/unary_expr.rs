@@ -42,7 +42,7 @@ where
         let eval_ret_ref = eval_ret.as_ref();
         let arr: &IA = eval_ret_ref.into();
         let bitmap = data_chunk.get_visibility_ref();
-        let mut output_array = <OA as Array>::Builder::new(data_chunk.cardinality())?;
+        let mut output_array = <OA as Array>::Builder::new(data_chunk.capacity())?;
         // TODO: Consider simplify the branch below.
         Ok(Arc::new(match bitmap {
             Some(bitmap) => {
@@ -56,8 +56,7 @@ where
                         output = Some(ret.as_scalar_ref());
                         output_array.append(output)?;
                     } else {
-                        output = None;
-                        output_array.append(output)?;
+                        output_array.append(None)?;
                     }
                 }
                 output_array.finish()?.into()
@@ -70,8 +69,7 @@ where
                         output = Some(ret.as_scalar_ref());
                         output_array.append(output)?;
                     } else {
-                        output = None;
-                        output_array.append(output)?;
+                        output_array.append(None)?;
                     }
                 }
                 output_array.finish()?.into()

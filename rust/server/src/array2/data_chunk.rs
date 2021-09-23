@@ -43,6 +43,16 @@ impl DataChunk {
         self.cardinality
     }
 
+    // return the number of visible tuples
+    pub fn capacity(&self) -> usize {
+        if let Some(bitmap) = &self.visibility {
+            bitmap
+                .iter()
+                .fold(0, |cnt, nullable| cnt + nullable as usize);
+        }
+        self.cardinality()
+    }
+
     pub fn visibility(&self) -> &Option<Bitmap> {
         &self.visibility
     }

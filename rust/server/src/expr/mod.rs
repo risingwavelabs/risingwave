@@ -1,5 +1,6 @@
 mod agg;
 mod arithmetic_expr;
+mod binary_expr;
 mod cmp;
 mod conjunction;
 pub mod expr_factory;
@@ -23,7 +24,7 @@ pub use conjunction::ConjunctionExpression;
 pub use substr::SubStrExpression;
 pub use type_cast::TypeCastExpression;
 
-use crate::expr::expr_factory::new_expr;
+use crate::expr::expr_factory::{build_binary_expr, build_unary_expr};
 pub use cmp::CompareOperatorKind;
 pub use conjunction::ConjunctionOperatorKind;
 
@@ -65,21 +66,22 @@ macro_rules! build_expression {
 
 pub fn build_from_proto(proto: &ExprNode) -> Result<BoxedExpression> {
     // TODO: Read from proto in a consistent way.
-    if proto.get_expr_type() == CAST {
-        return new_expr(proto);
-    }
+    match proto.get_expr_type() {
+        CAST => return build_unary_expr(proto),
+        EQUAL
+        | NOT_EQUAL
+        | LESS_THAN
+        | LESS_THAN_OR_EQUAL
+        | GREATER_THAN
+        | GREATER_THAN_OR_EQUAL => return build_binary_expr(proto),
+        _ => (),
+    };
     build_expression! {proto,
       CONSTANT_VALUE => LiteralExpression,
       INPUT_REF => InputRefExpression,
       AND => ConjunctionExpression,
       OR => ConjunctionExpression,
       NOT => ConjunctionExpression,
-      EQUAL => CompareExpression,
-      NOT_EQUAL => CompareExpression,
-      LESS_THAN => CompareExpression,
-      LESS_THAN_OR_EQUAL => CompareExpression,
-      GREATER_THAN => CompareExpression,
-      GREATER_THAN_OR_EQUAL => CompareExpression,
       ADD => ArithmeticExpression,
       SUBTRACT => ArithmeticExpression,
       MULTIPLY => ArithmeticExpression,

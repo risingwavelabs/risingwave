@@ -108,6 +108,66 @@ pub fn vec_geq(lhs: &ArrayImpl, rhs: &ArrayImpl) -> Result<BoolArray> {
     vec_cmp!(lhs, rhs, scalar_geq)
 }
 
+#[inline(always)]
+pub fn primitive_eq<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+where
+    T1: PrimitiveArrayItemType + AsPrimitive<T3>,
+    T2: PrimitiveArrayItemType + AsPrimitive<T3>,
+    T3: PrimitiveArrayItemType,
+{
+    Ok(l.as_() == r.as_())
+}
+
+#[inline(always)]
+pub fn primitive_neq<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+where
+    T1: PrimitiveArrayItemType + AsPrimitive<T3>,
+    T2: PrimitiveArrayItemType + AsPrimitive<T3>,
+    T3: PrimitiveArrayItemType,
+{
+    Ok(l.as_() != r.as_())
+}
+
+#[inline(always)]
+pub fn primitive_leq<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+where
+    T1: PrimitiveArrayItemType + AsPrimitive<T3>,
+    T2: PrimitiveArrayItemType + AsPrimitive<T3>,
+    T3: PrimitiveArrayItemType,
+{
+    Ok(l.as_() <= r.as_())
+}
+
+#[inline(always)]
+pub fn primitive_lt<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+where
+    T1: PrimitiveArrayItemType + AsPrimitive<T3>,
+    T2: PrimitiveArrayItemType + AsPrimitive<T3>,
+    T3: PrimitiveArrayItemType,
+{
+    Ok(l.as_() < r.as_())
+}
+
+#[inline(always)]
+pub fn primitive_geq<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+where
+    T1: PrimitiveArrayItemType + AsPrimitive<T3>,
+    T2: PrimitiveArrayItemType + AsPrimitive<T3>,
+    T3: PrimitiveArrayItemType,
+{
+    Ok(l.as_() >= r.as_())
+}
+
+#[inline(always)]
+pub fn primitive_gt<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+where
+    T1: PrimitiveArrayItemType + AsPrimitive<T3>,
+    T2: PrimitiveArrayItemType + AsPrimitive<T3>,
+    T3: PrimitiveArrayItemType,
+{
+    Ok(l.as_() > r.as_())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
