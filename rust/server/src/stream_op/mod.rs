@@ -55,10 +55,10 @@ use crate::array2::column::Column;
 use async_trait::async_trait;
 
 #[cfg(test)]
-mod tests;
+mod integration_tests;
 
 #[cfg(test)]
-mod unit_test;
+mod tests;
 
 pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
 

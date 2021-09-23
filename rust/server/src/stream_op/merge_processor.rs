@@ -123,7 +123,7 @@ impl Processor for UnaryMergeProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stream_op::tests::TestConsumer;
+    use crate::stream_op::integration_tests::TestConsumer;
     use crate::stream_op::{Op, StreamChunk};
     use futures::SinkExt;
     use std::sync::{Arc, Mutex};
