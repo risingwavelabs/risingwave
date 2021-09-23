@@ -2,7 +2,10 @@ package com.risingwave.pgwire
 
 import com.risingwave.common.exception.PgErrorCode
 import com.risingwave.common.exception.PgException
-import com.risingwave.pgwire.database.*
+import com.risingwave.pgwire.database.Database
+import com.risingwave.pgwire.database.DatabaseManager
+import com.risingwave.pgwire.database.PgResult
+import com.risingwave.pgwire.database.TransactionStatus
 import com.risingwave.pgwire.msg.CancelRequest
 import com.risingwave.pgwire.msg.Messages
 import com.risingwave.pgwire.msg.PgMessage
@@ -82,8 +85,8 @@ internal class StateMachine(private val out: ByteWriteChannel, private val dbMan
     log.info("receive query: {}", msg.sql)
     if (db == null) {
       throw PgException(
-          PgErrorCode.PROTOCOL_VIOLATION,
-          "database has not been set up before query"
+        PgErrorCode.PROTOCOL_VIOLATION,
+        "database has not been set up before query"
       )
     }
     val res = db!!.runStatement(msg.sql)

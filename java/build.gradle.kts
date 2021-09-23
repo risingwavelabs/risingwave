@@ -66,6 +66,9 @@ subprojects {
                     "src/main/java/org/apache/calcite/**"
                 )
             }
+            kotlin {
+                ktlint("0.37.2").userData(mapOf("indent_size" to "2"))
+            }
         }
 
 

@@ -1,15 +1,18 @@
 package com.risingwave.pgwire
 
 import com.risingwave.pgwire.database.DatabaseManager
-import io.ktor.network.selector.*
-import io.ktor.network.sockets.*
+import io.ktor.network.selector.ActorSelectorManager
+import io.ktor.network.sockets.ServerSocket
+import io.ktor.network.sockets.Socket
+import io.ktor.network.sockets.aSocket
+import io.ktor.network.sockets.isClosed
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.slf4j.LoggerFactory
 import java.net.InetSocketAddress
 
-class PgServer (private val port: Int, private val dbManager: DatabaseManager) {
+class PgServer(private val port: Int, private val dbManager: DatabaseManager) {
   companion object {
     private val log = LoggerFactory.getLogger(PgServer::class.java)
   }
