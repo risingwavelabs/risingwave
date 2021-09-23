@@ -18,6 +18,7 @@ pub struct SubMessage {
 
 #[derive(FromProtobuf, IntoProtobuf, PartialEq, Debug)]
 #[pb_convert(pb_type = "crate::proto::gen::message::OuterEnumProto")]
+#[allow(clippy::upper_case_acronyms)]
 pub enum OuterEnum {
     INVALID,
     #[pb_convert(pb_variant = "OK")]

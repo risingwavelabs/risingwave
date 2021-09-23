@@ -179,12 +179,13 @@ mod tests {
     use risingwave_proto::expr::{ExprNode, ExprNode_ExprNodeType, FunctionCall, InputRefExpr};
 
     #[test]
+    #[allow(clippy::many_single_char_names)]
     fn execute_sum_int32() -> Result<()> {
         let a = Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into());
         let t32 = Arc::new(Int32Type::new(false));
         let chunk = DataChunk::builder()
             .cardinality(3)
-            .columns(vec![Column::new(a, t32.clone())])
+            .columns(vec![Column::new(a, t32)])
             .build();
         let mut child = MockExecutor::new();
         child.add(chunk);
@@ -233,6 +234,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::many_single_char_names)]
     fn execute_sum_int32_grouped() -> Result<()> {
         use crate::array2::ArrayImpl;
         let a: Arc<ArrayImpl> = Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into());
@@ -256,15 +258,12 @@ mod tests {
         let chunk = DataChunk::builder()
             .cardinality(3)
             .columns(vec![
-                Column::new(a.clone(), t32.clone()),
+                Column::new(a, t32.clone()),
                 Column::new(
                     Arc::new(array_nonnull! { I32Array, [3, 4, 4] }.into()),
                     t32.clone(),
                 ),
-                Column::new(
-                    Arc::new(array_nonnull! { I32Array, [8, 8, 8] }.into()),
-                    t32.clone(),
-                ),
+                Column::new(Arc::new(array_nonnull! { I32Array, [8, 8, 8] }.into()), t32),
             ])
             .build();
         child.add(chunk);

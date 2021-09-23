@@ -137,10 +137,7 @@ async fn test_merger_sum_aggr() {
 
     let data = items.lock().unwrap();
     let array = data.last().unwrap().columns[0].array_ref().as_int64();
-    assert_eq!(
-        array.value_at(array.len() - 1),
-        Some((0..10).fold(0, |x, y| x + y))
-    );
+    assert_eq!(array.value_at(array.len() - 1), Some((0..10).sum()));
 }
 
 fn str_to_timestamp(elem: &str) -> i64 {

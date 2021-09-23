@@ -130,12 +130,10 @@ mod tests {
             array_builder.append(Some(v)).unwrap();
         }
         let ret_arr = array_builder.finish().unwrap();
-        for i in ret_arr.iter() {
-            if let Some(v) = i {
-                assert_eq!(v.get_years(), 1);
-                assert_eq!(v.get_months(), 12);
-                assert_eq!(v.get_days(), 0);
-            }
+        for v in ret_arr.iter().flatten() {
+            assert_eq!(v.get_years(), 1);
+            assert_eq!(v.get_months(), 12);
+            assert_eq!(v.get_days(), 0);
         }
     }
 }

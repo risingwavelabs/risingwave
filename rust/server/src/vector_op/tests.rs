@@ -24,7 +24,6 @@ fn test_primitive_type<T1, T2, T3, F>(
     );
     if should_error {
         assert!(ret.is_err());
-        return;
     } else {
         let ret = ret.expect("should success");
         assert_eq!(expected, ret.iter().collect::<Vec<Option<T3>>>());

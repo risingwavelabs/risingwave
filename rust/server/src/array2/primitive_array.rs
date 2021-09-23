@@ -183,7 +183,7 @@ mod tests {
         )
         .unwrap();
         if !matches!(ArrayImpl::from(arr), ArrayImpl::Int16(_)) {
-            assert!(false)
+            unreachable!()
         }
     }
 
@@ -196,7 +196,7 @@ mod tests {
         )
         .unwrap();
         if !matches!(ArrayImpl::from(arr), ArrayImpl::Int32(_)) {
-            assert!(false)
+            unreachable!()
         }
     }
 
@@ -209,7 +209,7 @@ mod tests {
         )
         .unwrap();
         if !matches!(ArrayImpl::from(arr), ArrayImpl::Int64(_)) {
-            assert!(false)
+            unreachable!()
         }
     }
 
@@ -222,7 +222,7 @@ mod tests {
         )
         .unwrap();
         if !matches!(ArrayImpl::from(arr), ArrayImpl::Float32(_)) {
-            assert!(false)
+            unreachable!()
         }
     }
 
@@ -235,7 +235,7 @@ mod tests {
         )
         .unwrap();
         if !matches!(ArrayImpl::from(arr), ArrayImpl::Float64(_)) {
-            assert!(false)
+            unreachable!()
         }
     }
 }

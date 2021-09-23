@@ -567,8 +567,8 @@ mod test_util {
         states_vec.resize_with(len, || hasher_builder.build_hasher());
 
         arrs.iter().for_each(|arr| {
-            for i in 0..arr.len() {
-                arr.hash_at(i, &mut states_scalar[i])
+            for (i, state) in states_scalar.iter_mut().enumerate() {
+                arr.hash_at(i, state)
             }
         });
         arrs.iter().for_each(|arr| arr.hash_vec(&mut states_vec));

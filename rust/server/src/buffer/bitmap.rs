@@ -293,13 +293,9 @@ mod tests {
             assert_eq!(booleans, vec![0u8, 1, 0, 1, 0, 0, 1, 0]);
         }
         {
-            let mut booleans = vec![];
-            for _ in 0..5 {
-                booleans.push(true);
-            }
-            let bitmap = Bitmap::from_vec(booleans)?;
+            let bitmap = Bitmap::from_vec(vec![true; 5])?;
             for b in bitmap.iter() {
-                assert_eq!(b, true);
+                assert!(b);
             }
         }
         Ok(())

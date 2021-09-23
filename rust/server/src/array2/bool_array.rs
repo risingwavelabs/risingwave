@@ -133,7 +133,7 @@ mod tests {
             .collect_vec();
         let array = helper_test_builder(v.clone());
         let res = v.iter().zip(array.iter()).all(|(a, b)| *a == b);
-        assert_eq!(res, true);
+        assert!(res);
     }
 
     #[test]

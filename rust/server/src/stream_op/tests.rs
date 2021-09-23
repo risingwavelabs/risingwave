@@ -94,7 +94,7 @@ async fn test_hash_dispatcher() {
         .collect::<Vec<_>>();
     let mut output_cols = vec![vec![vec![]; dimension]; num_outputs];
     let mut output_ops = vec![vec![]; num_outputs];
-    for row_idx in 0..cardinality {
+    for op in ops.iter() {
         let hash_builder = CRC32FastBuilder {};
         let mut hasher = hash_builder.build_hasher();
         let one_row: Vec<i32> = (0..dimension)
@@ -113,7 +113,7 @@ async fn test_hash_dispatcher() {
             .iter_mut()
             .zip(one_row.iter())
             .for_each(|(each_column, val)| each_column.push(*val));
-        output_ops[output_idx].push(ops[row_idx]);
+        output_ops[output_idx].push(op);
     }
 
     let columns = builders

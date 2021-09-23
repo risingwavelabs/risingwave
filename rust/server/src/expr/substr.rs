@@ -123,6 +123,7 @@ mod tests {
         }
         for i in 0..100 {
             if i % 2 == 0 {
+                #[allow(clippy::clone_double_ref)]
                 value.push(Some(s.clone()));
                 target.push(Some(&s[left..right]));
             } else {
@@ -144,8 +145,7 @@ mod tests {
         }
     }
     fn make_expression(off: Option<usize>, len: Option<usize>) -> ExprNode {
-        let mut expr_vec = Vec::new();
-        expr_vec.push(make_inputref(0));
+        let mut expr_vec = vec![make_inputref(0)];
         if let Some(off) = off {
             expr_vec.push(make_literal(off as i32))
         }

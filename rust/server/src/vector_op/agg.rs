@@ -629,7 +629,7 @@ mod tests {
     #[test]
     fn group_intersect() {
         assert_eq!(
-            EqGroups::intersect(&vec![EqGroups(vec![0, 2, 4]), EqGroups(vec![1, 2, 5]),]).0,
+            EqGroups::intersect(&[EqGroups(vec![0, 2, 4]), EqGroups(vec![1, 2, 5]),]).0,
             vec![0, 1, 2, 4, 5]
         );
     }

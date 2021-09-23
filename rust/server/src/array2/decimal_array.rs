@@ -144,7 +144,7 @@ mod tests {
         }
         let a = builder.finish().unwrap();
         let res = v.iter().zip(a.iter()).all(|(a, b)| *a == b);
-        assert_eq!(res, true);
+        assert!(res);
     }
 
     #[test]
@@ -210,6 +210,7 @@ mod tests {
             (0..ARR_LEN)
                 .map(|x| match x % 3 {
                     0 => Decimal::from_u32(0),
+                    #[allow(clippy::approx_constant)]
                     1 => Decimal::from_f32(3.14),
                     2 => None,
                     _ => unreachable!(),
@@ -219,7 +220,9 @@ mod tests {
                 .map(|x| match x % 5 {
                     0 => Decimal::from_u32(0),
                     1 => Decimal::from_u8(123),
+                    #[allow(clippy::approx_constant)]
                     2 => Decimal::from_f64(3.1415926),
+                    #[allow(clippy::approx_constant)]
                     3 => Decimal::from_f32(3.14),
                     4 => None,
                     _ => unreachable!(),

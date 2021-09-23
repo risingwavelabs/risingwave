@@ -163,15 +163,12 @@ mod tests {
         let mut vec_excutor = CompareExpression::try_from(&expr).unwrap();
         let res = vec_excutor.eval(&data_chunk).unwrap();
         if let Bool(array) = res.as_ref() {
-            assert_eq!(
-                array
-                    .iter()
-                    .enumerate()
-                    .all(|(idx, res)| res == target[idx]),
-                true
-            );
+            assert!(array
+                .iter()
+                .enumerate()
+                .all(|(idx, res)| res == target[idx]));
         } else {
-            assert!(false);
+            unreachable!()
         }
     }
     fn make_expression(kind: ExprNode_ExprNodeType) -> ExprNode {

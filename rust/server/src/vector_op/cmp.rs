@@ -177,6 +177,6 @@ mod tests {
                 }
             }
         });
-        assert_eq!(res, true);
+        assert!(res);
     }
 }

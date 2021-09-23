@@ -39,7 +39,7 @@ impl TestRunner {
     pub fn new() -> Self {
         let tid = ProtoTaskId::default();
         let mut tsid = TaskSinkId::default();
-        tsid.set_task_id(tid.clone());
+        tsid.set_task_id(tid);
         Self {
             env: GlobalTaskEnv::for_test(),
             task_mgr: TaskManager::new(),
@@ -57,7 +57,7 @@ impl TestRunner {
 
     pub fn run(&mut self, plan: PlanFragment) -> Result<Vec<TaskData>> {
         self.task_mgr
-            .fire_task(self.env.clone(), self.tsid.get_task_id(), plan.clone())?;
+            .fire_task(self.env.clone(), self.tsid.get_task_id(), plan)?;
         let mut task = self.task_mgr.take_task(&self.tsid).unwrap();
         let mut writer = FakeExchangeWriter { messages: vec![] };
         let messages = futures::executor::block_on(async move {
@@ -97,7 +97,7 @@ impl<'a> TableBuilder<'a> {
     pub fn create_table(mut self, col_types: &[DataType_TypeName]) -> Self {
         for type_name in col_types {
             let mut typ = DataType::new();
-            typ.set_type_name(type_name.clone());
+            typ.set_type_name(*type_name);
             typ.set_is_nullable(false);
             self.col_types.push(typ);
         }
@@ -232,8 +232,8 @@ impl<'a> SelectBuilder<'a> {
             .unwrap()
             .get_column_ids()
             .unwrap();
-        for col_id in column_ids.clone().iter() {
-            scan.mut_column_ids().push(col_id.clone());
+        for col_id in column_ids.iter() {
+            scan.mut_column_ids().push(*col_id);
         }
         self.plan.mut_root().set_body(Any::pack(&scan).unwrap());
         self.plan.mut_root().set_node_type(PlanNodeType::SEQ_SCAN);

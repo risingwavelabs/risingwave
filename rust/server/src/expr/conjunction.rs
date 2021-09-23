@@ -198,11 +198,11 @@ mod tests {
         let res = cmp_excutor.eval(&data_chunk).unwrap();
         if let Bool(array) = res.as_ref() {
             let iter = array.iter();
-            for (res, &tar) in iter.zip(target.into_iter()) {
+            for (res, &tar) in iter.zip(target.iter()) {
                 assert_eq!(res, tar);
             }
         } else {
-            assert!(false)
+            unreachable!()
         }
     }
     fn create_cmp_expression(
