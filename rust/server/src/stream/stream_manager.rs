@@ -5,21 +5,26 @@ use crate::error::{ErrorCode, Result};
 use crate::expr::build_from_proto;
 use crate::protobuf::Message as _;
 use crate::stream_op::*;
-use futures::channel::mpsc::{channel, Receiver};
+use futures::channel::mpsc::{channel, Receiver, Sender};
 use risingwave_proto::stream_plan;
+use risingwave_proto::stream_service::{self, ActorInfoTable};
 use tokio::task::JoinHandle;
+
+/// Default capacity of channel if two fragments are on the same node
+pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
+
+type ConsumableChannelPair = (Option<Sender<Message>>, Option<Receiver<Message>>);
 
 pub struct StreamManagerCore {
     /// Each processor runs in a future. Upon receiving a `Terminate` message, they will exit.
     /// `handles` store join handles of these futures, and therefore we could wait their
     /// termination.
     handles: Vec<JoinHandle<Result<()>>>,
-    /// `receivers` store the channel receivers for later `Processor`'s use. When `StreamManager`
-    /// receives a fragment registeration request, the manager will take receivers of upstreams
-    /// out of the `receivers` and create a `Processor`. Meanwhile, it will create a pair of
-    /// senders and receivers, where senders are used in `Dispatchers`, and receivers are
-    /// stored here for later use.
-    receivers: HashMap<u32, Receiver<Message>>,
+    /// `channels` store the senders and receivers for later `Processor`'s use. When `StreamManager`
+    /// receives an `update_actor_info` request, the manager will create sender receiver pairs.
+    /// And when `create_nodes` is called, the manager will take channels out of the `channels` and
+    /// create a `Processor`.
+    channels: HashMap<u32, ConsumableChannelPair>,
 }
 
 /// `StreamManager` manages all stream operators in this project.
@@ -39,9 +44,15 @@ impl StreamManager {
         core.create_fragment(fragment)
     }
 
-    pub async fn wait_all(&mut self) -> Result<()> {
+    pub async fn wait_all(&self) -> Result<()> {
         let mut core = self.core.lock().unwrap();
         core.wait_all().await
+    }
+
+    /// This function could only be called once during the lifecycle of `StreamManager` for now.
+    pub fn update_actor_info(&self, table: stream_service::ActorInfoTable) -> Result<()> {
+        let mut core = self.core.lock().unwrap();
+        core.update_actor_info(table)
     }
 }
 
@@ -49,7 +60,7 @@ impl StreamManagerCore {
     fn new() -> Self {
         Self {
             handles: vec![],
-            receivers: HashMap::new(),
+            channels: HashMap::new(),
         }
     }
 
@@ -62,9 +73,14 @@ impl StreamManagerCore {
         let outputs = downstreams
             .iter()
             .map(|downstream| {
-                let (tx, rx) = channel(16);
-                assert!(self.receivers.insert(*downstream, rx).is_none());
-                Box::new(ChannelOutput::new(tx)) as Box<dyn Output>
+                Box::new(ChannelOutput::new(
+                    self.channels
+                        .get_mut(downstream)
+                        .expect("downstream not registered")
+                        .0
+                        .take()
+                        .expect("sender has already been used"),
+                )) as Box<dyn Output>
             })
             .collect::<Vec<_>>();
 
@@ -146,9 +162,12 @@ impl StreamManagerCore {
         let join_handle = if upstreams.len() == 1 {
             // Only one upstream, use `UnarySimpleProcessor`.
             let rx = self
-                .receivers
-                .remove(&upstreams[0])
-                .expect("upstream not found");
+                .channels
+                .get_mut(&upstreams[0])
+                .expect("upstream not registered")
+                .1
+                .take()
+                .expect("receiver has already been used");
             let processor = UnarySimpleProcessor::new(rx, operator_head);
             // Create processor
             tokio::spawn(processor.run())
@@ -157,7 +176,14 @@ impl StreamManagerCore {
             // Get all upstream channels from `receivers`.
             let rxs = upstreams
                 .iter()
-                .map(|upstream| self.receivers.remove(upstream).expect("upstream not found"))
+                .map(|upstream| {
+                    self.channels
+                        .get_mut(upstream)
+                        .expect("upstream not registered")
+                        .1
+                        .take()
+                        .expect("receiver has already been used")
+                })
                 .collect::<Vec<_>>();
             // Create processor
             let processor = UnaryMergeProcessor::new(rxs, operator_head);
@@ -173,6 +199,25 @@ impl StreamManagerCore {
     pub async fn wait_all(&mut self) -> Result<()> {
         for handle in std::mem::take(&mut self.handles) {
             handle.await.unwrap()?;
+        }
+        Ok(())
+    }
+
+    fn update_actor_info(&mut self, table: ActorInfoTable) -> Result<()> {
+        for actor in table.get_info() {
+            let fragment_id = actor.get_fragment_id();
+            let addr = actor.get_host();
+            // FIXME: use `is_local_address` from `ExchangeExecutor`.
+            if addr.get_host() == "127.0.0.1" {
+                // actor is on local node, create a sender / receiver pair for it
+                let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+                assert!(self
+                    .channels
+                    .insert(fragment_id, (Some(tx), Some(rx)))
+                    .is_none());
+            } else {
+                todo!("remote node is not supported in streaming engine");
+            }
         }
         Ok(())
     }

@@ -54,10 +54,24 @@ impl StreamService for StreamServiceImpl {
 
     fn broadcast_actor_info_table(
         &mut self,
-        _ctx: RpcContext,
-        _req: ActorInfoTable,
-        _sink: UnarySink<BroadcastActorInfoTableResponse>,
+        ctx: RpcContext,
+        req: ActorInfoTable,
+        sink: UnarySink<BroadcastActorInfoTableResponse>,
     ) {
-        todo!()
+        let res = self.mgr.update_actor_info(req);
+        ctx.spawn(async move {
+            match res {
+                Err(e) => {
+                    error!("failed to update actor info table actor {}", e);
+                    sink.fail(RpcStatus::with_message(
+                        RpcStatusCode::INTERNAL,
+                        e.to_string(),
+                    ));
+                }
+                Ok(()) => {
+                    sink.success(BroadcastActorInfoTableResponse::default());
+                }
+            }
+        });
     }
 }
