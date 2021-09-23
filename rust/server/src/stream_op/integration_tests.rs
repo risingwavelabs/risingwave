@@ -81,7 +81,7 @@ async fn test_merger_sum_aggr() {
     // create a global aggregator and use a `TestConsumer` to collect all message
     let items = Arc::new(Mutex::new(vec![]));
     let consumer = TestConsumer::new(items.clone());
-    let output = LocalOutput::new(Box::new(consumer));
+    let output = OperatorOutput::new(Box::new(consumer));
     let aggregator = GlobalAggregationOperator::new(
         Box::new(GlobalStreamingSumAgg::new(
             StreamingSumAgg::<I64Array>::new(),
@@ -304,9 +304,9 @@ async fn test_tpch_q6() {
             Box::new(output),
             Arc::new(Float64Type::new(false)),
         );
-        let output = LocalOutput::new(Box::new(aggregator));
+        let output = OperatorOutput::new(Box::new(aggregator));
         let projection = ProjectionOperator::new(Box::new(output), vec![Box::new(multiply)]);
-        let output = LocalOutput::new(Box::new(projection));
+        let output = OperatorOutput::new(Box::new(projection));
         let filter = FilterOperator::new(Box::new(output), Box::new(and));
         let (tx, rx) = channel(16);
         let output = ChannelOutput::new(tx);
@@ -335,7 +335,7 @@ async fn test_tpch_q6() {
     // create a global aggregator and use a `TestConsumer` to collect all message
     let items = Arc::new(Mutex::new(vec![]));
     let consumer = TestConsumer::new(items.clone());
-    let output = LocalOutput::new(Box::new(consumer));
+    let output = OperatorOutput::new(Box::new(consumer));
     let aggregator = GlobalAggregationOperator::new(
         Box::new(GlobalStreamingFloatSumAgg::new(StreamingFloatSumAgg::<
             F64Array,

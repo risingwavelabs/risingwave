@@ -138,7 +138,7 @@ impl StreamManagerCore {
         downstreams: &[u32],
     ) -> Result<Box<dyn UnaryStreamOperator>> {
         let downstream_node: Box<dyn Output> = if node.has_downstream_node() {
-            Box::new(LocalOutput::new(self.create_nodes(
+            Box::new(OperatorOutput::new(self.create_nodes(
                 node.get_downstream_node(),
                 dispatcher,
                 downstreams,

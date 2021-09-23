@@ -17,9 +17,9 @@ mod projection_operator;
 
 pub use projection_operator::ProjectionOperator;
 
-mod local_output;
+mod operator_output;
 
-pub use local_output::LocalOutput;
+pub use operator_output::OperatorOutput;
 
 mod channel_output;
 

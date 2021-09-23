@@ -1,5 +1,5 @@
 use super::data_source::*;
-use super::{LocalOutput, Output, ProjectionOperator};
+use super::{OperatorOutput, Output, ProjectionOperator};
 use crate::array2::column::Column;
 use crate::array2::{Array, ArrayBuilder, ArrayImpl, I32ArrayBuilder};
 use crate::expr::{ArithmeticExpression, InputRefExpression};
@@ -35,7 +35,7 @@ async fn test_projection() {
         projection_out,
         vec![Box::new(test_expr)],
     ));
-    let source_out = Box::new(LocalOutput::new(projection_op));
+    let source_out = Box::new(OperatorOutput::new(projection_op));
 
     let handle = tokio::spawn(async move {
         tokio::time::sleep(time::Duration::from_millis(10)).await;
