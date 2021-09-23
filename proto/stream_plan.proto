@@ -13,6 +13,10 @@ message ProjectNode {
   repeated risingwave.expr.proto.ExprNode select_list = 1;
 }
 
+message FilterNode {
+  risingwave.expr.proto.ExprNode search_condition = 1;
+}
+
 message StreamNode {
   enum StreamNodeType {
     TABLE_INGRESS = 0;

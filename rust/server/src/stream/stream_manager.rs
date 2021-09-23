@@ -116,8 +116,14 @@ impl StreamManagerCore {
                     .collect::<Result<Vec<_>>>()?;
                 Box::new(ProjectionOperator::new(downstream_node, project_exprs))
             }
+            FILTER => {
+                let filter_node =
+                    stream_plan::FilterNode::parse_from_bytes(node.get_body().get_value())
+                        .map_err(ErrorCode::ProtobufError)?;
+                let search_condition = build_from_proto(filter_node.get_search_condition())?;
+                Box::new(FilterOperator::new(downstream_node, search_condition))
+            }
             // TODO: get configuration body of each operator
-            FILTER => todo!(),
             SIMPLE_AGG => todo!(),
             GLOBAL_SIMPLE_AGG => todo!(),
             HASH_AGG => todo!(),
