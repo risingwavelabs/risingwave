@@ -54,9 +54,9 @@ impl StreamManager {
         }
     }
 
-    pub fn create_fragment(&self, fragment: stream_plan::StreamFragment) -> Result<()> {
+    pub fn update_fragment(&self, fragments: &[stream_plan::StreamFragment]) -> Result<()> {
         let mut core = self.core.lock().unwrap();
-        core.create_fragment(fragment)
+        core.update_fragment(fragments)
     }
 
     pub async fn wait_all(&self) -> Result<()> {
@@ -178,7 +178,9 @@ impl StreamManagerCore {
         Ok(operator)
     }
 
-    pub fn create_fragment(&mut self, fragment: stream_plan::StreamFragment) -> Result<()> {
+    pub fn update_fragment(&mut self, fragments: &[stream_plan::StreamFragment]) -> Result<()> {
+        // TODO: implement this part
+        let fragment = &fragments[0];
         let operator_head = self.create_nodes(
             fragment.get_nodes(),
             fragment.get_dispatcher(),

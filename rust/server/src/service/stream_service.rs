@@ -1,8 +1,8 @@
 use crate::stream::StreamManager;
 use grpcio::{RpcContext, RpcStatus, RpcStatusCode, UnarySink};
 use risingwave_proto::stream_service::{
-    ActorInfoTable, BroadcastActorInfoTableResponse, CreateActorRequest, CreateActorResponse,
-    DropActorRequest, DropActorResponse,
+    ActorInfoTable, BroadcastActorInfoTableResponse, BuildFragmentRequest, BuildFragmentResponse,
+    UpdateFragmentRequest, UpdateFragmentResponse,
 };
 use risingwave_proto::stream_service_grpc::StreamService;
 use std::sync::Arc;
@@ -19,14 +19,14 @@ impl StreamServiceImpl {
 }
 
 impl StreamService for StreamServiceImpl {
-    fn create_actor(
+    fn update_fragment(
         &mut self,
         ctx: RpcContext,
-        req: CreateActorRequest,
-        sink: UnarySink<CreateActorResponse>,
+        req: UpdateFragmentRequest,
+        sink: UnarySink<UpdateFragmentResponse>,
     ) {
-        let fragment = req.get_fragment().clone();
-        let res = self.mgr.create_fragment(fragment);
+        let fragment = req.get_fragment();
+        let res = self.mgr.update_fragment(fragment);
         ctx.spawn(async move {
             match res {
                 Err(e) => {
@@ -37,17 +37,17 @@ impl StreamService for StreamServiceImpl {
                     ));
                 }
                 Ok(()) => {
-                    sink.success(CreateActorResponse::default());
+                    sink.success(UpdateFragmentResponse::default());
                 }
             }
         });
     }
 
-    fn drop_actor(
+    fn build_fragment(
         &mut self,
         _ctx: RpcContext,
-        _req: DropActorRequest,
-        _sink: UnarySink<DropActorResponse>,
+        _req: BuildFragmentRequest,
+        _sink: UnarySink<BuildFragmentResponse>,
     ) {
         todo!()
     }

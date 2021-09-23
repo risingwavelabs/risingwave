@@ -9,43 +9,45 @@ option java_package = "com.risingwave.proto.streaming.streamnode";
 option java_multiple_files = true;
 option optimize_for = SPEED;
 
-// Assuming only one compute node for streaming now.
-message CreateActorRequest {
+// Describe the fragments which will be running on this node
+message UpdateFragmentRequest {
   uint32 request_id = 1;
-  risingwave.streaming.proto.StreamFragment fragment = 2;
+  repeated risingwave.streaming.proto.StreamFragment fragment = 2;
 }
 
-message CreateActorResponse {
+message UpdateFragmentResponse {
   risingwave.proto.common.Status status = 1;
 }
 
-message DropActorRequest{
-  uint32 request_id = 1;
-  repeated uint32 fragment_id = 2;
-}
-
-message DropActorResponse{
-  risingwave.proto.common.Status status = 1;
-}
-
-// Encode which host machine a actor resides.
+// Encode which host machine an actor resides.
 message ActorInfo {
   uint32 fragment_id = 1;
   risingwave.executor.proto.HostAddress host = 2;
 }
 
-message ActorInfoTable{
+message ActorInfoTable {
   repeated ActorInfo info = 1;
 }
 
+// Create channels and gRPC connections for a fragment
+message BuildFragmentRequest {
+  uint32 request_id = 1;
+  repeated uint32 fragment_id = 2;
+}
+
+message BuildFragmentResponse {
+  uint32 request_id = 1;
+  repeated uint32 fragment_id = 2;
+}
+
 // Before starting streaming, the leader node broadcast the actor-host table to needed workers.
-message BroadcastActorInfoTableResponse{
+message BroadcastActorInfoTableResponse {
   risingwave.proto.common.Status status = 1;
 }
 
 service StreamService {
-  rpc CreateActor(CreateActorRequest) returns (CreateActorResponse);
-  rpc DropActor(DropActorRequest) returns (DropActorResponse);
+  rpc UpdateFragment(UpdateFragmentRequest) returns (UpdateFragmentResponse);
+  rpc BuildFragment(BuildFragmentRequest) returns (BuildFragmentResponse);
   rpc BroadcastActorInfoTable(ActorInfoTable) returns (BroadcastActorInfoTableResponse);
 }
 
