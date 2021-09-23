@@ -70,7 +70,10 @@ public class DdlPlanTestBase {
       throw new UnsupportedOperationException("unsupported ddl in test");
     }
 
-    String serializedJsonPlan = Messages.jsonFormat(ret);
-    assertEquals(testCase.getJson(), serializedJsonPlan, "Plan not match!");
+    // Do not error if no json test.
+    if (testCase.getJson() != null) {
+      String serializedJsonPlan = Messages.jsonFormat(ret);
+      assertEquals(testCase.getJson(), serializedJsonPlan, "Json not match!");
+    }
   }
 }

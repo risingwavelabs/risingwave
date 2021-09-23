@@ -44,7 +44,7 @@ public abstract class BatchPlanTestBase extends SqlTestBase {
     String explainedPlan = ExplainWriter.explainPlan(plan.getRoot());
     assertEquals(testCase.getPlan(), explainedPlan, "Plan not match!");
 
-    // Comment out this to wait for all plan serializaton to be ready
+    // Do not error if no json test.
     if (testCase.getJson() != null) {
       String serializedJsonPlan = Messages.jsonFormat(plan.getRoot().serialize());
       assertEquals(testCase.getJson(), serializedJsonPlan, "Json not match!");

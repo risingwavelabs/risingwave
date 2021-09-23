@@ -10,23 +10,6 @@ select * from t
 RwBatchFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])
 ]]>
         </Resource>
-        <Resource name="json">
-            <![CDATA[
-{
-  "nodeType": "SEQ_SCAN",
-  "body": {
-    "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",
-    "tableRefId": {
-      "schemaRefId": {
-        "databaseRefId": {
-        }
-      }
-    },
-    "columnIds": [0, 1, 2]
-  }
-}
-            ]]>
-        </Resource>
     </TestCase>
 
     <TestCase name="insert into values">
@@ -81,45 +64,6 @@ RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)])
   RwBatchFilterScan(table=[[test_schema, t]], columns=[v3])
 ]]>
         </Resource>
-<!--        <Resource name="json">-->
-<!--{-->
-<!--  "nodeType": "SIMPLE_AGG",-->
-<!--  "body": {-->
-<!--    "@type": "type.googleapis.com/risingwave.executor.proto.SimpleAggNode",-->
-<!--    "aggregations": [{-->
-<!--      "exprType": "SUM",-->
-<!--      "body": {-->
-<!--        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",-->
-<!--        "children": [{-->
-<!--          "exprType": "INPUT_REF",-->
-<!--          "body": {-->
-<!--            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"-->
-<!--          },-->
-<!--          "returnType": {-->
-<!--            "typeName": "FLOAT"-->
-<!--          }-->
-<!--        }]-->
-<!--      },-->
-<!--      "returnType": {-->
-<!--        "typeName": "FLOAT"-->
-<!--      }-->
-<!--    }]-->
-<!--  },-->
-<!--  "children": [{-->
-<!--    "nodeType": "SEQ_SCAN",-->
-<!--    "body": {-->
-<!--      "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",-->
-<!--      "tableRefId": {-->
-<!--        "schemaRefId": {-->
-<!--          "databaseRefId": {-->
-<!--          }-->
-<!--        }-->
-<!--      },-->
-<!--      "columnIds": [2]-->
-<!--    }-->
-<!--  }]-->
-<!--}-->
-<!--        </Resource>-->
     </TestCase>
 
         <TestCase name="simple agg with 2 sum, max, min">
@@ -134,98 +78,6 @@ RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)], EXPR$2=[MAX($2)],
   RwBatchFilterScan(table=[[test_schema, t]], columns=[v3,v2,v1])
 ]]>
         </Resource>
-<!--        <Resource name="json">-->
-<!--{-->
-<!--  "nodeType": "SIMPLE_AGG",-->
-<!--  "body": {-->
-<!--    "@type": "type.googleapis.com/risingwave.executor.proto.SimpleAggNode",-->
-<!--    "aggregations": [{-->
-<!--      "exprType": "SUM",-->
-<!--      "body": {-->
-<!--        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",-->
-<!--        "children": [{-->
-<!--          "exprType": "INPUT_REF",-->
-<!--          "body": {-->
-<!--            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"-->
-<!--          },-->
-<!--          "returnType": {-->
-<!--            "typeName": "FLOAT"-->
-<!--          }-->
-<!--        }]-->
-<!--      },-->
-<!--      "returnType": {-->
-<!--        "typeName": "FLOAT"-->
-<!--      }-->
-<!--    }, {-->
-<!--      "exprType": "SUM",-->
-<!--      "body": {-->
-<!--        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",-->
-<!--        "children": [{-->
-<!--          "exprType": "INPUT_REF",-->
-<!--          "body": {-->
-<!--            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",-->
-<!--            "columnIdx": 1-->
-<!--          },-->
-<!--          "returnType": {-->
-<!--            "typeName": "INT32"-->
-<!--          }-->
-<!--        }]-->
-<!--      },-->
-<!--      "returnType": {-->
-<!--        "typeName": "INT32"-->
-<!--      }-->
-<!--    }, {-->
-<!--      "exprType": "MAX",-->
-<!--      "body": {-->
-<!--        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",-->
-<!--        "children": [{-->
-<!--          "exprType": "INPUT_REF",-->
-<!--          "body": {-->
-<!--            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",-->
-<!--            "columnIdx": 2-->
-<!--          },-->
-<!--          "returnType": {-->
-<!--            "typeName": "INT32"-->
-<!--          }-->
-<!--        }]-->
-<!--      },-->
-<!--      "returnType": {-->
-<!--        "typeName": "INT32"-->
-<!--      }-->
-<!--    }, {-->
-<!--      "exprType": "MIN",-->
-<!--      "body": {-->
-<!--        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",-->
-<!--        "children": [{-->
-<!--          "exprType": "INPUT_REF",-->
-<!--          "body": {-->
-<!--            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"-->
-<!--          },-->
-<!--          "returnType": {-->
-<!--            "typeName": "FLOAT"-->
-<!--          }-->
-<!--        }]-->
-<!--      },-->
-<!--      "returnType": {-->
-<!--        "typeName": "FLOAT"-->
-<!--      }-->
-<!--    }]-->
-<!--  },-->
-<!--  "children": [{-->
-<!--    "nodeType": "SEQ_SCAN",-->
-<!--    "body": {-->
-<!--      "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",-->
-<!--      "tableRefId": {-->
-<!--        "schemaRefId": {-->
-<!--          "databaseRefId": {-->
-<!--          }-->
-<!--        }-->
-<!--      },-->
-<!--      "columnIds": [2, 1, 0]-->
-<!--    }-->
-<!--  }]-->
-<!--}-->
-<!--        </Resource>-->
     </TestCase>
 
     <TestCase name="hash agg with 2 sum">
@@ -240,97 +92,6 @@ RwBatchProject(EXPR$0=[$1], EXPR$1=[$2])
   RwBatchHashAgg(group=[{0}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
     RwBatchFilterScan(table=[[test_schema, t]], columns=[v1,v2])
 ]]>
-        </Resource>
-        <Resource name="json">
-{
-  "nodeType": "PROJECT",
-  "body": {
-    "@type": "type.googleapis.com/risingwave.executor.proto.ProjectNode",
-    "selectList": [{
-      "exprType": "INPUT_REF",
-      "body": {
-        "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
-        "columnIdx": 1
-      },
-      "returnType": {
-        "typeName": "INT32"
-      }
-    }, {
-      "exprType": "INPUT_REF",
-      "body": {
-        "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
-        "columnIdx": 2
-      },
-      "returnType": {
-        "typeName": "INT32"
-      }
-    }]
-  },
-  "children": [{
-    "nodeType": "HASH_AGG",
-    "body": {
-      "@type": "type.googleapis.com/risingwave.executor.proto.HashAggNode",
-      "groupByKeys": [{
-        "exprType": "INPUT_REF",
-        "body": {
-          "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
-        },
-        "returnType": {
-          "typeName": "INT32"
-        }
-      }],
-      "aggregations": [{
-        "exprType": "SUM",
-        "body": {
-          "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
-          "children": [{
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
-            },
-            "returnType": {
-              "typeName": "INT32"
-            }
-          }]
-        },
-        "returnType": {
-          "typeName": "INT32"
-        }
-      }, {
-        "exprType": "SUM",
-        "body": {
-          "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
-          "children": [{
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
-              "columnIdx": 1
-            },
-            "returnType": {
-              "typeName": "INT32"
-            }
-          }]
-        },
-        "returnType": {
-          "typeName": "INT32"
-        }
-      }]
-    },
-    "children": [{
-      "nodeType": "SEQ_SCAN",
-      "body": {
-        "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",
-        "tableRefId": {
-          "schemaRefId": {
-            "databaseRefId": {
-            }
-          }
-        },
-        "columnIds": [0, 1]
-      }
-    }]
-  }]
-}
         </Resource>
     </TestCase>
 
@@ -347,9 +108,6 @@ RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
     RwBatchFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])
 ]]>
         </Resource>
-        <!--        <Resource name="json">-->
-        <!--            fas-->
-        <!--        </Resource>-->
     </TestCase>
 
     <TestCase name="select with non-key sum 2">
@@ -364,9 +122,6 @@ RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
   RwBatchFilterScan(table=[[test_schema, t]], columns=[v1,v3])
 ]]>
         </Resource>
-        <!--        <Resource name="json">-->
-        <!--            fda-->
-        <!--        </Resource>-->
     </TestCase>
 
     <TestCase name="select with non-key min">
@@ -381,9 +136,6 @@ RwBatchSortAgg(group=[{}], EXPR$0=[MIN($0)])
   RwBatchFilterScan(table=[[test_schema, t]], columns=[v1])
 ]]>
         </Resource>
-        <!--        <Resource name="json">-->
-        <!--            fda-->
-        <!--        </Resource>-->
     </TestCase>
 
     <TestCase name="select with non-key max">
@@ -398,9 +150,6 @@ RwBatchSortAgg(group=[{}], EXPR$0=[MAX($0)])
   RwBatchFilterScan(table=[[test_schema, t]], columns=[v1])
 ]]>
         </Resource>
-        <!--        <Resource name="json">-->
-        <!--            dfas-->
-        <!--        </Resource>-->
     </TestCase>
 
     <TestCase name="select with non-key max with filter">
@@ -417,9 +166,6 @@ RwBatchSortAgg(group=[{}], EXPR$0=[MAX($0)])
       RwBatchFilterScan(table=[[test_schema, t]], columns=[v1,v2])
             ]]>
         </Resource>
-        <!--        <Resource name="json">-->
-        <!--            fdas-->
-        <!--        </Resource>-->
     </TestCase>
 
     <TestCase name="select with non-key avg">
@@ -434,9 +180,6 @@ RwBatchSortAgg(group=[{}], EXPR$0=[AVG($0)])
   RwBatchFilterScan(table=[[test_schema, t]], columns=[v2])
 ]]>
         </Resource>
-        <!--        <Resource name="json">-->
-        <!--            fdsa-->
-        <!--        </Resource>-->
     </TestCase>
 
     <TestCase name="select with sum and group by">
@@ -452,9 +195,6 @@ RwBatchProject(EXPR$0=[$1], v2=[$0])
     RwBatchFilterScan(table=[[test_schema, t]], columns=[v2,v1])
 ]]>
         </Resource>
-        <!--        <Resource name="json">-->
-        <!--            fdsa-->
-        <!--        </Resource>-->
     </TestCase>
 
     <TestCase name="select only">
@@ -469,9 +209,6 @@ RwBatchProject(EXPR$0=[/(100.0:DOUBLE, 8.0:DOUBLE)])
   RwBatchValues(tuples=[[{ 0 }]])
 ]]>
         </Resource>
-        <!--        <Resource name="json">-->
-        <!--            fdsa-->
-        <!--        </Resource>-->
     </TestCase>
     <TestCase name="filter expression for date">
         <Resource name="sql">
@@ -484,67 +221,6 @@ RwBatchProject(EXPR$0=[/(100.0:DOUBLE, 8.0:DOUBLE)])
 RwBatchFilter(condition=[>=($0, 1970-01-01)])
   RwBatchFilterScan(table=[[test_schema, t2]], columns=[v1])
             ]]>
-        </Resource>
-        <Resource name="json">
-<![CDATA[
-{
-  "nodeType": "FILTER",
-  "body": {
-    "@type": "type.googleapis.com/risingwave.executor.proto.FilterNode",
-    "searchCondition": {
-      "exprType": "GREATER_THAN_OR_EQUAL",
-      "body": {
-        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
-        "children": [{
-          "exprType": "INPUT_REF",
-          "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
-          },
-          "returnType": {
-            "typeName": "DATE"
-          }
-        }, {
-          "exprType": "CAST",
-          "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
-            "children": [{
-              "exprType": "CONSTANT_VALUE",
-              "body": {
-                "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
-                "body": "MTk3MC0wMS0wMQ=="
-              },
-              "returnType": {
-                "typeName": "CHAR",
-                "precision": 10
-              }
-            }]
-          },
-          "returnType": {
-            "typeName": "DATE"
-          }
-        }]
-      },
-      "returnType": {
-        "typeName": "BOOLEAN"
-      }
-    }
-  },
-  "children": [{
-    "nodeType": "SEQ_SCAN",
-    "body": {
-      "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",
-      "tableRefId": {
-        "schemaRefId": {
-          "databaseRefId": {
-          }
-        },
-        "tableId": 1
-      },
-      "columnIds": [0]
-    }
-  }]
-}
-]]>
         </Resource>
     </TestCase>
 </Root>
