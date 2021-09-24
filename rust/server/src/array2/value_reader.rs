@@ -2,11 +2,11 @@ use crate::error::{ErrorCode, Result, RwError};
 
 use crate::array2::PrimitiveArrayItemType;
 use byteorder::{BigEndian, ReadBytesExt};
-use risingwave_proto::data::Buffer;
+use std::io::Cursor;
 
 /// Reads an encoded buffer into a value.
 pub trait ValueReader<T: PrimitiveArrayItemType> {
-    fn read(buf: &Buffer) -> Result<T>;
+    fn read(cur: &mut Cursor<&[u8]>) -> Result<T>;
 }
 
 pub struct I16ValueReader {}
@@ -18,8 +18,8 @@ pub struct F64ValueReader {}
 macro_rules! impl_numeric_value_reader {
     ($value_type:ty, $value_reader:ty,  $read_fn:ident) => {
         impl ValueReader<$value_type> for $value_reader {
-            fn read(buf: &Buffer) -> Result<$value_type> {
-                buf.get_body().$read_fn::<BigEndian>().map_err(|e| {
+            fn read(cur: &mut Cursor<&[u8]>) -> Result<$value_type> {
+                cur.$read_fn::<BigEndian>().map_err(|e| {
                     RwError::from(ErrorCode::InternalError(format!(
                         "Failed to read value from buffer: {}",
                         e

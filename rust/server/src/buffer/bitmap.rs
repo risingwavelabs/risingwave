@@ -156,6 +156,20 @@ impl Bitmap {
         Ok(buf)
     }
 
+    pub fn from_protobuf(buf: &BufferProto) -> Result<Self> {
+        let num_bits = buf.get_body().len();
+        let mut bits = Buffer::new(Bitmap::num_of_bytes(num_bits))?;
+        let data = bits.as_slice_mut();
+        for (i, b) in buf.get_body().iter().enumerate() {
+            if *b == 1u8 {
+                bit_util::set_bit(data, i);
+            } else {
+                bit_util::unset_bit(data, i);
+            }
+        }
+        Ok(Self { bits, num_bits })
+    }
+
     pub fn iter(&self) -> BitmapIter<'_> {
         BitmapIter {
             bits: &self.bits,
@@ -241,6 +255,8 @@ impl<'a> std::iter::Iterator for BitmapIter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pb_construct::make_proto;
+    use risingwave_proto::data::Buffer as BufferProto;
 
     #[test]
     fn test_bitmap_length() {
@@ -299,5 +315,14 @@ mod tests {
             }
         }
         Ok(())
+    }
+
+    #[test]
+    fn test_bitmap_from_protobuf() {
+        let bitmap_bytes = vec![0u8, 1, 0, 1, 0, 0, 1, 0];
+        let buf = make_proto!(BufferProto, { body: bitmap_bytes.clone() });
+        let bitmap = Bitmap::from_protobuf(&buf).unwrap();
+        let actual_bytes: Vec<u8> = bitmap.iter().map(|b| b as u8).collect();
+        assert_eq!(actual_bytes, bitmap_bytes);
     }
 }

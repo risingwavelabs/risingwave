@@ -4,11 +4,13 @@ use crate::array2::value_reader::{
 use crate::array2::{
     ArrayBuilder, ArrayImpl, ArrayRef, PrimitiveArrayBuilder, PrimitiveArrayItemType,
 };
+use crate::buffer::Bitmap;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::types::{build_from_proto, DataType, DataTypeRef};
 use protobuf::well_known_types::Any as AnyProto;
 use risingwave_proto::data::{Column as ColumnProto, DataType_TypeName};
+use std::io::Cursor;
 use std::sync::Arc;
 
 /// Column is owned by DataChunk. It consists of logic data type and physical array implementation.
@@ -22,10 +24,28 @@ fn read_numeric_column<T: PrimitiveArrayItemType, R: ValueReader<T>>(
     col: &ColumnProto,
     cardinality: usize,
 ) -> Result<ArrayRef> {
+    ensure!(
+        col.get_values().len() == 1,
+        "Must have only 1 buffer in a numeric column"
+    );
+
+    let buf = col.get_values()[0].get_body();
+    let value_size = std::mem::size_of::<T>();
+    ensure!(
+        buf.len() % value_size == 0,
+        "Unexpected memory layout of numeric column"
+    );
+
     let mut builder = PrimitiveArrayBuilder::<T>::new(cardinality)?;
-    for buf in col.get_values() {
-        let v = R::read(buf)?;
-        builder.append(Some(v))?;
+    let bitmap = Bitmap::from_protobuf(col.get_null_bitmap())?;
+    let mut cursor = Cursor::new(buf);
+    for not_null in bitmap.iter() {
+        if not_null {
+            let v = R::read(&mut cursor)?;
+            builder.append(Some(v))?;
+        } else {
+            builder.append(None)?;
+        }
     }
     let arr = builder.finish()?;
     Ok(Arc::new(arr.into()))
@@ -42,7 +62,6 @@ impl Column {
         column.set_column_type(proto_data_type);
         column.set_null_bitmap(self.array.null_bitmap().to_protobuf()?);
         let values = self.array.to_protobuf()?;
-        // column.set_null_bitmap(bitmap);
         for (_idx, buf) in values.into_iter().enumerate() {
             column.mut_values().push(buf);
         }
@@ -91,5 +110,53 @@ impl Column {
 
     pub fn data_type_ref(&self) -> &dyn DataType {
         &*self.data_type
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::array2::{Array, I32Array, I32ArrayBuilder};
+    use crate::error::{ErrorCode, Result};
+    use crate::types::{DataTypeKind, Int32Type};
+    use protobuf::Message;
+    use risingwave_proto::data::Column as ColumnProto;
+
+    // Convert a column to protobuf, then convert it back to column, and ensures the two are identical.
+    #[test]
+    fn test_column_protobuf_conversion() -> Result<()> {
+        let cardinality = 2048;
+        let mut builder = I32ArrayBuilder::new(cardinality).unwrap();
+        for i in 0..cardinality {
+            if i % 2 == 0 {
+                builder.append(Some(i as i32)).unwrap();
+            } else {
+                builder.append(None).unwrap();
+            }
+        }
+        let col = Column::new(
+            Arc::new(ArrayImpl::from(builder.finish().unwrap())),
+            Arc::new(Int32Type::new(true)),
+        );
+        let col_proto = unpack_from_any!(col.to_protobuf().unwrap(), ColumnProto);
+        assert!(col_proto.get_column_type().get_is_nullable());
+        assert_eq!(
+            col_proto.get_column_type().get_type_name(),
+            DataType_TypeName::INT32
+        );
+
+        let new_col = Column::from_protobuf(col_proto, cardinality).unwrap();
+        assert_eq!(new_col.array.len(), cardinality);
+        assert_eq!(new_col.data_type.data_type_kind(), DataTypeKind::Int32);
+        assert!(new_col.data_type.is_nullable());
+        let arr: &I32Array = new_col.array_ref().as_int32();
+        arr.iter().enumerate().for_each(|(i, x)| {
+            if i % 2 == 0 {
+                assert_eq!(i as i32, x.unwrap());
+            } else {
+                assert!(x.is_none());
+            }
+        });
+        Ok(())
     }
 }
