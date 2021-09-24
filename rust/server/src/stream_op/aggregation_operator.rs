@@ -5,10 +5,15 @@ use std::sync::Arc;
 use super::aggregation::*;
 use super::{Message, Op, Output, StreamChunk, StreamOperator, UnaryStreamOperator};
 use crate::array2::column::Column;
-use crate::array2::Array;
+use crate::array2::*;
+use crate::buffer::Bitmap;
 use crate::error::Result;
+use crate::expr::AggKind;
 use crate::impl_consume_barrier_default;
-use crate::types::DataTypeRef;
+use crate::types::DataTypeKind;
+use crate::types::{DataTypeRef, ScalarImpl};
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 
 /// `StreamingSumAgg` sums data of the same type.
@@ -107,6 +112,263 @@ impl UnaryStreamOperator for AggregationOperator {
 
         self.first_data = false;
 
+        self.output.collect(Message::Chunk(chunk)).await?;
+        Ok(())
+    }
+}
+
+// mimic the aggregator in `server/src/vector_op/agg.rs`
+pub fn create_agg_state(
+    input_type: DataTypeRef,
+    agg_type: &AggKind,
+    return_type: DataTypeRef,
+) -> Result<Box<dyn StreamingAggStateImpl>> {
+    let state: Box<dyn StreamingAggStateImpl> = match (
+        input_type.data_type_kind(),
+        agg_type,
+        return_type.data_type_kind(),
+    ) {
+        (DataTypeKind::Int64, AggKind::Count, DataTypeKind::Int64) => Box::new(StreamingFoldAgg::<
+            I64Array,
+            I64Array,
+            Countable<<I64Array as Array>::OwnedItem>,
+        >::new()),
+        (DataTypeKind::Int32, AggKind::Count, DataTypeKind::Int64) => Box::new(StreamingFoldAgg::<
+            I64Array,
+            I32Array,
+            Countable<<I32Array as Array>::OwnedItem>,
+        >::new()),
+        (DataTypeKind::Int16, AggKind::Count, DataTypeKind::Int64) => Box::new(StreamingFoldAgg::<
+            I64Array,
+            I16Array,
+            Countable<<I16Array as Array>::OwnedItem>,
+        >::new()),
+        (DataTypeKind::Float32, AggKind::Count, DataTypeKind::Int64) => {
+            Box::new(StreamingFoldAgg::<
+                I64Array,
+                F32Array,
+                Countable<<F32Array as Array>::OwnedItem>,
+            >::new())
+        }
+        (DataTypeKind::Float64, AggKind::Count, DataTypeKind::Int64) => {
+            Box::new(StreamingFoldAgg::<
+                I64Array,
+                F64Array,
+                Countable<<F64Array as Array>::OwnedItem>,
+            >::new())
+        }
+        (DataTypeKind::Char, AggKind::Count, DataTypeKind::Int64) => Box::new(StreamingFoldAgg::<
+            I64Array,
+            UTF8Array,
+            Countable<<UTF8Array as Array>::OwnedItem>,
+        >::new()),
+        (DataTypeKind::Boolean, AggKind::Count, DataTypeKind::Int64) => {
+            Box::new(StreamingFoldAgg::<
+                I64Array,
+                BoolArray,
+                Countable<<BoolArray as Array>::OwnedItem>,
+            >::new())
+        }
+        (DataTypeKind::Int16, AggKind::Sum, DataTypeKind::Int16) => {
+            Box::new(StreamingSumAgg::<I16Array>::new())
+        }
+        (DataTypeKind::Int32, AggKind::Sum, DataTypeKind::Int32) => {
+            Box::new(StreamingSumAgg::<I32Array>::new())
+        }
+        (DataTypeKind::Float32, AggKind::Sum, DataTypeKind::Float32) => {
+            Box::new(StreamingFloatSumAgg::<F32Array>::new())
+        }
+        (DataTypeKind::Float64, AggKind::Sum, DataTypeKind::Float64) => {
+            Box::new(StreamingFloatSumAgg::<F64Array>::new())
+        }
+        _ => unimplemented!(),
+    };
+    Ok(state)
+}
+
+type Key = Option<ScalarImpl>;
+
+pub struct HashAggregationOperator {
+    /// Aggregation state of the current operator
+    /// first_data: bool, indicating whether this is a key saw by first time
+    state_entries: HashMap<Vec<Key>, (bool, Box<dyn StreamingAggStateImpl>)>,
+    /// The output of the current operator
+    output: Box<dyn Output>,
+    /// Input Type of the current aggregator
+    input_type: DataTypeRef,
+    /// Return type of current aggregator
+    return_type: DataTypeRef,
+    /// Indices of the columns
+    keys: Vec<usize>,
+    /// Index of the column being aggregated.
+    val: Option<usize>,
+    /// Aggregation Kind for constructing StreamingAggStateImpl
+    /// TODO: Use Streaming specific AggKind instead of borrowing from OLAP
+    agg_type: AggKind,
+}
+
+impl HashAggregationOperator {
+    pub fn new(
+        input_type: DataTypeRef,
+        output: Box<dyn Output>,
+        return_type: DataTypeRef,
+        keys: Vec<usize>,
+        val: Option<usize>,
+        agg_type: AggKind,
+    ) -> Self {
+        Self {
+            state_entries: HashMap::new(),
+            output,
+            input_type,
+            return_type,
+            keys,
+            val,
+            agg_type,
+        }
+    }
+}
+
+impl_consume_barrier_default!(HashAggregationOperator, StreamOperator);
+
+#[async_trait]
+impl UnaryStreamOperator for HashAggregationOperator {
+    async fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
+        let StreamChunk {
+            ops,
+            columns: arrays,
+            visibility,
+            cardinality: _,
+        } = chunk;
+
+        let total_num_rows = ops.len();
+        // get the grouped keys for each row
+        let mut keys = vec![vec![]; total_num_rows];
+        for key_idx in &self.keys {
+            let col = &arrays[*key_idx];
+            col.array().insert_key(&mut keys);
+        }
+
+        // Each vis map will be passed into StreamingAggStateImpl
+        let mut key_to_vis_maps = HashMap::new();
+        // Some grouped keys are the same and their corresponding rows will be collapsed together after aggregation.
+        // This vec records the row indices so that we can pick these rows from all the array into output chunk.
+        // Some row may get recorded twice as its key may produce two rows `UpdateDelete` and `UpdateInsert` in the final chunk.
+        let mut distinct_rows = Vec::new();
+        // Give all the unique keys an order and iterate them later,
+        // the order is the same as how we get distinct final columns from original columns.
+        let mut unique_keys = Vec::new();
+
+        for (row_idx, key) in keys.iter().enumerate() {
+            // if the visibility map has already shadowed this row,
+            // then we pass
+            if let Some(vis_map) = &visibility {
+                if !vis_map.is_set(row_idx).unwrap() {
+                    continue;
+                }
+            }
+            let vis_map = key_to_vis_maps.entry(key).or_insert_with(|| {
+                // Check whether the `key` shows up first time in the whole history, if not,
+                // then we need a row for `UpdateDelete` and another row for `UpdateInsert`.
+                // Otherwise, we will have only one row for `Insert`.
+                if self.state_entries.contains_key(key) {
+                    distinct_rows.push(row_idx);
+                }
+                distinct_rows.push(row_idx);
+                unique_keys.push(key);
+                vec![false; total_num_rows]
+            });
+            vis_map[row_idx] = true;
+        }
+        let output_cardinality = distinct_rows.len();
+        // turn the Vec of bool into Bitmap
+        let mut key_to_vis_maps = key_to_vis_maps
+            .into_iter()
+            .map(|(key, vis_map)| (key, Bitmap::from_vec(vis_map).unwrap()))
+            .collect::<HashMap<_, _>>();
+
+        // This builder is for the array to store the aggregated value for each grouped key.
+        let mut agg_array_builder = self.return_type.clone().create_array_builder(0).unwrap();
+        let mut new_ops = Vec::new();
+
+        unique_keys.into_iter().for_each(|key| {
+            let cur_vis_map = key_to_vis_maps.remove(key).unwrap();
+
+            // check existence to avoid paying the cost of `to_vec` everytime
+            if !self.state_entries.contains_key(key) {
+                self.state_entries.insert(
+                    key.to_vec(),
+                    (
+                        true,
+                        create_agg_state(
+                            self.input_type.clone(),
+                            &self.agg_type,
+                            self.return_type.clone(),
+                        )
+                        .unwrap(),
+                    ),
+                );
+            }
+
+            // since we checked existence, the key must exist.
+            let (first_data, state) = self.state_entries.get_mut(key).unwrap();
+            let mut builder = state.new_builder();
+            if !*first_data {
+                // record the last state into builder
+                state.get_output(&mut builder).unwrap();
+            }
+
+            // do we have a particular column to aggregate? Not for Count
+            // min, max, sum needs this
+            let aggregate_array = match self.val {
+                Some(agg_idx) => arrays[agg_idx].array_ref(),
+                None => arrays[0].array_ref(),
+            };
+
+            // Question: shouldn't the visibility map be replaced with some simple indices dictating
+            // which rows belong to this key
+            state
+                .apply_batch(&ops, Some(&cur_vis_map), aggregate_array)
+                .unwrap();
+            // output the current state into builder
+            state.get_output(&mut builder).unwrap();
+
+            agg_array_builder
+                .append_array(&builder.finish().unwrap())
+                .unwrap();
+
+            // same logic from `simple` AggregationOperator
+            if !*first_data {
+                new_ops.push(Op::UpdateDelete);
+                new_ops.push(Op::UpdateInsert);
+            } else {
+                new_ops.push(Op::Insert);
+            }
+
+            *first_data = false;
+        });
+
+        // compose the aggregation column
+        let agg_column = Column::new(
+            Arc::new(agg_array_builder.finish().unwrap()),
+            self.return_type.clone(),
+        );
+        // compose all the columns together
+        // rows with the same key collapse into one or two rows
+        let mut new_columns = Vec::new();
+        for array in arrays {
+            new_columns.push(Column::new(
+                Arc::new(array.array_ref().get_sub_array(&distinct_rows)),
+                array.data_type(),
+            ));
+        }
+        new_columns.push(agg_column);
+
+        let chunk = StreamChunk {
+            ops: new_ops,
+            visibility: None,
+            cardinality: output_cardinality,
+            columns: new_columns,
+        };
         self.output.collect(Message::Chunk(chunk)).await?;
         Ok(())
     }

@@ -287,6 +287,12 @@ impl_agg! { I32Array, Int32, I32Array }
 impl_agg! { I64Array, Int64, I64Array }
 impl_agg! { F32Array, Float32, F32Array }
 impl_agg! { F64Array, Float64, F64Array }
+impl_agg! { I64Array, Int64, F64Array }
+impl_agg! { I64Array, Int64, F32Array }
+impl_agg! { I64Array, Int64, I32Array }
+impl_agg! { I64Array, Int64, I16Array }
+impl_agg! { I64Array, Int64, BoolArray }
+impl_agg! { I64Array, Int64, UTF8Array }
 
 #[cfg(test)]
 mod tests {

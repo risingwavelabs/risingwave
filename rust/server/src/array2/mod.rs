@@ -13,7 +13,7 @@ mod value_reader;
 
 use crate::buffer::Bitmap;
 use crate::error::Result;
-use crate::types::{Scalar, ScalarRef};
+use crate::types::{Scalar, ScalarImpl, ScalarRef};
 pub use bool_array::{BoolArray, BoolArrayBuilder};
 pub use data_chunk::{DataChunk, DataChunkRef};
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
@@ -22,6 +22,7 @@ pub use iterator::ArrayIterator;
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
 use risingwave_proto::data::Buffer;
+use std::convert::From;
 use std::hash::Hasher;
 use std::sync::Arc;
 pub use utf8_array::{UTF8Array, UTF8ArrayBuilder};
@@ -422,6 +423,22 @@ impl ArrayImpl {
       };
     }
         for_all_variants! { impl_all_get_continuous_sub_array, self }
+    }
+
+    pub fn insert_key(&self, keys: &mut Vec<Vec<Option<ScalarImpl>>>) {
+        macro_rules! impl_all_insert_key {
+      ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        match $self {
+          $( Self::$variant_name(inner) => {
+            for (val, keys_for_one_row) in inner.iter().zip(keys.iter_mut()) {
+              let op: Option<ScalarImpl> = val.map(|v| v.to_owned_scalar().into());
+              keys_for_one_row.push(op);
+            }
+          }, )*
+        }
+      };
+    }
+        for_all_variants! { impl_all_insert_key, self }
     }
 }
 

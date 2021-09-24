@@ -1,10 +1,11 @@
 use super::data_source::*;
 use super::{OperatorOutput, Output, ProjectionOperator};
 use crate::array2::column::Column;
-use crate::array2::{Array, ArrayBuilder, ArrayImpl, I32ArrayBuilder};
-use crate::expr::{ArithmeticExpression, InputRefExpression};
-use crate::stream_op::Op;
+use crate::array2::{Array, ArrayBuilder, ArrayImpl, I32ArrayBuilder, I64ArrayBuilder};
+use crate::buffer::Bitmap;
+use crate::expr::{AggKind, ArithmeticExpression, InputRefExpression};
 use crate::stream_op::{DataDispatcher, HashDataDispatcher, StreamChunk};
+use crate::stream_op::{HashAggregationOperator, Op, UnaryStreamOperator};
 use crate::types::{ArithmeticOperatorKind, Int32Type, Int64Type};
 use crate::util::hash_util::CRC32FastBuilder;
 use std::hash::{BuildHasher, Hasher};
@@ -154,4 +155,86 @@ async fn test_hash_dispatcher() {
                 assert_eq!(real_vals, *expect_col);
             });
     }
+}
+
+#[tokio::test]
+async fn test_hash_aggregation_count() {
+    let input_type = Arc::new(Int64Type::new(false));
+    let return_type = Arc::new(Int64Type::new(false));
+    let agg_kind = AggKind::Count;
+    let data = Arc::new(Mutex::new(Vec::new()));
+    let mock_output = Box::new(MockOutput::new(data.clone())) as Box<dyn Output>;
+    let keys = vec![0];
+    let mut hash_aggregator =
+        HashAggregationOperator::new(input_type, mock_output, return_type, keys, None, agg_kind);
+
+    let ops1 = vec![Op::Insert, Op::Insert, Op::Insert];
+    let mut builder1 = I64ArrayBuilder::new(0).unwrap();
+    builder1.append(Some(1)).unwrap();
+    builder1.append(Some(2)).unwrap();
+    builder1.append(Some(2)).unwrap();
+    let array1 = builder1.finish().unwrap();
+    let column1 = Column::new(Arc::new(array1.into()), Arc::new(Int64Type::new(false)));
+    let cardinality1 = 3;
+    let chunk1 = StreamChunk {
+        ops: ops1,
+        columns: vec![column1],
+        visibility: None,
+        cardinality: cardinality1,
+    };
+
+    hash_aggregator.consume_chunk(chunk1).await.unwrap();
+    assert_eq!(data.lock().await.len(), 1);
+    let real_output = data.lock().await.drain(0..=0).next().unwrap();
+    assert_eq!(real_output.ops.len(), 2);
+    assert_eq!(real_output.ops[0], Op::Insert);
+    assert_eq!(real_output.ops[1], Op::Insert);
+    assert_eq!(real_output.columns.len(), 2);
+    let key_column = real_output.columns[0].array_ref().as_int64();
+    assert_eq!(key_column.value_at(0).unwrap(), 1);
+    assert_eq!(key_column.value_at(1).unwrap(), 2);
+    let agg_column = real_output.columns[1].array_ref().as_int64();
+    assert_eq!(agg_column.value_at(0).unwrap(), 1);
+    assert_eq!(agg_column.value_at(1).unwrap(), 2);
+
+    let ops2 = vec![Op::Delete, Op::Delete, Op::Delete];
+    let mut builder2 = I64ArrayBuilder::new(0).unwrap();
+    builder2.append(Some(1)).unwrap();
+    builder2.append(Some(2)).unwrap();
+    builder2.append(Some(2)).unwrap();
+    let array2 = builder2.finish().unwrap();
+    let column2 = Column::new(Arc::new(array2.into()), Arc::new(Int64Type::new(false)));
+    let cardinality2 = 3;
+    let chunk2 = StreamChunk {
+        ops: ops2,
+        columns: vec![column2],
+        visibility: Some(Bitmap::from_vec(vec![true, false, true]).unwrap()),
+        cardinality: cardinality2,
+    };
+    hash_aggregator.consume_chunk(chunk2).await.unwrap();
+    assert_eq!(data.lock().await.len(), 1);
+    let real_output = data.lock().await.drain(0..=0).next().unwrap();
+    assert_eq!(real_output.ops.len(), 4);
+    assert_eq!(
+        real_output.ops,
+        vec![
+            Op::UpdateDelete,
+            Op::UpdateInsert,
+            Op::UpdateDelete,
+            Op::UpdateInsert
+        ]
+    );
+    assert_eq!(real_output.columns.len(), 2);
+    let key_column = real_output.columns[0].array_ref().as_int64();
+    assert_eq!(key_column.len(), 4);
+    let key_column = (0..4)
+        .map(|idx| key_column.value_at(idx).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(key_column, vec![1, 1, 2, 2]);
+    let agg_column = real_output.columns[1].array_ref().as_int64();
+    assert_eq!(agg_column.len(), 4);
+    let agg_column = (0..4)
+        .map(|idx| agg_column.value_at(idx).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(agg_column, vec![1, 0, 2, 1]);
 }

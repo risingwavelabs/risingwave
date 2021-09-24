@@ -295,6 +295,7 @@ impl<'a> ScalarRef<'a> for IntervalUnit {
 }
 
 /// `ScalarImpl` embeds all possible scalars in the evaluation framework.
+#[derive(Clone)]
 pub enum ScalarImpl {
     Int16(i16),
     Int32(i32),
@@ -306,6 +307,93 @@ pub enum ScalarImpl {
     Decimal(Decimal),
     Interval(IntervalUnit),
 }
+
+macro_rules! for_all_variants {
+  ($macro:tt $(, $x:tt)*) => {
+    $macro! {
+      [$($x),*],
+      { i16, Int16 },
+      { i32, Int32 },
+      { i64, Int64 },
+      { f32, Float32 },
+      { f64, Float64 },
+      { String, UTF8 },
+      { bool, Bool },
+      { Decimal, Decimal },
+      { IntervalUnit, Interval }
+    }
+  };
+}
+
+macro_rules! for_all_native_types {
+($macro:tt $(, $x:tt)*) => {
+    $macro! {
+      [$($x),*],
+      { i16, Int16 },
+      { i32, Int32 },
+      { i64, Int64 },
+      { f32, Float32 },
+      { f64, Float64 }
+    }
+  };
+}
+
+macro_rules! impl_convert {
+  ([], $( { $variable_type:ty, $scalar_type:ident } ),*) => {
+    $(
+      impl From<$variable_type> for ScalarImpl {
+        fn from(val: $variable_type) -> Self {
+          ScalarImpl::$scalar_type(val)
+        }
+      }
+    )*
+  };
+}
+
+for_all_variants! { impl_convert }
+
+// TODO: may take type information into consideration later
+impl std::hash::Hash for ScalarImpl {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        macro_rules! impl_all_hash {
+      ([$self:ident], $({ $variant_type:ty, $scalar_type:ident } ),*) => {
+        match $self {
+          $( Self::$scalar_type(inner) => {
+            inner.hash_wrapper(state);
+          }, )*
+          Self::Bool(b) => b.hash(state),
+          Self::UTF8(s) => s.hash(state),
+          Self::Decimal(decimal) => decimal.hash(state),
+          Self::Interval(interval) => interval.hash(state),
+        }
+      };
+    }
+        for_all_native_types! { impl_all_hash, self }
+    }
+}
+
+// This should be unnecessary, but clippy would error if
+// we only implement Hash manually while leaving PartialEq to default implementation.
+// see https://rust-lang.github.io/rust-clippy/master/index.html#derive_hash_xor_eq
+impl std::cmp::PartialEq for ScalarImpl {
+    fn eq(&self, other: &Self) -> bool {
+        macro_rules! impl_all_eq {
+      ([($self:ident, $other:ident)], $( { $variable_type:ty, $scalar_type:ident } ),*) => {
+        match ($self, $other) {
+          $(
+            (ScalarImpl::$scalar_type(left), ScalarImpl::$scalar_type(right)) => {
+              left.eq(right)
+            },
+          )*
+          _ => false
+        }
+      };
+    }
+        for_all_variants! { impl_all_eq, (self, other) }
+    }
+}
+
+impl std::cmp::Eq for ScalarImpl {}
 
 /// `ScalarRefImpl` embeds all possible scalar references in the evaluation
 /// framework.
@@ -328,7 +416,7 @@ pub enum ScalarRefImpl<'a> {
 /// One month may contain 28/31 days. One day may contain 23/25 hours.
 /// This internals is learned from PG:
 /// https://www.postgresql.org/docs/9.1/datatype-datetime.html#:~:text=field%20is%20negative.-,Internally,-interval%20values%20are
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub struct IntervalUnit {
     months: i32,
     days: i32,
