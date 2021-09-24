@@ -24,6 +24,12 @@ impl Drop for Buffer {
     }
 }
 
+impl Clone for Buffer {
+    fn clone(&self) -> Self {
+        Self::try_from(self.as_slice()).unwrap()
+    }
+}
+
 impl Buffer {
     pub fn new(size: usize) -> Result<Buffer> {
         alloc_aligned(size).map(|ptr| Buffer { ptr, len: size })
@@ -162,5 +168,14 @@ mod tests {
         let buf = Buffer::new(1)?;
         assert_eq!(buf.len(), 1);
         Ok(())
+    }
+
+    #[test]
+    fn test_clone() {
+        let buf1 = Buffer::from_slice(vec![1i32]).unwrap();
+        let buf2 = buf1.clone();
+        assert_eq!(buf1.len(), 4);
+        assert_eq!(buf2.len(), 4);
+        assert_eq!(buf2.as_slice(), 1i32.to_le_bytes());
     }
 }

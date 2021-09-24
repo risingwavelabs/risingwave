@@ -127,6 +127,7 @@ impl StreamManagerCore {
                 outputs,
                 vec![dispatcher.get_column_idx() as usize],
             ))),
+            BROADCAST => Box::new(Dispatcher::new(BroadcastDispatcher::new(outputs))),
         }
     }
 

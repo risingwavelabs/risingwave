@@ -75,7 +75,7 @@ pub enum Op {
 pub type Ops<'a> = &'a [Op];
 
 /// `StreamChunk` is used to pass data between operators.
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct StreamChunk {
     // TODO: Optimize using bitmap
     ops: Vec<Op>,

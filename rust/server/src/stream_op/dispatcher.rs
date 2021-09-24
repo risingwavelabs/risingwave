@@ -147,3 +147,28 @@ impl DataDispatcher for HashDataDispatcher {
         Ok(())
     }
 }
+
+/// `BroadcastDispatcher` dispatches message to all outputs.
+pub struct BroadcastDispatcher {
+    outputs: Vec<Box<dyn Output>>,
+}
+
+impl BroadcastDispatcher {
+    pub fn new(outputs: Vec<Box<dyn Output>>) -> Self {
+        Self { outputs }
+    }
+}
+
+#[async_trait]
+impl DataDispatcher for BroadcastDispatcher {
+    fn get_outputs(&mut self) -> &mut [Box<dyn Output>] {
+        &mut self.outputs
+    }
+
+    async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()> {
+        for output in &mut self.outputs {
+            output.collect(Message::Chunk(chunk.clone())).await?;
+        }
+        Ok(())
+    }
+}

@@ -30,6 +30,7 @@ use crate::error::Result;
 use crate::util::bit_util;
 use risingwave_proto::data::Buffer as BufferProto;
 
+#[derive(Clone)]
 pub struct Bitmap {
     pub bits: Buffer,
 
