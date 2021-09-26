@@ -2,6 +2,7 @@ syntax = "proto3";
 
 import "google/protobuf/any.proto";
 import "expr.proto";
+import "data.proto";
 import "plan.proto";
 
 package risingwave.streaming.proto;
@@ -18,6 +19,19 @@ message FilterNode {
   risingwave.expr.proto.ExprNode search_condition = 1;
 }
 
+message LocalSimpleAggNode {
+  risingwave.expr.proto.ExprNode.ExprNodeType aggregation_type = 1;
+  risingwave.executor.proto.DataType input_type = 2;
+  risingwave.executor.proto.DataType return_type = 3;
+  int32 column_idx = 4;
+}
+
+message GlobalSimpleAggNode {
+  risingwave.expr.proto.ExprNode.ExprNodeType aggregation_type = 1;
+  risingwave.executor.proto.DataType input_type = 2;
+  risingwave.executor.proto.DataType return_type = 3;
+}
+
 // A materialized view is regarded as a table,
 // hence we copy the CreateTableNode definition in OLAP PlanNode.
 message MaterializedViewNode{
@@ -31,9 +45,9 @@ message StreamNode {
     KAFKA_INGRESS = 1;
     PROJECTION = 2;
     FILTER = 3;
-    SIMPLE_AGG = 4;
+    LOCAL_SIMPLE_AGG = 4;
     GLOBAL_SIMPLE_AGG = 5;
-    HASH_AGG = 6;
+    LOCAL_HASH_AGG = 6;
     GLOBAL_HASH_AGG = 7;
     HASH_JOIN = 8;
     MATERIALIZED_VIEW = 9;

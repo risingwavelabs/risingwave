@@ -10,12 +10,12 @@ use crate::buffer::Bitmap;
 use crate::error::Result;
 use crate::expr::AggKind;
 use crate::impl_consume_barrier_default;
-use crate::types::DataTypeKind;
 use crate::types::Int64Type;
+use crate::types::{DataType, DataTypeKind};
 use crate::types::{DataTypeRef, ScalarImpl};
-use std::collections::HashMap;
 
 use async_trait::async_trait;
+use std::collections::HashMap;
 
 /// `StreamingSumAgg` sums data of the same type.
 pub type StreamingSumAgg<R> = StreamingFoldAgg<R, R, PrimitiveSummable<<R as Array>::OwnedItem>>;
@@ -141,11 +141,10 @@ impl UnaryStreamOperator for LocalAggregationOperator {
     }
 }
 
-// mimic the aggregator in `server/src/vector_op/agg.rs`
-pub fn create_agg_state(
-    input_type: DataTypeRef,
+pub fn create_streaming_local_agg_state(
+    input_type: &dyn DataType,
     agg_type: &AggKind,
-    return_type: DataTypeRef,
+    return_type: &dyn DataType,
 ) -> Result<Box<dyn StreamingAggStateImpl>> {
     let state: Box<dyn StreamingAggStateImpl> = match (
         input_type.data_type_kind(),
@@ -324,10 +323,10 @@ impl UnaryStreamOperator for HashLocalAggregationOperator {
                     key.to_vec(),
                     (
                         true,
-                        create_agg_state(
-                            self.input_type.clone(),
+                        create_streaming_local_agg_state(
+                            &*self.input_type,
                             &self.agg_type,
-                            self.return_type.clone(),
+                            &*self.return_type,
                         )
                         .unwrap(),
                     ),

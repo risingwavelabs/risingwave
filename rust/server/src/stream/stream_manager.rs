@@ -2,12 +2,14 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use crate::error::{ErrorCode, Result};
-use crate::expr::build_from_proto;
+use crate::expr::{build_from_proto as build_expr_from_proto, AggKind};
 use crate::protobuf::Message as _;
 use crate::stream_op::*;
+use crate::types::build_from_proto as build_type_from_proto;
 use futures::channel::mpsc::{channel, Receiver, Sender};
 use risingwave_proto::stream_plan;
 use risingwave_proto::stream_service;
+use std::convert::TryInto;
 use tokio::task::JoinHandle;
 
 /// Default capacity of channel if two fragments are on the same node
@@ -169,7 +171,7 @@ impl StreamManagerCore {
                 let project_exprs = project_node
                     .get_select_list()
                     .iter()
-                    .map(build_from_proto)
+                    .map(build_expr_from_proto)
                     .collect::<Result<Vec<_>>>()?;
                 Box::new(ProjectionOperator::new(downstream_node, project_exprs))
             }
@@ -177,13 +179,39 @@ impl StreamManagerCore {
                 let filter_node =
                     stream_plan::FilterNode::parse_from_bytes(node.get_body().get_value())
                         .map_err(ErrorCode::ProtobufError)?;
-                let search_condition = build_from_proto(filter_node.get_search_condition())?;
+                let search_condition = build_expr_from_proto(filter_node.get_search_condition())?;
                 Box::new(FilterOperator::new(downstream_node, search_condition))
             }
+            LOCAL_SIMPLE_AGG => {
+                let aggr_node =
+                    stream_plan::LocalSimpleAggNode::parse_from_bytes(node.get_body().get_value())
+                        .map_err(ErrorCode::ProtobufError)?;
+                let agg_type: AggKind = aggr_node.get_aggregation_type().try_into()?;
+                let input_type = build_type_from_proto(aggr_node.get_input_type())?;
+                let return_type = build_type_from_proto(aggr_node.get_return_type())?;
+                let col_idx = aggr_node.get_column_idx();
+                Box::new(LocalAggregationOperator::new(
+                    create_streaming_local_agg_state(&*input_type, &agg_type, &*return_type)?,
+                    downstream_node,
+                    return_type,
+                    col_idx as usize,
+                ))
+            }
+            GLOBAL_SIMPLE_AGG => {
+                let aggr_node =
+                    stream_plan::LocalSimpleAggNode::parse_from_bytes(node.get_body().get_value())
+                        .map_err(ErrorCode::ProtobufError)?;
+                let agg_type: AggKind = aggr_node.get_aggregation_type().try_into()?;
+                let input_type = build_type_from_proto(aggr_node.get_input_type())?;
+                let return_type = build_type_from_proto(aggr_node.get_return_type())?;
+                Box::new(GlobalAggregationOperator::new(
+                    create_streaming_global_agg_state(&*input_type, &agg_type, &*return_type)?,
+                    downstream_node,
+                    return_type,
+                ))
+            }
             // TODO: get configuration body of each operator
-            SIMPLE_AGG => todo!(),
-            GLOBAL_SIMPLE_AGG => todo!(),
-            HASH_AGG => todo!(),
+            LOCAL_HASH_AGG => todo!(),
             GLOBAL_HASH_AGG => todo!(),
             others => todo!("unsupported StreamNodeType: {:?}", others),
         };

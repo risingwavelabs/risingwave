@@ -5,7 +5,9 @@ use super::{Message, Op, Output, StreamChunk, StreamOperator, UnaryStreamOperato
 use crate::array2::column::Column;
 use crate::array2::*;
 use crate::error::Result;
+use crate::expr::AggKind;
 use crate::impl_consume_barrier_default;
+use crate::types::DataType;
 use crate::types::DataTypeRef;
 
 use async_trait::async_trait;
@@ -134,4 +136,12 @@ impl UnaryStreamOperator for GlobalAggregationOperator {
         self.output.collect(Message::Chunk(chunk)).await?;
         Ok(())
     }
+}
+
+pub fn create_streaming_global_agg_state(
+    _input_type: &dyn DataType,
+    _agg_type: &AggKind,
+    _return_type: &dyn DataType,
+) -> Result<Box<dyn StreamingAggStateImpl>> {
+    todo!();
 }
