@@ -14,6 +14,7 @@ use tokio::task::JoinHandle;
 pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
 
 type ConsumableChannelPair = (Option<Sender<Message>>, Option<Receiver<Message>>);
+type ConsumableChannelVecPair = (Vec<Sender<Message>>, Vec<Receiver<Message>>);
 
 pub struct StreamManagerCore {
     /// Each processor runs in a future. Upon receiving a `Terminate` message, they will exit.
@@ -21,21 +22,18 @@ pub struct StreamManagerCore {
     /// termination.
     handles: Vec<JoinHandle<Result<()>>>,
 
-    /// `channels` store the senders and receivers for later `Processor`'s use. When `StreamManager`
+    /// `channel_pool` store the senders and receivers for later `Processor`'s use. When `StreamManager`
     ///
-    /// When `create_nodes` is called,
-    /// 1. The manager will take receivers out and create `Processor`.
-    /// 2. The manager will add downstream receivers.
-    ///
-    /// For example, when we create `1 -> 2, 3 -> 4`,
-    /// * Client should first send creating `1` request. The manager will add `2 => rx` and `3 => rx` to `receivers`.
-    /// * Then the client send creating `2`, and the manager will take `2 => rx` to create processor, and add `4 => rx`.
-    /// * Then the client send creating `3`, and the manager will take `3 => rx` to create processor, and add `4 => rx`.
-    /// * Finally the client send creating `4`, and the manager will take `4 => [rx, rx]` to create new processor.
-    receivers: HashMap<u32, Vec<Receiver<Message>>>,
+    /// Each actor has several senders and several receivers. Senders and receivers are created during
+    /// `update_fragment`. Upon `build_fragment`, all these channels will be taken out and built into
+    /// the operators and outputs.
+    channel_pool: HashMap<u32, ConsumableChannelVecPair>,
 
     /// Stores all actor information
-    info: HashMap<u32, stream_service::ActorInfo>,
+    actors: HashMap<u32, stream_service::ActorInfo>,
+
+    /// Stores all fragment information
+    fragments: HashMap<u32, stream_plan::StreamFragment>,
 
     /// Mock source, `fragment_id = 0`
     /// TODO: remove this
@@ -70,6 +68,12 @@ impl StreamManager {
         core.update_actor_info(table)
     }
 
+    /// This function could only be called once during the lifecycle of `StreamManager` for now.
+    pub fn build_fragment(&self, fragments: &[u32]) -> Result<()> {
+        let mut core = self.core.lock().unwrap();
+        core.build_fragment(fragments)
+    }
+
     #[cfg(test)]
     pub fn take_source(&self) -> Sender<Message> {
         let mut core = self.core.lock().unwrap();
@@ -79,7 +83,7 @@ impl StreamManager {
     #[cfg(test)]
     pub fn take_sink(&self) -> Receiver<Message> {
         let mut core = self.core.lock().unwrap();
-        core.receivers.remove(&233).unwrap().remove(0)
+        core.channel_pool.get_mut(&233).unwrap().1.remove(0)
     }
 }
 
@@ -88,8 +92,9 @@ impl StreamManagerCore {
         let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
         Self {
             handles: vec![],
-            receivers: HashMap::new(),
-            info: HashMap::new(),
+            channel_pool: HashMap::new(),
+            actors: HashMap::new(),
+            fragments: HashMap::new(),
             mock_source: (Some(tx), Some(rx)),
         }
     }
@@ -98,20 +103,20 @@ impl StreamManagerCore {
     fn create_dispatcher(
         &mut self,
         dispatcher: &stream_plan::Dispatcher,
+        fragment_id: u32,
         downstreams: &[u32],
     ) -> Box<dyn Output> {
         // create downstream receivers
-        let outputs = downstreams
-            .iter()
-            .map(|downstream| {
-                let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                self.receivers
-                    .entry(*downstream)
-                    .or_insert_with(Vec::new)
-                    .push(rx);
-                Box::new(ChannelOutput::new(tx)) as Box<dyn Output>
-            })
+        let outputs = self
+            .channel_pool
+            .get_mut(&fragment_id)
+            .map(|x| std::mem::take(&mut x.0))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|tx| Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
             .collect::<Vec<_>>();
+
+        assert_eq!(downstreams.len(), outputs.len());
 
         use stream_plan::Dispatcher_DispatcherType::*;
         match dispatcher.field_type {
@@ -121,12 +126,16 @@ impl StreamManagerCore {
                 outputs.pop().unwrap()
             }
             ROUND_ROBIN => {
+                assert!(!outputs.is_empty());
                 Box::new(Dispatcher::new(RoundRobinDataDispatcher::new(outputs))) as Box<dyn Output>
             }
-            HASH => Box::new(Dispatcher::new(HashDataDispatcher::new(
-                outputs,
-                vec![dispatcher.get_column_idx() as usize],
-            ))),
+            HASH => {
+                assert!(!outputs.is_empty());
+                Box::new(Dispatcher::new(HashDataDispatcher::new(
+                    outputs,
+                    vec![dispatcher.get_column_idx() as usize],
+                )))
+            }
             BROADCAST => Box::new(Dispatcher::new(BroadcastDispatcher::new(outputs))),
         }
     }
@@ -136,16 +145,18 @@ impl StreamManagerCore {
         &mut self,
         node: &stream_plan::StreamNode,
         dispatcher: &stream_plan::Dispatcher,
+        fragment_id: u32,
         downstreams: &[u32],
     ) -> Result<Box<dyn UnaryStreamOperator>> {
         let downstream_node: Box<dyn Output> = if node.has_downstream_node() {
             Box::new(OperatorOutput::new(self.create_nodes(
                 node.get_downstream_node(),
                 dispatcher,
+                fragment_id,
                 downstreams,
             )?))
         } else {
-            self.create_dispatcher(dispatcher, downstreams)
+            self.create_dispatcher(dispatcher, fragment_id, downstreams)
         };
 
         use stream_plan::StreamNode_StreamNodeType::*;
@@ -179,63 +190,70 @@ impl StreamManagerCore {
         Ok(operator)
     }
 
-    pub fn update_fragment(&mut self, fragments: &[stream_plan::StreamFragment]) -> Result<()> {
-        // TODO: implement this part
-        let fragment = &fragments[0];
-        let operator_head = self.create_nodes(
-            fragment.get_nodes(),
-            fragment.get_dispatcher(),
-            fragment.get_downstream_fragment_id(),
-        )?;
-        let fragment_id = fragment.get_fragment_id();
+    fn build_fragment(&mut self, fragments: &[u32]) -> Result<()> {
+        for fragment_id in fragments {
+            let fragment = self.fragments.remove(fragment_id).unwrap();
+            let operator_head = self.create_nodes(
+                fragment.get_nodes(),
+                fragment.get_dispatcher(),
+                *fragment_id,
+                fragment.get_downstream_fragment_id(),
+            )?;
 
-        let upstreams = fragment.get_upstream_fragment_id();
-        assert!(!upstreams.is_empty());
+            let upstreams = fragment.get_upstream_fragment_id();
+            assert!(!upstreams.is_empty());
 
-        let mut rxs = self.receivers.remove(&fragment_id).unwrap_or_else(Vec::new);
+            let mut rxs = self
+                .channel_pool
+                .get_mut(fragment_id)
+                .map(|x| std::mem::take(&mut x.1))
+                .unwrap_or_default();
 
-        for upstream in upstreams {
-            // TODO: remove this
-            if *upstream == 0 {
-                // `fragment_id = 0` is used as mock input
-                rxs.push(self.mock_source.1.take().unwrap());
-                continue;
+            for upstream in upstreams {
+                // TODO: remove this
+                if *upstream == 0 {
+                    // `fragment_id = 0` is used as mock input
+                    rxs.push(self.mock_source.1.take().unwrap());
+                    continue;
+                }
+
+                let actor = self
+                    .actors
+                    .get(upstream)
+                    .expect("upstream actor not found in info table");
+                // FIXME: use `is_local_address` from `ExchangeExecutor`.
+                if actor.get_host().get_host() == "127.0.0.1" {
+                    continue;
+                } else {
+                    todo!("remote node is not supported in streaming engine");
+                    // TODO: create gRPC connection
+                }
             }
 
-            let actor = self
-                .info
-                .get(upstream)
-                .expect("upstream actor not found in info table");
-            // FIXME: use `is_local_address` from `ExchangeExecutor`.
-            if actor.get_host().get_host() == "127.0.0.1" {
-                continue;
+            assert_eq!(
+        rxs.len(),
+        upstreams.len(),
+        "upstreams are not fully available: {} registered while {} required, fragment_id={}",
+        rxs.len(),
+        upstreams.len(),
+        fragment_id
+      );
+
+            let join_handle = if upstreams.len() == 1 {
+                // Only one upstream, use `UnarySimpleProcessor`.
+                let processor = UnarySimpleProcessor::new(rxs.remove(0), operator_head);
+                // Create processor
+                tokio::spawn(processor.run())
             } else {
-                todo!("remote node is not supported in streaming engine");
-            }
+                // Create processor
+                let processor = UnaryMergeProcessor::new(rxs, operator_head);
+                // Store join handle
+                tokio::spawn(processor.run())
+            };
+
+            // Store handle for later use
+            self.handles.push(join_handle);
         }
-
-        assert_eq!(
-            rxs.len(),
-            upstreams.len(),
-            "upstreams are not fully available: {} registered while {} required, fragment_id={}",
-            rxs.len(),
-            upstreams.len(),
-            fragment_id
-        );
-
-        let join_handle = if upstreams.len() == 1 {
-            // Only one upstream, use `UnarySimpleProcessor`.
-            let processor = UnarySimpleProcessor::new(rxs.remove(0), operator_head);
-            // Create processor
-            tokio::spawn(processor.run())
-        } else {
-            // Create processor
-            let processor = UnaryMergeProcessor::new(rxs, operator_head);
-            // Store join handle
-            tokio::spawn(processor.run())
-        };
-        // Store handle for later use
-        self.handles.push(join_handle);
 
         Ok(())
     }
@@ -248,15 +266,43 @@ impl StreamManagerCore {
     }
 
     fn update_actor_info(&mut self, table: stream_service::ActorInfoTable) -> Result<()> {
-        self.info.clear();
         for actor in table.get_info() {
-            assert!(
-                self.info
-                    .insert(actor.get_fragment_id(), actor.clone())
-                    .is_none(),
-                "error when creating actor: duplicated actor {}",
-                actor.get_fragment_id()
-            );
+            let ret = self.actors.insert(actor.get_fragment_id(), actor.clone());
+            if ret.is_some() {
+                return Err(ErrorCode::InternalError(format!(
+                    "duplicated actor {}",
+                    actor.get_fragment_id()
+                ))
+                .into());
+            }
+        }
+        Ok(())
+    }
+
+    fn update_fragment(&mut self, fragments: &[stream_plan::StreamFragment]) -> Result<()> {
+        for fragment in fragments {
+            let ret = self
+                .fragments
+                .insert(fragment.get_fragment_id(), fragment.clone());
+            if ret.is_some() {
+                return Err(ErrorCode::InternalError(format!(
+                    "duplicated fragment {}",
+                    fragment.get_fragment_id()
+                ))
+                .into());
+            }
+        }
+
+        for (current_id, fragment) in &self.fragments {
+            for downstream in fragment.get_downstream_fragment_id() {
+                // At this time, the graph might not be complete, so we do not check if downstream has `current_id`
+                // as upstream.
+                let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+                let current_channels = self.channel_pool.entry(*current_id).or_default();
+                current_channels.0.push(tx);
+                let downstream_channels = self.channel_pool.entry(*downstream).or_default();
+                downstream_channels.1.push(rx);
+            }
         }
         Ok(())
     }

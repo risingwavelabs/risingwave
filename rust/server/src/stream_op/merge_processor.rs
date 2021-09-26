@@ -95,17 +95,17 @@ impl Processor for UnaryMergeProcessor {
                     self.operator_head.consume_chunk(chunk).await?;
                 }
                 (_id, Message::Terminate) => {
-                    // TODO: pass terminate to downstream
                     terminate_count -= 1;
                     if terminate_count == 0 {
+                        self.operator_head.consume_terminate().await?;
                         return Ok(());
                     }
                 }
                 (_id, Message::Barrier(epoch)) => {
-                    // TODO: pass barrier to downstream
                     assert_eq!(epoch, next_epoch);
                     barrier_count -= 1;
                     if barrier_count == 0 {
+                        self.operator_head.consume_barrier(next_epoch).await?;
                         barrier_count = channel_cnt;
                         for tx in &mut txs {
                             tx.send(next_epoch).await.unwrap();

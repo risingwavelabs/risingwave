@@ -30,7 +30,7 @@ impl StreamService for StreamServiceImpl {
         ctx.spawn(async move {
             match res {
                 Err(e) => {
-                    error!("failed to create stream actor {}", e);
+                    error!("failed to update stream actor {}", e);
                     sink.fail(RpcStatus::with_message(
                         RpcStatusCode::INTERNAL,
                         e.to_string(),
@@ -45,11 +45,25 @@ impl StreamService for StreamServiceImpl {
 
     fn build_fragment(
         &mut self,
-        _ctx: RpcContext,
-        _req: BuildFragmentRequest,
-        _sink: UnarySink<BuildFragmentResponse>,
+        ctx: RpcContext,
+        req: BuildFragmentRequest,
+        sink: UnarySink<BuildFragmentResponse>,
     ) {
-        todo!()
+        let res = self.mgr.build_fragment(req.get_fragment_id());
+        ctx.spawn(async move {
+            match res {
+                Err(e) => {
+                    error!("failed to build fragments {}", e);
+                    sink.fail(RpcStatus::with_message(
+                        RpcStatusCode::INTERNAL,
+                        e.to_string(),
+                    ));
+                }
+                Ok(()) => {
+                    sink.success(BuildFragmentResponse::default());
+                }
+            }
+        });
     }
 
     fn broadcast_actor_info_table(
