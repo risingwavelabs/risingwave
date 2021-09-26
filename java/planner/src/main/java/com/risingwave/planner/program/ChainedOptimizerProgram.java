@@ -62,7 +62,8 @@ public class ChainedOptimizerProgram implements OptimizerProgram {
     LOGICAL_REWRITE("Logical rewrite"),
     JOIN_REORDER("Join reorder"),
     LOGICAL_CBO("CBO for logical optimization"),
-    PHYSICAL("Physical planning");
+    PHYSICAL("Physical planning"),
+    STREAMING("Streaming fragment generation");
 
     private final String description;
 

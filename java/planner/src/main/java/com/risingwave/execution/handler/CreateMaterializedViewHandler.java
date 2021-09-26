@@ -25,32 +25,29 @@ public class CreateMaterializedViewHandler implements SqlHandler {
 
   @Override
   public DdlResult handle(SqlNode ast, ExecutionContext context) {
-    TableCatalog catalog = convertAstToCatalog(ast, context);
+    SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
+    String tableName = createMaterializedView.name.getSimple();
+    SqlNode query = createMaterializedView.query;
+
+    BatchPlanner planner = new BatchPlanner();
+    BatchPlan plan = planner.plan(query, context);
+
+    TableCatalog catalog = convertPlanToCatalog(tableName, plan, context);
     return new DdlResult(StatementType.CREATE_MATERIALIZED_VIEW, 0);
   }
 
   @VisibleForTesting
-  protected TableCatalog convertAstToCatalog(SqlNode ast, ExecutionContext context) {
-    SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
-
+  protected TableCatalog convertPlanToCatalog(
+      String tableName, BatchPlan plan, ExecutionContext context) {
     SchemaCatalog.SchemaName schemaName = context.getCurrentSchema();
-    String tableName = createMaterializedView.name.getSimple();
-    SqlNode query = createMaterializedView.query;
-
     CreateTableInfo.Builder createTableInfoBuilder = CreateTableInfo.builder(tableName);
-
-    if (query != null) {
-      BatchPlanner planner = new BatchPlanner();
-      BatchPlan plan = planner.plan(query, context);
-
-      RisingWaveBatchPhyRel rootNode = plan.getRoot();
-      var rowType = rootNode.getRowType();
-      for (int i = 0; i < rowType.getFieldCount(); i++) {
-        var field = rowType.getFieldList().get(i);
-        ColumnDesc columnDesc =
-            new ColumnDesc((RisingWaveDataType) field.getType(), false, ColumnEncoding.RAW);
-        createTableInfoBuilder.addColumn(field.getName(), columnDesc);
-      }
+    RisingWaveBatchPhyRel rootNode = plan.getRoot();
+    var rowType = rootNode.getRowType();
+    for (int i = 0; i < rowType.getFieldCount(); i++) {
+      var field = rowType.getFieldList().get(i);
+      ColumnDesc columnDesc =
+          new ColumnDesc((RisingWaveDataType) field.getType(), false, ColumnEncoding.RAW);
+      createTableInfoBuilder.addColumn(field.getName(), columnDesc);
     }
     createTableInfoBuilder.setMv(true);
     CreateTableInfo tableInfo = createTableInfoBuilder.build();

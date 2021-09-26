@@ -12,9 +12,12 @@ import com.risingwave.common.config.LeaderServerConfigurations;
 import com.risingwave.common.datatype.NumericTypeBase;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.execution.context.FrontendEnv;
+import com.risingwave.planner.planner.batch.BatchPlanner;
+import com.risingwave.planner.rel.physical.batch.BatchPlan;
 import com.risingwave.scheduler.TestPlannerModule;
 import com.risingwave.sql.parser.SqlParser;
 import org.apache.calcite.sql.SqlNode;
+import org.apache.calcite.sql.ddl.SqlCreateMaterializedView;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
@@ -57,7 +60,14 @@ public class CreateMaterializedViewHandlerTest {
     String sql = "create materialized view mv1 as select v1, v2, sum(v3) from t group by v1, v2";
     SqlNode ast = SqlParser.createCalciteStatement(sql);
     var handler = ((CreateMaterializedViewHandler) sqlHandlerFactory.create(ast, executionContext));
-    TableCatalog catalog = handler.convertAstToCatalog(ast, executionContext);
+
+    SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
+    String tableName = createMaterializedView.name.getSimple();
+    SqlNode query = createMaterializedView.query;
+    BatchPlanner planner = new BatchPlanner();
+    BatchPlan plan = planner.plan(query, executionContext);
+    TableCatalog catalog = handler.convertPlanToCatalog(tableName, plan, executionContext);
+
     Assertions.assertEquals(catalog.isMaterializedView(), true);
 
     Assertions.assertEquals(catalog.getAllColumnCatalogs().size(), 3);
@@ -83,7 +93,14 @@ public class CreateMaterializedViewHandlerTest {
     String sql = "create materialized view mv2 as select v1+5 from t";
     SqlNode ast = SqlParser.createCalciteStatement(sql);
     var handler = ((CreateMaterializedViewHandler) sqlHandlerFactory.create(ast, executionContext));
-    TableCatalog catalog = handler.convertAstToCatalog(ast, executionContext);
+
+    SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
+    String tableName = createMaterializedView.name.getSimple();
+    SqlNode query = createMaterializedView.query;
+    BatchPlanner planner = new BatchPlanner();
+    BatchPlan plan = planner.plan(query, executionContext);
+    TableCatalog catalog = handler.convertPlanToCatalog(tableName, plan, executionContext);
+
     Assertions.assertEquals(catalog.isMaterializedView(), true);
 
     Assertions.assertEquals(catalog.getAllColumnCatalogs().size(), 1);

@@ -1,15 +1,21 @@
 package com.risingwave.planner.rel.physical.streaming;
 
-import org.apache.calcite.rel.RelNode;
-
+/**
+ * Plan for the stream execution. To be compatible with Calcite, a streaming plan is still a tree.
+ * The root represents the result (sink, MV), and the leaf nodes represent the sources.
+ *
+ * <p>We remove the `serialize()` interface for StreamingPlan, as the serialization phase requires a
+ * global id assigner. We defer the serialization implementation to later phases in the planning
+ * procedure.
+ */
 public class StreamingPlan {
-  private final RelNode physicalPlan;
+  private final RisingWaveStreamingRel streamingPlan;
 
-  public StreamingPlan(RelNode physicalPlan) {
-    this.physicalPlan = physicalPlan;
+  public StreamingPlan(RisingWaveStreamingRel streamingPlan) {
+    this.streamingPlan = streamingPlan;
   }
 
-  public RelNode getPhysicalPlan() {
-    return physicalPlan;
+  public RisingWaveStreamingRel getStreamingPlan() {
+    return streamingPlan;
   }
 }
