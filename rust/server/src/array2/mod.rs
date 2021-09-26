@@ -281,6 +281,17 @@ impl ArrayBuilderImpl {
         for_all_variants! { impl_all_append_array, self, other }
     }
 
+    pub fn append_null(&mut self) -> Result<()> {
+        macro_rules! impl_append_null {
+      ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        match $self {
+          $( Self::$variant_name(inner) => inner.append(None), )*
+        }
+      };
+    }
+        for_all_variants! { impl_append_null, self }
+    }
+
     pub fn finish(self) -> Result<ArrayImpl> {
         macro_rules! impl_all_finish {
       ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {

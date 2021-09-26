@@ -49,10 +49,11 @@ impl StreamOperator for TestConsumer {
 async fn test_merger_sum_aggr() {
     let make_actor = |sender| {
         let output = ChannelOutput::new(sender);
-        let aggregator = AggregationOperator::new(
+        let aggregator = LocalAggregationOperator::new(
             Box::new(StreamingSumAgg::<I64Array>::new()),
             Box::new(output),
             Arc::new(Int64Type::new(false)),
+            0,
         );
         let (tx, rx) = channel(16);
         let output = ChannelOutput::new(tx);
@@ -83,9 +84,7 @@ async fn test_merger_sum_aggr() {
     let consumer = TestConsumer::new(items.clone());
     let output = OperatorOutput::new(Box::new(consumer));
     let aggregator = GlobalAggregationOperator::new(
-        Box::new(GlobalStreamingSumAgg::new(
-            StreamingSumAgg::<I64Array>::new(),
-        )),
+        Box::new(GlobalStreamingSumAgg::<I64Array>::new()),
         Box::new(output),
         Arc::new(Int64Type::new(false)),
     );
@@ -296,10 +295,11 @@ async fn test_tpch_q6() {
     let make_actor = |sender| {
         let (_, _, _, _, and, multiply) = make_tpchq6_expr();
         let output = ChannelOutput::new(sender);
-        let aggregator = AggregationOperator::new(
+        let aggregator = LocalAggregationOperator::new(
             Box::new(StreamingFloatSumAgg::<F64Array>::new()),
             Box::new(output),
             Arc::new(Float64Type::new(false)),
+            0,
         );
         let output = OperatorOutput::new(Box::new(aggregator));
         let projection = ProjectionOperator::new(Box::new(output), vec![Box::new(multiply)]);
@@ -334,9 +334,7 @@ async fn test_tpch_q6() {
     let consumer = TestConsumer::new(items.clone());
     let output = OperatorOutput::new(Box::new(consumer));
     let aggregator = GlobalAggregationOperator::new(
-        Box::new(GlobalStreamingFloatSumAgg::new(StreamingFloatSumAgg::<
-            F64Array,
-        >::new())),
+        Box::new(GlobalStreamingFloatSumAgg::<F64Array>::new()),
         Box::new(output),
         Arc::new(Float64Type::new(false)),
     );

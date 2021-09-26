@@ -5,7 +5,7 @@ use crate::array2::{Array, ArrayBuilder, ArrayImpl, I32ArrayBuilder, I64ArrayBui
 use crate::buffer::Bitmap;
 use crate::expr::{AggKind, ArithmeticExpression, InputRefExpression};
 use crate::stream_op::{DataDispatcher, HashDataDispatcher, StreamChunk};
-use crate::stream_op::{HashAggregationOperator, Op, UnaryStreamOperator};
+use crate::stream_op::{HashLocalAggregationOperator, Op, UnaryStreamOperator};
 use crate::types::{ArithmeticOperatorKind, Int32Type, Int64Type};
 use crate::util::hash_util::CRC32FastBuilder;
 use std::hash::{BuildHasher, Hasher};
@@ -165,8 +165,14 @@ async fn test_hash_aggregation_count() {
     let data = Arc::new(Mutex::new(Vec::new()));
     let mock_output = Box::new(MockOutput::new(data.clone())) as Box<dyn Output>;
     let keys = vec![0];
-    let mut hash_aggregator =
-        HashAggregationOperator::new(input_type, mock_output, return_type, keys, None, agg_kind);
+    let mut hash_aggregator = HashLocalAggregationOperator::new(
+        input_type,
+        mock_output,
+        return_type,
+        keys,
+        None,
+        agg_kind,
+    );
 
     let ops1 = vec![Op::Insert, Op::Insert, Op::Insert];
     let mut builder1 = I64ArrayBuilder::new(0).unwrap();

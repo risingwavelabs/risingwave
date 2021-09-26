@@ -11,6 +11,7 @@ use crate::error::Result;
 use crate::expr::AggKind;
 use crate::impl_consume_barrier_default;
 use crate::types::DataTypeKind;
+use crate::types::Int64Type;
 use crate::types::{DataTypeRef, ScalarImpl};
 use std::collections::HashMap;
 
@@ -26,46 +27,57 @@ pub type StreamingFloatSumAgg<R> =
 /// `StreamingCountAgg` counts data of any type.
 pub type StreamingCountAgg<R> = StreamingFoldAgg<R, R, Countable<<R as Array>::OwnedItem>>;
 
-/// `AggregationOperator` is the aggregation operator for streaming system.
+/// `LocalAggregationOperator` is the aggregation operator for streaming system.
 /// To create an aggregation operator, a state should be passed along the
 /// constructor.
+///
+/// `LocalAggregationOperator` counts rows and outputs two columns, one is concrete
+/// data stored by state, and one is the count. These data will be further sent
+/// to `GlobalAggregationOperator` and become the real aggregated data.
 ///
 /// As the engine processes data in chunks, it is possible that multiple update
 /// messages could consolidate to a single row update. For example, our source
 /// emits 1000 inserts in one chunk, and we aggregates count function on that.
-/// Current `AggregationOperator` will only emit one row for a whole chunk.
+/// Current `LocalAggregationOperator` will only emit one row for a whole chunk.
 /// Therefore, we "automatically" implemented a window function inside
-/// `AggregationOperator`.
-pub struct AggregationOperator {
+/// `LocalAggregationOperator`.
+pub struct LocalAggregationOperator {
     /// Aggregation state of the current operator
     state: Box<dyn StreamingAggStateImpl>,
     /// The output of the current operator
     output: Box<dyn Output>,
     /// Whether this is the first time of consuming data
     first_data: bool,
+    /// Number of rows processed by this operator
+    row_state: StreamingRowCountAgg,
     /// Return type of current aggregator
     return_type: DataTypeRef,
+    /// Column to process
+    col_idx: usize,
 }
 
-impl AggregationOperator {
+impl LocalAggregationOperator {
     pub fn new(
         state: Box<dyn StreamingAggStateImpl>,
         output: Box<dyn Output>,
         return_type: DataTypeRef,
+        col_idx: usize,
     ) -> Self {
         Self {
             state,
             output,
             first_data: true,
+            row_state: StreamingRowCountAgg::new(),
             return_type,
+            col_idx,
         }
     }
 }
 
-impl_consume_barrier_default!(AggregationOperator, StreamOperator);
+impl_consume_barrier_default!(LocalAggregationOperator, StreamOperator);
 
 #[async_trait]
-impl UnaryStreamOperator for AggregationOperator {
+impl UnaryStreamOperator for LocalAggregationOperator {
     async fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
         let StreamChunk {
             ops,
@@ -75,21 +87,33 @@ impl UnaryStreamOperator for AggregationOperator {
         } = chunk;
 
         let mut builder = self.state.new_builder();
+        let mut row_count_builder = self.row_state.new_builder();
 
         if !self.first_data {
             // record the last state into builder
             self.state.get_output(&mut builder)?;
+            self.row_state.get_output(&mut row_count_builder)?;
         }
 
         self.state
-            .apply_batch(&ops, visibility.as_ref(), arrays[0].array_ref())?;
+            .apply_batch(&ops, visibility.as_ref(), arrays[self.col_idx].array_ref())?;
+
+        self.row_state
+            .apply_batch(&ops, visibility.as_ref(), arrays[self.col_idx].array_ref())?;
+
         // output the current state into builder
         self.state.get_output(&mut builder)?;
+        self.row_state.get_output(&mut row_count_builder)?;
 
         let chunk;
+
         let array = Arc::new(builder.finish()?);
         let column = Column::new(array, self.return_type.clone());
-        let columns = vec![column];
+
+        let array_rowcnt = Arc::new(row_count_builder.finish()?);
+        let column_rowcnt = Column::new(array_rowcnt, Arc::new(Int64Type::new(true)));
+
+        let columns = vec![column, column_rowcnt];
 
         // There should be only one column in output. Meanwhile, for the first update,
         // cardinality is 1. For the rest, cardinalty is 2, which includes a deletion and
@@ -188,7 +212,8 @@ pub fn create_agg_state(
 
 type Key = Option<ScalarImpl>;
 
-pub struct HashAggregationOperator {
+/// `HashLocalAggregationOperator` supports local hash aggregation.
+pub struct HashLocalAggregationOperator {
     /// Aggregation state of the current operator
     /// first_data: bool, indicating whether this is a key saw by first time
     state_entries: HashMap<Vec<Key>, (bool, Box<dyn StreamingAggStateImpl>)>,
@@ -207,7 +232,7 @@ pub struct HashAggregationOperator {
     agg_type: AggKind,
 }
 
-impl HashAggregationOperator {
+impl HashLocalAggregationOperator {
     pub fn new(
         input_type: DataTypeRef,
         output: Box<dyn Output>,
@@ -228,10 +253,10 @@ impl HashAggregationOperator {
     }
 }
 
-impl_consume_barrier_default!(HashAggregationOperator, StreamOperator);
+impl_consume_barrier_default!(HashLocalAggregationOperator, StreamOperator);
 
 #[async_trait]
-impl UnaryStreamOperator for HashAggregationOperator {
+impl UnaryStreamOperator for HashLocalAggregationOperator {
     async fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
         let StreamChunk {
             ops,
@@ -336,7 +361,7 @@ impl UnaryStreamOperator for HashAggregationOperator {
                 .append_array(&builder.finish().unwrap())
                 .unwrap();
 
-            // same logic from `simple` AggregationOperator
+            // same logic from `simple` LocalAggregationOperator
             if !*first_data {
                 new_ops.push(Op::UpdateDelete);
                 new_ops.push(Op::UpdateInsert);

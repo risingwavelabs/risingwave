@@ -1,9 +1,9 @@
 use crate::array2::DataChunk;
 use crate::{buffer::Bitmap, error::Result};
 
-mod aggregation_operator;
+mod local_aggregation_operator;
 
-pub use aggregation_operator::*;
+pub use local_aggregation_operator::*;
 
 mod global_aggregation_operator;
 

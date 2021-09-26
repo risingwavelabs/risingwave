@@ -15,16 +15,10 @@ use super::{Op, Ops, StreamingAggFunction, StreamingAggState, StreamingAggStateI
 /// `I`: Input type.
 pub trait StreamingFoldable<R: Scalar, I: Scalar>: Send + Sync + 'static {
     /// Called on `Insert` or `UpdateInsert`.
-    fn accumulate(
-        result: Option<R::ScalarRefType<'_>>,
-        input: Option<I::ScalarRefType<'_>>,
-    ) -> Result<Option<R>>;
+    fn accumulate(result: Option<&R>, input: Option<I::ScalarRefType<'_>>) -> Result<Option<R>>;
 
     /// Called on `Delete` or `UpdateDelete`.
-    fn retract(
-        result: Option<R::ScalarRefType<'_>>,
-        input: Option<I::ScalarRefType<'_>>,
-    ) -> Result<Option<R>>;
+    fn retract(result: Option<&R>, input: Option<I::ScalarRefType<'_>>) -> Result<Option<R>>;
 
     /// Get initial value of this foldable function.
     fn initial() -> Option<R> {
@@ -66,33 +60,25 @@ where
         + num_traits::CheckedSub<Output = S>
         + std::ops::Neg<Output = S>,
 {
-    fn accumulate(
-        result: Option<S::ScalarRefType<'_>>,
-        input: Option<S::ScalarRefType<'_>>,
-    ) -> Result<Option<S>> {
+    fn accumulate(result: Option<&S>, input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
         Ok(match (result, input) {
             (Some(x), Some(y)) => Some(
-                x.to_owned_scalar()
-                    .checked_add(&y.to_owned_scalar())
+                x.checked_add(&y.to_owned_scalar())
                     .ok_or_else(|| RwError::from(NumericValueOutOfRange))?,
             ),
-            (Some(x), None) => Some(x.to_owned_scalar()),
+            (Some(x), None) => Some(x.clone()),
             (None, Some(y)) => Some(y.to_owned_scalar()),
             (None, None) => None,
         })
     }
 
-    fn retract(
-        result: Option<S::ScalarRefType<'_>>,
-        input: Option<S::ScalarRefType<'_>>,
-    ) -> Result<Option<S>> {
+    fn retract(result: Option<&S>, input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
         Ok(match (result, input) {
             (Some(x), Some(y)) => Some(
-                x.to_owned_scalar()
-                    .checked_sub(&y.to_owned_scalar())
+                x.checked_sub(&y.to_owned_scalar())
                     .ok_or_else(|| RwError::from(NumericValueOutOfRange))?,
             ),
-            (Some(x), None) => Some(x.to_owned_scalar()),
+            (Some(x), None) => Some(x.clone()),
             (None, Some(y)) => Some(-y.to_owned_scalar()),
             (None, None) => None,
         })
@@ -120,39 +106,33 @@ where
         + num_traits::Float
         + std::ops::Neg<Output = S>,
 {
-    fn accumulate(
-        result: Option<S::ScalarRefType<'_>>,
-        input: Option<S::ScalarRefType<'_>>,
-    ) -> Result<Option<S>> {
+    fn accumulate(result: Option<&S>, input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
         Ok(match (result, input) {
             (Some(x), Some(y)) => {
-                let v = x.to_owned_scalar() + y.to_owned_scalar();
+                let v = x.add(y.to_owned_scalar());
                 if v.is_finite() && !v.is_nan() {
                     Some(v)
                 } else {
                     return Err(RwError::from(NumericValueOutOfRange));
                 }
             }
-            (Some(x), None) => Some(x.to_owned_scalar()),
+            (Some(x), None) => Some(*x),
             (None, Some(y)) => Some(y.to_owned_scalar()),
             (None, None) => None,
         })
     }
 
-    fn retract(
-        result: Option<S::ScalarRefType<'_>>,
-        input: Option<S::ScalarRefType<'_>>,
-    ) -> Result<Option<S>> {
+    fn retract(result: Option<&S>, input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
         Ok(match (result, input) {
             (Some(x), Some(y)) => {
-                let v = x.to_owned_scalar() - y.to_owned_scalar();
+                let v = x.sub(y.to_owned_scalar());
                 if v.is_finite() && !v.is_nan() {
                     Some(v)
                 } else {
                     return Err(RwError::from(NumericValueOutOfRange));
                 }
             }
-            (Some(x), None) => Some(x.to_owned_scalar()),
+            (Some(x), None) => Some(*x),
             (None, Some(y)) => Some(-y.to_owned_scalar()),
             (None, None) => None,
         })
@@ -173,19 +153,22 @@ impl<S> StreamingFoldable<i64, S> for Countable<S>
 where
     S: Scalar,
 {
-    fn accumulate(result: Option<i64>, input: Option<S::ScalarRefType<'_>>) -> Result<Option<i64>> {
+    fn accumulate(
+        result: Option<&i64>,
+        input: Option<S::ScalarRefType<'_>>,
+    ) -> Result<Option<i64>> {
         Ok(match (result, input) {
             (Some(x), Some(_)) => Some(x + 1),
-            (Some(x), None) => Some(x),
+            (Some(x), None) => Some(*x),
             // this is not possible, as initial value of countable is `0`.
             _ => unreachable!(),
         })
     }
 
-    fn retract(result: Option<i64>, input: Option<S::ScalarRefType<'_>>) -> Result<Option<i64>> {
+    fn retract(result: Option<&i64>, input: Option<S::ScalarRefType<'_>>) -> Result<Option<i64>> {
         Ok(match (result, input) {
             (Some(x), Some(_)) => Some(x - 1),
-            (Some(x), None) => Some(x),
+            (Some(x), None) => Some(*x),
             // this is not possible, as initial value of countable is `0`.
             _ => unreachable!(),
         })
@@ -205,17 +188,33 @@ where
     fn apply_batch_concrete(
         &mut self,
         ops: Ops<'_>,
-        skip: Option<&Bitmap>,
+        visibility: Option<&Bitmap>,
         data: &I,
     ) -> Result<()> {
-        for (row_idx, (op, data)) in ops.iter().zip(data.iter()).enumerate() {
-            if skip == None || skip.unwrap().is_set(row_idx).unwrap() {
-                match op {
-                    Op::Insert | Op::UpdateInsert => {
-                        self.result = S::accumulate(option_as_scalar_ref(&self.result), data)?
+        match visibility {
+            None => {
+                for (op, data) in ops.iter().zip(data.iter()) {
+                    match op {
+                        Op::Insert | Op::UpdateInsert => {
+                            self.result = S::accumulate(self.result.as_ref(), data)?
+                        }
+                        Op::Delete | Op::UpdateDelete => {
+                            self.result = S::retract(self.result.as_ref(), data)?
+                        }
                     }
-                    Op::Delete | Op::UpdateDelete => {
-                        self.result = S::retract(option_as_scalar_ref(&self.result), data)?
+                }
+            }
+            Some(visibility) => {
+                for ((visible, op), data) in visibility.iter().zip(ops.iter()).zip(data.iter()) {
+                    if visible {
+                        match op {
+                            Op::Insert | Op::UpdateInsert => {
+                                self.result = S::accumulate(self.result.as_ref(), data)?
+                            }
+                            Op::Delete | Op::UpdateDelete => {
+                                self.result = S::retract(self.result.as_ref(), data)?
+                            }
+                        }
                     }
                 }
             }
@@ -247,9 +246,14 @@ where
             _phantom: PhantomData,
         }
     }
+
+    /// Get current state without using an array builder
+    pub fn get_state(&self) -> &Option<R::OwnedItem> {
+        &self.result
+    }
 }
 
-macro_rules! impl_agg {
+macro_rules! impl_fold_agg {
   ($result:tt, $result_variant:tt, $input:tt) => {
     impl<S> StreamingAggStateImpl for StreamingFoldAgg<$result, $input, S>
     where
@@ -258,10 +262,10 @@ macro_rules! impl_agg {
       fn apply_batch(
         &mut self,
         ops: Ops<'_>,
-        skip: Option<&Bitmap>,
+        visibility: Option<&Bitmap>,
         data: &ArrayImpl,
       ) -> Result<()> {
-        self.apply_batch_concrete(ops, skip, data.into())
+        self.apply_batch_concrete(ops, visibility, data.into())
       }
 
       fn get_output(&self, builder: &mut ArrayBuilderImpl) -> Result<()> {
@@ -282,17 +286,18 @@ macro_rules! impl_agg {
   };
 }
 
-impl_agg! { I16Array, Int16, I16Array }
-impl_agg! { I32Array, Int32, I32Array }
-impl_agg! { I64Array, Int64, I64Array }
-impl_agg! { F32Array, Float32, F32Array }
-impl_agg! { F64Array, Float64, F64Array }
-impl_agg! { I64Array, Int64, F64Array }
-impl_agg! { I64Array, Int64, F32Array }
-impl_agg! { I64Array, Int64, I32Array }
-impl_agg! { I64Array, Int64, I16Array }
-impl_agg! { I64Array, Int64, BoolArray }
-impl_agg! { I64Array, Int64, UTF8Array }
+// Implement all supported combination of input and output for `StreamingFoldAgg`.
+impl_fold_agg! { I16Array, Int16, I16Array }
+impl_fold_agg! { I32Array, Int32, I32Array }
+impl_fold_agg! { I64Array, Int64, I64Array }
+impl_fold_agg! { F32Array, Float32, F32Array }
+impl_fold_agg! { F64Array, Float64, F64Array }
+impl_fold_agg! { I64Array, Int64, F64Array }
+impl_fold_agg! { I64Array, Int64, F32Array }
+impl_fold_agg! { I64Array, Int64, I32Array }
+impl_fold_agg! { I64Array, Int64, I16Array }
+impl_fold_agg! { I64Array, Int64, BoolArray }
+impl_fold_agg! { I64Array, Int64, UTF8Array }
 
 #[cfg(test)]
 mod tests {
@@ -305,7 +310,6 @@ mod tests {
         StreamingFoldAgg<R, R, PrimitiveSummable<<R as Array>::OwnedItem>>;
 
     type TestStreamingCountAgg<R> = StreamingFoldAgg<R, R, Countable<<R as Array>::OwnedItem>>;
-
     #[test]
     /// This test uses `Box<dyn StreamingAggStateImpl>` to test a state.
     fn test_primitive_sum_boxed() {
