@@ -2,6 +2,7 @@ syntax = "proto3";
 
 import "google/protobuf/any.proto";
 import "expr.proto";
+import "plan.proto";
 
 package risingwave.streaming.proto;
 option java_package = "com.risingwave.proto.streaming.plan";
@@ -17,6 +18,13 @@ message FilterNode {
   risingwave.expr.proto.ExprNode search_condition = 1;
 }
 
+// A materialized view is regarded as a table,
+// hence we copy the CreateTableNode definition in OLAP PlanNode.
+message MaterializedViewNode{
+  risingwave.executor.proto.TableRefId table_ref_id = 1;
+  repeated risingwave.executor.proto.ColumnDesc column_descs = 2;
+}
+
 message StreamNode {
   enum StreamNodeType {
     TABLE_INGRESS = 0;
@@ -28,6 +36,7 @@ message StreamNode {
     HASH_AGG = 6;
     GLOBAL_HASH_AGG = 7;
     HASH_JOIN = 8;
+    MATERIALIZED_VIEW = 9;
   }
   StreamNodeType node_type = 1;
   // Some nodes we can reuse plan nodes from plan.proto.
