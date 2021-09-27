@@ -269,141 +269,88 @@ macro_rules! array_builder_impl_enum {
 
 for_all_variants! { array_builder_impl_enum }
 
-impl ArrayBuilderImpl {
-    pub fn append_array(&mut self, other: &ArrayImpl) -> Result<()> {
-        macro_rules! impl_all_append_array {
-      ([$self:ident, $other:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        match $self {
-          $( Self::$variant_name(inner) => inner.append_array($other.into()), )*
+/// Implements all `ArrayBuilder` functions with `for_all_variant`.
+macro_rules! impl_array_builder {
+  ([], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+    impl ArrayBuilderImpl {
+      pub fn append_array(&mut self, other: &ArrayImpl) -> Result<()> {
+        match self {
+          $( Self::$variant_name(inner) => inner.append_array(other.into()), )*
         }
-      };
-    }
-        for_all_variants! { impl_all_append_array, self, other }
-    }
+      }
 
-    pub fn append_null(&mut self) -> Result<()> {
-        macro_rules! impl_append_null {
-      ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        match $self {
+      pub fn append_null(&mut self) -> Result<()> {
+        match self {
           $( Self::$variant_name(inner) => inner.append(None), )*
         }
-      };
-    }
-        for_all_variants! { impl_append_null, self }
-    }
+      }
 
-    pub fn finish(self) -> Result<ArrayImpl> {
-        macro_rules! impl_all_finish {
-      ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        match $self {
-          $( Self::$variant_name(inner) => inner.finish()?.into(), )*
-        }
-      };
-    }
-        Ok(for_all_variants! { impl_all_finish, self })
-    }
-
-    pub fn get_ident(&self) -> &'static str {
+      pub fn finish(self) -> Result<ArrayImpl> {
         match self {
-            ArrayBuilderImpl::Int16(_) => "Int16",
-            ArrayBuilderImpl::Int32(_) => "Int32",
-            ArrayBuilderImpl::Int64(_) => "Int64",
-            ArrayBuilderImpl::Float32(_) => "Float32",
-            ArrayBuilderImpl::Float64(_) => "Float64",
-            ArrayBuilderImpl::UTF8(_) => "UTF8",
-            ArrayBuilderImpl::Bool(_) => "Bool",
-            ArrayBuilderImpl::Decimal(_) => "Decimal",
-            ArrayBuilderImpl::Interval(_) => "Interval",
+          $( Self::$variant_name(inner) => Ok(inner.finish()?.into()), )*
         }
+      }
+
+      pub fn get_ident(&self) -> &'static str {
+        match self {
+          $( Self::$variant_name(_) => stringify!($variant_name), )*
+        }
+      }
     }
+  }
 }
 
-impl ArrayImpl {
-    pub fn len(&self) -> usize {
-        macro_rules! impl_all_len {
-      ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        match $self {
+for_all_variants! { impl_array_builder }
+
+/// Implements all `Array` functions with `for_all_variant`.
+macro_rules! impl_array {
+  ([], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+    impl ArrayImpl {
+      pub fn len(&self) -> usize {
+        match self {
           $( Self::$variant_name(inner) => inner.len(), )*
         }
-      };
-    }
-        for_all_variants! { impl_all_len, self }
-    }
+      }
 
-    pub fn null_bitmap(&self) -> &Bitmap {
-        macro_rules! impl_all_null_bitmap {
-      ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        match $self {
+      pub fn null_bitmap(&self) -> &Bitmap {
+        match self {
           $( Self::$variant_name(inner) => inner.null_bitmap(), )*
         }
-      };
-    }
-        for_all_variants! { impl_all_null_bitmap, self }
-    }
+      }
 
-    pub fn to_protobuf(&self) -> Result<Vec<Buffer>> {
-        macro_rules! impl_all_to_protobuf {
-      ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        match $self {
+      pub fn to_protobuf(&self) -> Result<Vec<Buffer>> {
+        match self {
           $( Self::$variant_name(inner) => inner.to_protobuf(), )*
         }
-      };
-    }
-        for_all_variants! { impl_all_to_protobuf, self }
-    }
+      }
 
-    pub fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
-        macro_rules! impl_all_hash_at {
-      ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        match $self {
+      pub fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
+        match self {
           $( Self::$variant_name(inner) => inner.hash_at(idx, state), )*
         }
-      };
-    }
-        for_all_variants! { impl_all_hash_at, self }
-    }
+      }
 
-    pub fn hash_vec<H: Hasher>(&self, hashers: &mut Vec<H>) {
-        macro_rules! impl_all_hash_vec {
-      ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        match $self {
+      pub fn hash_vec<H: Hasher>(&self, hashers: &mut Vec<H>) {
+        match self {
           $( Self::$variant_name(inner) => inner.hash_vec( hashers), )*
         }
-      };
-    }
-        for_all_variants! { impl_all_hash_vec, self }
-    }
+      }
 
-    pub fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Result<Self> {
-        macro_rules! impl_all_compact {
-      ([$self:ident, $visibility:ident, $cardinality:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        match $self {
-          $( Self::$variant_name(inner) => inner.compact(visibility, cardinality)?.into(), )*
-        }
-      };
-    }
-        Ok(for_all_variants! { impl_all_compact, self, visibility, cardinality })
-    }
-
-    pub fn get_ident(&self) -> &'static str {
+      pub fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Result<Self> {
         match self {
-            ArrayImpl::Int16(_) => "Int16",
-            ArrayImpl::Int32(_) => "Int32",
-            ArrayImpl::Int64(_) => "Int64",
-            ArrayImpl::Float32(_) => "Float32",
-            ArrayImpl::Float64(_) => "Float64",
-            ArrayImpl::UTF8(_) => "UTF8",
-            ArrayImpl::Bool(_) => "Bool",
-            ArrayImpl::Decimal(_) => "Decimal",
-            ArrayImpl::Interval(_) => "Interval",
+          $( Self::$variant_name(inner) => Ok(inner.compact(visibility, cardinality)?.into()), )*
         }
-    }
+      }
 
-    pub fn get_sub_array(&self, indices: &[usize]) -> ArrayImpl {
+      pub fn get_ident(&self) -> &'static str {
+        match self {
+          $( Self::$variant_name(_) => stringify!($variant_name), )*
+        }
+      }
+
+      pub fn get_sub_array(&self, indices: &[usize]) -> ArrayImpl {
         let capacity = indices.len();
-        macro_rules! impl_all_get_sub_array {
-      ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        match $self {
+        match self {
           $( Self::$variant_name(inner) => {
             let mut builder = <$builder>::new(capacity).unwrap();
             indices.iter().for_each(|idx| {
@@ -412,16 +359,11 @@ impl ArrayImpl {
             builder.finish().unwrap().into()
           }, )*
         }
-      };
-    }
-        for_all_variants! { impl_all_get_sub_array, self }
-    }
+      }
 
-    pub fn get_continuous_sub_array(&self, start_idx: usize, end_idx: usize) -> ArrayImpl {
+      pub fn get_continuous_sub_array(&self, start_idx: usize, end_idx: usize) -> ArrayImpl {
         let capacity = end_idx - start_idx + 1;
-        macro_rules! impl_all_get_continuous_sub_array {
-      ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        match $self {
+        match self {
           // TODO: for UTF8Array, we could select start and end offset and directly call copy_to_slice instead of accessing them one index by one index.
           $( Self::$variant_name(inner) => {
             let mut builder = <$builder>::new(capacity).unwrap();
@@ -431,15 +373,10 @@ impl ArrayImpl {
             builder.finish().unwrap().into()
           }, )*
         }
-      };
-    }
-        for_all_variants! { impl_all_get_continuous_sub_array, self }
-    }
+      }
 
-    pub fn insert_key(&self, keys: &mut Vec<Vec<Option<ScalarImpl>>>) {
-        macro_rules! impl_all_insert_key {
-      ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        match $self {
+      pub fn insert_key(&self, keys: &mut Vec<Vec<Option<ScalarImpl>>>) {
+        match self {
           $( Self::$variant_name(inner) => {
             for (val, keys_for_one_row) in inner.iter().zip(keys.iter_mut()) {
               let op: Option<ScalarImpl> = val.map(|v| v.to_owned_scalar().into());
@@ -447,11 +384,12 @@ impl ArrayImpl {
             }
           }, )*
         }
-      };
+      }
     }
-        for_all_variants! { impl_all_insert_key, self }
-    }
+  }
 }
+
+for_all_variants! { impl_array }
 
 macro_rules! impl_into_builders {
   ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {

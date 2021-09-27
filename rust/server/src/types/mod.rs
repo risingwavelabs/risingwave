@@ -10,21 +10,12 @@ mod primitive_data_type;
 pub use primitive_data_type::*;
 mod native_type;
 
+mod scalar_impl;
+pub use scalar_impl::*;
+
 use crate::error::ErrorCode::InternalError;
 pub use native_type::*;
-use risingwave_proto::data::DataType_TypeName::BOOLEAN;
-use risingwave_proto::data::DataType_TypeName::CHAR;
-use risingwave_proto::data::DataType_TypeName::DATE;
-use risingwave_proto::data::DataType_TypeName::DECIMAL;
-use risingwave_proto::data::DataType_TypeName::DOUBLE;
-use risingwave_proto::data::DataType_TypeName::FLOAT;
-use risingwave_proto::data::DataType_TypeName::INT16;
-use risingwave_proto::data::DataType_TypeName::INT32;
-use risingwave_proto::data::DataType_TypeName::INT64;
-use risingwave_proto::data::DataType_TypeName::TIME;
-use risingwave_proto::data::DataType_TypeName::TIMESTAMP;
-use risingwave_proto::data::DataType_TypeName::TIMESTAMPZ;
-use risingwave_proto::data::DataType_TypeName::VARCHAR;
+use risingwave_proto::data::DataType_TypeName::*;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 
@@ -37,15 +28,12 @@ mod string_type;
 pub use bool_type::*;
 pub use datetime_type::*;
 pub use decimal_type::*;
+pub use interval_type::*;
 pub use string_type::*;
 
 use crate::array2::{ArrayBuilderImpl, PrimitiveArrayItemType};
-use risingwave_proto::expr::ExprNode_ExprNodeType;
-use risingwave_proto::expr::ExprNode_ExprNodeType::ADD;
-use risingwave_proto::expr::ExprNode_ExprNodeType::DIVIDE;
-use risingwave_proto::expr::ExprNode_ExprNodeType::MODULUS;
-use risingwave_proto::expr::ExprNode_ExprNodeType::MULTIPLY;
-use risingwave_proto::expr::ExprNode_ExprNodeType::SUBTRACT;
+use paste::paste;
+use risingwave_proto::expr::ExprNode_ExprNodeType::{self, *};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub enum DataTypeKind {
@@ -174,156 +162,49 @@ pub trait ScalarRef<'a>: Copy + std::fmt::Debug + 'a {
     fn to_owned_scalar(&self) -> Self::ScalarType;
 }
 
-/// `ScalarPartialOrd` allows comparison between `Scalar` and `ScalarRef`.
+/// `for_all_variants` includes all variants of our scalar types. If you added a new scalar
+/// type inside the project, be sure to add a variant here.
 ///
-/// TODO: see if it is possible to implement this trait directly on `ScalarRef`.
-pub trait ScalarPartialOrd: Scalar {
-    fn scalar_cmp(&self, other: Self::ScalarRefType<'_>) -> Option<std::cmp::Ordering>;
-}
-
-/// Implement `Scalar` for `PrimitiveArrayItemType`.
-/// For PrimitiveArrayItemType, clone is trivial, so `T` is both `Scalar` and `ScalarRef`.
-impl<T: PrimitiveArrayItemType> Scalar for T {
-    type ScalarRefType<'a> = T;
-
-    fn as_scalar_ref(&self) -> T {
-        *self
-    }
-}
-
-/// Implement `ScalarRef` for `PrimitiveArrayItemType`.
-/// For PrimitiveArrayItemType, clone is trivial, so `T` is both `Scalar` and `ScalarRef`.
-impl<'a, T: PrimitiveArrayItemType> ScalarRef<'a> for T {
-    type ScalarType = T;
-
-    fn to_owned_scalar(&self) -> T {
-        *self
-    }
-}
-
-/// Implement `Scalar` for `String`.
-/// `String` could be converted to `&str`.
-impl Scalar for String {
-    type ScalarRefType<'a> = &'a str;
-
-    fn as_scalar_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-
-/// Implement `ScalarRef` for `String`.
-/// `String` could be converted to `&str`.
-impl<'a> ScalarRef<'a> for &'a str {
-    type ScalarType = String;
-
-    fn to_owned_scalar(&self) -> String {
-        self.to_string()
-    }
-}
-
-impl ScalarPartialOrd for String {
-    fn scalar_cmp(&self, other: &str) -> Option<std::cmp::Ordering> {
-        self.as_str().partial_cmp(other)
-    }
-}
-
-impl<T: PrimitiveArrayItemType> ScalarPartialOrd for T {
-    fn scalar_cmp(&self, other: Self) -> Option<std::cmp::Ordering> {
-        self.partial_cmp(&other)
-    }
-}
-
-impl ScalarPartialOrd for bool {
-    fn scalar_cmp(&self, other: Self) -> Option<std::cmp::Ordering> {
-        self.partial_cmp(&other)
-    }
-}
-
-/// Implement `Scalar` for `bool`.
-impl Scalar for bool {
-    type ScalarRefType<'a> = bool;
-
-    fn as_scalar_ref(&self) -> bool {
-        *self
-    }
-}
-
-/// Implement `Scalar` and `ScalarRef` for `String`.
-/// `String` could be converted to `&str`.
-impl<'a> ScalarRef<'a> for bool {
-    type ScalarType = bool;
-
-    fn to_owned_scalar(&self) -> bool {
-        *self
-    }
-}
-
-/// Implement `Scalar` for `Decimal`.
-impl Scalar for Decimal {
-    type ScalarRefType<'a> = Decimal;
-
-    fn as_scalar_ref(&self) -> Decimal {
-        *self
-    }
-}
-
-/// Implement `Scalar` for `Decimal`.
-impl<'a> ScalarRef<'a> for Decimal {
-    type ScalarType = Decimal;
-
-    fn to_owned_scalar(&self) -> Decimal {
-        *self
-    }
-}
-
-/// Implement `Scalar` for `IntervalUnit`.
-impl Scalar for IntervalUnit {
-    type ScalarRefType<'a> = IntervalUnit;
-
-    fn as_scalar_ref(&self) -> IntervalUnit {
-        *self
-    }
-}
-
-/// Implement `Scalar` for `IntervalUnit`.
-impl<'a> ScalarRef<'a> for IntervalUnit {
-    type ScalarType = IntervalUnit;
-
-    fn to_owned_scalar(&self) -> IntervalUnit {
-        *self
-    }
-}
-
-/// `ScalarImpl` embeds all possible scalars in the evaluation framework.
-#[derive(Clone)]
-pub enum ScalarImpl {
-    Int16(i16),
-    Int32(i32),
-    Int64(i64),
-    Float32(f32),
-    Float64(f64),
-    UTF8(String),
-    Bool(bool),
-    Decimal(Decimal),
-    Interval(IntervalUnit),
-}
-
+/// Every tuple has four elements, where
+/// `{ enum variant name, function suffix name, scalar type, scalar ref type }`
 macro_rules! for_all_variants {
   ($macro:tt $(, $x:tt)*) => {
     $macro! {
       [$($x),*],
-      { i16, Int16 },
-      { i32, Int32 },
-      { i64, Int64 },
-      { f32, Float32 },
-      { f64, Float64 },
-      { String, UTF8 },
-      { bool, Bool },
-      { Decimal, Decimal },
-      { IntervalUnit, Interval }
+      { Int16, int16, i16, i16 },
+      { Int32, int32, i32, i32 },
+      { Int64, int64, i64, i64 },
+      { Float32, float32, f32, f32 },
+      { Float64, float64, f64, f64 },
+      { UTF8, utf8, String, &'scalar str },
+      { Bool, bool, bool, bool },
+      { Decimal, decimal, Decimal, Decimal  },
+      { Interval, interval, IntervalUnit, IntervalUnit }
     }
   };
 }
+
+/// Define `ScalarImpl` and `ScalarRefImpl` with macro.
+macro_rules! scalar_impl_enum {
+  ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+    /// `ScalarImpl` embeds all possible scalars in the evaluation framework.
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum ScalarImpl {
+      $( $variant_name($scalar) ),*
+    }
+
+    /// `ScalarRefImpl` embeds all possible scalar references in the evaluation
+    /// framework.
+    pub enum ScalarRefImpl<'scalar> {
+      $( $variant_name($scalar_ref) ),*
+    }
+  };
+}
+
+for_all_variants! { scalar_impl_enum }
+
+// FIXME: `f32` is not `Eq`, and this is not safe. Consider using `ordered_float` in our project.
+impl Eq for ScalarImpl {}
 
 macro_rules! for_all_native_types {
 ($macro:tt $(, $x:tt)*) => {
@@ -338,12 +219,41 @@ macro_rules! for_all_native_types {
   };
 }
 
+/// `impl_convert` implements several conversions for `Scalar`.
+/// * `&ScalarImpl -> &Scalar` with `impl.as_int16()`.
+/// * `ScalarImpl -> Scalar` with `impl.into_int16()`.
+/// * `Scalar -> ScalarImpl` with `From` trait.
+/// * `ScalarRef -> ScalarRefImpl` with `From` trait.
 macro_rules! impl_convert {
-  ([], $( { $variable_type:ty, $scalar_type:ident } ),*) => {
+  ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
     $(
-      impl From<$variable_type> for ScalarImpl {
-        fn from(val: $variable_type) -> Self {
-          ScalarImpl::$scalar_type(val)
+      paste! {
+        impl From<$scalar> for ScalarImpl {
+          fn from(val: $scalar) -> Self {
+            ScalarImpl::$variant_name(val)
+          }
+        }
+
+        impl ScalarImpl {
+          pub fn [<as_ $suffix_name>](&self) -> &$scalar {
+            match self {
+              Self::$variant_name(ref scalar) => scalar,
+              other_scalar => panic!("cannot covert ScalarImpl::{} to concrete type", other_scalar.get_ident())
+            }
+          }
+
+          pub fn [<into_ $suffix_name>](self) -> $scalar {
+            match self {
+              Self::$variant_name(scalar) => scalar,
+              other_scalar =>  panic!("cannot covert ScalarImpl::{} to concrete type", other_scalar.get_ident())
+            }
+          }
+        }
+
+        impl <'scalar> From<$scalar_ref> for ScalarRefImpl<'scalar> {
+          fn from(val: $scalar_ref) -> Self {
+            ScalarRefImpl::$variant_name(val)
+          }
         }
       }
     )*
@@ -352,7 +262,9 @@ macro_rules! impl_convert {
 
 for_all_variants! { impl_convert }
 
+// FIXME: should implement Hash and Eq all by deriving
 // TODO: may take type information into consideration later
+#[allow(clippy::derive_hash_xor_eq)]
 impl std::hash::Hash for ScalarImpl {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         macro_rules! impl_all_hash {
@@ -369,84 +281,5 @@ impl std::hash::Hash for ScalarImpl {
       };
     }
         for_all_native_types! { impl_all_hash, self }
-    }
-}
-
-// This should be unnecessary, but clippy would error if
-// we only implement Hash manually while leaving PartialEq to default implementation.
-// see https://rust-lang.github.io/rust-clippy/master/index.html#derive_hash_xor_eq
-impl std::cmp::PartialEq for ScalarImpl {
-    fn eq(&self, other: &Self) -> bool {
-        macro_rules! impl_all_eq {
-      ([($self:ident, $other:ident)], $( { $variable_type:ty, $scalar_type:ident } ),*) => {
-        match ($self, $other) {
-          $(
-            (ScalarImpl::$scalar_type(left), ScalarImpl::$scalar_type(right)) => {
-              left.eq(right)
-            },
-          )*
-          _ => false
-        }
-      };
-    }
-        for_all_variants! { impl_all_eq, (self, other) }
-    }
-}
-
-impl std::cmp::Eq for ScalarImpl {}
-
-/// `ScalarRefImpl` embeds all possible scalar references in the evaluation
-/// framework.
-pub enum ScalarRefImpl<'a> {
-    Int16(i16),
-    Int32(i32),
-    Int64(i64),
-    Float32(f32),
-    Float64(f64),
-    UTF8(&'a str),
-    Bool(bool),
-    Interval(IntervalUnit),
-}
-
-/// Every interval can be represented by a `IntervalUnit`.
-/// Note that the difference between Interval and Instant.
-/// For example, `5 yrs 1 month 25 days 23:22:57` is a interval (Can be interpreted by Interval Unit
-/// with month = 61, days = 25, seconds = (57 + 23 * 3600 + 22 * 60) * 1000),
-/// `1970-01-01 04:05:06` is a Instant or Timestamp
-/// One month may contain 28/31 days. One day may contain 23/25 hours.
-/// This internals is learned from PG:
-/// https://www.postgresql.org/docs/9.1/datatype-datetime.html#:~:text=field%20is%20negative.-,Internally,-interval%20values%20are
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
-pub struct IntervalUnit {
-    months: i32,
-    days: i32,
-    ms: i64,
-}
-
-impl IntervalUnit {
-    pub fn new(months: i32, days: i32, ms: i64) -> Self {
-        IntervalUnit { months, days, ms }
-    }
-    pub fn get_days(&self) -> i32 {
-        self.days
-    }
-
-    pub fn get_months(&self) -> i32 {
-        self.months
-    }
-
-    pub fn get_years(&self) -> i32 {
-        self.months / 12
-    }
-
-    pub fn get_ms(&self) -> i64 {
-        self.ms
-    }
-
-    pub fn from_ymd(year: i32, month: i32, days: i32) -> Self {
-        let months = year * 12 + month;
-        let days = days;
-        let ms = 0;
-        IntervalUnit { months, days, ms }
     }
 }
