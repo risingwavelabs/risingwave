@@ -4,6 +4,7 @@ mod binary_expr;
 mod cmp;
 mod conjunction;
 pub mod expr_factory;
+mod expr_tmpl;
 mod input_ref;
 mod literal;
 mod substr;

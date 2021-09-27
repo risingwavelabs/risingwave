@@ -5,6 +5,7 @@ version = "0.0.1-SNAPSHOT"
 
 [dependencies]
 anyhow = "1"
+async-std = {version = "1"}
 async-stream = "0.3"
 async-trait = "0.1"
 backtrace = "0.3"
@@ -14,8 +15,8 @@ clap = "3.0.0-beta.4"
 crc32fast = "1"
 ctrlc = {version = "3.0", features = ["termination"]}
 futures = "0.3"
-async-std = {version = "1"}
 grpcio = "0.9"
+itertools = "0.10"
 log = "0.4"
 log4rs = "1"
 num-traits = "0.2"
@@ -39,7 +40,6 @@ typed-builder = "0.9"
 
 [dev-dependencies]
 approx = "0.5"
-itertools = "0.10"
 
 [[bin]]
 name = "compute-node"
