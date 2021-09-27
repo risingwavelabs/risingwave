@@ -1,12 +1,10 @@
 use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
-
-use crate::buffer::Bitmap;
-
-use crate::error::Result;
-
-use crate::types::NativeType;
-
 use crate::array2::ArrayImpl;
+use crate::buffer::Bitmap;
+use crate::error::Result;
+use crate::for_all_native_types;
+use crate::types::{NativeType, Scalar, ScalarRef};
+
 use risingwave_proto::data::{Buffer as BufferProto, Buffer, Buffer_CompressionType};
 use std::fmt::Debug;
 use std::{
@@ -16,36 +14,48 @@ use std::{
 
 /// Physical type of array items. It differs from NativeType with more limited type set.
 /// Specifically, it doesn't support u8/u16/u32/u64.
-pub trait PrimitiveArrayItemType: NativeType {
-    /// A helper to convert a primitive array to ArrayImpl.
-    fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl;
+#[rustfmt::skip]
+pub trait PrimitiveArrayItemType
+where
+  for<'a> Self: NativeType + Scalar<ScalarRefType<'a> = Self> + ScalarRef<'a, ScalarType = Self>,
+{
+  /// A helper to convert a primitive array to ArrayImpl.
+  fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl;
+
+  /// A helper to convert ArrayImpl to self.
+  fn try_into_array(arr: ArrayImpl) -> Option<PrimitiveArray<Self>>;
+
+  /// A helper to convert ArrayImpl to self.
+  fn try_into_array_ref(arr: &ArrayImpl) -> Option<&PrimitiveArray<Self>>;
 }
 
-impl PrimitiveArrayItemType for i16 {
-    fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl {
-        ArrayImpl::Int16(arr)
-    }
+macro_rules! impl_primitive_array_item_type {
+  ([], $({ $scalar_type:ty, $variant_type:ident } ),*) => {
+    $(
+      impl PrimitiveArrayItemType for $scalar_type {
+        fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl {
+          ArrayImpl::$variant_type(arr)
+        }
+
+        fn try_into_array(arr: ArrayImpl) -> Option<PrimitiveArray<Self>> {
+          match arr {
+            ArrayImpl::$variant_type(inner) => Some(inner),
+            _ => None,
+          }
+        }
+
+        fn try_into_array_ref(arr: &ArrayImpl) -> Option<&PrimitiveArray<Self>> {
+          match arr {
+            ArrayImpl::$variant_type(inner) => Some(inner),
+            _ => None,
+          }
+        }
+      }
+    )*
+  };
 }
-impl PrimitiveArrayItemType for i32 {
-    fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl {
-        ArrayImpl::Int32(arr)
-    }
-}
-impl PrimitiveArrayItemType for i64 {
-    fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl {
-        ArrayImpl::Int64(arr)
-    }
-}
-impl PrimitiveArrayItemType for f32 {
-    fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl {
-        ArrayImpl::Float32(arr)
-    }
-}
-impl PrimitiveArrayItemType for f64 {
-    fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl {
-        ArrayImpl::Float64(arr)
-    }
-}
+
+for_all_native_types! { impl_primitive_array_item_type }
 
 /// `PrimitiveArray` is a collection of primitive types, such as `i32`, `f32`.
 #[derive(Debug)]

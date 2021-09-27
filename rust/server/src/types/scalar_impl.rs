@@ -1,4 +1,5 @@
 use super::*;
+use crate::{for_all_native_types, for_all_scalar_variants};
 
 /// `ScalarPartialOrd` allows comparison between `Scalar` and `ScalarRef`.
 ///
@@ -7,25 +8,31 @@ pub trait ScalarPartialOrd: Scalar {
     fn scalar_cmp(&self, other: Self::ScalarRefType<'_>) -> Option<std::cmp::Ordering>;
 }
 
-/// Implement `Scalar` for `PrimitiveArrayItemType`.
+/// Implement `Scalar` and `ScalarRef` for native type.
 /// For PrimitiveArrayItemType, clone is trivial, so `T` is both `Scalar` and `ScalarRef`.
-impl<T: PrimitiveArrayItemType> Scalar for T {
-    type ScalarRefType<'a> = T;
+macro_rules! impl_all_native_scalar {
+  ([], $({ $scalar_type:ty, $variant_name:ident } ),*) => {
+    $(
+      impl Scalar for $scalar_type {
+        type ScalarRefType<'a> = Self;
 
-    fn as_scalar_ref(&self) -> T {
-        *self
-    }
+        fn as_scalar_ref(&self) -> Self {
+          *self
+        }
+      }
+
+      impl<'scalar> ScalarRef<'scalar> for $scalar_type {
+        type ScalarType = Self;
+
+        fn to_owned_scalar(&self) -> Self {
+          *self
+        }
+      }
+    )*
+  };
 }
 
-/// Implement `ScalarRef` for `PrimitiveArrayItemType`.
-/// For PrimitiveArrayItemType, clone is trivial, so `T` is both `Scalar` and `ScalarRef`.
-impl<'a, T: PrimitiveArrayItemType> ScalarRef<'a> for T {
-    type ScalarType = T;
-
-    fn to_owned_scalar(&self) -> T {
-        *self
-    }
-}
+for_all_native_types! { impl_all_native_scalar }
 
 /// Implement `Scalar` for `String`.
 /// `String` could be converted to `&str`.
@@ -53,7 +60,7 @@ impl ScalarPartialOrd for String {
     }
 }
 
-impl<T: PrimitiveArrayItemType> ScalarPartialOrd for T {
+impl<T: PrimitiveArrayItemType + Scalar> ScalarPartialOrd for T {
     fn scalar_cmp(&self, other: Self) -> Option<std::cmp::Ordering> {
         self.partial_cmp(&other)
     }
@@ -129,6 +136,19 @@ impl ScalarImpl {
         }
       };
     }
-        for_all_variants! { impl_all_get_ident, self }
+        for_all_scalar_variants! { impl_all_get_ident, self }
+    }
+}
+
+impl<'scalar> ScalarRefImpl<'scalar> {
+    pub fn get_ident(&self) -> &'static str {
+        macro_rules! impl_all_get_ident {
+      ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+        match $self {
+          $( Self::$variant_name(_) => stringify!($variant_name), )*
+        }
+      };
+    }
+        for_all_scalar_variants! { impl_all_get_ident, self }
     }
 }

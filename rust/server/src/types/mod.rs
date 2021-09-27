@@ -1,7 +1,8 @@
-use crate::error::{Result, RwError};
+use crate::error::{ErrorCode, Result, RwError};
 use risingwave_proto::data::DataType as DataTypeProto;
 use rust_decimal::Decimal;
 use std::any::Any;
+use std::convert::TryFrom;
 use std::sync::Arc;
 
 mod numeric_type;
@@ -16,7 +17,6 @@ pub use scalar_impl::*;
 use crate::error::ErrorCode::InternalError;
 pub use native_type::*;
 use risingwave_proto::data::DataType_TypeName::*;
-use std::convert::TryFrom;
 use std::fmt::Debug;
 
 mod bool_type;
@@ -127,7 +127,9 @@ impl TryFrom<&ExprNode_ExprNodeType> for ArithmeticOperatorKind {
 ///
 /// `Scalar` is reciprocal to `ScalarRef`. Use `as_scalar_ref` to get a
 /// reference which has the same lifetime as `self`.
-pub trait Scalar: Send + Sync + 'static + Clone + std::fmt::Debug {
+pub trait Scalar:
+    Send + Sync + 'static + Clone + std::fmt::Debug + TryFrom<ScalarImpl> + Into<ScalarImpl>
+{
     /// Type for reference of `Scalar`
     type ScalarRefType<'a>: ScalarRef<'a, ScalarType = Self> + 'a
     where
@@ -162,12 +164,13 @@ pub trait ScalarRef<'a>: Copy + std::fmt::Debug + 'a {
     fn to_owned_scalar(&self) -> Self::ScalarType;
 }
 
-/// `for_all_variants` includes all variants of our scalar types. If you added a new scalar
+/// `for_all_scalar_variants` includes all variants of our scalar types. If you added a new scalar
 /// type inside the project, be sure to add a variant here.
 ///
 /// Every tuple has four elements, where
 /// `{ enum variant name, function suffix name, scalar type, scalar ref type }`
-macro_rules! for_all_variants {
+#[macro_export]
+macro_rules! for_all_scalar_variants {
   ($macro:tt $(, $x:tt)*) => {
     $macro! {
       [$($x),*],
@@ -201,11 +204,13 @@ macro_rules! scalar_impl_enum {
   };
 }
 
-for_all_variants! { scalar_impl_enum }
+for_all_scalar_variants! { scalar_impl_enum }
 
 // FIXME: `f32` is not `Eq`, and this is not safe. Consider using `ordered_float` in our project.
 impl Eq for ScalarImpl {}
 
+/// `for_all_native_types` includes all native variants of our scalar types.
+#[macro_export]
 macro_rules! for_all_native_types {
 ($macro:tt $(, $x:tt)*) => {
     $macro! {
@@ -220,10 +225,10 @@ macro_rules! for_all_native_types {
 }
 
 /// `impl_convert` implements several conversions for `Scalar`.
+/// * `Scalar <-> ScalarImpl` with `From` and `TryFrom` trait.
+/// * `ScalarRef <-> ScalarRefImpl` with `From` and `TryFrom` trait.
 /// * `&ScalarImpl -> &Scalar` with `impl.as_int16()`.
 /// * `ScalarImpl -> Scalar` with `impl.into_int16()`.
-/// * `Scalar -> ScalarImpl` with `From` trait.
-/// * `ScalarRef -> ScalarRefImpl` with `From` trait.
 macro_rules! impl_convert {
   ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
     $(
@@ -231,6 +236,38 @@ macro_rules! impl_convert {
         impl From<$scalar> for ScalarImpl {
           fn from(val: $scalar) -> Self {
             ScalarImpl::$variant_name(val)
+          }
+        }
+
+        impl TryFrom<ScalarImpl> for $scalar {
+          type Error = RwError;
+
+          fn try_from(val: ScalarImpl) -> Result<Self> {
+            match val {
+              ScalarImpl::$variant_name(scalar) => Ok(scalar),
+              other_scalar => Err(ErrorCode::InternalError(
+                format!("cannot covert ScalarImpl::{} to concrete type", other_scalar.get_ident())
+              ).into())
+            }
+          }
+        }
+
+        impl <'scalar> From<$scalar_ref> for ScalarRefImpl<'scalar> {
+          fn from(val: $scalar_ref) -> Self {
+            ScalarRefImpl::$variant_name(val)
+          }
+        }
+
+        impl <'scalar> TryFrom<ScalarRefImpl<'scalar>> for $scalar_ref {
+          type Error = RwError;
+
+          fn try_from(val: ScalarRefImpl<'scalar>) -> Result<Self> {
+            match val {
+              ScalarRefImpl::$variant_name(scalar_ref) => Ok(scalar_ref),
+              other_scalar => Err(ErrorCode::InternalError(
+                format!("cannot covert ScalarRefImpl::{} to concrete type", other_scalar.get_ident())
+              ).into())
+            }
           }
         }
 
@@ -249,18 +286,12 @@ macro_rules! impl_convert {
             }
           }
         }
-
-        impl <'scalar> From<$scalar_ref> for ScalarRefImpl<'scalar> {
-          fn from(val: $scalar_ref) -> Self {
-            ScalarRefImpl::$variant_name(val)
-          }
-        }
       }
     )*
   };
 }
 
-for_all_variants! { impl_convert }
+for_all_scalar_variants! { impl_convert }
 
 // FIXME: should implement Hash and Eq all by deriving
 // TODO: may take type information into consideration later
