@@ -1,6 +1,7 @@
-use crate::error::{ErrorCode, Result};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::task::env::GlobalTaskEnv;
 use crate::task::task::{TaskExecution, TaskId};
+use crate::task::TaskSink;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use risingwave_proto::plan::PlanFragment;
 use risingwave_proto::task_service::{TaskId as ProtoTaskId, TaskSinkId as ProtoSinkId};
@@ -28,31 +29,62 @@ impl TaskManager {
         tid: &ProtoTaskId,
         plan: PlanFragment,
     ) -> Result<()> {
-        let mut tsk = TaskExecution::new(tid, plan, env);
-        tsk.async_execute(self.worker_pool.clone())?;
+        let task = TaskExecution::new(tid, plan, env);
+        task.async_execute(self.worker_pool.clone())?;
         self.tasks
             .lock()
             .unwrap()
-            .entry(tsk.get_task_id().clone())
-            .or_insert_with(|| Box::new(tsk));
+            .entry(task.get_task_id().clone())
+            .or_insert_with(|| Box::new(task));
         Ok(())
+    }
+
+    pub fn take_sink(&self, sink_id: &ProtoSinkId) -> Result<TaskSink> {
+        let task_id = TaskId::from(sink_id.get_task_id());
+        return self
+            .tasks
+            .lock()
+            .unwrap()
+            .get(&task_id)
+            .ok_or_else(|| ErrorCode::InternalError(format!("task {:?} is not running", task_id)))?
+            .get_task_sink(sink_id);
     }
 
     // NOTE: For now, draining out data from the task will block the grpc thread.
     // By design, `take_data` is an future, but for the safe of the unsafety to mix other
     // future runtimes (tokio, eg.) with grpc-rs reactor, we still implement it
     // in an blocking way.
-    pub fn take_task(&self, sid: &ProtoSinkId) -> Result<Box<TaskExecution>> {
-        let task_id = TaskId::from(sid.get_task_id());
-        let tsk = match self.tasks.lock().unwrap().remove(&task_id) {
-            Some(t) => t,
+    pub fn remove_task(&self, sid: &ProtoTaskId) -> Result<Option<Box<TaskExecution>>> {
+        let task_id = TaskId::from(sid);
+        match self.tasks.lock().unwrap().remove(&task_id) {
+            Some(t) => Ok(Some(t)),
             None => {
-                return Err(
-                    ErrorCode::InternalError(format!("No such task {:?}", &task_id)).into(),
-                );
+                return Err(ErrorCode::InternalError(format!("No such task {:?}", &task_id)).into())
             }
-        };
-        Ok(tsk)
+        }
+    }
+
+    pub fn check_if_task_running(&self, task_id: &TaskId) -> Result<()> {
+        match self.tasks.lock().unwrap().get(task_id) {
+            Some(task) => task.check_if_running(),
+            None => {
+                return Err(ErrorCode::InternalError(format!(
+                    "There is not such task:{:?} in task manager.",
+                    task_id
+                ))
+                .into())
+            }
+        }
+    }
+
+    pub fn get_error(&self, task_id: &TaskId) -> Result<Option<RwError>> {
+        return self
+            .tasks
+            .lock()
+            .unwrap()
+            .get(task_id)
+            .ok_or_else(|| ErrorCode::InternalError(format!("task {:?} is not running", task_id)))?
+            .get_error();
     }
 }
 

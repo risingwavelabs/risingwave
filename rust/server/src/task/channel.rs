@@ -15,7 +15,7 @@ pub trait ChanSender: Send {
 pub trait ChanReceiver: Send {
     // Returns `None` if there's no more data to read.
     // Otherwise it will wait until there's data.
-    async fn recv(&mut self, sink_id: u32) -> Option<DataChunkRef>;
+    async fn recv(&mut self) -> Option<DataChunkRef>;
 }
 
 pub type BoxChanSender = Box<dyn ChanSender>;
@@ -24,7 +24,9 @@ pub type BoxChanReceiver = Box<dyn ChanReceiver>;
 // Output-channel is a synchronous, bounded single-producer-multiple-consumer queue.
 // The producer is the local task executor, the consumer is ExchangeService.
 // The implementation depends on the shuffling strategy.
-pub fn create_output_channel(shuffle: &ShuffleInfo) -> Result<(BoxChanSender, BoxChanReceiver)> {
+pub fn create_output_channel(
+    shuffle: &ShuffleInfo,
+) -> Result<(BoxChanSender, Vec<BoxChanReceiver>)> {
     match shuffle.get_partition_mode() {
         ShufflePartitionMode::SINGLE => Ok(new_fifo_channel()),
         _ => Err(ErrorCode::NotImplementedError(format!(

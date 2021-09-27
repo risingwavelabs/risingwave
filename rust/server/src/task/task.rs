@@ -6,11 +6,13 @@ use crate::executor::{BoxedExecutor, ExecutorBuilder, ExecutorResult};
 use crate::service::ExchangeWriter;
 use crate::task::channel::{create_output_channel, BoxChanReceiver, BoxChanSender};
 use crate::task::GlobalTaskEnv;
+use crate::task::TaskManager;
 use crate::util::{json_to_pretty_string, JsonFormatter};
 use rayon::ThreadPool;
 use risingwave_proto::common::Status;
 use risingwave_proto::plan::PlanFragment;
 use risingwave_proto::task_service::TaskInfo_TaskStatus as TaskStatus;
+use risingwave_proto::task_service::TaskSinkId as ProtoSinkId;
 use risingwave_proto::task_service::{TaskData, TaskId as ProtoTaskId};
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
@@ -18,6 +20,12 @@ pub struct TaskId {
     pub task_id: u32,
     pub stage_id: u32,
     pub query_id: String,
+}
+
+#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+pub struct TaskSinkId {
+    pub task_id: TaskId,
+    pub sink_id: u32,
 }
 
 pub(in crate) enum TaskState {
@@ -38,15 +46,60 @@ impl From<&ProtoTaskId> for TaskId {
     }
 }
 
+impl From<&ProtoSinkId> for TaskSinkId {
+    fn from(proto: &ProtoSinkId) -> Self {
+        TaskSinkId {
+            task_id: TaskId::from(proto.get_task_id()),
+            sink_id: proto.get_sink_id(),
+        }
+    }
+}
+
+pub struct TaskSink {
+    task_manager: Arc<TaskManager>,
+    receiver: BoxChanReceiver,
+    sink_id: ProtoSinkId,
+}
+
+impl TaskSink {
+    pub async fn take_data(&mut self, writer: &mut dyn ExchangeWriter) -> Result<()> {
+        let task_id = TaskId::from(self.sink_id.get_task_id());
+        self.task_manager.check_if_task_running(&task_id)?;
+        loop {
+            let chunk = match self.receiver.recv().await {
+                None => {
+                    break;
+                }
+                Some(c) => c,
+            };
+            let pb = chunk.to_protobuf()?;
+            let mut task_data = TaskData::new();
+            task_data.set_status(Status::default());
+            task_data.set_record_batch(pb);
+            writer.write(task_data).await?;
+        }
+        let possible_err = self.task_manager.get_error(&task_id)?;
+        if let Some(err) = possible_err {
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    pub async fn direct_take_data(&mut self) -> Result<Option<DataChunkRef>> {
+        let task_id = TaskId::from(self.sink_id.get_task_id());
+        self.task_manager.check_if_task_running(&task_id)?;
+        Ok(self.receiver.recv().await)
+    }
+}
+
 pub struct TaskExecution {
     task_id: TaskId,
     plan: PlanFragment,
     state: Mutex<TaskStatus>,
-    receiver: Option<BoxChanReceiver>,
+    receivers: Mutex<Vec<Option<BoxChanReceiver>>>,
     env: GlobalTaskEnv,
-
     // The execution failure.
-    failure: Mutex<Option<RwError>>,
+    failure: Arc<Mutex<Option<RwError>>>,
 }
 
 impl TaskExecution {
@@ -55,9 +108,9 @@ impl TaskExecution {
             task_id: TaskId::from(proto_tid),
             plan,
             state: Mutex::new(TaskStatus::PENDING),
-            receiver: Option::None,
+            receivers: Mutex::new(Vec::new()),
             env,
-            failure: Mutex::new(Option::None),
+            failure: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -66,19 +119,19 @@ impl TaskExecution {
     }
 
     /// `get_data` consumes the data produced by `async_execute`.
-    pub fn async_execute(&mut self, worker_pool: Arc<ThreadPool>) -> Result<()> {
-        {
-            let mut state = self.state.lock().unwrap();
-            *state = TaskStatus::RUNNING;
-        }
+    pub fn async_execute(&self, worker_pool: Arc<ThreadPool>) -> Result<()> {
+        *self.state.lock().unwrap() = TaskStatus::RUNNING;
         debug!(
             "Prepare executing plan [{:?}]: {}",
             self.task_id,
             json_to_pretty_string(&self.plan.to_json()?)?
         );
         let exec = ExecutorBuilder::new(self.plan.get_root(), self.env.clone()).build()?;
-        let (sender, receiver) = create_output_channel(self.plan.get_shuffle_info())?;
-        self.receiver = Some(receiver);
+        let (sender, receivers) = create_output_channel(self.plan.get_shuffle_info())?;
+        self.receivers
+            .lock()
+            .unwrap()
+            .extend(receivers.into_iter().map(Some));
         worker_pool.install(|| {
             debug!("Executing plan [{:?}]", self.task_id);
             async_std::task::block_on(self.execute(exec, sender));
@@ -86,7 +139,7 @@ impl TaskExecution {
         Ok(())
     }
 
-    async fn execute(&mut self, root: BoxedExecutor, sender: BoxChanSender) {
+    async fn execute(&self, root: BoxedExecutor, sender: BoxChanSender) {
         if let Err(e) = TaskExecution::try_execute(root, sender).await {
             error!("Execution failed: {} [task_id={:?}]", &e, &self.task_id);
             let mut failure = self.failure.lock().unwrap();
@@ -110,41 +163,31 @@ impl TaskExecution {
         Ok(())
     }
 
-    // Completely drain out of the data from executor.
-    pub async fn take_data(&mut self, sink_id: u32, writer: &mut dyn ExchangeWriter) -> Result<()> {
-        self.check_if_running()?;
-        let mut receiver = self.receiver.take().unwrap();
-        loop {
-            let chunk = match receiver.recv(sink_id).await {
-                None => {
-                    break;
-                }
-                Some(c) => c,
-            };
-            let pb = chunk.to_protobuf()?;
-            let mut task_data = TaskData::new();
-            task_data.set_status(Status::default());
-            task_data.set_record_batch(pb);
-            writer.write(task_data).await?;
-        }
-        let possible_err = self.failure.lock().unwrap().clone();
-        if let Some(err) = possible_err {
-            return Err(err);
-        }
-        Ok(())
+    pub fn get_task_sink(&self, sink_id: &ProtoSinkId) -> Result<TaskSink> {
+        let task_id = TaskId::from(sink_id.get_task_id());
+        let receiver = self.receivers.lock().unwrap()[sink_id.get_sink_id() as usize]
+            .take()
+            .ok_or_else(|| {
+                ErrorCode::InternalError(format!(
+                    "Task{:?}'s sink{} has already been taken.",
+                    task_id,
+                    sink_id.get_sink_id(),
+                ))
+            })?;
+        let task_sink = TaskSink {
+            task_manager: self.env.task_manager(),
+            receiver,
+            sink_id: sink_id.clone(),
+        };
+        Ok(task_sink)
     }
 
-    pub async fn direct_take_data(&mut self, sink_id: u32) -> Result<Option<DataChunkRef>> {
-        self.check_if_running()?;
-        let mut receiver = self.receiver.take().unwrap();
-        let res = receiver.recv(sink_id).await;
-        self.receiver = Some(receiver);
-        Ok(res)
+    pub fn get_error(&self) -> Result<Option<RwError>> {
+        Ok(self.failure.lock().unwrap().clone())
     }
 
-    fn check_if_running(&self) -> Result<()> {
-        let state = self.state.lock().unwrap();
-        if *state != TaskStatus::RUNNING {
+    pub fn check_if_running(&self) -> Result<()> {
+        if *self.state.lock().unwrap() != TaskStatus::RUNNING {
             return Err(ErrorCode::InternalError(format!(
                 "task {:?} is not running",
                 self.get_task_id()

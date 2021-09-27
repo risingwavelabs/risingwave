@@ -1,5 +1,6 @@
 use crate::error::{ErrorCode, Result, RwError};
-use crate::task::{TaskExecution, TaskManager};
+use crate::task::TaskManager;
+use crate::task::TaskSink;
 use futures::SinkExt;
 use grpcio::{RpcContext, ServerStreamingSink, WriteFlags};
 use risingwave_proto::task_service::{TaskData, TaskSinkId};
@@ -17,13 +18,12 @@ impl ExchangeServiceImpl {
     }
 }
 
-async fn pull_from_task(
-    tsk_res: Result<Box<TaskExecution>>,
-    tsid: &TaskSinkId,
+async fn pull_from_task_sink(
+    task_sink_res: Result<TaskSink>,
     writer: &mut GrpcExchangeWriter<'_>,
 ) -> Result<()> {
-    let mut tsk = tsk_res?;
-    tsk.take_data(tsid.get_sink_id(), writer).await?;
+    let mut task_sink = task_sink_res?;
+    task_sink.take_data(writer).await?;
     Ok(())
 }
 
@@ -34,10 +34,10 @@ impl ExchangeService for ExchangeServiceImpl {
         tsid: TaskSinkId,
         mut sink: ServerStreamingSink<TaskData>,
     ) {
-        let task_result = self.mgr.take_task(&tsid);
+        let task_sink_result = self.mgr.take_sink(&tsid);
         ctx.spawn(async move {
             let mut writer = GrpcExchangeWriter::new(&mut sink);
-            let res = pull_from_task(task_result, &tsid, &mut writer)
+            let res = pull_from_task_sink(task_sink_result, &mut writer)
                 .await
                 .map_err(|e| e.to_grpc_error());
             match res {

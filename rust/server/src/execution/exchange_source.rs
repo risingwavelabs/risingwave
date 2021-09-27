@@ -1,7 +1,7 @@
 use crate::array2::{DataChunk, DataChunkRef};
 use crate::error::ErrorCode::GrpcError;
 use crate::error::Result;
-use crate::task::{GlobalTaskEnv, TaskExecution};
+use crate::task::{GlobalTaskEnv, TaskSink};
 use futures::StreamExt;
 use grpcio::{ChannelBuilder, ClientSStreamReceiver, Environment};
 use risingwave_proto::task_service::{TaskData, TaskSinkId};
@@ -64,20 +64,19 @@ impl ExchangeSource for GrpcExchangeSource {
 
 /// Exchange data from a local task execution.
 pub struct LocalExchangeSource {
-    task: Box<TaskExecution>,
-    sink_id: TaskSinkId,
+    task_sink: TaskSink,
 }
 
 impl LocalExchangeSource {
     pub fn create(sink_id: TaskSinkId, env: GlobalTaskEnv) -> Result<Self> {
-        let task = env.task_manager().take_task(&sink_id)?;
-        Ok(Self { sink_id, task })
+        let task_sink = env.task_manager().take_sink(&sink_id)?;
+        Ok(Self { task_sink })
     }
 }
 
 #[async_trait::async_trait]
 impl ExchangeSource for LocalExchangeSource {
     async fn take_data(&mut self) -> Result<Option<DataChunkRef>> {
-        self.task.direct_take_data(self.sink_id.get_sink_id()).await
+        Ok(self.task_sink.direct_take_data().await?)
     }
 }

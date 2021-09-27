@@ -3,7 +3,6 @@ use super::*;
 use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result};
 use crate::service::ExchangeWriter;
-use crate::task::TaskManager;
 use pb_convert::FromProtobuf;
 use protobuf::well_known_types::Any;
 use protobuf::Message;
@@ -30,7 +29,6 @@ impl ExchangeWriter for FakeExchangeWriter {
 }
 
 pub struct TestRunner {
-    task_mgr: TaskManager,
     tsid: TaskSinkId,
     env: GlobalTaskEnv,
 }
@@ -42,7 +40,6 @@ impl TestRunner {
         tsid.set_task_id(tid);
         Self {
             env: GlobalTaskEnv::for_test(),
-            task_mgr: TaskManager::new(),
             tsid,
         }
     }
@@ -56,14 +53,15 @@ impl TestRunner {
     }
 
     pub fn run(&mut self, plan: PlanFragment) -> Result<Vec<TaskData>> {
-        self.task_mgr
-            .fire_task(self.env.clone(), self.tsid.get_task_id(), plan)?;
-        let mut task = self.task_mgr.take_task(&self.tsid).unwrap();
+        let task_manager = self.env.task_manager();
+        task_manager.fire_task(self.env.clone(), self.tsid.get_task_id(), plan)?;
+        let mut task_sink = task_manager.take_sink(&self.tsid).unwrap();
         let mut writer = FakeExchangeWriter { messages: vec![] };
         let messages = futures::executor::block_on(async move {
-            task.take_data(0, &mut writer).await.unwrap();
+            task_sink.take_data(&mut writer).await.unwrap();
             writer.messages
         });
+        task_manager.remove_task(self.tsid.get_task_id()).unwrap();
         Ok(messages)
     }
 

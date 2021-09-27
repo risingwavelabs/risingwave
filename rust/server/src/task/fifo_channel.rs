@@ -23,7 +23,7 @@ impl ChanSender for FifoSender {
 
 #[async_trait::async_trait]
 impl ChanReceiver for FifoReceiver {
-    async fn recv(&mut self, _sink_id: u32) -> Option<DataChunkRef> {
+    async fn recv(&mut self) -> Option<DataChunkRef> {
         match self.receiver.recv() {
             Err(_) => None, // Sender is dropped.
             Ok(chunk) => Some(chunk),
@@ -31,10 +31,10 @@ impl ChanReceiver for FifoReceiver {
     }
 }
 
-pub fn new_fifo_channel() -> (BoxChanSender, BoxChanReceiver) {
+pub fn new_fifo_channel() -> (BoxChanSender, Vec<BoxChanReceiver>) {
     let (s, r) = mpsc::channel();
     (
         Box::new(FifoSender { sender: s }),
-        Box::new(FifoReceiver { receiver: r }),
+        vec![Box::new(FifoReceiver { receiver: r })],
     )
 }
