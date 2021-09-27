@@ -1,5 +1,11 @@
 package com.risingwave.planner.rel.physical.batch;
 
+import com.google.protobuf.Any;
+import com.risingwave.common.exception.PgErrorCode;
+import com.risingwave.common.exception.PgException;
+import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
+import com.risingwave.proto.plan.JoinType;
+import com.risingwave.proto.plan.NestedLoopJoinNode;
 import com.risingwave.proto.plan.PlanNode;
 import java.util.Collections;
 import java.util.List;
@@ -26,7 +32,18 @@ public class RwBatchNestLoopJoin extends Join implements RisingWaveBatchPhyRel {
 
   @Override
   public PlanNode serialize() {
-    throw new UnsupportedOperationException("RwBatchNestLoopJoin");
+    RexToProtoSerializer rexVisitor = new RexToProtoSerializer();
+    NestedLoopJoinNode joinNode =
+        NestedLoopJoinNode.newBuilder()
+            .setJoinCond(condition.accept(rexVisitor))
+            .setJoinType(getJoinTypeProto())
+            .build();
+    return PlanNode.newBuilder()
+        .setNodeType(PlanNode.PlanNodeType.NESTED_LOOP_JOIN)
+        .setBody(Any.pack(joinNode))
+        .addChildren(((RisingWaveBatchPhyRel) left).serialize())
+        .addChildren(((RisingWaveBatchPhyRel) right).serialize())
+        .build();
   }
 
   @Override
@@ -39,5 +56,26 @@ public class RwBatchNestLoopJoin extends Join implements RisingWaveBatchPhyRel {
       boolean semiJoinDone) {
     return new RwBatchNestLoopJoin(
         getCluster(), traitSet, getHints(), left, right, conditionExpr, joinType);
+  }
+
+  // Map from calcite join type to proto join type.
+  private JoinType getJoinTypeProto() {
+    switch (joinType) {
+      case INNER:
+        return JoinType.INNER;
+      case LEFT:
+        return JoinType.LEFT_OUTER;
+      case RIGHT:
+        return JoinType.RIGHT_OUTER;
+      case FULL:
+        return JoinType.FULL_OUTER;
+      case SEMI:
+        return JoinType.SEMI;
+      case ANTI:
+        return JoinType.ANTI;
+      default:
+        throw new PgException(
+            PgErrorCode.INTERNAL_ERROR, "unsupported join type: %s for nested loop join", joinType);
+    }
   }
 }

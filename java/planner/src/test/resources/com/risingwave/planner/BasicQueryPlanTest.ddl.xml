@@ -11,4 +11,10 @@ create table t2(v1 date not null)
         ]]>
     </Resource>
 
+    <Resource>
+        <![CDATA[
+create table t3(v1 int not null)
+        ]]>
+    </Resource>
+
 </Root>

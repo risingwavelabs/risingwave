@@ -91,6 +91,22 @@ message DropTableNode {
     TableRefId table_ref_id = 1;
 }
 
+enum JoinType {
+    // Note that it comes from Calcite's JoinRelType.
+    // DO NOT HAVE direction for SEMI and ANTI now.
+    INNER = 0;
+    LEFT_OUTER = 1;
+    RIGHT_OUTER = 2;
+    FULL_OUTER = 3;
+    SEMI = 4;
+    ANTI = 5;
+}
+
+message NestedLoopJoinNode {
+    JoinType join_type = 1;
+    risingwave.expr.proto.ExprNode join_cond = 2;
+}
+
 message HashAggNode {
     repeated risingwave.expr.proto.ExprNode group_by_keys = 1;
     repeated risingwave.expr.proto.ExprNode aggregations = 2;
@@ -116,6 +132,7 @@ message PlanNode {
         EXCHANGE = 10;
         GATHER = 11;
         ORDER_BY = 12;
+        NESTED_LOOP_JOIN = 13;
     }
     PlanNodeType node_type = 1;
     google.protobuf.Any body = 2;
