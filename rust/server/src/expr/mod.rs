@@ -1,13 +1,14 @@
 mod agg;
 mod arithmetic_expr;
 mod binary_expr;
+mod binary_expr_bytes;
 mod cmp;
 mod conjunction;
 pub mod expr_factory;
 mod expr_tmpl;
 mod input_ref;
 mod literal;
-mod substr;
+mod tenary_expr_bytes;
 mod type_cast;
 mod unary_expr;
 
@@ -22,10 +23,9 @@ use crate::error::Result;
 pub use arithmetic_expr::ArithmeticExpression;
 pub use cmp::CompareExpression;
 pub use conjunction::ConjunctionExpression;
-pub use substr::SubStrExpression;
 pub use type_cast::TypeCastExpression;
 
-use crate::expr::expr_factory::{build_binary_expr, build_unary_expr};
+use crate::expr::expr_factory::{build_binary_expr, build_substr_expr, build_unary_expr};
 pub use cmp::CompareOperatorKind;
 pub use conjunction::ConjunctionOperatorKind;
 
@@ -75,6 +75,7 @@ pub fn build_from_proto(proto: &ExprNode) -> Result<BoxedExpression> {
         | LESS_THAN_OR_EQUAL
         | GREATER_THAN
         | GREATER_THAN_OR_EQUAL => return build_binary_expr(proto),
+        SUBSTR => return build_substr_expr(proto),
         _ => (),
     };
     build_expression! {proto,
@@ -87,8 +88,7 @@ pub fn build_from_proto(proto: &ExprNode) -> Result<BoxedExpression> {
       SUBTRACT => ArithmeticExpression,
       MULTIPLY => ArithmeticExpression,
       DIVIDE => ArithmeticExpression,
-      MODULUS => ArithmeticExpression,
-      SUBSTR => SubStrExpression
+      MODULUS => ArithmeticExpression
     }
 }
 

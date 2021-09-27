@@ -25,7 +25,7 @@ use risingwave_proto::data::Buffer;
 use std::convert::From;
 use std::hash::Hasher;
 use std::sync::Arc;
-pub use utf8_array::{UTF8Array, UTF8ArrayBuilder};
+pub use utf8_array::*;
 
 pub type I64Array = PrimitiveArray<i64>;
 pub type I32Array = PrimitiveArray<i32>;

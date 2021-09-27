@@ -141,6 +141,40 @@ impl ArrayBuilder for UTF8ArrayBuilder {
     }
 }
 
+impl UTF8ArrayBuilder {
+    pub fn writer(self) -> BytesWriter {
+        BytesWriter { builder: self }
+    }
+}
+
+/// `BytesWriter` has the ownership of the right to append only one record.
+pub struct BytesWriter {
+    builder: UTF8ArrayBuilder,
+}
+
+impl BytesWriter {
+    /// `write_ref` will consume `BytesWriter` and pass the ownership
+    /// of `builder` to `BytesGuard`.
+    pub fn write_ref(mut self, value: &str) -> Result<BytesGuard> {
+        self.builder.append(Some(value))?;
+        Ok(BytesGuard {
+            builder: self.builder,
+        })
+    }
+}
+
+/// `BytesGuard` guarded that exactly one record was appendded.
+/// `BytesGuard` will be produced iff the `BytesWriter` was consumed.
+pub struct BytesGuard {
+    builder: UTF8ArrayBuilder,
+}
+
+impl BytesGuard {
+    pub fn into_inner(self) -> UTF8ArrayBuilder {
+        self.builder
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
