@@ -1,57 +1,36 @@
+use crate::array2::column::Column;
 use crate::array2::DataChunk;
 use crate::{buffer::Bitmap, error::Result};
 
-mod local_aggregation_operator;
-
-pub use local_aggregation_operator::*;
-
-mod global_aggregation_operator;
-
-pub use global_aggregation_operator::*;
-
-mod filter_operator;
-
-pub use filter_operator::FilterOperator;
-
-mod projection_operator;
-
-pub use projection_operator::ProjectionOperator;
-
-mod operator_output;
-
-pub use operator_output::OperatorOutput;
-
-mod channel_output;
-
-pub use channel_output::ChannelOutput;
-
 mod actor;
-
-pub use actor::Actor;
-
-mod data_source;
-
-pub use data_source::DataSource;
-
 mod aggregation;
-
+mod channel_output;
+mod data_source;
 mod dispatcher;
-
-pub use dispatcher::*;
-
+mod filter_operator;
+mod global_aggregation_operator;
+mod local_aggregation_operator;
+mod mem_table_output;
+mod merge_processor;
+mod operator_output;
 mod processor;
-
-pub use processor::*;
-
+mod projection_operator;
 mod simple_processor;
 
+pub use actor::Actor;
+pub use channel_output::ChannelOutput;
+pub use data_source::DataSource;
+pub use dispatcher::*;
+pub use filter_operator::FilterOperator;
+pub use global_aggregation_operator::*;
+pub use local_aggregation_operator::*;
+pub use mem_table_output::MemTableOutput;
+pub use merge_processor::*;
+pub use operator_output::OperatorOutput;
+pub use processor::*;
+pub use projection_operator::ProjectionOperator;
 pub use simple_processor::*;
 
-mod merge_processor;
-
-pub use merge_processor::*;
-
-use crate::array2::column::Column;
 use async_trait::async_trait;
 
 #[cfg(test)]

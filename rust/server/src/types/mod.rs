@@ -191,7 +191,7 @@ macro_rules! for_all_scalar_variants {
 macro_rules! scalar_impl_enum {
   ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
     /// `ScalarImpl` embeds all possible scalars in the evaluation framework.
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, PartialOrd)]
     pub enum ScalarImpl {
       $( $variant_name($scalar) ),*
     }

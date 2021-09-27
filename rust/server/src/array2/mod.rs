@@ -13,7 +13,7 @@ mod value_reader;
 
 use crate::buffer::Bitmap;
 use crate::error::Result;
-use crate::types::{Scalar, ScalarImpl, ScalarRef};
+use crate::types::{option_to_owned_scalar, Scalar, ScalarImpl, ScalarRef, ScalarRefImpl};
 pub use bool_array::{BoolArray, BoolArrayBuilder};
 pub use data_chunk::{DataChunk, DataChunkRef};
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
@@ -383,6 +383,18 @@ macro_rules! impl_array {
               keys_for_one_row.push(op);
             }
           }, )*
+        }
+      }
+
+      pub fn value_at(&self, idx: usize) -> Option<ScalarRefImpl<'_>> {
+        match self {
+          $( Self::$variant_name(inner) => inner.value_at(idx).map(ScalarRefImpl::$variant_name), )*
+        }
+      }
+
+      pub fn value_at_owned(&self, idx: usize) -> Option<ScalarImpl> {
+        match self {
+          $( Self::$variant_name(inner) => option_to_owned_scalar(&inner.value_at(idx)).map(ScalarImpl::$variant_name), )*
         }
       }
     }
