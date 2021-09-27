@@ -26,14 +26,15 @@ public class RwLogicalFilterScan extends FilterScanBase implements RisingWaveLog
       List<RelHint> hints,
       RelOptTable table,
       TableCatalog.TableId tableId,
-      ImmutableList<ColumnCatalog.ColumnId> columnIds) {
-    super(cluster, traitSet, hints, table, tableId, columnIds);
+      ImmutableList<ColumnCatalog.ColumnId> columnIds,
+      boolean stream) {
+    super(cluster, traitSet, hints, table, tableId, columnIds, stream);
     checkConvention();
   }
 
   public RwLogicalFilterScan copy(ImmutableList<ColumnCatalog.ColumnId> columnIds) {
     return new RwLogicalFilterScan(
-        getCluster(), getTraitSet(), getHints(), getTable(), tableId, columnIds);
+        getCluster(), getTraitSet(), getHints(), getTable(), tableId, columnIds, isStream());
   }
 
   @Override
@@ -71,7 +72,8 @@ public class RwLogicalFilterScan extends FilterScanBase implements RisingWaveLog
           source.getHints(),
           source.getTable(),
           tableCatalog.getId(),
-          tableCatalog.getAllColumnIdsSorted());
+          tableCatalog.getAllColumnIdsSorted(),
+          tableCatalog.isStream());
     }
   }
 }

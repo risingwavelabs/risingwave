@@ -1,3 +1,4 @@
+use crate::source::{SourceManager, SourceManagerRef};
 use crate::storage::{StorageManager, StorageManagerRef};
 use crate::task::TaskManager;
 use std::net::SocketAddr;
@@ -10,11 +11,13 @@ pub struct GlobalTaskEnv {
     storage_manager: StorageManagerRef,
     server_addr: SocketAddr,
     task_manager: Arc<TaskManager>,
+    source_manager: SourceManagerRef,
 }
 
 impl GlobalTaskEnv {
     pub fn new(
         storage_manager: StorageManagerRef,
+        source_manager: SourceManagerRef,
         task_manager: Arc<TaskManager>,
         server_addr: SocketAddr,
     ) -> Self {
@@ -22,17 +25,20 @@ impl GlobalTaskEnv {
             storage_manager,
             task_manager,
             server_addr,
+            source_manager,
         }
     }
 
     // Create an instance for testing purpose.
     #[cfg(test)]
     pub fn for_test() -> Self {
+        use crate::source::MemSourceManager;
         use crate::storage::MemStorageManager;
         GlobalTaskEnv {
             storage_manager: Arc::new(MemStorageManager::new()),
             task_manager: Arc::new(TaskManager::new()),
             server_addr: SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
+            source_manager: std::sync::Arc::new(MemSourceManager::new()),
         }
     }
 
@@ -50,5 +56,13 @@ impl GlobalTaskEnv {
 
     pub fn task_manager(&self) -> Arc<TaskManager> {
         self.task_manager.clone()
+    }
+
+    pub fn source_manager(&self) -> &dyn SourceManager {
+        &*self.source_manager
+    }
+
+    pub fn source_manager_ref(&self) -> SourceManagerRef {
+        self.source_manager.clone()
     }
 }

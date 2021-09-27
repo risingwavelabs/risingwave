@@ -1,6 +1,7 @@
 use crate::service::exchange_service::ExchangeServiceImpl;
 use crate::service::stream_service::StreamServiceImpl;
 use crate::service::task_service::TaskServiceImpl;
+use crate::source::MemSourceManager;
 use crate::storage::MemStorageManager;
 use crate::stream::StreamManager;
 use crate::task::{GlobalTaskEnv, TaskManager};
@@ -17,10 +18,11 @@ pub struct Server {
 impl Server {
     pub fn new(addr: SocketAddr) -> Result<Server> {
         let store_mgr = Arc::new(MemStorageManager::new());
+
         let task_mgr = Arc::new(TaskManager::new());
         let stream_mgr = Arc::new(StreamManager::new());
-        let env = GlobalTaskEnv::new(store_mgr, task_mgr.clone(), addr);
-
+        let source_mgr = Arc::new(MemSourceManager::new());
+        let env = GlobalTaskEnv::new(store_mgr, source_mgr, task_mgr.clone(), addr);
         let task_srv = TaskServiceImpl::new(task_mgr.clone(), env);
         let exchange_srv = ExchangeServiceImpl::new(task_mgr);
         let stream_srv = StreamServiceImpl::new(stream_mgr);

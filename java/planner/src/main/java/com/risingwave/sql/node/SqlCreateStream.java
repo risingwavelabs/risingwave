@@ -24,6 +24,22 @@ public class SqlCreateStream extends SqlCreate {
   private final SqlNodeList propertyList;
   private final SqlCharStringLiteral rowFormat;
 
+  public SqlIdentifier getName() {
+    return name;
+  }
+
+  public SqlNodeList getColumnList() {
+    return columnList;
+  }
+
+  public SqlNodeList getPropertyList() {
+    return propertyList;
+  }
+
+  public SqlCharStringLiteral getRowFormat() {
+    return rowFormat;
+  }
+
   private static final SqlOperator OPERATOR =
       new SqlSpecialOperator("CREATE STREAM", SqlKind.OTHER_DDL);
 

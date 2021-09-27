@@ -57,9 +57,12 @@ public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCata
             tableName,
             Collections.emptyList(),
             createTableInfo.isMv(),
+            createTableInfo.isStream(),
             ImmutableIntList.of(),
             DataDistributionType.ALL,
-            0);
+            0,
+            createTableInfo.getProperties(),
+            createTableInfo.getRowFormat());
 
     createTableInfo.getColumns().forEach(pair -> table.addColumn(pair.getKey(), pair.getValue()));
 

@@ -39,9 +39,15 @@ message ColumnDesc {
     risingwave.executor.proto.DataType column_type = 1;
     ColumnEncodingType encoding = 2;
     bool is_primary = 3;
+    string name = 4;
 }
 
 message SeqScanNode {
+    TableRefId table_ref_id = 1;
+    repeated int32 column_ids = 2;
+}
+
+message StreamScanNode {
     TableRefId table_ref_id = 1;
     repeated int32 column_ids = 2;
 }
@@ -85,6 +91,18 @@ message OrderByNode {
     }
     repeated OrderType order_types = 1;
     repeated risingwave.expr.proto.ExprNode orders = 2;
+}
+
+message CreateStreamNode {
+    enum RowFormatType {
+      JSON = 0;
+      PROTOBUF = 1;
+      AVRO = 2;
+    }
+    TableRefId table_ref_id = 1;
+    repeated ColumnDesc column_descs = 2;
+    RowFormatType format = 3;
+    map<string, string> properties = 4;
 }
 
 message DropTableNode {
@@ -133,6 +151,8 @@ message PlanNode {
         GATHER = 11;
         ORDER_BY = 12;
         NESTED_LOOP_JOIN = 13;
+        CREATE_STREAM = 14;
+        STREAM_SCAN = 15;
     }
     PlanNodeType node_type = 1;
     google.protobuf.Any body = 2;

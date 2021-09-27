@@ -17,6 +17,7 @@ import org.apache.calcite.rel.type.RelDataTypeFactory;
 public class FilterScanBase extends TableScan {
   protected final TableCatalog.TableId tableId;
   protected final ImmutableList<ColumnCatalog.ColumnId> columnIds;
+  private final boolean stream;
 
   protected FilterScanBase(
       RelOptCluster cluster,
@@ -24,10 +25,12 @@ public class FilterScanBase extends TableScan {
       List<RelHint> hints,
       RelOptTable table,
       TableCatalog.TableId tableId,
-      ImmutableList<ColumnCatalog.ColumnId> columnIds) {
+      ImmutableList<ColumnCatalog.ColumnId> columnIds,
+      boolean stream) {
     super(cluster, traitSet, hints, table);
     this.tableId = tableId;
     this.columnIds = columnIds;
+    this.stream = stream;
   }
 
   public TableCatalog.TableId getTableId() {
@@ -66,5 +69,9 @@ public class FilterScanBase extends TableScan {
     }
 
     return pw;
+  }
+
+  public boolean isStream() {
+    return stream;
   }
 }

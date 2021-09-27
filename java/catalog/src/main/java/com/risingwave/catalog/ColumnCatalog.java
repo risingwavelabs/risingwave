@@ -15,6 +15,10 @@ public class ColumnCatalog extends EntityBase<ColumnCatalog.ColumnId, ColumnCata
     return desc;
   }
 
+  public String getName() {
+    return getEntityName().getValue();
+  }
+
   public static class ColumnId extends NonRootLikeBase<Integer, TableCatalog.TableId> {
     public ColumnId(Integer value, TableCatalog.TableId parent) {
       super(value, parent);

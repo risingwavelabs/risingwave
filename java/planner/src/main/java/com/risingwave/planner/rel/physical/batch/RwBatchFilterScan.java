@@ -13,6 +13,7 @@ import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.logical.RwLogicalFilterScan;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.proto.plan.SeqScanNode;
+import com.risingwave.proto.plan.StreamScanNode;
 import com.risingwave.proto.plan.TableRefId;
 import com.risingwave.rpc.Messages;
 import java.util.Collections;
@@ -33,8 +34,9 @@ public class RwBatchFilterScan extends FilterScanBase implements RisingWaveBatch
       List<RelHint> hints,
       RelOptTable table,
       TableCatalog.TableId tableId,
-      ImmutableList<ColumnCatalog.ColumnId> columnIds) {
-    super(cluster, traitSet, hints, table, tableId, columnIds);
+      ImmutableList<ColumnCatalog.ColumnId> columnIds,
+      boolean stream) {
+    super(cluster, traitSet, hints, table, tableId, columnIds, stream);
     checkConvention();
   }
 
@@ -53,18 +55,35 @@ public class RwBatchFilterScan extends FilterScanBase implements RisingWaveBatch
     RelTraitSet newTraitSet = traitSet.plus(RisingWaveBatchPhyRel.BATCH_PHYSICAL).plus(distTrait);
 
     return new RwBatchFilterScan(
-        cluster, newTraitSet, Collections.emptyList(), table, tableCatalog.getId(), columnIds);
+        cluster,
+        newTraitSet,
+        Collections.emptyList(),
+        table,
+        tableCatalog.getId(),
+        columnIds,
+        tableCatalog.isStream());
   }
 
   @Override
   public PlanNode serialize() {
     TableRefId tableRefId = Messages.getTableRefId(tableId);
-    SeqScanNode.Builder seqScanNodeBuilder = SeqScanNode.newBuilder().setTableRefId(tableRefId);
-    columnIds.forEach(c -> seqScanNodeBuilder.addColumnIds(c.getValue()));
-    return PlanNode.newBuilder()
-        .setNodeType(PlanNode.PlanNodeType.SEQ_SCAN)
-        .setBody(Any.pack(seqScanNodeBuilder.build()))
-        .build();
+
+    if (isStream()) {
+      StreamScanNode.Builder streamScanNodeBuilder =
+          StreamScanNode.newBuilder().setTableRefId(tableRefId);
+      columnIds.forEach(c -> streamScanNodeBuilder.addColumnIds(c.getValue()));
+      return PlanNode.newBuilder()
+          .setNodeType(PlanNode.PlanNodeType.STREAM_SCAN)
+          .setBody(Any.pack(streamScanNodeBuilder.build()))
+          .build();
+    } else {
+      SeqScanNode.Builder seqScanNodeBuilder = SeqScanNode.newBuilder().setTableRefId(tableRefId);
+      columnIds.forEach(c -> seqScanNodeBuilder.addColumnIds(c.getValue()));
+      return PlanNode.newBuilder()
+          .setNodeType(PlanNode.PlanNodeType.SEQ_SCAN)
+          .setBody(Any.pack(seqScanNodeBuilder.build()))
+          .build();
+    }
   }
 
   public static class BatchFilterScanConverterRule extends ConverterRule {

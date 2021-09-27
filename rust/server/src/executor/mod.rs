@@ -8,7 +8,9 @@ mod drop_table;
 use drop_table::*;
 mod seq_scan;
 use seq_scan::*;
+mod create_stream;
 mod filter;
+mod stream_scan;
 use filter::*;
 mod projection;
 use projection::*;
@@ -24,7 +26,9 @@ mod test_utils;
 use crate::array2::DataChunkRef;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
+use crate::executor::create_stream::CreateStreamExecutor;
 use crate::executor::gather::GatherExecutor;
+use crate::executor::stream_scan::StreamScanExecutor;
 use crate::task::GlobalTaskEnv;
 use risingwave_proto::plan::{PlanNode, PlanNode_PlanNodeType};
 use std::convert::TryFrom;
@@ -99,7 +103,9 @@ impl<'a> ExecutorBuilder<'a> {
           PlanNode_PlanNodeType::FILTER => FilterExecutor,
           PlanNode_PlanNodeType::PROJECT => ProjectionExecutor,
           PlanNode_PlanNodeType::SIMPLE_AGG => SortAggExecutor,
-          PlanNode_PlanNodeType::ORDER_BY => OrderByExecutor
+          PlanNode_PlanNodeType::ORDER_BY => OrderByExecutor,
+          PlanNode_PlanNodeType::CREATE_STREAM => CreateStreamExecutor,
+          PlanNode_PlanNodeType::STREAM_SCAN => StreamScanExecutor
         }
     }
 

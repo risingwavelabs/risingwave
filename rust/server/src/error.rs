@@ -31,6 +31,8 @@ pub enum ErrorCode {
     ParseError(chrono::format::ParseError),
     #[error("Out of range")]
     NumericValueOutOfRange,
+    #[error("protocol error: {0}")]
+    ProtocolError(String),
 }
 
 #[derive(Clone)]
@@ -90,6 +92,7 @@ impl ErrorCode {
             ErrorCode::GrpcError(_, _) => 6,
             ErrorCode::ParseError(_) => 7,
             ErrorCode::NumericValueOutOfRange => 8,
+            ErrorCode::ProtocolError(_) => 9,
         }
     }
 }

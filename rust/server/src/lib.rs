@@ -30,6 +30,7 @@ mod execution;
 mod executor;
 mod expr;
 pub mod service;
+mod source;
 mod storage;
 mod stream;
 mod stream_op;

@@ -4,6 +4,7 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import static java.util.Objects.requireNonNull;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.risingwave.common.entity.EntityBase;
 import com.risingwave.common.entity.NonRootLikeBase;
 import com.risingwave.common.error.MetaServiceError;
@@ -40,26 +41,35 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
   private final ConcurrentMap<ColumnCatalog.ColumnId, ColumnCatalog> columnById;
   private final ConcurrentMap<ColumnCatalog.ColumnName, ColumnCatalog> columnByName;
   private final boolean materializedView;
+  private final boolean stream;
   private final ImmutableIntList primaryKeyColumnIds;
   private final DataDistributionType distributionType;
   private final Integer columnId;
+  private final ImmutableMap<String, String> properties;
+  private final String rowFormat;
 
   TableCatalog(
       TableId id,
       TableName name,
       Collection<ColumnCatalog> columns,
       boolean materializedView,
+      boolean stream,
       ImmutableIntList primaryKeyColumnIds,
       DataDistributionType distributionType,
-      Integer columnId) {
+      Integer columnId,
+      ImmutableMap<String, String> properties,
+      String rowFormat) {
     super(id, name);
     this.columns = new ArrayList<>(columns);
     this.columnById = EntityBase.groupBy(columns, ColumnCatalog::getId);
     this.columnByName = EntityBase.groupBy(columns, ColumnCatalog::getEntityName);
     this.materializedView = materializedView;
+    this.stream = stream;
     this.primaryKeyColumnIds = primaryKeyColumnIds;
     this.distributionType = distributionType;
     this.columnId = columnId;
+    this.properties = properties;
+    this.rowFormat = rowFormat;
   }
 
   public boolean isMaterializedView() {
@@ -188,6 +198,18 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
       @Nullable SqlNode parent,
       @Nullable CalciteConnectionConfig config) {
     return false;
+  }
+
+  public ImmutableMap<String, String> getProperties() {
+    return properties;
+  }
+
+  public String getRowFormat() {
+    return rowFormat;
+  }
+
+  public boolean isStream() {
+    return stream;
   }
 
   public static class TableId extends NonRootLikeBase<Integer, SchemaCatalog.SchemaId> {
