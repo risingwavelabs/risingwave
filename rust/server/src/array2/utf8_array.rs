@@ -145,6 +145,22 @@ impl UTF8ArrayBuilder {
     pub fn writer(self) -> BytesWriter {
         BytesWriter { builder: self }
     }
+
+    /// `append_partial` will add a partial dirty data of the new record.
+    /// The partial data will keep untracked until `finish_partial` was called.
+    unsafe fn append_partial(&mut self, x: &str) -> Result<()> {
+        self.data.extend_from_slice(x.as_bytes());
+        Ok(())
+    }
+
+    /// `finish_partial` will create a new record based on the current dirty data.
+    /// `finish_partial` was safe even if we don't call `append_partial`, which
+    /// is equivalent to appending an empty string.
+    fn finish_partial(&mut self) -> Result<()> {
+        self.offset.push(self.data.len());
+        self.bitmap.push(true);
+        Ok(())
+    }
 }
 
 /// `BytesWriter` has the ownership of the right to append only one record.
@@ -157,6 +173,39 @@ impl BytesWriter {
     /// of `builder` to `BytesGuard`.
     pub fn write_ref(mut self, value: &str) -> Result<BytesGuard> {
         self.builder.append(Some(value))?;
+        Ok(BytesGuard {
+            builder: self.builder,
+        })
+    }
+
+    /// `begin` will create a `PartialBytesWriter`, which allow multiple
+    /// appendings to create a new record.
+    pub fn begin(self) -> PartialBytesWriter {
+        PartialBytesWriter {
+            builder: self.builder,
+        }
+    }
+}
+
+pub struct PartialBytesWriter {
+    builder: UTF8ArrayBuilder,
+}
+
+impl PartialBytesWriter {
+    /// `write_ref` will append partial dirty data to `builder`.
+    /// `PartialBytesWriter::write_ref` is different from `BytesWriter::write_ref`
+    /// in that it allows us to call it multiple times.
+    pub fn write_ref(&mut self, value: &str) -> Result<()> {
+        // SAFETY: The dirty `builder` is owned by `PartialBytesWriter`.
+        // We can't access it until `finish` was callled.
+        unsafe { self.builder.append_partial(value) }
+    }
+
+    /// `finish` will be called while the entire record is written.
+    /// Exactly one new record was appended and the `builder` can be safely used,
+    /// so we move the builder to `BytesGuard`.
+    pub fn finish(mut self) -> Result<BytesGuard> {
+        self.builder.finish_partial()?;
         Ok(BytesGuard {
             builder: self.builder,
         })
@@ -177,6 +226,8 @@ impl BytesGuard {
 
 #[cfg(test)]
 mod tests {
+    use crate::error::Result;
+
     use super::*;
     use itertools::Itertools;
 
@@ -191,6 +242,23 @@ mod tests {
             }
         }
         builder.finish().unwrap();
+    }
+
+    #[test]
+    fn test_utf8_partial_writer() -> Result<()> {
+        let builder = UTF8ArrayBuilder::new(0)?;
+        let writer = builder.writer();
+        let mut partial_writer = writer.begin();
+        for _ in 0..2 {
+            partial_writer.write_ref("ran")?;
+        }
+        let guard = partial_writer.finish()?;
+        let builder = guard.into_inner();
+        let array = builder.finish()?;
+        assert_eq!(array.len(), 1);
+        assert_eq!(array.value_at(0), Some("ranran"));
+
+        Ok(())
     }
 
     #[test]
