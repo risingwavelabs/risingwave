@@ -39,7 +39,9 @@ pub type I16ArrayBuilder = PrimitiveArrayBuilder<i16>;
 pub type F64ArrayBuilder = PrimitiveArrayBuilder<f64>;
 pub type F32ArrayBuilder = PrimitiveArrayBuilder<f32>;
 
+/// The hash source for `None` values when hashing an item.
 static NULL_VAL_FOR_HASH: u32 = 0xfffffff0;
+
 /// A trait over all array builders.
 ///
 /// `ArrayBuilder` is a trait over all builders. You could build an array with
@@ -217,11 +219,12 @@ impl From<IntervalArray> for ArrayImpl {
 
 for_all_variants! { array_impl_enum }
 
-/// `impl_convert` implements 4 conversions for `Array`.
+/// `impl_convert` implements several conversions for `Array` and `ArrayBuilder`.
 /// * `ArrayImpl -> &Array` with `impl.as_int16()`.
 /// * `ArrayImpl -> Array` with `impl.into_int16()`.
 /// * `Array -> ArrayImpl` with `From` trait.
 /// * `&ArrayImpl -> &Array` with `From` trait.
+/// * `ArrayBuilder -> ArrayBuilderImpl` with `From` trait.
 macro_rules! impl_convert {
   ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
     $(
@@ -248,6 +251,12 @@ macro_rules! impl_convert {
               ArrayImpl::$variant_name(inner) => inner,
               other_array => panic!("cannot covert ArrayImpl::{} to concrete type", other_array.get_ident())
             }
+          }
+        }
+
+        impl From<$builder> for ArrayBuilderImpl {
+          fn from(builder: $builder) -> Self {
+            Self::$variant_name(builder)
           }
         }
       }
@@ -402,20 +411,6 @@ macro_rules! impl_array {
 }
 
 for_all_variants! { impl_array }
-
-macro_rules! impl_into_builders {
-  ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-    $(
-      impl From<$builder> for ArrayBuilderImpl {
-        fn from(builder: $builder) -> Self {
-          Self::$variant_name(builder)
-        }
-      }
-    )*
-  };
-}
-
-for_all_variants! { impl_into_builders }
 
 pub type ArrayRef = Arc<ArrayImpl>;
 
