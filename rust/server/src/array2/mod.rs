@@ -3,6 +3,7 @@
 mod bool_array;
 pub(crate) mod column;
 mod data_chunk;
+pub mod data_chunk_iter;
 mod decimal_array;
 pub(crate) mod interval_array;
 mod iterator;

@@ -1,5 +1,6 @@
 use crate::array2::column::Column;
 
+use crate::array2::data_chunk_iter::{DataChunkIter, DataTuple};
 use crate::array2::ArrayImpl;
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
@@ -19,7 +20,6 @@ pub struct DataChunk {
     /// Use Vec to be consistent with previous array::DataChunk
     #[builder(default)]
     columns: Vec<Column>,
-    // pub(crate) arrays: Vec<Arc<ArrayImpl>>,
     cardinality: usize,
     #[builder(default, setter(strip_option))]
     visibility: Option<Bitmap>,
@@ -211,6 +211,20 @@ impl DataChunk {
         }
         Ok(finalize_hashers(&mut states))
     }
+
+    /// Iterate for each row. The iterator will return all tuples (include visible and invisible).
+    pub fn iter(&self) -> DataChunkIter<'_> {
+        DataChunkIter::new(self)
+    }
+
+    // The overflow should be checked by up layer.
+    pub fn row_at(&self, pos: usize) -> DataTuple<'_> {
+        let mut row = Vec::with_capacity(self.columns.len());
+        for column in &self.columns {
+            row.push(column.array_ref().value_at(pos));
+        }
+        DataTuple::new(row)
+    }
 }
 
 impl TryFrom<Vec<Column>> for DataChunk {
@@ -292,6 +306,34 @@ mod tests {
                 val as i32
             );
             cur_idx += 1;
+        }
+    }
+
+    #[test]
+    fn test_chunk_iter() {
+        let num_of_columns: usize = 2;
+        let length = 5;
+        let mut columns = vec![];
+        for i in 0..num_of_columns {
+            let mut builder = PrimitiveArrayBuilder::<i32>::new(length).unwrap();
+            for _ in 0..length {
+                builder.append(Some(i as i32)).unwrap();
+            }
+            let arr = builder.finish().unwrap();
+            columns.push(Column::new(
+                Arc::new(arr.into()),
+                Arc::new(Int32Type::new(false)),
+            ))
+        }
+        let chunk: DataChunk = DataChunk::builder()
+            .cardinality(length)
+            .columns(columns)
+            .build();
+        for row in chunk.iter() {
+            for i in 0..num_of_columns {
+                let val = row.value_at(i).unwrap();
+                assert_eq!(val.into_int32(), i as i32);
+            }
         }
     }
 }

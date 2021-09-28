@@ -200,6 +200,7 @@ macro_rules! scalar_impl_enum {
 
     /// `ScalarRefImpl` embeds all possible scalar references in the evaluation
     /// framework.
+    #[derive(Copy, Clone)]
     pub enum ScalarRefImpl<'scalar> {
       $( $variant_name($scalar_ref) ),*
     }
@@ -285,6 +286,16 @@ macro_rules! impl_convert {
             match self {
               Self::$variant_name(scalar) => scalar,
               other_scalar =>  panic!("cannot covert ScalarImpl::{} to concrete type", other_scalar.get_ident())
+            }
+          }
+        }
+
+        impl <'scalar> ScalarRefImpl<'scalar> {
+          // Note that this conversion consume self.
+          pub fn [<into_ $suffix_name>](self) -> $scalar_ref {
+            match self {
+              Self::$variant_name(inner) => inner,
+              other_scalar => panic!("cannot covert ScalarRefImpl::{} to concrete type", other_scalar.get_ident())
             }
           }
         }
