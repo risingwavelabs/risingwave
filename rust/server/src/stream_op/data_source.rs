@@ -7,40 +7,70 @@ use crate::array2::{ArrayBuilder, ArrayImpl, I64ArrayBuilder};
 use crate::types::Int64Type;
 use async_trait::async_trait;
 
+/// Mocked data has there columns:
+/// linear and repeat are self defined iterators
+/// and scalar is a constant.
+pub struct MockData<I, J> {
+    linear: I,
+    scalar: i64,
+    repeat: J,
+}
+
+impl<I, J> MockData<I, J> {
+    pub fn new(linear: I, scalar: i64, repeat: J) -> Self {
+        Self {
+            linear,
+            scalar,
+            repeat,
+        }
+    }
+}
+
+impl<I: Iterator<Item = i64>, J: Iterator<Item = i64>> Iterator for MockData<I, J> {
+    type Item = (i64, i64, i64);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let l = self.linear.next().unwrap();
+        let r = self.repeat.next().unwrap();
+        Some((l, self.scalar, r))
+    }
+}
 #[async_trait]
 pub trait DataSource: Send + Sync + 'static {
     async fn run(&self, output: Box<dyn Output>) -> Result<()>;
     async fn cancel(&self) -> Result<()>;
 }
 
-pub struct MockDataSourceCore<I: std::iter::Iterator<Item = i64>> {
-    inner: I,
+pub struct MockDataSourceCore<I, J> {
+    inner: MockData<I, J>,
     is_running: bool,
 }
 
-pub struct MockDataSource<I: std::iter::Iterator<Item = i64>> {
-    core: Mutex<MockDataSourceCore<I>>,
+pub struct MockDataSource<I: std::iter::Iterator<Item = i64>, J: std::iter::Iterator<Item = i64>> {
+    core: Mutex<MockDataSourceCore<I, J>>,
 }
 
-impl<I> MockDataSource<I>
+impl<I, J> MockDataSource<I, J>
 where
     I: std::iter::Iterator<Item = i64> + Send,
+    J: std::iter::Iterator<Item = i64> + Send,
 {
-    pub fn new(inner: I) -> Self {
+    pub fn new(inner: MockData<I, J>) -> Self {
         let core = MockDataSourceCore {
             inner,
             is_running: true,
         };
-        MockDataSource {
+        Self {
             core: Mutex::new(core),
         }
     }
 }
 
 #[async_trait]
-impl<I> DataSource for MockDataSource<I>
+impl<I, J> DataSource for MockDataSource<I, J>
 where
     I: std::iter::Iterator<Item = i64> + Sync + Send + 'static,
+    J: std::iter::Iterator<Item = i64> + Sync + Send + 'static,
 {
     async fn run(&self, mut output: Box<dyn Output>) -> Result<()> {
         const N: usize = 10;
@@ -51,25 +81,43 @@ where
             }
             let mut col1 = I64ArrayBuilder::new(N)?;
             let mut col2 = I64ArrayBuilder::new(N)?;
+            let mut col3 = I64ArrayBuilder::new(N)?;
+            let mut ops = Vec::with_capacity(N);
+            let op_cycle = vec![
+                Op::Insert,
+                Op::Delete,
+                Op::UpdateDelete,
+                Op::UpdateInsert,
+                Op::Delete,
+                Op::Insert,
+                Op::UpdateDelete,
+                Op::UpdateInsert,
+            ];
+            let mut total_input = 0;
             for _ in 0..N {
                 match core.inner.next() {
-                    Some(i) => {
-                        col1.append(Some(i))?;
-                        col2.append(Some(1))?;
+                    Some((i1, i2, i3)) => {
+                        col1.append(Some(i1))?;
+                        col2.append(Some(i2))?;
+                        col3.append(Some(i3))?;
+                        ops.push(op_cycle[total_input as usize % op_cycle.len()]);
+                        total_input += 1;
                     }
                     None => break,
                 }
             }
             let col1 = Arc::new(ArrayImpl::Int64(col1.finish()?));
             let col2 = Arc::new(ArrayImpl::Int64(col2.finish()?));
+            let col3 = Arc::new(ArrayImpl::Int64(col3.finish()?));
             let cols = vec![
                 Column::new(col1, Arc::new(Int64Type::new(false))),
                 Column::new(col2, Arc::new(Int64Type::new(false))),
+                Column::new(col3, Arc::new(Int64Type::new(false))),
             ];
             let chunk = StreamChunk {
                 cardinality: N,
                 visibility: None,
-                ops: vec![Op::Insert; N],
+                ops,
                 columns: cols,
             };
             output.collect(Message::Chunk(chunk)).await?;
@@ -114,7 +162,10 @@ mod test {
     #[tokio::test]
     async fn test_data_source_read() -> Result<()> {
         let start: i64 = 114514;
-        let source = Arc::new(MockDataSource::new(start..));
+        let scalar: i64 = 0;
+        let repeat: (i64, i64) = (-20, 20);
+        let mock_data = MockData::new(start.., scalar, (repeat.0..repeat.1).cycle());
+        let source = Arc::new(MockDataSource::new(mock_data));
         let data = Arc::new(Mutex::new(vec![]));
         let output = MockOutput { data: data.clone() };
         let source2 = source.clone();
@@ -132,7 +183,7 @@ mod test {
         let data = data.lock().await;
         let mut expected = start;
         for chunk in data.iter() {
-            assert!(chunk.columns.len() == 2);
+            assert!(chunk.columns.len() == 3);
             let arr = chunk.columns[0].array_ref();
             if let ArrayImpl::Int64(arr) = arr {
                 for i in 0..arr.len() {
@@ -147,7 +198,7 @@ mod test {
             if let ArrayImpl::Int64(arr) = arr {
                 for i in 0..arr.len() {
                     let v = arr.value_at(i).expect("arr[i] exists");
-                    assert_eq!(v, 1);
+                    assert_eq!(v, scalar);
                 }
             } else {
                 unreachable!()

@@ -97,6 +97,10 @@ impl Bitmap {
         })
     }
 
+    pub fn num_bits(&self) -> usize {
+        self.num_bits
+    }
+
     pub fn num_of_bytes(num_bits: usize) -> usize {
         let num_bytes = num_bits / 8 + if num_bits % 8 > 0 { 1 } else { 0 };
         let r = num_bytes % 64;

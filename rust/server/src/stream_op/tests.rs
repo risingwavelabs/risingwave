@@ -1,14 +1,16 @@
 use super::data_source::*;
-use super::{OperatorOutput, Output, ProjectionOperator};
+use super::{FilterOperator, OperatorOutput, Output, ProjectionOperator};
 use crate::array2::column::Column;
-use crate::array2::{Array, ArrayBuilder, ArrayImpl, I32ArrayBuilder, I64ArrayBuilder};
+use crate::array2::{Array, ArrayBuilder, I32ArrayBuilder, I64ArrayBuilder};
 use crate::buffer::Bitmap;
-use crate::expr::{AggKind, ArithmeticExpression, InputRefExpression};
+use crate::expr::{
+    AggKind, ArithmeticExpression, CompareExpression, CompareOperatorKind, InputRefExpression,
+};
 use crate::stream_op::{DataDispatcher, HashDataDispatcher, StreamChunk};
 use crate::stream_op::{
     HashGlobalAggregationOperator, HashLocalAggregationOperator, Op, UnaryStreamOperator,
 };
-use crate::types::{ArithmeticOperatorKind, Int32Type, Int64Type};
+use crate::types::{ArithmeticOperatorKind, BoolType, Int32Type, Int64Type};
 use crate::util::hash_util::CRC32FastBuilder;
 use std::hash::{BuildHasher, Hasher};
 use std::sync::Arc;
@@ -18,9 +20,12 @@ use tokio::sync::Mutex;
 #[tokio::test]
 async fn test_projection() {
     let start: i64 = 114514;
+    let scalar: i64 = 1;
+    let repeat: (i64, i64) = (-20, 20);
+    let mock_data = MockData::new(start.., scalar, (repeat.0..repeat.1).cycle());
     let data = Arc::new(Mutex::new(vec![]));
     let projection_out = Box::new(MockOutput::new(data.clone()));
-    let source = Arc::new(MockDataSource::new(start..));
+    let source = Arc::new(MockDataSource::new(mock_data));
     let source2 = source.clone();
 
     let left_type = Arc::new(Int64Type::new(false));
@@ -53,18 +58,79 @@ async fn test_projection() {
     let mut expected = start;
     for chunk in data.iter() {
         assert!(chunk.columns.len() == 1);
-        let arr = chunk.columns[0].array_ref();
-        if let ArrayImpl::Int64(arr) = arr {
-            for i in 0..arr.len() {
-                let v = arr.value_at(i).expect("arr[i] exists");
-                assert_eq!(v, expected + 1);
-                expected += 1;
-            }
-        } else {
-            unreachable!()
+        let arr = chunk.columns[0].array_ref().as_int64();
+        for i in 0..arr.len() {
+            let v = arr.value_at(i).expect("arr[i] exists");
+            assert_eq!(v, expected + scalar);
+            expected += 1;
         }
     }
     println!("{} items collected.", expected - start);
+}
+
+#[tokio::test]
+async fn test_filter() {
+    let start: i64 = -1024;
+    let scalar: i64 = 0;
+    let repeat: (i64, i64) = (-20, 20);
+    let mock_data = MockData::new(start.., scalar, (repeat.0..repeat.1).cycle());
+    let data = Arc::new(Mutex::new(vec![]));
+    let filter_out = Box::new(MockOutput::new(data.clone()));
+    let source = Arc::new(MockDataSource::new(mock_data));
+    let source2 = source.clone();
+
+    let left_type = Arc::new(Int64Type::new(false));
+    let left_expr = InputRefExpression::new(left_type, 1);
+    let right_type = Arc::new(Int64Type::new(false));
+    let right_expr = InputRefExpression::new(right_type, 2);
+    let test_expr = CompareExpression::new(
+        Arc::new(BoolType::new(false)),
+        CompareOperatorKind::GreaterThan,
+        Box::new(left_expr),
+        Box::new(right_expr),
+    );
+
+    let filter_op = Box::new(FilterOperator::new(filter_out, Box::new(test_expr)));
+    let source_out = Box::new(OperatorOutput::new(filter_op));
+
+    let handle = tokio::spawn(async move {
+        tokio::time::sleep(time::Duration::from_millis(10)).await;
+        source2.cancel().await.expect("run without error");
+    });
+
+    source.run(source_out).await.expect("run without error");
+
+    handle.await.unwrap();
+
+    let data = data.lock().await;
+    let mut items_collected = 0;
+    for chunk in data.iter() {
+        assert!(chunk.columns.len() == 3);
+        let ops = &chunk.ops;
+        let visibility = chunk.visibility.as_ref().unwrap();
+        let vis_len = visibility.num_bits();
+        let arr_scalar = chunk.columns[1].array_ref().as_int64();
+        let arr_repeat = chunk.columns[2].array_ref().as_int64();
+        assert_eq!(vis_len, ops.len());
+        assert_eq!(vis_len, chunk.columns[0].array_ref().len());
+        let mut bool_array = Vec::with_capacity(vis_len);
+        for bit in visibility.iter() {
+            bool_array.push(bit);
+        }
+        for i in 0..bool_array.len() {
+            let bit = bool_array[i];
+            assert_eq!(bit, arr_scalar.value_at(i) > arr_repeat.value_at(i));
+
+            if ops[i] == Op::UpdateDelete && bit {
+                assert!(i + 1 >= vis_len || !(ops[i + 1] == Op::UpdateInsert) || bool_array[i + 1]);
+            }
+            if ops[i] == Op::UpdateInsert && bit {
+                assert!(i == 0 || !(ops[i - 1] == Op::UpdateDelete) || bool_array[i - 1]);
+            }
+            items_collected += 1;
+        }
+    }
+    println!("{} items collected.", items_collected);
 }
 
 #[tokio::test]
