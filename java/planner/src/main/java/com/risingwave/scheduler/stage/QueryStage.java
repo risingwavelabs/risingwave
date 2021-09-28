@@ -2,8 +2,10 @@ package com.risingwave.scheduler.stage;
 
 import static java.util.Objects.requireNonNull;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.protobuf.Any;
+import com.risingwave.node.WorkerNode;
 import com.risingwave.planner.rel.physical.batch.RisingWaveBatchPhyRel;
 import com.risingwave.planner.rel.physical.batch.RwBatchExchange;
 import com.risingwave.proto.computenode.ExchangeNode;
@@ -21,37 +23,50 @@ public class QueryStage {
   private final StageId stageId;
   private final RisingWaveBatchPhyRel root;
   private final PartitionSchema partitionSchema;
-  private final int parallelism;
 
   // Augmented fields.
-  private final ImmutableMap<StageId, ScheduledStage> stages;
+  private final ImmutableMap<StageId, ScheduledStage> exchangeSources;
   private final Query query;
+  private final int parallelism;
+  private final ImmutableList<WorkerNode> workers;
 
-  public QueryStage(
-      StageId stageId,
-      RisingWaveBatchPhyRel root,
-      PartitionSchema partitionSchema,
-      int parallelism) {
+  public QueryStage(StageId stageId, RisingWaveBatchPhyRel root, PartitionSchema partitionSchema) {
     this.stageId = stageId;
     this.root = root;
     this.partitionSchema = partitionSchema;
-    this.parallelism = parallelism;
-    this.stages = null; // Not yet augmented.
+
+    // Not yet augmented.
+    this.exchangeSources = null;
     this.query = null;
+    this.parallelism = 0;
+    this.workers = null;
   }
 
-  private QueryStage(QueryStage other, Query query, ImmutableMap<StageId, ScheduledStage> stages) {
+  private QueryStage(
+      QueryStage other,
+      Query query,
+      ImmutableMap<StageId, ScheduledStage> exchangeSources,
+      ImmutableList<WorkerNode> workers) {
     this.stageId = other.stageId;
     this.root = other.root;
     this.partitionSchema = other.partitionSchema;
-    this.parallelism = other.parallelism;
-    this.stages = stages;
+    this.exchangeSources = exchangeSources;
     this.query = query;
+    this.parallelism = workers.size();
+    this.workers = workers;
   }
 
-  public QueryStage augmentScheduledInfo(
-      Query query, ImmutableMap<StageId, ScheduledStage> stages) {
-    return new QueryStage(this, query, stages);
+  /**
+   * Augments the stage with more information.
+   *
+   * @param exchangeSources the children of this stage.
+   * @param workers the compute-nodes assigned to execute this stage, one node per-task.
+   */
+  public QueryStage augmentInfo(
+      Query query,
+      ImmutableMap<StageId, ScheduledStage> exchangeSources,
+      ImmutableList<WorkerNode> workers) {
+    return new QueryStage(this, query, exchangeSources, workers);
   }
 
   public StageId getStageId() {
@@ -59,7 +74,13 @@ public class QueryStage {
   }
 
   public int getParallelism() {
+    assert parallelism != 0;
     return parallelism;
+  }
+
+  public ImmutableList<WorkerNode> getWorkers() {
+    requireNonNull(workers, "QueryStage must be augmented.");
+    return workers;
   }
 
   public RisingWaveBatchPhyRel getRoot() {
@@ -76,7 +97,7 @@ public class QueryStage {
   }
 
   private PlanNode rewriteIfExchange(RisingWaveBatchPhyRel relNode) {
-    requireNonNull(stages, "QueryStage must be augmented before serialization.");
+    requireNonNull(exchangeSources, "QueryStage must be augmented before serialization.");
     requireNonNull(query, "QueryStage must be augmented before serialization.");
 
     PlanNode node = relNode.serialize();
@@ -86,7 +107,7 @@ public class QueryStage {
       assert node.getChildrenCount() == 0;
       StageId stageId = query.getExchangeSource((RwBatchExchange) relNode);
       ScheduledStage stage =
-          Optional.ofNullable(stages.get(stageId))
+          Optional.ofNullable(exchangeSources.get(stageId))
               .orElseThrow(
                   () ->
                       new NoSuchElementException(

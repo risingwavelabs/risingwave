@@ -21,13 +21,16 @@ import javax.inject.Singleton;
 public class RemoteQueryManager implements QueryManager {
   private final TaskManager taskManager;
   private final ActorFactory actorFactory;
+  private final ResourceManager resourceManager;
 
   private final ConcurrentMap<QueryId, QueryExecution> queries = new ConcurrentHashMap<>();
 
   @Inject
-  public RemoteQueryManager(TaskManager taskManager, ActorFactory actorFactory) {
+  public RemoteQueryManager(
+      TaskManager taskManager, ResourceManager resourceManager, ActorFactory actorFactory) {
     this.taskManager = requireNonNull(taskManager, "taskManager");
     this.actorFactory = requireNonNull(actorFactory, "actorFactory");
+    this.resourceManager = requireNonNull(resourceManager, "resourceManager");
   }
 
   @Override
@@ -42,7 +45,7 @@ public class RemoteQueryManager implements QueryManager {
     Query query = PlanFragmenter.planDistribution(plan);
 
     QueryExecution queryExecution =
-        new RemoteQueryExecution(query, actorFactory, taskManager, resultFuture);
+        new RemoteQueryExecution(query, actorFactory, taskManager, resourceManager, resultFuture);
     queryExecution.start();
     queries.put(query.getQueryId(), queryExecution);
   }

@@ -6,6 +6,7 @@ import akka.actor.typed.ActorRef;
 import akka.actor.typed.javadsl.Behaviors;
 import com.risingwave.scheduler.EventListener;
 import com.risingwave.scheduler.QueryResultLocation;
+import com.risingwave.scheduler.ResourceManager;
 import com.risingwave.scheduler.actor.ActorFactory;
 import com.risingwave.scheduler.stage.StageEvent;
 import com.risingwave.scheduler.task.TaskManager;
@@ -19,6 +20,7 @@ public class RemoteQueryExecution implements QueryExecution, EventListener<Stage
       Query query,
       ActorFactory actorFactory,
       TaskManager taskManager,
+      ResourceManager resourceManager,
       CompletableFuture<QueryResultLocation> resultFuture) {
     this.query = requireNonNull(query, "query");
     requireNonNull(resultFuture, "notifier");
@@ -28,7 +30,13 @@ public class RemoteQueryExecution implements QueryExecution, EventListener<Stage
             Behaviors.setup(
                 ctx ->
                     new QueryExecutionActor(
-                        ctx, query, taskManager, this, resultFuture, actorFactory)),
+                        ctx,
+                        query,
+                        taskManager,
+                        this,
+                        resultFuture,
+                        actorFactory,
+                        resourceManager)),
             String.format("QueryExecutionActor:%s", query.getQueryId()));
   }
 

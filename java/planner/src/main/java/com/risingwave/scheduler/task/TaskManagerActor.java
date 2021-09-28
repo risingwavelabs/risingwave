@@ -8,7 +8,6 @@ import akka.actor.typed.javadsl.AbstractBehavior;
 import akka.actor.typed.javadsl.ActorContext;
 import akka.actor.typed.javadsl.Receive;
 import com.risingwave.node.WorkerNode;
-import com.risingwave.node.WorkerNodeManager;
 import com.risingwave.proto.common.Status;
 import com.risingwave.proto.computenode.CreateTaskRequest;
 import com.risingwave.proto.computenode.CreateTaskResponse;
@@ -19,18 +18,14 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 class TaskManagerActor extends AbstractBehavior<TaskManagerEvent> {
-  private final WorkerNodeManager nodeManager;
   private final ComputeClientManager clientManager;
 
   private final ConcurrentMap<TaskId, QueryTaskExecution> taskExecutions =
       new ConcurrentHashMap<>();
 
   public TaskManagerActor(
-      ActorContext<TaskManagerEvent> context,
-      WorkerNodeManager nodeManager,
-      ComputeClientManager clientManager) {
+      ActorContext<TaskManagerEvent> context, ComputeClientManager clientManager) {
     super(context);
-    this.nodeManager = requireNonNull(nodeManager, "nodeManager");
     this.clientManager = requireNonNull(clientManager, "clientManager");
   }
 
@@ -45,7 +40,7 @@ class TaskManagerActor extends AbstractBehavior<TaskManagerEvent> {
     QueryTaskExecution taskExecution = createTaskExecution(event);
 
     TaskId taskId = event.getTask().getTaskId();
-    WorkerNode node = nodeManager.nextRandom();
+    WorkerNode node = event.getTask().getQueryStage().getWorkers().get(taskId.getId());
     CreateTaskResponse response = sendCreateTaskRequest(event, node);
 
     if (response.getStatus().getCode() != Status.Code.OK) {

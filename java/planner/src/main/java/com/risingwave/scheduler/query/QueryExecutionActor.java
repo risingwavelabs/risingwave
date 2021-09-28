@@ -15,6 +15,7 @@ import com.risingwave.common.exception.PgException;
 import com.risingwave.node.WorkerNode;
 import com.risingwave.scheduler.EventListener;
 import com.risingwave.scheduler.QueryResultLocation;
+import com.risingwave.scheduler.ResourceManager;
 import com.risingwave.scheduler.actor.ActorFactory;
 import com.risingwave.scheduler.stage.QueryStage;
 import com.risingwave.scheduler.stage.RemoteStageExecution;
@@ -42,6 +43,7 @@ public class QueryExecutionActor extends AbstractBehavior<QueryExecutionEvent> {
   private final EventListener<StageEvent> stageEventListener;
   private final CompletableFuture<QueryResultLocation> resultFuture;
   private final ActorFactory actorFactory;
+  private final ResourceManager resourceManager;
 
   /** Only modified by message handler. */
   private final ConcurrentMap<StageId, StageExecution> stageExecutions = new ConcurrentHashMap<>();
@@ -54,13 +56,15 @@ public class QueryExecutionActor extends AbstractBehavior<QueryExecutionEvent> {
       TaskManager taskManager,
       EventListener<StageEvent> stageEventListener,
       CompletableFuture<QueryResultLocation> resultFuture,
-      ActorFactory actorFactory) {
+      ActorFactory actorFactory,
+      ResourceManager resourceManager) {
     super(context);
     this.query = requireNonNull(query, "query");
     this.taskManager = requireNonNull(taskManager, "taskManager");
     this.stageEventListener = requireNonNull(stageEventListener, "stageEventListener");
     this.resultFuture = requireNonNull(resultFuture, "resultFuture");
     this.actorFactory = requireNonNull(actorFactory, "actorFactory");
+    this.resourceManager = requireNonNull(resourceManager, "resourceManager");
   }
 
   @Override
@@ -114,8 +118,7 @@ public class QueryExecutionActor extends AbstractBehavior<QueryExecutionEvent> {
   }
 
   private StageExecution createOrGetStageExecution(StageId stageId) {
-    QueryStage augmentedStage =
-        query.getQueryStageChecked(stageId).augmentScheduledInfo(query, getStageChildren(stageId));
+    QueryStage augmentedStage = resourceManager.schedule(query, stageId, getStageChildren(stageId));
     return stageExecutions.computeIfAbsent(
         stageId,
         id ->

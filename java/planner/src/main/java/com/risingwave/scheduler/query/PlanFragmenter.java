@@ -56,7 +56,7 @@ public class PlanFragmenter {
 
   private QueryStage newQueryStage(RisingWaveBatchPhyRel node) {
     StageId stageId = getNextStageId();
-    var stage = new QueryStage(stageId, node, new SinglePartitionSchema(), 1);
+    var stage = new QueryStage(stageId, node, new SinglePartitionSchema());
     graphBuilder.addNode(stage);
     return stage;
   }
