@@ -111,8 +111,11 @@ impl Bitmap {
         }
     }
 
+    /// Returns the number of valid bits in the bitmap,
+    /// also referred to its 'length'.
+    #[inline]
     pub fn len(&self) -> usize {
-        self.num_of_buffer_bytes() << 3
+        self.num_bits
     }
 
     fn num_of_buffer_bytes(&self) -> usize {
