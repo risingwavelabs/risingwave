@@ -93,6 +93,11 @@ message OrderByNode {
     repeated risingwave.expr.proto.ExprNode orders = 2;
 }
 
+message TopNNode {
+    OrderByNode order_by = 1;
+    uint32 limit = 2;
+}
+
 message CreateStreamNode {
     enum RowFormatType {
       JSON = 0;
@@ -153,6 +158,7 @@ message PlanNode {
         NESTED_LOOP_JOIN = 13;
         CREATE_STREAM = 14;
         STREAM_SCAN = 15;
+        TOP_N = 16;
     }
     PlanNodeType node_type = 1;
     google.protobuf.Any body = 2;

@@ -11,6 +11,9 @@ mod stream_scan;
 use filter::*;
 use insert_values::*;
 use order_by::*;
+mod top_n;
+use top_n::*;
+
 use projection::*;
 use risingwave_proto::plan::{PlanNode, PlanNode_PlanNodeType};
 use sort_agg::*;
@@ -108,7 +111,8 @@ impl<'a> ExecutorBuilder<'a> {
           PlanNode_PlanNodeType::SIMPLE_AGG => SortAggExecutor,
           PlanNode_PlanNodeType::ORDER_BY => OrderByExecutor,
           PlanNode_PlanNodeType::CREATE_STREAM => CreateStreamExecutor,
-          PlanNode_PlanNodeType::STREAM_SCAN => StreamScanExecutor
+          PlanNode_PlanNodeType::STREAM_SCAN => StreamScanExecutor,
+          PlanNode_PlanNodeType::TOP_N => TopNExecutor
         }
     }
 

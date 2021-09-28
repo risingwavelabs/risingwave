@@ -146,7 +146,7 @@ impl DataChunk {
     /// When the total cardinality of all the chunks is not evenly divided by the `each_size_limit`,
     /// the last new chunk will be the remainder.
     /// TODO: All data are copied twice now. We could save this optimization for the future.
-    pub fn rechunk(chunks: &[DataChunk], each_size_limit: usize) -> Result<Vec<DataChunk>> {
+    pub fn rechunk(chunks: &[DataChunkRef], each_size_limit: usize) -> Result<Vec<DataChunk>> {
         assert!(each_size_limit > 0);
         if chunks.is_empty() {
             return Ok(Vec::new());
@@ -275,7 +275,7 @@ mod tests {
                     Arc::new(Int32Type::new(false)),
                 )])
                 .build();
-            chunks.push(chunk);
+            chunks.push(Arc::new(chunk));
         }
 
         let total_card = num_chunks * chunk_size;

@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
+#![feature(binary_heap_drain_sorted)]
 
 extern crate anyhow;
 extern crate backtrace;
