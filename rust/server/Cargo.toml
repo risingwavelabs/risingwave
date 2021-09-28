@@ -16,7 +16,6 @@ crc32fast = "1"
 ctrlc = {version = "3.0", features = ["termination"]}
 futures = "0.3"
 grpcio = "0.9"
-itertools = "0.10"
 log = "0.4"
 log4rs = "1"
 num-traits = "0.2"
@@ -39,9 +38,12 @@ twox-hash = "1"
 typed-builder = "0.9"
 rdkafka = { version = "0.25", features = ["cmake-build"] }
 lazy_static = "1.4.0"
+either = "1"
+itertools = "0.10"
 
 [dev-dependencies]
 approx = "0.5"
+rand = "0.8"
 
 [[bin]]
 name = "compute-node"

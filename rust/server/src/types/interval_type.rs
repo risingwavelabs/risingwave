@@ -8,7 +8,7 @@ use super::*;
 /// One month may contain 28/31 days. One day may contain 23/25 hours.
 /// This internals is learned from PG:
 /// https://www.postgresql.org/docs/9.1/datatype-datetime.html#:~:text=field%20is%20negative.-,Internally,-interval%20values%20are
-#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Hash, Default)]
 pub struct IntervalUnit {
     months: i32,
     days: i32,

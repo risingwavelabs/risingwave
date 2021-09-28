@@ -8,6 +8,7 @@ extern crate futures;
 extern crate grpcio;
 #[macro_use]
 extern crate log;
+extern crate either;
 extern crate log4rs;
 extern crate pb_convert;
 extern crate protobuf;
@@ -35,6 +36,8 @@ mod storage;
 mod stream;
 mod stream_op;
 mod task;
+#[cfg(test)]
+mod test_utils;
 mod types;
 mod vector_op;
 

@@ -1,11 +1,14 @@
 use crate::array2::column::Column;
 
+use crate::array2::ArrayImpl;
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
-use crate::error::{ErrorCode, Result};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::util::hash_util::finalize_hashers;
+use itertools::Itertools;
 use protobuf::Message;
 use risingwave_proto::data::{Column as ColumnProto, DataChunk as DataChunkProto};
+use std::convert::TryFrom;
 use std::hash::BuildHasher;
 use std::sync::Arc;
 use typed_builder::TypedBuilder;
@@ -207,6 +210,29 @@ impl DataChunk {
             array.hash_vec(&mut states);
         }
         Ok(finalize_hashers(&mut states))
+    }
+}
+
+impl TryFrom<Vec<Column>> for DataChunk {
+    type Error = RwError;
+
+    fn try_from(columns: Vec<Column>) -> Result<Self> {
+        ensure!(!columns.is_empty(), "Columns can't be empty!");
+        ensure!(
+            columns
+                .iter()
+                .map(Column::array_ref)
+                .map(ArrayImpl::len)
+                .all_equal(),
+            "Not all columns length same!"
+        );
+
+        let cardinality = columns[0].array_ref().len();
+        Ok(Self {
+            columns,
+            cardinality,
+            visibility: None,
+        })
     }
 }
 

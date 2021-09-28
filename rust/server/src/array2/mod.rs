@@ -65,8 +65,17 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
         value: Option<<<Self as ArrayBuilder>::ArrayType as Array>::RefItem<'_>>,
     ) -> Result<()>;
 
+    fn append_null(&mut self) -> Result<()> {
+        self.append(None)
+    }
+
     /// Append an array to builder.
     fn append_array(&mut self, other: &Self::ArrayType) -> Result<()>;
+
+    /// Append an element in another array into builder.
+    fn append_array_element(&mut self, other: &Self::ArrayType, idx: usize) -> Result<()> {
+        self.append(other.value_at(idx))
+    }
 
     /// Finish build and return a new array.
     fn finish(self) -> Result<Self::ArrayType>;
@@ -132,6 +141,11 @@ pub trait Array: Send + Sync + Sized + 'static + Into<ArrayImpl> {
             self.hash_at(idx, state);
         }
     }
+
+    fn scalar_value_at(&self, row: usize) -> Option<ScalarImpl> {
+        self.value_at(row)
+            .map(|item| item.to_owned_scalar().to_scalar_value())
+    }
 }
 
 /// Implement `compact` on array, which removes element according to `visibility`.
@@ -159,6 +173,7 @@ impl<A: Array> CompactableArray for A {
 ///
 /// There are typically two ways of using this macro, pass token or pass no token.
 /// See the following implementations for example.
+#[macro_export]
 macro_rules! for_all_variants {
   ($macro:tt $(, $x:tt)*) => {
     $macro! {
@@ -294,6 +309,12 @@ macro_rules! impl_array_builder {
         }
       }
 
+      pub fn append_array_element(&mut self, other: &ArrayImpl, idx: usize) -> Result<()> {
+        match self {
+          $( Self::$variant_name(inner) => inner.append_array_element(other.into(), idx), )*
+        }
+      }
+
       pub fn finish(self) -> Result<ArrayImpl> {
         match self {
           $( Self::$variant_name(inner) => Ok(inner.finish()?.into()), )*
@@ -381,6 +402,12 @@ macro_rules! impl_array {
             });
             builder.finish().unwrap().into()
           }, )*
+        }
+      }
+
+      pub fn scalar_value_at(&self, row_id: usize) -> Option<ScalarImpl> {
+        match self {
+          $( Self::$variant_name(inner) => inner.scalar_value_at(row_id), )*
         }
       }
 

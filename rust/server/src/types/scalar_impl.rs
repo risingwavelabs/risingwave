@@ -19,6 +19,10 @@ macro_rules! impl_all_native_scalar {
         fn as_scalar_ref(&self) -> Self {
           *self
         }
+
+        fn to_scalar_value(self) -> ScalarImpl {
+          ScalarImpl::$variant_name(self)
+        }
       }
 
       impl<'scalar> ScalarRef<'scalar> for $scalar_type {
@@ -41,6 +45,10 @@ impl Scalar for String {
 
     fn as_scalar_ref(&self) -> &str {
         self.as_str()
+    }
+
+    fn to_scalar_value(self) -> ScalarImpl {
+        ScalarImpl::UTF8(self)
     }
 }
 
@@ -79,6 +87,10 @@ impl Scalar for bool {
     fn as_scalar_ref(&self) -> bool {
         *self
     }
+
+    fn to_scalar_value(self) -> ScalarImpl {
+        ScalarImpl::Bool(self)
+    }
 }
 
 /// Implement `Scalar` and `ScalarRef` for `String`.
@@ -98,6 +110,10 @@ impl Scalar for Decimal {
     fn as_scalar_ref(&self) -> Decimal {
         *self
     }
+
+    fn to_scalar_value(self) -> ScalarImpl {
+        ScalarImpl::Decimal(self)
+    }
 }
 
 /// Implement `Scalar` for `Decimal`.
@@ -115,6 +131,10 @@ impl Scalar for IntervalUnit {
 
     fn as_scalar_ref(&self) -> IntervalUnit {
         *self
+    }
+
+    fn to_scalar_value(self) -> ScalarImpl {
+        ScalarImpl::Interval(self)
     }
 }
 
