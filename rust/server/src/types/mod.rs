@@ -209,6 +209,8 @@ macro_rules! scalar_impl_enum {
 
 for_all_scalar_variants! { scalar_impl_enum }
 
+pub type Datum = Option<ScalarImpl>;
+
 // FIXME: `f32` is not `Eq`, and this is not safe. Consider using `ordered_float` in our project.
 impl Eq for ScalarImpl {}
 

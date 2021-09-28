@@ -55,7 +55,7 @@ macro_rules! array_impl_literal_append {
 
 pub struct LiteralExpression {
     return_type: DataTypeRef,
-    literal: Option<ScalarImpl>,
+    literal: crate::types::Datum,
 }
 
 impl Expression for LiteralExpression {
@@ -114,7 +114,7 @@ fn literal_type_match(return_type: DataTypeKind, literal: Option<&ScalarImpl>) -
 }
 
 impl LiteralExpression {
-    pub fn new(return_type: DataTypeRef, literal: Option<ScalarImpl>) -> Self {
+    pub fn new(return_type: DataTypeRef, literal: crate::types::Datum) -> Self {
         assert!(literal_type_match(
             return_type.deref().data_type_kind(),
             literal.as_ref()

@@ -11,13 +11,12 @@ use crate::error::{ErrorCode, Result};
 use crate::expr::AggKind;
 use crate::impl_consume_barrier_default;
 use crate::stream_op::{StreamingFloatSumAgg, StreamingSumAgg};
-use crate::types::{DataType, DataTypeKind};
-use crate::types::{DataTypeRef, ScalarImpl};
+use crate::types::{DataType, DataTypeKind, DataTypeRef, Datum};
 
 use async_trait::async_trait;
 use std::collections::HashMap;
 
-pub type HashKey = Option<ScalarImpl>;
+pub type HashKey = Datum;
 
 pub fn create_streaming_local_agg_state(
     input_type: &dyn DataType,

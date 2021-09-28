@@ -363,8 +363,8 @@ mod tests {
     };
     use crate::test_utils::rand_array::seed_rand_array_ref;
     use crate::types::{
-        BoolType, DataTypeKind, DecimalType, Float32Type, Float64Type, Int16Type, Int32Type,
-        Int64Type, ScalarImpl, StringType,
+        BoolType, DataTypeKind, Datum, DecimalType, Float32Type, Float64Type, Int16Type, Int32Type,
+        Int64Type, StringType,
     };
     use std::collections::HashMap;
     use std::convert::TryFrom;
@@ -372,7 +372,7 @@ mod tests {
     use std::sync::Arc;
 
     #[derive(Hash, PartialEq, Eq)]
-    struct Row(Vec<Option<ScalarImpl>>);
+    struct Row(Vec<Datum>);
 
     fn generate_random_data_chunk() -> DataChunk {
         let capacity = 128;
@@ -454,7 +454,7 @@ mod tests {
                             .unwrap_or_else(|_| panic!("Column not found: {}", *col_idx))
                     })
                     .map(|col| col.array_ref().scalar_value_at(row_idx))
-                    .collect::<Vec<Option<ScalarImpl>>>();
+                    .collect::<Vec<Datum>>();
 
                 normal_hash_map.entry(Row(row)).or_default().push(row_idx);
             }

@@ -14,7 +14,7 @@ mod value_reader;
 
 use crate::buffer::Bitmap;
 use crate::error::Result;
-use crate::types::{option_to_owned_scalar, Scalar, ScalarImpl, ScalarRef, ScalarRefImpl};
+use crate::types::{option_to_owned_scalar, Datum, Scalar, ScalarImpl, ScalarRef, ScalarRefImpl};
 pub use bool_array::{BoolArray, BoolArrayBuilder};
 pub use data_chunk::{DataChunk, DataChunkRef};
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
@@ -143,7 +143,7 @@ pub trait Array: Send + Sync + Sized + 'static + Into<ArrayImpl> {
         }
     }
 
-    fn scalar_value_at(&self, row: usize) -> Option<ScalarImpl> {
+    fn scalar_value_at(&self, row: usize) -> Datum {
         self.value_at(row)
             .map(|item| item.to_owned_scalar().to_scalar_value())
     }
@@ -406,17 +406,17 @@ macro_rules! impl_array {
         }
       }
 
-      pub fn scalar_value_at(&self, row_id: usize) -> Option<ScalarImpl> {
+      pub fn scalar_value_at(&self, row_id: usize) -> Datum {
         match self {
           $( Self::$variant_name(inner) => inner.scalar_value_at(row_id), )*
         }
       }
 
-      pub fn insert_key(&self, keys: &mut Vec<Vec<Option<ScalarImpl>>>) {
+      pub fn insert_key(&self, keys: &mut Vec<Vec<Datum>>) {
         match self {
           $( Self::$variant_name(inner) => {
             for (val, keys_for_one_row) in inner.iter().zip(keys.iter_mut()) {
-              let op: Option<ScalarImpl> = val.map(|v| v.to_owned_scalar().into());
+              let op: Datum = val.map(|v| v.to_owned_scalar().into());
               keys_for_one_row.push(op);
             }
           }, )*
@@ -429,7 +429,7 @@ macro_rules! impl_array {
         }
       }
 
-      pub fn value_at_owned(&self, idx: usize) -> Option<ScalarImpl> {
+      pub fn value_at_owned(&self, idx: usize) -> Datum {
         match self {
           $( Self::$variant_name(inner) => option_to_owned_scalar(&inner.value_at(idx)).map(ScalarImpl::$variant_name), )*
         }

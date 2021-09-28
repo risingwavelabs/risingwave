@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::types::ScalarImpl;
+use crate::types::Datum;
 use std::{
     cmp::Ordering,
     collections::BTreeMap,
@@ -10,7 +10,7 @@ use itertools::Itertools;
 use smallvec::SmallVec;
 
 #[derive(Clone, Debug, Default)]
-pub struct Row(pub SmallVec<[Option<ScalarImpl>; 5]>);
+pub struct Row(pub SmallVec<[Datum; 5]>);
 
 impl PartialEq for Row {
     fn eq(&self, other: &Self) -> bool {
