@@ -2,7 +2,7 @@ use crate::array2::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk};
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::expr::Expression;
-use crate::types::{build_from_proto, DataType, DataTypeKind, DataTypeRef, ScalarImpl};
+use crate::types::{build_from_proto, DataType, DataTypeKind, DataTypeRef, Datum, ScalarImpl};
 use std::convert::TryFrom;
 use std::convert::TryInto;
 
@@ -11,31 +11,12 @@ use protobuf::Message;
 use risingwave_proto::data::DataType_TypeName;
 use risingwave_proto::expr::{ConstantValue, ExprNode, ExprNode_ExprNodeType};
 
-use crate::types::IntervalUnit;
 use rust_decimal::Decimal;
 use std::ops::Deref;
 use std::sync::Arc;
 
 use crate::types::Scalar;
 use std::str::FromStr;
-// FIXME: delete it with array1
-#[derive(Clone, Debug)]
-pub enum Datum {
-    Bool(bool),
-    Int8(i8),
-    Int16(i16),
-    Int32(i32),
-    Int64(i64),
-    Float32(f32),
-    Float64(f64),
-    Decimal(Decimal),
-    UInt8(u8),
-    UInt16(u16),
-    UInt32(u32),
-    UInt64(u64),
-    UTF8String(String),
-    Interval(IntervalUnit),
-}
 
 macro_rules! array_impl_literal_append {
   ([$arr_builder: ident, $literal: ident, $cardinality: ident], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
@@ -55,7 +36,7 @@ macro_rules! array_impl_literal_append {
 
 pub struct LiteralExpression {
     return_type: DataTypeRef,
-    literal: crate::types::Datum,
+    literal: Datum,
 }
 
 impl Expression for LiteralExpression {
@@ -114,7 +95,7 @@ fn literal_type_match(return_type: DataTypeKind, literal: Option<&ScalarImpl>) -
 }
 
 impl LiteralExpression {
-    pub fn new(return_type: DataTypeRef, literal: crate::types::Datum) -> Self {
+    pub fn new(return_type: DataTypeRef, literal: Datum) -> Self {
         assert!(literal_type_match(
             return_type.deref().data_type_kind(),
             literal.as_ref()
