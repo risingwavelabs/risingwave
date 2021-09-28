@@ -218,12 +218,12 @@ impl PartialEq for Bitmap {
     fn eq(&self, other: &Self) -> bool {
         // buffer equality considers capacity, but here we want to only compare
         // actual data contents
-        let self_len = self.bits.len();
-        let other_len = other.bits.len();
-        if self_len != other_len {
+        if self.num_bits != other.num_bits {
             return false;
         }
-        self.bits.as_slice()[..self_len] == other.bits.as_slice()[..self_len]
+        // assume unset bits are always 0, and num_bits is always consistent with bits length
+        let length = (self.num_bits + 7) / 8;
+        self.bits.as_slice()[..length] == other.bits.as_slice()[..length]
     }
 }
 
@@ -260,6 +260,7 @@ impl<'a> std::iter::Iterator for BitmapIter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use itertools::Itertools;
     use pb_construct::make_proto;
     use risingwave_proto::data::Buffer as BufferProto;
 
@@ -329,5 +330,32 @@ mod tests {
         let bitmap = Bitmap::from_protobuf(&buf).unwrap();
         let actual_bytes: Vec<u8> = bitmap.iter().map(|b| b as u8).collect();
         assert_eq!(actual_bytes, bitmap_bytes);
+    }
+
+    #[test]
+    fn test_bitmap_eq() {
+        let b1 = Bitmap::from_vec(vec![false; 3]).unwrap();
+        let b2 = Bitmap::from_vec(vec![false; 5]).unwrap();
+        assert!(b1 != b2);
+
+        let b1 = Bitmap::from_vec(
+            [true, false]
+                .iter()
+                .cycle()
+                .cloned()
+                .take(10000)
+                .collect_vec(),
+        )
+        .unwrap();
+        let b2 = Bitmap::from_vec(
+            [true, false]
+                .iter()
+                .cycle()
+                .cloned()
+                .take(10000)
+                .collect_vec(),
+        )
+        .unwrap();
+        assert!(b1 == b2);
     }
 }
