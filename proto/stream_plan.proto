@@ -19,6 +19,11 @@ message FilterNode {
   risingwave.expr.proto.ExprNode search_condition = 1;
 }
 
+message MemTableMaterializedViewNode {
+  int32 memtable_id = 1;
+  repeated int32 pk_idx = 2;
+}
+
 message LocalSimpleAggNode {
   risingwave.expr.proto.ExprNode.ExprNodeType aggregation_type = 1;
   risingwave.executor.proto.DataType input_type = 2;
@@ -50,7 +55,7 @@ message StreamNode {
     LOCAL_HASH_AGG = 6;
     GLOBAL_HASH_AGG = 7;
     HASH_JOIN = 8;
-    MATERIALIZED_VIEW = 9;
+    MEMTABLE_MATERIALIZED_VIEW = 9;
   }
   StreamNodeType node_type = 1;
   // Some nodes we can reuse plan nodes from plan.proto.
@@ -70,6 +75,7 @@ message Dispatcher {
     ROUND_ROBIN = 1;
     HASH = 2;
     BROADCAST = 3;
+    BLACKHOLE = 4;
   }
   DispatcherType type = 1;
   int32 column_idx = 2;

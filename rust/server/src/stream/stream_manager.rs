@@ -4,6 +4,7 @@ use std::sync::Mutex;
 use crate::error::{ErrorCode, Result};
 use crate::expr::{build_from_proto as build_expr_from_proto, AggKind};
 use crate::protobuf::Message as _;
+use crate::storage::MemRowTable;
 use crate::stream_op::*;
 use crate::types::build_from_proto as build_type_from_proto;
 use futures::channel::mpsc::{channel, Receiver, Sender};
@@ -138,7 +139,11 @@ impl StreamManagerCore {
                     vec![dispatcher.get_column_idx() as usize],
                 )))
             }
-            BROADCAST => Box::new(Dispatcher::new(BroadcastDispatcher::new(outputs))),
+            BROADCAST => {
+                assert!(!outputs.is_empty());
+                Box::new(Dispatcher::new(BroadcastDispatcher::new(outputs)))
+            }
+            BLACKHOLE => Box::new(Dispatcher::new(BlackHoleDispatcher::new())),
         }
     }
 
@@ -213,6 +218,21 @@ impl StreamManagerCore {
             // TODO: get configuration body of each operator
             LOCAL_HASH_AGG => todo!(),
             GLOBAL_HASH_AGG => todo!(),
+            MEMTABLE_MATERIALIZED_VIEW => {
+                let mtmv = stream_plan::MemTableMaterializedViewNode::parse_from_bytes(
+                    node.get_body().get_value(),
+                )
+                .map_err(ErrorCode::ProtobufError)?;
+
+                // TODO: assign a memtable from manager
+                let memtable = MemRowTable::default();
+
+                Box::new(MemTableMVOperator::new(
+                    downstream_node,
+                    std::sync::Arc::new(memtable),
+                    mtmv.get_pk_idx().iter().map(|x| *x as usize).collect(),
+                ))
+            }
             others => todo!("unsupported StreamNodeType: {:?}", others),
         };
         Ok(operator)
