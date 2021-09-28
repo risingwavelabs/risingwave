@@ -1,20 +1,14 @@
 use super::Array;
 use std::iter::Iterator;
-use std::marker::PhantomData;
 
 pub struct ArrayIterator<'a, A: Array> {
     data: &'a A,
     pos: usize,
-    _phantom: PhantomData<&'a usize>,
 }
 
 impl<'a, A: Array> ArrayIterator<'a, A> {
     pub fn new(data: &'a A) -> Self {
-        Self {
-            data,
-            pos: 0,
-            _phantom: PhantomData,
-        }
+        Self { data, pos: 0 }
     }
 }
 
