@@ -12,6 +12,7 @@ mod primitive_array;
 mod utf8_array;
 mod value_reader;
 
+use crate::array2::iterator::ArrayImplIterator;
 use crate::buffer::Bitmap;
 use crate::error::Result;
 use crate::types::{option_to_owned_scalar, Datum, Scalar, ScalarImpl, ScalarRef, ScalarRefImpl};
@@ -439,6 +440,12 @@ macro_rules! impl_array {
 }
 
 for_all_variants! { impl_array }
+
+impl ArrayImpl {
+    pub fn iter(&self) -> ArrayImplIterator<'_> {
+        ArrayImplIterator::new(self)
+    }
+}
 
 pub type ArrayRef = Arc<ArrayImpl>;
 

@@ -1,6 +1,6 @@
 use crate::array2::column::Column;
 
-use crate::array2::data_chunk_iter::{DataChunkIter, DataTuple};
+use crate::array2::data_chunk_iter::{DataChunkIter, RowRef};
 use crate::array2::ArrayImpl;
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
@@ -214,16 +214,21 @@ impl DataChunk {
 
     /// Iterate for each row. The iterator will return all tuples (include visible and invisible).
     pub fn iter(&self) -> DataChunkIter<'_> {
-        DataChunkIter::new(self)
+        let array_iters = self
+            .columns
+            .iter()
+            .map(|column| column.array_ref().iter())
+            .collect();
+        DataChunkIter::new(array_iters)
     }
 
     // The overflow should be checked by up layer.
-    pub fn row_at(&self, pos: usize) -> DataTuple<'_> {
+    pub fn row_at(&self, pos: usize) -> RowRef<'_> {
         let mut row = Vec::with_capacity(self.columns.len());
         for column in &self.columns {
             row.push(column.array_ref().value_at(pos));
         }
-        DataTuple::new(row)
+        RowRef::new(row)
     }
 }
 

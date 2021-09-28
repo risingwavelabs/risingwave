@@ -1,14 +1,15 @@
-use crate::array2::DataChunk;
+use crate::array2::iterator::ArrayImplIterator;
 use crate::types::ScalarRefImpl;
 
 pub struct DataChunkIter<'a> {
-    chunk: &'a DataChunk,
-    pos: usize,
+    array_iters: Vec<ArrayImplIterator<'a>>,
 }
 
-pub struct DataTuple<'a>(Vec<Option<ScalarRefImpl<'a>>>);
+// TODO: Consider merge with Row in storage. It is end with Ref because it do not own data
+// and avoid conflict with Row.
+pub struct RowRef<'a>(Vec<Option<ScalarRefImpl<'a>>>);
 
-impl<'a> DataTuple<'a> {
+impl<'a> RowRef<'a> {
     pub fn new(values: Vec<Option<ScalarRefImpl<'a>>>) -> Self {
         Self(values)
     }
@@ -17,22 +18,25 @@ impl<'a> DataTuple<'a> {
         self.0[pos]
     }
 }
+
 impl<'a> Iterator for DataChunkIter<'a> {
-    type Item = DataTuple<'a>;
+    type Item = RowRef<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.pos >= self.chunk.cardinality() {
-            None
-        } else {
-            let item = self.chunk.row_at(self.pos);
-            self.pos += 1;
-            Some(item)
+        let mut ret = Vec::with_capacity(self.array_iters.len());
+        for iter in self.array_iters.iter_mut() {
+            // Once one column iter return None => the end reached
+            match iter.next() {
+                Some(val) => ret.push(val),
+                None => return None,
+            }
         }
+        return Some(RowRef(ret));
     }
 }
 
 impl<'a> DataChunkIter<'a> {
-    pub fn new(chunk: &'a DataChunk) -> Self {
-        DataChunkIter { chunk, pos: 0 }
+    pub fn new(array_iters: Vec<ArrayImplIterator<'a>>) -> Self {
+        DataChunkIter { array_iters }
     }
 }
