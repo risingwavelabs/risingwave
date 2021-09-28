@@ -58,6 +58,7 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
   private static final ImmutableMap<String, ExprNode.ExprNodeType> STRING_TO_FUNC_MAPPING =
       ImmutableMap.<String, ExprNode.ExprNodeType>builder()
           .put("SUBSTRING", ExprNode.ExprNodeType.SUBSTR)
+          .put("LENGTH", ExprNode.ExprNodeType.LENGTH)
           .build();
 
   public RexToProtoSerializer() {

@@ -3,6 +3,7 @@ use crate::array2::{I32Array, I64Array, UTF8Array};
 use crate::expr::BoxedExpression;
 use crate::types::{DataTypeKind, DataTypeRef};
 use crate::vector_op::cast;
+use crate::vector_op::length::length_default;
 use risingwave_proto::expr::ExprNode_ExprNodeType;
 use std::marker::PhantomData;
 
@@ -54,4 +55,13 @@ pub fn new_unary_expr(
             )
         }
     }
+}
+
+pub fn new_length_default(expr_ia1: BoxedExpression, return_type: DataTypeRef) -> BoxedExpression {
+    Box::new(UnaryExpression::<UTF8Array, I64Array, _> {
+        expr_ia1,
+        return_type,
+        func: length_default,
+        data1: PhantomData,
+    })
 }

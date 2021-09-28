@@ -7,6 +7,7 @@ pub mod cast;
 pub mod cmp;
 pub mod conjunction;
 mod div_op;
+pub mod length;
 mod mod_op;
 mod mul_op;
 mod sub_op;
