@@ -5,7 +5,9 @@ use crate::array2::{Array, ArrayBuilder, ArrayImpl, I32ArrayBuilder, I64ArrayBui
 use crate::buffer::Bitmap;
 use crate::expr::{AggKind, ArithmeticExpression, InputRefExpression};
 use crate::stream_op::{DataDispatcher, HashDataDispatcher, StreamChunk};
-use crate::stream_op::{HashLocalAggregationOperator, Op, UnaryStreamOperator};
+use crate::stream_op::{
+    HashGlobalAggregationOperator, HashLocalAggregationOperator, Op, UnaryStreamOperator,
+};
 use crate::types::{ArithmeticOperatorKind, Int32Type, Int64Type};
 use crate::util::hash_util::CRC32FastBuilder;
 use std::hash::{BuildHasher, Hasher};
@@ -158,7 +160,7 @@ async fn test_hash_dispatcher() {
 }
 
 #[tokio::test]
-async fn test_hash_aggregation_count() {
+async fn test_local_hash_aggregation_count() {
     let input_type = Arc::new(Int64Type::new(false));
     let return_type = Arc::new(Int64Type::new(false));
     let agg_kind = AggKind::Count;
@@ -195,13 +197,16 @@ async fn test_hash_aggregation_count() {
     assert_eq!(real_output.ops.len(), 2);
     assert_eq!(real_output.ops[0], Op::Insert);
     assert_eq!(real_output.ops[1], Op::Insert);
-    assert_eq!(real_output.columns.len(), 2);
+    assert_eq!(real_output.columns.len(), 3);
     let key_column = real_output.columns[0].array_ref().as_int64();
     assert_eq!(key_column.value_at(0).unwrap(), 1);
     assert_eq!(key_column.value_at(1).unwrap(), 2);
     let agg_column = real_output.columns[1].array_ref().as_int64();
     assert_eq!(agg_column.value_at(0).unwrap(), 1);
     assert_eq!(agg_column.value_at(1).unwrap(), 2);
+    let row_count_column = real_output.columns[2].array_ref().as_int64();
+    assert_eq!(row_count_column.value_at(0).unwrap(), 1);
+    assert_eq!(row_count_column.value_at(1).unwrap(), 2);
 
     let ops2 = vec![Op::Delete, Op::Delete, Op::Delete];
     let mut builder2 = I64ArrayBuilder::new(0).unwrap();
@@ -230,7 +235,7 @@ async fn test_hash_aggregation_count() {
             Op::UpdateInsert
         ]
     );
-    assert_eq!(real_output.columns.len(), 2);
+    assert_eq!(real_output.columns.len(), 3);
     let key_column = real_output.columns[0].array_ref().as_int64();
     assert_eq!(key_column.len(), 4);
     let key_column = (0..4)
@@ -243,4 +248,137 @@ async fn test_hash_aggregation_count() {
         .map(|idx| agg_column.value_at(idx).unwrap())
         .collect::<Vec<_>>();
     assert_eq!(agg_column, vec![1, 0, 2, 1]);
+    let row_count_column = real_output.columns[2].array_ref().as_int64();
+    assert_eq!(row_count_column.len(), 4);
+    let row_count_column = (0..4)
+        .map(|idx| row_count_column.value_at(idx).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(row_count_column, vec![1, 0, 2, 1]);
+}
+
+#[tokio::test]
+async fn test_global_hash_aggregation_count() {
+    let input_type = Arc::new(Int64Type::new(false));
+    let return_type = Arc::new(Int64Type::new(false));
+    let agg_kind = AggKind::Count;
+    let data = Arc::new(Mutex::new(Vec::new()));
+    let mock_output = Box::new(MockOutput::new(data.clone())) as Box<dyn Output>;
+    let key_indices = vec![0];
+    let val_indices = 1;
+    let mut hash_aggregator = HashGlobalAggregationOperator::new(
+        input_type,
+        mock_output,
+        return_type,
+        key_indices,
+        val_indices,
+        agg_kind,
+    );
+
+    let ops1 = vec![Op::Insert, Op::Insert, Op::Insert];
+    let mut key_builder1 = I64ArrayBuilder::new(0).unwrap();
+    key_builder1.append(Some(1)).unwrap();
+    key_builder1.append(Some(2)).unwrap();
+    key_builder1.append(Some(2)).unwrap();
+    let key_array1 = key_builder1.finish().unwrap();
+    let key_column1 = Column::new(Arc::new(key_array1.into()), Arc::new(Int64Type::new(false)));
+    let mut val_builder1 = I64ArrayBuilder::new(0).unwrap();
+    val_builder1.append(Some(1)).unwrap();
+    val_builder1.append(Some(2)).unwrap();
+    val_builder1.append(Some(2)).unwrap();
+    let value_array1 = val_builder1.finish().unwrap();
+    let value_column1 = Column::new(
+        Arc::new(value_array1.into()),
+        Arc::new(Int64Type::new(false)),
+    );
+    let mut row_count_builder1 = I64ArrayBuilder::new(0).unwrap();
+    row_count_builder1.append(Some(1)).unwrap();
+    row_count_builder1.append(Some(2)).unwrap();
+    row_count_builder1.append(Some(2)).unwrap();
+    let row_count_array1 = row_count_builder1.finish().unwrap();
+    let row_count_column1 = Column::new(
+        Arc::new(row_count_array1.into()),
+        Arc::new(Int64Type::new(false)),
+    );
+    let chunk1 = StreamChunk {
+        ops: ops1,
+        columns: vec![key_column1, value_column1, row_count_column1],
+        visibility: Some(Bitmap::from_vec(vec![true, true, true]).unwrap()),
+        cardinality: 3,
+    };
+
+    hash_aggregator.consume_chunk(chunk1).await.unwrap();
+    assert_eq!(data.lock().await.len(), 1);
+    let real_output = data.lock().await.drain(0..=0).next().unwrap();
+    assert_eq!(real_output.ops.len(), 2);
+    assert_eq!(real_output.ops[0], Op::Insert);
+    assert_eq!(real_output.ops[1], Op::Insert);
+    assert_eq!(real_output.columns.len(), 2);
+    let key_column = real_output.columns[0].array_ref().as_int64();
+    assert_eq!(key_column.value_at(0).unwrap(), 1);
+    assert_eq!(key_column.value_at(1).unwrap(), 2);
+    let agg_column = real_output.columns[1].array_ref().as_int64();
+    assert_eq!(agg_column.value_at(0).unwrap(), 1);
+    assert_eq!(agg_column.value_at(1).unwrap(), 4);
+
+    let ops2 = vec![Op::Delete, Op::Delete, Op::Delete, Op::Insert];
+    let mut key_builder2 = I64ArrayBuilder::new(0).unwrap();
+    key_builder2.append(Some(1)).unwrap();
+    key_builder2.append(Some(2)).unwrap();
+    key_builder2.append(Some(2)).unwrap();
+    key_builder2.append(Some(3)).unwrap();
+    let key_array2 = key_builder2.finish().unwrap();
+    let key_column2 = Column::new(Arc::new(key_array2.into()), Arc::new(Int64Type::new(false)));
+    let mut val_builder2 = I64ArrayBuilder::new(0).unwrap();
+    val_builder2.append(Some(1)).unwrap();
+    val_builder2.append(Some(2)).unwrap();
+    val_builder2.append(Some(1)).unwrap();
+    val_builder2.append(Some(3)).unwrap();
+    let value_array2 = val_builder2.finish().unwrap();
+    let value_column2 = Column::new(
+        Arc::new(value_array2.into()),
+        Arc::new(Int64Type::new(false)),
+    );
+    let mut row_count_builder2 = I64ArrayBuilder::new(0).unwrap();
+    row_count_builder2.append(Some(1)).unwrap();
+    row_count_builder2.append(Some(2)).unwrap();
+    row_count_builder2.append(Some(1)).unwrap();
+    row_count_builder2.append(Some(3)).unwrap();
+    let row_count_array2 = row_count_builder2.finish().unwrap();
+    let row_count_column2 = Column::new(
+        Arc::new(row_count_array2.into()),
+        Arc::new(Int64Type::new(false)),
+    );
+    let chunk2 = StreamChunk {
+        ops: ops2,
+        columns: vec![key_column2, value_column2, row_count_column2],
+        visibility: Some(Bitmap::from_vec(vec![true, false, true, true]).unwrap()),
+        cardinality: 4,
+    };
+    hash_aggregator.consume_chunk(chunk2).await.unwrap();
+    assert_eq!(data.lock().await.len(), 1);
+    let real_output = data.lock().await.drain(0..=0).next().unwrap();
+    assert_eq!(real_output.ops.len(), 5);
+    assert_eq!(
+        real_output.ops,
+        vec![
+            Op::UpdateDelete,
+            Op::UpdateInsert,
+            Op::UpdateDelete,
+            Op::UpdateInsert,
+            Op::Insert
+        ]
+    );
+    assert_eq!(real_output.columns.len(), 2);
+    let key_column = real_output.columns[0].array_ref().as_int64();
+    assert_eq!(key_column.len(), 5);
+    let key_column = (0..5)
+        .map(|idx| key_column.value_at(idx).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(key_column, vec![1, 1, 2, 2, 3]);
+    let agg_column = real_output.columns[1].array_ref().as_int64();
+    assert_eq!(agg_column.len(), 5);
+    let agg_column = (0..5)
+        .map(|idx| agg_column.value_at(idx))
+        .collect::<Vec<_>>();
+    assert_eq!(agg_column, vec![Some(1), None, Some(4), Some(3), Some(3)]);
 }

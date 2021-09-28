@@ -4,6 +4,9 @@ use crate::array2::*;
 use crate::buffer::Bitmap;
 use crate::error::Result;
 use crate::stream_op::{Op, Ops};
+use crate::types::{DataTypeRef, Int64Type};
+
+use std::sync::Arc;
 
 use super::StreamingAggStateImpl;
 
@@ -17,6 +20,14 @@ pub struct StreamingRowCountAgg {
 impl StreamingRowCountAgg {
     pub fn new() -> Self {
         Self { row_cnt: 0 }
+    }
+
+    pub fn create_array_builder(capacity: usize) -> Result<ArrayBuilderImpl> {
+        I64ArrayBuilder::new(capacity).map(|builder| builder.into())
+    }
+
+    pub fn return_type() -> DataTypeRef {
+        Arc::new(Int64Type::new(false))
     }
 }
 
