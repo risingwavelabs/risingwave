@@ -8,7 +8,7 @@ use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct StringType {
     nullable: bool,
     width: usize,

@@ -1,9 +1,18 @@
+#[cfg(test)]
+pub mod test_utils;
+
 use pb_convert_derive::FromProtobuf;
 
 #[derive(Clone, Debug, Hash, PartialOrd, PartialEq, Eq, FromProtobuf)]
 #[pb_convert(pb_type = "risingwave_proto::plan::DatabaseRefId")]
 pub struct DatabaseId {
     database_id: i32,
+}
+
+impl DatabaseId {
+    fn new(database_id: i32) -> Self {
+        DatabaseId { database_id }
+    }
 }
 
 #[derive(Clone, Debug, Hash, PartialOrd, PartialEq, Eq, FromProtobuf)]
@@ -13,11 +22,29 @@ pub struct SchemaId {
     schema_id: i32,
 }
 
+impl SchemaId {
+    fn new(database_ref_id: DatabaseId, schema_id: i32) -> Self {
+        SchemaId {
+            database_ref_id,
+            schema_id,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Hash, PartialOrd, PartialEq, Eq, FromProtobuf)]
 #[pb_convert(pb_type = "risingwave_proto::plan::TableRefId")]
 pub struct TableId {
     schema_ref_id: SchemaId,
     table_id: i32,
+}
+
+impl TableId {
+    fn new(schema_ref_id: SchemaId, table_id: i32) -> Self {
+        TableId {
+            schema_ref_id,
+            table_id,
+        }
+    }
 }
 
 #[cfg(test)]

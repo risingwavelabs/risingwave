@@ -200,7 +200,7 @@ macro_rules! scalar_impl_enum {
 
     /// `ScalarRefImpl` embeds all possible scalar references in the evaluation
     /// framework.
-    #[derive(Copy, Clone)]
+    #[derive(Debug, Copy, Clone, PartialEq)]
     pub enum ScalarRefImpl<'scalar> {
       $( $variant_name($scalar_ref) ),*
     }

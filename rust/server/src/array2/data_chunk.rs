@@ -87,6 +87,10 @@ impl DataChunk {
         })
     }
 
+    pub fn columns(&self) -> &[Column] {
+        &self.columns
+    }
+
     pub fn to_protobuf(&self) -> Result<DataChunkProto> {
         ensure!(self.visibility.is_none());
         let mut proto = DataChunkProto::new();

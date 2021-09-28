@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 macro_rules! make_numeric_type {
     ($name:ident, $native_ty:ty, $data_ty:expr, $proto_ty: expr) => {
-        #[derive(Debug)]
+        #[derive(Debug, Eq, PartialEq)]
         pub struct $name {
             nullable: bool,
         }

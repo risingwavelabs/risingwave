@@ -19,6 +19,8 @@ mod operator_output;
 mod processor;
 mod projection_operator;
 mod simple_processor;
+mod source_processor;
+mod table_data_source;
 
 pub use actor::Actor;
 pub use channel_output::ChannelOutput;
@@ -36,6 +38,8 @@ pub use operator_output::OperatorOutput;
 pub use processor::*;
 pub use projection_operator::ProjectionOperator;
 pub use simple_processor::*;
+pub use source_processor::*;
+pub use table_data_source::*;
 
 use async_trait::async_trait;
 
@@ -67,6 +71,22 @@ pub struct StreamChunk {
     columns: Vec<Column>,
     visibility: Option<Bitmap>,
     cardinality: usize,
+}
+
+impl StreamChunk {
+    pub fn new(
+        ops: Vec<Op>,
+        columns: Vec<Column>,
+        visibility: Option<Bitmap>,
+        cardinality: usize,
+    ) -> Self {
+        StreamChunk {
+            ops,
+            columns,
+            visibility,
+            cardinality,
+        }
+    }
 }
 
 #[derive(Debug)]

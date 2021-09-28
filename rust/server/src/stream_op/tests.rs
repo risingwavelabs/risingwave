@@ -1,32 +1,28 @@
 use super::data_source::*;
+use super::Result;
 use super::{FilterOperator, OperatorOutput, Output, ProjectionOperator};
 use crate::array2::column::Column;
 use crate::array2::{Array, ArrayBuilder, I32ArrayBuilder, I64ArrayBuilder};
 use crate::buffer::Bitmap;
-use crate::expr::{
-    AggKind, ArithmeticExpression, CompareExpression, CompareOperatorKind, InputRefExpression,
-};
-use crate::stream_op::{DataDispatcher, HashDataDispatcher, StreamChunk};
-use crate::stream_op::{
-    HashGlobalAggregationOperator, HashLocalAggregationOperator, Op, UnaryStreamOperator,
-};
+use crate::expr::*;
+use crate::stream_op::*;
 use crate::types::{ArithmeticOperatorKind, BoolType, Int32Type, Int64Type};
 use crate::util::hash_util::CRC32FastBuilder;
+use futures::channel::oneshot;
 use std::hash::{BuildHasher, Hasher};
 use std::sync::Arc;
-use std::time;
 use tokio::sync::Mutex;
 
 #[tokio::test]
-async fn test_projection() {
+async fn test_projection() -> Result<()> {
     let start: i64 = 114514;
+    let end = start + 1000;
     let scalar: i64 = 1;
     let repeat: (i64, i64) = (-20, 20);
-    let mock_data = MockData::new(start.., scalar, (repeat.0..repeat.1).cycle());
+    let mock_data = MockData::new(start..end, scalar, (repeat.0..repeat.1).cycle());
     let data = Arc::new(Mutex::new(vec![]));
     let projection_out = Box::new(MockOutput::new(data.clone()));
-    let source = Arc::new(MockDataSource::new(mock_data));
-    let source2 = source.clone();
+    let mut source = MockDataSource::new(mock_data);
 
     let left_type = Arc::new(Int64Type::new(false));
     let left_expr = InputRefExpression::new(left_type, 0);
@@ -44,15 +40,8 @@ async fn test_projection() {
         vec![Box::new(test_expr)],
     ));
     let source_out = Box::new(OperatorOutput::new(projection_op));
-
-    let handle = tokio::spawn(async move {
-        tokio::time::sleep(time::Duration::from_millis(10)).await;
-        source2.cancel().await.expect("run without error");
-    });
-
-    source.run(source_out).await.expect("run without error");
-
-    handle.await.unwrap();
+    let (_cancel_tx, cancel_rx) = oneshot::channel();
+    source.run(source_out, cancel_rx).await?;
 
     let data = data.lock().await;
     let mut expected = start;
@@ -66,18 +55,19 @@ async fn test_projection() {
         }
     }
     println!("{} items collected.", expected - start);
+    Ok(())
 }
 
 #[tokio::test]
-async fn test_filter() {
+async fn test_filter() -> Result<()> {
     let start: i64 = -1024;
+    let end = start + 1000;
     let scalar: i64 = 0;
     let repeat: (i64, i64) = (-20, 20);
-    let mock_data = MockData::new(start.., scalar, (repeat.0..repeat.1).cycle());
+    let mock_data = MockData::new(start..end, scalar, (repeat.0..repeat.1).cycle());
     let data = Arc::new(Mutex::new(vec![]));
     let filter_out = Box::new(MockOutput::new(data.clone()));
-    let source = Arc::new(MockDataSource::new(mock_data));
-    let source2 = source.clone();
+    let mut source = MockDataSource::new(mock_data);
 
     let left_type = Arc::new(Int64Type::new(false));
     let left_expr = InputRefExpression::new(left_type, 1);
@@ -93,14 +83,8 @@ async fn test_filter() {
     let filter_op = Box::new(FilterOperator::new(filter_out, Box::new(test_expr)));
     let source_out = Box::new(OperatorOutput::new(filter_op));
 
-    let handle = tokio::spawn(async move {
-        tokio::time::sleep(time::Duration::from_millis(10)).await;
-        source2.cancel().await.expect("run without error");
-    });
-
-    source.run(source_out).await.expect("run without error");
-
-    handle.await.unwrap();
+    let (_cancel_tx, cancel_rx) = oneshot::channel();
+    source.run(source_out, cancel_rx).await?;
 
     let data = data.lock().await;
     let mut items_collected = 0;
@@ -131,6 +115,7 @@ async fn test_filter() {
         }
     }
     println!("{} items collected.", items_collected);
+    Ok(())
 }
 
 #[tokio::test]

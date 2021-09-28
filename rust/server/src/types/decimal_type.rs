@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 pub const MAX_PRECISION: u32 = 28;
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct DecimalType {
     nullable: bool,
     precision: u32,

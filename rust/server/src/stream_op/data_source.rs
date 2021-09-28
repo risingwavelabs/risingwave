@@ -1,3 +1,4 @@
+use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -6,8 +7,9 @@ use crate::array2::column::Column;
 use crate::array2::{ArrayBuilder, ArrayImpl, I64ArrayBuilder};
 use crate::types::Int64Type;
 use async_trait::async_trait;
+use futures::channel::oneshot;
 
-/// Mocked data has there columns:
+/// Mocked data has three columns:
 /// linear and repeat are self defined iterators
 /// and scalar is a constant.
 pub struct MockData<I, J> {
@@ -30,24 +32,25 @@ impl<I: Iterator<Item = i64>, J: Iterator<Item = i64>> Iterator for MockData<I, 
     type Item = (i64, i64, i64);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let l = self.linear.next().unwrap();
-        let r = self.repeat.next().unwrap();
-        Some((l, self.scalar, r))
+        if let Some(l) = self.linear.next() {
+            let r = self.repeat.next().unwrap();
+            Some((l, self.scalar, r))
+        } else {
+            None
+        }
     }
 }
-#[async_trait]
-pub trait DataSource: Send + Sync + 'static {
-    async fn run(&self, output: Box<dyn Output>) -> Result<()>;
-    async fn cancel(&self) -> Result<()>;
-}
 
-pub struct MockDataSourceCore<I, J> {
-    inner: MockData<I, J>,
-    is_running: bool,
+/// `DataSource` is the source of streaming. A `DataSource` runs in background inside
+/// a `SourceProcessor`, generating chunks continuously unless `cancel` signal received.
+#[async_trait]
+pub trait DataSource: Debug + Send + Sync + 'static {
+    async fn run(&mut self, output: Box<dyn Output>, cancel: oneshot::Receiver<()>) -> Result<()>;
 }
 
 pub struct MockDataSource<I: std::iter::Iterator<Item = i64>, J: std::iter::Iterator<Item = i64>> {
-    core: Mutex<MockDataSourceCore<I, J>>,
+    inner: MockData<I, J>,
+    is_running: bool,
 }
 
 impl<I, J> MockDataSource<I, J>
@@ -56,13 +59,20 @@ where
     J: std::iter::Iterator<Item = i64> + Send,
 {
     pub fn new(inner: MockData<I, J>) -> Self {
-        let core = MockDataSourceCore {
+        MockDataSource {
             inner,
             is_running: true,
-        };
-        Self {
-            core: Mutex::new(core),
         }
+    }
+}
+
+impl<I, J> Debug for MockDataSource<I, J>
+where
+    I: std::iter::Iterator<Item = i64> + Send,
+    J: std::iter::Iterator<Item = i64> + Send,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MockDataSource").finish()
     }
 }
 
@@ -72,13 +82,14 @@ where
     I: std::iter::Iterator<Item = i64> + Sync + Send + 'static,
     J: std::iter::Iterator<Item = i64> + Sync + Send + 'static,
 {
-    async fn run(&self, mut output: Box<dyn Output>) -> Result<()> {
+    async fn run(
+        &mut self,
+        mut output: Box<dyn Output>,
+        mut cancel: oneshot::Receiver<()>,
+    ) -> Result<()> {
         const N: usize = 10;
         loop {
-            let mut core = self.core.lock().await;
-            if !core.is_running {
-                break;
-            }
+            let mut count = 0;
             let mut col1 = I64ArrayBuilder::new(N)?;
             let mut col2 = I64ArrayBuilder::new(N)?;
             let mut col3 = I64ArrayBuilder::new(N)?;
@@ -95,16 +106,23 @@ where
             ];
             let mut total_input = 0;
             for _ in 0..N {
-                match core.inner.next() {
+                if cancel.try_recv().expect("sender dropped").is_some() {
+                    break;
+                }
+                match self.inner.next() {
                     Some((i1, i2, i3)) => {
                         col1.append(Some(i1))?;
                         col2.append(Some(i2))?;
                         col3.append(Some(i3))?;
                         ops.push(op_cycle[total_input as usize % op_cycle.len()]);
                         total_input += 1;
+                        count += 1;
                     }
                     None => break,
                 }
+            }
+            if count == 0 {
+                break;
             }
             let col1 = Arc::new(ArrayImpl::Int64(col1.finish()?));
             let col2 = Arc::new(ArrayImpl::Int64(col2.finish()?));
@@ -123,12 +141,6 @@ where
             output.collect(Message::Chunk(chunk)).await?;
         }
 
-        Ok(())
-    }
-
-    async fn cancel(&self) -> Result<()> {
-        let mut core = self.core.lock().await;
-        core.is_running = false;
         Ok(())
     }
 }
@@ -157,28 +169,21 @@ impl Output for MockOutput {
 mod test {
     use super::*;
     use crate::array2::Array;
-    use std::time;
 
     #[tokio::test]
     async fn test_data_source_read() -> Result<()> {
         let start: i64 = 114514;
+        let end = start + 1000;
         let scalar: i64 = 0;
         let repeat: (i64, i64) = (-20, 20);
-        let mock_data = MockData::new(start.., scalar, (repeat.0..repeat.1).cycle());
-        let source = Arc::new(MockDataSource::new(mock_data));
+        let mock_data = MockData::new(start..end, scalar, (repeat.0..repeat.1).cycle());
+        let mut source = MockDataSource::new(mock_data);
         let data = Arc::new(Mutex::new(vec![]));
         let output = MockOutput { data: data.clone() };
-        let source2 = source.clone();
-
-        let handle = tokio::spawn(async move {
-            tokio::time::sleep(time::Duration::from_millis(10)).await;
-            source.cancel().await.expect("cancel without error");
-        });
 
         let output = Box::new(output);
-        source2.run(output).await.expect("run without error");
-
-        handle.await.unwrap();
+        let (_cancel_tx, cancel_rx) = oneshot::channel();
+        source.run(output, cancel_rx).await?;
 
         let data = data.lock().await;
         let mut expected = start;
