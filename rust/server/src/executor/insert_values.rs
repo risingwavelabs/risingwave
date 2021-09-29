@@ -1,7 +1,5 @@
 use crate::array2::column::Column;
-use crate::array2::{
-    Array, ArrayBuilder, ArrayBuilderImpl, DataChunk, I32Array, PrimitiveArrayBuilder,
-};
+use crate::array2::{ArrayBuilder, ArrayBuilderImpl, DataChunk, I32Array, PrimitiveArrayBuilder};
 use crate::catalog::TableId;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
@@ -59,7 +57,6 @@ impl Executor for InsertValuesExecutor {
         // We need a one row chunk rather than an empty chunk because constant expression's eval result
         // is same size as input chunk cardinality.
         let one_row_chunk = DataChunk::builder()
-            .cardinality(1)
             .columns(vec![Column::new(
                 Arc::new(one_row_array.into()),
                 Arc::new(Int32Type::new(false)),
@@ -87,10 +84,7 @@ impl Executor for InsertValuesExecutor {
             })
             .collect::<Result<Vec<Column>>>()?;
 
-        let chunk = DataChunk::builder()
-            .cardinality(cardinality)
-            .columns(columns)
-            .build();
+        let chunk = DataChunk::builder().columns(columns).build();
 
         let table_ref = (if let TableRef::Columnar(table_ref) =
             self.storage_manager.get_table(&self.table_id)?
@@ -111,7 +105,6 @@ impl Executor for InsertValuesExecutor {
 
             let array = array_builder.finish()?;
             let ret_chunk = DataChunk::builder()
-                .cardinality(array.len())
                 .columns(vec![Column::new(
                     Arc::new(array.into()),
                     Arc::new(Int32Type::new(false)),

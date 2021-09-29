@@ -89,7 +89,6 @@ message Column {
     DataType column_type = 1;
     Buffer null_bitmap = 2;
     repeated Buffer values = 3;
-    uint32 cardinality = 4;
 }
 
 message DataChunk {

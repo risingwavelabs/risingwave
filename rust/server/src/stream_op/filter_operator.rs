@@ -35,13 +35,12 @@ impl UnaryStreamOperator for FilterOperator {
             ops,
             columns: arrays,
             visibility,
-            cardinality,
+            // TODO: remove cardinality in StreamChunk
+            cardinality: _,
         } = chunk;
 
         let data_chunk = {
-            let data_chunk_builder = DataChunk::builder()
-                .columns(arrays)
-                .cardinality(cardinality);
+            let data_chunk_builder = DataChunk::builder().columns(arrays);
             if let Some(visibility) = visibility {
                 data_chunk_builder.visibility(visibility).build()
             } else {

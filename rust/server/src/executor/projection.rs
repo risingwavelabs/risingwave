@@ -27,7 +27,6 @@ impl Executor for ProjectionExecutor {
         let child_output = self.child.execute()?;
         match child_output {
             Batch(child_chunk) => {
-                let cardinality = child_chunk.cardinality();
                 let arrays: Vec<Column> = self
                     .expr
                     .iter_mut()
@@ -36,10 +35,7 @@ impl Executor for ProjectionExecutor {
                             .map(|arr| Column::new(arr, expr.return_type_ref()))
                     })
                     .collect::<Result<Vec<_>>>()?;
-                let ret = DataChunk::builder()
-                    .cardinality(cardinality)
-                    .columns(arrays)
-                    .build();
+                let ret = DataChunk::builder().columns(arrays).build();
                 Ok(Batch(Arc::new(ret)))
             }
             Done => Ok(Done),

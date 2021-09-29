@@ -20,16 +20,14 @@ pub struct DataChunk {
     /// Use Vec to be consistent with previous array::DataChunk
     #[builder(default)]
     columns: Vec<Column>,
-    cardinality: usize,
     #[builder(default, setter(strip_option))]
     visibility: Option<Bitmap>,
 }
 
 impl DataChunk {
-    pub fn new(columns: Vec<Column>, cardinality: usize, visibility: Option<Bitmap>) -> Self {
+    pub fn new(columns: Vec<Column>, visibility: Option<Bitmap>) -> Self {
         DataChunk {
             columns,
-            cardinality,
             visibility,
         }
     }
@@ -42,18 +40,21 @@ impl DataChunk {
         self.columns.len()
     }
 
+    /// return the number of visible tuples
     pub fn cardinality(&self) -> usize {
-        self.cardinality
+        if let Some(bitmap) = &self.visibility {
+            bitmap.iter().map(|visible| visible as usize).sum()
+        } else {
+            self.capacity()
+        }
     }
 
-    // return the number of visible tuples
+    /// return physical length of any chunk column
     pub fn capacity(&self) -> usize {
-        if let Some(bitmap) = &self.visibility {
-            bitmap
-                .iter()
-                .fold(0, |cnt, nullable| cnt + nullable as usize);
-        }
-        self.cardinality()
+        self.columns
+            .first()
+            .map(|col| col.array_ref().len())
+            .unwrap_or(0)
     }
 
     pub fn visibility(&self) -> &Option<Bitmap> {
@@ -63,7 +64,6 @@ impl DataChunk {
     pub fn with_visibility(&self, visibility: Bitmap) -> Self {
         DataChunk {
             columns: self.columns.clone(),
-            cardinality: self.cardinality,
             visibility: Some(visibility),
         }
     }
@@ -94,7 +94,7 @@ impl DataChunk {
     pub fn to_protobuf(&self) -> Result<DataChunkProto> {
         ensure!(self.visibility.is_none());
         let mut proto = DataChunkProto::new();
-        proto.set_cardinality(self.cardinality as u32);
+        proto.set_cardinality(self.cardinality() as u32);
         for arr in &self.columns {
             proto.mut_columns().push(arr.to_protobuf()?);
         }
@@ -122,10 +122,7 @@ impl DataChunk {
                             .map(|array| Column::new(Arc::new(array), data_type))
                     })
                     .collect::<Result<Vec<_>>>()?;
-                Ok(Self::builder()
-                    .cardinality(cardinality)
-                    .columns(columns)
-                    .build())
+                Ok(Self::builder().columns(columns).build())
             }
         }
     }
@@ -133,15 +130,13 @@ impl DataChunk {
     pub fn from_protobuf(proto: &DataChunkProto) -> Result<Self> {
         let mut chunk = DataChunk {
             columns: vec![],
-            cardinality: proto.get_cardinality() as usize,
             visibility: None,
         };
 
         for any_col in proto.get_columns() {
             let col = unpack_from_any!(any_col, ColumnProto);
-            chunk
-                .columns
-                .push(Column::from_protobuf(col, chunk.cardinality)?);
+            let cardinality = proto.get_cardinality() as usize;
+            chunk.columns.push(Column::from_protobuf(col, cardinality)?);
         }
         Ok(chunk)
     }
@@ -193,11 +188,7 @@ impl DataChunk {
                 );
                 new_columns.push(column);
             }
-            let cardinality = end_idx - start_idx + 1;
-            let new_chunk = DataChunk::builder()
-                .cardinality(cardinality)
-                .columns(new_columns)
-                .build();
+            let new_chunk = DataChunk::builder().columns(new_columns).build();
             new_chunks.push(new_chunk);
         }
         Ok(new_chunks)
@@ -250,10 +241,8 @@ impl TryFrom<Vec<Column>> for DataChunk {
             "Not all columns length same!"
         );
 
-        let cardinality = columns[0].array_ref().len();
         Ok(Self {
             columns,
-            cardinality,
             visibility: None,
         })
     }
@@ -278,7 +267,6 @@ mod tests {
                 builder.append(Some(i as i32)).unwrap();
             }
             let chunk = DataChunk::builder()
-                .cardinality(chunk_size)
                 .columns(vec![Column::new(
                     Arc::new(builder.finish().unwrap().into()),
                     Arc::new(Int32Type::new(false)),
@@ -334,10 +322,7 @@ mod tests {
                 Arc::new(Int32Type::new(false)),
             ))
         }
-        let chunk: DataChunk = DataChunk::builder()
-            .cardinality(length)
-            .columns(columns)
-            .build();
+        let chunk: DataChunk = DataChunk::builder().columns(columns).build();
         for row in chunk.iter() {
             for i in 0..num_of_columns {
                 let val = row.value_at(i).unwrap();

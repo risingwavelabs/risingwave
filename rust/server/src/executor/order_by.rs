@@ -169,10 +169,7 @@ impl Executor for OrderByExecutor {
             .zip(builders)
             .map(|(d, b)| Ok(Column::new(Arc::new(b.finish()?), d.clone())))
             .collect::<Result<Vec<_>>>()?;
-        let chunk = DataChunk::builder()
-            .cardinality(chunk_size)
-            .columns(columns)
-            .build();
+        let chunk = DataChunk::builder().columns(columns).build();
         Ok(ExecutorResult::Batch(Arc::new(chunk)))
     }
 
@@ -204,10 +201,7 @@ mod tests {
     fn test_simple_order_by_executor() {
         let col0 = create_column(&[Some(1), Some(2), Some(3)]).unwrap();
         let col1 = create_column(&[Some(3), Some(2), Some(1)]).unwrap();
-        let data_chunk = DataChunk::builder()
-            .cardinality(3)
-            .columns([col0, col1].to_vec())
-            .build();
+        let data_chunk = DataChunk::builder().columns([col0, col1].to_vec()).build();
         let mut mock_executor = MockExecutor::new();
         mock_executor.add(data_chunk);
         let input_ref_1 = InputRefExpression::new(Arc::new(Int32Type::new(false)), 0usize);

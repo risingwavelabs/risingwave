@@ -189,10 +189,7 @@ mod tests {
     ) {
         let col1 = create_column(lhs).unwrap();
         let col2 = create_column(rhs).unwrap();
-        let data_chunk = DataChunk::builder()
-            .cardinality(2)
-            .columns([col1, col2].to_vec())
-            .build();
+        let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
         let expr = create_cmp_expression(0, 1, kind).unwrap();
         let mut cmp_excutor = ConjunctionExpression::try_from(&expr).unwrap();
         let res = cmp_excutor.eval(&data_chunk).unwrap();

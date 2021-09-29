@@ -36,9 +36,7 @@ impl UnaryStreamOperator for ProjectionOperator {
         } = chunk;
 
         let data_chunk = {
-            let data_chunk_builder = DataChunk::builder()
-                .columns(columns)
-                .cardinality(cardinality);
+            let data_chunk_builder = DataChunk::builder().columns(columns);
             if let Some(visibility) = visibility {
                 data_chunk_builder.visibility(visibility).build()
             } else {

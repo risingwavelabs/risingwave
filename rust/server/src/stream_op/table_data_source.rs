@@ -88,13 +88,13 @@ mod test {
         let chunk1 = {
             let col1 = Column::new(col1_arr1.clone(), col1_type.clone());
             let col2 = Column::new(col2_arr1.clone(), col2_type.clone());
-            DataChunk::new(vec![col1, col2], 3, None)
+            DataChunk::new(vec![col1, col2], None)
         };
 
         let chunk2 = {
             let col1 = Column::new(col1_arr2.clone(), col1_type.clone());
             let col2 = Column::new(col2_arr2.clone(), col2_type.clone());
-            DataChunk::new(vec![col1, col2], 3, None)
+            DataChunk::new(vec![col1, col2], None)
         };
 
         let stream_recv = table.create_stream()?;

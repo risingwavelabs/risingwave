@@ -153,10 +153,7 @@ impl Executor for SortAggExecutor {
             .map(|(t, b)| Ok(Column::new(Arc::new(b.finish()?), t)))
             .collect::<Result<Vec<_>>>()?;
 
-        let ret = DataChunk::builder()
-            .cardinality(cardinality)
-            .columns(columns)
-            .build();
+        let ret = DataChunk::builder().columns(columns).build();
 
         Ok(ExecutorResult::Batch(Arc::new(ret)))
     }
@@ -184,7 +181,6 @@ mod tests {
         let a = Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into());
         let t32 = Arc::new(Int32Type::new(false));
         let chunk = DataChunk::builder()
-            .cardinality(3)
             .columns(vec![Column::new(a, t32)])
             .build();
         let mut child = MockExecutor::new();
@@ -240,7 +236,6 @@ mod tests {
         let a: Arc<ArrayImpl> = Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into());
         let t32 = Arc::new(Int32Type::new(false));
         let chunk = DataChunk::builder()
-            .cardinality(3)
             .columns(vec![
                 Column::new(a.clone(), t32.clone()),
                 Column::new(
@@ -256,7 +251,6 @@ mod tests {
         let mut child = MockExecutor::new();
         child.add(chunk);
         let chunk = DataChunk::builder()
-            .cardinality(3)
             .columns(vec![
                 Column::new(a, t32.clone()),
                 Column::new(

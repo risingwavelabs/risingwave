@@ -92,8 +92,6 @@ impl Executor for StreamScanExecutor {
 
         let mut values: Vec<Value> = Vec::with_capacity(K_STREAM_SCAN_CHUNK_SIZE);
 
-        let mut count = 0;
-
         for i in 0..K_STREAM_SCAN_CHUNK_SIZE {
             let next_message = async_std::task::block_on(self.reader.next())?;
 
@@ -158,8 +156,6 @@ impl Executor for StreamScanExecutor {
                     }
                 }
             }
-
-            count += 1;
         }
 
         let columns = builders
@@ -172,10 +168,7 @@ impl Executor for StreamScanExecutor {
             })
             .collect::<Result<Vec<Column>>>()?;
 
-        let ret = DataChunk::builder()
-            .cardinality(count)
-            .columns(columns)
-            .build();
+        let ret = DataChunk::builder().columns(columns).build();
 
         Ok(ExecutorResult::Batch(Arc::new(ret)))
     }

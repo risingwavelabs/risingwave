@@ -155,10 +155,7 @@ mod tests {
 
         let col1 = create_column(&lhs).unwrap();
         let col2 = create_column(&rhs).unwrap();
-        let data_chunk = DataChunk::builder()
-            .cardinality(2)
-            .columns([col1, col2].to_vec())
-            .build();
+        let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
         let expr = make_expression(kind);
         let mut vec_excutor = CompareExpression::try_from(&expr).unwrap();
         let res = vec_excutor.eval(&data_chunk).unwrap();

@@ -113,10 +113,7 @@ mod tests {
         assert_eq!(arr_1.len(), 5);
         assert_eq!(arr_2.len(), 5);
 
-        let chunk = DataChunk::builder()
-            .cardinality(5)
-            .columns(vec![column1, column2])
-            .build();
+        let chunk = DataChunk::builder().columns(vec![column1, column2]).build();
 
         let result_arr = test_expr.eval(&chunk)?;
         let array = result_arr.as_int32();

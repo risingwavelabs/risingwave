@@ -150,10 +150,7 @@ mod tests {
     fn test_simple_top_n_executor() {
         let col0 = create_column(&[Some(1), Some(2), Some(3)]).unwrap();
         let col1 = create_column(&[Some(3), Some(2), Some(1)]).unwrap();
-        let data_chunk = DataChunk::builder()
-            .cardinality(3)
-            .columns([col0, col1].to_vec())
-            .build();
+        let data_chunk = DataChunk::builder().columns(vec![col0, col1]).build();
         let mut mock_executor = MockExecutor::new();
         mock_executor.add(data_chunk);
         let input_ref_0 = InputRefExpression::new(Arc::new(Int32Type::new(false)), 0usize);

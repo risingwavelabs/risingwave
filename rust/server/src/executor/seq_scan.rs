@@ -77,10 +77,7 @@ impl Executor for SeqScanExecutor {
             .collect::<Result<Vec<Column>>>()?;
 
         // TODO: visibility map here
-        let ret = DataChunk::builder()
-            .cardinality(cur_chunk.cardinality())
-            .columns(arrays)
-            .build();
+        let ret = DataChunk::builder().columns(arrays).build();
 
         self.chunk_idx += 1;
         Ok(ExecutorResult::Batch(Arc::new(ret)))

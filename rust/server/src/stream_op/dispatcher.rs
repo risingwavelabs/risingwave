@@ -115,13 +115,11 @@ impl DataDispatcher for HashDataDispatcher {
             ops,
             columns: arrays,
             visibility,
-            cardinality,
+            cardinality: _,
         } = chunk;
 
         let data_chunk = {
-            let data_chunk_builder = DataChunk::builder()
-                .columns(arrays.clone())
-                .cardinality(cardinality);
+            let data_chunk_builder = DataChunk::builder().columns(arrays.clone());
             if let Some(visibility) = visibility {
                 data_chunk_builder.visibility(visibility).build()
             } else {

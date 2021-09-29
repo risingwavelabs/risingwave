@@ -82,10 +82,7 @@ mod tests {
     fn test_filter_executor() {
         let col1 = create_column(&[Some(2), Some(2)]).unwrap();
         let col2 = create_column(&[Some(1), Some(2)]).unwrap();
-        let data_chunk = DataChunk::builder()
-            .cardinality(2)
-            .columns([col1, col2].to_vec())
-            .build();
+        let data_chunk = DataChunk::builder().columns([col1, col2].to_vec()).build();
         let mut mock_executor = MockExecutor::new();
         mock_executor.add(data_chunk);
         let expr = make_expression(EQUAL);
