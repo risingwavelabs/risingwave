@@ -48,6 +48,7 @@ message ExprNode {
         CAST = 201;
         SUBSTR = 202;
         LENGTH = 203;
+        LIKE = 204;
     }
     ExprNodeType expr_type = 1;
     google.protobuf.Any body = 2;

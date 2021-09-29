@@ -1,10 +1,11 @@
-use crate::array2::{BoolArray, F32Array, F64Array, I16Array, I32Array, I64Array};
+use crate::array2::{BoolArray, F32Array, F64Array, I16Array, I32Array, I64Array, UTF8Array};
 use crate::expr::expr_tmpl::BinaryExpression;
 use crate::expr::BoxedExpression;
 use crate::types::{DataTypeKind, DataTypeRef};
 use crate::vector_op::cmp::{
     primitive_eq, primitive_geq, primitive_gt, primitive_leq, primitive_lt, primitive_neq,
 };
+use crate::vector_op::like::like_default;
 use risingwave_proto::expr::ExprNode_ExprNodeType;
 use std::marker::PhantomData;
 
@@ -294,4 +295,18 @@ pub fn new_binary_expr(
             )
         }
     }
+}
+
+pub fn new_like_default(
+    expr_ia1: BoxedExpression,
+    expr_ia2: BoxedExpression,
+    return_type: DataTypeRef,
+) -> BoxedExpression {
+    Box::new(BinaryExpression::<UTF8Array, UTF8Array, BoolArray, _> {
+        expr_ia1,
+        expr_ia2,
+        return_type,
+        func: like_default,
+        data1: PhantomData,
+    })
 }

@@ -59,6 +59,7 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
       ImmutableMap.<String, ExprNode.ExprNodeType>builder()
           .put("SUBSTRING", ExprNode.ExprNodeType.SUBSTR)
           .put("LENGTH", ExprNode.ExprNodeType.LENGTH)
+          .put("LIKE", ExprNode.ExprNodeType.LIKE)
           .build();
 
   public RexToProtoSerializer() {

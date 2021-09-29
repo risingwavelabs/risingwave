@@ -8,6 +8,7 @@ pub mod cmp;
 pub mod conjunction;
 mod div_op;
 pub mod length;
+pub mod like;
 mod mod_op;
 mod mul_op;
 mod sub_op;

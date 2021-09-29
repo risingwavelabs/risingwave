@@ -1,6 +1,7 @@
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::Result;
 use crate::expr::binary_expr::new_binary_expr;
+use crate::expr::binary_expr::new_like_default;
 use crate::expr::binary_expr_bytes::new_substr_start;
 use crate::expr::build_from_proto as expr_build_from_proto;
 use crate::expr::tenary_expr_bytes::new_substr_start_end;
@@ -76,4 +77,15 @@ pub fn build_length_expr(proto: &ExprNode) -> Result<BoxedExpression> {
     // TODO: add encoding length expr
     ensure!(children.len() == 1);
     Ok(new_length_default(child, data_type))
+}
+
+pub fn build_like_expr(proto: &ExprNode) -> Result<BoxedExpression> {
+    let data_type = type_build_from_proto(proto.get_return_type())?;
+    let function_call_node =
+        FunctionCall::parse_from_bytes(proto.get_body().get_value()).map_err(ProtobufError)?;
+    let children = function_call_node.get_children();
+    ensure!(children.len() == 2);
+    let expr_ia1 = expr_build_from_proto(&children[0])?;
+    let expr_ia2 = expr_build_from_proto(&children[1])?;
+    Ok(new_like_default(expr_ia1, expr_ia2, data_type))
 }
