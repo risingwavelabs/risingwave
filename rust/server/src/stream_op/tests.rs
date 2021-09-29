@@ -182,7 +182,6 @@ async fn test_hash_dispatcher() {
         ops,
         columns,
         visibility: None,
-        cardinality,
     };
     hash_dispatcher.dispatch_data(chunk).await.unwrap();
 
@@ -234,12 +233,10 @@ async fn test_local_hash_aggregation_count() {
     builder1.append(Some(2)).unwrap();
     let array1 = builder1.finish().unwrap();
     let column1 = Column::new(Arc::new(array1.into()), Arc::new(Int64Type::new(false)));
-    let cardinality1 = 3;
     let chunk1 = StreamChunk {
         ops: ops1,
         columns: vec![column1],
         visibility: None,
-        cardinality: cardinality1,
     };
 
     hash_aggregator.consume_chunk(chunk1).await.unwrap();
@@ -266,12 +263,10 @@ async fn test_local_hash_aggregation_count() {
     builder2.append(Some(2)).unwrap();
     let array2 = builder2.finish().unwrap();
     let column2 = Column::new(Arc::new(array2.into()), Arc::new(Int64Type::new(false)));
-    let cardinality2 = 3;
     let chunk2 = StreamChunk {
         ops: ops2,
         columns: vec![column2],
         visibility: Some(Bitmap::from_vec(vec![true, false, true]).unwrap()),
-        cardinality: cardinality2,
     };
     hash_aggregator.consume_chunk(chunk2).await.unwrap();
     assert_eq!(data.lock().await.len(), 1);
@@ -354,7 +349,6 @@ async fn test_global_hash_aggregation_count() {
         ops: ops1,
         columns: vec![key_column1, value_column1, row_count_column1],
         visibility: Some(Bitmap::from_vec(vec![true, true, true]).unwrap()),
-        cardinality: 3,
     };
 
     hash_aggregator.consume_chunk(chunk1).await.unwrap();
@@ -403,7 +397,6 @@ async fn test_global_hash_aggregation_count() {
         ops: ops2,
         columns: vec![key_column2, value_column2, row_count_column2],
         visibility: Some(Bitmap::from_vec(vec![true, false, true, true]).unwrap()),
-        cardinality: 4,
     };
     hash_aggregator.consume_chunk(chunk2).await.unwrap();
     assert_eq!(data.lock().await.len(), 1);

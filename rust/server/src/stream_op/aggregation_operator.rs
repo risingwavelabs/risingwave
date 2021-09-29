@@ -97,7 +97,6 @@ impl UnaryStreamOperator for AggregationOperator {
             ops,
             columns: arrays,
             visibility,
-            cardinality: _,
         } = chunk;
 
         let mut builders = self
@@ -138,14 +137,12 @@ impl UnaryStreamOperator for AggregationOperator {
             chunk = StreamChunk {
                 ops: vec![Op::Insert],
                 visibility: None,
-                cardinality: 1,
                 columns,
             };
         } else {
             chunk = StreamChunk {
                 ops: vec![Op::UpdateDelete, Op::UpdateInsert],
                 visibility: None,
-                cardinality: 2,
                 columns,
             };
         }

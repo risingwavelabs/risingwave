@@ -35,8 +35,6 @@ impl UnaryStreamOperator for FilterOperator {
             ops,
             columns: arrays,
             visibility,
-            // TODO: remove cardinality in StreamChunk
-            cardinality: _,
         } = chunk;
 
         let data_chunk = {
@@ -61,7 +59,6 @@ impl UnaryStreamOperator for FilterOperator {
         // TODO: Can we update ops and visibility inplace?
         let mut new_ops = Vec::with_capacity(n);
         let mut new_visibility = Vec::with_capacity(n);
-        let mut new_cardinality = 0usize;
         let mut last_res = false;
 
         assert!(match visibility {
@@ -79,7 +76,6 @@ impl UnaryStreamOperator for FilterOperator {
                         new_ops.push(op);
                         if res {
                             new_visibility.push(true);
-                            new_cardinality += 1;
                         } else {
                             new_visibility.push(false);
                         }
@@ -93,21 +89,18 @@ impl UnaryStreamOperator for FilterOperator {
                             new_ops.push(Op::UpdateInsert);
                             new_visibility.push(true);
                             new_visibility.push(false);
-                            new_cardinality += 1;
                         }
                         (false, true) => {
                             new_ops.push(Op::UpdateDelete);
                             new_ops.push(Op::Insert);
                             new_visibility.push(false);
                             new_visibility.push(true);
-                            new_cardinality += 1;
                         }
                         (true, true) => {
                             new_ops.push(Op::UpdateDelete);
                             new_ops.push(Op::UpdateInsert);
                             new_visibility.push(true);
                             new_visibility.push(true);
-                            new_cardinality += 2;
                         }
                         (false, false) => {
                             new_ops.push(Op::Insert);
@@ -125,7 +118,6 @@ impl UnaryStreamOperator for FilterOperator {
         let new_chunk = StreamChunk {
             columns: arrays,
             visibility: Some(Bitmap::from_vec(new_visibility)?),
-            cardinality: new_cardinality,
             ops: new_ops,
         };
 

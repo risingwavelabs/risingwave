@@ -176,7 +176,6 @@ impl UnaryStreamOperator for HashGlobalAggregationOperator {
             ops,
             columns: arrays,
             visibility,
-            cardinality: _,
         } = chunk;
 
         let total_num_rows = ops.len();
@@ -192,7 +191,6 @@ impl UnaryStreamOperator for HashGlobalAggregationOperator {
         // This builder is for the array to store the aggregated value for each grouped key.
         let mut agg_array_builder = self.return_type.clone().create_array_builder(0)?;
         let mut new_ops = Vec::new();
-        let output_cardinality = distinct_rows.len();
 
         unique_keys.into_iter().try_for_each(|key| -> Result<()> {
             let cur_vis_map = key_to_vis_maps.remove(key).ok_or_else(|| {
@@ -276,7 +274,6 @@ impl UnaryStreamOperator for HashGlobalAggregationOperator {
         let chunk = StreamChunk {
             ops: new_ops,
             visibility: None,
-            cardinality: output_cardinality,
             columns: new_columns,
         };
         self.output.collect(Message::Chunk(chunk)).await?;

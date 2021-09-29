@@ -133,7 +133,6 @@ where
                 Column::new(col3, Arc::new(Int64Type::new(false))),
             ];
             let chunk = StreamChunk {
-                cardinality: N,
                 visibility: None,
                 ops,
                 columns: cols,

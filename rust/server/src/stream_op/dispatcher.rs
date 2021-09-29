@@ -115,7 +115,6 @@ impl DataDispatcher for HashDataDispatcher {
             ops,
             columns: arrays,
             visibility,
-            cardinality: _,
         } = chunk;
 
         let data_chunk = {
@@ -135,29 +134,22 @@ impl DataDispatcher for HashDataDispatcher {
             .collect::<Vec<_>>();
 
         let mut vis_maps = vec![vec![]; num_outputs];
-        let mut cardinalities = vec![0; num_outputs];
         hash_values.iter().for_each(|hash| {
             for (output_idx, vis_map) in vis_maps.iter_mut().enumerate() {
                 if *hash == output_idx {
                     vis_map.push(true);
-                    cardinalities[output_idx] += 1;
                 } else {
                     vis_map.push(false);
                 }
             }
         });
 
-        for ((vis_map, cardinality), output) in vis_maps
-            .into_iter()
-            .zip(cardinalities.into_iter())
-            .zip(self.outputs.iter_mut())
-        {
+        for (vis_map, output) in vis_maps.into_iter().zip(self.outputs.iter_mut()) {
             let vis_map = Bitmap::from_vec(vis_map).unwrap();
             let new_stream_chunk = StreamChunk {
                 ops: ops.clone(),
                 columns: arrays.clone(),
                 visibility: Some(vis_map),
-                cardinality,
             };
             output.collect(Message::Chunk(new_stream_chunk)).await?;
         }

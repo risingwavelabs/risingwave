@@ -45,7 +45,6 @@ impl MemColumnarTable {
                 vec![Op::Insert; data.cardinality()],
                 Vec::from(data.columns()),
                 data.visibility().clone(),
-                data.cardinality(),
             );
             futures::executor::block_on(async move { sender.send(chunk).await })
                 .expect("send changes failed");

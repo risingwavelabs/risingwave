@@ -139,7 +139,6 @@ async fn test_merger_sum_aggr() {
                         ),
                         Arc::new(Int64Type::new(false)),
                     )],
-                    cardinality: i,
                     visibility: None,
                 }))
                 .await
@@ -427,7 +426,6 @@ async fn test_tpch_q6() {
     let make_chunk = |op: Op| StreamChunk {
         ops: vec![op; 10],
         visibility: None,
-        cardinality: 10,
         columns: vec![
             Column::new(
                 Arc::new(I64Array::from_slice(d_shipdate.as_slice()).unwrap().into()),

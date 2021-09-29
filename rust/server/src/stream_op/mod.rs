@@ -68,22 +68,32 @@ pub struct StreamChunk {
     ops: Vec<Op>,
     columns: Vec<Column>,
     visibility: Option<Bitmap>,
-    cardinality: usize,
 }
 
 impl StreamChunk {
-    pub fn new(
-        ops: Vec<Op>,
-        columns: Vec<Column>,
-        visibility: Option<Bitmap>,
-        cardinality: usize,
-    ) -> Self {
+    pub fn new(ops: Vec<Op>, columns: Vec<Column>, visibility: Option<Bitmap>) -> Self {
         StreamChunk {
             ops,
             columns,
             visibility,
-            cardinality,
         }
+    }
+
+    /// return the number of visible tuples
+    pub fn cardinality(&self) -> usize {
+        if let Some(bitmap) = &self.visibility {
+            bitmap.iter().map(|visible| visible as usize).sum()
+        } else {
+            self.capacity()
+        }
+    }
+
+    /// return physical length of any chunk column
+    pub fn capacity(&self) -> usize {
+        self.columns
+            .first()
+            .map(|col| col.array_ref().len())
+            .unwrap_or(0)
     }
 }
 

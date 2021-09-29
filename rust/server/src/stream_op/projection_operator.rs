@@ -32,7 +32,6 @@ impl UnaryStreamOperator for ProjectionOperator {
             ops,
             columns,
             visibility,
-            cardinality,
         } = chunk;
 
         let data_chunk = {
@@ -63,7 +62,6 @@ impl UnaryStreamOperator for ProjectionOperator {
             ops,
             columns: projected_columns,
             visibility: None,
-            cardinality,
         };
 
         self.output.collect(Message::Chunk(new_chunk)).await
