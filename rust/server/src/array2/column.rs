@@ -1,54 +1,20 @@
+use crate::array2::column_proto_readers::{read_numeric_column, read_string_column};
 use crate::array2::value_reader::{
-    F32ValueReader, F64ValueReader, I16ValueReader, I32ValueReader, I64ValueReader, ValueReader,
+    DecimalValueReader, F32ValueReader, F64ValueReader, I16ValueReader, I32ValueReader,
+    I64ValueReader, Utf8ValueReader,
 };
-use crate::array2::{
-    ArrayBuilder, ArrayImpl, ArrayRef, PrimitiveArrayBuilder, PrimitiveArrayItemType,
-};
-use crate::buffer::Bitmap;
+use crate::array2::{ArrayImpl, ArrayRef, DecimalArrayBuilder, UTF8ArrayBuilder};
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::types::{build_from_proto, DataType, DataTypeRef};
 use protobuf::well_known_types::Any as AnyProto;
 use risingwave_proto::data::{Column as ColumnProto, DataType_TypeName};
-use std::io::Cursor;
-use std::sync::Arc;
 
 /// Column is owned by DataChunk. It consists of logic data type and physical array implementation.
 #[derive(Clone, Debug)]
 pub struct Column {
     array: ArrayRef,
     data_type: DataTypeRef,
-}
-
-fn read_numeric_column<T: PrimitiveArrayItemType, R: ValueReader<T>>(
-    col: &ColumnProto,
-    cardinality: usize,
-) -> Result<ArrayRef> {
-    ensure!(
-        col.get_values().len() == 1,
-        "Must have only 1 buffer in a numeric column"
-    );
-
-    let buf = col.get_values()[0].get_body();
-    let value_size = std::mem::size_of::<T>();
-    ensure!(
-        buf.len() % value_size == 0,
-        "Unexpected memory layout of numeric column"
-    );
-
-    let mut builder = PrimitiveArrayBuilder::<T>::new(cardinality)?;
-    let bitmap = Bitmap::from_protobuf(col.get_null_bitmap())?;
-    let mut cursor = Cursor::new(buf);
-    for not_null in bitmap.iter() {
-        if not_null {
-            let v = R::read(&mut cursor)?;
-            builder.append(Some(v))?;
-        } else {
-            builder.append(None)?;
-        }
-    }
-    let arr = builder.finish()?;
-    Ok(Arc::new(arr.into()))
 }
 
 impl Column {
@@ -70,14 +36,18 @@ impl Column {
     }
 
     pub fn from_protobuf(col: ColumnProto, cardinality: usize) -> Result<Self> {
-        let array = match col.get_column_type().get_type_name() {
+        let type_name = col.get_column_type().get_type_name();
+        let array = match type_name {
             DataType_TypeName::INT16 => {
                 read_numeric_column::<i16, I16ValueReader>(&col, cardinality)?
             }
-            DataType_TypeName::INT32 => {
+            DataType_TypeName::INT32 | DataType_TypeName::DATE => {
                 read_numeric_column::<i32, I32ValueReader>(&col, cardinality)?
             }
-            DataType_TypeName::INT64 => {
+            DataType_TypeName::INT64
+            | DataType_TypeName::TIMESTAMP
+            | DataType_TypeName::TIME
+            | DataType_TypeName::TIMESTAMPZ => {
                 read_numeric_column::<i64, I64ValueReader>(&col, cardinality)?
             }
             DataType_TypeName::FLOAT => {
@@ -86,10 +56,17 @@ impl Column {
             DataType_TypeName::DOUBLE => {
                 read_numeric_column::<f64, F64ValueReader>(&col, cardinality)?
             }
+            DataType_TypeName::VARCHAR | DataType_TypeName::CHAR => {
+                read_string_column::<UTF8ArrayBuilder, Utf8ValueReader>(&col, cardinality)?
+            }
+            DataType_TypeName::DECIMAL => {
+                read_string_column::<DecimalArrayBuilder, DecimalValueReader>(&col, cardinality)?
+            }
             _ => {
-                return Err(RwError::from(InternalError(
-                    "unsupported conversion from Column to Array".to_string(),
-                )))
+                return Err(RwError::from(InternalError(format!(
+                    "unsupported conversion from Column to Array: {:?}",
+                    type_name
+                ))))
             }
         };
         let data_type = build_from_proto(col.get_column_type())?;
@@ -116,11 +93,12 @@ impl Column {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array2::{Array, I32Array, I32ArrayBuilder};
+    use crate::array2::{Array, ArrayBuilder, I32Array, I32ArrayBuilder, UTF8Array};
     use crate::error::{ErrorCode, Result};
-    use crate::types::{DataTypeKind, Int32Type};
+    use crate::types::{DataTypeKind, Int32Type, StringType};
     use protobuf::Message;
     use risingwave_proto::data::Column as ColumnProto;
+    use std::sync::Arc;
 
     // Convert a column to protobuf, then convert it back to column, and ensures the two are identical.
     #[test]
@@ -153,6 +131,34 @@ mod tests {
         arr.iter().enumerate().for_each(|(i, x)| {
             if i % 2 == 0 {
                 assert_eq!(i as i32, x.unwrap());
+            } else {
+                assert!(x.is_none());
+            }
+        });
+        Ok(())
+    }
+
+    #[test]
+    fn test_utf8_column_conversion() -> Result<()> {
+        let cardinality = 2048;
+        let mut builder = UTF8ArrayBuilder::new(cardinality).unwrap();
+        for i in 0..cardinality {
+            if i % 2 == 0 {
+                builder.append(Some("abc")).unwrap();
+            } else {
+                builder.append(None).unwrap();
+            }
+        }
+        let col = Column::new(
+            Arc::new(ArrayImpl::from(builder.finish().unwrap())),
+            StringType::create(true, 0, DataTypeKind::Varchar),
+        );
+        let col_proto = unpack_from_any!(col.to_protobuf().unwrap(), ColumnProto);
+        let new_col = Column::from_protobuf(col_proto, cardinality).unwrap();
+        let arr: &UTF8Array = new_col.array_ref().as_utf8();
+        arr.iter().enumerate().for_each(|(i, x)| {
+            if i % 2 == 0 {
+                assert_eq!("abc", x.unwrap());
             } else {
                 assert!(x.is_none());
             }

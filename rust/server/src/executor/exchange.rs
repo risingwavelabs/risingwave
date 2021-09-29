@@ -13,6 +13,7 @@ use std::net::SocketAddr;
 pub(super) struct ExchangeExecutor {
     sources: Vec<Box<dyn ExchangeSource>>,
     server_addr: SocketAddr,
+    source_idx: usize,
 }
 
 fn is_local_address(server_addr: &SocketAddr, peer_addr: &SocketAddr) -> bool {
@@ -73,6 +74,7 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for ExchangeExecutor {
         Ok(Self {
             sources,
             server_addr,
+            source_idx: 0,
         })
     }
 }
@@ -83,14 +85,18 @@ impl Executor for ExchangeExecutor {
     }
 
     fn execute(&mut self) -> Result<ExecutorResult> {
-        ensure!(self.sources.len() == 1); // Parallel execution is unsupported yet.
-
-        let source = self.sources.get_mut(0).unwrap();
-        let res = async_std::task::block_on(async move { source.take_data().await })?;
-        match res {
-            None => Ok(ExecutorResult::Done),
-            Some(res) => Ok(ExecutorResult::Batch(res)),
+        loop {
+            if self.source_idx >= self.sources.len() {
+                break;
+            }
+            let source = self.sources.get_mut(self.source_idx).unwrap();
+            let res = async_std::task::block_on(source.take_data())?;
+            match res {
+                None => self.source_idx += 1,
+                Some(res) => return Ok(ExecutorResult::Batch(res)),
+            }
         }
+        Ok(ExecutorResult::Done)
     }
 
     fn clean(&mut self) -> Result<()> {
@@ -101,6 +107,11 @@ impl Executor for ExchangeExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::array2::column::Column;
+    use crate::array2::{DataChunk, DataChunkRef, I32Array};
+    use crate::array_nonnull;
+    use crate::types::Int32Type;
+    use std::sync::Arc;
 
     #[test]
     fn test_is_local_address() {
@@ -114,5 +125,52 @@ mod tests {
         check_local("10.11.12.13:3456", "10.11.12.13:3456");
         check_local("10.11.12.13:3456", "0.0.0.0:3456");
         check_local("10.11.12.13:3456", "127.0.0.1:3456");
+    }
+
+    struct FakeExchangeSource {
+        chunk: Option<DataChunkRef>,
+    }
+
+    #[async_trait::async_trait]
+    impl ExchangeSource for FakeExchangeSource {
+        async fn take_data(&mut self) -> Result<Option<DataChunkRef>> {
+            let chunk = self.chunk.take();
+            Ok(chunk)
+        }
+    }
+
+    #[test]
+    fn test_exchange_multiple_sources() {
+        let chunk = Arc::new(
+            DataChunk::builder()
+                .columns(vec![Column::new(
+                    Arc::new(array_nonnull! { I32Array, [3, 4, 4] }.into()),
+                    Arc::new(Int32Type::new(false)),
+                )])
+                .build(),
+        );
+
+        let mut sources: Vec<Box<dyn ExchangeSource>> = vec![];
+        for _ in 0..3 {
+            sources.push(Box::new(FakeExchangeSource {
+                chunk: Some(chunk.clone()),
+            }));
+        }
+
+        let mut executor = ExchangeExecutor {
+            sources,
+            server_addr: SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
+            source_idx: 0,
+        };
+
+        let mut chunks: usize = 0;
+        loop {
+            let res = executor.execute().unwrap();
+            match res {
+                ExecutorResult::Batch(_) => chunks += 1,
+                ExecutorResult::Done => break,
+            }
+        }
+        assert_eq!(chunks, 3);
     }
 }

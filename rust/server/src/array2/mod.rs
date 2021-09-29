@@ -2,6 +2,7 @@
 
 mod bool_array;
 pub(crate) mod column;
+mod column_proto_readers;
 mod data_chunk;
 pub mod data_chunk_iter;
 mod decimal_array;
