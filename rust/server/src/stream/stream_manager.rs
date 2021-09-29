@@ -195,11 +195,15 @@ impl StreamManagerCore {
                 let input_type = build_type_from_proto(aggr_node.get_input_type())?;
                 let return_type = build_type_from_proto(aggr_node.get_return_type())?;
                 let col_idx = aggr_node.get_column_idx();
-                Box::new(LocalAggregationOperator::new(
-                    create_streaming_local_agg_state(&*input_type, &agg_type, &*return_type)?,
+                Box::new(AggregationOperator::new(
+                    vec![create_streaming_local_agg_state(
+                        &*input_type,
+                        &agg_type,
+                        &*return_type,
+                    )?],
                     downstream_node,
-                    return_type,
-                    col_idx as usize,
+                    vec![return_type],
+                    vec![col_idx as usize],
                 ))
             }
             GLOBAL_SIMPLE_AGG => {
@@ -209,10 +213,15 @@ impl StreamManagerCore {
                 let agg_type: AggKind = aggr_node.get_aggregation_type().try_into()?;
                 let input_type = build_type_from_proto(aggr_node.get_input_type())?;
                 let return_type = build_type_from_proto(aggr_node.get_return_type())?;
-                Box::new(GlobalAggregationOperator::new(
-                    create_streaming_global_agg_state(&*input_type, &agg_type, &*return_type)?,
+                Box::new(AggregationOperator::new(
+                    vec![create_streaming_local_agg_state(
+                        &*input_type,
+                        &agg_type,
+                        &*return_type,
+                    )?],
                     downstream_node,
-                    return_type,
+                    vec![return_type],
+                    vec![0],
                 ))
             }
             // TODO: get configuration body of each operator

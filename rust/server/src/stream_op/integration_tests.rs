@@ -49,11 +49,18 @@ impl StreamOperator for TestConsumer {
 async fn test_merger_sum_aggr() {
     let make_actor = |sender| {
         let output = ChannelOutput::new(sender);
-        let aggregator = LocalAggregationOperator::new(
-            Box::new(StreamingSumAgg::<I64Array>::new()),
+        // for the local aggregator, we need two states: sum and row count
+        let aggregator = AggregationOperator::new(
+            vec![
+                Box::new(StreamingSumAgg::<I64Array>::new()),
+                Box::new(StreamingRowCountAgg::new()),
+            ],
             Box::new(output),
-            Arc::new(Int64Type::new(false)),
-            0,
+            vec![
+                Arc::new(Int64Type::new(false)),
+                Arc::new(Int64Type::new(false)),
+            ],
+            vec![0, 0],
         );
         let (tx, rx) = channel(16);
         let output = ChannelOutput::new(tx);
@@ -83,10 +90,26 @@ async fn test_merger_sum_aggr() {
     let items = Arc::new(Mutex::new(vec![]));
     let consumer = TestConsumer::new(items.clone());
     let output = OperatorOutput::new(Box::new(consumer));
-    let aggregator = GlobalAggregationOperator::new(
-        Box::new(GlobalStreamingSumAgg::<I64Array>::new()),
+    let projection = ProjectionOperator::new(
         Box::new(output),
-        Arc::new(Int64Type::new(false)),
+        vec![
+            // TODO: use the new streaming_if_null expression here, and add `None` tests
+            Box::new(InputRefExpression::new(Arc::new(Int64Type::new(false)), 0)),
+        ],
+    );
+    let output = OperatorOutput::new(Box::new(projection));
+    // for global aggregator, we need to sum data and sum row count
+    let aggregator = AggregationOperator::new(
+        vec![
+            Box::new(StreamingSumAgg::<I64Array>::new()),
+            Box::new(StreamingSumAgg::<I64Array>::new()),
+        ],
+        Box::new(output),
+        vec![
+            Arc::new(Int64Type::new(false)),
+            Arc::new(Int64Type::new(false)),
+        ],
+        vec![0, 1],
     );
 
     // use a merger to collect data from dispatchers before sending them to aggregator
@@ -295,11 +318,18 @@ async fn test_tpch_q6() {
     let make_actor = |sender| {
         let (_, _, _, _, and, multiply) = make_tpchq6_expr();
         let output = ChannelOutput::new(sender);
-        let aggregator = LocalAggregationOperator::new(
-            Box::new(StreamingFloatSumAgg::<F64Array>::new()),
+        // for local aggregator, we need to sum data and count rows
+        let aggregator = AggregationOperator::new(
+            vec![
+                Box::new(StreamingFloatSumAgg::<F64Array>::new()),
+                Box::new(StreamingRowCountAgg::new()),
+            ],
             Box::new(output),
-            Arc::new(Float64Type::new(false)),
-            0,
+            vec![
+                Arc::new(Float64Type::new(false)),
+                Arc::new(Int64Type::new(false)),
+            ],
+            vec![0, 0],
         );
         let output = OperatorOutput::new(Box::new(aggregator));
         let projection = ProjectionOperator::new(Box::new(output), vec![Box::new(multiply)]);
@@ -333,10 +363,29 @@ async fn test_tpch_q6() {
     let items = Arc::new(Mutex::new(vec![]));
     let consumer = TestConsumer::new(items.clone());
     let output = OperatorOutput::new(Box::new(consumer));
-    let aggregator = GlobalAggregationOperator::new(
-        Box::new(GlobalStreamingFloatSumAgg::<F64Array>::new()),
+    let projection = ProjectionOperator::new(
         Box::new(output),
-        Arc::new(Float64Type::new(false)),
+        vec![
+            // TODO: use the new streaming_if_null expression here, and add `None` tests
+            Box::new(InputRefExpression::new(
+                Arc::new(Float64Type::new(false)),
+                0,
+            )),
+        ],
+    );
+    let output = OperatorOutput::new(Box::new(projection));
+    // for global aggregator, we need to sum data and sum row count
+    let aggregator = AggregationOperator::new(
+        vec![
+            Box::new(StreamingFloatSumAgg::<F64Array>::new()),
+            Box::new(StreamingSumAgg::<I64Array>::new()),
+        ],
+        Box::new(output),
+        vec![
+            Arc::new(Float64Type::new(false)),
+            Arc::new(Int64Type::new(false)),
+        ],
+        vec![0, 1],
     );
 
     // use a merger to collect data from dispatchers before sending them to aggregator
