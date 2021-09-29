@@ -1,5 +1,6 @@
 package com.risingwave.planner.rules.streaming;
 
+import com.risingwave.planner.rel.physical.streaming.RwStreamAgg;
 import com.risingwave.planner.rel.physical.streaming.RwStreamFilter;
 import com.risingwave.planner.rel.physical.streaming.RwStreamProject;
 import com.risingwave.planner.rel.physical.streaming.RwStreamTableSource;
@@ -13,5 +14,6 @@ public class StreamingConvertRules {
       RuleSets.ofList(
           RwStreamFilter.StreamFilterConverterRule.INSTANCE,
           RwStreamProject.StreamProjectConverterRule.INSTANCE,
-          RwStreamTableSource.StreamTableSourceConverterRule.INSTANCE);
+          RwStreamTableSource.StreamTableSourceConverterRule.INSTANCE,
+          RwStreamAgg.StreamAggregationConverterRule.INSTANCE);
 }

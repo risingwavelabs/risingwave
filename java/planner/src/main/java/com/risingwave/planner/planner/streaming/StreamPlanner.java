@@ -3,7 +3,6 @@ package com.risingwave.planner.planner.streaming;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.JOIN_REORDER;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.LOGICAL_CBO;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.LOGICAL_REWRITE;
-import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.STREAMING;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.SUBQUERY_REWRITE;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 import static com.risingwave.planner.rules.BatchRuleSets.LOGICAL_CONVERTER_RULES;
@@ -18,13 +17,15 @@ import com.risingwave.planner.program.JoinReorderProgram;
 import com.risingwave.planner.program.OptimizerProgram;
 import com.risingwave.planner.program.SubQueryRewriteProgram;
 import com.risingwave.planner.program.VolcanoOptimizerProgram;
-import com.risingwave.planner.rel.physical.streaming.RisingWaveStreamingRel;
+import com.risingwave.planner.rel.physical.streaming.RwStreamMaterializedView;
 import com.risingwave.planner.rel.physical.streaming.StreamingPlan;
+import com.risingwave.planner.rel.serialization.ExplainWriter;
 import com.risingwave.planner.rules.BatchRuleSets;
 import com.risingwave.planner.rules.streaming.StreamingConvertRules;
 import com.risingwave.planner.sql.SqlConverter;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.sql.SqlNode;
+import org.apache.calcite.sql.ddl.SqlCreateMaterializedView;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -33,22 +34,43 @@ public class StreamPlanner implements Planner<StreamingPlan> {
 
   public StreamPlanner() {}
 
+  /**
+   * The stream planner takes the whole create materialized view AST as input.
+   *
+   * @param ast the AST of parsed create materialized view statements.
+   * @param context the ExecutionContext.
+   * @return a StreamingPlan to be later handled in CreateMaterializedViewHandler.
+   */
   @Override
   public StreamingPlan plan(SqlNode ast, ExecutionContext context) {
+    SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
+    SqlNode query = createMaterializedView.query;
     SqlConverter sqlConverter = SqlConverter.builder(context).build();
-    RelNode rawPlan = sqlConverter.toRel(ast).rel;
-    OptimizerProgram optimizerProgram = buildOptimizerProgram();
-
-    RelNode result = optimizerProgram.optimize(rawPlan, context);
-    RisingWaveStreamingRel root = (RisingWaveStreamingRel) result;
-
-    // TODO: implement explain writer for streaming plan.
-    log.info("Create streaming plan:\n");
-
+    RelNode rawPlan = sqlConverter.toRel(query).rel;
+    // Logical optimization.
+    OptimizerProgram optimizerProgram = buildLogicalOptimizerProgram();
+    RelNode logicalPlan = optimizerProgram.optimize(rawPlan, context);
+    log.info("Logical plan: \n" + ExplainWriter.explainPlan(logicalPlan));
+    // Generate Streaming plan from logical plan.
+    RwStreamMaterializedView root = generateStreamingPlan(logicalPlan, context);
     return new StreamingPlan(root);
   }
 
-  private static OptimizerProgram buildOptimizerProgram() {
+  private RwStreamMaterializedView generateStreamingPlan(
+      RelNode logicalPlan, ExecutionContext context) {
+    OptimizerProgram streamingOptimizerProgram = buildStreamingOptimizerProgram();
+    RelNode rawStreamingPlan = streamingOptimizerProgram.optimize(logicalPlan, context);
+    RwStreamMaterializedView materializedViewPlan = addMaterializedViewNode(rawStreamingPlan);
+    log.info("Create streaming plan:\n" + ExplainWriter.explainPlan(materializedViewPlan));
+    return materializedViewPlan;
+  }
+
+  private RwStreamMaterializedView addMaterializedViewNode(RelNode root) {
+    return new RwStreamMaterializedView(
+        root.getCluster(), root.getTraitSet(), root, root.getRowType());
+  }
+
+  private static OptimizerProgram buildLogicalOptimizerProgram() {
     ChainedOptimizerProgram.Builder builder = ChainedOptimizerProgram.builder();
     // We use partial rules from batch planner until getting a RisingWave logical plan.
     builder.addLast(SUBQUERY_REWRITE, SubQueryRewriteProgram.INSTANCE);
@@ -66,13 +88,15 @@ public class StreamPlanner implements Planner<StreamingPlan> {
             .addRules(LOGICAL_OPTIMIZATION_RULES)
             .addRequiredOutputTraits(LOGICAL)
             .build());
-    // Next we transform RisingWave logical plan to streaming plan.
-    builder.addLast(
-        STREAMING,
-        VolcanoOptimizerProgram.builder()
-            .addRules(StreamingConvertRules.STREAMING_CONVERTER_RULES)
-            .build());
 
     return builder.build();
+  }
+
+  private static OptimizerProgram buildStreamingOptimizerProgram() {
+    HepOptimizerProgram program =
+        HepOptimizerProgram.builder()
+            .addRules(StreamingConvertRules.STREAMING_CONVERTER_RULES)
+            .build();
+    return program;
   }
 }

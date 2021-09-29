@@ -1,0 +1,18 @@
+<Root>
+    <TestCase name="select all columns from table">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T1 as select sum(v2) as V from t where v1>1
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView
+  RwStreamAgg(group=[{}], v=[SUM($0)])
+    RwStreamProject(v2=[$1])
+      RwStreamFilter(condition=[>($0, 1)])
+        RwStreamTableSource(table=[[test_schema, t]])
+]]>
+        </Resource>
+    </TestCase>
+</Root>

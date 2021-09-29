@@ -2,7 +2,10 @@ package com.risingwave.planner.rel.physical.streaming;
 
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
+import com.google.protobuf.Any;
 import com.risingwave.planner.rel.logical.RwLogicalFilter;
+import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
+import com.risingwave.proto.streaming.plan.FilterNode;
 import com.risingwave.proto.streaming.plan.StreamNode;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptRule;
@@ -22,7 +25,13 @@ public class RwStreamFilter extends Filter implements RisingWaveStreamingRel {
 
   @Override
   public StreamNode serialize() {
-    throw new UnsupportedOperationException("Not implemented yet");
+    RexToProtoSerializer rexVisitor = new RexToProtoSerializer();
+    FilterNode filterNode =
+        FilterNode.newBuilder().setSearchCondition(condition.accept(rexVisitor)).build();
+    return StreamNode.newBuilder()
+        .setNodeType(StreamNode.StreamNodeType.FILTER)
+        .setBody(Any.pack(filterNode))
+        .build();
   }
 
   @Override
@@ -48,8 +57,9 @@ public class RwStreamFilter extends Filter implements RisingWaveStreamingRel {
     @Override
     public @Nullable RelNode convert(RelNode rel) {
       var rwLogicalFilter = (RwLogicalFilter) rel;
-      var requiredInputTrait = rwLogicalFilter.getInput().getTraitSet().plus(STREAMING);
-      var newInput = RelOptRule.convert(rwLogicalFilter.getInput(), requiredInputTrait);
+      var requiredInputTrait = rwLogicalFilter.getInput().getTraitSet().replace(STREAMING);
+      var newInput =
+          RelOptRule.convert(rwLogicalFilter.getInput(), requiredInputTrait.plus(LOGICAL));
       return new RwStreamFilter(
           rel.getCluster(),
           rwLogicalFilter.getTraitSet().plus(STREAMING),

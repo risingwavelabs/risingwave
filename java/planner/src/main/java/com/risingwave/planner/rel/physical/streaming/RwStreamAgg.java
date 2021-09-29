@@ -1,13 +1,27 @@
 package com.risingwave.planner.rel.physical.streaming;
 
+import static com.google.common.base.Preconditions.checkArgument;
+import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
+
+import com.google.protobuf.Any;
+import com.risingwave.planner.rel.logical.RwLogicalAggregate;
+import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
+import com.risingwave.proto.expr.ExprNode;
+import com.risingwave.proto.streaming.plan.HashAggNode;
+import com.risingwave.proto.streaming.plan.SimpleAggNode;
 import com.risingwave.proto.streaming.plan.StreamNode;
+import java.util.ArrayList;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
+import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.convert.ConverterRule;
 import org.apache.calcite.rel.core.Aggregate;
 import org.apache.calcite.rel.core.AggregateCall;
 import org.apache.calcite.rel.hint.RelHint;
+import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.util.ImmutableBitSet;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
@@ -26,7 +40,33 @@ public class RwStreamAgg extends Aggregate implements RisingWaveStreamingRel {
 
   @Override
   public StreamNode serialize() {
-    throw new UnsupportedOperationException("Not implemented yet");
+    StreamNode node;
+    if (groupSet.length() == 0) {
+      SimpleAggNode.Builder simpleAggNodeBuilder = SimpleAggNode.newBuilder();
+      for (AggregateCall aggCall : aggCalls) {
+        simpleAggNodeBuilder.addAggregations(serializeAggCall(aggCall));
+      }
+      node =
+          StreamNode.newBuilder()
+              .setNodeType(StreamNode.StreamNodeType.LOCAL_SIMPLE_AGG)
+              .setBody(Any.pack(simpleAggNodeBuilder.build()))
+              .build();
+    } else {
+      HashAggNode.Builder hashAggNodeBuilder = HashAggNode.newBuilder();
+      for (int i = groupSet.nextSetBit(0); i >= 0; i = groupSet.nextSetBit(i + 1)) {
+        hashAggNodeBuilder.addGroupByKeys(
+            getCluster().getRexBuilder().makeInputRef(input, i).accept(new RexToProtoSerializer()));
+      }
+      for (AggregateCall aggCall : aggCalls) {
+        hashAggNodeBuilder.addAggregations(serializeAggCall(aggCall));
+      }
+      node =
+          StreamNode.newBuilder()
+              .setNodeType(StreamNode.StreamNodeType.LOCAL_HASH_AGG)
+              .setBody(Any.pack(hashAggNodeBuilder.build()))
+              .build();
+    }
+    return node;
   }
 
   @Override
@@ -38,5 +78,52 @@ public class RwStreamAgg extends Aggregate implements RisingWaveStreamingRel {
       List<AggregateCall> aggCalls) {
     return new RwStreamAgg(
         getCluster(), traitSet, getHints(), input, groupSet, groupSets, aggCalls);
+  }
+
+  private ExprNode serializeAggCall(AggregateCall aggCall) {
+    checkArgument(aggCall.getAggregation().kind != SqlKind.AVG, "avg is not yet supported");
+    List<RexNode> rexArgs = new ArrayList<>();
+    for (int i : aggCall.getArgList()) {
+      rexArgs.add(getCluster().getRexBuilder().makeInputRef(input, i));
+    }
+    RexNode rexAggCall =
+        getCluster().getRexBuilder().makeCall(aggCall.getType(), aggCall.getAggregation(), rexArgs);
+    return rexAggCall.accept(new RexToProtoSerializer());
+  }
+
+  public static class StreamAggregationConverterRule extends ConverterRule {
+    public static final RwStreamAgg.StreamAggregationConverterRule INSTANCE =
+        ConverterRule.Config.INSTANCE
+            .withInTrait(LOGICAL)
+            .withOutTrait(STREAMING)
+            .withRuleFactory(RwStreamAgg.StreamAggregationConverterRule::new)
+            .withOperandSupplier(t -> t.operand(RwLogicalAggregate.class).anyInputs())
+            .withDescription("Converting logical project to streaming project.")
+            .as(ConverterRule.Config.class)
+            .toRule(RwStreamAgg.StreamAggregationConverterRule.class);
+
+    protected StreamAggregationConverterRule(Config config) {
+      super(config);
+    }
+
+    @Override
+    public @Nullable RelNode convert(RelNode rel) {
+      RwLogicalAggregate rwLogicalAggregate = (RwLogicalAggregate) rel;
+      RelTraitSet requiredInputTraits =
+          rwLogicalAggregate.getInput().getTraitSet().replace(STREAMING);
+      RelNode newInput =
+          RelOptRule.convert(rwLogicalAggregate.getInput(), requiredInputTraits.plus(LOGICAL));
+      RelNode newLocalAgg =
+          new RwStreamAgg(
+              rwLogicalAggregate.getCluster(),
+              rwLogicalAggregate.getTraitSet().plus(STREAMING),
+              rwLogicalAggregate.getHints(),
+              newInput,
+              rwLogicalAggregate.getGroupSet(),
+              rwLogicalAggregate.getGroupSets(),
+              rwLogicalAggregate.getAggCallList());
+
+      return newLocalAgg;
+    }
   }
 }

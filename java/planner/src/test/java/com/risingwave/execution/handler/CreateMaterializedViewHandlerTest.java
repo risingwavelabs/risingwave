@@ -12,8 +12,8 @@ import com.risingwave.common.config.LeaderServerConfigurations;
 import com.risingwave.common.datatype.NumericTypeBase;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.execution.context.FrontendEnv;
-import com.risingwave.planner.planner.batch.BatchPlanner;
-import com.risingwave.planner.rel.physical.batch.BatchPlan;
+import com.risingwave.planner.planner.streaming.StreamPlanner;
+import com.risingwave.planner.rel.physical.streaming.StreamingPlan;
 import com.risingwave.scheduler.TestPlannerModule;
 import com.risingwave.sql.parser.SqlParser;
 import org.apache.calcite.sql.SqlNode;
@@ -63,9 +63,8 @@ public class CreateMaterializedViewHandlerTest {
 
     SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
     String tableName = createMaterializedView.name.getSimple();
-    SqlNode query = createMaterializedView.query;
-    BatchPlanner planner = new BatchPlanner();
-    BatchPlan plan = planner.plan(query, executionContext);
+    StreamPlanner planner = new StreamPlanner();
+    StreamingPlan plan = planner.plan(ast, executionContext);
     TableCatalog catalog = handler.convertPlanToCatalog(tableName, plan, executionContext);
 
     Assertions.assertEquals(catalog.isMaterializedView(), true);
@@ -96,9 +95,8 @@ public class CreateMaterializedViewHandlerTest {
 
     SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
     String tableName = createMaterializedView.name.getSimple();
-    SqlNode query = createMaterializedView.query;
-    BatchPlanner planner = new BatchPlanner();
-    BatchPlan plan = planner.plan(query, executionContext);
+    StreamPlanner planner = new StreamPlanner();
+    StreamingPlan plan = planner.plan(ast, executionContext);
     TableCatalog catalog = handler.convertPlanToCatalog(tableName, plan, executionContext);
 
     Assertions.assertEquals(catalog.isMaterializedView(), true);

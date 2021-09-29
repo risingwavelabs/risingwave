@@ -5,23 +5,17 @@ import static com.google.common.base.Verify.verify;
 import com.risingwave.planner.rel.RisingWaveRel;
 import com.risingwave.proto.streaming.plan.StreamNode;
 import org.apache.calcite.plan.Convention;
-import org.apache.calcite.plan.RelTraitSet;
 
 public interface RisingWaveStreamingRel extends RisingWaveRel {
   Convention STREAMING =
-      new Convention.Impl("RisingWave Streaming Plan", RisingWaveStreamingRel.class) {
-        @Override
-        public boolean canConvertConvention(Convention toConvention) {
-          return true;
-        }
+      new Convention.Impl("RisingWave Streaming Plan", RisingWaveStreamingRel.class);
 
-        @Override
-        public boolean useAbstractConvertersForConversion(
-            RelTraitSet fromTraits, RelTraitSet toTraits) {
-          return true;
-        }
-      };
-
+  /**
+   * Serialization for streaming nodes only encode local attributes, not any dependency between
+   * different stream nodes.
+   *
+   * @return protobuf of the streaming node.
+   */
   StreamNode serialize();
 
   @Override

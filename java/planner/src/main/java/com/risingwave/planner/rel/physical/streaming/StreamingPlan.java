@@ -9,13 +9,13 @@ package com.risingwave.planner.rel.physical.streaming;
  * procedure.
  */
 public class StreamingPlan {
-  private final RisingWaveStreamingRel streamingPlan;
+  private final RwStreamMaterializedView streamingPlan;
 
-  public StreamingPlan(RisingWaveStreamingRel streamingPlan) {
+  public StreamingPlan(RwStreamMaterializedView streamingPlan) {
     this.streamingPlan = streamingPlan;
   }
 
-  public RisingWaveStreamingRel getStreamingPlan() {
+  public RwStreamMaterializedView getStreamingPlan() {
     return streamingPlan;
   }
 }

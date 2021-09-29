@@ -1,20 +1,31 @@
 package com.risingwave.planner.rel.physical.streaming;
 
+import static com.risingwave.execution.context.ExecutionContext.contextOf;
+import static com.risingwave.planner.planner.PlannerUtils.isSingleMode;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
 import com.google.common.collect.ImmutableList;
+import com.google.protobuf.Any;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
+import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.logical.RwLogicalFilterScan;
+import com.risingwave.proto.plan.TableRefId;
 import com.risingwave.proto.streaming.plan.StreamNode;
+import com.risingwave.proto.streaming.plan.TableSourceNode;
+import com.risingwave.rpc.Messages;
+import java.util.Collections;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.plan.RelTraitSet;
+import org.apache.calcite.rel.RelDistribution;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.convert.ConverterRule;
 import org.apache.calcite.rel.core.TableScan;
 import org.apache.calcite.rel.hint.RelHint;
+import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 public class RwStreamTableSource extends TableScan implements RisingWaveStreamingRel {
@@ -35,7 +46,26 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
 
   @Override
   public StreamNode serialize() {
-    throw new UnsupportedOperationException("Not implemented yet");
+    TableRefId tableRefId = Messages.getTableRefId(tableId);
+
+    TableSourceNode.Builder tableSourceNodeBuilder =
+        TableSourceNode.newBuilder().setTableRefId(tableRefId);
+    columnIds.forEach(c -> tableSourceNodeBuilder.addColumnIds(c.getValue()));
+    return StreamNode.newBuilder()
+        .setNodeType(StreamNode.StreamNodeType.TABLE_INGRESS)
+        .setBody(Any.pack(tableSourceNodeBuilder.build()))
+        .build();
+  }
+
+  @Override
+  public RelDataType deriveRowType() {
+    RelDataTypeFactory.Builder typeBuilder = getCluster().getTypeFactory().builder();
+    TableCatalog tableCatalog = getTable().unwrapOrThrow(TableCatalog.class);
+    columnIds.stream()
+        .map(tableCatalog::getColumnChecked)
+        .forEachOrdered(
+            col -> typeBuilder.add(col.getEntityName().getValue(), col.getDesc().getDataType()));
+    return typeBuilder.build();
   }
 
   /**
@@ -48,11 +78,11 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
         ConverterRule.Config.INSTANCE
             .withInTrait(LOGICAL)
             .withOutTrait(STREAMING)
-            .withRuleFactory(RwStreamTableSource.StreamTableSourceConverterRule::new)
+            .withRuleFactory(StreamTableSourceConverterRule::new)
             .withOperandSupplier(t -> t.operand(RwLogicalFilterScan.class).anyInputs())
             .withDescription("Converting logical filter scan to streaming source node.")
             .as(Config.class)
-            .toRule(RwStreamTableSource.StreamTableSourceConverterRule.class);
+            .toRule(StreamTableSourceConverterRule.class);
 
     protected StreamTableSourceConverterRule(Config config) {
       super(config);
@@ -62,12 +92,22 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
     public @Nullable RelNode convert(RelNode rel) {
       RwLogicalFilterScan source = (RwLogicalFilterScan) rel;
 
+      TableCatalog tableCatalog = source.getTable().unwrapOrThrow(TableCatalog.class);
+
+      RelDistribution distTrait =
+          isSingleMode(contextOf(source.getCluster()))
+              ? RwDistributions.SINGLETON
+              : RwDistributions.RANDOM_DISTRIBUTED;
+
+      RelTraitSet newTraitSet =
+          source.getTraitSet().plus(RisingWaveStreamingRel.STREAMING).plus(distTrait);
+
       return new RwStreamTableSource(
           source.getCluster(),
-          source.getTraitSet(),
-          source.getHints(),
+          newTraitSet,
+          Collections.emptyList(),
           source.getTable(),
-          source.getTableId(),
+          tableCatalog.getId(),
           source.getColumnIds());
     }
   }

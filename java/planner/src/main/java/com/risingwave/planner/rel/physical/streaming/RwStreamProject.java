@@ -2,7 +2,10 @@ package com.risingwave.planner.rel.physical.streaming;
 
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
+import com.google.protobuf.Any;
 import com.risingwave.planner.rel.logical.RwLogicalProject;
+import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
+import com.risingwave.proto.streaming.plan.ProjectNode;
 import com.risingwave.proto.streaming.plan.StreamNode;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
@@ -30,7 +33,15 @@ public class RwStreamProject extends Project implements RisingWaveStreamingRel {
 
   @Override
   public StreamNode serialize() {
-    throw new UnsupportedOperationException("Not implemented yet");
+    RexToProtoSerializer rexVisitor = new RexToProtoSerializer();
+    ProjectNode.Builder projectNodeBuilder = ProjectNode.newBuilder();
+    for (int i = 0; i < exps.size(); i++) {
+      projectNodeBuilder.addSelectList(exps.get(i).accept(rexVisitor));
+    }
+    return StreamNode.newBuilder()
+        .setNodeType(StreamNode.StreamNodeType.PROJECTION)
+        .setBody(Any.pack(projectNodeBuilder.build()))
+        .build();
   }
 
   @Override
@@ -59,7 +70,8 @@ public class RwStreamProject extends Project implements RisingWaveStreamingRel {
       RwLogicalProject rwLogicalProject = (RwLogicalProject) rel;
       RelTraitSet requiredInputTraits =
           rwLogicalProject.getInput().getTraitSet().replace(STREAMING);
-      RelNode newInput = RelOptRule.convert(rwLogicalProject.getInput(), requiredInputTraits);
+      RelNode newInput =
+          RelOptRule.convert(rwLogicalProject.getInput(), requiredInputTraits.plus(LOGICAL));
       return new RwStreamProject(
           rel.getCluster(),
           rwLogicalProject.getTraitSet().plus(STREAMING),
