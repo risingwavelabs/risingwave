@@ -21,7 +21,7 @@ pub type StreamingFloatSumAgg<R> =
     StreamingFoldAgg<R, R, FloatPrimitiveSummable<<R as Array>::OwnedItem>>;
 
 /// `StreamingCountAgg` counts data of any type.
-pub type StreamingCountAgg<R> = StreamingFoldAgg<R, R, Countable<<R as Array>::OwnedItem>>;
+pub type StreamingCountAgg<S> = StreamingFoldAgg<I64Array, S, Countable<<S as Array>::OwnedItem>>;
 
 /// `LocalAggregationOperator` is the aggregation operator for streaming system.
 /// To create an aggregation operator, a state should be passed along the

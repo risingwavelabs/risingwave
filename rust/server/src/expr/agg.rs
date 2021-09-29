@@ -14,6 +14,7 @@ pub enum AggKind {
     Max,
     Sum,
     Count,
+    Avg,
 }
 
 pub struct AggExpression {
@@ -62,6 +63,7 @@ impl<'a> TryFrom<ExprNode_ExprNodeType> for AggKind {
             ExprNode_ExprNodeType::MIN => Ok(AggKind::Min),
             ExprNode_ExprNodeType::MAX => Ok(AggKind::Max),
             ExprNode_ExprNodeType::SUM => Ok(AggKind::Sum),
+            ExprNode_ExprNodeType::AVG => Ok(AggKind::Avg),
             ExprNode_ExprNodeType::COUNT => Ok(AggKind::Count),
             _ => Err(ErrorCode::InternalError("Unrecognized agg.".into()).into()),
         }

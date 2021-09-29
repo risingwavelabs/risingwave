@@ -4,6 +4,9 @@ pub use foldable::*;
 mod row_count;
 pub use row_count::*;
 
+mod avg;
+pub use avg::*;
+
 use super::{Op, Ops};
 use crate::array2::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl};
 use crate::buffer::Bitmap;
