@@ -5,7 +5,7 @@ use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::executor::ExecutorResult::Done;
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
-use crate::storage::TableRef;
+use crate::storage::{MemColumnarTable, TableRef};
 use pb_convert::FromProtobuf;
 use protobuf::Message;
 use risingwave_proto::plan::{PlanNode_PlanNodeType, SeqScanNode};
@@ -13,7 +13,7 @@ use std::convert::TryFrom;
 use std::sync::Arc;
 
 pub(super) struct SeqScanExecutor {
-    table: TableRef,
+    table: Arc<MemColumnarTable>,
     column_idxes: Vec<usize>,
     data: Vec<DataChunkRef>,
     chunk_idx: usize,
@@ -36,18 +36,24 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for SeqScanExecutor {
             .global_task_env()
             .storage_manager()
             .get_table(&table_id)?;
-        let column_idxes = seq_scan_node
-            .get_column_ids()
-            .iter()
-            .map(|c| table_ref.index_of_column_id(*c))
-            .collect::<Result<Vec<usize>>>()?;
+        if let TableRef::Columnar(table_ref) = table_ref {
+            let column_idxes = seq_scan_node
+                .get_column_ids()
+                .iter()
+                .map(|c| table_ref.index_of_column_id(*c))
+                .collect::<Result<Vec<usize>>>()?;
 
-        Ok(Self {
-            table: table_ref,
-            column_idxes,
-            chunk_idx: 0,
-            data: Vec::new(),
-        })
+            Ok(Self {
+                table: table_ref,
+                column_idxes,
+                chunk_idx: 0,
+                data: Vec::new(),
+            })
+        } else {
+            Err(RwError::from(InternalError(
+                "SeqScan requires a columnar table".to_string(),
+            )))
+        }
     }
 }
 

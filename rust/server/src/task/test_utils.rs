@@ -3,6 +3,7 @@ use super::*;
 use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result};
 use crate::service::ExchangeWriter;
+use crate::storage::TableRef;
 use pb_convert::FromProtobuf;
 use protobuf::well_known_types::Any;
 use protobuf::Message;
@@ -222,20 +223,23 @@ impl<'a> SelectBuilder<'a> {
     // select * from t;
     pub fn scan_all(mut self) -> Self {
         let mut scan = SeqScanNode::default();
-        let column_ids = self
+        let table_ref = self
             .runner
             .get_global_env()
             .storage_manager_ref()
             .get_table(&TableId::from_protobuf(&TableRefId::default()).unwrap())
-            .unwrap()
-            .get_column_ids()
             .unwrap();
-        for col_id in column_ids.iter() {
-            scan.mut_column_ids().push(*col_id);
+        if let TableRef::Columnar(column_table_ref) = table_ref {
+            let column_ids = column_table_ref.get_column_ids().unwrap();
+            for col_id in column_ids.iter() {
+                scan.mut_column_ids().push(*col_id);
+            }
+            self.plan.mut_root().set_body(Any::pack(&scan).unwrap());
+            self.plan.mut_root().set_node_type(PlanNodeType::SEQ_SCAN);
+            self
+        } else {
+            todo!()
         }
-        self.plan.mut_root().set_body(Any::pack(&scan).unwrap());
-        self.plan.mut_root().set_node_type(PlanNodeType::SEQ_SCAN);
-        self
     }
 
     pub fn run(self) -> Vec<TaskData> {

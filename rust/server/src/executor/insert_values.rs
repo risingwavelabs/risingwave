@@ -8,7 +8,7 @@ use crate::error::{Result, RwError};
 use crate::executor::ExecutorResult::Done;
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::expr::{build_from_proto, BoxedExpression};
-use crate::storage::StorageManagerRef;
+use crate::storage::{StorageManagerRef, TableRef};
 
 use crate::types::{DataType, Int32Type};
 use pb_convert::FromProtobuf;
@@ -92,10 +92,17 @@ impl Executor for InsertValuesExecutor {
             .columns(columns)
             .build();
 
-        let rows_inserted = self
-            .storage_manager
-            .get_table(&self.table_id)?
-            .append(chunk)?;
+        let table_ref = (if let TableRef::Columnar(table_ref) =
+            self.storage_manager.get_table(&self.table_id)?
+        {
+            Ok(table_ref)
+        } else {
+            Err(RwError::from(InternalError(
+                "Only columnar table support insert".to_string(),
+            )))
+        })?;
+
+        let rows_inserted = table_ref.append(chunk)?;
 
         // create ret value
         {

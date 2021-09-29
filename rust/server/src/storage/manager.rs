@@ -1,7 +1,7 @@
 use crate::catalog::TableId;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::storage::table::{MemTable, TableRef};
+use crate::storage::{MemColumnarTable, TableRef};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -32,7 +32,10 @@ impl StorageManager for MemStorageManager {
             "column count must be positive: {}",
             column_count
         );
-        tables.insert(table_id.clone(), MemTable::new(table_id, column_count));
+        tables.insert(
+            table_id.clone(),
+            TableRef::Columnar(Arc::new(MemColumnarTable::new(table_id, column_count))),
+        );
         Ok(())
     }
 

@@ -59,7 +59,7 @@ mod test {
     use crate::array2::{I32Array, UTF8Array};
     use crate::array_nonnull;
     use crate::catalog::test_utils::mock_table_id;
-    use crate::storage::MemTable;
+    use crate::storage::MemColumnarTable;
     use crate::stream_op::data_source::MockOutput;
     use crate::stream_op::{Op, Processor, SourceProcessor};
     use crate::types::{DataTypeKind, DataTypeRef, Int32Type, StringType};
@@ -72,7 +72,7 @@ mod test {
     #[tokio::test]
     async fn test_table_source() -> Result<()> {
         let table_id = mock_table_id();
-        let table = MemTable::new(&table_id, 2);
+        let table = MemColumnarTable::new(&table_id, 2);
 
         let col1_type = Arc::new(Int32Type::new(false)) as DataTypeRef;
         let col2_type = StringType::create(true, 10, DataTypeKind::Varchar);
