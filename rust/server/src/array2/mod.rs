@@ -15,7 +15,7 @@ mod value_reader;
 use crate::array2::iterator::ArrayImplIterator;
 use crate::buffer::Bitmap;
 use crate::error::Result;
-use crate::types::{option_to_owned_scalar, Datum, Scalar, ScalarImpl, ScalarRef, ScalarRefImpl};
+use crate::types::{Datum, Scalar, ScalarRef, ScalarRefImpl};
 pub use bool_array::{BoolArray, BoolArrayBuilder};
 pub use data_chunk::{DataChunk, DataChunkRef};
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
@@ -129,8 +129,10 @@ pub trait Array: Send + Sync + Sized + 'static + Into<ArrayImpl> {
 
     fn to_protobuf(&self) -> Result<Vec<Buffer>>;
 
+    /// Get the null `Bitmap` from `Array`.
     fn null_bitmap(&self) -> &Bitmap;
 
+    /// Check if an element is `null` or not.
     fn is_null(&self, idx: usize) -> bool {
         self.null_bitmap().is_set(idx).map(|v| !v).unwrap()
     }
@@ -143,15 +145,12 @@ pub trait Array: Send + Sync + Sized + 'static + Into<ArrayImpl> {
             self.hash_at(idx, state);
         }
     }
-
-    fn scalar_value_at(&self, row: usize) -> Datum {
-        self.value_at(row)
-            .map(|item| item.to_owned_scalar().to_scalar_value())
-    }
 }
 
 /// Implement `compact` on array, which removes element according to `visibility`.
 trait CompactableArray: Array {
+    /// Select some elements from `Array` based on `visibility` bitmap.
+    /// `cardinality` is only used to decide capacity of the new `Array`.
     fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Result<Self>;
 }
 
@@ -338,12 +337,14 @@ for_all_variants! { impl_array_builder }
 macro_rules! impl_array {
   ([], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
     impl ArrayImpl {
+      /// Number of items in array.
       pub fn len(&self) -> usize {
         match self {
           $( Self::$variant_name(inner) => inner.len(), )*
         }
       }
 
+      /// Get the null `Bitmap` of the array.
       pub fn null_bitmap(&self) -> &Bitmap {
         match self {
           $( Self::$variant_name(inner) => inner.null_bitmap(), )*
@@ -368,6 +369,7 @@ macro_rules! impl_array {
         }
       }
 
+      /// Select some elements from `Array` based on `visibility` bitmap.
       pub fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Result<Self> {
         match self {
           $( Self::$variant_name(inner) => Ok(inner.compact(visibility, cardinality)?.into()), )*
@@ -407,9 +409,12 @@ macro_rules! impl_array {
         }
       }
 
-      pub fn scalar_value_at(&self, row_id: usize) -> Datum {
+      /// Get the enum-wrapped `Datum` out of the `Array`.
+      pub fn scalar_value_at(&self, idx: usize) -> Datum {
         match self {
-          $( Self::$variant_name(inner) => inner.scalar_value_at(row_id), )*
+          $( Self::$variant_name(inner) => inner
+            .value_at(idx)
+            .map(|item| item.to_owned_scalar().to_scalar_value()), )*
         }
       }
 
@@ -424,15 +429,10 @@ macro_rules! impl_array {
         }
       }
 
+      /// Get the enum-wrapped `ScalarRefImpl` out of the `Array`.
       pub fn value_at(&self, idx: usize) -> Option<ScalarRefImpl<'_>> {
         match self {
           $( Self::$variant_name(inner) => inner.value_at(idx).map(ScalarRefImpl::$variant_name), )*
-        }
-      }
-
-      pub fn value_at_owned(&self, idx: usize) -> Datum {
-        match self {
-          $( Self::$variant_name(inner) => option_to_owned_scalar(&inner.value_at(idx)).map(ScalarImpl::$variant_name), )*
         }
       }
     }
