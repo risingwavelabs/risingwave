@@ -1,5 +1,5 @@
 [package]
-edition = "2018"
+edition = "2021"
 name = "risingwave-proto"
 version = "0.1.0"
 
