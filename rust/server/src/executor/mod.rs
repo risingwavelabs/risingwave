@@ -5,6 +5,8 @@ use drop_table::*;
 use exchange::*;
 mod seq_scan;
 use seq_scan::*;
+mod row_seq_scan;
+use row_seq_scan::*;
 mod create_stream;
 mod filter;
 mod stream_scan;
@@ -102,6 +104,7 @@ impl<'a> ExecutorBuilder<'a> {
         build_executor! { self,
           PlanNode_PlanNodeType::CREATE_TABLE => CreateTableExecutor,
           PlanNode_PlanNodeType::SEQ_SCAN => SeqScanExecutor,
+          PlanNode_PlanNodeType::ROW_SEQ_SCAN => RowSeqScanExecutor,
           PlanNode_PlanNodeType::INSERT_VALUE => InsertValuesExecutor,
           PlanNode_PlanNodeType::DROP_TABLE => DropTableExecutor,
           PlanNode_PlanNodeType::GATHER => GatherExecutor,

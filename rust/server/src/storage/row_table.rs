@@ -7,6 +7,7 @@ use std::{
 };
 
 use itertools::Itertools;
+use risingwave_proto::plan::ColumnDesc;
 use smallvec::SmallVec;
 
 #[derive(Clone, Debug, Default)]
@@ -52,6 +53,7 @@ struct MemRowTableInner {
 
 #[derive(Debug, Default)]
 pub struct MemRowTable {
+    fields: Vec<ColumnDesc>,
     inner: RwLock<MemRowTableInner>,
 }
 
@@ -102,5 +104,17 @@ impl MemRowTable {
     pub fn get(&self, key: Row) -> Result<Option<Row>> {
         let inner = self.inner.read().unwrap();
         inner.get(key)
+    }
+
+    /// Return the schema of the table.
+    pub fn schema(&self) -> Vec<ColumnDesc> {
+        self.fields.clone()
+    }
+
+    /// Create an iterator to scan over all records.
+    pub fn iter(&self) -> Result<impl Iterator<Item = (Row, Row)>> {
+        let inner = self.inner.read().unwrap();
+        let snapshot = inner.data.clone();
+        Ok(snapshot.into_iter())
     }
 }

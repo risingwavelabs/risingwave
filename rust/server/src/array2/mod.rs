@@ -15,7 +15,10 @@ mod value_reader;
 
 use crate::array2::iterator::ArrayImplIterator;
 use crate::buffer::Bitmap;
+pub use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
+pub use crate::error::RwError;
+use crate::types::ScalarImpl;
 use crate::types::{Datum, Scalar, ScalarRef, ScalarRefImpl};
 pub use bool_array::{BoolArray, BoolArrayBuilder};
 pub use data_chunk::{DataChunk, DataChunkRef};
@@ -308,6 +311,17 @@ macro_rules! impl_array_builder {
       pub fn append_null(&mut self) -> Result<()> {
         match self {
           $( Self::$variant_name(inner) => inner.append(None), )*
+        }
+      }
+
+      /// Append a datum, return error while type not match.
+      pub fn append_datum(&mut self, datum: Datum) -> Result<()> {
+        match datum {
+          None => self.append_null(),
+          Some(scalar) => match (self, scalar) {
+            $( (Self::$variant_name(inner), ScalarImpl::$variant_name(v)) => inner.append(Some(v.as_scalar_ref())), )*
+            _ => Err(RwError::from(InternalError("Invalid datum type".to_string()))),
+          },
         }
       }
 

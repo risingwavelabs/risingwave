@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 pub(super) struct SeqScanExecutor {
     table: Arc<MemColumnarTable>,
-    column_idxes: Vec<usize>,
+    column_indices: Vec<usize>,
     data: Vec<DataChunkRef>,
     chunk_idx: usize,
 }
@@ -37,7 +37,7 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for SeqScanExecutor {
             .storage_manager()
             .get_table(&table_id)?;
         if let TableRef::Columnar(table_ref) = table_ref {
-            let column_idxes = seq_scan_node
+            let column_indices = seq_scan_node
                 .get_column_ids()
                 .iter()
                 .map(|c| table_ref.index_of_column_id(*c))
@@ -45,7 +45,7 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for SeqScanExecutor {
 
             Ok(Self {
                 table: table_ref,
-                column_idxes,
+                column_indices,
                 chunk_idx: 0,
                 data: Vec::new(),
             })
@@ -70,14 +70,14 @@ impl Executor for SeqScanExecutor {
 
         let cur_chunk = &self.data[self.chunk_idx];
 
-        let arrays = self
-            .column_idxes
+        let columns = self
+            .column_indices
             .iter()
             .map(|idx| cur_chunk.column_at(*idx))
             .collect::<Result<Vec<Column>>>()?;
 
         // TODO: visibility map here
-        let ret = DataChunk::builder().columns(arrays).build();
+        let ret = DataChunk::builder().columns(columns).build();
 
         self.chunk_idx += 1;
         Ok(ExecutorResult::Batch(Arc::new(ret)))

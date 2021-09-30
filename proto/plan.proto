@@ -47,6 +47,11 @@ message SeqScanNode {
     repeated int32 column_ids = 2;
 }
 
+message RowSeqScanNode {
+    TableRefId table_ref_id = 1;
+    repeated int32 column_ids = 2;
+}
+
 message StreamScanNode {
     TableRefId table_ref_id = 1;
     repeated int32 column_ids = 2;
@@ -165,6 +170,7 @@ message PlanNode {
         STREAM_SCAN = 15;
         TOP_N = 16;
         SORT_AGG = 17;
+        ROW_SEQ_SCAN = 18;
     }
     PlanNodeType node_type = 1;
     google.protobuf.Any body = 2;
