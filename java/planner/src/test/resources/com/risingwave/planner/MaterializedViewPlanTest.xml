@@ -1,5 +1,5 @@
 <Root>
-    <TestCase name="select all columns from table">
+    <TestCase name="query 1">
         <Resource name="sql">
             <![CDATA[
 create materialized view T1 as select sum(v2) as V from t where v1>1
@@ -14,5 +14,838 @@ RwStreamMaterializedView
         RwStreamTableSource(table=[[test_schema, t]])
 ]]>
         </Resource>
+        <Resource name="json">
+            <![CDATA[
+{
+  "body": {
+    "@type": "type.googleapis.com/risingwave.streaming.proto.TableSourceNode",
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      }
+    },
+    "columnIds": [0, 1]
+  },
+  "downstreamNode": {
+    "nodeType": "FILTER",
+    "body": {
+      "@type": "type.googleapis.com/risingwave.streaming.proto.FilterNode",
+      "searchCondition": {
+        "exprType": "GREATER_THAN",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+          "children": [{
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+            },
+            "returnType": {
+              "typeName": "INT32"
+            }
+          }, {
+            "exprType": "CONSTANT_VALUE",
+            "body": {
+              "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+              "body": "AAAAAQ=="
+            },
+            "returnType": {
+              "typeName": "INT32"
+            }
+          }]
+        },
+        "returnType": {
+          "typeName": "BOOLEAN"
+        }
+      }
+    },
+    "downstreamNode": {
+      "nodeType": "PROJECTION",
+      "body": {
+        "@type": "type.googleapis.com/risingwave.streaming.proto.ProjectNode",
+        "selectList": [{
+          "exprType": "INPUT_REF",
+          "body": {
+            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+            "columnIdx": 1
+          },
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }]
+      },
+      "downstreamNode": {
+        "nodeType": "LOCAL_SIMPLE_AGG",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.streaming.proto.SimpleAggNode",
+          "aggCalls": [{
+            "type": "SUM",
+            "args": [{
+              "input": {
+              },
+              "type": {
+                "typeName": "INT32"
+              }
+            }],
+            "returnType": {
+              "typeName": "INT32"
+            }
+          }]
+        },
+        "downstreamNode": {
+          "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
+          "body": {
+            "@type": "type.googleapis.com/risingwave.streaming.proto.MaterializedViewNode",
+            "tableRefId": {
+              "schemaRefId": {
+                "databaseRefId": {
+                }
+              },
+              "tableId": 1
+            },
+            "columnDescs": [{
+              "columnType": {
+                "typeName": "INT32"
+              },
+              "encoding": "RAW"
+            }]
+          }
+        }
+      }
+    }
+  }
+}
+]]>
+        </Resource>>
     </TestCase>
+
+
+    <TestCase name="query 2">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T2 as select v1+v2 as V from t
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView
+  RwStreamProject(v=[+($0, $1)])
+    RwStreamTableSource(table=[[test_schema, t]])
+]]>
+        </Resource>
+        <Resource name="json">
+            <![CDATA[
+{
+  "body": {
+    "@type": "type.googleapis.com/risingwave.streaming.proto.TableSourceNode",
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      }
+    },
+    "columnIds": [0, 1]
+  },
+  "downstreamNode": {
+    "nodeType": "PROJECTION",
+    "body": {
+      "@type": "type.googleapis.com/risingwave.streaming.proto.ProjectNode",
+      "selectList": [{
+        "exprType": "ADD",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+          "children": [{
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+            },
+            "returnType": {
+              "typeName": "INT32"
+            }
+          }, {
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+              "columnIdx": 1
+            },
+            "returnType": {
+              "typeName": "INT32"
+            }
+          }]
+        },
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }]
+    },
+    "downstreamNode": {
+      "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
+      "body": {
+        "@type": "type.googleapis.com/risingwave.streaming.proto.MaterializedViewNode",
+        "tableRefId": {
+          "schemaRefId": {
+            "databaseRefId": {
+            }
+          },
+          "tableId": 2
+        },
+        "columnDescs": [{
+          "columnType": {
+            "typeName": "INT32"
+          },
+          "encoding": "RAW"
+        }]
+      }
+    }
+  }
+}
+]]>
+        </Resource>
+    </TestCase>
+
+
+    <TestCase name="query 3">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T3 as select v2, sum(v1) as V from t group by v2
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView
+  RwStreamAgg(group=[{0}], v=[SUM($1)])
+    RwStreamTableSource(table=[[test_schema, t]])
+]]>
+        </Resource>
+        <Resource name="json">
+            <![CDATA[
+{
+  "body": {
+    "@type": "type.googleapis.com/risingwave.streaming.proto.TableSourceNode",
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      }
+    },
+    "columnIds": [1, 0]
+  },
+  "downstreamNode": {
+    "nodeType": "LOCAL_HASH_AGG",
+    "body": {
+      "@type": "type.googleapis.com/risingwave.streaming.proto.HashAggNode",
+      "groupKeys": [{
+      }],
+      "aggCalls": [{
+        "type": "SUM",
+        "args": [{
+          "input": {
+            "columnIdx": 1
+          },
+          "type": {
+            "typeName": "INT32"
+          }
+        }],
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }]
+    },
+    "downstreamNode": {
+      "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
+      "body": {
+        "@type": "type.googleapis.com/risingwave.streaming.proto.MaterializedViewNode",
+        "tableRefId": {
+          "schemaRefId": {
+            "databaseRefId": {
+            }
+          },
+          "tableId": 3
+        },
+        "columnDescs": [{
+          "columnType": {
+            "typeName": "INT32"
+          },
+          "encoding": "RAW"
+        }, {
+          "columnType": {
+            "typeName": "INT32"
+          },
+          "encoding": "RAW"
+        }]
+      }
+    }
+  }
+}
+]]>
+        </Resource>
+    </TestCase>
+
+    <TestCase name="query 4">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T4 as select sum(v1)+sum(v2) as V from t
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView
+  RwStreamProject(v=[+($0, $1)])
+    RwStreamAgg(group=[{}], agg#0=[SUM($0)], agg#1=[SUM($1)])
+      RwStreamTableSource(table=[[test_schema, t]])
+]]>
+        </Resource>
+        <Resource name="json">
+            <![CDATA[
+{
+  "body": {
+    "@type": "type.googleapis.com/risingwave.streaming.proto.TableSourceNode",
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      }
+    },
+    "columnIds": [0, 1]
+  },
+  "downstreamNode": {
+    "nodeType": "LOCAL_SIMPLE_AGG",
+    "body": {
+      "@type": "type.googleapis.com/risingwave.streaming.proto.SimpleAggNode",
+      "aggCalls": [{
+        "type": "SUM",
+        "args": [{
+          "input": {
+          },
+          "type": {
+            "typeName": "INT32"
+          }
+        }],
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }, {
+        "type": "SUM",
+        "args": [{
+          "input": {
+            "columnIdx": 1
+          },
+          "type": {
+            "typeName": "INT32"
+          }
+        }],
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }]
+    },
+    "downstreamNode": {
+      "nodeType": "PROJECTION",
+      "body": {
+        "@type": "type.googleapis.com/risingwave.streaming.proto.ProjectNode",
+        "selectList": [{
+          "exprType": "ADD",
+          "body": {
+            "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+            "children": [{
+              "exprType": "INPUT_REF",
+              "body": {
+                "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+              },
+              "returnType": {
+                "typeName": "INT32"
+              }
+            }, {
+              "exprType": "INPUT_REF",
+              "body": {
+                "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+                "columnIdx": 1
+              },
+              "returnType": {
+                "typeName": "INT32"
+              }
+            }]
+          },
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }]
+      },
+      "downstreamNode": {
+        "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.streaming.proto.MaterializedViewNode",
+          "tableRefId": {
+            "schemaRefId": {
+              "databaseRefId": {
+              }
+            },
+            "tableId": 4
+          },
+          "columnDescs": [{
+            "columnType": {
+              "typeName": "INT32"
+            },
+            "encoding": "RAW"
+          }]
+        }
+      }
+    }
+  }
+}
+]]>
+        </Resource>
+    </TestCase>
+
+    <TestCase name="query 5">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T5 as select sum(v1+v2) as V from t
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView
+  RwStreamAgg(group=[{}], v=[SUM($0)])
+    RwStreamProject($f0=[+($0, $1)])
+      RwStreamTableSource(table=[[test_schema, t]])
+]]>
+        </Resource>
+        <Resource name="json">
+            <![CDATA[
+{
+  "body": {
+    "@type": "type.googleapis.com/risingwave.streaming.proto.TableSourceNode",
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      }
+    },
+    "columnIds": [0, 1]
+  },
+  "downstreamNode": {
+    "nodeType": "PROJECTION",
+    "body": {
+      "@type": "type.googleapis.com/risingwave.streaming.proto.ProjectNode",
+      "selectList": [{
+        "exprType": "ADD",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+          "children": [{
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+            },
+            "returnType": {
+              "typeName": "INT32"
+            }
+          }, {
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+              "columnIdx": 1
+            },
+            "returnType": {
+              "typeName": "INT32"
+            }
+          }]
+        },
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }]
+    },
+    "downstreamNode": {
+      "nodeType": "LOCAL_SIMPLE_AGG",
+      "body": {
+        "@type": "type.googleapis.com/risingwave.streaming.proto.SimpleAggNode",
+        "aggCalls": [{
+          "type": "SUM",
+          "args": [{
+            "input": {
+            },
+            "type": {
+              "typeName": "INT32"
+            }
+          }],
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }]
+      },
+      "downstreamNode": {
+        "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.streaming.proto.MaterializedViewNode",
+          "tableRefId": {
+            "schemaRefId": {
+              "databaseRefId": {
+              }
+            },
+            "tableId": 5
+          },
+          "columnDescs": [{
+            "columnType": {
+              "typeName": "INT32"
+            },
+            "encoding": "RAW"
+          }]
+        }
+      }
+    }
+  }
+}
+]]>
+        </Resource>
+    </TestCase>
+
+    <TestCase name="query 6">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T6 as select sum(v1) as V from t group by v2
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView
+  RwStreamProject(v=[$1])
+    RwStreamAgg(group=[{0}], v=[SUM($1)])
+      RwStreamTableSource(table=[[test_schema, t]])
+]]>
+        </Resource>
+        <Resource name="json">
+            <![CDATA[
+{
+  "body": {
+    "@type": "type.googleapis.com/risingwave.streaming.proto.TableSourceNode",
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      }
+    },
+    "columnIds": [1, 0]
+  },
+  "downstreamNode": {
+    "nodeType": "LOCAL_HASH_AGG",
+    "body": {
+      "@type": "type.googleapis.com/risingwave.streaming.proto.HashAggNode",
+      "groupKeys": [{
+      }],
+      "aggCalls": [{
+        "type": "SUM",
+        "args": [{
+          "input": {
+            "columnIdx": 1
+          },
+          "type": {
+            "typeName": "INT32"
+          }
+        }],
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }]
+    },
+    "downstreamNode": {
+      "nodeType": "PROJECTION",
+      "body": {
+        "@type": "type.googleapis.com/risingwave.streaming.proto.ProjectNode",
+        "selectList": [{
+          "exprType": "INPUT_REF",
+          "body": {
+            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+            "columnIdx": 1
+          },
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }]
+      },
+      "downstreamNode": {
+        "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.streaming.proto.MaterializedViewNode",
+          "tableRefId": {
+            "schemaRefId": {
+              "databaseRefId": {
+              }
+            },
+            "tableId": 6
+          },
+          "columnDescs": [{
+            "columnType": {
+              "typeName": "INT32"
+            },
+            "encoding": "RAW"
+          }]
+        }
+      }
+    }
+  }
+}
+]]>
+        </Resource>
+    </TestCase>
+
+    <TestCase name="query 7">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T7 as select sum(v1)+1 as V from t group by v2
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView
+  RwStreamProject(v=[+($1, 1)])
+    RwStreamAgg(group=[{0}], agg#0=[SUM($1)])
+      RwStreamTableSource(table=[[test_schema, t]])
+]]>
+        </Resource>
+        <Resource name="json">
+            <![CDATA[
+{
+  "body": {
+    "@type": "type.googleapis.com/risingwave.streaming.proto.TableSourceNode",
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      }
+    },
+    "columnIds": [1, 0]
+  },
+  "downstreamNode": {
+    "nodeType": "LOCAL_HASH_AGG",
+    "body": {
+      "@type": "type.googleapis.com/risingwave.streaming.proto.HashAggNode",
+      "groupKeys": [{
+      }],
+      "aggCalls": [{
+        "type": "SUM",
+        "args": [{
+          "input": {
+            "columnIdx": 1
+          },
+          "type": {
+            "typeName": "INT32"
+          }
+        }],
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }]
+    },
+    "downstreamNode": {
+      "nodeType": "PROJECTION",
+      "body": {
+        "@type": "type.googleapis.com/risingwave.streaming.proto.ProjectNode",
+        "selectList": [{
+          "exprType": "ADD",
+          "body": {
+            "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+            "children": [{
+              "exprType": "INPUT_REF",
+              "body": {
+                "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+                "columnIdx": 1
+              },
+              "returnType": {
+                "typeName": "INT32"
+              }
+            }, {
+              "exprType": "CONSTANT_VALUE",
+              "body": {
+                "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+                "body": "AAAAAQ=="
+              },
+              "returnType": {
+                "typeName": "INT32"
+              }
+            }]
+          },
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }]
+      },
+      "downstreamNode": {
+        "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.streaming.proto.MaterializedViewNode",
+          "tableRefId": {
+            "schemaRefId": {
+              "databaseRefId": {
+              }
+            },
+            "tableId": 7
+          },
+          "columnDescs": [{
+            "columnType": {
+              "typeName": "INT32"
+            },
+            "encoding": "RAW"
+          }]
+        }
+      }
+    }
+  }
+}
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="query 8">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T8 as select sum(v1)+1 as V from t where v1>v2
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView
+  RwStreamProject(v=[+($0, 1)])
+    RwStreamAgg(group=[{}], agg#0=[SUM($0)])
+      RwStreamProject(v1=[$0])
+        RwStreamFilter(condition=[>($0, $1)])
+          RwStreamTableSource(table=[[test_schema, t]])
+            ]]>
+        </Resource>
+        <Resource name="json">
+            <![CDATA[
+{
+  "body": {
+    "@type": "type.googleapis.com/risingwave.streaming.proto.TableSourceNode",
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      }
+    },
+    "columnIds": [0, 1]
+  },
+  "downstreamNode": {
+    "nodeType": "FILTER",
+    "body": {
+      "@type": "type.googleapis.com/risingwave.streaming.proto.FilterNode",
+      "searchCondition": {
+        "exprType": "GREATER_THAN",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+          "children": [{
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+            },
+            "returnType": {
+              "typeName": "INT32"
+            }
+          }, {
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+              "columnIdx": 1
+            },
+            "returnType": {
+              "typeName": "INT32"
+            }
+          }]
+        },
+        "returnType": {
+          "typeName": "BOOLEAN"
+        }
+      }
+    },
+    "downstreamNode": {
+      "nodeType": "PROJECTION",
+      "body": {
+        "@type": "type.googleapis.com/risingwave.streaming.proto.ProjectNode",
+        "selectList": [{
+          "exprType": "INPUT_REF",
+          "body": {
+            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+          },
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }]
+      },
+      "downstreamNode": {
+        "nodeType": "LOCAL_SIMPLE_AGG",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.streaming.proto.SimpleAggNode",
+          "aggCalls": [{
+            "type": "SUM",
+            "args": [{
+              "input": {
+              },
+              "type": {
+                "typeName": "INT32"
+              }
+            }],
+            "returnType": {
+              "typeName": "INT32"
+            }
+          }]
+        },
+        "downstreamNode": {
+          "nodeType": "PROJECTION",
+          "body": {
+            "@type": "type.googleapis.com/risingwave.streaming.proto.ProjectNode",
+            "selectList": [{
+              "exprType": "ADD",
+              "body": {
+                "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+                "children": [{
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  }
+                }, {
+                  "exprType": "CONSTANT_VALUE",
+                  "body": {
+                    "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+                    "body": "AAAAAQ=="
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  }
+                }]
+              },
+              "returnType": {
+                "typeName": "INT32"
+              }
+            }]
+          },
+          "downstreamNode": {
+            "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
+            "body": {
+              "@type": "type.googleapis.com/risingwave.streaming.proto.MaterializedViewNode",
+              "tableRefId": {
+                "schemaRefId": {
+                  "databaseRefId": {
+                  }
+                },
+                "tableId": 8
+              },
+              "columnDescs": [{
+                "columnType": {
+                  "typeName": "INT32"
+                },
+                "encoding": "RAW"
+              }]
+            }
+          }
+        }
+      }
+    }
+  }
+}
+            ]]>
+        </Resource>
+    </TestCase>>
+
 </Root>
