@@ -135,6 +135,11 @@ message HashAggNode {
     repeated risingwave.expr.proto.AggCall agg_calls = 2;
 }
 
+message SortAggNode {
+    repeated risingwave.expr.proto.ExprNode group_keys = 1;
+    repeated risingwave.expr.proto.AggCall agg_calls = 2;
+}
+
 message SimpleAggNode {
     // When there is no group_by_key, we use SimpleAggNode
     repeated risingwave.expr.proto.AggCall agg_calls = 1;
@@ -159,6 +164,7 @@ message PlanNode {
         CREATE_STREAM = 14;
         STREAM_SCAN = 15;
         TOP_N = 16;
+        SORT_AGG = 17;
     }
     PlanNodeType node_type = 1;
     google.protobuf.Any body = 2;

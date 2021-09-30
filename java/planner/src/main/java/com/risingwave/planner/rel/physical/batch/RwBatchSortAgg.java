@@ -2,8 +2,9 @@ package com.risingwave.planner.rel.physical.batch;
 
 import com.google.protobuf.Any;
 import com.risingwave.planner.rel.physical.RwAggregate;
+import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
 import com.risingwave.proto.plan.PlanNode;
-import com.risingwave.proto.plan.SimpleAggNode;
+import com.risingwave.proto.plan.SortAggNode;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelTraitSet;
@@ -28,28 +29,25 @@ public class RwBatchSortAgg extends RwAggregate implements RisingWaveBatchPhyRel
     checkConvention();
   }
 
-  private SimpleAggNode serializeSimpleAgg() {
-    SimpleAggNode.Builder simpleAggNodeBuilder = SimpleAggNode.newBuilder();
+  private SortAggNode serializeSortAgg() {
+    SortAggNode.Builder sortAggNodeBuilder = SortAggNode.newBuilder();
     for (AggregateCall aggCall : aggCalls) {
-      simpleAggNodeBuilder.addAggCalls(serializeAggCall(aggCall));
+      sortAggNodeBuilder.addAggCalls(serializeAggCall(aggCall));
     }
-    return simpleAggNodeBuilder.build();
+    for (int i = groupSet.nextSetBit(0); i >= 0; i = groupSet.nextSetBit(i + 1)) {
+      sortAggNodeBuilder.addGroupKeys(
+          getCluster().getRexBuilder().makeInputRef(input, i).accept(new RexToProtoSerializer()));
+    }
+    return sortAggNodeBuilder.build();
   }
 
   @Override
   public PlanNode serialize() {
-    PlanNode plan;
-    if (groupSet.length() == 0) {
-      plan =
-          PlanNode.newBuilder()
-              .setNodeType(PlanNode.PlanNodeType.SIMPLE_AGG)
-              .setBody(Any.pack(serializeSimpleAgg()))
-              .addChildren(((RisingWaveBatchPhyRel) input).serialize())
-              .build();
-    } else {
-      throw new UnsupportedOperationException();
-    }
-    return plan;
+    return PlanNode.newBuilder()
+        .setNodeType(PlanNode.PlanNodeType.SORT_AGG)
+        .setBody(Any.pack(serializeSortAgg()))
+        .addChildren(((RisingWaveBatchPhyRel) input).serialize())
+        .build();
   }
 
   @Override

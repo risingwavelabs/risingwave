@@ -108,7 +108,7 @@ impl<'a> ExecutorBuilder<'a> {
           PlanNode_PlanNodeType::EXCHANGE => ExchangeExecutor,
           PlanNode_PlanNodeType::FILTER => FilterExecutor,
           PlanNode_PlanNodeType::PROJECT => ProjectionExecutor,
-          PlanNode_PlanNodeType::SIMPLE_AGG => SortAggExecutor,
+          PlanNode_PlanNodeType::SORT_AGG => SortAggExecutor,
           PlanNode_PlanNodeType::ORDER_BY => OrderByExecutor,
           PlanNode_PlanNodeType::CREATE_STREAM => CreateStreamExecutor,
           PlanNode_PlanNodeType::STREAM_SCAN => StreamScanExecutor,

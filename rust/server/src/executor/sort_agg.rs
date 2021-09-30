@@ -6,7 +6,7 @@ use crate::expr::{build_from_proto, AggExpression, BoxedExpression};
 use crate::types::DataType;
 use crate::vector_op::agg::{self, BoxedAggState, BoxedSortedGrouper, EqGroups};
 use protobuf::Message as _;
-use risingwave_proto::plan::{PlanNode_PlanNodeType, SimpleAggNode};
+use risingwave_proto::plan::{PlanNode_PlanNodeType, SortAggNode};
 use std::convert::TryFrom;
 use std::sync::Arc;
 
@@ -29,7 +29,7 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for SortAggExecutor {
     type Error = RwError;
 
     fn try_from(source: &'a ExecutorBuilder<'a>) -> Result<Self> {
-        ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::SIMPLE_AGG);
+        ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::SORT_AGG);
 
         ensure!(source.plan_node().get_children().len() == 1);
         let proto_child = source
@@ -39,11 +39,11 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for SortAggExecutor {
             .ok_or_else(|| ErrorCode::InternalError(String::from("")))?;
         let child = ExecutorBuilder::new(proto_child, source.global_task_env().clone()).build()?;
 
-        let simple_agg_node =
-            SimpleAggNode::parse_from_bytes(source.plan_node().get_body().get_value())
+        let sort_agg_node =
+            SortAggNode::parse_from_bytes(source.plan_node().get_body().get_value())
                 .map_err(|e| RwError::from(ProtobufError(e)))?;
 
-        let agg_exprs = simple_agg_node
+        let agg_exprs = sort_agg_node
             .get_agg_calls()
             .iter()
             .map(AggExpression::try_from)
@@ -54,8 +54,8 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for SortAggExecutor {
             .map(|expr| expr.create_agg_state())
             .collect::<Result<Vec<BoxedAggState>>>()?;
 
-        // TODO(xiangjin): Deserialize from proto once the node definition is added.
-        let group_exprs = []
+        let group_exprs = sort_agg_node
+            .get_group_keys()
             .iter()
             .map(build_from_proto)
             .collect::<Result<Vec<BoxedExpression>>>()?;
