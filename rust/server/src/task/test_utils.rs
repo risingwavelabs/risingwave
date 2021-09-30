@@ -8,7 +8,7 @@ use pb_convert::FromProtobuf;
 use protobuf::well_known_types::Any;
 use protobuf::Message;
 use risingwave_proto::data::{Column, DataType, DataType_TypeName};
-use risingwave_proto::expr::{ConstantValue, ExprNode, ExprNode_ExprNodeType};
+use risingwave_proto::expr::{ConstantValue, ExprNode, ExprNode_Type};
 use risingwave_proto::plan::{
     ColumnDesc, CreateTableNode, InsertValueNode, InsertValueNode_ExprTuple, PlanFragment,
     PlanNode_PlanNodeType as PlanNodeType, SeqScanNode, TableRefId,
@@ -174,7 +174,7 @@ impl<'a> TableBuilder<'a> {
         for constant in constants {
             let mut node = ExprNode::default();
 
-            node.set_expr_type(ExprNode_ExprNodeType::CONSTANT_VALUE);
+            node.set_expr_type(ExprNode_Type::CONSTANT_VALUE);
             let mut typ = DataType::new();
             typ.set_type_name(DataType_TypeName::INT32);
             node.set_return_type(typ);

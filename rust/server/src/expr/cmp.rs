@@ -14,7 +14,7 @@ use crate::expr::BoxedExpression;
 use crate::expr::Expression;
 use crate::types::{build_from_proto as type_build_from_proto, DataType, DataTypeRef};
 use crate::vector_op::cmp::{vec_eq, vec_geq, vec_gt, vec_leq, vec_lt, vec_neq};
-use risingwave_proto::expr::ExprNode_ExprNodeType::{
+use risingwave_proto::expr::ExprNode_Type::{
     EQUAL, GREATER_THAN, GREATER_THAN_OR_EQUAL, LESS_THAN, LESS_THAN_OR_EQUAL, NOT_EQUAL,
 };
 
@@ -116,8 +116,8 @@ mod tests {
     use protobuf::well_known_types::Any as AnyProto;
     use protobuf::RepeatedField;
     use risingwave_proto::data::DataType as DataTypeProto;
-    use risingwave_proto::expr::ExprNode_ExprNodeType;
-    use risingwave_proto::expr::ExprNode_ExprNodeType::INPUT_REF;
+    use risingwave_proto::expr::ExprNode_Type;
+    use risingwave_proto::expr::ExprNode_Type::INPUT_REF;
     use risingwave_proto::expr::InputRefExpr;
     #[test]
     fn test_execute() {
@@ -129,7 +129,7 @@ mod tests {
         mock_execute(GREATER_THAN_OR_EQUAL, Box::new(|x, y| x >= y));
     }
 
-    fn mock_execute(kind: ExprNode_ExprNodeType, mut f: Box<dyn FnMut(i32, i32) -> bool>) {
+    fn mock_execute(kind: ExprNode_Type, mut f: Box<dyn FnMut(i32, i32) -> bool>) {
         let mut lhs = Vec::<Option<i32>>::new();
         let mut rhs = Vec::<Option<i32>>::new();
         let mut target = Vec::<Option<bool>>::new();
@@ -168,7 +168,7 @@ mod tests {
             unreachable!()
         }
     }
-    fn make_expression(kind: ExprNode_ExprNodeType) -> ExprNode {
+    fn make_expression(kind: ExprNode_Type) -> ExprNode {
         let lhs = make_inputref(0);
         let rhs = make_inputref(1);
         make_proto!(ExprNode, {

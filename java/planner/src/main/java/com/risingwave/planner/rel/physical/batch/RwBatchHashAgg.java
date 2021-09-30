@@ -1,14 +1,11 @@
 package com.risingwave.planner.rel.physical.batch;
 
-import static com.google.common.base.Preconditions.checkArgument;
-
 import com.google.protobuf.Any;
-import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
-import com.risingwave.proto.expr.ExprNode;
+import com.risingwave.planner.rel.physical.RwAggregate;
+import com.risingwave.proto.expr.InputRefExpr;
 import com.risingwave.proto.plan.HashAggNode;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.proto.plan.SimpleAggNode;
-import java.util.ArrayList;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelTraitSet;
@@ -16,12 +13,10 @@ import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.Aggregate;
 import org.apache.calcite.rel.core.AggregateCall;
 import org.apache.calcite.rel.hint.RelHint;
-import org.apache.calcite.rex.RexNode;
-import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.util.ImmutableBitSet;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-public class RwBatchHashAgg extends Aggregate implements RisingWaveBatchPhyRel {
+public class RwBatchHashAgg extends RwAggregate implements RisingWaveBatchPhyRel {
   public RwBatchHashAgg(
       RelOptCluster cluster,
       RelTraitSet traitSet,
@@ -34,21 +29,10 @@ public class RwBatchHashAgg extends Aggregate implements RisingWaveBatchPhyRel {
     checkConvention();
   }
 
-  private ExprNode serializeAggCall(AggregateCall aggCall) {
-    checkArgument(aggCall.getAggregation().kind != SqlKind.AVG, "avg is not yet supported");
-    List<RexNode> rexArgs = new ArrayList<>();
-    for (int i : aggCall.getArgList()) {
-      rexArgs.add(getCluster().getRexBuilder().makeInputRef(input, i));
-    }
-    RexNode rexAggCall =
-        getCluster().getRexBuilder().makeCall(aggCall.getType(), aggCall.getAggregation(), rexArgs);
-    return rexAggCall.accept(new RexToProtoSerializer());
-  }
-
   private SimpleAggNode serializeSimpleAgg() {
     SimpleAggNode.Builder simpleAggNodeBuilder = SimpleAggNode.newBuilder();
     for (AggregateCall aggCall : aggCalls) {
-      simpleAggNodeBuilder.addAggregations(serializeAggCall(aggCall));
+      simpleAggNodeBuilder.addAggCalls(serializeAggCall(aggCall));
     }
     return simpleAggNodeBuilder.build();
   }
@@ -56,11 +40,10 @@ public class RwBatchHashAgg extends Aggregate implements RisingWaveBatchPhyRel {
   private HashAggNode serializeHashAgg() {
     HashAggNode.Builder hashAggNodeBuilder = HashAggNode.newBuilder();
     for (int i = groupSet.nextSetBit(0); i >= 0; i = groupSet.nextSetBit(i + 1)) {
-      hashAggNodeBuilder.addGroupByKeys(
-          getCluster().getRexBuilder().makeInputRef(input, i).accept(new RexToProtoSerializer()));
+      hashAggNodeBuilder.addGroupKeys(InputRefExpr.newBuilder().setColumnIdx(i).build());
     }
     for (AggregateCall aggCall : aggCalls) {
-      hashAggNodeBuilder.addAggregations(serializeAggCall(aggCall));
+      hashAggNodeBuilder.addAggCalls(serializeAggCall(aggCall));
     }
     return hashAggNodeBuilder.build();
   }

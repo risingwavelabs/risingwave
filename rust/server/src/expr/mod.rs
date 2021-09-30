@@ -34,10 +34,10 @@ pub use conjunction::ConjunctionOperatorKind;
 use crate::types::{DataType, DataTypeRef};
 use risingwave_proto::expr::{
     ExprNode,
-    ExprNode_ExprNodeType::{ADD, DIVIDE, MODULUS, MULTIPLY, SUBTRACT},
-    ExprNode_ExprNodeType::{AND, NOT, OR},
-    ExprNode_ExprNodeType::{CAST, CONSTANT_VALUE, INPUT_REF, LENGTH, LIKE, SUBSTR},
-    ExprNode_ExprNodeType::{
+    ExprNode_Type::{ADD, DIVIDE, MODULUS, MULTIPLY, SUBTRACT},
+    ExprNode_Type::{AND, NOT, OR},
+    ExprNode_Type::{CAST, CONSTANT_VALUE, INPUT_REF, LENGTH, LIKE, SUBSTR},
+    ExprNode_Type::{
         EQUAL, GREATER_THAN, GREATER_THAN_OR_EQUAL, LESS_THAN, LESS_THAN_OR_EQUAL, NOT_EQUAL,
     },
 };

@@ -72,11 +72,11 @@ mod tests {
     use protobuf::well_known_types::Any as AnyProto;
     use protobuf::RepeatedField;
     use risingwave_proto::data::DataType as DataTypeProto;
-    use risingwave_proto::expr::ExprNode_ExprNodeType::EQUAL;
-    use risingwave_proto::expr::ExprNode_ExprNodeType::INPUT_REF;
+    use risingwave_proto::expr::ExprNode_Type::EQUAL;
+    use risingwave_proto::expr::ExprNode_Type::INPUT_REF;
     use risingwave_proto::expr::FunctionCall;
     use risingwave_proto::expr::InputRefExpr;
-    use risingwave_proto::expr::{ExprNode, ExprNode_ExprNodeType};
+    use risingwave_proto::expr::{ExprNode, ExprNode_Type};
     use std::sync::Arc;
     #[test]
     fn test_filter_executor() {
@@ -99,7 +99,7 @@ mod tests {
         }
     }
 
-    fn make_expression(kind: ExprNode_ExprNodeType) -> ExprNode {
+    fn make_expression(kind: ExprNode_Type) -> ExprNode {
         let lhs = make_inputref(0);
         let rhs = make_inputref(1);
         make_proto!(ExprNode, {

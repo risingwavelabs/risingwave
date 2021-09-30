@@ -2,7 +2,7 @@ use std::convert::TryFrom;
 
 use protobuf::Message;
 
-use risingwave_proto::expr::{ExprNode, ExprNode_ExprNodeType, InputRefExpr};
+use risingwave_proto::expr::{ExprNode, ExprNode_Type, InputRefExpr};
 
 use crate::array2::{ArrayRef, DataChunk};
 use crate::error::ErrorCode::ProtobufError;
@@ -43,7 +43,7 @@ impl<'a> TryFrom<&'a ExprNode> for InputRefExpression {
     type Error = RwError;
 
     fn try_from(proto: &'a ExprNode) -> Result<Self> {
-        ensure!(proto.get_expr_type() == ExprNode_ExprNodeType::INPUT_REF);
+        ensure!(proto.get_expr_type() == ExprNode_Type::INPUT_REF);
 
         let data_type = build_from_proto(proto.get_return_type())?;
 

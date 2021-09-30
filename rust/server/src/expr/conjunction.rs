@@ -2,7 +2,7 @@ use std::{convert::TryFrom, sync::Arc};
 
 use protobuf::Message;
 
-use risingwave_proto::expr::{ExprNode, ExprNode_ExprNodeType, FunctionCall};
+use risingwave_proto::expr::{ExprNode, ExprNode_Type, FunctionCall};
 
 use crate::array2::{ArrayImpl::Bool, ArrayRef, DataChunk};
 use crate::error::ErrorCode::{InternalError, ProtobufError};
@@ -111,7 +111,7 @@ impl<'a> TryFrom<&'a ExprNode> for ConjunctionExpression {
                 InternalError("conjunction expression must have lhs".to_string())
             })?)?;
         match proto.get_expr_type() {
-            ExprNode_ExprNodeType::AND => {
+            ExprNode_Type::AND => {
                 let rhs =
                     expr_build_from_proto(function_call_node.get_children().get(1).ok_or_else(
                         || InternalError("AND expression must have rhs".to_string()),
@@ -123,7 +123,7 @@ impl<'a> TryFrom<&'a ExprNode> for ConjunctionExpression {
                     lhs,
                 })
             }
-            ExprNode_ExprNodeType::OR => {
+            ExprNode_Type::OR => {
                 let rhs =
                     expr_build_from_proto(function_call_node.get_children().get(1).ok_or_else(
                         || InternalError("OR expression must have rhs".to_string()),
@@ -135,7 +135,7 @@ impl<'a> TryFrom<&'a ExprNode> for ConjunctionExpression {
                     lhs,
                 })
             }
-            ExprNode_ExprNodeType::NOT => Ok(Self {
+            ExprNode_Type::NOT => Ok(Self {
                 return_type,
                 kind: ConjunctionOperatorKind::Not,
                 rhs: None,
@@ -156,7 +156,7 @@ mod tests {
     use protobuf::well_known_types::Any as AnyProto;
     use protobuf::RepeatedField;
     use risingwave_proto::data::DataType as DataTypeProto;
-    use risingwave_proto::expr::ExprNode_ExprNodeType::{AND, NOT, OR};
+    use risingwave_proto::expr::ExprNode_Type::{AND, NOT, OR};
     use risingwave_proto::expr::InputRefExpr;
 
     #[test]
@@ -184,7 +184,7 @@ mod tests {
     fn mock_execute(
         lhs: &[Option<bool>],
         rhs: &[Option<bool>],
-        kind: ExprNode_ExprNodeType,
+        kind: ExprNode_Type,
         target: &[Option<bool>],
     ) {
         let col1 = create_column(lhs).unwrap();
@@ -202,11 +202,7 @@ mod tests {
             unreachable!()
         }
     }
-    fn create_cmp_expression(
-        idx1: i32,
-        idx2: i32,
-        kind: ExprNode_ExprNodeType,
-    ) -> Result<ExprNode> {
+    fn create_cmp_expression(idx1: i32, idx2: i32, kind: ExprNode_Type) -> Result<ExprNode> {
         let mut expr = ExprNode::new();
         expr.set_expr_type(kind);
         let lhs = create_inputref(idx1)?;
@@ -224,7 +220,7 @@ mod tests {
 
     fn create_inputref(idx: i32) -> Result<ExprNode> {
         let mut expr = ExprNode::new();
-        expr.set_expr_type(ExprNode_ExprNodeType::INPUT_REF);
+        expr.set_expr_type(ExprNode_Type::INPUT_REF);
         let mut body = InputRefExpr::new();
         body.set_column_idx(idx);
         expr.set_body(AnyProto::pack(&body).unwrap());

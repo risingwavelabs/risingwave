@@ -2,7 +2,7 @@ use std::convert::TryFrom;
 
 use protobuf::Message;
 
-use risingwave_proto::expr::{ExprNode, ExprNode_ExprNodeType, FunctionCall};
+use risingwave_proto::expr::{ExprNode, ExprNode_Type, FunctionCall};
 
 use crate::array2::{ArrayRef, DataChunk};
 use crate::error::ErrorCode::{InternalError, ProtobufError};
@@ -49,7 +49,7 @@ impl<'a> TryFrom<&'a ExprNode> for TypeCastExpression {
     type Error = RwError;
 
     fn try_from(proto: &'a ExprNode) -> Result<Self> {
-        ensure!(proto.get_expr_type() == ExprNode_ExprNodeType::CAST);
+        ensure!(proto.get_expr_type() == ExprNode_Type::CAST);
         let data_type = type_build_from_proto(proto.get_return_type())?;
         let function_call_node =
             FunctionCall::parse_from_bytes(proto.get_body().get_value()).map_err(ProtobufError)?;

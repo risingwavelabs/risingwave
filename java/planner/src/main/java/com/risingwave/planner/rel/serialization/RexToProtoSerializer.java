@@ -34,32 +34,28 @@ import org.apache.calcite.util.TimestampString;
 import org.apache.calcite.util.TimestampWithTimeZoneString;
 
 public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
-  private static final ImmutableMap<SqlKind, ExprNode.ExprNodeType> SQL_TO_FUNC_MAPPING =
-      ImmutableMap.<SqlKind, ExprNode.ExprNodeType>builder()
-          .put(SqlKind.CAST, ExprNode.ExprNodeType.CAST)
-          .put(SqlKind.PLUS, ExprNode.ExprNodeType.ADD)
-          .put(SqlKind.MINUS, ExprNode.ExprNodeType.SUBTRACT)
-          .put(SqlKind.TIMES, ExprNode.ExprNodeType.MULTIPLY)
-          .put(SqlKind.DIVIDE, ExprNode.ExprNodeType.DIVIDE)
-          .put(SqlKind.EQUALS, ExprNode.ExprNodeType.EQUAL)
-          .put(SqlKind.NOT_EQUALS, ExprNode.ExprNodeType.NOT_EQUAL)
-          .put(SqlKind.LESS_THAN, ExprNode.ExprNodeType.LESS_THAN)
-          .put(SqlKind.LESS_THAN_OR_EQUAL, ExprNode.ExprNodeType.LESS_THAN_OR_EQUAL)
-          .put(SqlKind.GREATER_THAN, ExprNode.ExprNodeType.GREATER_THAN)
-          .put(SqlKind.GREATER_THAN_OR_EQUAL, ExprNode.ExprNodeType.GREATER_THAN_OR_EQUAL)
-          .put(SqlKind.AND, ExprNode.ExprNodeType.AND)
-          .put(SqlKind.OR, ExprNode.ExprNodeType.OR)
-          .put(SqlKind.NOT, ExprNode.ExprNodeType.NOT)
-          .put(SqlKind.SUM, ExprNode.ExprNodeType.SUM)
-          .put(SqlKind.COUNT, ExprNode.ExprNodeType.COUNT)
-          .put(SqlKind.MIN, ExprNode.ExprNodeType.MIN)
-          .put(SqlKind.MAX, ExprNode.ExprNodeType.MAX)
+  private static final ImmutableMap<SqlKind, ExprNode.Type> SQL_TO_FUNC_MAPPING =
+      ImmutableMap.<SqlKind, ExprNode.Type>builder()
+          .put(SqlKind.CAST, ExprNode.Type.CAST)
+          .put(SqlKind.PLUS, ExprNode.Type.ADD)
+          .put(SqlKind.MINUS, ExprNode.Type.SUBTRACT)
+          .put(SqlKind.TIMES, ExprNode.Type.MULTIPLY)
+          .put(SqlKind.DIVIDE, ExprNode.Type.DIVIDE)
+          .put(SqlKind.EQUALS, ExprNode.Type.EQUAL)
+          .put(SqlKind.NOT_EQUALS, ExprNode.Type.NOT_EQUAL)
+          .put(SqlKind.LESS_THAN, ExprNode.Type.LESS_THAN)
+          .put(SqlKind.LESS_THAN_OR_EQUAL, ExprNode.Type.LESS_THAN_OR_EQUAL)
+          .put(SqlKind.GREATER_THAN, ExprNode.Type.GREATER_THAN)
+          .put(SqlKind.GREATER_THAN_OR_EQUAL, ExprNode.Type.GREATER_THAN_OR_EQUAL)
+          .put(SqlKind.AND, ExprNode.Type.AND)
+          .put(SqlKind.OR, ExprNode.Type.OR)
+          .put(SqlKind.NOT, ExprNode.Type.NOT)
           .build();
-  private static final ImmutableMap<String, ExprNode.ExprNodeType> STRING_TO_FUNC_MAPPING =
-      ImmutableMap.<String, ExprNode.ExprNodeType>builder()
-          .put("SUBSTRING", ExprNode.ExprNodeType.SUBSTR)
-          .put("LENGTH", ExprNode.ExprNodeType.LENGTH)
-          .put("LIKE", ExprNode.ExprNodeType.LIKE)
+  private static final ImmutableMap<String, ExprNode.Type> STRING_TO_FUNC_MAPPING =
+      ImmutableMap.<String, ExprNode.Type>builder()
+          .put("SUBSTRING", ExprNode.Type.SUBSTR)
+          .put("LENGTH", ExprNode.Type.LENGTH)
+          .put("LIKE", ExprNode.Type.LIKE)
           .build();
 
   public RexToProtoSerializer() {
@@ -200,7 +196,7 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
               dataType.getProtobufType());
       var children = new ArrayList<ExprNode>();
       children.add(constExpr);
-      var callExpr = makeFunctionCallExpr(children, protoDataType, ExprNode.ExprNodeType.CAST);
+      var callExpr = makeFunctionCallExpr(children, protoDataType, ExprNode.Type.CAST);
       return callExpr;
     }
     var retExpr = makeConstantExpr(literal, protoDataType, protoDataType);
@@ -213,7 +209,7 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
     DataType dataType = ((RisingWaveDataType) inputRef.getType()).getProtobufType();
     InputRefExpr inputRefExpr = InputRefExpr.newBuilder().setColumnIdx(columnIdx).build();
     return ExprNode.newBuilder()
-        .setExprType(ExprNode.ExprNodeType.INPUT_REF)
+        .setExprType(ExprNode.Type.INPUT_REF)
         .setBody(Any.pack(inputRefExpr))
         .setReturnType(dataType)
         .build();
@@ -230,7 +226,7 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
         children, protoDataType, funcCallOf(call.getKind(), call.getOperator().getName()));
   }
 
-  private static ExprNode.ExprNodeType funcCallOf(SqlKind kind, String name) {
+  private static ExprNode.Type funcCallOf(SqlKind kind, String name) {
     if (kind == SqlKind.OTHER_FUNCTION) {
       return Optional.of(STRING_TO_FUNC_MAPPING.get(name))
           .orElseThrow(
@@ -253,7 +249,7 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
   private static ExprNode makeConstantExpr(
       RexLiteral literal, DataType returnProtoDataType, DataType protoDataType) {
     return ExprNode.newBuilder()
-        .setExprType(ExprNode.ExprNodeType.CONSTANT_VALUE)
+        .setExprType(ExprNode.Type.CONSTANT_VALUE)
         .setBody(
             Any.pack(
                 ConstantValue.newBuilder()
@@ -266,7 +262,7 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
   }
 
   private static ExprNode makeFunctionCallExpr(
-      List<ExprNode> children, DataType protoDataType, ExprNode.ExprNodeType exprType) {
+      List<ExprNode> children, DataType protoDataType, ExprNode.Type exprType) {
     FunctionCall body = FunctionCall.newBuilder().addAllChildren(children).build();
 
     return ExprNode.newBuilder()

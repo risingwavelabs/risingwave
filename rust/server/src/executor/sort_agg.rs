@@ -2,7 +2,7 @@ use crate::array2::{column::Column, DataChunk};
 use crate::error::ErrorCode::ProtobufError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::executor::{BoxedExecutor, Executor, ExecutorBuilder, ExecutorResult};
-use crate::expr::{build_from_proto, AggExpression, BoxedExpression, Expression as _};
+use crate::expr::{build_from_proto, AggExpression, BoxedExpression};
 use crate::types::DataType;
 use crate::vector_op::agg::{self, BoxedAggState, BoxedSortedGrouper, EqGroups};
 use protobuf::Message as _;
@@ -44,7 +44,7 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for SortAggExecutor {
                 .map_err(|e| RwError::from(ProtobufError(e)))?;
 
         let agg_exprs = simple_agg_node
-            .get_aggregations()
+            .get_agg_calls()
             .iter()
             .map(AggExpression::try_from)
             .collect::<Result<Vec<AggExpression>>>()?;
@@ -173,7 +173,9 @@ mod tests {
     use pb_construct::make_proto;
     use protobuf::well_known_types::Any;
     use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};
-    use risingwave_proto::expr::{ExprNode, ExprNode_ExprNodeType, FunctionCall, InputRefExpr};
+    use risingwave_proto::expr::{
+        AggCall, AggCall_Arg, AggCall_Type, ExprNode, ExprNode_Type, InputRefExpr,
+    };
 
     #[test]
     #[allow(clippy::many_single_char_names)]
@@ -186,20 +188,17 @@ mod tests {
         let mut child = MockExecutor::new();
         child.add(chunk);
 
-        let proto = make_proto!(ExprNode, {
-          expr_type: ExprNode_ExprNodeType::SUM,
+        let proto = make_proto!(AggCall, {
+          field_type: AggCall_Type::SUM,
           return_type: make_proto!(DataTypeProto, {
             type_name: DataType_TypeName::INT64
           }),
-          body: Any::pack(&make_proto!(FunctionCall, {
-            children: vec![make_proto!(ExprNode, {
-              expr_type: ExprNode_ExprNodeType::INPUT_REF,
-              return_type: make_proto!(DataTypeProto, {
-                type_name: DataType_TypeName::INT32
-              }),
-              body: Any::pack(&make_proto!(InputRefExpr, {column_idx: 0})).unwrap()
-            })].into()
-          })).unwrap()
+          args: vec![make_proto!(AggCall_Arg, {
+            input: make_proto!(InputRefExpr, {column_idx: 0}),
+            field_type: make_proto!(DataTypeProto, {
+              type_name: DataType_TypeName::INT32
+            })
+          })].into()
         });
 
         let e = AggExpression::try_from(&proto)?;
@@ -262,20 +261,17 @@ mod tests {
             .build();
         child.add(chunk);
 
-        let proto = make_proto!(ExprNode, {
-          expr_type: ExprNode_ExprNodeType::SUM,
+        let proto = make_proto!(AggCall, {
+          field_type: AggCall_Type::SUM,
           return_type: make_proto!(DataTypeProto, {
             type_name: DataType_TypeName::INT64
           }),
-          body: Any::pack(&make_proto!(FunctionCall, {
-            children: vec![make_proto!(ExprNode, {
-              expr_type: ExprNode_ExprNodeType::INPUT_REF,
-              return_type: make_proto!(DataTypeProto, {
-                type_name: DataType_TypeName::INT32
-              }),
-              body: Any::pack(&make_proto!(InputRefExpr, {column_idx: 0})).unwrap()
-            })].into()
-          })).unwrap()
+          args: vec![make_proto!(AggCall_Arg, {
+            input: make_proto!(InputRefExpr, {column_idx: 0}),
+            field_type: make_proto!(DataTypeProto, {
+              type_name: DataType_TypeName::INT32
+            })
+          })].into()
         });
 
         let e = AggExpression::try_from(&proto)?;
@@ -284,7 +280,7 @@ mod tests {
         let group_exprs = (1..=2)
             .map(|idx| {
                 build_from_proto(&make_proto!(ExprNode, {
-                  expr_type: ExprNode_ExprNodeType::INPUT_REF,
+                  expr_type: ExprNode_Type::INPUT_REF,
                   return_type: make_proto!(DataTypeProto, {
                     type_name: DataType_TypeName::INT32
                   }),

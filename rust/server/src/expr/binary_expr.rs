@@ -6,7 +6,7 @@ use crate::vector_op::cmp::{
     primitive_eq, primitive_geq, primitive_gt, primitive_leq, primitive_lt, primitive_neq,
 };
 use crate::vector_op::like::like_default;
-use risingwave_proto::expr::ExprNode_ExprNodeType;
+use risingwave_proto::expr::ExprNode_Type;
 use std::marker::PhantomData;
 
 /// The macro is responsible for specializing expressions according to the left expr and right expr.
@@ -265,28 +265,28 @@ macro_rules! gen_across_binary {
 }
 
 pub fn new_binary_expr(
-    expr_type: ExprNode_ExprNodeType,
+    expr_type: ExprNode_Type,
     ret: DataTypeRef,
     l: BoxedExpression,
     r: BoxedExpression,
 ) -> BoxedExpression {
     match expr_type {
-        ExprNode_ExprNodeType::EQUAL => {
+        ExprNode_Type::EQUAL => {
             gen_across_binary!(l, r, ret, BoolArray, primitive_eq, primitive_eq)
         }
-        ExprNode_ExprNodeType::NOT_EQUAL => {
+        ExprNode_Type::NOT_EQUAL => {
             gen_across_binary!(l, r, ret, BoolArray, primitive_neq, primitive_neq)
         }
-        ExprNode_ExprNodeType::LESS_THAN => {
+        ExprNode_Type::LESS_THAN => {
             gen_across_binary!(l, r, ret, BoolArray, primitive_lt, primitive_lt)
         }
-        ExprNode_ExprNodeType::GREATER_THAN => {
+        ExprNode_Type::GREATER_THAN => {
             gen_across_binary!(l, r, ret, BoolArray, primitive_gt, primitive_gt)
         }
-        ExprNode_ExprNodeType::GREATER_THAN_OR_EQUAL => {
+        ExprNode_Type::GREATER_THAN_OR_EQUAL => {
             gen_across_binary!(l, r, ret, BoolArray, primitive_geq, primitive_geq)
         }
-        ExprNode_ExprNodeType::LESS_THAN_OR_EQUAL => {
+        ExprNode_Type::LESS_THAN_OR_EQUAL => {
             gen_across_binary!(l, r, ret, BoolArray, primitive_leq, primitive_leq)
         }
         _ => {

@@ -11,7 +11,7 @@ option java_multiple_files = true;
 option optimize_for = SPEED;
 
 message ExprNode {
-    enum ExprNodeType {
+    enum Type {
         INVALID = 0;
         INPUT_REF = 1;
         CONSTANT_VALUE = 2;
@@ -31,18 +31,10 @@ message ExprNode {
         GREATER_THAN = 12;
         GREATER_THAN_OR_EQUAL = 13;
 
-
         // logical operators
         AND = 21;
         OR = 22;
         NOT = 23;
-
-        // agg functions
-        SUM = 101;
-        MIN = 102;
-        MAX = 103;
-        COUNT = 104;
-        AVG = 105;
 
         // other functions
         CAST = 201;
@@ -50,7 +42,7 @@ message ExprNode {
         LENGTH = 203;
         LIKE = 204;
     }
-    ExprNodeType expr_type = 1;
+    Type expr_type = 1;
     google.protobuf.Any body = 2;
     risingwave.executor.proto.DataType return_type = 3;
 }
@@ -68,4 +60,23 @@ message ConstantValue {
 
 message FunctionCall {
     repeated ExprNode children = 1;
+}
+
+// Aggregate Function Calls for Aggregation
+message AggCall {
+    enum Type {
+        INVALID = 0;
+        SUM = 1;
+        MIN = 2;
+        MAX = 3;
+        COUNT = 4;
+        AVG = 5;
+    }
+    message Arg {
+        InputRefExpr input = 1;
+        risingwave.executor.proto.DataType type = 2;
+    }
+    Type type = 1;
+    repeated Arg args = 2;
+    risingwave.executor.proto.DataType return_type = 3;
 }

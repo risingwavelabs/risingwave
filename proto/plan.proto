@@ -131,13 +131,13 @@ message NestedLoopJoinNode {
 }
 
 message HashAggNode {
-    repeated risingwave.expr.proto.ExprNode group_by_keys = 1;
-    repeated risingwave.expr.proto.ExprNode aggregations = 2;
+    repeated risingwave.expr.proto.InputRefExpr group_keys = 1;
+    repeated risingwave.expr.proto.AggCall agg_calls = 2;
 }
 
 message SimpleAggNode {
     // When there is no group_by_key, we use SimpleAggNode
-    repeated risingwave.expr.proto.ExprNode aggregations = 1;
+    repeated risingwave.expr.proto.AggCall agg_calls = 1;
 }
 
 message PlanNode {

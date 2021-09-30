@@ -4,11 +4,11 @@ use crate::expr::BoxedExpression;
 use crate::types::{DataTypeKind, DataTypeRef};
 use crate::vector_op::cast;
 use crate::vector_op::length::length_default;
-use risingwave_proto::expr::ExprNode_ExprNodeType;
+use risingwave_proto::expr::ExprNode_Type;
 use std::marker::PhantomData;
 
 pub fn new_unary_expr(
-    expr_type: ExprNode_ExprNodeType,
+    expr_type: ExprNode_Type,
     return_type: DataTypeRef,
     child_expr: BoxedExpression,
 ) -> BoxedExpression {
@@ -17,7 +17,7 @@ pub fn new_unary_expr(
         return_type.data_type_kind(),
         child_expr.return_type().data_type_kind(),
     ) {
-        (ExprNode_ExprNodeType::CAST, DataTypeKind::Date, DataTypeKind::Char) => {
+        (ExprNode_Type::CAST, DataTypeKind::Date, DataTypeKind::Char) => {
             Box::new(UnaryExpression::<UTF8Array, I32Array, _> {
                 expr_ia1: child_expr,
                 return_type,
@@ -25,7 +25,7 @@ pub fn new_unary_expr(
                 data1: PhantomData,
             })
         }
-        (ExprNode_ExprNodeType::CAST, DataTypeKind::Time, DataTypeKind::Char) => {
+        (ExprNode_Type::CAST, DataTypeKind::Time, DataTypeKind::Char) => {
             Box::new(UnaryExpression::<UTF8Array, I64Array, _> {
                 expr_ia1: child_expr,
                 return_type,
@@ -33,7 +33,7 @@ pub fn new_unary_expr(
                 data1: PhantomData,
             })
         }
-        (ExprNode_ExprNodeType::CAST, DataTypeKind::Timestamp, DataTypeKind::Char) => {
+        (ExprNode_Type::CAST, DataTypeKind::Timestamp, DataTypeKind::Char) => {
             Box::new(UnaryExpression::<UTF8Array, I64Array, _> {
                 expr_ia1: child_expr,
                 return_type,
@@ -41,7 +41,7 @@ pub fn new_unary_expr(
                 data1: PhantomData,
             })
         }
-        (ExprNode_ExprNodeType::CAST, DataTypeKind::Timestampz, DataTypeKind::Char) => {
+        (ExprNode_Type::CAST, DataTypeKind::Timestampz, DataTypeKind::Char) => {
             Box::new(UnaryExpression::<UTF8Array, I64Array, _> {
                 expr_ia1: child_expr,
                 return_type,

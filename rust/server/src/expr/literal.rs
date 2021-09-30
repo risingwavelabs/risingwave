@@ -9,7 +9,7 @@ use std::convert::TryInto;
 use protobuf::Message;
 
 use risingwave_proto::data::DataType_TypeName;
-use risingwave_proto::expr::{ConstantValue, ExprNode, ExprNode_ExprNodeType};
+use risingwave_proto::expr::{ConstantValue, ExprNode, ExprNode_Type};
 
 use rust_decimal::Decimal;
 use std::ops::Deref;
@@ -111,7 +111,7 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
     type Error = RwError;
 
     fn try_from(proto: &'a ExprNode) -> Result<Self> {
-        ensure!(proto.expr_type == ExprNode_ExprNodeType::CONSTANT_VALUE);
+        ensure!(proto.expr_type == ExprNode_Type::CONSTANT_VALUE);
         let data_type = build_from_proto(proto.get_return_type())?;
 
         let proto_value =

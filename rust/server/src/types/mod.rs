@@ -33,7 +33,7 @@ pub use string_type::*;
 
 use crate::array2::{ArrayBuilderImpl, PrimitiveArrayItemType};
 use paste::paste;
-use risingwave_proto::expr::ExprNode_ExprNodeType::{self, *};
+use risingwave_proto::expr::ExprNode_Type::{self, *};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub enum DataTypeKind {
@@ -104,13 +104,13 @@ pub enum ArithmeticOperatorKind {
     Mod,
 }
 
-pub fn is_arithmetic_operator(expr_type: &ExprNode_ExprNodeType) -> bool {
+pub fn is_arithmetic_operator(expr_type: &ExprNode_Type) -> bool {
     matches!(expr_type, ADD | SUBTRACT | MULTIPLY | DIVIDE | MODULUS)
 }
 
-impl TryFrom<&ExprNode_ExprNodeType> for ArithmeticOperatorKind {
+impl TryFrom<&ExprNode_Type> for ArithmeticOperatorKind {
     type Error = RwError;
-    fn try_from(value: &ExprNode_ExprNodeType) -> Result<ArithmeticOperatorKind> {
+    fn try_from(value: &ExprNode_Type) -> Result<ArithmeticOperatorKind> {
         match value {
             ADD => Ok(ArithmeticOperatorKind::Plus),
             SUBTRACT => Ok(ArithmeticOperatorKind::Subtract),
