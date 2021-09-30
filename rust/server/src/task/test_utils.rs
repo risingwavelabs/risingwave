@@ -11,9 +11,17 @@ use risingwave_proto::data::{Column, DataType, DataType_TypeName};
 use risingwave_proto::expr::{ConstantValue, ExprNode, ExprNode_Type};
 use risingwave_proto::plan::{
     ColumnDesc, CreateTableNode, InsertValueNode, InsertValueNode_ExprTuple, PlanFragment,
-    PlanNode_PlanNodeType as PlanNodeType, SeqScanNode, TableRefId,
+    PlanNode_PlanNodeType as PlanNodeType, SeqScanNode, ShuffleInfo_PartitionMode, TableRefId,
 };
-use risingwave_proto::task_service::{TaskData, TaskId as ProtoTaskId, TaskSinkId};
+use risingwave_proto::task_service::{TaskData, TaskId as ProtoTaskId, TaskSinkId as ProtoSinkId};
+
+fn get_num_sinks(plan: &PlanFragment) -> u32 {
+    match plan.get_shuffle_info().partition_mode {
+        ShuffleInfo_PartitionMode::SINGLE => 1,
+        ShuffleInfo_PartitionMode::HASH => plan.get_shuffle_info().get_hash_info().output_count,
+        ShuffleInfo_PartitionMode::BROADCAST => plan.get_shuffle_info().get_broadcast_info().count,
+    }
+}
 
 // Write the execution results into a buffer for testing.
 // In a real server, the results will be flushed into a grpc sink.
@@ -30,18 +38,16 @@ impl ExchangeWriter for FakeExchangeWriter {
 }
 
 pub struct TestRunner {
-    tsid: TaskSinkId,
+    tid: ProtoTaskId,
     env: GlobalTaskEnv,
 }
 
 impl TestRunner {
     pub fn new() -> Self {
         let tid = ProtoTaskId::default();
-        let mut tsid = TaskSinkId::default();
-        tsid.set_task_id(tid);
         Self {
+            tid,
             env: GlobalTaskEnv::for_test(),
-            tsid,
         }
     }
 
@@ -53,24 +59,43 @@ impl TestRunner {
         SelectBuilder::new(self)
     }
 
-    pub fn run(&mut self, plan: PlanFragment) -> Result<Vec<TaskData>> {
+    pub fn run(&mut self, plan: PlanFragment) -> Result<Vec<Vec<TaskData>>> {
+        self.run_task(&plan)?;
+        self.collect_task_output(&plan)
+    }
+
+    pub fn run_task(&mut self, plan: &PlanFragment) -> Result<()> {
         let task_manager = self.env.task_manager();
-        task_manager.fire_task(self.env.clone(), self.tsid.get_task_id(), plan)?;
-        let mut task_sink = task_manager.take_sink(&self.tsid).unwrap();
-        let mut writer = FakeExchangeWriter { messages: vec![] };
-        let messages = futures::executor::block_on(async move {
-            task_sink.take_data(&mut writer).await.unwrap();
-            writer.messages
-        });
-        task_manager.remove_task(self.tsid.get_task_id()).unwrap();
-        Ok(messages)
+        task_manager.fire_task(self.env.clone(), &self.tid, plan.clone())
+    }
+
+    pub fn collect_task_output(&mut self, plan: &PlanFragment) -> Result<Vec<Vec<TaskData>>> {
+        let task_manager = self.env.task_manager();
+        let mut res = Vec::new();
+        let sink_ids = 0..get_num_sinks(plan);
+        for sink_id in sink_ids {
+            let mut proto_sink_id = ProtoSinkId::new();
+            proto_sink_id.set_sink_id(sink_id);
+            proto_sink_id.set_task_id(self.tid.clone());
+            let mut task_sink = task_manager.take_sink(&proto_sink_id)?;
+            let mut writer = FakeExchangeWriter { messages: vec![] };
+            let messages = futures::executor::block_on(async {
+                task_sink.take_data(&mut writer).await.unwrap();
+                writer.messages
+            });
+            res.push(messages);
+        }
+        // In test, we remove the task manually while in production,
+        // it should be removed by the requests from the leader node.
+        task_manager.remove_task(&self.tid)?;
+        Ok(res)
     }
 
     fn get_global_env(&self) -> GlobalTaskEnv {
         self.env.clone()
     }
 
-    fn validate_insert_result(result: Vec<TaskData>, inserted_rows: usize) {
+    fn validate_insert_result(result: &[TaskData], inserted_rows: usize) {
         ResultChecker::new()
             .add_i32_column(false, &[inserted_rows as i32])
             .check_result(result)
@@ -133,8 +158,8 @@ impl<'a> TableBuilder<'a> {
         let inserted_rows = self.tuples.len();
         let create = self.build_create_table_plan();
         let insert = self.build_insert_values_plan();
-        assert_eq!(self.runner.run(create).unwrap().len(), 0);
-        TestRunner::validate_insert_result(self.runner.run(insert).unwrap(), inserted_rows);
+        assert_eq!(self.runner.run(create).unwrap()[0].len(), 0);
+        TestRunner::validate_insert_result(&self.runner.run(insert).unwrap()[0], inserted_rows);
     }
 
     fn build_create_table_plan(&self) -> PlanFragment {
@@ -242,8 +267,28 @@ impl<'a> SelectBuilder<'a> {
         }
     }
 
-    pub fn run(self) -> Vec<TaskData> {
-        self.runner.run(self.plan).unwrap()
+    pub fn run_task(&mut self) -> &mut Self {
+        self.runner.run_task(&self.plan).unwrap();
+        self
+    }
+
+    pub fn collect_task_output(&mut self) -> Vec<Vec<TaskData>> {
+        self.runner.collect_task_output(&self.plan).unwrap()
+    }
+
+    pub fn run_and_collect_multiple_output(mut self) -> Vec<Vec<TaskData>> {
+        self.run_task().collect_task_output()
+    }
+
+    pub fn run_and_collect_single_output(self) -> Vec<TaskData> {
+        self.run_and_collect_multiple_output()
+            .drain(0..=0)
+            .next()
+            .unwrap()
+    }
+
+    pub fn get_mut_plan(&mut self) -> &mut PlanFragment {
+        &mut self.plan
     }
 }
 
@@ -262,7 +307,7 @@ impl ResultChecker {
 
     // We still do not support nullable testing very well.
     // TODO: vals &[i32] => vals &[Option<i32>]
-    pub fn add_i32_column(mut self, is_nullable: bool, vals: &[i32]) -> ResultChecker {
+    pub fn add_i32_column(&mut self, is_nullable: bool, vals: &[i32]) -> &mut ResultChecker {
         let mut typ = DataType::default();
         typ.set_type_name(DataType_TypeName::INT32);
         typ.set_is_nullable(is_nullable);
@@ -275,7 +320,7 @@ impl ResultChecker {
         self
     }
 
-    pub fn check_result(self, actual: Vec<TaskData>) {
+    pub fn check_result(&mut self, actual: &[TaskData]) {
         // Ensure the testing data itself is correct.
         assert_eq!(self.columns.len(), self.col_types.len());
         for col in self.columns.iter() {
@@ -288,7 +333,7 @@ impl ResultChecker {
         self.columns.first().unwrap().len()
     }
 
-    fn try_check_result(self, actual: Vec<TaskData>) -> Result<()> {
+    fn try_check_result(&mut self, actual: &[TaskData]) -> Result<()> {
         assert_eq!(actual.len(), 1);
         let chunk = actual.get(0).unwrap().get_record_batch();
         assert_eq!(chunk.get_cardinality(), self.cardinality() as u32);

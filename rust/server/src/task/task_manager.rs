@@ -113,12 +113,15 @@ mod tests {
             .insert_i32s(&[4, 3, 5])
             .run();
 
-        let res = runner.prepare_scan().scan_all().run();
+        let res = runner
+            .prepare_scan()
+            .scan_all()
+            .run_and_collect_single_output();
         ResultChecker::new()
             .add_i32_column(false, &[1, 2, 3, 4])
             .add_i32_column(false, &[4, 3, 4, 3])
             .add_i32_column(false, &[2, 3, 4, 5])
-            .check_result(res);
+            .check_result(&res);
     }
     #[test]
     fn test_bad_node_type() {

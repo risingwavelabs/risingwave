@@ -7,6 +7,7 @@ pub use task_manager::*;
 mod channel;
 mod env;
 mod fifo_channel;
+mod hash_shuffle_channel;
 mod task;
 mod task_manager;
 
