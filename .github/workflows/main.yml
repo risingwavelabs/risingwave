@@ -1,5 +1,3 @@
-# This is a basic workflow to help you get started with Actions
-
 name: CI
 
 defaults:
@@ -55,7 +53,13 @@ jobs:
 
       - name: Run java style check and tests
         run: |
-          make java_check
+          make java_check java_coverage_report
+
+      - uses: codecov/codecov-action@v2
+        with:
+          token: "6def27d3-3a2e-494e-923d-27c11d20f7ad"
+          directory: java
+          flags: java
 
   end-to-end:
     name: End-to-End Testing
@@ -141,6 +145,7 @@ jobs:
     runs-on: ${{ needs.start-runner.outputs.label }} # run the job on the newly created runner
     container:
       image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
+      options: --security-opt seccomp=unconfined
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -169,6 +174,10 @@ jobs:
           toolchain: nightly-2021-09-10
           components: rustfmt, clippy
       
+      - name: Install cargo-tarpaulin
+        run: |
+          cargo install cargo-tarpaulin
+
       - name: Run rust format check
         run: |
           make rust_fmt
@@ -177,12 +186,19 @@ jobs:
         run: |
           make rust_check
       
-      - name: Run rust test
+      - name: Run rust test with coverage
         run: |
-          make rust_test
+          make rust_test_with_coverage
+
+      - uses: codecov/codecov-action@v2
+        with:
+          token: "6def27d3-3a2e-494e-923d-27c11d20f7ad"
+          directory: rust
+          flags: rust
 
       - name: Build compute-node
         run: make rust_build
+        
       - uses: actions/upload-artifact@v2
         with:
           name: compute-node

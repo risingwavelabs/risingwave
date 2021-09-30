@@ -13,6 +13,9 @@ java_build:
 java_check:
 	cd java && ./gradlew check
 
+java_coverage_report:
+	cd java && ./gradlew jacocoTestReport
+
 sqllogictest:
 	cd go/sqllogictest && make
 	mkdir -p go/bin
@@ -29,6 +32,10 @@ rust_check:
 rust_test:
 	cd rust && mkdir -p proto
 	cd rust && RUSTFLAGS=-Dwarnings cargo test
+
+rust_test_with_coverage:
+	cd rust && mkdir -p proto
+	cd rust && RUSTFLAGS=-Dwarnings cargo tarpaulin --out Xml
 
 rust_build:
 	cd rust && cargo build
