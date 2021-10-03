@@ -128,31 +128,31 @@ impl Executor for StreamScanExecutor {
 
                 match builders[i].borrow_mut() {
                     ArrayBuilderImpl::Int16(b) => {
-                        b.append(value.map(|v| v.as_i64()).flatten().map(|v| v as i16))?;
+                        b.append(value.and_then(|v| v.as_i64()).map(|v| v as i16))?;
                     }
                     ArrayBuilderImpl::Int32(b) => {
-                        b.append(value.map(|v| v.as_i64()).flatten().map(|v| v as i32))?;
+                        b.append(value.and_then(|v| v.as_i64()).map(|v| v as i32))?;
                     }
                     ArrayBuilderImpl::Int64(b) => {
-                        b.append(value.map(|v| v.as_i64()).flatten())?;
+                        b.append(value.and_then(|v| v.as_i64()))?;
                     }
                     ArrayBuilderImpl::Float32(b) => {
-                        b.append(value.map(|v| v.as_f64()).flatten().map(|v| v as f32))?;
+                        b.append(value.and_then(|v| v.as_f64()).map(|v| v as f32))?;
                     }
                     ArrayBuilderImpl::Float64(b) => {
-                        b.append(value.map(|v| v.as_f64()).flatten())?;
+                        b.append(value.and_then(|v| v.as_f64()))?;
                     }
                     ArrayBuilderImpl::Bool(b) => {
-                        b.append(value.map(|v| v.as_bool()).flatten())?;
+                        b.append(value.and_then(|v| v.as_bool()))?;
                     }
                     ArrayBuilderImpl::Decimal(b) => {
-                        b.append(value.map(|v| v.as_u64()).flatten().map(Decimal::from))?;
+                        b.append(value.and_then(|v| v.as_u64()).map(Decimal::from))?;
                     }
                     ArrayBuilderImpl::Interval(_) => {
                         unimplemented!()
                     }
                     ArrayBuilderImpl::UTF8(b) => {
-                        b.append(value.map(|v| v.as_str()).flatten())?;
+                        b.append(value.and_then(|v| v.as_str()))?;
                     }
                 }
             }
