@@ -1,7 +1,7 @@
 use crate::array2::column::Column;
 
 use crate::array2::data_chunk_iter::{DataChunkIter, RowRef};
-use crate::array2::ArrayImpl;
+use crate::array2::{ArrayBuilderImpl, ArrayImpl};
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{ErrorCode, Result, RwError};
@@ -144,53 +144,91 @@ impl DataChunk {
     /// `rechunk` creates a new vector of data chunk whose size is `each_size_limit`.
     /// When the total cardinality of all the chunks is not evenly divided by the `each_size_limit`,
     /// the last new chunk will be the remainder.
-    /// TODO: All data are copied twice now. We could save this optimization for the future.
+    /// Currently, `rechunk` would ignore visibility map. May or may not support it later depending on the demand
     pub fn rechunk(chunks: &[DataChunkRef], each_size_limit: usize) -> Result<Vec<DataChunk>> {
         assert!(each_size_limit > 0);
+        // Corner case: one of the `chunks` may have 0 length
+        // remove the chunks with zero physical length here,
+        // or skip them in the loop below
+        let chunks = chunks
+            .iter()
+            .filter(|chunk| chunk.capacity() != 0)
+            .collect::<Vec<_>>();
         if chunks.is_empty() {
             return Ok(Vec::new());
         }
         assert!(!chunks[0].columns.is_empty());
 
-        let total_cardinality = chunks
+        let column_types = chunks[0]
+            .columns
             .iter()
-            .map(|chunk| chunk.cardinality())
+            .map(|col| col.data_type())
+            .collect::<Vec<_>>();
+
+        let mut total_capacity = chunks
+            .iter()
+            .map(|chunk| chunk.capacity())
             .reduce(|x, y| x + y)
             .unwrap();
-        let num_chunks = (total_cardinality + each_size_limit - 1) / each_size_limit;
-        // for each of the column in all the data chunks, merge them together into one single column
-        let mut new_arrays = Vec::with_capacity(chunks[0].columns.len());
-        for (col_idx, column) in chunks[0].columns.iter().enumerate() {
-            let mut array_builder = column
-                .data_type()
-                .create_array_builder(total_cardinality)
-                .unwrap();
-            for each_chunk in chunks.iter() {
-                array_builder
-                    .append_array(each_chunk.column_at(col_idx).unwrap().array_ref())
-                    .unwrap();
+        let num_chunks = (total_capacity + each_size_limit - 1) / each_size_limit;
+
+        // the idx of `chunks`
+        let mut chunk_idx = 0;
+        // the row idx of `chunks[chunk_idx]`
+        let mut start_row_idx = 0;
+        // how many rows does this new chunk need?
+        let mut new_chunk_require = std::cmp::min(total_capacity, each_size_limit);
+        let mut array_builders: Vec<ArrayBuilderImpl> = column_types
+            .iter()
+            .map(|col_type| col_type.clone().create_array_builder(new_chunk_require))
+            .try_collect()?;
+        let mut new_chunks = Vec::with_capacity(num_chunks);
+        while chunk_idx < chunks.len() {
+            let capacity = chunks[chunk_idx].capacity();
+            let num_rows_left = capacity - start_row_idx;
+            let actual_acquire = std::cmp::min(new_chunk_require, num_rows_left);
+            let end_row_idx = start_row_idx + actual_acquire - 1;
+            array_builders
+                .iter_mut()
+                .zip(chunks[chunk_idx].columns())
+                .try_for_each(|(builder, column)| {
+                    builder.append_array(
+                        &column
+                            .array_ref()
+                            .get_continuous_sub_array(start_row_idx, end_row_idx),
+                    )
+                })?;
+            // since `end_row_idx` is inclusive, exclude it for the next round.
+            start_row_idx = end_row_idx + 1;
+            // if the current `chunks[chunk_idx] is used up, move to the next one
+            if start_row_idx == capacity {
+                chunk_idx += 1;
+                start_row_idx = 0;
             }
-            new_arrays.push(array_builder.finish().unwrap());
+            new_chunk_require -= actual_acquire;
+            total_capacity -= actual_acquire;
+            // a new chunk receives enough rows, finalize it
+            if new_chunk_require == 0 {
+                let new_columns: Vec<Column> = array_builders
+                    .drain(..)
+                    .zip(column_types.iter())
+                    .map(|(builder, col_type)| {
+                        let array = builder.finish()?;
+                        Ok::<_, RwError>(Column::new(Arc::new(array), col_type.clone()))
+                    })
+                    .try_collect()?;
+
+                let data_chunk = DataChunk::builder().columns(new_columns).build();
+                new_chunks.push(data_chunk);
+
+                array_builders = column_types
+                    .iter()
+                    .map(|col_type| col_type.clone().create_array_builder(new_chunk_require))
+                    .try_collect()?;
+                new_chunk_require = std::cmp::min(total_capacity, each_size_limit);
+            }
         }
 
-        let mut new_chunks = Vec::with_capacity(num_chunks);
-        for chunk_idx in 0..num_chunks {
-            let mut new_columns = Vec::with_capacity(chunks[0].columns.len());
-            let start_idx = each_size_limit * chunk_idx;
-            let end_idx = std::cmp::min(
-                each_size_limit * (chunk_idx + 1) - 1,
-                new_arrays[0].len() - 1,
-            );
-            for (new_array, col) in new_arrays.iter().zip(chunks[0].columns.iter()) {
-                let column = Column::new(
-                    Arc::new(new_array.get_continuous_sub_array(start_idx, end_idx)),
-                    col.data_type(),
-                );
-                new_columns.push(column);
-            }
-            let new_chunk = DataChunk::builder().columns(new_columns).build();
-            new_chunks.push(new_chunk);
-        }
         Ok(new_chunks)
     }
     pub fn get_hash_values<H: BuildHasher>(
@@ -258,52 +296,66 @@ mod tests {
 
     #[test]
     fn test_rechunk() {
-        let num_chunks = 10;
-        let chunk_size = 60;
-        let mut chunks = vec![];
-        for chunk_idx in 0..num_chunks {
-            let mut builder = PrimitiveArrayBuilder::<i32>::new(0).unwrap();
-            for i in chunk_size * chunk_idx..chunk_size * (chunk_idx + 1) {
-                builder.append(Some(i as i32)).unwrap();
+        let test_case = |num_chunks: usize, chunk_size: usize, new_chunk_size: usize| {
+            let mut chunks = vec![];
+            for chunk_idx in 0..num_chunks {
+                let mut builder = PrimitiveArrayBuilder::<i32>::new(0).unwrap();
+                for i in chunk_size * chunk_idx..chunk_size * (chunk_idx + 1) {
+                    builder.append(Some(i as i32)).unwrap();
+                }
+                let chunk = DataChunk::builder()
+                    .columns(vec![Column::new(
+                        Arc::new(builder.finish().unwrap().into()),
+                        Arc::new(Int32Type::new(false)),
+                    )])
+                    .build();
+                chunks.push(Arc::new(chunk));
             }
-            let chunk = DataChunk::builder()
-                .columns(vec![Column::new(
-                    Arc::new(builder.finish().unwrap().into()),
-                    Arc::new(Int32Type::new(false)),
-                )])
-                .build();
-            chunks.push(Arc::new(chunk));
-        }
 
-        let total_card = num_chunks * chunk_size;
-        let new_chunk_size = 80;
-        let chunk_sizes = vec![80, 80, 80, 80, 80, 80, 80, 40];
-        let new_chunks = DataChunk::rechunk(&chunks, new_chunk_size).unwrap();
-        assert_eq!(new_chunks.len(), chunk_sizes.len());
-        // check cardinality
-        for (idx, chunk_size) in chunk_sizes.iter().enumerate() {
-            assert_eq!(*chunk_size, new_chunks[idx].cardinality());
-        }
-
-        let mut chunk_idx = 0;
-        let mut cur_idx = 0;
-        for val in 0..total_card {
-            if cur_idx >= chunk_sizes[chunk_idx] {
-                cur_idx = 0;
-                chunk_idx += 1;
+            let total_size = num_chunks * chunk_size;
+            let num_full_new_chunk = total_size / new_chunk_size;
+            let mut chunk_sizes = vec![new_chunk_size; num_full_new_chunk];
+            let remainder = total_size % new_chunk_size;
+            if remainder != 0 {
+                chunk_sizes.push(remainder);
             }
-            assert_eq!(
-                new_chunks[chunk_idx]
-                    .column_at(0)
-                    .unwrap()
-                    .array()
-                    .as_int32()
-                    .value_at(cur_idx)
-                    .unwrap(),
-                val as i32
-            );
-            cur_idx += 1;
-        }
+
+            let new_chunks = DataChunk::rechunk(&chunks, new_chunk_size).unwrap();
+            assert_eq!(new_chunks.len(), chunk_sizes.len());
+            // check cardinality
+            for (idx, chunk_size) in chunk_sizes.iter().enumerate() {
+                assert_eq!(*chunk_size, new_chunks[idx].capacity());
+            }
+
+            let mut chunk_idx = 0;
+            let mut cur_idx = 0;
+            for val in 0..total_size {
+                if cur_idx >= chunk_sizes[chunk_idx] {
+                    cur_idx = 0;
+                    chunk_idx += 1;
+                }
+                assert_eq!(
+                    new_chunks[chunk_idx]
+                        .column_at(0)
+                        .unwrap()
+                        .array()
+                        .as_int32()
+                        .value_at(cur_idx)
+                        .unwrap(),
+                    val as i32
+                );
+                cur_idx += 1;
+            }
+        };
+
+        test_case(0, 0, 1);
+        test_case(0, 10, 1);
+        test_case(10, 0, 1);
+        test_case(1, 1, 6);
+        test_case(1, 10, 11);
+        test_case(2, 3, 6);
+        test_case(5, 5, 6);
+        test_case(10, 10, 7);
     }
 
     #[test]
