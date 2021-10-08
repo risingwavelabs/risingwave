@@ -19,7 +19,7 @@ pub fn new_substr_start(
     })
 }
 
-pub fn new_substr_end(
+pub fn new_substr_for(
     expr_ia1: BoxedExpression,
     expr_ia2: BoxedExpression,
     return_type: DataTypeRef,
@@ -28,7 +28,7 @@ pub fn new_substr_end(
         expr_ia1,
         expr_ia2,
         return_type,
-        func: substr_end,
+        func: substr_for,
         data1: PhantomData,
     })
 }
