@@ -57,7 +57,7 @@ jobs:
 
       - uses: codecov/codecov-action@v2
         with:
-          token: "6def27d3-3a2e-494e-923d-27c11d20f7ad"
+          token: ${{ secrets.CODECOV_TOKEN }}
           directory: java
           flags: java
 
@@ -192,7 +192,7 @@ jobs:
 
       - uses: codecov/codecov-action@v2
         with:
-          token: "6def27d3-3a2e-494e-923d-27c11d20f7ad"
+          token: ${{ secrets.CODECOV_TOKEN }}
           directory: rust
           flags: rust
 

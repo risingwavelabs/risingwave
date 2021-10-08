@@ -1,8 +1,6 @@
 buildscript {
     repositories {
-        maven {
-            url = uri("https://plugins.gradle.org/m2/")
-        }
+        gradlePluginPortal()
     }
     dependencies {
         classpath("com.diffplug.spotless:spotless-plugin-gradle:5.14.1")
@@ -10,19 +8,19 @@ buildscript {
     }
 }
 
+plugins {
+    java
+    checkstyle
+    jacoco
+    id("com.diffplug.spotless").version("5.14.1")
+}
+
 repositories {
     // Required to download KtLint
     mavenCentral()
 }
 
-plugins {
-    java
-    checkstyle
-    jacoco
-    id("com.diffplug.spotless") version "5.14.1"
-}
-
-var javaVersion = JavaVersion.VERSION_11
+val javaVersion = JavaVersion.VERSION_11
 if (JavaVersion.current() != javaVersion) {
     throw GradleException("Only $javaVersion is supported!")
 }
@@ -39,10 +37,8 @@ subprojects {
         mavenCentral()
     }
 
-
     // bom is java-platform, can't apply java-library plugin
-    if (name != "bom") {
-
+    if (name != bomProject) {
         if (appProjects.contains(name)) {
             apply(plugin = "application")
         } else {
@@ -72,7 +68,7 @@ subprojects {
         }
 
 
-        tasks.named<Test>("test") {
+        tasks.test {
             useJUnitPlatform()
         }
 
@@ -84,7 +80,16 @@ subprojects {
                 csv.required.set(false)
                 html.required.set(true)
             }
-            onlyIf {true}
+        }
+
+        tasks.withType<JacocoReport> {
+            afterEvaluate {
+                classDirectories.setFrom(files(classDirectories.files.map {
+                    fileTree(it).apply {
+                        exclude("**/antlr/**")
+                    }
+                }))
+            }
         }
     }
 
@@ -96,5 +101,4 @@ subprojects {
         toolVersion = "8.44"
         maxWarnings = 0
     }
-
 }
