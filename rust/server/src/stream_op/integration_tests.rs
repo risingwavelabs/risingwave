@@ -51,16 +51,14 @@ async fn test_merger_sum_aggr() {
         let output = ChannelOutput::new(sender);
         // for the local aggregator, we need two states: sum and row count
         let aggregator = AggregationOperator::new(
-            vec![
-                Box::new(StreamingSumAgg::<I64Array>::new()),
-                Box::new(StreamingRowCountAgg::new()),
-            ],
             Box::new(output),
+            vec![Some(Arc::new(Int64Type::new(false))), None],
             vec![
                 Arc::new(Int64Type::new(false)),
                 Arc::new(Int64Type::new(false)),
             ],
-            vec![0, 0],
+            vec![vec![0], vec![0]],
+            vec![AggKind::Sum, AggKind::RowCount],
         );
         let (tx, rx) = channel(16);
         let output = ChannelOutput::new(tx);
@@ -100,16 +98,17 @@ async fn test_merger_sum_aggr() {
     let output = OperatorOutput::new(Box::new(projection));
     // for global aggregator, we need to sum data and sum row count
     let aggregator = AggregationOperator::new(
-        vec![
-            Box::new(StreamingSumAgg::<I64Array>::new()),
-            Box::new(StreamingSumAgg::<I64Array>::new()),
-        ],
         Box::new(output),
         vec![
+            Some(Arc::new(Int64Type::new(false))),
+            Some(Arc::new(Int64Type::new(false))),
+        ],
+        vec![
             Arc::new(Int64Type::new(false)),
             Arc::new(Int64Type::new(false)),
         ],
-        vec![0, 1],
+        vec![vec![0], vec![1]],
+        vec![AggKind::Sum, AggKind::Sum],
     );
 
     // use a merger to collect data from dispatchers before sending them to aggregator
@@ -319,16 +318,14 @@ async fn test_tpch_q6() {
         let output = ChannelOutput::new(sender);
         // for local aggregator, we need to sum data and count rows
         let aggregator = AggregationOperator::new(
-            vec![
-                Box::new(StreamingFloatSumAgg::<F64Array>::new()),
-                Box::new(StreamingRowCountAgg::new()),
-            ],
             Box::new(output),
+            vec![Some(Arc::new(Float64Type::new(false))), None],
             vec![
                 Arc::new(Float64Type::new(false)),
                 Arc::new(Int64Type::new(false)),
             ],
-            vec![0, 0],
+            vec![vec![0], vec![0]],
+            vec![AggKind::Sum, AggKind::RowCount],
         );
         let output = OperatorOutput::new(Box::new(aggregator));
         let projection = ProjectionOperator::new(Box::new(output), vec![Box::new(multiply)]);
@@ -375,16 +372,17 @@ async fn test_tpch_q6() {
     let output = OperatorOutput::new(Box::new(projection));
     // for global aggregator, we need to sum data and sum row count
     let aggregator = AggregationOperator::new(
-        vec![
-            Box::new(StreamingFloatSumAgg::<F64Array>::new()),
-            Box::new(StreamingSumAgg::<I64Array>::new()),
-        ],
         Box::new(output),
+        vec![
+            Some(Arc::new(Float64Type::new(false))),
+            Some(Arc::new(Int64Type::new(false))),
+        ],
         vec![
             Arc::new(Float64Type::new(false)),
             Arc::new(Int64Type::new(false)),
         ],
-        vec![0, 1],
+        vec![vec![0], vec![1]],
+        vec![AggKind::Sum, AggKind::Sum],
     );
 
     // use a merger to collect data from dispatchers before sending them to aggregator

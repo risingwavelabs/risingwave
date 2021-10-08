@@ -90,7 +90,6 @@ pub struct HashAggregationOperator {
     /// Index of the column being aggregated.
     /// the inner vector due to multiple arguments of the aggregation function
     /// the outer vector due to multi-state support
-    /// TODO: Need to change after expression support
     val_indices: Vec<Vec<usize>>,
     /// Aggregation Kind for constructing StreamingAggStateImpl
     /// TODO: Use Streaming specific AggKind instead of borrowing from OLAP

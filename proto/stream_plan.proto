@@ -28,19 +28,6 @@ message MemTableMaterializedViewNode {
   repeated int32 pk_idx = 2;
 }
 
-message LocalSimpleAggNode {
-  risingwave.expr.proto.AggCall.Type aggregation_type = 1;
-  risingwave.executor.proto.DataType input_type = 2;
-  risingwave.executor.proto.DataType return_type = 3;
-  int32 column_idx = 4;
-}
-
-message GlobalSimpleAggNode {
-  risingwave.expr.proto.AggCall.Type aggregation_type = 1;
-  risingwave.executor.proto.DataType input_type = 2;
-  risingwave.executor.proto.DataType return_type = 3;
-}
-
 // Version 2 streaming nodes: MaterializedViewNode, SimpleAggNode, HashAggNode.
 
 // A materialized view is regarded as a table,
@@ -52,7 +39,7 @@ message MaterializedViewNode{
 
 // Remark by Yanghao: for both local and global we use the same node in the protobuf.
 // Local and global aggregator distinguish with each other in their aggregation definition.
-message SimpleAggNode{
+message SimpleAggNode {
   repeated risingwave.expr.proto.AggCall agg_calls = 1;
 }
 

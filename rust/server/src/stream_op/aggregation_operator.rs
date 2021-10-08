@@ -7,6 +7,7 @@ use super::{Message, Op, Output, StreamChunk, StreamOperator, UnaryStreamOperato
 use crate::array2::column::Column;
 use crate::array2::*;
 use crate::error::{Result, RwError};
+use crate::expr::AggKind;
 use crate::impl_consume_barrier_default;
 use crate::types::DataTypeRef;
 use itertools::Itertools;
@@ -52,30 +53,41 @@ pub struct AggregationOperator {
     first_data: bool,
 
     /// Return type of current aggregator.
-    ///
-    /// TODO: After we add expression support, these should be part of the expression
-    /// instead of aggregator.
     return_types: Vec<DataTypeRef>,
 
     /// The column to process.
-    ///
-    /// TODO: Will be removed after expression is supported.
     col_idx: Vec<usize>,
 }
 
 impl AggregationOperator {
     pub fn new(
-        states: Vec<Box<dyn StreamingAggStateImpl>>,
         output: Box<dyn Output>,
+        input_types: Vec<Option<DataTypeRef>>,
         return_types: Vec<DataTypeRef>,
-        col_idx: Vec<usize>,
+        val_indices: Vec<Vec<usize>>,
+        agg_types: Vec<AggKind>,
     ) -> Self {
+        // FIXME: currently, `AggregationOperator` only supports one input argument.
         Self {
-            states,
+            states: agg_types
+                .into_iter()
+                .zip(input_types.iter())
+                .zip(return_types.iter())
+                .map(|((agg_type, input_type), return_type)| {
+                    create_streaming_agg_state(input_type, &agg_type, return_type)
+                })
+                .try_collect()
+                .unwrap(),
             output,
             first_data: true,
             return_types,
-            col_idx,
+            col_idx: val_indices
+                .into_iter()
+                .map(|mut x| {
+                    assert_eq!(x.len(), 1);
+                    x.pop().unwrap()
+                })
+                .collect_vec(),
         }
     }
 

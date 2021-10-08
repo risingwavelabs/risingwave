@@ -89,7 +89,10 @@ pub fn create_streaming_agg_state(
                 (_, AggKind::Sum, DataTypeKind::Float32) => {
                     Box::new(StreamingFloatSumAgg::<F32Array>::new())
                 }
-                _ => unimplemented!(),
+                (other_input, other_agg, other_return) => panic!(
+                    "streaming state not implemented: {:?} {:?} {:?}",
+                    other_input, other_agg, other_return
+                ),
             }
         }
         None => {
