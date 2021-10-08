@@ -196,10 +196,10 @@ impl StreamManagerCore {
                 let return_type = build_type_from_proto(aggr_node.get_return_type())?;
                 let col_idx = aggr_node.get_column_idx();
                 Box::new(AggregationOperator::new(
-                    vec![create_streaming_local_agg_state(
-                        &*input_type,
+                    vec![create_streaming_agg_state(
+                        &Some(input_type),
                         &agg_type,
-                        &*return_type,
+                        &return_type,
                     )?],
                     downstream_node,
                     vec![return_type],
@@ -214,10 +214,10 @@ impl StreamManagerCore {
                 let input_type = build_type_from_proto(aggr_node.get_input_type())?;
                 let return_type = build_type_from_proto(aggr_node.get_return_type())?;
                 Box::new(AggregationOperator::new(
-                    vec![create_streaming_local_agg_state(
-                        &*input_type,
+                    vec![create_streaming_agg_state(
+                        &Some(input_type),
                         &agg_type,
-                        &*return_type,
+                        &return_type,
                     )?],
                     downstream_node,
                     vec![return_type],

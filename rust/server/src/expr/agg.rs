@@ -12,6 +12,7 @@ pub enum AggKind {
     Max,
     Sum,
     Count,
+    RowCount,
     Avg,
 }
 

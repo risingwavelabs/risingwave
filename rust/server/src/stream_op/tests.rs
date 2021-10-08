@@ -211,19 +211,23 @@ async fn test_hash_dispatcher() {
 
 #[tokio::test]
 async fn test_local_hash_aggregation_count() {
-    let input_type = Arc::new(Int64Type::new(false));
-    let return_type = Arc::new(Int64Type::new(false));
-    let agg_kind = AggKind::Count;
+    let input_type1 = Arc::new(Int64Type::new(false));
+    let return_type1 = Arc::new(Int64Type::new(false));
+    let agg_kind1 = AggKind::Count;
     let data = Arc::new(Mutex::new(Vec::new()));
     let mock_output = Box::new(MockOutput::new(data.clone())) as Box<dyn Output>;
     let keys = vec![0];
-    let mut hash_aggregator = HashLocalAggregationOperator::new(
-        input_type,
+
+    // This is local hash aggregation, so we add another row count state
+    let return_type2 = Arc::new(Int64Type::new(false));
+    let agg_kind2 = AggKind::RowCount;
+    let mut hash_aggregator = HashAggregationOperator::new(
+        vec![Some(input_type1), None],
         mock_output,
-        return_type,
+        vec![return_type1, return_type2],
         keys,
-        None,
-        agg_kind,
+        vec![vec![0], vec![0]],
+        vec![agg_kind1, agg_kind2],
     );
 
     let ops1 = vec![Op::Insert, Op::Insert, Op::Insert];
@@ -304,20 +308,26 @@ async fn test_local_hash_aggregation_count() {
 
 #[tokio::test]
 async fn test_global_hash_aggregation_count() {
-    let input_type = Arc::new(Int64Type::new(false));
-    let return_type = Arc::new(Int64Type::new(false));
-    let agg_kind = AggKind::Count;
+    let input_type1 = Arc::new(Int64Type::new(false));
+    let return_type1 = Arc::new(Int64Type::new(false));
+    let agg_kind1 = AggKind::Sum;
     let data = Arc::new(Mutex::new(Vec::new()));
     let mock_output = Box::new(MockOutput::new(data.clone())) as Box<dyn Output>;
     let key_indices = vec![0];
-    let val_indices = 1;
-    let mut hash_aggregator = HashGlobalAggregationOperator::new(
-        input_type,
+    let val_indices1 = vec![1];
+
+    // This is local hash aggreagtion, so we add another sum state
+    let input_type2 = Arc::new(Int64Type::new(false));
+    let return_type2 = Arc::new(Int64Type::new(false));
+    let agg_kind2 = AggKind::Sum;
+    let val_indices2 = vec![2];
+    let mut hash_aggregator = HashAggregationOperator::new(
+        vec![Some(input_type1), Some(input_type2)],
         mock_output,
-        return_type,
+        vec![return_type1, return_type2],
         key_indices,
-        val_indices,
-        agg_kind,
+        vec![val_indices1, val_indices2],
+        vec![agg_kind1, agg_kind2],
     );
 
     let ops1 = vec![Op::Insert, Op::Insert, Op::Insert];
@@ -357,13 +367,16 @@ async fn test_global_hash_aggregation_count() {
     assert_eq!(real_output.ops.len(), 2);
     assert_eq!(real_output.ops[0], Op::Insert);
     assert_eq!(real_output.ops[1], Op::Insert);
-    assert_eq!(real_output.columns.len(), 2);
+    assert_eq!(real_output.columns.len(), 3);
     let key_column = real_output.columns[0].array_ref().as_int64();
     assert_eq!(key_column.value_at(0).unwrap(), 1);
     assert_eq!(key_column.value_at(1).unwrap(), 2);
     let agg_column = real_output.columns[1].array_ref().as_int64();
     assert_eq!(agg_column.value_at(0).unwrap(), 1);
     assert_eq!(agg_column.value_at(1).unwrap(), 4);
+    let row_sum_column = real_output.columns[2].array_ref().as_int64();
+    assert_eq!(row_sum_column.value_at(0).unwrap(), 1);
+    assert_eq!(row_sum_column.value_at(1).unwrap(), 4);
 
     let ops2 = vec![Op::Delete, Op::Delete, Op::Delete, Op::Insert];
     let mut key_builder2 = I64ArrayBuilder::new(0).unwrap();
@@ -412,7 +425,7 @@ async fn test_global_hash_aggregation_count() {
             Op::Insert
         ]
     );
-    assert_eq!(real_output.columns.len(), 2);
+    assert_eq!(real_output.columns.len(), 3);
     let key_column = real_output.columns[0].array_ref().as_int64();
     assert_eq!(key_column.len(), 5);
     let key_column = (0..5)
@@ -424,5 +437,17 @@ async fn test_global_hash_aggregation_count() {
     let agg_column = (0..5)
         .map(|idx| agg_column.value_at(idx))
         .collect::<Vec<_>>();
-    assert_eq!(agg_column, vec![Some(1), None, Some(4), Some(3), Some(3)]);
+    assert_eq!(
+        agg_column,
+        vec![Some(1), Some(0), Some(4), Some(3), Some(3)]
+    );
+    let row_sum_column = real_output.columns[2].array_ref().as_int64();
+    assert_eq!(row_sum_column.len(), 5);
+    let row_sum_column = (0..5)
+        .map(|idx| row_sum_column.value_at(idx))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        row_sum_column,
+        vec![Some(1), Some(0), Some(4), Some(3), Some(3)]
+    );
 }
