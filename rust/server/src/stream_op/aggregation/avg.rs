@@ -17,7 +17,7 @@ use crate::stream_op::*;
 use super::{StreamingAggFunction, StreamingAggState};
 
 /// `StreamingAvgAgg` calculates average number of `A`. The result type is `O`.
-///  We compose two foldable states, the StreamingSumAgg and the StreamingCountAgg.
+///  We compose two foldable states, the `StreamingSumAgg` and the `StreamingCountAgg`.
 ///  The average can be derived from these two foldable states.
 pub struct StreamingAvgAgg<A, O = A>
 where

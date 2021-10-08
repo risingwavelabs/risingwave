@@ -59,7 +59,7 @@ static NULL_VAL_FOR_HASH: u32 = 0xfffffff0;
 /// The associated type `ArrayType` is the type of the corresponding array. It is the
 /// return type of `finish`.
 pub trait ArrayBuilder: Send + Sync + Sized + 'static {
-    /// Corresponding `Array` of this builder, which is reciprocal to `ArrayBuilder.
+    /// Corresponding `Array` of this builder, which is reciprocal to `ArrayBuilder`.
     type ArrayType: Array<Builder = Self>;
 
     /// Create a new builder with `capacity`.

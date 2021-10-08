@@ -6,7 +6,7 @@ use std::any::Any;
 use std::convert::TryFrom;
 use std::sync::Arc;
 
-/// [BoolType] is not a primitive type because we use a bit for each bool value, not a [bool].
+/// `BoolType` is not a primitive type because we use a bit for each bool value, not a [`bool`].
 #[derive(Debug, Eq, PartialEq)]
 pub struct BoolType {
     nullable: bool,

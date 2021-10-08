@@ -9,7 +9,7 @@ pub trait ScalarPartialOrd: Scalar {
 }
 
 /// Implement `Scalar` and `ScalarRef` for native type.
-/// For PrimitiveArrayItemType, clone is trivial, so `T` is both `Scalar` and `ScalarRef`.
+/// For `PrimitiveArrayItemType`, clone is trivial, so `T` is both `Scalar` and `ScalarRef`.
 macro_rules! impl_all_native_scalar {
   ([], $({ $scalar_type:ty, $variant_name:ident } ),*) => {
     $(

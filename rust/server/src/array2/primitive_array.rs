@@ -12,20 +12,20 @@ use std::{
     mem::size_of,
 };
 
-/// Physical type of array items. It differs from NativeType with more limited type set.
+/// Physical type of array items. It differs from `NativeType` with more limited type set.
 /// Specifically, it doesn't support u8/u16/u32/u64.
 #[rustfmt::skip]
 pub trait PrimitiveArrayItemType
 where
   for<'a> Self: NativeType + Scalar<ScalarRefType<'a> = Self> + ScalarRef<'a, ScalarType = Self>,
 {
-  /// A helper to convert a primitive array to ArrayImpl.
+  /// A helper to convert a primitive array to `ArrayImpl`.
   fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl;
 
-  /// A helper to convert ArrayImpl to self.
+  /// A helper to convert `ArrayImpl` to self.
   fn try_into_array(arr: ArrayImpl) -> Option<PrimitiveArray<Self>>;
 
-  /// A helper to convert ArrayImpl to self.
+  /// A helper to convert `ArrayImpl` to self.
   fn try_into_array_ref(arr: &ArrayImpl) -> Option<&PrimitiveArray<Self>>;
 }
 

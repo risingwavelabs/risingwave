@@ -8,7 +8,7 @@ use crate::{
 use async_trait::async_trait;
 
 /// `ProjectionOperator` project data with the `expr`. The `expr` takes a chunk of data,
-/// and returns a new data_chunck.  And then, `ProjectionOperator` will insert, delete
+/// and returns a new data chunck. And then, `ProjectionOperator` will insert, delete
 /// or update element into next operator according to the result of the expression.
 pub struct ProjectionOperator {
     /// The output of the current operator

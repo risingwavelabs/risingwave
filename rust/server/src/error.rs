@@ -42,7 +42,7 @@ pub struct RwError {
 }
 
 impl RwError {
-    /// Turns a crate-wide RwError into grpc error.
+    /// Turns a crate-wide `RwError` into grpc error.
     pub fn to_grpc_error(&self) -> RpcStatus {
         RpcStatus::with_message(RpcStatusCode::INTERNAL, self.to_string())
     }

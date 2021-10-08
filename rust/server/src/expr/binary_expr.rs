@@ -11,14 +11,14 @@ use std::marker::PhantomData;
 
 /// The macro is responsible for specializing expressions according to the left expr and right expr.
 /// Parameters:
-///   l/r: the left/right child of the binary expression
-///   ret: the return type of the binary expression
-///   int_f/float_f: the scalar func for the binary
+///   `l`/`r`: the left/right child of the binary expression
+///   `ret`: the return type of the binary expression
+///   `int_f`/`float_f`: the scalar func for the binary
 /// returns:
 ///   Boxed Expression
 ///
 /// Note for scalar func:
-/// For some scalar_function, the operations are different with different types, we can not put them in one generic function
+/// For some scalar functions, the operations are different with different types, we can not put them in one generic function
 ///   e.g. adding for int is different from that for float
 /// Thus, we should manually specialize the scalar function according to different type and pass them to the macro.
 ///
