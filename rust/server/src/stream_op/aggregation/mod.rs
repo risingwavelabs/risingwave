@@ -49,16 +49,16 @@ pub trait StreamingAggStateImpl: Send + Sync + 'static {
     fn new_builder(&self) -> ArrayBuilderImpl;
 }
 
-/// https://www.postgresql.org/docs/13/functions-aggregate.html
+/// [postgresql specification of aggregate functions](https://www.postgresql.org/docs/13/functions-aggregate.html)
 /// Most of the general-purpose aggregate functions have one input except for:
-/// 1. count(*) -> bigint. The input type of count(*)
-/// 2. json_object_agg ( key "any", value "any" ) -> json
-/// 3. jsonb_object_agg ( key "any", value "any" ) -> jsonb
-/// 4. string_agg ( value text, delimiter text ) -> text
-/// 5. string_agg ( value bytea, delimiter bytea ) -> bytea
-/// We remark that there is difference between count(*) and count(any):
-/// 1. count(*) computes the number of input rows. And the semantics of row count is equal to the semantics of count(*)
-/// 2. count("any") computes the number of input rows in which the input value is not null.
+/// 1. `count(*) -> bigint`. The input type of count(*)
+/// 2. `json_object_agg ( key "any", value "any" ) -> json`
+/// 3. `jsonb_object_agg ( key "any", value "any" ) -> jsonb`
+/// 4. `string_agg ( value text, delimiter text ) -> text`
+/// 5. `string_agg ( value bytea, delimiter bytea ) -> bytea`
+/// We remark that there is difference between `count(*)` and `count(any)`:
+/// 1. `count(*)` computes the number of input rows. And the semantics of row count is equal to the semantics of `count(*)`
+/// 2. `count("any")` computes the number of input rows in which the input value is not null.
 pub fn create_streaming_agg_state(
     input_types: &Option<DataTypeRef>,
     agg_type: &AggKind,

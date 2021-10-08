@@ -99,24 +99,24 @@ pub struct HashAggregationOperator {
 
 impl HashAggregationOperator {
     pub fn new(
-        input_type: Vec<Option<DataTypeRef>>,
         output: Box<dyn Output>,
-        return_type: Vec<DataTypeRef>,
-        keys: Vec<usize>,
-        val: Vec<Vec<usize>>,
-        agg_type: Vec<AggKind>,
+        input_types: Vec<Option<DataTypeRef>>,
+        return_types: Vec<DataTypeRef>,
+        key_indices: Vec<usize>,
+        val_indices: Vec<Vec<usize>>,
+        agg_types: Vec<AggKind>,
     ) -> Self {
-        assert_eq!(input_type.len(), return_type.len());
-        assert_eq!(input_type.len(), val.len());
-        assert_eq!(input_type.len(), agg_type.len());
+        assert_eq!(input_types.len(), return_types.len());
+        assert_eq!(input_types.len(), val_indices.len());
+        assert_eq!(input_types.len(), agg_types.len());
         Self {
             state_entries: HashMap::new(),
             output,
-            input_types: input_type,
-            return_types: return_type,
-            key_indices: keys,
-            val_indices: val,
-            agg_types: agg_type,
+            input_types,
+            return_types,
+            key_indices,
+            val_indices,
+            agg_types,
         }
     }
 

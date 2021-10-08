@@ -222,8 +222,8 @@ async fn test_local_hash_aggregation_count() {
     let return_type2 = Arc::new(Int64Type::new(false));
     let agg_kind2 = AggKind::RowCount;
     let mut hash_aggregator = HashAggregationOperator::new(
-        vec![Some(input_type1), None],
         mock_output,
+        vec![Some(input_type1), None],
         vec![return_type1, return_type2],
         keys,
         vec![vec![0], vec![0]],
@@ -322,8 +322,8 @@ async fn test_global_hash_aggregation_count() {
     let agg_kind2 = AggKind::Sum;
     let val_indices2 = vec![2];
     let mut hash_aggregator = HashAggregationOperator::new(
-        vec![Some(input_type1), Some(input_type2)],
         mock_output,
+        vec![Some(input_type1), Some(input_type2)],
         vec![return_type1, return_type2],
         key_indices,
         vec![val_indices1, val_indices2],

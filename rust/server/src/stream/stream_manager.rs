@@ -1,15 +1,17 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use crate::error::{ErrorCode, Result};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{build_from_proto as build_expr_from_proto, AggKind};
 use crate::protobuf::Message as _;
 use crate::storage::MemRowTable;
 use crate::stream_op::*;
-use crate::types::build_from_proto as build_type_from_proto;
+use crate::types::{build_from_proto as build_type_from_proto, DataTypeRef};
 use futures::channel::mpsc::{channel, Receiver, Sender};
+use itertools::Itertools;
 use risingwave_proto::stream_plan;
 use risingwave_proto::stream_service;
+use std::convert::TryFrom;
 use std::convert::TryInto;
 use tokio::task::JoinHandle;
 
@@ -224,8 +226,48 @@ impl StreamManagerCore {
                     vec![0],
                 ))
             }
-            // TODO: get configuration body of each operator
-            LOCAL_HASH_AGG => todo!(),
+            // TODO: There will be only one hash aggregation, combining LOCAL and GLOBAL
+            LOCAL_HASH_AGG => {
+                let aggr_node =
+                    stream_plan::HashAggNode::parse_from_bytes(node.get_body().get_value())
+                        .map_err(ErrorCode::ProtobufError)?;
+                let agg_calls = aggr_node.get_agg_calls();
+                let (input_types, val_indices) = agg_calls.iter().map(|agg_call| {
+          let args = agg_call.get_args();
+          // for each aggregation function, there will be 0 or 1 input arguments for now
+          match args.len() {
+            0 => Ok((None, vec![])),
+            1 => {
+              // As the number of arguments is 1, we should be able to get
+              // the field type. If the `unwrap` inside `get_field_type` panics,
+              // there is some must-be-fixed disconnection between frontend and the executor
+                Ok((Some(build_type_from_proto(args[0].get_field_type())?), vec![args[0].get_input().column_idx as usize]))
+            }
+            _ => unreachable!()
+          }
+        }).try_collect::<(Option<DataTypeRef>, Vec<usize>), Vec<(Option<DataTypeRef>, Vec<usize>)>, RwError>()?.into_iter().unzip();
+                let return_types = agg_calls
+                    .iter()
+                    .map(|agg_call| (build_type_from_proto(agg_call.get_return_type())))
+                    .try_collect()?;
+                let keys = aggr_node
+                    .get_group_keys()
+                    .iter()
+                    .map(|key| key.column_idx as usize)
+                    .collect::<Vec<_>>();
+                let agg_types = agg_calls
+                    .iter()
+                    .map(|agg_call| AggKind::try_from(agg_call.get_field_type()))
+                    .try_collect()?;
+                Box::new(HashAggregationOperator::new(
+                    downstream_node,
+                    input_types,
+                    return_types,
+                    keys,
+                    val_indices,
+                    agg_types,
+                ))
+            }
             GLOBAL_HASH_AGG => todo!(),
             MEMTABLE_MATERIALIZED_VIEW => {
                 let mtmv = stream_plan::MemTableMaterializedViewNode::parse_from_bytes(
