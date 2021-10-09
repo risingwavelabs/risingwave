@@ -38,6 +38,11 @@ protobuf {
     }
     generateProtoTasks {
         ofSourceSet("main").forEach {
+            // See https://github.com/google/protobuf-gradle-plugin/issues/331#issuecomment-543333726
+            // Old proto generated files being undeleted causes build failure.
+            it.doFirst {
+                delete(this.outputs)
+            }
             it.plugins {
                 // Apply the "grpc" plugin whose spec is defined above, without options.
                 id("grpc")
