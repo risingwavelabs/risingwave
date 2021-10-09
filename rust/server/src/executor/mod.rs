@@ -35,6 +35,7 @@ mod gather;
 mod hash_map;
 mod insert_values;
 mod join;
+mod nested_loop_join;
 mod order_by;
 mod projection;
 mod sort_agg;

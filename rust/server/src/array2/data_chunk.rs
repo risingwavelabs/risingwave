@@ -1,6 +1,6 @@
 use crate::array2::column::Column;
 
-use crate::array2::data_chunk_iter::{DataChunkIter, RowRef};
+use crate::array2::data_chunk_iter::RowRef;
 use crate::array2::{ArrayBuilderImpl, ArrayImpl};
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
@@ -245,23 +245,22 @@ impl DataChunk {
         Ok(finalize_hashers(&mut states))
     }
 
-    /// Iterate for each row. The iterator will return all tuples (include visible and invisible).
-    pub fn iter(&self) -> DataChunkIter<'_> {
-        let array_iters = self
-            .columns
-            .iter()
-            .map(|column| column.array_ref().iter())
-            .collect();
-        DataChunkIter::new(array_iters)
-    }
-
-    // The overflow should be checked by up layer.
-    pub fn row_at(&self, pos: usize) -> RowRef<'_> {
+    /// Random access a tuple in a data chunk. Return in a row format.
+    /// # Arguments
+    /// * `pos` - Index of look up tuple
+    /// * `RowRef` - Reference of data tuple
+    /// * bool - whether this tuple is visible
+    pub fn row_at(&self, pos: usize) -> Result<(RowRef<'_>, bool)> {
         let mut row = Vec::with_capacity(self.columns.len());
         for column in &self.columns {
             row.push(column.array_ref().value_at(pos));
         }
-        RowRef::new(row)
+        let row = RowRef::new(row);
+        let vis = match self.visibility.as_ref() {
+            Some(bitmap) => bitmap.is_set(pos)?,
+            None => true,
+        };
+        Ok((row, vis))
     }
 }
 
@@ -356,30 +355,5 @@ mod tests {
         test_case(2, 3, 6);
         test_case(5, 5, 6);
         test_case(10, 10, 7);
-    }
-
-    #[test]
-    fn test_chunk_iter() {
-        let num_of_columns: usize = 2;
-        let length = 5;
-        let mut columns = vec![];
-        for i in 0..num_of_columns {
-            let mut builder = PrimitiveArrayBuilder::<i32>::new(length).unwrap();
-            for _ in 0..length {
-                builder.append(Some(i as i32)).unwrap();
-            }
-            let arr = builder.finish().unwrap();
-            columns.push(Column::new(
-                Arc::new(arr.into()),
-                Arc::new(Int32Type::new(false)),
-            ))
-        }
-        let chunk: DataChunk = DataChunk::builder().columns(columns).build();
-        for row in chunk.iter() {
-            for i in 0..num_of_columns {
-                let val = row.value_at(i).unwrap();
-                assert_eq!(val.into_int32(), i as i32);
-            }
-        }
     }
 }
