@@ -29,7 +29,7 @@ pub trait Source: Send + Sync + 'static {
 }
 
 #[async_trait::async_trait]
-pub trait SourceReader: Send + Sync + 'static {
+pub trait SourceReader: Debug + Send + Sync + 'static {
     async fn next(&mut self) -> Result<Option<SourceMessage>>;
     async fn cancel(&mut self) -> Result<()>;
 }

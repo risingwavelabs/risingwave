@@ -1,11 +1,12 @@
 use crate::array2::column::Column;
-use crate::array2::{ArrayBuilder, ArrayBuilderImpl, DataChunk};
+use crate::array2::{ArrayBuilder, ArrayBuilderImpl, DataChunk, DataChunkRef};
 use crate::catalog::TableId;
 use crate::error::ErrorCode;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::source::{SourceColumnDesc, SourceMessage, SourceReader};
+use itertools::Itertools;
 use pb_convert::FromProtobuf;
 use protobuf::Message;
 use risingwave_proto::plan::StreamScanNode;
@@ -13,75 +14,23 @@ use rust_decimal::Decimal;
 use serde_json::Value;
 use std::borrow::BorrowMut;
 use std::convert::TryFrom;
+use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 const K_STREAM_SCAN_CHUNK_SIZE: usize = 1024;
 
-pub(super) struct StreamScanExecutor {
+pub struct StreamScanExecutor {
     reader: Box<dyn SourceReader>,
     columns: Vec<SourceColumnDesc>,
-    column_idxes: Vec<usize>,
     done: bool,
 }
 
-impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for StreamScanExecutor {
-    type Error = RwError;
-
-    fn try_from(source: &'a ExecutorBuilder<'a>) -> Result<Self> {
-        let stream_scan_node = unpack_from_any!(source.plan_node().get_body(), StreamScanNode);
-
-        let table_id = TableId::from_protobuf(stream_scan_node.get_table_ref_id())
-            .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
-
-        let source_column = source
-            .global_task_env()
-            .source_manager()
-            .get_source(&table_id)?;
-
-        let column_idxes = stream_scan_node
-            .get_column_ids()
-            .iter()
-            .map(|id| {
-                source_column
-                    .columns
-                    .iter()
-                    .position(|c| c.column_id == *id)
-                    .ok_or_else(|| {
-                        InternalError(format!(
-                            "column id {:?} not found in table {:?}",
-                            id, table_id
-                        ))
-                        .into()
-                    })
-            })
-            .collect::<Result<Vec<usize>>>()?;
-
-        Ok(Self {
-            reader: source_column.source.reader()?,
-            columns: source_column.columns,
-            column_idxes,
-            done: false,
-        })
-    }
-}
-
-impl Executor for StreamScanExecutor {
-    fn init(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    fn execute(&mut self) -> Result<ExecutorResult> {
-        if self.done {
-            return Ok(ExecutorResult::Done);
-        }
-
-        let columns = self
-            .column_idxes
-            .iter()
-            .map(|idx| self.columns[*idx].clone())
-            .collect::<Vec<SourceColumnDesc>>();
-
-        let mut builders = columns
+impl StreamScanExecutor {
+    /// This function returns `DataChunkRef` because it will be used by both olap and streaming.
+    /// The streaming side may customize a bit from `DataChunk` to `StreamChunk`.
+    pub async fn next_data_chunk(&mut self) -> Result<Option<DataChunkRef>> {
+        let mut builders = self
+            .columns
             .iter()
             .map(|k| {
                 k.data_type
@@ -93,7 +42,7 @@ impl Executor for StreamScanExecutor {
         let mut values: Vec<Value> = Vec::with_capacity(K_STREAM_SCAN_CHUNK_SIZE);
 
         for i in 0..K_STREAM_SCAN_CHUNK_SIZE {
-            let next_message = async_std::task::block_on(self.reader.next())?;
+            let next_message = self.reader.next().await?;
 
             match next_message {
                 Some(source_message) => match source_message {
@@ -111,18 +60,19 @@ impl Executor for StreamScanExecutor {
                     }
                 },
                 None => {
+                    // There is no message any more, this is the case for olap only.
+                    // Streaming should be infinite
+                    self.done = true;
                     if i == 0 {
-                        return Ok(ExecutorResult::Done);
-                    } else {
-                        self.done = true;
-                        break;
+                        return Ok(None);
                     }
+                    break;
                 }
             };
         }
 
         for value in values.into_iter() {
-            for (i, k) in columns.iter().enumerate() {
+            for (i, k) in self.columns.iter().enumerate() {
                 let column_name = k.name.clone();
                 let value = value.get(column_name);
 
@@ -160,7 +110,7 @@ impl Executor for StreamScanExecutor {
 
         let columns = builders
             .into_iter()
-            .zip(columns.iter().map(|c| c.data_type.clone()))
+            .zip(self.columns.iter().map(|c| c.data_type.clone()))
             .map(|(builder, data_type)| {
                 builder
                     .finish()
@@ -168,11 +118,87 @@ impl Executor for StreamScanExecutor {
             })
             .collect::<Result<Vec<Column>>>()?;
 
-        let ret = DataChunk::builder().columns(columns).build();
-
-        Ok(ExecutorResult::Batch(Arc::new(ret)))
+        let ret = Arc::new(DataChunk::builder().columns(columns).build());
+        Ok(Some(ret))
     }
+}
+
+impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for StreamScanExecutor {
+    type Error = RwError;
+
+    /// This function is designed for OLAP to initialize the `StreamScanExecutor`
+    /// Things needed for initialization is
+    /// 1. `StreamScanNode` whose definition can be shared by OLAP and Streaming
+    /// 2. `SourceManager` whose definition can also be shared. But is it physically shared?
+    fn try_from(source: &'a ExecutorBuilder<'a>) -> Result<Self> {
+        let stream_scan_node = unpack_from_any!(source.plan_node().get_body(), StreamScanNode);
+
+        let table_id = TableId::from_protobuf(stream_scan_node.get_table_ref_id())
+            .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
+
+        let source_desc = source
+            .global_task_env()
+            .source_manager()
+            .get_source(&table_id)?;
+
+        let column_idxes = stream_scan_node
+            .get_column_ids()
+            .iter()
+            .map(|id| {
+                source_desc
+                    .columns
+                    .iter()
+                    .position(|c| c.column_id == *id)
+                    .ok_or_else::<RwError, _>(|| {
+                        InternalError(format!(
+                            "column id {:?} not found in table {:?}",
+                            id, table_id
+                        ))
+                        .into()
+                    })
+            })
+            .try_collect::<_, Vec<usize>, _>()?;
+
+        let columns = column_idxes
+            .iter()
+            .map(|idx| source_desc.columns[*idx].clone())
+            .collect::<Vec<SourceColumnDesc>>();
+
+        Ok(Self {
+            reader: source_desc.source.reader()?,
+            columns,
+            done: false,
+        })
+    }
+}
+
+impl Executor for StreamScanExecutor {
+    fn init(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    fn execute(&mut self) -> Result<ExecutorResult> {
+        if self.done {
+            return Ok(ExecutorResult::Done);
+        }
+        let next_chunk = async_std::task::block_on(self.next_data_chunk())?;
+        match next_chunk {
+            Some(chunk) => Ok(ExecutorResult::Batch(chunk)),
+            None => Ok(ExecutorResult::Done),
+        }
+    }
+
     fn clean(&mut self) -> Result<()> {
         async_std::task::block_on(self.reader.cancel())
+    }
+}
+
+impl Debug for StreamScanExecutor {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StreamScanExecutor")
+            .field("reader", &self.reader)
+            .field("columns", &self.columns)
+            .field("done", &self.done)
+            .finish()
     }
 }

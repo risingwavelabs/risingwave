@@ -21,6 +21,7 @@ pub struct KafkaSourceConfig {
     pub properties: HashMap<String, String>,
 }
 
+#[derive(Clone, Debug)]
 pub struct KafkaSource {
     config: KafkaSourceConfig,
 }
@@ -68,7 +69,10 @@ impl Source for KafkaSource {
             .subscribe(&topics.to_vec())
             .map_err(|e| RwError::from(InternalError(e.to_string())))?;
 
-        Ok(Box::new(KafkaSourceReader { consumer }))
+        Ok(Box::new(KafkaSourceReader {
+            consumer,
+            kafka_source: self.clone(),
+        }))
     }
 }
 
@@ -82,6 +86,15 @@ pub struct KafkaMessage {
 
 pub struct KafkaSourceReader {
     consumer: StreamConsumer<DefaultConsumerContext, AsyncStdRuntime>,
+    kafka_source: KafkaSource,
+}
+
+impl std::fmt::Debug for KafkaSourceReader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KafkaSourceReader")
+            .field("kafka_source", &self.kafka_source)
+            .finish()
+    }
 }
 
 pub struct AsyncStdRuntime;

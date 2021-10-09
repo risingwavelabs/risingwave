@@ -25,7 +25,7 @@ use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 use crate::executor::create_stream::CreateStreamExecutor;
 use crate::executor::gather::GatherExecutor;
-use crate::executor::stream_scan::StreamScanExecutor;
+pub use crate::executor::stream_scan::StreamScanExecutor;
 use crate::task::GlobalTaskEnv;
 
 mod create_table;

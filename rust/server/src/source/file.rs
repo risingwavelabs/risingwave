@@ -24,6 +24,15 @@ pub struct FileSource {
 
 pub struct FileSourceReader {
     file: BufReader<AsyncFile>,
+    file_source: FileSource,
+}
+
+impl std::fmt::Debug for FileSourceReader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FileSourceReader")
+            .field("file_source", &self.file_source)
+            .finish()
+    }
 }
 
 #[async_trait::async_trait]
@@ -68,6 +77,7 @@ impl Source for FileSource {
         match File::open(self.config.filename.as_str()) {
             Ok(file) => Ok(Box::new(FileSourceReader {
                 file: BufReader::new(AsyncFile::from(file)),
+                file_source: self.clone(),
             })),
             Err(e) => Err(RwError::from(InternalError(e.to_string()))),
         }
