@@ -11,7 +11,7 @@ use crate::impl_consume_barrier_default;
 use crate::types::{DataTypeRef, Datum};
 
 use async_trait::async_trait;
-use itertools::Itertools;
+use itertools::{multizip, Itertools};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -61,7 +61,16 @@ impl HashValue {
             .iter_mut()
             .zip(all_agg_input_arrays.iter())
             .try_for_each(|(agg_state, input_arrays)| {
-                agg_state.apply_batch(ops, visibility, input_arrays[0])
+                // FIXME: remove the dummy array.
+                if input_arrays.is_empty() {
+                    agg_state.apply_batch(
+                        ops,
+                        visibility,
+                        &I64Array::from_slice(&[None]).unwrap().into(),
+                    )
+                } else {
+                    agg_state.apply_batch(ops, visibility, input_arrays[0])
+                }
             })
     }
 
@@ -73,30 +82,59 @@ impl HashValue {
     }
 }
 
+/// An aggregation function may accept 0, 1 or 2 arguments.
+pub enum AggArgs {
+    None([DataTypeRef; 0], [usize; 0]),
+    Unary([DataTypeRef; 1], [usize; 1]),
+    Binary([DataTypeRef; 2], [usize; 2]),
+}
+
+impl AggArgs {
+    /// return the types of arguments.
+    pub fn arg_types(&self) -> &[DataTypeRef] {
+        use AggArgs::*;
+        match self {
+            None(typs, _) => typs,
+            Unary(typs, _) => typs,
+            Binary(typs, _) => typs,
+        }
+    }
+
+    /// return the indices of the arguments in [`StreamChunk`].
+    pub fn val_indices(&self) -> &[usize] {
+        use AggArgs::*;
+        match self {
+            None(_, val_indices) => val_indices,
+            Unary(_, val_indices) => val_indices,
+            Binary(_, val_indices) => val_indices,
+        }
+    }
+}
+
+/// Represents an aggregation function.
+pub struct AggCall {
+    /// Aggregation Kind for constructing [`StreamingAggStateImpl`]
+    kind: AggKind,
+    /// Arguments of aggregation function input.
+    args: AggArgs,
+    /// The return type of aggregation function.
+    return_type: DataTypeRef,
+}
+
 pub struct HashAggregationOperator {
     /// Aggregation state of the current operator
-    /// `Vec<HashKey>`
     state_entries: HashMap<HashKey, HashValue>,
     /// The output of the current operator
     output: Box<dyn Output>,
-    /// the inner vector due to aggregate functions that supports more than one input
-    /// the outer vector due to multi-state support
-    input_types: Vec<Option<DataTypeRef>>,
-    /// vector due to multi-state support
-    return_types: Vec<DataTypeRef>,
+    /// A [`HashAggregationOperator`] may have multiple [`AggCall`]s.
+    agg_calls: Vec<AggCall>,
     /// Indices of the columns
     /// all of the aggregation functions in this operator should depend on same group of keys
     key_indices: Vec<usize>,
-    /// Index of the column being aggregated.
-    /// the inner vector due to multiple arguments of the aggregation function
-    /// the outer vector due to multi-state support
-    val_indices: Vec<Vec<usize>>,
-    /// Aggregation Kind for constructing StreamingAggStateImpl
-    /// TODO: Use Streaming specific AggKind instead of borrowing from OLAP
-    agg_types: Vec<AggKind>,
 }
 
 impl HashAggregationOperator {
+    /// FIXME: update the signature to use [`AggCall`] later.
     pub fn new(
         output: Box<dyn Output>,
         input_types: Vec<Option<DataTypeRef>>,
@@ -108,14 +146,32 @@ impl HashAggregationOperator {
         assert_eq!(input_types.len(), return_types.len());
         assert_eq!(input_types.len(), val_indices.len());
         assert_eq!(input_types.len(), agg_types.len());
+        let agg_calls = multizip((
+            input_types.into_iter(),
+            return_types.into_iter(),
+            val_indices.into_iter(),
+            agg_types.into_iter(),
+        ))
+        .map(|(input_type, return_type, val_indices2, agg_type)| {
+            let args = match (input_type, val_indices2.len()) {
+                // FIXME: match `(None, 0)` here.
+                // Currently, [`AggregationStateImpl::apply_batch`] will accept exactly one array, we have to pass a dummy array to it.
+                (None, _) => AggArgs::None([], []),
+                (Some(input_type2), 1) => AggArgs::Unary([input_type2], [val_indices2[0]]),
+                arg => unreachable!(format!("{:?}", arg)),
+            };
+            AggCall {
+                kind: agg_type,
+                return_type,
+                args,
+            }
+        })
+        .collect::<Vec<_>>();
         Self {
             state_entries: HashMap::new(),
             output,
-            input_types,
-            return_types,
+            agg_calls,
             key_indices,
-            val_indices,
-            agg_types,
         }
     }
 
@@ -201,9 +257,9 @@ impl UnaryStreamOperator for HashAggregationOperator {
 
         // These builders are for storing the aggregated value for each aggregation function
         let mut agg_array_builders: Vec<ArrayBuilderImpl> = self
-            .return_types
+            .agg_calls
             .iter()
-            .map(|return_type| return_type.clone().create_array_builder(0))
+            .map(|agg_call| agg_call.return_type.clone().create_array_builder(0))
             .try_collect()?;
         let mut new_ops = Vec::new();
 
@@ -214,19 +270,17 @@ impl UnaryStreamOperator for HashAggregationOperator {
 
             // check existence to avoid paying the cost of copy in `entry(...).or_insert()` everytime
             if !self.state_entries.contains_key(key) {
-                let mut agg_states = Vec::with_capacity(self.input_types.len());
-                for ((input_type, agg_kind), return_type) in self
-                    .input_types
+                let agg_states = self
+                    .agg_calls
                     .iter()
-                    .zip(self.agg_types.iter())
-                    .zip(self.return_types.iter())
-                {
-                    agg_states.push(create_streaming_agg_state(
-                        input_type,
-                        agg_kind,
-                        return_type,
-                    )?);
-                }
+                    .map(|agg| {
+                        create_streaming_agg_state(
+                            agg.args.arg_types(),
+                            &agg.kind,
+                            &agg.return_type,
+                        )
+                    })
+                    .collect::<Result<Vec<_>>>()?;
                 let hash_value = HashValue::new(true, agg_states);
                 self.state_entries.insert(key.to_vec(), hash_value);
             }
@@ -240,12 +294,13 @@ impl UnaryStreamOperator for HashAggregationOperator {
             }
 
             let all_agg_input_arrays = self
-                .val_indices
+                .agg_calls
                 .iter()
-                .map(|input_indices| {
-                    input_indices
+                .map(|agg| {
+                    agg.args
+                        .val_indices()
                         .iter()
-                        .map(|idx| arrays[*idx].array_ref())
+                        .map(|val_idx| arrays[*val_idx].array_ref())
                         .collect::<Vec<_>>()
                 })
                 .collect::<Vec<_>>();
@@ -277,7 +332,7 @@ impl UnaryStreamOperator for HashAggregationOperator {
         // all the columns of aggregated value
         let agg_columns: Vec<Column> = agg_array_builders
             .into_iter()
-            .zip(self.return_types.iter())
+            .zip(self.agg_calls.iter().map(|agg| agg.return_type.clone()))
             .map(|(agg_array_builder, return_type)| {
                 Ok::<_, RwError>(Column::new(
                     Arc::new(agg_array_builder.finish()?),

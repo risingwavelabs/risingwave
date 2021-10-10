@@ -74,7 +74,8 @@ impl AggregationOperator {
                 .zip(input_types.iter())
                 .zip(return_types.iter())
                 .map(|((agg_type, input_type), return_type)| {
-                    create_streaming_agg_state(input_type, &agg_type, return_type)
+                    let input_types = input_type.iter().cloned().collect_vec();
+                    create_streaming_agg_state(&input_types, &agg_type, return_type)
                 })
                 .try_collect()
                 .unwrap(),

@@ -60,12 +60,12 @@ pub trait StreamingAggStateImpl: Send + Sync + 'static {
 /// 1. `count(*)` computes the number of input rows. And the semantics of row count is equal to the semantics of `count(*)`
 /// 2. `count("any")` computes the number of input rows in which the input value is not null.
 pub fn create_streaming_agg_state(
-    input_types: &Option<DataTypeRef>,
+    input_types: &[DataTypeRef],
     agg_type: &AggKind,
     return_type: &DataTypeRef,
 ) -> Result<Box<dyn StreamingAggStateImpl>> {
     let state: Box<dyn StreamingAggStateImpl> = match input_types {
-        Some(input_type) => {
+        [input_type] => {
             match (
                 input_type.data_type_kind(),
                 agg_type,
@@ -95,7 +95,7 @@ pub fn create_streaming_agg_state(
                 ),
             }
         }
-        None => {
+        [] => {
             match (agg_type, return_type.data_type_kind()) {
                 // `AggKind::Count` for partial/local Count(*) == RowCount while `AggKind::Sum` for final/global Count(*)
                 (AggKind::RowCount, DataTypeKind::Int64) => Box::new(StreamingRowCountAgg::new()),
@@ -105,6 +105,7 @@ pub fn create_streaming_agg_state(
                 _ => unimplemented!(),
             }
         }
+        _ => todo!(),
     };
     Ok(state)
 }
