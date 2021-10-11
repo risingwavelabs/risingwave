@@ -181,7 +181,7 @@ mod tests {
     #[allow(clippy::many_single_char_names)]
     fn execute_sum_int32() -> Result<()> {
         let a = Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into());
-        let t32 = Arc::new(Int32Type::new(false));
+        let t32 = Int32Type::create(false);
         let chunk = DataChunk::builder()
             .columns(vec![Column::new(a, t32)])
             .build();
@@ -233,7 +233,7 @@ mod tests {
     fn execute_sum_int32_grouped() -> Result<()> {
         use crate::array2::ArrayImpl;
         let a: Arc<ArrayImpl> = Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into());
-        let t32 = Arc::new(Int32Type::new(false));
+        let t32 = Int32Type::create(false);
         let chunk = DataChunk::builder()
             .columns(vec![
                 Column::new(a.clone(), t32.clone()),

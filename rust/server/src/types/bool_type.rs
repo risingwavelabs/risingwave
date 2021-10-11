@@ -44,7 +44,7 @@ impl BoolType {
     }
 
     pub fn create(nullable: bool) -> DataTypeRef {
-        Arc::new(BoolType::new(nullable)) as DataTypeRef
+        Arc::new(Self::new(nullable))
     }
 }
 

@@ -6,8 +6,6 @@ use crate::error::Result;
 use crate::stream_op::{Op, Ops};
 use crate::types::{DataTypeRef, Int64Type};
 
-use std::sync::Arc;
-
 use super::StreamingAggStateImpl;
 
 /// `StreamingRowCountAgg` count rows, no matter whether the datum is null.
@@ -28,7 +26,7 @@ impl StreamingRowCountAgg {
     }
 
     pub fn return_type() -> DataTypeRef {
-        Arc::new(Int64Type::new(false))
+        Int64Type::create(false)
     }
 }
 

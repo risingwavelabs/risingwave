@@ -3,6 +3,7 @@ use crate::error::Result;
 use crate::error::RwError;
 use crate::types::DataType;
 use crate::types::DataTypeKind;
+use crate::types::DataTypeRef;
 use crate::types::PrimitiveDataType;
 use risingwave_proto::data::DataType as DataTypeProto;
 use risingwave_proto::data::DataType_TypeName;
@@ -21,6 +22,10 @@ macro_rules! make_numeric_type {
         impl $name {
             pub fn new(nullable: bool) -> Self {
                 Self { nullable }
+            }
+
+            pub fn create(nullable: bool) -> DataTypeRef {
+                Arc::new(Self::new(nullable))
             }
         }
 

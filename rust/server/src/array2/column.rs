@@ -114,7 +114,7 @@ mod tests {
         }
         let col = Column::new(
             Arc::new(ArrayImpl::from(builder.finish().unwrap())),
-            Arc::new(Int32Type::new(true)),
+            Int32Type::create(true),
         );
         let col_proto = unpack_from_any!(col.to_protobuf().unwrap(), ColumnProto);
         assert!(col_proto.get_column_type().get_is_nullable());

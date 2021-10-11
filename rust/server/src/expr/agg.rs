@@ -92,8 +92,8 @@ mod tests {
 
     #[test]
     fn eval_sum_int32() -> Result<()> {
-        let t32 = Arc::new(Int32Type::new(false));
-        let t64 = Arc::new(Int64Type::new(false));
+        let t32 = Int32Type::create(false);
+        let t64 = Int64Type::create(false);
         let mut e = AggExpression {
             return_type: t64.clone(),
             agg_kind: AggKind::Sum,

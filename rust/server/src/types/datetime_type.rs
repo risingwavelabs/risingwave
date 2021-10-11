@@ -3,6 +3,7 @@ use crate::error::Result;
 use crate::error::RwError;
 use crate::types::DataType;
 use crate::types::DataTypeKind;
+use crate::types::DataTypeRef;
 use risingwave_proto::data::DataType as DataTypeProto;
 use risingwave_proto::data::DataType_TypeName;
 use std::any::Any;
@@ -26,6 +27,10 @@ macro_rules! make_datetime_type {
                     nullable,
                     precision,
                 }
+            }
+
+            pub fn create(nullable: bool, precision: u32) -> DataTypeRef {
+                Arc::new(Self::new(nullable, precision))
             }
         }
 

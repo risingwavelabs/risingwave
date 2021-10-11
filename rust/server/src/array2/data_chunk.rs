@@ -305,7 +305,7 @@ mod tests {
                 let chunk = DataChunk::builder()
                     .columns(vec![Column::new(
                         Arc::new(builder.finish().unwrap().into()),
-                        Arc::new(Int32Type::new(false)),
+                        Int32Type::create(false),
                     )])
                     .build();
                 chunks.push(Arc::new(chunk));

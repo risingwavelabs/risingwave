@@ -128,9 +128,9 @@ where
             let col2 = Arc::new(ArrayImpl::Int64(col2.finish()?));
             let col3 = Arc::new(ArrayImpl::Int64(col3.finish()?));
             let cols = vec![
-                Column::new(col1, Arc::new(Int64Type::new(false))),
-                Column::new(col2, Arc::new(Int64Type::new(false))),
-                Column::new(col3, Arc::new(Int64Type::new(false))),
+                Column::new(col1, Int64Type::create(false)),
+                Column::new(col2, Int64Type::create(false)),
+                Column::new(col3, Int64Type::create(false)),
             ];
             let chunk = StreamChunk {
                 visibility: None,

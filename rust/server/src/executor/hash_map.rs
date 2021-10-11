@@ -380,27 +380,27 @@ mod tests {
         let columns = vec![
             Column::new(
                 seed_rand_array_ref::<BoolArray>(capacity, seed),
-                Arc::new(BoolType::new(true)),
+                BoolType::create(true),
             ),
             Column::new(
                 seed_rand_array_ref::<I16Array>(capacity, seed),
-                Arc::new(Int16Type::new(true)),
+                Int16Type::create(true),
             ),
             Column::new(
                 seed_rand_array_ref::<I32Array>(capacity, seed),
-                Arc::new(Int32Type::new(true)),
+                Int32Type::create(true),
             ),
             Column::new(
                 seed_rand_array_ref::<I64Array>(capacity, seed),
-                Arc::new(Int64Type::new(true)),
+                Int64Type::create(true),
             ),
             Column::new(
                 seed_rand_array_ref::<F32Array>(capacity, seed),
-                Arc::new(Float32Type::new(true)),
+                Float32Type::create(true),
             ),
             Column::new(
                 seed_rand_array_ref::<F64Array>(capacity, seed),
-                Arc::new(Float64Type::new(true)),
+                Float64Type::create(true),
             ),
             Column::new(
                 seed_rand_array_ref::<DecimalArray>(capacity, seed),

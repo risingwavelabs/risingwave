@@ -284,10 +284,7 @@ mod tests {
                 builder.append(Some(i as i32)).unwrap();
             }
             let arr = builder.finish().unwrap();
-            columns.push(Column::new(
-                Arc::new(arr.into()),
-                Arc::new(Int32Type::new(false)),
-            ))
+            columns.push(Column::new(Arc::new(arr.into()), Int32Type::create(false)))
         }
         let chunk1: DataChunk = DataChunk::builder().columns(columns.clone()).build();
         let bool_vec = vec![true, false, true, false, false];

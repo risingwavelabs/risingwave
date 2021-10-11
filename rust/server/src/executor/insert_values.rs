@@ -59,7 +59,7 @@ impl Executor for InsertValuesExecutor {
         let one_row_chunk = DataChunk::builder()
             .columns(vec![Column::new(
                 Arc::new(one_row_array.into()),
-                Arc::new(Int32Type::new(false)),
+                Int32Type::create(false),
             )])
             .build();
 
@@ -107,7 +107,7 @@ impl Executor for InsertValuesExecutor {
             let ret_chunk = DataChunk::builder()
                 .columns(vec![Column::new(
                     Arc::new(array.into()),
-                    Arc::new(Int32Type::new(false)),
+                    Int32Type::create(false),
                 )])
                 .build();
 

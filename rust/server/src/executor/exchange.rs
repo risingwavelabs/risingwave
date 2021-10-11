@@ -145,7 +145,7 @@ mod tests {
             DataChunk::builder()
                 .columns(vec![Column::new(
                     Arc::new(array_nonnull! { I32Array, [3, 4, 4] }.into()),
-                    Arc::new(Int32Type::new(false)),
+                    Int32Type::create(false),
                 )])
                 .build(),
         );

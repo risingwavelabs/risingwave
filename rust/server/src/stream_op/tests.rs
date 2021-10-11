@@ -24,12 +24,12 @@ async fn test_projection() -> Result<()> {
     let projection_out = Box::new(MockOutput::new(data.clone()));
     let mut source = MockDataSource::new(mock_data);
 
-    let left_type = Arc::new(Int64Type::new(false));
+    let left_type = Int64Type::create(false);
     let left_expr = InputRefExpression::new(left_type, 0);
-    let right_type = Arc::new(Int64Type::new(false));
+    let right_type = Int64Type::create(false);
     let right_expr = InputRefExpression::new(right_type, 1);
     let test_expr = ArithmeticExpression::new(
-        Arc::new(Int64Type::new(false)),
+        Int64Type::create(false),
         ArithmeticOperatorKind::Plus,
         Box::new(left_expr),
         Box::new(right_expr),
@@ -69,12 +69,12 @@ async fn test_filter() -> Result<()> {
     let filter_out = Box::new(MockOutput::new(data.clone()));
     let mut source = MockDataSource::new(mock_data);
 
-    let left_type = Arc::new(Int64Type::new(false));
+    let left_type = Int64Type::create(false);
     let left_expr = InputRefExpression::new(left_type, 1);
-    let right_type = Arc::new(Int64Type::new(false));
+    let right_type = Int64Type::create(false);
     let right_expr = InputRefExpression::new(right_type, 2);
     let test_expr = CompareExpression::new(
-        Arc::new(BoolType::new(false)),
+        BoolType::create(false),
         CompareOperatorKind::GreaterThan,
         Box::new(left_expr),
         Box::new(right_expr),
@@ -174,7 +174,7 @@ async fn test_hash_dispatcher() {
         .into_iter()
         .map(|builder| {
             let array = builder.finish().unwrap();
-            Column::new(Arc::new(array.into()), Arc::new(Int32Type::new(false)))
+            Column::new(Arc::new(array.into()), Int32Type::create(false))
         })
         .collect::<Vec<_>>();
 
@@ -218,14 +218,14 @@ async fn test_local_hash_aggregation_count() {
     let agg_calls = vec![
         AggCall {
             kind: AggKind::Count,
-            args: AggArgs::Unary([Arc::new(Int64Type::new(false))], [0]),
-            return_type: Arc::new(Int64Type::new(false)),
+            args: AggArgs::Unary([Int64Type::create(false)], [0]),
+            return_type: Int64Type::create(false),
         },
         // This is local hash aggregation, so we add another row count state
         AggCall {
             kind: AggKind::Count,
             args: AggArgs::None([], []),
-            return_type: Arc::new(Int64Type::new(false)),
+            return_type: Int64Type::create(false),
         },
     ];
     let mut hash_aggregator = HashAggregationOperator::new(mock_output, agg_calls, keys);
@@ -236,7 +236,7 @@ async fn test_local_hash_aggregation_count() {
     builder1.append(Some(2)).unwrap();
     builder1.append(Some(2)).unwrap();
     let array1 = builder1.finish().unwrap();
-    let column1 = Column::new(Arc::new(array1.into()), Arc::new(Int64Type::new(false)));
+    let column1 = Column::new(Arc::new(array1.into()), Int64Type::create(false));
     let chunk1 = StreamChunk {
         ops: ops1,
         columns: vec![column1],
@@ -266,7 +266,7 @@ async fn test_local_hash_aggregation_count() {
     builder2.append(Some(2)).unwrap();
     builder2.append(Some(2)).unwrap();
     let array2 = builder2.finish().unwrap();
-    let column2 = Column::new(Arc::new(array2.into()), Arc::new(Int64Type::new(false)));
+    let column2 = Column::new(Arc::new(array2.into()), Int64Type::create(false));
     let chunk2 = StreamChunk {
         ops: ops2,
         columns: vec![column2],
@@ -315,14 +315,14 @@ async fn test_global_hash_aggregation_count() {
     let agg_calls = vec![
         AggCall {
             kind: AggKind::Sum,
-            args: AggArgs::Unary([Arc::new(Int64Type::new(false))], [1]),
-            return_type: Arc::new(Int64Type::new(false)),
+            args: AggArgs::Unary([Int64Type::create(false)], [1]),
+            return_type: Int64Type::create(false),
         },
         // This is local hash aggreagtion, so we add another sum state
         AggCall {
             kind: AggKind::Sum,
-            args: AggArgs::Unary([Arc::new(Int64Type::new(false))], [2]),
-            return_type: Arc::new(Int64Type::new(false)),
+            args: AggArgs::Unary([Int64Type::create(false)], [2]),
+            return_type: Int64Type::create(false),
         },
     ];
     let mut hash_aggregator = HashAggregationOperator::new(mock_output, agg_calls, key_indices);
@@ -333,25 +333,20 @@ async fn test_global_hash_aggregation_count() {
     key_builder1.append(Some(2)).unwrap();
     key_builder1.append(Some(2)).unwrap();
     let key_array1 = key_builder1.finish().unwrap();
-    let key_column1 = Column::new(Arc::new(key_array1.into()), Arc::new(Int64Type::new(false)));
+    let key_column1 = Column::new(Arc::new(key_array1.into()), Int64Type::create(false));
     let mut val_builder1 = I64ArrayBuilder::new(0).unwrap();
     val_builder1.append(Some(1)).unwrap();
     val_builder1.append(Some(2)).unwrap();
     val_builder1.append(Some(2)).unwrap();
     let value_array1 = val_builder1.finish().unwrap();
-    let value_column1 = Column::new(
-        Arc::new(value_array1.into()),
-        Arc::new(Int64Type::new(false)),
-    );
+    let value_column1 = Column::new(Arc::new(value_array1.into()), Int64Type::create(false));
     let mut row_count_builder1 = I64ArrayBuilder::new(0).unwrap();
     row_count_builder1.append(Some(1)).unwrap();
     row_count_builder1.append(Some(2)).unwrap();
     row_count_builder1.append(Some(2)).unwrap();
     let row_count_array1 = row_count_builder1.finish().unwrap();
-    let row_count_column1 = Column::new(
-        Arc::new(row_count_array1.into()),
-        Arc::new(Int64Type::new(false)),
-    );
+    let row_count_column1 =
+        Column::new(Arc::new(row_count_array1.into()), Int64Type::create(false));
     let chunk1 = StreamChunk {
         ops: ops1,
         columns: vec![key_column1, value_column1, row_count_column1],
@@ -382,27 +377,22 @@ async fn test_global_hash_aggregation_count() {
     key_builder2.append(Some(2)).unwrap();
     key_builder2.append(Some(3)).unwrap();
     let key_array2 = key_builder2.finish().unwrap();
-    let key_column2 = Column::new(Arc::new(key_array2.into()), Arc::new(Int64Type::new(false)));
+    let key_column2 = Column::new(Arc::new(key_array2.into()), Int64Type::create(false));
     let mut val_builder2 = I64ArrayBuilder::new(0).unwrap();
     val_builder2.append(Some(1)).unwrap();
     val_builder2.append(Some(2)).unwrap();
     val_builder2.append(Some(1)).unwrap();
     val_builder2.append(Some(3)).unwrap();
     let value_array2 = val_builder2.finish().unwrap();
-    let value_column2 = Column::new(
-        Arc::new(value_array2.into()),
-        Arc::new(Int64Type::new(false)),
-    );
+    let value_column2 = Column::new(Arc::new(value_array2.into()), Int64Type::create(false));
     let mut row_count_builder2 = I64ArrayBuilder::new(0).unwrap();
     row_count_builder2.append(Some(1)).unwrap();
     row_count_builder2.append(Some(2)).unwrap();
     row_count_builder2.append(Some(1)).unwrap();
     row_count_builder2.append(Some(3)).unwrap();
     let row_count_array2 = row_count_builder2.finish().unwrap();
-    let row_count_column2 = Column::new(
-        Arc::new(row_count_array2.into()),
-        Arc::new(Int64Type::new(false)),
-    );
+    let row_count_column2 =
+        Column::new(Arc::new(row_count_array2.into()), Int64Type::create(false));
     let chunk2 = StreamChunk {
         ops: ops2,
         columns: vec![key_column2, value_column2, row_count_column2],

@@ -92,7 +92,7 @@ mod tests {
     //
     //   let chunk = DataChunk::builder().cardinality(5).arrays(arrays).build();
     //
-    //   let type1 = Arc::new(Int32Type::new(false));
+    //   let type1 = Int32Type::create(false);
     //   let expr1 = new_input_ref(type1, 0);
     //   let expr_vec = vec![expr1];
     //

@@ -193,7 +193,7 @@ mod tests {
 
     fn create_column(vec: &[Option<i32>]) -> Result<Column> {
         let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
-        let data_type = Arc::new(Int32Type::new(false));
+        let data_type = Int32Type::create(false);
         Ok(Column::new(array, data_type))
     }
 
@@ -204,8 +204,8 @@ mod tests {
         let data_chunk = DataChunk::builder().columns([col0, col1].to_vec()).build();
         let mut mock_executor = MockExecutor::new();
         mock_executor.add(data_chunk);
-        let input_ref_1 = InputRefExpression::new(Arc::new(Int32Type::new(false)), 0usize);
-        let input_ref_2 = InputRefExpression::new(Arc::new(Int32Type::new(false)), 1usize);
+        let input_ref_1 = InputRefExpression::new(Int32Type::create(false), 0usize);
+        let input_ref_2 = InputRefExpression::new(Int32Type::create(false), 1usize);
         let order_pairs = vec![
             OrderPair {
                 order: Box::new(input_ref_2),

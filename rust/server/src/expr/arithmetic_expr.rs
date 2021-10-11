@@ -94,12 +94,12 @@ mod tests {
     #[test]
     fn test_arithmetic_expr_eval() -> Result<()> {
         // Let this test succeed.
-        let left_type = Arc::new(Int32Type::new(false));
+        let left_type = Int32Type::create(false);
         let left_expr = InputRefExpression::new(left_type, 0);
-        let right_type = Arc::new(Int32Type::new(false));
+        let right_type = Int32Type::create(false);
         let right_expr = InputRefExpression::new(right_type, 1);
         let mut test_expr = ArithmeticExpression {
-            return_type: Arc::new(Int32Type::new(false)),
+            return_type: Int32Type::create(false),
             operator_type: ArithmeticOperatorKind::Plus,
             left_child: Box::new(left_expr),
             right_child: Box::new(right_expr),
@@ -124,7 +124,7 @@ mod tests {
 
     fn create_column(vec: &[Option<i32>]) -> Result<Column> {
         let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
-        let data_type = Arc::new(Int32Type::new(false));
+        let data_type = Int32Type::create(false);
         Ok(Column::new(array, data_type))
     }
 }

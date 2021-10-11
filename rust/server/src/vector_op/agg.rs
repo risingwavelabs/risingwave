@@ -498,7 +498,6 @@ impl_sorted_grouper! { I64Array, Int64 }
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
 
     fn eval_agg(
         input_type: DataTypeRef,
@@ -517,8 +516,8 @@ mod tests {
     fn vec_sum_int32() -> Result<()> {
         let input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]).unwrap();
         let agg_type = AggKind::Sum;
-        let input_type = Arc::new(Int32Type::new(true));
-        let return_type = Arc::new(Int64Type::new(true));
+        let input_type = Int32Type::create(true);
+        let return_type = Int64Type::create(true);
         let actual = eval_agg(
             input_type,
             &input.into(),
@@ -548,8 +547,8 @@ mod tests {
     fn vec_min_float32() -> Result<()> {
         let input = F32Array::from_slice(&[Some(1.), Some(2.), Some(3.)]).unwrap();
         let agg_type = AggKind::Min;
-        let input_type = Arc::new(Float32Type::new(true));
-        let return_type = Arc::new(Float32Type::new(true));
+        let input_type = Float32Type::create(true);
+        let return_type = Float32Type::create(true);
         let actual = eval_agg(
             input_type,
             &input.into(),
@@ -586,8 +585,8 @@ mod tests {
     fn vec_count_int32() -> Result<()> {
         let input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]).unwrap();
         let agg_type = AggKind::Count;
-        let input_type = Arc::new(Int32Type::new(true));
-        let return_type = Arc::new(Int64Type::new(true));
+        let input_type = Int32Type::create(true);
+        let return_type = Int64Type::create(true);
         let actual = eval_agg(
             input_type,
             &input.into(),

@@ -74,7 +74,7 @@ mod test {
         let table_id = mock_table_id();
         let table = MemColumnarTable::new(&table_id, 2);
 
-        let col1_type = Arc::new(Int32Type::new(false)) as DataTypeRef;
+        let col1_type = Int32Type::create(false) as DataTypeRef;
         let col2_type = StringType::create(true, 10, DataTypeKind::Varchar);
 
         // Prepare test data chunks

@@ -52,11 +52,8 @@ async fn test_merger_sum_aggr() {
         // for the local aggregator, we need two states: sum and row count
         let aggregator = AggregationOperator::new(
             Box::new(output),
-            vec![Some(Arc::new(Int64Type::new(false))), None],
-            vec![
-                Arc::new(Int64Type::new(false)),
-                Arc::new(Int64Type::new(false)),
-            ],
+            vec![Some(Int64Type::create(false)), None],
+            vec![Int64Type::create(false), Int64Type::create(false)],
             vec![vec![0], vec![0]],
             vec![AggKind::Sum, AggKind::RowCount],
         );
@@ -92,7 +89,7 @@ async fn test_merger_sum_aggr() {
         Box::new(output),
         vec![
             // TODO: use the new streaming_if_null expression here, and add `None` tests
-            Box::new(InputRefExpression::new(Arc::new(Int64Type::new(false)), 0)),
+            Box::new(InputRefExpression::new(Int64Type::create(false), 0)),
         ],
     );
     let output = OperatorOutput::new(Box::new(projection));
@@ -100,13 +97,10 @@ async fn test_merger_sum_aggr() {
     let aggregator = AggregationOperator::new(
         Box::new(output),
         vec![
-            Some(Arc::new(Int64Type::new(false))),
-            Some(Arc::new(Int64Type::new(false))),
+            Some(Int64Type::create(false)),
+            Some(Int64Type::create(false)),
         ],
-        vec![
-            Arc::new(Int64Type::new(false)),
-            Arc::new(Int64Type::new(false)),
-        ],
+        vec![Int64Type::create(false), Int64Type::create(false)],
         vec![vec![0], vec![1]],
         vec![AggKind::Sum, AggKind::Sum],
     );
@@ -136,7 +130,7 @@ async fn test_merger_sum_aggr() {
                             .unwrap()
                             .into(),
                         ),
-                        Arc::new(Int64Type::new(false)),
+                        Int64Type::create(false),
                     )],
                     visibility: None,
                 }))
@@ -181,103 +175,94 @@ fn make_tpchq6_expr() -> (
         StringType::create(true, 20, DataTypeKind::Char),
         Some(ScalarImpl::UTF8("1995-01-01 00:00:00".to_string())),
     );
-    let const_0_05 = LiteralExpression::new(
-        Arc::new(Float64Type::new(false)),
-        Some(ScalarImpl::Float64(0.05)),
-    );
-    let const_0_07 = LiteralExpression::new(
-        Arc::new(Float64Type::new(false)),
-        Some(ScalarImpl::Float64(0.07)),
-    );
-    let const_24 =
-        LiteralExpression::new(Arc::new(Int32Type::new(false)), Some(ScalarImpl::Int32(24)));
-    let t_shipdate = Arc::new(TimestampType::new(false, 10));
+    let const_0_05 =
+        LiteralExpression::new(Float64Type::create(false), Some(ScalarImpl::Float64(0.05)));
+    let const_0_07 =
+        LiteralExpression::new(Float64Type::create(false), Some(ScalarImpl::Float64(0.07)));
+    let const_24 = LiteralExpression::new(Int32Type::create(false), Some(ScalarImpl::Int32(24)));
+    let t_shipdate = TimestampType::create(false, 10);
     let l_shipdate = InputRefExpression::new(t_shipdate.clone(), 0);
     let l_shipdate_2 = InputRefExpression::new(t_shipdate.clone(), 0);
-    let t_discount = Arc::new(Float64Type::new(false));
+    let t_discount = Float64Type::create(false);
     let l_discount = InputRefExpression::new(t_discount.clone(), 1);
     let l_discount_2 = InputRefExpression::new(t_discount.clone(), 1);
     let l_discount_3 = InputRefExpression::new(t_discount.clone(), 1);
-    let t_quantity = Arc::new(Int32Type::new(false));
+    let t_quantity = Int32Type::create(false);
     let l_quantity = InputRefExpression::new(t_quantity.clone(), 2);
-    let t_extended_price = Arc::new(Float64Type::new(false));
+    let t_extended_price = Float64Type::create(false);
     let l_extended_price = InputRefExpression::new(t_extended_price.clone(), 3);
 
-    let l_shipdate_geq_cast = TypeCastExpression::new(
-        Arc::new(TimestampType::new(false, 10)),
-        Box::new(const_1994_01_01),
-    );
+    let l_shipdate_geq_cast =
+        TypeCastExpression::new(TimestampType::create(false, 10), Box::new(const_1994_01_01));
 
-    let l_shipdate_le_cast = TypeCastExpression::new(
-        Arc::new(TimestampType::new(false, 10)),
-        Box::new(const_1995_01_01),
-    );
+    let l_shipdate_le_cast =
+        TypeCastExpression::new(TimestampType::create(false, 10), Box::new(const_1995_01_01));
 
     let l_shipdate_geq = CompareExpression::new(
-        Arc::new(BoolType::new(false)),
+        BoolType::create(false),
         CompareOperatorKind::GreaterThanOrEqual,
         Box::new(l_shipdate),
         Box::new(l_shipdate_geq_cast),
     );
 
     let l_shipdate_le = CompareExpression::new(
-        Arc::new(BoolType::new(false)),
+        BoolType::create(false),
         CompareOperatorKind::LessThan,
         Box::new(l_shipdate_2),
         Box::new(l_shipdate_le_cast),
     );
 
     let l_discount_geq = CompareExpression::new(
-        Arc::new(BoolType::new(false)),
+        BoolType::create(false),
         CompareOperatorKind::GreaterThanOrEqual,
         Box::new(l_discount),
         Box::new(const_0_05),
     );
 
     let l_discount_leq = CompareExpression::new(
-        Arc::new(BoolType::new(false)),
+        BoolType::create(false),
         CompareOperatorKind::LessThanOrEqual,
         Box::new(l_discount_2),
         Box::new(const_0_07),
     );
 
     let l_quantity_le = CompareExpression::new(
-        Arc::new(BoolType::new(false)),
+        BoolType::create(false),
         CompareOperatorKind::LessThan,
         Box::new(l_quantity),
         Box::new(const_24),
     );
 
     let and = ConjunctionExpression::new(
-        Arc::new(BoolType::new(false)),
+        BoolType::create(false),
         ConjunctionOperatorKind::And,
         Box::new(l_shipdate_geq),
         Some(Box::new(l_shipdate_le)),
     );
 
     let and = ConjunctionExpression::new(
-        Arc::new(BoolType::new(false)),
+        BoolType::create(false),
         ConjunctionOperatorKind::And,
         Box::new(and),
         Some(Box::new(l_discount_geq)),
     );
 
     let and = ConjunctionExpression::new(
-        Arc::new(BoolType::new(false)),
+        BoolType::create(false),
         ConjunctionOperatorKind::And,
         Box::new(and),
         Some(Box::new(l_discount_leq)),
     );
 
     let and = ConjunctionExpression::new(
-        Arc::new(BoolType::new(false)),
+        BoolType::create(false),
         ConjunctionOperatorKind::And,
         Box::new(and),
         Some(Box::new(l_quantity_le)),
     );
 
     let multiply = ArithmeticExpression::new(
-        Arc::new(Float64Type::new(false)),
+        Float64Type::create(false),
         ArithmeticOperatorKind::Multiply,
         Box::new(l_extended_price),
         Box::new(l_discount_3),
@@ -319,11 +304,8 @@ async fn test_tpch_q6() {
         // for local aggregator, we need to sum data and count rows
         let aggregator = AggregationOperator::new(
             Box::new(output),
-            vec![Some(Arc::new(Float64Type::new(false))), None],
-            vec![
-                Arc::new(Float64Type::new(false)),
-                Arc::new(Int64Type::new(false)),
-            ],
+            vec![Some(Float64Type::create(false)), None],
+            vec![Float64Type::create(false), Int64Type::create(false)],
             vec![vec![0], vec![0]],
             vec![AggKind::Sum, AggKind::RowCount],
         );
@@ -363,10 +345,7 @@ async fn test_tpch_q6() {
         Box::new(output),
         vec![
             // TODO: use the new streaming_if_null expression here, and add `None` tests
-            Box::new(InputRefExpression::new(
-                Arc::new(Float64Type::new(false)),
-                0,
-            )),
+            Box::new(InputRefExpression::new(Float64Type::create(false), 0)),
         ],
     );
     let output = OperatorOutput::new(Box::new(projection));
@@ -374,13 +353,10 @@ async fn test_tpch_q6() {
     let aggregator = AggregationOperator::new(
         Box::new(output),
         vec![
-            Some(Arc::new(Float64Type::new(false))),
-            Some(Arc::new(Int64Type::new(false))),
+            Some(Float64Type::create(false)),
+            Some(Int64Type::create(false)),
         ],
-        vec![
-            Arc::new(Float64Type::new(false)),
-            Arc::new(Int64Type::new(false)),
-        ],
+        vec![Float64Type::create(false), Int64Type::create(false)],
         vec![vec![0], vec![1]],
         vec![AggKind::Sum, AggKind::Sum],
     );
