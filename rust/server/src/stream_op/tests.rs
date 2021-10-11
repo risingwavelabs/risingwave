@@ -1,8 +1,9 @@
 use super::data_source::*;
 use super::Result;
 use super::{FilterOperator, OperatorOutput, Output, ProjectionOperator};
+use crate::array;
 use crate::array2::column::Column;
-use crate::array2::{Array, ArrayBuilder, I32ArrayBuilder, I64ArrayBuilder};
+use crate::array2::{Array, ArrayBuilder, I32ArrayBuilder, I64Array};
 use crate::buffer::Bitmap;
 use crate::expr::*;
 use crate::stream_op::*;
@@ -231,11 +232,7 @@ async fn test_local_hash_aggregation_count() {
     let mut hash_aggregator = HashAggregationOperator::new(mock_output, agg_calls, keys);
 
     let ops1 = vec![Op::Insert, Op::Insert, Op::Insert];
-    let mut builder1 = I64ArrayBuilder::new(0).unwrap();
-    builder1.append(Some(1)).unwrap();
-    builder1.append(Some(2)).unwrap();
-    builder1.append(Some(2)).unwrap();
-    let array1 = builder1.finish().unwrap();
+    let array1 = array! { I64Array, [Some(1), Some(2), Some(2)] };
     let column1 = Column::new(Arc::new(array1.into()), Int64Type::create(false));
     let chunk1 = StreamChunk {
         ops: ops1,
@@ -261,11 +258,7 @@ async fn test_local_hash_aggregation_count() {
     assert_eq!(row_count_column.value_at(1).unwrap(), 2);
 
     let ops2 = vec![Op::Delete, Op::Delete, Op::Delete];
-    let mut builder2 = I64ArrayBuilder::new(0).unwrap();
-    builder2.append(Some(1)).unwrap();
-    builder2.append(Some(2)).unwrap();
-    builder2.append(Some(2)).unwrap();
-    let array2 = builder2.finish().unwrap();
+    let array2 = array! { I64Array, [Some(1), Some(2), Some(2)] };
     let column2 = Column::new(Arc::new(array2.into()), Int64Type::create(false));
     let chunk2 = StreamChunk {
         ops: ops2,
@@ -328,23 +321,11 @@ async fn test_global_hash_aggregation_count() {
     let mut hash_aggregator = HashAggregationOperator::new(mock_output, agg_calls, key_indices);
 
     let ops1 = vec![Op::Insert, Op::Insert, Op::Insert];
-    let mut key_builder1 = I64ArrayBuilder::new(0).unwrap();
-    key_builder1.append(Some(1)).unwrap();
-    key_builder1.append(Some(2)).unwrap();
-    key_builder1.append(Some(2)).unwrap();
-    let key_array1 = key_builder1.finish().unwrap();
+    let key_array1 = array! { I64Array, [Some(1), Some(2), Some(2)] };
     let key_column1 = Column::new(Arc::new(key_array1.into()), Int64Type::create(false));
-    let mut val_builder1 = I64ArrayBuilder::new(0).unwrap();
-    val_builder1.append(Some(1)).unwrap();
-    val_builder1.append(Some(2)).unwrap();
-    val_builder1.append(Some(2)).unwrap();
-    let value_array1 = val_builder1.finish().unwrap();
+    let value_array1 = array! { I64Array, [Some(1), Some(2), Some(2)] };
     let value_column1 = Column::new(Arc::new(value_array1.into()), Int64Type::create(false));
-    let mut row_count_builder1 = I64ArrayBuilder::new(0).unwrap();
-    row_count_builder1.append(Some(1)).unwrap();
-    row_count_builder1.append(Some(2)).unwrap();
-    row_count_builder1.append(Some(2)).unwrap();
-    let row_count_array1 = row_count_builder1.finish().unwrap();
+    let row_count_array1 = array! { I64Array, [Some(1), Some(2), Some(2)] };
     let row_count_column1 =
         Column::new(Arc::new(row_count_array1.into()), Int64Type::create(false));
     let chunk1 = StreamChunk {
@@ -371,26 +352,11 @@ async fn test_global_hash_aggregation_count() {
     assert_eq!(row_sum_column.value_at(1).unwrap(), 4);
 
     let ops2 = vec![Op::Delete, Op::Delete, Op::Delete, Op::Insert];
-    let mut key_builder2 = I64ArrayBuilder::new(0).unwrap();
-    key_builder2.append(Some(1)).unwrap();
-    key_builder2.append(Some(2)).unwrap();
-    key_builder2.append(Some(2)).unwrap();
-    key_builder2.append(Some(3)).unwrap();
-    let key_array2 = key_builder2.finish().unwrap();
+    let key_array2 = array! { I64Array, [Some(1), Some(2), Some(2), Some(3)] };
     let key_column2 = Column::new(Arc::new(key_array2.into()), Int64Type::create(false));
-    let mut val_builder2 = I64ArrayBuilder::new(0).unwrap();
-    val_builder2.append(Some(1)).unwrap();
-    val_builder2.append(Some(2)).unwrap();
-    val_builder2.append(Some(1)).unwrap();
-    val_builder2.append(Some(3)).unwrap();
-    let value_array2 = val_builder2.finish().unwrap();
+    let value_array2 = array! { I64Array, [Some(1), Some(2), Some(1), Some(3)] };
     let value_column2 = Column::new(Arc::new(value_array2.into()), Int64Type::create(false));
-    let mut row_count_builder2 = I64ArrayBuilder::new(0).unwrap();
-    row_count_builder2.append(Some(1)).unwrap();
-    row_count_builder2.append(Some(2)).unwrap();
-    row_count_builder2.append(Some(1)).unwrap();
-    row_count_builder2.append(Some(3)).unwrap();
-    let row_count_array2 = row_count_builder2.finish().unwrap();
+    let row_count_array2 = array! { I64Array, [Some(1), Some(2), Some(1), Some(3)] };
     let row_count_column2 =
         Column::new(Arc::new(row_count_array2.into()), Int64Type::create(false));
     let chunk2 = StreamChunk {
