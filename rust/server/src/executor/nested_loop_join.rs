@@ -238,8 +238,70 @@ impl ProbeTable {
     /// Note: Use this function with careful: It is not designed to be a general concatenate of two chunk:
     /// Usually one side should be const row chunk and the other side is normal chunk. Currently only feasible to use in join
     /// executor.
-    /// If Two normal chunk, the result is undefined.
-    fn concatenate(_left: &DataChunk, _right: &DataChunk) -> Result<DataChunk> {
-        todo!()
+    /// If two normal chunk, the result is undefined.
+    fn concatenate(left: &DataChunk, right: &DataChunk) -> Result<DataChunk> {
+        assert_eq!(left.capacity(), right.capacity());
+        let mut concated_columns = Vec::with_capacity(left.columns().len() + right.columns().len());
+        concated_columns.extend_from_slice(left.columns());
+        concated_columns.extend_from_slice(right.columns());
+        let vis;
+        // Only handle one side is constant row chunk: One of visibility must be None.
+        match (left.visibility(), right.visibility()) {
+            (None, _) => {
+                vis = right.visibility().clone();
+            }
+            (_, None) => {
+                vis = left.visibility().clone();
+            }
+            (Some(_), Some(_)) => {
+                unimplemented!(
+                    "The concatenate behaviour of two chunk with visibility is undefined"
+                )
+            }
+        }
+        Ok(DataChunk::new(concated_columns, vis))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::array2::column::Column;
+    use crate::array2::*;
+    use crate::buffer::Bitmap;
+    use crate::executor::nested_loop_join::ProbeTable;
+    use crate::types::Int32Type;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_concatenate() {
+        let num_of_columns: usize = 2;
+        let length = 5;
+        let mut columns = vec![];
+        for i in 0..num_of_columns {
+            let mut builder = PrimitiveArrayBuilder::<i32>::new(length).unwrap();
+            for _ in 0..length {
+                builder.append(Some(i as i32)).unwrap();
+            }
+            let arr = builder.finish().unwrap();
+            columns.push(Column::new(
+                Arc::new(arr.into()),
+                Arc::new(Int32Type::new(false)),
+            ))
+        }
+        let chunk1: DataChunk = DataChunk::builder().columns(columns.clone()).build();
+        let bool_vec = vec![true, false, true, false, false];
+        let chunk2: DataChunk = DataChunk::builder()
+            .columns(columns.clone())
+            .visibility(Bitmap::from_vec(bool_vec.clone()).unwrap())
+            .build();
+        let chunk = ProbeTable::concatenate(&chunk1, &chunk2).unwrap();
+        assert_eq!(chunk.capacity(), chunk1.capacity());
+        assert_eq!(chunk.capacity(), chunk2.capacity());
+        assert_eq!(chunk.columns().len(), chunk1.columns().len() * 2);
+        let mut bool_vec_iter = bool_vec.iter();
+        for bit in chunk.visibility().clone().unwrap().iter() {
+            assert_eq!(bit, *bool_vec_iter.next().unwrap());
+        }
     }
 }
