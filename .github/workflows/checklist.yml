@@ -1,0 +1,23 @@
+name: PR Checklist
+
+on:
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  checklist_job:
+    runs-on: ubuntu-latest
+    name: checklist job
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v1
+        with:
+          fetch-depth: 0
+      - name: Checklist
+        uses: wyozi/contextual-qa-checklist-action@master
+        with:
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
+          input-file: .github/checklist.yml
+          show-paths: false
+          comment-header: "Great PR! Please check the following items before merging:"
+          comment-footer: ""

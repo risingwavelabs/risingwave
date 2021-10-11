@@ -6,6 +6,7 @@ use crate::vector_op::agg::{self, BoxedAggState};
 use risingwave_proto::expr::{AggCall, AggCall_Type};
 use std::convert::TryFrom;
 
+/// Kind of aggregation function
 #[derive(Debug)]
 pub enum AggKind {
     Min,
@@ -16,6 +17,7 @@ pub enum AggKind {
     Avg,
 }
 
+/// Aggregation Expression
 pub struct AggExpression {
     return_type: DataTypeRef,
     agg_kind: AggKind,

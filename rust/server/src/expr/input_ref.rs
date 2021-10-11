@@ -10,6 +10,7 @@ use crate::error::{Result, RwError};
 use crate::expr::Expression;
 use crate::types::{build_from_proto, DataType, DataTypeRef};
 
+/// `InputRefExpression` references to a column in input relation
 pub struct InputRefExpression {
     return_type: DataTypeRef,
     idx: usize,
