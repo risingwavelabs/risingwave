@@ -9,7 +9,7 @@ use crate::stream_op::*;
 use crate::types::{build_from_proto as build_type_from_proto, DataTypeRef};
 use futures::channel::mpsc::{channel, Receiver, Sender};
 use itertools::Itertools;
-use risingwave_proto::expr::AggCall;
+use risingwave_proto::expr::AggCall as AggCallProto;
 use risingwave_proto::stream_plan;
 use risingwave_proto::stream_service;
 use std::convert::TryFrom;
@@ -101,7 +101,30 @@ struct AggCallsPackedReturn {
     agg_types: Vec<AggKind>,
 }
 
-fn from_agg_calls(agg_calls: &[AggCall]) -> Result<AggCallsPackedReturn> {
+fn build_agg_call_from_proto(agg_call_proto: &AggCallProto) -> Result<AggCall> {
+    let args = {
+        let args = agg_call_proto.get_args();
+        match args {
+            [] => AggArgs::None([], []),
+            [arg] => AggArgs::Unary(
+                [build_type_from_proto(arg.get_field_type())?],
+                [arg.get_input().column_idx as usize],
+            ),
+            _ => {
+                return Err(RwError::from(ErrorCode::NotImplementedError(
+                    "multiple aggregation args".to_string(),
+                )))
+            }
+        }
+    };
+    Ok(AggCall {
+        kind: AggKind::try_from(agg_call_proto.get_field_type())?,
+        args,
+        return_type: build_type_from_proto(agg_call_proto.get_return_type())?,
+    })
+}
+
+fn from_agg_calls(agg_calls: &[AggCallProto]) -> Result<AggCallsPackedReturn> {
     let (input_types, val_indices) = agg_calls.iter().map(|agg_call| {
     let args = agg_call.get_args();
     // for each aggregation function, there will be 0 or 1 input arguments for now
@@ -256,7 +279,6 @@ impl StreamManagerCore {
                 let aggr_node =
                     stream_plan::HashAggNode::parse_from_bytes(node.get_body().get_value())
                         .map_err(ErrorCode::ProtobufError)?;
-                let agg_calls = aggr_node.get_agg_calls();
 
                 let keys = aggr_node
                     .get_group_keys()
@@ -264,20 +286,16 @@ impl StreamManagerCore {
                     .map(|key| key.column_idx as usize)
                     .collect::<Vec<_>>();
 
-                let AggCallsPackedReturn {
-                    input_types,
-                    return_types,
-                    val_indices,
-                    agg_types,
-                } = from_agg_calls(agg_calls)?;
+                let agg_calls: Vec<AggCall> = aggr_node
+                    .get_agg_calls()
+                    .iter()
+                    .map(build_agg_call_from_proto)
+                    .try_collect()?;
 
                 Box::new(HashAggregationOperator::new(
                     downstream_node,
-                    input_types,
-                    return_types,
+                    agg_calls,
                     keys,
-                    val_indices,
-                    agg_types,
                 ))
             }
             GLOBAL_HASH_AGG => todo!(),

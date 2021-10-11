@@ -211,24 +211,24 @@ async fn test_hash_dispatcher() {
 
 #[tokio::test]
 async fn test_local_hash_aggregation_count() {
-    let input_type1 = Arc::new(Int64Type::new(false));
-    let return_type1 = Arc::new(Int64Type::new(false));
-    let agg_kind1 = AggKind::Count;
     let data = Arc::new(Mutex::new(Vec::new()));
     let mock_output = Box::new(MockOutput::new(data.clone())) as Box<dyn Output>;
     let keys = vec![0];
 
-    // This is local hash aggregation, so we add another row count state
-    let return_type2 = Arc::new(Int64Type::new(false));
-    let agg_kind2 = AggKind::RowCount;
-    let mut hash_aggregator = HashAggregationOperator::new(
-        mock_output,
-        vec![Some(input_type1), None],
-        vec![return_type1, return_type2],
-        keys,
-        vec![vec![0], vec![0]],
-        vec![agg_kind1, agg_kind2],
-    );
+    let agg_calls = vec![
+        AggCall {
+            kind: AggKind::Count,
+            args: AggArgs::Unary([Arc::new(Int64Type::new(false))], [0]),
+            return_type: Arc::new(Int64Type::new(false)),
+        },
+        // This is local hash aggregation, so we add another row count state
+        AggCall {
+            kind: AggKind::Count,
+            args: AggArgs::None([], []),
+            return_type: Arc::new(Int64Type::new(false)),
+        },
+    ];
+    let mut hash_aggregator = HashAggregationOperator::new(mock_output, agg_calls, keys);
 
     let ops1 = vec![Op::Insert, Op::Insert, Op::Insert];
     let mut builder1 = I64ArrayBuilder::new(0).unwrap();
@@ -308,27 +308,24 @@ async fn test_local_hash_aggregation_count() {
 
 #[tokio::test]
 async fn test_global_hash_aggregation_count() {
-    let input_type1 = Arc::new(Int64Type::new(false));
-    let return_type1 = Arc::new(Int64Type::new(false));
-    let agg_kind1 = AggKind::Sum;
     let data = Arc::new(Mutex::new(Vec::new()));
     let mock_output = Box::new(MockOutput::new(data.clone())) as Box<dyn Output>;
     let key_indices = vec![0];
-    let val_indices1 = vec![1];
 
-    // This is local hash aggreagtion, so we add another sum state
-    let input_type2 = Arc::new(Int64Type::new(false));
-    let return_type2 = Arc::new(Int64Type::new(false));
-    let agg_kind2 = AggKind::Sum;
-    let val_indices2 = vec![2];
-    let mut hash_aggregator = HashAggregationOperator::new(
-        mock_output,
-        vec![Some(input_type1), Some(input_type2)],
-        vec![return_type1, return_type2],
-        key_indices,
-        vec![val_indices1, val_indices2],
-        vec![agg_kind1, agg_kind2],
-    );
+    let agg_calls = vec![
+        AggCall {
+            kind: AggKind::Sum,
+            args: AggArgs::Unary([Arc::new(Int64Type::new(false))], [1]),
+            return_type: Arc::new(Int64Type::new(false)),
+        },
+        // This is local hash aggreagtion, so we add another sum state
+        AggCall {
+            kind: AggKind::Sum,
+            args: AggArgs::Unary([Arc::new(Int64Type::new(false))], [2]),
+            return_type: Arc::new(Int64Type::new(false)),
+        },
+    ];
+    let mut hash_aggregator = HashAggregationOperator::new(mock_output, agg_calls, key_indices);
 
     let ops1 = vec![Op::Insert, Op::Insert, Op::Insert];
     let mut key_builder1 = I64ArrayBuilder::new(0).unwrap();

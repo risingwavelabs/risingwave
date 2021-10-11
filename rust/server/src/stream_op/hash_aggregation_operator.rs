@@ -11,7 +11,7 @@ use crate::impl_consume_barrier_default;
 use crate::types::{DataTypeRef, Datum};
 
 use async_trait::async_trait;
-use itertools::{multizip, Itertools};
+use itertools::Itertools;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -114,11 +114,11 @@ impl AggArgs {
 /// Represents an aggregation function.
 pub struct AggCall {
     /// Aggregation Kind for constructing [`StreamingAggStateImpl`]
-    kind: AggKind,
+    pub kind: AggKind,
     /// Arguments of aggregation function input.
-    args: AggArgs,
+    pub args: AggArgs,
     /// The return type of aggregation function.
-    return_type: DataTypeRef,
+    pub return_type: DataTypeRef,
 }
 
 pub struct HashAggregationOperator {
@@ -134,39 +134,7 @@ pub struct HashAggregationOperator {
 }
 
 impl HashAggregationOperator {
-    /// FIXME: update the signature to use [`AggCall`] later.
-    pub fn new(
-        output: Box<dyn Output>,
-        input_types: Vec<Option<DataTypeRef>>,
-        return_types: Vec<DataTypeRef>,
-        key_indices: Vec<usize>,
-        val_indices: Vec<Vec<usize>>,
-        agg_types: Vec<AggKind>,
-    ) -> Self {
-        assert_eq!(input_types.len(), return_types.len());
-        assert_eq!(input_types.len(), val_indices.len());
-        assert_eq!(input_types.len(), agg_types.len());
-        let agg_calls = multizip((
-            input_types.into_iter(),
-            return_types.into_iter(),
-            val_indices.into_iter(),
-            agg_types.into_iter(),
-        ))
-        .map(|(input_type, return_type, val_indices2, agg_type)| {
-            let args = match (input_type, val_indices2.len()) {
-                // FIXME: match `(None, 0)` here.
-                // Currently, [`AggregationStateImpl::apply_batch`] will accept exactly one array, we have to pass a dummy array to it.
-                (None, _) => AggArgs::None([], []),
-                (Some(input_type2), 1) => AggArgs::Unary([input_type2], [val_indices2[0]]),
-                arg => unreachable!(format!("{:?}", arg)),
-            };
-            AggCall {
-                kind: agg_type,
-                return_type,
-                args,
-            }
-        })
-        .collect::<Vec<_>>();
+    pub fn new(output: Box<dyn Output>, agg_calls: Vec<AggCall>, key_indices: Vec<usize>) -> Self {
         Self {
             state_entries: HashMap::new(),
             output,
