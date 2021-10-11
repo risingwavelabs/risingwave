@@ -25,11 +25,16 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
     String tableName = createMaterializedView.name.getSimple();
 
+    // Generate a raw 'sequential plan' for streaming.
     StreamPlanner planner = new StreamPlanner();
     StreamingPlan plan = planner.plan(ast, context);
 
+    // Bind stream plan with materialized view catalog.
     TableCatalog catalog = convertPlanToCatalog(tableName, plan, context);
     plan.getStreamingPlan().setTableId(catalog.getId());
+    // Add exchange node in the stream plan.
+
+    // Serialize the stream plan into stream fragments.
 
     return new DdlResult(StatementType.CREATE_MATERIALIZED_VIEW, 0);
   }

@@ -16,11 +16,13 @@ import com.risingwave.proto.streaming.plan.TableSourceNode;
 import com.risingwave.rpc.Messages;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelDistribution;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.convert.ConverterRule;
 import org.apache.calcite.rel.core.TableScan;
 import org.apache.calcite.rel.hint.RelHint;
@@ -31,6 +33,7 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 public class RwStreamTableSource extends TableScan implements RisingWaveStreamingRel {
   protected final TableCatalog.TableId tableId;
   protected final ImmutableList<ColumnCatalog.ColumnId> columnIds;
+  protected boolean isDispatched = false;
 
   public RwStreamTableSource(
       RelOptCluster cluster,
@@ -66,6 +69,26 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
         .forEachOrdered(
             col -> typeBuilder.add(col.getEntityName().getValue(), col.getDesc().getDataType()));
     return typeBuilder.build();
+  }
+
+  @Override
+  public RelWriter explainTerms(RelWriter pw) {
+    pw.item("table", table.getQualifiedName());
+    if (!columnIds.isEmpty()) {
+      TableCatalog tableCatalog = getTable().unwrapOrThrow(TableCatalog.class);
+      String columnNames =
+          columnIds.stream()
+              .map(tableCatalog::getColumnChecked)
+              .map(ColumnCatalog::getEntityName)
+              .map(ColumnCatalog.ColumnName::getValue)
+              .collect(Collectors.joining(","));
+
+      pw.item("columns", columnNames);
+    }
+    if (isDispatched) {
+      pw.item("dispatched", true);
+    }
+    return pw;
   }
 
   /**
@@ -110,5 +133,13 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
           tableCatalog.getId(),
           source.getColumnIds());
     }
+  }
+
+  public void setDispatched() {
+    isDispatched = true;
+  }
+
+  public boolean isDispatched() {
+    return isDispatched;
   }
 }

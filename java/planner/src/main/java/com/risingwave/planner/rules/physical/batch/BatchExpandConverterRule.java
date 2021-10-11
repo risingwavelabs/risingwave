@@ -8,7 +8,6 @@ import com.risingwave.planner.rel.common.dist.RwDistributionTrait;
 import com.risingwave.planner.rel.common.dist.RwDistributionTraitDef;
 import com.risingwave.planner.rel.physical.batch.RwBatchExchange;
 import com.risingwave.planner.rel.physical.batch.RwBatchSort;
-import org.apache.calcite.plan.RelOptPlanner;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.plan.RelRule;
@@ -39,9 +38,7 @@ public class BatchExpandConverterRule extends RelRule<BatchExpandConverterRule.C
 
     var ret = call.rel(1);
     if (toTraits.getTrait(RwDistributionTraitDef.getInstance()) != null) {
-      ret =
-          satisfyDistribution(
-              ret, toTraits.getTrait(RwDistributionTraitDef.getInstance()), call.getPlanner());
+      ret = satisfyDistribution(ret, toTraits.getTrait(RwDistributionTraitDef.getInstance()));
     }
 
     if (toTraits.getCollation() != null) {
@@ -52,8 +49,7 @@ public class BatchExpandConverterRule extends RelRule<BatchExpandConverterRule.C
     call.transformTo(ret);
   }
 
-  private static RelNode satisfyDistribution(
-      RelNode rel, RwDistributionTrait toDist, RelOptPlanner planner) {
+  private static RelNode satisfyDistribution(RelNode rel, RwDistributionTrait toDist) {
     checkArgument(rel.getTraitSet().contains(BATCH_PHYSICAL), "Can't convert logical trait!");
     if (toDist.getType() == RelDistribution.Type.ANY) {
       return rel;

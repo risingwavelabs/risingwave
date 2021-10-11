@@ -9,6 +9,7 @@ import static com.risingwave.planner.rules.BatchRuleSets.LOGICAL_CONVERTER_RULES
 import static com.risingwave.planner.rules.BatchRuleSets.LOGICAL_OPTIMIZATION_RULES;
 import static com.risingwave.planner.rules.BatchRuleSets.LOGICAL_REWRITE_RULES;
 
+import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.planner.planner.Planner;
 import com.risingwave.planner.program.ChainedOptimizerProgram;
@@ -23,7 +24,11 @@ import com.risingwave.planner.rel.serialization.ExplainWriter;
 import com.risingwave.planner.rules.BatchRuleSets;
 import com.risingwave.planner.rules.streaming.StreamingConvertRules;
 import com.risingwave.planner.sql.SqlConverter;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rex.RexInputRef;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlCreateMaterializedView;
 import org.slf4j.Logger;
@@ -66,8 +71,20 @@ public class StreamPlanner implements Planner<StreamingPlan> {
   }
 
   private RwStreamMaterializedView addMaterializedViewNode(RelNode root) {
+    var rowType = root.getRowType();
+    List<RexInputRef> inputRefList = new ArrayList();
+    for (int i = 0; i < rowType.getFieldCount(); i++) {
+      var field = rowType.getFieldList().get(i);
+      RexInputRef inputRef = new RexInputRef(i, (RisingWaveDataType) field.getType());
+      inputRefList.add(inputRef);
+    }
     return new RwStreamMaterializedView(
-        root.getCluster(), root.getTraitSet(), root, root.getRowType());
+        root.getCluster(),
+        root.getTraitSet(),
+        Collections.emptyList(),
+        root,
+        inputRefList,
+        root.getRowType());
   }
 
   private static OptimizerProgram buildLogicalOptimizerProgram() {

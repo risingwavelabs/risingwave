@@ -2,6 +2,7 @@ package com.risingwave.planner;
 
 import com.risingwave.execution.handler.CreateMaterializedViewHandler;
 import com.risingwave.planner.planner.batch.BatchPlanner;
+import com.risingwave.planner.planner.streaming.StreamFragmenter;
 import com.risingwave.planner.rel.physical.batch.BatchPlan;
 import com.risingwave.planner.rel.physical.streaming.StreamingPlan;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
@@ -50,12 +51,12 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     StreamingPlan plan = streamPlanner.plan(ast, executionContext);
     String resultPlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
     Assertions.assertEquals(
-        "RwStreamMaterializedView\n"
+        "RwStreamMaterializedView(v=[$0])\n"
             + "  RwStreamProject(v=[+($0, 1)])\n"
             + "    RwStreamAgg(group=[{}], agg#0=[SUM($0)])\n"
             + "      RwStreamProject(v1=[$0])\n"
             + "        RwStreamFilter(condition=[>($0, $1)])\n"
-            + "          RwStreamTableSource(table=[[test_schema, t]])",
+            + "          RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])",
         resultPlan);
 
     CreateMaterializedViewHandler handler = new CreateMaterializedViewHandler();
@@ -65,7 +66,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
 
     StreamNode serializedProto = serializer.serialize(plan);
     String serializedJsonPlan = Messages.jsonFormat(serializedProto);
-    System.out.println(serializedJsonPlan);
+    // System.out.println(serializedJsonPlan);
   }
 
   @Test
@@ -78,5 +79,34 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     String explain = ExplainWriter.explainPlan(plan.getRoot());
 
     Assertions.assertTrue(explain.contains("RwBatchMaterializedViewScan"));
+  }
+
+  @Test
+  @Order(3)
+  void testDistributedStreamingPlan() {
+    // A sample code for distributed streaming plan.
+    String sql =
+        "create materialized view T_distributed as select sum(v1)+1 as V from t where v1>v2";
+
+    SqlNode ast = parseSql(sql);
+    StreamingPlan plan = streamPlanner.plan(ast, executionContext);
+
+    CreateMaterializedViewHandler handler = new CreateMaterializedViewHandler();
+    SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
+    String tableName = createMaterializedView.name.getSimple();
+    handler.convertPlanToCatalog(tableName, plan, executionContext);
+
+    StreamingPlan exchangePlan = StreamFragmenter.generateGraph(plan, executionContext);
+    String explainExchangePlan = ExplainWriter.explainPlan(exchangePlan.getStreamingPlan());
+    String expectedPlan =
+        "RwStreamMaterializedView(v=[$0])\n"
+            + "  RwStreamProject(v=[+($0, 1)])\n"
+            + "    RwStreamAgg(group=[{}], agg#0=[SUM($0)])\n"
+            + "      RwStreamProject(v1=[$0])\n"
+            + "        RwStreamFilter(condition=[>($0, $1)])\n"
+            + "          RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
+            + "            RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2], dispatched=[true])";
+    System.out.println(explainExchangePlan);
+    Assertions.assertEquals(explainExchangePlan, expectedPlan);
   }
 }

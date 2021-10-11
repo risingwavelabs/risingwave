@@ -2,6 +2,7 @@ package com.risingwave.planner;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import com.risingwave.common.config.LeaderServerConfigurations;
 import com.risingwave.execution.handler.CreateMaterializedViewHandler;
 import com.risingwave.planner.planner.streaming.StreamPlanner;
 import com.risingwave.planner.rel.physical.streaming.StreamingPlan;
@@ -21,7 +22,11 @@ public abstract class StreamPlanTestBase extends SqlTestBase {
 
   protected void init() {
     super.initEnv();
-
+    executionContext
+        .getConf()
+        .set(
+            LeaderServerConfigurations.CLUSTER_MODE,
+            LeaderServerConfigurations.ClusterMode.Distributed);
     initTables();
     streamPlanner = new StreamPlanner();
     serializer = new StreamPlanSerializer(executionContext);

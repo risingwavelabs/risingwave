@@ -7,11 +7,11 @@ create materialized view T1 as select sum(v2) as V from t where v1>1
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView
+RwStreamMaterializedView(v=[$0])
   RwStreamAgg(group=[{}], v=[SUM($0)])
     RwStreamProject(v2=[$1])
       RwStreamFilter(condition=[>($0, 1)])
-        RwStreamTableSource(table=[[test_schema, t]])
+        RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
 ]]>
         </Resource>
         <Resource name="json">
@@ -128,9 +128,9 @@ create materialized view T2 as select v1+v2 as V from t
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView
+RwStreamMaterializedView(v=[$0])
   RwStreamProject(v=[+($0, $1)])
-    RwStreamTableSource(table=[[test_schema, t]])
+    RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
 ]]>
         </Resource>
         <Resource name="json">
@@ -212,9 +212,9 @@ create materialized view T3 as select v2, sum(v1) as V from t group by v2
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView
+RwStreamMaterializedView(v2=[$0], v=[$1])
   RwStreamAgg(group=[{0}], v=[SUM($1)])
-    RwStreamTableSource(table=[[test_schema, t]])
+    RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1])
 ]]>
         </Resource>
         <Resource name="json">
@@ -289,10 +289,10 @@ create materialized view T4 as select sum(v1)+sum(v2) as V from t
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView
+RwStreamMaterializedView(v=[$0])
   RwStreamProject(v=[+($0, $1)])
     RwStreamAgg(group=[{}], agg#0=[SUM($0)], agg#1=[SUM($1)])
-      RwStreamTableSource(table=[[test_schema, t]])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
 ]]>
         </Resource>
         <Resource name="json">
@@ -405,10 +405,10 @@ create materialized view T5 as select sum(v1+v2) as V from t
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView
+RwStreamMaterializedView(v=[$0])
   RwStreamAgg(group=[{}], v=[SUM($0)])
     RwStreamProject($f0=[+($0, $1)])
-      RwStreamTableSource(table=[[test_schema, t]])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
 ]]>
         </Resource>
         <Resource name="json">
@@ -508,10 +508,10 @@ create materialized view T6 as select sum(v1) as V from t group by v2
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView
+RwStreamMaterializedView(v=[$0])
   RwStreamProject(v=[$1])
     RwStreamAgg(group=[{0}], v=[SUM($1)])
-      RwStreamTableSource(table=[[test_schema, t]])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1])
 ]]>
         </Resource>
         <Resource name="json">
@@ -597,10 +597,10 @@ create materialized view T7 as select sum(v1)+1 as V from t group by v2
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView
+RwStreamMaterializedView(v=[$0])
   RwStreamProject(v=[+($1, 1)])
     RwStreamAgg(group=[{0}], agg#0=[SUM($1)])
-      RwStreamTableSource(table=[[test_schema, t]])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1])
 ]]>
         </Resource>
         <Resource name="json">
@@ -703,12 +703,12 @@ create materialized view T8 as select sum(v1)+1 as V from t where v1>v2
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView
+RwStreamMaterializedView(v=[$0])
   RwStreamProject(v=[+($0, 1)])
     RwStreamAgg(group=[{}], agg#0=[SUM($0)])
       RwStreamProject(v1=[$0])
         RwStreamFilter(condition=[>($0, $1)])
-          RwStreamTableSource(table=[[test_schema, t]])
+          RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
             ]]>
         </Resource>
         <Resource name="json">

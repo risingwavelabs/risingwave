@@ -37,6 +37,15 @@ public class RwDistributionTraitDef extends RelTraitDef<RwDistributionTrait> {
       RwDistributionTrait toDist,
       boolean allowInfiniteCostConverters) {
     checkArgument(rel.getTraitSet().contains(BATCH_PHYSICAL), "Can't convert logical trait!");
+    return convertToBatchExchange(planner, rel, toDist, allowInfiniteCostConverters);
+  }
+
+  private @Nullable RelNode convertToBatchExchange(
+      RelOptPlanner planner,
+      RelNode rel,
+      RwDistributionTrait toDist,
+      boolean allowInfiniteCostConverters) {
+    // TODO: this conversion may be unnecessary.
     if (toDist.getType() == RelDistribution.Type.ANY) {
       return rel;
     }
