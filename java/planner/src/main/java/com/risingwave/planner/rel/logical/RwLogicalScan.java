@@ -3,7 +3,7 @@ package com.risingwave.planner.rel.logical;
 import com.google.common.collect.ImmutableList;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
-import com.risingwave.planner.rel.common.FilterScanBase;
+import com.risingwave.planner.rel.common.RwScan;
 import java.util.List;
 import org.apache.calcite.plan.Convention;
 import org.apache.calcite.plan.RelOptCluster;
@@ -18,23 +18,23 @@ import org.apache.calcite.rel.logical.LogicalTableScan;
 import org.apache.calcite.rel.metadata.RelMetadataQuery;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-public class RwLogicalFilterScan extends FilterScanBase implements RisingWaveLogicalRel {
+/** */
+public class RwLogicalScan extends RwScan implements RisingWaveLogicalRel {
 
-  private RwLogicalFilterScan(
+  private RwLogicalScan(
       RelOptCluster cluster,
       RelTraitSet traitSet,
       List<RelHint> hints,
       RelOptTable table,
       TableCatalog.TableId tableId,
-      ImmutableList<ColumnCatalog.ColumnId> columnIds,
-      boolean stream) {
-    super(cluster, traitSet, hints, table, tableId, columnIds, stream);
+      ImmutableList<ColumnCatalog.ColumnId> columnIds) {
+    super(cluster, traitSet, hints, table, tableId, columnIds);
     checkConvention();
   }
 
-  public RwLogicalFilterScan copy(ImmutableList<ColumnCatalog.ColumnId> columnIds) {
-    return new RwLogicalFilterScan(
-        getCluster(), getTraitSet(), getHints(), getTable(), tableId, columnIds, isStream());
+  public RwLogicalScan copy(ImmutableList<ColumnCatalog.ColumnId> columnIds) {
+    return new RwLogicalScan(
+        getCluster(), getTraitSet(), getHints(), getTable(), tableId, columnIds);
   }
 
   @Override
@@ -66,14 +66,13 @@ public class RwLogicalFilterScan extends FilterScanBase implements RisingWaveLog
 
       TableCatalog tableCatalog = source.getTable().unwrapOrThrow(TableCatalog.class);
 
-      return new RwLogicalFilterScan(
+      return new RwLogicalScan(
           source.getCluster(),
           source.getTraitSet().plus(LOGICAL),
           source.getHints(),
           source.getTable(),
           tableCatalog.getId(),
-          tableCatalog.getAllColumnIdsSorted(),
-          tableCatalog.isStream());
+          tableCatalog.getAllColumnIdsSorted());
     }
   }
 }

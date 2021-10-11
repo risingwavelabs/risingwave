@@ -1,6 +1,8 @@
 package com.risingwave.planner;
 
 import com.risingwave.execution.handler.CreateMaterializedViewHandler;
+import com.risingwave.planner.planner.batch.BatchPlanner;
+import com.risingwave.planner.rel.physical.batch.BatchPlan;
 import com.risingwave.planner.rel.physical.streaming.StreamingPlan;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
 import com.risingwave.planner.util.PlanTestCaseLoader;
@@ -10,28 +12,51 @@ import com.risingwave.proto.streaming.plan.StreamNode;
 import com.risingwave.rpc.Messages;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlCreateMaterializedView;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.TestMethodOrder;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ArgumentsSource;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 public class MaterializedViewPlanTest extends StreamPlanTestBase {
   @BeforeAll
   public void initAll() {
     super.init();
   }
 
+  @ParameterizedTest(name = "{index} => {0}")
+  @DisplayName("Streaming plan tests")
+  @ArgumentsSource(PlanTestCaseLoader.class)
+  @Order(0)
+  public void testStreamingPlan(@ToPlannerTestCase PlannerTestCase testCase) {
+    // Comment the line below if you want to make quick proto changes and this test block the
+    // progress.
+    runTestCase(testCase);
+  }
+
   @Test
-  void testStreamPlanCase1() {
+  @Order(1)
+  void testCreateMaterializedView() {
     // A sample code for stream testing. Keep this for debugging.
     String sql = "create materialized view T_test as select sum(v1)+1 as V from t where v1>v2";
-    System.out.println("query sql: \n" + sql);
     SqlNode ast = parseSql(sql);
     StreamingPlan plan = streamPlanner.plan(ast, executionContext);
-    String explainPlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
+    String resultPlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
+    Assertions.assertEquals(
+        "RwStreamMaterializedView\n"
+            + "  RwStreamProject(v=[+($0, 1)])\n"
+            + "    RwStreamAgg(group=[{}], agg#0=[SUM($0)])\n"
+            + "      RwStreamProject(v1=[$0])\n"
+            + "        RwStreamFilter(condition=[>($0, $1)])\n"
+            + "          RwStreamTableSource(table=[[test_schema, t]])",
+        resultPlan);
 
     CreateMaterializedViewHandler handler = new CreateMaterializedViewHandler();
     SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
@@ -43,12 +68,15 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     System.out.println(serializedJsonPlan);
   }
 
-  @ParameterizedTest(name = "{index} => {0}")
-  @DisplayName("Streaming plan tests")
-  @ArgumentsSource(PlanTestCaseLoader.class)
-  public void testStreamingPlan(@ToPlannerTestCase PlannerTestCase testCase) {
-    // Comment the line below if you want to make quick proto changes and this test block the
-    // progress.
-    runTestCase(testCase);
+  @Test
+  @Order(2)
+  void testSelectFromMaterializedView() {
+    String sql = "select * from T_test"; // T_test was created in previous case
+
+    BatchPlanner batchPlanner = new BatchPlanner();
+    BatchPlan plan = batchPlanner.plan(parseSql(sql), executionContext);
+    String explain = ExplainWriter.explainPlan(plan.getRoot());
+
+    Assertions.assertTrue(explain.contains("RwBatchMaterializedViewScan"));
   }
 }

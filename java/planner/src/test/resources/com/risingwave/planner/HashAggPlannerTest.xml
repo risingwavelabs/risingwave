@@ -37,7 +37,7 @@ RwBatchGather
               RwBatchHashAgg(group=[{0, 1}], sum_qty=[SUM($2)], sum_base_price=[SUM($3)], sum_disc_price=[SUM($4)], sum_charge=[SUM($5)], agg#4=[SUM($2)], agg#5=[COUNT($2)], agg#6=[SUM($3)], agg#7=[COUNT($3)], agg#8=[SUM($6)], agg#9=[COUNT($6)], count_order=[COUNT()])
                 RwBatchProject(l_returnflag=[$4], l_linestatus=[$5], l_quantity=[$0], l_extendedprice=[$1], $f4=[*($1, -(1, $2))], $f5=[*(*($1, -(1, $2)), +(1, $3))], l_discount=[$2])
                   RwBatchFilter(condition=[<=($6, -(1998-12-01, 6134400000:INTERVAL DAY))])
-                    RwBatchFilterScan(table=[[test_schema, lineitem]], columns=[l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate])
+                    RwBatchTableScan(table=[[test_schema, lineitem]], columns=[l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate])
             ]]>
         </Resource>
     </TestCase>

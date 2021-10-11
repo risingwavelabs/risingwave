@@ -50,7 +50,7 @@ public class StreamPlanner implements Planner<StreamingPlan> {
     // Logical optimization.
     OptimizerProgram optimizerProgram = buildLogicalOptimizerProgram();
     RelNode logicalPlan = optimizerProgram.optimize(rawPlan, context);
-    log.info("Logical plan: \n" + ExplainWriter.explainPlan(logicalPlan));
+    log.debug("Logical plan: \n" + ExplainWriter.explainPlan(logicalPlan));
     // Generate Streaming plan from logical plan.
     RwStreamMaterializedView root = generateStreamingPlan(logicalPlan, context);
     return new StreamingPlan(root);
@@ -61,7 +61,7 @@ public class StreamPlanner implements Planner<StreamingPlan> {
     OptimizerProgram streamingOptimizerProgram = buildStreamingOptimizerProgram();
     RelNode rawStreamingPlan = streamingOptimizerProgram.optimize(logicalPlan, context);
     RwStreamMaterializedView materializedViewPlan = addMaterializedViewNode(rawStreamingPlan);
-    log.info("Create streaming plan:\n" + ExplainWriter.explainPlan(materializedViewPlan));
+    log.debug("Create streaming plan:\n" + ExplainWriter.explainPlan(materializedViewPlan));
     return materializedViewPlan;
   }
 
@@ -93,10 +93,8 @@ public class StreamPlanner implements Planner<StreamingPlan> {
   }
 
   private static OptimizerProgram buildStreamingOptimizerProgram() {
-    HepOptimizerProgram program =
-        HepOptimizerProgram.builder()
-            .addRules(StreamingConvertRules.STREAMING_CONVERTER_RULES)
-            .build();
-    return program;
+    return HepOptimizerProgram.builder()
+        .addRules(StreamingConvertRules.STREAMING_CONVERTER_RULES)
+        .build();
   }
 }

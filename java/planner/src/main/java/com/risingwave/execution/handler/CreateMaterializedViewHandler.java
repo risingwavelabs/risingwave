@@ -40,10 +40,10 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     SchemaCatalog.SchemaName schemaName = context.getCurrentSchema();
 
     CreateTableInfo.Builder createTableInfoBuilder = CreateTableInfo.builder(tableName);
-    RwStreamMaterializedView rootNode = (RwStreamMaterializedView) plan.getStreamingPlan();
+    RwStreamMaterializedView rootNode = plan.getStreamingPlan();
     var columns = rootNode.getColumns();
-    for (int i = 0; i < columns.size(); i++) {
-      createTableInfoBuilder.addColumn(columns.get(i).getKey(), columns.get(i).getValue());
+    for (var column : columns) {
+      createTableInfoBuilder.addColumn(column.getKey(), column.getValue());
     }
     createTableInfoBuilder.setMv(true);
     CreateTableInfo tableInfo = createTableInfoBuilder.build();

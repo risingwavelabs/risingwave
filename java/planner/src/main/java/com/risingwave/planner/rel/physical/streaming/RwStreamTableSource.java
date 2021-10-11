@@ -9,7 +9,7 @@ import com.google.protobuf.Any;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
-import com.risingwave.planner.rel.logical.RwLogicalFilterScan;
+import com.risingwave.planner.rel.logical.RwLogicalScan;
 import com.risingwave.proto.plan.TableRefId;
 import com.risingwave.proto.streaming.plan.StreamNode;
 import com.risingwave.proto.streaming.plan.TableSourceNode;
@@ -79,7 +79,7 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
             .withInTrait(LOGICAL)
             .withOutTrait(STREAMING)
             .withRuleFactory(StreamTableSourceConverterRule::new)
-            .withOperandSupplier(t -> t.operand(RwLogicalFilterScan.class).anyInputs())
+            .withOperandSupplier(t -> t.operand(RwLogicalScan.class).anyInputs())
             .withDescription("Converting logical filter scan to streaming source node.")
             .as(Config.class)
             .toRule(StreamTableSourceConverterRule.class);
@@ -90,7 +90,7 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
 
     @Override
     public @Nullable RelNode convert(RelNode rel) {
-      RwLogicalFilterScan source = (RwLogicalFilterScan) rel;
+      RwLogicalScan source = (RwLogicalScan) rel;
 
       TableCatalog tableCatalog = source.getTable().unwrapOrThrow(TableCatalog.class);
 

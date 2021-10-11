@@ -14,23 +14,21 @@ import org.apache.calcite.rel.hint.RelHint;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 
-public class FilterScanBase extends TableScan {
+/** Base class for all kinds of Scan executor */
+public abstract class RwScan extends TableScan {
   protected final TableCatalog.TableId tableId;
   protected final ImmutableList<ColumnCatalog.ColumnId> columnIds;
-  private final boolean stream;
 
-  protected FilterScanBase(
+  protected RwScan(
       RelOptCluster cluster,
       RelTraitSet traitSet,
       List<RelHint> hints,
       RelOptTable table,
       TableCatalog.TableId tableId,
-      ImmutableList<ColumnCatalog.ColumnId> columnIds,
-      boolean stream) {
+      ImmutableList<ColumnCatalog.ColumnId> columnIds) {
     super(cluster, traitSet, hints, table);
     this.tableId = tableId;
     this.columnIds = columnIds;
-    this.stream = stream;
   }
 
   public TableCatalog.TableId getTableId() {
@@ -69,9 +67,5 @@ public class FilterScanBase extends TableScan {
     }
 
     return pw;
-  }
-
-  public boolean isStream() {
-    return stream;
   }
 }

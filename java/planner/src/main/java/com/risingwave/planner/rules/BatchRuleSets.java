@@ -2,14 +2,13 @@ package com.risingwave.planner.rules;
 
 import com.risingwave.planner.rel.logical.RwLogicalAggregate;
 import com.risingwave.planner.rel.logical.RwLogicalFilter;
-import com.risingwave.planner.rel.logical.RwLogicalFilterScan;
 import com.risingwave.planner.rel.logical.RwLogicalInsert;
 import com.risingwave.planner.rel.logical.RwLogicalJoin;
 import com.risingwave.planner.rel.logical.RwLogicalProject;
+import com.risingwave.planner.rel.logical.RwLogicalScan;
 import com.risingwave.planner.rel.logical.RwLogicalSort;
 import com.risingwave.planner.rel.logical.RwLogicalValues;
 import com.risingwave.planner.rel.physical.batch.RwBatchFilter;
-import com.risingwave.planner.rel.physical.batch.RwBatchFilterScan;
 import com.risingwave.planner.rel.physical.batch.RwBatchGather;
 import com.risingwave.planner.rel.physical.batch.RwBatchInsertValues;
 import com.risingwave.planner.rel.physical.batch.RwBatchProject;
@@ -18,6 +17,7 @@ import com.risingwave.planner.rel.physical.batch.RwBatchValues;
 import com.risingwave.planner.rules.logical.GatherConversionRule;
 import com.risingwave.planner.rules.logical.ProjectToTableScanRule;
 import com.risingwave.planner.rules.physical.batch.BatchExpandConverterRule;
+import com.risingwave.planner.rules.physical.batch.BatchScanConverterRule;
 import com.risingwave.planner.rules.physical.batch.InsertValuesRule;
 import com.risingwave.planner.rules.physical.batch.aggregate.BatchHashAggRule;
 import com.risingwave.planner.rules.physical.batch.aggregate.BatchSortAggRule;
@@ -102,7 +102,7 @@ public class BatchRuleSets {
           RwLogicalFilter.RwFilterConverterRule.INSTANCE,
           RwLogicalAggregate.RwAggregateConverterRule.INSTANCE,
           RwLogicalValues.RwValuesConverterRule.INSTANCE,
-          RwLogicalFilterScan.RwLogicalFilterScanConverterRule.INSTANCE,
+          RwLogicalScan.RwLogicalFilterScanConverterRule.INSTANCE,
           RwLogicalSort.RwLogicalSortConverterRule.INSTANCE,
           RwLogicalJoin.RwLogicalJoinConverterRule.INSTANCE,
           GatherConversionRule.Config.DEFAULT.toRule());
@@ -119,7 +119,7 @@ public class BatchRuleSets {
           RwBatchFilter.BatchFilterConverterRule.INSTANCE,
           RwBatchProject.BatchProjectConverterRule.INSTANCE,
           RwBatchValues.BatchValuesConverterRule.INSTANCE,
-          RwBatchFilterScan.BatchFilterScanConverterRule.INSTANCE,
+          BatchScanConverterRule.INSTANCE,
           RwBatchGather.RwBatchGatherConverterRule.INSTANCE,
           RwBatchSort.RwBatchSortConverterRule.INSTANCE,
           RwBatchInsertValues.BatchInsertValuesConverterRule.INSTANCE);

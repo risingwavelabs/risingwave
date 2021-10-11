@@ -7,7 +7,7 @@ select * from t
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwBatchFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])
+RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
 ]]>
         </Resource>
     </TestCase>
@@ -34,7 +34,7 @@ select v3, v1+v2, v1-v2, v1*v2, v1/v2 from t
         <Resource name="plan">
             <![CDATA[
 RwBatchProject(v3=[$2], EXPR$1=[+($0, $1)], EXPR$2=[-($0, $1)], EXPR$3=[*($0, $1)], EXPR$4=[/($0, $1)])
-  RwBatchFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])
+  RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
             ]]>
         </Resource>
     </TestCase>
@@ -48,7 +48,7 @@ select * from t where v1 > 1
         <Resource name="plan">
             <![CDATA[
 RwBatchFilter(condition=[>($0, 1)])
-  RwBatchFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])
+  RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
             ]]>
         </Resource>
     </TestCase>
@@ -61,7 +61,7 @@ select sum(v3) from t
         <Resource name="plan">
             <![CDATA[
 RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)])
-  RwBatchFilterScan(table=[[test_schema, t]], columns=[v3])
+  RwBatchTableScan(table=[[test_schema, t]], columns=[v3])
 ]]>
         </Resource>
     </TestCase>
@@ -75,7 +75,7 @@ select sum(v3), sum(v2), max(v1), min(v3) from t
         <Resource name="plan">
             <![CDATA[
 RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)], EXPR$2=[MAX($2)], EXPR$3=[MIN($0)])
-  RwBatchFilterScan(table=[[test_schema, t]], columns=[v3,v2,v1])
+  RwBatchTableScan(table=[[test_schema, t]], columns=[v3,v2,v1])
 ]]>
         </Resource>
     </TestCase>
@@ -90,7 +90,7 @@ select sum(v1), sum(v2) from t group by v1
             <![CDATA[
 RwBatchProject(EXPR$0=[$1], EXPR$1=[$2])
   RwBatchHashAgg(group=[{0}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
-    RwBatchFilterScan(table=[[test_schema, t]], columns=[v1,v2])
+    RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2])
 ]]>
         </Resource>
     </TestCase>
@@ -105,7 +105,7 @@ select sum(v1+v2),sum(v1+v3) from t
             <![CDATA[
 RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
   RwBatchProject($f0=[+($0, $1)], $f1=[+($0, $2)])
-    RwBatchFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])
+    RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
 ]]>
         </Resource>
     </TestCase>
@@ -119,7 +119,7 @@ select sum(v1), sum(v3) from t
         <Resource name="plan">
             <![CDATA[
 RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
-  RwBatchFilterScan(table=[[test_schema, t]], columns=[v1,v3])
+  RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v3])
 ]]>
         </Resource>
     </TestCase>
@@ -133,7 +133,7 @@ select min(v1) from t
         <Resource name="plan">
             <![CDATA[
 RwBatchSortAgg(group=[{}], EXPR$0=[MIN($0)])
-  RwBatchFilterScan(table=[[test_schema, t]], columns=[v1])
+  RwBatchTableScan(table=[[test_schema, t]], columns=[v1])
 ]]>
         </Resource>
     </TestCase>
@@ -147,7 +147,7 @@ select max(v1) from t
         <Resource name="plan">
             <![CDATA[
 RwBatchSortAgg(group=[{}], EXPR$0=[MAX($0)])
-  RwBatchFilterScan(table=[[test_schema, t]], columns=[v1])
+  RwBatchTableScan(table=[[test_schema, t]], columns=[v1])
 ]]>
         </Resource>
     </TestCase>
@@ -163,7 +163,7 @@ select max(v1) from t where v2>3
 RwBatchSortAgg(group=[{}], EXPR$0=[MAX($0)])
   RwBatchProject(v1=[$0])
     RwBatchFilter(condition=[>($1, 3)])
-      RwBatchFilterScan(table=[[test_schema, t]], columns=[v1,v2])
+      RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2])
             ]]>
         </Resource>
     </TestCase>
@@ -177,7 +177,7 @@ select avg(v2) from t
         <Resource name="plan">
             <![CDATA[
 RwBatchSortAgg(group=[{}], EXPR$0=[AVG($0)])
-  RwBatchFilterScan(table=[[test_schema, t]], columns=[v2])
+  RwBatchTableScan(table=[[test_schema, t]], columns=[v2])
 ]]>
         </Resource>
     </TestCase>
@@ -192,7 +192,7 @@ select sum(v1), v2 from t group by v2
             <![CDATA[
 RwBatchProject(EXPR$0=[$1], v2=[$0])
   RwBatchHashAgg(group=[{0}], EXPR$0=[SUM($1)])
-    RwBatchFilterScan(table=[[test_schema, t]], columns=[v2,v1])
+    RwBatchTableScan(table=[[test_schema, t]], columns=[v2,v1])
 ]]>
         </Resource>
     </TestCase>
@@ -219,7 +219,7 @@ RwBatchProject(EXPR$0=[/(100.0:DOUBLE, 8.0:DOUBLE)])
         <Resource name="plan">
             <![CDATA[
 RwBatchFilter(condition=[>=($0, 1970-01-01)])
-  RwBatchFilterScan(table=[[test_schema, t2]], columns=[v1])
+  RwBatchTableScan(table=[[test_schema, t2]], columns=[v1])
             ]]>
         </Resource>
     </TestCase>
@@ -232,8 +232,8 @@ RwBatchFilter(condition=[>=($0, 1970-01-01)])
         <Resource name="plan">
             <![CDATA[
 RwBatchNestLoopJoin(condition=[>($0, $3)], joinType=[inner])
-  RwBatchFilterScan(table=[[test_schema, t]], columns=[v1,v2,v3])
-  RwBatchFilterScan(table=[[test_schema, t3]], columns=[v1])
+  RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
+  RwBatchTableScan(table=[[test_schema, t3]], columns=[v1])
 ]]>
         </Resource>
         <Resource name="json">
