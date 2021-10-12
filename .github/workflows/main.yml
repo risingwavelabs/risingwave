@@ -176,7 +176,7 @@ jobs:
       
       - name: Install cargo-tarpaulin
         run: |
-          cargo install cargo-tarpaulin
+          cargo install --force cargo-tarpaulin
 
       - name: Run rust format check
         run: |
