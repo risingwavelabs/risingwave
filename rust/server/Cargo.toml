@@ -40,6 +40,7 @@ rdkafka = { version = "0.25", features = ["cmake-build"] }
 lazy_static = "1.4.0"
 either = "1"
 itertools = "0.10"
+tempfile = "3.2.0"
 
 [dev-dependencies]
 approx = "0.5"

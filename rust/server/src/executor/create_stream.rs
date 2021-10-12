@@ -3,18 +3,21 @@ use crate::error::ErrorCode::{InternalError, ProtobufError, ProtocolError};
 use crate::error::Result;
 use crate::error::RwError;
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
-use crate::source::{FileSourceConfig, KafkaSourceConfig};
+use crate::source::{FileSourceConfig, KafkaSourceConfig, SourceFormat};
 use crate::source::{SourceColumnDesc, SourceConfig, SourceManagerRef};
 use crate::types::build_from_proto;
 use pb_convert::FromProtobuf;
 use protobuf::Message;
-use risingwave_proto::plan::{CreateStreamNode, PlanNode_PlanNodeType};
+use risingwave_proto::plan::{
+    CreateStreamNode, CreateStreamNode_RowFormatType, PlanNode_PlanNodeType,
+};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 
 pub(super) struct CreateStreamExecutor {
     table_id: TableId,
     config: SourceConfig,
+    format: SourceFormat,
     columns: Vec<SourceColumnDesc>,
     source_manager: SourceManagerRef,
 }
@@ -71,6 +74,12 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for CreateStreamExecutor {
             })
             .collect::<Result<Vec<SourceColumnDesc>>>()?;
 
+        let format = match node.get_format() {
+            CreateStreamNode_RowFormatType::JSON => SourceFormat::Json,
+            CreateStreamNode_RowFormatType::PROTOBUF => SourceFormat::Protobuf,
+            CreateStreamNode_RowFormatType::AVRO => SourceFormat::Avro,
+        };
+
         let properties = node.get_properties();
 
         let config = match get_from_properties!(properties, "upstream_source").as_str() {
@@ -85,6 +94,7 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for CreateStreamExecutor {
         Ok(Self {
             table_id,
             config,
+            format,
             source_manager: source.global_task_env().source_manager_ref(),
             columns,
         })
@@ -98,8 +108,12 @@ impl Executor for CreateStreamExecutor {
     }
 
     fn execute(&mut self) -> Result<ExecutorResult> {
-        self.source_manager
-            .create_source(&self.table_id, &self.config, self.columns.clone())?;
+        self.source_manager.create_source(
+            &self.table_id,
+            self.format.clone(),
+            &self.config,
+            self.columns.clone(),
+        )?;
 
         Ok(ExecutorResult::Done)
     }

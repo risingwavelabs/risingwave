@@ -1,7 +1,7 @@
 use crate::catalog::TableId;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::source::{FileSource, KafkaSource, Source, SourceConfig};
+use crate::source::{FileSource, KafkaSource, Source, SourceConfig, SourceFormat};
 use crate::types::DataTypeRef;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -12,6 +12,7 @@ pub trait SourceManager: Sync + Send {
     fn create_source(
         &self,
         source_id: &TableId,
+        format: SourceFormat,
         config: &SourceConfig,
         columns: Vec<SourceColumnDesc>,
     ) -> Result<()>;
@@ -29,6 +30,7 @@ pub struct SourceColumnDesc {
 #[derive(Clone)]
 pub struct SourceDesc {
     pub source: SourceRef,
+    pub format: SourceFormat,
     pub columns: Vec<SourceColumnDesc>,
 }
 
@@ -42,6 +44,7 @@ impl SourceManager for MemSourceManager {
     fn create_source(
         &self,
         table_id: &TableId,
+        format: SourceFormat,
         config: &SourceConfig,
         columns: Vec<SourceColumnDesc>,
     ) -> Result<()> {
@@ -58,7 +61,11 @@ impl SourceManager for MemSourceManager {
             SourceConfig::File(_) => Arc::new(FileSource::new(config.clone())?),
         };
 
-        let desc = SourceDesc { source, columns };
+        let desc = SourceDesc {
+            source,
+            format,
+            columns,
+        };
 
         tables.insert(table_id.clone(), desc);
 
