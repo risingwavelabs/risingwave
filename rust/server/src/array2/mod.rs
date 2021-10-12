@@ -433,17 +433,6 @@ macro_rules! impl_array {
         }
       }
 
-      pub fn insert_key(&self, keys: &mut Vec<Vec<Datum>>) {
-        match self {
-          $( Self::$variant_name(inner) => {
-            for (val, keys_for_one_row) in inner.iter().zip(keys.iter_mut()) {
-              let op: Datum = val.map(|v| v.to_owned_scalar().into());
-              keys_for_one_row.push(op);
-            }
-          }, )*
-        }
-      }
-
       /// Get the enum-wrapped `ScalarRefImpl` out of the `Array`.
       pub fn value_at(&self, idx: usize) -> Option<ScalarRefImpl<'_>> {
         match self {

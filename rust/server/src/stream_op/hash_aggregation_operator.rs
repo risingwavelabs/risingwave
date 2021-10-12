@@ -217,7 +217,9 @@ impl UnaryStreamOperator for HashAggregationOperator {
         let mut keys = vec![vec![]; total_num_rows];
         for key_idx in &self.key_indices {
             let col = &arrays[*key_idx];
-            col.array().insert_key(&mut keys);
+            for (row_idx, key) in keys.iter_mut().enumerate() {
+                key.push(col.array().scalar_value_at(row_idx));
+            }
         }
 
         let (unique_keys, distinct_rows, mut key_to_vis_maps) =
