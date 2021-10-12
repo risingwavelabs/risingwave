@@ -59,19 +59,17 @@ impl Bitmap {
     pub fn new(num_bits: usize) -> Result<Self> {
         let len = Bitmap::num_of_bytes(num_bits);
         Ok(Bitmap {
-            bits: Buffer::try_from(&vec![0xFF; len])?,
+            bits: Buffer::new_with_default(len)?,
             num_bits,
         })
     }
 
     pub fn from_bool_array(bools: &BoolArray) -> Result<Self> {
-        let mut buffer = Buffer::new(Bitmap::num_of_bytes(bools.len()))?;
+        let mut buffer = Buffer::new_with_default(Bitmap::num_of_bytes(bools.len()))?;
         let data = buffer.as_slice_mut();
         for (idx, value) in (bools.iter()).enumerate() {
             if let Some(true) = value {
                 bit_util::set_bit(data, idx);
-            } else {
-                bit_util::unset_bit(data, idx);
             }
         }
         Ok(Self {
@@ -81,13 +79,11 @@ impl Bitmap {
     }
 
     pub fn from_vec(bools: Vec<bool>) -> Result<Self> {
-        let mut buffer = Buffer::new(Bitmap::num_of_bytes(bools.len()))?;
+        let mut buffer = Buffer::new_with_default(Bitmap::num_of_bytes(bools.len()))?;
         let data = buffer.as_slice_mut();
         (0..bools.len()).for_each(|idx| {
             if bools[idx] {
                 bit_util::set_bit(data, idx);
-            } else {
-                bit_util::unset_bit(data, idx);
             }
         });
 
@@ -166,13 +162,11 @@ impl Bitmap {
 
     pub fn from_protobuf(buf: &BufferProto) -> Result<Self> {
         let num_bits = buf.get_body().len();
-        let mut bits = Buffer::new(Bitmap::num_of_bytes(num_bits))?;
+        let mut bits = Buffer::new_with_default(Bitmap::num_of_bytes(num_bits))?;
         let data = bits.as_slice_mut();
         for (i, b) in buf.get_body().iter().enumerate() {
             if *b == 1u8 {
                 bit_util::set_bit(data, i);
-            } else {
-                bit_util::unset_bit(data, i);
             }
         }
         Ok(Self { bits, num_bits })
@@ -224,7 +218,9 @@ impl PartialEq for Bitmap {
         if self.num_bits != other.num_bits {
             return false;
         }
-        // assume unset bits are always 0, and num_bits is always consistent with bits length
+        // assume unset bits are always 0, and num_bits is always consistent with bits length.
+        // Note: If you new a Buffer without init, the PartialEq may have UB due to uninit mem cuz we are
+        // comparing bytes by bytes instead of bits by bits.
         let length = (self.num_bits + 7) / 8;
         self.bits.as_slice()[..length] == other.bits.as_slice()[..length]
     }
@@ -360,5 +356,12 @@ mod tests {
         )
         .unwrap();
         assert!(b1 == b2);
+    }
+
+    #[test]
+    fn test_bitmap_init() {
+        let bm1 = Bitmap::new(1).unwrap();
+        let bm2 = Bitmap::from_vec(vec![false]).unwrap();
+        assert_eq!(bm1, bm2);
     }
 }
