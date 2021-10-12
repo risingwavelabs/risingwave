@@ -1,4 +1,5 @@
-use crate::array2::data_chunk_iter::RowRef;
+use crate::array2::column::Column;
+use crate::array2::row_ref::RowRef;
 use crate::array2::{DataChunk, DataChunkRef};
 use crate::buffer::Bitmap;
 use crate::error::Result;
@@ -6,6 +7,7 @@ use crate::executor::join::JoinType;
 use crate::executor::ExecutorResult::{Batch, Done};
 use crate::executor::{BoxedExecutor, Executor, ExecutorResult};
 use crate::expr::BoxedExpression;
+use crate::types::DataType;
 use std::mem::swap;
 use std::sync::Arc;
 
@@ -146,8 +148,46 @@ impl OuterTableSource {
     }
 
     /// Create constant data chunk (one tuple repeat `capacity` times).
-    fn as_chunk(&self, _row_ref: &RowRef<'_>, _capacity: usize) -> Result<DataChunk> {
-        todo!("convert row into chunk is not implemented yet!")
+    fn convert_row_to_chunk(&self, row_ref: &RowRef<'_>, num_tuples: usize) -> Result<DataChunk> {
+        match &self.cur_chunk {
+            Batch(chunk) => {
+                let num_columns = chunk.columns().len();
+                assert_eq!(row_ref.size(), num_columns);
+                let mut array_builders = Vec::with_capacity(num_columns);
+                let mut data_types = Vec::with_capacity(num_columns);
+                // Create array builders and data types.
+                for column in chunk.columns() {
+                    array_builders.push(DataType::create_array_builder(
+                        column.data_type().clone(),
+                        num_tuples,
+                    )?);
+                    data_types.push(column.data_type().clone());
+                }
+
+                // Append scalar to these builders.
+                for _i in 0..num_tuples {
+                    for (col_idx, builder) in
+                        array_builders.iter_mut().enumerate().take(num_columns)
+                    {
+                        builder.append_scalar_ref(row_ref.value_at(col_idx))?;
+                    }
+                }
+
+                // Finish each array builder and get Column.
+                let result_columns = array_builders
+                    .into_iter()
+                    .zip(data_types.iter())
+                    .map(|(builder, data_type)| {
+                        builder
+                            .finish()
+                            .map(|arr| Column::new(Arc::new(arr), data_type.clone()))
+                    })
+                    .collect::<Result<Vec<Column>>>()?;
+
+                Ok(DataChunk::new(result_columns, None))
+            }
+            Done => unreachable!("Should never convert row to chunk while no more data to scan"),
+        }
     }
 
     /// Try advance to next outer tuple. If it is Done but still invoked, it's
@@ -169,6 +209,16 @@ impl OuterTableSource {
 
     fn clean(&mut self) -> Result<()> {
         self.outer.clean()
+    }
+}
+
+impl OuterTableSource {
+    fn new(outer: BoxedExecutor, cur_chunk: ExecutorResult, idx: usize) -> Self {
+        Self {
+            outer,
+            cur_chunk,
+            idx,
+        }
     }
 }
 
@@ -216,7 +266,7 @@ impl ProbeTable {
         if self.chunk_idx < self.inner_table.len() {
             let chunk = self.inner_table[self.chunk_idx].clone();
             // Concatenate two chunk into a new one first.
-            let constant_row_chunk = outer_source.as_chunk(&row, chunk.capacity())?;
+            let constant_row_chunk = outer_source.convert_row_to_chunk(&row, chunk.capacity())?;
             let new_chunk = Self::concatenate(&constant_row_chunk, &*chunk)?;
             let sel_vector = self.join_cond.eval(&new_chunk)?;
             // Note that do not materialize results here. Just update the visibility.
@@ -267,10 +317,16 @@ impl ProbeTable {
 mod tests {
 
     use crate::array2::column::Column;
+    use crate::array2::row_ref::RowRef;
     use crate::array2::*;
     use crate::buffer::Bitmap;
-    use crate::executor::nested_loop_join::ProbeTable;
+    use crate::catalog::test_utils::mock_table_id;
+    use crate::executor::join::nested_loop_join::{OuterTableSource, ProbeTable};
+    use crate::executor::seq_scan::SeqScanExecutor;
+    use crate::executor::ExecutorResult;
+    use crate::storage::MemColumnarTable;
     use crate::types::Int32Type;
+    use crate::types::ScalarRefImpl;
     use std::sync::Arc;
 
     #[test]
@@ -299,6 +355,35 @@ mod tests {
         assert_eq!(
             chunk.visibility().clone().unwrap(),
             Bitmap::from_vec(bool_vec).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_convert_row_to_chunk() {
+        let row = RowRef::new(vec![Some(ScalarRefImpl::Int32(3))]);
+        let seq_scan_exec = SeqScanExecutor::new(
+            Arc::new(MemColumnarTable::new(&mock_table_id(), 0)),
+            vec![],
+            vec![],
+            0,
+        );
+        let chunk = DataChunk::new(
+            vec![Column::new(
+                Arc::new(I32ArrayBuilder::new(1024).unwrap().finish().unwrap().into()),
+                Arc::new(Int32Type::new(true)),
+            )],
+            None,
+        );
+        let source = OuterTableSource::new(
+            Box::new(seq_scan_exec),
+            ExecutorResult::Batch(Arc::new(chunk)),
+            0,
+        );
+        let const_row_chunk = source.convert_row_to_chunk(&row, 5).unwrap();
+        assert_eq!(const_row_chunk.capacity(), 5);
+        assert_eq!(
+            const_row_chunk.row_at(2).unwrap().0.value_at(0),
+            Some(ScalarRefImpl::Int32(3))
         );
     }
 }

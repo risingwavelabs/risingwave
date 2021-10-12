@@ -9,7 +9,11 @@ impl<'a> RowRef<'a> {
         Self(values)
     }
 
-    pub fn value_at(&self, pos: usize) -> Option<&ScalarRefImpl<'a>> {
-        self.0[pos].as_ref()
+    pub fn value_at(&self, pos: usize) -> Option<ScalarRefImpl<'a>> {
+        self.0[pos]
+    }
+
+    pub fn size(&self) -> usize {
+        self.0.len()
     }
 }

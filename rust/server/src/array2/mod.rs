@@ -4,12 +4,12 @@ mod bool_array;
 pub(crate) mod column;
 mod column_proto_readers;
 mod data_chunk;
-pub mod data_chunk_iter;
 mod decimal_array;
 pub(crate) mod interval_array;
 mod iterator;
 mod macros;
 mod primitive_array;
+pub mod row_ref;
 mod utf8_array;
 mod value_reader;
 
@@ -321,6 +321,17 @@ macro_rules! impl_array_builder {
           Some(scalar) => match (self, scalar) {
             $( (Self::$variant_name(inner), ScalarImpl::$variant_name(v)) => inner.append(Some(v.as_scalar_ref())), )*
             _ => Err(RwError::from(InternalError("Invalid datum type".to_string()))),
+          },
+        }
+      }
+
+      /// Append a scalar ref, return error while type not match.
+      pub fn append_scalar_ref(&mut self, scalar_ref: Option<ScalarRefImpl<'_>>) -> Result<()> {
+        match scalar_ref {
+          None => self.append_null(),
+          Some(scalar_ref_inner) => match (self, scalar_ref_inner) {
+            $( (Self::$variant_name(inner), ScalarRefImpl::$variant_name(v)) => inner.append(Some(v)), )*
+            _ => Err(RwError::from(InternalError("Invalid scalar ref type".to_string()))),
           },
         }
       }

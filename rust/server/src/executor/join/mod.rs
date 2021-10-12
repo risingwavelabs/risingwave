@@ -2,6 +2,7 @@ use crate::executor::join::JoinType::Inner;
 
 mod hash_join;
 mod hash_join_state;
+mod nested_loop_join;
 
 #[derive(Copy, Clone, Debug)]
 pub(super) enum JoinType {

@@ -1,6 +1,6 @@
 use crate::array2::column::Column;
 
-use crate::array2::data_chunk_iter::RowRef;
+use crate::array2::row_ref::RowRef;
 use crate::array2::{ArrayBuilderImpl, ArrayImpl};
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;

@@ -3,22 +3,15 @@ use std::convert::TryFrom;
 use create_table::*;
 use drop_table::*;
 use exchange::*;
-mod seq_scan;
-use seq_scan::*;
-mod row_seq_scan;
-use row_seq_scan::*;
-mod create_stream;
-mod filter;
-mod stream_scan;
 use filter::*;
 use insert_values::*;
 use order_by::*;
-mod top_n;
-use top_n::*;
-
 use projection::*;
 use risingwave_proto::plan::{PlanNode, PlanNode_PlanNodeType};
+use row_seq_scan::*;
+use seq_scan::*;
 use sort_agg::*;
+use top_n::*;
 
 use crate::array2::DataChunkRef;
 use crate::error::ErrorCode::InternalError;
@@ -28,19 +21,24 @@ use crate::executor::gather::GatherExecutor;
 pub use crate::executor::stream_scan::StreamScanExecutor;
 use crate::task::GlobalTaskEnv;
 
+mod create_stream;
 mod create_table;
 mod drop_table;
 mod exchange;
+mod filter;
 mod gather;
 mod hash_map;
 mod insert_values;
 mod join;
-mod nested_loop_join;
 mod order_by;
 mod projection;
+mod row_seq_scan;
+mod seq_scan;
 mod sort_agg;
+mod stream_scan;
 #[cfg(test)]
 mod test_utils;
+mod top_n;
 
 pub enum ExecutorResult {
     Batch(DataChunkRef),

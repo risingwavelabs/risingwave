@@ -169,10 +169,9 @@ mod tests {
     }
 
     #[test]
-    fn test_buffer_new() -> Result<()> {
-        let buf = Buffer::new_with_default(1)?;
+    fn test_buffer_new() {
+        let buf = Buffer::new_with_default(1).unwrap();
         assert_eq!(buf.len(), 1);
-        Ok(())
     }
 
     #[test]

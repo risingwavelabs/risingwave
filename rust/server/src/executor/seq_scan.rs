@@ -88,3 +88,19 @@ impl Executor for SeqScanExecutor {
         Ok(())
     }
 }
+
+impl SeqScanExecutor {
+    pub(crate) fn new(
+        table: Arc<MemColumnarTable>,
+        column_indices: Vec<usize>,
+        data: Vec<DataChunkRef>,
+        chunk_idx: usize,
+    ) -> Self {
+        Self {
+            table,
+            column_indices,
+            data,
+            chunk_idx,
+        }
+    }
+}
