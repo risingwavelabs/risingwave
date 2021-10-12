@@ -11,6 +11,7 @@ import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
 import com.risingwave.proto.expr.ExprNode;
 import com.risingwave.proto.plan.OrderByNode;
 import com.risingwave.proto.plan.PlanNode;
+import com.risingwave.proto.plan.TopNNode;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptRule;
@@ -21,6 +22,7 @@ import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.convert.ConverterRule;
 import org.apache.calcite.rel.core.Sort;
 import org.apache.calcite.rex.RexInputRef;
+import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
 import org.apache.commons.lang3.SerializationException;
 import org.checkerframework.checker.nullness.qual.Nullable;
@@ -60,11 +62,25 @@ public class RwBatchSort extends Sort implements RisingWaveBatchPhyRel {
       }
       orderByNodeBuilder.addOrders(order).addOrderTypes(orderType);
     }
-    return PlanNode.newBuilder()
-        .setNodeType(PlanNode.PlanNodeType.ORDER_BY)
-        .setBody(Any.pack(orderByNodeBuilder.build()))
-        .addChildren(((RisingWaveBatchPhyRel) input).serialize())
-        .build();
+    if (fetch != null && offset == null) {
+      // serialize to TopNNode
+      // FIXME: it's may not optimal to use TopN here, we need to discuss it based on the scale of
+      // fetch
+      TopNNode.Builder topnNodeBuilder = TopNNode.newBuilder();
+      topnNodeBuilder.setOrderBy(orderByNodeBuilder.build()).setLimit(RexLiteral.intValue(fetch));
+      return PlanNode.newBuilder()
+          .setNodeType(PlanNode.PlanNodeType.TOP_N)
+          .setBody(Any.pack(topnNodeBuilder.build()))
+          .addChildren(((RisingWaveBatchPhyRel) input).serialize())
+          .build();
+    } else {
+      // serialize to OrderByNode
+      return PlanNode.newBuilder()
+          .setNodeType(PlanNode.PlanNodeType.ORDER_BY)
+          .setBody(Any.pack(orderByNodeBuilder.build()))
+          .addChildren(((RisingWaveBatchPhyRel) input).serialize())
+          .build();
+    }
   }
 
   @Override

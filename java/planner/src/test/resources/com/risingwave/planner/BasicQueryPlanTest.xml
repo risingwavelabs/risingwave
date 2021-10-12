@@ -197,6 +197,104 @@ RwBatchProject(EXPR$0=[$1], v2=[$0])
         </Resource>
     </TestCase>
 
+    <TestCase name="select with order by">
+        <Resource name="sql">
+            <![CDATA[
+select * from t order by v1;
+]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchSort(sort0=[$0], dir0=[ASC])
+  RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
+]]>
+        </Resource>>
+        <Resource name="json">
+            <![CDATA[
+{
+  "nodeType": "ORDER_BY",
+  "body": {
+    "@type": "type.googleapis.com/risingwave.executor.proto.OrderByNode",
+    "orderTypes": ["ASCENDING"],
+    "orders": [{
+      "exprType": "INPUT_REF",
+      "body": {
+        "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+      },
+      "returnType": {
+        "typeName": "INT32"
+      }
+    }]
+  },
+  "children": [{
+    "nodeType": "SEQ_SCAN",
+    "body": {
+      "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",
+      "tableRefId": {
+        "schemaRefId": {
+          "databaseRefId": {
+          }
+        }
+      },
+      "columnIds": [0, 1, 2]
+    }
+  }]
+}
+]]>
+        </Resource>>
+    </TestCase>
+
+    <TestCase name="select with order by + limit">
+        <Resource name="sql">
+            <![CDATA[
+select * from t order by v1 limit 1;
+]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchSort(sort0=[$0], dir0=[ASC], fetch=[1])
+  RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
+]]>
+        </Resource>>
+        <Resource name="json">
+            <![CDATA[
+{
+  "nodeType": "TOP_N",
+  "body": {
+    "@type": "type.googleapis.com/risingwave.executor.proto.TopNNode",
+    "orderBy": {
+      "orderTypes": ["ASCENDING"],
+      "orders": [{
+        "exprType": "INPUT_REF",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+        },
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }]
+    },
+    "limit": 1
+  },
+  "children": [{
+    "nodeType": "SEQ_SCAN",
+    "body": {
+      "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",
+      "tableRefId": {
+        "schemaRefId": {
+          "databaseRefId": {
+          }
+        }
+      },
+      "columnIds": [0, 1, 2]
+    }
+  }]
+}
+]]>
+        </Resource>>
+    </TestCase>
+
+
     <TestCase name="select only">
         <Resource name="sql">
             <![CDATA[
