@@ -296,9 +296,9 @@ mod tests {
         assert_eq!(chunk.capacity(), chunk1.capacity());
         assert_eq!(chunk.capacity(), chunk2.capacity());
         assert_eq!(chunk.columns().len(), chunk1.columns().len() * 2);
-        let mut bool_vec_iter = bool_vec.iter();
-        for bit in chunk.visibility().clone().unwrap().iter() {
-            assert_eq!(bit, *bool_vec_iter.next().unwrap());
-        }
+        assert_eq!(
+            chunk.visibility().clone().unwrap(),
+            Bitmap::from_vec(bool_vec).unwrap()
+        );
     }
 }
