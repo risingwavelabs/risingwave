@@ -2,6 +2,7 @@ mod agg;
 mod arithmetic_expr;
 mod binary_expr;
 mod binary_expr_bytes;
+mod binary_expr_nullable;
 mod cmp;
 mod conjunction;
 pub mod expr_factory;

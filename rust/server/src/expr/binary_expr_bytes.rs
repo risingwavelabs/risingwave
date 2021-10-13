@@ -15,7 +15,7 @@ pub fn new_substr_start(
         expr_ia2,
         return_type,
         func: substr_start,
-        data1: PhantomData,
+        _phantom: PhantomData,
     })
 }
 
@@ -29,6 +29,6 @@ pub fn new_substr_for(
         expr_ia2,
         return_type,
         func: substr_for,
-        data1: PhantomData,
+        _phantom: PhantomData,
     })
 }

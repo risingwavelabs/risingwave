@@ -36,7 +36,7 @@ macro_rules! gen_across_binary {
                     expr_ia2: $r,
                     return_type: $ret,
                     func: $int_f::<i16, i16, i16>,
-                    data1: PhantomData,
+                    _phantom: PhantomData,
                 })
             }
             (DataTypeKind::Int16, DataTypeKind::Int32) => {
@@ -45,7 +45,7 @@ macro_rules! gen_across_binary {
                     expr_ia2: $r,
                     return_type: $ret,
                     func: $int_f::<i16, i32, i32>,
-                    data1: PhantomData,
+                    _phantom: PhantomData,
                 })
             }
             (DataTypeKind::Int16, DataTypeKind::Int64) => {
@@ -54,7 +54,7 @@ macro_rules! gen_across_binary {
                     expr_ia2: $r,
                     return_type: $ret,
                     func: $int_f::<i16, i64, i64>,
-                    data1: PhantomData,
+                    _phantom: PhantomData,
                 })
             }
             (DataTypeKind::Int16, DataTypeKind::Float32) => {
@@ -63,7 +63,7 @@ macro_rules! gen_across_binary {
                     expr_ia2: $r,
                     return_type: $ret,
                     func: $float_f::<i16, f32, f32>,
-                    data1: PhantomData,
+                    _phantom: PhantomData,
                 })
             }
             (DataTypeKind::Int16, DataTypeKind::Float64) => {
@@ -72,7 +72,7 @@ macro_rules! gen_across_binary {
                     expr_ia2: $r,
                     return_type: $ret,
                     func: $float_f::<i16, f64, f64>,
-                    data1: PhantomData,
+                    _phantom: PhantomData,
                 })
             }
             (DataTypeKind::Int32, DataTypeKind::Int32) => {
@@ -81,7 +81,7 @@ macro_rules! gen_across_binary {
                     expr_ia2: $r,
                     return_type: $ret,
                     func: $int_f::<i32, i32, i32>,
-                    data1: PhantomData,
+                    _phantom: PhantomData,
                 })
             }
             (DataTypeKind::Int32, DataTypeKind::Int64) => {
@@ -90,7 +90,7 @@ macro_rules! gen_across_binary {
                     expr_ia2: $r,
                     return_type: $ret,
                     func: $int_f::<i32, i64, i64>,
-                    data1: PhantomData,
+                    _phantom: PhantomData,
                 })
             }
             (DataTypeKind::Int32, DataTypeKind::Float32) => {
@@ -99,7 +99,7 @@ macro_rules! gen_across_binary {
                     expr_ia2: $r,
                     return_type: $ret,
                     func: $float_f::<i32, f32, f32>,
-                    data1: PhantomData,
+                    _phantom: PhantomData,
                 })
             }
             (DataTypeKind::Int32, DataTypeKind::Float64) => {
@@ -108,7 +108,7 @@ macro_rules! gen_across_binary {
                     expr_ia2: $r,
                     return_type: $ret,
                     func: $float_f::<i32, f64, f64>,
-                    data1: PhantomData,
+                    _phantom: PhantomData,
                 })
             }
             (DataTypeKind::Int64, DataTypeKind::Int64) => {
@@ -117,7 +117,7 @@ macro_rules! gen_across_binary {
                     expr_ia2: $r,
                     return_type: $ret,
                     func: $int_f::<i64, i64, i64>,
-                    data1: PhantomData,
+                    _phantom: PhantomData,
                 })
             }
             (DataTypeKind::Int64, DataTypeKind::Float32) => {
@@ -126,7 +126,7 @@ macro_rules! gen_across_binary {
                     expr_ia2: $r,
                     return_type: $ret,
                     func: $float_f::<i64, f32, f32>,
-                    data1: PhantomData,
+                    _phantom: PhantomData,
                 })
             }
             (DataTypeKind::Int64, DataTypeKind::Float64) => {
@@ -135,7 +135,7 @@ macro_rules! gen_across_binary {
                     expr_ia2: $r,
                     return_type: $ret,
                     func: $float_f::<i64, f64, f64>,
-                    data1: PhantomData,
+                    _phantom: PhantomData,
                 })
             }
             (DataTypeKind::Float32, DataTypeKind::Float32) => {
@@ -144,7 +144,7 @@ macro_rules! gen_across_binary {
                     expr_ia2: $r,
                     return_type: $ret,
                     func: $float_f::<f32, f32, f32>,
-                    data1: PhantomData,
+                    _phantom: PhantomData,
                 })
             }
             (DataTypeKind::Float32, DataTypeKind::Float64) => {
@@ -153,7 +153,7 @@ macro_rules! gen_across_binary {
                     expr_ia2: $r,
                     return_type: $ret,
                     func: $float_f::<f32, f64, f64>,
-                    data1: PhantomData,
+                    _phantom: PhantomData,
                 })
             }
             (DataTypeKind::Float64, DataTypeKind::Float64) => {
@@ -162,7 +162,7 @@ macro_rules! gen_across_binary {
                     expr_ia2: $r,
                     return_type: $ret,
                     func: $float_f::<f64, f64, f64>,
-                    data1: PhantomData,
+                    _phantom: PhantomData,
                 })
             }
             (DataTypeKind::Int32, DataTypeKind::Int16) => {
@@ -171,7 +171,7 @@ macro_rules! gen_across_binary {
                     expr_ia2: $r,
                     return_type: $ret,
                     func: $int_f::<i32, i16, i32>,
-                    data1: PhantomData,
+                    _phantom: PhantomData,
                 })
             }
             (DataTypeKind::Int64, DataTypeKind::Int16) => {
@@ -180,7 +180,7 @@ macro_rules! gen_across_binary {
                     expr_ia2: $r,
                     return_type: $ret,
                     func: $int_f::<i64, i16, i64>,
-                    data1: PhantomData,
+                    _phantom: PhantomData,
                 })
             }
             (DataTypeKind::Int64, DataTypeKind::Int32) => {
@@ -189,7 +189,7 @@ macro_rules! gen_across_binary {
                     expr_ia2: $r,
                     return_type: $ret,
                     func: $int_f::<i64, i32, i64>,
-                    data1: PhantomData,
+                    _phantom: PhantomData,
                 })
             }
             (DataTypeKind::Float32, DataTypeKind::Int16) => {
@@ -198,7 +198,7 @@ macro_rules! gen_across_binary {
                     expr_ia2: $r,
                     return_type: $ret,
                     func: $float_f::<f32, i16, f32>,
-                    data1: PhantomData,
+                    _phantom: PhantomData,
                 })
             }
             (DataTypeKind::Float32, DataTypeKind::Int32) => {
@@ -207,7 +207,7 @@ macro_rules! gen_across_binary {
                     expr_ia2: $r,
                     return_type: $ret,
                     func: $float_f::<f32, i32, f32>,
-                    data1: PhantomData,
+                    _phantom: PhantomData,
                 })
             }
             (DataTypeKind::Float32, DataTypeKind::Int64) => {
@@ -216,7 +216,7 @@ macro_rules! gen_across_binary {
                     expr_ia2: $r,
                     return_type: $ret,
                     func: $float_f::<f32, i64, f32>,
-                    data1: PhantomData,
+                    _phantom: PhantomData,
                 })
             }
             (DataTypeKind::Float64, DataTypeKind::Int16) => {
@@ -225,7 +225,7 @@ macro_rules! gen_across_binary {
                     expr_ia2: $r,
                     return_type: $ret,
                     func: $float_f::<f64, i16, f64>,
-                    data1: PhantomData,
+                    _phantom: PhantomData,
                 })
             }
             (DataTypeKind::Float64, DataTypeKind::Int32) => {
@@ -234,7 +234,7 @@ macro_rules! gen_across_binary {
                     expr_ia2: $r,
                     return_type: $ret,
                     func: $float_f::<f64, i32, f64>,
-                    data1: PhantomData,
+                    _phantom: PhantomData,
                 })
             }
             (DataTypeKind::Float64, DataTypeKind::Int64) => {
@@ -243,7 +243,7 @@ macro_rules! gen_across_binary {
                     expr_ia2: $r,
                     return_type: $ret,
                     func: $float_f::<f64, i64, f64>,
-                    data1: PhantomData,
+                    _phantom: PhantomData,
                 })
             }
             (DataTypeKind::Float64, DataTypeKind::Float32) => {
@@ -252,7 +252,7 @@ macro_rules! gen_across_binary {
                     expr_ia2: $r,
                     return_type: $ret,
                     func: $float_f::<f64, f32, f64>,
-                    data1: PhantomData,
+                    _phantom: PhantomData,
                 })
             }
             _ => {
@@ -307,6 +307,6 @@ pub fn new_like_default(
         expr_ia2,
         return_type,
         func: like_default,
-        data1: PhantomData,
+        _phantom: PhantomData,
     })
 }

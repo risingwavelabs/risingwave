@@ -22,7 +22,7 @@ pub fn new_unary_expr(
                 expr_ia1: child_expr,
                 return_type,
                 func: cast::str_to_date,
-                data1: PhantomData,
+                _phantom: PhantomData,
             })
         }
         (ExprNode_Type::CAST, DataTypeKind::Time, DataTypeKind::Char) => {
@@ -30,7 +30,7 @@ pub fn new_unary_expr(
                 expr_ia1: child_expr,
                 return_type,
                 func: cast::str_to_time,
-                data1: PhantomData,
+                _phantom: PhantomData,
             })
         }
         (ExprNode_Type::CAST, DataTypeKind::Timestamp, DataTypeKind::Char) => {
@@ -38,7 +38,7 @@ pub fn new_unary_expr(
                 expr_ia1: child_expr,
                 return_type,
                 func: cast::str_to_timestamp,
-                data1: PhantomData,
+                _phantom: PhantomData,
             })
         }
         (ExprNode_Type::CAST, DataTypeKind::Timestampz, DataTypeKind::Char) => {
@@ -46,7 +46,7 @@ pub fn new_unary_expr(
                 expr_ia1: child_expr,
                 return_type,
                 func: cast::str_to_timestampz,
-                data1: PhantomData,
+                _phantom: PhantomData,
             })
         }
         (_, _, _) => {
@@ -62,6 +62,6 @@ pub fn new_length_default(expr_ia1: BoxedExpression, return_type: DataTypeRef) -
         expr_ia1,
         return_type,
         func: length_default,
-        data1: PhantomData,
+        _phantom: PhantomData,
     })
 }
