@@ -33,6 +33,7 @@ import org.apache.calcite.util.TimeString;
 import org.apache.calcite.util.TimestampString;
 import org.apache.calcite.util.TimestampWithTimeZoneString;
 
+/** Serialize Rex to protoExprNode */
 public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
   private static final ImmutableMap<SqlKind, ExprNode.Type> SQL_TO_FUNC_MAPPING =
       ImmutableMap.<SqlKind, ExprNode.Type>builder()
@@ -261,10 +262,38 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
         .build();
   }
 
+  private static ExprNode makeBiFunctionCallExprNode(
+      ExprNode left, ExprNode right, DataType protoDataType, ExprNode.Type exprType) {
+    FunctionCall body = FunctionCall.newBuilder().addChildren(left).addChildren(right).build();
+    return ExprNode.newBuilder()
+        .setExprType(exprType)
+        .setReturnType(protoDataType)
+        .setBody(Any.pack(body))
+        .build();
+  }
+
+  private static ExprNode makeBiFunctionCallExprNode(
+      List<ExprNode> children, DataType protoDataType, ExprNode.Type exprType) {
+    return children.stream()
+        .reduce(
+            (ExprNode left, ExprNode right) ->
+                makeBiFunctionCallExprNode(left, right, protoDataType, exprType))
+        .orElseThrow(
+            () ->
+                new PgException(
+                    PgErrorCode.INTERNAL_ERROR,
+                    "%s function call: has %d children",
+                    exprType.toString(),
+                    children.size()));
+  }
+
   private static ExprNode makeFunctionCallExpr(
       List<ExprNode> children, DataType protoDataType, ExprNode.Type exprType) {
+    //  in the backend, each AND & OR expr will be processed in binary expression
+    if (exprType == ExprNode.Type.AND || exprType == ExprNode.Type.OR) {
+      return makeBiFunctionCallExprNode(children, protoDataType, exprType);
+    }
     FunctionCall body = FunctionCall.newBuilder().addAllChildren(children).build();
-
     return ExprNode.newBuilder()
         .setExprType(exprType)
         .setReturnType(protoDataType)

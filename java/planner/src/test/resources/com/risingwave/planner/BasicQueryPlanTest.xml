@@ -42,14 +42,134 @@ RwBatchProject(v3=[$2], EXPR$1=[+($0, $1)], EXPR$2=[-($0, $1)], EXPR$3=[*($0, $1
     <TestCase name="select with filter">
         <Resource name="sql">
             <![CDATA[
-select * from t where v1 > 1
+select * from t where v1 > 1 and v2 > 1 and v3 > 1
             ]]>
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwBatchFilter(condition=[>($0, 1)])
+RwBatchFilter(condition=[AND(>($0, 1), >($1, 1), >($2, 1))])
   RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
             ]]>
+        </Resource>
+        <Resource name="json">
+{
+  "nodeType": "FILTER",
+  "body": {
+    "@type": "type.googleapis.com/risingwave.executor.proto.FilterNode",
+    "searchCondition": {
+      "exprType": "AND",
+      "body": {
+        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+        "children": [{
+          "exprType": "AND",
+          "body": {
+            "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+            "children": [{
+              "exprType": "GREATER_THAN",
+              "body": {
+                "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+                "children": [{
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  }
+                }, {
+                  "exprType": "CONSTANT_VALUE",
+                  "body": {
+                    "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+                    "body": "AAAAAQ=="
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  }
+                }]
+              },
+              "returnType": {
+                "typeName": "BOOLEAN"
+              }
+            }, {
+              "exprType": "GREATER_THAN",
+              "body": {
+                "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+                "children": [{
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+                    "columnIdx": 1
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  }
+                }, {
+                  "exprType": "CONSTANT_VALUE",
+                  "body": {
+                    "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+                    "body": "AAAAAQ=="
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  }
+                }]
+              },
+              "returnType": {
+                "typeName": "BOOLEAN"
+              }
+            }]
+          },
+          "returnType": {
+            "typeName": "BOOLEAN"
+          }
+        }, {
+          "exprType": "GREATER_THAN",
+          "body": {
+            "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+            "children": [{
+              "exprType": "INPUT_REF",
+              "body": {
+                "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+                "columnIdx": 2
+              },
+              "returnType": {
+                "typeName": "FLOAT"
+              }
+            }, {
+              "exprType": "CONSTANT_VALUE",
+              "body": {
+                "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+                "body": "AAAAAQ=="
+              },
+              "returnType": {
+                "typeName": "INT32"
+              }
+            }]
+          },
+          "returnType": {
+            "typeName": "BOOLEAN"
+          }
+        }]
+      },
+      "returnType": {
+        "typeName": "BOOLEAN"
+      }
+    }
+  },
+  "children": [{
+    "nodeType": "SEQ_SCAN",
+    "body": {
+      "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",
+      "tableRefId": {
+        "schemaRefId": {
+          "databaseRefId": {
+          }
+        }
+      },
+      "columnIds": [0, 1, 2]
+    }
+  }]
+}
         </Resource>
     </TestCase>
     <TestCase name="simple agg">
