@@ -13,6 +13,7 @@ struct MemTableInner {
     stream_sender: Option<mpsc::UnboundedSender<StreamChunk>>,
 }
 
+/// An In-memory columnar table for OLAP query
 pub struct MemColumnarTable {
     table_id: TableId,
     inner: RwLock<MemTableInner>,

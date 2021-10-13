@@ -14,7 +14,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Checklist
-        uses: wyozi/contextual-qa-checklist-action@master
+        uses: fuyufjh/contextual-qa-checklist-action@master
         with:
           gh-token: ${{ secrets.GITHUB_TOKEN }}
           input-file: .github/checklist.yml
