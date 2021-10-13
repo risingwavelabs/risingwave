@@ -1,9 +1,9 @@
 use risingwave_proto::expr::ExprNode_Type;
 
-use crate::array2::{BoolArray, DecimalArray, F32Array, F64Array, I16Array, I32Array};
+use crate::array::{BoolArray, DecimalArray, F32Array, F64Array, I16Array, I32Array};
 use crate::error::Result;
 use crate::{
-    array2::I64Array, expr::expr_tmpl::BinaryNullableExpression, types::DataTypeKind,
+    array::I64Array, expr::expr_tmpl::BinaryNullableExpression, types::DataTypeKind,
     types::DataTypeRef,
 };
 use std::marker::PhantomData;
