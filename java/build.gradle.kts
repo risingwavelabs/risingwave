@@ -1,3 +1,4 @@
+
 buildscript {
     repositories {
         gradlePluginPortal()
@@ -7,6 +8,7 @@ buildscript {
         classpath("com.google.protobuf:protobuf-gradle-plugin:0.8.17")
     }
 }
+
 
 plugins {
     java
@@ -20,6 +22,7 @@ repositories {
     mavenCentral()
 }
 
+
 val javaVersion = JavaVersion.VERSION_11
 if (JavaVersion.current() != javaVersion) {
     throw GradleException("Only $javaVersion is supported!")
@@ -28,6 +31,10 @@ if (JavaVersion.current() != javaVersion) {
 val bomProject = "bom"
 val appProjects = setOf("pgserver")
 
+apply(plugin = "git")
+// Absolute paths of all changed files
+val changedFiles: List<String> by extra
+println("Changed files: ${changedFiles}")
 
 subprojects {
     group = "com.risingwave"
@@ -93,12 +100,32 @@ subprojects {
         }
     }
 
-    apply<CheckstylePlugin>()
+    apply(plugin = "checkstyle")
     configure<CheckstyleExtension> {
         val configLoc = File(rootDir, "codestyle")
         configDirectory.set(configLoc)
         isShowViolations = true
         toolVersion = "8.44"
         maxWarnings = 0
+    }
+
+
+    tasks.withType<Checkstyle> {
+        val allSrcDirs = project.sourceSets
+            .flatMap { it.allSource.srcDirs }
+            .map { it.absolutePath }
+            .toList()
+
+        // We need this line because if nothing changed in this project, checkstyle task just includes all
+        // source files, which is what we want to avoid.
+        include("")
+        for (changedFile in changedFiles) {
+            for (srcDir in allSrcDirs) {
+                if (changedFile.startsWith(srcDir)) {
+                    include(changedFile.substring(srcDir.length + 1))
+                    break
+                }
+            }
+        }
     }
 }
