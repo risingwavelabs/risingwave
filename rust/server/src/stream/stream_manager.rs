@@ -6,7 +6,7 @@ use crate::expr::{build_from_proto as build_expr_from_proto, AggKind};
 use crate::protobuf::Message as _;
 use crate::storage::MemRowTable;
 use crate::stream_op::*;
-use crate::types::{build_from_proto as build_type_from_proto, DataTypeRef};
+use crate::types::build_from_proto as build_type_from_proto;
 use futures::channel::mpsc::{channel, Receiver, Sender};
 use itertools::Itertools;
 use risingwave_proto::expr::AggCall as AggCallProto;
@@ -92,15 +92,6 @@ impl StreamManager {
     }
 }
 
-type AggInputDataTypes = Vec<Option<DataTypeRef>>;
-type AggReturnDataTypes = Vec<DataTypeRef>;
-struct AggCallsPackedReturn {
-    input_types: AggInputDataTypes,
-    return_types: AggReturnDataTypes,
-    val_indices: Vec<Vec<usize>>,
-    agg_types: Vec<AggKind>,
-}
-
 fn build_agg_call_from_proto(agg_call_proto: &AggCallProto) -> Result<AggCall> {
     let args = {
         let args = agg_call_proto.get_args();
@@ -121,38 +112,6 @@ fn build_agg_call_from_proto(agg_call_proto: &AggCallProto) -> Result<AggCall> {
         kind: AggKind::try_from(agg_call_proto.get_field_type())?,
         args,
         return_type: build_type_from_proto(agg_call_proto.get_return_type())?,
-    })
-}
-
-fn from_agg_calls(agg_calls: &[AggCallProto]) -> Result<AggCallsPackedReturn> {
-    let (input_types, val_indices) = agg_calls.iter().map(|agg_call| {
-    let args = agg_call.get_args();
-    // for each aggregation function, there will be 0 or 1 input arguments for now
-    match args.len() {
-      0 => Ok((None, vec![])),
-      1 => {
-        // As the number of arguments is 1, we should be able to get
-        // the field type. If the `unwrap` inside `get_field_type` panics,
-        // there is some must-be-fixed disconnection between frontend and the executor
-          Ok((Some(build_type_from_proto(args[0].get_field_type())?), vec![args[0].get_input().column_idx as usize]))
-      }
-      _ => unreachable!()
-    }
-  }).try_collect::<(Option<DataTypeRef>, Vec<usize>), Vec<(Option<DataTypeRef>, Vec<usize>)>, RwError>()?.into_iter().unzip();
-    let return_types = agg_calls
-        .iter()
-        .map(|agg_call| (build_type_from_proto(agg_call.get_return_type())))
-        .try_collect()?;
-    let agg_types = agg_calls
-        .iter()
-        .map(|agg_call| AggKind::try_from(agg_call.get_field_type()))
-        .try_collect()?;
-
-    Ok(AggCallsPackedReturn {
-        input_types,
-        return_types,
-        val_indices,
-        agg_types,
     })
 }
 
@@ -255,21 +214,12 @@ impl StreamManagerCore {
                 let aggr_node =
                     stream_plan::SimpleAggNode::parse_from_bytes(node.get_body().get_value())
                         .map_err(ErrorCode::ProtobufError)?;
-                let agg_calls = aggr_node.get_agg_calls();
-                let AggCallsPackedReturn {
-                    input_types,
-                    return_types,
-                    val_indices,
-                    agg_types,
-                } = from_agg_calls(agg_calls)?;
-
-                Box::new(AggregationOperator::new(
-                    input,
-                    input_types,
-                    return_types,
-                    val_indices,
-                    agg_types,
-                ))
+                let agg_calls: Vec<AggCall> = aggr_node
+                    .get_agg_calls()
+                    .iter()
+                    .map(build_agg_call_from_proto)
+                    .try_collect()?;
+                Box::new(AggregationOperator::new(input, agg_calls)?)
             }
             GLOBAL_SIMPLE_AGG => todo!(),
             // TODO: There will be only one hash aggregation, combining LOCAL and GLOBAL

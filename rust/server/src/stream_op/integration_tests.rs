@@ -22,11 +22,20 @@ async fn test_merger_sum_aggr() {
         // for the local aggregator, we need two states: sum and row count
         let aggregator = AggregationOperator::new(
             Box::new(input),
-            vec![Some(Int64Type::create(false)), None],
-            vec![Int64Type::create(false), Int64Type::create(false)],
-            vec![vec![0], vec![0]],
-            vec![AggKind::Sum, AggKind::RowCount],
-        );
+            vec![
+                AggCall {
+                    kind: AggKind::Sum,
+                    args: AggArgs::Unary([Int64Type::create(false)], [0]),
+                    return_type: Int64Type::create(false),
+                },
+                AggCall {
+                    kind: AggKind::RowCount,
+                    args: AggArgs::None([], []),
+                    return_type: Int64Type::create(false),
+                },
+            ],
+        )
+        .unwrap();
         let (tx, rx) = channel(16);
         let consumer = SenderConsumer::new(Box::new(aggregator), tx);
         let actor = Actor::new(Box::new(consumer));
@@ -63,13 +72,19 @@ async fn test_merger_sum_aggr() {
     let aggregator = AggregationOperator::new(
         Box::new(merger),
         vec![
-            Some(Int64Type::create(false)),
-            Some(Int64Type::create(false)),
+            AggCall {
+                kind: AggKind::Sum,
+                args: AggArgs::Unary([Int64Type::create(false)], [0]),
+                return_type: Int64Type::create(false),
+            },
+            AggCall {
+                kind: AggKind::Sum,
+                args: AggArgs::Unary([Int64Type::create(false)], [1]),
+                return_type: Int64Type::create(false),
+            },
         ],
-        vec![Int64Type::create(false), Int64Type::create(false)],
-        vec![vec![0], vec![1]],
-        vec![AggKind::Sum, AggKind::Sum],
-    );
+    )
+    .unwrap();
     let projection = ProjectionOperator::new(
         Box::new(aggregator),
         vec![
@@ -274,11 +289,20 @@ async fn test_tpch_q6() {
         // for local aggregator, we need to sum data and count rows
         let aggregator = AggregationOperator::new(
             Box::new(projection),
-            vec![Some(Float64Type::create(false)), None],
-            vec![Float64Type::create(false), Int64Type::create(false)],
-            vec![vec![0], vec![0]],
-            vec![AggKind::Sum, AggKind::RowCount],
-        );
+            vec![
+                AggCall {
+                    kind: AggKind::Sum,
+                    args: AggArgs::Unary([Float64Type::create(false)], [0]),
+                    return_type: Float64Type::create(false),
+                },
+                AggCall {
+                    kind: AggKind::RowCount,
+                    args: AggArgs::None([], []),
+                    return_type: Int64Type::create(false),
+                },
+            ],
+        )
+        .unwrap();
         let (tx, rx) = channel(16);
         let consumer = SenderConsumer::new(Box::new(aggregator), tx);
         let actor = Actor::new(Box::new(consumer));
@@ -315,13 +339,19 @@ async fn test_tpch_q6() {
     let aggregator = AggregationOperator::new(
         Box::new(merger),
         vec![
-            Some(Float64Type::create(false)),
-            Some(Int64Type::create(false)),
+            AggCall {
+                kind: AggKind::Sum,
+                args: AggArgs::Unary([Float64Type::create(false)], [0]),
+                return_type: Float64Type::create(false),
+            },
+            AggCall {
+                kind: AggKind::Sum,
+                args: AggArgs::Unary([Int64Type::create(false)], [1]),
+                return_type: Int64Type::create(false),
+            },
         ],
-        vec![Float64Type::create(false), Int64Type::create(false)],
-        vec![vec![0], vec![1]],
-        vec![AggKind::Sum, AggKind::Sum],
-    );
+    )
+    .unwrap();
     let projection = ProjectionOperator::new(
         Box::new(aggregator),
         vec![

@@ -7,9 +7,7 @@ use super::{Message, Op, SimpleStreamOperator, StreamChunk, StreamOperator};
 use crate::array::column::Column;
 use crate::array::*;
 use crate::error::{Result, RwError};
-use crate::expr::AggKind;
 use crate::impl_consume_barrier_default;
-use crate::types::DataTypeRef;
 use itertools::Itertools;
 
 use async_trait::async_trait;
@@ -52,44 +50,24 @@ pub struct AggregationOperator {
     /// persisted in the future.
     first_data: bool,
 
-    /// Return type of current aggregator.
-    return_types: Vec<DataTypeRef>,
-
-    /// The column to process.
-    col_idx: Vec<usize>,
+    /// An operator will support multiple aggregation calls.
+    agg_calls: Vec<AggCall>,
 }
 
 impl AggregationOperator {
-    pub fn new(
-        input: Box<dyn StreamOperator>,
-        input_types: Vec<Option<DataTypeRef>>,
-        return_types: Vec<DataTypeRef>,
-        val_indices: Vec<Vec<usize>>,
-        agg_types: Vec<AggKind>,
-    ) -> Self {
-        // FIXME: currently, `AggregationOperator` only supports one input argument.
-        Self {
-            states: agg_types
-                .into_iter()
-                .zip(input_types.iter())
-                .zip(return_types.iter())
-                .map(|((agg_type, input_type), return_type)| {
-                    let input_types = input_type.iter().cloned().collect_vec();
-                    create_streaming_agg_state(&input_types, &agg_type, return_type)
-                })
-                .try_collect()
-                .unwrap(),
+    pub fn new(input: Box<dyn StreamOperator>, agg_calls: Vec<AggCall>) -> Result<Self> {
+        let states: Vec<_> = agg_calls
+            .iter()
+            .map(|agg| {
+                create_streaming_agg_state(agg.args.arg_types(), &agg.kind, &agg.return_type)
+            })
+            .try_collect()?;
+        Ok(Self {
+            states,
             input,
             first_data: true,
-            return_types,
-            col_idx: val_indices
-                .into_iter()
-                .map(|mut x| {
-                    assert_eq!(x.len(), 1);
-                    x.pop().unwrap()
-                })
-                .collect_vec(),
-        }
+            agg_calls,
+        })
     }
 
     /// Record current states into a group of builders
@@ -122,10 +100,22 @@ impl SimpleStreamOperator for AggregationOperator {
             self.record_states(&mut builders)?;
         }
 
-        // apply chunk to states
-        for (state, col_idx) in self.states.iter_mut().zip(self.col_idx.iter()) {
-            state.apply_batch(&ops, visibility.as_ref(), arrays[*col_idx].array_ref())?;
-        }
+        self.states
+            .iter_mut()
+            .zip(self.agg_calls.iter())
+            .try_for_each(|(state, agg)| match agg.args {
+                // FIXME: remove the dummy array.
+                AggArgs::None([], []) => state.apply_batch(
+                    &ops,
+                    visibility.as_ref(),
+                    &I64Array::from_slice(&[None]).unwrap().into(),
+                ),
+                AggArgs::Unary(_, [col_idx]) => {
+                    state.apply_batch(&ops, visibility.as_ref(), arrays[col_idx].array_ref())
+                }
+                // FIXME: currently, `AggregationOperator` only supports zero or one input argument.
+                AggArgs::Binary(_, _) => todo!(),
+            })?;
 
         // output the current state into builder
         self.record_states(&mut builders)?;
@@ -134,11 +124,11 @@ impl SimpleStreamOperator for AggregationOperator {
 
         let columns = builders
             .into_iter()
-            .zip(self.return_types.iter())
-            .map(|(builder, return_type)| {
+            .zip(self.agg_calls.iter())
+            .map(|(builder, agg)| {
                 Ok::<_, RwError>(Column::new(
                     Arc::new(builder.finish()?),
-                    return_type.clone(),
+                    agg.return_type.clone(),
                 ))
             })
             .try_collect()?;
