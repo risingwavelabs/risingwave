@@ -1,4 +1,4 @@
-use crate::array2::*;
+use crate::array::*;
 use crate::expr::*;
 use crate::types::*;
 use std::sync::{Arc, Mutex};

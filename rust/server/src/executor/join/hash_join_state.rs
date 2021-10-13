@@ -1,5 +1,5 @@
-use crate::array2::column::Column;
-use crate::array2::{ArrayBuilderImpl, DataChunk, DataChunkRef};
+use crate::array::column::Column;
+use crate::array::{ArrayBuilderImpl, DataChunk, DataChunkRef};
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 use crate::executor::hash_map::{HashKey, PrecomputedBuildHasher};

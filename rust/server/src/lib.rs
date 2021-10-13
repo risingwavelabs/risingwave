@@ -28,7 +28,7 @@ mod error;
 pub mod util;
 mod alloc;
 #[macro_use]
-mod array2;
+mod array;
 mod buffer;
 mod catalog;
 mod execution;

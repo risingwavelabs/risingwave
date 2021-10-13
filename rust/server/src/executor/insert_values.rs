@@ -1,5 +1,5 @@
-use crate::array2::column::Column;
-use crate::array2::{ArrayBuilder, ArrayBuilderImpl, DataChunk, I32Array, PrimitiveArrayBuilder};
+use crate::array::column::Column;
+use crate::array::{ArrayBuilder, ArrayBuilderImpl, DataChunk, I32Array, PrimitiveArrayBuilder};
 use crate::catalog::TableId;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};

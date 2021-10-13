@@ -1,6 +1,6 @@
 use super::BoxedExecutor;
-use crate::array2::column::Column;
-use crate::array2::DataChunk;
+use crate::array::column::Column;
+use crate::array::DataChunk;
 use crate::error::ErrorCode::ProtobufError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::executor::ExecutorResult::{Batch, Done};

@@ -1,4 +1,4 @@
-use crate::array2::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk};
+use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk};
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::expr::Expression;

@@ -1,4 +1,4 @@
-use crate::array2::{ArrayRef, DataChunk};
+use crate::array::{ArrayRef, DataChunk};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expression, InputRefExpression};
 use crate::types::{build_from_proto as type_build_from_proto, DataType, DataTypeRef};
@@ -85,7 +85,7 @@ impl<'a> TryFrom<&'a AggCall> for AggExpression {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array2::{column::Column, Array as _, I32Array, I64Array};
+    use crate::array::{column::Column, Array as _, I32Array, I64Array};
     use crate::array_nonnull;
     use crate::types::{Int32Type, Int64Type};
     use std::sync::Arc;

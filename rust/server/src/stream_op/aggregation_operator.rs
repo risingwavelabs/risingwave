@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use super::aggregation::*;
 use super::{Message, Op, SimpleStreamOperator, StreamChunk, StreamOperator};
-use crate::array2::column::Column;
-use crate::array2::*;
+use crate::array::column::Column;
+use crate::array::*;
 use crate::error::{Result, RwError};
 use crate::expr::AggKind;
 use crate::impl_consume_barrier_default;

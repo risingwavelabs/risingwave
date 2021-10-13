@@ -5,12 +5,12 @@
 use std::marker::PhantomData;
 use std::ops::Neg;
 
-use crate::array2::Array;
+use crate::array::Array;
 use crate::types::option_as_scalar_ref;
 
 use num_traits::{CheckedAdd, CheckedSub};
 
-use crate::array2::*;
+use crate::array::*;
 use crate::buffer::Bitmap;
 use crate::stream_op::*;
 
@@ -129,10 +129,10 @@ impl_cast_div!(i64, i64, i64);
 mod tests {
 
     use super::StreamingAvgAgg;
-    use crate::array2::ArrayBuilder;
+    use crate::array::ArrayBuilder;
     use crate::{
         array,
-        array2::{Array, F64Array, I64Array},
+        array::{Array, F64Array, I64Array},
         array_nonnull,
         buffer::Bitmap,
         stream_op::{

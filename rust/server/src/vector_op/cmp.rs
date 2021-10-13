@@ -1,7 +1,7 @@
 use num_traits::AsPrimitive;
 
-use crate::array2::ArrayImpl::{Float32, Float64, Int16, Int32, Int64};
-use crate::array2::{
+use crate::array::ArrayImpl::{Float32, Float64, Int16, Int32, Int64};
+use crate::array::{
     Array, ArrayBuilder, ArrayImpl, BoolArray, BoolArrayBuilder, PrimitiveArray,
     PrimitiveArrayItemType,
 };

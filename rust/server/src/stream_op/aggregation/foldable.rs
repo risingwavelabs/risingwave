@@ -2,7 +2,7 @@
 
 use std::marker::PhantomData;
 
-use crate::array2::*;
+use crate::array::*;
 use crate::buffer::Bitmap;
 use crate::error::{ErrorCode::NumericValueOutOfRange, Result, RwError};
 use crate::types::{option_as_scalar_ref, Scalar, ScalarRef};
@@ -303,7 +303,7 @@ impl_fold_agg! { I64Array, Int64, UTF8Array }
 mod tests {
     use super::super::tests::get_output_from_state;
     use super::*;
-    use crate::array2::I64Array;
+    use crate::array::I64Array;
     use crate::{array, array_nonnull};
 
     type TestStreamingSumAgg<R> =

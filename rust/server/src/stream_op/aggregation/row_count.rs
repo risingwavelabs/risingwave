@@ -1,6 +1,6 @@
 //! This module implements `StreamingRowCountAgg`.
 
-use crate::array2::*;
+use crate::array::*;
 use crate::buffer::Bitmap;
 use crate::error::Result;
 use crate::stream_op::{Op, Ops};
@@ -78,7 +78,7 @@ impl StreamingAggStateImpl for StreamingRowCountAgg {
 
 #[cfg(test)]
 mod tests {
-    use crate::array2::I64Array;
+    use crate::array::I64Array;
 
     use super::super::tests::get_output_from_impl_state;
     use super::*;

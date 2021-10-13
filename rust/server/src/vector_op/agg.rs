@@ -1,4 +1,4 @@
-use crate::array2::*;
+use crate::array::*;
 use crate::error::{ErrorCode, Result};
 use crate::expr::AggKind;
 use crate::types::*;

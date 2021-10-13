@@ -1,6 +1,6 @@
-use crate::array2::ArrayImpl;
-use crate::array2::ArrayImpl::{Float32, Float64, Int16, Int32, Int64};
-use crate::array2::ArrayRef;
+use crate::array::ArrayImpl;
+use crate::array::ArrayImpl::{Float32, Float64, Int16, Int32, Int64};
+use crate::array::ArrayRef;
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 use crate::types::ArithmeticOperatorKind;

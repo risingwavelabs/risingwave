@@ -1,4 +1,4 @@
-use crate::array2::{ArrayRef, DataChunk};
+use crate::array::{ArrayRef, DataChunk};
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::expr::build_from_proto_option;
@@ -84,8 +84,8 @@ impl<'a> TryFrom<&'a ExprNode> for ArithmeticExpression {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array2::column::Column;
-    use crate::array2::{Array, PrimitiveArray};
+    use crate::array::column::Column;
+    use crate::array::{Array, PrimitiveArray};
     use crate::error::Result;
     use crate::expr::input_ref::InputRefExpression;
     use crate::types::Int32Type;

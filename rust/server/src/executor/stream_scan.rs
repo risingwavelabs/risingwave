@@ -7,7 +7,7 @@ use protobuf::Message;
 use pb_convert::FromProtobuf;
 use risingwave_proto::plan::StreamScanNode;
 
-use crate::array2::DataChunkRef;
+use crate::array::DataChunkRef;
 use crate::catalog::TableId;
 use crate::error::ErrorCode;
 use crate::error::ErrorCode::InternalError;

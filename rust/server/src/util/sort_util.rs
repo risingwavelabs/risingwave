@@ -1,4 +1,4 @@
-use crate::array2::{Array, ArrayImpl, DataChunk, DataChunkRef};
+use crate::array::{Array, ArrayImpl, DataChunk, DataChunkRef};
 use crate::error::{ErrorCode::InternalError, Result, RwError};
 use crate::expr::InputRefExpression;
 use crate::types::{ScalarPartialOrd, ScalarRef};

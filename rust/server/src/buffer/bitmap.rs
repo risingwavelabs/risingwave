@@ -23,8 +23,8 @@ use std::mem;
 use std::ops::BitAnd;
 use std::ops::BitOr;
 
-use crate::array2::Array;
-use crate::array2::BoolArray;
+use crate::array::Array;
+use crate::array::BoolArray;
 use crate::buffer::Buffer;
 use crate::error::Result;
 use crate::util::bit_util;

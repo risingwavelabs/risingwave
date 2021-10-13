@@ -1,4 +1,4 @@
-use crate::array2::{DataChunk, DataChunkRef};
+use crate::array::{DataChunk, DataChunkRef};
 use crate::error::Result;
 use crate::executor::ExecutorResult::Done;
 use crate::executor::{Executor, ExecutorResult};

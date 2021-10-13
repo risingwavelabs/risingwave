@@ -1,5 +1,5 @@
-use crate::array2::PrimitiveArrayItemType;
-use crate::array2::{Array, ArrayBuilder, PrimitiveArray, PrimitiveArrayBuilder};
+use crate::array::PrimitiveArrayItemType;
+use crate::array::{Array, ArrayBuilder, PrimitiveArray, PrimitiveArrayBuilder};
 use crate::error::ErrorCode::NumericValueOutOfRange;
 use crate::error::{Result, RwError};
 

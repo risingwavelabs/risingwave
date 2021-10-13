@@ -1,4 +1,4 @@
-use crate::array2::{column::Column, DataChunk};
+use crate::array::{column::Column, DataChunk};
 use crate::error::ErrorCode::ProtobufError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::executor::{BoxedExecutor, Executor, ExecutorBuilder, ExecutorResult};
@@ -166,7 +166,7 @@ impl Executor for SortAggExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array2::{Array as _, I32Array, I64Array};
+    use crate::array::{Array as _, I32Array, I64Array};
     use crate::array_nonnull;
     use crate::executor::test_utils::MockExecutor;
     use crate::types::Int32Type;
@@ -231,7 +231,7 @@ mod tests {
     #[test]
     #[allow(clippy::many_single_char_names)]
     fn execute_sum_int32_grouped() -> Result<()> {
-        use crate::array2::ArrayImpl;
+        use crate::array::ArrayImpl;
         let a: Arc<ArrayImpl> = Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into());
         let t32 = Int32Type::create(false);
         let chunk = DataChunk::builder()

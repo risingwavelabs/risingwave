@@ -1,5 +1,5 @@
 use super::Array;
-use crate::array2::ArrayImpl;
+use crate::array::ArrayImpl;
 use crate::types::ScalarRefImpl;
 
 pub struct ArrayIterator<'a, A: Array> {

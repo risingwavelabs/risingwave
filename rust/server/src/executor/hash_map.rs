@@ -1,4 +1,4 @@
-use crate::array2::{Array, ArrayImpl, DataChunk};
+use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::error::Result;
 use crate::types::Scalar;
 use crate::types::{IntervalUnit, ScalarImpl, ScalarRef};
@@ -353,8 +353,8 @@ impl HashKey for SerializedKey {
 mod tests {
     use super::*;
     use crate::array;
-    use crate::array2::column::Column;
-    use crate::array2::{
+    use crate::array::column::Column;
+    use crate::array::{
         ArrayRef, BoolArray, DataChunk, DecimalArray, F32Array, F64Array, I16Array, I32Array,
         I64Array, UTF8Array,
     };

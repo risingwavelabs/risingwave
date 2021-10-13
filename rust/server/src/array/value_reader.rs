@@ -1,4 +1,4 @@
-use crate::array2::{
+use crate::array::{
     Array, ArrayBuilder, DecimalArrayBuilder, PrimitiveArrayItemType, UTF8ArrayBuilder,
 };
 use crate::error::ErrorCode::InternalError;

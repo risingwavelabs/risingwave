@@ -1,5 +1,5 @@
 use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
-use crate::array2::ArrayImpl;
+use crate::array::ArrayImpl;
 use crate::buffer::Bitmap;
 use crate::error::Result;
 use crate::for_all_native_types;

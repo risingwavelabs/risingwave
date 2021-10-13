@@ -5,8 +5,8 @@ use protobuf::Message;
 
 use risingwave_proto::expr::{ExprNode, FunctionCall};
 
-use crate::array2::ArrayRef;
-use crate::array2::DataChunk;
+use crate::array::ArrayRef;
+use crate::array::DataChunk;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::expr::build_from_proto as expr_build_from_proto;
@@ -108,9 +108,9 @@ impl<'a> TryFrom<&'a ExprNode> for CompareExpression {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array2::column::Column;
-    use crate::array2::Array;
-    use crate::array2::{ArrayImpl::Bool, PrimitiveArray};
+    use crate::array::column::Column;
+    use crate::array::Array;
+    use crate::array::{ArrayImpl::Bool, PrimitiveArray};
     use crate::types::Int32Type;
     use pb_construct::make_proto;
     use protobuf::well_known_types::Any as AnyProto;

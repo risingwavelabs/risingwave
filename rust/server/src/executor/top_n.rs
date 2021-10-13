@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::vec::Vec;
 
 use super::BoxedExecutor;
-use crate::array2::{DataChunk, DataChunkRef};
+use crate::array::{DataChunk, DataChunkRef};
 use crate::error::{
     ErrorCode::{InternalError, ProtobufError},
     Result, RwError,
@@ -131,8 +131,8 @@ impl Executor for TopNExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array2::column::Column;
-    use crate::array2::{Array, DataChunk, PrimitiveArray};
+    use crate::array::column::Column;
+    use crate::array::{Array, DataChunk, PrimitiveArray};
     use crate::executor::test_utils::MockExecutor;
     use crate::expr::InputRefExpression;
     use crate::types::Int32Type;

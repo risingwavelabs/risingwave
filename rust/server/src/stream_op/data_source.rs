@@ -2,8 +2,8 @@ use std::fmt::{Debug, Formatter};
 use std::sync::{Arc, Mutex};
 
 use super::{Message, Op, Result, StreamChunk};
-use crate::array2::column::Column;
-use crate::array2::{ArrayBuilder, ArrayImpl, I64ArrayBuilder};
+use crate::array::column::Column;
+use crate::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder};
 use crate::stream_op::{StreamConsumer, StreamOperator};
 use crate::types::Int64Type;
 use async_trait::async_trait;
@@ -151,7 +151,7 @@ impl StreamConsumer for MockConsumer {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::array2::Array;
+    use crate::array::Array;
 
     #[tokio::test]
     async fn test_data_source_read() -> Result<()> {

@@ -1,7 +1,7 @@
 use super::{Message, SimpleStreamOperator, StreamChunk, StreamOperator};
 use crate::impl_consume_barrier_default;
 use crate::{
-    array2::{column::Column, DataChunk},
+    array::{column::Column, DataChunk},
     error::Result,
     expr::BoxedExpression,
 };

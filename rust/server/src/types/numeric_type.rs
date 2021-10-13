@@ -1,4 +1,4 @@
-use crate::array2::{ArrayBuilder, ArrayBuilderImpl, PrimitiveArrayBuilder};
+use crate::array::{ArrayBuilder, ArrayBuilderImpl, PrimitiveArrayBuilder};
 use crate::error::Result;
 use crate::error::RwError;
 use crate::types::DataType;

@@ -1,4 +1,4 @@
-use crate::array2::DataChunkRef;
+use crate::array::DataChunkRef;
 use crate::error::Result;
 use crate::executor::hash_map::HashKey;
 use crate::executor::join::hash_join::HashJoinState::{FirstProbe, Probe, ProbeRemaining};

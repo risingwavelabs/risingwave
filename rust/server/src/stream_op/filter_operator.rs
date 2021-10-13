@@ -1,6 +1,6 @@
 use super::{Message, Op, SimpleStreamOperator, StreamChunk, StreamOperator};
 use crate::{
-    array2::{Array, ArrayImpl, DataChunk},
+    array::{Array, ArrayImpl, DataChunk},
     buffer::Bitmap,
     error::Result,
     expr::BoxedExpression,

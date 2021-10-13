@@ -1,4 +1,4 @@
-use crate::array2::{Array, PrimitiveArray, PrimitiveArrayItemType};
+use crate::array::{Array, PrimitiveArray, PrimitiveArrayItemType};
 use crate::error::Result;
 use crate::vector_op::add_op::*;
 use crate::vector_op::div_op::*;

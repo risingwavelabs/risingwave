@@ -3,8 +3,8 @@
 macro_rules! array {
   ($array:tt, [$( $value:expr ),*]) => {
     {
-      use crate::array2::Array;
-      use crate::array2::ArrayBuilder;
+      use crate::array::Array;
+      use crate::array::ArrayBuilder;
       let mut builder = <$array as Array>::Builder::new(0).unwrap();
       $(
         builder.append($value).unwrap();
@@ -19,8 +19,8 @@ macro_rules! array {
 macro_rules! array_nonnull {
   ($array:tt, [$( $value:expr ),*]) => {
     {
-      use crate::array2::Array;
-      use crate::array2::ArrayBuilder;
+      use crate::array::Array;
+      use crate::array::ArrayBuilder;
       let mut builder = <$array as Array>::Builder::new(0).unwrap();
       $(
         builder.append(Some($value)).unwrap();
@@ -32,8 +32,8 @@ macro_rules! array_nonnull {
 
 #[cfg(test)]
 mod tests {
-    use crate::array2::Array;
-    use crate::array2::I16Array;
+    use crate::array::Array;
+    use crate::array::I16Array;
 
     #[test]
     fn test_build_array() {

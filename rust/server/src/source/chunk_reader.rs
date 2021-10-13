@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use crate::array2::column::Column;
-use crate::array2::{ArrayBuilderImpl, DataChunk, DataChunkRef};
+use crate::array::column::Column;
+use crate::array::{ArrayBuilderImpl, DataChunk, DataChunkRef};
 use crate::error::Result;
 use crate::source::{SourceColumnDesc, SourceMessage, SourceParser, SourceReader};
 

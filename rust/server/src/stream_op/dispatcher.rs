@@ -1,5 +1,5 @@
 use super::{Message, Result, StreamChunk};
-use crate::array2::DataChunk;
+use crate::array::DataChunk;
 use crate::buffer::Bitmap;
 use crate::stream_op::{StreamConsumer, StreamOperator};
 use crate::util::hash_util::CRC32FastBuilder;

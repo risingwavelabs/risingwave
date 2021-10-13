@@ -41,9 +41,9 @@ impl Debug for TableDataSource {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::array2::column::Column;
-    use crate::array2::{ArrayImpl, DataChunk};
-    use crate::array2::{I32Array, UTF8Array};
+    use crate::array::column::Column;
+    use crate::array::{ArrayImpl, DataChunk};
+    use crate::array::{I32Array, UTF8Array};
     use crate::array_nonnull;
     use crate::catalog::test_utils::mock_table_id;
     use crate::storage::MemColumnarTable;

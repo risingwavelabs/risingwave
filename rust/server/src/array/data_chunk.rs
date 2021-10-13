@@ -1,7 +1,7 @@
-use crate::array2::column::Column;
+use crate::array::column::Column;
 
-use crate::array2::row_ref::RowRef;
-use crate::array2::{ArrayBuilderImpl, ArrayImpl};
+use crate::array::row_ref::RowRef;
+use crate::array::{ArrayBuilderImpl, ArrayImpl};
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{ErrorCode, Result, RwError};
@@ -290,7 +290,7 @@ pub type DataChunkRef = Arc<DataChunk>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array2::*;
+    use crate::array::*;
     use crate::types::Int32Type;
 
     #[test]

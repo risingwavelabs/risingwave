@@ -1,5 +1,5 @@
 use super::BoxedExecutor;
-use crate::array2::ArrayImpl::Bool;
+use crate::array::ArrayImpl::Bool;
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
@@ -64,8 +64,8 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for FilterExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array2::column::Column;
-    use crate::array2::{Array, DataChunk, PrimitiveArray};
+    use crate::array::column::Column;
+    use crate::array::{Array, DataChunk, PrimitiveArray};
     use crate::executor::test_utils::MockExecutor;
     use crate::types::Int32Type;
     use pb_construct::make_proto;

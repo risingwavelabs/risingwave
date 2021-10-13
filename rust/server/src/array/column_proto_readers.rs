@@ -1,5 +1,5 @@
-use crate::array2::value_reader::{PrimitiveValueReader, VarSizedValueReader};
-use crate::array2::{ArrayBuilder, ArrayRef, PrimitiveArrayBuilder, PrimitiveArrayItemType};
+use crate::array::value_reader::{PrimitiveValueReader, VarSizedValueReader};
+use crate::array::{ArrayBuilder, ArrayRef, PrimitiveArrayBuilder, PrimitiveArrayItemType};
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;

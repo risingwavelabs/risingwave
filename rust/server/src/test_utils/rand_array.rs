@@ -2,7 +2,7 @@
 //!
 //! Use [`seed_rand_array`] to generate an random array.
 
-use crate::array2::{Array, ArrayBuilder, ArrayRef};
+use crate::array::{Array, ArrayBuilder, ArrayRef};
 use crate::types::Scalar;
 use crate::types::{IntervalUnit, NativeType};
 use rand::distributions::Standard;
@@ -96,8 +96,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array2::interval_array::IntervalArray;
-    use crate::array2::*;
+    use crate::array::interval_array::IntervalArray;
+    use crate::array::*;
     use crate::for_all_variants;
 
     #[test]

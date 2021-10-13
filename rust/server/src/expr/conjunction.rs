@@ -4,7 +4,7 @@ use protobuf::Message;
 
 use risingwave_proto::expr::{ExprNode, ExprNode_Type, FunctionCall};
 
-use crate::array2::{ArrayImpl::Bool, ArrayRef, DataChunk};
+use crate::array::{ArrayImpl::Bool, ArrayRef, DataChunk};
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::expr::build_from_proto as expr_build_from_proto;
@@ -149,8 +149,8 @@ impl<'a> TryFrom<&'a ExprNode> for ConjunctionExpression {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array2::column::Column;
-    use crate::array2::{Array, BoolArray};
+    use crate::array::column::Column;
+    use crate::array::{Array, BoolArray};
     use crate::error::Result;
     use crate::types::BoolType;
     use protobuf::well_known_types::Any as AnyProto;

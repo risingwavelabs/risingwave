@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use crate::array2::DataChunkRef;
+use crate::array::DataChunkRef;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::executor::{BoxedExecutor, ExecutorBuilder, ExecutorResult};
 use crate::service::ExchangeWriter;

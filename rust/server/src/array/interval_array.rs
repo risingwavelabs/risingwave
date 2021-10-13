@@ -1,6 +1,6 @@
 use std::hash::Hash;
 
-use crate::array2::{Array, ArrayBuilder, ArrayIterator};
+use crate::array::{Array, ArrayBuilder, ArrayIterator};
 use crate::buffer::Bitmap;
 use crate::error::Result;
 use crate::types::IntervalUnit;
@@ -118,8 +118,8 @@ impl ArrayBuilder for IntervalArrayBuilder {
 
 #[cfg(test)]
 mod tests {
-    use crate::array2::interval_array::{IntervalArrayBuilder, IntervalUnit};
-    use crate::array2::{Array, ArrayBuilder};
+    use crate::array::interval_array::{IntervalArrayBuilder, IntervalUnit};
+    use crate::array::{Array, ArrayBuilder};
 
     #[test]
     fn test_interval_array() {

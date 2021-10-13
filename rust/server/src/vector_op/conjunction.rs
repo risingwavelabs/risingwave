@@ -1,4 +1,4 @@
-use crate::array2::{Array, ArrayBuilder, BoolArray, BoolArrayBuilder};
+use crate::array::{Array, ArrayBuilder, BoolArray, BoolArrayBuilder};
 use crate::error::Result;
 use crate::types::Scalar;
 

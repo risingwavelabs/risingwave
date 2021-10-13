@@ -1,4 +1,4 @@
-use crate::array2::{ArrayBuilder, ArrayBuilderImpl, UTF8ArrayBuilder};
+use crate::array::{ArrayBuilder, ArrayBuilderImpl, UTF8ArrayBuilder};
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 use crate::types::{DataType, DataTypeKind, DataTypeRef};

@@ -13,7 +13,7 @@ pub mod row_ref;
 mod utf8_array;
 mod value_reader;
 
-use crate::array2::iterator::ArrayImplIterator;
+use crate::array::iterator::ArrayImplIterator;
 use crate::buffer::Bitmap;
 pub use crate::error::ErrorCode::InternalError;
 use crate::error::Result;

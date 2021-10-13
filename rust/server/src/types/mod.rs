@@ -31,7 +31,7 @@ pub use decimal_type::*;
 pub use interval_type::*;
 pub use string_type::*;
 
-use crate::array2::{ArrayBuilderImpl, PrimitiveArrayItemType};
+use crate::array::{ArrayBuilderImpl, PrimitiveArrayItemType};
 use paste::paste;
 use risingwave_proto::expr::ExprNode_Type::{self, *};
 

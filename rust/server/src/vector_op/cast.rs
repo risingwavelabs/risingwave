@@ -1,5 +1,5 @@
 // TODO: delete vector_op. use new vectorized
-use crate::array2::{Array, ArrayBuilder, ArrayImpl, ArrayRef, I32Array, I64Array};
+use crate::array::{Array, ArrayBuilder, ArrayImpl, ArrayRef, I32Array, I64Array};
 use crate::error::{ErrorCode::ParseError, Result, RwError};
 use crate::types::{DataTypeKind, DataTypeRef, Scalar};
 use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};

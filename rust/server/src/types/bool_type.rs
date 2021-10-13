@@ -1,4 +1,4 @@
-use crate::array2::{ArrayBuilder, ArrayBuilderImpl, BoolArrayBuilder};
+use crate::array::{ArrayBuilder, ArrayBuilderImpl, BoolArrayBuilder};
 use crate::error::{Result, RwError};
 use crate::types::{DataType, DataTypeKind, DataTypeRef};
 use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};

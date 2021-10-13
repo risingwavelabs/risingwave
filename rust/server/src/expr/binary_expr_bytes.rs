@@ -1,4 +1,4 @@
-use crate::array2::{I32Array, UTF8Array};
+use crate::array::{I32Array, UTF8Array};
 use crate::expr::expr_tmpl::BinaryBytesExpression;
 use crate::expr::BoxedExpression;
 use crate::types::DataTypeRef;

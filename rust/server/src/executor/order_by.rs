@@ -1,5 +1,5 @@
 use super::BoxedExecutor;
-use crate::array2::{
+use crate::array::{
     column::Column, Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, DataChunkRef,
 };
 use crate::error::{
@@ -182,8 +182,8 @@ impl Executor for OrderByExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array2::column::Column;
-    use crate::array2::{DataChunk, PrimitiveArray};
+    use crate::array::column::Column;
+    use crate::array::{DataChunk, PrimitiveArray};
     use crate::executor::test_utils::MockExecutor;
     use crate::expr::InputRefExpression;
     use crate::types::Int32Type;

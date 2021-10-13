@@ -1,4 +1,4 @@
-use crate::array2::{
+use crate::array::{
     Array, ArrayBuilder, PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType,
 };
 use crate::error::Result;

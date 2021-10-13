@@ -1,5 +1,5 @@
-use crate::array2::column::Column;
-use crate::array2::DataChunk;
+use crate::array::column::Column;
+use crate::array::DataChunk;
 use crate::{buffer::Bitmap, error::Result};
 
 mod actor;

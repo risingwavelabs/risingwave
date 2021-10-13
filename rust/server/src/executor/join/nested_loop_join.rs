@@ -1,6 +1,6 @@
-use crate::array2::column::Column;
-use crate::array2::row_ref::RowRef;
-use crate::array2::{DataChunk, DataChunkRef};
+use crate::array::column::Column;
+use crate::array::row_ref::RowRef;
+use crate::array::{DataChunk, DataChunkRef};
 use crate::buffer::Bitmap;
 use crate::error::Result;
 use crate::executor::join::JoinType;
@@ -316,9 +316,9 @@ impl ProbeTable {
 #[cfg(test)]
 mod tests {
 
-    use crate::array2::column::Column;
-    use crate::array2::row_ref::RowRef;
-    use crate::array2::*;
+    use crate::array::column::Column;
+    use crate::array::row_ref::RowRef;
+    use crate::array::*;
     use crate::buffer::Bitmap;
     use crate::catalog::test_utils::mock_table_id;
     use crate::executor::join::nested_loop_join::{OuterTableSource, ProbeTable};

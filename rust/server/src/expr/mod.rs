@@ -16,8 +16,8 @@ pub use agg::{AggExpression, AggKind};
 pub use input_ref::InputRefExpression;
 pub use literal::*;
 
-use crate::array2::ArrayRef;
-use crate::array2::DataChunk;
+use crate::array::ArrayRef;
+use crate::array::DataChunk;
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 pub use arithmetic_expr::ArithmeticExpression;

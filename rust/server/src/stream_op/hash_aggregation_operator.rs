@@ -2,8 +2,8 @@
 
 use super::aggregation::*;
 use super::{Message, Op, SimpleStreamOperator, StreamChunk, StreamOperator};
-use crate::array2::column::Column;
-use crate::array2::*;
+use crate::array::column::Column;
+use crate::array::*;
 use crate::buffer::Bitmap;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::AggKind;

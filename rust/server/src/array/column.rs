@@ -1,9 +1,9 @@
-use crate::array2::column_proto_readers::{read_numeric_column, read_string_column};
-use crate::array2::value_reader::{
+use crate::array::column_proto_readers::{read_numeric_column, read_string_column};
+use crate::array::value_reader::{
     DecimalValueReader, F32ValueReader, F64ValueReader, I16ValueReader, I32ValueReader,
     I64ValueReader, Utf8ValueReader,
 };
-use crate::array2::{ArrayImpl, ArrayRef, DecimalArrayBuilder, UTF8ArrayBuilder};
+use crate::array::{ArrayImpl, ArrayRef, DecimalArrayBuilder, UTF8ArrayBuilder};
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::types::{build_from_proto, DataType, DataTypeRef};
@@ -93,7 +93,7 @@ impl Column {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array2::{Array, ArrayBuilder, I32Array, I32ArrayBuilder, UTF8Array};
+    use crate::array::{Array, ArrayBuilder, I32Array, I32ArrayBuilder, UTF8Array};
     use crate::error::{ErrorCode, Result};
     use crate::types::{DataTypeKind, Int32Type, StringType};
     use protobuf::Message;

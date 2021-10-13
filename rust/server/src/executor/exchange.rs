@@ -107,8 +107,8 @@ impl Executor for ExchangeExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array2::column::Column;
-    use crate::array2::{DataChunk, DataChunkRef, I32Array};
+    use crate::array::column::Column;
+    use crate::array::{DataChunk, DataChunkRef, I32Array};
     use crate::array_nonnull;
     use crate::types::Int32Type;
     use std::sync::Arc;

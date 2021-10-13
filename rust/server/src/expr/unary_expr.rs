@@ -1,5 +1,5 @@
 use super::expr_tmpl::UnaryExpression;
-use crate::array2::{I32Array, I64Array, UTF8Array};
+use crate::array::{I32Array, I64Array, UTF8Array};
 use crate::expr::BoxedExpression;
 use crate::types::{DataTypeKind, DataTypeRef};
 use crate::vector_op::cast;

@@ -8,7 +8,7 @@ mod avg;
 pub use avg::*;
 
 use super::{Op, Ops, StreamingCountAgg, StreamingFloatSumAgg, StreamingSumAgg};
-use crate::array2::{
+use crate::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, F32Array, F64Array, I16Array, I32Array,
     I64Array,
 };
@@ -114,7 +114,7 @@ pub fn create_streaming_agg_state(
 mod tests {
     use super::*;
 
-    use crate::array2::from_builder;
+    use crate::array::from_builder;
 
     pub fn get_output_from_state<O, S>(state: &mut S) -> O::ArrayType
     where

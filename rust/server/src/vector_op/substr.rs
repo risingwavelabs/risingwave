@@ -1,4 +1,4 @@
-use crate::array2::{BytesGuard, BytesWriter};
+use crate::array::{BytesGuard, BytesWriter};
 use crate::error::Result;
 use std::cmp::{max, min};
 
@@ -28,7 +28,7 @@ pub fn substr_start_for(
 
 #[cfg(test)]
 mod tests {
-    use crate::array2::{Array, ArrayBuilder, UTF8ArrayBuilder};
+    use crate::array::{Array, ArrayBuilder, UTF8ArrayBuilder};
 
     use super::*;
 

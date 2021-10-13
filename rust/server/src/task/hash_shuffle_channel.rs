@@ -1,4 +1,4 @@
-use crate::array2::DataChunkRef;
+use crate::array::DataChunkRef;
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{ErrorCode, Result};

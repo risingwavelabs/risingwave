@@ -13,7 +13,7 @@ use seq_scan::*;
 use sort_agg::*;
 use top_n::*;
 
-use crate::array2::DataChunkRef;
+use crate::array::DataChunkRef;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 use crate::executor::create_stream::CreateStreamExecutor;

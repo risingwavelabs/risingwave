@@ -1,4 +1,4 @@
-use crate::array2::{
+use crate::array::{
     Array, ArrayBuilder, ArrayImpl, ArrayRef, BytesGuard, BytesWriter, DataChunk, UTF8ArrayBuilder,
 };
 use crate::error::Result;
