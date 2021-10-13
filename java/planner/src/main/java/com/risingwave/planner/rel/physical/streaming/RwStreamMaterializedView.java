@@ -69,6 +69,7 @@ public class RwStreamMaterializedView extends Project implements RisingWaveStrea
     return StreamNode.newBuilder()
         .setNodeType(StreamNode.StreamNodeType.MEMTABLE_MATERIALIZED_VIEW)
         .setBody(Any.pack(materializedViewNode))
+        .setInput(((RisingWaveStreamingRel) input).serialize())
         .build();
   }
 

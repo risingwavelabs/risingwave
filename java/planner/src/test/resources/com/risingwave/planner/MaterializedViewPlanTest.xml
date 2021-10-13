@@ -17,49 +17,42 @@ RwStreamMaterializedView(v=[$0])
         <Resource name="json">
             <![CDATA[
 {
+  "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
   "body": {
-    "@type": "type.googleapis.com/risingwave.streaming.proto.TableSourceNode",
+    "@type": "type.googleapis.com/risingwave.streaming.proto.MaterializedViewNode",
     "tableRefId": {
       "schemaRefId": {
         "databaseRefId": {
         }
-      }
+      },
+      "tableId": 1
     },
-    "columnIds": [0, 1]
+    "columnDescs": [{
+      "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW"
+    }]
   },
-  "downstreamNode": {
-    "nodeType": "FILTER",
+  "input": {
+    "nodeType": "LOCAL_SIMPLE_AGG",
     "body": {
-      "@type": "type.googleapis.com/risingwave.streaming.proto.FilterNode",
-      "searchCondition": {
-        "exprType": "GREATER_THAN",
-        "body": {
-          "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
-          "children": [{
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
-            },
-            "returnType": {
-              "typeName": "INT32"
-            }
-          }, {
-            "exprType": "CONSTANT_VALUE",
-            "body": {
-              "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
-              "body": "AAAAAQ=="
-            },
-            "returnType": {
-              "typeName": "INT32"
-            }
-          }]
-        },
+      "@type": "type.googleapis.com/risingwave.streaming.proto.SimpleAggNode",
+      "aggCalls": [{
+        "type": "SUM",
+        "args": [{
+          "input": {
+          },
+          "type": {
+            "typeName": "INT32"
+          }
+        }],
         "returnType": {
-          "typeName": "BOOLEAN"
+          "typeName": "INT32"
         }
-      }
+      }]
     },
-    "downstreamNode": {
+    "input": {
       "nodeType": "PROJECTION",
       "body": {
         "@type": "type.googleapis.com/risingwave.streaming.proto.ProjectNode",
@@ -74,41 +67,48 @@ RwStreamMaterializedView(v=[$0])
           }
         }]
       },
-      "downstreamNode": {
-        "nodeType": "LOCAL_SIMPLE_AGG",
+      "input": {
+        "nodeType": "FILTER",
         "body": {
-          "@type": "type.googleapis.com/risingwave.streaming.proto.SimpleAggNode",
-          "aggCalls": [{
-            "type": "SUM",
-            "args": [{
-              "input": {
-              },
-              "type": {
-                "typeName": "INT32"
-              }
-            }],
+          "@type": "type.googleapis.com/risingwave.streaming.proto.FilterNode",
+          "searchCondition": {
+            "exprType": "GREATER_THAN",
+            "body": {
+              "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+              "children": [{
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                }
+              }, {
+                "exprType": "CONSTANT_VALUE",
+                "body": {
+                  "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+                  "body": "AAAAAQ=="
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                }
+              }]
+            },
             "returnType": {
-              "typeName": "INT32"
+              "typeName": "BOOLEAN"
             }
-          }]
+          }
         },
-        "downstreamNode": {
-          "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
+        "input": {
           "body": {
-            "@type": "type.googleapis.com/risingwave.streaming.proto.MaterializedViewNode",
+            "@type": "type.googleapis.com/risingwave.streaming.proto.TableSourceNode",
             "tableRefId": {
               "schemaRefId": {
                 "databaseRefId": {
                 }
-              },
-              "tableId": 1
+              }
             },
-            "columnDescs": [{
-              "columnType": {
-                "typeName": "INT32"
-              },
-              "encoding": "RAW"
-            }]
+            "columnIds": [0, 1]
           }
         }
       }
@@ -136,17 +136,24 @@ RwStreamMaterializedView(v=[$0])
         <Resource name="json">
             <![CDATA[
 {
+  "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
   "body": {
-    "@type": "type.googleapis.com/risingwave.streaming.proto.TableSourceNode",
+    "@type": "type.googleapis.com/risingwave.streaming.proto.MaterializedViewNode",
     "tableRefId": {
       "schemaRefId": {
         "databaseRefId": {
         }
-      }
+      },
+      "tableId": 2
     },
-    "columnIds": [0, 1]
+    "columnDescs": [{
+      "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW"
+    }]
   },
-  "downstreamNode": {
+  "input": {
     "nodeType": "PROJECTION",
     "body": {
       "@type": "type.googleapis.com/risingwave.streaming.proto.ProjectNode",
@@ -178,23 +185,16 @@ RwStreamMaterializedView(v=[$0])
         }
       }]
     },
-    "downstreamNode": {
-      "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
+    "input": {
       "body": {
-        "@type": "type.googleapis.com/risingwave.streaming.proto.MaterializedViewNode",
+        "@type": "type.googleapis.com/risingwave.streaming.proto.TableSourceNode",
         "tableRefId": {
           "schemaRefId": {
             "databaseRefId": {
             }
-          },
-          "tableId": 2
+          }
         },
-        "columnDescs": [{
-          "columnType": {
-            "typeName": "INT32"
-          },
-          "encoding": "RAW"
-        }]
+        "columnIds": [0, 1]
       }
     }
   }
@@ -220,17 +220,29 @@ RwStreamMaterializedView(v2=[$0], v=[$1])
         <Resource name="json">
             <![CDATA[
 {
+  "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
   "body": {
-    "@type": "type.googleapis.com/risingwave.streaming.proto.TableSourceNode",
+    "@type": "type.googleapis.com/risingwave.streaming.proto.MaterializedViewNode",
     "tableRefId": {
       "schemaRefId": {
         "databaseRefId": {
         }
-      }
+      },
+      "tableId": 3
     },
-    "columnIds": [1, 0]
+    "columnDescs": [{
+      "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW"
+    }, {
+      "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW"
+    }]
   },
-  "downstreamNode": {
+  "input": {
     "nodeType": "LOCAL_HASH_AGG",
     "body": {
       "@type": "type.googleapis.com/risingwave.streaming.proto.HashAggNode",
@@ -251,28 +263,16 @@ RwStreamMaterializedView(v2=[$0], v=[$1])
         }
       }]
     },
-    "downstreamNode": {
-      "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
+    "input": {
       "body": {
-        "@type": "type.googleapis.com/risingwave.streaming.proto.MaterializedViewNode",
+        "@type": "type.googleapis.com/risingwave.streaming.proto.TableSourceNode",
         "tableRefId": {
           "schemaRefId": {
             "databaseRefId": {
             }
-          },
-          "tableId": 3
+          }
         },
-        "columnDescs": [{
-          "columnType": {
-            "typeName": "INT32"
-          },
-          "encoding": "RAW"
-        }, {
-          "columnType": {
-            "typeName": "INT32"
-          },
-          "encoding": "RAW"
-        }]
+        "columnIds": [1, 0]
       }
     }
   }
@@ -298,17 +298,140 @@ RwStreamMaterializedView(v=[$0])
         <Resource name="json">
             <![CDATA[
 {
+  "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
   "body": {
-    "@type": "type.googleapis.com/risingwave.streaming.proto.TableSourceNode",
+    "@type": "type.googleapis.com/risingwave.streaming.proto.MaterializedViewNode",
     "tableRefId": {
       "schemaRefId": {
         "databaseRefId": {
         }
-      }
+      },
+      "tableId": 4
     },
-    "columnIds": [0, 1]
+    "columnDescs": [{
+      "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW"
+    }]
   },
-  "downstreamNode": {
+  "input": {
+    "nodeType": "PROJECTION",
+    "body": {
+      "@type": "type.googleapis.com/risingwave.streaming.proto.ProjectNode",
+      "selectList": [{
+        "exprType": "ADD",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+          "children": [{
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+            },
+            "returnType": {
+              "typeName": "INT32"
+            }
+          }, {
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+              "columnIdx": 1
+            },
+            "returnType": {
+              "typeName": "INT32"
+            }
+          }]
+        },
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }]
+    },
+    "input": {
+      "nodeType": "LOCAL_SIMPLE_AGG",
+      "body": {
+        "@type": "type.googleapis.com/risingwave.streaming.proto.SimpleAggNode",
+        "aggCalls": [{
+          "type": "SUM",
+          "args": [{
+            "input": {
+            },
+            "type": {
+              "typeName": "INT32"
+            }
+          }],
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }, {
+          "type": "SUM",
+          "args": [{
+            "input": {
+              "columnIdx": 1
+            },
+            "type": {
+              "typeName": "INT32"
+            }
+          }],
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }]
+      },
+      "input": {
+        "body": {
+          "@type": "type.googleapis.com/risingwave.streaming.proto.TableSourceNode",
+          "tableRefId": {
+            "schemaRefId": {
+              "databaseRefId": {
+              }
+            }
+          },
+          "columnIds": [0, 1]
+        }
+      }
+    }
+  }
+}
+]]>
+        </Resource>
+    </TestCase>
+
+    <TestCase name="query 5">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T5 as select sum(v1+v2) as V from t
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(v=[$0])
+  RwStreamAgg(group=[{}], v=[SUM($0)])
+    RwStreamProject($f0=[+($0, $1)])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
+]]>
+        </Resource>
+        <Resource name="json">
+            <![CDATA[
+{
+  "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
+  "body": {
+    "@type": "type.googleapis.com/risingwave.streaming.proto.MaterializedViewNode",
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      },
+      "tableId": 5
+    },
+    "columnDescs": [{
+      "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW"
+    }]
+  },
+  "input": {
     "nodeType": "LOCAL_SIMPLE_AGG",
     "body": {
       "@type": "type.googleapis.com/risingwave.streaming.proto.SimpleAggNode",
@@ -324,22 +447,9 @@ RwStreamMaterializedView(v=[$0])
         "returnType": {
           "typeName": "INT32"
         }
-      }, {
-        "type": "SUM",
-        "args": [{
-          "input": {
-            "columnIdx": 1
-          },
-          "type": {
-            "typeName": "INT32"
-          }
-        }],
-        "returnType": {
-          "typeName": "INT32"
-        }
       }]
     },
-    "downstreamNode": {
+    "input": {
       "nodeType": "PROJECTION",
       "body": {
         "@type": "type.googleapis.com/risingwave.streaming.proto.ProjectNode",
@@ -371,126 +481,16 @@ RwStreamMaterializedView(v=[$0])
           }
         }]
       },
-      "downstreamNode": {
-        "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
+      "input": {
         "body": {
-          "@type": "type.googleapis.com/risingwave.streaming.proto.MaterializedViewNode",
+          "@type": "type.googleapis.com/risingwave.streaming.proto.TableSourceNode",
           "tableRefId": {
             "schemaRefId": {
               "databaseRefId": {
               }
-            },
-            "tableId": 4
+            }
           },
-          "columnDescs": [{
-            "columnType": {
-              "typeName": "INT32"
-            },
-            "encoding": "RAW"
-          }]
-        }
-      }
-    }
-  }
-}
-]]>
-        </Resource>
-    </TestCase>
-
-    <TestCase name="query 5">
-        <Resource name="sql">
-            <![CDATA[
-create materialized view T5 as select sum(v1+v2) as V from t
-            ]]>
-        </Resource>
-        <Resource name="plan">
-            <![CDATA[
-RwStreamMaterializedView(v=[$0])
-  RwStreamAgg(group=[{}], v=[SUM($0)])
-    RwStreamProject($f0=[+($0, $1)])
-      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
-]]>
-        </Resource>
-        <Resource name="json">
-            <![CDATA[
-{
-  "body": {
-    "@type": "type.googleapis.com/risingwave.streaming.proto.TableSourceNode",
-    "tableRefId": {
-      "schemaRefId": {
-        "databaseRefId": {
-        }
-      }
-    },
-    "columnIds": [0, 1]
-  },
-  "downstreamNode": {
-    "nodeType": "PROJECTION",
-    "body": {
-      "@type": "type.googleapis.com/risingwave.streaming.proto.ProjectNode",
-      "selectList": [{
-        "exprType": "ADD",
-        "body": {
-          "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
-          "children": [{
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
-            },
-            "returnType": {
-              "typeName": "INT32"
-            }
-          }, {
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
-              "columnIdx": 1
-            },
-            "returnType": {
-              "typeName": "INT32"
-            }
-          }]
-        },
-        "returnType": {
-          "typeName": "INT32"
-        }
-      }]
-    },
-    "downstreamNode": {
-      "nodeType": "LOCAL_SIMPLE_AGG",
-      "body": {
-        "@type": "type.googleapis.com/risingwave.streaming.proto.SimpleAggNode",
-        "aggCalls": [{
-          "type": "SUM",
-          "args": [{
-            "input": {
-            },
-            "type": {
-              "typeName": "INT32"
-            }
-          }],
-          "returnType": {
-            "typeName": "INT32"
-          }
-        }]
-      },
-      "downstreamNode": {
-        "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
-        "body": {
-          "@type": "type.googleapis.com/risingwave.streaming.proto.MaterializedViewNode",
-          "tableRefId": {
-            "schemaRefId": {
-              "databaseRefId": {
-              }
-            },
-            "tableId": 5
-          },
-          "columnDescs": [{
-            "columnType": {
-              "typeName": "INT32"
-            },
-            "encoding": "RAW"
-          }]
+          "columnIds": [0, 1]
         }
       }
     }
@@ -517,69 +517,69 @@ RwStreamMaterializedView(v=[$0])
         <Resource name="json">
             <![CDATA[
 {
+  "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
   "body": {
-    "@type": "type.googleapis.com/risingwave.streaming.proto.TableSourceNode",
+    "@type": "type.googleapis.com/risingwave.streaming.proto.MaterializedViewNode",
     "tableRefId": {
       "schemaRefId": {
         "databaseRefId": {
         }
-      }
+      },
+      "tableId": 6
     },
-    "columnIds": [1, 0]
+    "columnDescs": [{
+      "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW"
+    }]
   },
-  "downstreamNode": {
-    "nodeType": "LOCAL_HASH_AGG",
+  "input": {
+    "nodeType": "PROJECTION",
     "body": {
-      "@type": "type.googleapis.com/risingwave.streaming.proto.HashAggNode",
-      "groupKeys": [{
-      }],
-      "aggCalls": [{
-        "type": "SUM",
-        "args": [{
-          "input": {
-            "columnIdx": 1
-          },
-          "type": {
-            "typeName": "INT32"
-          }
-        }],
+      "@type": "type.googleapis.com/risingwave.streaming.proto.ProjectNode",
+      "selectList": [{
+        "exprType": "INPUT_REF",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+          "columnIdx": 1
+        },
         "returnType": {
           "typeName": "INT32"
         }
       }]
     },
-    "downstreamNode": {
-      "nodeType": "PROJECTION",
+    "input": {
+      "nodeType": "LOCAL_HASH_AGG",
       "body": {
-        "@type": "type.googleapis.com/risingwave.streaming.proto.ProjectNode",
-        "selectList": [{
-          "exprType": "INPUT_REF",
-          "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
-            "columnIdx": 1
-          },
+        "@type": "type.googleapis.com/risingwave.streaming.proto.HashAggNode",
+        "groupKeys": [{
+        }],
+        "aggCalls": [{
+          "type": "SUM",
+          "args": [{
+            "input": {
+              "columnIdx": 1
+            },
+            "type": {
+              "typeName": "INT32"
+            }
+          }],
           "returnType": {
             "typeName": "INT32"
           }
         }]
       },
-      "downstreamNode": {
-        "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
+      "input": {
         "body": {
-          "@type": "type.googleapis.com/risingwave.streaming.proto.MaterializedViewNode",
+          "@type": "type.googleapis.com/risingwave.streaming.proto.TableSourceNode",
           "tableRefId": {
             "schemaRefId": {
               "databaseRefId": {
               }
-            },
-            "tableId": 6
+            }
           },
-          "columnDescs": [{
-            "columnType": {
-              "typeName": "INT32"
-            },
-            "encoding": "RAW"
-          }]
+          "columnIds": [1, 0]
         }
       }
     }
@@ -606,87 +606,87 @@ RwStreamMaterializedView(v=[$0])
         <Resource name="json">
             <![CDATA[
 {
+  "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
   "body": {
-    "@type": "type.googleapis.com/risingwave.streaming.proto.TableSourceNode",
+    "@type": "type.googleapis.com/risingwave.streaming.proto.MaterializedViewNode",
     "tableRefId": {
       "schemaRefId": {
         "databaseRefId": {
         }
-      }
+      },
+      "tableId": 7
     },
-    "columnIds": [1, 0]
+    "columnDescs": [{
+      "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW"
+    }]
   },
-  "downstreamNode": {
-    "nodeType": "LOCAL_HASH_AGG",
+  "input": {
+    "nodeType": "PROJECTION",
     "body": {
-      "@type": "type.googleapis.com/risingwave.streaming.proto.HashAggNode",
-      "groupKeys": [{
-      }],
-      "aggCalls": [{
-        "type": "SUM",
-        "args": [{
-          "input": {
-            "columnIdx": 1
-          },
-          "type": {
-            "typeName": "INT32"
-          }
-        }],
+      "@type": "type.googleapis.com/risingwave.streaming.proto.ProjectNode",
+      "selectList": [{
+        "exprType": "ADD",
+        "body": {
+          "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+          "children": [{
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+              "columnIdx": 1
+            },
+            "returnType": {
+              "typeName": "INT32"
+            }
+          }, {
+            "exprType": "CONSTANT_VALUE",
+            "body": {
+              "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+              "body": "AAAAAQ=="
+            },
+            "returnType": {
+              "typeName": "INT32"
+            }
+          }]
+        },
         "returnType": {
           "typeName": "INT32"
         }
       }]
     },
-    "downstreamNode": {
-      "nodeType": "PROJECTION",
+    "input": {
+      "nodeType": "LOCAL_HASH_AGG",
       "body": {
-        "@type": "type.googleapis.com/risingwave.streaming.proto.ProjectNode",
-        "selectList": [{
-          "exprType": "ADD",
-          "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
-            "children": [{
-              "exprType": "INPUT_REF",
-              "body": {
-                "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
-                "columnIdx": 1
-              },
-              "returnType": {
-                "typeName": "INT32"
-              }
-            }, {
-              "exprType": "CONSTANT_VALUE",
-              "body": {
-                "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
-                "body": "AAAAAQ=="
-              },
-              "returnType": {
-                "typeName": "INT32"
-              }
-            }]
-          },
+        "@type": "type.googleapis.com/risingwave.streaming.proto.HashAggNode",
+        "groupKeys": [{
+        }],
+        "aggCalls": [{
+          "type": "SUM",
+          "args": [{
+            "input": {
+              "columnIdx": 1
+            },
+            "type": {
+              "typeName": "INT32"
+            }
+          }],
           "returnType": {
             "typeName": "INT32"
           }
         }]
       },
-      "downstreamNode": {
-        "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
+      "input": {
         "body": {
-          "@type": "type.googleapis.com/risingwave.streaming.proto.MaterializedViewNode",
+          "@type": "type.googleapis.com/risingwave.streaming.proto.TableSourceNode",
           "tableRefId": {
             "schemaRefId": {
               "databaseRefId": {
               }
-            },
-            "tableId": 7
+            }
           },
-          "columnDescs": [{
-            "columnType": {
-              "typeName": "INT32"
-            },
-            "encoding": "RAW"
-          }]
+          "columnIds": [1, 0]
         }
       }
     }
@@ -714,22 +714,29 @@ RwStreamMaterializedView(v=[$0])
         <Resource name="json">
             <![CDATA[
 {
+  "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
   "body": {
-    "@type": "type.googleapis.com/risingwave.streaming.proto.TableSourceNode",
+    "@type": "type.googleapis.com/risingwave.streaming.proto.MaterializedViewNode",
     "tableRefId": {
       "schemaRefId": {
         "databaseRefId": {
         }
-      }
+      },
+      "tableId": 8
     },
-    "columnIds": [0, 1]
+    "columnDescs": [{
+      "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW"
+    }]
   },
-  "downstreamNode": {
-    "nodeType": "FILTER",
+  "input": {
+    "nodeType": "PROJECTION",
     "body": {
-      "@type": "type.googleapis.com/risingwave.streaming.proto.FilterNode",
-      "searchCondition": {
-        "exprType": "GREATER_THAN",
+      "@type": "type.googleapis.com/risingwave.streaming.proto.ProjectNode",
+      "selectList": [{
+        "exprType": "ADD",
         "body": {
           "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
           "children": [{
@@ -741,10 +748,10 @@ RwStreamMaterializedView(v=[$0])
               "typeName": "INT32"
             }
           }, {
-            "exprType": "INPUT_REF",
+            "exprType": "CONSTANT_VALUE",
             "body": {
-              "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
-              "columnIdx": 1
+              "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+              "body": "AAAAAQ=="
             },
             "returnType": {
               "typeName": "INT32"
@@ -752,48 +759,48 @@ RwStreamMaterializedView(v=[$0])
           }]
         },
         "returnType": {
-          "typeName": "BOOLEAN"
+          "typeName": "INT32"
         }
-      }
+      }]
     },
-    "downstreamNode": {
-      "nodeType": "PROJECTION",
+    "input": {
+      "nodeType": "LOCAL_SIMPLE_AGG",
       "body": {
-        "@type": "type.googleapis.com/risingwave.streaming.proto.ProjectNode",
-        "selectList": [{
-          "exprType": "INPUT_REF",
-          "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
-          },
+        "@type": "type.googleapis.com/risingwave.streaming.proto.SimpleAggNode",
+        "aggCalls": [{
+          "type": "SUM",
+          "args": [{
+            "input": {
+            },
+            "type": {
+              "typeName": "INT32"
+            }
+          }],
           "returnType": {
             "typeName": "INT32"
           }
         }]
       },
-      "downstreamNode": {
-        "nodeType": "LOCAL_SIMPLE_AGG",
+      "input": {
+        "nodeType": "PROJECTION",
         "body": {
-          "@type": "type.googleapis.com/risingwave.streaming.proto.SimpleAggNode",
-          "aggCalls": [{
-            "type": "SUM",
-            "args": [{
-              "input": {
-              },
-              "type": {
-                "typeName": "INT32"
-              }
-            }],
+          "@type": "type.googleapis.com/risingwave.streaming.proto.ProjectNode",
+          "selectList": [{
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+            },
             "returnType": {
               "typeName": "INT32"
             }
           }]
         },
-        "downstreamNode": {
-          "nodeType": "PROJECTION",
+        "input": {
+          "nodeType": "FILTER",
           "body": {
-            "@type": "type.googleapis.com/risingwave.streaming.proto.ProjectNode",
-            "selectList": [{
-              "exprType": "ADD",
+            "@type": "type.googleapis.com/risingwave.streaming.proto.FilterNode",
+            "searchCondition": {
+              "exprType": "GREATER_THAN",
               "body": {
                 "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
                 "children": [{
@@ -805,10 +812,10 @@ RwStreamMaterializedView(v=[$0])
                     "typeName": "INT32"
                   }
                 }, {
-                  "exprType": "CONSTANT_VALUE",
+                  "exprType": "INPUT_REF",
                   "body": {
-                    "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
-                    "body": "AAAAAQ=="
+                    "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+                    "columnIdx": 1
                   },
                   "returnType": {
                     "typeName": "INT32"
@@ -816,27 +823,20 @@ RwStreamMaterializedView(v=[$0])
                 }]
               },
               "returnType": {
-                "typeName": "INT32"
+                "typeName": "BOOLEAN"
               }
-            }]
+            }
           },
-          "downstreamNode": {
-            "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
+          "input": {
             "body": {
-              "@type": "type.googleapis.com/risingwave.streaming.proto.MaterializedViewNode",
+              "@type": "type.googleapis.com/risingwave.streaming.proto.TableSourceNode",
               "tableRefId": {
                 "schemaRefId": {
                   "databaseRefId": {
                   }
-                },
-                "tableId": 8
+                }
               },
-              "columnDescs": [{
-                "columnType": {
-                  "typeName": "INT32"
-                },
-                "encoding": "RAW"
-              }]
+              "columnIds": [0, 1]
             }
           }
         }

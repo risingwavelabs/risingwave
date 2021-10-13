@@ -171,10 +171,11 @@ impl StreamManagerCore {
     /// Create dispatchers with downstream information registered before
     fn create_dispatcher(
         &mut self,
+        input: Box<dyn StreamOperator>,
         dispatcher: &stream_plan::Dispatcher,
         fragment_id: u32,
         downstreams: &[u32],
-    ) -> Box<dyn Output> {
+    ) -> Box<dyn StreamConsumer> {
         // create downstream receivers
         let outputs = self
             .channel_pool
@@ -182,34 +183,36 @@ impl StreamManagerCore {
             .map(|x| std::mem::take(&mut x.0))
             .unwrap_or_default()
             .into_iter()
-            .map(|tx| Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
             .collect::<Vec<_>>();
 
         assert_eq!(downstreams.len(), outputs.len());
 
         use stream_plan::Dispatcher_DispatcherType::*;
         match dispatcher.field_type {
-            SIMPLE => {
-                let mut outputs = outputs;
-                assert_eq!(outputs.len(), 1);
-                outputs.pop().unwrap()
-            }
             ROUND_ROBIN => {
                 assert!(!outputs.is_empty());
-                Box::new(Dispatcher::new(RoundRobinDataDispatcher::new(outputs))) as Box<dyn Output>
+                Box::new(Dispatcher::new(
+                    input,
+                    RoundRobinDataDispatcher::new(outputs),
+                ))
             }
             HASH => {
                 assert!(!outputs.is_empty());
-                Box::new(Dispatcher::new(HashDataDispatcher::new(
-                    outputs,
-                    vec![dispatcher.get_column_idx() as usize],
-                )))
+                Box::new(Dispatcher::new(
+                    input,
+                    HashDataDispatcher::new(outputs, vec![dispatcher.get_column_idx() as usize]),
+                ))
             }
             BROADCAST => {
                 assert!(!outputs.is_empty());
-                Box::new(Dispatcher::new(BroadcastDispatcher::new(outputs)))
+                Box::new(Dispatcher::new(input, BroadcastDispatcher::new(outputs)))
             }
-            BLACKHOLE => Box::new(Dispatcher::new(BlackHoleDispatcher::new())),
+            SIMPLE => {
+                assert_eq!(outputs.len(), 1);
+                let output = outputs.into_iter().next().unwrap();
+                Box::new(Dispatcher::new(input, SimpleDispatcher::new(output)))
+            }
+            BLACKHOLE => Box::new(Dispatcher::new(input, BlackHoleDispatcher::new())),
         }
     }
 
@@ -217,24 +220,19 @@ impl StreamManagerCore {
     fn create_nodes(
         &mut self,
         node: &stream_plan::StreamNode,
-        dispatcher: &stream_plan::Dispatcher,
-        fragment_id: u32,
-        downstreams: &[u32],
-    ) -> Result<Box<dyn UnaryStreamOperator>> {
-        let downstream_node: Box<dyn Output> = if node.has_downstream_node() {
-            Box::new(OperatorOutput::new(self.create_nodes(
-                node.get_downstream_node(),
-                dispatcher,
-                fragment_id,
-                downstreams,
-            )?))
-        } else {
-            self.create_dispatcher(dispatcher, fragment_id, downstreams)
-        };
-
+        merger: Box<dyn StreamOperator>,
+    ) -> Result<Box<dyn StreamOperator>> {
         use stream_plan::StreamNode_StreamNodeType::*;
 
-        let operator: Box<dyn UnaryStreamOperator> = match node.get_node_type() {
+        // Create the input operator before creating itself
+        // Note(eric): Maybe we should put a `Merger` operator in proto
+        let input = if node.has_input() {
+            self.create_nodes(node.get_input(), merger)?
+        } else {
+            merger
+        };
+
+        let operator: Box<dyn StreamOperator> = match node.get_node_type() {
             PROJECTION => {
                 let project_node =
                     stream_plan::ProjectNode::parse_from_bytes(node.get_body().get_value())
@@ -244,14 +242,14 @@ impl StreamManagerCore {
                     .iter()
                     .map(build_expr_from_proto)
                     .collect::<Result<Vec<_>>>()?;
-                Box::new(ProjectionOperator::new(downstream_node, project_exprs))
+                Box::new(ProjectionOperator::new(input, project_exprs))
             }
             FILTER => {
                 let filter_node =
                     stream_plan::FilterNode::parse_from_bytes(node.get_body().get_value())
                         .map_err(ErrorCode::ProtobufError)?;
                 let search_condition = build_expr_from_proto(filter_node.get_search_condition())?;
-                Box::new(FilterOperator::new(downstream_node, search_condition))
+                Box::new(FilterOperator::new(input, search_condition))
             }
             LOCAL_SIMPLE_AGG => {
                 let aggr_node =
@@ -266,7 +264,7 @@ impl StreamManagerCore {
                 } = from_agg_calls(agg_calls)?;
 
                 Box::new(AggregationOperator::new(
-                    downstream_node,
+                    input,
                     input_types,
                     return_types,
                     val_indices,
@@ -292,11 +290,7 @@ impl StreamManagerCore {
                     .map(build_agg_call_from_proto)
                     .try_collect()?;
 
-                Box::new(HashAggregationOperator::new(
-                    downstream_node,
-                    agg_calls,
-                    keys,
-                ))
+                Box::new(HashAggregationOperator::new(input, agg_calls, keys))
             }
             GLOBAL_HASH_AGG => todo!(),
             MEMTABLE_MATERIALIZED_VIEW => {
@@ -309,7 +303,7 @@ impl StreamManagerCore {
                 let memtable = MemRowTable::default();
 
                 Box::new(MemTableMVOperator::new(
-                    downstream_node,
+                    input,
                     std::sync::Arc::new(memtable),
                     mtmv.get_pk_idx().iter().map(|x| *x as usize).collect(),
                 ))
@@ -319,69 +313,74 @@ impl StreamManagerCore {
         Ok(operator)
     }
 
+    fn create_merger(
+        &mut self,
+        fragment_id: u32,
+        upstreams: &[u32],
+    ) -> Result<Box<dyn StreamOperator>> {
+        assert!(!upstreams.is_empty());
+
+        let mut rxs = self
+            .channel_pool
+            .get_mut(&fragment_id)
+            .map(|x| std::mem::take(&mut x.1))
+            .unwrap_or_default();
+
+        for upstream in upstreams {
+            // TODO: remove this
+            if *upstream == 0 {
+                // `fragment_id = 0` is used as mock input
+                rxs.push(self.mock_source.1.take().unwrap());
+                continue;
+            }
+
+            let actor = self
+                .actors
+                .get(upstream)
+                .expect("upstream actor not found in info table");
+            // FIXME: use `is_local_address` from `ExchangeExecutor`.
+            if actor.get_host().get_host() == "127.0.0.1" {
+                continue;
+            } else {
+                todo!("remote node is not supported in streaming engine");
+                // TODO: create gRPC connection
+            }
+        }
+
+        assert_eq!(
+            rxs.len(),
+            upstreams.len(),
+            "upstreams are not fully available: {} registered while {} required, fragment_id={}",
+            rxs.len(),
+            upstreams.len(),
+            fragment_id
+        );
+
+        if upstreams.len() == 1 {
+            // Only one upstream, use `ReceiverOperator`.
+            Ok(Box::new(ReceiverOperator::new(rxs.remove(0))))
+        } else {
+            Ok(Box::new(MergeOperator::new(rxs)))
+        }
+    }
+
     fn build_fragment(&mut self, fragments: &[u32]) -> Result<()> {
         for fragment_id in fragments {
             let fragment = self.fragments.remove(fragment_id).unwrap();
-            let operator_head = self.create_nodes(
-                fragment.get_nodes(),
+
+            let merger = self.create_merger(*fragment_id, fragment.get_upstream_fragment_id())?;
+
+            let operator = self.create_nodes(fragment.get_nodes(), merger)?;
+
+            let dispatcher = self.create_dispatcher(
+                operator,
                 fragment.get_dispatcher(),
                 *fragment_id,
                 fragment.get_downstream_fragment_id(),
-            )?;
+            );
 
-            let upstreams = fragment.get_upstream_fragment_id();
-            assert!(!upstreams.is_empty());
-
-            let mut rxs = self
-                .channel_pool
-                .get_mut(fragment_id)
-                .map(|x| std::mem::take(&mut x.1))
-                .unwrap_or_default();
-
-            for upstream in upstreams {
-                // TODO: remove this
-                if *upstream == 0 {
-                    // `fragment_id = 0` is used as mock input
-                    rxs.push(self.mock_source.1.take().unwrap());
-                    continue;
-                }
-
-                let actor = self
-                    .actors
-                    .get(upstream)
-                    .expect("upstream actor not found in info table");
-                // FIXME: use `is_local_address` from `ExchangeExecutor`.
-                if actor.get_host().get_host() == "127.0.0.1" {
-                    continue;
-                } else {
-                    todo!("remote node is not supported in streaming engine");
-                    // TODO: create gRPC connection
-                }
-            }
-
-            assert_eq!(
-        rxs.len(),
-        upstreams.len(),
-        "upstreams are not fully available: {} registered while {} required, fragment_id={}",
-        rxs.len(),
-        upstreams.len(),
-        fragment_id
-      );
-
-            let join_handle = if upstreams.len() == 1 {
-                // Only one upstream, use `UnarySimpleProcessor`.
-                let processor = UnarySimpleProcessor::new(rxs.remove(0), operator_head);
-                // Create processor
-                tokio::spawn(processor.run())
-            } else {
-                // Create processor
-                let processor = UnaryMergeProcessor::new(rxs, operator_head);
-                // Store join handle
-                tokio::spawn(processor.run())
-            };
-
-            // Store handle for later use
-            self.handles.push(join_handle);
+            let actor = Actor::new(dispatcher);
+            tokio::spawn(actor.run());
         }
 
         Ok(())

@@ -1,9 +1,8 @@
 use crate::catalog::TableId;
 use crate::error::Result;
-use crate::stream_op::{DataSource, Message, Output, StreamChunk};
+use crate::stream_op::{Message, StreamChunk, StreamOperator};
 use async_trait::async_trait;
 use futures::channel::mpsc::UnboundedReceiver;
-use futures::channel::oneshot;
 use futures::StreamExt;
 use std::fmt::{Debug, Formatter};
 
@@ -20,25 +19,13 @@ impl TableDataSource {
 }
 
 #[async_trait]
-impl DataSource for TableDataSource {
-    async fn run(
-        &mut self,
-        mut output: Box<dyn Output>,
-        mut cancel: oneshot::Receiver<()>,
-    ) -> Result<()> {
-        loop {
-            futures::select! {
-              _ = cancel => {
-                return Ok(())
-              },
-              received = self.receiver.next() => {
-                if let Some(chunk) = received {
-                  output.collect(Message::Chunk(chunk)).await?;
-                } else {
-                  panic!("table stream closed unexpectedly");
-                }
-              }
-            }
+impl StreamOperator for TableDataSource {
+    async fn next(&mut self) -> Result<Message> {
+        let received = self.receiver.next().await;
+        if let Some(chunk) = received {
+            Ok(Message::Chunk(chunk))
+        } else {
+            panic!("table stream closed unexpectedly");
         }
     }
 }
@@ -60,14 +47,11 @@ mod test {
     use crate::array_nonnull;
     use crate::catalog::test_utils::mock_table_id;
     use crate::storage::MemColumnarTable;
-    use crate::stream_op::data_source::MockOutput;
-    use crate::stream_op::{Op, Processor, SourceProcessor};
+    use crate::stream_op::data_source::MockConsumer;
+    use crate::stream_op::{Op, StreamConsumer};
     use crate::types::{DataTypeKind, DataTypeRef, Int32Type, StringType};
     use itertools::Itertools;
-    use std::sync::Arc;
-    use std::time::Duration;
-    use tokio::sync::Mutex;
-    use tokio::time::sleep;
+    use std::sync::{Arc, Mutex};
 
     #[tokio::test]
     async fn test_table_source() -> Result<()> {
@@ -100,19 +84,15 @@ mod test {
         let stream_recv = table.create_stream()?;
         let source = TableDataSource::new(table_id, stream_recv);
         let output_buf = Arc::new(Mutex::new(Vec::new()));
-        let output = MockOutput::new(output_buf.clone());
-        let (cancel_tx, cancel_rx) = oneshot::channel();
-        let processor = SourceProcessor::new(Box::new(source), Box::new(output), cancel_rx);
-
-        let handler = tokio::spawn(async { processor.run().await });
+        let mut consumer = MockConsumer::new(Box::new(source), output_buf.clone());
 
         // Write 1st chunk
         let card = table.append(chunk1)?;
         assert_eq!(3, card);
 
-        sleep(Duration::from_millis(10)).await;
+        consumer.next().await?;
         {
-            let chunks = output_buf.lock().await;
+            let chunks = output_buf.lock().unwrap();
             assert_eq!(1, chunks.len());
             let chunk = chunks.get(0).unwrap();
             assert_eq!(2, chunk.columns.len());
@@ -131,9 +111,9 @@ mod test {
         let card = table.append(chunk2)?;
         assert_eq!(3, card);
 
-        sleep(Duration::from_millis(10)).await;
+        consumer.next().await?;
         {
-            let chunks = output_buf.lock().await;
+            let chunks = output_buf.lock().unwrap();
             assert_eq!(2, chunks.len());
             let chunk = chunks.get(1).unwrap();
             assert_eq!(2, chunk.columns.len());
@@ -147,10 +127,6 @@ mod test {
             );
             assert_eq!(vec![Op::Insert; 3], chunk.ops);
         }
-
-        // Shutdown processor
-        cancel_tx.send(()).unwrap();
-        handler.await.unwrap()?;
 
         Ok(())
     }

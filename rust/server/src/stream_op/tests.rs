@@ -1,29 +1,45 @@
 use super::data_source::*;
 use super::Result;
-use super::{FilterOperator, OperatorOutput, Output, ProjectionOperator};
+use super::{FilterOperator, ProjectionOperator};
 use crate::array;
 use crate::array2::column::Column;
-use crate::array2::{Array, ArrayBuilder, I32ArrayBuilder, I64Array};
+use crate::array2::{Array, ArrayBuilder, I64Array, I64ArrayBuilder};
 use crate::buffer::Bitmap;
 use crate::expr::*;
 use crate::stream_op::*;
-use crate::types::{ArithmeticOperatorKind, BoolType, Int32Type, Int64Type};
-use crate::util::hash_util::CRC32FastBuilder;
-use futures::channel::oneshot;
-use std::hash::{BuildHasher, Hasher};
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use crate::types::{ArithmeticOperatorKind, BoolType, Int64Type};
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
+
+pub struct MockSource {
+    chunks: VecDeque<StreamChunk>,
+}
+
+impl MockSource {
+    pub fn new(chunks: Vec<StreamChunk>) -> Self {
+        Self {
+            chunks: chunks.into_iter().collect(),
+        }
+    }
+}
+
+#[async_trait]
+impl StreamOperator for MockSource {
+    async fn next(&mut self) -> Result<Message> {
+        match self.chunks.pop_front() {
+            Some(chunk) => Ok(Message::Chunk(chunk)),
+            None => Ok(Message::Terminate),
+        }
+    }
+}
 
 #[tokio::test]
 async fn test_projection() -> Result<()> {
     let start: i64 = 114514;
-    let end = start + 1000;
     let scalar: i64 = 1;
     let repeat: (i64, i64) = (-20, 20);
-    let mock_data = MockData::new(start..end, scalar, (repeat.0..repeat.1).cycle());
-    let data = Arc::new(Mutex::new(vec![]));
-    let projection_out = Box::new(MockOutput::new(data.clone()));
-    let mut source = MockDataSource::new(mock_data);
+    let mock_data = MockData::new(start.., scalar, (repeat.0..repeat.1).cycle());
+    let source = MockDataSource::new(mock_data);
 
     let left_type = Int64Type::create(false);
     let left_expr = InputRefExpression::new(left_type, 0);
@@ -37,14 +53,18 @@ async fn test_projection() -> Result<()> {
     );
 
     let projection_op = Box::new(ProjectionOperator::new(
-        projection_out,
+        Box::new(source),
         vec![Box::new(test_expr)],
     ));
-    let source_out = Box::new(OperatorOutput::new(projection_op));
-    let (_cancel_tx, cancel_rx) = oneshot::channel();
-    source.run(source_out, cancel_rx).await?;
 
-    let data = data.lock().await;
+    let data = Arc::new(Mutex::new(vec![]));
+    let mut consumer = MockConsumer::new(projection_op, data.clone());
+
+    for _ in 0..10 {
+        consumer.next().await?;
+    }
+
+    let data = data.lock().unwrap();
     let mut expected = start;
     for chunk in data.iter() {
         assert!(chunk.columns.len() == 1);
@@ -62,13 +82,10 @@ async fn test_projection() -> Result<()> {
 #[tokio::test]
 async fn test_filter() -> Result<()> {
     let start: i64 = -1024;
-    let end = start + 1000;
     let scalar: i64 = 0;
     let repeat: (i64, i64) = (-20, 20);
-    let mock_data = MockData::new(start..end, scalar, (repeat.0..repeat.1).cycle());
-    let data = Arc::new(Mutex::new(vec![]));
-    let filter_out = Box::new(MockOutput::new(data.clone()));
-    let mut source = MockDataSource::new(mock_data);
+    let mock_data = MockData::new(start.., scalar, (repeat.0..repeat.1).cycle());
+    let source = MockDataSource::new(mock_data);
 
     let left_type = Int64Type::create(false);
     let left_expr = InputRefExpression::new(left_type, 1);
@@ -80,14 +97,16 @@ async fn test_filter() -> Result<()> {
         Box::new(left_expr),
         Box::new(right_expr),
     );
+    let filter_op = FilterOperator::new(Box::new(source), Box::new(test_expr));
 
-    let filter_op = Box::new(FilterOperator::new(filter_out, Box::new(test_expr)));
-    let source_out = Box::new(OperatorOutput::new(filter_op));
+    let data = Arc::new(Mutex::new(vec![]));
+    let mut consumer = MockConsumer::new(Box::new(filter_op), data.clone());
 
-    let (_cancel_tx, cancel_rx) = oneshot::channel();
-    source.run(source_out, cancel_rx).await?;
+    for _ in 0..10 {
+        consumer.next().await?;
+    }
 
-    let data = data.lock().await;
+    let data = data.lock().unwrap();
     let mut items_collected = 0;
     for chunk in data.iter() {
         assert!(chunk.columns.len() == 3);
@@ -119,103 +138,128 @@ async fn test_filter() -> Result<()> {
     Ok(())
 }
 
+// TODO: Fix this after introducing Input/Output interface for Merger and Dispatcher
+/*
 #[tokio::test]
 async fn test_hash_dispatcher() {
-    let num_outputs = 5;
-    let cardinality = 10;
-    let dimension = 4;
-    let key_indices = &[0, 2];
-    let output_data_vecs = (0..num_outputs)
-        .map(|_| Arc::new(Mutex::new(Vec::new())))
-        .collect::<Vec<_>>();
-    let outputs = output_data_vecs
-        .iter()
-        .map(|data| Box::new(MockOutput::new(data.clone())) as Box<dyn Output>)
-        .collect::<Vec<_>>();
-    let mut hash_dispatcher = HashDataDispatcher::new(outputs, key_indices.to_vec());
+  let num_outputs = 5;
+  let cardinality = 10;
+  let dimension = 4;
+  let key_indices = &[0, 2];
+  let output_data_vecs = (0..num_outputs)
+    .map(|_| Arc::new(Mutex::new(Vec::new())))
+    .collect::<Vec<_>>();
+  let outputs = output_data_vecs
+    .iter()
+    .map(|data| Box::new(MockConsumer::new(data.clone())) as Box<dyn Output>)
+    .collect::<Vec<_>>();
+  let mut hash_dispatcher = HashDataDispatcher::new(outputs, key_indices.to_vec());
 
-    let mut ops = Vec::new();
-    for idx in 0..cardinality {
-        if idx % 2 == 0 {
-            ops.push(Op::Insert);
-        } else {
-            ops.push(Op::Delete);
-        }
+  let mut ops = Vec::new();
+  for idx in 0..cardinality {
+    if idx % 2 == 0 {
+      ops.push(Op::Insert);
+    } else {
+      ops.push(Op::Delete);
     }
+  }
 
-    let mut start = 19260817..;
-    let mut builders = (0..dimension)
-        .map(|_| I32ArrayBuilder::new(cardinality).unwrap())
-        .collect::<Vec<_>>();
-    let mut output_cols = vec![vec![vec![]; dimension]; num_outputs];
-    let mut output_ops = vec![vec![]; num_outputs];
-    for op in ops.iter() {
-        let hash_builder = CRC32FastBuilder {};
-        let mut hasher = hash_builder.build_hasher();
-        let one_row: Vec<i32> = (0..dimension)
-            .map(|_| start.next().unwrap())
-            .collect::<Vec<_>>();
-        for key_idx in key_indices.iter() {
-            let val = one_row[*key_idx];
-            let bytes = val.to_le_bytes();
-            hasher.update(&bytes);
-        }
-        let output_idx = hasher.finish() as usize % num_outputs;
-        for (builder, val) in builders.iter_mut().zip(one_row.iter()) {
-            builder.append(Some(*val)).unwrap();
-        }
-        output_cols[output_idx]
-            .iter_mut()
-            .zip(one_row.iter())
-            .for_each(|(each_column, val)| each_column.push(*val));
-        output_ops[output_idx].push(op);
+  let mut start = 19260817..;
+  let mut builders = (0..dimension)
+    .map(|_| I32ArrayBuilder::new(cardinality).unwrap())
+    .collect::<Vec<_>>();
+  let mut output_cols = vec![vec![vec![]; dimension]; num_outputs];
+  let mut output_ops = vec![vec![]; num_outputs];
+  for op in ops.iter() {
+    let hash_builder = CRC32FastBuilder {};
+    let mut hasher = hash_builder.build_hasher();
+    let one_row: Vec<i32> = (0..dimension)
+      .map(|_| start.next().unwrap())
+      .collect::<Vec<_>>();
+    for key_idx in key_indices.iter() {
+      let val = one_row[*key_idx];
+      let bytes = val.to_le_bytes();
+      hasher.update(&bytes);
     }
-
-    let columns = builders
-        .into_iter()
-        .map(|builder| {
-            let array = builder.finish().unwrap();
-            Column::new(Arc::new(array.into()), Int32Type::create(false))
-        })
-        .collect::<Vec<_>>();
-
-    let chunk = StreamChunk {
-        ops,
-        columns,
-        visibility: None,
-    };
-    hash_dispatcher.dispatch_data(chunk).await.unwrap();
-
-    for (output_idx, output) in output_data_vecs.into_iter().enumerate() {
-        let guard = output.lock().await;
-        assert_eq!(guard.len(), 1);
-        let real_chunk = guard.get(0).unwrap();
-        real_chunk
-            .columns
-            .iter()
-            .zip(output_cols[output_idx].iter())
-            .for_each(|(real_col, expect_col)| {
-                let real_vals = real_chunk
-                    .visibility
-                    .as_ref()
-                    .unwrap()
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, vis)| *vis)
-                    .map(|(row_idx, _)| real_col.array_ref().as_int32().value_at(row_idx).unwrap())
-                    .collect::<Vec<_>>();
-                assert_eq!(real_vals.len(), expect_col.len());
-                assert_eq!(real_vals, *expect_col);
-            });
+    let output_idx = hasher.finish() as usize % num_outputs;
+    for (builder, val) in builders.iter_mut().zip(one_row.iter()) {
+      builder.append(Some(*val)).unwrap();
     }
+    output_cols[output_idx]
+      .iter_mut()
+      .zip(one_row.iter())
+      .for_each(|(each_column, val)| each_column.push(*val));
+    output_ops[output_idx].push(op);
+  }
+
+  let columns = builders
+    .into_iter()
+    .map(|builder| {
+      let array = builder.finish().unwrap();
+      Column::new(Arc::new(array.into()), Int32Type::create(false))
+    })
+    .collect::<Vec<_>>();
+
+  let chunk = StreamChunk {
+    ops,
+    columns,
+    visibility: None,
+  };
+  hash_dispatcher.dispatch_data(chunk).await.unwrap();
+
+  for (output_idx, output) in output_data_vecs.into_iter().enumerate() {
+    let guard = output.lock().await;
+    assert_eq!(guard.len(), 1);
+    let real_chunk = guard.get(0).unwrap();
+    real_chunk
+      .columns
+      .iter()
+      .zip(output_cols[output_idx].iter())
+      .for_each(|(real_col, expect_col)| {
+        let real_vals = real_chunk
+          .visibility
+          .as_ref()
+          .unwrap()
+          .iter()
+          .enumerate()
+          .filter(|(_, vis)| *vis)
+          .map(|(row_idx, _)| real_col.array_ref().as_int32().value_at(row_idx).unwrap())
+          .collect::<Vec<_>>();
+        assert_eq!(real_vals.len(), expect_col.len());
+        assert_eq!(real_vals, *expect_col);
+      });
+  }
 }
+*/
 
 #[tokio::test]
 async fn test_local_hash_aggregation_count() {
-    let data = Arc::new(Mutex::new(Vec::new()));
-    let mock_output = Box::new(MockOutput::new(data.clone())) as Box<dyn Output>;
-    let keys = vec![0];
+    let ops1 = vec![Op::Insert, Op::Insert, Op::Insert];
+    let array1 = array! { I64Array, [Some(1), Some(2), Some(2)] };
+    let column1 = Column::new(Arc::new(array1.into()), Int64Type::create(false));
+    let chunk1 = StreamChunk {
+        ops: ops1,
+        columns: vec![column1],
+        visibility: None,
+    };
 
+    let ops2 = vec![Op::Delete, Op::Delete, Op::Delete];
+    let mut builder2 = I64ArrayBuilder::new(0).unwrap();
+    builder2.append(Some(1)).unwrap();
+    builder2.append(Some(2)).unwrap();
+    builder2.append(Some(2)).unwrap();
+    let array2 = builder2.finish().unwrap();
+    let column2 = Column::new(Arc::new(array2.into()), Arc::new(Int64Type::new(false)));
+    let chunk2 = StreamChunk {
+        ops: ops2,
+        columns: vec![column2],
+        visibility: Some(Bitmap::from_vec(vec![true, false, true]).unwrap()),
+    };
+
+    let source = MockSource::new(vec![chunk1, chunk2]);
+
+    // This is local hash aggregation, so we add another row count state
+    let keys = vec![0];
     let agg_calls = vec![
         AggCall {
             kind: AggKind::Count,
@@ -229,20 +273,14 @@ async fn test_local_hash_aggregation_count() {
             return_type: Int64Type::create(false),
         },
     ];
-    let mut hash_aggregator = HashAggregationOperator::new(mock_output, agg_calls, keys);
+    let hash_aggregator = HashAggregationOperator::new(Box::new(source), agg_calls, keys);
 
-    let ops1 = vec![Op::Insert, Op::Insert, Op::Insert];
-    let array1 = array! { I64Array, [Some(1), Some(2), Some(2)] };
-    let column1 = Column::new(Arc::new(array1.into()), Int64Type::create(false));
-    let chunk1 = StreamChunk {
-        ops: ops1,
-        columns: vec![column1],
-        visibility: None,
-    };
+    let data = Arc::new(Mutex::new(Vec::new()));
+    let mut consumer = MockConsumer::new(Box::new(hash_aggregator), data.clone());
 
-    hash_aggregator.consume_chunk(chunk1).await.unwrap();
-    assert_eq!(data.lock().await.len(), 1);
-    let real_output = data.lock().await.drain(0..=0).next().unwrap();
+    assert!(consumer.next().await.unwrap());
+    assert_eq!(data.lock().unwrap().len(), 1);
+    let real_output = data.lock().unwrap().drain(0..=0).next().unwrap();
     assert_eq!(real_output.ops.len(), 2);
     assert_eq!(real_output.ops[0], Op::Insert);
     assert_eq!(real_output.ops[1], Op::Insert);
@@ -257,17 +295,9 @@ async fn test_local_hash_aggregation_count() {
     assert_eq!(row_count_column.value_at(0).unwrap(), 1);
     assert_eq!(row_count_column.value_at(1).unwrap(), 2);
 
-    let ops2 = vec![Op::Delete, Op::Delete, Op::Delete];
-    let array2 = array! { I64Array, [Some(1), Some(2), Some(2)] };
-    let column2 = Column::new(Arc::new(array2.into()), Int64Type::create(false));
-    let chunk2 = StreamChunk {
-        ops: ops2,
-        columns: vec![column2],
-        visibility: Some(Bitmap::from_vec(vec![true, false, true]).unwrap()),
-    };
-    hash_aggregator.consume_chunk(chunk2).await.unwrap();
-    assert_eq!(data.lock().await.len(), 1);
-    let real_output = data.lock().await.drain(0..=0).next().unwrap();
+    assert!(consumer.next().await.unwrap());
+    assert_eq!(data.lock().unwrap().len(), 1);
+    let real_output = data.lock().unwrap().drain(0..=0).next().unwrap();
     assert_eq!(real_output.ops.len(), 4);
     assert_eq!(
         real_output.ops,
@@ -301,25 +331,6 @@ async fn test_local_hash_aggregation_count() {
 
 #[tokio::test]
 async fn test_global_hash_aggregation_count() {
-    let data = Arc::new(Mutex::new(Vec::new()));
-    let mock_output = Box::new(MockOutput::new(data.clone())) as Box<dyn Output>;
-    let key_indices = vec![0];
-
-    let agg_calls = vec![
-        AggCall {
-            kind: AggKind::Sum,
-            args: AggArgs::Unary([Int64Type::create(false)], [1]),
-            return_type: Int64Type::create(false),
-        },
-        // This is local hash aggreagtion, so we add another sum state
-        AggCall {
-            kind: AggKind::Sum,
-            args: AggArgs::Unary([Int64Type::create(false)], [2]),
-            return_type: Int64Type::create(false),
-        },
-    ];
-    let mut hash_aggregator = HashAggregationOperator::new(mock_output, agg_calls, key_indices);
-
     let ops1 = vec![Op::Insert, Op::Insert, Op::Insert];
     let key_array1 = array! { I64Array, [Some(1), Some(2), Some(2)] };
     let key_column1 = Column::new(Arc::new(key_array1.into()), Int64Type::create(false));
@@ -334,9 +345,45 @@ async fn test_global_hash_aggregation_count() {
         visibility: Some(Bitmap::from_vec(vec![true, true, true]).unwrap()),
     };
 
-    hash_aggregator.consume_chunk(chunk1).await.unwrap();
-    assert_eq!(data.lock().await.len(), 1);
-    let real_output = data.lock().await.drain(0..=0).next().unwrap();
+    let ops2 = vec![Op::Delete, Op::Delete, Op::Delete, Op::Insert];
+    let key_array2 = array! { I64Array, [Some(1), Some(2), Some(2), Some(3)] };
+    let key_column2 = Column::new(Arc::new(key_array2.into()), Int64Type::create(false));
+    let value_array2 = array! { I64Array, [Some(1), Some(2), Some(1), Some(3)] };
+    let value_column2 = Column::new(Arc::new(value_array2.into()), Int64Type::create(false));
+    let row_count_array2 = array! { I64Array, [Some(1), Some(2), Some(1), Some(3)] };
+    let row_count_column2 =
+        Column::new(Arc::new(row_count_array2.into()), Int64Type::create(false));
+    let chunk2 = StreamChunk {
+        ops: ops2,
+        columns: vec![key_column2, value_column2, row_count_column2],
+        visibility: Some(Bitmap::from_vec(vec![true, false, true, true]).unwrap()),
+    };
+
+    let source = MockSource::new(vec![chunk1, chunk2]);
+
+    // This is local hash aggreagtion, so we add another sum state
+    let key_indices = vec![0];
+    let agg_calls = vec![
+        AggCall {
+            kind: AggKind::Sum,
+            args: AggArgs::Unary([Int64Type::create(false)], [1]),
+            return_type: Int64Type::create(false),
+        },
+        // This is local hash aggreagtion, so we add another sum state
+        AggCall {
+            kind: AggKind::Sum,
+            args: AggArgs::Unary([Int64Type::create(false)], [2]),
+            return_type: Int64Type::create(false),
+        },
+    ];
+    let hash_aggregator = HashAggregationOperator::new(Box::new(source), agg_calls, key_indices);
+
+    let data = Arc::new(Mutex::new(Vec::new()));
+    let mut consumer = MockConsumer::new(Box::new(hash_aggregator), data.clone());
+
+    assert!(consumer.next().await.unwrap());
+    assert_eq!(data.lock().unwrap().len(), 1);
+    let real_output = data.lock().unwrap().drain(0..=0).next().unwrap();
     assert_eq!(real_output.ops.len(), 2);
     assert_eq!(real_output.ops[0], Op::Insert);
     assert_eq!(real_output.ops[1], Op::Insert);
@@ -351,22 +398,9 @@ async fn test_global_hash_aggregation_count() {
     assert_eq!(row_sum_column.value_at(0).unwrap(), 1);
     assert_eq!(row_sum_column.value_at(1).unwrap(), 4);
 
-    let ops2 = vec![Op::Delete, Op::Delete, Op::Delete, Op::Insert];
-    let key_array2 = array! { I64Array, [Some(1), Some(2), Some(2), Some(3)] };
-    let key_column2 = Column::new(Arc::new(key_array2.into()), Int64Type::create(false));
-    let value_array2 = array! { I64Array, [Some(1), Some(2), Some(1), Some(3)] };
-    let value_column2 = Column::new(Arc::new(value_array2.into()), Int64Type::create(false));
-    let row_count_array2 = array! { I64Array, [Some(1), Some(2), Some(1), Some(3)] };
-    let row_count_column2 =
-        Column::new(Arc::new(row_count_array2.into()), Int64Type::create(false));
-    let chunk2 = StreamChunk {
-        ops: ops2,
-        columns: vec![key_column2, value_column2, row_count_column2],
-        visibility: Some(Bitmap::from_vec(vec![true, false, true, true]).unwrap()),
-    };
-    hash_aggregator.consume_chunk(chunk2).await.unwrap();
-    assert_eq!(data.lock().await.len(), 1);
-    let real_output = data.lock().await.drain(0..=0).next().unwrap();
+    assert!(consumer.next().await.unwrap());
+    assert_eq!(data.lock().unwrap().len(), 1);
+    let real_output = data.lock().unwrap().drain(0..=0).next().unwrap();
     assert_eq!(real_output.ops.len(), 5);
     assert_eq!(
         real_output.ops,

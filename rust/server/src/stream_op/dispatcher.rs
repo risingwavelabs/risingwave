@@ -1,19 +1,25 @@
-use super::{Message, Output, Result, StreamChunk};
+use super::{Message, Result, StreamChunk};
 use crate::array2::DataChunk;
 use crate::buffer::Bitmap;
+use crate::stream_op::{StreamConsumer, StreamOperator};
 use crate::util::hash_util::CRC32FastBuilder;
 use async_trait::async_trait;
+use futures::channel::mpsc::Sender;
+use futures::SinkExt;
 
+// Note(eric): the wrapper struct `Dispatcher` seems redundant. We could implement them
+// as StreamConsumer directly like `SenderConsumer`
 pub struct Dispatcher<Inner: DataDispatcher> {
+    input: Box<dyn StreamOperator>,
     inner: Inner,
 }
 
 impl<Inner: DataDispatcher + Send> Dispatcher<Inner> {
-    pub fn new(inner: Inner) -> Self {
-        Self { inner }
+    pub fn new(input: Box<dyn StreamOperator>, inner: Inner) -> Self {
+        Self { input, inner }
     }
 
-    pub async fn dispatch(&mut self, msg: Message) -> Result<()> {
+    async fn dispatch(&mut self, msg: Message) -> Result<()> {
         if let Message::Chunk(chunk) = msg {
             self.inner.dispatch_data(chunk).await
         } else {
@@ -21,12 +27,13 @@ impl<Inner: DataDispatcher + Send> Dispatcher<Inner> {
             for output in outputs {
                 // TODO: clone here
                 output
-                    .collect(match msg {
+                    .send(match msg {
                         Message::Barrier(epoch) => Message::Barrier(epoch),
                         Message::Terminate => Message::Terminate,
                         _ => unreachable!(),
                     })
-                    .await?
+                    .await
+                    .unwrap(); // TODO: do not use unwrap
             }
             Ok(())
         }
@@ -34,19 +41,22 @@ impl<Inner: DataDispatcher + Send> Dispatcher<Inner> {
 }
 
 #[async_trait]
-impl<Inner: DataDispatcher + Send + Sync + 'static> Output for Dispatcher<Inner> {
-    async fn collect(&mut self, msg: Message) -> Result<()> {
-        self.dispatch(msg).await
+impl<Inner: DataDispatcher + Send + Sync + 'static> StreamConsumer for Dispatcher<Inner> {
+    async fn next(&mut self) -> Result<bool> {
+        let msg = self.input.next().await?;
+        let terminated = matches!(msg, Message::Terminate);
+        self.dispatch(msg).await?;
+        Ok(!terminated)
     }
 }
 
 #[async_trait]
 pub trait DataDispatcher {
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()>;
-    fn get_outputs(&mut self) -> &mut [Box<dyn Output>];
+    fn get_outputs(&mut self) -> &mut [Sender<Message>];
 }
 
-pub struct BlackHoleDispatcher(Vec<Box<dyn Output>>);
+pub struct BlackHoleDispatcher(Vec<Sender<Message>>);
 
 impl BlackHoleDispatcher {
     pub fn new() -> Self {
@@ -60,32 +70,33 @@ impl DataDispatcher for BlackHoleDispatcher {
         Ok(())
     }
 
-    fn get_outputs(&mut self) -> &mut [Box<dyn Output>] {
+    fn get_outputs(&mut self) -> &mut [Sender<Message>] {
         &mut self.0
     }
 }
 
 pub struct RoundRobinDataDispatcher {
-    outputs: Vec<Box<dyn Output>>,
+    outputs: Vec<Sender<Message>>,
     cur: usize,
 }
 
 impl RoundRobinDataDispatcher {
-    pub fn new(outputs: Vec<Box<dyn Output>>) -> Self {
+    pub fn new(outputs: Vec<Sender<Message>>) -> Self {
         Self { outputs, cur: 0 }
     }
 }
 
 #[async_trait]
 impl DataDispatcher for RoundRobinDataDispatcher {
-    fn get_outputs(&mut self) -> &mut [Box<dyn Output>] {
+    fn get_outputs(&mut self) -> &mut [Sender<Message>] {
         &mut self.outputs
     }
 
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()> {
         self.outputs[self.cur]
-            .collect(Message::Chunk(chunk))
-            .await?;
+            .send(Message::Chunk(chunk))
+            .await
+            .unwrap();
         self.cur += 1;
         self.cur %= self.outputs.len();
         Ok(())
@@ -93,19 +104,19 @@ impl DataDispatcher for RoundRobinDataDispatcher {
 }
 
 pub struct HashDataDispatcher {
-    outputs: Vec<Box<dyn Output>>,
+    outputs: Vec<Sender<Message>>,
     keys: Vec<usize>,
 }
 
 impl HashDataDispatcher {
-    pub fn new(outputs: Vec<Box<dyn Output>>, keys: Vec<usize>) -> Self {
+    pub fn new(outputs: Vec<Sender<Message>>, keys: Vec<usize>) -> Self {
         Self { outputs, keys }
     }
 }
 
 #[async_trait]
 impl DataDispatcher for HashDataDispatcher {
-    fn get_outputs(&mut self) -> &mut [Box<dyn Output>] {
+    fn get_outputs(&mut self) -> &mut [Sender<Message>] {
         &mut self.outputs
     }
 
@@ -151,7 +162,7 @@ impl DataDispatcher for HashDataDispatcher {
                 columns: arrays.clone(),
                 visibility: Some(vis_map),
             };
-            output.collect(Message::Chunk(new_stream_chunk)).await?;
+            output.send(Message::Chunk(new_stream_chunk)).await.unwrap();
         }
         Ok(())
     }
@@ -159,25 +170,70 @@ impl DataDispatcher for HashDataDispatcher {
 
 /// `BroadcastDispatcher` dispatches message to all outputs.
 pub struct BroadcastDispatcher {
-    outputs: Vec<Box<dyn Output>>,
+    outputs: Vec<Sender<Message>>,
 }
 
 impl BroadcastDispatcher {
-    pub fn new(outputs: Vec<Box<dyn Output>>) -> Self {
+    pub fn new(outputs: Vec<Sender<Message>>) -> Self {
         Self { outputs }
     }
 }
 
 #[async_trait]
 impl DataDispatcher for BroadcastDispatcher {
-    fn get_outputs(&mut self) -> &mut [Box<dyn Output>] {
+    fn get_outputs(&mut self) -> &mut [Sender<Message>] {
         &mut self.outputs
     }
 
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()> {
         for output in &mut self.outputs {
-            output.collect(Message::Chunk(chunk.clone())).await?;
+            output.send(Message::Chunk(chunk.clone())).await.unwrap(); // TODO: do not use unwrap
         }
         Ok(())
+    }
+}
+
+/// `SimpleDispatcher` dispatches message to a single
+pub struct SimpleDispatcher {
+    output: Sender<Message>,
+}
+
+impl SimpleDispatcher {
+    pub fn new(output: Sender<Message>) -> Self {
+        Self { output }
+    }
+}
+
+#[async_trait]
+impl DataDispatcher for SimpleDispatcher {
+    fn get_outputs(&mut self) -> &mut [Sender<Message>] {
+        std::slice::from_mut(&mut self.output)
+    }
+
+    async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()> {
+        self.output.send(Message::Chunk(chunk)).await.unwrap();
+        Ok(())
+    }
+}
+
+/// `SenderConsumer` consumes data from input operator and send it into a channel
+pub struct SenderConsumer {
+    input: Box<dyn StreamOperator>,
+    channel: Sender<Message>,
+}
+
+impl SenderConsumer {
+    pub fn new(input: Box<dyn StreamOperator>, channel: Sender<Message>) -> Self {
+        Self { input, channel }
+    }
+}
+
+#[async_trait]
+impl StreamConsumer for SenderConsumer {
+    async fn next(&mut self) -> Result<bool> {
+        let message = self.input.next().await?;
+        let terminated = matches!(message, Message::Terminate);
+        self.channel.send(message).await.unwrap(); // TODO: do not use unwrap
+        Ok(!terminated)
     }
 }

@@ -1,7 +1,7 @@
 //! Global Streaming Hash Aggregators
 
 use super::aggregation::*;
-use super::{Message, Op, Output, StreamChunk, StreamOperator, UnaryStreamOperator};
+use super::{Message, Op, SimpleStreamOperator, StreamChunk, StreamOperator};
 use crate::array2::column::Column;
 use crate::array2::*;
 use crate::buffer::Bitmap;
@@ -124,8 +124,8 @@ pub struct AggCall {
 pub struct HashAggregationOperator {
     /// Aggregation state of the current operator
     state_entries: HashMap<HashKey, HashValue>,
-    /// The output of the current operator
-    output: Box<dyn Output>,
+    /// The input of the current operator
+    input: Box<dyn StreamOperator>,
     /// A [`HashAggregationOperator`] may have multiple [`AggCall`]s.
     agg_calls: Vec<AggCall>,
     /// Indices of the columns
@@ -134,10 +134,14 @@ pub struct HashAggregationOperator {
 }
 
 impl HashAggregationOperator {
-    pub fn new(output: Box<dyn Output>, agg_calls: Vec<AggCall>, key_indices: Vec<usize>) -> Self {
+    pub fn new(
+        input: Box<dyn StreamOperator>,
+        agg_calls: Vec<AggCall>,
+        key_indices: Vec<usize>,
+    ) -> Self {
         Self {
             state_entries: HashMap::new(),
-            output,
+            input,
             agg_calls,
             key_indices,
         }
@@ -203,9 +207,8 @@ impl HashAggregationOperator {
 
 impl_consume_barrier_default!(HashAggregationOperator, StreamOperator);
 
-#[async_trait]
-impl UnaryStreamOperator for HashAggregationOperator {
-    async fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
+impl SimpleStreamOperator for HashAggregationOperator {
+    fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
         let StreamChunk {
             ops,
             columns: arrays,
@@ -328,7 +331,6 @@ impl UnaryStreamOperator for HashAggregationOperator {
             visibility: None,
             columns: new_columns,
         };
-        self.output.collect(Message::Chunk(chunk)).await?;
-        Ok(())
+        Ok(Message::Chunk(chunk))
     }
 }

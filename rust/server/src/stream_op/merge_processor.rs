@@ -1,130 +1,94 @@
-use super::{Processor, Result, UnaryStreamOperator};
-use async_stream::stream;
+use super::{Result, StreamOperator};
 use async_trait::async_trait;
-use futures::channel::mpsc::{unbounded, Receiver, UnboundedReceiver};
-use futures::{SinkExt, Stream, StreamExt};
+use futures::channel::mpsc::Receiver;
+use futures::future::select_all;
+use futures::StreamExt;
 
 use super::Message;
 
-/// `UnaryMergeProcessor` merges data from multiple channels. Dataflow from one channel
+/// `MergeOperator` merges data from multiple channels. Dataflow from one channel
 /// will be stopped on barrier.
-pub struct UnaryMergeProcessor {
-    inputs: Vec<Receiver<Message>>,
-    operator_head: Box<dyn UnaryStreamOperator>,
+pub struct MergeOperator {
+    /// Number of inputs
+    num_inputs: usize,
+
+    /// Active channels
+    active: Vec<Receiver<Message>>,
+
+    /// Count of terminated channels
+    terminated: usize,
+
+    /// Channels that blocked by barriers are parked here. Would be put back
+    /// until all barriers reached
+    blocked: Vec<Receiver<Message>>,
+
+    /// Current barrier epoch (for assertion)
+    next_epoch: u64,
 }
 
-impl UnaryMergeProcessor {
-    pub fn new(
-        inputs: Vec<Receiver<Message>>,
-        operator_head: Box<dyn UnaryStreamOperator>,
-    ) -> Self {
+impl MergeOperator {
+    pub fn new(inputs: Vec<Receiver<Message>>) -> Self {
         Self {
-            inputs,
-            operator_head,
+            num_inputs: inputs.len(),
+            active: inputs,
+            blocked: vec![],
+            terminated: 0,
+            next_epoch: 0,
         }
-    }
-}
-
-/// `barrier_receiver` converts a message stream to a barrier stream.
-/// The stream will emit item only when barrier epoch >= current epoch.
-///
-/// For example, assume `M` is message, and `Bx` is barrier of epoch x.
-/// The timeline is as follows.
-/// ```plain
-/// epoch:     0           1          2
-/// recv:      M M M B0    M M M B1   M M M
-/// barrier:               B0         B1
-/// ```
-/// The epoch will only begin when a message from barrier receiver is
-/// received.
-fn barrier_receiver(
-    id: usize,
-    recv: Receiver<Message>,
-    mut barrier: UnboundedReceiver<u64>,
-) -> impl Stream<Item = (usize, Message)> {
-    stream! {
-      for await value in recv {
-        match value {
-          Message::Chunk(chunk) => {
-            yield (id, Message::Chunk(chunk));
-          },
-          Message::Terminate => {
-            yield (id, Message::Terminate);
-          },
-          Message::Barrier(epoch) => {
-            yield (id, Message::Barrier(epoch));
-            while let Some(barrier_epoch) = barrier.next().await {
-              if barrier_epoch >= epoch {
-                break;
-              }
-            }
-          }
-        }
-      }
     }
 }
 
 #[async_trait]
-impl Processor for UnaryMergeProcessor {
-    async fn run(mut self) -> Result<()> {
-        let mut txs = vec![];
-        let mut streams = vec![];
+impl StreamOperator for MergeOperator {
+    async fn next(&mut self) -> Result<Message> {
+        loop {
+            // Convert channel receivers to futures here to do `select_all`
+            let mut futures = vec![];
+            for ch in self.active.drain(..) {
+                futures.push(ch.into_future());
+            }
+            let ((message, from), _id, remains) = select_all(futures).await;
+            for fut in remains.into_iter() {
+                self.active.push(fut.into_inner().unwrap());
+            }
 
-        let channel_cnt = self.inputs.len();
-
-        // once `terminate_count` becomes zero, the runner will be stopped.
-        let mut terminate_count = channel_cnt;
-
-        // once `barrier_count` becomes zero, the next epoch will begin.
-        let mut barrier_count = channel_cnt;
-        let mut next_epoch = 0;
-
-        for (id, input) in self.inputs.into_iter().enumerate() {
-            // create a barrier notifier and make a barrier stream
-            let (tx, rx) = unbounded();
-            let receiver = Box::pin(barrier_receiver(id, input, rx));
-            streams.push(receiver);
-            txs.push(tx);
-        }
-
-        let mut stream = futures::stream::select_all(streams.into_iter());
-
-        while let Some(msg) = stream.next().await {
-            match msg {
-                (_id, Message::Chunk(chunk)) => {
-                    self.operator_head.consume_chunk(chunk).await?;
+            match message.unwrap() {
+                Message::Chunk(chunk) => {
+                    self.active.push(from);
+                    return Ok(Message::Chunk(chunk));
                 }
-                (_id, Message::Terminate) => {
-                    terminate_count -= 1;
-                    if terminate_count == 0 {
-                        self.operator_head.consume_terminate().await?;
-                        return Ok(());
-                    }
+                Message::Terminate => {
+                    // Drop the terminated channel
+                    self.terminated += 1;
                 }
-                (_id, Message::Barrier(epoch)) => {
-                    assert_eq!(epoch, next_epoch);
-                    barrier_count -= 1;
-                    if barrier_count == 0 {
-                        self.operator_head.consume_barrier(next_epoch).await?;
-                        barrier_count = channel_cnt;
-                        for tx in &mut txs {
-                            tx.send(next_epoch).await.unwrap();
-                        }
-                        next_epoch += 1;
-                    }
+                Message::Barrier(epoch) => {
+                    // Move this channel into the `blocked` list
+                    assert_eq!(epoch, self.next_epoch);
+                    self.blocked.push(from);
                 }
             }
-        }
 
-        unreachable!()
+            if self.terminated == self.num_inputs {
+                return Ok(Message::Terminate);
+            }
+            if self.blocked.len() == self.num_inputs {
+                // Emit the barrier to downstream once all barriers collected from upstream
+                assert!(self.active.is_empty());
+                self.active = std::mem::take(&mut self.blocked);
+                let epoch = self.next_epoch;
+                self.next_epoch += 1;
+                return Ok(Message::Barrier(epoch));
+            }
+            assert!(!self.active.is_empty())
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stream_op::integration_tests::TestConsumer;
-    use crate::stream_op::{Op, StreamChunk};
+    use crate::stream_op::data_source::MockConsumer;
+    use crate::stream_op::{Actor, Op, StreamChunk};
     use futures::SinkExt;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
@@ -143,19 +107,18 @@ mod tests {
         const CHANNEL_NUMBER: usize = 10;
         let mut txs = Vec::with_capacity(CHANNEL_NUMBER);
         let mut rxs = Vec::with_capacity(CHANNEL_NUMBER);
-        let msgs = Arc::new(Mutex::new(vec![]));
-        let consumer = TestConsumer::new(msgs.clone());
         for _i in 0..CHANNEL_NUMBER {
             let (tx, rx) = futures::channel::mpsc::channel(16);
             txs.push(tx);
             rxs.push(rx);
         }
-        let merger = UnaryMergeProcessor {
-            inputs: rxs,
-            operator_head: Box::new(consumer),
-        };
+        let merger = MergeOperator::new(rxs);
 
-        let handle = tokio::spawn(merger.run());
+        let msgs = Arc::new(Mutex::new(vec![]));
+        let consumer = MockConsumer::new(Box::new(merger), msgs.clone());
+        let actor = Actor::new(Box::new(consumer));
+
+        let handle = tokio::spawn(actor.run());
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
         for mut tx in txs {

@@ -1,8 +1,7 @@
 use crate::error::Result;
 use crate::executor::StreamScanExecutor;
-use crate::stream_op::{DataSource, Message, Op, Output, StreamChunk};
+use crate::stream_op::{Message, Op, StreamChunk, StreamOperator};
 use async_trait::async_trait;
-use futures::channel::oneshot;
 use futures::FutureExt;
 use std::fmt::{Debug, Formatter};
 
@@ -17,31 +16,18 @@ impl KafkaDataSource {
 }
 
 #[async_trait]
-impl DataSource for KafkaDataSource {
-    async fn run(
-        &mut self,
-        mut output: Box<dyn Output>,
-        mut cancel: oneshot::Receiver<()>,
-    ) -> Result<()> {
-        loop {
-            futures::select! {
-              _ = cancel => {
-                return Ok(())
-              },
-              received = self.executor.next_data_chunk().fuse() => {
-                let received = received?;
-                if let Some(chunk) = received {
-                  // `capacity` or `cardinality` should be both fine as we just read the data from external sources
-                  // no visibility map yet
-                  let capacity = chunk.capacity();
-                  let ops = vec![Op::Insert; capacity];
-                  let stream_chunk = StreamChunk::new(ops, chunk.columns().to_vec(), None);
-                  output.collect(Message::Chunk(stream_chunk)).await?;
-                } else {
-                  output.collect(Message::Terminate).await?;
-                }
-              }
-            }
+impl StreamOperator for KafkaDataSource {
+    async fn next(&mut self) -> Result<Message> {
+        let received = self.executor.next_data_chunk().fuse().await?;
+        if let Some(chunk) = received {
+            // `capacity` or `cardinality` should be both fine as we just read the data from external sources
+            // no visibility map yet
+            let capacity = chunk.capacity();
+            let ops = vec![Op::Insert; capacity];
+            let stream_chunk = StreamChunk::new(ops, chunk.columns().to_vec(), None);
+            Ok(Message::Chunk(stream_chunk))
+        } else {
+            Ok(Message::Terminate)
         }
     }
 }

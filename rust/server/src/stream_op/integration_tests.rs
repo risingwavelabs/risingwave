@@ -1,101 +1,67 @@
 use crate::array2::*;
 use crate::expr::*;
 use crate::types::*;
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
-use super::UnarySimpleProcessor;
+use super::ReceiverOperator;
 use super::*;
-
 use approx::assert_relative_eq;
+
+use crate::stream_op::data_source::MockConsumer;
 use futures::channel::mpsc::channel;
-
-/// `TestConsumer` is only used in tests, which collects all result into
-/// a vector.
-pub struct TestConsumer {
-    items: Arc<Mutex<Vec<StreamChunk>>>,
-}
-
-impl TestConsumer {
-    pub fn new(items: Arc<Mutex<Vec<StreamChunk>>>) -> Self {
-        Self { items }
-    }
-}
-
-#[async_trait]
-impl UnaryStreamOperator for TestConsumer {
-    async fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
-        let mut items = self.items.lock().unwrap();
-        items.push(chunk);
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl StreamOperator for TestConsumer {
-    async fn consume_barrier(&mut self, _: u64) -> Result<()> {
-        Ok(())
-    }
-
-    async fn consume_terminate(&mut self) -> Result<()> {
-        Ok(())
-    }
-}
+use futures::SinkExt;
 
 /// This test creates a merger-dispatcher pair, and run a sum. Each chunk
 /// has 0~9 elements. We first insert the 10 chunks, then delete them,
 /// and do this again and again.
 #[tokio::test]
 async fn test_merger_sum_aggr() {
-    let make_actor = |sender| {
-        let output = ChannelOutput::new(sender);
+    // `make_actor` build an actor to do local aggregation
+    let make_actor = |input_rx| {
+        let input = ReceiverOperator::new(input_rx);
         // for the local aggregator, we need two states: sum and row count
         let aggregator = AggregationOperator::new(
-            Box::new(output),
+            Box::new(input),
             vec![Some(Int64Type::create(false)), None],
             vec![Int64Type::create(false), Int64Type::create(false)],
             vec![vec![0], vec![0]],
             vec![AggKind::Sum, AggKind::RowCount],
         );
         let (tx, rx) = channel(16);
-        let output = ChannelOutput::new(tx);
-        (
-            UnarySimpleProcessor::new(rx, Box::new(aggregator)),
-            Box::new(output) as Box<dyn Output>,
-        )
+        let consumer = SenderConsumer::new(Box::new(aggregator), tx);
+        let actor = Actor::new(Box::new(consumer));
+        (actor, rx)
     };
 
-    let mut rxs = vec![];
-    let mut outputs = vec![];
+    // join handles of all actors
     let mut handles = vec![];
 
-    // create 17 actors
+    // input and output channels of the local aggregation actors
+    let mut inputs = vec![];
+    let mut outputs = vec![];
+
+    // create 17 local aggregation actors
     for _ in 0..17 {
         let (tx, rx) = channel(16);
-        let (consumer, actor) = make_actor(tx);
-        outputs.push(actor);
-        handles.push(tokio::spawn(consumer.run()));
-        rxs.push(rx);
+        let (actor, channel) = make_actor(rx);
+        outputs.push(channel);
+        handles.push(tokio::spawn(actor.run()));
+        inputs.push(tx);
     }
 
     // create a round robin dispatcher, which dispatches messages to the actors
-    let mut dispatcher = Dispatcher::new(RoundRobinDataDispatcher::new(outputs));
+    let (mut input, rx) = channel(16);
+    let receiver_op = ReceiverOperator::new(rx);
+    let dispatcher = Dispatcher::new(Box::new(receiver_op), RoundRobinDataDispatcher::new(inputs));
+    let actor = Actor::new(Box::new(dispatcher));
+    handles.push(tokio::spawn(actor.run()));
 
-    // create a global aggregator and use a `TestConsumer` to collect all message
-    let items = Arc::new(Mutex::new(vec![]));
-    let consumer = TestConsumer::new(items.clone());
-    let output = OperatorOutput::new(Box::new(consumer));
-    let projection = ProjectionOperator::new(
-        Box::new(output),
-        vec![
-            // TODO: use the new streaming_if_null expression here, and add `None` tests
-            Box::new(InputRefExpression::new(Int64Type::create(false), 0)),
-        ],
-    );
-    let output = OperatorOutput::new(Box::new(projection));
+    // use a merge operator to collect data from dispatchers before sending them to aggregator
+    let merger = MergeOperator::new(outputs);
+
     // for global aggregator, we need to sum data and sum row count
     let aggregator = AggregationOperator::new(
-        Box::new(output),
+        Box::new(merger),
         vec![
             Some(Int64Type::create(false)),
             Some(Int64Type::create(false)),
@@ -104,12 +70,17 @@ async fn test_merger_sum_aggr() {
         vec![vec![0], vec![1]],
         vec![AggKind::Sum, AggKind::Sum],
     );
-
-    // use a merger to collect data from dispatchers before sending them to aggregator
-    let merger = UnaryMergeProcessor::new(rxs, Box::new(aggregator));
-
-    // start merger thread
-    let join_handle = tokio::spawn(merger.run());
+    let projection = ProjectionOperator::new(
+        Box::new(aggregator),
+        vec![
+            // TODO: use the new streaming_if_null expression here, and add `None` tests
+            Box::new(InputRefExpression::new(Int64Type::create(false), 0)),
+        ],
+    );
+    let items = Arc::new(Mutex::new(vec![]));
+    let consumer = MockConsumer::new(Box::new(projection), items.clone());
+    let actor = Actor::new(Box::new(consumer));
+    handles.push(tokio::spawn(actor.run()));
 
     for j in 0..11 {
         let op;
@@ -119,32 +90,27 @@ async fn test_merger_sum_aggr() {
             op = Op::Delete;
         }
         for i in 0..10 {
-            dispatcher
-                .dispatch(Message::Chunk(StreamChunk {
-                    ops: (0..i).map(|_| op).collect::<Vec<_>>(),
-                    columns: vec![Column::new(
-                        Arc::new(
-                            I64Array::from_slice(
-                                (0..i).map(|_| Some(1)).collect::<Vec<_>>().as_slice(),
-                            )
-                            .unwrap()
-                            .into(),
-                        ),
-                        Int64Type::create(false),
-                    )],
-                    visibility: None,
-                }))
-                .await
-                .unwrap();
+            let chunk = StreamChunk {
+                ops: (0..i).map(|_| op).collect::<Vec<_>>(),
+                columns: vec![Column::new(
+                    Arc::new(
+                        I64Array::from_slice(
+                            (0..i).map(|_| Some(1)).collect::<Vec<_>>().as_slice(),
+                        )
+                        .unwrap()
+                        .into(),
+                    ),
+                    Int64Type::create(false),
+                )],
+                visibility: None,
+            };
+            input.send(Message::Chunk(chunk)).await.unwrap();
         }
-        dispatcher.dispatch(Message::Barrier(j)).await.unwrap();
+        input.send(Message::Barrier(j)).await.unwrap();
     }
-    dispatcher.dispatch(Message::Terminate).await.unwrap();
+    input.send(Message::Terminate).await.unwrap();
 
-    // wait for `Merger`
-    join_handle.await.unwrap().unwrap();
-
-    // wait for `Consumer`s
+    // wait for all actors
     for handle in handles {
         handle.await.unwrap().unwrap();
     }
@@ -298,60 +264,56 @@ async fn test_tpch_q6() {
     let (t_shipdate, t_discount, t_quantity, t_extended_price, _, _) = make_tpchq6_expr();
 
     // make an actor after dispatcher, which includes filter, projection, and local aggregator.
-    let make_actor = |sender| {
+    let make_actor = |input_rx| {
         let (_, _, _, _, and, multiply) = make_tpchq6_expr();
-        let output = ChannelOutput::new(sender);
+        let input = ReceiverOperator::new(input_rx);
+
+        let filter = FilterOperator::new(Box::new(input), Box::new(and));
+        let projection = ProjectionOperator::new(Box::new(filter), vec![Box::new(multiply)]);
+
         // for local aggregator, we need to sum data and count rows
         let aggregator = AggregationOperator::new(
-            Box::new(output),
+            Box::new(projection),
             vec![Some(Float64Type::create(false)), None],
             vec![Float64Type::create(false), Int64Type::create(false)],
             vec![vec![0], vec![0]],
             vec![AggKind::Sum, AggKind::RowCount],
         );
-        let output = OperatorOutput::new(Box::new(aggregator));
-        let projection = ProjectionOperator::new(Box::new(output), vec![Box::new(multiply)]);
-        let output = OperatorOutput::new(Box::new(projection));
-        let filter = FilterOperator::new(Box::new(output), Box::new(and));
         let (tx, rx) = channel(16);
-        let output = ChannelOutput::new(tx);
-        (
-            UnarySimpleProcessor::new(rx, Box::new(filter)),
-            Box::new(output) as Box<dyn Output>,
-        )
+        let consumer = SenderConsumer::new(Box::new(aggregator), tx);
+        let actor = Actor::new(Box::new(consumer));
+        (actor, rx)
     };
 
-    let mut rxs = vec![];
+    // join handles of all actors
+    let mut handles = vec![];
+
+    // input and output channels of the local aggregation actors
+    let mut inputs = vec![];
     let mut outputs = vec![];
-    let mut join_handles = vec![];
 
     // create 10 actors
     for _ in 0..10 {
         let (tx, rx) = channel(16);
-        let (consumer, actor) = make_actor(tx);
-        outputs.push(actor);
-        join_handles.push(tokio::spawn(consumer.run()));
-        rxs.push(rx);
+        let (actor, channel) = make_actor(rx);
+        outputs.push(channel);
+        handles.push(tokio::spawn(actor.run()));
+        inputs.push(tx);
     }
 
     // create a round robin dispatcher, which dispatches messages to the actors
-    let mut dispatcher = Dispatcher::new(RoundRobinDataDispatcher::new(outputs));
+    let (mut input, rx) = channel(16);
+    let receiver_op = ReceiverOperator::new(rx);
+    let dispatcher = Dispatcher::new(Box::new(receiver_op), RoundRobinDataDispatcher::new(inputs));
+    let actor = Actor::new(Box::new(dispatcher));
+    handles.push(tokio::spawn(actor.run()));
 
-    // create a global aggregator and use a `TestConsumer` to collect all message
-    let items = Arc::new(Mutex::new(vec![]));
-    let consumer = TestConsumer::new(items.clone());
-    let output = OperatorOutput::new(Box::new(consumer));
-    let projection = ProjectionOperator::new(
-        Box::new(output),
-        vec![
-            // TODO: use the new streaming_if_null expression here, and add `None` tests
-            Box::new(InputRefExpression::new(Float64Type::create(false), 0)),
-        ],
-    );
-    let output = OperatorOutput::new(Box::new(projection));
-    // for global aggregator, we need to sum data and sum row count
+    // use a merge operator to collect data from dispatchers before sending them to aggregator
+    let merger = MergeOperator::new(outputs);
+
+    // create a global aggregator to sum data and sum row count
     let aggregator = AggregationOperator::new(
-        Box::new(output),
+        Box::new(merger),
         vec![
             Some(Float64Type::create(false)),
             Some(Int64Type::create(false)),
@@ -360,12 +322,20 @@ async fn test_tpch_q6() {
         vec![vec![0], vec![1]],
         vec![AggKind::Sum, AggKind::Sum],
     );
+    let projection = ProjectionOperator::new(
+        Box::new(aggregator),
+        vec![
+            // TODO: use the new streaming_if_null expression here, and add `None` tests
+            Box::new(InputRefExpression::new(Float64Type::create(false), 0)),
+        ],
+    );
 
-    // use a merger to collect data from dispatchers before sending them to aggregator
-    let merger = UnaryMergeProcessor::new(rxs, Box::new(aggregator));
+    let items = Arc::new(Mutex::new(vec![]));
+    let consumer = MockConsumer::new(Box::new(projection), items.clone());
+    let actor = Actor::new(Box::new(consumer));
 
     // start merger thread
-    let join_handle = tokio::spawn(merger.run());
+    handles.push(tokio::spawn(actor.run()));
 
     let d_shipdate = vec![
         "1990-01-01 00:00:00",
@@ -425,30 +395,27 @@ async fn test_tpch_q6() {
     };
 
     for i in 0..100 {
-        dispatcher
-            .dispatch(Message::Chunk(make_chunk(Insert)))
+        input
+            .send(Message::Chunk(make_chunk(Insert)))
             .await
             .unwrap();
-        dispatcher
-            .dispatch(Message::Chunk(make_chunk(Delete)))
+        input
+            .send(Message::Chunk(make_chunk(Delete)))
             .await
             .unwrap();
         if i % 10 == 0 {
-            dispatcher.dispatch(Message::Barrier(i / 10)).await.unwrap();
+            input.send(Message::Barrier(i / 10)).await.unwrap();
         }
     }
 
-    dispatcher
-        .dispatch(Message::Chunk(make_chunk(Insert)))
+    input
+        .send(Message::Chunk(make_chunk(Insert)))
         .await
         .unwrap();
-    dispatcher.dispatch(Message::Terminate).await.unwrap();
+    input.send(Message::Terminate).await.unwrap();
 
-    // wait for `Merger`
-    join_handle.await.unwrap().unwrap();
-
-    // wait for `Processor`s
-    for handle in join_handles {
+    // wait for all actors
+    for handle in handles {
         handle.await.unwrap().unwrap();
     }
 

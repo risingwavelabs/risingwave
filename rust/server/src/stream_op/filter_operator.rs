@@ -1,4 +1,4 @@
-use super::{Message, Op, Output, StreamChunk, StreamOperator, UnaryStreamOperator};
+use super::{Message, Op, SimpleStreamOperator, StreamChunk, StreamOperator};
 use crate::{
     array2::{Array, ArrayImpl, DataChunk},
     buffer::Bitmap,
@@ -12,15 +12,15 @@ use async_trait::async_trait;
 /// `FilterOperator` will insert, delete or update element into next operator according
 /// to the result of the expression.
 pub struct FilterOperator {
-    /// The output of the current operator
-    output: Box<dyn Output>,
+    /// The input of the current operator
+    input: Box<dyn StreamOperator>,
     /// Expression of the current filter, note that the filter must always have the same output for the same input.
     expr: BoxedExpression,
 }
 
 impl FilterOperator {
-    pub fn new(output: Box<dyn Output>, expr: BoxedExpression) -> Self {
-        Self { output, expr }
+    pub fn new(input: Box<dyn StreamOperator>, expr: BoxedExpression) -> Self {
+        Self { input, expr }
     }
 }
 
@@ -28,9 +28,8 @@ use crate::impl_consume_barrier_default;
 
 impl_consume_barrier_default!(FilterOperator, StreamOperator);
 
-#[async_trait]
-impl UnaryStreamOperator for FilterOperator {
-    async fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
+impl SimpleStreamOperator for FilterOperator {
+    fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
         let StreamChunk {
             ops,
             columns: arrays,
@@ -121,6 +120,6 @@ impl UnaryStreamOperator for FilterOperator {
             ops: new_ops,
         };
 
-        self.output.collect(Message::Chunk(new_chunk)).await
+        Ok(Message::Chunk(new_chunk))
     }
 }

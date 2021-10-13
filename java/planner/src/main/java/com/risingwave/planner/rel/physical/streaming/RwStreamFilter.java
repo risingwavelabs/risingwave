@@ -31,6 +31,7 @@ public class RwStreamFilter extends Filter implements RisingWaveStreamingRel {
     return StreamNode.newBuilder()
         .setNodeType(StreamNode.StreamNodeType.FILTER)
         .setBody(Any.pack(filterNode))
+        .setInput(((RisingWaveStreamingRel) input).serialize())
         .build();
   }
 

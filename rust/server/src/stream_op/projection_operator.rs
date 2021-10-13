@@ -1,4 +1,4 @@
-use super::{Message, Output, StreamChunk, StreamOperator, UnaryStreamOperator};
+use super::{Message, SimpleStreamOperator, StreamChunk, StreamOperator};
 use crate::impl_consume_barrier_default;
 use crate::{
     array2::{column::Column, DataChunk},
@@ -11,23 +11,22 @@ use async_trait::async_trait;
 /// and returns a new data chunck. And then, `ProjectionOperator` will insert, delete
 /// or update element into next operator according to the result of the expression.
 pub struct ProjectionOperator {
-    /// The output of the current operator
-    output: Box<dyn Output>,
+    /// The input of the current operator
+    input: Box<dyn StreamOperator>,
     /// Expressions of the current projection.
     exprs: Vec<BoxedExpression>,
 }
 
 impl ProjectionOperator {
-    pub fn new(output: Box<dyn Output>, exprs: Vec<BoxedExpression>) -> Self {
-        Self { output, exprs }
+    pub fn new(input: Box<dyn StreamOperator>, exprs: Vec<BoxedExpression>) -> Self {
+        Self { input, exprs }
     }
 }
 
 impl_consume_barrier_default!(ProjectionOperator, StreamOperator);
 
-#[async_trait]
-impl UnaryStreamOperator for ProjectionOperator {
-    async fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
+impl SimpleStreamOperator for ProjectionOperator {
+    fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
         let StreamChunk {
             ops,
             columns,
@@ -64,6 +63,6 @@ impl UnaryStreamOperator for ProjectionOperator {
             visibility: None,
         };
 
-        self.output.collect(Message::Chunk(new_chunk)).await
+        Ok(Message::Chunk(new_chunk))
     }
 }

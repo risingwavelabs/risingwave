@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use super::aggregation::*;
-use super::{Message, Op, Output, StreamChunk, StreamOperator, UnaryStreamOperator};
+use super::{Message, Op, SimpleStreamOperator, StreamChunk, StreamOperator};
 use crate::array2::column::Column;
 use crate::array2::*;
 use crate::error::{Result, RwError};
@@ -43,8 +43,8 @@ pub struct AggregationOperator {
     /// Aggregation states of the current operator
     states: Vec<Box<dyn StreamingAggStateImpl>>,
 
-    /// The output of the current operator
-    output: Box<dyn Output>,
+    /// The input of the current operator
+    input: Box<dyn StreamOperator>,
 
     /// Whether this is the first time of consuming data.
     ///
@@ -61,7 +61,7 @@ pub struct AggregationOperator {
 
 impl AggregationOperator {
     pub fn new(
-        output: Box<dyn Output>,
+        input: Box<dyn StreamOperator>,
         input_types: Vec<Option<DataTypeRef>>,
         return_types: Vec<DataTypeRef>,
         val_indices: Vec<Vec<usize>>,
@@ -79,7 +79,7 @@ impl AggregationOperator {
                 })
                 .try_collect()
                 .unwrap(),
-            output,
+            input,
             first_data: true,
             return_types,
             col_idx: val_indices
@@ -103,9 +103,8 @@ impl AggregationOperator {
 
 impl_consume_barrier_default!(AggregationOperator, StreamOperator);
 
-#[async_trait]
-impl UnaryStreamOperator for AggregationOperator {
-    async fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
+impl SimpleStreamOperator for AggregationOperator {
+    fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
         let StreamChunk {
             ops,
             columns: arrays,
@@ -162,7 +161,6 @@ impl UnaryStreamOperator for AggregationOperator {
 
         self.first_data = false;
 
-        self.output.collect(Message::Chunk(chunk)).await?;
-        Ok(())
+        Ok(Message::Chunk(chunk))
     }
 }

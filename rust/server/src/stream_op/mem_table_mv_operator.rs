@@ -1,30 +1,29 @@
-use super::{Message, Output, Result, StreamChunk, StreamOperator, UnaryStreamOperator};
+use super::{Message, Result, SimpleStreamOperator, StreamChunk, StreamOperator};
 use crate::storage::MemRowTableRef as MemTableRef;
 use crate::storage::Row;
 use async_trait::async_trait;
 use smallvec::SmallVec;
 
 /// `MemTableMVOperator` writes data to a row-based memtable, so that data could
-/// be quried by the AP engine.
+/// be queried by the AP engine.
 pub struct MemTableMVOperator {
-    output: Box<dyn Output>,
+    input: Box<dyn StreamOperator>,
     table: MemTableRef,
     pk_col: Vec<usize>,
 }
 
 impl MemTableMVOperator {
-    pub fn new(output: Box<dyn Output>, table: MemTableRef, pk_col: Vec<usize>) -> Self {
+    pub fn new(input: Box<dyn StreamOperator>, table: MemTableRef, pk_col: Vec<usize>) -> Self {
         Self {
-            output,
+            input,
             table,
             pk_col,
         }
     }
 }
 
-#[async_trait]
-impl UnaryStreamOperator for MemTableMVOperator {
-    async fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
+impl SimpleStreamOperator for MemTableMVOperator {
+    fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
         let StreamChunk {
             ops,
             columns,
@@ -73,7 +72,7 @@ impl UnaryStreamOperator for MemTableMVOperator {
 
         self.table.ingest(ingest_op)?;
 
-        self.output.collect(Message::Chunk(chunk)).await
+        Ok(Message::Chunk(chunk))
     }
 }
 

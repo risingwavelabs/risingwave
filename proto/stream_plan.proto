@@ -65,10 +65,9 @@ message StreamNode {
   // Some nodes we can reuse plan nodes from plan.proto.
   // TODO: should we enforce strong typed body on nodes?
   google.protobuf.Any body = 2;
-  // We assume that StreamNodes always appear in fragments,
-  // and each fragment encode a chain of nodes.
-  // Hence each StreamNode has only one downstream.
-  StreamNode downstream_node = 3;
+  // Child node in plan aka. upstream nodes in the streaming DAG
+  // Currently we assume the operetors in one fragment are always chained list rather than tree
+  StreamNode input = 3;
 }
 
 // A dispatcher redistribute messages.

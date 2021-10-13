@@ -24,7 +24,7 @@ public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel
   @Override
   public StreamNode serialize() {
     // This node should never be serialized.
-    return null;
+    throw new UnsupportedOperationException(getClass().getName() + " should never be serialized");
   }
 
   @Override

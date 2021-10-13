@@ -64,7 +64,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     String tableName = createMaterializedView.name.getSimple();
     handler.convertPlanToCatalog(tableName, plan, executionContext);
 
-    StreamNode serializedProto = serializer.serialize(plan);
+    StreamNode serializedProto = plan.getStreamingPlan().serialize();
     String serializedJsonPlan = Messages.jsonFormat(serializedProto);
     // System.out.println(serializedJsonPlan);
   }

@@ -5,7 +5,6 @@ use crate::{buffer::Bitmap, error::Result};
 mod actor;
 mod aggregation;
 mod aggregation_operator;
-mod channel_output;
 mod data_source;
 mod dispatcher;
 mod filter_operator;
@@ -14,18 +13,13 @@ mod identity_operator;
 mod kafka_data_source;
 mod mem_table_mv_operator;
 mod merge_processor;
-mod operator_output;
-mod processor;
 mod projection_operator;
 mod simple_processor;
-mod source_processor;
 mod table_data_source;
 
 pub use actor::Actor;
 pub use aggregation::*;
 pub use aggregation_operator::*;
-pub use channel_output::ChannelOutput;
-pub use data_source::DataSource;
 pub use dispatcher::*;
 pub use filter_operator::FilterOperator;
 pub use hash_aggregation_operator::*;
@@ -33,11 +27,8 @@ pub use identity_operator::IdentityOperator;
 pub use kafka_data_source::*;
 pub use mem_table_mv_operator::MemTableMVOperator;
 pub use merge_processor::*;
-pub use operator_output::OperatorOutput;
-pub use processor::*;
 pub use projection_operator::ProjectionOperator;
 pub use simple_processor::*;
-pub use source_processor::*;
 pub use table_data_source::*;
 
 use async_trait::async_trait;
@@ -102,6 +93,7 @@ impl StreamChunk {
 pub enum Message {
     Chunk(StreamChunk),
     Barrier(u64),
+    // Note(eric): consider remove this. A stream is always terminated by an error or dropped by user
     Terminate,
     // TODO: Watermark
 }
@@ -109,45 +101,41 @@ pub enum Message {
 /// `StreamOperator` is an operator which supports handling of control messages.
 #[async_trait]
 pub trait StreamOperator: Send + Sync + 'static {
-    async fn consume_barrier(&mut self, epoch: u64) -> Result<()>;
-    async fn consume_terminate(&mut self) -> Result<()>;
-    // TODO: watermark and state management
+    async fn next(&mut self) -> Result<Message>;
 }
 
-/// `UnaryStreamOperator` accepts a single chunk as input.
-#[async_trait]
-pub trait UnaryStreamOperator: StreamOperator {
-    async fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<()>;
+/// `SimpleStreamOperator` accepts a single chunk as input.
+pub trait SimpleStreamOperator: StreamOperator {
+    fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message>;
 }
 
 /// Most operators don't care about the control messages, and therefore
 /// this macro provides a default implementation for them. The operator
-/// must have a field named `output`, so as to pass along messages.
+/// must have a field named `input`, so as to pass along messages, and
+/// implement the `SimpleStreamOperator` trait to provide a `consume_chunk`
+/// function
 #[macro_export]
 macro_rules! impl_consume_barrier_default {
     ($type:ident, $trait: ident) => {
         #[async_trait]
         impl $trait for $type {
-            async fn consume_barrier(&mut self, epoch: u64) -> Result<()> {
-                self.output.collect(Message::Barrier(epoch)).await
-            }
-
-            async fn consume_terminate(&mut self) -> Result<()> {
-                self.output.collect(Message::Terminate).await
+            async fn next(&mut self) -> Result<Message> {
+                match self.input.next().await {
+                    Ok(message) => match message {
+                        Message::Chunk(chunk) => self.consume_chunk(chunk),
+                        Message::Barrier(epoch) => Ok(Message::Barrier(epoch)),
+                        Message::Terminate => Ok(Message::Terminate),
+                    },
+                    Err(e) => Err(e),
+                }
             }
         }
     };
 }
 
-/// `BinaryStreamOperator` accepts two chunks as input.
+/// `StreamConsumer` is the last step in a fragment
 #[async_trait]
-pub trait BinaryStreamOperator: StreamOperator {
-    async fn consume_chunk_first(&mut self, chunk: StreamChunk) -> Result<()>;
-    async fn consume_chunk_second(&mut self, chunk: StreamChunk) -> Result<()>;
-}
-
-/// Output message could be written into a `Output`.
-#[async_trait]
-pub trait Output: Send + Sync + 'static {
-    async fn collect(&mut self, msg: Message) -> Result<()>;
+pub trait StreamConsumer: Send + Sync + 'static {
+    /// Run next stream chunk. returns whether the stream is terminated
+    async fn next(&mut self) -> Result<bool>;
 }

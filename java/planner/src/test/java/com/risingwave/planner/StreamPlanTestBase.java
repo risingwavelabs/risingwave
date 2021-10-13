@@ -7,7 +7,6 @@ import com.risingwave.execution.handler.CreateMaterializedViewHandler;
 import com.risingwave.planner.planner.streaming.StreamPlanner;
 import com.risingwave.planner.rel.physical.streaming.StreamingPlan;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
-import com.risingwave.planner.rel.serialization.StreamPlanSerializer;
 import com.risingwave.planner.util.PlannerTestCase;
 import com.risingwave.planner.util.PlannerTestDdlLoader;
 import com.risingwave.proto.streaming.plan.StreamNode;
@@ -18,7 +17,6 @@ import org.apache.calcite.sql.ddl.SqlCreateMaterializedView;
 
 public abstract class StreamPlanTestBase extends SqlTestBase {
   protected StreamPlanner streamPlanner;
-  protected StreamPlanSerializer serializer;
 
   protected void init() {
     super.initEnv();
@@ -29,7 +27,6 @@ public abstract class StreamPlanTestBase extends SqlTestBase {
             LeaderServerConfigurations.ClusterMode.Distributed);
     initTables();
     streamPlanner = new StreamPlanner();
-    serializer = new StreamPlanSerializer(executionContext);
   }
 
   private void initTables() {
@@ -62,7 +59,7 @@ public abstract class StreamPlanTestBase extends SqlTestBase {
 
     // Do not error if no json test.
     if (testCase.getJson() != null) {
-      StreamNode serializedProto = serializer.serialize(plan);
+      StreamNode serializedProto = plan.getStreamingPlan().serialize();
       String serializedJsonPlan = Messages.jsonFormat(serializedProto);
       assertEquals(testCase.getJson(), serializedJsonPlan, "Proto json not match!");
     }
