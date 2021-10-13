@@ -14,6 +14,7 @@ use risingwave_proto::plan::PlanFragment;
 use risingwave_proto::task_service::TaskInfo_TaskStatus as TaskStatus;
 use risingwave_proto::task_service::TaskSinkId as ProtoSinkId;
 use risingwave_proto::task_service::{TaskData, TaskId as ProtoTaskId};
+use std::fmt::{Debug, Formatter};
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub struct TaskId {
@@ -22,10 +23,20 @@ pub struct TaskId {
     pub query_id: String,
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+#[derive(PartialEq, Eq, Hash, Clone)]
 pub struct TaskSinkId {
     pub task_id: TaskId,
     pub sink_id: u32,
+}
+
+/// More compact formatter compared to derived `fmt::Debug`.
+impl Debug for TaskSinkId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!(
+            "TaskSinkId {{ query_id: \"{}\", stage_id: {}, task_id: {}, sink_id: {} }}",
+            self.task_id.query_id, self.task_id.stage_id, self.task_id.task_id, self.sink_id
+        ))
+    }
 }
 
 pub(in crate) enum TaskState {
@@ -62,6 +73,7 @@ pub struct TaskSink {
 }
 
 impl TaskSink {
+    /// Writes the data in serialized format to `ExchangeWriter`.
     pub async fn take_data(&mut self, writer: &mut dyn ExchangeWriter) -> Result<()> {
         let task_id = TaskId::from(self.sink_id.get_task_id());
         self.task_manager.check_if_task_running(&task_id)?;
@@ -85,6 +97,7 @@ impl TaskSink {
         Ok(())
     }
 
+    /// Directly takes data without serialization.
     pub async fn direct_take_data(&mut self) -> Result<Option<DataChunkRef>> {
         let task_id = TaskId::from(self.sink_id.get_task_id());
         self.task_manager.check_if_task_running(&task_id)?;
@@ -141,9 +154,9 @@ impl TaskExecution {
 
     async fn execute(&self, root: BoxedExecutor, sender: BoxChanSender) {
         if let Err(e) = TaskExecution::try_execute(root, sender).await {
-            error!("Execution failed: {} [task_id={:?}]", &e, &self.task_id);
-            let mut failure = self.failure.lock().unwrap();
-            *failure = Some(e);
+            // Prints the entire backtrace of error.
+            error!("Execution failed [{:?}]: {:?}", &self.task_id, &e);
+            *self.failure.lock().unwrap() = Some(e);
         }
     }
 
@@ -195,5 +208,27 @@ impl TaskExecution {
             .into());
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_task_sink_id_debug() {
+        let task_id = TaskId {
+            task_id: 1,
+            stage_id: 2,
+            query_id: "abc".to_string(),
+        };
+        let task_sink_id = TaskSinkId {
+            task_id,
+            sink_id: 3,
+        };
+        assert_eq!(
+            format!("{:?}", task_sink_id),
+            "TaskSinkId { query_id: \"abc\", stage_id: 2, task_id: 1, sink_id: 3 }"
+        );
     }
 }

@@ -19,6 +19,8 @@ pub trait ExchangeSource: Send {
 pub struct GrpcExchangeSource {
     client: ExchangeServiceClient,
     stream: ClientSStreamReceiver<TaskData>,
+
+    // Address of the remote endpoint.
     addr: SocketAddr,
     sink_id: TaskSinkId,
 }
@@ -54,8 +56,12 @@ impl ExchangeSource for GrpcExchangeSource {
             None => return Ok(None),
             Some(r) => r,
         };
-        let task_data =
-            res.map_err(|e| GrpcError("failed to take data from stream".to_string(), e))?;
+        let task_data = res.map_err(|e| {
+            GrpcError(
+                format!("failed to take data from stream ({:?})", self.addr),
+                e,
+            )
+        })?;
         Ok(Some(Arc::new(DataChunk::from_protobuf(
             task_data.get_record_batch(),
         )?)))

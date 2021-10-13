@@ -85,7 +85,7 @@ impl TestRunner {
             });
             res.push(messages);
         }
-        // In test, we remove the task manually while in production,
+        // In test, we remove the task manually, while in production,
         // it should be removed by the requests from the leader node.
         task_manager.remove_task(&self.tid)?;
         Ok(res)

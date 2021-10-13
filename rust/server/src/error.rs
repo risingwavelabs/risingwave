@@ -33,6 +33,8 @@ pub enum ErrorCode {
     NumericValueOutOfRange,
     #[error("protocol error: {0}")]
     ProtocolError(String),
+    #[error("Task not found")]
+    TaskNotFound,
 }
 
 #[derive(Clone)]
@@ -44,7 +46,7 @@ pub struct RwError {
 impl RwError {
     /// Turns a crate-wide `RwError` into grpc error.
     pub fn to_grpc_error(&self) -> RpcStatus {
-        RpcStatus::with_message(RpcStatusCode::INTERNAL, self.to_string())
+        RpcStatus::with_message(self.inner.to_grpc_error_code(), self.to_string())
     }
 }
 
@@ -93,6 +95,16 @@ impl ErrorCode {
             ErrorCode::ParseError(_) => 7,
             ErrorCode::NumericValueOutOfRange => 8,
             ErrorCode::ProtocolError(_) => 9,
+            ErrorCode::TaskNotFound => 10,
+        }
+    }
+
+    fn to_grpc_error_code(&self) -> RpcStatusCode {
+        match self {
+            ErrorCode::OK => RpcStatusCode::OK,
+            ErrorCode::NotImplementedError(_) => RpcStatusCode::UNIMPLEMENTED,
+            ErrorCode::TaskNotFound => RpcStatusCode::NOT_FOUND,
+            _ => RpcStatusCode::INTERNAL,
         }
     }
 }
@@ -256,5 +268,22 @@ mod tests {
             })();
             assert_eq!(Err(RwError::from(expected_error)), error);
         }
+    }
+
+    #[test]
+    fn test_to_grpc_error() {
+        fn check_grpc_error(ec: ErrorCode, grpc_code: RpcStatusCode) {
+            assert_eq!(RwError::from(ec).to_grpc_error().code(), grpc_code);
+        }
+
+        check_grpc_error(ErrorCode::TaskNotFound, RpcStatusCode::NOT_FOUND);
+        check_grpc_error(
+            ErrorCode::InternalError(String::new()),
+            RpcStatusCode::INTERNAL,
+        );
+        check_grpc_error(
+            ErrorCode::NotImplementedError(String::new()),
+            RpcStatusCode::UNIMPLEMENTED,
+        );
     }
 }

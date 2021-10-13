@@ -43,6 +43,7 @@ public class RwBatchExchange extends Exchange implements RisingWaveBatchPhyRel {
   @Override
   public PlanNode serialize() {
     // Exchange is a pipeline breaker, we do not serialize its children.
+    // The exchange sources is unknown by far, which will be assigned later by scheduler.
     return PlanNode.newBuilder().setNodeType(PlanNode.PlanNodeType.EXCHANGE).build();
   }
 

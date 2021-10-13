@@ -1,9 +1,9 @@
 use crate::error::{ErrorCode, Result, RwError};
 use crate::task::TaskManager;
-use crate::task::TaskSink;
+use crate::task::{TaskSink, TaskSinkId};
 use futures::SinkExt;
-use grpcio::{RpcContext, ServerStreamingSink, WriteFlags};
-use risingwave_proto::task_service::{TaskData, TaskSinkId};
+use grpcio::{RpcContext, RpcStatus, ServerStreamingSink, WriteFlags};
+use risingwave_proto::task_service::{TaskData, TaskSinkId as ProtoTaskSinkId};
 use risingwave_proto::task_service_grpc::ExchangeService;
 use std::sync::Arc;
 
@@ -31,18 +31,25 @@ impl ExchangeService for ExchangeServiceImpl {
     fn get_data(
         &mut self,
         ctx: RpcContext<'_>,
-        tsid: TaskSinkId,
+        proto_tsid: ProtoTaskSinkId,
         mut sink: ServerStreamingSink<TaskData>,
     ) {
-        let task_sink_result = self.mgr.take_sink(&tsid);
+        let tsid = TaskSinkId::from(&proto_tsid);
+        let peer = ctx.peer();
+        let task_sink_result = self.mgr.take_sink(&proto_tsid);
         ctx.spawn(async move {
+            debug!("Serve exchange RPC from {} [{:?}]", peer, tsid);
             let mut writer = GrpcExchangeWriter::new(&mut sink);
             let res = pull_from_task_sink(task_sink_result, &mut writer)
                 .await
                 .map_err(|e| e.to_grpc_error());
             match res {
                 Err(e) => {
-                    if let Err(io_err) = sink.fail(e).await {
+                    // Augment error with TaskSinkId.
+                    let ne =
+                        RpcStatus::with_message(e.code(), format!("{} [{:?}]", e.message(), tsid));
+                    error!("Failed to serve exchange RPC from {}: {}", peer, ne);
+                    if let Err(io_err) = sink.fail(ne).await {
                         error!("Failed to fail RPC: {}", io_err);
                     }
                 }

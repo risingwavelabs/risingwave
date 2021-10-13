@@ -1,4 +1,5 @@
-use crate::error::{ErrorCode, Result, RwError};
+use crate::error::ErrorCode::TaskNotFound;
+use crate::error::{Result, RwError};
 use crate::task::env::GlobalTaskEnv;
 use crate::task::task::{TaskExecution, TaskId};
 use crate::task::TaskSink;
@@ -41,39 +42,27 @@ impl TaskManager {
 
     pub fn take_sink(&self, sink_id: &ProtoSinkId) -> Result<TaskSink> {
         let task_id = TaskId::from(sink_id.get_task_id());
-        return self
-            .tasks
+        self.tasks
             .lock()
             .unwrap()
             .get(&task_id)
-            .ok_or_else(|| ErrorCode::InternalError(format!("task {:?} is not running", task_id)))?
-            .get_task_sink(sink_id);
+            .ok_or(TaskNotFound)?
+            .get_task_sink(sink_id)
     }
 
-    // NOTE: For now, draining out data from the task will block the grpc thread.
-    // By design, `take_data` is an future, but for the safe of the unsafety to mix other
-    // future runtimes (tokio, eg.) with grpc-rs reactor, we still implement it
-    // in an blocking way.
+    #[cfg(test)]
     pub fn remove_task(&self, sid: &ProtoTaskId) -> Result<Option<Box<TaskExecution>>> {
         let task_id = TaskId::from(sid);
         match self.tasks.lock().unwrap().remove(&task_id) {
             Some(t) => Ok(Some(t)),
-            None => {
-                return Err(ErrorCode::InternalError(format!("No such task {:?}", &task_id)).into())
-            }
+            None => Err(TaskNotFound.into()),
         }
     }
 
     pub fn check_if_task_running(&self, task_id: &TaskId) -> Result<()> {
         match self.tasks.lock().unwrap().get(task_id) {
             Some(task) => task.check_if_running(),
-            None => {
-                return Err(ErrorCode::InternalError(format!(
-                    "There is not such task:{:?} in task manager.",
-                    task_id
-                ))
-                .into())
-            }
+            None => Err(TaskNotFound.into()),
         }
     }
 
@@ -83,7 +72,7 @@ impl TaskManager {
             .lock()
             .unwrap()
             .get(task_id)
-            .ok_or_else(|| ErrorCode::InternalError(format!("task {:?} is not running", task_id)))?
+            .ok_or(TaskNotFound)?
             .get_error();
     }
 }
@@ -97,9 +86,12 @@ impl Default for TaskManager {
 #[cfg(test)]
 mod tests {
     use crate::task::test_utils::{ResultChecker, TestRunner};
-    use crate::task::{GlobalTaskEnv, TaskManager};
+    use crate::task::{GlobalTaskEnv, TaskId, TaskManager};
+    use grpcio::RpcStatusCode;
+    use pb_construct::make_proto;
     use risingwave_proto::plan::{PlanFragment, PlanNode_PlanNodeType};
     use risingwave_proto::task_service::TaskId as ProtoTaskId;
+    use risingwave_proto::task_service::TaskSinkId as ProtoTaskSinkId;
 
     #[test]
     fn test_select_all() {
@@ -133,5 +125,30 @@ mod tests {
         assert!(manager
             .fire_task(env, &ProtoTaskId::default(), plan)
             .is_err());
+    }
+
+    #[test]
+    fn test_task_not_found() {
+        let manager = TaskManager::new();
+        let task_id = TaskId {
+            task_id: 0,
+            stage_id: 0,
+            query_id: "abc".to_string(),
+        };
+
+        assert_eq!(
+            manager
+                .check_if_task_running(&task_id)
+                .unwrap_err()
+                .to_grpc_error()
+                .code(),
+            RpcStatusCode::NOT_FOUND
+        );
+
+        let sink_id = make_proto!(ProtoTaskSinkId, {});
+        match manager.take_sink(&sink_id) {
+            Err(e) => assert_eq!(e.to_grpc_error().code(), RpcStatusCode::NOT_FOUND),
+            Ok(_) => unreachable!(),
+        };
     }
 }
