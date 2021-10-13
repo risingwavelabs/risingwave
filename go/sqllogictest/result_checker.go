@@ -175,7 +175,10 @@ func (t *logicTest) formatValues(vals []string, valsPerLine int) []string {
 // Returns a nil error to indicate the behavior was as expected.
 func verifyError(sql, pos string, expectErr *errorArg, err error) error {
 	if expectErr == nil {
-		return err
+		if err == nil {
+			return nil
+		}
+		return fmt.Errorf("%s: %s\nexpected no error, but error %s occurred", pos, sql, err)
 	}
 	if err == nil {
 		return fmt.Errorf("%s: %s\nexpected %q, but no error occurred", pos, sql, expectErr)

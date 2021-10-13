@@ -41,7 +41,8 @@ build/
 **/tags
 
 # runtime log
-rust/log/*
+rust/log/
+log/
 
 # CLion
 cmake-build-debug/
@@ -60,6 +61,5 @@ rust/**/target
 rust/proto/src/*.rs
 !rust/proto/src/lib.rs
 *.iml
-rust/log/
 
 go/bin/

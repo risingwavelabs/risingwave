@@ -84,6 +84,21 @@ To run end-to-end tests, start the frontend server and a compute server, and the
 python3 ./scripts/sqllogictest_java.py
 ```
 
+## Distributed Testing
+
+To run end-to-end tests with multiple compute-nodes, run the script:
+
+```sh
+./scripts/start_cluster.sh 3
+```
+
+It will start processes in the background. After testing you can run the following script
+to cleanup:
+
+```sh
+./scripts/kill_cluster.sh
+```
+
 ## Code Formatting
 Before submitting your PR, you should format the code first.
 

@@ -200,8 +200,44 @@ func (t *logicTest) execStatement(stmt *logicStatement) error {
 	return verifyError(stmt.sql, stmt.pos, stmt.expectErr, err)
 }
 
-func (t *logicTest) execQuery(query *logicQuery) error {
+type bufferedRows struct {
+	columns []string
+	tuples  [][]interface{}
+}
+
+// tryExecQuery executes the query and checks if there's error.
+func (t *logicTest) tryExecQuery(query *logicQuery) (*bufferedRows, error) {
 	rows, err := t.db.Query(query.sql)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+
+	var tuples [][]interface{}
+	for rows.Next() {
+		vals := make([]interface{}, len(cols))
+		for i := range vals {
+			vals[i] = new(interface{})
+		}
+		if err := rows.Scan(vals...); err != nil {
+			return nil, err
+		}
+		tuples = append(tuples, vals)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return &bufferedRows{tuples: tuples, columns: cols}, nil
+}
+
+func (t *logicTest) execQuery(query *logicQuery) error {
+	rows, err := t.tryExecQuery(query)
 	if err := verifyError(query.sql, query.pos, query.expectErr, err); err != nil {
 		return err
 	}
@@ -209,29 +245,18 @@ func (t *logicTest) execQuery(query *logicQuery) error {
 		// An error occurred, but it was expected.
 		return nil
 	}
-	defer rows.Close()
 
-	cols, err := rows.Columns()
-	if err != nil {
-		return err
-	}
+	cols := rows.columns
 	if len(query.colTypes) != len(cols) {
 		return fmt.Errorf("%s: expected %d columns, but found %d",
 			query.pos, len(query.colTypes), len(cols))
-	}
-	vals := make([]interface{}, len(cols))
-	for i := range vals {
-		vals[i] = new(interface{})
 	}
 
 	var actualResultsRaw []string
 	if query.colNames {
 		actualResultsRaw = append(actualResultsRaw, cols...)
 	}
-	for rows.Next() {
-		if err := rows.Scan(vals...); err != nil {
-			return err
-		}
+	for _, vals := range rows.tuples {
 		for i, v := range vals {
 			val := *v.(*interface{})
 			if val == nil {
@@ -258,9 +283,6 @@ func (t *logicTest) execQuery(query *logicQuery) error {
 			}
 			actualResultsRaw = append(actualResultsRaw, fmt.Sprint(val))
 		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
 	}
 
 	return query.deepEquals(t, actualResultsRaw, len(cols))

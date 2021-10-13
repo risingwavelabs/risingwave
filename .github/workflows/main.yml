@@ -22,10 +22,7 @@ concurrency:
 jobs:
   java-check:
     name: Java Check
-    needs: start-runner # required to start the main job when the runner is ready
-    runs-on: ${{ needs.start-runner.outputs.label }} # run the job on the newly created runner
-    container:
-      image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -67,9 +64,8 @@ jobs:
       - start-runner # required to start the main job when the runner is ready
       - java-check
       - rust-check
-    runs-on: ${{ needs.start-runner.outputs.label }} # run the job on the newly created runner
-    container:
-      image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
+    runs-on: ubuntu-latest
+    timeout-minutes: 15 # NOTE: Increase this number when we have more tests.
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -92,29 +88,38 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
+      - uses: actions/setup-go@v2
+        with:
+          go-version: '1.13'
+
       - name: Build sqllogictest
-        # sqllogictest involves some cgo libraries, the compilation will fail on ccache.
-        env:
-          CC: gcc
-          CXX: g++
         run: |
           make sqllogictest
 
       - uses: actions/download-artifact@v2
         with:
           name: compute-node
+          path: ./rust/target/debug
 
       - name: Build java frontend
         run: make java_build
 
-      - name: Run end-to-end tests
+      - name: Run single-node end-to-end tests
         run: |
-          ls
-          chmod +x ./compute-node
-          cd java && ./gradlew -p pgserver run & sleep 10
-          RUST_BACKTRACE=1 ./compute-node --log4rs-config rust/config/log4rs.yaml & sleep 10
-
+          chmod +x ./rust/target/debug/compute-node
+          ./scripts/start_cluster.sh 1
           python3 ./scripts/sqllogictest_java.py
+          ./scripts/kill_cluster.sh
+
+      - name: Run 3-node end-to-end tests
+        run: |
+          sleep 5
+          ./scripts/start_cluster.sh 3
+          python3 ./scripts/sqllogictest_java.py
+
+      - name: Show compute-nodes logs on failure
+        if: ${{ failure() }}
+        run: ./scripts/dump_cluster_logs.sh
 
   start-runner:
     name: Start self-hosted EC2 runner
@@ -205,6 +210,19 @@ jobs:
           if-no-files-found: error # 'warn' or 'ignore' are also available, defaults to `warn`
           path: |
             rust/target/debug/compute-node
+
+  shell-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          ignore: java # we assume java folder has no script.
 
   stop-runner:
     name: Stop self-hosted EC2 runner
