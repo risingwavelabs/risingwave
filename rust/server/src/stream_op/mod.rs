@@ -13,7 +13,6 @@ mod merge;
 mod mview_sink;
 mod projection_operator;
 mod simple_agg;
-mod simple_processor;
 mod table_data_source;
 
 pub use actor::Actor;
@@ -27,7 +26,6 @@ pub use merge::*;
 pub use mview_sink::*;
 pub use projection_operator::*;
 pub use simple_agg::*;
-pub use simple_processor::*;
 pub use table_data_source::*;
 
 use async_trait::async_trait;

@@ -6,6 +6,27 @@ use futures::StreamExt;
 
 use super::Message;
 
+/// `ReceiverExecutor` is used along with a channel. After creating a mpsc channel,
+/// there should be a `ReceiverExecutor` running in the background, so as to push
+/// messages down to the operators.
+pub struct ReceiverExecutor {
+    receiver: Receiver<Message>,
+}
+
+impl ReceiverExecutor {
+    pub fn new(receiver: Receiver<Message>) -> Self {
+        Self { receiver }
+    }
+}
+
+#[async_trait]
+impl StreamOperator for ReceiverExecutor {
+    async fn next(&mut self) -> Result<Message> {
+        let msg = self.receiver.next().await.unwrap(); // TODO: remove unwrap
+        Ok(msg)
+    }
+}
+
 /// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
 /// will be stopped on barrier.
 pub struct MergeExecutor {
