@@ -4,15 +4,15 @@ use crate::storage::Row;
 use async_trait::async_trait;
 use smallvec::SmallVec;
 
-/// `MemTableMVOperator` writes data to a row-based memtable, so that data could
+/// `MViewSinkExecutor` writes data to a row-based memtable, so that data could
 /// be queried by the AP engine.
-pub struct MemTableMVOperator {
+pub struct MViewSinkExecutor {
     input: Box<dyn StreamOperator>,
     table: MemTableRef,
     pk_col: Vec<usize>,
 }
 
-impl MemTableMVOperator {
+impl MViewSinkExecutor {
     pub fn new(input: Box<dyn StreamOperator>, table: MemTableRef, pk_col: Vec<usize>) -> Self {
         Self {
             input,
@@ -22,7 +22,7 @@ impl MemTableMVOperator {
     }
 }
 
-impl SimpleStreamOperator for MemTableMVOperator {
+impl SimpleStreamOperator for MViewSinkExecutor {
     fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
         let StreamChunk {
             ops,
@@ -78,4 +78,4 @@ impl SimpleStreamOperator for MemTableMVOperator {
 
 use crate::impl_consume_barrier_default;
 
-impl_consume_barrier_default!(MemTableMVOperator, StreamOperator);
+impl_consume_barrier_default!(MViewSinkExecutor, StreamOperator);

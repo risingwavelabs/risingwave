@@ -23,7 +23,7 @@ pub use filter::*;
 pub use hash_agg::*;
 pub use identity_operator::IdentityOperator;
 pub use kafka_source::*;
-pub use mem_table_mv_operator::MemTableMVOperator;
+pub use mem_table_mv_operator::*;
 pub use merge_processor::*;
 pub use projection_operator::ProjectionOperator;
 pub use simple_agg::*;

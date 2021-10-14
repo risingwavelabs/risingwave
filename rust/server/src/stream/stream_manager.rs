@@ -256,7 +256,7 @@ impl StreamManagerCore {
                 // TODO: assign a memtable from manager
                 let memtable = MemRowTable::default();
 
-                Box::new(MemTableMVOperator::new(
+                Box::new(MViewSinkExecutor::new(
                     input,
                     std::sync::Arc::new(memtable),
                     mtmv.get_pk_idx().iter().map(|x| *x as usize).collect(),
