@@ -3,7 +3,7 @@ use crate::expr::*;
 use crate::types::*;
 use std::sync::{Arc, Mutex};
 
-use super::ReceiverOperator;
+use super::ReceiverExecutor;
 use super::*;
 use approx::assert_relative_eq;
 
@@ -40,7 +40,7 @@ impl StreamConsumer for MockConsumer {
 async fn test_merger_sum_aggr() {
     // `make_actor` build an actor to do local aggregation
     let make_actor = |input_rx| {
-        let input = ReceiverOperator::new(input_rx);
+        let input = ReceiverExecutor::new(input_rx);
         // for the local aggregator, we need two states: sum and row count
         let aggregator = SimpleAggExecutor::new(
             Box::new(input),
@@ -82,7 +82,7 @@ async fn test_merger_sum_aggr() {
 
     // create a round robin dispatcher, which dispatches messages to the actors
     let (mut input, rx) = channel(16);
-    let receiver_op = ReceiverOperator::new(rx);
+    let receiver_op = ReceiverExecutor::new(rx);
     let dispatcher =
         DispatchExecutor::new(Box::new(receiver_op), RoundRobinDataDispatcher::new(inputs));
     let actor = Actor::new(Box::new(dispatcher));
@@ -304,7 +304,7 @@ async fn test_tpch_q6() {
     // make an actor after dispatcher, which includes filter, projection, and local aggregator.
     let make_actor = |input_rx| {
         let (_, _, _, _, and, multiply) = make_tpchq6_expr();
-        let input = ReceiverOperator::new(input_rx);
+        let input = ReceiverExecutor::new(input_rx);
 
         let filter = FilterExecutor::new(Box::new(input), Box::new(and));
         let projection = ProjectExecutor::new(Box::new(filter), vec![Box::new(multiply)]);
@@ -350,7 +350,7 @@ async fn test_tpch_q6() {
 
     // create a round robin dispatcher, which dispatches messages to the actors
     let (mut input, rx) = channel(16);
-    let receiver_op = ReceiverOperator::new(rx);
+    let receiver_op = ReceiverExecutor::new(rx);
     let dispatcher =
         DispatchExecutor::new(Box::new(receiver_op), RoundRobinDataDispatcher::new(inputs));
     let actor = Actor::new(Box::new(dispatcher));
