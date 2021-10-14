@@ -61,15 +61,10 @@ impl HashValue {
             .iter_mut()
             .zip(all_agg_input_arrays.iter())
             .try_for_each(|(agg_state, input_arrays)| {
-                // FIXME: remove the dummy array.
                 if input_arrays.is_empty() {
-                    agg_state.apply_batch(
-                        ops,
-                        visibility,
-                        &I64Array::from_slice(&[None]).unwrap().into(),
-                    )
+                    agg_state.apply_batch(ops, visibility, &[])
                 } else {
-                    agg_state.apply_batch(ops, visibility, input_arrays[0])
+                    agg_state.apply_batch(ops, visibility, &[input_arrays[0]])
                 }
             })
     }

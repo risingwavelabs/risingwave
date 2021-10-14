@@ -263,9 +263,9 @@ macro_rules! impl_fold_agg {
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
-        data: &ArrayImpl,
+        data: &[&ArrayImpl],
       ) -> Result<()> {
-        self.apply_batch_concrete(ops, visibility, data.into())
+        self.apply_batch_concrete(ops, visibility, data[0].into())
       }
 
       fn get_output(&self, builder: &mut ArrayBuilderImpl) -> Result<()> {
@@ -318,7 +318,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
-            &array_nonnull!(I64Array, [1, 2, 3, 3]).into(),
+            &[&array_nonnull!(I64Array, [1, 2, 3, 3]).into()],
         )
         .unwrap();
         let mut builder = agg.new_builder();
@@ -329,7 +329,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Insert, Op::Delete, Op::Delete, Op::Insert],
             Some(&Bitmap::from_vec(vec![true, true, false, false]).unwrap()),
-            &array_nonnull!(I64Array, [3, 1, 3, 1]).into(),
+            &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
         )
         .unwrap();
         let mut builder = agg.new_builder();
@@ -344,7 +344,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
-            &array_nonnull!(I64Array, [1, 2, 3, 3]).into(),
+            &[&array_nonnull!(I64Array, [1, 2, 3, 3]).into()],
         )
         .unwrap();
         let array = get_output_from_state(&mut agg);
@@ -353,7 +353,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Insert, Op::Delete, Op::Delete, Op::Insert],
             Some(&Bitmap::from_vec(vec![true, true, false, false]).unwrap()),
-            &array_nonnull!(I64Array, [3, 1, 3, 1]).into(),
+            &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
         )
         .unwrap();
         let mut builder = agg.new_builder();
@@ -368,7 +368,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Delete, Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
-            &array_nonnull!(I64Array, [10, 1, 2, 3, 3]).into(),
+            &[&array_nonnull!(I64Array, [10, 1, 2, 3, 3]).into()],
         )
         .unwrap();
         let array = get_output_from_state(&mut agg);
@@ -377,7 +377,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
             Some(&Bitmap::from_vec(vec![false, true, false, false]).unwrap()),
-            &array_nonnull!(I64Array, [3, 1, 3, 1]).into(),
+            &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
         )
         .unwrap();
         let mut builder = agg.new_builder();
@@ -399,7 +399,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Delete, Op::Insert, Op::Insert, Op::Delete],
             None,
-            &array_nonnull!(I64Array, [1, 2, 1, 2]).into(),
+            &[&array_nonnull!(I64Array, [1, 2, 1, 2]).into()],
         )
         .unwrap();
         let array = get_output_from_state(&mut agg);
@@ -408,7 +408,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Delete, Op::Delete, Op::Delete, Op::Insert],
             Some(&Bitmap::from_vec(vec![false, true, false, true]).unwrap()),
-            &array_nonnull!(I64Array, [3, 1, 3, 1]).into(),
+            &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
         )
         .unwrap();
         let mut builder = agg.new_builder();
@@ -423,7 +423,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
-            &array!(I64Array, [Some(1), None, Some(3), Some(1)]).into(),
+            &[&array!(I64Array, [Some(1), None, Some(3), Some(1)]).into()],
         )
         .unwrap();
 
@@ -433,7 +433,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
             Some(&Bitmap::from_vec(vec![false, true, false, false]).unwrap()),
-            &array!(I64Array, [Some(1), None, Some(3), Some(1)]).into(),
+            &[&array!(I64Array, [Some(1), None, Some(3), Some(1)]).into()],
         )
         .unwrap();
         let mut builder = agg.new_builder();

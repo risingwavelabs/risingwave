@@ -44,7 +44,7 @@ pub trait StreamingAggStateImpl: Send + Sync + 'static {
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
-        data: &ArrayImpl,
+        data: &[&ArrayImpl],
     ) -> Result<()>;
 
     fn get_output(&self, builder: &mut ArrayBuilderImpl) -> Result<()>;

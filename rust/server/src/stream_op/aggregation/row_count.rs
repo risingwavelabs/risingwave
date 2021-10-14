@@ -35,7 +35,7 @@ impl StreamingAggStateImpl for StreamingRowCountAgg {
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
-        _data: &ArrayImpl,
+        _data: &[&ArrayImpl],
     ) -> Result<()> {
         match visibility {
             None => {
@@ -78,8 +78,6 @@ impl StreamingAggStateImpl for StreamingRowCountAgg {
 
 #[cfg(test)]
 mod tests {
-    use crate::array::I64Array;
-
     use super::super::tests::get_output_from_impl_state;
     use super::*;
 
@@ -97,13 +95,7 @@ mod tests {
         );
 
         // insert one element to state
-        state
-            .apply_batch(
-                &[Op::Insert],
-                None,
-                &I64Array::from_slice(&[None]).unwrap().into(),
-            )
-            .unwrap();
+        state.apply_batch(&[Op::Insert], None, &[]).unwrap();
 
         // should be one row
         assert_eq!(
@@ -115,13 +107,7 @@ mod tests {
         );
 
         // delete one element from state
-        state
-            .apply_batch(
-                &[Op::Delete],
-                None,
-                &I64Array::from_slice(&[None]).unwrap().into(),
-            )
-            .unwrap();
+        state.apply_batch(&[Op::Delete], None, &[]).unwrap();
 
         // should be 0 rows.
         assert_eq!(
@@ -133,13 +119,7 @@ mod tests {
         );
 
         // one more deletion, so we are having `-1` elements inside.
-        state
-            .apply_batch(
-                &[Op::Delete],
-                None,
-                &I64Array::from_slice(&[None]).unwrap().into(),
-            )
-            .unwrap();
+        state.apply_batch(&[Op::Delete], None, &[]).unwrap();
 
         // should be the same as `TestState`'s output
         assert_eq!(
@@ -155,7 +135,7 @@ mod tests {
             .apply_batch(
                 &[Op::Delete, Op::Insert],
                 Some(&Bitmap::from_vec(vec![false, true]).unwrap()),
-                &I64Array::from_slice(&[None, None]).unwrap().into(),
+                &[],
             )
             .unwrap();
 
@@ -173,7 +153,7 @@ mod tests {
             .apply_batch(
                 &[Op::Delete, Op::Insert],
                 Some(&Bitmap::from_vec(vec![true, false]).unwrap()),
-                &I64Array::from_slice(&[None, None]).unwrap().into(),
+                &[],
             )
             .unwrap();
 
