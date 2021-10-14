@@ -314,7 +314,7 @@ impl StreamManagerCore {
             // Only one upstream, use `ReceiverOperator`.
             Ok(Box::new(ReceiverOperator::new(rxs.remove(0))))
         } else {
-            Ok(Box::new(MergeOperator::new(rxs)))
+            Ok(Box::new(MergeExecutor::new(rxs)))
         }
     }
 

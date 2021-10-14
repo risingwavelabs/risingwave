@@ -6,9 +6,9 @@ use futures::StreamExt;
 
 use super::Message;
 
-/// `MergeOperator` merges data from multiple channels. Dataflow from one channel
+/// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
 /// will be stopped on barrier.
-pub struct MergeOperator {
+pub struct MergeExecutor {
     /// Number of inputs
     num_inputs: usize,
 
@@ -26,7 +26,7 @@ pub struct MergeOperator {
     next_epoch: u64,
 }
 
-impl MergeOperator {
+impl MergeExecutor {
     pub fn new(inputs: Vec<Receiver<Message>>) -> Self {
         Self {
             num_inputs: inputs.len(),
@@ -39,7 +39,7 @@ impl MergeOperator {
 }
 
 #[async_trait]
-impl StreamOperator for MergeOperator {
+impl StreamOperator for MergeExecutor {
     async fn next(&mut self) -> Result<Message> {
         loop {
             // Convert channel receivers to futures here to do `select_all`
@@ -112,7 +112,7 @@ mod tests {
             txs.push(tx);
             rxs.push(rx);
         }
-        let merger = MergeOperator::new(rxs);
+        let merger = MergeExecutor::new(rxs);
 
         let msgs = Arc::new(Mutex::new(vec![]));
         let consumer = MockConsumer::new(Box::new(merger), msgs.clone());

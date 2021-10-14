@@ -89,7 +89,7 @@ async fn test_merger_sum_aggr() {
     handles.push(tokio::spawn(actor.run()));
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
-    let merger = MergeOperator::new(outputs);
+    let merger = MergeExecutor::new(outputs);
 
     // for global aggregator, we need to sum data and sum row count
     let aggregator = SimpleAggExecutor::new(
@@ -357,7 +357,7 @@ async fn test_tpch_q6() {
     handles.push(tokio::spawn(actor.run()));
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
-    let merger = MergeOperator::new(outputs);
+    let merger = MergeExecutor::new(outputs);
 
     // create a global aggregator to sum data and sum row count
     let aggregator = SimpleAggExecutor::new(
