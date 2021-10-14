@@ -22,6 +22,20 @@ pub type StreamingFloatSumAgg<R> =
 /// `StreamingCountAgg` counts data of any type.
 pub type StreamingCountAgg<S> = StreamingFoldAgg<I64Array, S, Countable<<S as Array>::OwnedItem>>;
 
+/// `StreamingMinAgg` get minimum data of the same type.
+pub type StreamingMinAgg<S> = StreamingFoldAgg<S, S, Minimizable<<S as Array>::OwnedItem>>;
+
+/// `StreamingFloatMinAgg` get minimum data of the same float type.
+pub type StreamingFloatMinAgg<S> =
+    StreamingFoldAgg<S, S, FloatMinimizable<<S as Array>::OwnedItem>>;
+
+/// `StreamingMaxAgg` get maximum data of the same type.
+pub type StreamingMaxAgg<S> = StreamingFoldAgg<S, S, Maximizable<<S as Array>::OwnedItem>>;
+
+/// `StreamingFloatMaxAgg` get maximum data of the same float type.
+pub type StreamingFloatMaxAgg<S> =
+    StreamingFoldAgg<S, S, FloatMaximizable<<S as Array>::OwnedItem>>;
+
 pub use super::aggregation::StreamingRowCountAgg;
 
 /// `AggregationOperator` is the aggregation operator for streaming system.

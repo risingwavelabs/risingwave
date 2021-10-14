@@ -4,7 +4,9 @@ use std::marker::PhantomData;
 
 use crate::array::*;
 use crate::buffer::Bitmap;
-use crate::error::{ErrorCode::NumericValueOutOfRange, Result, RwError};
+use crate::error::{
+    ErrorCode::NotImplementedError, ErrorCode::NumericValueOutOfRange, Result, RwError,
+};
 use crate::types::{option_as_scalar_ref, Scalar, ScalarRef};
 
 use super::{Op, Ops, StreamingAggFunction, StreamingAggState, StreamingAggStateImpl};
@@ -179,6 +181,138 @@ where
     }
 }
 
+/// `Minimizable` return minimum value overall.
+/// It produces the same type of output as input `S`.
+pub struct Minimizable<S>
+where
+    S: Scalar + Ord,
+{
+    _phantom: PhantomData<S>,
+}
+
+impl<S> StreamingFoldable<S, S> for Minimizable<S>
+where
+    S: Scalar + Ord,
+{
+    fn accumulate(result: Option<&S>, input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
+        Ok(match (result, input) {
+            (Some(x), Some(y)) => Some(x.clone().min(y.to_owned_scalar())),
+            (None, Some(y)) => Some(y.to_owned_scalar()),
+            (Some(x), None) => Some(x.clone()),
+            (None, None) => None,
+        })
+    }
+
+    fn retract(_result: Option<&S>, _input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
+        Err(RwError::from(NotImplementedError(
+            "insert only for minimum".to_string(),
+        )))
+    }
+}
+
+/// `FloatMinimizable` return minimum float value overall.
+/// It produces the same type of output as input `S`.
+pub struct FloatMinimizable<S>
+where
+    S: Scalar + num_traits::Float,
+{
+    _phantom: PhantomData<S>,
+}
+
+impl<S> StreamingFoldable<S, S> for FloatMinimizable<S>
+where
+    S: Scalar + num_traits::Float,
+{
+    fn accumulate(result: Option<&S>, input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
+        let valid = |val: S| -> bool { val.is_finite() && !val.is_nan() };
+
+        Ok(match (result, input) {
+            (Some(x), Some(y)) => {
+                if valid(*x) && valid(y.to_owned_scalar()) {
+                    Some((*x).min(y.to_owned_scalar()))
+                } else {
+                    return Err(RwError::from(NumericValueOutOfRange));
+                }
+            }
+            (None, Some(y)) => Some(y.to_owned_scalar()),
+            (Some(x), None) => Some(*x),
+            (None, None) => None,
+        })
+    }
+
+    fn retract(_result: Option<&S>, _input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
+        Err(RwError::from(NotImplementedError(
+            "insert only for float minimum".to_string(),
+        )))
+    }
+}
+
+/// `Maximizable` return maximum value overall.
+/// It produces the same type of output as input `S`.
+pub struct Maximizable<S>
+where
+    S: Scalar + Ord,
+{
+    _phantom: PhantomData<S>,
+}
+
+impl<S> StreamingFoldable<S, S> for Maximizable<S>
+where
+    S: Scalar + Ord,
+{
+    fn accumulate(result: Option<&S>, input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
+        Ok(match (result, input) {
+            (Some(x), Some(y)) => Some(x.clone().max(y.to_owned_scalar())),
+            (None, Some(y)) => Some(y.to_owned_scalar()),
+            (Some(x), None) => Some(x.clone()),
+            (None, None) => None,
+        })
+    }
+
+    fn retract(_result: Option<&S>, _input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
+        Err(RwError::from(NotImplementedError(
+            "insert only for maximum".to_string(),
+        )))
+    }
+}
+
+/// `FloatMaximizable` return maximum float value overall.
+/// It produces the same type of output as input `S`.
+pub struct FloatMaximizable<S>
+where
+    S: Scalar + num_traits::Float,
+{
+    _phantom: PhantomData<S>,
+}
+
+impl<S> StreamingFoldable<S, S> for FloatMaximizable<S>
+where
+    S: Scalar + num_traits::Float,
+{
+    fn accumulate(result: Option<&S>, input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
+        let valid = |val: S| -> bool { val.is_finite() && !val.is_nan() };
+
+        Ok(match (result, input) {
+            (Some(x), Some(y)) => {
+                if valid(*x) && valid(y.to_owned_scalar()) {
+                    Some((*x).max(y.to_owned_scalar()))
+                } else {
+                    return Err(RwError::from(NumericValueOutOfRange));
+                }
+            }
+            (None, Some(y)) => Some(y.to_owned_scalar()),
+            (Some(x), None) => Some(*x),
+            (None, None) => None,
+        })
+    }
+
+    fn retract(_result: Option<&S>, _input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
+        Err(RwError::from(NotImplementedError(
+            "insert only for float maximum".to_string(),
+        )))
+    }
+}
+
 impl<R, I, S> StreamingAggState<I> for StreamingFoldAgg<R, I, S>
 where
     R: Array,
@@ -310,6 +444,14 @@ mod tests {
         StreamingFoldAgg<R, R, PrimitiveSummable<<R as Array>::OwnedItem>>;
 
     type TestStreamingCountAgg<R> = StreamingFoldAgg<R, R, Countable<<R as Array>::OwnedItem>>;
+
+    type TestStreamingMinAgg<R> = StreamingFoldAgg<R, R, Minimizable<<R as Array>::OwnedItem>>;
+
+    type TestStreamingFloatMinAgg<R> =
+        StreamingFoldAgg<R, R, FloatMinimizable<<R as Array>::OwnedItem>>;
+
+    type TestStreamingMaxAgg<R> = StreamingFoldAgg<R, R, Maximizable<<R as Array>::OwnedItem>>;
+
     #[test]
     /// This test uses `Box<dyn StreamingAggStateImpl>` to test a state.
     fn test_primitive_sum_boxed() {
@@ -440,5 +582,80 @@ mod tests {
         agg.get_output(&mut builder).unwrap();
         let array = builder.finish().unwrap();
         assert_eq!(array.as_int64().value_at(0), Some(1));
+    }
+
+    #[test]
+    fn test_minimum() {
+        let mut agg = TestStreamingMinAgg::<I64Array>::new();
+        agg.apply_batch(
+            &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
+            None,
+            &[&array!(I64Array, [Some(1), Some(10), None, Some(5)]).into()],
+        )
+        .unwrap();
+
+        let array = get_output_from_state(&mut agg);
+        assert_eq!(array.value_at(0), Some(1));
+
+        agg.apply_batch(
+            &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
+            None,
+            &[&array!(I64Array, [Some(1), Some(10), Some(-1), Some(5)]).into()],
+        )
+        .unwrap();
+        let mut builder = agg.new_builder();
+        agg.get_output(&mut builder).unwrap();
+        let array = builder.finish().unwrap();
+        assert_eq!(array.as_int64().value_at(0), Some(-1));
+    }
+
+    #[test]
+    fn test_minimum_float() {
+        let mut agg = TestStreamingFloatMinAgg::<F64Array>::new();
+        agg.apply_batch(
+            &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
+            None,
+            &[&array!(F64Array, [Some(1.0), Some(10.0), None, Some(5.0)]).into()],
+        )
+        .unwrap();
+
+        let array = get_output_from_state(&mut agg);
+        assert_eq!(array.value_at(0), Some(1.0));
+
+        agg.apply_batch(
+            &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
+            None,
+            &[&array!(F64Array, [Some(1.0), Some(10.0), Some(-1.0), Some(5.0)]).into()],
+        )
+        .unwrap();
+        let mut builder = agg.new_builder();
+        agg.get_output(&mut builder).unwrap();
+        let array = builder.finish().unwrap();
+        assert_eq!(array.as_float64().value_at(0), Some(-1.0));
+    }
+
+    #[test]
+    fn test_maximum() {
+        let mut agg = TestStreamingMaxAgg::<I64Array>::new();
+        agg.apply_batch(
+            &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
+            None,
+            &[&array!(I64Array, [Some(10), Some(1), None, Some(5)]).into()],
+        )
+        .unwrap();
+
+        let array = get_output_from_state(&mut agg);
+        assert_eq!(array.value_at(0), Some(10));
+
+        agg.apply_batch(
+            &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
+            None,
+            &[&array!(I64Array, [Some(1), Some(10), Some(100), Some(5)]).into()],
+        )
+        .unwrap();
+        let mut builder = agg.new_builder();
+        agg.get_output(&mut builder).unwrap();
+        let array = builder.finish().unwrap();
+        assert_eq!(array.as_int64().value_at(0), Some(100));
     }
 }

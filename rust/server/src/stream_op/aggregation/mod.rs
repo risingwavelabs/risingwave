@@ -10,7 +10,10 @@ pub use row_count::*;
 mod avg;
 pub use avg::*;
 
-use super::{Op, Ops, StreamingCountAgg, StreamingFloatSumAgg, StreamingSumAgg};
+use super::{
+    Op, Ops, StreamingCountAgg, StreamingFloatMaxAgg, StreamingFloatMinAgg, StreamingFloatSumAgg,
+    StreamingMaxAgg, StreamingMinAgg, StreamingSumAgg,
+};
 use crate::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, F32Array, F64Array, I16Array, I32Array,
     I64Array,
@@ -91,6 +94,36 @@ pub fn create_streaming_agg_state(
                 }
                 (_, AggKind::Sum, DataTypeKind::Float32) => {
                     Box::new(StreamingFloatSumAgg::<F32Array>::new())
+                }
+                (_, AggKind::Min, DataTypeKind::Int16) => {
+                    Box::new(StreamingMinAgg::<I16Array>::new())
+                }
+                (_, AggKind::Min, DataTypeKind::Int32) => {
+                    Box::new(StreamingMinAgg::<I32Array>::new())
+                }
+                (_, AggKind::Min, DataTypeKind::Int64) => {
+                    Box::new(StreamingMinAgg::<I64Array>::new())
+                }
+                (_, AggKind::Min, DataTypeKind::Float32) => {
+                    Box::new(StreamingFloatMinAgg::<F32Array>::new())
+                }
+                (_, AggKind::Min, DataTypeKind::Float64) => {
+                    Box::new(StreamingFloatMinAgg::<F64Array>::new())
+                }
+                (_, AggKind::Max, DataTypeKind::Int16) => {
+                    Box::new(StreamingMaxAgg::<I16Array>::new())
+                }
+                (_, AggKind::Max, DataTypeKind::Int32) => {
+                    Box::new(StreamingMaxAgg::<I32Array>::new())
+                }
+                (_, AggKind::Max, DataTypeKind::Int64) => {
+                    Box::new(StreamingMaxAgg::<I64Array>::new())
+                }
+                (_, AggKind::Max, DataTypeKind::Float32) => {
+                    Box::new(StreamingFloatMaxAgg::<F32Array>::new())
+                }
+                (_, AggKind::Max, DataTypeKind::Float64) => {
+                    Box::new(StreamingFloatMaxAgg::<F64Array>::new())
                 }
                 (other_input, other_agg, other_return) => panic!(
                     "streaming state not implemented: {:?} {:?} {:?}",
