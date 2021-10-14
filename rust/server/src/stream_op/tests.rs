@@ -200,7 +200,7 @@ async fn test_local_hash_aggregation_count() {
         },
     ];
 
-    let mut hash_agg = HashAggregationOperator::new(Box::new(source), agg_calls, keys);
+    let mut hash_agg = HashAggExecutor::new(Box::new(source), agg_calls, keys);
 
     if let Message::Chunk(chunk) = hash_agg.next().await.unwrap() {
         assert_eq!(chunk.ops.len(), 2);
@@ -292,7 +292,7 @@ async fn test_global_hash_aggregation_count() {
             return_type: Int64Type::create(false),
         },
     ];
-    let mut hash_agg = HashAggregationOperator::new(Box::new(source), agg_calls, key_indices);
+    let mut hash_agg = HashAggExecutor::new(Box::new(source), agg_calls, key_indices);
 
     if let Message::Chunk(chunk) = hash_agg.next().await.unwrap() {
         assert_eq!(chunk.ops.len(), 2);

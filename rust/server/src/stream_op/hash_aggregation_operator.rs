@@ -77,19 +77,19 @@ impl HashValue {
     }
 }
 
-pub struct HashAggregationOperator {
+pub struct HashAggExecutor {
     /// Aggregation state of the current operator
     state_entries: HashMap<HashKey, HashValue>,
     /// The input of the current operator
     input: Box<dyn StreamOperator>,
-    /// A [`HashAggregationOperator`] may have multiple [`AggCall`]s.
+    /// A [`HashAggExecutor`] may have multiple [`AggCall`]s.
     agg_calls: Vec<AggCall>,
     /// Indices of the columns
     /// all of the aggregation functions in this operator should depend on same group of keys
     key_indices: Vec<usize>,
 }
 
-impl HashAggregationOperator {
+impl HashAggExecutor {
     pub fn new(
         input: Box<dyn StreamOperator>,
         agg_calls: Vec<AggCall>,
@@ -161,9 +161,9 @@ impl HashAggregationOperator {
     }
 }
 
-impl_consume_barrier_default!(HashAggregationOperator, StreamOperator);
+impl_consume_barrier_default!(HashAggExecutor, StreamOperator);
 
-impl SimpleStreamOperator for HashAggregationOperator {
+impl SimpleStreamOperator for HashAggExecutor {
     fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
         let StreamChunk {
             ops,

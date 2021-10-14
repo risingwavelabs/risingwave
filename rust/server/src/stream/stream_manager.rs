@@ -244,7 +244,7 @@ impl StreamManagerCore {
                     .map(build_agg_call_from_proto)
                     .try_collect()?;
 
-                Box::new(HashAggregationOperator::new(input, agg_calls, keys))
+                Box::new(HashAggExecutor::new(input, agg_calls, keys))
             }
             GLOBAL_HASH_AGG => todo!(),
             MEMTABLE_MATERIALIZED_VIEW => {
