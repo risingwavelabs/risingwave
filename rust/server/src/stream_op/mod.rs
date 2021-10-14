@@ -4,7 +4,6 @@ use crate::{buffer::Bitmap, error::Result};
 
 mod actor;
 mod aggregation;
-mod aggregation_operator;
 mod dispatcher;
 mod filter_operator;
 mod hash_aggregation_operator;
@@ -13,12 +12,12 @@ mod kafka_data_source;
 mod mem_table_mv_operator;
 mod merge_processor;
 mod projection_operator;
+mod simple_agg;
 mod simple_processor;
 mod table_data_source;
 
 pub use actor::Actor;
 pub use aggregation::*;
-pub use aggregation_operator::*;
 pub use dispatcher::*;
 pub use filter_operator::FilterOperator;
 pub use hash_aggregation_operator::*;
@@ -27,6 +26,7 @@ pub use kafka_data_source::*;
 pub use mem_table_mv_operator::MemTableMVOperator;
 pub use merge_processor::*;
 pub use projection_operator::ProjectionOperator;
+pub use simple_agg::*;
 pub use simple_processor::*;
 pub use table_data_source::*;
 
