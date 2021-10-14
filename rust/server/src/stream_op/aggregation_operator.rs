@@ -38,20 +38,20 @@ pub type StreamingFloatMaxAgg<S> =
 
 pub use super::aggregation::StreamingRowCountAgg;
 
-/// `AggregationOperator` is the aggregation operator for streaming system.
+/// `SimpleAggExecutor` is the aggregation operator for streaming system.
 /// To create an aggregation operator, states and expressions should be passed along the
 /// constructor.
 ///
-/// `AggregationOperator` maintain multiple states together. If there are `n`
+/// `SimpleAggExecutor` maintain multiple states together. If there are `n`
 /// states and `n` expressions, there will be `n` columns as output.
 ///
 /// As the engine processes data in chunks, it is possible that multiple update
 /// messages could consolidate to a single row update. For example, our source
 /// emits 1000 inserts in one chunk, and we aggregates count function on that.
-/// Current `AggregationOperator` will only emit one row for a whole chunk.
+/// Current `SimpleAggExecutor` will only emit one row for a whole chunk.
 /// Therefore, we "automatically" implemented a window function inside
-/// `AggregationOperator`.
-pub struct AggregationOperator {
+/// `SimpleAggExecutor`.
+pub struct SimpleAggExecutor {
     /// Aggregation states of the current operator
     states: Vec<Box<dyn StreamingAggStateImpl>>,
 
@@ -68,7 +68,7 @@ pub struct AggregationOperator {
     agg_calls: Vec<AggCall>,
 }
 
-impl AggregationOperator {
+impl SimpleAggExecutor {
     pub fn new(input: Box<dyn StreamOperator>, agg_calls: Vec<AggCall>) -> Result<Self> {
         let states: Vec<_> = agg_calls
             .iter()
@@ -93,9 +93,9 @@ impl AggregationOperator {
     }
 }
 
-impl_consume_barrier_default!(AggregationOperator, StreamOperator);
+impl_consume_barrier_default!(SimpleAggExecutor, StreamOperator);
 
-impl SimpleStreamOperator for AggregationOperator {
+impl SimpleStreamOperator for SimpleAggExecutor {
     fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
         let StreamChunk {
             ops,

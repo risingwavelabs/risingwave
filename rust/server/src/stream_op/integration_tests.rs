@@ -42,7 +42,7 @@ async fn test_merger_sum_aggr() {
     let make_actor = |input_rx| {
         let input = ReceiverOperator::new(input_rx);
         // for the local aggregator, we need two states: sum and row count
-        let aggregator = AggregationOperator::new(
+        let aggregator = SimpleAggExecutor::new(
             Box::new(input),
             vec![
                 AggCall {
@@ -92,7 +92,7 @@ async fn test_merger_sum_aggr() {
     let merger = MergeOperator::new(outputs);
 
     // for global aggregator, we need to sum data and sum row count
-    let aggregator = AggregationOperator::new(
+    let aggregator = SimpleAggExecutor::new(
         Box::new(merger),
         vec![
             AggCall {
@@ -310,7 +310,7 @@ async fn test_tpch_q6() {
         let projection = ProjectionOperator::new(Box::new(filter), vec![Box::new(multiply)]);
 
         // for local aggregator, we need to sum data and count rows
-        let aggregator = AggregationOperator::new(
+        let aggregator = SimpleAggExecutor::new(
             Box::new(projection),
             vec![
                 AggCall {
@@ -360,7 +360,7 @@ async fn test_tpch_q6() {
     let merger = MergeOperator::new(outputs);
 
     // create a global aggregator to sum data and sum row count
-    let aggregator = AggregationOperator::new(
+    let aggregator = SimpleAggExecutor::new(
         Box::new(merger),
         vec![
             AggCall {

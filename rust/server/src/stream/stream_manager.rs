@@ -223,7 +223,7 @@ impl StreamManagerCore {
                     .iter()
                     .map(build_agg_call_from_proto)
                     .try_collect()?;
-                Box::new(AggregationOperator::new(input, agg_calls)?)
+                Box::new(SimpleAggExecutor::new(input, agg_calls)?)
             }
             GLOBAL_SIMPLE_AGG => todo!(),
             // TODO: There will be only one hash aggregation, combining LOCAL and GLOBAL
