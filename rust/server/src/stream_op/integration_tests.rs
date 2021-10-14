@@ -37,7 +37,7 @@ async fn test_merger_sum_aggr() {
         )
         .unwrap();
         let (tx, rx) = channel(16);
-        let consumer = SenderConsumer::new(Box::new(aggregator), tx);
+        let consumer = SenderConsumer::new(Box::new(aggregator), Box::new(ChannelOutput::new(tx)));
         let actor = Actor::new(Box::new(consumer));
         (actor, rx)
     };
@@ -55,13 +55,14 @@ async fn test_merger_sum_aggr() {
         let (actor, channel) = make_actor(rx);
         outputs.push(channel);
         handles.push(tokio::spawn(actor.run()));
-        inputs.push(tx);
+        inputs.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>);
     }
 
     // create a round robin dispatcher, which dispatches messages to the actors
     let (mut input, rx) = channel(16);
     let receiver_op = ReceiverOperator::new(rx);
-    let dispatcher = Dispatcher::new(Box::new(receiver_op), RoundRobinDataDispatcher::new(inputs));
+    let dispatcher =
+        DispatchOperator::new(Box::new(receiver_op), RoundRobinDataDispatcher::new(inputs));
     let actor = Actor::new(Box::new(dispatcher));
     handles.push(tokio::spawn(actor.run()));
 
@@ -304,7 +305,7 @@ async fn test_tpch_q6() {
         )
         .unwrap();
         let (tx, rx) = channel(16);
-        let consumer = SenderConsumer::new(Box::new(aggregator), tx);
+        let consumer = SenderConsumer::new(Box::new(aggregator), Box::new(ChannelOutput::new(tx)));
         let actor = Actor::new(Box::new(consumer));
         (actor, rx)
     };
@@ -322,13 +323,14 @@ async fn test_tpch_q6() {
         let (actor, channel) = make_actor(rx);
         outputs.push(channel);
         handles.push(tokio::spawn(actor.run()));
-        inputs.push(tx);
+        inputs.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>);
     }
 
     // create a round robin dispatcher, which dispatches messages to the actors
     let (mut input, rx) = channel(16);
     let receiver_op = ReceiverOperator::new(rx);
-    let dispatcher = Dispatcher::new(Box::new(receiver_op), RoundRobinDataDispatcher::new(inputs));
+    let dispatcher =
+        DispatchOperator::new(Box::new(receiver_op), RoundRobinDataDispatcher::new(inputs));
     let actor = Actor::new(Box::new(dispatcher));
     handles.push(tokio::spawn(actor.run()));
 

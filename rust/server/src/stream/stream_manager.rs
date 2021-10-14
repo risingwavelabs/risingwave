@@ -142,6 +142,7 @@ impl StreamManagerCore {
             .map(|x| std::mem::take(&mut x.0))
             .unwrap_or_default()
             .into_iter()
+            .map(|tx| Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
             .collect::<Vec<_>>();
 
         assert_eq!(downstreams.len(), outputs.len());
@@ -150,28 +151,31 @@ impl StreamManagerCore {
         match dispatcher.field_type {
             ROUND_ROBIN => {
                 assert!(!outputs.is_empty());
-                Box::new(Dispatcher::new(
+                Box::new(DispatchOperator::new(
                     input,
                     RoundRobinDataDispatcher::new(outputs),
                 ))
             }
             HASH => {
                 assert!(!outputs.is_empty());
-                Box::new(Dispatcher::new(
+                Box::new(DispatchOperator::new(
                     input,
                     HashDataDispatcher::new(outputs, vec![dispatcher.get_column_idx() as usize]),
                 ))
             }
             BROADCAST => {
                 assert!(!outputs.is_empty());
-                Box::new(Dispatcher::new(input, BroadcastDispatcher::new(outputs)))
+                Box::new(DispatchOperator::new(
+                    input,
+                    BroadcastDispatcher::new(outputs),
+                ))
             }
             SIMPLE => {
                 assert_eq!(outputs.len(), 1);
                 let output = outputs.into_iter().next().unwrap();
-                Box::new(Dispatcher::new(input, SimpleDispatcher::new(output)))
+                Box::new(DispatchOperator::new(input, SimpleDispatcher::new(output)))
             }
-            BLACKHOLE => Box::new(Dispatcher::new(input, BlackHoleDispatcher::new())),
+            BLACKHOLE => Box::new(DispatchOperator::new(input, BlackHoleDispatcher::new())),
         }
     }
 
