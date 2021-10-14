@@ -5,18 +5,18 @@ use async_trait::async_trait;
 use futures::FutureExt;
 use std::fmt::{Debug, Formatter};
 
-pub struct KafkaDataSource {
+pub struct KafkaSourceExecutor {
     executor: StreamScanExecutor,
 }
 
-impl KafkaDataSource {
+impl KafkaSourceExecutor {
     pub fn new(executor: StreamScanExecutor) -> Self {
         Self { executor }
     }
 }
 
 #[async_trait]
-impl StreamOperator for KafkaDataSource {
+impl StreamOperator for KafkaSourceExecutor {
     async fn next(&mut self) -> Result<Message> {
         let received = self.executor.next_data_chunk().fuse().await?;
         if let Some(chunk) = received {
@@ -32,9 +32,9 @@ impl StreamOperator for KafkaDataSource {
     }
 }
 
-impl Debug for KafkaDataSource {
+impl Debug for KafkaSourceExecutor {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("KafkaDataSource")
+        f.debug_struct("KafkaSourceOperator")
             .field("stream_scan_executor", &self.executor)
             .finish()
     }
