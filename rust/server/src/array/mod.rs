@@ -4,12 +4,12 @@ mod bool_array;
 pub(crate) mod column;
 mod column_proto_readers;
 mod data_chunk;
+pub mod data_chunk_iter;
 mod decimal_array;
 pub(crate) mod interval_array;
 mod iterator;
 mod macros;
 mod primitive_array;
-pub mod row_ref;
 mod utf8_array;
 mod value_reader;
 

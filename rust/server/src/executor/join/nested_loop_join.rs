@@ -1,5 +1,5 @@
 use crate::array::column::Column;
-use crate::array::row_ref::RowRef;
+use crate::array::data_chunk_iter::RowRef;
 use crate::array::{DataChunk, DataChunkRef};
 use crate::buffer::Bitmap;
 use crate::error::Result;
@@ -317,7 +317,7 @@ impl ProbeTable {
 mod tests {
 
     use crate::array::column::Column;
-    use crate::array::row_ref::RowRef;
+    use crate::array::data_chunk_iter::RowRef;
     use crate::array::*;
     use crate::buffer::Bitmap;
     use crate::catalog::test_utils::mock_table_id;

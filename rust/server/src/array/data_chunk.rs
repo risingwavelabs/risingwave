@@ -1,6 +1,6 @@
 use crate::array::column::Column;
 
-use crate::array::row_ref::RowRef;
+use crate::array::data_chunk_iter::{DataChunkIter, RowRef};
 use crate::array::{ArrayBuilderImpl, ArrayImpl};
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
@@ -247,6 +247,11 @@ impl DataChunk {
         Ok(finalize_hashers(&mut states))
     }
 
+    /// Iterate for each row. The iterator will return all tuples (include visible and invisible).
+    pub fn iter(&self) -> DataChunkIter<'_> {
+        DataChunkIter::new(self)
+    }
+
     /// Random access a tuple in a data chunk. Return in a row format.
     /// # Arguments
     /// * `pos` - Index of look up tuple
@@ -357,5 +362,30 @@ mod tests {
         test_case(2, 3, 6);
         test_case(5, 5, 6);
         test_case(10, 10, 7);
+    }
+
+    #[test]
+    fn test_chunk_iter() {
+        let num_of_columns: usize = 2;
+        let length = 5;
+        let mut columns = vec![];
+        for i in 0..num_of_columns {
+            let mut builder = PrimitiveArrayBuilder::<i32>::new(length).unwrap();
+            for _ in 0..length {
+                builder.append(Some(i as i32)).unwrap();
+            }
+            let arr = builder.finish().unwrap();
+            columns.push(Column::new(
+                Arc::new(arr.into()),
+                Arc::new(Int32Type::new(false)),
+            ))
+        }
+        let chunk: DataChunk = DataChunk::builder().columns(columns).build();
+        for row in chunk.iter() {
+            for i in 0..num_of_columns {
+                let val = row.value_at(i).unwrap();
+                assert_eq!(val.into_int32(), i as i32);
+            }
+        }
     }
 }
