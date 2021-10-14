@@ -58,6 +58,9 @@ pub fn create_agg_state(
         (DataTypeKind::Float64, AggKind::Count, DataTypeKind::Int64) => {
             Box::new(GeneralAgg::<F64Array, _, _>::new(count))
         }
+        (DataTypeKind::Decimal, AggKind::Count, DataTypeKind::Int64) => {
+            Box::new(GeneralAgg::<DecimalArray, _, _>::new(count))
+        }
         (DataTypeKind::Char, AggKind::Count, DataTypeKind::Int64) => {
             Box::new(GeneralAgg::<UTF8Array, _, _>::new(count_str))
         }
@@ -70,16 +73,18 @@ pub fn create_agg_state(
         (DataTypeKind::Int32, AggKind::Sum, DataTypeKind::Int64) => {
             Box::new(GeneralAgg::<I32Array, _, I64Array>::new(sum))
         }
-        // (DataTypeKind::Int64, AggKind::Sum, DataTypeKind::Decimal) => todo!(),
+        (DataTypeKind::Int64, AggKind::Sum, DataTypeKind::Decimal) => {
+            Box::new(GeneralAgg::<I64Array, _, DecimalArray>::new(sum))
+        }
         (DataTypeKind::Float32, AggKind::Sum, DataTypeKind::Float32) => {
             Box::new(GeneralAgg::<F32Array, _, F32Array>::new(sum))
         }
         (DataTypeKind::Float64, AggKind::Sum, DataTypeKind::Float64) => {
             Box::new(GeneralAgg::<F64Array, _, F64Array>::new(sum))
         }
-        // (DataTypeKind::Decimal, AggKind::Sum, DataTypeKind::Decimal) => {
-        //   todo!()
-        // }
+        (DataTypeKind::Decimal, AggKind::Sum, DataTypeKind::Decimal) => {
+            Box::new(GeneralAgg::<DecimalArray, _, DecimalArray>::new(sum))
+        }
         (DataTypeKind::Int16, AggKind::Min, DataTypeKind::Int16) => {
             Box::new(GeneralAgg::<I16Array, _, I16Array>::new(min))
         }
@@ -95,9 +100,9 @@ pub fn create_agg_state(
         (DataTypeKind::Float64, AggKind::Min, DataTypeKind::Float64) => {
             Box::new(GeneralAgg::<F64Array, _, F64Array>::new(min))
         }
-        // (DataTypeKind::Decimal, AggKind::Min, DataTypeKind::Decimal) => {
-        //   todo!()
-        // }
+        (DataTypeKind::Decimal, AggKind::Min, DataTypeKind::Decimal) => {
+            Box::new(GeneralAgg::<DecimalArray, _, DecimalArray>::new(min))
+        }
         (DataTypeKind::Char, AggKind::Min, DataTypeKind::Char) => {
             Box::new(GeneralAgg::<UTF8Array, _, UTF8Array>::new(min_str))
         }
@@ -240,13 +245,16 @@ impl_aggregator! { I32Array, Int32, I32Array, Int32 }
 impl_aggregator! { I64Array, Int64, I64Array, Int64 }
 impl_aggregator! { F32Array, Float32, F32Array, Float32 }
 impl_aggregator! { F64Array, Float64, F64Array, Float64 }
+impl_aggregator! { DecimalArray, Decimal, DecimalArray, Decimal }
 impl_aggregator! { UTF8Array, UTF8, UTF8Array, UTF8 }
 impl_aggregator! { I16Array, Int16, I64Array, Int64 }
 impl_aggregator! { I32Array, Int32, I64Array, Int64 }
 impl_aggregator! { F32Array, Float32, I64Array, Int64 }
 impl_aggregator! { F64Array, Float64, I64Array, Int64 }
+impl_aggregator! { DecimalArray, Decimal, I64Array, Int64 }
 impl_aggregator! { UTF8Array, UTF8, I64Array, Int64 }
 impl_aggregator! { BoolArray, Bool, I64Array, Int64 }
+impl_aggregator! { I64Array, Int64, DecimalArray, Decimal }
 
 use std::convert::From;
 use std::ops::Add;
@@ -498,6 +506,7 @@ impl_sorted_grouper! { I64Array, Int64 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rust_decimal::Decimal;
 
     fn eval_agg(
         input_type: DataTypeRef,
@@ -510,6 +519,21 @@ mod tests {
         agg_state.update(input)?;
         agg_state.output(&mut builder)?;
         builder.finish()
+    }
+
+    #[test]
+    fn test_create_agg_state() {
+        let int64_type = Int64Type::create(true);
+        let decimal_type = DecimalType::create(true, 10, 0).unwrap();
+        assert!(
+            create_agg_state(decimal_type.clone(), &AggKind::Count, int64_type.clone()).is_ok()
+        );
+        assert!(
+            create_agg_state(decimal_type.clone(), &AggKind::Sum, decimal_type.clone()).is_ok()
+        );
+        assert!(
+            create_agg_state(decimal_type.clone(), &AggKind::Min, decimal_type.clone()).is_ok()
+        );
     }
 
     #[test]
@@ -531,17 +555,24 @@ mod tests {
         Ok(())
     }
 
-    // #[test]
-    // fn vec_sum_int64() -> Result<()> {
-    //   let input = I64Array::from_slice(&[Some(1), Some(2), Some(3)])?;
-    //   let agg_type = AggKind::Sum;
-    //   let return_type = Arc::new(DecimalType::new(true, 10, 0)?);
-    //   let actual = eval_agg(input, &agg_type, return_type)?;
-    //   let actual: &DecimalArray = downcast_ref(actual.as_ref())?;
-    //   let actual = actual.as_iter()?.collect::<Vec<Option<Decimal>>>();
-    //   assert_eq!(actual, vec![Some(Decimal::from(6))]);
-    //   Ok(())
-    // }
+    #[test]
+    fn vec_sum_int64() -> Result<()> {
+        let input = I64Array::from_slice(&[Some(1), Some(2), Some(3)])?;
+        let agg_type = AggKind::Sum;
+        let input_type = Int64Type::create(true);
+        let return_type = DecimalType::create(true, 10, 0)?;
+        let actual = eval_agg(
+            input_type,
+            &input.into(),
+            &agg_type,
+            return_type,
+            DecimalArrayBuilder::new(0)?.into(),
+        )?;
+        let actual: &DecimalArray = (&actual).into();
+        let actual = actual.iter().collect::<Vec<Option<Decimal>>>();
+        assert_eq!(actual, vec![Some(Decimal::from(6))]);
+        Ok(())
+    }
 
     #[test]
     fn vec_min_float32() -> Result<()> {
