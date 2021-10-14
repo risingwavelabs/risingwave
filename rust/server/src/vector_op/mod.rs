@@ -13,6 +13,7 @@ mod mod_op;
 mod mul_op;
 mod sub_op;
 pub mod substr;
+pub mod upper;
 
 #[cfg(test)]
 mod tests;

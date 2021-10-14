@@ -1,9 +1,10 @@
-use super::expr_tmpl::UnaryExpression;
+use super::expr_tmpl::{UnaryBytesExpression, UnaryExpression};
 use crate::array::{I32Array, I64Array, UTF8Array};
 use crate::expr::BoxedExpression;
 use crate::types::{DataTypeKind, DataTypeRef};
 use crate::vector_op::cast;
 use crate::vector_op::length::length_default;
+use crate::vector_op::upper::upper;
 use risingwave_proto::expr::ExprNode_Type;
 use std::marker::PhantomData;
 
@@ -49,6 +50,12 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
+        (ExprNode_Type::UPPER, _, _) => Box::new(UnaryBytesExpression::<UTF8Array, _> {
+            expr_ia1: child_expr,
+            return_type,
+            func: upper,
+            _phantom: PhantomData,
+        }),
         (_, _, _) => {
             unimplemented!(
                 "The expression using vectorized expression framework is not supported yet!"

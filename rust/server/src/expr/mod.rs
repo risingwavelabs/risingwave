@@ -37,7 +37,7 @@ use risingwave_proto::expr::{
     ExprNode,
     ExprNode_Type::{ADD, DIVIDE, MODULUS, MULTIPLY, SUBTRACT},
     ExprNode_Type::{AND, NOT, OR},
-    ExprNode_Type::{CAST, CONSTANT_VALUE, INPUT_REF, LENGTH, LIKE, SUBSTR},
+    ExprNode_Type::{CAST, CONSTANT_VALUE, INPUT_REF, LENGTH, LIKE, SUBSTR, UPPER},
     ExprNode_Type::{
         EQUAL, GREATER_THAN, GREATER_THAN_OR_EQUAL, LESS_THAN, LESS_THAN_OR_EQUAL, NOT_EQUAL,
     },
@@ -71,7 +71,7 @@ macro_rules! build_expression {
 pub fn build_from_proto(proto: &ExprNode) -> Result<BoxedExpression> {
     // TODO: Read from proto in a consistent way.
     match proto.get_expr_type() {
-        CAST => return build_unary_expr(proto),
+        CAST | UPPER => return build_unary_expr(proto),
         EQUAL
         | NOT_EQUAL
         | LESS_THAN
