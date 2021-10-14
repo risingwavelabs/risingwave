@@ -6,20 +6,20 @@ use futures::channel::mpsc::UnboundedReceiver;
 use futures::StreamExt;
 use std::fmt::{Debug, Formatter};
 
-/// `TableDataSource` extracts changes from a Table
-pub struct TableDataSource {
+/// `TableSourceExecutor` extracts changes from a Table
+pub struct TableSourceExecutor {
     table_id: TableId,
     receiver: UnboundedReceiver<StreamChunk>,
 }
 
-impl TableDataSource {
+impl TableSourceExecutor {
     pub fn new(table_id: TableId, receiver: UnboundedReceiver<StreamChunk>) -> Self {
-        TableDataSource { table_id, receiver }
+        TableSourceExecutor { table_id, receiver }
     }
 }
 
 #[async_trait]
-impl StreamOperator for TableDataSource {
+impl StreamOperator for TableSourceExecutor {
     async fn next(&mut self) -> Result<Message> {
         let received = self.receiver.next().await;
         if let Some(chunk) = received {
@@ -30,9 +30,9 @@ impl StreamOperator for TableDataSource {
     }
 }
 
-impl Debug for TableDataSource {
+impl Debug for TableSourceExecutor {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TableDataSource")
+        f.debug_struct("TableSourceExecutor")
             .field("table_id", &self.table_id)
             .finish()
     }
@@ -81,7 +81,7 @@ mod tests {
         };
 
         let stream_recv = table.create_stream()?;
-        let mut source = TableDataSource::new(table_id, stream_recv);
+        let mut source = TableSourceExecutor::new(table_id, stream_recv);
 
         // Write 1st chunk
         let card = table.append(chunk1)?;
