@@ -25,7 +25,7 @@ pub use identity_operator::IdentityOperator;
 pub use kafka_source::*;
 pub use merge::*;
 pub use mview_sink::*;
-pub use projection_operator::ProjectionOperator;
+pub use projection_operator::*;
 pub use simple_agg::*;
 pub use simple_processor::*;
 pub use table_data_source::*;

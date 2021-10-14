@@ -1,5 +1,5 @@
 use super::Result;
-use super::{FilterExecutor, ProjectionOperator};
+use super::{FilterExecutor, ProjectExecutor};
 use crate::array::{Array, I64Array};
 use crate::buffer::Bitmap;
 use crate::expr::*;
@@ -62,7 +62,7 @@ async fn test_projection() {
         Box::new(right_expr),
     );
 
-    let mut project = ProjectionOperator::new(Box::new(source), vec![Box::new(test_expr)]);
+    let mut project = ProjectExecutor::new(Box::new(source), vec![Box::new(test_expr)]);
 
     if let Message::Chunk(chunk) = project.next().await.unwrap() {
         assert_eq!(chunk.ops, vec![Op::Insert, Op::Insert, Op::Insert]);

@@ -205,7 +205,7 @@ impl StreamManagerCore {
                     .iter()
                     .map(build_expr_from_proto)
                     .collect::<Result<Vec<_>>>()?;
-                Box::new(ProjectionOperator::new(input, project_exprs))
+                Box::new(ProjectExecutor::new(input, project_exprs))
             }
             FILTER => {
                 let filter_node =

@@ -108,7 +108,7 @@ async fn test_merger_sum_aggr() {
         ],
     )
     .unwrap();
-    let projection = ProjectionOperator::new(
+    let projection = ProjectExecutor::new(
         Box::new(aggregator),
         vec![
             // TODO: use the new streaming_if_null expression here, and add `None` tests
@@ -307,7 +307,7 @@ async fn test_tpch_q6() {
         let input = ReceiverOperator::new(input_rx);
 
         let filter = FilterExecutor::new(Box::new(input), Box::new(and));
-        let projection = ProjectionOperator::new(Box::new(filter), vec![Box::new(multiply)]);
+        let projection = ProjectExecutor::new(Box::new(filter), vec![Box::new(multiply)]);
 
         // for local aggregator, we need to sum data and count rows
         let aggregator = SimpleAggExecutor::new(
@@ -376,7 +376,7 @@ async fn test_tpch_q6() {
         ],
     )
     .unwrap();
-    let projection = ProjectionOperator::new(
+    let projection = ProjectExecutor::new(
         Box::new(aggregator),
         vec![
             // TODO: use the new streaming_if_null expression here, and add `None` tests
