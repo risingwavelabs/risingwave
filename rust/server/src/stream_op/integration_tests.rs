@@ -7,9 +7,31 @@ use super::ReceiverOperator;
 use super::*;
 use approx::assert_relative_eq;
 
-use crate::stream_op::data_source::MockConsumer;
 use futures::channel::mpsc::channel;
 use futures::SinkExt;
+
+pub struct MockConsumer {
+    input: Box<dyn StreamOperator>,
+    data: Arc<Mutex<Vec<StreamChunk>>>,
+}
+
+impl MockConsumer {
+    pub fn new(input: Box<dyn StreamOperator>, data: Arc<Mutex<Vec<StreamChunk>>>) -> Self {
+        Self { input, data }
+    }
+}
+
+#[async_trait]
+impl StreamConsumer for MockConsumer {
+    async fn next(&mut self) -> Result<bool> {
+        match self.input.next().await? {
+            Message::Chunk(chunk) => self.data.lock().unwrap().push(chunk),
+            Message::Terminate => return Ok(false),
+            _ => {} // do nothing
+        }
+        Ok(true)
+    }
+}
 
 /// This test creates a merger-dispatcher pair, and run a sum. Each chunk
 /// has 0~9 elements. We first insert the 10 chunks, then delete them,

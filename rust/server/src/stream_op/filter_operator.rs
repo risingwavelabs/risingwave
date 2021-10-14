@@ -102,8 +102,8 @@ impl SimpleStreamOperator for FilterOperator {
                             new_visibility.push(true);
                         }
                         (false, false) => {
-                            new_ops.push(Op::Insert);
-                            new_ops.push(Op::Insert);
+                            new_ops.push(Op::UpdateDelete);
+                            new_ops.push(Op::UpdateInsert);
                             new_visibility.push(false);
                             new_visibility.push(false);
                         }

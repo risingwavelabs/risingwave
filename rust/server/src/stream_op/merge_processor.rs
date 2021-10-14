@@ -87,7 +87,7 @@ impl StreamOperator for MergeOperator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stream_op::data_source::MockConsumer;
+    use crate::stream_op::integration_tests::MockConsumer;
     use crate::stream_op::{Actor, Op, StreamChunk};
     use futures::SinkExt;
     use std::sync::{Arc, Mutex};

@@ -47,11 +47,10 @@ mod tests {
     use crate::array_nonnull;
     use crate::catalog::test_utils::mock_table_id;
     use crate::storage::MemColumnarTable;
-    use crate::stream_op::data_source::MockConsumer;
-    use crate::stream_op::{Op, StreamConsumer};
+    use crate::stream_op::Op;
     use crate::types::{DataTypeKind, DataTypeRef, Int32Type, StringType};
     use itertools::Itertools;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_table_source() -> Result<()> {
@@ -82,19 +81,13 @@ mod tests {
         };
 
         let stream_recv = table.create_stream()?;
-        let source = TableDataSource::new(table_id, stream_recv);
-        let output_buf = Arc::new(Mutex::new(Vec::new()));
-        let mut consumer = MockConsumer::new(Box::new(source), output_buf.clone());
+        let mut source = TableDataSource::new(table_id, stream_recv);
 
         // Write 1st chunk
         let card = table.append(chunk1)?;
         assert_eq!(3, card);
 
-        consumer.next().await?;
-        {
-            let chunks = output_buf.lock().unwrap();
-            assert_eq!(1, chunks.len());
-            let chunk = chunks.get(0).unwrap();
+        if let Message::Chunk(chunk) = source.next().await.unwrap() {
             assert_eq!(2, chunk.columns.len());
             assert_eq!(
                 col1_arr1.iter().collect_vec(),
@@ -105,17 +98,15 @@ mod tests {
                 chunk.columns[1].array_ref().iter().collect_vec()
             );
             assert_eq!(vec![Op::Insert; 3], chunk.ops);
+        } else {
+            unreachable!();
         }
 
         // Write 2nd chunk
         let card = table.append(chunk2)?;
         assert_eq!(3, card);
 
-        consumer.next().await?;
-        {
-            let chunks = output_buf.lock().unwrap();
-            assert_eq!(2, chunks.len());
-            let chunk = chunks.get(1).unwrap();
+        if let Message::Chunk(chunk) = source.next().await.unwrap() {
             assert_eq!(2, chunk.columns.len());
             assert_eq!(
                 col1_arr2.iter().collect_vec(),
@@ -126,6 +117,8 @@ mod tests {
                 chunk.columns[1].array_ref().iter().collect_vec()
             );
             assert_eq!(vec![Op::Insert; 3], chunk.ops);
+        } else {
+            unreachable!();
         }
 
         Ok(())

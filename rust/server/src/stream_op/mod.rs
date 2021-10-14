@@ -5,7 +5,6 @@ use crate::{buffer::Bitmap, error::Result};
 mod actor;
 mod aggregation;
 mod aggregation_operator;
-mod data_source;
 mod dispatcher;
 mod filter_operator;
 mod hash_aggregation_operator;
