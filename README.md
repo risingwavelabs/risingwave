@@ -108,6 +108,14 @@ cd java
 ./gradlew spotlessApply
 ```
 
+For Rust code, please run:
+
+```
+cd rust
+cargo fmt
+cargo clippy --all-targets --all-features
+```
+
 ## Toolchain
 Currently, we are using nightly toolchain `nightly-2021-09-10`. If anyone needs to upgrade
 the toolchain, be sure to bump `rust-toolchain` file as well as GitHub workflow.
