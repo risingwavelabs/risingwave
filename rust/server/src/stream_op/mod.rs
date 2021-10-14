@@ -4,7 +4,7 @@ use crate::{buffer::Bitmap, error::Result};
 
 mod actor;
 mod aggregation;
-mod dispatcher;
+mod dispatch;
 mod filter_operator;
 mod hash_aggregation_operator;
 mod identity_operator;
@@ -18,7 +18,7 @@ mod table_data_source;
 
 pub use actor::Actor;
 pub use aggregation::*;
-pub use dispatcher::*;
+pub use dispatch::*;
 pub use filter_operator::FilterOperator;
 pub use hash_aggregation_operator::*;
 pub use identity_operator::IdentityOperator;
