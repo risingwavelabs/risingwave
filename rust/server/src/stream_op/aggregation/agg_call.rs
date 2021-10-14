@@ -1,10 +1,14 @@
 use crate::expr::AggKind;
 use crate::types::DataTypeRef;
+use std::slice;
 
 /// An aggregation function may accept 0, 1 or 2 arguments.
 pub enum AggArgs {
-    None([DataTypeRef; 0], [usize; 0]),
-    Unary([DataTypeRef; 1], [usize; 1]),
+    /// `None` is used for aggregation function accepts 0 arguments, such as [`AggKind::RowCount`].
+    None,
+    /// `Unary` is used for aggregation function accepts 1 argument, such as [`AggKind::Sum`].
+    Unary(DataTypeRef, usize),
+    /// `Binary` is used for aggregation function accepts 2 arguments.
     Binary([DataTypeRef; 2], [usize; 2]),
 }
 
@@ -13,8 +17,8 @@ impl AggArgs {
     pub fn arg_types(&self) -> &[DataTypeRef] {
         use AggArgs::*;
         match self {
-            None(typs, _) => typs,
-            Unary(typs, _) => typs,
+            None => Default::default(),
+            Unary(typ, _) => slice::from_ref(typ),
             Binary(typs, _) => typs,
         }
     }
@@ -23,8 +27,8 @@ impl AggArgs {
     pub fn val_indices(&self) -> &[usize] {
         use AggArgs::*;
         match self {
-            None(_, val_indices) => val_indices,
-            Unary(_, val_indices) => val_indices,
+            None => Default::default(),
+            Unary(_, val_idx) => slice::from_ref(val_idx),
             Binary(_, val_indices) => val_indices,
         }
     }

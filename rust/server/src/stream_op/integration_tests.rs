@@ -25,12 +25,12 @@ async fn test_merger_sum_aggr() {
             vec![
                 AggCall {
                     kind: AggKind::Sum,
-                    args: AggArgs::Unary([Int64Type::create(false)], [0]),
+                    args: AggArgs::Unary(Int64Type::create(false), 0),
                     return_type: Int64Type::create(false),
                 },
                 AggCall {
                     kind: AggKind::RowCount,
-                    args: AggArgs::None([], []),
+                    args: AggArgs::None,
                     return_type: Int64Type::create(false),
                 },
             ],
@@ -75,12 +75,12 @@ async fn test_merger_sum_aggr() {
         vec![
             AggCall {
                 kind: AggKind::Sum,
-                args: AggArgs::Unary([Int64Type::create(false)], [0]),
+                args: AggArgs::Unary(Int64Type::create(false), 0),
                 return_type: Int64Type::create(false),
             },
             AggCall {
                 kind: AggKind::Sum,
-                args: AggArgs::Unary([Int64Type::create(false)], [1]),
+                args: AggArgs::Unary(Int64Type::create(false), 1),
                 return_type: Int64Type::create(false),
             },
         ],
@@ -293,12 +293,12 @@ async fn test_tpch_q6() {
             vec![
                 AggCall {
                     kind: AggKind::Sum,
-                    args: AggArgs::Unary([Float64Type::create(false)], [0]),
+                    args: AggArgs::Unary(Float64Type::create(false), 0),
                     return_type: Float64Type::create(false),
                 },
                 AggCall {
                     kind: AggKind::RowCount,
-                    args: AggArgs::None([], []),
+                    args: AggArgs::None,
                     return_type: Int64Type::create(false),
                 },
             ],
@@ -343,12 +343,12 @@ async fn test_tpch_q6() {
         vec![
             AggCall {
                 kind: AggKind::Sum,
-                args: AggArgs::Unary([Float64Type::create(false)], [0]),
+                args: AggArgs::Unary(Float64Type::create(false), 0),
                 return_type: Float64Type::create(false),
             },
             AggCall {
                 kind: AggKind::Sum,
-                args: AggArgs::Unary([Int64Type::create(false)], [1]),
+                args: AggArgs::Unary(Int64Type::create(false), 1),
                 return_type: Int64Type::create(false),
             },
         ],

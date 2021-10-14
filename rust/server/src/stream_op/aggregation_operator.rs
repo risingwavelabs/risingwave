@@ -105,12 +105,12 @@ impl SimpleStreamOperator for AggregationOperator {
             .zip(self.agg_calls.iter())
             .try_for_each(|(state, agg)| match agg.args {
                 // FIXME: remove the dummy array.
-                AggArgs::None([], []) => state.apply_batch(
+                AggArgs::None => state.apply_batch(
                     &ops,
                     visibility.as_ref(),
                     &I64Array::from_slice(&[None]).unwrap().into(),
                 ),
-                AggArgs::Unary(_, [col_idx]) => {
+                AggArgs::Unary(_, col_idx) => {
                     state.apply_batch(&ops, visibility.as_ref(), arrays[col_idx].array_ref())
                 }
                 // FIXME: currently, `AggregationOperator` only supports zero or one input argument.

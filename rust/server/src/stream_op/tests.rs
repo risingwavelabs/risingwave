@@ -169,13 +169,13 @@ async fn test_local_hash_aggregation_count() {
     let agg_calls = vec![
         AggCall {
             kind: AggKind::Count,
-            args: AggArgs::Unary([Int64Type::create(false)], [0]),
+            args: AggArgs::Unary(Int64Type::create(false), 0),
             return_type: Int64Type::create(false),
         },
         // This is local hash aggregation, so we add another row count state
         AggCall {
             kind: AggKind::Count,
-            args: AggArgs::None([], []),
+            args: AggArgs::None,
             return_type: Int64Type::create(false),
         },
     ];
@@ -272,13 +272,13 @@ async fn test_global_hash_aggregation_count() {
     let agg_calls = vec![
         AggCall {
             kind: AggKind::Sum,
-            args: AggArgs::Unary([Int64Type::create(false)], [1]),
+            args: AggArgs::Unary(Int64Type::create(false), 1),
             return_type: Int64Type::create(false),
         },
         // This is local hash aggreagtion, so we add another sum state
         AggCall {
             kind: AggKind::Sum,
-            args: AggArgs::Unary([Int64Type::create(false)], [2]),
+            args: AggArgs::Unary(Int64Type::create(false), 2),
             return_type: Int64Type::create(false),
         },
     ];

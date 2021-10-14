@@ -96,10 +96,10 @@ fn build_agg_call_from_proto(agg_call_proto: &AggCallProto) -> Result<AggCall> {
     let args = {
         let args = agg_call_proto.get_args();
         match args {
-            [] => AggArgs::None([], []),
+            [] => AggArgs::None,
             [arg] => AggArgs::Unary(
-                [build_type_from_proto(arg.get_field_type())?],
-                [arg.get_input().column_idx as usize],
+                build_type_from_proto(arg.get_field_type())?,
+                arg.get_input().column_idx as usize,
             ),
             _ => {
                 return Err(RwError::from(ErrorCode::NotImplementedError(
