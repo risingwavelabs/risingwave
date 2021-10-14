@@ -33,15 +33,15 @@ impl Output for ChannelOutput {
     }
 }
 
-/// `DispatchOperator` consumes messages and send them into downstream actors. Usually,
+/// `DispatchExecutor` consumes messages and send them into downstream actors. Usually,
 /// data chunks will be dispatched with some specified policy, while control message
 /// such as barriers will be distributed to all receivers.
-pub struct DispatchOperator<Inner: DataDispatcher> {
+pub struct DispatchExecutor<Inner: DataDispatcher> {
     input: Box<dyn StreamOperator>,
     inner: Inner,
 }
 
-impl<Inner: DataDispatcher + Send> DispatchOperator<Inner> {
+impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
     pub fn new(input: Box<dyn StreamOperator>, inner: Inner) -> Self {
         Self { input, inner }
     }
@@ -67,7 +67,7 @@ impl<Inner: DataDispatcher + Send> DispatchOperator<Inner> {
 }
 
 #[async_trait]
-impl<Inner: DataDispatcher + Send + Sync + 'static> StreamConsumer for DispatchOperator<Inner> {
+impl<Inner: DataDispatcher + Send + Sync + 'static> StreamConsumer for DispatchExecutor<Inner> {
     async fn next(&mut self) -> Result<bool> {
         let msg = self.input.next().await?;
         let terminated = matches!(msg, Message::Terminate);

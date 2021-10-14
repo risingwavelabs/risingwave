@@ -84,7 +84,7 @@ async fn test_merger_sum_aggr() {
     let (mut input, rx) = channel(16);
     let receiver_op = ReceiverOperator::new(rx);
     let dispatcher =
-        DispatchOperator::new(Box::new(receiver_op), RoundRobinDataDispatcher::new(inputs));
+        DispatchExecutor::new(Box::new(receiver_op), RoundRobinDataDispatcher::new(inputs));
     let actor = Actor::new(Box::new(dispatcher));
     handles.push(tokio::spawn(actor.run()));
 
@@ -352,7 +352,7 @@ async fn test_tpch_q6() {
     let (mut input, rx) = channel(16);
     let receiver_op = ReceiverOperator::new(rx);
     let dispatcher =
-        DispatchOperator::new(Box::new(receiver_op), RoundRobinDataDispatcher::new(inputs));
+        DispatchExecutor::new(Box::new(receiver_op), RoundRobinDataDispatcher::new(inputs));
     let actor = Actor::new(Box::new(dispatcher));
     handles.push(tokio::spawn(actor.run()));
 

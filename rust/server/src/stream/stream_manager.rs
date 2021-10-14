@@ -151,21 +151,21 @@ impl StreamManagerCore {
         match dispatcher.field_type {
             ROUND_ROBIN => {
                 assert!(!outputs.is_empty());
-                Box::new(DispatchOperator::new(
+                Box::new(DispatchExecutor::new(
                     input,
                     RoundRobinDataDispatcher::new(outputs),
                 ))
             }
             HASH => {
                 assert!(!outputs.is_empty());
-                Box::new(DispatchOperator::new(
+                Box::new(DispatchExecutor::new(
                     input,
                     HashDataDispatcher::new(outputs, vec![dispatcher.get_column_idx() as usize]),
                 ))
             }
             BROADCAST => {
                 assert!(!outputs.is_empty());
-                Box::new(DispatchOperator::new(
+                Box::new(DispatchExecutor::new(
                     input,
                     BroadcastDispatcher::new(outputs),
                 ))
@@ -173,9 +173,9 @@ impl StreamManagerCore {
             SIMPLE => {
                 assert_eq!(outputs.len(), 1);
                 let output = outputs.into_iter().next().unwrap();
-                Box::new(DispatchOperator::new(input, SimpleDispatcher::new(output)))
+                Box::new(DispatchExecutor::new(input, SimpleDispatcher::new(output)))
             }
-            BLACKHOLE => Box::new(DispatchOperator::new(input, BlackHoleDispatcher::new())),
+            BLACKHOLE => Box::new(DispatchExecutor::new(input, BlackHoleDispatcher::new())),
         }
     }
 
