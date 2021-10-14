@@ -408,33 +408,6 @@ macro_rules! impl_array {
         }
       }
 
-      pub fn get_sub_array(&self, indices: &[usize]) -> ArrayImpl {
-        let capacity = indices.len();
-        match self {
-          $( Self::$variant_name(inner) => {
-            let mut builder = <$builder>::new(capacity).unwrap();
-            indices.iter().for_each(|idx| {
-              builder.append(inner.value_at(*idx)).unwrap();
-            });
-            builder.finish().unwrap().into()
-          }, )*
-        }
-      }
-
-      pub fn get_continuous_sub_array(&self, start_idx: usize, end_idx: usize) -> ArrayImpl {
-        let capacity = end_idx - start_idx + 1;
-        match self {
-          // TODO: for UTF8Array, we could select start and end offset and directly call copy_to_slice instead of accessing them one index by one index.
-          $( Self::$variant_name(inner) => {
-            let mut builder = <$builder>::new(capacity).unwrap();
-            (start_idx..=end_idx).for_each(|idx| {
-              builder.append(inner.value_at(idx)).unwrap();
-            });
-            builder.finish().unwrap().into()
-          }, )*
-        }
-      }
-
       /// Get the enum-wrapped `Datum` out of the `Array`.
       pub fn scalar_value_at(&self, idx: usize) -> Datum {
         match self {
@@ -490,23 +463,6 @@ mod tests {
             }
         }
         builder.finish()
-    }
-
-    #[test]
-    fn test_get_sub_array() {
-        let i32vec = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-        let indices = vec![0, 2, 4, 6, 8];
-        let mut builder = PrimitiveArrayBuilder::<i32>::new(0).unwrap();
-        for i in &i32vec {
-            builder.append(Some(*i)).unwrap();
-        }
-        let array = builder.finish().unwrap();
-        let array_impl = ArrayImpl::Int32(array);
-        let sub_array = array_impl.get_sub_array(&indices[..]);
-        let inner = sub_array.as_int32();
-        for (i, idx) in indices.iter().enumerate() {
-            assert_eq!(inner.value_at(i).unwrap(), i32vec[*idx]);
-        }
     }
 
     #[test]

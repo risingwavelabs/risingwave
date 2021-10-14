@@ -279,10 +279,16 @@ impl SimpleStreamOperator for HashAggregationOperator {
         // rows with the same key collapse into one or two rows
         let mut new_columns = Vec::new();
         for key_idx in &self.key_indices {
-            let array = &arrays[*key_idx];
+            let column = &arrays[*key_idx];
+            let mut array_builder = column
+                .data_type()
+                .create_array_builder(distinct_rows.len())?;
+            for row_idx in &distinct_rows {
+                array_builder.append_scalar_ref(column.array_ref().value_at(*row_idx))?;
+            }
             new_columns.push(Column::new(
-                Arc::new(array.array_ref().get_sub_array(&distinct_rows)),
-                array.data_type(),
+                Arc::new(array_builder.finish()?),
+                column.data_type(),
             ));
         }
         new_columns.extend(agg_columns.into_iter());

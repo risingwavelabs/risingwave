@@ -192,11 +192,13 @@ impl DataChunk {
                 .iter_mut()
                 .zip(chunks[chunk_idx].columns())
                 .try_for_each(|(builder, column)| {
-                    builder.append_array(
-                        &column
-                            .array_ref()
-                            .get_continuous_sub_array(start_row_idx, end_row_idx),
-                    )
+                    let mut array_builder = column
+                        .data_type()
+                        .create_array_builder(end_row_idx - start_row_idx + 1)?;
+                    for row_idx in start_row_idx..=end_row_idx {
+                        array_builder.append_scalar_ref(column.array_ref().value_at(row_idx))?;
+                    }
+                    builder.append_array(&array_builder.finish()?)
                 })?;
             // since `end_row_idx` is inclusive, exclude it for the next round.
             start_row_idx = end_row_idx + 1;
