@@ -31,6 +31,7 @@ pub use simple_processor::*;
 pub use table_data_source::*;
 
 use async_trait::async_trait;
+use std::sync::Arc;
 
 #[cfg(test)]
 mod integration_tests;
@@ -85,6 +86,40 @@ impl StreamChunk {
             .first()
             .map(|col| col.array_ref().len())
             .unwrap_or(0)
+    }
+
+    /// compact the `StreamChunck` with its visibility map
+    pub fn compact(self) -> Result<Self> {
+        match &self.visibility {
+            None => Ok(self),
+            Some(visibility) => {
+                let cardinality = visibility
+                    .iter()
+                    .fold(0, |vis_cnt, vis| vis_cnt + vis as usize);
+                let columns = self
+                    .columns
+                    .into_iter()
+                    .map(|col| {
+                        let array = col.array();
+                        let data_type = col.data_type();
+                        array
+                            .compact(visibility, cardinality)
+                            .map(|array| Column::new(Arc::new(array), data_type))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                let mut ops = Vec::with_capacity(cardinality);
+                for (op, visible) in self.ops.into_iter().zip(visibility.iter()) {
+                    if visible {
+                        ops.push(op);
+                    }
+                }
+                Ok(StreamChunk {
+                    ops,
+                    columns,
+                    visibility: None,
+                })
+            }
+        }
     }
 }
 

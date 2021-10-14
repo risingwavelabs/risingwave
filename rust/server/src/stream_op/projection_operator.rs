@@ -27,6 +27,8 @@ impl_consume_barrier_default!(ProjectionOperator, StreamOperator);
 
 impl SimpleStreamOperator for ProjectionOperator {
     fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
+        let chunk = chunk.compact()?;
+
         let StreamChunk {
             ops,
             columns,
@@ -41,10 +43,6 @@ impl SimpleStreamOperator for ProjectionOperator {
                 data_chunk_builder.build()
             }
         };
-
-        // FIXME: unnecessary compact.
-        // See https://github.com/singularity-data/risingwave/issues/704
-        let data_chunk = data_chunk.compact()?;
 
         let projected_columns = self
             .exprs
