@@ -39,7 +39,7 @@ impl Debug for TableDataSource {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use crate::array::column::Column;
     use crate::array::{ArrayImpl, DataChunk};

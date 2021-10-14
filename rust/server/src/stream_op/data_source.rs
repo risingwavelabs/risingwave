@@ -149,7 +149,7 @@ impl StreamConsumer for MockConsumer {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use crate::array::Array;
 

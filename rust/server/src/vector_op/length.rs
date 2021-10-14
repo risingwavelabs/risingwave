@@ -6,7 +6,7 @@ pub fn length_default(s: &str) -> Result<i64> {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
 
     use super::*;
 
