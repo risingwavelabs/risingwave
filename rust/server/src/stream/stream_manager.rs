@@ -212,7 +212,7 @@ impl StreamManagerCore {
                     stream_plan::FilterNode::parse_from_bytes(node.get_body().get_value())
                         .map_err(ErrorCode::ProtobufError)?;
                 let search_condition = build_expr_from_proto(filter_node.get_search_condition())?;
-                Box::new(FilterOperator::new(input, search_condition))
+                Box::new(FilterExecutor::new(input, search_condition))
             }
             LOCAL_SIMPLE_AGG => {
                 let aggr_node =

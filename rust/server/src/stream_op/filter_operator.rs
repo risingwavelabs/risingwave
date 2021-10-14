@@ -7,18 +7,18 @@ use crate::{
 };
 use async_trait::async_trait;
 
-/// `FilterOperator` filters data with the `expr`. The `expr` takes a chunk of data,
+/// `FilterExecutor` filters data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a boolean array on whether each item should be retained. And then,
-/// `FilterOperator` will insert, delete or update element into next operator according
+/// `FilterExecutor` will insert, delete or update element into next operator according
 /// to the result of the expression.
-pub struct FilterOperator {
+pub struct FilterExecutor {
     /// The input of the current operator
     input: Box<dyn StreamOperator>,
     /// Expression of the current filter, note that the filter must always have the same output for the same input.
     expr: BoxedExpression,
 }
 
-impl FilterOperator {
+impl FilterExecutor {
     pub fn new(input: Box<dyn StreamOperator>, expr: BoxedExpression) -> Self {
         Self { input, expr }
     }
@@ -26,9 +26,9 @@ impl FilterOperator {
 
 use crate::impl_consume_barrier_default;
 
-impl_consume_barrier_default!(FilterOperator, StreamOperator);
+impl_consume_barrier_default!(FilterExecutor, StreamOperator);
 
-impl SimpleStreamOperator for FilterOperator {
+impl SimpleStreamOperator for FilterExecutor {
     fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
         let StreamChunk {
             ops,

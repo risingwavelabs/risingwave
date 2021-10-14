@@ -1,5 +1,5 @@
 use super::Result;
-use super::{FilterOperator, ProjectionOperator};
+use super::{FilterExecutor, ProjectionOperator};
 use crate::array::{Array, I64Array};
 use crate::buffer::Bitmap;
 use crate::expr::*;
@@ -128,7 +128,7 @@ async fn test_filter() {
         Box::new(left_expr),
         Box::new(right_expr),
     );
-    let mut filter = FilterOperator::new(Box::new(source), Box::new(test_expr));
+    let mut filter = FilterExecutor::new(Box::new(source), Box::new(test_expr));
 
     if let Message::Chunk(chunk) = filter.next().await.unwrap() {
         assert_eq!(

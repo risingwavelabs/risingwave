@@ -306,7 +306,7 @@ async fn test_tpch_q6() {
         let (_, _, _, _, and, multiply) = make_tpchq6_expr();
         let input = ReceiverOperator::new(input_rx);
 
-        let filter = FilterOperator::new(Box::new(input), Box::new(and));
+        let filter = FilterExecutor::new(Box::new(input), Box::new(and));
         let projection = ProjectionOperator::new(Box::new(filter), vec![Box::new(multiply)]);
 
         // for local aggregator, we need to sum data and count rows

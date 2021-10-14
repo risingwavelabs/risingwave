@@ -19,7 +19,7 @@ mod table_data_source;
 pub use actor::Actor;
 pub use aggregation::*;
 pub use dispatch::*;
-pub use filter_operator::FilterOperator;
+pub use filter_operator::*;
 pub use hash_aggregation_operator::*;
 pub use identity_operator::IdentityOperator;
 pub use kafka_data_source::*;
