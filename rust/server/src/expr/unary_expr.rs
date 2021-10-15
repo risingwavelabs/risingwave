@@ -4,6 +4,7 @@ use crate::expr::BoxedExpression;
 use crate::types::{DataTypeKind, DataTypeRef};
 use crate::vector_op::cast;
 use crate::vector_op::length::length_default;
+use crate::vector_op::trim::trim;
 use crate::vector_op::upper::upper;
 use risingwave_proto::expr::ExprNode_Type;
 use std::marker::PhantomData;
@@ -69,6 +70,15 @@ pub fn new_length_default(expr_ia1: BoxedExpression, return_type: DataTypeRef) -
         expr_ia1,
         return_type,
         func: length_default,
+        _phantom: PhantomData,
+    })
+}
+
+pub fn new_trim_expr(expr_ia1: BoxedExpression, return_type: DataTypeRef) -> BoxedExpression {
+    Box::new(UnaryBytesExpression::<UTF8Array, _> {
+        expr_ia1,
+        return_type,
+        func: trim,
         _phantom: PhantomData,
     })
 }
