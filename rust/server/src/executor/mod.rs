@@ -5,6 +5,7 @@ use drop_table::*;
 use exchange::*;
 use filter::*;
 use insert_values::*;
+use limit::*;
 use order_by::*;
 use projection::*;
 use risingwave_proto::plan::{PlanNode, PlanNode_PlanNodeType};
@@ -30,6 +31,7 @@ mod gather;
 mod hash_map;
 mod insert_values;
 mod join;
+mod limit;
 mod order_by;
 mod projection;
 mod row_seq_scan;
@@ -114,7 +116,8 @@ impl<'a> ExecutorBuilder<'a> {
           PlanNode_PlanNodeType::ORDER_BY => OrderByExecutor,
           PlanNode_PlanNodeType::CREATE_STREAM => CreateStreamExecutor,
           PlanNode_PlanNodeType::STREAM_SCAN => StreamScanExecutor,
-          PlanNode_PlanNodeType::TOP_N => TopNExecutor
+          PlanNode_PlanNodeType::TOP_N => TopNExecutor,
+          PlanNode_PlanNodeType::LIMIT => LimitExecutor
         }
     }
 

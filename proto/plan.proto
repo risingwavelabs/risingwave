@@ -103,6 +103,11 @@ message TopNNode {
     uint32 limit = 2;
 }
 
+message LimitNode {
+    uint32 limit = 1;
+    uint32 offset = 2;
+}
+
 message CreateStreamNode {
     enum RowFormatType {
       JSON = 0;
@@ -171,6 +176,7 @@ message PlanNode {
         TOP_N = 16;
         SORT_AGG = 17;
         ROW_SEQ_SCAN = 18;
+        LIMIT = 19;
     }
     PlanNodeType node_type = 1;
     google.protobuf.Any body = 2;
