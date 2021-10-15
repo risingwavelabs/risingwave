@@ -1,0 +1,7 @@
+codecov:
+  notify:
+    # do not notify until 2 builds collected (java & rust)
+    after_n_builds: 2
+comment:
+  # do not comment until 2 builds collected (java & rust)
+  after_n_builds: 2
