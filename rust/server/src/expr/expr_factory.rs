@@ -2,6 +2,7 @@ use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::Result;
 use crate::expr::binary_expr::new_binary_expr;
 use crate::expr::binary_expr::new_like_default;
+use crate::expr::binary_expr::new_position_expr;
 use crate::expr::binary_expr_bytes::new_substr_start;
 use crate::expr::build_from_proto as expr_build_from_proto;
 use crate::expr::tenary_expr_bytes::new_substr_start_end;
@@ -66,6 +67,17 @@ pub fn build_substr_expr(proto: &ExprNode) -> Result<BoxedExpression> {
     } else {
         unreachable!()
     }
+}
+
+pub fn build_position_expr(proto: &ExprNode) -> Result<BoxedExpression> {
+    let data_type = type_build_from_proto(proto.get_return_type())?;
+    let function_call_node =
+        FunctionCall::parse_from_bytes(proto.get_body().get_value()).map_err(ProtobufError)?;
+    let children = function_call_node.get_children();
+    ensure!(children.len() == 2);
+    let str = expr_build_from_proto(&children[0])?;
+    let sub_str = expr_build_from_proto(&children[1])?;
+    Ok(new_position_expr(str, sub_str, data_type))
 }
 
 pub fn build_trim_expr(proto: &ExprNode) -> Result<BoxedExpression> {

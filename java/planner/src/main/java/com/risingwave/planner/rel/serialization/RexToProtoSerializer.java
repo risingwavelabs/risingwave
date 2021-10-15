@@ -58,6 +58,7 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
           .put("TRIM", ExprNode.Type.TRIM)
           .put("LENGTH", ExprNode.Type.LENGTH)
           .put("LIKE", ExprNode.Type.LIKE)
+          .put("POSITION", ExprNode.Type.POSITION)
           .put("UPPER", ExprNode.Type.UPPER)
           .build();
 

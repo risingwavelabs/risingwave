@@ -6,6 +6,7 @@ use crate::vector_op::cmp::{
     primitive_eq, primitive_geq, primitive_gt, primitive_leq, primitive_lt, primitive_neq,
 };
 use crate::vector_op::like::like_default;
+use crate::vector_op::position::position;
 use risingwave_proto::expr::ExprNode_Type;
 use std::marker::PhantomData;
 
@@ -307,6 +308,20 @@ pub fn new_like_default(
         expr_ia2,
         return_type,
         func: like_default,
+        _phantom: PhantomData,
+    })
+}
+
+pub fn new_position_expr(
+    expr_ia1: BoxedExpression,
+    expr_ia2: BoxedExpression,
+    return_type: DataTypeRef,
+) -> BoxedExpression {
+    Box::new(BinaryExpression::<UTF8Array, UTF8Array, I32Array, _> {
+        expr_ia1,
+        expr_ia2,
+        return_type,
+        func: position,
         _phantom: PhantomData,
     })
 }

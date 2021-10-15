@@ -43,6 +43,7 @@ message ExprNode {
         LIKE = 204;
         UPPER = 205;
         TRIM = 207;
+        POSITION = 209;
         STREAM_NULL_BY_ROW_COUNT = 1000;
     }
     Type expr_type = 1;
