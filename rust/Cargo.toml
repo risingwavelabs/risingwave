@@ -1,7 +1,10 @@
 [workspace]
 members = [
   "server",
+  "batch",
+  "stream",
   "proto",
+  "common",
   "utils/pb-construct",
   "utils/pb-convert-derive",
   "utils/pb-convert",

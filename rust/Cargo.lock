@@ -1532,6 +1532,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_batch"
+version = "0.1.0"
+
+[[package]]
+name = "risingwave_common"
+version = "0.1.0"
+
+[[package]]
+name = "risingwave_stream"
+version = "0.1.0"
+
+[[package]]
 name = "rust_decimal"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
