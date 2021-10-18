@@ -9,7 +9,7 @@ pub mod expr_factory;
 mod expr_tmpl;
 mod input_ref;
 mod literal;
-mod tenary_expr_bytes;
+mod ternary_expr_bytes;
 pub mod unary_expr;
 
 pub use agg::{AggExpression, AggKind};

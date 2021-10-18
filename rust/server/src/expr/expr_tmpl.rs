@@ -288,10 +288,10 @@ macro_rules! gen_expr_nullable {
 
 gen_expr_normal!(UnaryExpression, IA1);
 gen_expr_normal!(BinaryExpression, IA1, IA2);
-gen_expr_normal!(TenaryExpression, IA1, IA2, IA3);
+gen_expr_normal!(TernaryExpression, IA1, IA2, IA3);
 
 gen_expr_bytes!(UnaryBytesExpression, IA1);
 gen_expr_bytes!(BinaryBytesExpression, IA1, IA2);
-gen_expr_bytes!(TenaryBytesExpression, IA1, IA2, IA3);
+gen_expr_bytes!(TernaryBytesExpression, IA1, IA2, IA3);
 
 gen_expr_nullable!(BinaryNullableExpression, IA1, IA2);

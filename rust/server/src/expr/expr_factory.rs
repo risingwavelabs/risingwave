@@ -5,7 +5,7 @@ use crate::expr::binary_expr::new_like_default;
 use crate::expr::binary_expr::new_position_expr;
 use crate::expr::binary_expr_bytes::new_substr_start;
 use crate::expr::build_from_proto as expr_build_from_proto;
-use crate::expr::tenary_expr_bytes::new_substr_start_end;
+use crate::expr::ternary_expr_bytes::new_substr_start_end;
 use crate::expr::unary_expr::new_length_default;
 use crate::expr::unary_expr::new_trim_expr;
 use crate::expr::unary_expr::new_unary_expr;
