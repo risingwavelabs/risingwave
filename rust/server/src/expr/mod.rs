@@ -79,6 +79,9 @@ pub fn build_from_proto(proto: &ExprNode) -> Result<BoxedExpression> {
         | LESS_THAN_OR_EQUAL
         | GREATER_THAN
         | GREATER_THAN_OR_EQUAL => return build_binary_expr(proto),
+        ADD | SUBTRACT | MULTIPLY | DIVIDE | MODULUS => {
+            return build_binary_expr(proto);
+        }
         SUBSTR => return build_substr_expr(proto),
         LENGTH => return build_length_expr(proto),
         LIKE => return build_like_expr(proto),
@@ -91,12 +94,7 @@ pub fn build_from_proto(proto: &ExprNode) -> Result<BoxedExpression> {
       INPUT_REF => InputRefExpression,
       AND => ConjunctionExpression,
       OR => ConjunctionExpression,
-      NOT => ConjunctionExpression,
-      ADD => ArithmeticExpression,
-      SUBTRACT => ArithmeticExpression,
-      MULTIPLY => ArithmeticExpression,
-      DIVIDE => ArithmeticExpression,
-      MODULUS => ArithmeticExpression
+      NOT => ConjunctionExpression
     }
 }
 

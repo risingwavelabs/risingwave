@@ -1,8 +1,7 @@
 mod add_op;
 pub mod agg;
 
-// TODO(chi): add back cast and cmp
-
+pub mod arithmetic_op;
 pub mod cast;
 pub mod cmp;
 pub mod conjunction;
