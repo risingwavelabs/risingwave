@@ -247,7 +247,7 @@ impl DataChunk {
         Ok(finalize_hashers(&mut states))
     }
 
-    /// Iterate for each row. The iterator will return all tuples (include visible and invisible).
+    /// Get an iterator for visible rows.
     pub fn iter(&self) -> DataChunkIter<'_> {
         DataChunkIter::new(self)
     }
