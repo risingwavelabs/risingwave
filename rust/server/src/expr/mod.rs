@@ -10,8 +10,7 @@ mod expr_tmpl;
 mod input_ref;
 mod literal;
 mod tenary_expr_bytes;
-mod type_cast;
-mod unary_expr;
+pub mod unary_expr;
 
 pub use agg::{AggExpression, AggKind};
 pub use input_ref::InputRefExpression;
@@ -24,7 +23,6 @@ use crate::error::Result;
 pub use arithmetic_expr::ArithmeticExpression;
 pub use cmp::CompareExpression;
 pub use conjunction::ConjunctionExpression;
-pub use type_cast::TypeCastExpression;
 
 use crate::expr::expr_factory::{
     build_binary_expr, build_length_expr, build_like_expr, build_position_expr, build_substr_expr,

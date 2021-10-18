@@ -7,8 +7,10 @@ use super::ReceiverExecutor;
 use super::*;
 use approx::assert_relative_eq;
 
+use crate::expr::unary_expr::new_unary_expr;
 use futures::channel::mpsc::channel;
 use futures::SinkExt;
+use risingwave_proto::expr::ExprNode_Type;
 
 pub struct MockConsumer {
     input: Box<dyn Executor>,
@@ -196,24 +198,30 @@ fn make_tpchq6_expr() -> (
     let t_extended_price = Float64Type::create(false);
     let l_extended_price = InputRefExpression::new(t_extended_price.clone(), 3);
 
-    let l_shipdate_geq_cast =
-        TypeCastExpression::new(TimestampType::create(false, 10), Box::new(const_1994_01_01));
+    let l_shipdate_geq_cast = new_unary_expr(
+        ExprNode_Type::CAST,
+        TimestampType::create(false, 10),
+        Box::new(const_1994_01_01),
+    );
 
-    let l_shipdate_le_cast =
-        TypeCastExpression::new(TimestampType::create(false, 10), Box::new(const_1995_01_01));
+    let l_shipdate_le_cast = new_unary_expr(
+        ExprNode_Type::CAST,
+        TimestampType::create(false, 10),
+        Box::new(const_1995_01_01),
+    );
 
     let l_shipdate_geq = CompareExpression::new(
         BoolType::create(false),
         CompareOperatorKind::GreaterThanOrEqual,
         Box::new(l_shipdate),
-        Box::new(l_shipdate_geq_cast),
+        l_shipdate_geq_cast,
     );
 
     let l_shipdate_le = CompareExpression::new(
         BoolType::create(false),
         CompareOperatorKind::LessThan,
         Box::new(l_shipdate_2),
-        Box::new(l_shipdate_le_cast),
+        l_shipdate_le_cast,
     );
 
     let l_discount_geq = CompareExpression::new(
