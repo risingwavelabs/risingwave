@@ -22,7 +22,7 @@ impl MockSource {
 }
 
 #[async_trait]
-impl StreamOperator for MockSource {
+impl Executor for MockSource {
     async fn next(&mut self) -> Result<Message> {
         match self.chunks.pop_front() {
             Some(chunk) => Ok(Message::Chunk(chunk)),

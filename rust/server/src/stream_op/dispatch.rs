@@ -1,7 +1,7 @@
 use super::{Message, Result, StreamChunk};
 use crate::array::DataChunk;
 use crate::buffer::Bitmap;
-use crate::stream_op::{StreamConsumer, StreamOperator};
+use crate::stream_op::{Executor, StreamConsumer};
 use crate::util::hash_util::CRC32FastBuilder;
 use async_trait::async_trait;
 use futures::channel::mpsc::Sender;
@@ -37,12 +37,12 @@ impl Output for ChannelOutput {
 /// data chunks will be dispatched with some specified policy, while control message
 /// such as barriers will be distributed to all receivers.
 pub struct DispatchExecutor<Inner: DataDispatcher> {
-    input: Box<dyn StreamOperator>,
+    input: Box<dyn Executor>,
     inner: Inner,
 }
 
 impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
-    pub fn new(input: Box<dyn StreamOperator>, inner: Inner) -> Self {
+    pub fn new(input: Box<dyn Executor>, inner: Inner) -> Self {
         Self { input, inner }
     }
 
@@ -241,12 +241,12 @@ impl DataDispatcher for SimpleDispatcher {
 
 /// `SenderConsumer` consumes data from input operator and send it into a channel
 pub struct SenderConsumer {
-    input: Box<dyn StreamOperator>,
+    input: Box<dyn Executor>,
     channel: Box<dyn Output>,
 }
 
 impl SenderConsumer {
-    pub fn new(input: Box<dyn StreamOperator>, channel: Box<dyn Output>) -> Self {
+    pub fn new(input: Box<dyn Executor>, channel: Box<dyn Output>) -> Self {
         Self { input, channel }
     }
 }

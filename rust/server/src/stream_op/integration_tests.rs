@@ -11,12 +11,12 @@ use futures::channel::mpsc::channel;
 use futures::SinkExt;
 
 pub struct MockConsumer {
-    input: Box<dyn StreamOperator>,
+    input: Box<dyn Executor>,
     data: Arc<Mutex<Vec<StreamChunk>>>,
 }
 
 impl MockConsumer {
-    pub fn new(input: Box<dyn StreamOperator>, data: Arc<Mutex<Vec<StreamChunk>>>) -> Self {
+    pub fn new(input: Box<dyn Executor>, data: Arc<Mutex<Vec<StreamChunk>>>) -> Self {
         Self { input, data }
     }
 }

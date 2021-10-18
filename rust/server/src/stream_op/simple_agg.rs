@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use super::aggregation::*;
-use super::{Message, Op, SimpleStreamOperator, StreamChunk, StreamOperator};
+use super::{Executor, Message, Op, SimpleExecutor, StreamChunk};
 use crate::array::column::Column;
 use crate::array::*;
 use crate::error::{Result, RwError};
@@ -56,7 +56,7 @@ pub struct SimpleAggExecutor {
     states: Vec<Box<dyn StreamingAggStateImpl>>,
 
     /// The input of the current operator
-    input: Box<dyn StreamOperator>,
+    input: Box<dyn Executor>,
 
     /// Whether this is the first time of consuming data.
     ///
@@ -69,7 +69,7 @@ pub struct SimpleAggExecutor {
 }
 
 impl SimpleAggExecutor {
-    pub fn new(input: Box<dyn StreamOperator>, agg_calls: Vec<AggCall>) -> Result<Self> {
+    pub fn new(input: Box<dyn Executor>, agg_calls: Vec<AggCall>) -> Result<Self> {
         let states: Vec<_> = agg_calls
             .iter()
             .map(|agg| {
@@ -93,9 +93,9 @@ impl SimpleAggExecutor {
     }
 }
 
-impl_consume_barrier_default!(SimpleAggExecutor, StreamOperator);
+impl_consume_barrier_default!(SimpleAggExecutor, Executor);
 
-impl SimpleStreamOperator for SimpleAggExecutor {
+impl SimpleExecutor for SimpleAggExecutor {
     fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
         let StreamChunk {
             ops,

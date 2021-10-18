@@ -130,7 +130,7 @@ impl StreamManagerCore {
     /// Create dispatchers with downstream information registered before
     fn create_dispatcher(
         &mut self,
-        input: Box<dyn StreamOperator>,
+        input: Box<dyn Executor>,
         dispatcher: &stream_plan::Dispatcher,
         fragment_id: u32,
         downstreams: &[u32],
@@ -183,8 +183,8 @@ impl StreamManagerCore {
     fn create_nodes(
         &mut self,
         node: &stream_plan::StreamNode,
-        merger: Box<dyn StreamOperator>,
-    ) -> Result<Box<dyn StreamOperator>> {
+        merger: Box<dyn Executor>,
+    ) -> Result<Box<dyn Executor>> {
         use stream_plan::StreamNode_StreamNodeType::*;
 
         // Create the input operator before creating itself
@@ -195,7 +195,7 @@ impl StreamManagerCore {
             merger
         };
 
-        let operator: Box<dyn StreamOperator> = match node.get_node_type() {
+        let operator: Box<dyn Executor> = match node.get_node_type() {
             PROJECTION => {
                 let project_node =
                     stream_plan::ProjectNode::parse_from_bytes(node.get_body().get_value())
@@ -267,11 +267,7 @@ impl StreamManagerCore {
         Ok(operator)
     }
 
-    fn create_merger(
-        &mut self,
-        fragment_id: u32,
-        upstreams: &[u32],
-    ) -> Result<Box<dyn StreamOperator>> {
+    fn create_merger(&mut self, fragment_id: u32, upstreams: &[u32]) -> Result<Box<dyn Executor>> {
         assert!(!upstreams.is_empty());
 
         let mut rxs = self

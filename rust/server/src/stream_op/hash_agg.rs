@@ -1,7 +1,7 @@
 //! Global Streaming Hash Aggregators
 
 use super::aggregation::*;
-use super::{Message, Op, SimpleStreamOperator, StreamChunk, StreamOperator};
+use super::{Executor, Message, Op, SimpleExecutor, StreamChunk};
 use crate::array::column::Column;
 use crate::array::*;
 use crate::buffer::Bitmap;
@@ -81,7 +81,7 @@ pub struct HashAggExecutor {
     /// Aggregation state of the current operator
     state_entries: HashMap<HashKey, HashValue>,
     /// The input of the current operator
-    input: Box<dyn StreamOperator>,
+    input: Box<dyn Executor>,
     /// A [`HashAggExecutor`] may have multiple [`AggCall`]s.
     agg_calls: Vec<AggCall>,
     /// Indices of the columns
@@ -90,11 +90,7 @@ pub struct HashAggExecutor {
 }
 
 impl HashAggExecutor {
-    pub fn new(
-        input: Box<dyn StreamOperator>,
-        agg_calls: Vec<AggCall>,
-        key_indices: Vec<usize>,
-    ) -> Self {
+    pub fn new(input: Box<dyn Executor>, agg_calls: Vec<AggCall>, key_indices: Vec<usize>) -> Self {
         Self {
             state_entries: HashMap::new(),
             input,
@@ -161,9 +157,9 @@ impl HashAggExecutor {
     }
 }
 
-impl_consume_barrier_default!(HashAggExecutor, StreamOperator);
+impl_consume_barrier_default!(HashAggExecutor, Executor);
 
-impl SimpleStreamOperator for HashAggExecutor {
+impl SimpleExecutor for HashAggExecutor {
     fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
         let StreamChunk {
             ops,

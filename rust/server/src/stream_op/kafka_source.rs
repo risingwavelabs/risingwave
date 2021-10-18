@@ -1,6 +1,6 @@
 use crate::error::Result;
 use crate::executor::StreamScanExecutor;
-use crate::stream_op::{Message, Op, StreamChunk, StreamOperator};
+use crate::stream_op::{Executor, Message, Op, StreamChunk};
 use async_trait::async_trait;
 use futures::FutureExt;
 use std::fmt::{Debug, Formatter};
@@ -16,7 +16,7 @@ impl KafkaSourceExecutor {
 }
 
 #[async_trait]
-impl StreamOperator for KafkaSourceExecutor {
+impl Executor for KafkaSourceExecutor {
     async fn next(&mut self) -> Result<Message> {
         let received = self.executor.next_data_chunk().fuse().await?;
         if let Some(chunk) = received {

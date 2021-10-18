@@ -1,6 +1,6 @@
 use crate::catalog::TableId;
 use crate::error::Result;
-use crate::stream_op::{Message, StreamChunk, StreamOperator};
+use crate::stream_op::{Executor, Message, StreamChunk};
 use async_trait::async_trait;
 use futures::channel::mpsc::UnboundedReceiver;
 use futures::StreamExt;
@@ -19,7 +19,7 @@ impl TableSourceExecutor {
 }
 
 #[async_trait]
-impl StreamOperator for TableSourceExecutor {
+impl Executor for TableSourceExecutor {
     async fn next(&mut self) -> Result<Message> {
         let received = self.receiver.next().await;
         if let Some(chunk) = received {

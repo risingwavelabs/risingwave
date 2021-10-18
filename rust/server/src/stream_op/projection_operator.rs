@@ -1,4 +1,4 @@
-use super::{Message, SimpleStreamOperator, StreamChunk, StreamOperator};
+use super::{Executor, Message, SimpleExecutor, StreamChunk};
 use crate::impl_consume_barrier_default;
 use crate::{
     array::{column::Column, DataChunk},
@@ -12,20 +12,20 @@ use async_trait::async_trait;
 /// or update element into next operator according to the result of the expression.
 pub struct ProjectExecutor {
     /// The input of the current operator
-    input: Box<dyn StreamOperator>,
+    input: Box<dyn Executor>,
     /// Expressions of the current projection.
     exprs: Vec<BoxedExpression>,
 }
 
 impl ProjectExecutor {
-    pub fn new(input: Box<dyn StreamOperator>, exprs: Vec<BoxedExpression>) -> Self {
+    pub fn new(input: Box<dyn Executor>, exprs: Vec<BoxedExpression>) -> Self {
         Self { input, exprs }
     }
 }
 
-impl_consume_barrier_default!(ProjectExecutor, StreamOperator);
+impl_consume_barrier_default!(ProjectExecutor, Executor);
 
-impl SimpleStreamOperator for ProjectExecutor {
+impl SimpleExecutor for ProjectExecutor {
     fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
         let chunk = chunk.compact()?;
 

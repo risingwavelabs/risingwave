@@ -1,4 +1,4 @@
-use super::{Result, StreamOperator};
+use super::{Executor, Result};
 use async_trait::async_trait;
 use futures::channel::mpsc::Receiver;
 use futures::future::select_all;
@@ -20,7 +20,7 @@ impl ReceiverExecutor {
 }
 
 #[async_trait]
-impl StreamOperator for ReceiverExecutor {
+impl Executor for ReceiverExecutor {
     async fn next(&mut self) -> Result<Message> {
         let msg = self.receiver.next().await.unwrap(); // TODO: remove unwrap
         Ok(msg)
@@ -60,7 +60,7 @@ impl MergeExecutor {
 }
 
 #[async_trait]
-impl StreamOperator for MergeExecutor {
+impl Executor for MergeExecutor {
     async fn next(&mut self) -> Result<Message> {
         loop {
             // Convert channel receivers to futures here to do `select_all`

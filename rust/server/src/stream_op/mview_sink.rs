@@ -1,4 +1,4 @@
-use super::{Message, Result, SimpleStreamOperator, StreamChunk, StreamOperator};
+use super::{Executor, Message, Result, SimpleExecutor, StreamChunk};
 use crate::storage::MemRowTableRef as MemTableRef;
 use crate::storage::Row;
 use async_trait::async_trait;
@@ -7,13 +7,13 @@ use smallvec::SmallVec;
 /// `MViewSinkExecutor` writes data to a row-based memtable, so that data could
 /// be queried by the AP engine.
 pub struct MViewSinkExecutor {
-    input: Box<dyn StreamOperator>,
+    input: Box<dyn Executor>,
     table: MemTableRef,
     pk_col: Vec<usize>,
 }
 
 impl MViewSinkExecutor {
-    pub fn new(input: Box<dyn StreamOperator>, table: MemTableRef, pk_col: Vec<usize>) -> Self {
+    pub fn new(input: Box<dyn Executor>, table: MemTableRef, pk_col: Vec<usize>) -> Self {
         Self {
             input,
             table,
@@ -22,7 +22,7 @@ impl MViewSinkExecutor {
     }
 }
 
-impl SimpleStreamOperator for MViewSinkExecutor {
+impl SimpleExecutor for MViewSinkExecutor {
     fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
         let StreamChunk {
             ops,
@@ -78,4 +78,4 @@ impl SimpleStreamOperator for MViewSinkExecutor {
 
 use crate::impl_consume_barrier_default;
 
-impl_consume_barrier_default!(MViewSinkExecutor, StreamOperator);
+impl_consume_barrier_default!(MViewSinkExecutor, Executor);

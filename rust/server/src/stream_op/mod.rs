@@ -128,21 +128,21 @@ pub enum Message {
     // TODO: Watermark
 }
 
-/// `StreamOperator` is an operator which supports handling of control messages.
+/// `Executor` supports handling of control messages.
 #[async_trait]
-pub trait StreamOperator: Send + Sync + 'static {
+pub trait Executor: Send + Sync + 'static {
     async fn next(&mut self) -> Result<Message>;
 }
 
-/// `SimpleStreamOperator` accepts a single chunk as input.
-pub trait SimpleStreamOperator: StreamOperator {
+/// `SimpleExecutor` accepts a single chunk as input.
+pub trait SimpleExecutor: Executor {
     fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message>;
 }
 
 /// Most operators don't care about the control messages, and therefore
 /// this macro provides a default implementation for them. The operator
 /// must have a field named `input`, so as to pass along messages, and
-/// implement the `SimpleStreamOperator` trait to provide a `consume_chunk`
+/// implement the `SimpleExecutor` trait to provide a `consume_chunk`
 /// function
 #[macro_export]
 macro_rules! impl_consume_barrier_default {

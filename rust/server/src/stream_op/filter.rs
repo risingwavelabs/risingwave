@@ -1,4 +1,4 @@
-use super::{Message, Op, SimpleStreamOperator, StreamChunk, StreamOperator};
+use super::{Executor, Message, Op, SimpleExecutor, StreamChunk};
 use crate::{
     array::{Array, ArrayImpl, DataChunk},
     buffer::Bitmap,
@@ -13,22 +13,22 @@ use async_trait::async_trait;
 /// to the result of the expression.
 pub struct FilterExecutor {
     /// The input of the current operator
-    input: Box<dyn StreamOperator>,
+    input: Box<dyn Executor>,
     /// Expression of the current filter, note that the filter must always have the same output for the same input.
     expr: BoxedExpression,
 }
 
 impl FilterExecutor {
-    pub fn new(input: Box<dyn StreamOperator>, expr: BoxedExpression) -> Self {
+    pub fn new(input: Box<dyn Executor>, expr: BoxedExpression) -> Self {
         Self { input, expr }
     }
 }
 
 use crate::impl_consume_barrier_default;
 
-impl_consume_barrier_default!(FilterExecutor, StreamOperator);
+impl_consume_barrier_default!(FilterExecutor, Executor);
 
-impl SimpleStreamOperator for FilterExecutor {
+impl SimpleExecutor for FilterExecutor {
     fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
         let StreamChunk {
             ops,
