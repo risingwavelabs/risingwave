@@ -10,10 +10,17 @@ import com.risingwave.scheduler.TestPlannerModule;
 import com.risingwave.sql.parser.SqlParser;
 import org.apache.calcite.sql.SqlNode;
 
+/**
+ * To write a json plan tests, the json source should be write in a `xxx.json` under
+ * com/risingwave/planner/json. The XML section should have attribute name="json", path="xxx.json".
+ * The TestBase will automatically find the files and compare serialize results.
+ */
 public abstract class SqlTestBase {
 
   protected static final String TEST_DB_NAME = "test_db";
   protected static final String TEST_SCHEMA_NAME = "test_schema";
+  // The json files folder.
+  protected static final String jsonFilesPathPrefix = "com/risingwave/planner/json/";
   protected ExecutionContext executionContext;
   protected SqlHandlerFactory sqlHandlerFactory;
 

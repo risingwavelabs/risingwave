@@ -11,6 +11,7 @@ import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.w3c.dom.Text;
 
+/** Utils for planner test loader. */
 public class ResourceUtil {
   public static final String ROOT_TAG = "Root";
   public static final String TEST_CASE_TAG = "TestCase";
@@ -19,6 +20,7 @@ public class ResourceUtil {
   public static final String SQL_TAG = "sql";
   public static final String PLAN_TAG = "plan";
   public static final String JSON_TAG = "json";
+  public static final String PATH_TAG = "path";
 
   public static URL findFile(Class<?> clazz, final String suffix) {
     // The reference file for class "com.foo.Bar" is "com/foo/Bar.xml"

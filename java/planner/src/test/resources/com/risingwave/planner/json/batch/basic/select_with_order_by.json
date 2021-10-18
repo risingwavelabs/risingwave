@@ -1,0 +1,29 @@
+{
+  "nodeType": "ORDER_BY",
+  "body": {
+    "@type": "type.googleapis.com/risingwave.executor.proto.OrderByNode",
+    "orderTypes": ["ASCENDING"],
+    "orders": [{
+      "exprType": "INPUT_REF",
+      "body": {
+        "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+      },
+      "returnType": {
+        "typeName": "INT32"
+      }
+    }]
+  },
+  "children": [{
+    "nodeType": "SEQ_SCAN",
+    "body": {
+      "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",
+      "tableRefId": {
+        "schemaRefId": {
+          "databaseRefId": {
+          }
+        }
+      },
+      "columnIds": [0, 1, 2]
+    }
+  }]
+}

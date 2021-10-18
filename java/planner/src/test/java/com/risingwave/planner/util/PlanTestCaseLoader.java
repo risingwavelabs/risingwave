@@ -16,6 +16,7 @@ import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 
+/** Load plan test for verification. Batch/Stream planner share a common loader. */
 public class PlanTestCaseLoader implements ArgumentsProvider {
 
   @Override
@@ -64,7 +65,13 @@ public class PlanTestCaseLoader implements ArgumentsProvider {
       } else if (ResourceUtil.PLAN_TAG.equals(name)) {
         plan = ResourceUtil.getText(res).trim();
       } else if (ResourceUtil.JSON_TAG.equals(name)) {
-        json = ResourceUtil.getText(res).trim();
+        if (res.hasAttribute(ResourceUtil.PATH_TAG)) {
+          String path = res.getAttribute(ResourceUtil.PATH_TAG);
+          json = res.getAttribute(ResourceUtil.PATH_TAG);
+        } else {
+          // TODO: remove directly read json source. It should be a path to json file.
+          json = ResourceUtil.getText(res).trim();
+        }
       }
 
       if (sql != null && plan != null && json != null) {

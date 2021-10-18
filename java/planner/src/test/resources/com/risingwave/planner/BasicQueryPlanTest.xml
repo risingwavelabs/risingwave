@@ -51,125 +51,7 @@ RwBatchFilter(condition=[AND(>($0, 1), >($1, 1), >($2, 1))])
   RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
             ]]>
         </Resource>
-        <Resource name="json">
-{
-  "nodeType": "FILTER",
-  "body": {
-    "@type": "type.googleapis.com/risingwave.executor.proto.FilterNode",
-    "searchCondition": {
-      "exprType": "AND",
-      "body": {
-        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
-        "children": [{
-          "exprType": "AND",
-          "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
-            "children": [{
-              "exprType": "GREATER_THAN",
-              "body": {
-                "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
-                "children": [{
-                  "exprType": "INPUT_REF",
-                  "body": {
-                    "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
-                  },
-                  "returnType": {
-                    "typeName": "INT32"
-                  }
-                }, {
-                  "exprType": "CONSTANT_VALUE",
-                  "body": {
-                    "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
-                    "body": "AAAAAQ=="
-                  },
-                  "returnType": {
-                    "typeName": "INT32"
-                  }
-                }]
-              },
-              "returnType": {
-                "typeName": "BOOLEAN"
-              }
-            }, {
-              "exprType": "GREATER_THAN",
-              "body": {
-                "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
-                "children": [{
-                  "exprType": "INPUT_REF",
-                  "body": {
-                    "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
-                    "columnIdx": 1
-                  },
-                  "returnType": {
-                    "typeName": "INT32"
-                  }
-                }, {
-                  "exprType": "CONSTANT_VALUE",
-                  "body": {
-                    "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
-                    "body": "AAAAAQ=="
-                  },
-                  "returnType": {
-                    "typeName": "INT32"
-                  }
-                }]
-              },
-              "returnType": {
-                "typeName": "BOOLEAN"
-              }
-            }]
-          },
-          "returnType": {
-            "typeName": "BOOLEAN"
-          }
-        }, {
-          "exprType": "GREATER_THAN",
-          "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
-            "children": [{
-              "exprType": "INPUT_REF",
-              "body": {
-                "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
-                "columnIdx": 2
-              },
-              "returnType": {
-                "typeName": "FLOAT"
-              }
-            }, {
-              "exprType": "CONSTANT_VALUE",
-              "body": {
-                "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
-                "body": "AAAAAQ=="
-              },
-              "returnType": {
-                "typeName": "INT32"
-              }
-            }]
-          },
-          "returnType": {
-            "typeName": "BOOLEAN"
-          }
-        }]
-      },
-      "returnType": {
-        "typeName": "BOOLEAN"
-      }
-    }
-  },
-  "children": [{
-    "nodeType": "SEQ_SCAN",
-    "body": {
-      "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",
-      "tableRefId": {
-        "schemaRefId": {
-          "databaseRefId": {
-          }
-        }
-      },
-      "columnIds": [0, 1, 2]
-    }
-  }]
-}
+        <Resource name="json" path="batch/basic/select_with_filter">
         </Resource>
     </TestCase>
     <TestCase name="simple agg">
@@ -329,38 +211,7 @@ RwBatchSort(sort0=[$0], dir0=[ASC])
   RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
 ]]>
         </Resource>>
-        <Resource name="json">
-            <![CDATA[
-{
-  "nodeType": "ORDER_BY",
-  "body": {
-    "@type": "type.googleapis.com/risingwave.executor.proto.OrderByNode",
-    "orderTypes": ["ASCENDING"],
-    "orders": [{
-      "exprType": "INPUT_REF",
-      "body": {
-        "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
-      },
-      "returnType": {
-        "typeName": "INT32"
-      }
-    }]
-  },
-  "children": [{
-    "nodeType": "SEQ_SCAN",
-    "body": {
-      "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",
-      "tableRefId": {
-        "schemaRefId": {
-          "databaseRefId": {
-          }
-        }
-      },
-      "columnIds": [0, 1, 2]
-    }
-  }]
-}
-]]>
+        <Resource name="json" path="batch/basic/select_with_order_by">
         </Resource>>
     </TestCase>
 
@@ -376,41 +227,7 @@ RwBatchSort(sort0=[$0], dir0=[ASC], fetch=[1])
   RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
 ]]>
         </Resource>>
-        <Resource name="json">
-            <![CDATA[
-{
-  "nodeType": "TOP_N",
-  "body": {
-    "@type": "type.googleapis.com/risingwave.executor.proto.TopNNode",
-    "orderBy": {
-      "orderTypes": ["ASCENDING"],
-      "orders": [{
-        "exprType": "INPUT_REF",
-        "body": {
-          "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
-        },
-        "returnType": {
-          "typeName": "INT32"
-        }
-      }]
-    },
-    "limit": 1
-  },
-  "children": [{
-    "nodeType": "SEQ_SCAN",
-    "body": {
-      "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",
-      "tableRefId": {
-        "schemaRefId": {
-          "databaseRefId": {
-          }
-        }
-      },
-      "columnIds": [0, 1, 2]
-    }
-  }]
-}
-]]>
+        <Resource name="json" path="batch/basic/select_with_order_by_limit">
         </Resource>>
     </TestCase>
 
@@ -454,68 +271,7 @@ RwBatchNestLoopJoin(condition=[>($0, $3)], joinType=[inner])
   RwBatchTableScan(table=[[test_schema, t3]], columns=[v1])
 ]]>
         </Resource>
-        <Resource name="json">
-            <![CDATA[
-            {
-  "nodeType": "NESTED_LOOP_JOIN",
-  "body": {
-    "@type": "type.googleapis.com/risingwave.executor.proto.NestedLoopJoinNode",
-    "joinCond": {
-      "exprType": "GREATER_THAN",
-      "body": {
-        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
-        "children": [{
-          "exprType": "INPUT_REF",
-          "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
-          },
-          "returnType": {
-            "typeName": "INT32"
-          }
-        }, {
-          "exprType": "INPUT_REF",
-          "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
-            "columnIdx": 3
-          },
-          "returnType": {
-            "typeName": "INT32"
-          }
-        }]
-      },
-      "returnType": {
-        "typeName": "BOOLEAN"
-      }
-    }
-  },
-  "children": [{
-    "nodeType": "SEQ_SCAN",
-    "body": {
-      "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",
-      "tableRefId": {
-        "schemaRefId": {
-          "databaseRefId": {
-          }
-        }
-      },
-      "columnIds": [0, 1, 2]
-    }
-  }, {
-    "nodeType": "SEQ_SCAN",
-    "body": {
-      "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",
-      "tableRefId": {
-        "schemaRefId": {
-          "databaseRefId": {
-          }
-        },
-        "tableId": 2
-      },
-      "columnIds": [0]
-    }
-  }]
-}
-]]>
+        <Resource name="json" path="batch/basic/nested_loop_join">
         </Resource>
     </TestCase>
 </Root>

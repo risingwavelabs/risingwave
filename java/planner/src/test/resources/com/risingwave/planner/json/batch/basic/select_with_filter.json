@@ -1,0 +1,118 @@
+{
+  "nodeType": "FILTER",
+  "body": {
+    "@type": "type.googleapis.com/risingwave.executor.proto.FilterNode",
+    "searchCondition": {
+      "exprType": "AND",
+      "body": {
+        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+        "children": [{
+          "exprType": "AND",
+          "body": {
+            "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+            "children": [{
+              "exprType": "GREATER_THAN",
+              "body": {
+                "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+                "children": [{
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  }
+                }, {
+                  "exprType": "CONSTANT_VALUE",
+                  "body": {
+                    "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+                    "body": "AAAAAQ=="
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  }
+                }]
+              },
+              "returnType": {
+                "typeName": "BOOLEAN"
+              }
+            }, {
+              "exprType": "GREATER_THAN",
+              "body": {
+                "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+                "children": [{
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+                    "columnIdx": 1
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  }
+                }, {
+                  "exprType": "CONSTANT_VALUE",
+                  "body": {
+                    "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+                    "body": "AAAAAQ=="
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  }
+                }]
+              },
+              "returnType": {
+                "typeName": "BOOLEAN"
+              }
+            }]
+          },
+          "returnType": {
+            "typeName": "BOOLEAN"
+          }
+        }, {
+          "exprType": "GREATER_THAN",
+          "body": {
+            "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+            "children": [{
+              "exprType": "INPUT_REF",
+              "body": {
+                "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+                "columnIdx": 2
+              },
+              "returnType": {
+                "typeName": "FLOAT"
+              }
+            }, {
+              "exprType": "CONSTANT_VALUE",
+              "body": {
+                "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+                "body": "AAAAAQ=="
+              },
+              "returnType": {
+                "typeName": "INT32"
+              }
+            }]
+          },
+          "returnType": {
+            "typeName": "BOOLEAN"
+          }
+        }]
+      },
+      "returnType": {
+        "typeName": "BOOLEAN"
+      }
+    }
+  },
+  "children": [{
+    "nodeType": "SEQ_SCAN",
+    "body": {
+      "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",
+      "tableRefId": {
+        "schemaRefId": {
+          "databaseRefId": {
+          }
+        }
+      },
+      "columnIds": [0, 1, 2]
+    }
+  }]
+}

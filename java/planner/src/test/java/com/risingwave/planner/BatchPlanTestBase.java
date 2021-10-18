@@ -8,11 +8,14 @@ import com.risingwave.planner.rel.serialization.ExplainWriter;
 import com.risingwave.planner.util.PlannerTestCase;
 import com.risingwave.planner.util.PlannerTestDdlLoader;
 import com.risingwave.rpc.Messages;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import org.apache.calcite.sql.SqlNode;
 
+/** Test base for Batch plan. */
 public abstract class BatchPlanTestBase extends SqlTestBase {
-
   protected BatchPlanner batchPlanner;
 
   protected void init() {
@@ -46,8 +49,20 @@ public abstract class BatchPlanTestBase extends SqlTestBase {
 
     // Do not error if no json test.
     if (testCase.getJson() != null) {
-      String serializedJsonPlan = Messages.jsonFormat(plan.getRoot().serialize());
-      assertEquals(testCase.getJson(), serializedJsonPlan, "Json not match!");
+      try {
+        String serializedJsonPlan = Messages.jsonFormat(plan.getRoot().serialize());
+        String ans =
+            Files.readString(
+                Path.of(
+                    getClass()
+                        .getClassLoader()
+                        .getResource(jsonFilesPathPrefix + testCase.getJson() + ".json")
+                        .toURI()),
+                StandardCharsets.UTF_8);
+        assertEquals(ans, serializedJsonPlan, "Json not match!");
+      } catch (Exception e) {
+        throw new RuntimeException("Json load fail");
+      }
     }
   }
 }
