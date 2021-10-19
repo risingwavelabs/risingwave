@@ -5,6 +5,26 @@ import org.gradle.api.Plugin
 import org.gradle.api.Project
 import java.io.File
 
+fun Project.getExecOutput(command: String): List<String> {
+  val output = ByteArrayOutputStream()
+  this.exec {
+    commandLine = command.split(" ")
+    standardOutput = output
+    errorOutput = System.err
+  }
+
+  val result = output.toString().trim().split("\n")
+  output.close()
+  return result
+}
+
+fun Project.getCurrentBranch(): String {
+  return this.getExecOutput("git branch --show-current")[0]
+}
+
+fun Project.getMergeBase(target: String, source: String): String {
+  return this.getExecOutput("git merge-base $target $source")[0]
+}
 
 /**
  * Get all files that are changed but not deleted nor renamed.
@@ -14,17 +34,24 @@ import java.io.File
  */
 fun Project.getChangedFiles(): List<String> {
   // Get the target and source branch
-  val ghprbTargetBranch = System.getenv("ghprbTargetBranch")
-  val ghprbSourceBranch = System.getenv("ghprbSourceBranch")
+  val ghprbTargetBranch = System.getenv("GITHUB_BASE_REF")
+  val ghprbSourceBranch = System.getenv("GITHUB_HEAD_REF")
+
+  println("ghprbTargetBranch: $ghprbTargetBranch, ghprbSourceBranch: $ghprbSourceBranch")
 
   // Compare to master if no branch specified
-  val targetBranch = ghprbTargetBranch?.let { "origin/${it}" } ?: "origin/master"
-  val sourceBranch = ghprbSourceBranch?.let { "${it}" } ?: "."
+  val targetBranch = ghprbTargetBranch?.let { "origin/$it" } ?: "origin/master"
+  val sourceBranch = ghprbSourceBranch?.let { "origin/$it" } ?: this.getCurrentBranch()
+
+  println("targetBranch: $targetBranch, sourceBranch: $sourceBranch")
+
+  val mergeBase = this.getMergeBase(targetBranch, sourceBranch)
+  println("merge base: $mergeBase")
 
   // Get list of all changed files including status
   val systemOutStream = ByteArrayOutputStream();
   this.exec {
-    commandLine = "git diff --name-status --diff-filter=dr $targetBranch $sourceBranch".split(" ");
+    commandLine = "git diff --name-status --diff-filter=dr $mergeBase $sourceBranch".split(" ");
     standardOutput = systemOutStream
     errorOutput = System.err
   }
