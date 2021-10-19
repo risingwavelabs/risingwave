@@ -131,6 +131,11 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
 
         // TODO: We need to unify these
         let value = match proto.get_return_type().get_type_name() {
+            DataType_TypeName::BOOLEAN => ScalarImpl::Bool(
+                i8::from_be_bytes(proto_value.get_body().try_into().map_err(|e| {
+                    InternalError(format!("Failed to deserialize bool, reason: {:?}", e))
+                })?) == 1,
+            ),
             DataType_TypeName::INT16 => ScalarImpl::Int16(i16::from_be_bytes(
                 proto_value.get_body().try_into().map_err(|e| {
                     InternalError(format!("Failed to deserialize i16, reason: {:?}", e))

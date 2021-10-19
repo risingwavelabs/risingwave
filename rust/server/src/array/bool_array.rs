@@ -3,7 +3,8 @@ use std::hash::{Hash, Hasher};
 use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
 use crate::buffer::Bitmap;
 use crate::error::Result;
-use risingwave_proto::data::Buffer;
+use risingwave_proto::data::{Buffer as BufferProto, Buffer_CompressionType};
+use std::mem::size_of;
 
 #[derive(Debug)]
 pub struct BoolArray {
@@ -43,8 +44,21 @@ impl Array for BoolArray {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> Result<Vec<Buffer>> {
-        todo!()
+    fn to_protobuf(&self) -> Result<Vec<BufferProto>> {
+        let values = {
+            let mut output_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<bool>());
+
+            for v in self.iter().flatten() {
+                let bool_numeric = if v { 1 } else { 0 } as u8;
+                output_buffer.push(bool_numeric);
+            }
+
+            let mut b = BufferProto::new();
+            b.set_compression(Buffer_CompressionType::NONE);
+            b.set_body(output_buffer);
+            b
+        };
+        Ok(vec![values])
     }
 
     fn null_bitmap(&self) -> &Bitmap {

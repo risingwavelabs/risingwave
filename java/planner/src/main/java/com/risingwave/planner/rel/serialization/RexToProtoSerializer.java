@@ -73,6 +73,18 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
     requireNonNull(val.getValue(), "val.value");
     ByteBuffer bb;
     switch (dataType.getTypeName()) {
+      case BOOLEAN:
+        {
+          bb = ByteBuffer.allocate(1).order(ByteOrder.BIG_ENDIAN);
+          bb.put(
+              (byte)
+                  (requireNonNull(
+                          val.getValueAs(Boolean.class),
+                          "RexLiteral return a null value in byte array serialization!")
+                      ? 1
+                      : 0));
+          break;
+        }
       case INT16:
         {
           bb = ByteBuffer.allocate(2).order(ByteOrder.BIG_ENDIAN);

@@ -21,6 +21,7 @@ import com.risingwave.sql.tree.AllColumns;
 import com.risingwave.sql.tree.ArithmeticExpression;
 import com.risingwave.sql.tree.AstVisitor;
 import com.risingwave.sql.tree.BetweenPredicate;
+import com.risingwave.sql.tree.BooleanLiteral;
 import com.risingwave.sql.tree.Cast;
 import com.risingwave.sql.tree.ColumnDefinition;
 import com.risingwave.sql.tree.ColumnType;
@@ -442,6 +443,11 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
   }
 
   @Override
+  protected SqlNode visitBooleanLiteral(BooleanLiteral node, Void context) {
+    return SqlLiteral.createBoolean(node.getValue(), SqlParserPos.ZERO);
+  }
+
+  @Override
   protected SqlNode visitLongLiteral(LongLiteral node, Void context) {
     return SqlLiteral.createExactNumeric(String.valueOf(node.getValue()), SqlParserPos.ZERO);
   }
@@ -742,6 +748,8 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
   private static SqlBasicTypeNameSpec toBasicTypeNameSpec(ColumnType<?> columnType) {
     String typeName = columnType.name().toUpperCase();
     switch (typeName) {
+      case "BOOLEAN":
+        return new SqlBasicTypeNameSpec(SqlTypeName.BOOLEAN, SqlParserPos.ZERO);
       case "SMALLINT":
         return new SqlBasicTypeNameSpec(SqlTypeName.SMALLINT, SqlParserPos.ZERO);
       case "INT":
