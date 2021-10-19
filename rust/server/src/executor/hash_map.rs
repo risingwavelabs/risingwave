@@ -1,7 +1,7 @@
 use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::error::Result;
-use crate::types::Scalar;
-use crate::types::{IntervalUnit, ScalarImpl, ScalarRef};
+use crate::types::{Datum, Scalar};
+use crate::types::{IntervalUnit, ScalarRef};
 use crate::util::hash_util::CRC32FastBuilder;
 use rust_decimal::Decimal;
 use std::convert::TryInto;
@@ -23,6 +23,11 @@ pub trait HashKeySerialize<'a>: ScalarRef<'a> + Default {
     fn serialize(self) -> Self::S;
 }
 
+/// Trait for different kinds of hash keys.
+///
+/// Current comparison implementation treats `null == null`. This is consistent with postgresql's
+/// group by implementation, but not join. In pg's join implementation, `null != null`, and the join
+/// executor should take care of this.
 pub trait HashKey: Hash + Eq + Sized {
     type S: HashKeySerializer<K = Self>;
 
@@ -45,6 +50,8 @@ pub trait HashKey: Hash + Eq + Sized {
             .map(Self::S::into_hash_key)
             .collect())
     }
+
+    fn has_null(&self) -> bool;
 }
 
 /// Designed for hash keys with at most `N` serialized bytes.
@@ -62,9 +69,9 @@ pub struct FixedSizeKey<const N: usize> {
 /// 3. Sizes of data types exceed `256` bytes.
 /// 4. Any column's serialized format can't be used for equality check.
 pub struct SerializedKey {
-    key: Vec<ScalarImpl>,
-    null_bitmap: Vec<bool>,
+    key: Vec<Datum>,
     hash_code: u64,
+    has_null: bool,
 }
 
 /// Fix clippy warning.
@@ -84,7 +91,7 @@ impl<const N: usize> Hash for FixedSizeKey<N> {
 
 impl PartialEq for SerializedKey {
     fn eq(&self, other: &Self) -> bool {
-        (self.null_bitmap == other.null_bitmap) && (self.key == other.key)
+        self.key == other.key
     }
 }
 
@@ -126,12 +133,12 @@ impl BuildHasher for PrecomputedBuildHasher {
     }
 }
 
-type Key16 = FixedSizeKey<2>;
-type Key32 = FixedSizeKey<4>;
-type Key64 = FixedSizeKey<8>;
-type Key128 = FixedSizeKey<16>;
-type Key256 = FixedSizeKey<32>;
-type KeySerialized = SerializedKey;
+pub type Key16 = FixedSizeKey<2>;
+pub type Key32 = FixedSizeKey<4>;
+pub type Key64 = FixedSizeKey<8>;
+pub type Key128 = FixedSizeKey<16>;
+pub type Key256 = FixedSizeKey<32>;
+pub type KeySerialized = SerializedKey;
 
 impl HashKeySerialize<'_> for bool {
     type S = [u8; 1];
@@ -235,7 +242,7 @@ impl<const N: usize> HashKeySerializer for FixedSizeKeySerializer<N> {
     fn from_hash_code(hash_code: u64) -> Self {
         Self {
             buffer: [0u8; N],
-            null_bitmap: 0u8,
+            null_bitmap: 0xFFu8,
             null_bitmap_idx: 0,
             data_len: 0,
             hash_code,
@@ -276,9 +283,9 @@ impl<const N: usize> HashKeySerializer for FixedSizeKeySerializer<N> {
 }
 
 pub struct SerializedKeySerializer {
-    buffer: Vec<ScalarImpl>,
-    null_bitmap: Vec<bool>,
+    buffer: Vec<Datum>,
     hash_code: u64,
+    has_null: bool,
 }
 
 impl HashKeySerializer for SerializedKeySerializer {
@@ -287,21 +294,20 @@ impl HashKeySerializer for SerializedKeySerializer {
     fn from_hash_code(hash_code: u64) -> Self {
         Self {
             buffer: Vec::new(),
-            null_bitmap: Vec::new(),
             hash_code,
+            has_null: false,
         }
     }
 
     fn append<'a, D: HashKeySerialize<'a>>(&mut self, data: Option<D>) -> Result<()> {
         match data {
             Some(v) => {
-                self.buffer.push(v.to_owned_scalar().to_scalar_value());
-                self.null_bitmap.push(true);
+                self.buffer
+                    .push(Some(v.to_owned_scalar().to_scalar_value()));
             }
             None => {
-                self.buffer
-                    .push(D::default().to_owned_scalar().to_scalar_value());
-                self.null_bitmap.push(false);
+                self.buffer.push(None);
+                self.has_null = true;
             }
         }
         Ok(())
@@ -310,8 +316,8 @@ impl HashKeySerializer for SerializedKeySerializer {
     fn into_hash_key(self) -> SerializedKey {
         SerializedKey {
             key: self.buffer,
-            null_bitmap: self.null_bitmap,
             hash_code: self.hash_code,
+            has_null: self.has_null,
         }
     }
 }
@@ -343,10 +349,18 @@ impl ArrayImpl {
 
 impl<const N: usize> HashKey for FixedSizeKey<N> {
     type S = FixedSizeKeySerializer<N>;
+
+    fn has_null(&self) -> bool {
+        self.null_bitmap != 0xFF
+    }
 }
 
 impl HashKey for SerializedKey {
     type S = SerializedKeySerializer;
+
+    fn has_null(&self) -> bool {
+        self.has_null
+    }
 }
 
 #[cfg(test)]

@@ -1,5 +1,6 @@
 use crate::executor::join::JoinType::Inner;
 
+mod chunked_data;
 mod hash_join;
 mod hash_join_state;
 mod nested_loop_join;
@@ -25,7 +26,7 @@ impl JoinType {
     pub(super) fn need_join_remaining(self) -> bool {
         matches!(
             self,
-            JoinType::RightOuter | JoinType::RightAnti | JoinType::FullOuter
+            JoinType::RightOuter | JoinType::RightAnti | JoinType::FullOuter | JoinType::RightSemi
         )
     }
 }

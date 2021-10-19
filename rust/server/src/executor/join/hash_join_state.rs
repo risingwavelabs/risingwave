@@ -3,6 +3,7 @@ use crate::array::{ArrayBuilderImpl, DataChunk, DataChunkRef};
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 use crate::executor::hash_map::{HashKey, PrecomputedBuildHasher};
+use crate::executor::join::chunked_data::{ChunkedData, RowId};
 use crate::executor::join::hash_join::EquiJoinParams;
 use crate::executor::join::JoinType;
 use crate::types::DataType;
@@ -15,57 +16,23 @@ use std::sync::Arc;
 
 const MAX_BUILD_ROW_COUNT: usize = u32::MAX as usize;
 
-const END: RowId = RowId {
-    chunk_id: u32::MAX,
-    row_id: u32::MAX,
-};
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
-pub(super) struct RowId {
-    chunk_id: u32,
-    row_id: u32,
-}
-
-impl RowId {
-    #[inline(always)]
-    fn is_end(&self) -> bool {
-        *self == END
-    }
-
-    #[inline(always)]
-    fn chunk_id(&self) -> usize {
-        self.chunk_id as usize
-    }
-
-    #[inline(always)]
-    fn row_id(&self) -> usize {
-        self.row_id as usize
-    }
-
-    #[inline(always)]
-    fn next_chunk(self) -> RowId {
-        RowId {
-            chunk_id: self.chunk_id + 1,
-            row_id: 0,
-        }
-    }
-
-    #[inline(always)]
-    fn next_row(self) -> RowId {
-        RowId {
-            chunk_id: self.chunk_id,
-            row_id: self.row_id + 1,
-        }
-    }
-}
-
-#[derive(Default)]
 pub(super) struct BuildTable {
+    /// Accumulated build data.
     build_data: Vec<DataChunkRef>,
+    /// Total row count of build data.
     row_count: usize,
+    params: EquiJoinParams,
 }
 
 impl BuildTable {
+    pub(super) fn with_params(params: EquiJoinParams) -> Self {
+        Self {
+            build_data: Vec::new(),
+            row_count: 0,
+            params,
+        }
+    }
+
     pub(super) fn append_build_chunk(&mut self, data_chunk: DataChunkRef) -> Result<()> {
         ensure!(
             (MAX_BUILD_ROW_COUNT - self.row_count) > data_chunk.cardinality(),
@@ -75,84 +42,110 @@ impl BuildTable {
         self.build_data.push(data_chunk);
         Ok(())
     }
+
+    fn build_hash_map<K: HashKey>(&self) -> Result<(ChunkedData<Option<RowId>>, JoinHashMap<K>)> {
+        let mut hash_map =
+            JoinHashMap::with_capacity_and_hasher(self.row_count, PrecomputedBuildHasher);
+        let mut build_index = ChunkedData::<Option<RowId>>::with_chunk_sizes(
+            self.build_data.iter().map(|c| c.cardinality()),
+        )?;
+
+        for (chunk_id, data_chunk) in self.build_data.iter().enumerate() {
+            let keys = K::build(self.params.build_key_columns(), data_chunk.as_ref())?;
+            for (row_id_in_chunk, row_key) in keys.into_iter().enumerate() {
+                // In pg `null` and `null` never joins, so we should skip them in hash table.
+                if row_key.has_null() {
+                    continue;
+                }
+                let current_row_id = RowId::new(chunk_id, row_id_in_chunk);
+                build_index[current_row_id] = hash_map.insert(row_key, current_row_id);
+            }
+        }
+
+        Ok((build_index, hash_map))
+    }
 }
 
 pub(super) struct ProbeTable<K> {
+    /// Hashmap created by join keys.
+    ///
+    /// Key is composed by fields in join condition.
+    ///
+    /// Value of this map is the first row id in `build_data` which has same key. The chain of rows
+    /// with same key are stored in `build_index`.
+    ///
+    /// For example, when we have following build keys:
+    ///
+    /// |key|
+    /// |---|
+    /// | a |
+    /// | b |
+    /// | a |
+    ///
+    /// The `build_table` has following values:
+    ///
+    /// ```ignore
+    /// {a -> RowId(0, 0), b -> RowId(0, 1)}
+    /// ```
+    ///
+    /// And the `build_index` has following data:
+    /// ```ignore
+    /// |Some(2)| // Point to next row with same key.
+    /// |None|    // No more row with same key.
+    /// |None|    // No more row with same key.
+    /// ```
     build_table: JoinHashMap<K>,
     build_data: Vec<DataChunkRef>,
-    build_index: Vec<Vec<RowId>>,
-    build_matched: RefCell<Option<Vec<Vec<bool>>>>,
+    build_index: ChunkedData<Option<RowId>>,
+
+    /// Used only when join remaining is required after probing.
+    ///
+    /// See [`JoinType::need_join_remaining`]
+    build_matched: RefCell<Option<ChunkedData<bool>>>,
     cur_probe_data_chunk: Option<DataChunkRef>,
     params: EquiJoinParams,
 }
 
-impl<K> Default for ProbeTable<K> {
-    fn default() -> Self {
-        Self {
-            build_table: JoinHashMap::default(),
-            build_data: Vec::default(),
-            build_index: Vec::default(),
-            build_matched: RefCell::new(None),
-            cur_probe_data_chunk: None,
-            params: EquiJoinParams::default(),
-        }
-    }
-}
-
+/// Iterator for joined row ids for one key.
+///
+/// See [`ProbeTable`]
 struct JoinedRowIdIterator<'a> {
-    cur: RowId,
-    index: &'a Vec<Vec<RowId>>,
+    cur: Option<RowId>,
+    index: &'a ChunkedData<Option<RowId>>,
 }
 
-impl<'a> Iterator for JoinedRowIdIterator<'a> {
-    type Item = RowId;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.cur.is_end() {
-            None
-        } else {
-            let ret = self.cur;
-            let next = self.index[self.cur.chunk_id()][self.cur.row_id()];
-            self.cur = next;
-            Some(ret)
-        }
-    }
-}
-
-struct AllRowIdIterator<'a> {
-    cur: RowId,
-    data: &'a Vec<DataChunkRef>,
-}
-
-impl<'a> Iterator for AllRowIdIterator<'a> {
-    type Item = RowId;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.data.get(self.cur.chunk_id()) {
-            Some(chunk) => {
-                let ret = Some(self.cur);
-                if self.cur.row_id() > chunk.cardinality() {
-                    self.cur = self.cur.next_chunk();
-                } else {
-                    self.cur = self.cur.next_row();
-                }
-
-                ret
-            }
-            None => None,
-        }
-    }
-}
-
-impl<K> TryFrom<BuildTable> for ProbeTable<K> {
+impl<K: HashKey> TryFrom<BuildTable> for ProbeTable<K> {
     type Error = RwError;
 
-    fn try_from(_build_table: BuildTable) -> Result<Self> {
-        todo!()
+    fn try_from(build_table: BuildTable) -> Result<Self> {
+        let (build_index, hash_map) = build_table.build_hash_map()?;
+
+        let mut build_matched = RefCell::new(None);
+        if build_table.params.join_type().need_join_remaining() {
+            build_matched = RefCell::new(Some(ChunkedData::<bool>::with_chunk_sizes(
+                build_table
+                    .build_data
+                    .iter()
+                    .map(|c| c.as_ref().cardinality()),
+            )?));
+        }
+
+        Ok(Self {
+            build_table: hash_map,
+            build_data: build_table.build_data,
+            build_index,
+            build_matched,
+            cur_probe_data_chunk: None,
+            params: build_table.params,
+        })
     }
 }
 
 impl<K: HashKey> ProbeTable<K> {
+    pub(super) fn join_type(&self) -> JoinType {
+        self.params.join_type()
+    }
+
     // TODO: Should we consider output multi data chunks when necessary?
     pub(super) fn join(&mut self, data_chunk: DataChunkRef) -> Result<DataChunkRef> {
         self.cur_probe_data_chunk = Some(data_chunk.clone());
@@ -189,7 +182,9 @@ impl<K: HashKey> ProbeTable<K> {
         let mut output_array_builders = self.create_output_array_builders(2048)?;
 
         match self.params.join_type() {
-            JoinType::RightAnti => self.do_right_anti_join_remaining(&mut output_array_builders)?,
+            JoinType::RightAnti | JoinType::RightOuter => {
+                self.do_right_anti_join_remaining(&mut output_array_builders)?
+            }
             JoinType::FullOuter => self.do_full_outer_join_remaining(&mut output_array_builders)?,
             _ => return Ok(None),
         };
@@ -238,16 +233,11 @@ impl<K: HashKey> ProbeTable<K> {
     ) -> Result<()> {
         for (row_id, probe_key) in probe_keys.iter().enumerate() {
             match self.first_joined_row_id(probe_key) {
-                Some(first_joined_row) => {
-                    self.joined_row_ids_from(first_joined_row)
-                        .try_for_each(|build_row_id| {
-                            self.append_one_row(
-                                Some(build_row_id),
-                                Some(row_id),
-                                output_array_builders,
-                            )
-                        })?
-                }
+                Some(first_joined_row) => self
+                    .joined_row_ids_from(Some(first_joined_row))
+                    .try_for_each(|build_row_id| {
+                        self.append_one_row(Some(build_row_id), Some(row_id), output_array_builders)
+                    })?,
                 None => self.append_one_row(None, Some(row_id), output_array_builders)?,
             }
         }
@@ -262,6 +252,7 @@ impl<K: HashKey> ProbeTable<K> {
     ) -> Result<()> {
         for (row_id, probe_key) in probe_keys.iter().enumerate() {
             self.all_joined_row_ids(probe_key)
+                .take(1)
                 .try_for_each(|_| self.append_one_row(None, Some(row_id), output_array_builders))?;
         }
 
@@ -350,7 +341,7 @@ impl<K: HashKey> ProbeTable<K> {
         for (row_id, probe_key) in probe_keys.iter().enumerate() {
             match self.first_joined_row_id(probe_key) {
                 Some(first_joined_row) => {
-                    for build_row_id in self.joined_row_ids_from(first_joined_row) {
+                    for build_row_id in self.joined_row_ids_from(Some(first_joined_row)) {
                         self.append_one_row(
                             Some(build_row_id),
                             Some(row_id),
@@ -382,7 +373,7 @@ impl<K: HashKey> ProbeTable<K> {
     fn set_build_matched(&self, build_row_id: RowId) -> Result<()> {
         match self.build_matched.borrow_mut().deref_mut() {
             Some(flags) => {
-                flags[build_row_id.chunk_id()][build_row_id.row_id()] = true;
+                flags[build_row_id] = true;
                 Ok(())
             }
             None => Err(RwError::from(InternalError(
@@ -393,7 +384,7 @@ impl<K: HashKey> ProbeTable<K> {
 
     fn is_build_matched(&self, build_row_id: RowId) -> Result<bool> {
         match self.build_matched.borrow().deref() {
-            Some(flags) => Ok(flags[build_row_id.chunk_id()][build_row_id.row_id()]),
+            Some(flags) => Ok(flags[build_row_id]),
             None => Err(RwError::from(InternalError(
                 "Build match flags not found!".to_string(),
             ))),
@@ -412,7 +403,7 @@ impl<K: HashKey> ProbeTable<K> {
         self.build_table.get(probe_key).copied()
     }
 
-    fn joined_row_ids_from(&self, start: RowId) -> impl Iterator<Item = RowId> + '_ {
+    fn joined_row_ids_from(&self, start: Option<RowId>) -> impl Iterator<Item = RowId> + '_ {
         JoinedRowIdIterator {
             cur: start,
             index: &self.build_index,
@@ -421,8 +412,8 @@ impl<K: HashKey> ProbeTable<K> {
 
     fn all_joined_row_ids(&self, probe_key: &K) -> impl Iterator<Item = RowId> + '_ {
         match self.first_joined_row_id(probe_key) {
-            Some(first_joined_row_id) => self.joined_row_ids_from(first_joined_row_id),
-            None => self.joined_row_ids_from(END),
+            Some(first_joined_row_id) => self.joined_row_ids_from(Some(first_joined_row_id)),
+            None => self.joined_row_ids_from(None),
         }
     }
 
@@ -472,11 +463,21 @@ impl<K: HashKey> ProbeTable<K> {
     }
 
     fn all_build_row_ids(&self) -> impl Iterator<Item = RowId> + '_ {
-        AllRowIdIterator {
-            cur: RowId::default(),
-            data: &self.build_data,
-        }
+        self.build_index.all_row_ids()
     }
 }
 
 pub(super) type JoinHashMap<K> = HashMap<K, RowId, PrecomputedBuildHasher>;
+
+impl<'a> Iterator for JoinedRowIdIterator<'a> {
+    type Item = RowId;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let ret = self.cur;
+        if let Some(cur_row_id) = self.cur {
+            self.cur = self.index[cur_row_id];
+        }
+
+        ret
+    }
+}

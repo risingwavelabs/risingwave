@@ -32,6 +32,7 @@ impl<'a> DataChunkIter<'a> {
 
 /// TODO: Consider merge with Row in storage. It is end with Ref because it do not own data
 /// and avoid conflict with [`Row`].
+#[derive(Debug, PartialEq)]
 pub struct RowRef<'a>(Vec<Option<ScalarRefImpl<'a>>>);
 
 impl<'a> RowRef<'a> {
