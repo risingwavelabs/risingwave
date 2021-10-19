@@ -1,16 +1,19 @@
 package com.risingwave.planner.util;
 
+import java.util.Optional;
+
+/** Abstraction for a single test case. Load by TestCase Loader. */
 public class PlannerTestCase {
   private final String name;
   private final String sql;
   private final String plan;
-  private final String json;
+  private final Optional<String> json;
 
   public PlannerTestCase(String name, String sql, String plan, String json) {
     this.name = name;
     this.sql = sql;
     this.plan = plan;
-    this.json = json;
+    this.json = Optional.ofNullable(json);
   }
 
   public String getSql() {
@@ -21,7 +24,7 @@ public class PlannerTestCase {
     return plan;
   }
 
-  public String getJson() {
+  public Optional<String> getJson() {
     return json;
   }
 

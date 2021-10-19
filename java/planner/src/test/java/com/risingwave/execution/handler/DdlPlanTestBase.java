@@ -19,6 +19,7 @@ import com.risingwave.sql.parser.SqlParser;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
 
+/** Test base for ddl plan. */
 public class DdlPlanTestBase {
   private static final String TEST_DB_NAME = "test_db";
   private static final String TEST_SCHEMA_NAME = "test_schema";
@@ -71,9 +72,9 @@ public class DdlPlanTestBase {
     }
 
     // Do not error if no json test.
-    if (testCase.getJson() != null) {
+    if (testCase.getJson().isPresent()) {
       String serializedJsonPlan = Messages.jsonFormat(ret);
-      assertEquals(testCase.getJson(), serializedJsonPlan, "Json not match!");
+      assertEquals(testCase.getJson().get(), serializedJsonPlan, "Json not match!");
     }
   }
 }

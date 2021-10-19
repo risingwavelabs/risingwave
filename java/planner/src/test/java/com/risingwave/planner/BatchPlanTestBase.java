@@ -48,7 +48,7 @@ public abstract class BatchPlanTestBase extends SqlTestBase {
     assertEquals(testCase.getPlan(), explainedPlan, "Plan not match!");
 
     // Do not error if no json test.
-    if (testCase.getJson() != null) {
+    if (testCase.getJson().isPresent()) {
       try {
         String serializedJsonPlan = Messages.jsonFormat(plan.getRoot().serialize());
         String ans =
@@ -56,7 +56,7 @@ public abstract class BatchPlanTestBase extends SqlTestBase {
                 Path.of(
                     getClass()
                         .getClassLoader()
-                        .getResource(jsonFilesPathPrefix + testCase.getJson() + ".json")
+                        .getResource(jsonFilesPathPrefix + testCase.getJson().get() + ".json")
                         .toURI()),
                 StandardCharsets.UTF_8);
         assertEquals(ans, serializedJsonPlan, "Json not match!");

@@ -15,6 +15,7 @@ import java.util.List;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlCreateMaterializedView;
 
+/** Test base for stream plan. */
 public abstract class StreamPlanTestBase extends SqlTestBase {
   protected StreamPlanner streamPlanner;
 
@@ -58,10 +59,10 @@ public abstract class StreamPlanTestBase extends SqlTestBase {
     handler.convertPlanToCatalog(tableName, plan, executionContext);
 
     // Do not error if no json test.
-    if (testCase.getJson() != null) {
+    if (testCase.getJson().isPresent()) {
       StreamNode serializedProto = plan.getStreamingPlan().serialize();
       String serializedJsonPlan = Messages.jsonFormat(serializedProto);
-      assertEquals(testCase.getJson(), serializedJsonPlan, "Proto json not match!");
+      assertEquals(testCase.getJson().get(), serializedJsonPlan, "Proto json not match!");
     }
   }
 }
