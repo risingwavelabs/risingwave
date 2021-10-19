@@ -1,5 +1,6 @@
 package com.risingwave.planner;
 
+import com.risingwave.common.config.LeaderServerConfigurations;
 import com.risingwave.execution.handler.CreateMaterializedViewHandler;
 import com.risingwave.planner.planner.batch.BatchPlanner;
 import com.risingwave.planner.planner.streaming.StreamFragmenter;
@@ -24,12 +25,17 @@ import org.junit.jupiter.api.TestMethodOrder;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ArgumentsSource;
 
+/** Tests for streaming job */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 public class MaterializedViewPlanTest extends StreamPlanTestBase {
   @BeforeAll
   public void initAll() {
     super.init();
+    executionContext
+        .getConf()
+        .set(
+            LeaderServerConfigurations.CLUSTER_MODE, LeaderServerConfigurations.ClusterMode.Single);
   }
 
   @ParameterizedTest(name = "{index} => {0}")
@@ -84,6 +90,11 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
   @Test
   @Order(3)
   void testDistributedStreamingPlan() {
+    executionContext
+        .getConf()
+        .set(
+            LeaderServerConfigurations.CLUSTER_MODE,
+            LeaderServerConfigurations.ClusterMode.Distributed);
     // A sample code for distributed streaming plan.
     String sql =
         "create materialized view T_distributed as select sum(v1)+1 as V from t where v1>v2";
@@ -106,6 +117,38 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
             + "        RwStreamFilter(condition=[>($0, $1)])\n"
             + "          RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
             + "            RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2], dispatched=[true])";
+    System.out.println(explainExchangePlan);
+    Assertions.assertEquals(explainExchangePlan, expectedPlan);
+  }
+
+  @Test
+  @Order(4)
+  void testDistributedAggPlan() {
+    executionContext
+        .getConf()
+        .set(
+            LeaderServerConfigurations.CLUSTER_MODE,
+            LeaderServerConfigurations.ClusterMode.Distributed);
+    // A sample code for distributed streaming aggregation plan.
+    String sql = "create materialized view T_agg as select v1, sum(v2) as V from t group by v1";
+
+    SqlNode ast = parseSql(sql);
+    StreamingPlan plan = streamPlanner.plan(ast, executionContext);
+
+    CreateMaterializedViewHandler handler = new CreateMaterializedViewHandler();
+    SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
+    String tableName = createMaterializedView.name.getSimple();
+    handler.convertPlanToCatalog(tableName, plan, executionContext);
+
+    StreamingPlan exchangePlan = StreamFragmenter.generateGraph(plan, executionContext);
+    String explainExchangePlan = ExplainWriter.explainPlan(exchangePlan.getStreamingPlan());
+    String expectedPlan =
+        "RwStreamMaterializedView(v1=[$0], v=[$1])\n"
+            + "  RwStreamAgg(group=[{0}], v=[SUM($1)])\n"
+            + "    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
+            + "      RwStreamAgg(group=[{0}], v=[SUM($1)])\n"
+            + "        RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
+            + "          RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2], dispatched=[true])";
     System.out.println(explainExchangePlan);
     Assertions.assertEquals(explainExchangePlan, expectedPlan);
   }

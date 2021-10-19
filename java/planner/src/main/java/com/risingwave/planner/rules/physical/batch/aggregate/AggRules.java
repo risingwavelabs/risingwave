@@ -14,8 +14,15 @@ import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.util.ImmutableBitSet;
 import org.apache.calcite.util.ImmutableIntList;
 
+/** Aggregation Helper Functions */
 public class AggRules {
-  static List<AggSplitter> getAggSplitters(RwLogicalAggregate logicalAgg, RelOptRuleCall call) {
+  /**
+   * @param logicalAgg Logical Aggregation
+   * @param call The rule call context
+   * @return A list of AggSplitter
+   */
+  public static List<AggSplitter> getAggSplitters(
+      RwLogicalAggregate logicalAgg, RelOptRuleCall call) {
     return Streams.mapWithIndex(
             logicalAgg.getAggCallList().stream(),
             (aggCall, idx) ->
@@ -23,7 +30,12 @@ public class AggRules {
         .collect(Collectors.toList());
   }
 
-  static List<List<AggregateCall>> getLocalAggCalls(
+  /**
+   * @param logicalAgg Logical Aggregation
+   * @param splitters A list of AggSplitter
+   * @return A list of lists of AggregateCall
+   */
+  public static List<List<AggregateCall>> getLocalAggCalls(
       RwLogicalAggregate logicalAgg, List<AggSplitter> splitters) {
     var start = logicalAgg.getGroupCount();
     var ret = new ArrayList<List<AggregateCall>>(splitters.size());
@@ -37,7 +49,13 @@ public class AggRules {
     return ret;
   }
 
-  static List<List<AggregateCall>> getGlobalAggCalls(
+  /**
+   * @param logicalAgg Logical Aggregation
+   * @param newInput The output of local aggregation
+   * @param splitters A list of AggSplitter
+   * @return A list of lists of AggregateCall
+   */
+  public static List<List<AggregateCall>> getGlobalAggCalls(
       RwLogicalAggregate logicalAgg, RelNode newInput, List<AggSplitter> splitters) {
     var start = logicalAgg.getGroupCount();
     var ret = new ArrayList<List<AggregateCall>>(splitters.size());
@@ -51,7 +69,13 @@ public class AggRules {
     return ret;
   }
 
-  static List<RexNode> getLastCalcs(
+  /**
+   * @param logicalAgg Logical Aggregation
+   * @param input The input
+   * @param splitters A list of AggSplitter
+   * @return A list of Expression Node
+   */
+  public static List<RexNode> getLastCalcs(
       RwLogicalAggregate logicalAgg, RelNode input, List<AggSplitter> splitters) {
     var start = logicalAgg.getGroupCount();
     var ret = new ArrayList<RexNode>(splitters.size());

@@ -21,6 +21,7 @@ import org.apache.calcite.rel.hint.RelHint;
 import org.apache.calcite.util.ImmutableBitSet;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+/** Stream Aggregation */
 public class RwStreamAgg extends RwAggregate implements RisingWaveStreamingRel {
   public RwStreamAgg(
       RelOptCluster cluster,
@@ -77,6 +78,7 @@ public class RwStreamAgg extends RwAggregate implements RisingWaveStreamingRel {
         getCluster(), traitSet, getHints(), input, groupSet, groupSets, aggCalls);
   }
 
+  /** Rule for converting logical aggregation to stream aggregation */
   public static class StreamAggregationConverterRule extends ConverterRule {
     public static final RwStreamAgg.StreamAggregationConverterRule INSTANCE =
         ConverterRule.Config.INSTANCE
@@ -84,7 +86,7 @@ public class RwStreamAgg extends RwAggregate implements RisingWaveStreamingRel {
             .withOutTrait(STREAMING)
             .withRuleFactory(RwStreamAgg.StreamAggregationConverterRule::new)
             .withOperandSupplier(t -> t.operand(RwLogicalAggregate.class).anyInputs())
-            .withDescription("Converting logical project to streaming project.")
+            .withDescription("Converting logical agg to streaming agg.")
             .as(ConverterRule.Config.class)
             .toRule(RwStreamAgg.StreamAggregationConverterRule.class);
 
@@ -97,8 +99,7 @@ public class RwStreamAgg extends RwAggregate implements RisingWaveStreamingRel {
       RwLogicalAggregate rwLogicalAggregate = (RwLogicalAggregate) rel;
       RelTraitSet requiredInputTraits =
           rwLogicalAggregate.getInput().getTraitSet().replace(STREAMING);
-      RelNode newInput =
-          RelOptRule.convert(rwLogicalAggregate.getInput(), requiredInputTraits.plus(LOGICAL));
+      RelNode newInput = RelOptRule.convert(rwLogicalAggregate.getInput(), requiredInputTraits);
 
       return new RwStreamAgg(
           rwLogicalAggregate.getCluster(),

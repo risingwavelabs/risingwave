@@ -1,12 +1,12 @@
 package com.risingwave.planner.rules.streaming;
 
-import com.risingwave.planner.rel.physical.streaming.RwStreamAgg;
 import com.risingwave.planner.rel.physical.streaming.RwStreamFilter;
 import com.risingwave.planner.rel.physical.streaming.RwStreamProject;
 import com.risingwave.planner.rel.physical.streaming.RwStreamTableSource;
 import org.apache.calcite.tools.RuleSet;
 import org.apache.calcite.tools.RuleSets;
 
+/** Rules for converting logical RelNode to stream RelNode */
 public class StreamingConvertRules {
   public StreamingConvertRules() {}
 
@@ -15,5 +15,6 @@ public class StreamingConvertRules {
           RwStreamFilter.StreamFilterConverterRule.INSTANCE,
           RwStreamProject.StreamProjectConverterRule.INSTANCE,
           RwStreamTableSource.StreamTableSourceConverterRule.INSTANCE,
-          RwStreamAgg.StreamAggregationConverterRule.INSTANCE);
+          StreamingAggRule.Config.DEFAULT.toRule(),
+          StreamingExpandConverterRule.Config.DEFAULT.toRule());
 }

@@ -9,7 +9,6 @@ import static com.risingwave.planner.rules.BatchRuleSets.LOGICAL_CONVERTER_RULES
 import static com.risingwave.planner.rules.BatchRuleSets.LOGICAL_OPTIMIZATION_RULES;
 import static com.risingwave.planner.rules.BatchRuleSets.LOGICAL_REWRITE_RULES;
 
-import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.planner.planner.Planner;
 import com.risingwave.planner.program.ChainedOptimizerProgram;
@@ -18,6 +17,7 @@ import com.risingwave.planner.program.JoinReorderProgram;
 import com.risingwave.planner.program.OptimizerProgram;
 import com.risingwave.planner.program.SubQueryRewriteProgram;
 import com.risingwave.planner.program.VolcanoOptimizerProgram;
+import com.risingwave.planner.rel.physical.streaming.RisingWaveStreamingRel;
 import com.risingwave.planner.rel.physical.streaming.RwStreamMaterializedView;
 import com.risingwave.planner.rel.physical.streaming.StreamingPlan;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
@@ -34,6 +34,7 @@ import org.apache.calcite.sql.ddl.SqlCreateMaterializedView;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/** The planner for streaming job */
 public class StreamPlanner implements Planner<StreamingPlan> {
   private static final Logger log = LoggerFactory.getLogger(StreamPlanner.class);
 
@@ -75,7 +76,7 @@ public class StreamPlanner implements Planner<StreamingPlan> {
     List<RexInputRef> inputRefList = new ArrayList();
     for (int i = 0; i < rowType.getFieldCount(); i++) {
       var field = rowType.getFieldList().get(i);
-      RexInputRef inputRef = new RexInputRef(i, (RisingWaveDataType) field.getType());
+      RexInputRef inputRef = new RexInputRef(i, field.getType());
       inputRefList.add(inputRef);
     }
     return new RwStreamMaterializedView(
@@ -110,8 +111,9 @@ public class StreamPlanner implements Planner<StreamingPlan> {
   }
 
   private static OptimizerProgram buildStreamingOptimizerProgram() {
-    return HepOptimizerProgram.builder()
+    return VolcanoOptimizerProgram.builder()
         .addRules(StreamingConvertRules.STREAMING_CONVERTER_RULES)
+        .addRequiredOutputTraits(RisingWaveStreamingRel.STREAMING)
         .build();
   }
 }

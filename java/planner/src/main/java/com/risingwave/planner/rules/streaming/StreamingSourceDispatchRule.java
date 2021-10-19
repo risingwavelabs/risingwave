@@ -2,7 +2,6 @@ package com.risingwave.planner.rules.streaming;
 
 import static com.risingwave.execution.context.ExecutionContext.contextOf;
 import static com.risingwave.planner.planner.PlannerUtils.isSingleMode;
-import static com.risingwave.planner.rel.physical.streaming.RisingWaveStreamingRel.STREAMING;
 
 import com.risingwave.planner.rel.common.dist.RwDistributionTrait;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
@@ -12,6 +11,7 @@ import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.plan.RelRule;
 
+/** Rule for adding RwStreamExchange immediately after RwStreamTableSource */
 public class StreamingSourceDispatchRule extends RelRule<StreamingSourceDispatchRule.Config> {
   // This rule add distribution trait to RwStreamTableSource nodes. The trait will be later expanded
   // as exchange nodes in StreamExpandExchangeRule.
@@ -37,16 +37,11 @@ public class StreamingSourceDispatchRule extends RelRule<StreamingSourceDispatch
     int[] distFields = {0};
     RwDistributionTrait distributionTrait = RwDistributions.hash(distFields);
 
-    // We still need to convert the outTrait of sources into distributionTrait to avoid infinite
-    // recursion.
-    var sourceRequiredTraits =
-        streamTableSource.getTraitSet().plus(STREAMING).plus(distributionTrait);
-    var convertedSource = RelOptRule.convert(streamTableSource, sourceRequiredTraits);
-
     var exchange = RwStreamExchange.create(streamTableSource, distributionTrait);
     call.transformTo(exchange);
   }
 
+  /** Default config */
   public interface Config extends RelRule.Config {
     StreamingSourceDispatchRule.Config DEFAULT =
         RelRule.Config.EMPTY

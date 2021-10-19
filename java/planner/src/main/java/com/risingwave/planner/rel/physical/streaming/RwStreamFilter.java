@@ -16,6 +16,7 @@ import org.apache.calcite.rel.core.Filter;
 import org.apache.calcite.rex.RexNode;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+/** Stream Filter */
 public class RwStreamFilter extends Filter implements RisingWaveStreamingRel {
   public RwStreamFilter(
       RelOptCluster cluster, RelTraitSet traits, RelNode child, RexNode condition) {
@@ -40,6 +41,7 @@ public class RwStreamFilter extends Filter implements RisingWaveStreamingRel {
     return new RwStreamFilter(getCluster(), traitSet, input, condition);
   }
 
+  /** Rule for converting logical filter to stream filter */
   public static class StreamFilterConverterRule extends ConverterRule {
     public static final StreamFilterConverterRule INSTANCE =
         Config.INSTANCE
@@ -59,8 +61,7 @@ public class RwStreamFilter extends Filter implements RisingWaveStreamingRel {
     public @Nullable RelNode convert(RelNode rel) {
       var rwLogicalFilter = (RwLogicalFilter) rel;
       var requiredInputTrait = rwLogicalFilter.getInput().getTraitSet().replace(STREAMING);
-      var newInput =
-          RelOptRule.convert(rwLogicalFilter.getInput(), requiredInputTrait.plus(LOGICAL));
+      var newInput = RelOptRule.convert(rwLogicalFilter.getInput(), requiredInputTrait);
       return new RwStreamFilter(
           rel.getCluster(),
           rwLogicalFilter.getTraitSet().plus(STREAMING),

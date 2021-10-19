@@ -19,6 +19,7 @@ import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rex.RexNode;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+/** Stream Project */
 public class RwStreamProject extends Project implements RisingWaveStreamingRel {
   public RwStreamProject(
       RelOptCluster cluster,
@@ -51,6 +52,7 @@ public class RwStreamProject extends Project implements RisingWaveStreamingRel {
     return new RwStreamProject(getCluster(), traitSet, getHints(), input, projects, rowType);
   }
 
+  /** Rule for converting logical project to stream project */
   public static class StreamProjectConverterRule extends ConverterRule {
     public static final RwStreamProject.StreamProjectConverterRule INSTANCE =
         ConverterRule.Config.INSTANCE
@@ -71,8 +73,7 @@ public class RwStreamProject extends Project implements RisingWaveStreamingRel {
       RwLogicalProject rwLogicalProject = (RwLogicalProject) rel;
       RelTraitSet requiredInputTraits =
           rwLogicalProject.getInput().getTraitSet().replace(STREAMING);
-      RelNode newInput =
-          RelOptRule.convert(rwLogicalProject.getInput(), requiredInputTraits.plus(LOGICAL));
+      RelNode newInput = RelOptRule.convert(rwLogicalProject.getInput(), requiredInputTraits);
       return new RwStreamProject(
           rel.getCluster(),
           rwLogicalProject.getTraitSet().plus(STREAMING),
