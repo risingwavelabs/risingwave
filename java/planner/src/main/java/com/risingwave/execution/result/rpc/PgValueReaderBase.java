@@ -4,6 +4,7 @@ import com.risingwave.execution.result.rpc.primitive.BooleanBufferReader;
 import com.risingwave.pgwire.types.PgValue;
 import javax.annotation.Nullable;
 
+/** Read value from data chunk */
 public abstract class PgValueReaderBase implements PgValueReader {
   private final BooleanBufferReader nullBitmapReader;
 
@@ -13,9 +14,8 @@ public abstract class PgValueReaderBase implements PgValueReader {
 
   @Override
   public PgValue next() {
-    PgValue value = nextValue();
     boolean isNull = (nullBitmapReader != null) && !nullBitmapReader.next();
-    return isNull ? null : value;
+    return isNull ? null : nextValue();
   }
 
   protected abstract PgValue nextValue();

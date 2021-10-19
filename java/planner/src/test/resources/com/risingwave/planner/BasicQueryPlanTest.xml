@@ -274,4 +274,16 @@ RwBatchNestLoopJoin(condition=[>($0, $3)], joinType=[inner])
         <Resource name="json" path="batch/basic/nested_loop_join">
         </Resource>
     </TestCase>
+    <TestCase name="nested loop join">
+        <Resource name="sql">
+            <![CDATA[
+            insert into t4 values(NULL);
+]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchInsertValues(table=[t4], values=[((null:INTEGER))])
+]]>
+        </Resource>
+    </TestCase>
 </Root>

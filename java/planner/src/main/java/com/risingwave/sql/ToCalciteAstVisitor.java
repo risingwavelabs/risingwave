@@ -52,6 +52,7 @@ import com.risingwave.sql.tree.NaturalJoin;
 import com.risingwave.sql.tree.Node;
 import com.risingwave.sql.tree.NotExpression;
 import com.risingwave.sql.tree.NotNullColumnConstraint;
+import com.risingwave.sql.tree.NullLiteral;
 import com.risingwave.sql.tree.QualifiedName;
 import com.risingwave.sql.tree.QualifiedNameReference;
 import com.risingwave.sql.tree.Query;
@@ -103,6 +104,7 @@ import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.util.Pair;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+/** A visitor for transforming sqlNode to calcite node */
 public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
   private final RisingWaveOperatorTable operatorTable = new RisingWaveOperatorTable();
 
@@ -427,6 +429,11 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
         values.rows().stream().map(row -> row.accept(this, context)).toArray(SqlNode[]::new);
 
     return new SqlBasicCall(SqlStdOperatorTable.VALUES, operands, SqlParserPos.ZERO);
+  }
+
+  @Override
+  public SqlNode visitNullLiteral(NullLiteral node, Void context) {
+    return SqlLiteral.createNull(SqlParserPos.ZERO);
   }
 
   @Override

@@ -67,6 +67,9 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
   }
 
   private static byte[] getBytesRepresentation(RexLiteral val, DataType dataType) {
+    if (val.isNull()) {
+      return ByteBuffer.allocate(0).array();
+    }
     requireNonNull(val.getValue(), "val.value");
     ByteBuffer bb;
     switch (dataType.getTypeName()) {

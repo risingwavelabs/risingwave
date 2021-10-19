@@ -105,6 +105,10 @@ impl LiteralExpression {
             literal,
         }
     }
+
+    fn literal(&self) -> Datum {
+        self.literal.clone()
+    }
 }
 
 impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
@@ -117,8 +121,15 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
         let proto_value =
             ConstantValue::parse_from_bytes(proto.get_body().get_value()).map_err(ProtobufError)?;
 
+        // when the body length is zero, the value is None
+        if proto_value.get_body().is_empty() {
+            return Ok(Self {
+                return_type: data_type,
+                literal: None,
+            });
+        }
+
         // TODO: We need to unify these
-        // TODO: Add insert NULL
         let value = match proto.get_return_type().get_type_name() {
             DataType_TypeName::INT16 => ScalarImpl::Int16(i16::from_be_bytes(
                 proto_value.get_body().try_into().map_err(|e| {
@@ -175,8 +186,73 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
 
         Ok(Self {
             return_type: data_type,
-            // FIXME: add NULL value
             literal: Some(value),
         })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::array::column::Column;
+    use crate::array::PrimitiveArray;
+    use crate::types::Int32Type;
+    use pb_construct::make_proto;
+    use protobuf::well_known_types::Any as AnyProto;
+    use risingwave_proto::data::DataType as DataTypeProto;
+    use risingwave_proto::expr::ConstantValue;
+    use risingwave_proto::expr::{ExprNode, ExprNode_Type};
+
+    #[test]
+    fn test() {
+        let v = 1i32;
+        let t = DataType_TypeName::INT32;
+        let bytes = v.to_be_bytes().to_vec();
+        let expr = LiteralExpression::try_from(&make_expression(bytes, t)).unwrap();
+        assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
+
+        let v = 1i64;
+        let t = DataType_TypeName::INT64;
+        let bytes = v.to_be_bytes().to_vec();
+        let expr = LiteralExpression::try_from(&make_expression(bytes, t)).unwrap();
+        assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
+
+        let v = 1f32;
+        let t = DataType_TypeName::FLOAT;
+        let bytes = v.to_be_bytes().to_vec();
+        let expr = LiteralExpression::try_from(&make_expression(bytes, t)).unwrap();
+        assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
+
+        let v = 1f64;
+        let t = DataType_TypeName::DOUBLE;
+        let bytes = v.to_be_bytes().to_vec();
+        let expr = LiteralExpression::try_from(&make_expression(bytes, t)).unwrap();
+        assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
+
+        let v = None;
+        let t = DataType_TypeName::FLOAT;
+        let bytes = Vec::new();
+        let expr = LiteralExpression::try_from(&make_expression(bytes, t)).unwrap();
+        assert_eq!(v, expr.literal());
+    }
+
+    fn make_expression(bytes: Vec<u8>, data_type: DataType_TypeName) -> ExprNode {
+        make_proto!(ExprNode, {
+          expr_type: ExprNode_Type::CONSTANT_VALUE,
+          body: AnyProto::pack(
+            &make_proto!(ConstantValue, { body: bytes })
+          ).unwrap(),
+          return_type: make_proto!(DataTypeProto, {
+            type_name: data_type
+          })
+        })
+    }
+
+    fn create_column(vec: &[Option<i32>]) -> Result<Column> {
+        let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
+        let data_type = Int32Type::create(false);
+        Ok(Column::new(array, data_type))
     }
 }

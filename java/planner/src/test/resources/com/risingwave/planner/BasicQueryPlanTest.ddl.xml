@@ -17,4 +17,10 @@ create table t3(v1 int not null)
         ]]>
     </Resource>
 
+    <Resource>
+        <![CDATA[
+create table t4(v1 int)
+        ]]>
+    </Resource>
+
 </Root>
