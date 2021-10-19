@@ -1,4 +1,5 @@
 package com.risingwave.gradle.plugin.git
+
 import java.io.ByteArrayOutputStream
 import java.util.regex.Pattern
 import org.gradle.api.Plugin
@@ -40,8 +41,16 @@ fun Project.getChangedFiles(): List<String> {
   println("ghprbTargetBranch: $ghprbTargetBranch, ghprbSourceBranch: $ghprbSourceBranch")
 
   // Compare to master if no branch specified
-  val targetBranch = ghprbTargetBranch?.let { "origin/$it" } ?: "origin/master"
-  val sourceBranch = ghprbSourceBranch?.let { "origin/$it" } ?: this.getCurrentBranch()
+  val targetBranch = if (ghprbTargetBranch?.isBlank() != false) {
+    "origin/master"
+  } else {
+    "origin/$ghprbTargetBranch"
+  }
+  val sourceBranch = if (ghprbSourceBranch?.isBlank() != false) {
+    this.getCurrentBranch()
+  } else {
+    "origin/$ghprbSourceBranch"
+  }
 
   println("targetBranch: $targetBranch, sourceBranch: $sourceBranch")
 
