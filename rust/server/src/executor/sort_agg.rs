@@ -2,7 +2,7 @@ use crate::array::{column::Column, DataChunk};
 use crate::error::ErrorCode::ProtobufError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::executor::{BoxedExecutor, Executor, ExecutorBuilder, ExecutorResult};
-use crate::expr::{build_from_proto, AggExpression, BoxedExpression};
+use crate::expr::{build_from_proto, BoxedExpression};
 use crate::types::DataType;
 use crate::vector_op::agg::{self, BoxedAggState, BoxedSortedGrouper, EqGroups};
 use protobuf::Message as _;
@@ -17,7 +17,6 @@ use std::sync::Arc;
 /// As a special case, simple aggregate without groups satisfies the requirement
 /// automatically because all tuples should be aggregated together.
 pub(super) struct SortAggExecutor {
-    agg_exprs: Vec<AggExpression>,
     agg_states: Vec<BoxedAggState>,
     group_exprs: Vec<BoxedExpression>,
     sorted_groupers: Vec<BoxedSortedGrouper>,
@@ -43,15 +42,10 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for SortAggExecutor {
             SortAggNode::parse_from_bytes(source.plan_node().get_body().get_value())
                 .map_err(|e| RwError::from(ProtobufError(e)))?;
 
-        let agg_exprs = sort_agg_node
+        let agg_states = sort_agg_node
             .get_agg_calls()
             .iter()
-            .map(AggExpression::try_from)
-            .collect::<Result<Vec<AggExpression>>>()?;
-
-        let agg_states = agg_exprs
-            .iter()
-            .map(|expr| expr.create_agg_state())
+            .map(agg::create_agg_state)
             .collect::<Result<Vec<BoxedAggState>>>()?;
 
         let group_exprs = sort_agg_node
@@ -66,7 +60,6 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for SortAggExecutor {
             .collect::<Result<Vec<BoxedSortedGrouper>>>()?;
 
         Ok(Self {
-            agg_exprs,
             agg_states,
             group_exprs,
             sorted_groupers,
@@ -93,7 +86,7 @@ impl Executor for SortAggExecutor {
             .map(|e| DataType::create_array_builder(e.return_type_ref(), cardinality))
             .collect::<Result<Vec<_>>>()?;
         let mut array_builders = self
-            .agg_exprs
+            .agg_states
             .iter()
             .map(|e| DataType::create_array_builder(e.return_type_ref(), cardinality))
             .collect::<Result<Vec<_>>>()?;
@@ -123,14 +116,9 @@ impl Executor for SortAggExecutor {
 
             self.agg_states
                 .iter_mut()
-                .zip(&mut self.agg_exprs)
                 .zip(&mut array_builders)
-                .try_for_each(|((state, expr), builder)| {
-                    state.update_and_output_with_sorted_groups(
-                        expr.eval_child(&child_chunk)?.as_ref(),
-                        builder,
-                        &groups,
-                    )
+                .try_for_each(|(state, builder)| {
+                    state.update_and_output_with_sorted_groups(&child_chunk, builder, &groups)
                 })?;
         }
         self.child_done = true;
@@ -148,7 +136,7 @@ impl Executor for SortAggExecutor {
             .group_exprs
             .iter()
             .map(|e| e.return_type_ref())
-            .chain(self.agg_exprs.iter().map(|e| e.return_type_ref()))
+            .chain(self.agg_states.iter().map(|e| e.return_type_ref()))
             .zip(group_builders.into_iter().chain(array_builders))
             .map(|(t, b)| Ok(Column::new(Arc::new(b.finish()?), t)))
             .collect::<Result<Vec<_>>>()?;
@@ -201,11 +189,9 @@ mod tests {
           })].into()
         });
 
-        let e = AggExpression::try_from(&proto)?;
-        let s = e.create_agg_state()?;
+        let s = agg::create_agg_state(&proto)?;
 
         let mut executor = SortAggExecutor {
-            agg_exprs: vec![e],
             agg_states: vec![s],
             group_exprs: vec![],
             sorted_groupers: vec![],
@@ -274,8 +260,7 @@ mod tests {
           })].into()
         });
 
-        let e = AggExpression::try_from(&proto)?;
-        let s = e.create_agg_state()?;
+        let s = agg::create_agg_state(&proto)?;
 
         let group_exprs = (1..=2)
             .map(|idx| {
@@ -294,7 +279,6 @@ mod tests {
             .collect::<Result<Vec<BoxedSortedGrouper>>>()?;
 
         let mut executor = SortAggExecutor {
-            agg_exprs: vec![e],
             agg_states: vec![s],
             group_exprs,
             sorted_groupers,

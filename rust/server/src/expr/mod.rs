@@ -12,7 +12,7 @@ mod literal;
 mod ternary_expr_bytes;
 pub mod unary_expr;
 
-pub use agg::{AggExpression, AggKind};
+pub use agg::AggKind;
 pub use input_ref::InputRefExpression;
 pub use literal::*;
 

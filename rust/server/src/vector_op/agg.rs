@@ -2,14 +2,17 @@ use crate::array::*;
 use crate::error::{ErrorCode, Result};
 use crate::expr::AggKind;
 use crate::types::*;
+use risingwave_proto::expr::AggCall;
 use std::marker::PhantomData;
 
 /// An `Aggregator` supports `update` data and `output` result.
 pub trait Aggregator: Send + 'static {
+    fn return_type_ref(&self) -> DataTypeRef;
+
     /// `update` the aggregator with `Array` with input with type checked at runtime.
     ///
     /// This may be deprecated as it consumes whole array without sort or hash group info.
-    fn update(&mut self, input: &ArrayImpl) -> Result<()>;
+    fn update(&mut self, input: &DataChunk) -> Result<()>;
 
     /// `output` the aggregator to `ArrayBuilder` with input with type checked at runtime.
     fn output(&self, builder: &mut ArrayBuilderImpl) -> Result<()>;
@@ -24,7 +27,7 @@ pub trait Aggregator: Send + 'static {
     /// there are no more upstream data.
     fn update_and_output_with_sorted_groups(
         &mut self,
-        input: &ArrayImpl,
+        input: &DataChunk,
         builder: &mut ArrayBuilderImpl,
         groups: &EqGroups,
     ) -> Result<()>;
@@ -32,8 +35,22 @@ pub trait Aggregator: Send + 'static {
 
 pub type BoxedAggState = Box<dyn Aggregator>;
 
-pub fn create_agg_state(
+pub fn create_agg_state(proto: &AggCall) -> Result<Box<dyn Aggregator>> {
+    ensure!(
+        proto.get_args().len() == 1,
+        "Agg expression can only have exactly one child"
+    );
+    let arg = &proto.get_args()[0];
+    let return_type = build_from_proto(proto.get_return_type())?;
+    let agg_kind = AggKind::try_from(proto.get_field_type())?;
+    let input_type = build_from_proto(arg.get_field_type())?;
+    let input_col_idx = arg.get_input().get_column_idx() as usize;
+    create_agg_state_unary(input_type, input_col_idx, &agg_kind, return_type)
+}
+
+fn create_agg_state_unary(
     input_type: DataTypeRef,
+    input_col_idx: usize,
     agg_type: &AggKind,
     return_type: DataTypeRef,
 ) -> Result<Box<dyn Aggregator>> {
@@ -44,74 +61,159 @@ pub fn create_agg_state(
     ) {
         // TODO(xiangjin): Ideally count non-null on Array without checking its type.
         (DataTypeKind::Int16, AggKind::Count, DataTypeKind::Int64) => {
-            Box::new(GeneralAgg::<I16Array, _, _>::new(count))
+            Box::new(GeneralAgg::<I16Array, _, _>::new(
+                return_type,
+                input_col_idx,
+                count,
+            ))
         }
         (DataTypeKind::Int32, AggKind::Count, DataTypeKind::Int64) => {
-            Box::new(GeneralAgg::<I32Array, _, _>::new(count))
+            Box::new(GeneralAgg::<I32Array, _, _>::new(
+                return_type,
+                input_col_idx,
+                count,
+            ))
         }
         (DataTypeKind::Int64, AggKind::Count, DataTypeKind::Int64) => {
-            Box::new(GeneralAgg::<I64Array, _, _>::new(count))
+            Box::new(GeneralAgg::<I64Array, _, _>::new(
+                return_type,
+                input_col_idx,
+                count,
+            ))
         }
         (DataTypeKind::Float32, AggKind::Count, DataTypeKind::Int64) => {
-            Box::new(GeneralAgg::<F32Array, _, _>::new(count))
+            Box::new(GeneralAgg::<F32Array, _, _>::new(
+                return_type,
+                input_col_idx,
+                count,
+            ))
         }
         (DataTypeKind::Float64, AggKind::Count, DataTypeKind::Int64) => {
-            Box::new(GeneralAgg::<F64Array, _, _>::new(count))
+            Box::new(GeneralAgg::<F64Array, _, _>::new(
+                return_type,
+                input_col_idx,
+                count,
+            ))
         }
         (DataTypeKind::Decimal, AggKind::Count, DataTypeKind::Int64) => {
-            Box::new(GeneralAgg::<DecimalArray, _, _>::new(count))
+            Box::new(GeneralAgg::<DecimalArray, _, _>::new(
+                return_type,
+                input_col_idx,
+                count,
+            ))
         }
         (DataTypeKind::Char, AggKind::Count, DataTypeKind::Int64) => {
-            Box::new(GeneralAgg::<UTF8Array, _, _>::new(count_str))
+            Box::new(GeneralAgg::<UTF8Array, _, _>::new(
+                return_type,
+                input_col_idx,
+                count_str,
+            ))
         }
         (DataTypeKind::Boolean, AggKind::Count, DataTypeKind::Int64) => {
-            Box::new(GeneralAgg::<BoolArray, _, _>::new(count))
+            Box::new(GeneralAgg::<BoolArray, _, _>::new(
+                return_type,
+                input_col_idx,
+                count,
+            ))
         }
         (DataTypeKind::Int16, AggKind::Sum, DataTypeKind::Int64) => {
-            Box::new(GeneralAgg::<I16Array, _, I64Array>::new(sum))
+            Box::new(GeneralAgg::<I16Array, _, I64Array>::new(
+                return_type,
+                input_col_idx,
+                sum,
+            ))
         }
         (DataTypeKind::Int32, AggKind::Sum, DataTypeKind::Int64) => {
-            Box::new(GeneralAgg::<I32Array, _, I64Array>::new(sum))
+            Box::new(GeneralAgg::<I32Array, _, I64Array>::new(
+                return_type,
+                input_col_idx,
+                sum,
+            ))
         }
         (DataTypeKind::Int64, AggKind::Sum, DataTypeKind::Decimal) => {
-            Box::new(GeneralAgg::<I64Array, _, DecimalArray>::new(sum))
+            Box::new(GeneralAgg::<I64Array, _, DecimalArray>::new(
+                return_type,
+                input_col_idx,
+                sum,
+            ))
         }
         (DataTypeKind::Float32, AggKind::Sum, DataTypeKind::Float32) => {
-            Box::new(GeneralAgg::<F32Array, _, F32Array>::new(sum))
+            Box::new(GeneralAgg::<F32Array, _, F32Array>::new(
+                return_type,
+                input_col_idx,
+                sum,
+            ))
         }
         (DataTypeKind::Float64, AggKind::Sum, DataTypeKind::Float64) => {
-            Box::new(GeneralAgg::<F64Array, _, F64Array>::new(sum))
+            Box::new(GeneralAgg::<F64Array, _, F64Array>::new(
+                return_type,
+                input_col_idx,
+                sum,
+            ))
         }
         (DataTypeKind::Decimal, AggKind::Sum, DataTypeKind::Decimal) => {
-            Box::new(GeneralAgg::<DecimalArray, _, DecimalArray>::new(sum))
+            Box::new(GeneralAgg::<DecimalArray, _, DecimalArray>::new(
+                return_type,
+                input_col_idx,
+                sum,
+            ))
         }
         (DataTypeKind::Int16, AggKind::Min, DataTypeKind::Int16) => {
-            Box::new(GeneralAgg::<I16Array, _, I16Array>::new(min))
+            Box::new(GeneralAgg::<I16Array, _, I16Array>::new(
+                return_type,
+                input_col_idx,
+                min,
+            ))
         }
         (DataTypeKind::Int32, AggKind::Min, DataTypeKind::Int32) => {
-            Box::new(GeneralAgg::<I32Array, _, I32Array>::new(min))
+            Box::new(GeneralAgg::<I32Array, _, I32Array>::new(
+                return_type,
+                input_col_idx,
+                min,
+            ))
         }
         (DataTypeKind::Int64, AggKind::Min, DataTypeKind::Int64) => {
-            Box::new(GeneralAgg::<I64Array, _, I64Array>::new(min))
+            Box::new(GeneralAgg::<I64Array, _, I64Array>::new(
+                return_type,
+                input_col_idx,
+                min,
+            ))
         }
         (DataTypeKind::Float32, AggKind::Min, DataTypeKind::Float32) => {
-            Box::new(GeneralAgg::<F32Array, _, F32Array>::new(min))
+            Box::new(GeneralAgg::<F32Array, _, F32Array>::new(
+                return_type,
+                input_col_idx,
+                min,
+            ))
         }
         (DataTypeKind::Float64, AggKind::Min, DataTypeKind::Float64) => {
-            Box::new(GeneralAgg::<F64Array, _, F64Array>::new(min))
+            Box::new(GeneralAgg::<F64Array, _, F64Array>::new(
+                return_type,
+                input_col_idx,
+                min,
+            ))
         }
         (DataTypeKind::Decimal, AggKind::Min, DataTypeKind::Decimal) => {
-            Box::new(GeneralAgg::<DecimalArray, _, DecimalArray>::new(min))
+            Box::new(GeneralAgg::<DecimalArray, _, DecimalArray>::new(
+                return_type,
+                input_col_idx,
+                min,
+            ))
         }
         (DataTypeKind::Char, AggKind::Min, DataTypeKind::Char) => {
-            Box::new(GeneralAgg::<UTF8Array, _, UTF8Array>::new(min_str))
+            Box::new(GeneralAgg::<UTF8Array, _, UTF8Array>::new(
+                return_type,
+                input_col_idx,
+                min_str,
+            ))
         }
-        (unimpl_input, unimpl_agg, unimpl_ret) => todo!(
-            "unsupported aggregator: type={:?} input={:?} output={:?}",
-            unimpl_agg,
-            unimpl_input,
-            unimpl_ret
-        ),
+        (unimpl_input, unimpl_agg, unimpl_ret) => {
+            return Err(ErrorCode::InternalError(format!(
+                "unsupported aggregator: type={:?} input={:?} output={:?}",
+                unimpl_agg, unimpl_input, unimpl_ret
+            ))
+            .into())
+        }
     };
     Ok(state)
 }
@@ -122,6 +224,8 @@ where
     F: Send + for<'a> RTFn<'a, T, R>,
     R: Array,
 {
+    return_type: DataTypeRef,
+    input_col_idx: usize,
     result: Option<R::OwnedItem>,
     f: F,
     _phantom: PhantomData<T>,
@@ -132,8 +236,10 @@ where
     F: Send + for<'a> RTFn<'a, T, R>,
     R: Array,
 {
-    fn new(f: F) -> Self {
+    fn new(return_type: DataTypeRef, input_col_idx: usize, f: F) -> Self {
         Self {
+            return_type,
+            input_col_idx,
             result: None,
             f,
             _phantom: PhantomData,
@@ -196,8 +302,13 @@ macro_rules! impl_aggregator {
         where
             F: 'static + Send + for<'a> RTFn<'a, $input, $result>,
         {
-            fn update(&mut self, input: &ArrayImpl) -> Result<()> {
-                if let ArrayImpl::$input_variant(i) = input {
+            fn return_type_ref(&self) -> DataTypeRef {
+                self.return_type.clone()
+            }
+            fn update(&mut self, input: &DataChunk) -> Result<()> {
+                if let ArrayImpl::$input_variant(i) =
+                    input.column_at(self.input_col_idx)?.array_ref()
+                {
                     self.update_concrete(i)
                 } else {
                     Err(ErrorCode::InternalError(format!(
@@ -220,12 +331,12 @@ macro_rules! impl_aggregator {
             }
             fn update_and_output_with_sorted_groups(
                 &mut self,
-                input: &ArrayImpl,
+                input: &DataChunk,
                 builder: &mut ArrayBuilderImpl,
                 groups: &EqGroups,
             ) -> Result<()> {
                 if let (ArrayImpl::$input_variant(i), ArrayBuilderImpl::$result_variant(b)) =
-                    (input, builder)
+                    (input.column_at(self.input_col_idx)?.array_ref(), builder)
                 {
                     self.update_and_output_with_sorted_groups_concrete(i, b, groups)
                 } else {
@@ -506,17 +617,20 @@ impl_sorted_grouper! { I64Array, Int64 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::array::column::Column;
     use rust_decimal::Decimal;
+    use std::sync::Arc;
 
     fn eval_agg(
         input_type: DataTypeRef,
-        input: &ArrayImpl,
+        input: ArrayRef,
         agg_type: &AggKind,
         return_type: DataTypeRef,
         mut builder: ArrayBuilderImpl,
     ) -> Result<ArrayImpl> {
-        let mut agg_state = create_agg_state(input_type, agg_type, return_type.clone())?;
-        agg_state.update(input)?;
+        let input_chunk = DataChunk::new(vec![Column::new(input, input_type.clone())], None);
+        let mut agg_state = create_agg_state_unary(input_type, 0, agg_type, return_type.clone())?;
+        agg_state.update(&input_chunk)?;
         agg_state.output(&mut builder)?;
         builder.finish()
     }
@@ -525,15 +639,35 @@ mod tests {
     fn test_create_agg_state() {
         let int64_type = Int64Type::create(true);
         let decimal_type = DecimalType::create(true, 10, 0).unwrap();
-        assert!(
-            create_agg_state(decimal_type.clone(), &AggKind::Count, int64_type.clone()).is_ok()
-        );
-        assert!(
-            create_agg_state(decimal_type.clone(), &AggKind::Sum, decimal_type.clone()).is_ok()
-        );
-        assert!(
-            create_agg_state(decimal_type.clone(), &AggKind::Min, decimal_type.clone()).is_ok()
-        );
+        let bool_type = BoolType::create(true);
+        let char_type = StringType::create(true, 5, DataTypeKind::Char);
+
+        macro_rules! test_create {
+            ($input_type:expr, $agg:ident, $return_type:expr, $expected:ident) => {
+                assert!(create_agg_state_unary(
+                    $input_type.clone(),
+                    0,
+                    &AggKind::$agg,
+                    $return_type.clone()
+                )
+                .$expected());
+            };
+        }
+
+        test_create! { int64_type, Count, int64_type, is_ok }
+        test_create! { decimal_type, Count, int64_type, is_ok }
+        test_create! { bool_type, Count, int64_type, is_ok }
+        test_create! { char_type, Count, int64_type, is_ok }
+
+        test_create! { int64_type, Sum, decimal_type, is_ok }
+        test_create! { decimal_type, Sum, decimal_type, is_ok }
+        test_create! { bool_type, Sum, bool_type, is_err }
+        test_create! { char_type, Sum, char_type, is_err }
+
+        test_create! { int64_type, Min, int64_type, is_ok }
+        test_create! { decimal_type, Min, decimal_type, is_ok }
+        test_create! { bool_type, Min, bool_type, is_err }
+        test_create! { char_type, Min, char_type, is_ok }
     }
 
     #[test]
@@ -544,7 +678,7 @@ mod tests {
         let return_type = Int64Type::create(true);
         let actual = eval_agg(
             input_type,
-            &input.into(),
+            Arc::new(input.into()),
             &agg_type,
             return_type,
             ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)?),
@@ -563,7 +697,7 @@ mod tests {
         let return_type = DecimalType::create(true, 10, 0)?;
         let actual = eval_agg(
             input_type,
-            &input.into(),
+            Arc::new(input.into()),
             &agg_type,
             return_type,
             DecimalArrayBuilder::new(0)?.into(),
@@ -582,7 +716,7 @@ mod tests {
         let return_type = Float32Type::create(true);
         let actual = eval_agg(
             input_type,
-            &input.into(),
+            Arc::new(input.into()),
             &agg_type,
             return_type,
             ArrayBuilderImpl::Float32(F32ArrayBuilder::new(0)?),
@@ -601,7 +735,7 @@ mod tests {
         let return_type = StringType::create(true, 5, DataTypeKind::Char);
         let actual = eval_agg(
             input_type,
-            &input.into(),
+            Arc::new(input.into()),
             &agg_type,
             return_type,
             ArrayBuilderImpl::UTF8(UTF8ArrayBuilder::new(0)?),
@@ -620,7 +754,7 @@ mod tests {
         let return_type = Int64Type::create(true);
         let actual = eval_agg(
             input_type,
-            &input.into(),
+            Arc::new(input.into()),
             &agg_type,
             return_type,
             ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)?),
@@ -676,7 +810,7 @@ mod tests {
             group_value: None,
         };
         let mut g1_builder = I32ArrayBuilder::new(0)?;
-        let mut a = GeneralAgg::<I32Array, _, I64Array>::new(sum);
+        let mut a = GeneralAgg::<I32Array, _, I64Array>::new(Int64Type::create(true), 0, sum);
         let mut a_builder = I64ArrayBuilder::new(0)?;
 
         let g0_input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]).unwrap();
