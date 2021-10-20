@@ -1,4 +1,6 @@
-use crate::array::column_proto_readers::{read_numeric_column, read_string_column};
+use crate::array::column_proto_readers::{
+    read_bool_column, read_numeric_column, read_string_column,
+};
 use crate::array::value_reader::{
     DecimalValueReader, F32ValueReader, F64ValueReader, I16ValueReader, I32ValueReader,
     I64ValueReader, Utf8ValueReader,
@@ -56,6 +58,7 @@ impl Column {
             DataType_TypeName::DOUBLE => {
                 read_numeric_column::<f64, F64ValueReader>(&col, cardinality)?
             }
+            DataType_TypeName::BOOLEAN => read_bool_column(&col, cardinality)?,
             DataType_TypeName::VARCHAR | DataType_TypeName::CHAR => {
                 read_string_column::<UTF8ArrayBuilder, Utf8ValueReader>(&col, cardinality)?
             }
@@ -93,9 +96,11 @@ impl Column {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array::{Array, ArrayBuilder, I32Array, I32ArrayBuilder, UTF8Array};
+    use crate::array::{
+        Array, ArrayBuilder, BoolArray, BoolArrayBuilder, I32Array, I32ArrayBuilder, UTF8Array,
+    };
     use crate::error::{ErrorCode, Result};
-    use crate::types::{DataTypeKind, Int32Type, StringType};
+    use crate::types::{BoolType, DataTypeKind, Int32Type, StringType};
     use protobuf::Message;
     use risingwave_proto::data::Column as ColumnProto;
     use std::sync::Arc;
@@ -134,6 +139,41 @@ mod tests {
             } else {
                 assert!(x.is_none());
             }
+        });
+        Ok(())
+    }
+
+    #[test]
+    fn test_bool_column_protobuf_conversion() -> Result<()> {
+        let cardinality = 2048;
+        let mut builder = BoolArrayBuilder::new(cardinality).unwrap();
+        for i in 0..cardinality {
+            match i % 3 {
+                0 => builder.append(Some(false)).unwrap(),
+                1 => builder.append(Some(true)).unwrap(),
+                _ => builder.append(None).unwrap(),
+            }
+        }
+        let col = Column::new(
+            Arc::new(ArrayImpl::from(builder.finish().unwrap())),
+            BoolType::create(true),
+        );
+        let col_proto = unpack_from_any!(col.to_protobuf().unwrap(), ColumnProto);
+        assert!(col_proto.get_column_type().get_is_nullable());
+        assert_eq!(
+            col_proto.get_column_type().get_type_name(),
+            DataType_TypeName::BOOLEAN
+        );
+
+        let new_col = Column::from_protobuf(col_proto, cardinality).unwrap();
+        assert_eq!(new_col.array.len(), cardinality);
+        assert_eq!(new_col.data_type.data_type_kind(), DataTypeKind::Boolean);
+        assert!(new_col.data_type.is_nullable());
+        let arr: &BoolArray = new_col.array_ref().into();
+        arr.iter().enumerate().for_each(|(i, x)| match i % 3 {
+            0 => assert_eq!(Some(false), x),
+            1 => assert_eq!(Some(true), x),
+            _ => assert_eq!(None, x),
         });
         Ok(())
     }

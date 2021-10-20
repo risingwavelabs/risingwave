@@ -1,5 +1,7 @@
 use crate::array::value_reader::{PrimitiveValueReader, VarSizedValueReader};
-use crate::array::{ArrayBuilder, ArrayRef, PrimitiveArrayBuilder, PrimitiveArrayItemType};
+use crate::array::{
+    ArrayBuilder, ArrayRef, BoolArrayBuilder, PrimitiveArrayBuilder, PrimitiveArrayItemType,
+};
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
@@ -34,6 +36,31 @@ pub fn read_numeric_column<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>
         if not_null {
             let v = R::read(&mut cursor)?;
             builder.append(Some(v))?;
+        } else {
+            builder.append(None)?;
+        }
+    }
+    let arr = builder.finish()?;
+    Ok(Arc::new(arr.into()))
+}
+
+pub fn read_bool_column(col: &ColumnProto, cardinality: usize) -> Result<ArrayRef> {
+    ensure!(
+        col.get_values().len() == 1,
+        "Must have only 1 buffer in a bool column"
+    );
+
+    let buf = col.get_values()[0].get_body();
+
+    let mut builder = BoolArrayBuilder::new(cardinality)?;
+    let bitmap = Bitmap::from_protobuf(col.get_null_bitmap())?;
+    let mut cursor = Cursor::new(buf);
+    for not_null in bitmap.iter() {
+        if not_null {
+            let v = cursor
+                .read_u8()
+                .map_err(|e| InternalError(format!("Failed to read u8 from bool buffer: {}", e)))?;
+            builder.append(Some(v != 0))?;
         } else {
             builder.append(None)?;
         }
