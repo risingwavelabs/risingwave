@@ -1,9 +1,6 @@
 package com.risingwave.planner.rel.physical.streaming;
 
-import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
-
 import com.google.protobuf.Any;
-import com.risingwave.planner.rel.logical.RwLogicalAggregate;
 import com.risingwave.planner.rel.physical.RwAggregate;
 import com.risingwave.proto.expr.InputRefExpr;
 import com.risingwave.proto.streaming.plan.HashAggNode;
@@ -11,10 +8,8 @@ import com.risingwave.proto.streaming.plan.SimpleAggNode;
 import com.risingwave.proto.streaming.plan.StreamNode;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
-import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelNode;
-import org.apache.calcite.rel.convert.ConverterRule;
 import org.apache.calcite.rel.core.Aggregate;
 import org.apache.calcite.rel.core.AggregateCall;
 import org.apache.calcite.rel.hint.RelHint;
@@ -76,39 +71,5 @@ public class RwStreamAgg extends RwAggregate implements RisingWaveStreamingRel {
       List<AggregateCall> aggCalls) {
     return new RwStreamAgg(
         getCluster(), traitSet, getHints(), input, groupSet, groupSets, aggCalls);
-  }
-
-  /** Rule for converting logical aggregation to stream aggregation */
-  public static class StreamAggregationConverterRule extends ConverterRule {
-    public static final RwStreamAgg.StreamAggregationConverterRule INSTANCE =
-        ConverterRule.Config.INSTANCE
-            .withInTrait(LOGICAL)
-            .withOutTrait(STREAMING)
-            .withRuleFactory(RwStreamAgg.StreamAggregationConverterRule::new)
-            .withOperandSupplier(t -> t.operand(RwLogicalAggregate.class).anyInputs())
-            .withDescription("Converting logical agg to streaming agg.")
-            .as(ConverterRule.Config.class)
-            .toRule(RwStreamAgg.StreamAggregationConverterRule.class);
-
-    protected StreamAggregationConverterRule(Config config) {
-      super(config);
-    }
-
-    @Override
-    public @Nullable RelNode convert(RelNode rel) {
-      RwLogicalAggregate rwLogicalAggregate = (RwLogicalAggregate) rel;
-      RelTraitSet requiredInputTraits =
-          rwLogicalAggregate.getInput().getTraitSet().replace(STREAMING);
-      RelNode newInput = RelOptRule.convert(rwLogicalAggregate.getInput(), requiredInputTraits);
-
-      return new RwStreamAgg(
-          rwLogicalAggregate.getCluster(),
-          rwLogicalAggregate.getTraitSet().plus(STREAMING),
-          rwLogicalAggregate.getHints(),
-          newInput,
-          rwLogicalAggregate.getGroupSet(),
-          rwLogicalAggregate.getGroupSets(),
-          rwLogicalAggregate.getAggCallList());
-    }
   }
 }
