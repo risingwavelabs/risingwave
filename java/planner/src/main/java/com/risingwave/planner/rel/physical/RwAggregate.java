@@ -23,6 +23,9 @@ public abstract class RwAggregate extends Aggregate {
   private static final ImmutableMap<SqlKind, AggCall.Type> SQL_TO_AGG_CALL =
       ImmutableMap.<SqlKind, AggCall.Type>builder()
           .put(SqlKind.SUM, AggCall.Type.SUM)
+          // `SUM0` is the global phase for `COUNT`. It is different from `SUM` for type inference
+          // rules but can be treated the same in backend.
+          .put(SqlKind.SUM0, AggCall.Type.SUM)
           .put(SqlKind.COUNT, AggCall.Type.COUNT)
           .put(SqlKind.MIN, AggCall.Type.MIN)
           .put(SqlKind.MAX, AggCall.Type.MAX)

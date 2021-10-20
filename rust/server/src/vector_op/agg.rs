@@ -36,16 +36,29 @@ pub trait Aggregator: Send + 'static {
 pub type BoxedAggState = Box<dyn Aggregator>;
 
 pub fn create_agg_state(proto: &AggCall) -> Result<Box<dyn Aggregator>> {
-    ensure!(
-        proto.get_args().len() == 1,
-        "Agg expression can only have exactly one child"
-    );
-    let arg = &proto.get_args()[0];
     let return_type = build_from_proto(proto.get_return_type())?;
     let agg_kind = AggKind::try_from(proto.get_field_type())?;
-    let input_type = build_from_proto(arg.get_field_type())?;
-    let input_col_idx = arg.get_input().get_column_idx() as usize;
-    create_agg_state_unary(input_type, input_col_idx, &agg_kind, return_type)
+    match proto.get_args() {
+        [arg] => {
+            let input_type = build_from_proto(arg.get_field_type())?;
+            let input_col_idx = arg.get_input().get_column_idx() as usize;
+            create_agg_state_unary(input_type, input_col_idx, &agg_kind, return_type)
+        }
+        [] => match (&agg_kind, return_type.data_type_kind()) {
+            (AggKind::Count, DataTypeKind::Int64) => Ok(Box::new(CountStar {
+                return_type,
+                result: 0,
+            })),
+            _ => Err(ErrorCode::InternalError(format!(
+                "Agg {:?} without args not supported",
+                agg_kind
+            ))
+            .into()),
+        },
+        _ => {
+            Err(ErrorCode::InternalError("Agg with more than 1 input not supported.".into()).into())
+        }
+    }
 }
 
 fn create_agg_state_unary(
@@ -207,6 +220,14 @@ fn create_agg_state_unary(
                 min_str,
             ))
         }
+        // Global Agg
+        (DataTypeKind::Int64, AggKind::Sum, DataTypeKind::Int64) => {
+            Box::new(GeneralAgg::<I64Array, _, I64Array>::new(
+                return_type,
+                input_col_idx,
+                sum,
+            ))
+        }
         (unimpl_input, unimpl_agg, unimpl_ret) => {
             return Err(ErrorCode::InternalError(format!(
                 "unsupported aggregator: type={:?} input={:?} output={:?}",
@@ -216,6 +237,58 @@ fn create_agg_state_unary(
         }
     };
     Ok(state)
+}
+
+struct CountStar {
+    return_type: DataTypeRef,
+    result: usize,
+}
+impl Aggregator for CountStar {
+    fn return_type_ref(&self) -> DataTypeRef {
+        self.return_type.clone()
+    }
+    fn update(&mut self, input: &DataChunk) -> Result<()> {
+        self.result += input.cardinality();
+        Ok(())
+    }
+    fn output(&self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+        match builder {
+            ArrayBuilderImpl::Int64(b) => b.append(Some(self.result as i64)),
+            _ => Err(ErrorCode::InternalError("Unexpected builder for count(*).".into()).into()),
+        }
+    }
+    fn update_and_output_with_sorted_groups(
+        &mut self,
+        input: &DataChunk,
+        builder: &mut ArrayBuilderImpl,
+        groups: &EqGroups,
+    ) -> Result<()> {
+        let builder = match builder {
+            ArrayBuilderImpl::Int64(b) => b,
+            _ => {
+                return Err(
+                    ErrorCode::InternalError("Unexpected builder for count(*).".into()).into(),
+                )
+            }
+        };
+        // The first element continues the same group in `self.result`. The following
+        // groups' sizes are simply distance between group start indices. The distance
+        // between last element and `input.cardinality()` is the ongoing group that
+        // may continue in following chunks.
+        let mut groups_iter = groups.0.iter();
+        if let Some(first) = groups_iter.next() {
+            builder.append(Some((self.result + first) as i64))?;
+            let mut prev = first;
+            for g in groups_iter {
+                builder.append(Some((g - prev) as i64))?;
+                prev = g;
+            }
+            self.result = input.cardinality() - prev;
+        } else {
+            self.result += input.cardinality();
+        }
+        Ok(())
+    }
 }
 
 struct GeneralAgg<T, F, R>
@@ -618,6 +691,9 @@ impl_sorted_grouper! { I64Array, Int64 }
 mod tests {
     use super::*;
     use crate::array::column::Column;
+    use pb_construct::make_proto;
+    use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};
+    use risingwave_proto::expr::{AggCall, AggCall_Type};
     use rust_decimal::Decimal;
     use std::sync::Arc;
 
@@ -849,5 +925,73 @@ mod tests {
             vec![Some(1), Some(2), Some(4), Some(5)]
         );
         Ok(())
+    }
+
+    #[test]
+    fn vec_count_star() {
+        let mut g0 = GeneralSortedGrouper::<I32Array> {
+            ongoing: false,
+            group_value: None,
+        };
+        let mut g0_builder = I32ArrayBuilder::new(0).unwrap();
+        let proto = make_proto!(AggCall, {
+          field_type: AggCall_Type::COUNT,
+          return_type: make_proto!(DataTypeProto, {
+            type_name: DataType_TypeName::INT64
+          }),
+          args: vec![].into()
+        });
+        let mut a = create_agg_state(&proto).unwrap();
+        let mut a_builder = a.return_type_ref().create_array_builder(0).unwrap();
+        let t32 = Arc::new(Int32Type::new(true));
+
+        let input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]).unwrap();
+        let eq = g0.split_groups_concrete(&input).unwrap();
+        g0.update_and_output_with_sorted_groups_concrete(&input, &mut g0_builder, &eq)
+            .unwrap();
+        a.update_and_output_with_sorted_groups(
+            &DataChunk::new(vec![Column::new(Arc::new(input.into()), t32.clone())], None),
+            &mut a_builder,
+            &eq,
+        )
+        .unwrap();
+
+        let input = I32Array::from_slice(&[Some(3), Some(3), Some(3)]).unwrap();
+        let eq = g0.split_groups_concrete(&input).unwrap();
+        g0.update_and_output_with_sorted_groups_concrete(&input, &mut g0_builder, &eq)
+            .unwrap();
+        a.update_and_output_with_sorted_groups(
+            &DataChunk::new(vec![Column::new(Arc::new(input.into()), t32.clone())], None),
+            &mut a_builder,
+            &eq,
+        )
+        .unwrap();
+
+        let input = I32Array::from_slice(&[Some(3), Some(4), Some(4)]).unwrap();
+        let eq = g0.split_groups_concrete(&input).unwrap();
+        g0.update_and_output_with_sorted_groups_concrete(&input, &mut g0_builder, &eq)
+            .unwrap();
+        a.update_and_output_with_sorted_groups(
+            &DataChunk::new(vec![Column::new(Arc::new(input.into()), t32)], None),
+            &mut a_builder,
+            &eq,
+        )
+        .unwrap();
+
+        g0.output_concrete(&mut g0_builder).unwrap();
+        a.output(&mut a_builder).unwrap();
+        assert_eq!(
+            g0_builder.finish().unwrap().iter().collect::<Vec<_>>(),
+            vec![Some(1), Some(3), Some(4)]
+        );
+        assert_eq!(
+            a_builder
+                .finish()
+                .unwrap()
+                .as_int64()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![Some(2), Some(5), Some(2)]
+        );
     }
 }
