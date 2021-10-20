@@ -1,0 +1,62 @@
+<Root>
+    <TestCase name="NoGroupByNoCountAggSingleMode">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T_no_group_no_count_single as select sum(v1) as V from t
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(v=[$0])
+  RwStreamProject(v=[$STREAM_NULL_BY_ROW_COUNT($1, $0)])
+    RwStreamAgg(group=[{}], v=[SUM($0)], Row Count=[COUNT()])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v1])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="NoGroupByHasCountAggSingleMode">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T_no_group_has_count_single as select Count(*), Sum(v1) as V from t
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(EXPR$0=[$0], v=[$1])
+  RwStreamProject(EXPR$0=[$0], v=[$STREAM_NULL_BY_ROW_COUNT($0, $1)])
+    RwStreamAgg(group=[{}], EXPR$0=[COUNT()], v=[SUM($0)])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v1])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="HasGroupByHasCountAggSingleMode">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T_has_group_has_count_single as select v2, Count(*), Sum(v1) as V from t group by v2
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(v2=[$0], EXPR$1=[$1], v=[$2])
+  RwStreamProject(v2=[$0], EXPR$1=[$1], v=[$STREAM_NULL_BY_ROW_COUNT($1, $2)])
+    RwStreamAgg(group=[{0}], EXPR$1=[COUNT()], v=[SUM($1)])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="HasGroupByNoCountAggSingleMode">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T_has_group_no_count_single as select v2, Sum(v1) as V from t group by v2
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(v2=[$0], v=[$1])
+  RwStreamProject(v2=[$0], v=[$STREAM_NULL_BY_ROW_COUNT($2, $1)])
+    RwStreamAgg(group=[{0}], v=[SUM($1)], Row Count=[COUNT()])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1])
+]]>
+        </Resource>
+    </TestCase>
+</Root>

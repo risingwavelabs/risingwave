@@ -59,10 +59,11 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     Assertions.assertEquals(
         "RwStreamMaterializedView(v=[$0])\n"
             + "  RwStreamProject(v=[+($0, 1)])\n"
-            + "    RwStreamAgg(group=[{}], agg#0=[SUM($0)])\n"
-            + "      RwStreamProject(v1=[$0])\n"
-            + "        RwStreamFilter(condition=[>($0, $1)])\n"
-            + "          RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])",
+            + "    RwStreamProject($f0=[$STREAM_NULL_BY_ROW_COUNT($1, $0)])\n"
+            + "      RwStreamAgg(group=[{}], agg#0=[SUM($0)], Row Count=[COUNT()])\n"
+            + "        RwStreamProject(v1=[$0])\n"
+            + "          RwStreamFilter(condition=[>($0, $1)])\n"
+            + "            RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])",
         resultPlan);
 
     CreateMaterializedViewHandler handler = new CreateMaterializedViewHandler();
@@ -112,11 +113,12 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     String expectedPlan =
         "RwStreamMaterializedView(v=[$0])\n"
             + "  RwStreamProject(v=[+($0, 1)])\n"
-            + "    RwStreamAgg(group=[{}], agg#0=[SUM($0)])\n"
-            + "      RwStreamProject(v1=[$0])\n"
-            + "        RwStreamFilter(condition=[>($0, $1)])\n"
-            + "          RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
-            + "            RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2], dispatched=[true])";
+            + "    RwStreamProject($f0=[$STREAM_NULL_BY_ROW_COUNT($1, $0)])\n"
+            + "      RwStreamAgg(group=[{}], agg#0=[SUM($0)], Row Count=[COUNT()])\n"
+            + "        RwStreamProject(v1=[$0])\n"
+            + "          RwStreamFilter(condition=[>($0, $1)])\n"
+            + "            RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
+            + "              RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2], dispatched=[true])";
     System.out.println(explainExchangePlan);
     Assertions.assertEquals(explainExchangePlan, expectedPlan);
   }
