@@ -10,11 +10,11 @@ proc-macro = true
 [dependencies]
 anyhow = "1"
 darling = "0.13"
-pb-convert = {path = "../pb-convert"}
-phf = {version = "0.10", features = ["macros"]}
+pb-convert = { path = "../pb-convert" }
+phf = { version = "0.10", features = ["macros"] }
 proc-macro2 = "1"
 quote = "1"
-syn = {version = "1", features = ["full"]}
+syn = { version = "1", features = ["full"] }
 thiserror = "1"
 
 [dev-dependencies]
