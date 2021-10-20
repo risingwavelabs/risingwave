@@ -58,12 +58,17 @@ public class BatchDataChunkResult extends AbstractQueryResult {
       boolean hasNext = internalIter.next();
       if (!hasNext) {
         // If no data in current task, switch to next one.
-        index++;
-        if (index == data.size()) {
-          return false;
-        }
-        resetDataIter();
-        return internalIter.next();
+        // It should be a loop cuz currently the backend can not guaranteed that
+        // the length of data chunk in middle is not 0.
+        // TODO: It may be removed when data chunk are always batched.
+        do {
+          index++;
+          if (index >= data.size()) {
+            return false;
+          }
+          resetDataIter();
+        } while (internalIter.next() == false);
+        return true;
       }
 
       return hasNext;
