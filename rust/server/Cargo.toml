@@ -44,6 +44,7 @@ tempfile = "3.2.0"
 
 [dev-dependencies]
 approx = "0.5"
+assert_matches = "1.5"
 rand = "0.8"
 
 [[bin]]

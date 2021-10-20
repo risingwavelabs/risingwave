@@ -44,7 +44,7 @@ pub struct MergeExecutor {
     blocked: Vec<Receiver<Message>>,
 
     /// Current barrier epoch (for assertion)
-    next_epoch: u64,
+    next_epoch: Option<u64>,
 }
 
 impl MergeExecutor {
@@ -54,7 +54,7 @@ impl MergeExecutor {
             active: inputs,
             blocked: vec![],
             terminated: 0,
-            next_epoch: 0,
+            next_epoch: None,
         }
     }
 }
@@ -84,7 +84,12 @@ impl Executor for MergeExecutor {
                 }
                 Message::Barrier(epoch) => {
                     // Move this channel into the `blocked` list
-                    assert_eq!(epoch, self.next_epoch);
+                    if self.blocked.is_empty() {
+                        assert_eq!(self.next_epoch, None);
+                        self.next_epoch = Some(epoch);
+                    } else {
+                        assert_eq!(self.next_epoch, Some(epoch));
+                    }
                     self.blocked.push(from);
                 }
             }
@@ -96,8 +101,7 @@ impl Executor for MergeExecutor {
                 // Emit the barrier to downstream once all barriers collected from upstream
                 assert!(self.active.is_empty());
                 self.active = std::mem::take(&mut self.blocked);
-                let epoch = self.next_epoch;
-                self.next_epoch += 1;
+                let epoch = self.next_epoch.take().unwrap();
                 return Ok(Message::Barrier(epoch));
             }
             assert!(!self.active.is_empty())
@@ -108,10 +112,10 @@ impl Executor for MergeExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stream_op::integration_tests::MockConsumer;
-    use crate::stream_op::{Actor, Op, StreamChunk};
+    use crate::stream_op::{Op, StreamChunk};
+    use assert_matches::assert_matches;
     use futures::SinkExt;
-    use std::sync::{Arc, Mutex};
+    use itertools::Itertools;
     use std::time::Duration;
 
     fn build_test_chunk(epoch: u64) -> StreamChunk {
@@ -133,18 +137,16 @@ mod tests {
             txs.push(tx);
             rxs.push(rx);
         }
-        let merger = MergeExecutor::new(rxs);
+        let mut merger = MergeExecutor::new(rxs);
 
-        let msgs = Arc::new(Mutex::new(vec![]));
-        let consumer = MockConsumer::new(Box::new(merger), msgs.clone());
-        let actor = Actor::new(Box::new(consumer));
-
-        let handle = tokio::spawn(actor.run());
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
+        let epochs = (10..1000u64).step_by(10).collect_vec();
+
         for mut tx in txs {
+            let epochs = epochs.clone();
             let handle = tokio::spawn(async move {
-                for epoch in 0..100 {
+                for epoch in epochs {
                     tx.send(Message::Chunk(build_test_chunk(epoch)))
                         .await
                         .unwrap();
@@ -156,17 +158,22 @@ mod tests {
             handles.push(handle);
         }
 
+        for epoch in epochs {
+            // expect n chunks
+            for _ in 0..CHANNEL_NUMBER {
+                assert_matches!(merger.next().await.unwrap(), Message::Chunk(chunk) => {
+                  assert_eq!(chunk.ops.len() as u64, epoch);
+                });
+            }
+            // expect a barrier
+            assert_matches!(merger.next().await.unwrap(), Message::Barrier(barrier_epoch) => {
+              assert_eq!(barrier_epoch, epoch);
+            });
+        }
+        assert_matches!(merger.next().await.unwrap(), Message::Terminate);
+
         for handle in handles {
             handle.await.unwrap();
-        }
-        handle.await.unwrap().unwrap();
-
-        let data = msgs.lock().unwrap();
-        assert_eq!(data.len(), 100 * CHANNEL_NUMBER);
-
-        // check if data are received epoch by epoch
-        for (id, item) in data.iter().enumerate() {
-            assert_eq!(item.ops.len(), id / CHANNEL_NUMBER);
         }
     }
 }
