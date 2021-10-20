@@ -275,7 +275,7 @@ impl SimpleExecutor for HashAggExecutor {
                 .data_type()
                 .create_array_builder(distinct_rows.len())?;
             for row_idx in &distinct_rows {
-                array_builder.append_scalar_ref(column.array_ref().value_at(*row_idx))?;
+                array_builder.append_datum_ref(column.array_ref().value_at(*row_idx))?;
             }
             new_columns.push(Column::new(
                 Arc::new(array_builder.finish()?),

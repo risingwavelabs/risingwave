@@ -19,7 +19,7 @@ pub use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 pub use crate::error::RwError;
 use crate::types::ScalarImpl;
-use crate::types::{Datum, Scalar, ScalarRef, ScalarRefImpl};
+use crate::types::{Datum, DatumRef, Scalar, ScalarRef, ScalarRefImpl};
 pub use bool_array::{BoolArray, BoolArrayBuilder};
 pub use data_chunk::{DataChunk, DataChunkRef};
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
@@ -326,7 +326,7 @@ macro_rules! impl_array_builder {
       }
 
       /// Append a scalar ref, return error while type not match.
-      pub fn append_scalar_ref(&mut self, scalar_ref: Option<ScalarRefImpl<'_>>) -> Result<()> {
+      pub fn append_datum_ref(&mut self, scalar_ref: DatumRef<'_>) -> Result<()> {
         match scalar_ref {
           None => self.append_null(),
           Some(scalar_ref_inner) => match (self, scalar_ref_inner) {
@@ -418,7 +418,7 @@ macro_rules! impl_array {
       }
 
       /// Get the enum-wrapped `ScalarRefImpl` out of the `Array`.
-      pub fn value_at(&self, idx: usize) -> Option<ScalarRefImpl<'_>> {
+      pub fn value_at(&self, idx: usize) -> DatumRef<'_> {
         match self {
           $( Self::$variant_name(inner) => inner.value_at(idx).map(ScalarRefImpl::$variant_name), )*
         }

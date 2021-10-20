@@ -1,6 +1,6 @@
 use super::Array;
 use crate::array::ArrayImpl;
-use crate::types::ScalarRefImpl;
+use crate::types::DatumRef;
 
 pub struct ArrayIterator<'a, A: Array> {
     data: &'a A,
@@ -38,7 +38,7 @@ impl<'a> ArrayImplIterator<'a> {
 }
 
 impl<'a> Iterator for ArrayImplIterator<'a> {
-    type Item = Option<ScalarRefImpl<'a>>;
+    type Item = DatumRef<'a>;
     fn next(&mut self) -> Option<Self::Item> {
         if self.pos >= self.data.len() {
             None

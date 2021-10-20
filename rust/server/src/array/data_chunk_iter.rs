@@ -1,5 +1,5 @@
 use crate::array::DataChunk;
-use crate::types::ScalarRefImpl;
+use crate::types::DatumRef;
 
 pub struct DataChunkIter<'a> {
     chunk: &'a DataChunk,
@@ -33,14 +33,14 @@ impl<'a> DataChunkIter<'a> {
 /// TODO: Consider merge with Row in storage. It is end with Ref because it do not own data
 /// and avoid conflict with [`Row`].
 #[derive(Debug, PartialEq)]
-pub struct RowRef<'a>(Vec<Option<ScalarRefImpl<'a>>>);
+pub struct RowRef<'a>(Vec<DatumRef<'a>>);
 
 impl<'a> RowRef<'a> {
-    pub fn new(values: Vec<Option<ScalarRefImpl<'a>>>) -> Self {
+    pub fn new(values: Vec<DatumRef<'a>>) -> Self {
         Self(values)
     }
 
-    pub fn value_at(&self, pos: usize) -> Option<ScalarRefImpl<'a>> {
+    pub fn value_at(&self, pos: usize) -> DatumRef<'a> {
         self.0[pos]
     }
 

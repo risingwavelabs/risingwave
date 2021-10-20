@@ -169,7 +169,7 @@ impl OuterTableSource {
                     for (col_idx, builder) in
                         array_builders.iter_mut().enumerate().take(num_columns)
                     {
-                        builder.append_scalar_ref(row_ref.value_at(col_idx))?;
+                        builder.append_datum_ref(row_ref.value_at(col_idx))?;
                     }
                 }
 

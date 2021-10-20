@@ -196,7 +196,7 @@ impl DataChunk {
                         .data_type()
                         .create_array_builder(end_row_idx - start_row_idx + 1)?;
                     for row_idx in start_row_idx..=end_row_idx {
-                        array_builder.append_scalar_ref(column.array_ref().value_at(row_idx))?;
+                        array_builder.append_datum_ref(column.array_ref().value_at(row_idx))?;
                     }
                     builder.append_array(&array_builder.finish()?)
                 })?;
