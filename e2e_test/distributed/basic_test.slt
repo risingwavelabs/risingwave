@@ -1,0 +1,218 @@
+statement ok
+create table t (v1 int not null, v2 int not null, v3 int not null)
+
+statement ok
+insert into t values (1,4,2), (2,3,3), (3,4,4), (4,3,5)
+
+query III rowsort
+select * from t
+----
+1 4 2
+2 3 3
+3 4 4
+4 3 5
+
+query III rowsort
+select * from t where v1 = 1
+----
+1 4 2
+
+query III rowsort
+select * from t where v1 > 1 and v2 = 3
+----
+2 3 3
+4 3 5
+
+
+query I rowsort
+select min(v2) from t
+----
+3
+
+query I rowsort
+select v1 from t
+----
+1
+2
+3
+4
+
+query I rowsort
+select v1+v2 from t
+----
+5
+5
+7
+7
+
+query III
+select * from t order by v1 desc
+----
+4 3 5
+3 4 4
+2 3 3
+1 4 2
+
+query III
+select * from t order by v1 desc limit 1
+----
+4 3 5
+
+query III
+select * from t order by v2, v1
+----
+2 3 3
+4 3 5
+1 4 2
+3 4 4
+
+query III
+select * from t order by v2, v1 limit 2
+----
+2 3 3
+4 3 5
+
+query III
+select * from t order by v2, v1 limit 10
+----
+2 3 3
+4 3 5
+1 4 2
+3 4 4
+
+query III
+select * from t order by v2 desc, v1 limit 2
+----
+1 4 2
+3 4 4
+
+statement ok
+drop table t
+
+# Date/Time related
+statement ok
+create table t (v1 date not null, v2 time not null, v3 timestamp not null)
+
+statement ok
+insert into t values
+    ('1970-01-01', '04:05:06', '1970-01-01 04:05:06'),
+    ('1989-01-01', '23:48:17', '1989-01-01 23:48:17'),
+    ('2019-05-12', '10:20:48', '2019-05-12 10:20:48')
+
+query TTT
+select * from t
+----
+1970-01-01 00:00:00 +0000 +0000 0000-01-01 04:05:06 +0000 UTC 1970-01-01 04:05:06 +0000 +0000
+1989-01-01 00:00:00 +0000 +0000 0000-01-01 23:48:17 +0000 UTC 1989-01-01 23:48:17 +0000 +0000
+2019-05-12 00:00:00 +0000 +0000 0000-01-01 10:20:48 +0000 UTC 2019-05-12 10:20:48 +0000 +0000
+
+statement ok
+drop table t
+
+# String related
+statement ok
+create table t (v1 int not null, v2 char(8) not null)
+
+statement ok
+insert into t values (1,'1'), (2,'22'), (3,'333'), (4,'4444')
+
+query IT
+select * from t
+----
+1 1
+2 22
+3 333
+4 4444
+
+query T
+select substring(v2 from 1 for 1) from t
+----
+1
+2
+3
+4
+
+query T
+select substring(v2 from 1) from t
+----
+1
+22
+333
+4444
+
+statement ok
+drop table t
+
+# Decimal related
+
+statement ok
+create table t (v1 numeric not null, v2 int not null)
+
+statement ok
+insert into t values (12345.01234, 1), (2.02, 2), (3.03, 3), (4.04, 4)
+
+query RI
+select * from t
+----
+12345.01234 1
+2.02 2
+3.03 3
+4.04 4
+
+statement ok
+drop table t
+
+statement ok
+create table t (v1 numeric(10, 5) not null, v2 int not null)
+
+statement ok
+insert into t values (12345.01234, 1), (12345, 2), (3.03, 3), (4.04, 4)
+
+query RI
+select * from t
+----
+12345.01234 1
+12345.00000 2
+3.03000 3
+4.04000 4
+
+query R
+select min(v1) from t
+----
+3.03000
+
+statement ok
+drop table t
+
+statement ok
+create table t (v1 int, v2 int not null)
+
+statement ok
+insert into t values(1, 2), (null, 2), (null, 2)
+
+query II
+select * from t
+----
+1     2
+NULL  2
+NULL  2
+
+statement ok
+drop table t
+
+#bool type
+statement ok
+create table t (v1 boolean)
+
+statement ok
+insert into t values (true), (false), (true)
+
+query B
+select * from t
+----
+true
+false
+true
+
+statement ok
+drop table t

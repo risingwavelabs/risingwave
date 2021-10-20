@@ -82,7 +82,7 @@ make rust_test
 To run end-to-end tests, start the frontend server and a compute server, and then run:
 ```
 make sqllogictest
-python3 ./scripts/sqllogictest_java.py
+python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/distributed/
 ```
 
 ## Distributed Testing

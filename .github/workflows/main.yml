@@ -182,18 +182,18 @@ jobs:
         run: |
           chmod +x ./rust/target/debug/compute-node
           ./scripts/start_cluster.sh 1
-          python3 ./scripts/sqllogictest_java.py -p ${{ env.RW_PORT }} -db dev
+          python3 ./scripts/sqllogictest.py -p ${{ env.RW_PORT }} -db dev -f ./e2e_test/distributed/
           ./scripts/kill_cluster.sh
 
       - name: Run tests on Postgresql
         run: |
-          python3 ./scripts/sqllogictest_java.py -p ${{ env.PG_PORT }}
+          python3 ./scripts/sqllogictest.py -p ${{ env.PG_PORT }} -f ./e2e_test/distributed/
 
       - name: Run 3-node end-to-end tests
         run: |
           sleep 5
           ./scripts/start_cluster.sh 3
-          python3 ./scripts/sqllogictest_java.py -p ${{ env.RW_PORT }} -db dev
+          python3 ./scripts/sqllogictest.py -p ${{ env.RW_PORT }} -db dev -f ./e2e_test/distributed/
 
       - name: Show compute-nodes logs on failure
         if: ${{ failure() }}
