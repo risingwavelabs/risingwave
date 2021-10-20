@@ -5,6 +5,7 @@ use crate::expr::binary_expr::new_like_default;
 use crate::expr::binary_expr::new_position_expr;
 use crate::expr::binary_expr_bytes::new_substr_start;
 use crate::expr::build_from_proto as expr_build_from_proto;
+use crate::expr::ternary_expr_bytes::new_replace_expr;
 use crate::expr::ternary_expr_bytes::new_substr_start_end;
 use crate::expr::unary_expr::new_length_default;
 use crate::expr::unary_expr::new_trim_expr;
@@ -15,7 +16,6 @@ use protobuf::Message;
 use risingwave_proto::expr::{ExprNode, FunctionCall};
 
 pub fn build_unary_expr(proto: &ExprNode) -> Result<BoxedExpression> {
-    // FIXME: Note that now it only contains some other expressions so it may not be general enough.
     let data_type = type_build_from_proto(proto.get_return_type())?;
     let function_call_node =
         FunctionCall::parse_from_bytes(proto.get_body().get_value()).map_err(ProtobufError)?;
@@ -33,7 +33,6 @@ pub fn build_unary_expr(proto: &ExprNode) -> Result<BoxedExpression> {
 }
 
 pub fn build_binary_expr(proto: &ExprNode) -> Result<BoxedExpression> {
-    // FIXME: Note that now it only contains some other expressions so it may not be general enough.
     let data_type = type_build_from_proto(proto.get_return_type())?;
     let function_call_node =
         FunctionCall::parse_from_bytes(proto.get_body().get_value()).map_err(ProtobufError)?;
@@ -50,7 +49,6 @@ pub fn build_binary_expr(proto: &ExprNode) -> Result<BoxedExpression> {
 }
 
 pub fn build_substr_expr(proto: &ExprNode) -> Result<BoxedExpression> {
-    // FIXME: Note that now it only contains some other expressions so it may not be general enough.
     let data_type = type_build_from_proto(proto.get_return_type())?;
     let function_call_node =
         FunctionCall::parse_from_bytes(proto.get_body().get_value()).map_err(ProtobufError)?;
@@ -92,15 +90,26 @@ pub fn build_trim_expr(proto: &ExprNode) -> Result<BoxedExpression> {
     Ok(new_trim_expr(child, data_type))
 }
 
-pub fn build_length_expr(proto: &ExprNode) -> Result<BoxedExpression> {
-    // FIXME: Note that now it only contains some other expressions so it may not be general enough.
+pub fn build_replace_expr(proto: &ExprNode) -> Result<BoxedExpression> {
     let data_type = type_build_from_proto(proto.get_return_type())?;
     let function_call_node =
         FunctionCall::parse_from_bytes(proto.get_body().get_value()).map_err(ProtobufError)?;
     let children = function_call_node.get_children();
-    let child = expr_build_from_proto(&children[0])?;
+    ensure!(children.len() == 3);
+    let s = expr_build_from_proto(&children[0])?;
+    let from_str = expr_build_from_proto(&children[1])?;
+    let to_str = expr_build_from_proto(&children[2])?;
+    Ok(new_replace_expr(s, from_str, to_str, data_type))
+}
+
+pub fn build_length_expr(proto: &ExprNode) -> Result<BoxedExpression> {
+    let data_type = type_build_from_proto(proto.get_return_type())?;
+    let function_call_node =
+        FunctionCall::parse_from_bytes(proto.get_body().get_value()).map_err(ProtobufError)?;
+    let children = function_call_node.get_children();
     // TODO: add encoding length expr
     ensure!(children.len() == 1);
+    let child = expr_build_from_proto(&children[0])?;
     Ok(new_length_default(child, data_type))
 }
 
