@@ -1,4 +1,4 @@
-use crate::array::DataChunkRef;
+use crate::array::DataChunk;
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{ErrorCode, Result};
@@ -7,21 +7,17 @@ use crate::util::hash_util::CRC32FastBuilder;
 use risingwave_proto::plan::*;
 use std::option::Option;
 use std::sync::mpsc;
-use std::sync::Arc;
 
 pub struct HashShuffleSender {
-    senders: Vec<mpsc::Sender<DataChunkRef>>,
+    senders: Vec<mpsc::Sender<DataChunk>>,
     hash_info: ShuffleInfo_HashInfo,
 }
 
 pub struct HashShuffleReceiver {
-    receiver: mpsc::Receiver<DataChunkRef>,
+    receiver: mpsc::Receiver<DataChunk>,
 }
 
-fn generate_hash_values(
-    chunk: DataChunkRef,
-    hash_info: &ShuffleInfo_HashInfo,
-) -> Result<Vec<usize>> {
+fn generate_hash_values(chunk: &DataChunk, hash_info: &ShuffleInfo_HashInfo) -> Result<Vec<usize>> {
     let output_count = hash_info.output_count as usize;
 
     let hasher_builder = match hash_info.hash_method {
@@ -45,10 +41,10 @@ fn generate_hash_values(
 }
 
 fn generate_new_data_chunks(
-    chunk: DataChunkRef,
+    chunk: &DataChunk,
     hash_info: &ShuffleInfo_HashInfo,
     hash_values: &[usize],
-) -> Result<Vec<DataChunkRef>> {
+) -> Result<Vec<DataChunk>> {
     let output_count = hash_info.output_count as usize;
     let mut vis_maps = vec![vec![]; output_count];
     hash_values.iter().for_each(|hash| {
@@ -69,16 +65,16 @@ fn generate_new_data_chunks(
             sink_id,
             new_data_chunk.cardinality()
         );
-        res.push(Arc::new(new_data_chunk));
+        res.push(new_data_chunk);
     }
     Ok(res)
 }
 
 #[async_trait::async_trait]
 impl ChanSender for HashShuffleSender {
-    async fn send(&mut self, chunk: DataChunkRef) -> Result<()> {
-        let hash_values = generate_hash_values(chunk.clone(), &self.hash_info)?;
-        let new_data_chunks = generate_new_data_chunks(chunk, &self.hash_info, &hash_values)?;
+    async fn send(&mut self, chunk: DataChunk) -> Result<()> {
+        let hash_values = generate_hash_values(&chunk, &self.hash_info)?;
+        let new_data_chunks = generate_new_data_chunks(&chunk, &self.hash_info, &hash_values)?;
 
         for (sink_id, new_data_chunk) in new_data_chunks.into_iter().enumerate() {
             debug!(
@@ -97,7 +93,7 @@ impl ChanSender for HashShuffleSender {
 
 #[async_trait::async_trait]
 impl ChanReceiver for HashShuffleReceiver {
-    async fn recv(&mut self) -> Option<DataChunkRef> {
+    async fn recv(&mut self) -> Option<DataChunk> {
         match self.receiver.recv() {
             Err(_) => None, // Sender is dropped.
             Ok(chunk) => Some(chunk),

@@ -1,15 +1,14 @@
-use crate::array::{DataChunk, DataChunkRef};
+use crate::array::DataChunk;
 use crate::error::Result;
 use crate::executor::ExecutorResult::Done;
 use crate::executor::{Executor, ExecutorResult};
 use std::collections::VecDeque;
-use std::sync::Arc;
 
 // MockExecutor is to mock the input of executor.
 // You can bind one or more MockExecutor as the children of the executor to test,
 // (HashAgg, e.g), so that allow testing without instantiating real SeqScans and real storage.
 pub struct MockExecutor {
-    chunks: VecDeque<DataChunkRef>,
+    chunks: VecDeque<DataChunk>,
 }
 
 impl MockExecutor {
@@ -20,7 +19,7 @@ impl MockExecutor {
     }
 
     pub fn add(&mut self, chunk: DataChunk) {
-        self.chunks.push_back(Arc::new(chunk));
+        self.chunks.push_back(chunk);
     }
 }
 

@@ -112,7 +112,7 @@ impl Executor for InsertValuesExecutor {
                 .build();
 
             self.executed = true;
-            Ok(ExecutorResult::Batch(Arc::new(ret_chunk)))
+            Ok(ExecutorResult::Batch(ret_chunk))
         }
     }
 

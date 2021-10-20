@@ -83,25 +83,18 @@ impl OrderByExecutor {
             self.vis_indices[idx] += 1;
         }
     }
-    fn get_order_index_from(&self, chunk: DataChunkRef) -> Vec<usize> {
+    fn get_order_index_from(&self, chunk: &DataChunk) -> Vec<usize> {
         let mut index: Vec<usize> = (0..chunk.cardinality()).collect();
         index.sort_by(|ia, ib| {
-            compare_two_row(
-                self.order_pairs.as_ref(),
-                chunk.as_ref(),
-                *ia,
-                chunk.as_ref(),
-                *ib,
-            )
-            .unwrap_or(Ordering::Equal)
+            compare_two_row(self.order_pairs.as_ref(), chunk, *ia, chunk, *ib)
+                .unwrap_or(Ordering::Equal)
         });
         index
     }
     fn collect_child_data(&mut self) -> Result<()> {
         while let ExecutorResult::Batch(chunk) = self.child.execute()? {
-            self.sorted_indices
-                .push(self.get_order_index_from(chunk.clone()));
-            self.chunks.push(chunk);
+            self.sorted_indices.push(self.get_order_index_from(&chunk));
+            self.chunks.push(Arc::new(chunk));
         }
         self.vis_indices = vec![0usize; self.chunks.len()];
         for idx in 0..self.chunks.len() {
@@ -170,7 +163,7 @@ impl Executor for OrderByExecutor {
             .map(|(d, b)| Ok(Column::new(Arc::new(b.finish()?), d.clone())))
             .collect::<Result<Vec<_>>>()?;
         let chunk = DataChunk::builder().columns(columns).build();
-        Ok(ExecutorResult::Batch(Arc::new(chunk)))
+        Ok(ExecutorResult::Batch(chunk))
     }
 
     fn clean(&mut self) -> Result<()> {
@@ -229,7 +222,7 @@ mod tests {
         let res = order_by_executor.execute().unwrap();
         assert!(matches!(res, ExecutorResult::Batch(_)));
         if let ExecutorResult::Batch(res) = res {
-            let col0 = res.as_ref().column_at(0).unwrap();
+            let col0 = res.column_at(0).unwrap();
             assert_eq!(col0.array().as_int32().value_at(0), Some(3));
             assert_eq!(col0.array().as_int32().value_at(1), Some(2));
             assert_eq!(col0.array().as_int32().value_at(2), Some(1));

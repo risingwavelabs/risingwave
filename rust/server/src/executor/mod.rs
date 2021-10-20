@@ -14,7 +14,7 @@ use seq_scan::*;
 use sort_agg::*;
 use top_n::*;
 
-use crate::array::DataChunkRef;
+use crate::array::DataChunk;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 use crate::executor::create_stream::CreateStreamExecutor;
@@ -43,15 +43,15 @@ mod test_utils;
 mod top_n;
 
 pub enum ExecutorResult {
-    Batch(DataChunkRef),
+    Batch(DataChunk),
     Done,
 }
 
 impl ExecutorResult {
     #[cfg(test)] // Remove when this is useful in non-test code.
-    fn batch_or(&self) -> Result<DataChunkRef> {
+    fn batch_or(self) -> Result<DataChunk> {
         match self {
-            ExecutorResult::Batch(chunk) => Ok(chunk.clone()),
+            ExecutorResult::Batch(chunk) => Ok(chunk),
             ExecutorResult::Done => {
                 Err(InternalError("result is Done, not Batch".to_string()).into())
             }

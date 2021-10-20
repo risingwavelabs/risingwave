@@ -9,7 +9,6 @@ use crate::expr::{build_from_proto, BoxedExpression};
 use protobuf::Message;
 use risingwave_proto::plan::{PlanNode_PlanNodeType, ProjectNode};
 use std::convert::TryFrom;
-use std::sync::Arc;
 
 pub(super) struct ProjectionExecutor {
     expr: Vec<BoxedExpression>,
@@ -36,7 +35,7 @@ impl Executor for ProjectionExecutor {
                     })
                     .collect::<Result<Vec<_>>>()?;
                 let ret = DataChunk::builder().columns(arrays).build();
-                Ok(Batch(Arc::new(ret)))
+                Ok(Batch(ret))
             }
             Done => Ok(Done),
         }

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::array::column::Column;
-use crate::array::{ArrayBuilderImpl, DataChunk, DataChunkRef};
+use crate::array::{ArrayBuilderImpl, DataChunk};
 use crate::error::Result;
 use crate::source::{SourceColumnDesc, SourceMessage, SourceParser, SourceReader};
 
@@ -28,7 +28,7 @@ impl ChunkReader {
         }
     }
 
-    pub async fn next_chunk(&mut self, max_chunk_size: usize) -> Result<Option<DataChunkRef>> {
+    pub async fn next_chunk(&mut self, max_chunk_size: usize) -> Result<Option<DataChunk>> {
         if self.done {
             return Ok(None);
         }
@@ -81,7 +81,7 @@ impl ChunkReader {
             })
             .collect::<Result<Vec<Column>>>()?;
 
-        let ret = Arc::new(DataChunk::builder().columns(columns).build());
+        let ret = DataChunk::builder().columns(columns).build();
         Ok(Some(ret))
     }
 

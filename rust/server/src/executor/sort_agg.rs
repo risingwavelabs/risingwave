@@ -143,7 +143,7 @@ impl Executor for SortAggExecutor {
 
         let ret = DataChunk::builder().columns(columns).build();
 
-        Ok(ExecutorResult::Batch(Arc::new(ret)))
+        Ok(ExecutorResult::Batch(ret))
     }
 
     fn clean(&mut self) -> Result<()> {

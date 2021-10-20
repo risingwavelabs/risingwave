@@ -1,5 +1,5 @@
 use crate::array::column::Column;
-use crate::array::{ArrayBuilderImpl, DataChunk, DataChunkRef};
+use crate::array::{ArrayBuilderImpl, DataChunk};
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 use crate::executor::hash_map::{HashKey, PrecomputedBuildHasher};
@@ -17,9 +17,7 @@ use std::sync::Arc;
 const MAX_BUILD_ROW_COUNT: usize = u32::MAX as usize;
 
 pub(super) struct BuildTable {
-    /// Accumulated build data.
-    build_data: Vec<DataChunkRef>,
-    /// Total row count of build data.
+    build_data: Vec<DataChunk>,
     row_count: usize,
     params: EquiJoinParams,
 }
@@ -33,7 +31,7 @@ impl BuildTable {
         }
     }
 
-    pub(super) fn append_build_chunk(&mut self, data_chunk: DataChunkRef) -> Result<()> {
+    pub(super) fn append_build_chunk(&mut self, data_chunk: DataChunk) -> Result<()> {
         ensure!(
             (MAX_BUILD_ROW_COUNT - self.row_count) > data_chunk.cardinality(),
             "Build table size exceeded limit!"
@@ -51,7 +49,7 @@ impl BuildTable {
         )?;
 
         for (chunk_id, data_chunk) in self.build_data.iter().enumerate() {
-            let keys = K::build(self.params.build_key_columns(), data_chunk.as_ref())?;
+            let keys = K::build(self.params.build_key_columns(), data_chunk)?;
             for (row_id_in_chunk, row_key) in keys.into_iter().enumerate() {
                 // In pg `null` and `null` never joins, so we should skip them in hash table.
                 if row_key.has_null() {
@@ -95,14 +93,14 @@ pub(super) struct ProbeTable<K> {
     /// |None|    // No more row with same key.
     /// ```
     build_table: JoinHashMap<K>,
-    build_data: Vec<DataChunkRef>,
+    build_data: Vec<DataChunk>,
     build_index: ChunkedData<Option<RowId>>,
 
     /// Used only when join remaining is required after probing.
     ///
     /// See [`JoinType::need_join_remaining`]
     build_matched: RefCell<Option<ChunkedData<bool>>>,
-    cur_probe_data_chunk: Option<DataChunkRef>,
+    cur_probe_data_chunk: Option<DataChunk>,
     params: EquiJoinParams,
 }
 
@@ -123,10 +121,7 @@ impl<K: HashKey> TryFrom<BuildTable> for ProbeTable<K> {
         let mut build_matched = RefCell::new(None);
         if build_table.params.join_type().need_join_remaining() {
             build_matched = RefCell::new(Some(ChunkedData::<bool>::with_chunk_sizes(
-                build_table
-                    .build_data
-                    .iter()
-                    .map(|c| c.as_ref().cardinality()),
+                build_table.build_data.iter().map(|c| c.cardinality()),
             )?));
         }
 
@@ -147,11 +142,11 @@ impl<K: HashKey> ProbeTable<K> {
     }
 
     // TODO: Should we consider output multi data chunks when necessary?
-    pub(super) fn join(&mut self, data_chunk: DataChunkRef) -> Result<DataChunkRef> {
-        self.cur_probe_data_chunk = Some(data_chunk.clone());
-        let probe_keys = K::build(self.params.probe_key_columns(), data_chunk.as_ref())?;
+    pub(super) fn join(&mut self, data_chunk: DataChunk) -> Result<DataChunk> {
+        let probe_keys = K::build(self.params.probe_key_columns(), &data_chunk)?;
         let mut output_array_builders =
             self.create_output_array_builders(data_chunk.cardinality())?;
+        self.cur_probe_data_chunk = Some(data_chunk);
 
         match self.params.join_type() {
             JoinType::Inner => self.do_inner_join(probe_keys, &mut output_array_builders)?,
@@ -177,7 +172,7 @@ impl<K: HashKey> ProbeTable<K> {
         self.create_data_chunk(output_array_builders)
     }
 
-    pub(super) fn join_remaining(&mut self) -> Result<Option<DataChunkRef>> {
+    pub(super) fn join_remaining(&mut self) -> Result<Option<DataChunk>> {
         // TODO: Count null values
         let mut output_array_builders = self.create_output_array_builders(2048)?;
 
@@ -192,10 +187,7 @@ impl<K: HashKey> ProbeTable<K> {
         self.create_data_chunk(output_array_builders).map(Some)
     }
 
-    fn create_data_chunk(
-        &self,
-        output_array_builders: Vec<ArrayBuilderImpl>,
-    ) -> Result<DataChunkRef> {
+    fn create_data_chunk(&self, output_array_builders: Vec<ArrayBuilderImpl>) -> Result<DataChunk> {
         let columns = output_array_builders
             .into_iter()
             .zip(self.params.output_types().iter())
@@ -209,7 +201,7 @@ impl<K: HashKey> ProbeTable<K> {
                 },
             )?;
 
-        DataChunk::try_from(columns).map(Arc::new)
+        DataChunk::try_from(columns)
     }
 
     fn do_inner_join(

@@ -1,6 +1,6 @@
 use crate::array::column::Column;
 use crate::array::data_chunk_iter::RowRef;
-use crate::array::{DataChunk, DataChunkRef};
+use crate::array::DataChunk;
 use crate::buffer::Bitmap;
 use crate::error::Result;
 use crate::executor::join::JoinType;
@@ -32,7 +32,7 @@ struct NestedLoopJoinExecutor {
     state: NestedLoopJoinState,
 }
 
-type ProbeResult = Option<DataChunkRef>;
+type ProbeResult = Option<DataChunk>;
 enum NestedLoopJoinState {
     FirstProbe(ProbeTable),
     Probe(ProbeTable),
@@ -87,7 +87,7 @@ impl NestedLoopJoinExecutor {
         &mut self,
         first_probe: bool,
         mut probe_table: ProbeTable,
-    ) -> Result<Option<DataChunkRef>> {
+    ) -> Result<Option<DataChunk>> {
         if first_probe {
             probe_table.init(&mut self.inner_source)?;
         }
@@ -117,7 +117,7 @@ impl NestedLoopJoinExecutor {
 
     /// Similar to [`probe_remaining`] in [`HashJoin`]. It should be done when join operator has a row id matched
     /// table and wants to support RIGHT OUTER/ RIGHT SEMI/ FULL OUTER.
-    fn probe_remaining(&mut self) -> Result<Option<DataChunkRef>> {
+    fn probe_remaining(&mut self) -> Result<Option<DataChunk>> {
         todo!()
     }
 }
@@ -225,7 +225,7 @@ impl OuterTableSource {
 /// [`ProbeTable`] contains the tuple to be probed. It is also called inner relation in join.
 /// `inner_table` is a buffer for all data. For all probe key, directly fetch data in `inner_table` without call executor.
 /// The executor is only called when building `inner_table`.
-type InnerTable = Vec<DataChunkRef>;
+type InnerTable = Vec<DataChunk>;
 struct ProbeTable {
     /// Eval joined result by reusing Expression.
     join_cond: BoxedExpression,
@@ -264,16 +264,16 @@ impl ProbeTable {
         // Developer error if occur.
         assert!(self.chunk_idx <= self.inner_table.len());
         if self.chunk_idx < self.inner_table.len() {
-            let chunk = self.inner_table[self.chunk_idx].clone();
+            let chunk = &self.inner_table[self.chunk_idx];
             // Concatenate two chunk into a new one first.
             let constant_row_chunk = outer_source.convert_row_to_chunk(&row, chunk.capacity())?;
-            let new_chunk = Self::concatenate(&constant_row_chunk, &*chunk)?;
+            let new_chunk = Self::concatenate(&constant_row_chunk, chunk)?;
             let sel_vector = self.join_cond.eval(&new_chunk)?;
             // Note that do not materialize results here. Just update the visibility.
             let joined_chunk =
                 new_chunk.with_visibility(Bitmap::from_bool_array(sel_vector.as_bool())?);
             self.chunk_idx += 1;
-            Ok(Some(Arc::new(joined_chunk)))
+            Ok(Some(joined_chunk))
         } else {
             self.chunk_idx = 0;
             Ok(None)
@@ -374,11 +374,8 @@ mod tests {
             )],
             None,
         );
-        let source = OuterTableSource::new(
-            Box::new(seq_scan_exec),
-            ExecutorResult::Batch(Arc::new(chunk)),
-            0,
-        );
+        let source =
+            OuterTableSource::new(Box::new(seq_scan_exec), ExecutorResult::Batch(chunk), 0);
         let const_row_chunk = source.convert_row_to_chunk(&row, 5).unwrap();
         assert_eq!(const_row_chunk.capacity(), 5);
         assert_eq!(

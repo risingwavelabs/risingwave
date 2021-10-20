@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use crate::array::DataChunkRef;
+use crate::array::DataChunk;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::executor::{BoxedExecutor, ExecutorBuilder, ExecutorResult};
 use crate::service::ExchangeWriter;
@@ -98,7 +98,7 @@ impl TaskSink {
     }
 
     /// Directly takes data without serialization.
-    pub async fn direct_take_data(&mut self) -> Result<Option<DataChunkRef>> {
+    pub async fn direct_take_data(&mut self) -> Result<Option<DataChunk>> {
         let task_id = TaskId::from(self.sink_id.get_task_id());
         self.task_manager.check_if_task_running(&task_id)?;
         Ok(self.receiver.recv().await)

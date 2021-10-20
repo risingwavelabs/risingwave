@@ -1,11 +1,10 @@
-use crate::array::DataChunkRef;
+use crate::array::DataChunk;
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::executor::ExecutorResult::{Batch, Done};
 use std::cmp::min;
 use std::convert::TryFrom;
-use std::sync::Arc;
 
 use itertools::Itertools;
 use protobuf::Message;
@@ -52,7 +51,7 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for LimitExecutor {
 }
 
 impl LimitExecutor {
-    fn process_chunk(&mut self, chunk: DataChunkRef) -> Result<DataChunkRef> {
+    fn process_chunk(&mut self, chunk: DataChunk) -> Result<DataChunk> {
         let mut new_vis;
         if let Some(old_vis) = chunk.visibility() {
             new_vis = old_vis.iter().collect_vec();
@@ -78,7 +77,7 @@ impl LimitExecutor {
         let chunk = chunk
             .with_visibility(Bitmap::from_vec(new_vis)?)
             .compact()?;
-        Ok(Arc::new(chunk))
+        Ok(chunk)
     }
 }
 
@@ -158,7 +157,7 @@ mod tests {
         };
         let mut results = vec![];
         while let Batch(chunk) = limit_executor.execute().unwrap() {
-            results.push(chunk);
+            results.push(Arc::new(chunk));
         }
         let chunks =
             DataChunk::rechunk(results.into_iter().collect_vec().as_slice(), row_num).unwrap();

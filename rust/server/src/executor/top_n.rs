@@ -46,7 +46,7 @@ impl TopNHeap {
             });
     }
 
-    pub fn dump(&mut self) -> Option<DataChunkRef> {
+    pub fn dump(&mut self) -> Option<DataChunk> {
         if self.min_heap.is_empty() {
             return None;
         }
@@ -58,7 +58,7 @@ impl TopNHeap {
         chunks.reverse();
         if let Ok(mut res) = DataChunk::rechunk(&chunks, self.limit) {
             assert_eq!(res.len(), 1);
-            Some(Arc::new(res.remove(0)))
+            Some(res.remove(0))
         } else {
             None
         }
@@ -113,7 +113,7 @@ impl Executor for TopNExecutor {
 
     fn execute(&mut self) -> Result<ExecutorResult> {
         while let ExecutorResult::Batch(chunk) = self.child.execute()? {
-            self.top_n_heap.fit(chunk);
+            self.top_n_heap.fit(Arc::new(chunk));
         }
         if let Some(chunk) = self.top_n_heap.dump() {
             Ok(ExecutorResult::Batch(chunk))
@@ -170,7 +170,7 @@ mod tests {
         assert!(matches!(res, ExecutorResult::Batch(_)));
         if let ExecutorResult::Batch(res) = res {
             assert_eq!(res.cardinality(), 2);
-            let col0 = res.as_ref().column_at(0).unwrap();
+            let col0 = res.column_at(0).unwrap();
             assert_eq!(col0.array().as_int32().value_at(0), Some(3));
             assert_eq!(col0.array().as_int32().value_at(1), Some(2));
         }

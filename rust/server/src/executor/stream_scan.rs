@@ -7,7 +7,7 @@ use protobuf::Message;
 use pb_convert::FromProtobuf;
 use risingwave_proto::plan::StreamScanNode;
 
-use crate::array::DataChunkRef;
+use crate::array::DataChunk;
 use crate::catalog::TableId;
 use crate::error::ErrorCode;
 use crate::error::ErrorCode::InternalError;
@@ -26,7 +26,7 @@ pub struct StreamScanExecutor {
 impl StreamScanExecutor {
     /// This function returns `DataChunkRef` because it will be used by both olap and streaming.
     /// The streaming side may customize a bit from `DataChunk` to `StreamChunk`.
-    pub async fn next_data_chunk(&mut self) -> Result<Option<DataChunkRef>> {
+    pub async fn next_data_chunk(&mut self) -> Result<Option<DataChunk>> {
         match self.reader.next_chunk(K_STREAM_SCAN_CHUNK_SIZE).await? {
             None => Ok(None),
             Some(chunk) => Ok(Some(chunk)),

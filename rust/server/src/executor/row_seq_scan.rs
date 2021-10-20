@@ -98,7 +98,7 @@ impl Executor for RowSeqScanExecutor {
                     })
                     .collect::<Result<Vec<_>>>()?;
                 let data_chunk = DataChunk::builder().columns(columns).build();
-                Ok(ExecutorResult::Batch(Arc::new(data_chunk)))
+                Ok(ExecutorResult::Batch(data_chunk))
             }
             None => Ok(ExecutorResult::Done),
         }

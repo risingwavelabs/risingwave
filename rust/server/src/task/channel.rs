@@ -1,4 +1,4 @@
-use crate::array::DataChunkRef;
+use crate::array::DataChunk;
 use crate::error::{ErrorCode, Result};
 use crate::task::fifo_channel::new_fifo_channel;
 use crate::task::hash_shuffle_channel::new_hash_shuffle_channel;
@@ -9,14 +9,14 @@ use std::option::Option;
 pub trait ChanSender: Send {
     // `send` will block until there's enough resource to process the chunk.
     // Currently, `send` will only be called from single thread.
-    async fn send(&mut self, chunk: DataChunkRef) -> Result<()>;
+    async fn send(&mut self, chunk: DataChunk) -> Result<()>;
 }
 
 #[async_trait::async_trait]
 pub trait ChanReceiver: Send {
     // Returns `None` if there's no more data to read.
     // Otherwise it will wait until there's data.
-    async fn recv(&mut self) -> Option<DataChunkRef>;
+    async fn recv(&mut self) -> Option<DataChunk>;
 }
 
 pub type BoxChanSender = Box<dyn ChanSender>;

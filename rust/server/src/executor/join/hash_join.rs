@@ -1,4 +1,4 @@
-use crate::array::DataChunkRef;
+use crate::array::DataChunk;
 use crate::error::Result;
 use crate::executor::hash_map::HashKey;
 use crate::executor::join::hash_join::HashJoinState::{FirstProbe, Probe, ProbeRemaining};
@@ -152,7 +152,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         &mut self,
         first_probe: bool,
         mut probe_table: ProbeTable<K>,
-    ) -> Result<Option<DataChunkRef>> {
+    ) -> Result<Option<DataChunk>> {
         if first_probe {
             self.left_child.init()?;
         }
@@ -176,7 +176,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }
     }
 
-    fn probe_remaining(&mut self, mut probe_table: ProbeTable<K>) -> Result<Option<DataChunkRef>> {
+    fn probe_remaining(&mut self, mut probe_table: ProbeTable<K>) -> Result<Option<DataChunk>> {
         let ret = probe_table.join_remaining()?;
         self.state = HashJoinState::Done;
         Ok(ret)

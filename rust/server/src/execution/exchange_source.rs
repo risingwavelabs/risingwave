@@ -1,4 +1,4 @@
-use crate::array::{DataChunk, DataChunkRef};
+use crate::array::DataChunk;
 use crate::error::ErrorCode::GrpcError;
 use crate::error::Result;
 use crate::task::{GlobalTaskEnv, TaskSink};
@@ -12,7 +12,7 @@ use std::sync::Arc;
 /// Each ExchangeSource maps to one task, it takes the execution result from task chunk by chunk.
 #[async_trait::async_trait]
 pub trait ExchangeSource: Send {
-    async fn take_data(&mut self) -> Result<Option<DataChunkRef>>;
+    async fn take_data(&mut self) -> Result<Option<DataChunk>>;
 }
 
 /// Use grpc client as the source.
@@ -51,7 +51,7 @@ impl GrpcExchangeSource {
 
 #[async_trait::async_trait]
 impl ExchangeSource for GrpcExchangeSource {
-    async fn take_data(&mut self) -> Result<Option<DataChunkRef>> {
+    async fn take_data(&mut self) -> Result<Option<DataChunk>> {
         let res = match self.stream.next().await {
             None => return Ok(None),
             Some(r) => r,
@@ -62,9 +62,9 @@ impl ExchangeSource for GrpcExchangeSource {
                 e,
             )
         })?;
-        Ok(Some(Arc::new(DataChunk::from_protobuf(
+        Ok(Some(DataChunk::from_protobuf(
             task_data.get_record_batch(),
-        )?)))
+        )?))
     }
 }
 
@@ -82,7 +82,7 @@ impl LocalExchangeSource {
 
 #[async_trait::async_trait]
 impl ExchangeSource for LocalExchangeSource {
-    async fn take_data(&mut self) -> Result<Option<DataChunkRef>> {
+    async fn take_data(&mut self) -> Result<Option<DataChunk>> {
         Ok(self.task_sink.direct_take_data().await?)
     }
 }

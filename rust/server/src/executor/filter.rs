@@ -9,7 +9,6 @@ use crate::expr::{build_from_proto, BoxedExpression};
 use protobuf::Message;
 use risingwave_proto::plan::{FilterNode, PlanNode_PlanNodeType};
 use std::convert::TryFrom;
-use std::sync::Arc;
 pub(super) struct FilterExecutor {
     expr: BoxedExpression,
     child: BoxedExecutor,
@@ -23,14 +22,14 @@ impl Executor for FilterExecutor {
     fn execute(&mut self) -> Result<ExecutorResult> {
         let res = self.child.execute()?;
         if let Batch(data_chunk) = res {
-            let vis_array = self.expr.eval(data_chunk.as_ref())?;
+            let vis_array = self.expr.eval(&data_chunk)?;
             if let Bool(vis) = vis_array.as_ref() {
                 let mut vis = Bitmap::from_bool_array(vis)?;
                 if let Some(old_vis) = data_chunk.visibility() {
                     vis = ((&vis) & old_vis)?;
                 }
                 let data_chunk = data_chunk.with_visibility(vis);
-                return data_chunk.compact().map(|x| Batch(Arc::new(x)));
+                return data_chunk.compact().map(Batch);
             } else {
                 return Err(InternalError("Filter can only receive bool array".to_string()).into());
             }
@@ -92,7 +91,7 @@ mod tests {
         };
         let res = filter_executor.execute().unwrap();
         if let Batch(res) = res {
-            let col1 = res.as_ref().column_at(0).unwrap();
+            let col1 = res.column_at(0).unwrap();
             let array = col1.array();
             let col1 = array.as_int32();
             assert_eq!(col1.len(), 1);

@@ -108,7 +108,7 @@ impl Executor for ExchangeExecutor {
 mod tests {
     use super::*;
     use crate::array::column::Column;
-    use crate::array::{DataChunk, DataChunkRef, I32Array};
+    use crate::array::{DataChunk, I32Array};
     use crate::array_nonnull;
     use crate::types::Int32Type;
     use std::sync::Arc;
@@ -128,12 +128,12 @@ mod tests {
     }
 
     struct FakeExchangeSource {
-        chunk: Option<DataChunkRef>,
+        chunk: Option<DataChunk>,
     }
 
     #[async_trait::async_trait]
     impl ExchangeSource for FakeExchangeSource {
-        async fn take_data(&mut self) -> Result<Option<DataChunkRef>> {
+        async fn take_data(&mut self) -> Result<Option<DataChunk>> {
             let chunk = self.chunk.take();
             Ok(chunk)
         }
@@ -141,20 +141,15 @@ mod tests {
 
     #[test]
     fn test_exchange_multiple_sources() {
-        let chunk = Arc::new(
-            DataChunk::builder()
+        let mut sources: Vec<Box<dyn ExchangeSource>> = vec![];
+        for _ in 0..3 {
+            let chunk = DataChunk::builder()
                 .columns(vec![Column::new(
                     Arc::new(array_nonnull! { I32Array, [3, 4, 4] }.into()),
                     Int32Type::create(false),
                 )])
-                .build(),
-        );
-
-        let mut sources: Vec<Box<dyn ExchangeSource>> = vec![];
-        for _ in 0..3 {
-            sources.push(Box::new(FakeExchangeSource {
-                chunk: Some(chunk.clone()),
-            }));
+                .build();
+            sources.push(Box::new(FakeExchangeSource { chunk: Some(chunk) }));
         }
 
         let mut executor = ExchangeExecutor {

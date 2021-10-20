@@ -80,7 +80,7 @@ impl Executor for SeqScanExecutor {
         let ret = DataChunk::builder().columns(columns).build();
 
         self.chunk_idx += 1;
-        Ok(ExecutorResult::Batch(Arc::new(ret)))
+        Ok(ExecutorResult::Batch(ret))
     }
 
     fn clean(&mut self) -> Result<()> {
