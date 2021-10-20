@@ -261,6 +261,22 @@ jobs:
         run: |
           cargo install --force cargo-tarpaulin
 
+      - name: Detect changed Cargo.toml
+        uses: tj-actions/changed-files@v10.1
+        id: detect-changed-cargo-toml
+        with:
+          files: Cargo.toml
+
+      - name: Install cargo-sort
+        if: steps.detect-changed-cargo-toml.outputs.any_changed == 'true'
+        run: |
+          cargo install --force cargo-sort
+
+      - name: Run rust cargo-sort check
+        if: steps.detect-changed-cargo-toml.outputs.any_changed == 'true'
+        run: |
+          make rust_cargo_sort_check
+
       - name: Run rust format check
         run: |
           make rust_fmt

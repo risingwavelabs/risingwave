@@ -2,7 +2,7 @@ SHELL := /bin/bash
 .PHONY: all java java_test java_build java_check
 all: cpp java
 
-java: java_test 
+java: java_test
 
 java_test:
 	cd java && ./gradlew test
@@ -28,6 +28,9 @@ rust_fmt:
 
 rust_check:
 	cd rust && cargo clippy --all-targets --all-features -- -D warnings
+
+rust_cargo_sort_check:
+	cd rust && cargo sort -c -w
 
 rust_test:
 	cd rust && mkdir -p proto
