@@ -50,6 +50,7 @@ import com.risingwave.sql.tree.LikePredicate;
 import com.risingwave.sql.tree.LogicalBinaryExpression;
 import com.risingwave.sql.tree.LongLiteral;
 import com.risingwave.sql.tree.NaturalJoin;
+import com.risingwave.sql.tree.NegativeExpression;
 import com.risingwave.sql.tree.Node;
 import com.risingwave.sql.tree.NotExpression;
 import com.risingwave.sql.tree.NotNullColumnConstraint;
@@ -435,6 +436,13 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
   @Override
   public SqlNode visitNullLiteral(NullLiteral node, Void context) {
     return SqlLiteral.createNull(SqlParserPos.ZERO);
+  }
+
+  @Override
+  public SqlNode visitNegativeExpression(NegativeExpression node, Void context) {
+    return SqlLiteral.createNegative(
+        SqlLiteral.createExactNumeric(String.valueOf(node.getValue()), SqlParserPos.ZERO),
+        SqlParserPos.ZERO);
   }
 
   @Override
