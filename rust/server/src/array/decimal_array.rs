@@ -122,7 +122,7 @@ impl ArrayBuilder for DecimalArrayBuilder {
 
     fn finish(self) -> Result<DecimalArray> {
         Ok(DecimalArray {
-            bitmap: Bitmap::from_vec(self.bitmap)?,
+            bitmap: self.bitmap.try_into()?,
             data: self.data,
         })
     }

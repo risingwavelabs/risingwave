@@ -134,7 +134,6 @@ mod tests {
         array,
         array::{Array, F64Array, I64Array},
         array_nonnull,
-        buffer::Bitmap,
         stream_op::{
             aggregation::{tests::get_output_from_state, StreamingAggState},
             Op,
@@ -191,7 +190,7 @@ mod tests {
         avg_agg
             .apply_batch_concrete(
                 &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
-                Some(&Bitmap::from_vec(vec![false, true, false, true]).unwrap()),
+                Some(&(vec![false, true, false, true]).try_into().unwrap()),
                 &array!(I64Array, [Some(1), None, Some(3), Some(1)]),
             )
             .unwrap();

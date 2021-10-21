@@ -30,7 +30,7 @@ pub fn read_numeric_column<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>
     );
 
     let mut builder = PrimitiveArrayBuilder::<T>::new(cardinality)?;
-    let bitmap = Bitmap::from_protobuf(col.get_null_bitmap())?;
+    let bitmap: Bitmap = (col.get_null_bitmap()).try_into()?;
     let mut cursor = Cursor::new(buf);
     for not_null in bitmap.iter() {
         if not_null {
@@ -53,7 +53,7 @@ pub fn read_bool_column(col: &ColumnProto, cardinality: usize) -> Result<ArrayRe
     let buf = col.get_values()[0].get_body();
 
     let mut builder = BoolArrayBuilder::new(cardinality)?;
-    let bitmap = Bitmap::from_protobuf(col.get_null_bitmap())?;
+    let bitmap: Bitmap = col.get_null_bitmap().try_into()?;
     let mut cursor = Cursor::new(buf);
     for not_null in bitmap.iter() {
         if not_null {
@@ -88,7 +88,7 @@ pub fn read_string_column<B: ArrayBuilder, R: VarSizedValueReader<B>>(
     let data_buf = col.get_values()[1].get_body();
 
     let mut builder = B::new(cardinality)?;
-    let bitmap = Bitmap::from_protobuf(col.get_null_bitmap())?;
+    let bitmap: Bitmap = (col.get_null_bitmap()).try_into()?;
     let mut offset_cursor = Cursor::new(offset_buff);
     let mut data_cursor = Cursor::new(data_buf);
     let mut prev_offset: i64 = -1;

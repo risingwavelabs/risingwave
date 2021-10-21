@@ -134,7 +134,7 @@ mod tests {
         state
             .apply_batch(
                 &[Op::Delete, Op::Insert],
-                Some(&Bitmap::from_vec(vec![false, true]).unwrap()),
+                Some(&(vec![false, true]).try_into().unwrap()),
                 &[],
             )
             .unwrap();
@@ -152,7 +152,7 @@ mod tests {
         state
             .apply_batch(
                 &[Op::Delete, Op::Insert],
-                Some(&Bitmap::from_vec(vec![true, false]).unwrap()),
+                Some(&(vec![true, false]).try_into().unwrap()),
                 &[],
             )
             .unwrap();

@@ -108,7 +108,7 @@ impl ArrayBuilder for IntervalArrayBuilder {
 
     fn finish(self) -> Result<Self::ArrayType> {
         Ok(IntervalArray {
-            bitmap: Bitmap::from_vec(self.bitmap)?,
+            bitmap: self.bitmap.try_into()?,
             months_buffer: self.months_buffer,
             days_buffer: self.days_buffer,
             ms_buffer: self.ms_buffer,

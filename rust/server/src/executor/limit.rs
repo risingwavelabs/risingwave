@@ -1,5 +1,4 @@
 use crate::array::DataChunk;
-use crate::buffer::Bitmap;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::Result;
 use crate::executor::ExecutorResult::{Batch, Done};
@@ -70,9 +69,7 @@ impl LimitExecutor {
             self.returned += r - l;
             self.skipped += l;
         }
-        let chunk = chunk
-            .with_visibility(Bitmap::from_vec(new_vis)?)
-            .compact()?;
+        let chunk = chunk.with_visibility(new_vis.try_into()?).compact()?;
         Ok(chunk)
     }
 }
@@ -268,9 +265,13 @@ mod tests {
             .unwrap()
             .into_iter()
             .for_each(|x| {
-                mock_executor.add(x.with_visibility(
-                    Bitmap::from_bool_array(x.column_at(1).unwrap().array_ref().into()).unwrap(),
-                ))
+                mock_executor.add(
+                    x.with_visibility(
+                        (x.column_at(1).unwrap().array_ref().as_bool())
+                            .try_into()
+                            .unwrap(),
+                    ),
+                )
             });
 
         let mut limit_executor = LimitExecutor {

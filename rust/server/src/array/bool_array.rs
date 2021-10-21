@@ -113,7 +113,7 @@ impl ArrayBuilder for BoolArrayBuilder {
 
     fn finish(self) -> Result<BoolArray> {
         Ok(BoolArray {
-            bitmap: Bitmap::from_vec(self.bitmap)?,
+            bitmap: self.bitmap.try_into()?,
             data: self.data,
         })
     }

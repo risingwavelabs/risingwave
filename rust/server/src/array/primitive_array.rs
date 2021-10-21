@@ -164,7 +164,7 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
 
     fn finish(self) -> Result<PrimitiveArray<T>> {
         Ok(PrimitiveArray {
-            bitmap: Bitmap::from_vec(self.bitmap)?,
+            bitmap: self.bitmap.try_into()?,
             data: self.data,
         })
     }

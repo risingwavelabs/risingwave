@@ -1,7 +1,6 @@
 use crate::array::column::Column;
 use crate::array::data_chunk_iter::RowRef;
 use crate::array::DataChunk;
-use crate::buffer::Bitmap;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::executor::join::JoinType;
@@ -330,7 +329,7 @@ impl ProbeTable {
             let sel_vector = self.join_expr.eval(&new_chunk)?;
             // Materialize the joined chunk result.
             let joined_chunk = new_chunk
-                .with_visibility(Bitmap::from_bool_array(sel_vector.as_bool())?)
+                .with_visibility(sel_vector.as_bool().try_into()?)
                 .compact()?;
             self.chunk_idx += 1;
             Ok(Some(joined_chunk))
@@ -379,7 +378,7 @@ mod tests {
     use crate::array::column::Column;
     use crate::array::data_chunk_iter::RowRef;
     use crate::array::*;
-    use crate::buffer::Bitmap;
+
     use crate::catalog::test_utils::mock_table_id;
     use crate::executor::join::nested_loop_join::{OuterTableSource, ProbeTable};
     use crate::executor::seq_scan::SeqScanExecutor;
@@ -406,7 +405,7 @@ mod tests {
         let bool_vec = vec![true, false, true, false, false];
         let chunk2: DataChunk = DataChunk::builder()
             .columns(columns.clone())
-            .visibility(Bitmap::from_vec(bool_vec.clone()).unwrap())
+            .visibility((bool_vec.clone()).try_into().unwrap())
             .build();
         let chunk = ProbeTable::concatenate(&chunk1, &chunk2).unwrap();
         assert_eq!(chunk.capacity(), chunk1.capacity());
@@ -414,7 +413,7 @@ mod tests {
         assert_eq!(chunk.columns().len(), chunk1.columns().len() * 2);
         assert_eq!(
             chunk.visibility().clone().unwrap(),
-            Bitmap::from_vec(bool_vec).unwrap()
+            (bool_vec).try_into().unwrap()
         );
     }
 

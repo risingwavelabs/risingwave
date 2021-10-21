@@ -1,7 +1,6 @@
 use super::{Executor, Message, Op, SimpleExecutor, StreamChunk};
 use crate::{
     array::{Array, ArrayImpl, DataChunk},
-    buffer::Bitmap,
     error::Result,
     expr::BoxedExpression,
 };
@@ -116,7 +115,7 @@ impl SimpleExecutor for FilterExecutor {
 
         let new_chunk = StreamChunk {
             columns: arrays,
-            visibility: Some(Bitmap::from_vec(new_visibility)?),
+            visibility: Some((new_visibility).try_into()?),
             ops: new_ops,
         };
 

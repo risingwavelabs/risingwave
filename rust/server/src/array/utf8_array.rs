@@ -134,7 +134,7 @@ impl ArrayBuilder for UTF8ArrayBuilder {
 
     fn finish(self) -> Result<UTF8Array> {
         Ok(UTF8Array {
-            bitmap: Bitmap::from_vec(self.bitmap)?,
+            bitmap: (self.bitmap).try_into()?,
             data: self.data,
             offset: self.offset,
         })

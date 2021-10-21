@@ -1,7 +1,6 @@
 use super::Result;
 use super::{FilterExecutor, ProjectExecutor};
 use crate::array::{Array, I64Array};
-use crate::buffer::Bitmap;
 use crate::expr::*;
 use crate::stream_op::*;
 use crate::types::{ArithmeticOperatorKind, BoolType, Int64Type};
@@ -47,7 +46,7 @@ async fn test_projection() {
             column_nonnull! { I64Array, Int64Type, [7, 3] },
             column_nonnull! { I64Array, Int64Type, [8, 6] },
         ],
-        visibility: Some(Bitmap::from_vec(vec![true, true]).unwrap()),
+        visibility: Some((vec![true, true]).try_into().unwrap()),
     };
     let source = MockSource::new(vec![chunk1, chunk2]);
 
@@ -180,7 +179,7 @@ async fn test_local_hash_aggregation_count() {
     let chunk2 = StreamChunk {
         ops: vec![Op::Delete, Op::Delete, Op::Delete],
         columns: vec![column_nonnull! { I64Array, Int64Type, [1, 2, 2] }],
-        visibility: Some(Bitmap::from_vec(vec![true, false, true]).unwrap()),
+        visibility: Some((vec![true, false, true]).try_into().unwrap()),
     };
     let source = MockSource::new(vec![chunk1, chunk2]);
 
@@ -273,7 +272,7 @@ async fn test_global_hash_aggregation_count() {
             column_nonnull! { I64Array, Int64Type, [1, 2, 1, 3] },
             column_nonnull! { I64Array, Int64Type, [1, 2, 1, 3] },
         ],
-        visibility: Some(Bitmap::from_vec(vec![true, false, true, true]).unwrap()),
+        visibility: Some((vec![true, false, true, true]).try_into().unwrap()),
     };
     let source = MockSource::new(vec![chunk1, chunk2]);
 

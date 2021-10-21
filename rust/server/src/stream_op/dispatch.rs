@@ -1,6 +1,5 @@
 use super::{Message, Result, StreamChunk};
 use crate::array::DataChunk;
-use crate::buffer::Bitmap;
 use crate::stream_op::{Executor, StreamConsumer};
 use crate::util::hash_util::CRC32FastBuilder;
 use async_trait::async_trait;
@@ -179,7 +178,7 @@ impl DataDispatcher for HashDataDispatcher {
         });
 
         for (vis_map, output) in vis_maps.into_iter().zip(self.outputs.iter_mut()) {
-            let vis_map = Bitmap::from_vec(vis_map).unwrap();
+            let vis_map = (vis_map).try_into().unwrap();
             let new_stream_chunk = StreamChunk {
                 ops: ops.clone(),
                 columns: arrays.clone(),

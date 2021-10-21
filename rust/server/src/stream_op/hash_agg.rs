@@ -150,7 +150,7 @@ impl HashAggExecutor {
         // turn the Vec of bool into Bitmap
         let key_to_vis_maps = key_to_vis_maps
             .into_iter()
-            .map(|(key, vis_map)| Ok((key, Bitmap::from_vec(vis_map)?)))
+            .map(|(key, vis_map)| Ok((key, (vis_map).try_into()?)))
             .collect::<Result<HashMap<&HashKey, Bitmap>>>();
 
         Ok((unique_keys, distinct_rows, key_to_vis_maps?))

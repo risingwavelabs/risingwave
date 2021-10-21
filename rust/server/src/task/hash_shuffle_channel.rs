@@ -1,5 +1,4 @@
 use crate::array::DataChunk;
-use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{ErrorCode, Result};
 use crate::task::channel::{BoxChanReceiver, BoxChanSender, ChanReceiver, ChanSender};
@@ -58,7 +57,7 @@ fn generate_new_data_chunks(
     });
     let mut res = Vec::with_capacity(output_count);
     for (sink_id, vis_map_vec) in vis_maps.into_iter().enumerate() {
-        let vis_map = Bitmap::from_vec(vis_map_vec)?;
+        let vis_map = (vis_map_vec).try_into()?;
         let new_data_chunk = chunk.with_visibility(vis_map).compact()?;
         debug!(
             "send to sink:{}, cardinality:{}",

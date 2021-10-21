@@ -1,6 +1,6 @@
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::array::ArrayImpl::Bool;
-use crate::buffer::Bitmap;
+
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::Result;
 use crate::executor::ExecutorResult::{Batch, Done};
@@ -24,7 +24,7 @@ impl Executor for FilterExecutor {
         if let Batch(data_chunk) = res {
             let vis_array = self.expr.eval(&data_chunk)?;
             if let Bool(vis) = vis_array.as_ref() {
-                let mut vis = Bitmap::from_bool_array(vis)?;
+                let mut vis = vis.try_into()?;
                 if let Some(old_vis) = data_chunk.visibility() {
                     vis = ((&vis) & old_vis)?;
                 }

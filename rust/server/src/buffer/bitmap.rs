@@ -25,10 +25,50 @@ use std::ops::BitOr;
 
 use crate::array::Array;
 use crate::array::BoolArray;
+use crate::array::RwError;
 use crate::buffer::Buffer;
 use crate::error::Result;
 use crate::util::bit_util;
 use risingwave_proto::data::Buffer as BufferProto;
+
+#[derive(Default)]
+pub struct BitmapBuilder {
+    len: usize,
+    data: Vec<u8>,
+    num_high_bits: usize,
+
+    // `head` is 'dirty' bitmap data and will be flushed to `self.data` when `self.len%8==0`.
+    head: u8,
+}
+
+impl BitmapBuilder {
+    fn append(&mut self, bit_set: bool) -> &mut Self {
+        self.head |= (bit_set as u8) << (self.len % 8);
+        self.num_high_bits += bit_set as usize;
+        self.len += 1;
+        if self.len % 8 == 0 {
+            self.data.push(self.head);
+            self.head = 0;
+        }
+        self
+    }
+    fn finish(&mut self) -> Bitmap {
+        if self.len % 8 != 0 {
+            self.data.push(self.head);
+        }
+        let num_high_bits = self.num_high_bits;
+        let bits = Buffer::from_slice(self.data.as_slice()).unwrap();
+        Bitmap {
+            num_bits: self.len(),
+            bits,
+            num_high_bits,
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+}
 
 #[derive(Clone)]
 pub struct Bitmap {
@@ -37,6 +77,9 @@ pub struct Bitmap {
     // The useful bits in the bitmap. The total number of bits will usually
     // be larger than the useful bits due to byte-padding.
     num_bits: usize,
+
+    // The number of high bits in the bitmap.
+    num_high_bits: usize,
 }
 
 impl std::fmt::Debug for Bitmap {
@@ -61,36 +104,12 @@ impl Bitmap {
         Ok(Bitmap {
             bits: Buffer::new_with_default(len)?,
             num_bits,
+            num_high_bits: 0,
         })
     }
 
-    pub fn from_bool_array(bools: &BoolArray) -> Result<Self> {
-        let mut buffer = Buffer::new_with_default(Bitmap::num_of_bytes(bools.len()))?;
-        let data = buffer.as_slice_mut();
-        for (idx, value) in (bools.iter()).enumerate() {
-            if let Some(true) = value {
-                bit_util::set_bit(data, idx);
-            }
-        }
-        Ok(Self {
-            bits: buffer,
-            num_bits: bools.len(),
-        })
-    }
-
-    pub fn from_vec(bools: Vec<bool>) -> Result<Self> {
-        let mut buffer = Buffer::new_with_default(Bitmap::num_of_bytes(bools.len()))?;
-        let data = buffer.as_slice_mut();
-        (0..bools.len()).for_each(|idx| {
-            if bools[idx] {
-                bit_util::set_bit(data, idx);
-            }
-        });
-
-        Ok(Self {
-            bits: buffer,
-            num_bits: bools.len(),
-        })
+    pub fn num_high_bits(&self) -> usize {
+        self.num_high_bits
     }
 
     pub fn num_bits(&self) -> usize {
@@ -160,18 +179,6 @@ impl Bitmap {
         Ok(buf)
     }
 
-    pub fn from_protobuf(buf: &BufferProto) -> Result<Self> {
-        let num_bits = buf.get_body().len();
-        let mut bits = Buffer::new_with_default(Bitmap::num_of_bytes(num_bits))?;
-        let data = bits.as_slice_mut();
-        for (i, b) in buf.get_body().iter().enumerate() {
-            if *b == 1u8 {
-                bit_util::set_bit(data, i);
-            }
-        }
-        Ok(Self { bits, num_bits })
-    }
-
     pub fn iter(&self) -> BitmapIter<'_> {
         BitmapIter {
             bits: &self.bits,
@@ -204,10 +211,48 @@ impl<'a, 'b> BitOr<&'b Bitmap> for &'a Bitmap {
 
 impl From<Buffer> for Bitmap {
     fn from(buf: Buffer) -> Self {
+        let num_high_bits = buf.as_slice().iter().map(|x| x.count_ones()).sum::<u32>() as usize;
         Self {
             num_bits: buf.len() << 3,
             bits: buf,
+            num_high_bits,
         }
+    }
+}
+
+impl TryFrom<&BoolArray> for Bitmap {
+    type Error = RwError;
+    fn try_from(bools: &BoolArray) -> Result<Bitmap> {
+        let mut builder = BitmapBuilder::default();
+        bools.iter().for_each(|e| {
+            builder.append(e.unwrap_or(false));
+        });
+        Ok(builder.finish())
+    }
+}
+
+impl TryFrom<Vec<bool>> for Bitmap {
+    type Error = RwError;
+
+    fn try_from(bools: Vec<bool>) -> Result<Bitmap> {
+        let mut builder = BitmapBuilder::default();
+        bools.iter().for_each(|e| {
+            builder.append(*e);
+        });
+        Ok(builder.finish())
+    }
+}
+
+impl TryFrom<&BufferProto> for Bitmap {
+    type Error = RwError;
+
+    fn try_from(buf: &BufferProto) -> Result<Bitmap> {
+        let mut builder = BitmapBuilder::default();
+        buf.get_body().iter().for_each(|e| {
+            builder.append(*e == 1_u8);
+        });
+
+        Ok(builder.finish())
     }
 }
 
@@ -264,6 +309,50 @@ mod tests {
     use risingwave_proto::data::Buffer as BufferProto;
 
     #[test]
+    fn test_bitmap_builder() {
+        let bitmap1 = BitmapBuilder::default()
+            .append(false)
+            .append(true)
+            .append(true)
+            .append(false)
+            .append(true)
+            .append(false)
+            .append(true)
+            .append(false)
+            .append(true)
+            .append(false)
+            .append(true)
+            .append(true)
+            .append(false)
+            .append(true)
+            .append(false)
+            .append(true)
+            .finish();
+        let byte1 = 0b0101_0110_u8;
+        let byte2 = 0b1010_1101_u8;
+        let expected = Bitmap::from(Buffer::try_from([byte1, byte2]).unwrap());
+        assert_eq!(bitmap1, expected);
+        assert_eq!(
+            bitmap1.num_high_bits(),
+            (byte1.count_ones() + byte2.count_ones()) as usize
+        );
+
+        let bitmap2 = BitmapBuilder::default()
+            .append(false)
+            .append(true)
+            .append(true)
+            .append(false)
+            .append(true)
+            .append(false)
+            .append(true)
+            .append(false)
+            .finish();
+        let byte1 = 0b0101_0110_u8;
+        let expected = Bitmap::from(Buffer::try_from([byte1]).unwrap());
+        assert_eq!(bitmap2, expected);
+    }
+
+    #[test]
     fn test_bitmap_length() {
         assert_eq!(64, Bitmap::new(63 * 8).unwrap().num_of_buffer_bytes());
         assert_eq!(64, Bitmap::new(64 * 8).unwrap().num_of_buffer_bytes());
@@ -314,7 +403,7 @@ mod tests {
             assert_eq!(booleans, vec![0u8, 1, 0, 1, 0, 0, 1, 0]);
         }
         {
-            let bitmap = Bitmap::from_vec(vec![true; 5])?;
+            let bitmap: Bitmap = vec![true; 5].try_into()?;
             for b in bitmap.iter() {
                 assert!(b);
             }
@@ -326,42 +415,57 @@ mod tests {
     fn test_bitmap_from_protobuf() {
         let bitmap_bytes = vec![0u8, 1, 0, 1, 0, 0, 1, 0];
         let buf = make_proto!(BufferProto, { body: bitmap_bytes.clone() });
-        let bitmap = Bitmap::from_protobuf(&buf).unwrap();
+        let bitmap: Bitmap = (&buf).try_into().unwrap();
         let actual_bytes: Vec<u8> = bitmap.iter().map(|b| b as u8).collect();
         assert_eq!(actual_bytes, bitmap_bytes);
+        assert_eq!(bitmap.num_high_bits(), 3);
+    }
+
+    #[test]
+    fn test_bitmap_from_buffer() {
+        let byte1 = 0b0110_1010_u8;
+        let byte2 = 0b1011_0101_u8;
+        let bitmap = Bitmap::from(Buffer::try_from([0b0110_1010, 0b1011_0101]).unwrap());
+        let expected = Bitmap::try_from(vec![
+            false, true, false, true, false, true, true, false, true, false, true, false, true,
+            true, false, true,
+        ])
+        .unwrap();
+        let num_high_bits = (byte1.count_ones() + byte2.count_ones()) as usize;
+        assert_eq!(expected, bitmap);
+        assert_eq!(bitmap.num_high_bits(), num_high_bits);
+        assert_eq!(expected.num_high_bits(), num_high_bits);
     }
 
     #[test]
     fn test_bitmap_eq() {
-        let b1 = Bitmap::from_vec(vec![false; 3]).unwrap();
-        let b2 = Bitmap::from_vec(vec![false; 5]).unwrap();
+        let b1: Bitmap = (vec![false; 3]).try_into().unwrap();
+        let b2: Bitmap = (vec![false; 5]).try_into().unwrap();
         assert!(b1 != b2);
 
-        let b1 = Bitmap::from_vec(
-            [true, false]
-                .iter()
-                .cycle()
-                .cloned()
-                .take(10000)
-                .collect_vec(),
-        )
-        .unwrap();
-        let b2 = Bitmap::from_vec(
-            [true, false]
-                .iter()
-                .cycle()
-                .cloned()
-                .take(10000)
-                .collect_vec(),
-        )
-        .unwrap();
+        let b1: Bitmap = [true, false]
+            .iter()
+            .cycle()
+            .cloned()
+            .take(10000)
+            .collect_vec()
+            .try_into()
+            .unwrap();
+        let b2: Bitmap = [true, false]
+            .iter()
+            .cycle()
+            .cloned()
+            .take(10000)
+            .collect_vec()
+            .try_into()
+            .unwrap();
         assert!(b1 == b2);
     }
 
     #[test]
     fn test_bitmap_init() {
         let bm1 = Bitmap::new(1).unwrap();
-        let bm2 = Bitmap::from_vec(vec![false]).unwrap();
+        let bm2 = (vec![false]).try_into().unwrap();
         assert_eq!(bm1, bm2);
     }
 }
