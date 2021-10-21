@@ -7,8 +7,9 @@ use crate::types::DataType;
 use crate::vector_op::agg::{self, BoxedAggState, BoxedSortedGrouper, EqGroups};
 use protobuf::Message as _;
 use risingwave_proto::plan::{PlanNode_PlanNodeType, SortAggNode};
-use std::convert::TryFrom;
 use std::sync::Arc;
+
+use super::BoxedExecutorBuilder;
 
 /// `SortAggExecutor` implements the sort aggregate algorithm, where tuples
 /// belonging to the same group are continuous because they are sorted by the
@@ -24,10 +25,8 @@ pub(super) struct SortAggExecutor {
     child_done: bool,
 }
 
-impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for SortAggExecutor {
-    type Error = RwError;
-
-    fn try_from(source: &'a ExecutorBuilder<'a>) -> Result<Self> {
+impl BoxedExecutorBuilder for SortAggExecutor {
+    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::SORT_AGG);
 
         ensure!(source.plan_node().get_children().len() == 1);
@@ -59,13 +58,13 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for SortAggExecutor {
             .map(|e| agg::create_sorted_grouper(e.return_type()))
             .collect::<Result<Vec<BoxedSortedGrouper>>>()?;
 
-        Ok(Self {
+        Ok(Box::new(Self {
             agg_states,
             group_exprs,
             sorted_groupers,
             child,
             child_done: false,
-        })
+        }))
     }
 }
 

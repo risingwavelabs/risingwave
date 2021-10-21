@@ -1,10 +1,10 @@
-use super::BoxedExecutor;
+use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::array::{
     column::Column, Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, DataChunkRef,
 };
 use crate::error::{
     ErrorCode::{InternalError, ProtobufError},
-    Result, RwError,
+    Result,
 };
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::types::DataTypeRef;
@@ -14,7 +14,6 @@ use crate::util::sort_util::{
 use protobuf::Message;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use std::convert::TryFrom;
 use std::iter::Iterator;
 use std::sync::Arc;
 use std::vec::Vec;
@@ -32,9 +31,8 @@ pub(super) struct OrderByExecutor {
     data_types: Vec<DataTypeRef>,
 }
 
-impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for OrderByExecutor {
-    type Error = RwError;
-    fn try_from(source: &'a ExecutorBuilder<'a>) -> Result<Self> {
+impl BoxedExecutorBuilder for OrderByExecutor {
+    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::ORDER_BY);
         ensure!(source.plan_node().get_children().len() == 1);
         let order_by_node =
@@ -44,7 +42,7 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for OrderByExecutor {
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
             let child =
                 ExecutorBuilder::new(child_plan, source.global_task_env().clone()).build()?;
-            return Ok(Self {
+            return Ok(Box::new(Self {
                 order_pairs: Arc::new(order_pairs),
                 child,
                 first_execution: true,
@@ -53,7 +51,7 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for OrderByExecutor {
                 sorted_indices: vec![],
                 min_heap: BinaryHeap::new(),
                 data_types: vec![],
-            });
+            }));
         }
         Err(InternalError("OrderBy must have one child".to_string()).into())
     }

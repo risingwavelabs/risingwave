@@ -1,5 +1,5 @@
 use crate::error::ErrorCode::ProtobufError;
-use crate::error::{Result, RwError};
+use crate::error::Result;
 use crate::execution::exchange_source::{ExchangeSource, GrpcExchangeSource, LocalExchangeSource};
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::task::GlobalTaskEnv;
@@ -7,8 +7,9 @@ use crate::util::addr::get_host_port;
 use protobuf::Message;
 use risingwave_proto::plan::PlanNode_PlanNodeType;
 use risingwave_proto::task_service::{ExchangeNode, ExchangeSource as ProtoExchangeSource};
-use std::convert::TryFrom;
 use std::net::SocketAddr;
+
+use super::{BoxedExecutor, BoxedExecutorBuilder};
 
 pub(super) struct ExchangeExecutor {
     sources: Vec<Box<dyn ExchangeSource>>,
@@ -56,26 +57,25 @@ impl ExchangeExecutor {
     }
 }
 
-impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for ExchangeExecutor {
-    type Error = RwError;
-    fn try_from(builder: &'a ExecutorBuilder<'a>) -> Result<Self> {
-        ensure!(builder.plan_node().get_node_type() == PlanNode_PlanNodeType::EXCHANGE);
-        let node = ExchangeNode::parse_from_bytes(builder.plan_node().get_body().get_value())
+impl BoxedExecutorBuilder for ExchangeExecutor {
+    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+        ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::EXCHANGE);
+        let node = ExchangeNode::parse_from_bytes(source.plan_node().get_body().get_value())
             .map_err(ProtobufError)?;
-        let server_addr = *builder.env.server_address();
+        let server_addr = *source.env.server_address();
 
         let mut sources: Vec<Box<dyn ExchangeSource>> = vec![];
         for proto_source in node.get_sources() {
             sources.push(ExchangeExecutor::create_source(
-                builder.env.clone(),
+                source.env.clone(),
                 proto_source,
             )?);
         }
-        Ok(Self {
+        Ok(Box::new(Self {
             sources,
             server_addr,
             source_idx: 0,
-        })
+        }))
     }
 }
 

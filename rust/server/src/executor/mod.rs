@@ -1,24 +1,23 @@
-use std::convert::TryFrom;
-
-use create_table::*;
-use drop_table::*;
-use exchange::*;
-use filter::*;
-use insert_values::*;
 use limit::*;
-use order_by::*;
-use projection::*;
 use risingwave_proto::plan::{PlanNode, PlanNode_PlanNodeType};
-use row_seq_scan::*;
-use seq_scan::*;
-use sort_agg::*;
-use top_n::*;
 
 use crate::array::DataChunk;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 use crate::executor::create_stream::CreateStreamExecutor;
 use crate::executor::gather::GatherExecutor;
+use drop_table::*;
+use exchange::*;
+use filter::*;
+use insert_values::*;
+use order_by::*;
+use projection::*;
+use row_seq_scan::*;
+use seq_scan::*;
+use sort_agg::*;
+use top_n::*;
+
+use crate::executor::create_table::CreateTableExecutor;
 pub use crate::executor::stream_scan::StreamScanExecutor;
 use crate::task::GlobalTaskEnv;
 
@@ -67,6 +66,11 @@ pub trait Executor: Send {
 
 pub type BoxedExecutor = Box<dyn Executor>;
 
+/// every Executor should impl this trait to provide a static method to build a `BoxedExecutor` from proto and global environment
+pub trait BoxedExecutorBuilder {
+    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor>;
+}
+
 pub struct ExecutorBuilder<'a> {
     plan_node: &'a PlanNode,
     env: GlobalTaskEnv,
@@ -77,7 +81,7 @@ macro_rules! build_executor {
     match $source.plan_node().get_node_type() {
       $(
         $proto_type_name => {
-          <$data_type>::try_from($source).map(|d| Box::new(d) as BoxedExecutor)
+          <$data_type>::new_boxed_executor($source)
         },
       )*
       _ => Err(RwError::from(InternalError(format!("Unsupported plan node type: {:?}", $source.plan_node().get_node_type()))))

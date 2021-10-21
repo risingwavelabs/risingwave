@@ -1,16 +1,14 @@
 use crate::array::DataChunk;
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
-use crate::error::{Result, RwError};
+use crate::error::Result;
 use crate::executor::ExecutorResult::{Batch, Done};
-use std::cmp::min;
-use std::convert::TryFrom;
-
 use itertools::Itertools;
 use protobuf::Message;
 use risingwave_proto::plan::{LimitNode as LimitProto, PlanNode_PlanNodeType};
+use std::cmp::min;
 
-use super::{BoxedExecutor, Executor, ExecutorBuilder, ExecutorResult};
+use super::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult};
 
 /// Limit executor.
 pub(super) struct LimitExecutor {
@@ -25,9 +23,8 @@ pub(super) struct LimitExecutor {
     returned: usize,
 }
 
-impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for LimitExecutor {
-    type Error = RwError;
-    fn try_from(source: &'a ExecutorBuilder<'a>) -> Result<Self> {
+impl BoxedExecutorBuilder for LimitExecutor {
+    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::LIMIT);
         ensure!(source.plan_node().get_children().len() == 1);
         let limit_node = LimitProto::parse_from_bytes(source.plan_node().get_body().get_value())
@@ -38,18 +35,17 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for LimitExecutor {
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
             let child =
                 ExecutorBuilder::new(child_plan, source.global_task_env().clone()).build()?;
-            return Ok(Self {
+            return Ok(Box::new(Self {
                 child,
                 limit,
                 offset,
                 skipped: 0,
                 returned: 0,
-            });
+            }));
         }
         Err(InternalError("Limit must have one child".to_string()).into())
     }
 }
-
 impl LimitExecutor {
     fn process_chunk(&mut self, chunk: DataChunk) -> Result<DataChunk> {
         let mut new_vis;

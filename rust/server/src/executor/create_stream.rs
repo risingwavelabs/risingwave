@@ -12,7 +12,8 @@ use risingwave_proto::plan::{
     CreateStreamNode, CreateStreamNode_RowFormatType, PlanNode_PlanNodeType,
 };
 use std::collections::HashMap;
-use std::convert::TryFrom;
+
+use super::{BoxedExecutor, BoxedExecutorBuilder};
 
 pub(super) struct CreateStreamExecutor {
     table_id: TableId,
@@ -48,10 +49,8 @@ impl CreateStreamExecutor {
     }
 }
 
-impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for CreateStreamExecutor {
-    type Error = RwError;
-
-    fn try_from(source: &'a ExecutorBuilder<'a>) -> Result<Self> {
+impl BoxedExecutorBuilder for CreateStreamExecutor {
+    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::CREATE_STREAM);
 
         let node = CreateStreamNode::parse_from_bytes(source.plan_node().get_body().get_value())
@@ -91,13 +90,13 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for CreateStreamExecutor {
             )))),
         }?;
 
-        Ok(Self {
+        Ok(Box::new(Self {
             table_id,
             config,
             format,
             source_manager: source.global_task_env().source_manager_ref(),
             columns,
-        })
+        }))
     }
 }
 

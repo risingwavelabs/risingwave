@@ -11,8 +11,9 @@ use crate::types::DataTypeRef;
 use pb_convert::FromProtobuf;
 use protobuf::Message;
 use risingwave_proto::plan::{PlanNode_PlanNodeType, RowSeqScanNode};
-use std::convert::TryFrom;
 use std::sync::Arc;
+
+use super::{BoxedExecutor, BoxedExecutorBuilder};
 
 type RowIter = impl Iterator<Item = (Row, Row)>;
 
@@ -28,10 +29,8 @@ pub(super) struct RowSeqScanExecutor {
     column_ids: Vec<usize>,
 }
 
-impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for RowSeqScanExecutor {
-    type Error = RwError;
-
-    fn try_from(source: &'a ExecutorBuilder<'a>) -> Result<Self> {
+impl BoxedExecutorBuilder for RowSeqScanExecutor {
+    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::ROW_SEQ_SCAN);
 
         let seq_scan_node =
@@ -52,7 +51,7 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for RowSeqScanExecutor {
                 .map(|f| build_from_proto(f.get_column_type()))
                 .collect::<Result<Vec<_>>>()?;
 
-            Ok(Self {
+            Ok(Box::new(Self {
                 data_types,
                 column_ids: seq_scan_node
                     .get_column_ids()
@@ -60,7 +59,7 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for RowSeqScanExecutor {
                     .map(|i| *i as usize)
                     .collect::<Vec<_>>(),
                 iter: make_row_iter(table_ref)?,
-            })
+            }))
         } else {
             Err(RwError::from(InternalError(
                 "RowSeqScan requires a row table".to_string(),

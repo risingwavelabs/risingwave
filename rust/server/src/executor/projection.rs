@@ -1,4 +1,4 @@
-use super::BoxedExecutor;
+use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::array::column::Column;
 use crate::array::DataChunk;
 use crate::error::ErrorCode::ProtobufError;
@@ -8,7 +8,6 @@ use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::expr::{build_from_proto, BoxedExpression};
 use protobuf::Message;
 use risingwave_proto::plan::{PlanNode_PlanNodeType, ProjectNode};
-use std::convert::TryFrom;
 
 pub(super) struct ProjectionExecutor {
     expr: Vec<BoxedExpression>,
@@ -47,9 +46,8 @@ impl Executor for ProjectionExecutor {
     }
 }
 
-impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for ProjectionExecutor {
-    type Error = RwError;
-    fn try_from(source: &'a ExecutorBuilder<'a>) -> Result<Self> {
+impl BoxedExecutorBuilder for ProjectionExecutor {
+    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::PROJECT);
         ensure!(source.plan_node().get_children().len() == 1);
         let proto_value = source.plan_node().get_body();
@@ -71,10 +69,10 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for ProjectionExecutor {
             .map(build_from_proto)
             .collect::<Result<Vec<BoxedExpression>>>()?;
 
-        Ok(Self {
+        Ok(Box::new(Self {
             expr: project_exprs,
             child: child_node,
-        })
+        }))
     }
 }
 

@@ -12,8 +12,9 @@ use crate::types::{DataType, Int32Type};
 use pb_convert::FromProtobuf;
 use protobuf::Message;
 use risingwave_proto::plan::{InsertValueNode, PlanNode_PlanNodeType};
-use std::convert::TryFrom;
 use std::sync::Arc;
+
+use super::{BoxedExecutor, BoxedExecutorBuilder};
 
 pub(super) struct InsertValuesExecutor {
     table_id: TableId,
@@ -122,10 +123,8 @@ impl Executor for InsertValuesExecutor {
     }
 }
 
-impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for InsertValuesExecutor {
-    type Error = RwError;
-
-    fn try_from(source: &'a ExecutorBuilder<'a>) -> Result<Self> {
+impl BoxedExecutorBuilder for InsertValuesExecutor {
+    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::INSERT_VALUE);
         let insert_value_node =
             InsertValueNode::parse_from_bytes(source.plan_node().get_body().get_value())
@@ -147,11 +146,11 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for InsertValuesExecutor {
             rows.push(expr_row);
         }
 
-        Ok(Self {
+        Ok(Box::new(Self {
             table_id,
             storage_manager,
             rows,
             executed: false,
-        })
+        }))
     }
 }

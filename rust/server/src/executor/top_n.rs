@@ -1,14 +1,13 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
-use std::convert::TryFrom;
 use std::sync::Arc;
 use std::vec::Vec;
 
-use super::BoxedExecutor;
+use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::array::{DataChunk, DataChunkRef};
 use crate::error::{
     ErrorCode::{InternalError, ProtobufError},
-    Result, RwError,
+    Result,
 };
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::util::sort_util::{fetch_orders_from_order_by_node, HeapElem, OrderPair};
@@ -70,9 +69,8 @@ pub(super) struct TopNExecutor {
     top_n_heap: TopNHeap,
 }
 
-impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for TopNExecutor {
-    type Error = RwError;
-    fn try_from(source: &'a ExecutorBuilder<'a>) -> Result<Self> {
+impl BoxedExecutorBuilder for TopNExecutor {
+    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::TOP_N);
         ensure!(source.plan_node().get_children().len() == 1);
         let top_n_node = TopNNode::parse_from_bytes(source.plan_node().get_body().get_value())
@@ -82,11 +80,11 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for TopNExecutor {
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
             let child =
                 ExecutorBuilder::new(child_plan, source.global_task_env().clone()).build()?;
-            return Ok(Self::new(
+            return Ok(Box::new(Self::new(
                 child,
                 order_pairs,
                 top_n_node.get_limit() as usize,
-            ));
+            )));
         }
         Err(InternalError("TopN must have one child".to_string()).into())
     }

@@ -1,14 +1,14 @@
-use super::BoxedExecutor;
+use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::array::ArrayImpl::Bool;
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
-use crate::error::{Result, RwError};
+use crate::error::Result;
 use crate::executor::ExecutorResult::{Batch, Done};
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::expr::{build_from_proto, BoxedExpression};
 use protobuf::Message;
 use risingwave_proto::plan::{FilterNode, PlanNode_PlanNodeType};
-use std::convert::TryFrom;
+
 pub(super) struct FilterExecutor {
     expr: BoxedExpression,
     child: BoxedExecutor,
@@ -42,9 +42,8 @@ impl Executor for FilterExecutor {
     }
 }
 
-impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for FilterExecutor {
-    type Error = RwError;
-    fn try_from(source: &'a ExecutorBuilder<'a>) -> Result<Self> {
+impl BoxedExecutorBuilder for FilterExecutor {
+    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::FILTER);
         ensure!(source.plan_node().get_children().len() == 1);
         let filter_node = FilterNode::parse_from_bytes(source.plan_node().get_body().get_value())
@@ -54,7 +53,7 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for FilterExecutor {
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
             let child =
                 ExecutorBuilder::new(child_plan, source.global_task_env().clone()).build()?;
-            return Ok(Self { expr, child });
+            return Ok(Box::new(Self { expr, child }));
         }
         Err(InternalError("Filter must have one children".to_string()).into())
     }

@@ -1,4 +1,3 @@
-use std::convert::TryFrom;
 use std::fmt::{Debug, Formatter};
 
 use itertools::Itertools;
@@ -14,6 +13,8 @@ use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::source::{ChunkReader, JSONParser, SourceColumnDesc, SourceFormat, SourceParser};
+
+use super::{BoxedExecutor, BoxedExecutorBuilder};
 
 const K_STREAM_SCAN_CHUNK_SIZE: usize = 1024;
 
@@ -34,14 +35,12 @@ impl StreamScanExecutor {
     }
 }
 
-impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for StreamScanExecutor {
-    type Error = RwError;
-
+impl BoxedExecutorBuilder for StreamScanExecutor {
     /// This function is designed for OLAP to initialize the `StreamScanExecutor`
     /// Things needed for initialization is
     /// 1. `StreamScanNode` whose definition can be shared by OLAP and Streaming
     /// 2. `SourceManager` whose definition can also be shared. But is it physically shared?
-    fn try_from(source: &'a ExecutorBuilder<'a>) -> Result<Self> {
+    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         let stream_scan_node = unpack_from_any!(source.plan_node().get_body(), StreamScanNode);
 
         let table_id = TableId::from_protobuf(stream_scan_node.get_table_ref_id())
@@ -80,11 +79,11 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for StreamScanExecutor {
             _ => unimplemented!(),
         };
 
-        Ok(Self {
+        Ok(Box::new(Self {
             reader: ChunkReader::new(&columns, source_desc.source.reader()?, parser),
             columns,
             done: false,
-        })
+        }))
     }
 }
 

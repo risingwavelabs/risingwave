@@ -9,8 +9,9 @@ use crate::storage::{MemColumnarTable, TableRef};
 use pb_convert::FromProtobuf;
 use protobuf::Message;
 use risingwave_proto::plan::{PlanNode_PlanNodeType, SeqScanNode};
-use std::convert::TryFrom;
 use std::sync::Arc;
+
+use super::{BoxedExecutor, BoxedExecutorBuilder};
 
 pub(super) struct SeqScanExecutor {
     table: Arc<MemColumnarTable>,
@@ -19,10 +20,8 @@ pub(super) struct SeqScanExecutor {
     chunk_idx: usize,
 }
 
-impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for SeqScanExecutor {
-    type Error = RwError;
-
-    fn try_from(source: &'a ExecutorBuilder<'a>) -> Result<Self> {
+impl BoxedExecutorBuilder for SeqScanExecutor {
+    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::SEQ_SCAN);
 
         let seq_scan_node =
@@ -43,12 +42,12 @@ impl<'a> TryFrom<&'a ExecutorBuilder<'a>> for SeqScanExecutor {
                 .map(|c| table_ref.index_of_column_id(*c))
                 .collect::<Result<Vec<usize>>>()?;
 
-            Ok(Self {
+            Ok(Box::new(Self {
                 table: table_ref,
                 column_indices,
                 chunk_idx: 0,
                 data: Vec::new(),
-            })
+            }))
         } else {
             Err(RwError::from(InternalError(
                 "SeqScan requires a columnar table".to_string(),
