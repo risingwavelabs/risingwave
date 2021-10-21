@@ -24,10 +24,20 @@ select * from t where v1 > 1 and v2 = 3
 4 3 5
 
 
-query I rowsort
+query I
 select min(v2) from t
 ----
 3
+
+query I
+select count(*) from t
+----
+4
+
+query I
+select count(*) from t where v2 = 3
+----
+2
 
 query I rowsort
 select v1 from t
