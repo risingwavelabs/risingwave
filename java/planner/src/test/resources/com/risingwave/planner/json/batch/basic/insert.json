@@ -1,5 +1,5 @@
 {
-  "nodeType": "DEFAULT_INSERT",
+  "nodeType": "INSERT",
   "body": {
     "@type": "type.googleapis.com/plan.InsertNode",
     "tableRefId": {

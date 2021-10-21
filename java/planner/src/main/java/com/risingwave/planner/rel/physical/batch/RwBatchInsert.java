@@ -79,7 +79,7 @@ public class RwBatchInsert extends TableModify implements RisingWaveBatchPhyRel 
     }
 
     return PlanNode.newBuilder()
-        .setNodeType(PlanNode.PlanNodeType.DEFAULT_INSERT)
+        .setNodeType(PlanNode.PlanNodeType.INSERT)
         .setBody(Any.pack(insertNodeBuilder.build()))
         .addChildren(((RisingWaveBatchPhyRel) input).serialize())
         .build();

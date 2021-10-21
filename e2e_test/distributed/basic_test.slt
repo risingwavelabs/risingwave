@@ -243,3 +243,6 @@ query I
 select * from t where v1 < -1
 ----
 -2
+
+statement ok
+drop table t

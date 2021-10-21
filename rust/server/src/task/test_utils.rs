@@ -10,8 +10,8 @@ use protobuf::Message;
 use risingwave_proto::data::{Column, DataType, DataType_TypeName};
 use risingwave_proto::expr::{ConstantValue, ExprNode, ExprNode_Type};
 use risingwave_proto::plan::{
-    ColumnDesc, CreateTableNode, InsertValueNode, InsertValueNode_ExprTuple, PlanFragment,
-    PlanNode_PlanNodeType as PlanNodeType, SeqScanNode, ShuffleInfo_PartitionMode, TableRefId,
+    ColumnDesc, CreateTableNode, InsertNode, PlanFragment, PlanNode_PlanNodeType as PlanNodeType,
+    SeqScanNode, ShuffleInfo_PartitionMode, TableRefId, ValuesNode, ValuesNode_ExprTuple,
 };
 use risingwave_proto::task_service::{TaskData, TaskId as ProtoTaskId, TaskSinkId as ProtoSinkId};
 
@@ -179,23 +179,30 @@ impl<'a> TableBuilder<'a> {
 
     fn build_insert_values_plan(&self) -> PlanFragment {
         let mut plan = PlanFragment::default();
-        let mut insert = InsertValueNode::default();
+        let mut insert = InsertNode::default();
         let col_num = self.col_types.len();
         for _ in 0..col_num {
             insert.mut_column_ids().push(0);
         }
+
+        let mut child_plan = PlanFragment::default();
+        let mut values = ValuesNode::default();
         for tuple in self.tuples.iter() {
-            insert
-                .insert_tuples
-                .push(TableBuilder::build_insert(tuple.clone()));
+            values
+                .tuples
+                .push(TableBuilder::build_values(tuple.clone()));
         }
+        child_plan.mut_root().set_body(Any::pack(&values).unwrap());
+        child_plan.mut_root().set_node_type(PlanNodeType::VALUE);
+
+        plan.mut_root().children.push(child_plan.take_root());
         plan.mut_root().set_body(Any::pack(&insert).unwrap());
-        plan.mut_root().set_node_type(PlanNodeType::INSERT_VALUE);
+        plan.mut_root().set_node_type(PlanNodeType::INSERT);
         plan
     }
 
-    fn build_insert(constants: Vec<ConstantValue>) -> InsertValueNode_ExprTuple {
-        let mut tuple = InsertValueNode_ExprTuple::default();
+    fn build_values(constants: Vec<ConstantValue>) -> ValuesNode_ExprTuple {
+        let mut tuple = ValuesNode_ExprTuple::default();
         for constant in constants {
             let mut node = ExprNode::default();
 

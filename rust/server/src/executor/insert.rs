@@ -77,7 +77,7 @@ impl Executor for InsertExecutor {
 
 impl BoxedExecutorBuilder for InsertExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::DEFAULT_INSERT);
+        ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::INSERT);
         let insert_node = InsertNode::parse_from_bytes(source.plan_node().get_body().get_value())
             .map_err(ProtobufError)?;
 

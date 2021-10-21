@@ -15,7 +15,6 @@ use crate::task::GlobalTaskEnv;
 use drop_table::*;
 use exchange::*;
 use filter::*;
-use insert_values::*;
 use order_by::*;
 use projection::*;
 use row_seq_scan::*;
@@ -31,7 +30,6 @@ mod filter;
 mod gather;
 mod hash_map;
 mod insert;
-mod insert_values;
 mod join;
 mod limit;
 mod order_by;
@@ -114,7 +112,7 @@ impl<'a> ExecutorBuilder<'a> {
           PlanNode_PlanNodeType::CREATE_TABLE => CreateTableExecutor,
           PlanNode_PlanNodeType::SEQ_SCAN => SeqScanExecutor,
           PlanNode_PlanNodeType::ROW_SEQ_SCAN => RowSeqScanExecutor,
-          PlanNode_PlanNodeType::INSERT_VALUE => InsertValuesExecutor,
+          PlanNode_PlanNodeType::INSERT => InsertExecutor,
           PlanNode_PlanNodeType::DROP_TABLE => DropTableExecutor,
           PlanNode_PlanNodeType::GATHER => GatherExecutor,
           PlanNode_PlanNodeType::EXCHANGE => ExchangeExecutor,
@@ -127,7 +125,6 @@ impl<'a> ExecutorBuilder<'a> {
           PlanNode_PlanNodeType::TOP_N => TopNExecutor,
           PlanNode_PlanNodeType::LIMIT => LimitExecutor,
           PlanNode_PlanNodeType::VALUE => ValuesExecutor,
-          PlanNode_PlanNodeType::DEFAULT_INSERT => InsertExecutor,
           PlanNode_PlanNodeType::NESTED_LOOP_JOIN => NestedLoopJoinExecutor
         }
     }

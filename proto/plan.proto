@@ -70,17 +70,6 @@ message FilterScanNode {
     repeated int32 column_ids = 2;
 }
 
-message InsertValueNode {
-    // Not intended to be a general wrapper of repeated exprs.
-    // Only used when nested in another `repeated`.
-    message ExprTuple {
-        repeated expr.ExprNode cells = 1;
-    }
-    TableRefId table_ref_id = 1;
-    repeated int32 column_ids = 2;
-    repeated ExprTuple insert_tuples = 3;
-}
-
 message InsertNode {
     TableRefId table_ref_id = 1;
     repeated int32 column_ids = 2;
@@ -171,7 +160,7 @@ message PlanNode {
     enum PlanNodeType {
         INVALID = 0;
         FILTER_SCAN = 1;
-        INSERT_VALUE = 2;
+        INSERT = 2;
         SEQ_SCAN = 3;
         PROJECT = 4;
         CREATE_TABLE = 5;
@@ -189,8 +178,7 @@ message PlanNode {
         SORT_AGG = 17;
         ROW_SEQ_SCAN = 18;
         LIMIT = 19;
-        DEFAULT_INSERT = 20;
-        VALUE = 21;
+        VALUE = 20;
     }
     PlanNodeType node_type = 1;
     google.protobuf.Any body = 2;
