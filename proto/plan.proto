@@ -81,6 +81,18 @@ message InsertValueNode {
     repeated ExprTuple insert_tuples = 3;
 }
 
+message InsertNode {
+    TableRefId table_ref_id = 1;
+    repeated int32 column_ids = 2;
+}
+
+message ValuesNode {
+    message ExprTuple {
+        repeated expr.ExprNode cells = 1;
+    }
+    repeated ExprTuple tuples = 1;
+}
+
 message CreateTableNode {
     TableRefId table_ref_id = 1;
     repeated ColumnDesc column_descs = 2;
@@ -177,6 +189,8 @@ message PlanNode {
         SORT_AGG = 17;
         ROW_SEQ_SCAN = 18;
         LIMIT = 19;
+        DEFAULT_INSERT = 20;
+        VALUE = 21;
     }
     PlanNodeType node_type = 1;
     google.protobuf.Any body = 2;

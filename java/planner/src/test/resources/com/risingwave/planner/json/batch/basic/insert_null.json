@@ -1,0 +1,31 @@
+{
+  "nodeType": "DEFAULT_INSERT",
+  "body": {
+    "@type": "type.googleapis.com/plan.InsertNode",
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      },
+      "tableId": 3
+    },
+    "columnIds": [0]
+  },
+  "children": [{
+    "nodeType": "VALUE",
+    "body": {
+      "@type": "type.googleapis.com/plan.ValuesNode",
+      "tuples": [{
+        "cells": [{
+          "exprType": "CONSTANT_VALUE",
+          "body": {
+            "@type": "type.googleapis.com/expr.ConstantValue"
+          },
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }]
+      }]
+    }
+  }]
+}

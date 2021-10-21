@@ -1,0 +1,114 @@
+{
+  "nodeType": "DEFAULT_INSERT",
+  "body": {
+    "@type": "type.googleapis.com/plan.InsertNode",
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      }
+    },
+    "columnIds": [0, 1, 2, 3]
+  },
+  "children": [{
+    "nodeType": "PROJECT",
+    "body": {
+      "@type": "type.googleapis.com/plan.ProjectNode",
+      "selectList": [{
+        "exprType": "CAST",
+        "body": {
+          "@type": "type.googleapis.com/expr.FunctionCall",
+          "children": [{
+            "exprType": "CONSTANT_VALUE",
+            "body": {
+              "@type": "type.googleapis.com/expr.ConstantValue",
+              "body": "MTk3MC0wMS0wMQ=="
+            },
+            "returnType": {
+              "typeName": "CHAR",
+              "precision": 10
+            }
+          }]
+        },
+        "returnType": {
+          "typeName": "DATE"
+        }
+      }, {
+        "exprType": "CAST",
+        "body": {
+          "@type": "type.googleapis.com/expr.FunctionCall",
+          "children": [{
+            "exprType": "CONSTANT_VALUE",
+            "body": {
+              "@type": "type.googleapis.com/expr.ConstantValue",
+              "body": "MDQ6MDU6MDY="
+            },
+            "returnType": {
+              "typeName": "CHAR",
+              "precision": 8
+            }
+          }]
+        },
+        "returnType": {
+          "typeName": "TIME"
+        }
+      }, {
+        "exprType": "CAST",
+        "body": {
+          "@type": "type.googleapis.com/expr.FunctionCall",
+          "children": [{
+            "exprType": "CONSTANT_VALUE",
+            "body": {
+              "@type": "type.googleapis.com/expr.ConstantValue",
+              "body": "MTk3MC0wMS0wMSAwNDowNTowNg=="
+            },
+            "returnType": {
+              "typeName": "CHAR",
+              "precision": 19
+            }
+          }]
+        },
+        "returnType": {
+          "typeName": "TIMESTAMP"
+        }
+      }, {
+        "exprType": "CAST",
+        "body": {
+          "@type": "type.googleapis.com/expr.FunctionCall",
+          "children": [{
+            "exprType": "CONSTANT_VALUE",
+            "body": {
+              "@type": "type.googleapis.com/expr.ConstantValue",
+              "body": "MTk3MC0wMS0wMSAwNDowNTowNiAtMDg6MDA="
+            },
+            "returnType": {
+              "typeName": "CHAR",
+              "precision": 26
+            }
+          }]
+        },
+        "returnType": {
+          "typeName": "TIMESTAMPZ"
+        }
+      }]
+    },
+    "children": [{
+      "nodeType": "VALUE",
+      "body": {
+        "@type": "type.googleapis.com/plan.ValuesNode",
+        "tuples": [{
+          "cells": [{
+            "exprType": "CONSTANT_VALUE",
+            "body": {
+              "@type": "type.googleapis.com/expr.ConstantValue",
+              "body": "AAAAAA=="
+            },
+            "returnType": {
+              "typeName": "INT32"
+            }
+          }]
+        }]
+      }
+    }]
+  }]
+}

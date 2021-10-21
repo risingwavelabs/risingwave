@@ -5,7 +5,12 @@ use crate::array::DataChunk;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 use crate::executor::create_stream::CreateStreamExecutor;
+use crate::executor::create_table::CreateTableExecutor;
 use crate::executor::gather::GatherExecutor;
+use crate::executor::insert::InsertExecutor;
+pub use crate::executor::stream_scan::StreamScanExecutor;
+use crate::executor::values::ValuesExecutor;
+use crate::task::GlobalTaskEnv;
 use drop_table::*;
 use exchange::*;
 use filter::*;
@@ -17,10 +22,6 @@ use seq_scan::*;
 use sort_agg::*;
 use top_n::*;
 
-use crate::executor::create_table::CreateTableExecutor;
-pub use crate::executor::stream_scan::StreamScanExecutor;
-use crate::task::GlobalTaskEnv;
-
 mod create_stream;
 mod create_table;
 mod drop_table;
@@ -28,6 +29,7 @@ mod exchange;
 mod filter;
 mod gather;
 mod hash_map;
+mod insert;
 mod insert_values;
 mod join;
 mod limit;
@@ -40,6 +42,7 @@ mod stream_scan;
 #[cfg(test)]
 mod test_utils;
 mod top_n;
+mod values;
 
 pub enum ExecutorResult {
     Batch(DataChunk),
@@ -121,7 +124,9 @@ impl<'a> ExecutorBuilder<'a> {
           PlanNode_PlanNodeType::CREATE_STREAM => CreateStreamExecutor,
           PlanNode_PlanNodeType::STREAM_SCAN => StreamScanExecutor,
           PlanNode_PlanNodeType::TOP_N => TopNExecutor,
-          PlanNode_PlanNodeType::LIMIT => LimitExecutor
+          PlanNode_PlanNodeType::LIMIT => LimitExecutor,
+          PlanNode_PlanNodeType::VALUE => ValuesExecutor,
+          PlanNode_PlanNodeType::DEFAULT_INSERT => InsertExecutor
         }
     }
 

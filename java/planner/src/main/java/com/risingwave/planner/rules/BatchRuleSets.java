@@ -10,7 +10,7 @@ import com.risingwave.planner.rel.logical.RwLogicalSort;
 import com.risingwave.planner.rel.logical.RwLogicalValues;
 import com.risingwave.planner.rel.physical.batch.RwBatchFilter;
 import com.risingwave.planner.rel.physical.batch.RwBatchGather;
-import com.risingwave.planner.rel.physical.batch.RwBatchInsertValues;
+import com.risingwave.planner.rel.physical.batch.RwBatchInsert;
 import com.risingwave.planner.rel.physical.batch.RwBatchProject;
 import com.risingwave.planner.rel.physical.batch.RwBatchSort;
 import com.risingwave.planner.rel.physical.batch.RwBatchValues;
@@ -18,7 +18,6 @@ import com.risingwave.planner.rules.logical.GatherConversionRule;
 import com.risingwave.planner.rules.logical.ProjectToTableScanRule;
 import com.risingwave.planner.rules.physical.batch.BatchExpandConverterRule;
 import com.risingwave.planner.rules.physical.batch.BatchScanConverterRule;
-import com.risingwave.planner.rules.physical.batch.InsertValuesRule;
 import com.risingwave.planner.rules.physical.batch.aggregate.BatchHashAggRule;
 import com.risingwave.planner.rules.physical.batch.aggregate.BatchSortAggRule;
 import com.risingwave.planner.rules.physical.batch.join.BatchHashJoinRule;
@@ -28,6 +27,7 @@ import org.apache.calcite.rel.rules.PruneEmptyRules;
 import org.apache.calcite.tools.RuleSet;
 import org.apache.calcite.tools.RuleSets;
 
+/** Planner rule sets. */
 public class BatchRuleSets {
   private BatchRuleSets() {}
 
@@ -108,21 +108,18 @@ public class BatchRuleSets {
           GatherConversionRule.Config.DEFAULT.toRule());
 
   public static final RuleSet LOGICAL_OPTIMIZATION_RULES =
-      RuleSets.ofList(
-          ProjectToTableScanRule.Config.INSTANCE.toRule(),
-          InsertValuesRule.Config.VALUES.toRule(),
-          InsertValuesRule.Config.PROJECT_VALUES.toRule());
+      RuleSets.ofList(ProjectToTableScanRule.Config.INSTANCE.toRule());
 
   public static final RuleSet PHYSICAL_CONVERTER_RULES =
       RuleSets.ofList(
           BatchExpandConverterRule.Config.DEFAULT.toRule(),
           RwBatchFilter.BatchFilterConverterRule.INSTANCE,
           RwBatchProject.BatchProjectConverterRule.INSTANCE,
-          RwBatchValues.BatchValuesConverterRule.INSTANCE,
           BatchScanConverterRule.INSTANCE,
           RwBatchGather.RwBatchGatherConverterRule.INSTANCE,
           RwBatchSort.RwBatchSortConverterRule.INSTANCE,
-          RwBatchInsertValues.BatchInsertValuesConverterRule.INSTANCE);
+          RwBatchInsert.BatchInsertConverterRule.INSTANCE,
+          RwBatchValues.BatchValuesConverterRule.INSTANCE);
 
   public static final RuleSet PHYSICAL_AGG_RULES =
       RuleSets.ofList(

@@ -3,8 +3,11 @@ package com.risingwave.planner.rel.physical.batch;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
 import com.google.common.collect.ImmutableList;
+import com.google.protobuf.Any;
 import com.risingwave.planner.rel.logical.RwLogicalValues;
+import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
 import com.risingwave.proto.plan.PlanNode;
+import com.risingwave.proto.plan.ValuesNode;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelNode;
@@ -12,8 +15,14 @@ import org.apache.calcite.rel.convert.ConverterRule;
 import org.apache.calcite.rel.core.Values;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rex.RexLiteral;
+import org.apache.calcite.rex.RexNode;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+/**
+ * Physical version values operator.
+ *
+ * @see RwLogicalValues
+ */
 public class RwBatchValues extends Values implements RisingWaveBatchPhyRel {
   protected RwBatchValues(
       RelOptCluster cluster,
@@ -26,9 +35,28 @@ public class RwBatchValues extends Values implements RisingWaveBatchPhyRel {
 
   @Override
   public PlanNode serialize() {
-    throw new UnsupportedOperationException("RwBatchValues#serialize is not supported");
+    ValuesNode.Builder valuesNodeBuilder = ValuesNode.newBuilder();
+    for (int i = 0; i < tuples.size(); ++i) {
+      ImmutableList<RexLiteral> tuple = tuples.get(i);
+      ValuesNode.ExprTuple.Builder exprTupleBuilder = ValuesNode.ExprTuple.newBuilder();
+      for (int j = 0; j < tuple.size(); ++j) {
+        RexNode value = tuple.get(j);
+
+        RexToProtoSerializer rexToProtoSerializer = new RexToProtoSerializer();
+
+        // Add to Expr tuple.
+        exprTupleBuilder.addCells(value.accept(rexToProtoSerializer));
+      }
+      valuesNodeBuilder.addTuples(exprTupleBuilder.build());
+    }
+
+    return PlanNode.newBuilder()
+        .setNodeType(PlanNode.PlanNodeType.VALUE)
+        .setBody(Any.pack(valuesNodeBuilder.build()))
+        .build();
   }
 
+  /** Values converter rule between logical and physical. */
   public static class BatchValuesConverterRule extends ConverterRule {
     public static final BatchValuesConverterRule INSTANCE =
         Config.INSTANCE

@@ -20,8 +20,11 @@ insert into t values(1,4,2), (2,3,3), (3,4,4), (4,3,5)
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwBatchInsertValues(table=[t], values=[((1,4,2:FLOAT),(2,3,3:FLOAT),(3,4,4:FLOAT),(4,3,5:FLOAT))])
+RwBatchInsert(table=[[test_schema, t]], operation=[INSERT], flattened=[false])
+  RwBatchValues(tuples=[[{ 1, 4, 2 }, { 2, 3, 3 }, { 3, 4, 4 }, { 4, 3, 5 }]])
 ]]>
+        </Resource>
+        <Resource name="json" path="batch/basic/insert">
         </Resource>
     </TestCase>
 
@@ -274,7 +277,7 @@ RwBatchNestLoopJoin(condition=[>($0, $3)], joinType=[inner])
         <Resource name="json" path="batch/basic/nested_loop_join">
         </Resource>
     </TestCase>
-    <TestCase name="nested loop join">
+    <TestCase name="insert null">
         <Resource name="sql">
             <![CDATA[
             insert into t4 values(NULL);
@@ -282,8 +285,11 @@ RwBatchNestLoopJoin(condition=[>($0, $3)], joinType=[inner])
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwBatchInsertValues(table=[t4], values=[((null:INTEGER))])
+RwBatchInsert(table=[[test_schema, t4]], operation=[INSERT], flattened=[false])
+  RwBatchValues(tuples=[[{ null }]])
 ]]>
+        </Resource>
+        <Resource name="json" path="batch/basic/insert_null">
         </Resource>
     </TestCase>
 </Root>

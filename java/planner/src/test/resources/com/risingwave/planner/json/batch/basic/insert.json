@@ -1,0 +1,136 @@
+{
+  "nodeType": "DEFAULT_INSERT",
+  "body": {
+    "@type": "type.googleapis.com/plan.InsertNode",
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      }
+    },
+    "columnIds": [0, 1, 2]
+  },
+  "children": [{
+    "nodeType": "VALUE",
+    "body": {
+      "@type": "type.googleapis.com/plan.ValuesNode",
+      "tuples": [{
+        "cells": [{
+          "exprType": "CONSTANT_VALUE",
+          "body": {
+            "@type": "type.googleapis.com/expr.ConstantValue",
+            "body": "AAAAAQ=="
+          },
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }, {
+          "exprType": "CONSTANT_VALUE",
+          "body": {
+            "@type": "type.googleapis.com/expr.ConstantValue",
+            "body": "AAAABA=="
+          },
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }, {
+          "exprType": "CONSTANT_VALUE",
+          "body": {
+            "@type": "type.googleapis.com/expr.ConstantValue",
+            "body": "QAAAAA=="
+          },
+          "returnType": {
+            "typeName": "FLOAT"
+          }
+        }]
+      }, {
+        "cells": [{
+          "exprType": "CONSTANT_VALUE",
+          "body": {
+            "@type": "type.googleapis.com/expr.ConstantValue",
+            "body": "AAAAAg=="
+          },
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }, {
+          "exprType": "CONSTANT_VALUE",
+          "body": {
+            "@type": "type.googleapis.com/expr.ConstantValue",
+            "body": "AAAAAw=="
+          },
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }, {
+          "exprType": "CONSTANT_VALUE",
+          "body": {
+            "@type": "type.googleapis.com/expr.ConstantValue",
+            "body": "QEAAAA=="
+          },
+          "returnType": {
+            "typeName": "FLOAT"
+          }
+        }]
+      }, {
+        "cells": [{
+          "exprType": "CONSTANT_VALUE",
+          "body": {
+            "@type": "type.googleapis.com/expr.ConstantValue",
+            "body": "AAAAAw=="
+          },
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }, {
+          "exprType": "CONSTANT_VALUE",
+          "body": {
+            "@type": "type.googleapis.com/expr.ConstantValue",
+            "body": "AAAABA=="
+          },
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }, {
+          "exprType": "CONSTANT_VALUE",
+          "body": {
+            "@type": "type.googleapis.com/expr.ConstantValue",
+            "body": "QIAAAA=="
+          },
+          "returnType": {
+            "typeName": "FLOAT"
+          }
+        }]
+      }, {
+        "cells": [{
+          "exprType": "CONSTANT_VALUE",
+          "body": {
+            "@type": "type.googleapis.com/expr.ConstantValue",
+            "body": "AAAABA=="
+          },
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }, {
+          "exprType": "CONSTANT_VALUE",
+          "body": {
+            "@type": "type.googleapis.com/expr.ConstantValue",
+            "body": "AAAAAw=="
+          },
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }, {
+          "exprType": "CONSTANT_VALUE",
+          "body": {
+            "@type": "type.googleapis.com/expr.ConstantValue",
+            "body": "QKAAAA=="
+          },
+          "returnType": {
+            "typeName": "FLOAT"
+          }
+        }]
+      }]
+    }
+  }]
+}
