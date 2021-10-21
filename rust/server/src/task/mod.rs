@@ -4,6 +4,7 @@ pub use env::*;
 pub use task::*;
 pub use task_manager::*;
 
+mod broadcast_channel;
 mod channel;
 mod env;
 mod fifo_channel;

@@ -1,5 +1,6 @@
 use crate::array::DataChunk;
-use crate::error::{ErrorCode, Result};
+use crate::error::Result;
+use crate::task::broadcast_channel::new_broadcast_channel;
 use crate::task::fifo_channel::new_fifo_channel;
 use crate::task::hash_shuffle_channel::new_hash_shuffle_channel;
 use risingwave_proto::plan::{ShuffleInfo, ShuffleInfo_PartitionMode as ShufflePartitionMode};
@@ -31,10 +32,6 @@ pub fn create_output_channel(
     match shuffle.get_partition_mode() {
         ShufflePartitionMode::SINGLE => Ok(new_fifo_channel()),
         ShufflePartitionMode::HASH => Ok(new_hash_shuffle_channel(shuffle)),
-        _ => Err(ErrorCode::NotImplementedError(format!(
-            "unsupported partition mode: {:?}",
-            shuffle.get_partition_mode()
-        ))
-        .into()),
+        ShufflePartitionMode::BROADCAST => Ok(new_broadcast_channel(shuffle)),
     }
 }
