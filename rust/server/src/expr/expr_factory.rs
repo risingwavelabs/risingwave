@@ -8,6 +8,7 @@ use crate::expr::build_from_proto as expr_build_from_proto;
 use crate::expr::ternary_expr_bytes::new_replace_expr;
 use crate::expr::ternary_expr_bytes::new_substr_start_end;
 use crate::expr::unary_expr::new_length_default;
+use crate::expr::unary_expr::new_ltrim_expr;
 use crate::expr::unary_expr::new_trim_expr;
 use crate::expr::unary_expr::new_unary_expr;
 use crate::expr::BoxedExpression;
@@ -79,7 +80,6 @@ pub fn build_position_expr(proto: &ExprNode) -> Result<BoxedExpression> {
 }
 
 pub fn build_trim_expr(proto: &ExprNode) -> Result<BoxedExpression> {
-    // FIXME: Note that now it only contains some other expressions so it may not be general enough.
     let data_type = type_build_from_proto(proto.get_return_type())?;
     let function_call_node =
         FunctionCall::parse_from_bytes(proto.get_body().get_value()).map_err(ProtobufError)?;
@@ -88,6 +88,17 @@ pub fn build_trim_expr(proto: &ExprNode) -> Result<BoxedExpression> {
     // TODO: add delimiter trim expr
     ensure!(children.len() == 1);
     Ok(new_trim_expr(child, data_type))
+}
+
+pub fn build_ltrim_expr(proto: &ExprNode) -> Result<BoxedExpression> {
+    let data_type = type_build_from_proto(proto.get_return_type())?;
+    let function_call_node =
+        FunctionCall::parse_from_bytes(proto.get_body().get_value()).map_err(ProtobufError)?;
+    let children = function_call_node.get_children();
+    let child = expr_build_from_proto(&children[0])?;
+    // TODO: add delimiter trim expr
+    ensure!(children.len() == 1);
+    Ok(new_ltrim_expr(child, data_type))
 }
 
 pub fn build_replace_expr(proto: &ExprNode) -> Result<BoxedExpression> {

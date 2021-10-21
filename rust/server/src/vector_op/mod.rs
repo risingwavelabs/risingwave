@@ -8,6 +8,7 @@ pub mod conjunction;
 mod div_op;
 pub mod length;
 pub mod like;
+pub mod ltrim;
 mod mod_op;
 mod mul_op;
 pub mod position;

@@ -45,6 +45,7 @@ message ExprNode {
         TRIM = 207;
         REPLACE = 208;
         POSITION = 209;
+        LTRIM = 210;
         STREAM_NULL_BY_ROW_COUNT = 1000;
     }
     Type expr_type = 1;
