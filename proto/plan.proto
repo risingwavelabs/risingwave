@@ -6,7 +6,7 @@ import "data.proto";
 import "expr.proto";
 
 
-package risingwave.executor.proto;
+package plan;
 option java_package = "com.risingwave.proto.plan";
 option java_multiple_files = true;
 option optimize_for = SPEED;
@@ -36,7 +36,7 @@ message ColumnDesc {
         BYTE_DICT = 6;
         DELTA = 7;
     }
-    risingwave.executor.proto.DataType column_type = 1;
+    data.DataType column_type = 1;
     ColumnEncodingType encoding = 2;
     bool is_primary = 3;
     string name = 4;
@@ -58,11 +58,11 @@ message StreamScanNode {
 }
 
 message ProjectNode {
-    repeated risingwave.expr.proto.ExprNode select_list = 1;
+    repeated expr.ExprNode select_list = 1;
 }
 
 message FilterNode {
-    risingwave.expr.proto.ExprNode search_condition = 1;
+    expr.ExprNode search_condition = 1;
 }
 
 message FilterScanNode {
@@ -74,7 +74,7 @@ message InsertValueNode {
     // Not intended to be a general wrapper of repeated exprs.
     // Only used when nested in another `repeated`.
     message ExprTuple {
-        repeated risingwave.expr.proto.ExprNode cells = 1;
+        repeated expr.ExprNode cells = 1;
     }
     TableRefId table_ref_id = 1;
     repeated int32 column_ids = 2;
@@ -95,7 +95,7 @@ message OrderByNode {
         DESCENDING = 2;
     }
     repeated OrderType order_types = 1;
-    repeated risingwave.expr.proto.ExprNode orders = 2;
+    repeated expr.ExprNode orders = 2;
 }
 
 message TopNNode {
@@ -137,22 +137,22 @@ enum JoinType {
 
 message NestedLoopJoinNode {
     JoinType join_type = 1;
-    risingwave.expr.proto.ExprNode join_cond = 2;
+    expr.ExprNode join_cond = 2;
 }
 
 message HashAggNode {
-    repeated risingwave.expr.proto.InputRefExpr group_keys = 1;
-    repeated risingwave.expr.proto.AggCall agg_calls = 2;
+    repeated expr.InputRefExpr group_keys = 1;
+    repeated expr.AggCall agg_calls = 2;
 }
 
 message SortAggNode {
-    repeated risingwave.expr.proto.ExprNode group_keys = 1;
-    repeated risingwave.expr.proto.AggCall agg_calls = 2;
+    repeated expr.ExprNode group_keys = 1;
+    repeated expr.AggCall agg_calls = 2;
 }
 
 message SimpleAggNode {
     // When there is no group_by_key, we use SimpleAggNode
-    repeated risingwave.expr.proto.AggCall agg_calls = 1;
+    repeated expr.AggCall agg_calls = 1;
 }
 
 message PlanNode {

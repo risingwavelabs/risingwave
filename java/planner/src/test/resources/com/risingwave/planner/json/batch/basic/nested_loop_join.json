@@ -1,15 +1,15 @@
 {
   "nodeType": "NESTED_LOOP_JOIN",
   "body": {
-    "@type": "type.googleapis.com/risingwave.executor.proto.NestedLoopJoinNode",
+    "@type": "type.googleapis.com/plan.NestedLoopJoinNode",
     "joinCond": {
       "exprType": "GREATER_THAN",
       "body": {
-        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+        "@type": "type.googleapis.com/expr.FunctionCall",
         "children": [{
           "exprType": "INPUT_REF",
           "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+            "@type": "type.googleapis.com/expr.InputRefExpr"
           },
           "returnType": {
             "typeName": "INT32"
@@ -17,7 +17,7 @@
         }, {
           "exprType": "INPUT_REF",
           "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+            "@type": "type.googleapis.com/expr.InputRefExpr",
             "columnIdx": 3
           },
           "returnType": {
@@ -33,7 +33,7 @@
   "children": [{
     "nodeType": "SEQ_SCAN",
     "body": {
-      "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",
+      "@type": "type.googleapis.com/plan.SeqScanNode",
       "tableRefId": {
         "schemaRefId": {
           "databaseRefId": {
@@ -45,7 +45,7 @@
   }, {
     "nodeType": "SEQ_SCAN",
     "body": {
-      "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",
+      "@type": "type.googleapis.com/plan.SeqScanNode",
       "tableRefId": {
         "schemaRefId": {
           "databaseRefId": {

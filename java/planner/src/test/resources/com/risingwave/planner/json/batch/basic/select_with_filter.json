@@ -1,23 +1,23 @@
 {
   "nodeType": "FILTER",
   "body": {
-    "@type": "type.googleapis.com/risingwave.executor.proto.FilterNode",
+    "@type": "type.googleapis.com/plan.FilterNode",
     "searchCondition": {
       "exprType": "AND",
       "body": {
-        "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+        "@type": "type.googleapis.com/expr.FunctionCall",
         "children": [{
           "exprType": "AND",
           "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+            "@type": "type.googleapis.com/expr.FunctionCall",
             "children": [{
               "exprType": "GREATER_THAN",
               "body": {
-                "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+                "@type": "type.googleapis.com/expr.FunctionCall",
                 "children": [{
                   "exprType": "INPUT_REF",
                   "body": {
-                    "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+                    "@type": "type.googleapis.com/expr.InputRefExpr"
                   },
                   "returnType": {
                     "typeName": "INT32"
@@ -25,7 +25,7 @@
                 }, {
                   "exprType": "CONSTANT_VALUE",
                   "body": {
-                    "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+                    "@type": "type.googleapis.com/expr.ConstantValue",
                     "body": "AAAAAQ=="
                   },
                   "returnType": {
@@ -39,11 +39,11 @@
             }, {
               "exprType": "GREATER_THAN",
               "body": {
-                "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+                "@type": "type.googleapis.com/expr.FunctionCall",
                 "children": [{
                   "exprType": "INPUT_REF",
                   "body": {
-                    "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+                    "@type": "type.googleapis.com/expr.InputRefExpr",
                     "columnIdx": 1
                   },
                   "returnType": {
@@ -52,7 +52,7 @@
                 }, {
                   "exprType": "CONSTANT_VALUE",
                   "body": {
-                    "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+                    "@type": "type.googleapis.com/expr.ConstantValue",
                     "body": "AAAAAQ=="
                   },
                   "returnType": {
@@ -71,11 +71,11 @@
         }, {
           "exprType": "GREATER_THAN",
           "body": {
-            "@type": "type.googleapis.com/risingwave.expr.proto.FunctionCall",
+            "@type": "type.googleapis.com/expr.FunctionCall",
             "children": [{
               "exprType": "INPUT_REF",
               "body": {
-                "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr",
+                "@type": "type.googleapis.com/expr.InputRefExpr",
                 "columnIdx": 2
               },
               "returnType": {
@@ -84,7 +84,7 @@
             }, {
               "exprType": "CONSTANT_VALUE",
               "body": {
-                "@type": "type.googleapis.com/risingwave.expr.proto.ConstantValue",
+                "@type": "type.googleapis.com/expr.ConstantValue",
                 "body": "AAAAAQ=="
               },
               "returnType": {
@@ -105,7 +105,7 @@
   "children": [{
     "nodeType": "SEQ_SCAN",
     "body": {
-      "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",
+      "@type": "type.googleapis.com/plan.SeqScanNode",
       "tableRefId": {
         "schemaRefId": {
           "databaseRefId": {

@@ -4,7 +4,7 @@ import "stream_plan.proto";
 import "common.proto";
 import "task_service.proto";
 
-package risingwave.streaming.proto;
+package stream_service;
 option java_package = "com.risingwave.proto.streaming.streamnode";
 option java_multiple_files = true;
 option optimize_for = SPEED;
@@ -12,17 +12,17 @@ option optimize_for = SPEED;
 // Describe the fragments which will be running on this node
 message UpdateFragmentRequest {
   uint32 request_id = 1;
-  repeated risingwave.streaming.proto.StreamFragment fragment = 2;
+  repeated stream_plan.StreamFragment fragment = 2;
 }
 
 message UpdateFragmentResponse {
-  risingwave.proto.common.Status status = 1;
+  common.Status status = 1;
 }
 
 // Encode which host machine an actor resides.
 message ActorInfo {
   uint32 fragment_id = 1;
-  risingwave.executor.proto.HostAddress host = 2;
+  task_service.HostAddress host = 2;
 }
 
 message ActorInfoTable {
@@ -42,7 +42,7 @@ message BuildFragmentResponse {
 
 // Before starting streaming, the leader node broadcast the actor-host table to needed workers.
 message BroadcastActorInfoTableResponse {
-  risingwave.proto.common.Status status = 1;
+  common.Status status = 1;
 }
 
 service StreamService {

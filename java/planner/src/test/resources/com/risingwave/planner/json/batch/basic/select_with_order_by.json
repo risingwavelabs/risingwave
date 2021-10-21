@@ -1,12 +1,12 @@
 {
   "nodeType": "ORDER_BY",
   "body": {
-    "@type": "type.googleapis.com/risingwave.executor.proto.OrderByNode",
+    "@type": "type.googleapis.com/plan.OrderByNode",
     "orderTypes": ["ASCENDING"],
     "orders": [{
       "exprType": "INPUT_REF",
       "body": {
-        "@type": "type.googleapis.com/risingwave.expr.proto.InputRefExpr"
+        "@type": "type.googleapis.com/expr.InputRefExpr"
       },
       "returnType": {
         "typeName": "INT32"
@@ -16,7 +16,7 @@
   "children": [{
     "nodeType": "SEQ_SCAN",
     "body": {
-      "@type": "type.googleapis.com/risingwave.executor.proto.SeqScanNode",
+      "@type": "type.googleapis.com/plan.SeqScanNode",
       "tableRefId": {
         "schemaRefId": {
           "databaseRefId": {

@@ -5,22 +5,22 @@ import "expr.proto";
 import "data.proto";
 import "plan.proto";
 
-package risingwave.streaming.proto;
+package stream_plan;
 option java_package = "com.risingwave.proto.streaming.plan";
 option java_multiple_files = true;
 option optimize_for = SPEED;
 
 message TableSourceNode {
-  risingwave.executor.proto.TableRefId table_ref_id = 1;
+  plan.TableRefId table_ref_id = 1;
   repeated int32 column_ids = 2;
 }
 
 message ProjectNode {
-  repeated risingwave.expr.proto.ExprNode select_list = 1;
+  repeated expr.ExprNode select_list = 1;
 }
 
 message FilterNode {
-  risingwave.expr.proto.ExprNode search_condition = 1;
+  expr.ExprNode search_condition = 1;
 }
 
 message MemTableMaterializedViewNode {
@@ -33,19 +33,19 @@ message MemTableMaterializedViewNode {
 // A materialized view is regarded as a table,
 // hence we copy the CreateTableNode definition in OLAP PlanNode.
 message MaterializedViewNode{
-  risingwave.executor.proto.TableRefId table_ref_id = 1;
-  repeated risingwave.executor.proto.ColumnDesc column_descs = 2;
+  plan.TableRefId table_ref_id = 1;
+  repeated plan.ColumnDesc column_descs = 2;
 }
 
 // Remark by Yanghao: for both local and global we use the same node in the protobuf.
 // Local and global aggregator distinguish with each other in their aggregation definition.
 message SimpleAggNode {
-  repeated risingwave.expr.proto.AggCall agg_calls = 1;
+  repeated expr.AggCall agg_calls = 1;
 }
 
 message HashAggNode{
-  repeated risingwave.expr.proto.InputRefExpr group_keys = 1;
-  repeated risingwave.expr.proto.AggCall agg_calls = 2;
+  repeated expr.InputRefExpr group_keys = 1;
+  repeated expr.AggCall agg_calls = 2;
 }
 
 message StreamNode {
