@@ -13,6 +13,7 @@ mod mod_op;
 mod mul_op;
 pub mod position;
 pub mod replace;
+pub mod rtrim;
 mod sub_op;
 pub mod substr;
 pub mod trim;

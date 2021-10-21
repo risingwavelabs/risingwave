@@ -5,6 +5,7 @@ use crate::types::{DataTypeKind, DataTypeRef};
 use crate::vector_op::cast;
 use crate::vector_op::length::length_default;
 use crate::vector_op::ltrim::ltrim;
+use crate::vector_op::rtrim::rtrim;
 use crate::vector_op::trim::trim;
 use crate::vector_op::upper::upper;
 use risingwave_proto::expr::ExprNode_Type;
@@ -89,6 +90,15 @@ pub fn new_ltrim_expr(expr_ia1: BoxedExpression, return_type: DataTypeRef) -> Bo
         expr_ia1,
         return_type,
         func: ltrim,
+        _phantom: PhantomData,
+    })
+}
+
+pub fn new_rtrim_expr(expr_ia1: BoxedExpression, return_type: DataTypeRef) -> BoxedExpression {
+    Box::new(UnaryBytesExpression::<UTF8Array, _> {
+        expr_ia1,
+        return_type,
+        func: rtrim,
         _phantom: PhantomData,
     })
 }

@@ -26,7 +26,7 @@ pub use conjunction::ConjunctionExpression;
 
 use crate::expr::expr_factory::{
     build_binary_expr, build_length_expr, build_like_expr, build_ltrim_expr, build_position_expr,
-    build_replace_expr, build_substr_expr, build_trim_expr, build_unary_expr,
+    build_replace_expr, build_rtrim_expr, build_substr_expr, build_trim_expr, build_unary_expr,
 };
 pub use cmp::CompareOperatorKind;
 pub use conjunction::ConjunctionOperatorKind;
@@ -37,8 +37,8 @@ use risingwave_proto::expr::{
     ExprNode_Type::{ADD, DIVIDE, MODULUS, MULTIPLY, SUBTRACT},
     ExprNode_Type::{AND, NOT, OR},
     ExprNode_Type::{
-        CAST, CONSTANT_VALUE, INPUT_REF, LENGTH, LIKE, LTRIM, POSITION, REPLACE, SUBSTR, TRIM,
-        UPPER,
+        CAST, CONSTANT_VALUE, INPUT_REF, LENGTH, LIKE, LTRIM, POSITION, REPLACE, RTRIM, SUBSTR,
+        TRIM, UPPER,
     },
     ExprNode_Type::{
         EQUAL, GREATER_THAN, GREATER_THAN_OR_EQUAL, LESS_THAN, LESS_THAN_OR_EQUAL, NOT_EQUAL,
@@ -89,6 +89,7 @@ pub fn build_from_proto(proto: &ExprNode) -> Result<BoxedExpression> {
         LIKE => return build_like_expr(proto),
         TRIM => return build_trim_expr(proto),
         LTRIM => return build_ltrim_expr(proto),
+        RTRIM => return build_rtrim_expr(proto),
         POSITION => return build_position_expr(proto),
         _ => (),
     };
