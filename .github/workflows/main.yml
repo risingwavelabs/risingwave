@@ -76,7 +76,7 @@ jobs:
         run: |
           chmod +x ./rust/target/debug/compute-node
           ./scripts/start_cluster.sh 1
-          python3 ./scripts/sqllogictest_java.py -p ${{ env.RW_PORT }} -db dev
+          python3 ./scripts/sqllogictest.py -p ${{ env.RW_PORT }} -db dev -f ./e2e_test/streaming/
           ./scripts/kill_cluster.sh
 
       - name: Stop kafka cluster
