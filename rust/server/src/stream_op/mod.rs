@@ -10,7 +10,7 @@ mod hash_agg;
 mod kafka_source;
 mod merge;
 mod mview_sink;
-mod projection_operator;
+mod project;
 mod simple_agg;
 mod table_source;
 
@@ -22,7 +22,7 @@ pub use hash_agg::*;
 pub use kafka_source::*;
 pub use merge::*;
 pub use mview_sink::*;
-pub use projection_operator::*;
+pub use project::*;
 pub use simple_agg::*;
 pub use table_source::*;
 
