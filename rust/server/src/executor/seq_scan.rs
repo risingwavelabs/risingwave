@@ -103,3 +103,61 @@ impl SeqScanExecutor {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::array::{Array, I64Array};
+    use crate::catalog::test_utils::mock_table_id;
+    use crate::types::Int64Type;
+    use crate::*;
+
+    #[test]
+    fn test_seq_scan_executor() -> Result<()> {
+        let table_id = mock_table_id();
+        let table = MemColumnarTable::new(&table_id, 5);
+
+        let col1 = column_nonnull! { I64Array, Int64Type, [1, 3, 5, 7, 9] };
+        let col2 = column_nonnull! { I64Array, Int64Type, [2, 4, 6, 8, 10] };
+        let data_chunk1 = DataChunk::builder().columns(vec![col1]).build();
+        let data_chunk2 = DataChunk::builder().columns(vec![col2]).build();
+        table.append(data_chunk1)?;
+        table.append(data_chunk2)?;
+
+        let mut seq_scan_executor = SeqScanExecutor {
+            table: Arc::new(table),
+            column_indices: vec![0],
+            data: vec![],
+            chunk_idx: 0,
+        };
+        assert!(seq_scan_executor.init().is_ok());
+
+        let result_chunk1 = seq_scan_executor.execute()?.batch_or()?;
+        assert_eq!(result_chunk1.dimension(), 1);
+        assert_eq!(
+            result_chunk1
+                .column_at(0)?
+                .array()
+                .as_int64()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
+        );
+
+        let result_chunk2 = seq_scan_executor.execute()?.batch_or()?;
+        assert_eq!(result_chunk2.dimension(), 1);
+        assert_eq!(
+            result_chunk2
+                .column_at(0)?
+                .array()
+                .as_int64()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
+        );
+        assert!(seq_scan_executor.execute().is_ok());
+        assert!(seq_scan_executor.clean().is_ok());
+
+        Ok(())
+    }
+}
