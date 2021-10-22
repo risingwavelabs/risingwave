@@ -6,7 +6,7 @@ use crate::error::ErrorCode::InternalError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{build_from_proto as build_expr_from_proto, AggKind};
 use crate::protobuf::Message as _;
-use crate::storage::{StorageManagerRef, TableRef};
+use crate::storage::*;
 use crate::stream_op::*;
 use crate::types::build_from_proto as build_type_from_proto;
 use futures::channel::mpsc::{channel, Receiver, Sender};
@@ -77,13 +77,9 @@ impl StreamManager {
     }
 
     /// This function could only be called once during the lifecycle of `StreamManager` for now.
-    pub fn build_fragment(
-        &self,
-        fragments: &[u32],
-        storage_manager: StorageManagerRef,
-    ) -> Result<()> {
+    pub fn build_fragment(&self, fragments: &[u32], table_manager: TableManagerRef) -> Result<()> {
         let mut core = self.core.lock().unwrap();
-        core.build_fragment(fragments, storage_manager)
+        core.build_fragment(fragments, table_manager)
     }
 
     #[cfg(test)]
@@ -191,14 +187,14 @@ impl StreamManagerCore {
         &mut self,
         node: &stream_plan::StreamNode,
         merger: Box<dyn Executor>,
-        storage_mgr: StorageManagerRef,
+        table_manager: TableManagerRef,
     ) -> Result<Box<dyn Executor>> {
         use stream_plan::StreamNode_StreamNodeType::*;
 
         // Create the input operator before creating itself
         // Note(eric): Maybe we should put a `Merger` operator in proto
         let input = if node.has_input() {
-            self.create_nodes(node.get_input(), merger, storage_mgr.clone())?
+            self.create_nodes(node.get_input(), merger, table_manager.clone())?
         } else {
             merger
         };
@@ -212,8 +208,8 @@ impl StreamManagerCore {
                 let table_id = TableId::from_protobuf(table_source_node.get_table_ref_id())
                     .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
-                let table_ref = storage_mgr.clone().get_table(&table_id).unwrap();
-                if let TableRef::Columnar(table) = table_ref {
+                let table_ref = table_manager.clone().get_table(&table_id).unwrap();
+                if let SimpleTableRef::Columnar(table) = table_ref {
                     let stream_receiver = table.create_stream()?;
                     Ok(Box::new(TableSourceExecutor::new(
                         table_id,
@@ -291,9 +287,9 @@ impl StreamManagerCore {
                     .iter()
                     .map(|key| *key as usize)
                     .collect::<Vec<_>>();
-                storage_mgr.create_materialized_view(&table_id, columns, pks.clone())?;
-                let table_ref = storage_mgr.get_table(&table_id).unwrap();
-                if let TableRef::Row(table) = table_ref {
+                table_manager.create_materialized_view(&table_id, columns, pks.clone())?;
+                let table_ref = table_manager.get_table(&table_id).unwrap();
+                if let SimpleTableRef::Row(table) = table_ref {
                     let executor = Box::new(MViewSinkExecutor::new(input, table, pks));
                     Ok(executor)
                 } else {
@@ -354,18 +350,14 @@ impl StreamManagerCore {
         }
     }
 
-    fn build_fragment(
-        &mut self,
-        fragments: &[u32],
-        storage_manager: StorageManagerRef,
-    ) -> Result<()> {
+    fn build_fragment(&mut self, fragments: &[u32], table_manager: TableManagerRef) -> Result<()> {
         for fragment_id in fragments {
             let fragment = self.fragments.remove(fragment_id).unwrap();
 
             let merger = self.create_merger(*fragment_id, fragment.get_upstream_fragment_id())?;
 
             let operator =
-                self.create_nodes(fragment.get_nodes(), merger, storage_manager.clone())?;
+                self.create_nodes(fragment.get_nodes(), merger, table_manager.clone())?;
 
             let dispatcher = self.create_dispatcher(
                 operator,

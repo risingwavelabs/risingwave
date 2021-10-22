@@ -6,7 +6,7 @@ use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::executor::ExecutorResult::{Batch, Done};
 use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult};
-use crate::storage::{StorageManagerRef, TableRef};
+use crate::storage::*;
 
 use crate::types::Int32Type;
 use pb_convert::FromProtobuf;
@@ -18,7 +18,7 @@ use std::sync::Arc;
 pub(super) struct InsertExecutor {
     /// target table id
     table_id: TableId,
-    storage_manager: StorageManagerRef,
+    table_manager: TableManagerRef,
 
     child: BoxedExecutor,
     executed: bool,
@@ -36,8 +36,8 @@ impl Executor for InsertExecutor {
             return Ok(Done);
         }
 
-        let table_ref = (if let TableRef::Columnar(table_ref) =
-            self.storage_manager.get_table(&self.table_id)?
+        let table_ref = (if let SimpleTableRef::Columnar(table_ref) =
+            self.table_manager.get_table(&self.table_id)?
         {
             Ok(table_ref)
         } else {
@@ -84,7 +84,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
         let table_id = TableId::from_protobuf(insert_node.get_table_ref_id())
             .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
-        let storage_manager = source.global_task_env().storage_manager_ref();
+        let table_manager = source.global_task_env().table_manager_ref();
 
         let proto_child = source.plan_node.get_children().get(0).ok_or_else(|| {
             RwError::from(ErrorCode::InternalError(String::from(
@@ -95,7 +95,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
 
         Ok(Box::new(Self {
             table_id,
-            storage_manager,
+            table_manager,
             child,
             executed: false,
         }))
@@ -108,7 +108,7 @@ mod tests {
     use crate::array::{Array, I64Array};
     use crate::catalog::test_utils::mock_table_id;
     use crate::executor::test_utils::MockExecutor;
-    use crate::storage::{MemStorageManager, StorageManager};
+    use crate::storage::{SimpleTableManager, TableManager};
     use crate::types::Int64Type;
     use crate::*;
     use std::sync::Arc;
@@ -116,10 +116,10 @@ mod tests {
     #[test]
     fn test_insert_executor() -> Result<()> {
         let table_id = mock_table_id();
-        let storage_manager = Arc::new(MemStorageManager::new());
+        let table_manager = Arc::new(SimpleTableManager::new());
         let mut mock_executor = MockExecutor::new();
 
-        storage_manager.create_table(&table_id, 2)?;
+        table_manager.create_table(&table_id, 2)?;
         let col1 = column_nonnull! { I64Array, Int64Type, [1, 3, 5, 7, 9] };
         let col2 = column_nonnull! { I64Array, Int64Type, [2, 4, 6, 8, 10] };
         let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
@@ -127,7 +127,7 @@ mod tests {
 
         let mut insert_executor = InsertExecutor {
             table_id,
-            storage_manager,
+            table_manager,
             child: Box::new(mock_executor),
             executed: false,
         };
@@ -146,9 +146,9 @@ mod tests {
         );
 
         let table_ref = insert_executor
-            .storage_manager
+            .table_manager
             .get_table(&insert_executor.table_id)?;
-        if let TableRef::Columnar(table_ref) = table_ref {
+        if let SimpleTableRef::Columnar(table_ref) = table_ref {
             let data_ref = table_ref.get_data()?;
             assert_eq!(
                 data_ref[0]

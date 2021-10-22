@@ -2,7 +2,7 @@ use crate::service::exchange_service::ExchangeServiceImpl;
 use crate::service::stream_service::StreamServiceImpl;
 use crate::service::task_service::TaskServiceImpl;
 use crate::source::MemSourceManager;
-use crate::storage::MemStorageManager;
+use crate::storage::SimpleTableManager;
 use crate::stream::StreamManager;
 use crate::task::{GlobalTaskEnv, TaskManager};
 use grpcio::{ChannelBuilder, Environment, Result, ServerBuilder, ShutdownFuture};
@@ -17,7 +17,7 @@ pub struct Server {
 
 impl Server {
     pub fn new(addr: SocketAddr) -> Result<Server> {
-        let store_mgr = Arc::new(MemStorageManager::new());
+        let store_mgr = Arc::new(SimpleTableManager::new());
 
         let task_mgr = Arc::new(TaskManager::new());
         let stream_mgr = Arc::new(StreamManager::new());

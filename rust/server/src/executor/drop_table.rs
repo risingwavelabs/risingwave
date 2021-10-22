@@ -2,7 +2,7 @@ use crate::catalog::TableId;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::Result;
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
-use crate::storage::StorageManagerRef;
+use crate::storage::TableManagerRef;
 use pb_convert::FromProtobuf;
 use protobuf::Message;
 use risingwave_proto::plan::{DropTableNode, PlanNode_PlanNodeType};
@@ -11,7 +11,7 @@ use super::{BoxedExecutor, BoxedExecutorBuilder};
 
 pub(super) struct DropTableExecutor {
     table_id: TableId,
-    storage_manager: StorageManagerRef,
+    table_manager: TableManagerRef,
 }
 
 impl BoxedExecutorBuilder for DropTableExecutor {
@@ -26,7 +26,7 @@ impl BoxedExecutorBuilder for DropTableExecutor {
 
         Ok(Box::new(Self {
             table_id,
-            storage_manager: source.global_task_env().storage_manager_ref(),
+            table_manager: source.global_task_env().table_manager_ref(),
         }))
     }
 }
@@ -37,7 +37,7 @@ impl Executor for DropTableExecutor {
     }
 
     fn execute(&mut self) -> Result<ExecutorResult> {
-        self.storage_manager
+        self.table_manager
             .drop_table(&self.table_id)
             .map(|_| ExecutorResult::Done)
     }

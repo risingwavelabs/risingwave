@@ -399,7 +399,7 @@ mod tests {
     use crate::executor::join::nested_loop_join::{BuildTable, ProbeSideSource};
     use crate::executor::seq_scan::SeqScanExecutor;
     use crate::executor::ExecutorResult;
-    use crate::storage::MemColumnarTable;
+    use crate::storage::SimpleMemTable;
     use crate::types::Int32Type;
     use crate::types::ScalarRefImpl;
     use std::sync::Arc;
@@ -437,7 +437,7 @@ mod tests {
     fn test_convert_row_to_chunk() {
         let row = RowRef::new(vec![Some(ScalarRefImpl::Int32(3))]);
         let seq_scan_exec = SeqScanExecutor::new(
-            Arc::new(MemColumnarTable::new(&mock_table_id(), 0)),
+            Arc::new(SimpleMemTable::new(&mock_table_id(), 0)),
             vec![],
             vec![],
             0,

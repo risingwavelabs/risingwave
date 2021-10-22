@@ -46,7 +46,7 @@ mod tests {
     use crate::array::{I32Array, UTF8Array};
     use crate::array_nonnull;
     use crate::catalog::test_utils::mock_table_id;
-    use crate::storage::MemColumnarTable;
+    use crate::storage::{SimpleMemTable, Table};
     use crate::stream_op::Op;
     use crate::types::{DataTypeKind, DataTypeRef, Int32Type, StringType};
     use itertools::Itertools;
@@ -55,7 +55,7 @@ mod tests {
     #[tokio::test]
     async fn test_table_source() -> Result<()> {
         let table_id = mock_table_id();
-        let table = MemColumnarTable::new(&table_id, 2);
+        let table = SimpleMemTable::new(&table_id, 2);
 
         let col1_type = Int32Type::create(false) as DataTypeRef;
         let col2_type = StringType::create(true, 10, DataTypeKind::Varchar);

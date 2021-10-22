@@ -1,5 +1,5 @@
 use crate::source::{SourceManager, SourceManagerRef};
-use crate::storage::{StorageManager, StorageManagerRef};
+use crate::storage::{TableManager, TableManagerRef};
 use crate::task::TaskManager;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -8,7 +8,7 @@ use std::sync::Arc;
 /// The instance will be shared by every task.
 #[derive(Clone)]
 pub struct GlobalTaskEnv {
-    storage_manager: StorageManagerRef,
+    table_manager: TableManagerRef,
     server_addr: SocketAddr,
     task_manager: Arc<TaskManager>,
     source_manager: SourceManagerRef,
@@ -16,13 +16,13 @@ pub struct GlobalTaskEnv {
 
 impl GlobalTaskEnv {
     pub fn new(
-        storage_manager: StorageManagerRef,
+        table_manager: TableManagerRef,
         source_manager: SourceManagerRef,
         task_manager: Arc<TaskManager>,
         server_addr: SocketAddr,
     ) -> Self {
         GlobalTaskEnv {
-            storage_manager,
+            table_manager,
             task_manager,
             server_addr,
             source_manager,
@@ -33,21 +33,21 @@ impl GlobalTaskEnv {
     #[cfg(test)]
     pub fn for_test() -> Self {
         use crate::source::MemSourceManager;
-        use crate::storage::MemStorageManager;
+        use crate::storage::SimpleTableManager;
         GlobalTaskEnv {
-            storage_manager: Arc::new(MemStorageManager::new()),
+            table_manager: Arc::new(SimpleTableManager::new()),
             task_manager: Arc::new(TaskManager::new()),
             server_addr: SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
             source_manager: std::sync::Arc::new(MemSourceManager::new()),
         }
     }
 
-    pub fn storage_manager(&self) -> &dyn StorageManager {
-        &*self.storage_manager
+    pub fn table_manager(&self) -> &dyn TableManager {
+        &*self.table_manager
     }
 
-    pub fn storage_manager_ref(&self) -> StorageManagerRef {
-        self.storage_manager.clone()
+    pub fn table_manager_ref(&self) -> TableManagerRef {
+        self.table_manager.clone()
     }
 
     pub fn server_address(&self) -> &SocketAddr {

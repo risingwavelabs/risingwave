@@ -4,7 +4,7 @@ use crate::array::{Array, I32Array, I64Array};
 use crate::catalog::TableId;
 use crate::error::ErrorCode::InternalError;
 use crate::expr::*;
-use crate::storage::{MemStorageManager, Row, StorageManager, TableRef};
+use crate::storage::{Row, SimpleTableManager, SimpleTableRef, TableManager};
 use crate::stream_op::*;
 use crate::types::{ArithmeticOperatorKind, BoolType, Int32Type, Int64Type, Scalar};
 use crate::*;
@@ -42,7 +42,7 @@ impl Executor for MockSource {
 #[tokio::test]
 async fn test_sink() {
     // Prepare storage and memtable.
-    let store_mgr = Arc::new(MemStorageManager::new());
+    let store_mgr = Arc::new(SimpleTableManager::new());
     let table_ref_proto = make_proto!(TableRefId, {
         schema_ref_id: make_proto!(SchemaRefId, {
             database_ref_id: make_proto!(DatabaseRefId, {
@@ -87,7 +87,7 @@ async fn test_sink() {
     };
 
     let table_ref = store_mgr.get_table(&table_id).unwrap();
-    if let TableRef::Row(table) = table_ref {
+    if let SimpleTableRef::Row(table) = table_ref {
         // Prepare stream executors.
         let source = MockSource::new(vec![chunk1, chunk2]);
         let mut sink_executor =
@@ -136,7 +136,7 @@ async fn test_sink() {
 #[tokio::test]
 async fn test_sink_no_key() {
     // Prepare storage and memtable.
-    let store_mgr = Arc::new(MemStorageManager::new());
+    let store_mgr = Arc::new(SimpleTableManager::new());
     let table_ref_proto = make_proto!(TableRefId, {
         schema_ref_id: make_proto!(SchemaRefId, {
             database_ref_id: make_proto!(DatabaseRefId, {
@@ -180,7 +180,7 @@ async fn test_sink_no_key() {
     };
     // Prepare stream executors.
     let table_ref = store_mgr.get_table(&table_id).unwrap();
-    if let TableRef::Row(table) = table_ref {
+    if let SimpleTableRef::Row(table) = table_ref {
         let source = MockSource::new(vec![chunk1, chunk2]);
         let mut sink_executor = Box::new(MViewSinkExecutor::new(
             Box::new(source),

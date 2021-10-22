@@ -1,4 +1,4 @@
-use crate::storage::StorageManagerRef;
+use crate::storage::TableManagerRef;
 use crate::stream::StreamManager;
 use grpcio::{RpcContext, RpcStatus, RpcStatusCode, UnarySink};
 use risingwave_proto::stream_service::{
@@ -11,12 +11,12 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct StreamServiceImpl {
     mgr: Arc<StreamManager>,
-    storage_mgr: StorageManagerRef,
+    table_manager: TableManagerRef,
 }
 
 impl StreamServiceImpl {
-    pub fn new(mgr: Arc<StreamManager>, storage_mgr: StorageManagerRef) -> Self {
-        StreamServiceImpl { mgr, storage_mgr }
+    pub fn new(mgr: Arc<StreamManager>, table_manager: TableManagerRef) -> Self {
+        StreamServiceImpl { mgr, table_manager }
     }
 }
 
@@ -53,7 +53,7 @@ impl StreamService for StreamServiceImpl {
     ) {
         let res = self
             .mgr
-            .build_fragment(req.get_fragment_id(), self.storage_mgr.clone());
+            .build_fragment(req.get_fragment_id(), self.table_manager.clone());
         ctx.spawn(async move {
             match res {
                 Err(e) => {

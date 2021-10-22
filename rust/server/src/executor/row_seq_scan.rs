@@ -5,7 +5,7 @@ use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
-use crate::storage::{MemRowTable, Row, TableRef};
+use crate::storage::{MemRowTable, Row, SimpleTableRef};
 use crate::types::build_from_proto;
 use crate::types::DataTypeRef;
 use pb_convert::FromProtobuf;
@@ -44,9 +44,9 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
 
         let table_ref = source
             .global_task_env()
-            .storage_manager()
+            .table_manager()
             .get_table(&table_id)?;
-        if let TableRef::Row(table_ref) = table_ref {
+        if let SimpleTableRef::Row(table_ref) = table_ref {
             let data_types = table_ref
                 .schema()
                 .into_iter()

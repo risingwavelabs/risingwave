@@ -5,7 +5,7 @@ use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::executor::ExecutorResult::Done;
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
-use crate::storage::{MemColumnarTable, TableRef};
+use crate::storage::*;
 use pb_convert::FromProtobuf;
 use protobuf::Message;
 use risingwave_proto::plan::{PlanNode_PlanNodeType, SeqScanNode};
@@ -14,7 +14,7 @@ use std::sync::Arc;
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 
 pub(super) struct SeqScanExecutor {
-    table: Arc<MemColumnarTable>,
+    table: Arc<SimpleMemTable>,
     column_indices: Vec<usize>,
     data: Vec<DataChunkRef>,
     chunk_idx: usize,
@@ -33,9 +33,9 @@ impl BoxedExecutorBuilder for SeqScanExecutor {
 
         let table_ref = source
             .global_task_env()
-            .storage_manager()
+            .table_manager()
             .get_table(&table_id)?;
-        if let TableRef::Columnar(table_ref) = table_ref {
+        if let SimpleTableRef::Columnar(table_ref) = table_ref {
             let column_indices = seq_scan_node
                 .get_column_ids()
                 .iter()
@@ -90,7 +90,7 @@ impl Executor for SeqScanExecutor {
 
 impl SeqScanExecutor {
     pub(crate) fn new(
-        table: Arc<MemColumnarTable>,
+        table: Arc<SimpleMemTable>,
         column_indices: Vec<usize>,
         data: Vec<DataChunkRef>,
         chunk_idx: usize,
@@ -115,7 +115,7 @@ mod tests {
     #[test]
     fn test_seq_scan_executor() -> Result<()> {
         let table_id = mock_table_id();
-        let table = MemColumnarTable::new(&table_id, 5);
+        let table = SimpleMemTable::new(&table_id, 5);
 
         let col1 = column_nonnull! { I64Array, Int64Type, [1, 3, 5, 7, 9] };
         let col2 = column_nonnull! { I64Array, Int64Type, [2, 4, 6, 8, 10] };

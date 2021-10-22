@@ -2,7 +2,7 @@ use crate::catalog::TableId;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::Result;
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
-use crate::storage::StorageManagerRef;
+use crate::storage::TableManagerRef;
 use pb_convert::FromProtobuf;
 use protobuf::Message;
 use risingwave_proto::plan::{CreateTableNode, PlanNode_PlanNodeType};
@@ -12,7 +12,7 @@ use super::{BoxedExecutor, BoxedExecutorBuilder};
 pub(super) struct CreateTableExecutor {
     table_id: TableId,
     column_count: usize,
-    storage_manager: StorageManagerRef,
+    table_manager: TableManagerRef,
 }
 
 impl BoxedExecutorBuilder for CreateTableExecutor {
@@ -30,7 +30,7 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
         Ok(Box::new(Self {
             table_id,
             column_count,
-            storage_manager: source.global_task_env().storage_manager_ref(),
+            table_manager: source.global_task_env().table_manager_ref(),
         }))
     }
 }
@@ -42,7 +42,7 @@ impl Executor for CreateTableExecutor {
     }
 
     fn execute(&mut self) -> Result<ExecutorResult> {
-        self.storage_manager
+        self.table_manager
             .create_table(&self.table_id, self.column_count)
             .map(|_| ExecutorResult::Done)
     }

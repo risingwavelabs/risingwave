@@ -19,8 +19,8 @@ use crate::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder};
 use crate::catalog::TableId;
 use crate::error::ErrorCode::InternalError;
 use crate::error::RwError;
-use crate::storage::TableRef;
-use crate::storage::{MemStorageManager, Row, StorageManager};
+use crate::storage::SimpleTableRef;
+use crate::storage::{Row, SimpleTableManager, Table, TableManager};
 use crate::stream::StreamManager;
 use crate::stream_op::Message;
 use crate::types::{Int32Type, Scalar};
@@ -102,12 +102,12 @@ async fn test_stream_mv_proto() {
     });
 
     // Initialize storage.
-    let storage_manager = Arc::new(MemStorageManager::new());
+    let table_manager = Arc::new(SimpleTableManager::new());
     let table_id =
         TableId::from_protobuf(&make_table_ref_id(0)).expect("Failed to convert table id");
-    let _res = storage_manager.create_table(&table_id, 2);
+    let _res = table_manager.create_table(&table_id, 2);
     let table_ref =
-        (if let TableRef::Columnar(table_ref) = storage_manager.get_table(&table_id).unwrap() {
+        (if let SimpleTableRef::Columnar(table_ref) = table_manager.get_table(&table_id).unwrap() {
             Ok(table_ref)
         } else {
             Err(RwError::from(InternalError(
@@ -144,7 +144,7 @@ async fn test_stream_mv_proto() {
     stream_manager.update_actor_info(actor_info_table).unwrap();
     stream_manager.update_fragment(&[fragment_proto]).unwrap();
     stream_manager
-        .build_fragment(&[1], storage_manager.clone())
+        .build_fragment(&[1], table_manager.clone())
         .unwrap();
 
     // Insert data and check if the materialized view has been updated.
@@ -152,11 +152,11 @@ async fn test_stream_mv_proto() {
     let table_id_mv = TableId::from_protobuf(&make_table_ref_id(1))
         .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))
         .unwrap();
-    let table_ref_mv = storage_manager.get_table(&table_id_mv).unwrap();
+    let table_ref_mv = table_manager.get_table(&table_id_mv).unwrap();
 
     let mut sink = stream_manager.take_sink(233);
     if let Message::Chunk(_chunk) = sink.next().await.unwrap() {
-        if let TableRef::Row(table_mv) = table_ref_mv {
+        if let SimpleTableRef::Row(table_mv) = table_ref_mv {
             let mut value_vec = SmallVec::new();
             value_vec.push(Some(1.to_scalar_value()));
             let value_row = Row(value_vec);

@@ -6,7 +6,7 @@ use risingwave_proto::stream_service::*;
 use risingwave_proto::task_service::HostAddress;
 use std::sync::Arc;
 
-use crate::storage::MemStorageManager;
+use crate::storage::SimpleTableManager;
 use crate::stream_op::Message;
 
 use super::*;
@@ -112,9 +112,9 @@ async fn test_stream_proto() {
         ])
         .unwrap();
 
-    let storage_mgr = Arc::new(MemStorageManager::new());
+    let table_manager = Arc::new(SimpleTableManager::new());
     stream_manager
-        .build_fragment(&[1, 3, 7, 11, 13], storage_mgr)
+        .build_fragment(&[1, 3, 7, 11, 13], table_manager)
         .unwrap();
 
     let mut source = stream_manager.take_source();

@@ -3,7 +3,7 @@ use super::*;
 use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result};
 use crate::service::ExchangeWriter;
-use crate::storage::TableRef;
+use crate::storage::{SimpleTableRef, Table};
 use pb_convert::FromProtobuf;
 use protobuf::well_known_types::Any;
 use protobuf::Message;
@@ -258,10 +258,10 @@ impl<'a> SelectBuilder<'a> {
         let table_ref = self
             .runner
             .get_global_env()
-            .storage_manager_ref()
+            .table_manager_ref()
             .get_table(&TableId::from_protobuf(&TableRefId::default()).unwrap())
             .unwrap();
-        if let TableRef::Columnar(column_table_ref) = table_ref {
+        if let SimpleTableRef::Columnar(column_table_ref) = table_ref {
             let column_ids = column_table_ref.get_column_ids().unwrap();
             for col_id in column_ids.iter() {
                 scan.mut_column_ids().push(*col_id);
