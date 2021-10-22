@@ -292,4 +292,22 @@ RwBatchInsert(table=[[test_schema, t4]], operation=[INSERT], flattened=[false])
         <Resource name="json" path="batch/basic/insert_null">
         </Resource>
     </TestCase>
+    <TestCase name="hash inner join">
+        <Resource name="sql">
+            <![CDATA[
+            select * from t, t3 where t.v1 = t3.v1;
+]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchHashJoin(condition=[=($0, $3)], joinType=[inner])
+  RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+    RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
+  RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+    RwBatchTableScan(table=[[test_schema, t3]], columns=[v1])
+]]>
+        </Resource>
+        <Resource name="json" path="batch/basic/hash_inner_join">
+        </Resource>
+    </TestCase>
 </Root>

@@ -1,6 +1,7 @@
 use crate::array::{ArrayBuilder, ArrayBuilderImpl, PrimitiveArrayBuilder};
 use crate::error::Result;
 use crate::error::RwError;
+use crate::types::DataSize;
 use crate::types::DataType;
 use crate::types::DataTypeKind;
 use crate::types::DataTypeRef;
@@ -9,6 +10,7 @@ use risingwave_proto::data::DataType_TypeName;
 use std::any::Any;
 use std::convert::TryFrom;
 use std::default::Default;
+use std::mem::size_of;
 use std::sync::Arc;
 
 /// Generate macros for TIME/TIMESTAMP/TIMESTAMP WITH TIMEZONE.
@@ -66,6 +68,10 @@ macro_rules! make_datetime_type {
 
             fn as_any(&self) -> &dyn Any {
                 self
+            }
+
+            fn data_size(&self) -> DataSize {
+                DataSize::Fixed(size_of::<$native_ty>())
             }
         }
 

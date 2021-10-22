@@ -90,7 +90,7 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
             NestedLoopJoinNode::parse_from_bytes(source.plan_node().get_body().get_value())
                 .map_err(|e| RwError::from(ProtobufError(e)))?;
 
-        let join_type = JoinType::from_proto_join_type(nested_loop_join_node.get_join_type());
+        let join_type = JoinType::from_proto(nested_loop_join_node.get_join_type());
         let join_expr = build_from_proto(nested_loop_join_node.get_join_cond())?;
         let left_plan_opt = source.plan_node().get_children().get(0);
         let right_plan_opt = source.plan_node().get_children().get(1);

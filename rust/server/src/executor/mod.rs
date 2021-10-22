@@ -8,6 +8,7 @@ use crate::executor::create_stream::CreateStreamExecutor;
 use crate::executor::create_table::CreateTableExecutor;
 use crate::executor::insert::InsertExecutor;
 use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;
+use crate::executor::join::HashJoinExecutorBuilder;
 pub use crate::executor::stream_scan::StreamScanExecutor;
 use crate::executor::values::ValuesExecutor;
 use crate::task::GlobalTaskEnv;
@@ -122,7 +123,8 @@ impl<'a> ExecutorBuilder<'a> {
           PlanNode_PlanNodeType::TOP_N => TopNExecutor,
           PlanNode_PlanNodeType::LIMIT => LimitExecutor,
           PlanNode_PlanNodeType::VALUE => ValuesExecutor,
-          PlanNode_PlanNodeType::NESTED_LOOP_JOIN => NestedLoopJoinExecutor
+          PlanNode_PlanNodeType::NESTED_LOOP_JOIN => NestedLoopJoinExecutor,
+          PlanNode_PlanNodeType::HASH_JOIN => HashJoinExecutorBuilder
         }
     }
 

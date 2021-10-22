@@ -53,12 +53,21 @@ pub enum DataTypeKind {
     Interval,
 }
 
+/// Number of bytes of one element in array of [`DataType`].
+pub enum DataSize {
+    /// For types with fixed size, e.g. int, float.
+    Fixed(usize),
+    /// For types with variable size, e.g. string.
+    Variable,
+}
+
 pub trait DataType: Debug + Sync + Send + 'static {
     fn data_type_kind(&self) -> DataTypeKind;
     fn is_nullable(&self) -> bool;
     fn create_array_builder(self: Arc<Self>, capacity: usize) -> Result<ArrayBuilderImpl>;
     fn to_protobuf(&self) -> Result<DataTypeProto>;
     fn as_any(&self) -> &dyn Any;
+    fn data_size(&self) -> DataSize;
 }
 
 pub type DataTypeRef = Arc<dyn DataType>;

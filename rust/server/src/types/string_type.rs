@@ -1,7 +1,7 @@
 use crate::array::{ArrayBuilder, ArrayBuilderImpl, UTF8ArrayBuilder};
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
-use crate::types::{DataType, DataTypeKind, DataTypeRef};
+use crate::types::{DataSize, DataType, DataTypeKind, DataTypeRef};
 use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};
 use std::any::Any;
 use std::convert::TryFrom;
@@ -53,6 +53,10 @@ impl DataType for StringType {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+
+    fn data_size(&self) -> DataSize {
+        DataSize::Variable
     }
 }
 

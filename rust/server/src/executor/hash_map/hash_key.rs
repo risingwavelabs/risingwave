@@ -9,7 +9,7 @@ use std::default::Default;
 use std::hash::{BuildHasher, Hash, Hasher};
 
 /// Max element count in [`FixedSizeKeyWithHashCode`]
-const MAX_FIXED_SIZE_KEY_ELEMENTS: usize = 8;
+pub(super) const MAX_FIXED_SIZE_KEY_ELEMENTS: usize = 8;
 
 pub trait HashKeySerializer {
     type K: HashKey;
@@ -28,7 +28,7 @@ pub trait HashKeySerialize<'a>: ScalarRef<'a> + Default {
 /// Current comparison implementation treats `null == null`. This is consistent with postgresql's
 /// group by implementation, but not join. In pg's join implementation, `null != null`, and the join
 /// executor should take care of this.
-pub trait HashKey: Hash + Eq + Sized {
+pub trait HashKey: Hash + Eq + Sized + Send + Sync + 'static {
     type S: HashKeySerializer<K = Self>;
 
     fn build(column_idxes: &[usize], data_chunk: &DataChunk) -> Result<Vec<Self>> {
@@ -55,6 +55,8 @@ pub trait HashKey: Hash + Eq + Sized {
 }
 
 /// Designed for hash keys with at most `N` serialized bytes.
+///
+/// See [`crate::executor::hash_map::calc_hash_key_kind`]
 pub struct FixedSizeKey<const N: usize> {
     hash_code: u64,
     key: [u8; N],
@@ -63,11 +65,7 @@ pub struct FixedSizeKey<const N: usize> {
 
 /// Designed for hash keys which can't be represented by [`FixedSizeKey`].
 ///
-/// When any of following conditions is met, we choose [`SerializedKey`]:
-/// 1. Has variable size column.
-/// 2. Number of columns exceeds [`MAX_FIXED_SIZE_KEY_ELEMENTS`]
-/// 3. Sizes of data types exceed `256` bytes.
-/// 4. Any column's serialized format can't be used for equality check.
+/// See [`crate::executor::hash_map::calc_hash_key_kind`]
 pub struct SerializedKey {
     key: Vec<Datum>,
     hash_code: u64,

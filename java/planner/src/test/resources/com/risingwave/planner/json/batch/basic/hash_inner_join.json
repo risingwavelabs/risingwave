@@ -1,0 +1,41 @@
+{
+  "nodeType": "HASH_JOIN",
+  "body": {
+    "@type": "type.googleapis.com/plan.HashJoinNode",
+    "leftKey": [{
+      "dataType": {
+        "typeName": "INT32"
+      }
+    }],
+    "leftOutput": [{
+      "dataType": {
+        "typeName": "INT32"
+      }
+    }, {
+      "columnIdx": 1,
+      "dataType": {
+        "typeName": "INT32"
+      }
+    }, {
+      "columnIdx": 2,
+      "dataType": {
+        "typeName": "FLOAT"
+      }
+    }],
+    "rightKey": [{
+      "dataType": {
+        "typeName": "INT32"
+      }
+    }],
+    "rightOutput": [{
+      "dataType": {
+        "typeName": "INT32"
+      }
+    }]
+  },
+  "children": [{
+    "nodeType": "EXCHANGE"
+  }, {
+    "nodeType": "EXCHANGE"
+  }]
+}

@@ -1,10 +1,8 @@
 package com.risingwave.planner.rel.physical.batch;
 
 import com.google.protobuf.Any;
-import com.risingwave.common.exception.PgErrorCode;
-import com.risingwave.common.exception.PgException;
 import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
-import com.risingwave.proto.plan.JoinType;
+import com.risingwave.planner.rules.physical.batch.join.BatchJoinRules;
 import com.risingwave.proto.plan.NestedLoopJoinNode;
 import com.risingwave.proto.plan.PlanNode;
 import java.util.Collections;
@@ -17,6 +15,7 @@ import org.apache.calcite.rel.core.JoinRelType;
 import org.apache.calcite.rel.hint.RelHint;
 import org.apache.calcite.rex.RexNode;
 
+/** Batch physical plan node nest loop join. */
 public class RwBatchNestLoopJoin extends Join implements RisingWaveBatchPhyRel {
   public RwBatchNestLoopJoin(
       RelOptCluster cluster,
@@ -36,7 +35,7 @@ public class RwBatchNestLoopJoin extends Join implements RisingWaveBatchPhyRel {
     NestedLoopJoinNode joinNode =
         NestedLoopJoinNode.newBuilder()
             .setJoinCond(condition.accept(rexVisitor))
-            .setJoinType(getJoinTypeProto())
+            .setJoinType(BatchJoinRules.getJoinTypeProto(joinType))
             .build();
     return PlanNode.newBuilder()
         .setNodeType(PlanNode.PlanNodeType.NESTED_LOOP_JOIN)
@@ -56,26 +55,5 @@ public class RwBatchNestLoopJoin extends Join implements RisingWaveBatchPhyRel {
       boolean semiJoinDone) {
     return new RwBatchNestLoopJoin(
         getCluster(), traitSet, getHints(), left, right, conditionExpr, joinType);
-  }
-
-  // Map from calcite join type to proto join type.
-  private JoinType getJoinTypeProto() {
-    switch (joinType) {
-      case INNER:
-        return JoinType.INNER;
-      case LEFT:
-        return JoinType.LEFT_OUTER;
-      case RIGHT:
-        return JoinType.RIGHT_OUTER;
-      case FULL:
-        return JoinType.FULL_OUTER;
-      case SEMI:
-        return JoinType.SEMI;
-      case ANTI:
-        return JoinType.ANTI;
-      default:
-        throw new PgException(
-            PgErrorCode.INTERNAL_ERROR, "unsupported join type: %s for nested loop join", joinType);
-    }
   }
 }

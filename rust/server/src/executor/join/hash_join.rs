@@ -1,14 +1,23 @@
 use crate::array::DataChunk;
+use crate::error::ErrorCode::ProtobufError;
 use crate::error::Result;
-use crate::executor::hash_map::HashKey;
+use crate::executor::hash_map::hash_key_dispatch;
+use crate::executor::hash_map::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
+use crate::executor::hash_map::{HashKeyKind, Key128, Key16, Key256, Key32, Key64, KeySerialized};
 use crate::executor::join::hash_join::HashJoinState::{FirstProbe, Probe, ProbeRemaining};
 use crate::executor::join::hash_join_state::{BuildTable, ProbeTable};
 use crate::executor::join::JoinType;
 use crate::executor::ExecutorResult::Batch;
-use crate::executor::{BoxedExecutor, Executor, ExecutorResult};
+use crate::executor::{
+    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult,
+};
+use crate::types::build_from_proto as type_build_from_proto;
 use crate::types::DataTypeRef;
 use either::Either;
+use protobuf::Message;
+use risingwave_proto::plan::{HashJoinNode, PlanNode_PlanNodeType};
 use std::convert::TryInto;
+use std::marker::PhantomData;
 use std::mem::swap;
 
 /// Parameters of equi-join.
@@ -190,6 +199,100 @@ impl<K> HashJoinExecutor<K> {
             right_child,
             state: HashJoinState::Build(BuildTable::with_params(params)),
         }
+    }
+}
+
+pub struct HashJoinExecutorBuilder {
+    params: EquiJoinParams,
+    left_child: BoxedExecutor,
+    right_child: BoxedExecutor,
+}
+
+struct HashJoinExecutorBuilderDispatcher<K> {
+    _marker: PhantomData<K>,
+}
+
+/// A dispatcher to help create specialized hash join executor.
+impl<K: HashKey> HashKeyDispatcher<K> for HashJoinExecutorBuilderDispatcher<K> {
+    type Input = HashJoinExecutorBuilder;
+    type Output = BoxedExecutor;
+
+    fn dispatch(input: HashJoinExecutorBuilder) -> Self::Output {
+        Box::new(HashJoinExecutor::<K>::new(
+            input.left_child,
+            input.right_child,
+            input.params,
+        ))
+    }
+}
+
+/// Hash join executor builder.
+impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
+    fn new_boxed_executor(context: &ExecutorBuilder) -> Result<BoxedExecutor> {
+        ensure!(context.plan_node().get_node_type() == PlanNode_PlanNodeType::HASH_JOIN);
+        ensure!(context.plan_node().get_children().len() == 2);
+
+        let hash_join_node =
+            HashJoinNode::parse_from_bytes(context.plan_node().get_body().get_value())
+                .map_err(ProtobufError)?;
+
+        let mut params = EquiJoinParams::default();
+        for left_key in hash_join_node.get_left_key() {
+            params.left_key_columns.push(left_key.column_idx as usize);
+            params
+                .left_key_types
+                .push(type_build_from_proto(left_key.get_data_type())?);
+        }
+
+        for right_key in hash_join_node.get_right_key() {
+            params.right_key_columns.push(right_key.column_idx as usize);
+            params
+                .right_key_types
+                .push(type_build_from_proto(right_key.get_data_type())?);
+        }
+
+        ensure!(params.left_key_columns.len() == params.right_key_columns.len());
+
+        for left_output in hash_join_node.get_left_output() {
+            params
+                .output_columns
+                .push(Either::Left(left_output.column_idx as usize));
+            params
+                .output_data_types
+                .push(type_build_from_proto(left_output.get_data_type())?);
+        }
+
+        for right_output in hash_join_node.get_right_output() {
+            params
+                .output_columns
+                .push(Either::Right(right_output.column_idx as usize));
+            params
+                .output_data_types
+                .push(type_build_from_proto(right_output.get_data_type())?);
+        }
+
+        params.join_type = JoinType::from_proto(hash_join_node.get_join_type());
+
+        let left_child =
+            ExecutorBuilder::new(&context.plan_node.get_children()[0], context.env.clone())
+                .build()?;
+        let right_child =
+            ExecutorBuilder::new(&context.plan_node.get_children()[1], context.env.clone())
+                .build()?;
+
+        let hash_key_kind = calc_hash_key_kind(&params.right_key_types);
+
+        let builder = HashJoinExecutorBuilder {
+            params,
+            left_child,
+            right_child,
+        };
+
+        Ok(hash_key_dispatch!(
+            hash_key_kind,
+            HashJoinExecutorBuilderDispatcher,
+            builder
+        ))
     }
 }
 

@@ -61,7 +61,7 @@ public abstract class BatchPlanTestBase extends SqlTestBase {
                 StandardCharsets.UTF_8);
         assertEquals(ans, serializedJsonPlan, "Json not match!");
       } catch (Exception e) {
-        throw new RuntimeException("Json load fail");
+        throw new RuntimeException("Json load fail", e);
       }
     }
   }

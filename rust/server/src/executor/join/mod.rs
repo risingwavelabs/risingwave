@@ -1,8 +1,10 @@
 use crate::executor::join::JoinType::Inner;
+use risingwave_proto::plan::JoinType as JoinTypeProto;
 
 mod chunked_data;
-use crate::risingwave_proto::plan::JoinType as JoinTypeProto;
 mod hash_join;
+pub use hash_join::*;
+
 mod hash_join_state;
 pub mod nested_loop_join;
 
@@ -30,24 +32,23 @@ impl JoinType {
             JoinType::RightOuter | JoinType::RightAnti | JoinType::FullOuter | JoinType::RightSemi
         )
     }
+
+    pub fn from_proto(proto: JoinTypeProto) -> Self {
+        match proto {
+            JoinTypeProto::INNER => JoinType::Inner,
+            JoinTypeProto::LEFT_OUTER => JoinType::LeftOuter,
+            JoinTypeProto::LEFT_SEMI => JoinType::LeftSemi,
+            JoinTypeProto::LEFT_ANTI => JoinType::LeftAnti,
+            JoinTypeProto::RIGHT_OUTER => JoinType::RightOuter,
+            JoinTypeProto::RIGHT_SEMI => JoinType::RightSemi,
+            JoinTypeProto::RIGHT_ANTI => JoinType::RightAnti,
+            JoinTypeProto::FULL_OUTER => JoinType::FullOuter,
+        }
+    }
 }
 
 impl Default for JoinType {
     fn default() -> Self {
         Inner
-    }
-}
-
-impl JoinType {
-    pub fn from_proto_join_type(join_type_proto: JoinTypeProto) -> Self {
-        match join_type_proto {
-            JoinTypeProto::INNER => JoinType::Inner,
-            JoinTypeProto::LEFT_OUTER => JoinType::LeftOuter,
-            JoinTypeProto::RIGHT_OUTER => JoinType::RightOuter,
-            JoinTypeProto::FULL_OUTER => JoinType::FullOuter,
-            // Join type should not distinguish Left/Right Semi/Anti.
-            JoinTypeProto::SEMI => JoinType::LeftSemi,
-            JoinTypeProto::ANTI => JoinType::LeftAnti,
-        }
     }
 }

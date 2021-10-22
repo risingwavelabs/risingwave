@@ -1,0 +1,106 @@
+statement ok
+create table t1(v1 int, v2 float);
+
+statement ok
+insert into t1 values
+(1, 6.1::FLOAT), (2, null), (null, 8.4::FLOAT), (3, 3.9::FLOAT), (null, null),
+(4, 6.6::FLOAT), (3, null), (null, 0.7::FLOAT), (5, null), (null, 5.5::FLOAT);
+
+
+statement ok
+create table t2(v1 int, v2 real);
+
+statement ok
+insert into t2 values
+(8, 6.1::REAL), (2, null), (null, 8.9::REAL), (3, null), (null, 3.5::REAL),
+(6, null), (4, 7.5::REAL), (6, null), (null, 8::REAL), (7, null),
+(null, 9.1::REAL), (9, null), (3, 5.7::REAL), (9, null), (null, 9.6::REAL),
+(100, null), (null, 8.18::REAL), (200, null);
+
+query RR rowsort
+select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 join t2 on t1.v1 = t2.v1;
+----
+NULL  NULL
+NULL  5.7
+NULL  NULL
+3.9   5.7
+3.9   NULL
+6.6   7.5
+
+
+query RR rowsort
+select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 left outer join t2 on t1.v1 = t2.v1;
+----
+6.1   NULL
+NULL  NULL
+NULL  5.7
+NULL  NULL
+3.9   5.7
+3.9   NULL
+6.6   7.5
+NULL  NULL
+NULL  NULL
+8.4   NULL
+0.7   NULL
+5.5   NULL
+
+query RR rowsort
+select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 right outer join t2 on t1.v1 = t2.v1;
+----
+NULL  NULL
+NULL  5.7
+NULL  NULL
+3.9   5.7
+3.9   NULL
+6.6   7.5
+NULL  NULL
+NULL  NULL
+NULL  NULL
+NULL  6.1
+NULL  NULL
+NULL  NULL
+NULL  NULL
+NULL  NULL
+NULL  8.9
+NULL  9.1
+NULL  9.6
+NULL  3.5
+NULL  8.18
+NULL  8
+
+query RR rowsort
+select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 full outer join t2 on t1.v1 = t2.v1;
+----
+6.1   NULL
+NULL  NULL
+NULL  5.7
+NULL  NULL
+3.9   5.7
+3.9   NULL
+6.6   7.5
+NULL  NULL
+NULL  NULL
+8.4   NULL
+0.7   NULL
+5.5   NULL
+NULL  NULL
+NULL  NULL
+NULL  NULL
+NULL  6.1
+NULL  NULL
+NULL  NULL
+NULL  NULL
+NULL  NULL
+NULL  8.9
+NULL  9.1
+NULL  9.6
+NULL  3.5
+NULL  8.18
+NULL  8
+
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;

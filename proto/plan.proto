@@ -132,8 +132,10 @@ enum JoinType {
     LEFT_OUTER = 1;
     RIGHT_OUTER = 2;
     FULL_OUTER = 3;
-    SEMI = 4;
-    ANTI = 5;
+    LEFT_SEMI = 4;
+    LEFT_ANTI = 5;
+    RIGHT_SEMI = 6;
+    RIGHT_ANTI = 7;
 }
 
 message NestedLoopJoinNode {
@@ -154,6 +156,19 @@ message SortAggNode {
 message SimpleAggNode {
     // When there is no group_by_key, we use SimpleAggNode
     repeated expr.AggCall agg_calls = 1;
+}
+
+message HashJoinNode {
+    // TODO: We should remove this after adding schema for executor.
+   message InputRefAndDataType {
+       int32 column_idx = 1;
+       data.DataType data_type = 2;
+   }
+   JoinType join_type = 1;
+   repeated InputRefAndDataType left_key = 2;
+   repeated InputRefAndDataType left_output = 3;
+   repeated InputRefAndDataType right_key = 4;
+   repeated InputRefAndDataType right_output = 5;
 }
 
 message PlanNode {
@@ -178,6 +193,7 @@ message PlanNode {
         ROW_SEQ_SCAN = 17;
         LIMIT = 18;
         VALUE = 19;
+        HASH_JOIN = 20;
     }
     PlanNodeType node_type = 1;
     google.protobuf.Any body = 2;

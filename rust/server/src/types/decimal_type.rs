@@ -1,6 +1,6 @@
 use crate::array::{ArrayBuilder, ArrayBuilderImpl, DecimalArrayBuilder};
 use crate::error::{Result, RwError};
-use crate::types::{DataType, DataTypeKind, DataTypeRef};
+use crate::types::{DataSize, DataType, DataTypeKind, DataTypeRef};
 use risingwave_proto::data::DataType as DataTypeProto;
 use risingwave_proto::data::DataType_TypeName;
 use std::any::Any;
@@ -70,6 +70,10 @@ impl DataType for DecimalType {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+
+    fn data_size(&self) -> DataSize {
+        DataSize::Fixed(16)
     }
 }
 
