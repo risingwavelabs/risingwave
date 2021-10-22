@@ -4,10 +4,10 @@ import subprocess
 import argparse
 
 parser = argparse.ArgumentParser()
-parser.add_argument("-p", "--port")
+parser.add_argument("-p", "--port", default="4567")
 parser.add_argument("-db", "--pgdb", default="postgres")
 parser.add_argument("-u", "--user", default="postgres")
-parser.add_argument("-f", "--files")
+parser.add_argument("-f", "--files", default="./e2e_test/distributed/")
 # Note we do not need pass word yet.
 args = parser.parse_args()
 return_code = 0
