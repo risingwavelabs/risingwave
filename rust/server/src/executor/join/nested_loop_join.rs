@@ -26,27 +26,35 @@ use std::sync::Arc;
 /// 2. Concatenated with inner chunk, eval expression and get sel vector
 /// 3. Create new chunk with new sel vector and yield to upper.
 pub struct NestedLoopJoinExecutor {
+    /// Expression to eval join condition
+    join_expr: BoxedExpression,
     /// Executor should handle different join type.
     join_type: JoinType,
     /// Outer relation data source (return in tuple level).
-    outer_source: OuterTableSource,
-    /// Inner relation data source (Used for building probe table).
-    inner_source: BoxedExecutor,
+    probe_side_source: ProbeSideSource,
+    /// Inner relation data source (Used for building build table).
+    build_side_source: BoxedExecutor,
     /// Manage inner source and expression evaluation.
     state: NestedLoopJoinState,
 }
 
 type ProbeResult = Option<DataChunk>;
 enum NestedLoopJoinState {
-    FirstProbe(ProbeTable),
-    Probe(ProbeTable),
-    ProbeRemaining(ProbeTable),
+    /// [`Build`] should load all inner table into memory.
+    Build,
+    /// One Difference between [`FirstProbe`] and [`Probe`]:
+    /// Only init the probe side source until [`FirstProbe`] so that
+    /// avoid unnecessary init if build side fail.
+    FirstProbe(BuildTable),
+    /// [`Probe`] finds matching rows for all outer table.
+    Probe(BuildTable),
+    ProbeRemaining(BuildTable),
     Done,
 }
 
 impl Executor for NestedLoopJoinExecutor {
     fn init(&mut self) -> crate::error::Result<()> {
-        self.outer_source.init()
+        Ok(())
     }
 
     fn execute(&mut self) -> crate::error::Result<ExecutorResult> {
@@ -55,14 +63,19 @@ impl Executor for NestedLoopJoinExecutor {
             swap(&mut cur_state, &mut self.state);
 
             match cur_state {
-                NestedLoopJoinState::FirstProbe(probe_table) => {
-                    let ret = self.probe(true, probe_table)?;
+                NestedLoopJoinState::Build => {
+                    let mut build_table = BuildTable::new();
+                    build_table.init(&mut self.build_side_source)?;
+                    self.state = NestedLoopJoinState::FirstProbe(build_table);
+                }
+                NestedLoopJoinState::FirstProbe(build_table) => {
+                    let ret = self.probe(true, build_table)?;
                     if let Some(data_chunk) = ret {
                         return Ok(ExecutorResult::Batch(data_chunk));
                     }
                 }
-                NestedLoopJoinState::Probe(probe_table) => {
-                    let ret = self.probe(false, probe_table)?;
+                NestedLoopJoinState::Probe(build_table) => {
+                    let ret = self.probe(false, build_table)?;
                     if let Some(data_chunk) = ret {
                         return Ok(ExecutorResult::Batch(data_chunk));
                     }
@@ -77,7 +90,7 @@ impl Executor for NestedLoopJoinExecutor {
         }
     }
     fn clean(&mut self) -> crate::error::Result<()> {
-        self.outer_source.clean()
+        self.probe_side_source.clean()
     }
 }
 
@@ -104,15 +117,15 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                 match join_type {
                     JoinType::Inner => {
                         // TODO: Support more join type.
-                        let outer_table_source = OuterTableSource::new(left_child);
+                        let outer_table_source = ProbeSideSource::new(left_child);
 
-                        let probe_table = ProbeTable::new(join_expr);
-                        let join_state = NestedLoopJoinState::FirstProbe(probe_table);
+                        let join_state = NestedLoopJoinState::Build;
 
                         Ok(Box::new(Self {
+                            join_expr,
                             join_type,
-                            outer_source: outer_table_source,
-                            inner_source: right_child,
+                            probe_side_source: outer_table_source,
+                            build_side_source: right_child,
                             state: join_state,
                         }))
                     }
@@ -128,33 +141,34 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
 impl NestedLoopJoinExecutor {
     /// Probe matched rows in `probe_table`.
     /// # Arguments
-    /// * `first_probe`: whether the first probing. Build probe table if yes.
+    /// * `first_probe`: whether the first probing. Init outer source if yes.
     /// * `probe_table`: Table to be probed.
     /// If nothing gained from `probe_table.join()`, Advance to next row until all outer tuples are exhausted.
     fn probe(
         &mut self,
         first_probe: bool,
-        mut probe_table: ProbeTable,
+        mut build_table: BuildTable,
     ) -> Result<Option<DataChunk>> {
         if first_probe {
-            probe_table.init(&mut self.inner_source)?;
+            self.probe_side_source.init()?;
         }
 
-        let cur_row = self.outer_source.current_row()?;
+        let cur_row = self.probe_side_source.current_row()?;
         match cur_row {
             Some((row, vis)) => {
                 // Only process visible tuple.
                 if vis {
-                    let probe_result = probe_table.join(row, &self.outer_source)?;
-                    self.state = NestedLoopJoinState::Probe(probe_table);
+                    let probe_result =
+                        build_table.join(row, &self.probe_side_source, &mut self.join_expr)?;
+                    self.state = NestedLoopJoinState::Probe(build_table);
                     if let Some(data_chunk) = probe_result {
                         return Ok(Some(data_chunk));
                     } else {
-                        self.outer_source.advance()?;
+                        self.probe_side_source.advance()?;
                     }
                 } else {
                     // If not visible, proceed to next tuple.
-                    self.outer_source.advance()?;
+                    self.probe_side_source.advance()?;
                 }
             }
             // No more outer tuple means job finished.
@@ -174,14 +188,14 @@ impl NestedLoopJoinExecutor {
 /// This is designed for nested loop join to support row level iteration.
 /// It will managed the scan state of outer table (Reset [`DataChunk`] Iter
 /// when exhaust current chunk) for executor to simplify logic.
-struct OuterTableSource {
+struct ProbeSideSource {
     outer: BoxedExecutor,
     cur_chunk: ExecutorResult,
     /// The row index to read in current chunk.
     idx: usize,
 }
 
-impl OuterTableSource {
+impl ProbeSideSource {
     /// Note the difference between `new` and `init`. `new` do not load data but `init` will
     /// call executor. The `ExecutorResult::Done` do not really means there is no more data in outer
     /// table, it is just used for init (Otherwise we have to use Option).
@@ -272,23 +286,20 @@ impl OuterTableSource {
     }
 }
 
-/// [`ProbeTable`] contains the tuple to be probed. It is also called inner relation in join.
+/// [`BuildTable`] contains the tuple to be probed. It is also called inner relation in join.
 /// `inner_table` is a buffer for all data. For all probe key, directly fetch data in `inner_table` without call executor.
 /// The executor is only called when building `inner_table`.
 type InnerTable = Vec<DataChunk>;
-struct ProbeTable {
-    /// Eval joined result by reusing Expression.
-    join_expr: BoxedExpression,
+struct BuildTable {
     /// Buffering of inner table. TODO: Spill to disk or more fine-grained memory management to avoid OOM.
     inner_table: InnerTable,
     /// Pos of chunk in inner table. Tracks current probing progress.
     chunk_idx: usize,
 }
 
-impl ProbeTable {
-    fn new(join_expr: BoxedExpression) -> Self {
+impl BuildTable {
+    fn new() -> Self {
         Self {
-            join_expr,
             inner_table: vec![],
             chunk_idx: 0,
         }
@@ -318,15 +329,20 @@ impl ProbeTable {
     /// # Arguments
     /// * `row` - Tuple to be be probed.
     /// * `outer_source` - Help `row` convert into a chunk.
-    fn join(&mut self, row: RowRef<'_>, outer_source: &OuterTableSource) -> Result<ProbeResult> {
+    fn join(
+        &mut self,
+        row: RowRef<'_>,
+        outer_source: &ProbeSideSource,
+        join_expr: &mut BoxedExpression,
+    ) -> Result<ProbeResult> {
         // Developer error if occur.
         assert!(self.chunk_idx <= self.inner_table.len());
         if self.chunk_idx < self.inner_table.len() {
             let chunk = &self.inner_table[self.chunk_idx];
-            // Concatenate two chunk into a new one first.
             let constant_row_chunk = outer_source.convert_row_to_chunk(&row, chunk.capacity())?;
+            // Concatenate two chunk into a new one first.
             let new_chunk = Self::concatenate(&constant_row_chunk, chunk)?;
-            let sel_vector = self.join_expr.eval(&new_chunk)?;
+            let sel_vector = join_expr.eval(&new_chunk)?;
             // Materialize the joined chunk result.
             let joined_chunk = new_chunk
                 .with_visibility(sel_vector.as_bool().try_into()?)
@@ -380,7 +396,7 @@ mod tests {
     use crate::array::*;
 
     use crate::catalog::test_utils::mock_table_id;
-    use crate::executor::join::nested_loop_join::{OuterTableSource, ProbeTable};
+    use crate::executor::join::nested_loop_join::{BuildTable, ProbeSideSource};
     use crate::executor::seq_scan::SeqScanExecutor;
     use crate::executor::ExecutorResult;
     use crate::storage::MemColumnarTable;
@@ -407,7 +423,7 @@ mod tests {
             .columns(columns.clone())
             .visibility((bool_vec.clone()).try_into().unwrap())
             .build();
-        let chunk = ProbeTable::concatenate(&chunk1, &chunk2).unwrap();
+        let chunk = BuildTable::concatenate(&chunk1, &chunk2).unwrap();
         assert_eq!(chunk.capacity(), chunk1.capacity());
         assert_eq!(chunk.capacity(), chunk2.capacity());
         assert_eq!(chunk.columns().len(), chunk1.columns().len() * 2);
@@ -433,7 +449,7 @@ mod tests {
             )],
             None,
         );
-        let source = OuterTableSource {
+        let source = ProbeSideSource {
             outer: Box::new(seq_scan_exec),
             cur_chunk: ExecutorResult::Batch(chunk),
             idx: 0,
