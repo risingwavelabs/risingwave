@@ -1,5 +1,6 @@
+use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
-use crate::types::Datum;
+use crate::types::{Datum, Scalar};
 use std::{
     cmp::Ordering,
     collections::BTreeMap,
@@ -55,6 +56,7 @@ struct MemRowTableInner {
 pub struct MemRowTable {
     fields: Vec<ColumnDesc>,
     inner: RwLock<MemRowTableInner>,
+    pks: Vec<usize>,
 }
 
 pub type MemRowTableRef = Arc<MemRowTable>;
@@ -82,6 +84,54 @@ impl MemRowTableInner {
 
     pub fn get(&self, key: Row) -> Result<Option<Row>> {
         Ok(self.data.get(&key).map(Clone::clone))
+    }
+
+    /// A temporary solution for the case when no key specified.
+    /// We set the whole row as key, and the multiplicity as value.
+    /// This works for two fn: `insert_one_row`, `delete_one_row`
+    pub fn insert_one_row(&mut self, row: Row) -> Result<()> {
+        let value = self.data.get(&row);
+        match value {
+            None => {
+                let mut value_vec = SmallVec::new();
+                let datum = Some(1.to_scalar_value());
+                value_vec.push(datum);
+                let value_row = Row(value_vec);
+                self.data.insert(row, value_row);
+            }
+            Some(res) => {
+                // Create a new value row of multiplicity+1.
+                let mut value_vec = SmallVec::new();
+                let datum = res.0.get(0).unwrap().clone();
+                let occurrences = datum.unwrap();
+                let occ_value = occurrences.as_int32() + 1;
+                value_vec.push(Some(occ_value.to_scalar_value()));
+                let value_row = Row(value_vec);
+                self.data.insert(row, value_row);
+            }
+        };
+        Ok(())
+    }
+
+    pub fn delete_one_row(&mut self, row: Row) -> Result<()> {
+        let value = self.data.get(&row);
+        match value {
+            None => Err(InternalError("deleting non-existing row".to_string()).into()),
+            Some(res) => {
+                let datum = res.0.get(0).unwrap().clone();
+                let occurrences = datum.unwrap();
+                let occ_value = occurrences.as_int32();
+                if *occ_value > 1 {
+                    let mut value_vec = SmallVec::new();
+                    value_vec.push(Some((occ_value - 1).to_scalar_value()));
+                    let value_row = Row(value_vec);
+                    self.data.insert(row, value_row);
+                } else {
+                    self.data.remove(&row);
+                }
+                Ok(())
+            }
+        }
     }
 }
 
@@ -116,5 +166,103 @@ impl MemRowTable {
         let inner = self.inner.read().unwrap();
         let snapshot = inner.data.clone();
         Ok(snapshot.into_iter())
+    }
+
+    /// Init.
+    pub(crate) fn new(fields: Vec<ColumnDesc>, pks: Vec<usize>) -> Self {
+        let inner = RwLock::new(MemRowTableInner::default());
+        Self { fields, inner, pks }
+    }
+    /// Get all primary key columns.
+    pub fn get_pk(&self) -> Vec<usize> {
+        self.pks.clone()
+    }
+
+    /// A temporary solution for the case when no key specified.
+    /// We set the whole row as key, and the multiplicity as value.
+    /// This works for three fn in `MemRowTable`: `insert_one_row`, `delete_one_row`.
+    pub fn insert_one_row(&mut self, row: Row) -> Result<()> {
+        let mut inner = self.inner.write().unwrap();
+        inner.insert_one_row(row)
+    }
+
+    pub fn delete_one_row(&mut self, row: Row) -> Result<()> {
+        let mut inner = self.inner.write().unwrap();
+        inner.delete_one_row(row)
+    }
+
+    /// `insert_batch` takes a batch of (row,bool) where bool is an indicator.
+    pub fn insert_batch(&self, batch: Vec<(Row, bool)>) -> Result<()> {
+        let mut inner = self.inner.write().unwrap();
+        for (key, value) in batch {
+            match value {
+                true => inner.insert_one_row(key)?,
+                false => inner.delete_one_row(key)?,
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn mock_one_row() -> Row {
+        let mut value_vec = SmallVec::new();
+        value_vec.push(Some(1.to_scalar_value()));
+        value_vec.push(Some(4.to_scalar_value()));
+        Row(value_vec)
+    }
+
+    #[test]
+    fn test_row_table() {
+        let mut mem_table = MemRowTable::new(vec![], vec![]);
+        // Insert (1,4)
+        let row1 = mock_one_row();
+        let _res1 = mem_table.insert_one_row(row1);
+
+        // Check (1,4) -> (1)
+        let row2 = mock_one_row();
+        let get_row1 = mem_table.get(row2);
+        if let Ok(res_row_in) = get_row1 {
+            let datum = res_row_in.unwrap().0.get(0).unwrap().clone();
+            // Dirty trick to assert_eq between (&int32 and integer).
+            let d_value = datum.unwrap().as_int32() + 1;
+            assert_eq!(d_value, 2);
+        } else {
+            unreachable!();
+        }
+
+        // Insert (1,4)
+        let row3 = mock_one_row();
+        let _res2 = mem_table.insert_one_row(row3);
+
+        // Check (1,4) -> (2)
+        let row4 = mock_one_row();
+        let get_row2 = mem_table.get(row4);
+        if let Ok(res_row_in) = get_row2 {
+            let datum = res_row_in.unwrap().0.get(0).unwrap().clone();
+            // Dirty trick to assert_eq between (&int32 and integer).
+            let d_value = datum.unwrap().as_int32() + 1;
+            assert_eq!(d_value, 3);
+        } else {
+            unreachable!();
+        }
+
+        // Delete (1,4)
+        let row5 = mock_one_row();
+        let _res3 = mem_table.delete_one_row(row5);
+
+        // Check (1,4) -> (1)
+        let row6 = mock_one_row();
+        let get_row3 = mem_table.get(row6);
+        if let Ok(res_row_in) = get_row3 {
+            let datum = res_row_in.unwrap().0.get(0).unwrap().clone();
+            // Dirty trick to assert_eq between (&int32 and integer).
+            let d_value = datum.unwrap().as_int32() + 1;
+            assert_eq!(d_value, 2);
+        } else {
+            unreachable!();
+        }
     }
 }

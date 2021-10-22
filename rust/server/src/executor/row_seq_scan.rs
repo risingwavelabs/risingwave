@@ -27,6 +27,8 @@ pub(super) struct RowSeqScanExecutor {
     iter: RowIter,
     data_types: Vec<DataTypeRef>,
     column_ids: Vec<usize>,
+    /// If empty, then the row will be iterated in a different manner.
+    has_pk: bool,
 }
 
 impl BoxedExecutorBuilder for RowSeqScanExecutor {
@@ -50,6 +52,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
                 .into_iter()
                 .map(|f| build_from_proto(f.get_column_type()))
                 .collect::<Result<Vec<_>>>()?;
+            let pks = table_ref.get_pk();
 
             Ok(Box::new(Self {
                 data_types,
@@ -59,6 +62,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
                     .map(|i| *i as usize)
                     .collect::<Vec<_>>(),
                 iter: make_row_iter(table_ref)?,
+                has_pk: !pks.is_empty(),
             }))
         } else {
             Err(RwError::from(InternalError(
@@ -75,29 +79,66 @@ impl Executor for RowSeqScanExecutor {
 
     fn execute(&mut self) -> Result<ExecutorResult> {
         match self.iter.next() {
-            Some((_, row)) => {
-                // Make rust analyzer happy.
-                let row = row as Row;
-                let row = row.0;
-                let columns = self
-                    .column_ids
-                    .iter()
-                    .map(|column_id| {
-                        if let (Some(data_type), Some(datum)) =
-                            (self.data_types.get(*column_id), row.get(*column_id))
-                        {
-                            // We can scan row by row here currently.
-                            let mut builder = data_type.clone().create_array_builder(1)?;
-                            builder.append_datum(datum.clone())?;
-                            let array = builder.finish()?;
-                            Ok(Column::new(Arc::new(array), data_type.clone()))
-                        } else {
-                            Err(RwError::from(InternalError("No column found".to_string())))
-                        }
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-                let data_chunk = DataChunk::builder().columns(columns).build();
-                Ok(ExecutorResult::Batch(data_chunk))
+            Some((key_row, value_row)) => {
+                if !self.has_pk {
+                    // If no pk, then return keys with multiple times specified by value.
+                    let value_arr = value_row.0;
+                    let value_datum = value_arr.get(0).unwrap().clone();
+                    let occurrences = value_datum.unwrap();
+                    let occ_value = occurrences.as_int32();
+
+                    let row = key_row as Row;
+                    let row = row.0;
+
+                    let columns = self
+                        .column_ids
+                        .iter()
+                        .map(|column_id| {
+                            if let (Some(data_type), Some(datum)) =
+                                (self.data_types.get(*column_id), row.get(*column_id))
+                            {
+                                // We can scan row by row here currently.
+                                let mut builder = data_type.clone().create_array_builder(1)?;
+                                let mut i = 0;
+                                while i < *occ_value {
+                                    builder.append_datum(datum.clone())?;
+                                    i += 1;
+                                }
+                                let array = builder.finish()?;
+                                Ok(Column::new(Arc::new(array), data_type.clone()))
+                            } else {
+                                Err(RwError::from(InternalError("No column found".to_string())))
+                            }
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+
+                    let data_chunk = DataChunk::builder().columns(columns).build();
+                    Ok(ExecutorResult::Batch(data_chunk))
+                } else {
+                    // Scan through value pairs.
+                    // Make rust analyzer happy.
+                    let row = value_row as Row;
+                    let row = row.0;
+                    let columns = self
+                        .column_ids
+                        .iter()
+                        .map(|column_id| {
+                            if let (Some(data_type), Some(datum)) =
+                                (self.data_types.get(*column_id), row.get(*column_id))
+                            {
+                                // We can scan row by row here currently.
+                                let mut builder = data_type.clone().create_array_builder(1)?;
+                                builder.append_datum(datum.clone())?;
+                                let array = builder.finish()?;
+                                Ok(Column::new(Arc::new(array), data_type.clone()))
+                            } else {
+                                Err(RwError::from(InternalError("No column found".to_string())))
+                            }
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    let data_chunk = DataChunk::builder().columns(columns).build();
+                    Ok(ExecutorResult::Batch(data_chunk))
+                }
             }
             None => Ok(ExecutorResult::Done),
         }

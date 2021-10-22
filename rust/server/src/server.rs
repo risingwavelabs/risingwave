@@ -22,10 +22,10 @@ impl Server {
         let task_mgr = Arc::new(TaskManager::new());
         let stream_mgr = Arc::new(StreamManager::new());
         let source_mgr = Arc::new(MemSourceManager::new());
-        let env = GlobalTaskEnv::new(store_mgr, source_mgr, task_mgr.clone(), addr);
+        let env = GlobalTaskEnv::new(store_mgr.clone(), source_mgr, task_mgr.clone(), addr);
         let task_srv = TaskServiceImpl::new(task_mgr.clone(), env);
         let exchange_srv = ExchangeServiceImpl::new(task_mgr);
-        let stream_srv = StreamServiceImpl::new(stream_mgr);
+        let stream_srv = StreamServiceImpl::new(stream_mgr, store_mgr);
         let grpc_env = Arc::new(Environment::new(2));
         let channel_args = ChannelBuilder::new(grpc_env.clone())
             .reuse_port(false) // Detect conflicted port.

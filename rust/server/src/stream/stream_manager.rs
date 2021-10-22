@@ -1,14 +1,17 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+use crate::catalog::TableId;
+use crate::error::ErrorCode::InternalError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{build_from_proto as build_expr_from_proto, AggKind};
 use crate::protobuf::Message as _;
-use crate::storage::MemRowTable;
+use crate::storage::{StorageManagerRef, TableRef};
 use crate::stream_op::*;
 use crate::types::build_from_proto as build_type_from_proto;
 use futures::channel::mpsc::{channel, Receiver, Sender};
 use itertools::Itertools;
+use pb_convert::FromProtobuf;
 use risingwave_proto::expr::AggCall as AggCallProto;
 use risingwave_proto::stream_plan;
 use risingwave_proto::stream_service;
@@ -74,9 +77,13 @@ impl StreamManager {
     }
 
     /// This function could only be called once during the lifecycle of `StreamManager` for now.
-    pub fn build_fragment(&self, fragments: &[u32]) -> Result<()> {
+    pub fn build_fragment(
+        &self,
+        fragments: &[u32],
+        storage_manager: StorageManagerRef,
+    ) -> Result<()> {
         let mut core = self.core.lock().unwrap();
-        core.build_fragment(fragments)
+        core.build_fragment(fragments, storage_manager)
     }
 
     #[cfg(test)]
@@ -86,9 +93,9 @@ impl StreamManager {
     }
 
     #[cfg(test)]
-    pub fn take_sink(&self) -> Receiver<Message> {
+    pub fn take_sink(&self, id: u32) -> Receiver<Message> {
         let mut core = self.core.lock().unwrap();
-        core.channel_pool.get_mut(&233).unwrap().1.remove(0)
+        core.channel_pool.get_mut(&id).unwrap().1.remove(0)
     }
 }
 
@@ -184,18 +191,40 @@ impl StreamManagerCore {
         &mut self,
         node: &stream_plan::StreamNode,
         merger: Box<dyn Executor>,
+        storage_mgr: StorageManagerRef,
     ) -> Result<Box<dyn Executor>> {
         use stream_plan::StreamNode_StreamNodeType::*;
 
         // Create the input operator before creating itself
         // Note(eric): Maybe we should put a `Merger` operator in proto
         let input = if node.has_input() {
-            self.create_nodes(node.get_input(), merger)?
+            self.create_nodes(node.get_input(), merger, storage_mgr.clone())?
         } else {
             merger
         };
 
-        let operator: Box<dyn Executor> = match node.get_node_type() {
+        let operator: Result<Box<dyn Executor>> = match node.get_node_type() {
+            TABLE_INGRESS => {
+                let table_source_node =
+                    stream_plan::TableSourceNode::parse_from_bytes(node.get_body().get_value())
+                        .map_err(ErrorCode::ProtobufError)?;
+
+                let table_id = TableId::from_protobuf(table_source_node.get_table_ref_id())
+                    .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
+
+                let table_ref = storage_mgr.clone().get_table(&table_id).unwrap();
+                if let TableRef::Columnar(table) = table_ref {
+                    let stream_receiver = table.create_stream()?;
+                    Ok(Box::new(TableSourceExecutor::new(
+                        table_id,
+                        stream_receiver,
+                    )))
+                } else {
+                    Err(RwError::from(InternalError(
+                        "Streaming source only supports columnar table".to_string(),
+                    )))
+                }
+            }
             PROJECTION => {
                 let project_node =
                     stream_plan::ProjectNode::parse_from_bytes(node.get_body().get_value())
@@ -205,14 +234,14 @@ impl StreamManagerCore {
                     .iter()
                     .map(build_expr_from_proto)
                     .collect::<Result<Vec<_>>>()?;
-                Box::new(ProjectExecutor::new(input, project_exprs))
+                Ok(Box::new(ProjectExecutor::new(input, project_exprs)))
             }
             FILTER => {
                 let filter_node =
                     stream_plan::FilterNode::parse_from_bytes(node.get_body().get_value())
                         .map_err(ErrorCode::ProtobufError)?;
                 let search_condition = build_expr_from_proto(filter_node.get_search_condition())?;
-                Box::new(FilterExecutor::new(input, search_condition))
+                Ok(Box::new(FilterExecutor::new(input, search_condition)))
             }
             LOCAL_SIMPLE_AGG => {
                 let aggr_node =
@@ -223,7 +252,7 @@ impl StreamManagerCore {
                     .iter()
                     .map(build_agg_call_from_proto)
                     .try_collect()?;
-                Box::new(SimpleAggExecutor::new(input, agg_calls)?)
+                Ok(Box::new(SimpleAggExecutor::new(input, agg_calls)?))
             }
             GLOBAL_SIMPLE_AGG => todo!(),
             // TODO: There will be only one hash aggregation, combining LOCAL and GLOBAL
@@ -244,27 +273,38 @@ impl StreamManagerCore {
                     .map(build_agg_call_from_proto)
                     .try_collect()?;
 
-                Box::new(HashAggExecutor::new(input, agg_calls, keys))
+                Ok(Box::new(HashAggExecutor::new(input, agg_calls, keys)))
             }
             GLOBAL_HASH_AGG => todo!(),
             MEMTABLE_MATERIALIZED_VIEW => {
-                let mtmv = stream_plan::MemTableMaterializedViewNode::parse_from_bytes(
+                // We use stream_plan.MaterializedViewNode instead of stream_plan.MemTableMaterializedViewNode to unify the interface.
+                let materialized_view_node = stream_plan::MaterializedViewNode::parse_from_bytes(
                     node.get_body().get_value(),
                 )
                 .map_err(ErrorCode::ProtobufError)?;
+                let table_id = TableId::from_protobuf(materialized_view_node.get_table_ref_id())
+                    .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
-                // TODO: assign a memtable from manager
-                let memtable = MemRowTable::default();
-
-                Box::new(MViewSinkExecutor::new(
-                    input,
-                    std::sync::Arc::new(memtable),
-                    mtmv.get_pk_idx().iter().map(|x| *x as usize).collect(),
-                ))
+                let columns = materialized_view_node.get_column_descs().to_vec();
+                let pks = materialized_view_node
+                    .pk_indices
+                    .iter()
+                    .map(|key| *key as usize)
+                    .collect::<Vec<_>>();
+                storage_mgr.create_materialized_view(&table_id, columns, pks.clone())?;
+                let table_ref = storage_mgr.get_table(&table_id).unwrap();
+                if let TableRef::Row(table) = table_ref {
+                    let executor = Box::new(MViewSinkExecutor::new(input, table, pks));
+                    Ok(executor)
+                } else {
+                    Err(RwError::from(InternalError(
+                        "Materialized view creation internal error".to_string(),
+                    )))
+                }
             }
             others => todo!("unsupported StreamNodeType: {:?}", others),
         };
-        Ok(operator)
+        operator
     }
 
     fn create_merger(&mut self, fragment_id: u32, upstreams: &[u32]) -> Result<Box<dyn Executor>> {
@@ -314,13 +354,18 @@ impl StreamManagerCore {
         }
     }
 
-    fn build_fragment(&mut self, fragments: &[u32]) -> Result<()> {
+    fn build_fragment(
+        &mut self,
+        fragments: &[u32],
+        storage_manager: StorageManagerRef,
+    ) -> Result<()> {
         for fragment_id in fragments {
             let fragment = self.fragments.remove(fragment_id).unwrap();
 
             let merger = self.create_merger(*fragment_id, fragment.get_upstream_fragment_id())?;
 
-            let operator = self.create_nodes(fragment.get_nodes(), merger)?;
+            let operator =
+                self.create_nodes(fragment.get_nodes(), merger, storage_manager.clone())?;
 
             let dispatcher = self.create_dispatcher(
                 operator,

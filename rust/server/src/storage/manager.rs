@@ -1,7 +1,8 @@
 use crate::catalog::TableId;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::storage::{MemColumnarTable, TableRef};
+use crate::storage::{MemColumnarTable, MemRowTable, TableRef};
+use risingwave_proto::plan::ColumnDesc;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -9,6 +10,12 @@ pub trait StorageManager: Sync + Send {
     fn create_table(&self, table_id: &TableId, column_count: usize) -> Result<()>;
     fn get_table(&self, table_id: &TableId) -> Result<TableRef>;
     fn drop_table(&self, table_id: &TableId) -> Result<()>;
+    fn create_materialized_view(
+        &self,
+        table_id: &TableId,
+        columns: Vec<ColumnDesc>,
+        pk_columns: Vec<usize>,
+    ) -> Result<()>;
 }
 
 pub type StorageManagerRef = Arc<dyn StorageManager>;
@@ -55,6 +62,29 @@ impl StorageManager for MemStorageManager {
             table_id
         );
         tables.remove(table_id);
+        Ok(())
+    }
+
+    fn create_materialized_view(
+        &self,
+        table_id: &TableId,
+        columns: Vec<ColumnDesc>,
+        pk_columns: Vec<usize>,
+    ) -> Result<()> {
+        let mut tables = self.get_tables()?;
+
+        ensure!(
+            !tables.contains_key(table_id),
+            "Table id already exists: {:?}",
+            table_id
+        );
+        let column_count = columns.len();
+        ensure!(column_count > 0, "There must be more than one column in MV");
+        tables.insert(
+            table_id.clone(),
+            TableRef::Row(Arc::new(MemRowTable::new(columns, pk_columns))),
+        );
+
         Ok(())
     }
 }

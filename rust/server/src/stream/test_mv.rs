@@ -1,0 +1,177 @@
+use pb_construct::make_proto;
+use pb_convert::FromProtobuf;
+use protobuf::well_known_types::Any as AnyProto;
+use protobuf::RepeatedField;
+use risingwave_proto::data::{DataType, DataType_TypeName};
+use risingwave_proto::expr::{ExprNode, ExprNode_Type, InputRefExpr};
+use risingwave_proto::plan::{ColumnDesc, ColumnDesc_ColumnEncodingType};
+use risingwave_proto::plan::{DatabaseRefId, SchemaRefId, TableRefId};
+use risingwave_proto::stream_plan::Dispatcher;
+use risingwave_proto::stream_plan::StreamNode_StreamNodeType;
+use risingwave_proto::stream_plan::{
+    MaterializedViewNode, ProjectNode, StreamFragment, StreamNode, TableSourceNode,
+};
+use risingwave_proto::stream_service::{ActorInfo, ActorInfoTable};
+use risingwave_proto::task_service::HostAddress;
+
+use crate::array::column::Column;
+use crate::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder};
+use crate::catalog::TableId;
+use crate::error::ErrorCode::InternalError;
+use crate::error::RwError;
+use crate::storage::TableRef;
+use crate::storage::{MemStorageManager, Row, StorageManager};
+use crate::stream::StreamManager;
+use crate::stream_op::Message;
+use crate::types::{Int32Type, Scalar};
+use futures::StreamExt;
+use smallvec::SmallVec;
+use std::sync::Arc;
+
+fn make_int32_type_proto() -> DataType {
+    return make_proto!(DataType, { type_name: DataType_TypeName::INT32 });
+}
+
+fn make_table_ref_id(id: i32) -> TableRefId {
+    return make_proto!(TableRefId, {
+        schema_ref_id: make_proto!(SchemaRefId, {
+            database_ref_id: make_proto!(DatabaseRefId, {
+                database_id: 0
+            })
+        }),
+        table_id: id
+    });
+}
+
+#[tokio::test]
+async fn test_stream_mv_proto() {
+    // Build example proto for a stream executor chain.
+    // TableSource -> Project -> Materialized View
+    // Select v1 from T(v1,v2).
+    let source_proto = make_proto!(StreamNode, {
+        node_type: StreamNode_StreamNodeType::TABLE_INGRESS,
+        body: AnyProto::pack(
+          &make_proto!(TableSourceNode, {
+                table_ref_id: make_table_ref_id(0),
+                column_ids: vec![0,1]
+            })
+        ).unwrap()
+    });
+    let expr_proto = make_proto!(ExprNode,{
+        expr_type: ExprNode_Type::INPUT_REF,
+        body: AnyProto::pack(
+            &make_proto!(InputRefExpr,{
+                column_idx: 0
+            })
+        ).unwrap(),
+        return_type: make_int32_type_proto()
+    });
+    let column_desc_proto = make_proto!(ColumnDesc,{
+        column_type: make_int32_type_proto(),
+        encoding: ColumnDesc_ColumnEncodingType::RAW,
+        name: "v1".to_string()
+    });
+
+    let project_proto = make_proto!(StreamNode,{
+        node_type: StreamNode_StreamNodeType::PROJECTION,
+        body: AnyProto::pack(
+            &make_proto!(ProjectNode,{
+                select_list: RepeatedField::from_slice(&[expr_proto])
+            })
+        ).unwrap(),
+        input: source_proto
+    });
+    let mview_proto = make_proto!(StreamNode,{
+        node_type: StreamNode_StreamNodeType::MEMTABLE_MATERIALIZED_VIEW,
+        body: AnyProto::pack(
+            &make_proto!(MaterializedViewNode,{
+                table_ref_id: make_table_ref_id(1),
+                column_descs: RepeatedField::from_slice(&[column_desc_proto])
+            })
+        ).unwrap(),
+        input: project_proto
+    });
+    let fragment_proto = make_proto!(StreamFragment, {
+      fragment_id: 1,
+      nodes: mview_proto,
+        upstream_fragment_id: vec![0],
+        dispatcher: make_proto!(Dispatcher,{
+
+        }),
+        downstream_fragment_id: vec![233]
+    });
+
+    // Initialize storage.
+    let storage_manager = Arc::new(MemStorageManager::new());
+    let table_id =
+        TableId::from_protobuf(&make_table_ref_id(0)).expect("Failed to convert table id");
+    let _res = storage_manager.create_table(&table_id, 2);
+    let table_ref =
+        (if let TableRef::Columnar(table_ref) = storage_manager.get_table(&table_id).unwrap() {
+            Ok(table_ref)
+        } else {
+            Err(RwError::from(InternalError(
+                "Only columnar table support insert".to_string(),
+            )))
+        })
+        .unwrap();
+    // Mock initial data.
+    // One row of (1,2)
+    let mut array_builder1 = PrimitiveArrayBuilder::<i32>::new(1).unwrap();
+    array_builder1.append(Some(1_i32)).unwrap();
+    let array1 = array_builder1.finish().unwrap();
+    let column1 = Column::new(Arc::new(array1.into()), Int32Type::create(false));
+    let mut array_builder2 = PrimitiveArrayBuilder::<i32>::new(1).unwrap();
+    array_builder2.append(Some(2_i32)).unwrap();
+    let array2 = array_builder2.finish().unwrap();
+    let column2 = Column::new(Arc::new(array2.into()), Int32Type::create(false));
+    let columns = vec![column1, column2];
+    let append_chunk = DataChunk::builder().columns(columns).build();
+
+    // Build stream actor.
+    let stream_manager = StreamManager::new();
+
+    let actor_info_proto = make_proto!(ActorInfo, {
+    fragment_id: 1,
+    host: make_proto!(HostAddress, {
+      host: "127.0.0.1".into(),
+      port: 2333
+      })
+    });
+    let actor_info_table = make_proto!(ActorInfoTable, {
+        info: RepeatedField::from_slice(&[actor_info_proto])
+    });
+    stream_manager.update_actor_info(actor_info_table).unwrap();
+    stream_manager.update_fragment(&[fragment_proto]).unwrap();
+    stream_manager
+        .build_fragment(&[1], storage_manager.clone())
+        .unwrap();
+
+    // Insert data and check if the materialized view has been updated.
+    let _res_app = table_ref.append(append_chunk);
+    let table_id_mv = TableId::from_protobuf(&make_table_ref_id(1))
+        .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))
+        .unwrap();
+    let table_ref_mv = storage_manager.get_table(&table_id_mv).unwrap();
+
+    let mut sink = stream_manager.take_sink(233);
+    if let Message::Chunk(_chunk) = sink.next().await.unwrap() {
+        if let TableRef::Row(table_mv) = table_ref_mv {
+            let mut value_vec = SmallVec::new();
+            value_vec.push(Some(1.to_scalar_value()));
+            let value_row = Row(value_vec);
+            let res_row = table_mv.get(value_row);
+            if let Ok(res_row_in) = res_row {
+                let datum = res_row_in.unwrap().0.get(0).unwrap().clone();
+                let d_value = datum.unwrap().as_int32() + 1;
+                assert_eq!(d_value, 2);
+            } else {
+                unreachable!();
+            }
+        } else {
+            unreachable!();
+        }
+    } else {
+        unreachable!();
+    }
+}

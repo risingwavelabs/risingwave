@@ -4,7 +4,9 @@ use pb_construct::make_proto;
 use risingwave_proto::stream_plan::*;
 use risingwave_proto::stream_service::*;
 use risingwave_proto::task_service::HostAddress;
+use std::sync::Arc;
 
+use crate::storage::MemStorageManager;
 use crate::stream_op::Message;
 
 use super::*;
@@ -110,10 +112,13 @@ async fn test_stream_proto() {
         ])
         .unwrap();
 
-    stream_manager.build_fragment(&[1, 3, 7, 11, 13]).unwrap();
+    let storage_mgr = Arc::new(MemStorageManager::new());
+    stream_manager
+        .build_fragment(&[1, 3, 7, 11, 13], storage_mgr)
+        .unwrap();
 
     let mut source = stream_manager.take_source();
-    let mut sink = stream_manager.take_sink();
+    let mut sink = stream_manager.take_sink(233);
 
     let consumer = tokio::spawn(async move {
         for _epoch in 0..100 {

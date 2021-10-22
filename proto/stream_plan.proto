@@ -23,18 +23,13 @@ message FilterNode {
   expr.ExprNode search_condition = 1;
 }
 
-message MemTableMaterializedViewNode {
-  int32 memtable_id = 1;
-  repeated int32 pk_idx = 2;
-}
-
-// Version 2 streaming nodes: MaterializedViewNode, SimpleAggNode, HashAggNode.
-
 // A materialized view is regarded as a table,
 // hence we copy the CreateTableNode definition in OLAP PlanNode.
+// In addition, we also specify primary key to MV for efficient point lookup during update and deletion.
 message MaterializedViewNode{
   plan.TableRefId table_ref_id = 1;
   repeated plan.ColumnDesc column_descs = 2;
+  repeated int32 pk_indices = 3;
 }
 
 // Remark by Yanghao: for both local and global we use the same node in the protobuf.
@@ -66,7 +61,7 @@ message StreamNode {
   // TODO: should we enforce strong typed body on nodes?
   google.protobuf.Any body = 2;
   // Child node in plan aka. upstream nodes in the streaming DAG
-  // Currently we assume the operetors in one fragment are always chained list rather than tree
+  // Currently we assume the operators in one fragment are always chained list rather than tree
   StreamNode input = 3;
 }
 

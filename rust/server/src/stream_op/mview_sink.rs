@@ -32,6 +32,9 @@ impl SimpleExecutor for MViewSinkExecutor {
         } = &chunk;
 
         let mut ingest_op = vec![];
+        let mut row_batch = vec![];
+
+        let pk_num = &self.pk_col.len();
 
         for (idx, op) in ops.iter().enumerate() {
             // check visibility
@@ -60,17 +63,31 @@ impl SimpleExecutor for MViewSinkExecutor {
             let row = Row(row);
 
             use super::Op::*;
-            match op {
-                Insert | UpdateInsert => {
-                    ingest_op.push((pk_row, Some(row)));
+            if *pk_num > 0 {
+                match op {
+                    Insert | UpdateInsert => {
+                        ingest_op.push((pk_row, Some(row)));
+                    }
+                    Delete | UpdateDelete => {
+                        ingest_op.push((pk_row, None));
+                    }
                 }
-                Delete | UpdateDelete => {
-                    ingest_op.push((pk_row, None));
+            } else {
+                match op {
+                    Insert | UpdateInsert => {
+                        row_batch.push((row, true));
+                    }
+                    Delete | UpdateDelete => {
+                        row_batch.push((row, false));
+                    }
                 }
             }
         }
-
-        self.table.ingest(ingest_op)?;
+        if *pk_num > 0 {
+            self.table.ingest(ingest_op)?;
+        } else {
+            self.table.insert_batch(row_batch)?;
+        }
 
         Ok(Message::Chunk(chunk))
     }
