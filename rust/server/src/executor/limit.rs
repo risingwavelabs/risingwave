@@ -283,11 +283,7 @@ mod tests {
         };
         let mut results = vec![];
         while let Batch(chunk) = limit_executor.execute().unwrap() {
-            results.push(Arc::new(
-                DataChunk::new(chunk.columns().to_vec(), chunk.visibility().clone())
-                    .compact()
-                    .unwrap(),
-            ));
+            results.push(Arc::new(chunk.compact().unwrap()));
         }
         let chunks =
             DataChunk::rechunk(results.into_iter().collect_vec().as_slice(), row_num).unwrap();

@@ -14,10 +14,7 @@ pub struct BroadcastSender {
 impl ChanSender for BroadcastSender {
     async fn send(&mut self, chunk: DataChunk) -> Result<()> {
         self.senders.iter().try_for_each(|sender| {
-            let columns = chunk.columns().to_vec();
-            let vis_map = chunk.get_visibility_ref().cloned();
-            let this_chunk = DataChunk::new(columns, vis_map);
-            sender.send(this_chunk).map_err(|e| {
+            sender.send(chunk.clone()).map_err(|e| {
                 ErrorCode::InternalError(format!("chunk was sent to a closed channel {}", e)).into()
             })
         })
