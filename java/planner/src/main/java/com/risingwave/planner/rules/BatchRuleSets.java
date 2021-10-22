@@ -9,12 +9,10 @@ import com.risingwave.planner.rel.logical.RwLogicalScan;
 import com.risingwave.planner.rel.logical.RwLogicalSort;
 import com.risingwave.planner.rel.logical.RwLogicalValues;
 import com.risingwave.planner.rel.physical.batch.RwBatchFilter;
-import com.risingwave.planner.rel.physical.batch.RwBatchGather;
 import com.risingwave.planner.rel.physical.batch.RwBatchInsert;
 import com.risingwave.planner.rel.physical.batch.RwBatchProject;
 import com.risingwave.planner.rel.physical.batch.RwBatchSort;
 import com.risingwave.planner.rel.physical.batch.RwBatchValues;
-import com.risingwave.planner.rules.logical.GatherConversionRule;
 import com.risingwave.planner.rules.logical.ProjectToTableScanRule;
 import com.risingwave.planner.rules.physical.batch.BatchExpandConverterRule;
 import com.risingwave.planner.rules.physical.batch.BatchScanConverterRule;
@@ -104,8 +102,7 @@ public class BatchRuleSets {
           RwLogicalValues.RwValuesConverterRule.INSTANCE,
           RwLogicalScan.RwLogicalFilterScanConverterRule.INSTANCE,
           RwLogicalSort.RwLogicalSortConverterRule.INSTANCE,
-          RwLogicalJoin.RwLogicalJoinConverterRule.INSTANCE,
-          GatherConversionRule.Config.DEFAULT.toRule());
+          RwLogicalJoin.RwLogicalJoinConverterRule.INSTANCE);
 
   public static final RuleSet LOGICAL_OPTIMIZATION_RULES =
       RuleSets.ofList(ProjectToTableScanRule.Config.INSTANCE.toRule());
@@ -116,7 +113,6 @@ public class BatchRuleSets {
           RwBatchFilter.BatchFilterConverterRule.INSTANCE,
           RwBatchProject.BatchProjectConverterRule.INSTANCE,
           BatchScanConverterRule.INSTANCE,
-          RwBatchGather.RwBatchGatherConverterRule.INSTANCE,
           RwBatchSort.RwBatchSortConverterRule.INSTANCE,
           RwBatchInsert.BatchInsertConverterRule.INSTANCE,
           RwBatchValues.BatchValuesConverterRule.INSTANCE);

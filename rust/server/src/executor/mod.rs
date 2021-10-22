@@ -6,7 +6,6 @@ use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 use crate::executor::create_stream::CreateStreamExecutor;
 use crate::executor::create_table::CreateTableExecutor;
-use crate::executor::gather::GatherExecutor;
 use crate::executor::insert::InsertExecutor;
 use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;
 pub use crate::executor::stream_scan::StreamScanExecutor;
@@ -27,7 +26,6 @@ mod create_table;
 mod drop_table;
 mod exchange;
 mod filter;
-mod gather;
 mod hash_map;
 mod insert;
 mod join;
@@ -114,7 +112,6 @@ impl<'a> ExecutorBuilder<'a> {
           PlanNode_PlanNodeType::ROW_SEQ_SCAN => RowSeqScanExecutor,
           PlanNode_PlanNodeType::INSERT => InsertExecutor,
           PlanNode_PlanNodeType::DROP_TABLE => DropTableExecutor,
-          PlanNode_PlanNodeType::GATHER => GatherExecutor,
           PlanNode_PlanNodeType::EXCHANGE => ExchangeExecutor,
           PlanNode_PlanNodeType::FILTER => FilterExecutor,
           PlanNode_PlanNodeType::PROJECT => ProjectionExecutor,

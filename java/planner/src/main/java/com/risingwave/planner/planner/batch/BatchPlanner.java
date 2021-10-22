@@ -22,7 +22,7 @@ import com.risingwave.planner.program.JoinReorderProgram;
 import com.risingwave.planner.program.OptimizerProgram;
 import com.risingwave.planner.program.SubQueryRewriteProgram;
 import com.risingwave.planner.program.VolcanoOptimizerProgram;
-import com.risingwave.planner.rel.logical.RwLogicalGather;
+import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.physical.batch.BatchPlan;
 import com.risingwave.planner.rel.physical.batch.RisingWaveBatchPhyRel;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
@@ -33,26 +33,18 @@ import org.apache.calcite.sql.SqlNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/** Planner for batch query */
 public class BatchPlanner implements Planner<BatchPlan> {
   private static final Logger log = LoggerFactory.getLogger(BatchPlanner.class);
 
   public BatchPlanner() {}
 
-  private static RelNode toRel(
-      SqlConverter sqlConverter, SqlNode sqlNode, ExecutionContext context) {
-    RelNode root = sqlConverter.toRel(sqlNode).rel;
-    if (!isSingleMode(context)) {
-      root = RwLogicalGather.create(root);
-    }
-
-    return root;
-  }
-
   @Override
   public BatchPlan plan(SqlNode ast, ExecutionContext context) {
     SqlConverter sqlConverter = SqlConverter.builder(context).build();
-    RelNode rawPlan = toRel(sqlConverter, ast, context);
-    OptimizerProgram optimizerProgram = buildOptimizerProgram();
+    RelNode rawPlan = sqlConverter.toRel(ast).rel;
+
+    OptimizerProgram optimizerProgram = buildOptimizerProgram(!isSingleMode(context));
 
     RelNode result = optimizerProgram.optimize(rawPlan, context);
     RisingWaveBatchPhyRel root = (RisingWaveBatchPhyRel) result;
@@ -61,7 +53,7 @@ public class BatchPlanner implements Planner<BatchPlan> {
     return new BatchPlan(root);
   }
 
-  private static OptimizerProgram buildOptimizerProgram() {
+  private static OptimizerProgram buildOptimizerProgram(boolean isDistributed) {
     ChainedOptimizerProgram.Builder builder = ChainedOptimizerProgram.builder();
 
     builder.addLast(SUBQUERY_REWRITE, SubQueryRewriteProgram.INSTANCE);
@@ -80,14 +72,18 @@ public class BatchPlanner implements Planner<BatchPlan> {
             .addRequiredOutputTraits(LOGICAL)
             .build());
 
-    builder.addLast(
-        PHYSICAL,
+    var physical =
         VolcanoOptimizerProgram.builder()
             .addRules(PHYSICAL_CONVERTER_RULES)
             .addRules(PHYSICAL_AGG_RULES)
             .addRules(PHYSICAL_JOIN_RULES)
-            .addRequiredOutputTraits(RisingWaveBatchPhyRel.BATCH_PHYSICAL)
-            .build());
+            .addRequiredOutputTraits(RisingWaveBatchPhyRel.BATCH_PHYSICAL);
+
+    if (isDistributed) {
+      physical.addRequiredOutputTraits(RwDistributions.SINGLETON);
+    }
+
+    builder.addLast(PHYSICAL, physical.build());
 
     return builder.build();
   }
