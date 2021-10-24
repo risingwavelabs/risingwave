@@ -26,7 +26,7 @@ message FilterNode {
 // A materialized view is regarded as a table,
 // hence we copy the CreateTableNode definition in OLAP PlanNode.
 // In addition, we also specify primary key to MV for efficient point lookup during update and deletion.
-message MaterializedViewNode{
+message MViewNode{
   plan.TableRefId table_ref_id = 1;
   repeated plan.ColumnDesc column_descs = 2;
   repeated int32 pk_indices = 3;

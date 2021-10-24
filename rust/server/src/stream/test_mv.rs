@@ -9,7 +9,7 @@ use risingwave_proto::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 use risingwave_proto::stream_plan::Dispatcher;
 use risingwave_proto::stream_plan::StreamNode_StreamNodeType;
 use risingwave_proto::stream_plan::{
-    MaterializedViewNode, ProjectNode, StreamFragment, StreamNode, TableSourceNode,
+    MViewNode, ProjectNode, StreamFragment, StreamNode, TableSourceNode,
 };
 use risingwave_proto::stream_service::{ActorInfo, ActorInfoTable};
 use risingwave_proto::task_service::HostAddress;
@@ -84,7 +84,7 @@ async fn test_stream_mv_proto() {
     let mview_proto = make_proto!(StreamNode,{
         node_type: StreamNode_StreamNodeType::MEMTABLE_MATERIALIZED_VIEW,
         body: AnyProto::pack(
-            &make_proto!(MaterializedViewNode,{
+            &make_proto!(MViewNode,{
                 table_ref_id: make_table_ref_id(1),
                 column_descs: RepeatedField::from_slice(&[column_desc_proto])
             })

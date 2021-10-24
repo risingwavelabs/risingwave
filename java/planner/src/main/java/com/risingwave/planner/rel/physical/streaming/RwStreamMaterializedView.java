@@ -5,7 +5,7 @@ import com.risingwave.catalog.ColumnDesc;
 import com.risingwave.catalog.ColumnEncoding;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.common.datatype.RisingWaveDataType;
-import com.risingwave.proto.streaming.plan.MaterializedViewNode;
+import com.risingwave.proto.streaming.plan.MViewNode;
 import com.risingwave.proto.streaming.plan.StreamNode;
 import com.risingwave.rpc.Messages;
 import java.util.ArrayList;
@@ -47,14 +47,9 @@ public class RwStreamMaterializedView extends Project implements RisingWaveStrea
         getCluster(), traitSet, getHints(), input, projects, rowType);
   }
 
-  // public RwStreamMaterializedView copy(RelTraitSet traitSet, RelNode input, RelDataType rowType)
-  // {
-  //  return new RwStreamMaterializedView(getCluster(), traitSet, input, rowType);
-  // }
-
   @Override
   public StreamNode serialize() {
-    MaterializedViewNode.Builder materializedViewNodeBuilder = MaterializedViewNode.newBuilder();
+    MViewNode.Builder materializedViewNodeBuilder = MViewNode.newBuilder();
     for (Pair<String, ColumnDesc> pair : getColumns()) {
       com.risingwave.proto.plan.ColumnDesc.Builder columnDescBuilder =
           com.risingwave.proto.plan.ColumnDesc.newBuilder();
@@ -64,7 +59,7 @@ public class RwStreamMaterializedView extends Project implements RisingWaveStrea
           .setIsPrimary(false);
       materializedViewNodeBuilder.addColumnDescs(columnDescBuilder);
     }
-    MaterializedViewNode materializedViewNode =
+    MViewNode materializedViewNode =
         materializedViewNodeBuilder.setTableRefId(Messages.getTableRefId(tableId)).build();
     return StreamNode.newBuilder()
         .setNodeType(StreamNode.StreamNodeType.MEMTABLE_MATERIALIZED_VIEW)
@@ -78,6 +73,12 @@ public class RwStreamMaterializedView extends Project implements RisingWaveStrea
     this.tableId = tableId;
   }
 
+  /**
+   * Return a list of column descriptions from the underlying expression. The column descriptions
+   * can be used to generate metadata for storage.
+   *
+   * @return List of name->column description pairs.
+   */
   public List<Pair<String, ColumnDesc>> getColumns() {
     List<Pair<String, ColumnDesc>> list = new ArrayList<>();
     var rowType = getRowType();

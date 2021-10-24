@@ -20,7 +20,7 @@ RwStreamMaterializedView(v=[$0])
 {
   "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
   "body": {
-    "@type": "type.googleapis.com/stream_plan.MaterializedViewNode",
+    "@type": "type.googleapis.com/stream_plan.MViewNode",
     "tableRefId": {
       "schemaRefId": {
         "databaseRefId": {
@@ -177,7 +177,7 @@ RwStreamMaterializedView(v=[$0])
 {
   "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
   "body": {
-    "@type": "type.googleapis.com/stream_plan.MaterializedViewNode",
+    "@type": "type.googleapis.com/stream_plan.MViewNode",
     "tableRefId": {
       "schemaRefId": {
         "databaseRefId": {
@@ -262,7 +262,7 @@ RwStreamMaterializedView(v2=[$0], v=[$1])
 {
   "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
   "body": {
-    "@type": "type.googleapis.com/stream_plan.MaterializedViewNode",
+    "@type": "type.googleapis.com/stream_plan.MViewNode",
     "tableRefId": {
       "schemaRefId": {
         "databaseRefId": {
@@ -388,7 +388,7 @@ RwStreamMaterializedView(v=[$0])
 {
   "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
   "body": {
-    "@type": "type.googleapis.com/stream_plan.MaterializedViewNode",
+    "@type": "type.googleapis.com/stream_plan.MViewNode",
     "tableRefId": {
       "schemaRefId": {
         "databaseRefId": {
@@ -570,7 +570,7 @@ RwStreamMaterializedView(v=[$0])
 {
   "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
   "body": {
-    "@type": "type.googleapis.com/stream_plan.MaterializedViewNode",
+    "@type": "type.googleapis.com/stream_plan.MViewNode",
     "tableRefId": {
       "schemaRefId": {
         "databaseRefId": {
@@ -712,7 +712,7 @@ RwStreamMaterializedView(v=[$0])
 {
   "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
   "body": {
-    "@type": "type.googleapis.com/stream_plan.MaterializedViewNode",
+    "@type": "type.googleapis.com/stream_plan.MViewNode",
     "tableRefId": {
       "schemaRefId": {
         "databaseRefId": {
@@ -849,7 +849,7 @@ RwStreamMaterializedView(v=[$0])
 {
   "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
   "body": {
-    "@type": "type.googleapis.com/stream_plan.MaterializedViewNode",
+    "@type": "type.googleapis.com/stream_plan.MViewNode",
     "tableRefId": {
       "schemaRefId": {
         "databaseRefId": {
@@ -1005,7 +1005,7 @@ RwStreamMaterializedView(v=[$0])
 {
   "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
   "body": {
-    "@type": "type.googleapis.com/stream_plan.MaterializedViewNode",
+    "@type": "type.googleapis.com/stream_plan.MViewNode",
     "tableRefId": {
       "schemaRefId": {
         "databaseRefId": {

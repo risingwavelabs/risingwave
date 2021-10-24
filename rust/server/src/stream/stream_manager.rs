@@ -274,10 +274,9 @@ impl StreamManagerCore {
             GLOBAL_HASH_AGG => todo!(),
             MEMTABLE_MATERIALIZED_VIEW => {
                 // We use stream_plan.MaterializedViewNode instead of stream_plan.MemTableMaterializedViewNode to unify the interface.
-                let materialized_view_node = stream_plan::MaterializedViewNode::parse_from_bytes(
-                    node.get_body().get_value(),
-                )
-                .map_err(ErrorCode::ProtobufError)?;
+                let materialized_view_node =
+                    stream_plan::MViewNode::parse_from_bytes(node.get_body().get_value())
+                        .map_err(ErrorCode::ProtobufError)?;
                 let table_id = TableId::from_protobuf(materialized_view_node.get_table_ref_id())
                     .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
