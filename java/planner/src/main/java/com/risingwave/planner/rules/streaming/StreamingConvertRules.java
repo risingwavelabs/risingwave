@@ -16,5 +16,6 @@ public class StreamingConvertRules {
           RwStreamProject.StreamProjectConverterRule.INSTANCE,
           RwStreamTableSource.StreamTableSourceConverterRule.INSTANCE,
           StreamingAggRule.Config.DEFAULT.toRule(),
-          StreamingExpandConverterRule.Config.DEFAULT.toRule());
+          StreamingExpandConverterRule.Config.DEFAULT.toRule(),
+          StreamingEliminateProjectRule.Config.DEFAULT.toRule());
 }
