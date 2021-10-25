@@ -3,7 +3,6 @@
 #![warn(clippy::doc_markdown)]
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
-#![feature(type_alias_impl_trait)]
 #![feature(binary_heap_drain_sorted)]
 
 extern crate anyhow;

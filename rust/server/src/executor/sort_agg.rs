@@ -68,12 +68,13 @@ impl BoxedExecutorBuilder for SortAggExecutor {
     }
 }
 
+#[async_trait::async_trait]
 impl Executor for SortAggExecutor {
     fn init(&mut self) -> Result<()> {
         self.child.init()
     }
 
-    fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<ExecutorResult> {
         if self.child_done {
             return Ok(ExecutorResult::Done);
         }
@@ -90,7 +91,7 @@ impl Executor for SortAggExecutor {
             .map(|e| DataType::create_array_builder(e.return_type_ref(), cardinality))
             .collect::<Result<Vec<_>>>()?;
 
-        while let ExecutorResult::Batch(child_chunk) = self.child.execute()? {
+        while let ExecutorResult::Batch(child_chunk) = self.child.execute().await? {
             let group_arrays = self
                 .group_exprs
                 .iter_mut()
@@ -164,9 +165,9 @@ mod tests {
         AggCall, AggCall_Arg, AggCall_Type, ExprNode, ExprNode_Type, InputRefExpr,
     };
 
-    #[test]
+    #[tokio::test]
     #[allow(clippy::many_single_char_names)]
-    fn execute_sum_int32() -> Result<()> {
+    async fn execute_sum_int32() -> Result<()> {
         let a = Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into());
         let t32 = Int32Type::create(false);
         let chunk = DataChunk::builder()
@@ -199,8 +200,8 @@ mod tests {
         };
 
         executor.init()?;
-        let o = executor.execute()?.batch_or()?;
-        if let ExecutorResult::Batch(_) = executor.execute()? {
+        let o = executor.execute().await?.batch_or()?;
+        if let ExecutorResult::Batch(_) = executor.execute().await? {
             panic!("simple agg should have no more than 1 output.");
         }
         executor.clean()?;
@@ -213,9 +214,9 @@ mod tests {
         Ok(())
     }
 
-    #[test]
+    #[tokio::test]
     #[allow(clippy::many_single_char_names)]
-    fn execute_sum_int32_grouped() -> Result<()> {
+    async fn execute_sum_int32_grouped() -> Result<()> {
         use crate::array::ArrayImpl;
         let a: Arc<ArrayImpl> = Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into());
         let t32 = Int32Type::create(false);
@@ -286,8 +287,8 @@ mod tests {
         };
 
         executor.init()?;
-        let o = executor.execute()?.batch_or()?;
-        if let ExecutorResult::Batch(_) = executor.execute()? {
+        let o = executor.execute().await?.batch_or()?;
+        if let ExecutorResult::Batch(_) = executor.execute().await? {
             panic!("simple agg should have no more than 1 output.");
         }
         executor.clean()?;

@@ -5,7 +5,7 @@ use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
-use crate::storage::{MemRowTable, Row, SimpleTableRef};
+use crate::storage::{MemRowTable, MemTableRowIter, Row, SimpleTableRef};
 use crate::types::build_from_proto;
 use crate::types::DataTypeRef;
 use pb_convert::FromProtobuf;
@@ -15,16 +15,14 @@ use std::sync::Arc;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 
-type RowIter = impl Iterator<Item = (Row, Row)>;
-
-fn make_row_iter(table_ref: Arc<MemRowTable>) -> Result<RowIter> {
+fn make_row_iter(table_ref: Arc<MemRowTable>) -> Result<MemTableRowIter> {
     table_ref.iter()
 }
 
 /// Executor that scans data from row table
 pub(super) struct RowSeqScanExecutor {
     /// An iterator to scan MemRowTable.
-    iter: RowIter,
+    iter: MemTableRowIter,
     data_types: Vec<DataTypeRef>,
     column_ids: Vec<usize>,
     /// If empty, then the row will be iterated in a different manner.
@@ -72,12 +70,13 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
     }
 }
 
+#[async_trait::async_trait]
 impl Executor for RowSeqScanExecutor {
     fn init(&mut self) -> Result<()> {
         Ok(())
     }
 
-    fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<ExecutorResult> {
         match self.iter.next() {
             Some((key_row, value_row)) => {
                 if !self.has_pk {

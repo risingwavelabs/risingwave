@@ -14,13 +14,14 @@ pub(super) struct FilterExecutor {
     child: BoxedExecutor,
 }
 
+#[async_trait::async_trait]
 impl Executor for FilterExecutor {
     fn init(&mut self) -> Result<()> {
         self.child.init()
     }
 
-    fn execute(&mut self) -> Result<ExecutorResult> {
-        let res = self.child.execute()?;
+    async fn execute(&mut self) -> Result<ExecutorResult> {
+        let res = self.child.execute().await?;
         if let Batch(data_chunk) = res {
             let vis_array = self.expr.eval(&data_chunk)?;
             if let Bool(vis) = vis_array.as_ref() {
@@ -76,8 +77,9 @@ mod tests {
     use risingwave_proto::expr::InputRefExpr;
     use risingwave_proto::expr::{ExprNode, ExprNode_Type};
     use std::sync::Arc;
-    #[test]
-    fn test_filter_executor() {
+
+    #[tokio::test]
+    async fn test_filter_executor() {
         let col1 = create_column(&[Some(2), Some(2)]).unwrap();
         let col2 = create_column(&[Some(1), Some(2)]).unwrap();
         let data_chunk = DataChunk::builder().columns([col1, col2].to_vec()).build();
@@ -88,7 +90,7 @@ mod tests {
             expr: build_from_proto(&expr).unwrap(),
             child: Box::new(mock_executor),
         };
-        let res = filter_executor.execute().unwrap();
+        let res = filter_executor.execute().await.unwrap();
         if let Batch(res) = res {
             let col1 = res.column_at(0).unwrap();
             let array = col1.array();

@@ -23,12 +23,13 @@ impl MockExecutor {
     }
 }
 
+#[async_trait::async_trait]
 impl Executor for MockExecutor {
     fn init(&mut self) -> Result<()> {
         Ok(())
     }
 
-    fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<ExecutorResult> {
         if self.chunks.is_empty() {
             return Ok(Done);
         }

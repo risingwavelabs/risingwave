@@ -87,12 +87,13 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
     }
 }
 
+#[async_trait::async_trait]
 impl Executor for StreamScanExecutor {
     fn init(&mut self) -> Result<()> {
         Ok(())
     }
 
-    fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<ExecutorResult> {
         if self.done {
             return Ok(ExecutorResult::Done);
         }

@@ -31,12 +31,13 @@ impl BoxedExecutorBuilder for DropTableExecutor {
     }
 }
 
+#[async_trait::async_trait]
 impl Executor for DropTableExecutor {
     fn init(&mut self) -> Result<()> {
         Ok(())
     }
 
-    fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<ExecutorResult> {
         self.table_manager
             .drop_table(&self.table_id)
             .map(|_| ExecutorResult::Done)

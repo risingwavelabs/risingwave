@@ -24,6 +24,7 @@ pub(super) struct InsertExecutor {
     executed: bool,
 }
 
+#[async_trait::async_trait]
 impl Executor for InsertExecutor {
     fn init(&mut self) -> Result<()> {
         self.child.init()?;
@@ -31,7 +32,7 @@ impl Executor for InsertExecutor {
         Ok(())
     }
 
-    fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<ExecutorResult> {
         if self.executed {
             return Ok(Done);
         }
@@ -46,7 +47,7 @@ impl Executor for InsertExecutor {
             )))
         })?;
         let mut rows_inserted = 0;
-        while let Batch(child_chunk) = self.child.execute()? {
+        while let Batch(child_chunk) = self.child.execute().await? {
             rows_inserted += table_ref.append(child_chunk)?;
         }
 
@@ -113,8 +114,8 @@ mod tests {
     use crate::*;
     use std::sync::Arc;
 
-    #[test]
-    fn test_insert_executor() -> Result<()> {
+    #[tokio::test]
+    async fn test_insert_executor() -> Result<()> {
         let table_id = mock_table_id();
         let table_manager = Arc::new(SimpleTableManager::new());
         let mut mock_executor = MockExecutor::new();
@@ -133,7 +134,7 @@ mod tests {
         };
         assert!(insert_executor.init().is_ok());
 
-        let result = insert_executor.execute()?.batch_or()?;
+        let result = insert_executor.execute().await?.batch_or()?;
         assert!(insert_executor.clean().is_ok());
         assert_eq!(
             result

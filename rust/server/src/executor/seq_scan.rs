@@ -56,13 +56,14 @@ impl BoxedExecutorBuilder for SeqScanExecutor {
     }
 }
 
+#[async_trait::async_trait]
 impl Executor for SeqScanExecutor {
     fn init(&mut self) -> Result<()> {
         self.data = self.table.get_data()?;
         Ok(())
     }
 
-    fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<ExecutorResult> {
         if self.chunk_idx >= self.data.len() {
             return Ok(Done);
         }
@@ -112,8 +113,8 @@ mod tests {
     use crate::types::Int64Type;
     use crate::*;
 
-    #[test]
-    fn test_seq_scan_executor() -> Result<()> {
+    #[tokio::test]
+    async fn test_seq_scan_executor() -> Result<()> {
         let table_id = mock_table_id();
         let table = SimpleMemTable::new(&table_id, 5);
 
@@ -132,7 +133,7 @@ mod tests {
         };
         assert!(seq_scan_executor.init().is_ok());
 
-        let result_chunk1 = seq_scan_executor.execute()?.batch_or()?;
+        let result_chunk1 = seq_scan_executor.execute().await?.batch_or()?;
         assert_eq!(result_chunk1.dimension(), 1);
         assert_eq!(
             result_chunk1
@@ -144,7 +145,7 @@ mod tests {
             vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
         );
 
-        let result_chunk2 = seq_scan_executor.execute()?.batch_or()?;
+        let result_chunk2 = seq_scan_executor.execute().await?.batch_or()?;
         assert_eq!(result_chunk2.dimension(), 1);
         assert_eq!(
             result_chunk2
@@ -155,7 +156,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
         );
-        assert!(seq_scan_executor.execute().is_ok());
+        assert!(seq_scan_executor.execute().await.is_ok());
         assert!(seq_scan_executor.clean().is_ok());
 
         Ok(())

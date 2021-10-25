@@ -89,8 +89,9 @@ impl OrderByExecutor {
         });
         index
     }
-    fn collect_child_data(&mut self) -> Result<()> {
-        while let ExecutorResult::Batch(chunk) = self.child.execute()? {
+
+    async fn collect_child_data(&mut self) -> Result<()> {
+        while let ExecutorResult::Batch(chunk) = self.child.execute().await? {
             self.sorted_indices.push(self.get_order_index_from(&chunk));
             self.chunks.push(Arc::new(chunk));
         }
@@ -110,6 +111,7 @@ impl OrderByExecutor {
     }
 }
 
+#[async_trait::async_trait]
 impl Executor for OrderByExecutor {
     fn init(&mut self) -> Result<()> {
         self.first_execution = true;
@@ -117,9 +119,9 @@ impl Executor for OrderByExecutor {
         Ok(())
     }
 
-    fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<ExecutorResult> {
         if self.first_execution {
-            self.collect_child_data()?;
+            self.collect_child_data().await?;
             self.fill_data_types();
             self.first_execution = false;
         }
@@ -188,8 +190,8 @@ mod tests {
         Ok(Column::new(array, data_type))
     }
 
-    #[test]
-    fn test_simple_order_by_executor() {
+    #[tokio::test]
+    async fn test_simple_order_by_executor() {
         let col0 = create_column(&[Some(1), Some(2), Some(3)]).unwrap();
         let col1 = create_column(&[Some(3), Some(2), Some(1)]).unwrap();
         let data_chunk = DataChunk::builder().columns([col0, col1].to_vec()).build();
@@ -217,7 +219,7 @@ mod tests {
             min_heap: BinaryHeap::new(),
             data_types: vec![],
         };
-        let res = order_by_executor.execute().unwrap();
+        let res = order_by_executor.execute().await.unwrap();
         assert!(matches!(res, ExecutorResult::Batch(_)));
         if let ExecutorResult::Batch(res) = res {
             let col0 = res.column_at(0).unwrap();

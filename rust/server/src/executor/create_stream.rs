@@ -100,13 +100,14 @@ impl BoxedExecutorBuilder for CreateStreamExecutor {
     }
 }
 
+#[async_trait::async_trait]
 impl Executor for CreateStreamExecutor {
     fn init(&mut self) -> Result<()> {
         info!("create stream executor initing!");
         Ok(())
     }
 
-    fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<ExecutorResult> {
         self.source_manager.create_source(
             &self.table_id,
             self.format.clone(),

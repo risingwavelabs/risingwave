@@ -102,26 +102,27 @@ impl EquiJoinParams {
     }
 }
 
+#[async_trait::async_trait]
 impl<K: HashKey + Send + Sync> Executor for HashJoinExecutor<K> {
     fn init(&mut self) -> Result<()> {
         Ok(())
     }
 
-    fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<ExecutorResult> {
         loop {
             let mut cur_state = HashJoinState::Done;
             swap(&mut cur_state, &mut self.state);
 
             match cur_state {
-                HashJoinState::Build(build_table) => self.build(build_table)?,
+                HashJoinState::Build(build_table) => self.build(build_table).await?,
                 HashJoinState::FirstProbe(probe_table) => {
-                    let ret = self.probe(true, probe_table)?;
+                    let ret = self.probe(true, probe_table).await?;
                     if let Some(data_chunk) = ret {
                         return Ok(ExecutorResult::Batch(data_chunk));
                     }
                 }
                 HashJoinState::Probe(probe_table) => {
-                    let ret = self.probe(false, probe_table)?;
+                    let ret = self.probe(false, probe_table).await?;
                     if let Some(data_chunk) = ret {
                         return Ok(ExecutorResult::Batch(data_chunk));
                     }
@@ -145,9 +146,9 @@ impl<K: HashKey + Send + Sync> Executor for HashJoinExecutor<K> {
 }
 
 impl<K: HashKey> HashJoinExecutor<K> {
-    fn build(&mut self, mut build_table: BuildTable) -> Result<()> {
+    async fn build(&mut self, mut build_table: BuildTable) -> Result<()> {
         self.right_child.init()?;
-        while let Batch(chunk) = self.right_child.execute()? {
+        while let Batch(chunk) = self.right_child.execute().await? {
             build_table.append_build_chunk(chunk)?;
         }
 
@@ -157,7 +158,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         Ok(())
     }
 
-    fn probe(
+    async fn probe(
         &mut self,
         first_probe: bool,
         mut probe_table: ProbeTable<K>,
@@ -166,7 +167,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             self.left_child.init()?;
         }
 
-        match self.left_child.execute()? {
+        match self.left_child.execute().await? {
             ExecutorResult::Batch(data_chunk) => {
                 let ret = probe_table.join(data_chunk).map(Some);
                 self.state = Probe(probe_table);
@@ -568,13 +569,13 @@ mod tests {
             )) as BoxedExecutor
         }
 
-        fn do_test(&self, expected: DataChunk) {
+        async fn do_test(&self, expected: DataChunk) {
             let mut join_executor = self.create_join_executor();
             join_executor.init().expect("Failed to init join executor.");
 
             let mut data_chunk_merger = DataChunkMerger::new(self.output_data_types()).unwrap();
 
-            while let ExecutorResult::Batch(data_chunk) = join_executor.execute().unwrap() {
+            while let ExecutorResult::Batch(data_chunk) = join_executor.execute().await.unwrap() {
                 data_chunk_merger.append(&data_chunk).unwrap();
             }
 
@@ -588,8 +589,8 @@ mod tests {
     /// ```sql
     /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 join t2 on t1.v1 = t2.v1;
     /// ```
-    #[test]
-    fn test_inner_join() {
+    #[tokio::test]
+    async fn test_inner_join() {
         let test_fixture = TestFixture::with_join_type(JoinType::Inner);
 
         let column1 = Column::new(
@@ -611,15 +612,15 @@ mod tests {
         let expected_chunk =
             DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
 
-        test_fixture.do_test(expected_chunk);
+        test_fixture.do_test(expected_chunk).await;
     }
 
     /// Sql:
     /// ```sql
     /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 left outer join t2 on t1.v1 = t2.v1;
     /// ```
-    #[test]
-    fn test_left_outer_join() {
+    #[tokio::test]
+    async fn test_left_outer_join() {
         let test_fixture = TestFixture::with_join_type(JoinType::LeftOuter);
 
         let column1 = Column::new(
@@ -643,15 +644,15 @@ mod tests {
         let expected_chunk =
             DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
 
-        test_fixture.do_test(expected_chunk);
+        test_fixture.do_test(expected_chunk).await;
     }
 
     /// Sql:
     /// ```sql
     /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 right outer join t2 on t1.v1 = t2.v1;
     /// ```
-    #[test]
-    fn test_right_outer_join() {
+    #[tokio::test]
+    async fn test_right_outer_join() {
         let test_fixture = TestFixture::with_join_type(JoinType::RightOuter);
 
         let column1 = Column::new(
@@ -682,14 +683,14 @@ mod tests {
         let expected_chunk =
             DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
 
-        test_fixture.do_test(expected_chunk);
+        test_fixture.do_test(expected_chunk).await;
     }
 
     ///```sql
     /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 full outer join t2 on t1.v1 = t2.v1;
     /// ```
-    #[test]
-    fn test_full_outer_join() {
+    #[tokio::test]
+    async fn test_full_outer_join() {
         let test_fixture = TestFixture::with_join_type(JoinType::FullOuter);
 
         let column1 = Column::new(
@@ -725,11 +726,11 @@ mod tests {
         let expected_chunk =
             DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
 
-        test_fixture.do_test(expected_chunk);
+        test_fixture.do_test(expected_chunk).await;
     }
 
-    #[test]
-    fn test_left_anti_join() {
+    #[tokio::test]
+    async fn test_left_anti_join() {
         let test_fixture = TestFixture::with_join_type(JoinType::LeftAnti);
 
         let column1 = Column::new(
@@ -744,11 +745,11 @@ mod tests {
 
         let expected_chunk = DataChunk::try_from(vec![column1]).expect("Failed to create chunk!");
 
-        test_fixture.do_test(expected_chunk);
+        test_fixture.do_test(expected_chunk).await;
     }
 
-    #[test]
-    fn test_left_semi_join() {
+    #[tokio::test]
+    async fn test_left_semi_join() {
         let test_fixture = TestFixture::with_join_type(JoinType::LeftSemi);
 
         let column1 = Column::new(
@@ -763,11 +764,11 @@ mod tests {
 
         let expected_chunk = DataChunk::try_from(vec![column1]).expect("Failed to create chunk!");
 
-        test_fixture.do_test(expected_chunk);
+        test_fixture.do_test(expected_chunk).await;
     }
 
-    #[test]
-    fn test_right_anti_join() {
+    #[tokio::test]
+    async fn test_right_anti_join() {
         let test_fixture = TestFixture::with_join_type(JoinType::RightAnti);
 
         let column1 = Column::new(
@@ -784,11 +785,11 @@ mod tests {
 
         let expected_chunk = DataChunk::try_from(vec![column1]).expect("Failed to create chunk!");
 
-        test_fixture.do_test(expected_chunk);
+        test_fixture.do_test(expected_chunk).await;
     }
 
-    #[test]
-    fn test_right_semi_join() {
+    #[tokio::test]
+    async fn test_right_semi_join() {
         let test_fixture = TestFixture::with_join_type(JoinType::RightSemi);
 
         let column1 = Column::new(
@@ -803,6 +804,6 @@ mod tests {
 
         let expected_chunk = DataChunk::try_from(vec![column1]).expect("Failed to create chunk!");
 
-        test_fixture.do_test(expected_chunk);
+        test_fixture.do_test(expected_chunk).await;
     }
 }

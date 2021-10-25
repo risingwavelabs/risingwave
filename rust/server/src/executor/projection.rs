@@ -14,14 +14,15 @@ pub(super) struct ProjectionExecutor {
     child: BoxedExecutor,
 }
 
+#[async_trait::async_trait]
 impl Executor for ProjectionExecutor {
     fn init(&mut self) -> Result<()> {
         self.child.init()?;
         Ok(())
     }
 
-    fn execute(&mut self) -> Result<ExecutorResult> {
-        let child_output = self.child.execute()?;
+    async fn execute(&mut self) -> Result<ExecutorResult> {
+        let child_output = self.child.execute().await?;
         match child_output {
             Batch(child_chunk) => {
                 let arrays: Vec<Column> = self
@@ -82,8 +83,8 @@ mod tests {
     use crate::types::Int32Type;
     use crate::*;
 
-    #[test]
-    fn test_project_executor() -> Result<()> {
+    #[tokio::test]
+    async fn test_project_executor() -> Result<()> {
         let col1 = column_nonnull! {I32Array, Int32Type, [1, 2, 33333, 4, 5]};
         let col2 = column_nonnull! {I32Array, Int32Type, [7, 8, 66666, 4, 3]};
         let chunk = DataChunk::builder().columns(vec![col1, col2]).build();
@@ -101,7 +102,7 @@ mod tests {
         };
         assert!(proj_executor.init().is_ok());
 
-        let result_chunk = proj_executor.execute()?.batch_or()?;
+        let result_chunk = proj_executor.execute().await?.batch_or()?;
         assert!(proj_executor.clean().is_ok());
         assert_eq!(result_chunk.dimension(), 1);
         assert_eq!(

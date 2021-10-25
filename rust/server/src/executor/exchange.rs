@@ -79,12 +79,13 @@ impl BoxedExecutorBuilder for ExchangeExecutor {
     }
 }
 
+#[async_trait::async_trait]
 impl Executor for ExchangeExecutor {
     fn init(&mut self) -> Result<()> {
         Ok(())
     }
 
-    fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<ExecutorResult> {
         loop {
             if self.source_idx >= self.sources.len() {
                 break;
@@ -139,8 +140,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_exchange_multiple_sources() {
+    #[tokio::test]
+    async fn test_exchange_multiple_sources() {
         let mut sources: Vec<Box<dyn ExchangeSource>> = vec![];
         for _ in 0..3 {
             let chunk = DataChunk::builder()
@@ -160,7 +161,7 @@ mod tests {
 
         let mut chunks: usize = 0;
         loop {
-            let res = executor.execute().unwrap();
+            let res = executor.execute().await.unwrap();
             match res {
                 ExecutorResult::Batch(_) => chunks += 1,
                 ExecutorResult::Done => break,

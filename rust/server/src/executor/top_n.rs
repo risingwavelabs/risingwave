@@ -103,14 +103,15 @@ impl TopNExecutor {
     }
 }
 
+#[async_trait::async_trait]
 impl Executor for TopNExecutor {
     fn init(&mut self) -> Result<()> {
         self.child.init()?;
         Ok(())
     }
 
-    fn execute(&mut self) -> Result<ExecutorResult> {
-        while let ExecutorResult::Batch(chunk) = self.child.execute()? {
+    async fn execute(&mut self) -> Result<ExecutorResult> {
+        while let ExecutorResult::Batch(chunk) = self.child.execute().await? {
             self.top_n_heap.fit(Arc::new(chunk));
         }
         if let Some(chunk) = self.top_n_heap.dump() {
@@ -144,8 +145,8 @@ mod tests {
         Ok(Column::new(array, data_type))
     }
 
-    #[test]
-    fn test_simple_top_n_executor() {
+    #[tokio::test]
+    async fn test_simple_top_n_executor() {
         let col0 = create_column(&[Some(1), Some(2), Some(3)]).unwrap();
         let col1 = create_column(&[Some(3), Some(2), Some(1)]).unwrap();
         let data_chunk = DataChunk::builder().columns(vec![col0, col1]).build();
@@ -164,7 +165,7 @@ mod tests {
             },
         ];
         let mut top_n_executor = TopNExecutor::new(Box::new(mock_executor), order_pairs, 2usize);
-        let res = top_n_executor.execute().unwrap();
+        let res = top_n_executor.execute().await.unwrap();
         assert!(matches!(res, ExecutorResult::Batch(_)));
         if let ExecutorResult::Batch(res) = res {
             assert_eq!(res.cardinality(), 2);
@@ -172,7 +173,7 @@ mod tests {
             assert_eq!(col0.array().as_int32().value_at(0), Some(3));
             assert_eq!(col0.array().as_int32().value_at(1), Some(2));
         }
-        let res = top_n_executor.execute().unwrap();
+        let res = top_n_executor.execute().await.unwrap();
         assert!(matches!(res, ExecutorResult::Done));
     }
 }

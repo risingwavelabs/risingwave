@@ -59,9 +59,10 @@ impl ExecutorResult {
     }
 }
 
+#[async_trait::async_trait]
 pub trait Executor: Send {
     fn init(&mut self) -> Result<()>;
-    fn execute(&mut self) -> Result<ExecutorResult>;
+    async fn execute(&mut self) -> Result<ExecutorResult>;
     fn clean(&mut self) -> Result<()>;
 }
 

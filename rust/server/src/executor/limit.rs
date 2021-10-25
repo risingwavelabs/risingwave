@@ -74,17 +74,18 @@ impl LimitExecutor {
     }
 }
 
+#[async_trait::async_trait]
 impl Executor for LimitExecutor {
     fn init(&mut self) -> Result<()> {
         self.child.init()?;
         Ok(())
     }
 
-    fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<ExecutorResult> {
         if self.returned == self.limit {
             return Ok(Done);
         }
-        while let Batch(chunk) = self.child.execute()? {
+        while let Batch(chunk) = self.child.execute().await? {
             let cardinality = chunk.cardinality();
             if cardinality + self.skipped <= self.offset {
                 self.skipped += cardinality;
@@ -124,7 +125,12 @@ mod tests {
         Ok(Column::new(array, data_type))
     }
 
-    fn test_limit_all_visable(row_num: usize, chunk_size: usize, limit: usize, offset: usize) {
+    async fn test_limit_all_visable(
+        row_num: usize,
+        chunk_size: usize,
+        limit: usize,
+        offset: usize,
+    ) {
         let col = create_column(
             (0..row_num)
                 .into_iter()
@@ -149,7 +155,7 @@ mod tests {
             returned: 0,
         };
         let mut results = vec![];
-        while let Batch(chunk) = limit_executor.execute().unwrap() {
+        while let Batch(chunk) = limit_executor.execute().await.unwrap() {
             results.push(Arc::new(chunk));
         }
         let chunks =
@@ -226,7 +232,7 @@ mod tests {
         }
     }
 
-    fn test_limit_with_visibility(
+    async fn test_limit_with_visibility(
         row_num: usize,
         chunk_size: usize,
         limit: usize,
@@ -282,7 +288,7 @@ mod tests {
             returned: 0,
         };
         let mut results = vec![];
-        while let Batch(chunk) = limit_executor.execute().unwrap() {
+        while let Batch(chunk) = limit_executor.execute().await.unwrap() {
             results.push(Arc::new(chunk.compact().unwrap()));
         }
         let chunks =
@@ -315,39 +321,39 @@ mod tests {
             })
     }
 
-    #[test]
-    fn test_limit_executor() {
-        test_limit_all_visable(18, 18, 11, 0);
-        test_limit_all_visable(18, 3, 9, 0);
-        test_limit_all_visable(18, 3, 10, 0);
-        test_limit_all_visable(18, 3, 11, 0);
+    #[tokio::test]
+    async fn test_limit_executor() {
+        test_limit_all_visable(18, 18, 11, 0).await;
+        test_limit_all_visable(18, 3, 9, 0).await;
+        test_limit_all_visable(18, 3, 10, 0).await;
+        test_limit_all_visable(18, 3, 11, 0).await;
     }
 
-    #[test]
-    fn test_limit_executor_large() {
-        test_limit_all_visable(1024, 1024, 512, 0);
-        test_limit_all_visable(1024, 33, 512, 0);
-        test_limit_all_visable(1024, 33, 515, 0);
+    #[tokio::test]
+    async fn test_limit_executor_large() {
+        test_limit_all_visable(1024, 1024, 512, 0).await;
+        test_limit_all_visable(1024, 33, 512, 0).await;
+        test_limit_all_visable(1024, 33, 515, 0).await;
     }
 
-    #[test]
-    fn test_limit_executor_with_offset() {
+    #[tokio::test]
+    async fn test_limit_executor_with_offset() {
         for limit in 9..12 {
             for offset in 3..6 {
-                test_limit_all_visable(18, 3, limit, offset)
+                test_limit_all_visable(18, 3, limit, offset).await;
             }
         }
     }
 
-    #[test]
-    fn test_limit_executor_with_visibility() {
+    #[tokio::test]
+    async fn test_limit_executor_with_visibility() {
         let tot_row = 6;
         for mask in 0..(1 << tot_row) {
             let mut visibility = vec![];
             for i in 0..tot_row {
                 visibility.push((mask >> i) & 1 == 1);
             }
-            test_limit_with_visibility(tot_row, 2, 2, 2, visibility);
+            test_limit_with_visibility(tot_row, 2, 2, 2, visibility).await;
         }
     }
 }

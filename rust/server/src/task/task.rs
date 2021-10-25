@@ -164,7 +164,7 @@ impl TaskExecution {
     async fn try_execute(mut root: BoxedExecutor, mut sender: BoxChanSender) -> Result<()> {
         root.init()?;
         loop {
-            let exec_res = root.execute()?;
+            let exec_res = root.execute().await?;
             let chunk = match exec_res {
                 ExecutorResult::Done => {
                     break;

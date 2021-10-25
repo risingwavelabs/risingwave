@@ -19,13 +19,14 @@ pub(super) struct ValuesExecutor {
     executed: bool,
 }
 
+#[async_trait::async_trait]
 impl Executor for ValuesExecutor {
     fn init(&mut self) -> Result<()> {
         info!("Values executor");
         Ok(())
     }
 
-    fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<ExecutorResult> {
         if self.executed {
             return Ok(Done);
         }
@@ -119,8 +120,8 @@ mod tests {
     use crate::expr::LiteralExpression;
     use crate::types::{Int16Type, Int32Type, Int64Type, ScalarImpl};
 
-    #[test]
-    fn test_values_executor() -> Result<()> {
+    #[tokio::test]
+    async fn test_values_executor() -> Result<()> {
         let exprs = vec![vec![
             Box::new(LiteralExpression::new(
                 Int16Type::create(false),
@@ -142,7 +143,7 @@ mod tests {
         };
         assert!(values_executor.init().is_ok());
 
-        let result = values_executor.execute()?.batch_or()?;
+        let result = values_executor.execute().await?.batch_or()?;
         assert!(values_executor.clean().is_ok());
         assert_eq!(
             result

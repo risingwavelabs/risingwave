@@ -35,13 +35,14 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
     }
 }
 
+#[async_trait::async_trait]
 impl Executor for CreateTableExecutor {
     fn init(&mut self) -> Result<()> {
         info!("create table executor initing!");
         Ok(())
     }
 
-    fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<ExecutorResult> {
         self.table_manager
             .create_table(&self.table_id, self.column_count)
             .map(|_| ExecutorResult::Done)

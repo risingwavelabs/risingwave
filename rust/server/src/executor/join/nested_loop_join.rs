@@ -52,12 +52,13 @@ enum NestedLoopJoinState {
     Done,
 }
 
+#[async_trait::async_trait]
 impl Executor for NestedLoopJoinExecutor {
     fn init(&mut self) -> crate::error::Result<()> {
         Ok(())
     }
 
-    fn execute(&mut self) -> crate::error::Result<ExecutorResult> {
+    async fn execute(&mut self) -> crate::error::Result<ExecutorResult> {
         loop {
             let mut cur_state = NestedLoopJoinState::Done;
             swap(&mut cur_state, &mut self.state);
@@ -65,17 +66,17 @@ impl Executor for NestedLoopJoinExecutor {
             match cur_state {
                 NestedLoopJoinState::Build => {
                     let mut build_table = BuildTable::new();
-                    build_table.init(&mut self.build_side_source)?;
+                    build_table.init(&mut self.build_side_source).await?;
                     self.state = NestedLoopJoinState::FirstProbe(build_table);
                 }
                 NestedLoopJoinState::FirstProbe(build_table) => {
-                    let ret = self.probe(true, build_table)?;
+                    let ret = self.probe(true, build_table).await?;
                     if let Some(data_chunk) = ret {
                         return Ok(ExecutorResult::Batch(data_chunk));
                     }
                 }
                 NestedLoopJoinState::Probe(build_table) => {
-                    let ret = self.probe(false, build_table)?;
+                    let ret = self.probe(false, build_table).await?;
                     if let Some(data_chunk) = ret {
                         return Ok(ExecutorResult::Batch(data_chunk));
                     }
@@ -144,13 +145,13 @@ impl NestedLoopJoinExecutor {
     /// * `first_probe`: whether the first probing. Init outer source if yes.
     /// * `probe_table`: Table to be probed.
     /// If nothing gained from `probe_table.join()`, Advance to next row until all outer tuples are exhausted.
-    fn probe(
+    async fn probe(
         &mut self,
         first_probe: bool,
         mut build_table: BuildTable,
     ) -> Result<Option<DataChunk>> {
         if first_probe {
-            self.probe_side_source.init()?;
+            self.probe_side_source.init().await?;
         }
 
         let cur_row = self.probe_side_source.current_row()?;
@@ -164,11 +165,11 @@ impl NestedLoopJoinExecutor {
                     if let Some(data_chunk) = probe_result {
                         return Ok(Some(data_chunk));
                     } else {
-                        self.probe_side_source.advance()?;
+                        self.probe_side_source.advance().await?;
                     }
                 } else {
                     // If not visible, proceed to next tuple.
-                    self.probe_side_source.advance()?;
+                    self.probe_side_source.advance().await?;
                 }
             }
             // No more outer tuple means job finished.
@@ -207,9 +208,9 @@ impl ProbeSideSource {
         }
     }
 
-    fn init(&mut self) -> Result<()> {
+    async fn init(&mut self) -> Result<()> {
         self.outer.init()?;
-        self.cur_chunk = self.outer.execute()?;
+        self.cur_chunk = self.outer.execute().await?;
         Ok(())
     }
 
@@ -266,12 +267,12 @@ impl ProbeSideSource {
 
     /// Try advance to next outer tuple. If it is Done but still invoked, it's
     /// a developer error.
-    fn advance(&mut self) -> Result<()> {
+    async fn advance(&mut self) -> Result<()> {
         self.idx += 1;
         match &self.cur_chunk {
             Batch(chunk) => {
                 if self.idx >= chunk.capacity() {
-                    self.cur_chunk = self.outer.execute()?;
+                    self.cur_chunk = self.outer.execute().await?;
                 }
             }
             Done => {
@@ -310,9 +311,9 @@ impl BuildTable {
     /// # Arguments
     /// * `inner_source` - The source executor to load inner table. It is designed to pass as param cuz
     /// only used in init.
-    fn init(&mut self, inner_source: &mut BoxedExecutor) -> Result<()> {
+    async fn init(&mut self, inner_source: &mut BoxedExecutor) -> Result<()> {
         inner_source.init()?;
-        while let Batch(chunk) = inner_source.execute()? {
+        while let Batch(chunk) = inner_source.execute().await? {
             self.inner_table.push(chunk);
         }
         inner_source.clean()

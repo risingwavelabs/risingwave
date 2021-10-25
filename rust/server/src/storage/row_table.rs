@@ -14,6 +14,8 @@ use smallvec::SmallVec;
 #[derive(Clone, Debug, Default)]
 pub struct Row(pub SmallVec<[Datum; 5]>);
 
+pub type MemTableRowIter = <BTreeMap<Row, Row> as IntoIterator>::IntoIter;
+
 impl PartialEq for Row {
     fn eq(&self, other: &Self) -> bool {
         if self.0.len() != other.0.len() {
@@ -162,7 +164,7 @@ impl MemRowTable {
     }
 
     /// Create an iterator to scan over all records.
-    pub fn iter(&self) -> Result<impl Iterator<Item = (Row, Row)>> {
+    pub fn iter(&self) -> Result<MemTableRowIter> {
         let inner = self.inner.read().unwrap();
         let snapshot = inner.data.clone();
         Ok(snapshot.into_iter())
