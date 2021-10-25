@@ -170,7 +170,7 @@ fn make_tpchq6_expr() -> (
     DataTypeRef,
     DataTypeRef,
     DataTypeRef,
-    ConjunctionExpression,
+    BoxedExpression,
     BoxedExpression,
 ) {
     let const_1994_01_01 = LiteralExpression::new(
@@ -245,32 +245,32 @@ fn make_tpchq6_expr() -> (
         Box::new(const_24),
     );
 
-    let and = ConjunctionExpression::new(
+    let and = new_binary_expr(
+        ExprNode_Type::AND,
         BoolType::create(false),
-        ConjunctionOperatorKind::And,
         l_shipdate_geq,
-        Some(l_shipdate_le),
+        l_shipdate_le,
     );
 
-    let and = ConjunctionExpression::new(
+    let and = new_binary_expr(
+        ExprNode_Type::AND,
         BoolType::create(false),
-        ConjunctionOperatorKind::And,
-        Box::new(and),
-        Some(l_discount_geq),
+        and,
+        l_discount_geq,
     );
 
-    let and = ConjunctionExpression::new(
+    let and = new_binary_expr(
+        ExprNode_Type::AND,
         BoolType::create(false),
-        ConjunctionOperatorKind::And,
-        Box::new(and),
-        Some(l_discount_leq),
+        and,
+        l_discount_leq,
     );
 
-    let and = ConjunctionExpression::new(
+    let and = new_binary_expr(
+        ExprNode_Type::AND,
         BoolType::create(false),
-        ConjunctionOperatorKind::And,
-        Box::new(and),
-        Some(l_quantity_le),
+        and,
+        l_quantity_le,
     );
 
     let multiply = new_binary_expr(
@@ -314,7 +314,7 @@ async fn test_tpch_q6() {
         let (_, _, _, _, and, multiply) = make_tpchq6_expr();
         let input = ReceiverExecutor::new(input_rx);
 
-        let filter = FilterExecutor::new(Box::new(input), Box::new(and));
+        let filter = FilterExecutor::new(Box::new(input), and);
         let projection = ProjectExecutor::new(Box::new(filter), vec![multiply]);
 
         // for local aggregator, we need to sum data and count rows

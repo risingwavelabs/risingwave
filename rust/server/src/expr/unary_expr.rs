@@ -1,13 +1,13 @@
 use super::expr_tmpl::{UnaryBytesExpression, UnaryExpression};
-use crate::array::{I32Array, I64Array, UTF8Array};
+use crate::array::{BoolArray, I32Array, I64Array, UTF8Array};
 use crate::expr::BoxedExpression;
 use crate::types::{DataTypeKind, DataTypeRef};
-use crate::vector_op::cast;
 use crate::vector_op::length::length_default;
 use crate::vector_op::ltrim::ltrim;
 use crate::vector_op::rtrim::rtrim;
 use crate::vector_op::trim::trim;
 use crate::vector_op::upper::upper;
+use crate::vector_op::{cast, conjunction};
 use risingwave_proto::expr::ExprNode_Type;
 use std::marker::PhantomData;
 
@@ -53,6 +53,12 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
+        (ExprNode_Type::NOT, _, _) => Box::new(UnaryExpression::<BoolArray, BoolArray, _> {
+            expr_ia1: child_expr,
+            return_type,
+            func: conjunction::not,
+            _phantom: PhantomData,
+        }),
         (ExprNode_Type::UPPER, _, _) => Box::new(UnaryBytesExpression::<UTF8Array, _> {
             expr_ia1: child_expr,
             return_type,

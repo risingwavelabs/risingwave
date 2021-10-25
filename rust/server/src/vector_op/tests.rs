@@ -1,5 +1,6 @@
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::cmp::*;
+use crate::vector_op::conjunction::*;
 use rust_decimal::Decimal;
 use std::str::FromStr;
 #[test]
@@ -82,4 +83,11 @@ fn test_comparison() {
     assert!(prim_leq::<i64, i32, i64>(1i64, 1).unwrap());
     assert!(!prim_gt::<i64, i32, i64>(1i64, 1).unwrap());
     assert!(prim_geq::<i64, i32, i64>(1i64, 1).unwrap());
+}
+
+#[test]
+fn test_conjunction() {
+    assert!(not(false).unwrap());
+    assert!(!and(true, false).unwrap());
+    assert!(or(true, false).unwrap());
 }

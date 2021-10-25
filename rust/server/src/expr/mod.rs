@@ -2,7 +2,6 @@ mod agg;
 pub mod binary_expr;
 mod binary_expr_bytes;
 mod binary_expr_nullable;
-mod conjunction;
 pub mod expr_factory;
 mod expr_tmpl;
 mod input_ref;
@@ -18,13 +17,11 @@ use crate::array::ArrayRef;
 use crate::array::DataChunk;
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
-pub use conjunction::ConjunctionExpression;
 
 use crate::expr::expr_factory::{
     build_binary_expr, build_length_expr, build_like_expr, build_ltrim_expr, build_position_expr,
     build_replace_expr, build_rtrim_expr, build_substr_expr, build_trim_expr, build_unary_expr,
 };
-pub use conjunction::ConjunctionOperatorKind;
 
 use crate::types::{DataType, DataTypeRef};
 use risingwave_proto::expr::{
@@ -68,14 +65,14 @@ macro_rules! build_expression {
 pub fn build_from_proto(proto: &ExprNode) -> Result<BoxedExpression> {
     // TODO: Read from proto in a consistent way.
     match proto.get_expr_type() {
-        CAST | UPPER => return build_unary_expr(proto),
+        CAST | UPPER | NOT => return build_unary_expr(proto),
         EQUAL
         | NOT_EQUAL
         | LESS_THAN
         | LESS_THAN_OR_EQUAL
         | GREATER_THAN
         | GREATER_THAN_OR_EQUAL => return build_binary_expr(proto),
-        ADD | SUBTRACT | MULTIPLY | DIVIDE | MODULUS => {
+        ADD | SUBTRACT | MULTIPLY | DIVIDE | MODULUS | AND | OR => {
             return build_binary_expr(proto);
         }
         SUBSTR => return build_substr_expr(proto),
@@ -90,10 +87,7 @@ pub fn build_from_proto(proto: &ExprNode) -> Result<BoxedExpression> {
     };
     build_expression! {proto,
       CONSTANT_VALUE => LiteralExpression,
-      INPUT_REF => InputRefExpression,
-      AND => ConjunctionExpression,
-      OR => ConjunctionExpression,
-      NOT => ConjunctionExpression
+      INPUT_REF => InputRefExpression
     }
 }
 
@@ -103,3 +97,6 @@ pub fn build_from_proto_option(proto: Option<&ExprNode>) -> Result<BoxedExpressi
         None => Err(InternalError("Expression build error.".to_string()).into()),
     }
 }
+
+#[cfg(test)]
+mod tests;

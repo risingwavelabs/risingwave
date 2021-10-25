@@ -7,6 +7,7 @@ use crate::types::{
 };
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::cmp::*;
+use crate::vector_op::conjunction::{and, or};
 use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
 use risingwave_proto::expr::ExprNode_Type;
@@ -169,6 +170,20 @@ pub fn new_binary_expr(
         ExprNode_Type::MODULUS => {
             gen_binary_expr! {arithmetic_impl, prim_mod, prim_mod, deci_f_mod, deci_mod, l, r, ret}
         }
+        ExprNode_Type::AND => Box::new(BinaryExpression::<BoolArray, BoolArray, BoolArray, _> {
+            expr_ia1: l,
+            expr_ia2: r,
+            return_type: ret,
+            func: and,
+            _phantom: PhantomData,
+        }),
+        ExprNode_Type::OR => Box::new(BinaryExpression::<BoolArray, BoolArray, BoolArray, _> {
+            expr_ia1: l,
+            expr_ia2: r,
+            return_type: ret,
+            func: or,
+            _phantom: PhantomData,
+        }),
         _ => {
             unimplemented!(
                 "The expression using vectorized expression framework is not supported yet!"
@@ -203,185 +218,4 @@ pub fn new_position_expr(
         func: position,
         _phantom: PhantomData,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use super::*;
-    use crate::array::column::Column;
-    use crate::array::ArrayImpl;
-    use crate::array::{Array, DataChunk, DecimalArray};
-    use crate::expr::build_from_proto;
-    use crate::types::Scalar;
-    use pb_construct::make_proto;
-    use protobuf::well_known_types::Any as AnyProto;
-    use protobuf::RepeatedField;
-    use risingwave_proto::data::DataType as DataTypeProto;
-    use risingwave_proto::expr::ExprNode_Type::INPUT_REF;
-    use risingwave_proto::expr::InputRefExpr;
-    use risingwave_proto::expr::{ExprNode, ExprNode_Type, FunctionCall};
-    use rust_decimal::Decimal;
-
-    #[test]
-    fn test() {
-        test_i32::<I32Array, _>(|x, y| x + y, ExprNode_Type::ADD);
-        test_i32::<I32Array, _>(|x, y| x - y, ExprNode_Type::SUBTRACT);
-        test_i32::<I32Array, _>(|x, y| x * y, ExprNode_Type::MULTIPLY);
-        test_i32::<I32Array, _>(|x, y| x / y, ExprNode_Type::DIVIDE);
-        test_i32::<BoolArray, _>(|x, y| x == y, ExprNode_Type::EQUAL);
-        test_i32::<BoolArray, _>(|x, y| x != y, ExprNode_Type::NOT_EQUAL);
-        test_i32::<BoolArray, _>(|x, y| x > y, ExprNode_Type::GREATER_THAN);
-        test_i32::<BoolArray, _>(|x, y| x >= y, ExprNode_Type::GREATER_THAN_OR_EQUAL);
-        test_i32::<BoolArray, _>(|x, y| x < y, ExprNode_Type::LESS_THAN);
-        test_i32::<BoolArray, _>(|x, y| x <= y, ExprNode_Type::LESS_THAN_OR_EQUAL);
-        test_decimal::<DecimalArray, _>(|x, y| x + y, ExprNode_Type::ADD);
-        test_decimal::<DecimalArray, _>(|x, y| x - y, ExprNode_Type::SUBTRACT);
-        test_decimal::<DecimalArray, _>(|x, y| x * y, ExprNode_Type::MULTIPLY);
-        test_decimal::<DecimalArray, _>(|x, y| x / y, ExprNode_Type::DIVIDE);
-        test_decimal::<BoolArray, _>(|x, y| x == y, ExprNode_Type::EQUAL);
-        test_decimal::<BoolArray, _>(|x, y| x != y, ExprNode_Type::NOT_EQUAL);
-        test_decimal::<BoolArray, _>(|x, y| x > y, ExprNode_Type::GREATER_THAN);
-        test_decimal::<BoolArray, _>(|x, y| x >= y, ExprNode_Type::GREATER_THAN_OR_EQUAL);
-        test_decimal::<BoolArray, _>(|x, y| x < y, ExprNode_Type::LESS_THAN);
-        test_decimal::<BoolArray, _>(|x, y| x <= y, ExprNode_Type::LESS_THAN_OR_EQUAL);
-    }
-
-    fn test_i32<A, F>(f: F, kind: ExprNode_Type)
-    where
-        A: Array,
-        for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
-        for<'a> <A as Array>::RefItem<'a>: PartialEq,
-        F: Fn(i32, i32) -> <A as Array>::OwnedItem,
-    {
-        let mut lhs = Vec::<Option<i32>>::new();
-        let mut rhs = Vec::<Option<i32>>::new();
-        let mut target = Vec::<Option<<A as Array>::OwnedItem>>::new();
-        for i in 0..100 {
-            if i % 2 == 0 {
-                lhs.push(Some(i));
-                rhs.push(None);
-                target.push(None);
-            } else if i % 3 == 0 {
-                lhs.push(Some(i));
-                rhs.push(Some(i + 1));
-                target.push(Some(f(i, i + 1)));
-            } else if i % 5 == 0 {
-                lhs.push(Some(i + 1));
-                rhs.push(Some(i));
-                target.push(Some(f(i + 1, i)));
-            } else {
-                lhs.push(Some(i));
-                rhs.push(Some(i));
-                target.push(Some(f(i, i)));
-            }
-        }
-
-        let col1 = Column::new(
-            I32Array::from_slice(&lhs)
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-            Int32Type::create(true),
-        );
-        let col2 = Column::new(
-            I32Array::from_slice(&rhs)
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-            Int32Type::create(true),
-        );
-        let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
-        let expr = make_expression(kind, risingwave_proto::data::DataType_TypeName::INT32);
-        let mut vec_excutor = build_from_proto(&expr).unwrap();
-        let res = vec_excutor.eval(&data_chunk).unwrap();
-        let arr: &A = res.as_ref().into();
-        for (idx, item) in arr.iter().enumerate() {
-            let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
-            assert_eq!(x, item);
-        }
-    }
-
-    fn test_decimal<A, F>(f: F, kind: ExprNode_Type)
-    where
-        A: Array,
-        for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
-        for<'a> <A as Array>::RefItem<'a>: PartialEq,
-        F: Fn(Decimal, Decimal) -> <A as Array>::OwnedItem,
-    {
-        let mut lhs = Vec::<Option<Decimal>>::new();
-        let mut rhs = Vec::<Option<Decimal>>::new();
-        let mut target = Vec::<Option<<A as Array>::OwnedItem>>::new();
-        for i in 0..100 {
-            if i % 2 == 0 {
-                lhs.push(Some(i.into()));
-                rhs.push(None);
-                target.push(None);
-            } else if i % 3 == 0 {
-                lhs.push(Some(i.into()));
-                rhs.push(Some((i + 1).into()));
-                target.push(Some(f((i).into(), (i + 1).into())));
-            } else if i % 5 == 0 {
-                lhs.push(Some((i + 1).into()));
-                rhs.push(Some((i).into()));
-                target.push(Some(f((i + 1).into(), (i).into())));
-            } else {
-                lhs.push(Some((i).into()));
-                rhs.push(Some((i).into()));
-                target.push(Some(f((i).into(), (i).into())));
-            }
-        }
-
-        let col1 = Column::new(
-            DecimalArray::from_slice(&lhs)
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-            DecimalType::create(true, 10, 5).unwrap(),
-        );
-        let col2 = Column::new(
-            DecimalArray::from_slice(&rhs)
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-            DecimalType::create(true, 10, 5).unwrap(),
-        );
-        let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
-        let expr = make_expression(kind, risingwave_proto::data::DataType_TypeName::DECIMAL);
-        let mut vec_excutor = build_from_proto(&expr).unwrap();
-        let res = vec_excutor.eval(&data_chunk).unwrap();
-        let arr: &A = res.as_ref().into();
-        for (idx, item) in arr.iter().enumerate() {
-            let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
-            assert_eq!(x, item);
-        }
-    }
-
-    fn make_expression(
-        kind: ExprNode_Type,
-        ret: risingwave_proto::data::DataType_TypeName,
-    ) -> ExprNode {
-        let lhs = make_inputref(0, ret);
-        let rhs = make_inputref(1, ret);
-        make_proto!(ExprNode, {
-          expr_type: kind,
-          body: AnyProto::pack(
-            &make_proto!(FunctionCall, {
-              children: RepeatedField::from_slice(&[lhs, rhs])
-            })
-          ).unwrap(),
-          return_type: make_proto!(DataTypeProto, {
-            type_name: risingwave_proto::data::DataType_TypeName::BOOLEAN
-          })
-        })
-    }
-
-    fn make_inputref(idx: i32, ret: risingwave_proto::data::DataType_TypeName) -> ExprNode {
-        make_proto!(ExprNode, {
-          expr_type: INPUT_REF,
-          body: AnyProto::pack(
-            &make_proto!(InputRefExpr, {column_idx: idx})
-          ).unwrap(),
-          return_type: make_proto!(DataTypeProto, {
-            type_name: ret
-          })
-        })
-    }
 }
