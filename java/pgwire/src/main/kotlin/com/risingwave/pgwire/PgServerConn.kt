@@ -29,6 +29,7 @@ class PgServerConn(private val socket: Socket, private val dbManager: DatabaseMa
       }
     } catch (e: Throwable) {
       log.error(e.message)
+    } finally {
       // Possible blocking point. `close` is not a suspendable method.
       socket.close()
     }
