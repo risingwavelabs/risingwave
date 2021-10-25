@@ -8,10 +8,10 @@ use async_trait::async_trait;
 
 /// `FilterExecutor` filters data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a boolean array on whether each item should be retained. And then,
-/// `FilterExecutor` will insert, delete or update element into next operator according
+/// `FilterExecutor` will insert, delete or update element into next executor according
 /// to the result of the expression.
 pub struct FilterExecutor {
-    /// The input of the current operator
+    /// The input of the current executor
     input: Box<dyn Executor>,
     /// Expression of the current filter, note that the filter must always have the same output for the same input.
     expr: BoxedExpression,

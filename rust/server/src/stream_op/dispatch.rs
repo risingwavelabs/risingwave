@@ -215,7 +215,7 @@ impl DataDispatcher for BroadcastDispatcher {
     }
 }
 
-/// `SimpleDispatcher` dispatches message to a single
+/// `SimpleDispatcher` dispatches message to a single output.
 pub struct SimpleDispatcher {
     output: Box<dyn Output>,
 }
@@ -238,7 +238,7 @@ impl DataDispatcher for SimpleDispatcher {
     }
 }
 
-/// `SenderConsumer` consumes data from input operator and send it into a channel
+/// `SenderConsumer` consumes data from input executor and send it into a channel.
 pub struct SenderConsumer {
     input: Box<dyn Executor>,
     channel: Box<dyn Output>,

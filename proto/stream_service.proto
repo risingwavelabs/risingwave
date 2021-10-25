@@ -51,4 +51,4 @@ service StreamService {
   rpc BroadcastActorInfoTable(ActorInfoTable) returns (BroadcastActorInfoTableResponse);
 }
 
-// TODO: Lifecylce management for actors.
+// TODO: Lifecycle management for actors.

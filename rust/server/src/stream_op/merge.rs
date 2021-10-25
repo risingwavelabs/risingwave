@@ -8,7 +8,7 @@ use super::Message;
 
 /// `ReceiverExecutor` is used along with a channel. After creating a mpsc channel,
 /// there should be a `ReceiverExecutor` running in the background, so as to push
-/// messages down to the operators.
+/// messages down to the executors.
 pub struct ReceiverExecutor {
     receiver: Receiver<Message>,
 }

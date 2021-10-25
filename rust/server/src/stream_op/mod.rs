@@ -49,7 +49,7 @@ pub enum Op {
 
 pub type Ops<'a> = &'a [Op];
 
-/// `StreamChunk` is used to pass data between operators.
+/// `StreamChunk` is used to pass data between executors.
 #[derive(Default, Debug, Clone)]
 pub struct StreamChunk {
     // TODO: Optimize using bitmap
@@ -139,8 +139,8 @@ pub trait SimpleExecutor: Executor {
     fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message>;
 }
 
-/// Most operators don't care about the control messages, and therefore
-/// this macro provides a default implementation for them. The operator
+/// Most executors don't care about the control messages, and therefore
+/// this macro provides a default implementation for them. The executor
 /// must have a field named `input`, so as to pass along messages, and
 /// implement the `SimpleExecutor` trait to provide a `consume_chunk`
 /// function

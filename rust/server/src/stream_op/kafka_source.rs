@@ -34,7 +34,7 @@ impl Executor for KafkaSourceExecutor {
 
 impl Debug for KafkaSourceExecutor {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("KafkaSourceOperator")
+        f.debug_struct("KafkaSourceExecutor")
             .field("stream_scan_executor", &self.executor)
             .finish()
     }

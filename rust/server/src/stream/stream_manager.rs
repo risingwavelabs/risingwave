@@ -34,21 +34,21 @@ pub struct StreamManagerCore {
     ///
     /// Each actor has several senders and several receivers. Senders and receivers are created during
     /// `update_fragment`. Upon `build_fragment`, all these channels will be taken out and built into
-    /// the operators and outputs.
+    /// the executors and outputs.
     channel_pool: HashMap<u32, ConsumableChannelVecPair>,
 
-    /// Stores all actor information
+    /// Stores all actor information.
     actors: HashMap<u32, stream_service::ActorInfo>,
 
-    /// Stores all fragment information
+    /// Stores all fragment information.
     fragments: HashMap<u32, stream_plan::StreamFragment>,
 
-    /// Mock source, `fragment_id = 0`
+    /// Mock source, `fragment_id = 0`.
     /// TODO: remove this
     mock_source: ConsumableChannelPair,
 }
 
-/// `StreamManager` manages all stream operators in this project.
+/// `StreamManager` manages all stream executors in this project.
 pub struct StreamManager {
     core: Mutex<StreamManagerCore>,
 }
@@ -182,7 +182,7 @@ impl StreamManagerCore {
         }
     }
 
-    /// Create a chain of nodes and return the head operator
+    /// Create a chain of nodes and return the head executor.
     fn create_nodes(
         &mut self,
         node: &stream_plan::StreamNode,
@@ -191,15 +191,15 @@ impl StreamManagerCore {
     ) -> Result<Box<dyn Executor>> {
         use stream_plan::StreamNode_StreamNodeType::*;
 
-        // Create the input operator before creating itself
-        // Note(eric): Maybe we should put a `Merger` operator in proto
+        // Create the input executor before creating itself
+        // Note(eric): Maybe we should put a `Merger` executor in proto
         let input = if node.has_input() {
             self.create_nodes(node.get_input(), merger, table_manager.clone())?
         } else {
             merger
         };
 
-        let operator: Result<Box<dyn Executor>> = match node.get_node_type() {
+        let executor: Result<Box<dyn Executor>> = match node.get_node_type() {
             TABLE_INGRESS => {
                 let table_source_node =
                     stream_plan::TableSourceNode::parse_from_bytes(node.get_body().get_value())
@@ -299,7 +299,7 @@ impl StreamManagerCore {
             }
             others => todo!("unsupported StreamNodeType: {:?}", others),
         };
-        operator
+        executor
     }
 
     fn create_merger(&mut self, fragment_id: u32, upstreams: &[u32]) -> Result<Box<dyn Executor>> {
@@ -342,7 +342,7 @@ impl StreamManagerCore {
         );
 
         if upstreams.len() == 1 {
-            // Only one upstream, use `ReceiverOperator`.
+            // Only one upstream, use `ReceiverExecutor`.
             Ok(Box::new(ReceiverExecutor::new(rxs.remove(0))))
         } else {
             Ok(Box::new(MergeExecutor::new(rxs)))
@@ -355,11 +355,11 @@ impl StreamManagerCore {
 
             let merger = self.create_merger(*fragment_id, fragment.get_upstream_fragment_id())?;
 
-            let operator =
+            let executor =
                 self.create_nodes(fragment.get_nodes(), merger, table_manager.clone())?;
 
             let dispatcher = self.create_dispatcher(
-                operator,
+                executor,
                 fragment.get_dispatcher(),
                 *fragment_id,
                 fragment.get_downstream_fragment_id(),

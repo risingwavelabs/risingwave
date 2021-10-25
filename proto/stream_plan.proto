@@ -26,7 +26,7 @@ message FilterNode {
 // A materialized view is regarded as a table,
 // hence we copy the CreateTableNode definition in OLAP PlanNode.
 // In addition, we also specify primary key to MV for efficient point lookup during update and deletion.
-message MViewNode{
+message MViewNode {
   plan.TableRefId table_ref_id = 1;
   repeated plan.ColumnDesc column_descs = 2;
   repeated int32 pk_indices = 3;
@@ -38,7 +38,7 @@ message SimpleAggNode {
   repeated expr.AggCall agg_calls = 1;
 }
 
-message HashAggNode{
+message HashAggNode {
   repeated expr.InputRefExpr group_keys = 1;
   repeated expr.AggCall agg_calls = 2;
 }
@@ -61,7 +61,7 @@ message StreamNode {
   // TODO: should we enforce strong typed body on nodes?
   google.protobuf.Any body = 2;
   // Child node in plan aka. upstream nodes in the streaming DAG
-  // Currently we assume the operators in one fragment are always chained list rather than tree
+  // Currently we assume the executors in one fragment are always chained list rather than tree
   StreamNode input = 3;
 }
 
