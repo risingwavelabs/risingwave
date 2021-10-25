@@ -5,9 +5,9 @@ use std::sync::{Arc, Mutex};
 
 use super::ReceiverExecutor;
 use super::*;
-use approx::assert_relative_eq;
-
+use crate::expr::binary_expr::new_binary_expr;
 use crate::expr::unary_expr::new_unary_expr;
+use approx::assert_relative_eq;
 use futures::channel::mpsc::channel;
 use futures::SinkExt;
 use risingwave_proto::expr::ExprNode_Type;
@@ -171,7 +171,7 @@ fn make_tpchq6_expr() -> (
     DataTypeRef,
     DataTypeRef,
     ConjunctionExpression,
-    ArithmeticExpression,
+    BoxedExpression,
 ) {
     let const_1994_01_01 = LiteralExpression::new(
         StringType::create(true, 20, DataTypeKind::Char),
@@ -193,7 +193,7 @@ fn make_tpchq6_expr() -> (
     let l_discount = InputRefExpression::new(t_discount.clone(), 1);
     let l_discount_2 = InputRefExpression::new(t_discount.clone(), 1);
     let l_discount_3 = InputRefExpression::new(t_discount.clone(), 1);
-    let t_quantity = Int32Type::create(false);
+    let t_quantity = Float64Type::create(false);
     let l_quantity = InputRefExpression::new(t_quantity.clone(), 2);
     let t_extended_price = Float64Type::create(false);
     let l_extended_price = InputRefExpression::new(t_extended_price.clone(), 3);
@@ -210,37 +210,37 @@ fn make_tpchq6_expr() -> (
         Box::new(const_1995_01_01),
     );
 
-    let l_shipdate_geq = CompareExpression::new(
+    let l_shipdate_geq = new_binary_expr(
+        ExprNode_Type::GREATER_THAN_OR_EQUAL,
         BoolType::create(false),
-        CompareOperatorKind::GreaterThanOrEqual,
         Box::new(l_shipdate),
         l_shipdate_geq_cast,
     );
 
-    let l_shipdate_le = CompareExpression::new(
+    let l_shipdate_le = new_binary_expr(
+        ExprNode_Type::LESS_THAN_OR_EQUAL,
         BoolType::create(false),
-        CompareOperatorKind::LessThan,
         Box::new(l_shipdate_2),
         l_shipdate_le_cast,
     );
 
-    let l_discount_geq = CompareExpression::new(
+    let l_discount_geq = new_binary_expr(
+        ExprNode_Type::GREATER_THAN_OR_EQUAL,
         BoolType::create(false),
-        CompareOperatorKind::GreaterThanOrEqual,
         Box::new(l_discount),
         Box::new(const_0_05),
     );
 
-    let l_discount_leq = CompareExpression::new(
+    let l_discount_leq = new_binary_expr(
+        ExprNode_Type::LESS_THAN_OR_EQUAL,
         BoolType::create(false),
-        CompareOperatorKind::LessThanOrEqual,
         Box::new(l_discount_2),
         Box::new(const_0_07),
     );
 
-    let l_quantity_le = CompareExpression::new(
+    let l_quantity_le = new_binary_expr(
+        ExprNode_Type::LESS_THAN,
         BoolType::create(false),
-        CompareOperatorKind::LessThan,
         Box::new(l_quantity),
         Box::new(const_24),
     );
@@ -248,34 +248,34 @@ fn make_tpchq6_expr() -> (
     let and = ConjunctionExpression::new(
         BoolType::create(false),
         ConjunctionOperatorKind::And,
-        Box::new(l_shipdate_geq),
-        Some(Box::new(l_shipdate_le)),
+        l_shipdate_geq,
+        Some(l_shipdate_le),
     );
 
     let and = ConjunctionExpression::new(
         BoolType::create(false),
         ConjunctionOperatorKind::And,
         Box::new(and),
-        Some(Box::new(l_discount_geq)),
+        Some(l_discount_geq),
     );
 
     let and = ConjunctionExpression::new(
         BoolType::create(false),
         ConjunctionOperatorKind::And,
         Box::new(and),
-        Some(Box::new(l_discount_leq)),
+        Some(l_discount_leq),
     );
 
     let and = ConjunctionExpression::new(
         BoolType::create(false),
         ConjunctionOperatorKind::And,
         Box::new(and),
-        Some(Box::new(l_quantity_le)),
+        Some(l_quantity_le),
     );
 
-    let multiply = ArithmeticExpression::new(
+    let multiply = new_binary_expr(
+        ExprNode_Type::MULTIPLY,
         Float64Type::create(false),
-        ArithmeticOperatorKind::Multiply,
         Box::new(l_extended_price),
         Box::new(l_discount_3),
     );
@@ -299,7 +299,7 @@ fn make_tpchq6_expr() -> (
 //   and l_shipdate < '1995-01-01'
 //   and l_discount between 0.05 and 0.07
 //   and l_quantity < 24
-//
+
 // Columns:
 // 0. l_shipdate DATETIME
 // 1. l_discount DOUBLE
@@ -315,7 +315,7 @@ async fn test_tpch_q6() {
         let input = ReceiverExecutor::new(input_rx);
 
         let filter = FilterExecutor::new(Box::new(input), Box::new(and));
-        let projection = ProjectExecutor::new(Box::new(filter), vec![Box::new(multiply)]);
+        let projection = ProjectExecutor::new(Box::new(filter), vec![multiply]);
 
         // for local aggregator, we need to sum data and count rows
         let aggregator = SimpleAggExecutor::new(
@@ -421,11 +421,11 @@ async fn test_tpch_q6() {
     .into_iter()
     .map(Some)
     .collect::<Vec<_>>();
-    let d_quantity = vec![20, 20, 20, 20, 20, 30, 30, 30, 30, 30] // first 5 elements matches condition on quantity
+    let d_quantity = vec![20f64, 20.0, 20.0, 20.0, 20.0, 30.0, 30.0, 30.0, 30.0, 30.0] // first 5 elements matches condition on quantity
         .into_iter()
         .map(Some)
         .collect::<Vec<_>>();
-    let d_extended_price = vec![10; 10].into_iter().map(Some).collect::<Vec<_>>();
+    let d_extended_price = vec![10f64; 10].into_iter().map(Some).collect::<Vec<_>>();
 
     use super::Op::*;
 
@@ -442,12 +442,12 @@ async fn test_tpch_q6() {
                 t_discount.clone(),
             ),
             Column::new(
-                Arc::new(I64Array::from_slice(d_quantity.as_slice()).unwrap().into()),
+                Arc::new(F64Array::from_slice(d_quantity.as_slice()).unwrap().into()),
                 t_quantity.clone(),
             ),
             Column::new(
                 Arc::new(
-                    I64Array::from_slice(d_extended_price.as_slice())
+                    F64Array::from_slice(d_extended_price.as_slice())
                         .unwrap()
                         .into(),
                 ),

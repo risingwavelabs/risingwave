@@ -33,7 +33,6 @@ pub use string_type::*;
 
 use crate::array::{ArrayBuilderImpl, PrimitiveArrayItemType};
 use paste::paste;
-use risingwave_proto::expr::ExprNode_Type::{self, *};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub enum DataTypeKind {
@@ -111,24 +110,6 @@ pub enum ArithmeticOperatorKind {
     Multiply,
     Divide,
     Mod,
-}
-
-pub fn is_arithmetic_operator(expr_type: &ExprNode_Type) -> bool {
-    matches!(expr_type, ADD | SUBTRACT | MULTIPLY | DIVIDE | MODULUS)
-}
-
-impl TryFrom<&ExprNode_Type> for ArithmeticOperatorKind {
-    type Error = RwError;
-    fn try_from(value: &ExprNode_Type) -> Result<ArithmeticOperatorKind> {
-        match value {
-            ADD => Ok(ArithmeticOperatorKind::Plus),
-            SUBTRACT => Ok(ArithmeticOperatorKind::Subtract),
-            MULTIPLY => Ok(ArithmeticOperatorKind::Multiply),
-            DIVIDE => Ok(ArithmeticOperatorKind::Divide),
-            MODULUS => Ok(ArithmeticOperatorKind::Mod),
-            _ => Err(InternalError("Not arithmetic operator.".to_string()).into()),
-        }
-    }
 }
 
 /// `Scalar` is a trait over all possible owned types in the evaluation

@@ -1,149 +1,85 @@
-use crate::array::{Array, PrimitiveArray, PrimitiveArrayItemType};
-use crate::error::Result;
-use crate::vector_op::add_op::*;
-use crate::vector_op::div_op::*;
-use crate::vector_op::mod_op::*;
-use crate::vector_op::mul_op::*;
-use crate::vector_op::sub_op::*;
-
-fn test_primitive_type<T1, T2, T3, F>(
-    left: Vec<Option<T1>>,
-    right: Vec<Option<T2>>,
-    expected: Vec<Option<T3>>,
-    func: F,
-    should_error: bool,
-) where
-    T1: PrimitiveArrayItemType,
-    T2: PrimitiveArrayItemType,
-    T3: PrimitiveArrayItemType,
-    F: Fn(&PrimitiveArray<T1>, &PrimitiveArray<T2>) -> Result<PrimitiveArray<T3>>,
-{
-    let ret = func(
-        &PrimitiveArray::<T1>::from_slice(&left).unwrap(),
-        &PrimitiveArray::<T2>::from_slice(&right).unwrap(),
+use crate::vector_op::arithmetic_op::*;
+use crate::vector_op::cmp::*;
+use rust_decimal::Decimal;
+use std::str::FromStr;
+#[test]
+fn test_arithmetic() {
+    assert_eq!(
+        deci_add::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 1).unwrap(),
+        Decimal::from_str("2.0").unwrap()
     );
-    if should_error {
-        assert!(ret.is_err());
-    } else {
-        let ret = ret.expect("should success");
-        assert_eq!(expected, ret.iter().collect::<Vec<Option<T3>>>());
-    }
+    assert_eq!(
+        deci_sub::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 2).unwrap(),
+        Decimal::from_str("-1.0").unwrap()
+    );
+    assert_eq!(
+        deci_mul::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 2).unwrap(),
+        Decimal::from_str("2.0").unwrap()
+    );
+    assert_eq!(
+        deci_div::<Decimal, i32, Decimal>(Decimal::from_str("2.0").unwrap(), 2).unwrap(),
+        Decimal::from_str("1.0").unwrap()
+    );
+    assert_eq!(
+        deci_mod::<Decimal, i32, Decimal>(Decimal::from_str("2.0").unwrap(), 2).unwrap(),
+        Decimal::from_str("0").unwrap()
+    );
+    assert_eq!(int_add::<i16, i32, i32>(1i16, 1i32).unwrap(), 2i32);
+    assert_eq!(int_sub::<i16, i32, i32>(1i16, 1i32).unwrap(), 0i32);
+    assert_eq!(int_mul::<i16, i32, i32>(1i16, 1i32).unwrap(), 1i32);
+    assert_eq!(int_div::<i16, i32, i32>(1i16, 1i32).unwrap(), 1i32);
+    assert_eq!(prim_mod::<i16, i32, i32>(1i16, 1i32).unwrap(), 0i32);
+
+    assert_eq!(
+        deci_f_add::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), -1f32).unwrap(),
+        Decimal::from_str("0.0").unwrap()
+    );
+    assert_eq!(
+        deci_f_sub::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 1f32).unwrap(),
+        Decimal::from_str("0.0").unwrap()
+    );
+    assert_eq!(
+        deci_f_div::<Decimal, f32, Decimal>(Decimal::from_str("0.0").unwrap(), 1f32).unwrap(),
+        Decimal::from_str("0.0").unwrap()
+    );
+    assert_eq!(
+        deci_f_mul::<Decimal, f32, Decimal>(Decimal::from_str("0.0").unwrap(), 1f32).unwrap(),
+        Decimal::from_str("0.0").unwrap()
+    );
+    assert_eq!(
+        deci_f_mod::<Decimal, f32, Decimal>(Decimal::from_str("0.0").unwrap(), 1f32).unwrap(),
+        Decimal::from_str("0.0").unwrap()
+    );
+    assert!(float_add::<i32, f32, f32>(-1i32, 1f32).unwrap().abs() < f32::EPSILON);
+    assert!(float_sub::<i32, f32, f32>(1i32, 1f32).unwrap().abs() < f32::EPSILON);
+    assert!(float_mul::<i32, f32, f32>(0i32, 1f32).unwrap().abs() < f32::EPSILON);
+    assert!(float_div::<i32, f32, f32>(0i32, 1f32).unwrap().abs() < f32::EPSILON);
 }
 
 #[test]
-fn test_primitive() {
-    test_primitive_type(
-        vec![Some(15i16), None, Some(2i16)],
-        vec![Some(127i16), Some(3i16), None],
-        vec![Some(142i16), None, None],
-        vector_add_primitive_integer,
-        false,
-    );
-
-    test_primitive_type(
-        vec![Some(15i32), None, Some(2i32)],
-        vec![Some(14i32), None, Some(7i32)],
-        vec![Some(29i32), None, Some(9i32)],
-        vector_add_primitive_integer,
-        false,
-    );
-
-    test_primitive_type(
-        vec![Some(15i64), None, Some(2i64)],
-        vec![Some(19i64), None, Some(8i64)],
-        vec![Some(34i64), None, Some(10i64)],
-        vector_add_primitive_integer,
-        false,
-    );
-
-    test_primitive_type(
-        vec![Some(15i32), None, Some(2i32)],
-        vec![Some(14i32), None, None],
-        vec![Some(1i32), None, None],
-        vector_sub_primitive_integer,
-        false,
-    );
-
-    test_primitive_type(
-        vec![Some(15i64), None, Some(2i64)],
-        vec![Some(19i64), None, Some(8i64)],
-        vec![Some(-4i64), None, Some(-6i64)],
-        vector_sub_primitive_integer,
-        false,
-    );
-
-    test_primitive_type(
-        vec![Some(5i32), None, Some(3i32)],
-        vec![Some(9i32), Some(8i32), Some(-8i32)],
-        vec![Some(45i32), None, Some(-24i32)],
-        vector_mul_primitive_integer,
-        false,
-    );
-
-    test_primitive_type(
-        vec![Some(10i32), None, Some(9i32)],
-        vec![Some(5i32), Some(8i32), Some(2i32)],
-        vec![Some(2i32), None, Some(4i32)],
-        vector_div_primitive_integer,
-        false,
-    );
-
-    test_primitive_type(
-        vec![Some(3f32), None, Some(9f32)],
-        vec![Some(5f32), Some(8f32), Some(2f32)],
-        vec![Some(8f32), None, Some(11f32)],
-        vector_add_primitive_float,
-        false,
-    );
-
-    test_primitive_type(
-        vec![Some(10i32), None, Some(9i32)],
-        vec![Some(5i32), Some(8i32), Some(2i32)],
-        vec![Some(0i32), None, Some(1i32)],
-        vector_mod_primitive,
-        false,
-    );
-}
-
-#[test]
-fn test_primitive_overflow() {
-    test_primitive_type(
-        vec![Some(10i16)],
-        vec![Some(32765i16)],
-        vec![Some(0i16)],
-        vector_add_primitive_integer,
-        true,
-    );
-
-    test_primitive_type(
-        vec![Some(32765i16)],
-        vec![Some(-10000i16)],
-        vec![Some(0i16)],
-        vector_sub_primitive_integer,
-        true,
-    );
-
-    test_primitive_type(
-        vec![Some(10000i16)],
-        vec![Some(10000i16)],
-        vec![Some(0i16)],
-        vector_mul_primitive_integer,
-        true,
-    );
-
-    test_primitive_type(
-        vec![Some(10000i16)],
-        vec![Some(0i16)],
-        vec![Some(0i16)],
-        vector_div_primitive_integer,
-        true,
-    );
-
-    test_primitive_type(
-        vec![Some(10000f32)],
-        vec![Some(f32::INFINITY)],
-        vec![Some(0f32)],
-        vector_add_primitive_float,
-        true,
-    );
+fn test_comparison() {
+    assert!(deci_eq::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 1).unwrap());
+    assert!(deci_f_eq::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 1.0).unwrap());
+    assert!(!deci_neq::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 1).unwrap());
+    assert!(!deci_f_neq::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 1.0).unwrap());
+    assert!(!deci_gt::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 2).unwrap());
+    assert!(!deci_f_gt::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 2.0).unwrap());
+    assert!(deci_leq::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 2).unwrap());
+    assert!(deci_f_leq::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 2.1).unwrap());
+    assert!(!deci_geq::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 2).unwrap());
+    assert!(!deci_f_geq::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 2.1).unwrap());
+    assert!(deci_lt::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 2).unwrap());
+    assert!(deci_f_lt::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 2.1).unwrap());
+    assert!(prim_eq::<f32, i32, f32>(1.0, 1).unwrap());
+    assert!(!prim_neq::<f32, i32, f32>(1.0, 1).unwrap());
+    assert!(!prim_lt::<f32, i32, f32>(1.0, 1).unwrap());
+    assert!(prim_leq::<f32, i32, f32>(1.0, 1).unwrap());
+    assert!(!prim_gt::<f32, i32, f32>(1.0, 1).unwrap());
+    assert!(prim_geq::<f32, i32, f32>(1.0, 1).unwrap());
+    assert!(prim_eq::<i64, i32, i64>(1i64, 1).unwrap());
+    assert!(!prim_neq::<i64, i32, i64>(1i64, 1).unwrap());
+    assert!(!prim_lt::<i64, i32, i64>(1i64, 1).unwrap());
+    assert!(prim_leq::<i64, i32, i64>(1i64, 1).unwrap());
+    assert!(!prim_gt::<i64, i32, i64>(1i64, 1).unwrap());
+    assert!(prim_geq::<i64, i32, i64>(1i64, 1).unwrap());
 }

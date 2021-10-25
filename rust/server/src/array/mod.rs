@@ -12,13 +12,16 @@ mod macros;
 mod primitive_array;
 mod utf8_array;
 mod value_reader;
-
 use crate::array::iterator::ArrayImplIterator;
 use crate::buffer::Bitmap;
 pub use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 pub use crate::error::RwError;
-use crate::types::ScalarImpl;
+use crate::types::{BoolType, ScalarImpl};
+use crate::types::{
+    DataTypeKind, DateType, DecimalType, Float32Type, Float64Type, Int16Type, Int32Type, Int64Type,
+    TimestampType,
+};
 use crate::types::{Datum, DatumRef, Scalar, ScalarRef, ScalarRefImpl};
 pub use bool_array::{BoolArray, BoolArrayBuilder};
 pub use data_chunk::{DataChunk, DataChunkRef};
@@ -199,7 +202,7 @@ macro_rules! for_all_variants {
 /// Define `ArrayImpl` with macro.
 macro_rules! array_impl_enum {
   ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-    /// `ArrayImpl` embeds all possible array in `arary2` module.
+    /// `ArrayImpl` embeds all possible array in `array` module.
     #[derive(Debug)]
     pub enum ArrayImpl {
       $( $variant_name($array) ),*
@@ -289,7 +292,7 @@ for_all_variants! { impl_convert }
 /// Define `ArrayImplBuilder` with macro.
 macro_rules! array_builder_impl_enum {
   ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-    /// `ArrayBuilderImpl` embeds all possible array in `arary2` module.
+    /// `ArrayBuilderImpl` embeds all possible array in `array` module.
     pub enum ArrayBuilderImpl {
       $( $variant_name($builder) ),*
     }
@@ -447,6 +450,47 @@ where
     builder.finish()
 }
 
+// This trait combine the array with its data type. It helps generate the across type expression
+pub trait DataTypeTrait {
+    const DATA_TYPE_ENUM: DataTypeKind;
+    type ArrayType: Array;
+}
+impl DataTypeTrait for BoolType {
+    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Boolean;
+    type ArrayType = BoolArray;
+}
+impl DataTypeTrait for Int16Type {
+    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Int16;
+    type ArrayType = I16Array;
+}
+impl DataTypeTrait for Int32Type {
+    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Int32;
+    type ArrayType = I32Array;
+}
+impl DataTypeTrait for Int64Type {
+    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Int64;
+    type ArrayType = I64Array;
+}
+impl DataTypeTrait for Float32Type {
+    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Float32;
+    type ArrayType = F32Array;
+}
+impl DataTypeTrait for Float64Type {
+    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Float64;
+    type ArrayType = F64Array;
+}
+impl DataTypeTrait for DecimalType {
+    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Decimal;
+    type ArrayType = DecimalArray;
+}
+impl DataTypeTrait for TimestampType {
+    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Timestamp;
+    type ArrayType = I64Array;
+}
+impl DataTypeTrait for DateType {
+    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Date;
+    type ArrayType = I32Array;
+}
 #[cfg(test)]
 mod tests {
     use super::*;

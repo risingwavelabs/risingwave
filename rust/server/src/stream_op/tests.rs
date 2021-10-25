@@ -3,20 +3,21 @@ use super::{FilterExecutor, ProjectExecutor};
 use crate::array::{Array, I32Array, I64Array};
 use crate::catalog::TableId;
 use crate::error::ErrorCode::InternalError;
+use crate::expr::binary_expr::new_binary_expr;
 use crate::expr::*;
 use crate::storage::{Row, SimpleTableManager, SimpleTableRef, TableManager};
 use crate::stream_op::*;
-use crate::types::{ArithmeticOperatorKind, BoolType, Int32Type, Int64Type, Scalar};
+use crate::types::{BoolType, Int32Type, Int64Type, Scalar};
 use crate::*;
 use itertools::Itertools;
 use pb_construct::make_proto;
 use pb_convert::FromProtobuf;
 use risingwave_proto::data::{DataType, DataType_TypeName};
+use risingwave_proto::expr::ExprNode_Type;
 use risingwave_proto::plan::{ColumnDesc, ColumnDesc_ColumnEncodingType};
 use risingwave_proto::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 use smallvec::SmallVec;
 use std::collections::VecDeque;
-
 pub struct MockSource {
     chunks: VecDeque<StreamChunk>,
 }
@@ -254,14 +255,14 @@ async fn test_projection() {
     let left_expr = InputRefExpression::new(left_type, 0);
     let right_type = Int64Type::create(false);
     let right_expr = InputRefExpression::new(right_type, 1);
-    let test_expr = ArithmeticExpression::new(
+    let test_expr = new_binary_expr(
+        ExprNode_Type::ADD,
         Int64Type::create(false),
-        ArithmeticOperatorKind::Plus,
         Box::new(left_expr),
         Box::new(right_expr),
     );
 
-    let mut project = ProjectExecutor::new(Box::new(source), vec![Box::new(test_expr)]);
+    let mut project = ProjectExecutor::new(Box::new(source), vec![test_expr]);
 
     if let Message::Chunk(chunk) = project.next().await.unwrap() {
         assert_eq!(chunk.ops, vec![Op::Insert, Op::Insert, Op::Insert]);
@@ -321,13 +322,13 @@ async fn test_filter() {
     let left_expr = InputRefExpression::new(left_type, 0);
     let right_type = Int64Type::create(false);
     let right_expr = InputRefExpression::new(right_type, 1);
-    let test_expr = CompareExpression::new(
+    let test_expr = new_binary_expr(
+        ExprNode_Type::GREATER_THAN,
         BoolType::create(false),
-        CompareOperatorKind::GreaterThan,
         Box::new(left_expr),
         Box::new(right_expr),
     );
-    let mut filter = FilterExecutor::new(Box::new(source), Box::new(test_expr));
+    let mut filter = FilterExecutor::new(Box::new(source), test_expr);
 
     if let Message::Chunk(chunk) = filter.next().await.unwrap() {
         assert_eq!(

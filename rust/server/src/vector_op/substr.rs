@@ -28,9 +28,8 @@ pub fn substr_start_for(
 
 #[cfg(test)]
 mod tests {
-    use crate::array::{Array, ArrayBuilder, UTF8ArrayBuilder};
-
     use super::*;
+    use crate::array::{Array, ArrayBuilder, UTF8ArrayBuilder};
 
     #[test]
     fn test_substr() -> Result<()> {

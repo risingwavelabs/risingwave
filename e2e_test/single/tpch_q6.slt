@@ -1,0 +1,43 @@
+# q6(FIXME: replace DOUBLE to Decimal)
+statement ok
+CREATE TABLE lineitem (
+        l_orderkey BIGINT,
+        l_partkey INTEGER,
+        l_suppkey INTEGER,
+        l_linenumber INTEGER,
+        l_quantity DOUBLE,
+        l_extendedprice DOUBLE,
+        l_discount DOUBLE,
+        l_tax DOUBLE,
+        l_returnflag CHAR(1),
+        l_linestatus CHAR(1),
+        l_shipdate DATE,
+        l_commitdate DATE,
+        l_receiptdate DATE,
+        l_shipinstruct CHAR(25),
+        l_shipmode CHAR(10),
+        l_comment VARCHAR(44));
+
+statement ok
+insert into lineitem values                                                                                                                                               
+ (9, 127857, 5394, 1, 20, 84818.25, 0.09, 0.05, 'N', 'O', '1998-10-20', '1998-09-10', '1998-11-15', 'COLLECT COD', 'SHIP', 'es haggle blithely above the silent ac'),        
+ (9, 127857, 5394, 1, 20, 84818.25, 0.05, 0.05, 'N', 'O', '1994-02-01', '1998-09-10', '1998-11-15', 'COLLECT COD', 'SHIP', 'es haggle blithely above the silent ac'),
+ (9, 127857, 5394, 1, 20, 84818.25, 0.10, 0.05, 'N', 'O', '1994-02-01', '1998-09-10', '1998-11-15', 'COLLECT COD', 'SHIP', 'es haggle blithely above the silent ac'),        
+ (9, 127857, 5394, 1, 25, 84818.25, 0.09, 0.05, 'N', 'O', '1994-02-01', '1998-09-10', '1998-11-15', 'COLLECT COD', 'SHIP', 'es haggle blithely above the silent ac'),
+ (9, 127857, 5394, 1, 20, 84818.25, 0.09, 0.05, 'N', 'O', '1994-02-01', '1998-09-10', '1998-11-15', 'COLLECT COD', 'SHIP', 'es haggle blithely above the silent ac');        
+
+query R
+select
+	sum(l_extendedprice * l_discount) as revenue
+from
+	lineitem
+where
+	l_shipdate >= date '1994-01-01'
+	and l_shipdate < date '1995-01-01'
+	and l_discount between 0.08 - 0.01 and 0.08 + 0.01
+	and l_quantity < 24;
+----
+7633.6425
+
+statement ok
+drop table lineitem

@@ -1,9 +1,7 @@
 mod agg;
-mod arithmetic_expr;
-mod binary_expr;
+pub mod binary_expr;
 mod binary_expr_bytes;
 mod binary_expr_nullable;
-mod cmp;
 mod conjunction;
 pub mod expr_factory;
 mod expr_tmpl;
@@ -20,15 +18,12 @@ use crate::array::ArrayRef;
 use crate::array::DataChunk;
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
-pub use arithmetic_expr::ArithmeticExpression;
-pub use cmp::CompareExpression;
 pub use conjunction::ConjunctionExpression;
 
 use crate::expr::expr_factory::{
     build_binary_expr, build_length_expr, build_like_expr, build_ltrim_expr, build_position_expr,
     build_replace_expr, build_rtrim_expr, build_substr_expr, build_trim_expr, build_unary_expr,
 };
-pub use cmp::CompareOperatorKind;
 pub use conjunction::ConjunctionOperatorKind;
 
 use crate::types::{DataType, DataTypeRef};
