@@ -31,7 +31,7 @@ Note that we only tested our code against Java 11. So please use the specific ve
 
 ## Development
 You should have already seen multiple folders in our repo, including `java`, `rust`,
-and `e2e_test_java`.
+and `e2e_test`.
 
 The `java` folder contains the system's frontend code. The frontend includes parser, binder, planner,
 optimizer, and other components. We use Calcite to serve as our query optimizer.
@@ -39,7 +39,7 @@ optimizer, and other components. We use Calcite to serve as our query optimizer.
 The `rust` folder contains the system's backend code. The backend includes the streaming engine, OLAP
 engine, and storage engine.
 
-The `e2e_test_java` folder contains the latest end-to-end test cases.
+The `e2e_test` folder contains the latest end-to-end test cases.
 
 ## Deployment
 To run the system, you need to use at least three terminals, one for frontend server, one for compute server,
