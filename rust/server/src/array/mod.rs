@@ -325,11 +325,11 @@ macro_rules! impl_array_builder {
         }
       }
 
-      /// Append a scalar ref, return error while type not match.
-      pub fn append_datum_ref(&mut self, scalar_ref: DatumRef<'_>) -> Result<()> {
-        match scalar_ref {
+      /// Append a datum ref, return error while type not match.
+      pub fn append_datum_ref(&mut self, datum_ref: DatumRef<'_>) -> Result<()> {
+        match datum_ref {
           None => self.append_null(),
-          Some(scalar_ref_inner) => match (self, scalar_ref_inner) {
+          Some(scalar_ref) => match (self, scalar_ref) {
             $( (Self::$variant_name(inner), ScalarRefImpl::$variant_name(v)) => inner.append(Some(v)), )*
             _ => Err(RwError::from(InternalError("Invalid scalar ref type".to_string()))),
           },

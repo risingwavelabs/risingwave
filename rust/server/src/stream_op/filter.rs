@@ -50,7 +50,7 @@ impl SimpleExecutor for FilterExecutor {
 
         let pred_output = self.expr.eval(&data_chunk)?;
 
-        let (arrays, visibility) = data_chunk.destruct();
+        let (arrays, visibility) = data_chunk.into_parts();
 
         let n = ops.len();
 

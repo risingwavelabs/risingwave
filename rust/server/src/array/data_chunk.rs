@@ -31,7 +31,7 @@ impl DataChunk {
         }
     }
 
-    pub fn destruct(self) -> (Vec<Column>, Option<Bitmap>) {
+    pub fn into_parts(self) -> (Vec<Column>, Option<Bitmap>) {
         (self.columns, self.visibility)
     }
 
