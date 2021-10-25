@@ -17,31 +17,14 @@ use std::sync::Arc;
 
 pub type HashKey = Vec<Datum>;
 
-pub struct HashValue {
-    /// indicating whether this is a key saw by the first time
-    /// if it is the first time, the aggregation operator would only
-    /// output one row for it, e.g. `Insert`.
-    /// if it is not the first time, the aggregation operator would
-    /// output two rows for it, e.g. `UpdateDelete` and `UpdateInsert`
-    first_data: bool,
+struct HashValue {
     /// one or more aggregation states, all corresponding to the same key
     agg_states: Vec<Box<dyn StreamingAggStateImpl>>,
 }
 
 impl HashValue {
-    pub fn new(first_data: bool, agg_states: Vec<Box<dyn StreamingAggStateImpl>>) -> Self {
-        HashValue {
-            first_data,
-            agg_states,
-        }
-    }
-
-    fn is_first_data(&self) -> bool {
-        self.first_data
-    }
-
-    fn unset_first_data(&mut self) {
-        self.first_data = false;
+    pub fn new(agg_states: Vec<Box<dyn StreamingAggStateImpl>>) -> Self {
+        HashValue { agg_states }
     }
 
     fn record_states(&self, agg_array_builder: &mut [ArrayBuilderImpl]) -> Result<()> {
@@ -103,7 +86,7 @@ impl HashAggExecutor {
     /// `visibility`, leave invisible ones out of aggregation
     /// `state_entries`, the current state to check whether a key has existed or not
     #[allow(clippy::complexity)]
-    pub fn get_unique_keys<'a, 'b>(
+    fn get_unique_keys<'a, 'b>(
         &self,
         keys: &'a [HashKey],
         visibility: &Option<Bitmap>,
@@ -193,8 +176,10 @@ impl SimpleExecutor for HashAggExecutor {
                 ErrorCode::InternalError(format!("Visibility does not exist for key {:?}", key))
             })?;
 
+            let not_first_data = self.state_entries.contains_key(key);
+
             // check existence to avoid paying the cost of copy in `entry(...).or_insert()` everytime
-            if !self.state_entries.contains_key(key) {
+            if !not_first_data {
                 let agg_states = self
                     .agg_calls
                     .iter()
@@ -206,14 +191,13 @@ impl SimpleExecutor for HashAggExecutor {
                         )
                     })
                     .collect::<Result<Vec<_>>>()?;
-                let hash_value = HashValue::new(true, agg_states);
+                let hash_value = HashValue::new(agg_states);
                 self.state_entries.insert(key.to_vec(), hash_value);
             }
-
             // since we just checked existence, the key must exist so we `unwrap` directly
             let value = self.state_entries.get_mut(key).unwrap();
             let mut builders = value.new_builders();
-            if !value.is_first_data() {
+            if not_first_data {
                 // record the last state into builder
                 value.record_states(&mut builders)?;
             }
@@ -243,14 +227,13 @@ impl SimpleExecutor for HashAggExecutor {
                 })?;
 
             // same logic from `simple` LocalAggregationOperator
-            if !value.is_first_data() {
+            if not_first_data {
                 new_ops.push(Op::UpdateDelete);
                 new_ops.push(Op::UpdateInsert);
             } else {
                 new_ops.push(Op::Insert);
             }
 
-            value.unset_first_data();
             Ok(())
         })?;
 

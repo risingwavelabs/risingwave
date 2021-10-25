@@ -477,7 +477,7 @@ async fn test_global_hash_aggregation_count() {
     };
     let source = MockSource::new(vec![chunk1, chunk2]);
 
-    // This is local hash aggreagtion, so we add another sum state
+    // This is local hash aggregation, so we add another sum state
     let key_indices = vec![0];
     let agg_calls = vec![
         AggCall {
@@ -485,7 +485,7 @@ async fn test_global_hash_aggregation_count() {
             args: AggArgs::Unary(Int64Type::create(false), 1),
             return_type: Int64Type::create(false),
         },
-        // This is local hash aggreagtion, so we add another sum state
+        // This is local hash aggregation, so we add another sum state
         AggCall {
             kind: AggKind::Sum,
             args: AggArgs::Unary(Int64Type::create(false), 2),
