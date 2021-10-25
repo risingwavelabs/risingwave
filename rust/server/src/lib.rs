@@ -34,7 +34,6 @@ mod catalog;
 mod execution;
 mod executor;
 mod expr;
-pub mod service;
 mod source;
 mod storage;
 mod stream;
@@ -45,4 +44,4 @@ mod test_utils;
 mod types;
 mod vector_op;
 
-pub mod server;
+pub mod rpc;

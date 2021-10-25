@@ -59,6 +59,7 @@ java/**/build
 
 rust/**/target
 rust/proto/src/*.rs
+rust/prost/src/*.rs
 !rust/proto/src/lib.rs
 *.iml
 

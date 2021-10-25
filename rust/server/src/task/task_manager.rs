@@ -87,11 +87,11 @@ impl Default for TaskManager {
 mod tests {
     use crate::task::test_utils::{ResultChecker, TestRunner};
     use crate::task::{GlobalTaskEnv, TaskId, TaskManager};
-    use grpcio::RpcStatusCode;
     use pb_construct::make_proto;
     use risingwave_proto::plan::{PlanFragment, PlanNode_PlanNodeType};
     use risingwave_proto::task_service::TaskId as ProtoTaskId;
     use risingwave_proto::task_service::TaskSinkId as ProtoTaskSinkId;
+    use tonic::Code;
 
     #[test]
     fn test_select_all() {
@@ -140,14 +140,14 @@ mod tests {
             manager
                 .check_if_task_running(&task_id)
                 .unwrap_err()
-                .to_grpc_error()
+                .to_grpc_status()
                 .code(),
-            RpcStatusCode::NOT_FOUND
+            Code::NotFound
         );
 
         let sink_id = make_proto!(ProtoTaskSinkId, {});
         match manager.take_sink(&sink_id) {
-            Err(e) => assert_eq!(e.to_grpc_error().code(), RpcStatusCode::NOT_FOUND),
+            Err(e) => assert_eq!(e.to_grpc_status().code(), Code::NotFound),
             Ok(_) => unreachable!(),
         };
     }

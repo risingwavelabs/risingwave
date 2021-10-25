@@ -2,11 +2,12 @@ use super::*;
 
 use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result};
-use crate::service::ExchangeWriter;
+use crate::rpc::service::exchange_service::ExchangeWriter;
 use crate::storage::{SimpleTableRef, Table};
 use pb_convert::FromProtobuf;
 use protobuf::well_known_types::Any;
 use protobuf::Message;
+use risingwave_pb::ToProto;
 use risingwave_proto::data::{Column, DataType, DataType_TypeName};
 use risingwave_proto::expr::{ConstantValue, ExprNode, ExprNode_Type};
 use risingwave_proto::plan::{
@@ -31,8 +32,8 @@ struct FakeExchangeWriter {
 
 #[async_trait::async_trait]
 impl ExchangeWriter for FakeExchangeWriter {
-    async fn write(&mut self, data: TaskData) -> Result<()> {
-        self.messages.push(data);
+    async fn write(&mut self, data: risingwave_pb::task_service::TaskData) -> Result<()> {
+        self.messages.push(data.to_proto());
         Ok(())
     }
 }

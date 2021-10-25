@@ -1,6 +1,6 @@
 extern crate protoc_grpcio;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() {
     let proto_dir = "../../proto";
 
     println!("cargo:rerun-if-changed={}", proto_dir);
@@ -19,7 +19,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|f| format!("{}/{}", proto_dir, f))
         .collect();
 
-    protoc_grpcio::compile_grpc_protos(&protos, &[proto_dir], "src", None)
-        .expect("Failed to compile grpc!");
-    Ok(())
+    protoc_grpcio::compile_grpc_protos(&protos, &[proto_dir], "src", None).unwrap();
 }

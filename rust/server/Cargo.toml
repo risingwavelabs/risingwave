@@ -10,8 +10,10 @@ async-stream = "0.3"
 async-trait = "0.1"
 backtrace = "0.3"
 byteorder = "1"
+bytes = "0.4"
 chrono = "0.4"
-clap = "3.0.0-beta.4"
+clap = "3.0.0-beta.5"
+clap_derive = "3.0.0-beta.5"
 crc32fast = "1"
 ctrlc = { version = "3.0", features = ["termination"] }
 either = "1"
@@ -26,9 +28,11 @@ paste = "1"
 pb-construct = { path = "../utils/pb-construct" }
 pb-convert = { path = "../utils/pb-convert" }
 pb-convert-derive = { path = "../utils/pb-convert-derive" }
+prost = "0.8"
 protobuf = "2"
 rayon = "1"
 rdkafka = { version = "0.25", features = ["cmake-build"] }
+risingwave-pb = { path = "../prost" }
 risingwave-proto = { path = "../proto" }
 rust_decimal = "1"
 rust_decimal_macros = "1"
@@ -38,7 +42,9 @@ serde_with = "1"
 smallvec = "1"
 tempfile = "3.2.0"
 thiserror = "1"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
+tokio-stream = "0.1.7"
+tonic = "0.5"
 twox-hash = "1"
 typed-builder = "0.9"
 

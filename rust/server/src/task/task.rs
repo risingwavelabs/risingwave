@@ -3,12 +3,13 @@ use std::sync::{Arc, Mutex};
 use crate::array::DataChunk;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::executor::{BoxedExecutor, ExecutorBuilder, ExecutorResult};
-use crate::service::ExchangeWriter;
+use crate::rpc::service::exchange_service::ExchangeWriter;
 use crate::task::channel::{create_output_channel, BoxChanReceiver, BoxChanSender};
 use crate::task::GlobalTaskEnv;
 use crate::task::TaskManager;
 use crate::util::{json_to_pretty_string, JsonFormatter};
 use rayon::ThreadPool;
+use risingwave_pb::ToProst;
 use risingwave_proto::common::Status;
 use risingwave_proto::plan::PlanFragment;
 use risingwave_proto::task_service::TaskInfo_TaskStatus as TaskStatus;
@@ -88,7 +89,7 @@ impl TaskSink {
             let mut task_data = TaskData::new();
             task_data.set_status(Status::default());
             task_data.set_record_batch(pb);
-            writer.write(task_data).await?;
+            writer.write(task_data.to_prost()).await?;
         }
         let possible_err = self.task_manager.get_error(&task_id)?;
         if let Some(err) = possible_err {

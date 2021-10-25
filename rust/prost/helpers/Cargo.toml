@@ -1,0 +1,14 @@
+[package]
+name = "prost-helpers"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+anyhow = "1.0"
+proc-macro-error = "1.0"
+proc-macro2 = { version = "1", default-features = false }
+quote = "1"
+syn = "1"

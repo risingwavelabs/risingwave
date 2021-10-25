@@ -5,8 +5,8 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
-use crate::grpcio::{RpcStatus, RpcStatusCode};
 use backtrace::Backtrace;
+use grpcio::{RpcStatus, RpcStatusCode};
 use protobuf::ProtobufError;
 use std::io::Error as IoError;
 use thiserror::Error;
@@ -21,12 +21,18 @@ pub enum ErrorCode {
     InternalError(String),
     #[error(transparent)]
     ProtobufError(ProtobufError),
+    #[error(transparent)]
+    ProstError(prost::DecodeError),
     #[error("Feature is not yet implemented: {0}")]
     NotImplementedError(String),
     #[error(transparent)]
     IoError(IoError),
     #[error("Grpc failure: {0}: {1}")]
     GrpcError(String, grpcio::Error),
+    #[error("Grpc failure: {0}: {1}")]
+    TonicError(String, tonic::Status),
+    #[error("Grpc network failure: {0}: {1}")]
+    GrpcNetworkError(String, tonic::transport::Error),
     #[error("Parse string error: {0}")]
     ParseError(chrono::format::ParseError),
     #[error("Out of range")]
@@ -46,7 +52,23 @@ pub struct RwError {
 impl RwError {
     /// Turns a crate-wide `RwError` into grpc error.
     pub fn to_grpc_error(&self) -> RpcStatus {
-        RpcStatus::with_message(self.inner.to_grpc_error_code(), self.to_string())
+        let code = match *self.inner {
+            ErrorCode::OK => RpcStatusCode::OK,
+            ErrorCode::NotImplementedError(_) => RpcStatusCode::UNIMPLEMENTED,
+            ErrorCode::TaskNotFound => RpcStatusCode::NOT_FOUND,
+            _ => RpcStatusCode::INTERNAL,
+        };
+        RpcStatus::with_message(code, self.to_string())
+    }
+
+    pub fn to_grpc_status(&self) -> tonic::Status {
+        let code = match *self.inner {
+            ErrorCode::OK => tonic::Code::Ok,
+            ErrorCode::NotImplementedError(_) => tonic::Code::Unimplemented,
+            ErrorCode::TaskNotFound => tonic::Code::NotFound,
+            _ => tonic::Code::Internal,
+        };
+        tonic::Status::new(code, self.to_string())
     }
 }
 
@@ -96,15 +118,9 @@ impl ErrorCode {
             ErrorCode::NumericValueOutOfRange => 8,
             ErrorCode::ProtocolError(_) => 9,
             ErrorCode::TaskNotFound => 10,
-        }
-    }
-
-    fn to_grpc_error_code(&self) -> RpcStatusCode {
-        match self {
-            ErrorCode::OK => RpcStatusCode::OK,
-            ErrorCode::NotImplementedError(_) => RpcStatusCode::UNIMPLEMENTED,
-            ErrorCode::TaskNotFound => RpcStatusCode::NOT_FOUND,
-            _ => RpcStatusCode::INTERNAL,
+            ErrorCode::ProstError(_) => 11,
+            ErrorCode::GrpcNetworkError(_, _) => 12,
+            ErrorCode::TonicError(_, _) => 13,
         }
     }
 }
@@ -268,6 +284,21 @@ mod tests {
             })();
             assert_eq!(Err(RwError::from(expected_error)), error);
         }
+    }
+
+    #[test]
+    fn test_to_grpc_status() {
+        use tonic::Code;
+        fn check_grpc_error(ec: ErrorCode, grpc_code: Code) {
+            assert_eq!(RwError::from(ec).to_grpc_status().code(), grpc_code);
+        }
+
+        check_grpc_error(ErrorCode::TaskNotFound, Code::NotFound);
+        check_grpc_error(ErrorCode::InternalError(String::new()), Code::Internal);
+        check_grpc_error(
+            ErrorCode::NotImplementedError(String::new()),
+            Code::Unimplemented,
+        );
     }
 
     #[test]
