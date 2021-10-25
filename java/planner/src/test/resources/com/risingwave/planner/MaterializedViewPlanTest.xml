@@ -252,9 +252,10 @@ create materialized view T3 as select v2, sum(v1) as V from t group by v2
         <Resource name="plan">
             <![CDATA[
 RwStreamMaterializedView(v2=[$0], v=[$1])
-  RwStreamProject(v2=[$0], v=[$STREAM_NULL_BY_ROW_COUNT($2, $1)])
-    RwStreamAgg(group=[{0}], v=[SUM($1)], Row Count=[COUNT()])
-      RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1])
+  RwStreamProject(v2=[$0], v=[$1])
+    RwStreamFilter(condition=[<>($2, 0)])
+      RwStreamAgg(group=[{0}], v=[SUM($1)], Row Count=[COUNT()])
+        RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1])
 ]]>
         </Resource>
         <Resource name="json">
@@ -295,28 +296,10 @@ RwStreamMaterializedView(v2=[$0], v=[$1])
           "typeName": "INT32"
         }
       }, {
-        "exprType": "STREAM_NULL_BY_ROW_COUNT",
+        "exprType": "INPUT_REF",
         "body": {
-          "@type": "type.googleapis.com/expr.FunctionCall",
-          "children": [{
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr",
-              "columnIdx": 2
-            },
-            "returnType": {
-              "typeName": "INT64"
-            }
-          }, {
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr",
-              "columnIdx": 1
-            },
-            "returnType": {
-              "typeName": "INT32"
-            }
-          }]
+          "@type": "type.googleapis.com/expr.InputRefExpr",
+          "columnIdx": 1
         },
         "returnType": {
           "typeName": "INT32"
@@ -324,41 +307,75 @@ RwStreamMaterializedView(v2=[$0], v=[$1])
       }]
     },
     "input": {
-      "nodeType": "LOCAL_HASH_AGG",
+      "nodeType": "FILTER",
       "body": {
-        "@type": "type.googleapis.com/stream_plan.HashAggNode",
-        "groupKeys": [{
-        }],
-        "aggCalls": [{
-          "type": "SUM",
-          "args": [{
-            "input": {
-              "columnIdx": 1
-            },
-            "type": {
-              "typeName": "INT32"
-            }
-          }],
+        "@type": "type.googleapis.com/stream_plan.FilterNode",
+        "searchCondition": {
+          "exprType": "NOT_EQUAL",
+          "body": {
+            "@type": "type.googleapis.com/expr.FunctionCall",
+            "children": [{
+              "exprType": "INPUT_REF",
+              "body": {
+                "@type": "type.googleapis.com/expr.InputRefExpr",
+                "columnIdx": 2
+              },
+              "returnType": {
+                "typeName": "INT64"
+              }
+            }, {
+              "exprType": "CONSTANT_VALUE",
+              "body": {
+                "@type": "type.googleapis.com/expr.ConstantValue",
+                "body": "AAAAAAAAAAA="
+              },
+              "returnType": {
+                "typeName": "INT64"
+              }
+            }]
+          },
           "returnType": {
-            "typeName": "INT32"
+            "typeName": "BOOLEAN"
           }
-        }, {
-          "type": "COUNT",
-          "returnType": {
-            "typeName": "INT64"
-          }
-        }]
+        }
       },
       "input": {
+        "nodeType": "LOCAL_HASH_AGG",
         "body": {
-          "@type": "type.googleapis.com/stream_plan.TableSourceNode",
-          "tableRefId": {
-            "schemaRefId": {
-              "databaseRefId": {
+          "@type": "type.googleapis.com/stream_plan.HashAggNode",
+          "groupKeys": [{
+          }],
+          "aggCalls": [{
+            "type": "SUM",
+            "args": [{
+              "input": {
+                "columnIdx": 1
+              },
+              "type": {
+                "typeName": "INT32"
               }
+            }],
+            "returnType": {
+              "typeName": "INT32"
             }
-          },
-          "columnIds": [1, 0]
+          }, {
+            "type": "COUNT",
+            "returnType": {
+              "typeName": "INT64"
+            }
+          }]
+        },
+        "input": {
+          "body": {
+            "@type": "type.googleapis.com/stream_plan.TableSourceNode",
+            "tableRefId": {
+              "schemaRefId": {
+                "databaseRefId": {
+                }
+              }
+            },
+            "columnIds": [1, 0]
+          }
         }
       }
     }
@@ -702,9 +719,10 @@ create materialized view T6 as select sum(v1) as V from t group by v2
             <![CDATA[
 RwStreamMaterializedView(v=[$0])
   RwStreamProject(v=[$1])
-    RwStreamProject(v2=[$0], v=[$STREAM_NULL_BY_ROW_COUNT($2, $1)])
-      RwStreamAgg(group=[{0}], v=[SUM($1)], Row Count=[COUNT()])
-        RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1])
+    RwStreamProject(v2=[$0], v=[$1])
+      RwStreamFilter(condition=[<>($2, 0)])
+        RwStreamAgg(group=[{0}], v=[SUM($1)], Row Count=[COUNT()])
+          RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1])
 ]]>
         </Resource>
         <Resource name="json">
@@ -755,28 +773,10 @@ RwStreamMaterializedView(v=[$0])
             "typeName": "INT32"
           }
         }, {
-          "exprType": "STREAM_NULL_BY_ROW_COUNT",
+          "exprType": "INPUT_REF",
           "body": {
-            "@type": "type.googleapis.com/expr.FunctionCall",
-            "children": [{
-              "exprType": "INPUT_REF",
-              "body": {
-                "@type": "type.googleapis.com/expr.InputRefExpr",
-                "columnIdx": 2
-              },
-              "returnType": {
-                "typeName": "INT64"
-              }
-            }, {
-              "exprType": "INPUT_REF",
-              "body": {
-                "@type": "type.googleapis.com/expr.InputRefExpr",
-                "columnIdx": 1
-              },
-              "returnType": {
-                "typeName": "INT32"
-              }
-            }]
+            "@type": "type.googleapis.com/expr.InputRefExpr",
+            "columnIdx": 1
           },
           "returnType": {
             "typeName": "INT32"
@@ -784,41 +784,75 @@ RwStreamMaterializedView(v=[$0])
         }]
       },
       "input": {
-        "nodeType": "LOCAL_HASH_AGG",
+        "nodeType": "FILTER",
         "body": {
-          "@type": "type.googleapis.com/stream_plan.HashAggNode",
-          "groupKeys": [{
-          }],
-          "aggCalls": [{
-            "type": "SUM",
-            "args": [{
-              "input": {
-                "columnIdx": 1
-              },
-              "type": {
-                "typeName": "INT32"
-              }
-            }],
+          "@type": "type.googleapis.com/stream_plan.FilterNode",
+          "searchCondition": {
+            "exprType": "NOT_EQUAL",
+            "body": {
+              "@type": "type.googleapis.com/expr.FunctionCall",
+              "children": [{
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr",
+                  "columnIdx": 2
+                },
+                "returnType": {
+                  "typeName": "INT64"
+                }
+              }, {
+                "exprType": "CONSTANT_VALUE",
+                "body": {
+                  "@type": "type.googleapis.com/expr.ConstantValue",
+                  "body": "AAAAAAAAAAA="
+                },
+                "returnType": {
+                  "typeName": "INT64"
+                }
+              }]
+            },
             "returnType": {
-              "typeName": "INT32"
+              "typeName": "BOOLEAN"
             }
-          }, {
-            "type": "COUNT",
-            "returnType": {
-              "typeName": "INT64"
-            }
-          }]
+          }
         },
         "input": {
+          "nodeType": "LOCAL_HASH_AGG",
           "body": {
-            "@type": "type.googleapis.com/stream_plan.TableSourceNode",
-            "tableRefId": {
-              "schemaRefId": {
-                "databaseRefId": {
+            "@type": "type.googleapis.com/stream_plan.HashAggNode",
+            "groupKeys": [{
+            }],
+            "aggCalls": [{
+              "type": "SUM",
+              "args": [{
+                "input": {
+                  "columnIdx": 1
+                },
+                "type": {
+                  "typeName": "INT32"
                 }
+              }],
+              "returnType": {
+                "typeName": "INT32"
               }
-            },
-            "columnIds": [1, 0]
+            }, {
+              "type": "COUNT",
+              "returnType": {
+                "typeName": "INT64"
+              }
+            }]
+          },
+          "input": {
+            "body": {
+              "@type": "type.googleapis.com/stream_plan.TableSourceNode",
+              "tableRefId": {
+                "schemaRefId": {
+                  "databaseRefId": {
+                  }
+                }
+              },
+              "columnIds": [1, 0]
+            }
           }
         }
       }
@@ -839,9 +873,10 @@ create materialized view T7 as select sum(v1)+1 as V from t group by v2
             <![CDATA[
 RwStreamMaterializedView(v=[$0])
   RwStreamProject(v=[+($1, 1)])
-    RwStreamProject(v2=[$0], $f1=[$STREAM_NULL_BY_ROW_COUNT($2, $1)])
-      RwStreamAgg(group=[{0}], agg#0=[SUM($1)], Row Count=[COUNT()])
-        RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1])
+    RwStreamProject(v2=[$0], $f1=[$1])
+      RwStreamFilter(condition=[<>($2, 0)])
+        RwStreamAgg(group=[{0}], agg#0=[SUM($1)], Row Count=[COUNT()])
+          RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1])
 ]]>
         </Resource>
         <Resource name="json">
@@ -910,28 +945,10 @@ RwStreamMaterializedView(v=[$0])
             "typeName": "INT32"
           }
         }, {
-          "exprType": "STREAM_NULL_BY_ROW_COUNT",
+          "exprType": "INPUT_REF",
           "body": {
-            "@type": "type.googleapis.com/expr.FunctionCall",
-            "children": [{
-              "exprType": "INPUT_REF",
-              "body": {
-                "@type": "type.googleapis.com/expr.InputRefExpr",
-                "columnIdx": 2
-              },
-              "returnType": {
-                "typeName": "INT64"
-              }
-            }, {
-              "exprType": "INPUT_REF",
-              "body": {
-                "@type": "type.googleapis.com/expr.InputRefExpr",
-                "columnIdx": 1
-              },
-              "returnType": {
-                "typeName": "INT32"
-              }
-            }]
+            "@type": "type.googleapis.com/expr.InputRefExpr",
+            "columnIdx": 1
           },
           "returnType": {
             "typeName": "INT32"
@@ -939,41 +956,75 @@ RwStreamMaterializedView(v=[$0])
         }]
       },
       "input": {
-        "nodeType": "LOCAL_HASH_AGG",
+        "nodeType": "FILTER",
         "body": {
-          "@type": "type.googleapis.com/stream_plan.HashAggNode",
-          "groupKeys": [{
-          }],
-          "aggCalls": [{
-            "type": "SUM",
-            "args": [{
-              "input": {
-                "columnIdx": 1
-              },
-              "type": {
-                "typeName": "INT32"
-              }
-            }],
+          "@type": "type.googleapis.com/stream_plan.FilterNode",
+          "searchCondition": {
+            "exprType": "NOT_EQUAL",
+            "body": {
+              "@type": "type.googleapis.com/expr.FunctionCall",
+              "children": [{
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr",
+                  "columnIdx": 2
+                },
+                "returnType": {
+                  "typeName": "INT64"
+                }
+              }, {
+                "exprType": "CONSTANT_VALUE",
+                "body": {
+                  "@type": "type.googleapis.com/expr.ConstantValue",
+                  "body": "AAAAAAAAAAA="
+                },
+                "returnType": {
+                  "typeName": "INT64"
+                }
+              }]
+            },
             "returnType": {
-              "typeName": "INT32"
+              "typeName": "BOOLEAN"
             }
-          }, {
-            "type": "COUNT",
-            "returnType": {
-              "typeName": "INT64"
-            }
-          }]
+          }
         },
         "input": {
+          "nodeType": "LOCAL_HASH_AGG",
           "body": {
-            "@type": "type.googleapis.com/stream_plan.TableSourceNode",
-            "tableRefId": {
-              "schemaRefId": {
-                "databaseRefId": {
+            "@type": "type.googleapis.com/stream_plan.HashAggNode",
+            "groupKeys": [{
+            }],
+            "aggCalls": [{
+              "type": "SUM",
+              "args": [{
+                "input": {
+                  "columnIdx": 1
+                },
+                "type": {
+                  "typeName": "INT32"
                 }
+              }],
+              "returnType": {
+                "typeName": "INT32"
               }
-            },
-            "columnIds": [1, 0]
+            }, {
+              "type": "COUNT",
+              "returnType": {
+                "typeName": "INT64"
+              }
+            }]
+          },
+          "input": {
+            "body": {
+              "@type": "type.googleapis.com/stream_plan.TableSourceNode",
+              "tableRefId": {
+                "schemaRefId": {
+                  "databaseRefId": {
+                  }
+                }
+              },
+              "columnIds": [1, 0]
+            }
           }
         }
       }
