@@ -3,6 +3,7 @@ name: PR Checklist
 on:
   pull_request:
     branches: [ master ]
+    types: [opened]
 
 jobs:
   checklist_job:
