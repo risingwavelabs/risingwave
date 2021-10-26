@@ -5,11 +5,12 @@ import static java.util.Objects.requireNonNull;
 import com.risingwave.planner.rel.physical.batch.BatchPlan;
 import com.risingwave.planner.rel.physical.batch.RisingWaveBatchPhyRel;
 import com.risingwave.planner.rel.physical.batch.RwBatchExchange;
-import com.risingwave.scheduler.shuffle.SinglePartitionSchema;
+import com.risingwave.scheduler.exchange.SingleDistributionSchema;
 import com.risingwave.scheduler.stage.QueryStage;
 import com.risingwave.scheduler.stage.StageId;
 import org.apache.calcite.rel.RelNode;
 
+/** PlanFragmenter split physical plan into multiple stages according to the Exchange operators */
 public class PlanFragmenter {
   private final QueryId queryId = QueryId.next();
 
@@ -56,7 +57,7 @@ public class PlanFragmenter {
 
   private QueryStage newQueryStage(RisingWaveBatchPhyRel node) {
     StageId stageId = getNextStageId();
-    var stage = new QueryStage(stageId, node, new SinglePartitionSchema());
+    var stage = new QueryStage(stageId, node, new SingleDistributionSchema());
     graphBuilder.addNode(stage);
     return stage;
   }

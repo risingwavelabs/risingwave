@@ -9,18 +9,21 @@ use std::sync::mpsc;
 
 pub struct HashShuffleSender {
     senders: Vec<mpsc::Sender<DataChunk>>,
-    hash_info: ShuffleInfo_HashInfo,
+    hash_info: ExchangeInfo_HashInfo,
 }
 
 pub struct HashShuffleReceiver {
     receiver: mpsc::Receiver<DataChunk>,
 }
 
-fn generate_hash_values(chunk: &DataChunk, hash_info: &ShuffleInfo_HashInfo) -> Result<Vec<usize>> {
+fn generate_hash_values(
+    chunk: &DataChunk,
+    hash_info: &ExchangeInfo_HashInfo,
+) -> Result<Vec<usize>> {
     let output_count = hash_info.output_count as usize;
 
     let hasher_builder = match hash_info.hash_method {
-        ShuffleInfo_HashInfo_HashMethod::CRC32 => CRC32FastBuilder {},
+        ExchangeInfo_HashInfo_HashMethod::CRC32 => CRC32FastBuilder {},
     };
 
     let hash_values = chunk
@@ -41,7 +44,7 @@ fn generate_hash_values(chunk: &DataChunk, hash_info: &ShuffleInfo_HashInfo) -> 
 
 fn generate_new_data_chunks(
     chunk: &DataChunk,
-    hash_info: &ShuffleInfo_HashInfo,
+    hash_info: &ExchangeInfo_HashInfo,
     hash_values: &[usize],
 ) -> Result<Vec<DataChunk>> {
     let output_count = hash_info.output_count as usize;
@@ -100,7 +103,7 @@ impl ChanReceiver for HashShuffleReceiver {
     }
 }
 
-pub fn new_hash_shuffle_channel(shuffle: &ShuffleInfo) -> (BoxChanSender, Vec<BoxChanReceiver>) {
+pub fn new_hash_shuffle_channel(shuffle: &ExchangeInfo) -> (BoxChanSender, Vec<BoxChanReceiver>) {
     let hash_info = shuffle.get_hash_info();
     let output_count = hash_info.output_count as usize;
     let mut senders = Vec::with_capacity(output_count);
@@ -130,17 +133,16 @@ mod tests {
     use std::hash::BuildHasher;
 
     pub fn hash_shuffle_plan(plan: &mut PlanFragment, keys: Vec<u32>, num_sinks: u32) {
-        let mut hash_info = ShuffleInfo_HashInfo::default();
-        hash_info.set_hash_method(ShuffleInfo_HashInfo_HashMethod::CRC32);
+        let mut hash_info = ExchangeInfo_HashInfo::default();
+        hash_info.set_hash_method(ExchangeInfo_HashInfo_HashMethod::CRC32);
         hash_info.set_keys(keys);
         hash_info.set_output_count(num_sinks);
-        let shuffle_info_oneof_shuffle_info =
-            ShuffleInfo_oneof_shuffle_info::hash_info(hash_info.clone());
-        let mut shuffle_info = ShuffleInfo::default();
-        shuffle_info.set_hash_info(hash_info);
-        shuffle_info.shuffle_info = Some(shuffle_info_oneof_shuffle_info);
-        shuffle_info.partition_mode = ShuffleInfo_PartitionMode::HASH;
-        plan.set_shuffle_info(shuffle_info);
+        let distribution = ExchangeInfo_oneof_distribution::hash_info(hash_info.clone());
+        let mut exchange_info = ExchangeInfo::default();
+        exchange_info.set_hash_info(hash_info);
+        exchange_info.distribution = Some(distribution);
+        exchange_info.mode = ExchangeInfo_DistributionMode::HASH;
+        plan.set_exchange_info(exchange_info);
     }
 
     #[test]

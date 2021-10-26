@@ -2,9 +2,9 @@ package com.risingwave.planner.rel.physical.batch;
 
 import static java.util.Objects.requireNonNull;
 
+import com.risingwave.proto.plan.ExchangeInfo;
 import com.risingwave.proto.plan.PlanFragment;
 import com.risingwave.proto.plan.PlanNode;
-import com.risingwave.proto.plan.ShuffleInfo;
 
 /**
  * Plan for adhoc query execution. The counterpart is streaming plan, which is designed for
@@ -22,11 +22,11 @@ public class BatchPlan {
   }
 
   public PlanFragment serialize() {
-    ShuffleInfo shuffleInfo =
-        ShuffleInfo.newBuilder().setPartitionMode(ShuffleInfo.PartitionMode.SINGLE).build();
+    ExchangeInfo exchangeInfo =
+        ExchangeInfo.newBuilder().setMode(ExchangeInfo.DistributionMode.SINGLE).build();
 
     PlanNode rootNode = root.serialize();
 
-    return PlanFragment.newBuilder().setRoot(rootNode).setShuffleInfo(shuffleInfo).build();
+    return PlanFragment.newBuilder().setRoot(rootNode).setExchangeInfo(exchangeInfo).build();
   }
 }

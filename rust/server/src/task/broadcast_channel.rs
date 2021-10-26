@@ -7,7 +7,7 @@ use std::sync::mpsc;
 /// `BroadcastSender` sends the same chunk to a number of `BroadcastReceiver`s.
 pub struct BroadcastSender {
     senders: Vec<mpsc::Sender<DataChunk>>,
-    broadcast_info: ShuffleInfo_BroadcastInfo,
+    broadcast_info: ExchangeInfo_BroadcastInfo,
 }
 
 #[async_trait::async_trait]
@@ -36,7 +36,7 @@ impl ChanReceiver for BroadcastReceiver {
     }
 }
 
-pub fn new_broadcast_channel(shuffle: &ShuffleInfo) -> (BoxChanSender, Vec<BoxChanReceiver>) {
+pub fn new_broadcast_channel(shuffle: &ExchangeInfo) -> (BoxChanSender, Vec<BoxChanReceiver>) {
     let broadcast_info = shuffle.get_broadcast_info();
     let output_count = broadcast_info.count as usize;
     let mut senders = Vec::with_capacity(output_count);
@@ -64,15 +64,14 @@ mod tests {
     use rand::Rng;
 
     fn broadcast_plan(plan: &mut PlanFragment, num_sinks: u32) {
-        let mut broadcast_info = ShuffleInfo_BroadcastInfo::default();
+        let mut broadcast_info = ExchangeInfo_BroadcastInfo::default();
         broadcast_info.set_count(num_sinks);
-        let shuffle_info_oneof_shuffle_info =
-            ShuffleInfo_oneof_shuffle_info::broadcast_info(broadcast_info.clone());
-        let mut shuffle_info = ShuffleInfo::default();
-        shuffle_info.set_broadcast_info(broadcast_info);
-        shuffle_info.partition_mode = ShuffleInfo_PartitionMode::BROADCAST;
-        shuffle_info.shuffle_info = Some(shuffle_info_oneof_shuffle_info);
-        plan.set_shuffle_info(shuffle_info);
+        let distribution = ExchangeInfo_oneof_distribution::broadcast_info(broadcast_info.clone());
+        let mut exchange_info = ExchangeInfo::default();
+        exchange_info.set_broadcast_info(broadcast_info);
+        exchange_info.mode = ExchangeInfo_DistributionMode::BROADCAST;
+        exchange_info.distribution = Some(distribution);
+        plan.set_exchange_info(exchange_info);
     }
 
     #[test]

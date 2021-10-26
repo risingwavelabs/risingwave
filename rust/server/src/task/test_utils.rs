@@ -11,16 +11,21 @@ use risingwave_pb::ToProto;
 use risingwave_proto::data::{Column, DataType, DataType_TypeName};
 use risingwave_proto::expr::{ConstantValue, ExprNode, ExprNode_Type};
 use risingwave_proto::plan::{
-    ColumnDesc, CreateTableNode, InsertNode, PlanFragment, PlanNode_PlanNodeType as PlanNodeType,
-    SeqScanNode, ShuffleInfo_PartitionMode, TableRefId, ValuesNode, ValuesNode_ExprTuple,
+    ColumnDesc, CreateTableNode, ExchangeInfo_DistributionMode, InsertNode, PlanFragment,
+    PlanNode_PlanNodeType as PlanNodeType, SeqScanNode, TableRefId, ValuesNode,
+    ValuesNode_ExprTuple,
 };
 use risingwave_proto::task_service::{TaskData, TaskId as ProtoTaskId, TaskSinkId as ProtoSinkId};
 
 fn get_num_sinks(plan: &PlanFragment) -> u32 {
-    match plan.get_shuffle_info().partition_mode {
-        ShuffleInfo_PartitionMode::SINGLE => 1,
-        ShuffleInfo_PartitionMode::HASH => plan.get_shuffle_info().get_hash_info().output_count,
-        ShuffleInfo_PartitionMode::BROADCAST => plan.get_shuffle_info().get_broadcast_info().count,
+    match plan.get_exchange_info().mode {
+        ExchangeInfo_DistributionMode::SINGLE => 1,
+        ExchangeInfo_DistributionMode::HASH => {
+            plan.get_exchange_info().get_hash_info().output_count
+        }
+        ExchangeInfo_DistributionMode::BROADCAST => {
+            plan.get_exchange_info().get_broadcast_info().count
+        }
     }
 }
 

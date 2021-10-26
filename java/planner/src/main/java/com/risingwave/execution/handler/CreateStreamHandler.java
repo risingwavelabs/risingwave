@@ -20,9 +20,9 @@ import com.risingwave.proto.computenode.CreateTaskRequest;
 import com.risingwave.proto.computenode.CreateTaskResponse;
 import com.risingwave.proto.computenode.TaskSinkId;
 import com.risingwave.proto.plan.CreateStreamNode;
+import com.risingwave.proto.plan.ExchangeInfo;
 import com.risingwave.proto.plan.PlanFragment;
 import com.risingwave.proto.plan.PlanNode;
-import com.risingwave.proto.plan.ShuffleInfo;
 import com.risingwave.rpc.ComputeClient;
 import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.Messages;
@@ -35,6 +35,7 @@ import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlColumnDeclaration;
 import org.apache.calcite.sql.validate.SqlValidator;
 
+/** Handler of <code>CREATE STREAM</code> statement */
 public class CreateStreamHandler implements SqlHandler {
   @Override
   public DdlResult handle(SqlNode ast, ExecutionContext context) {
@@ -90,8 +91,8 @@ public class CreateStreamHandler implements SqlHandler {
     CreateStreamNode creatStreamNode =
         createStreamNodeBuilder.setTableRefId(Messages.getTableRefId(tableId)).build();
 
-    ShuffleInfo shuffleInfo =
-        ShuffleInfo.newBuilder().setPartitionMode(ShuffleInfo.PartitionMode.SINGLE).build();
+    ExchangeInfo exchangeInfo =
+        ExchangeInfo.newBuilder().setMode(ExchangeInfo.DistributionMode.SINGLE).build();
 
     PlanNode rootNode =
         PlanNode.newBuilder()
@@ -99,7 +100,7 @@ public class CreateStreamHandler implements SqlHandler {
             .setNodeType(PlanNode.PlanNodeType.CREATE_STREAM)
             .build();
 
-    return PlanFragment.newBuilder().setRoot(rootNode).setShuffleInfo(shuffleInfo).build();
+    return PlanFragment.newBuilder().setRoot(rootNode).setExchangeInfo(exchangeInfo).build();
   }
 
   @VisibleForTesting

@@ -14,15 +14,19 @@ import com.risingwave.proto.computenode.HostAddress;
 import com.risingwave.proto.computenode.TaskSinkId;
 import com.risingwave.proto.plan.PlanFragment;
 import com.risingwave.proto.plan.PlanNode;
+import com.risingwave.scheduler.exchange.DistributionSchema;
 import com.risingwave.scheduler.query.Query;
-import com.risingwave.scheduler.shuffle.PartitionSchema;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 
+/**
+ * A QueryStage is part of a distributed physical plan running in one local node. Operators in one
+ * stage are pipelined.
+ */
 public class QueryStage {
   private final StageId stageId;
   private final RisingWaveBatchPhyRel root;
-  private final PartitionSchema partitionSchema;
+  private final DistributionSchema distributionSchema;
 
   // Augmented fields.
   private final ImmutableMap<StageId, ScheduledStage> exchangeSources;
@@ -30,10 +34,18 @@ public class QueryStage {
   private final int parallelism;
   private final ImmutableList<WorkerNode> workers;
 
-  public QueryStage(StageId stageId, RisingWaveBatchPhyRel root, PartitionSchema partitionSchema) {
+  /**
+   * Constructor
+   *
+   * @param stageId stage identifier
+   * @param root root of plan tree
+   * @param distributionSchema data distribution of the stage
+   */
+  public QueryStage(
+      StageId stageId, RisingWaveBatchPhyRel root, DistributionSchema distributionSchema) {
     this.stageId = stageId;
     this.root = root;
-    this.partitionSchema = partitionSchema;
+    this.distributionSchema = distributionSchema;
 
     // Not yet augmented.
     this.exchangeSources = null;
@@ -49,7 +61,7 @@ public class QueryStage {
       ImmutableList<WorkerNode> workers) {
     this.stageId = other.stageId;
     this.root = other.root;
-    this.partitionSchema = other.partitionSchema;
+    this.distributionSchema = other.distributionSchema;
     this.exchangeSources = exchangeSources;
     this.query = query;
     this.parallelism = workers.size();
@@ -92,7 +104,7 @@ public class QueryStage {
     PlanNode protoRoot = rewriteIfExchange(root);
     return PlanFragment.newBuilder()
         .setRoot(protoRoot)
-        .setShuffleInfo(partitionSchema.toShuffleInfo())
+        .setExchangeInfo(distributionSchema.toExchangeInfo())
         .build();
   }
 

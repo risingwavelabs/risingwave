@@ -3,7 +3,9 @@ use crate::error::Result;
 use crate::task::broadcast_channel::new_broadcast_channel;
 use crate::task::fifo_channel::new_fifo_channel;
 use crate::task::hash_shuffle_channel::new_hash_shuffle_channel;
-use risingwave_proto::plan::{ShuffleInfo, ShuffleInfo_PartitionMode as ShufflePartitionMode};
+use risingwave_proto::plan::{
+    ExchangeInfo, ExchangeInfo_DistributionMode as ShuffleDistributionMode,
+};
 use std::option::Option;
 
 #[async_trait::async_trait]
@@ -27,11 +29,11 @@ pub type BoxChanReceiver = Box<dyn ChanReceiver>;
 // The producer is the local task executor, the consumer is ExchangeService.
 // The implementation depends on the shuffling strategy.
 pub fn create_output_channel(
-    shuffle: &ShuffleInfo,
+    shuffle: &ExchangeInfo,
 ) -> Result<(BoxChanSender, Vec<BoxChanReceiver>)> {
-    match shuffle.get_partition_mode() {
-        ShufflePartitionMode::SINGLE => Ok(new_fifo_channel()),
-        ShufflePartitionMode::HASH => Ok(new_hash_shuffle_channel(shuffle)),
-        ShufflePartitionMode::BROADCAST => Ok(new_broadcast_channel(shuffle)),
+    match shuffle.get_mode() {
+        ShuffleDistributionMode::SINGLE => Ok(new_fifo_channel()),
+        ShuffleDistributionMode::HASH => Ok(new_hash_shuffle_channel(shuffle)),
+        ShuffleDistributionMode::BROADCAST => Ok(new_broadcast_channel(shuffle)),
     }
 }

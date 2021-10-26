@@ -205,8 +205,8 @@ message PlanNode {
     repeated PlanNode children = 3;
 }
 
-message ShuffleInfo {
-    enum PartitionMode {
+message ExchangeInfo {
+    enum DistributionMode {
         // No partitioning at all, used for root segment which aggregates query results
         SINGLE = 0;
         BROADCAST = 1;
@@ -226,9 +226,9 @@ message ShuffleInfo {
         repeated uint32 keys = 3;
     }
 
-    PartitionMode partition_mode = 1;
+    DistributionMode mode = 1;
 
-    oneof shuffle_info {
+    oneof distribution {
         BroadcastInfo broadcast_info = 2;
         HashInfo hash_info = 3;
     }
@@ -238,5 +238,5 @@ message ShuffleInfo {
 
 message PlanFragment {
     PlanNode root = 1;
-    ShuffleInfo shuffle_info = 2;
+    ExchangeInfo exchange_info = 2;
 }

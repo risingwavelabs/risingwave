@@ -20,9 +20,9 @@ import com.risingwave.proto.computenode.CreateTaskRequest;
 import com.risingwave.proto.computenode.CreateTaskResponse;
 import com.risingwave.proto.computenode.TaskSinkId;
 import com.risingwave.proto.plan.CreateTableNode;
+import com.risingwave.proto.plan.ExchangeInfo;
 import com.risingwave.proto.plan.PlanFragment;
 import com.risingwave.proto.plan.PlanNode;
-import com.risingwave.proto.plan.ShuffleInfo;
 import com.risingwave.rpc.ComputeClient;
 import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.Messages;
@@ -32,6 +32,7 @@ import org.apache.calcite.sql.ddl.SqlColumnDeclaration;
 import org.apache.calcite.sql.ddl.SqlCreateTable;
 import org.apache.calcite.sql.validate.SqlValidator;
 
+/** Handler of <code>CREATE TABLE</code> statement */
 @HandlerSignature(sqlKinds = {SqlKind.CREATE_TABLE})
 public class CreateTableHandler implements SqlHandler {
   @Override
@@ -68,8 +69,8 @@ public class CreateTableHandler implements SqlHandler {
     CreateTableNode creatTableNode =
         createTableNodeBuilder.setTableRefId(Messages.getTableRefId(tableId)).build();
 
-    ShuffleInfo shuffleInfo =
-        ShuffleInfo.newBuilder().setPartitionMode(ShuffleInfo.PartitionMode.SINGLE).build();
+    ExchangeInfo exchangeInfo =
+        ExchangeInfo.newBuilder().setMode(ExchangeInfo.DistributionMode.SINGLE).build();
 
     PlanNode rootNode =
         PlanNode.newBuilder()
@@ -77,7 +78,7 @@ public class CreateTableHandler implements SqlHandler {
             .setNodeType(PlanNode.PlanNodeType.CREATE_TABLE)
             .build();
 
-    return PlanFragment.newBuilder().setRoot(rootNode).setShuffleInfo(shuffleInfo).build();
+    return PlanFragment.newBuilder().setRoot(rootNode).setExchangeInfo(exchangeInfo).build();
   }
 
   @VisibleForTesting
