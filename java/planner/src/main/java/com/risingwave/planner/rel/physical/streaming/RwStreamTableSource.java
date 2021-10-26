@@ -8,6 +8,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.protobuf.Any;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
+import com.risingwave.planner.rel.common.dist.RwDistributionTrait;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.logical.RwLogicalScan;
 import com.risingwave.proto.plan.TableRefId;
@@ -30,10 +31,10 @@ import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+/** The `RelNode` for streaming table source. */
 public class RwStreamTableSource extends TableScan implements RisingWaveStreamingRel {
   protected final TableCatalog.TableId tableId;
   protected final ImmutableList<ColumnCatalog.ColumnId> columnIds;
-  protected boolean isDispatched = false;
 
   public RwStreamTableSource(
       RelOptCluster cluster,
@@ -85,16 +86,12 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
 
       pw.item("columns", columnNames);
     }
-    if (isDispatched) {
-      pw.item("dispatched", true);
-    }
     return pw;
   }
 
   /**
-   * Remark by Yanghao (2021.9.25): in the current version, the LogicalFilterScan node in logical
-   * plan contains no condition, hence we treat it as a TableScan node and convert it to a
-   * TableSource node directly.
+   * The converter rule for converting a `RwLogicalScan` node to a `RwStreamTableSource`. In
+   * distributed mode, an exchange node will be placed on top of `RwStreamTableSource`.
    */
   public static class StreamTableSourceConverterRule extends ConverterRule {
     public static final RwStreamTableSource.StreamTableSourceConverterRule INSTANCE =
@@ -117,29 +114,31 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
 
       TableCatalog tableCatalog = source.getTable().unwrapOrThrow(TableCatalog.class);
 
+      boolean isSingle = isSingleMode(contextOf(source.getCluster()));
+
       RelDistribution distTrait =
-          isSingleMode(contextOf(source.getCluster()))
-              ? RwDistributions.SINGLETON
-              : RwDistributions.RANDOM_DISTRIBUTED;
+          isSingle ? RwDistributions.SINGLETON : RwDistributions.RANDOM_DISTRIBUTED;
 
       RelTraitSet newTraitSet =
           source.getTraitSet().plus(RisingWaveStreamingRel.STREAMING).plus(distTrait);
 
-      return new RwStreamTableSource(
-          source.getCluster(),
-          newTraitSet,
-          Collections.emptyList(),
-          source.getTable(),
-          tableCatalog.getId(),
-          source.getColumnIds());
+      var streamTableSource =
+          new RwStreamTableSource(
+              source.getCluster(),
+              newTraitSet,
+              Collections.emptyList(),
+              source.getTable(),
+              tableCatalog.getId(),
+              source.getColumnIds());
+
+      if (isSingle) {
+        return streamTableSource;
+      } else {
+        int[] distFields = {0};
+        RwDistributionTrait exchangeDistributionTrait = RwDistributions.hash(distFields);
+        var exchange = RwStreamExchange.create(streamTableSource, exchangeDistributionTrait);
+        return exchange;
+      }
     }
-  }
-
-  public void setDispatched() {
-    isDispatched = true;
-  }
-
-  public boolean isDispatched() {
-    return isDispatched;
   }
 }

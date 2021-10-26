@@ -100,7 +100,7 @@ public class BatchRuleSets {
           RwLogicalFilter.RwFilterConverterRule.INSTANCE,
           RwLogicalAggregate.RwAggregateConverterRule.INSTANCE,
           RwLogicalValues.RwValuesConverterRule.INSTANCE,
-          RwLogicalScan.RwLogicalFilterScanConverterRule.INSTANCE,
+          RwLogicalScan.RwLogicalScanConverterRule.INSTANCE,
           RwLogicalSort.RwLogicalSortConverterRule.INSTANCE,
           RwLogicalJoin.RwLogicalJoinConverterRule.INSTANCE);
 

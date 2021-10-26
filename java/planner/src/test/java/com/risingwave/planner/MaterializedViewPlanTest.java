@@ -117,7 +117,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
             + "          RwStreamAgg(group=[{}], agg#0=[SUM($0)], Row Count=[COUNT()])\n"
             + "            RwStreamFilter(condition=[>($0, $1)])\n"
             + "              RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
-            + "                RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2], dispatched=[true])";
+            + "                RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])";
     System.out.println(explainExchangePlan);
     Assertions.assertEquals(expectedPlan, explainExchangePlan);
   }
@@ -152,7 +152,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
             + "          RwStreamProject(v1=[$0], v=[$STREAM_NULL_BY_ROW_COUNT($2, $1)], Row Count=[$2])\n"
             + "            RwStreamAgg(group=[{0}], v=[SUM($1)], Row Count=[COUNT()])\n"
             + "              RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
-            + "                RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2], dispatched=[true])";
+            + "                RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])";
     System.out.println(explainExchangePlan);
     Assertions.assertEquals(expectedPlan, explainExchangePlan);
   }

@@ -45,18 +45,22 @@ public class RwLogicalScan extends RwScan implements RisingWaveLogicalRel {
     return planner.getCostFactory().makeCost(valueCount, cpu, io);
   }
 
-  public static class RwLogicalFilterScanConverterRule extends ConverterRule {
-    public static final RwLogicalFilterScanConverterRule INSTANCE =
+  /**
+   * The converter rule for converting a Calcite logical `LogicalTableScan` node to a risingwave
+   * `RwLogicalScan` node.
+   */
+  public static class RwLogicalScanConverterRule extends ConverterRule {
+    public static final RwLogicalScanConverterRule INSTANCE =
         Config.INSTANCE
             .withInTrait(Convention.NONE)
             .withOutTrait(LOGICAL)
-            .withRuleFactory(RwLogicalFilterScanConverterRule::new)
+            .withRuleFactory(RwLogicalScanConverterRule::new)
             .withOperandSupplier(t -> t.operand(LogicalTableScan.class).noInputs())
-            .withDescription("RisingWaveLogicalFilterScanConverter")
+            .withDescription("RisingWaveLogicalScanConverter")
             .as(Config.class)
-            .toRule(RwLogicalFilterScanConverterRule.class);
+            .toRule(RwLogicalScanConverterRule.class);
 
-    protected RwLogicalFilterScanConverterRule(Config config) {
+    protected RwLogicalScanConverterRule(Config config) {
       super(config);
     }
 
