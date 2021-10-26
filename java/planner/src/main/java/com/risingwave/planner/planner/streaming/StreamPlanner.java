@@ -113,6 +113,7 @@ public class StreamPlanner implements Planner<StreamingPlan> {
   private static OptimizerProgram buildStreamingOptimizerProgram() {
     return VolcanoOptimizerProgram.builder()
         .addRules(StreamingConvertRules.STREAMING_CONVERTER_RULES)
+        .addRules(StreamingConvertRules.STREAMING_REMOVE_RULES)
         .addRequiredOutputTraits(RisingWaveStreamingRel.STREAMING)
         .build();
   }

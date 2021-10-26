@@ -9,10 +9,9 @@ create materialized view T1 as select sum(v2) as V from t where v1>1
             <![CDATA[
 RwStreamMaterializedView(v=[$0])
   RwStreamProject(v=[$STREAM_NULL_BY_ROW_COUNT($1, $0)])
-    RwStreamAgg(group=[{}], v=[SUM($0)], Row Count=[COUNT()])
-      RwStreamProject(v2=[$1])
-        RwStreamFilter(condition=[>($0, 1)])
-          RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
+    RwStreamAgg(group=[{}], v=[SUM($1)], Row Count=[COUNT()])
+      RwStreamFilter(condition=[>($0, 1)])
+        RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
 ]]>
         </Resource>
         <Resource name="json">
@@ -75,6 +74,7 @@ RwStreamMaterializedView(v=[$0])
           "type": "SUM",
           "args": [{
             "input": {
+              "columnIdx": 1
             },
             "type": {
               "typeName": "INT32"
@@ -91,63 +91,47 @@ RwStreamMaterializedView(v=[$0])
         }]
       },
       "input": {
-        "nodeType": "PROJECTION",
+        "nodeType": "FILTER",
         "body": {
-          "@type": "type.googleapis.com/stream_plan.ProjectNode",
-          "selectList": [{
-            "exprType": "INPUT_REF",
+          "@type": "type.googleapis.com/stream_plan.FilterNode",
+          "searchCondition": {
+            "exprType": "GREATER_THAN",
             "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr",
-              "columnIdx": 1
+              "@type": "type.googleapis.com/expr.FunctionCall",
+              "children": [{
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr"
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                }
+              }, {
+                "exprType": "CONSTANT_VALUE",
+                "body": {
+                  "@type": "type.googleapis.com/expr.ConstantValue",
+                  "body": "AAAAAQ=="
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                }
+              }]
             },
             "returnType": {
-              "typeName": "INT32"
+              "typeName": "BOOLEAN"
             }
-          }]
+          }
         },
         "input": {
-          "nodeType": "FILTER",
           "body": {
-            "@type": "type.googleapis.com/stream_plan.FilterNode",
-            "searchCondition": {
-              "exprType": "GREATER_THAN",
-              "body": {
-                "@type": "type.googleapis.com/expr.FunctionCall",
-                "children": [{
-                  "exprType": "INPUT_REF",
-                  "body": {
-                    "@type": "type.googleapis.com/expr.InputRefExpr"
-                  },
-                  "returnType": {
-                    "typeName": "INT32"
-                  }
-                }, {
-                  "exprType": "CONSTANT_VALUE",
-                  "body": {
-                    "@type": "type.googleapis.com/expr.ConstantValue",
-                    "body": "AAAAAQ=="
-                  },
-                  "returnType": {
-                    "typeName": "INT32"
-                  }
-                }]
-              },
-              "returnType": {
-                "typeName": "BOOLEAN"
-              }
-            }
-          },
-          "input": {
-            "body": {
-              "@type": "type.googleapis.com/stream_plan.TableSourceNode",
-              "tableRefId": {
-                "schemaRefId": {
-                  "databaseRefId": {
-                  }
+            "@type": "type.googleapis.com/stream_plan.TableSourceNode",
+            "tableRefId": {
+              "schemaRefId": {
+                "databaseRefId": {
                 }
-              },
-              "columnIds": [0, 1]
-            }
+              }
+            },
+            "columnIds": [0, 1]
           }
         }
       }
@@ -970,9 +954,8 @@ create materialized view T8 as select sum(v1)+1 as V from t where v1>v2
 RwStreamMaterializedView(v=[$0])
   RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($1, $0), 1)])
     RwStreamAgg(group=[{}], agg#0=[SUM($0)], Row Count=[COUNT()])
-      RwStreamProject(v1=[$0])
-        RwStreamFilter(condition=[>($0, $1)])
-          RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
+      RwStreamFilter(condition=[>($0, $1)])
+        RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
             ]]>
         </Resource>
         <Resource name="json">
@@ -1069,62 +1052,47 @@ RwStreamMaterializedView(v=[$0])
         }]
       },
       "input": {
-        "nodeType": "PROJECTION",
+        "nodeType": "FILTER",
         "body": {
-          "@type": "type.googleapis.com/stream_plan.ProjectNode",
-          "selectList": [{
-            "exprType": "INPUT_REF",
+          "@type": "type.googleapis.com/stream_plan.FilterNode",
+          "searchCondition": {
+            "exprType": "GREATER_THAN",
             "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr"
+              "@type": "type.googleapis.com/expr.FunctionCall",
+              "children": [{
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr"
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                }
+              }, {
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr",
+                  "columnIdx": 1
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                }
+              }]
             },
             "returnType": {
-              "typeName": "INT32"
+              "typeName": "BOOLEAN"
             }
-          }]
+          }
         },
         "input": {
-          "nodeType": "FILTER",
           "body": {
-            "@type": "type.googleapis.com/stream_plan.FilterNode",
-            "searchCondition": {
-              "exprType": "GREATER_THAN",
-              "body": {
-                "@type": "type.googleapis.com/expr.FunctionCall",
-                "children": [{
-                  "exprType": "INPUT_REF",
-                  "body": {
-                    "@type": "type.googleapis.com/expr.InputRefExpr"
-                  },
-                  "returnType": {
-                    "typeName": "INT32"
-                  }
-                }, {
-                  "exprType": "INPUT_REF",
-                  "body": {
-                    "@type": "type.googleapis.com/expr.InputRefExpr",
-                    "columnIdx": 1
-                  },
-                  "returnType": {
-                    "typeName": "INT32"
-                  }
-                }]
-              },
-              "returnType": {
-                "typeName": "BOOLEAN"
-              }
-            }
-          },
-          "input": {
-            "body": {
-              "@type": "type.googleapis.com/stream_plan.TableSourceNode",
-              "tableRefId": {
-                "schemaRefId": {
-                  "databaseRefId": {
-                  }
+            "@type": "type.googleapis.com/stream_plan.TableSourceNode",
+            "tableRefId": {
+              "schemaRefId": {
+                "databaseRefId": {
                 }
-              },
-              "columnIds": [0, 1]
-            }
+              }
+            },
+            "columnIds": [0, 1]
           }
         }
       }
