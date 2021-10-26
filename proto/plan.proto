@@ -121,6 +121,10 @@ message CreateStreamNode {
     map<string, string> properties = 4;
 }
 
+message DropStreamNode {
+    TableRefId table_ref_id = 1;
+}
+
 message DropTableNode {
     TableRefId table_ref_id = 1;
 }
@@ -194,6 +198,7 @@ message PlanNode {
         LIMIT = 18;
         VALUE = 19;
         HASH_JOIN = 20;
+        DROP_STREAM = 21;
     }
     PlanNodeType node_type = 1;
     google.protobuf.Any body = 2;

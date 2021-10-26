@@ -8,3 +8,6 @@ select * from s
 2 22
 3 333
 4 4444
+
+statement ok
+drop stream s

@@ -86,7 +86,7 @@ statement
     | COPY tableWithPartition FROM path=expr withProperties? (RETURN SUMMARY)?       #copyFrom
     | COPY tableWithPartition columns? where?
         TO DIRECTORY? path=expr withProperties?                                      #copyTo
-    | DROP TABLE (IF EXISTS)? table                                                  #dropTable
+    | DROP (TABLE | STREAM) (IF EXISTS)? table                                       #dropTable
     | DROP ALIAS qname                                                               #dropAlias
     | DROP SNAPSHOT qname                                                            #dropSnapshot
     | DROP FUNCTION (IF EXISTS)? name=qname

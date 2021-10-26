@@ -21,6 +21,8 @@ use row_seq_scan::*;
 use seq_scan::*;
 use sort_agg::*;
 use top_n::*;
+mod drop_stream;
+use drop_stream::*;
 
 mod create_stream;
 mod create_table;
@@ -125,7 +127,8 @@ impl<'a> ExecutorBuilder<'a> {
           PlanNode_PlanNodeType::LIMIT => LimitExecutor,
           PlanNode_PlanNodeType::VALUE => ValuesExecutor,
           PlanNode_PlanNodeType::NESTED_LOOP_JOIN => NestedLoopJoinExecutor,
-          PlanNode_PlanNodeType::HASH_JOIN => HashJoinExecutorBuilder
+          PlanNode_PlanNodeType::HASH_JOIN => HashJoinExecutorBuilder,
+          PlanNode_PlanNodeType::DROP_STREAM => DropStreamExecutor
         }
     }
 

@@ -24,6 +24,10 @@ import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlDropTable;
 
+/**
+ * DropTableHandler is the handler of both DropTable and DropStream. It determines the type by
+ * `isStream`.
+ */
 @HandlerSignature(sqlKinds = {SqlKind.DROP_TABLE})
 public class DropTableHandler implements SqlHandler {
   @Override
@@ -51,11 +55,15 @@ public class DropTableHandler implements SqlHandler {
         DropTableNode.newBuilder().setTableRefId(Messages.getTableRefId(tableId)).build();
     ShuffleInfo shuffleInfo =
         ShuffleInfo.newBuilder().setPartitionMode(ShuffleInfo.PartitionMode.SINGLE).build();
+
+    PlanNode.PlanNodeType planNodeType = PlanNode.PlanNodeType.DROP_TABLE;
+
+    if (table.isStream()) {
+      planNodeType = PlanNode.PlanNodeType.DROP_STREAM;
+    }
+
     PlanNode rootNode =
-        PlanNode.newBuilder()
-            .setBody(Any.pack(dropTableNode))
-            .setNodeType(PlanNode.PlanNodeType.DROP_TABLE)
-            .build();
+        PlanNode.newBuilder().setBody(Any.pack(dropTableNode)).setNodeType(planNodeType).build();
 
     return PlanFragment.newBuilder().setRoot(rootNode).setShuffleInfo(shuffleInfo).build();
   }
