@@ -8,7 +8,6 @@ use crate::task::channel::{create_output_channel, BoxChanReceiver, BoxChanSender
 use crate::task::GlobalTaskEnv;
 use crate::task::TaskManager;
 use crate::util::{json_to_pretty_string, JsonFormatter};
-use rayon::ThreadPool;
 use risingwave_pb::ToProst;
 use risingwave_proto::common::Status;
 use risingwave_proto::plan::PlanFragment;
@@ -133,7 +132,7 @@ impl TaskExecution {
     }
 
     /// `get_data` consumes the data produced by `async_execute`.
-    pub fn async_execute(&self, worker_pool: Arc<ThreadPool>) -> Result<()> {
+    pub fn async_execute(&self) -> Result<()> {
         *self.state.lock().unwrap() = TaskStatus::RUNNING;
         debug!(
             "Prepare executing plan [{:?}]: {}",
@@ -146,19 +145,18 @@ impl TaskExecution {
             .lock()
             .unwrap()
             .extend(receivers.into_iter().map(Some));
-        worker_pool.install(|| {
-            debug!("Executing plan [{:?}]", self.task_id);
-            async_std::task::block_on(self.execute(exec, sender));
+
+        let failure = self.failure.clone();
+        let task_id = self.task_id.clone();
+        tokio::spawn(async move {
+            debug!("Executing plan [{:?}]", task_id);
+            if let Err(e) = TaskExecution::try_execute(exec, sender).await {
+                // Prints the entire backtrace of error.
+                error!("Execution failed [{:?}]: {:?}", &task_id, &e);
+                *failure.lock().unwrap() = Some(e);
+            }
         });
         Ok(())
-    }
-
-    async fn execute(&self, root: BoxedExecutor, sender: BoxChanSender) {
-        if let Err(e) = TaskExecution::try_execute(root, sender).await {
-            // Prints the entire backtrace of error.
-            error!("Execution failed [{:?}]: {:?}", &self.task_id, &e);
-            *self.failure.lock().unwrap() = Some(e);
-        }
     }
 
     async fn try_execute(mut root: BoxedExecutor, mut sender: BoxChanSender) -> Result<()> {

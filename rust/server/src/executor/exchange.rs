@@ -5,16 +5,26 @@ use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::task::GlobalTaskEnv;
 use crate::util::addr::get_host_port;
 use protobuf::Message;
+use risingwave_pb::ToProst;
 use risingwave_proto::plan::PlanNode_PlanNodeType;
 use risingwave_proto::task_service::{ExchangeNode, ExchangeSource as ProtoExchangeSource};
+use std::marker::PhantomData;
 use std::net::SocketAddr;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 
-pub(super) struct ExchangeExecutor {
-    sources: Vec<Box<dyn ExchangeSource>>,
+pub(super) type ExchangeExecutor = GenericExchangeExecutor<DefaultCreateSource>;
+
+pub struct GenericExchangeExecutor<C> {
+    sources: Vec<ProtoExchangeSource>,
     server_addr: SocketAddr,
+    env: GlobalTaskEnv,
+
     source_idx: usize,
+    current_source: Option<Box<dyn ExchangeSource>>,
+
+    // Mock-able CreateSource.
+    source_creator: PhantomData<C>,
 }
 
 fn is_local_address(server_addr: &SocketAddr, peer_addr: &SocketAddr) -> bool {
@@ -25,8 +35,20 @@ fn is_local_address(server_addr: &SocketAddr, peer_addr: &SocketAddr) -> bool {
     false
 }
 
-impl ExchangeExecutor {
-    fn create_source(
+/// `CreateSource` determines the right type of `ExchangeSource` to create.
+#[async_trait::async_trait]
+pub trait CreateSource: Send {
+    async fn create_source(
+        env: GlobalTaskEnv,
+        value: &ProtoExchangeSource,
+    ) -> Result<Box<dyn ExchangeSource>>;
+}
+
+pub struct DefaultCreateSource {}
+
+#[async_trait::async_trait]
+impl CreateSource for DefaultCreateSource {
+    async fn create_source(
         env: GlobalTaskEnv,
         value: &ProtoExchangeSource,
     ) -> Result<Box<dyn ExchangeSource>> {
@@ -41,7 +63,7 @@ impl ExchangeExecutor {
         if is_local_address(env.server_address(), &peer_addr) {
             debug!("Exchange locally [{:?}]", value.get_sink_id());
             return Ok(Box::new(LocalExchangeSource::create(
-                value.get_sink_id().clone(),
+                value.get_sink_id().clone().to_prost(),
                 env,
             )?));
         }
@@ -50,37 +72,34 @@ impl ExchangeExecutor {
             &peer_addr,
             value.get_sink_id()
         );
-        Ok(Box::new(GrpcExchangeSource::create(
-            peer_addr,
-            value.get_sink_id().clone(),
-        )?))
+        Ok(Box::new(
+            GrpcExchangeSource::create(peer_addr, value.get_sink_id().clone().to_prost()).await?,
+        ))
     }
 }
 
-impl BoxedExecutorBuilder for ExchangeExecutor {
+impl<CS: 'static + CreateSource> BoxedExecutorBuilder for GenericExchangeExecutor<CS> {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::EXCHANGE);
         let node = ExchangeNode::parse_from_bytes(source.plan_node().get_body().get_value())
             .map_err(ProtobufError)?;
         let server_addr = *source.env.server_address();
 
-        let mut sources: Vec<Box<dyn ExchangeSource>> = vec![];
-        for proto_source in node.get_sources() {
-            sources.push(ExchangeExecutor::create_source(
-                source.env.clone(),
-                proto_source,
-            )?);
-        }
+        ensure!(!node.get_sources().is_empty());
+        let sources: Vec<ProtoExchangeSource> = node.get_sources().to_vec();
         Ok(Box::new(Self {
             sources,
             server_addr,
+            env: source.env.clone(),
+            source_creator: PhantomData,
             source_idx: 0,
+            current_source: None,
         }))
     }
 }
 
 #[async_trait::async_trait]
-impl Executor for ExchangeExecutor {
+impl<CS: CreateSource> Executor for GenericExchangeExecutor<CS> {
     fn init(&mut self) -> Result<()> {
         Ok(())
     }
@@ -90,11 +109,21 @@ impl Executor for ExchangeExecutor {
             if self.source_idx >= self.sources.len() {
                 break;
             }
-            let source = self.sources.get_mut(self.source_idx).unwrap();
-            let res = async_std::task::block_on(source.take_data())?;
-            match res {
-                None => self.source_idx += 1,
-                Some(res) => return Ok(ExecutorResult::Batch(res)),
+            if self.current_source.is_none() {
+                let proto_source = &self.sources[self.source_idx];
+                let source = CS::create_source(self.env.clone(), proto_source).await?;
+                self.current_source = Some(source);
+            }
+            let mut source = self.current_source.take().unwrap();
+            match source.take_data().await? {
+                None => {
+                    self.current_source = None;
+                    self.source_idx += 1;
+                }
+                Some(res) => {
+                    self.current_source = Some(source);
+                    return Ok(ExecutorResult::Batch(res));
+                }
             }
         }
         Ok(ExecutorResult::Done)
@@ -128,35 +157,50 @@ mod tests {
         check_local("10.11.12.13:3456", "127.0.0.1:3456");
     }
 
-    struct FakeExchangeSource {
-        chunk: Option<DataChunk>,
-    }
-
-    #[async_trait::async_trait]
-    impl ExchangeSource for FakeExchangeSource {
-        async fn take_data(&mut self) -> Result<Option<DataChunk>> {
-            let chunk = self.chunk.take();
-            Ok(chunk)
-        }
-    }
-
     #[tokio::test]
     async fn test_exchange_multiple_sources() {
-        let mut sources: Vec<Box<dyn ExchangeSource>> = vec![];
-        for _ in 0..3 {
-            let chunk = DataChunk::builder()
-                .columns(vec![Column::new(
-                    Arc::new(array_nonnull! { I32Array, [3, 4, 4] }.into()),
-                    Int32Type::create(false),
-                )])
-                .build();
-            sources.push(Box::new(FakeExchangeSource { chunk: Some(chunk) }));
+        struct FakeExchangeSource {
+            chunk: Option<DataChunk>,
         }
 
-        let mut executor = ExchangeExecutor {
+        #[async_trait::async_trait]
+        impl ExchangeSource for FakeExchangeSource {
+            async fn take_data(&mut self) -> Result<Option<DataChunk>> {
+                let chunk = self.chunk.take();
+                Ok(chunk)
+            }
+        }
+
+        struct FakeCreateSource {}
+
+        #[async_trait::async_trait]
+        impl CreateSource for FakeCreateSource {
+            async fn create_source(
+                _: GlobalTaskEnv,
+                _: &ProtoExchangeSource,
+            ) -> Result<Box<dyn ExchangeSource>> {
+                let chunk = DataChunk::builder()
+                    .columns(vec![Column::new(
+                        Arc::new(array_nonnull! { I32Array, [3, 4, 4] }.into()),
+                        Int32Type::create(false),
+                    )])
+                    .build();
+                Ok(Box::new(FakeExchangeSource { chunk: Some(chunk) }))
+            }
+        }
+
+        let mut sources: Vec<ProtoExchangeSource> = vec![];
+        for _ in 0..3 {
+            sources.push(ProtoExchangeSource::default());
+        }
+
+        let mut executor = GenericExchangeExecutor::<FakeCreateSource> {
             sources,
             server_addr: SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
             source_idx: 0,
+            current_source: None,
+            source_creator: PhantomData,
+            env: GlobalTaskEnv::for_test(),
         };
 
         let mut chunks: usize = 0;

@@ -1,13 +1,15 @@
 use crate::array::DataChunk;
-use crate::error::ErrorCode::GrpcError;
+use crate::error::ErrorCode::{GrpcNetworkError, InternalError, TonicError};
 use crate::error::Result;
 use crate::task::{GlobalTaskEnv, TaskSink};
 use futures::StreamExt;
-use grpcio::{ChannelBuilder, ClientSStreamReceiver, Environment};
-use risingwave_proto::task_service::{TaskData, TaskSinkId};
-use risingwave_proto::task_service_grpc::ExchangeServiceClient;
+use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
+use risingwave_pb::task_service::{TaskData, TaskSinkId};
+use risingwave_pb::ToProto;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::time::Duration;
+use tonic::transport::{Channel, Endpoint};
+use tonic::Streaming;
 
 /// Each ExchangeSource maps to one task, it takes the execution result from task chunk by chunk.
 #[async_trait::async_trait]
@@ -17,8 +19,8 @@ pub trait ExchangeSource: Send {
 
 /// Use grpc client as the source.
 pub struct GrpcExchangeSource {
-    client: ExchangeServiceClient,
-    stream: ClientSStreamReceiver<TaskData>,
+    client: ExchangeServiceClient<Channel>,
+    stream: Streaming<TaskData>,
 
     // Address of the remote endpoint.
     addr: SocketAddr,
@@ -26,20 +28,29 @@ pub struct GrpcExchangeSource {
 }
 
 impl GrpcExchangeSource {
-    pub fn create(addr: SocketAddr, sink_id: TaskSinkId) -> Result<Self> {
-        let channel =
-            ChannelBuilder::new(Arc::new(Environment::new(2))).connect(addr.to_string().as_str());
-        let client = ExchangeServiceClient::new(channel);
-        let stream = client.get_data(&sink_id).map_err(|e| {
-            GrpcError(
-                format!(
-                    "failed to create stream {} for sink_id={}",
-                    addr,
-                    sink_id.get_sink_id()
-                ),
-                e,
-            )
-        })?;
+    pub async fn create(addr: SocketAddr, sink_id: TaskSinkId) -> Result<Self> {
+        let mut client = ExchangeServiceClient::new(
+            Endpoint::from_shared(format!("http://{}", addr))
+                .map_err(|e| InternalError(format!("{}", e)))?
+                .connect_timeout(Duration::from_secs(5))
+                .connect()
+                .await
+                .map_err(|e| GrpcNetworkError(format!("failed to connect to {}", addr), e))?,
+        );
+        let stream = client
+            .get_data(sink_id.clone())
+            .await
+            .map_err(|e| {
+                TonicError(
+                    format!(
+                        "failed to create stream {} for sink_id={}",
+                        addr,
+                        sink_id.get_sink_id()
+                    ),
+                    e,
+                )
+            })?
+            .into_inner();
         Ok(Self {
             client,
             stream,
@@ -57,13 +68,15 @@ impl ExchangeSource for GrpcExchangeSource {
             Some(r) => r,
         };
         let task_data = res.map_err(|e| {
-            GrpcError(
+            TonicError(
                 format!("failed to take data from stream ({:?})", self.addr),
                 e,
             )
         })?;
         Ok(Some(DataChunk::from_protobuf(
-            task_data.get_record_batch(),
+            &task_data
+                .get_record_batch()
+                .to_proto::<risingwave_proto::data::DataChunk>(),
         )?))
     }
 }
@@ -75,7 +88,9 @@ pub struct LocalExchangeSource {
 
 impl LocalExchangeSource {
     pub fn create(sink_id: TaskSinkId, env: GlobalTaskEnv) -> Result<Self> {
-        let task_sink = env.task_manager().take_sink(&sink_id)?;
+        let task_sink = env
+            .task_manager()
+            .take_sink(&sink_id.to_proto::<risingwave_proto::task_service::TaskSinkId>())?;
         Ok(Self { task_sink })
     }
 }
@@ -84,5 +99,88 @@ impl LocalExchangeSource {
 impl ExchangeSource for LocalExchangeSource {
     async fn take_data(&mut self) -> Result<Option<DataChunk>> {
         Ok(self.task_sink.direct_take_data().await?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::execution::exchange_source::{ExchangeSource, GrpcExchangeSource};
+    use crate::util::addr::get_host_port;
+    use risingwave_pb::data::DataChunk;
+    use risingwave_pb::task_service::exchange_service_server::{
+        ExchangeService, ExchangeServiceServer,
+    };
+    use risingwave_pb::task_service::{TaskData, TaskSinkId};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::thread::sleep;
+    use std::time::Duration;
+    use tokio_stream::wrappers::ReceiverStream;
+    use tonic::{Request, Response, Status};
+
+    struct FakeExchangeService {
+        rpc_called: Arc<AtomicBool>,
+    }
+
+    #[async_trait::async_trait]
+    impl ExchangeService for FakeExchangeService {
+        type GetDataStream = ReceiverStream<Result<TaskData, Status>>;
+
+        async fn get_data(
+            &self,
+            _: Request<TaskSinkId>,
+        ) -> Result<Response<Self::GetDataStream>, Status> {
+            let (tx, rx) = tokio::sync::mpsc::channel(10);
+            self.rpc_called.store(true, Ordering::SeqCst);
+            for _ in [0..3] {
+                tx.send(Ok(TaskData {
+                    status: None,
+                    record_batch: Some(DataChunk::default()),
+                }))
+                .await
+                .unwrap();
+            }
+            Ok(Response::new(ReceiverStream::new(rx)))
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_exchange_client() {
+        let rpc_called = Arc::new(AtomicBool::new(false));
+        let server_run = Arc::new(AtomicBool::new(false));
+        let addr = get_host_port("127.0.0.1:12345").unwrap();
+
+        // Start a server.
+        let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
+        let exchange_svc = ExchangeServiceServer::new(FakeExchangeService {
+            rpc_called: rpc_called.clone(),
+        });
+        let cp_server_run = server_run.clone();
+        let join_handle = tokio::spawn(async move {
+            cp_server_run.store(true, Ordering::SeqCst);
+            tonic::transport::Server::builder()
+                .add_service(exchange_svc)
+                .serve_with_shutdown(addr, async move {
+                    shutdown_recv.recv().await;
+                })
+                .await
+                .unwrap();
+        });
+
+        sleep(Duration::from_secs(1));
+        assert!(server_run.load(Ordering::SeqCst));
+
+        let mut src = GrpcExchangeSource::create(addr, TaskSinkId::default())
+            .await
+            .unwrap();
+        for _ in [0..3] {
+            assert!(src.take_data().await.unwrap().is_some());
+        }
+        assert!(src.take_data().await.unwrap().is_none());
+        assert!(rpc_called.load(Ordering::SeqCst));
+
+        // Gracefully terminate the server.
+        shutdown_send.send(()).unwrap();
+        join_handle.await.unwrap();
     }
 }

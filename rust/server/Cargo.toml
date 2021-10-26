@@ -18,7 +18,6 @@ crc32fast = "1"
 ctrlc = { version = "3.0", features = ["termination"] }
 either = "1"
 futures = "0.3"
-grpcio = "0.9"
 itertools = "0.10"
 lazy_static = "1.4.0"
 log = "0.4"
@@ -30,7 +29,6 @@ pb-convert = { path = "../utils/pb-convert" }
 pb-convert-derive = { path = "../utils/pb-convert-derive" }
 prost = "0.8"
 protobuf = "2"
-rayon = "1"
 rdkafka = { version = "0.25", features = ["cmake-build"] }
 risingwave-pb = { path = "../prost" }
 risingwave-proto = { path = "../proto" }
@@ -58,4 +56,3 @@ name = "compute-node"
 path = "src/bin/compute_node.rs"
 
 [build-dependencies]
-protoc-grpcio = "3"

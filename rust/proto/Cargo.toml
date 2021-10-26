@@ -5,8 +5,7 @@ version = "0.1.0"
 
 [dependencies]
 futures = "0.3"
-grpcio = "0.9"
 protobuf = "2"
 
 [build-dependencies]
-protoc-grpcio = "3"
+protoc-rust = "2"

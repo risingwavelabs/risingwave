@@ -1,5 +1,3 @@
-extern crate protoc_grpcio;
-
 fn main() {
     let proto_dir = "../../proto";
 
@@ -19,5 +17,10 @@ fn main() {
         .map(|f| format!("{}/{}", proto_dir, f))
         .collect();
 
-    protoc_grpcio::compile_grpc_protos(&protos, &[proto_dir], "src", None).unwrap();
+    protoc_rust::Codegen::new()
+        .out_dir("src")
+        .inputs(&protos)
+        .include(proto_dir)
+        .run()
+        .unwrap();
 }

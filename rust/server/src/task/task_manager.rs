@@ -3,7 +3,6 @@ use crate::error::{Result, RwError};
 use crate::task::env::GlobalTaskEnv;
 use crate::task::task::{TaskExecution, TaskId};
 use crate::task::TaskSink;
-use rayon::{ThreadPool, ThreadPoolBuilder};
 use risingwave_proto::plan::PlanFragment;
 use risingwave_proto::task_service::{TaskId as ProtoTaskId, TaskSinkId as ProtoSinkId};
 use std::collections::HashMap;
@@ -11,15 +10,12 @@ use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
 pub struct TaskManager {
-    worker_pool: Arc<ThreadPool>,
     tasks: Arc<Mutex<HashMap<TaskId, Box<TaskExecution>>>>,
 }
 
 impl TaskManager {
     pub fn new() -> Self {
-        let worker_pool = Arc::new(ThreadPoolBuilder::default().num_threads(4).build().unwrap());
         TaskManager {
-            worker_pool,
             tasks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -31,7 +27,7 @@ impl TaskManager {
         plan: PlanFragment,
     ) -> Result<()> {
         let task = TaskExecution::new(tid, plan, env);
-        task.async_execute(self.worker_pool.clone())?;
+        task.async_execute()?;
         self.tasks
             .lock()
             .unwrap()
@@ -93,8 +89,8 @@ mod tests {
     use risingwave_proto::task_service::TaskSinkId as ProtoTaskSinkId;
     use tonic::Code;
 
-    #[test]
-    fn test_select_all() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_select_all() {
         let mut runner = TestRunner::new();
         runner
             .prepare_table()
@@ -103,20 +99,23 @@ mod tests {
             .insert_i32s(&[2, 3, 3])
             .insert_i32s(&[3, 4, 4])
             .insert_i32s(&[4, 3, 5])
-            .run();
+            .run()
+            .await;
 
         let res = runner
             .prepare_scan()
             .scan_all()
-            .run_and_collect_single_output();
+            .run_and_collect_single_output()
+            .await;
         ResultChecker::new()
             .add_i32_column(false, &[1, 2, 3, 4])
             .add_i32_column(false, &[4, 3, 4, 3])
             .add_i32_column(false, &[2, 3, 4, 5])
             .check_result(&res);
     }
-    #[test]
-    fn test_bad_node_type() {
+
+    #[tokio::test]
+    async fn test_bad_node_type() {
         let env = GlobalTaskEnv::for_test();
         let manager = TaskManager::new();
         let mut plan = PlanFragment::default();

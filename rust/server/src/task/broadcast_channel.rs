@@ -74,9 +74,9 @@ mod tests {
         plan.set_exchange_info(exchange_info);
     }
 
-    #[test]
-    fn test_broadcast() {
-        let test_case = |num_columns: usize, num_rows: usize, num_sinks: u32| {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_broadcast() {
+        async fn test_case(num_columns: usize, num_rows: usize, num_sinks: u32) {
             let mut rng = rand::thread_rng();
             let mut rows = vec![];
             for _row_idx in 0..num_rows {
@@ -98,11 +98,11 @@ mod tests {
             for row in &rows {
                 table_builder = table_builder.insert_i32s(row);
             }
-            table_builder.run();
+            table_builder.run().await;
 
             let mut builder = runner.prepare_scan().scan_all();
             broadcast_plan(builder.get_mut_plan(), num_sinks);
-            let res = builder.run_and_collect_multiple_output();
+            let res = builder.run_and_collect_multiple_output().await;
             assert_eq!(num_sinks as usize, res.len());
             for (_, col) in res.into_iter().enumerate() {
                 let mut res_checker = ResultChecker::new();
@@ -111,11 +111,11 @@ mod tests {
                 }
                 res_checker.check_result(&col);
             }
-        };
+        }
 
-        test_case(1, 1, 3);
-        test_case(2, 2, 5);
-        test_case(10, 10, 5);
-        test_case(100, 100, 7);
+        test_case(1, 1, 3).await;
+        test_case(2, 2, 5).await;
+        test_case(10, 10, 5).await;
+        test_case(100, 100, 7).await;
     }
 }

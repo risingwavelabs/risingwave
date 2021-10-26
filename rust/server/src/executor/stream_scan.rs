@@ -97,7 +97,7 @@ impl Executor for StreamScanExecutor {
         if self.done {
             return Ok(ExecutorResult::Done);
         }
-        let next_chunk = async_std::task::block_on(self.next_data_chunk())?;
+        let next_chunk = self.next_data_chunk().await?;
         match next_chunk {
             Some(chunk) => Ok(ExecutorResult::Batch(chunk)),
             None => Ok(ExecutorResult::Done),

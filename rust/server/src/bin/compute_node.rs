@@ -14,7 +14,7 @@ struct Opts {
 }
 
 #[cfg(not(tarpaulin_include))]
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() {
     let opts: Opts = Opts::parse();
     log4rs::init_file(opts.log4rs_config, Default::default()).unwrap();

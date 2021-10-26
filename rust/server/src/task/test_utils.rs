@@ -65,9 +65,9 @@ impl TestRunner {
         SelectBuilder::new(self)
     }
 
-    pub fn run(&mut self, plan: PlanFragment) -> Result<Vec<Vec<TaskData>>> {
+    pub async fn run(&mut self, plan: PlanFragment) -> Result<Vec<Vec<TaskData>>> {
         self.run_task(&plan)?;
-        self.collect_task_output(&plan)
+        self.collect_task_output(&plan).await
     }
 
     pub fn run_task(&mut self, plan: &PlanFragment) -> Result<()> {
@@ -75,7 +75,7 @@ impl TestRunner {
         task_manager.fire_task(self.env.clone(), &self.tid, plan.clone())
     }
 
-    pub fn collect_task_output(&mut self, plan: &PlanFragment) -> Result<Vec<Vec<TaskData>>> {
+    pub async fn collect_task_output(&mut self, plan: &PlanFragment) -> Result<Vec<Vec<TaskData>>> {
         let task_manager = self.env.task_manager();
         let mut res = Vec::new();
         let sink_ids = 0..get_num_sinks(plan);
@@ -85,11 +85,8 @@ impl TestRunner {
             proto_sink_id.set_task_id(self.tid.clone());
             let mut task_sink = task_manager.take_sink(&proto_sink_id)?;
             let mut writer = FakeExchangeWriter { messages: vec![] };
-            let messages = futures::executor::block_on(async {
-                task_sink.take_data(&mut writer).await.unwrap();
-                writer.messages
-            });
-            res.push(messages);
+            task_sink.take_data(&mut writer).await.unwrap();
+            res.push(writer.messages);
         }
         // In test, we remove the task manually, while in production,
         // it should be removed by the requests from the leader node.
@@ -160,12 +157,15 @@ impl<'a> TableBuilder<'a> {
         self
     }
 
-    pub fn run(self) {
+    pub async fn run(self) {
         let inserted_rows = self.tuples.len();
         let create = self.build_create_table_plan();
         let insert = self.build_insert_values_plan();
-        assert_eq!(self.runner.run(create).unwrap()[0].len(), 0);
-        TestRunner::validate_insert_result(&self.runner.run(insert).unwrap()[0], inserted_rows);
+        assert_eq!(self.runner.run(create).await.unwrap()[0].len(), 0);
+        TestRunner::validate_insert_result(
+            &self.runner.run(insert).await.unwrap()[0],
+            inserted_rows,
+        );
     }
 
     fn build_create_table_plan(&self) -> PlanFragment {
@@ -285,16 +285,17 @@ impl<'a> SelectBuilder<'a> {
         self
     }
 
-    pub fn collect_task_output(&mut self) -> Vec<Vec<TaskData>> {
-        self.runner.collect_task_output(&self.plan).unwrap()
+    pub async fn collect_task_output(&mut self) -> Vec<Vec<TaskData>> {
+        self.runner.collect_task_output(&self.plan).await.unwrap()
     }
 
-    pub fn run_and_collect_multiple_output(mut self) -> Vec<Vec<TaskData>> {
-        self.run_task().collect_task_output()
+    pub async fn run_and_collect_multiple_output(mut self) -> Vec<Vec<TaskData>> {
+        self.run_task().collect_task_output().await
     }
 
-    pub fn run_and_collect_single_output(self) -> Vec<TaskData> {
+    pub async fn run_and_collect_single_output(self) -> Vec<TaskData> {
         self.run_and_collect_multiple_output()
+            .await
             .drain(0..=0)
             .next()
             .unwrap()
