@@ -24,11 +24,8 @@ import com.risingwave.planner.rel.serialization.ExplainWriter;
 import com.risingwave.planner.rules.BatchRuleSets;
 import com.risingwave.planner.rules.streaming.StreamingConvertRules;
 import com.risingwave.planner.sql.SqlConverter;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
 import org.apache.calcite.rel.RelNode;
-import org.apache.calcite.rex.RexInputRef;
+import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlCreateMaterializedView;
 import org.slf4j.Logger;
@@ -49,43 +46,29 @@ public class StreamPlanner implements Planner<StreamingPlan> {
    */
   @Override
   public StreamingPlan plan(SqlNode ast, ExecutionContext context) {
-    SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
-    SqlNode query = createMaterializedView.query;
+    SqlCreateMaterializedView create = (SqlCreateMaterializedView) ast;
     SqlConverter sqlConverter = SqlConverter.builder(context).build();
-    RelNode rawPlan = sqlConverter.toRel(query).rel;
+    RelNode rawPlan = sqlConverter.toRel(create.query).rel;
     // Logical optimization.
     OptimizerProgram optimizerProgram = buildLogicalOptimizerProgram();
     RelNode logicalPlan = optimizerProgram.optimize(rawPlan, context);
     log.debug("Logical plan: \n" + ExplainWriter.explainPlan(logicalPlan));
     // Generate Streaming plan from logical plan.
-    RwStreamMaterializedView root = generateStreamingPlan(logicalPlan, context);
+    RwStreamMaterializedView root = generateStreamingPlan(logicalPlan, context, create.name);
     return new StreamingPlan(root);
   }
 
   private RwStreamMaterializedView generateStreamingPlan(
-      RelNode logicalPlan, ExecutionContext context) {
+      RelNode logicalPlan, ExecutionContext context, SqlIdentifier name) {
     OptimizerProgram streamingOptimizerProgram = buildStreamingOptimizerProgram();
     RelNode rawStreamingPlan = streamingOptimizerProgram.optimize(logicalPlan, context);
-    RwStreamMaterializedView materializedViewPlan = addMaterializedViewNode(rawStreamingPlan);
+    RwStreamMaterializedView materializedViewPlan = addMaterializedViewNode(rawStreamingPlan, name);
     log.debug("Create streaming plan:\n" + ExplainWriter.explainPlan(materializedViewPlan));
     return materializedViewPlan;
   }
 
-  private RwStreamMaterializedView addMaterializedViewNode(RelNode root) {
-    var rowType = root.getRowType();
-    List<RexInputRef> inputRefList = new ArrayList();
-    for (int i = 0; i < rowType.getFieldCount(); i++) {
-      var field = rowType.getFieldList().get(i);
-      RexInputRef inputRef = new RexInputRef(i, field.getType());
-      inputRefList.add(inputRef);
-    }
-    return new RwStreamMaterializedView(
-        root.getCluster(),
-        root.getTraitSet(),
-        Collections.emptyList(),
-        root,
-        inputRefList,
-        root.getRowType());
+  private RwStreamMaterializedView addMaterializedViewNode(RelNode root, SqlIdentifier name) {
+    return new RwStreamMaterializedView(root.getCluster(), root.getTraitSet(), root, name);
   }
 
   private static OptimizerProgram buildLogicalOptimizerProgram() {

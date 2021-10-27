@@ -312,10 +312,13 @@
             <property name="tokens" value="METHOD_DEF, CTOR_DEF, ANNOTATION_FIELD_DEF, COMPACT_CTOR_DEF"/>
         </module>
         <module name="MissingJavadocPackage"/>
-        <module name="MissingJavadocType"/>
+        <module name="MissingJavadocType">
+            <property name="skipAnnotations" value="TestInstance"/>
+        </module>
         <module name="MissingJavadocMethod">
             <property name="minLineCount" value="8"/>
             <property name="allowMissingPropertyJavadoc" value="true"/>
+            <property name="allowedAnnotations" value="Test"/>
         </module>
         <module name="MethodName">
             <property name="format" value="^[a-z][a-z0-9][a-zA-Z0-9_]*$"/>

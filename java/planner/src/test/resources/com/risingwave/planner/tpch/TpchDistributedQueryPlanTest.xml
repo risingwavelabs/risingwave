@@ -335,13 +335,12 @@ where
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
-  RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
-    RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
-      RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
-        RwBatchProject($f0=[*($1, $2)])
-          RwBatchFilter(condition=[AND(>=($3, 1994-01-01), <(CAST($3):TIMESTAMP(0), +(1994-01-01, 12:INTERVAL YEAR)), OR(AND(>=($2, -(0.08:DECIMAL(3,2), 0.01:DECIMAL(3,2))), <=($2, +(0.08:DECIMAL(3,2), 0.01:DECIMAL(3,2)))), AND(>=($2, +(0.08:DECIMAL(3,2), 0.01:DECIMAL(3,2))), <=($2, -(0.08:DECIMAL(3,2), 0.01:DECIMAL(3,2))))), <($0, 24))])
-            RwBatchTableScan(table=[[test_schema, lineitem]], columns=[l_quantity,l_extendedprice,l_discount,l_shipdate])
+RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
+  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
+    RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
+      RwBatchProject($f0=[*($1, $2)])
+        RwBatchFilter(condition=[AND(>=($3, 1994-01-01), <(CAST($3):TIMESTAMP(0), +(1994-01-01, 12:INTERVAL YEAR)), OR(AND(>=($2, -(0.08:DECIMAL(3,2), 0.01:DECIMAL(3,2))), <=($2, +(0.08:DECIMAL(3,2), 0.01:DECIMAL(3,2)))), AND(>=($2, +(0.08:DECIMAL(3,2), 0.01:DECIMAL(3,2))), <=($2, -(0.08:DECIMAL(3,2), 0.01:DECIMAL(3,2))))), <($0, 24))])
+          RwBatchTableScan(table=[[test_schema, lineitem]], columns=[l_quantity,l_extendedprice,l_discount,l_shipdate])
               ]]>
         </Resource>
     </TestCase>
@@ -1158,14 +1157,13 @@ where
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
-  RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
-    RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
-      RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
-        RwBatchProject($f0=[*($5, -(1, $6))])
-          RwBatchNestLoopJoin(condition=[OR(AND(=($16, $1), =($19, 'Brand#22':CHAR(8)), SEARCH($22, Sarg['SM BOX':CHAR(0), 'SM CASE':CHAR(0), 'SM PACK':CHAR(0), 'SM PKG':CHAR(0)]:CHAR(0)), >=($4, 8), <=($4, +(8, 10)), SEARCH($21, Sarg[[1..5]]), SEARCH($14, Sarg['AIR':CHAR(0), 'AIR REG':CHAR(0)]:CHAR(0)), =($13, 'DELIVER IN PERSON':CHAR(17))), AND(=($16, $1), =($19, 'Brand#23':CHAR(8)), SEARCH($22, Sarg['MED BAG':CHAR(0), 'MED BOX':CHAR(0), 'MED PACK':CHAR(0), 'MED PKG':CHAR(0)]:CHAR(0)), >=($4, 10), <=($4, +(10, 10)), SEARCH($21, Sarg[[1..10]]), SEARCH($14, Sarg['AIR':CHAR(0), 'AIR REG':CHAR(0)]:CHAR(0)), =($13, 'DELIVER IN PERSON':CHAR(17))), AND(=($16, $1), =($19, 'Brand#12':CHAR(8)), SEARCH($22, Sarg['LG BOX':CHAR(0), 'LG CASE':CHAR(0), 'LG PACK':CHAR(0), 'LG PKG':CHAR(0)]:CHAR(0)), >=($4, 24), <=($4, +(24, 10)), SEARCH($21, Sarg[[1..15]]), SEARCH($14, Sarg['AIR':CHAR(0), 'AIR REG':CHAR(0)]:CHAR(0)), =($13, 'DELIVER IN PERSON':CHAR(17))))], joinType=[inner])
-            RwBatchTableScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_partkey,l_suppkey,l_linenumber,l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate,l_commitdate,l_receiptdate,l_shipinstruct,l_shipmode,l_comment])
-            RwBatchTableScan(table=[[test_schema, part]], columns=[p_partkey,p_name,p_mfgr,p_brand,p_type,p_size,p_container,p_retailprice,p_comment])
+RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
+  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
+    RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
+      RwBatchProject($f0=[*($5, -(1, $6))])
+        RwBatchNestLoopJoin(condition=[OR(AND(=($16, $1), =($19, 'Brand#22':CHAR(8)), SEARCH($22, Sarg['SM BOX':CHAR(0), 'SM CASE':CHAR(0), 'SM PACK':CHAR(0), 'SM PKG':CHAR(0)]:CHAR(0)), >=($4, 8), <=($4, +(8, 10)), SEARCH($21, Sarg[[1..5]]), SEARCH($14, Sarg['AIR':CHAR(0), 'AIR REG':CHAR(0)]:CHAR(0)), =($13, 'DELIVER IN PERSON':CHAR(17))), AND(=($16, $1), =($19, 'Brand#23':CHAR(8)), SEARCH($22, Sarg['MED BAG':CHAR(0), 'MED BOX':CHAR(0), 'MED PACK':CHAR(0), 'MED PKG':CHAR(0)]:CHAR(0)), >=($4, 10), <=($4, +(10, 10)), SEARCH($21, Sarg[[1..10]]), SEARCH($14, Sarg['AIR':CHAR(0), 'AIR REG':CHAR(0)]:CHAR(0)), =($13, 'DELIVER IN PERSON':CHAR(17))), AND(=($16, $1), =($19, 'Brand#12':CHAR(8)), SEARCH($22, Sarg['LG BOX':CHAR(0), 'LG CASE':CHAR(0), 'LG PACK':CHAR(0), 'LG PKG':CHAR(0)]:CHAR(0)), >=($4, 24), <=($4, +(24, 10)), SEARCH($21, Sarg[[1..15]]), SEARCH($14, Sarg['AIR':CHAR(0), 'AIR REG':CHAR(0)]:CHAR(0)), =($13, 'DELIVER IN PERSON':CHAR(17))))], joinType=[inner])
+          RwBatchTableScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_partkey,l_suppkey,l_linenumber,l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate,l_commitdate,l_receiptdate,l_shipinstruct,l_shipmode,l_comment])
+          RwBatchTableScan(table=[[test_schema, part]], columns=[p_partkey,p_name,p_mfgr,p_brand,p_type,p_size,p_container,p_retailprice,p_comment])
             ]]>
         </Resource>
     </TestCase>

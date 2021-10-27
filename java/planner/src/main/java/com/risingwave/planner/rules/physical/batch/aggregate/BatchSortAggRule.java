@@ -23,6 +23,7 @@ import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.plan.RelRule;
 import org.apache.calcite.rex.RexNode;
 
+/** BatchSortAggRule converts a LogicalAggregate to SortAgg operator */
 public class BatchSortAggRule extends RelRule<BatchSortAggRule.Config> {
   protected BatchSortAggRule(Config config) {
     super(config);
@@ -83,7 +84,7 @@ public class BatchSortAggRule extends RelRule<BatchSortAggRule.Config> {
     var localBatchAggInputRequiredTraits = logicalAgg.getInput().getTraitSet().plus(BATCH_PHYSICAL);
     var batchAggTraits = logicalAgg.getTraitSet().plus(BATCH_PHYSICAL);
 
-    if (logicalAgg.getGroupCount() > 0) {
+    if (!logicalAgg.isSimpleAgg()) {
       var collation = collationOf(logicalAgg.getGroupSet());
       localBatchAggInputRequiredTraits = localBatchAggInputRequiredTraits.plus(collation);
       batchAggTraits = batchAggTraits.plus(collation);
@@ -103,27 +104,26 @@ public class BatchSortAggRule extends RelRule<BatchSortAggRule.Config> {
             localAggCalls.stream().flatMap(List::stream).collect(Collectors.toList()));
 
     RwDistributionTrait globalDist;
-    if (logicalAgg.getGroupCount() > 0) {
+    if (!logicalAgg.isSimpleAgg()) {
       globalDist = RwDistributions.hash(logicalAgg.getGroupSet().toArray());
     } else {
       globalDist = RwDistributions.SINGLETON;
     }
 
-    var globalAggRequiredTraits = localBatchAgg.getTraitSet().plus(globalDist);
+    var globalAggInput =
+        RelOptRule.convert(localBatchAgg, localBatchAgg.getTraitSet().plus(globalDist));
 
-    var globalAggInput = RelOptRule.convert(localBatchAgg, globalAggRequiredTraits);
-
-    var globalBatchAggCalls = getGlobalAggCalls(logicalAgg, globalAggInput, splitters);
+    var globalAggCalls = getGlobalAggCalls(logicalAgg, globalAggInput, splitters);
 
     var globalBatchAgg =
         new RwBatchSortAgg(
             logicalAgg.getCluster(),
-            batchAggTraits,
+            batchAggTraits.plus(globalDist),
             logicalAgg.getHints(),
             globalAggInput,
             logicalAgg.getGroupSet(),
             logicalAgg.getGroupSets(),
-            globalBatchAggCalls.stream().flatMap(List::stream).collect(Collectors.toList()));
+            globalAggCalls.stream().flatMap(List::stream).collect(Collectors.toList()));
 
     var allLastCalcAreTrivial = splitters.stream().allMatch(AggSplitter::isLastCalcTrivial);
 
@@ -151,6 +151,7 @@ public class BatchSortAggRule extends RelRule<BatchSortAggRule.Config> {
     }
   }
 
+  /** Rule config of BatchSortAggRule */
   public interface Config extends RelRule.Config {
     Config DEFAULT =
         RelRule.Config.EMPTY

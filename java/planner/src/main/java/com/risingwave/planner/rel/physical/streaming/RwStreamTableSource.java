@@ -48,6 +48,7 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
     this.columnIds = columnIds;
   }
 
+  /** Serialize to protobuf */
   @Override
   public StreamNode serialize() {
     TableRefId tableRefId = Messages.getTableRefId(tableId);
@@ -61,6 +62,7 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
         .build();
   }
 
+  /** Derive row type from table catalog */
   @Override
   public RelDataType deriveRowType() {
     RelDataTypeFactory.Builder typeBuilder = getCluster().getTypeFactory().builder();
@@ -72,6 +74,7 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
     return typeBuilder.build();
   }
 
+  /** Explain */
   @Override
   public RelWriter explainTerms(RelWriter pw) {
     pw.item("table", table.getQualifiedName());
@@ -108,6 +111,7 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
       super(config);
     }
 
+    /** Convert RwLogicalScan to RwStreamTableSource */
     @Override
     public @Nullable RelNode convert(RelNode rel) {
       RwLogicalScan source = (RwLogicalScan) rel;
@@ -136,8 +140,7 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
       } else {
         int[] distFields = {0};
         RwDistributionTrait exchangeDistributionTrait = RwDistributions.hash(distFields);
-        var exchange = RwStreamExchange.create(streamTableSource, exchangeDistributionTrait);
-        return exchange;
+        return RwStreamExchange.create(streamTableSource, exchangeDistributionTrait);
       }
     }
   }

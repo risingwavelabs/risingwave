@@ -7,7 +7,7 @@ create materialized view T1 as select sum(v2) as V from t where v1>1
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(v=[$0])
+RwStreamMaterializedView(name=[t1])
   RwStreamProject(v=[$STREAM_NULL_BY_ROW_COUNT($1, $0)])
     RwStreamAgg(group=[{}], v=[SUM($1)], Row Count=[COUNT()])
       RwStreamFilter(condition=[>($0, 1)])
@@ -151,7 +151,7 @@ create materialized view T2 as select v1+v2 as V from t
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(v=[$0])
+RwStreamMaterializedView(name=[t2])
   RwStreamProject(v=[+($0, $1)])
     RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
 ]]>
@@ -235,7 +235,7 @@ create materialized view T3 as select v2, sum(v1) as V from t group by v2
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(v2=[$0], v=[$1])
+RwStreamMaterializedView(name=[t3])
   RwStreamProject(v2=[$0], v=[$1])
     RwStreamFilter(condition=[<>($2, 0)])
       RwStreamAgg(group=[{0}], v=[SUM($1)], Row Count=[COUNT()])
@@ -377,7 +377,7 @@ create materialized view T4 as select sum(v1)+sum(v2) as V from t
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(v=[$0])
+RwStreamMaterializedView(name=[t4])
   RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($2, $0), $STREAM_NULL_BY_ROW_COUNT($2, $1))])
     RwStreamAgg(group=[{}], agg#0=[SUM($0)], agg#1=[SUM($1)], Row Count=[COUNT()])
       RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
@@ -534,7 +534,7 @@ create materialized view T5 as select sum(v1+v2) as V from t
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(v=[$0])
+RwStreamMaterializedView(name=[t5])
   RwStreamProject(v=[$STREAM_NULL_BY_ROW_COUNT($1, $0)])
     RwStreamAgg(group=[{}], v=[SUM($0)], Row Count=[COUNT()])
       RwStreamProject($f0=[+($0, $1)])
@@ -676,7 +676,7 @@ create materialized view T6 as select sum(v1) as V from t group by v2
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(v=[$0])
+RwStreamMaterializedView(name=[t6])
   RwStreamProject(v=[$1])
     RwStreamFilter(condition=[<>($2, 0)])
       RwStreamAgg(group=[{0}], v=[SUM($1)], Row Count=[COUNT()])
@@ -805,7 +805,7 @@ create materialized view T7 as select sum(v1)+1 as V from t group by v2
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(v=[$0])
+RwStreamMaterializedView(name=[t7])
   RwStreamProject(v=[+($1, 1)])
     RwStreamFilter(condition=[<>($2, 0)])
       RwStreamAgg(group=[{0}], agg#0=[SUM($1)], Row Count=[COUNT()])
@@ -951,7 +951,7 @@ create materialized view T8 as select sum(v1)+1 as V from t where v1>v2
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(v=[$0])
+RwStreamMaterializedView(name=[t8])
   RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($1, $0), 1)])
     RwStreamAgg(group=[{}], agg#0=[SUM($0)], Row Count=[COUNT()])
       RwStreamFilter(condition=[>($0, $1)])

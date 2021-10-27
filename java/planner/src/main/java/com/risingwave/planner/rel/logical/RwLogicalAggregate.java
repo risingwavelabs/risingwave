@@ -14,6 +14,7 @@ import org.apache.calcite.rel.logical.LogicalAggregate;
 import org.apache.calcite.util.ImmutableBitSet;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+/** Logical Aggregate */
 public class RwLogicalAggregate extends Aggregate implements RisingWaveLogicalRel {
   private RwLogicalAggregate(
       RelOptCluster cluster,
@@ -38,10 +39,12 @@ public class RwLogicalAggregate extends Aggregate implements RisingWaveLogicalRe
         getCluster(), traitSet, getHints(), input, groupSet, groupSets, aggCalls);
   }
 
+  /** An Aggregate is simple if there is no group keys */
   public boolean isSimpleAgg() {
     return groupSet.isEmpty();
   }
 
+  /** Rule to convert a LogicalAggregate to RwLogicalAggregate */
   public static class RwAggregateConverterRule extends ConverterRule {
     public static final RwAggregateConverterRule INSTANCE =
         Config.INSTANCE
@@ -57,6 +60,7 @@ public class RwLogicalAggregate extends Aggregate implements RisingWaveLogicalRe
       super(config);
     }
 
+    /** Convert LogicalAggregate to RwLogicalAggregate */
     @Override
     public @Nullable RelNode convert(RelNode rel) {
       LogicalAggregate logicalAgg = (LogicalAggregate) rel;

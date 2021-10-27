@@ -57,7 +57,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     StreamingPlan plan = streamPlanner.plan(ast, executionContext);
     String resultPlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
     Assertions.assertEquals(
-        "RwStreamMaterializedView(v=[$0])\n"
+        "RwStreamMaterializedView(name=[t_test])\n"
             + "  RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($1, $0), 1)])\n"
             + "    RwStreamAgg(group=[{}], agg#0=[SUM($0)], Row Count=[COUNT()])\n"
             + "      RwStreamFilter(condition=[>($0, $1)])\n"
@@ -109,7 +109,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     StreamingPlan exchangePlan = StreamFragmenter.generateGraph(plan, executionContext);
     String explainExchangePlan = ExplainWriter.explainPlan(exchangePlan.getStreamingPlan());
     String expectedPlan =
-        "RwStreamMaterializedView(v=[$0])\n"
+        "RwStreamMaterializedView(name=[t_distributed])\n"
             + "  RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($1, $0), 1)])\n"
             + "    RwStreamAgg(group=[{}], agg#0=[SUM($0)], Row Sum0=[$SUM0($1)])\n"
             + "      RwStreamExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])\n"
@@ -144,7 +144,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     StreamingPlan exchangePlan = StreamFragmenter.generateGraph(plan, executionContext);
     String explainExchangePlan = ExplainWriter.explainPlan(exchangePlan.getStreamingPlan());
     String expectedPlan =
-        "RwStreamMaterializedView(v1=[$0], v=[$1])\n"
+        "RwStreamMaterializedView(name=[t_agg])\n"
             + "  RwStreamProject(v1=[$0], v=[$1])\n"
             + "    RwStreamFilter(condition=[<>($2, 0)])\n"
             + "      RwStreamAgg(group=[{0}], v=[SUM($1)], Row Sum0=[$SUM0($2)])\n"
