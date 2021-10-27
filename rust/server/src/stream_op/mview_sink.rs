@@ -49,16 +49,16 @@ impl SimpleExecutor for MViewSinkExecutor {
             // assemble pk row
             let mut pk_row = SmallVec::new();
             for column_id in &self.pk_col {
-                let scalar_ref = columns[*column_id].array_ref().scalar_value_at(idx);
-                pk_row.push(scalar_ref);
+                let datum = columns[*column_id].array_ref().datum_at(idx);
+                pk_row.push(datum);
             }
             let pk_row = Row(pk_row);
 
             // assemble row
             let mut row = SmallVec::new();
             for column in columns {
-                let scalar_ref = column.array_ref().scalar_value_at(idx);
-                row.push(scalar_ref);
+                let datum = column.array_ref().datum_at(idx);
+                row.push(datum);
             }
             let row = Row(row);
 

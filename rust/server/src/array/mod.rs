@@ -412,7 +412,7 @@ macro_rules! impl_array {
       }
 
       /// Get the enum-wrapped `Datum` out of the `Array`.
-      pub fn scalar_value_at(&self, idx: usize) -> Datum {
+      pub fn datum_at(&self, idx: usize) -> Datum {
         match self {
           $( Self::$variant_name(inner) => inner
             .value_at(idx)

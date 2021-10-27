@@ -465,7 +465,7 @@ mod tests {
                         data.column_at(*col_idx)
                             .unwrap_or_else(|_| panic!("Column not found: {}", *col_idx))
                     })
-                    .map(|col| col.array_ref().scalar_value_at(row_idx))
+                    .map(|col| col.array_ref().datum_at(row_idx))
                     .collect::<Vec<Datum>>();
 
                 normal_hash_map.entry(Row(row)).or_default().push(row_idx);

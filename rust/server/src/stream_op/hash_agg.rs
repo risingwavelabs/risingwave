@@ -90,8 +90,7 @@ impl HashAggExecutor {
         &self,
         keys: &'a [HashKey],
         visibility: &Option<Bitmap>,
-        state_entries: &HashMap<HashKey, HashValue>,
-    ) -> Result<(Vec<&'b HashKey>, Vec<usize>, HashMap<&'b HashKey, Bitmap>)>
+    ) -> Result<(Vec<&'b HashKey>, HashMap<&'b HashKey, Bitmap>)>
     where
         'a: 'b,
     {
@@ -100,10 +99,7 @@ impl HashAggExecutor {
         // all the rows whose keys are not `key1`, but also shadows those rows shadowed in the `input`
         // The vis map of each hash key will be passed into StreamingAggStateImpl
         let mut key_to_vis_maps = HashMap::new();
-        // Some grouped keys are the same and their corresponding rows will be collapsed together after aggregation.
-        // This vec records the row indices so that we can pick these rows from all the arrays into output chunk.
-        // Some row may get recorded twice as its key may produce two rows `UpdateDelete` and `UpdateInsert` in the final chunk.
-        let mut distinct_rows = Vec::new();
+
         // Give all the unique keys an order and iterate them later,
         // the order is the same as how we get distinct final columns from original columns.
         let mut unique_keys = Vec::new();
@@ -117,13 +113,6 @@ impl HashAggExecutor {
                 }
             }
             let vis_map = key_to_vis_maps.entry(key).or_insert_with(|| {
-                // Check whether the `key` shows up first time in the whole history, if not,
-                // then we need a row for `UpdateDelete` and another row for `UpdateInsert`.
-                // Otherwise, we will have only one row for `Insert`.
-                if state_entries.contains_key(key) {
-                    distinct_rows.push(row_idx);
-                }
-                distinct_rows.push(row_idx);
                 unique_keys.push(key);
                 vec![false; total_num_rows]
             });
@@ -136,7 +125,7 @@ impl HashAggExecutor {
             .map(|(key, vis_map)| Ok((key, (vis_map).try_into()?)))
             .collect::<Result<HashMap<&HashKey, Bitmap>>>();
 
-        Ok((unique_keys, distinct_rows, key_to_vis_maps?))
+        Ok((unique_keys, key_to_vis_maps?))
     }
 }
 
@@ -146,22 +135,25 @@ impl SimpleExecutor for HashAggExecutor {
     fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
         let StreamChunk {
             ops,
-            columns: arrays,
+            columns,
             visibility,
         } = chunk;
 
         let total_num_rows = ops.len();
         // get the grouped keys for each row
         let mut keys = vec![vec![]; total_num_rows];
+        let mut key_array_builders = Vec::with_capacity(self.key_indices.len());
+        let mut key_data_types = Vec::with_capacity(self.key_indices.len());
         for key_idx in &self.key_indices {
-            let col = &arrays[*key_idx];
+            let col = &columns[*key_idx];
             for (row_idx, key) in keys.iter_mut().enumerate() {
-                key.push(col.array().scalar_value_at(row_idx));
+                key.push(col.array().datum_at(row_idx));
             }
+            key_data_types.push(col.data_type());
+            key_array_builders.push(col.data_type().create_array_builder(0)?);
         }
 
-        let (unique_keys, distinct_rows, mut key_to_vis_maps) =
-            self.get_unique_keys(&keys, &visibility, &self.state_entries)?;
+        let (unique_keys, mut key_to_vis_maps) = self.get_unique_keys(&keys, &visibility)?;
 
         // These builders are for storing the aggregated value for each aggregation function
         let mut agg_array_builders: Vec<ArrayBuilderImpl> = self
@@ -209,7 +201,7 @@ impl SimpleExecutor for HashAggExecutor {
                     agg.args
                         .val_indices()
                         .iter()
-                        .map(|val_idx| arrays[*val_idx].array_ref())
+                        .map(|val_idx| columns[*val_idx].array_ref())
                         .collect::<Vec<_>>()
                 })
                 .collect::<Vec<_>>();
@@ -226,12 +218,22 @@ impl SimpleExecutor for HashAggExecutor {
                     agg_array_builder.append_array(&builder.finish()?)
                 })?;
 
-            // same logic from `simple` LocalAggregationOperator
+            // same logic from [`super::SimpleAggExecutor`]
             if not_first_data {
                 new_ops.push(Op::UpdateDelete);
                 new_ops.push(Op::UpdateInsert);
+                key_array_builders.iter_mut().zip(key.iter()).try_for_each(
+                    |(key_col, datum)| {
+                        key_col.append_datum(datum.clone())?;
+                        key_col.append_datum(datum.clone())
+                    },
+                )?;
             } else {
                 new_ops.push(Op::Insert);
+                key_array_builders
+                    .iter_mut()
+                    .zip(key.iter())
+                    .try_for_each(|(key_col, datum)| key_col.append_datum(datum.clone()))?;
             }
 
             Ok(())
@@ -249,22 +251,13 @@ impl SimpleExecutor for HashAggExecutor {
             })
             .try_collect()?;
 
-        // compose all the columns together
-        // rows with the same key collapse into one or two rows
-        let mut new_columns = Vec::new();
-        for key_idx in &self.key_indices {
-            let column = &arrays[*key_idx];
-            let mut array_builder = column
-                .data_type()
-                .create_array_builder(distinct_rows.len())?;
-            for row_idx in &distinct_rows {
-                array_builder.append_datum_ref(column.array_ref().value_at(*row_idx))?;
-            }
-            new_columns.push(Column::new(
-                Arc::new(array_builder.finish()?),
-                column.data_type(),
-            ));
-        }
+        let mut new_columns: Vec<Column> = key_array_builders
+            .into_iter()
+            .zip(key_data_types.into_iter())
+            .map(|(builder, dt)| -> Result<Column> {
+                Ok(Column::new(Arc::new(builder.finish()?), dt))
+            })
+            .try_collect()?;
         new_columns.extend(agg_columns.into_iter());
 
         let chunk = StreamChunk {
