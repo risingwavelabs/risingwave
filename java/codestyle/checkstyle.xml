@@ -315,11 +315,6 @@
         <module name="MissingJavadocType">
             <property name="skipAnnotations" value="TestInstance"/>
         </module>
-        <module name="MissingJavadocMethod">
-            <property name="minLineCount" value="8"/>
-            <property name="allowMissingPropertyJavadoc" value="true"/>
-            <property name="allowedAnnotations" value="Test"/>
-        </module>
         <module name="MethodName">
             <property name="format" value="^[a-z][a-z0-9][a-zA-Z0-9_]*$"/>
             <message key="name.invalidPattern"
