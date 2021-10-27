@@ -44,17 +44,6 @@ message HashAggNode {
 }
 
 message StreamNode {
-  enum StreamNodeType {
-    TABLE_INGRESS = 0;
-    KAFKA_INGRESS = 1;
-    PROJECTION = 2;
-    FILTER = 3;
-    SIMPLE_AGG = 4;
-    HASH_AGG = 5;
-    HASH_JOIN = 6;
-    MEMTABLE_MATERIALIZED_VIEW = 7;
-  }
-  StreamNodeType node_type = 1;
   // Some nodes we can reuse plan nodes from plan.proto.
   // TODO: should we enforce strong typed body on nodes?
   oneof node {

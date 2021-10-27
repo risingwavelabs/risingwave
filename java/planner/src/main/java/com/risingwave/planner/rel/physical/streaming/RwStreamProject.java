@@ -39,7 +39,6 @@ public class RwStreamProject extends Project implements RisingWaveStreamingRel {
       projectNodeBuilder.addSelectList(exps.get(i).accept(rexVisitor));
     }
     return StreamNode.newBuilder()
-        .setNodeType(StreamNode.StreamNodeType.PROJECTION)
         .setProjectNode(projectNodeBuilder.build())
         .setInput(((RisingWaveStreamingRel) input).serialize())
         .build();

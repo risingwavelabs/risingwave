@@ -52,7 +52,6 @@ async fn test_stream_proto() {
             StreamFragment {
                 fragment_id: 1,
                 nodes: Some(StreamNode {
-                    node_type: stream_node::StreamNodeType::Projection as i32,
                     node: Some(Node::ProjectNode(ProjectNode::default())),
                     input: None,
                 }),
@@ -67,7 +66,6 @@ async fn test_stream_proto() {
             StreamFragment {
                 fragment_id: 3,
                 nodes: Some(StreamNode {
-                    node_type: stream_node::StreamNodeType::Projection as i32,
                     node: Some(Node::ProjectNode(ProjectNode::default())),
                     input: None,
                 }),
@@ -82,7 +80,6 @@ async fn test_stream_proto() {
             StreamFragment {
                 fragment_id: 7,
                 nodes: Some(StreamNode {
-                    node_type: stream_node::StreamNodeType::Projection as i32,
                     node: Some(Node::ProjectNode(ProjectNode::default())),
                     input: None,
                 }),
@@ -97,7 +94,6 @@ async fn test_stream_proto() {
             StreamFragment {
                 fragment_id: 11,
                 nodes: Some(StreamNode {
-                    node_type: stream_node::StreamNodeType::Projection as i32,
                     node: Some(Node::ProjectNode(ProjectNode::default())),
                     input: None,
                 }),
@@ -112,7 +108,6 @@ async fn test_stream_proto() {
             StreamFragment {
                 fragment_id: 13,
                 nodes: Some(StreamNode {
-                    node_type: stream_node::StreamNodeType::Projection as i32,
                     node: Some(Node::ProjectNode(ProjectNode::default())),
                     input: None,
                 }),

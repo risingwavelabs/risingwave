@@ -17,13 +17,9 @@ RwStreamMaterializedView(name=[t1])
         <Resource name="json">
             <![CDATA[
 {
-  "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
   "input": {
-    "nodeType": "PROJECTION",
     "input": {
-      "nodeType": "SIMPLE_AGG",
       "input": {
-        "nodeType": "FILTER",
         "input": {
           "tableSourceNode": {
             "tableRefId": {
@@ -154,9 +150,7 @@ RwStreamMaterializedView(name=[t2])
         <Resource name="json">
             <![CDATA[
 {
-  "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
   "input": {
-    "nodeType": "PROJECTION",
     "input": {
       "tableSourceNode": {
         "tableRefId": {
@@ -237,13 +231,9 @@ RwStreamMaterializedView(name=[t3])
         <Resource name="json">
             <![CDATA[
 {
-  "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
   "input": {
-    "nodeType": "PROJECTION",
     "input": {
-      "nodeType": "FILTER",
       "input": {
-        "nodeType": "HASH_AGG",
         "input": {
           "tableSourceNode": {
             "tableRefId": {
@@ -373,11 +363,8 @@ RwStreamMaterializedView(name=[t4])
         <Resource name="json">
             <![CDATA[
 {
-  "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
   "input": {
-    "nodeType": "PROJECTION",
     "input": {
-      "nodeType": "SIMPLE_AGG",
       "input": {
         "tableSourceNode": {
           "tableRefId": {
@@ -527,13 +514,9 @@ RwStreamMaterializedView(name=[t5])
         <Resource name="json">
             <![CDATA[
 {
-  "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
   "input": {
-    "nodeType": "PROJECTION",
     "input": {
-      "nodeType": "SIMPLE_AGG",
       "input": {
-        "nodeType": "PROJECTION",
         "input": {
           "tableSourceNode": {
             "tableRefId": {
@@ -664,13 +647,9 @@ RwStreamMaterializedView(name=[t6])
         <Resource name="json">
             <![CDATA[
 {
-  "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
   "input": {
-    "nodeType": "PROJECTION",
     "input": {
-      "nodeType": "FILTER",
       "input": {
-        "nodeType": "HASH_AGG",
         "input": {
           "tableSourceNode": {
             "tableRefId": {
@@ -788,13 +767,9 @@ RwStreamMaterializedView(name=[t7])
         <Resource name="json">
             <![CDATA[
 {
-  "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
   "input": {
-    "nodeType": "PROJECTION",
     "input": {
-      "nodeType": "FILTER",
       "input": {
-        "nodeType": "HASH_AGG",
         "input": {
           "tableSourceNode": {
             "tableRefId": {
@@ -929,13 +904,9 @@ RwStreamMaterializedView(name=[t8])
         <Resource name="json">
             <![CDATA[
 {
-  "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
   "input": {
-    "nodeType": "PROJECTION",
     "input": {
-      "nodeType": "SIMPLE_AGG",
       "input": {
-        "nodeType": "FILTER",
         "input": {
           "tableSourceNode": {
             "tableRefId": {

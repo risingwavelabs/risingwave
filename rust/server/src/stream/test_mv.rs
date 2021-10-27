@@ -2,7 +2,7 @@ use pb_construct::make_proto;
 use pb_convert::FromProtobuf;
 use protobuf::well_known_types::Any as AnyProto;
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
-use risingwave_pb::stream_plan::stream_node::{Node, StreamNodeType::*};
+use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{
     dispatcher::DispatcherType, Dispatcher, MViewNode, ProjectNode, StreamFragment, StreamNode,
     TableSourceNode,
@@ -49,7 +49,6 @@ async fn test_stream_mv_proto() {
     // TableSource -> Project -> Materialized View
     // Select v1 from T(v1,v2).
     let source_proto = StreamNode {
-        node_type: TableIngress as i32,
         node: Some(Node::TableSourceNode(TableSourceNode {
             table_ref_id: Some(make_table_ref_id(0)),
             column_ids: vec![0, 1],
@@ -72,14 +71,12 @@ async fn test_stream_mv_proto() {
     });
 
     let project_proto = StreamNode {
-        node_type: Projection as i32,
         node: Some(Node::ProjectNode(ProjectNode {
             select_list: vec![expr_proto.to_prost::<risingwave_pb::expr::ExprNode>()],
         })),
         input: Some(Box::new(source_proto)),
     };
     let mview_proto = StreamNode {
-        node_type: MemtableMaterializedView as i32,
         node: Some(Node::MviewNode(MViewNode {
             table_ref_id: Some(make_table_ref_id(1)),
             column_descs: vec![column_desc_proto.to_prost::<risingwave_pb::plan::ColumnDesc>()],

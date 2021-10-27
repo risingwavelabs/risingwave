@@ -55,10 +55,7 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
     TableSourceNode.Builder tableSourceNodeBuilder =
         TableSourceNode.newBuilder().setTableRefId(tableRefId);
     columnIds.forEach(c -> tableSourceNodeBuilder.addColumnIds(c.getValue()));
-    return StreamNode.newBuilder()
-        .setNodeType(StreamNode.StreamNodeType.TABLE_INGRESS)
-        .setTableSourceNode(tableSourceNodeBuilder.build())
-        .build();
+    return StreamNode.newBuilder().setTableSourceNode(tableSourceNodeBuilder.build()).build();
   }
 
   /** Derive row type from table catalog */

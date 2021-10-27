@@ -51,7 +51,6 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
     MViewNode materializedViewNode =
         materializedViewNodeBuilder.setTableRefId(Messages.getTableRefId(tableId)).build();
     return StreamNode.newBuilder()
-        .setNodeType(StreamNode.StreamNodeType.MEMTABLE_MATERIALIZED_VIEW)
         .setMviewNode(materializedViewNode)
         .setInput(((RisingWaveStreamingRel) input).serialize())
         .build();

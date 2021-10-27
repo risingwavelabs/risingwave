@@ -39,7 +39,6 @@ public class RwStreamAgg extends RwAggregate implements RisingWaveStreamingRel {
       }
       node =
           StreamNode.newBuilder()
-              .setNodeType(StreamNode.StreamNodeType.SIMPLE_AGG)
               .setSimpleAggNode(simpleAggNodeBuilder.build())
               .setInput(((RisingWaveStreamingRel) input).serialize())
               .build();
@@ -53,7 +52,6 @@ public class RwStreamAgg extends RwAggregate implements RisingWaveStreamingRel {
       }
       node =
           StreamNode.newBuilder()
-              .setNodeType(StreamNode.StreamNodeType.HASH_AGG)
               .setHashAggNode(hashAggNodeBuilder.build())
               .setInput(((RisingWaveStreamingRel) input).serialize())
               .build();
