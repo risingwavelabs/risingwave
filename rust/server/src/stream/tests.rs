@@ -1,9 +1,9 @@
 use futures::SinkExt;
 use futures::StreamExt;
-use pb_construct::make_proto;
-use risingwave_proto::stream_plan::*;
-use risingwave_proto::stream_service::*;
-use risingwave_proto::task_service::HostAddress;
+use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::*;
+use risingwave_pb::stream_service::*;
+use risingwave_pb::task_service::HostAddress;
 use std::sync::Arc;
 
 use crate::storage::SimpleTableManager;
@@ -12,13 +12,13 @@ use crate::stream_op::Message;
 use super::*;
 
 fn helper_make_local_actor(fragment_id: u32) -> ActorInfo {
-    make_proto!(ActorInfo, {
-      fragment_id: fragment_id,
-      host: make_proto!(HostAddress, {
-        host: "127.0.0.1".into(),
-        port: 2333
-      })
-    })
+    ActorInfo {
+        fragment_id,
+        host: Some(HostAddress {
+            host: "127.0.0.1".into(),
+            port: 2333,
+        }),
+    }
 }
 
 /// This test creates stream plan protos and feed them into `StreamManager`.
@@ -41,74 +41,88 @@ async fn test_stream_proto() {
         .iter()
         .cloned()
         .map(helper_make_local_actor)
-        .collect::<Vec<_>>()
-        .into();
+        .collect::<Vec<_>>();
     stream_manager
-        .update_actor_info(make_proto!(ActorInfoTable, { info: info }))
+        .update_actor_info(ActorInfoTable { info })
         .unwrap();
 
     stream_manager
         .update_fragment(&[
             // create 0 -> (1) -> 3
-            make_proto!(StreamFragment, {
-              fragment_id: 1,
-              nodes: make_proto!(StreamNode, {
-                node_type: StreamNode_StreamNodeType::PROJECTION
-              }),
-              upstream_fragment_id: vec![0],
-              dispatcher: make_proto!(Dispatcher, {
-                field_type: Dispatcher_DispatcherType::ROUND_ROBIN
-              }),
-              downstream_fragment_id: vec![3]
-            }),
+            StreamFragment {
+                fragment_id: 1,
+                nodes: Some(StreamNode {
+                    node_type: stream_node::StreamNodeType::Projection as i32,
+                    node: Some(Node::ProjectNode(ProjectNode::default())),
+                    input: None,
+                }),
+                upstream_fragment_id: vec![0],
+                dispatcher: Some(Dispatcher {
+                    r#type: dispatcher::DispatcherType::RoundRobin as i32,
+                    column_idx: 0,
+                }),
+                downstream_fragment_id: vec![3],
+            },
             // create 1 -> (3) -> 7, 11
-            make_proto!(StreamFragment, {
-              fragment_id: 3,
-              nodes: make_proto!(StreamNode, {
-                node_type: StreamNode_StreamNodeType::PROJECTION
-              }),
-              upstream_fragment_id: vec![1],
-              dispatcher: make_proto!(Dispatcher, {
-                field_type: Dispatcher_DispatcherType::ROUND_ROBIN
-              }),
-              downstream_fragment_id: vec![7, 11]
-            }),
+            StreamFragment {
+                fragment_id: 3,
+                nodes: Some(StreamNode {
+                    node_type: stream_node::StreamNodeType::Projection as i32,
+                    node: Some(Node::ProjectNode(ProjectNode::default())),
+                    input: None,
+                }),
+                upstream_fragment_id: vec![1],
+                dispatcher: Some(Dispatcher {
+                    r#type: dispatcher::DispatcherType::RoundRobin as i32,
+                    column_idx: 0,
+                }),
+                downstream_fragment_id: vec![7, 11],
+            },
             // create 3 -> (7) -> 13
-            make_proto!(StreamFragment, {
-              fragment_id: 7,
-              nodes: make_proto!(StreamNode, {
-                node_type: StreamNode_StreamNodeType::PROJECTION
-              }),
-              upstream_fragment_id: vec![3],
-              dispatcher: make_proto!(Dispatcher, {
-                field_type: Dispatcher_DispatcherType::SIMPLE
-              }),
-              downstream_fragment_id: vec![13]
-            }),
+            StreamFragment {
+                fragment_id: 7,
+                nodes: Some(StreamNode {
+                    node_type: stream_node::StreamNodeType::Projection as i32,
+                    node: Some(Node::ProjectNode(ProjectNode::default())),
+                    input: None,
+                }),
+                upstream_fragment_id: vec![3],
+                dispatcher: Some(Dispatcher {
+                    r#type: dispatcher::DispatcherType::RoundRobin as i32,
+                    column_idx: 0,
+                }),
+                downstream_fragment_id: vec![13],
+            },
             // create 3 -> (11) -> 13
-            make_proto!(StreamFragment, {
-              fragment_id: 11,
-              nodes: make_proto!(StreamNode, {
-                node_type: StreamNode_StreamNodeType::PROJECTION
-              }),
-              upstream_fragment_id: vec![3],
-              dispatcher: make_proto!(Dispatcher, {
-                field_type: Dispatcher_DispatcherType::SIMPLE
-              }),
-              downstream_fragment_id: vec![13]
-            }),
+            StreamFragment {
+                fragment_id: 11,
+                nodes: Some(StreamNode {
+                    node_type: stream_node::StreamNodeType::Projection as i32,
+                    node: Some(Node::ProjectNode(ProjectNode::default())),
+                    input: None,
+                }),
+                upstream_fragment_id: vec![3],
+                dispatcher: Some(Dispatcher {
+                    r#type: dispatcher::DispatcherType::Simple as i32,
+                    column_idx: 0,
+                }),
+                downstream_fragment_id: vec![13],
+            },
             // create 7, 11 -> (13) -> 233
-            make_proto!(StreamFragment, {
-              fragment_id: 13,
-              nodes: make_proto!(StreamNode, {
-                node_type: StreamNode_StreamNodeType::PROJECTION
-              }),
-              upstream_fragment_id: vec![7, 11],
-              dispatcher: make_proto!(Dispatcher, {
-                field_type: Dispatcher_DispatcherType::SIMPLE
-              }),
-              downstream_fragment_id: vec![233]
-            }),
+            StreamFragment {
+                fragment_id: 13,
+                nodes: Some(StreamNode {
+                    node_type: stream_node::StreamNodeType::Projection as i32,
+                    node: Some(Node::ProjectNode(ProjectNode::default())),
+                    input: None,
+                }),
+                upstream_fragment_id: vec![7, 11],
+                dispatcher: Some(Dispatcher {
+                    r#type: dispatcher::DispatcherType::Simple as i32,
+                    column_idx: 0,
+                }),
+                downstream_fragment_id: vec![233],
+            },
         ])
         .unwrap();
 

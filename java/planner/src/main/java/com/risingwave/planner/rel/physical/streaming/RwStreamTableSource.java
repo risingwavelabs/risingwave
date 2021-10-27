@@ -5,7 +5,6 @@ import static com.risingwave.planner.planner.PlannerUtils.isSingleMode;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
 import com.google.common.collect.ImmutableList;
-import com.google.protobuf.Any;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.planner.rel.common.dist.RwDistributionTrait;
@@ -58,7 +57,7 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
     columnIds.forEach(c -> tableSourceNodeBuilder.addColumnIds(c.getValue()));
     return StreamNode.newBuilder()
         .setNodeType(StreamNode.StreamNodeType.TABLE_INGRESS)
-        .setBody(Any.pack(tableSourceNodeBuilder.build()))
+        .setTableSourceNode(tableSourceNodeBuilder.build())
         .build();
   }
 

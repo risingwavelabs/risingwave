@@ -5,8 +5,6 @@ use risingwave_pb::stream_service::{
     ActorInfoTable, BroadcastActorInfoTableResponse, BuildFragmentRequest, BuildFragmentResponse,
     UpdateFragmentRequest, UpdateFragmentResponse,
 };
-use risingwave_pb::ToProto;
-use risingwave_proto::stream_plan::StreamFragment;
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
@@ -30,13 +28,7 @@ impl StreamService for StreamServiceImpl {
         request: Request<UpdateFragmentRequest>,
     ) -> std::result::Result<Response<UpdateFragmentResponse>, Status> {
         let req = request.into_inner();
-
-        let fragments = req
-            .fragment
-            .iter()
-            .map(|f| f.to_proto())
-            .collect::<Vec<StreamFragment>>();
-        let res = self.mgr.update_fragment(fragments.as_slice());
+        let res = self.mgr.update_fragment(&req.fragment);
         match res {
             Err(e) => {
                 error!("failed to update stream actor {}", e);
@@ -76,7 +68,7 @@ impl StreamService for StreamServiceImpl {
     ) -> std::result::Result<Response<BroadcastActorInfoTableResponse>, Status> {
         let table = request.into_inner();
 
-        let res = self.mgr.update_actor_info(table.to_proto());
+        let res = self.mgr.update_actor_info(table);
         match res {
             Err(e) => {
                 error!("failed to update actor info table actor {}", e);

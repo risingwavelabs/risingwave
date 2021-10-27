@@ -1,6 +1,5 @@
 package com.risingwave.planner.rel.physical.streaming;
 
-import com.google.protobuf.Any;
 import com.risingwave.planner.rel.physical.RwAggregate;
 import com.risingwave.proto.expr.InputRefExpr;
 import com.risingwave.proto.streaming.plan.HashAggNode;
@@ -40,8 +39,8 @@ public class RwStreamAgg extends RwAggregate implements RisingWaveStreamingRel {
       }
       node =
           StreamNode.newBuilder()
-              .setNodeType(StreamNode.StreamNodeType.LOCAL_SIMPLE_AGG)
-              .setBody(Any.pack(simpleAggNodeBuilder.build()))
+              .setNodeType(StreamNode.StreamNodeType.SIMPLE_AGG)
+              .setSimpleAggNode(simpleAggNodeBuilder.build())
               .setInput(((RisingWaveStreamingRel) input).serialize())
               .build();
     } else {
@@ -54,8 +53,8 @@ public class RwStreamAgg extends RwAggregate implements RisingWaveStreamingRel {
       }
       node =
           StreamNode.newBuilder()
-              .setNodeType(StreamNode.StreamNodeType.LOCAL_HASH_AGG)
-              .setBody(Any.pack(hashAggNodeBuilder.build()))
+              .setNodeType(StreamNode.StreamNodeType.HASH_AGG)
+              .setHashAggNode(hashAggNodeBuilder.build())
               .setInput(((RisingWaveStreamingRel) input).serialize())
               .build();
     }

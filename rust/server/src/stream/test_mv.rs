@@ -1,18 +1,19 @@
 use pb_construct::make_proto;
 use pb_convert::FromProtobuf;
 use protobuf::well_known_types::Any as AnyProto;
-use protobuf::RepeatedField;
-use risingwave_proto::data::{DataType, DataType_TypeName};
-use risingwave_proto::expr::{ExprNode, ExprNode_Type, InputRefExpr};
-use risingwave_proto::plan::{ColumnDesc, ColumnDesc_ColumnEncodingType};
-use risingwave_proto::plan::{DatabaseRefId, SchemaRefId, TableRefId};
-use risingwave_proto::stream_plan::Dispatcher;
-use risingwave_proto::stream_plan::StreamNode_StreamNodeType;
-use risingwave_proto::stream_plan::{
-    MViewNode, ProjectNode, StreamFragment, StreamNode, TableSourceNode,
+use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
+use risingwave_pb::stream_plan::stream_node::{Node, StreamNodeType::*};
+use risingwave_pb::stream_plan::{
+    dispatcher::DispatcherType, Dispatcher, MViewNode, ProjectNode, StreamFragment, StreamNode,
+    TableSourceNode,
 };
-use risingwave_proto::stream_service::{ActorInfo, ActorInfoTable};
-use risingwave_proto::task_service::HostAddress;
+use risingwave_pb::stream_service::{ActorInfo, ActorInfoTable};
+use risingwave_pb::task_service::HostAddress;
+use risingwave_pb::ToProst;
+use risingwave_pb::ToProto;
+use risingwave_proto::data::{DataType, DataType_TypeName};
+use risingwave_proto::expr::{ExprNode_Type, InputRefExpr};
+use risingwave_proto::plan::ColumnDesc_ColumnEncodingType;
 
 use crate::array::column::Column;
 use crate::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder};
@@ -28,19 +29,18 @@ use futures::StreamExt;
 use smallvec::SmallVec;
 use std::sync::Arc;
 
-fn make_int32_type_proto() -> DataType {
+fn make_int32_type_proto() -> risingwave_proto::data::DataType {
     return make_proto!(DataType, { type_name: DataType_TypeName::INT32 });
 }
 
 fn make_table_ref_id(id: i32) -> TableRefId {
-    return make_proto!(TableRefId, {
-        schema_ref_id: make_proto!(SchemaRefId, {
-            database_ref_id: make_proto!(DatabaseRefId, {
-                database_id: 0
-            })
+    TableRefId {
+        schema_ref_id: Some(SchemaRefId {
+            database_ref_id: Some(DatabaseRefId { database_id: 0 }),
+            schema_id: 0,
         }),
-        table_id: id
-    });
+        table_id: id,
+    }
 }
 
 #[tokio::test]
@@ -48,16 +48,15 @@ async fn test_stream_mv_proto() {
     // Build example proto for a stream executor chain.
     // TableSource -> Project -> Materialized View
     // Select v1 from T(v1,v2).
-    let source_proto = make_proto!(StreamNode, {
-        node_type: StreamNode_StreamNodeType::TABLE_INGRESS,
-        body: AnyProto::pack(
-          &make_proto!(TableSourceNode, {
-                table_ref_id: make_table_ref_id(0),
-                column_ids: vec![0,1]
-            })
-        ).unwrap()
-    });
-    let expr_proto = make_proto!(ExprNode,{
+    let source_proto = StreamNode {
+        node_type: TableIngress as i32,
+        node: Some(Node::TableSourceNode(TableSourceNode {
+            table_ref_id: Some(make_table_ref_id(0)),
+            column_ids: vec![0, 1],
+        })),
+        input: None,
+    };
+    let expr_proto = make_proto!(risingwave_proto::expr::ExprNode,{
         expr_type: ExprNode_Type::INPUT_REF,
         body: AnyProto::pack(
             &make_proto!(InputRefExpr,{
@@ -66,45 +65,45 @@ async fn test_stream_mv_proto() {
         ).unwrap(),
         return_type: make_int32_type_proto()
     });
-    let column_desc_proto = make_proto!(ColumnDesc,{
+    let column_desc_proto = make_proto!(risingwave_proto::plan::ColumnDesc,{
         column_type: make_int32_type_proto(),
         encoding: ColumnDesc_ColumnEncodingType::RAW,
         name: "v1".to_string()
     });
 
-    let project_proto = make_proto!(StreamNode,{
-        node_type: StreamNode_StreamNodeType::PROJECTION,
-        body: AnyProto::pack(
-            &make_proto!(ProjectNode,{
-                select_list: RepeatedField::from_slice(&[expr_proto])
-            })
-        ).unwrap(),
-        input: source_proto
-    });
-    let mview_proto = make_proto!(StreamNode,{
-        node_type: StreamNode_StreamNodeType::MEMTABLE_MATERIALIZED_VIEW,
-        body: AnyProto::pack(
-            &make_proto!(MViewNode,{
-                table_ref_id: make_table_ref_id(1),
-                column_descs: RepeatedField::from_slice(&[column_desc_proto])
-            })
-        ).unwrap(),
-        input: project_proto
-    });
-    let fragment_proto = make_proto!(StreamFragment, {
-      fragment_id: 1,
-      nodes: mview_proto,
+    let project_proto = StreamNode {
+        node_type: Projection as i32,
+        node: Some(Node::ProjectNode(ProjectNode {
+            select_list: vec![expr_proto.to_prost::<risingwave_pb::expr::ExprNode>()],
+        })),
+        input: Some(Box::new(source_proto)),
+    };
+    let mview_proto = StreamNode {
+        node_type: MemtableMaterializedView as i32,
+        node: Some(Node::MviewNode(MViewNode {
+            table_ref_id: Some(make_table_ref_id(1)),
+            column_descs: vec![column_desc_proto.to_prost::<risingwave_pb::plan::ColumnDesc>()],
+            pk_indices: vec![],
+        })),
+        input: Some(Box::new(project_proto)),
+    };
+    let fragment_proto = StreamFragment {
+        fragment_id: 1,
+        nodes: Some(mview_proto),
         upstream_fragment_id: vec![0],
-        dispatcher: make_proto!(Dispatcher,{
-
+        dispatcher: Some(Dispatcher {
+            r#type: DispatcherType::Simple as i32,
+            column_idx: 0,
         }),
-        downstream_fragment_id: vec![233]
-    });
+        downstream_fragment_id: vec![233],
+    };
 
     // Initialize storage.
     let table_manager = Arc::new(SimpleTableManager::new());
-    let table_id =
-        TableId::from_protobuf(&make_table_ref_id(0)).expect("Failed to convert table id");
+    let table_id = TableId::from_protobuf(
+        &make_table_ref_id(0).to_proto::<risingwave_proto::plan::TableRefId>(),
+    )
+    .expect("Failed to convert table id");
     let _res = table_manager.create_table(&table_id, 2);
     let table_ref =
         (if let SimpleTableRef::Columnar(table_ref) = table_manager.get_table(&table_id).unwrap() {
@@ -131,16 +130,16 @@ async fn test_stream_mv_proto() {
     // Build stream actor.
     let stream_manager = StreamManager::new();
 
-    let actor_info_proto = make_proto!(ActorInfo, {
-    fragment_id: 1,
-    host: make_proto!(HostAddress, {
-      host: "127.0.0.1".into(),
-      port: 2333
-      })
-    });
-    let actor_info_table = make_proto!(ActorInfoTable, {
-        info: RepeatedField::from_slice(&[actor_info_proto])
-    });
+    let actor_info_proto = ActorInfo {
+        fragment_id: 1,
+        host: Some(HostAddress {
+            host: "127.0.0.1".into(),
+            port: 2333,
+        }),
+    };
+    let actor_info_table = ActorInfoTable {
+        info: vec![actor_info_proto],
+    };
     stream_manager.update_actor_info(actor_info_table).unwrap();
     stream_manager.update_fragment(&[fragment_proto]).unwrap();
     stream_manager
@@ -149,9 +148,11 @@ async fn test_stream_mv_proto() {
 
     // Insert data and check if the materialized view has been updated.
     let _res_app = table_ref.append(append_chunk);
-    let table_id_mv = TableId::from_protobuf(&make_table_ref_id(1))
-        .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))
-        .unwrap();
+    let table_id_mv = TableId::from_protobuf(
+        &make_table_ref_id(1).to_proto::<risingwave_proto::plan::TableRefId>(),
+    )
+    .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))
+    .unwrap();
     let table_ref_mv = table_manager.get_table(&table_id_mv).unwrap();
 
     let mut sink = stream_manager.take_sink(233);

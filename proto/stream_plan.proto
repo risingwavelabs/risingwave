@@ -49,17 +49,22 @@ message StreamNode {
     KAFKA_INGRESS = 1;
     PROJECTION = 2;
     FILTER = 3;
-    LOCAL_SIMPLE_AGG = 4;
-    GLOBAL_SIMPLE_AGG = 5;
-    LOCAL_HASH_AGG = 6;
-    GLOBAL_HASH_AGG = 7;
-    HASH_JOIN = 8;
-    MEMTABLE_MATERIALIZED_VIEW = 9;
+    SIMPLE_AGG = 4;
+    HASH_AGG = 5;
+    HASH_JOIN = 6;
+    MEMTABLE_MATERIALIZED_VIEW = 7;
   }
   StreamNodeType node_type = 1;
   // Some nodes we can reuse plan nodes from plan.proto.
   // TODO: should we enforce strong typed body on nodes?
-  google.protobuf.Any body = 2;
+  oneof node {
+      TableSourceNode table_source_node = 4;
+      ProjectNode project_node = 5;
+      FilterNode filter_node = 6;
+      MViewNode mview_node = 7;
+      SimpleAggNode simple_agg_node = 8;
+      HashAggNode hash_agg_node = 9;
+  }
   // Child node in plan aka. upstream nodes in the streaming DAG
   // Currently we assume the executors in one fragment are always chained list rather than tree
   StreamNode input = 3;

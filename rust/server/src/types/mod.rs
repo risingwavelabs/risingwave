@@ -1,4 +1,5 @@
 use crate::error::{ErrorCode, Result, RwError};
+use risingwave_pb::ToProto;
 use risingwave_proto::data::DataType as DataTypeProto;
 use rust_decimal::Decimal;
 use std::any::Any;
@@ -101,6 +102,10 @@ pub fn build_from_proto(proto: &DataTypeProto) -> Result<DataTypeRef> {
       TIMESTAMPZ => TimestampWithTimeZoneType,
       DECIMAL => DecimalType
     }
+}
+
+pub fn build_from_prost(prost: &risingwave_pb::data::DataType) -> Result<DataTypeRef> {
+    build_from_proto(&prost.to_proto::<risingwave_proto::data::DataType>())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]

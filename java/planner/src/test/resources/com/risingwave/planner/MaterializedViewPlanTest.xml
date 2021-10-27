@@ -18,82 +18,24 @@ RwStreamMaterializedView(name=[t1])
             <![CDATA[
 {
   "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
-  "body": {
-    "@type": "type.googleapis.com/stream_plan.MViewNode",
-    "tableRefId": {
-      "schemaRefId": {
-        "databaseRefId": {
-        }
-      },
-      "tableId": 1
-    },
-    "columnDescs": [{
-      "columnType": {
-        "typeName": "INT32"
-      },
-      "encoding": "RAW"
-    }]
-  },
   "input": {
     "nodeType": "PROJECTION",
-    "body": {
-      "@type": "type.googleapis.com/stream_plan.ProjectNode",
-      "selectList": [{
-        "exprType": "STREAM_NULL_BY_ROW_COUNT",
-        "body": {
-          "@type": "type.googleapis.com/expr.FunctionCall",
-          "children": [{
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr",
-              "columnIdx": 1
-            },
-            "returnType": {
-              "typeName": "INT64"
-            }
-          }, {
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr"
-            },
-            "returnType": {
-              "typeName": "INT32"
-            }
-          }]
-        },
-        "returnType": {
-          "typeName": "INT32"
-        }
-      }]
-    },
     "input": {
-      "nodeType": "LOCAL_SIMPLE_AGG",
-      "body": {
-        "@type": "type.googleapis.com/stream_plan.SimpleAggNode",
-        "aggCalls": [{
-          "type": "SUM",
-          "args": [{
-            "input": {
-              "columnIdx": 1
-            },
-            "type": {
-              "typeName": "INT32"
-            }
-          }],
-          "returnType": {
-            "typeName": "INT32"
-          }
-        }, {
-          "type": "COUNT",
-          "returnType": {
-            "typeName": "INT64"
-          }
-        }]
-      },
+      "nodeType": "SIMPLE_AGG",
       "input": {
         "nodeType": "FILTER",
-        "body": {
-          "@type": "type.googleapis.com/stream_plan.FilterNode",
+        "input": {
+          "tableSourceNode": {
+            "tableRefId": {
+              "schemaRefId": {
+                "databaseRefId": {
+                }
+              }
+            },
+            "columnIds": [0, 1]
+          }
+        },
+        "filterNode": {
           "searchCondition": {
             "exprType": "GREATER_THAN",
             "body": {
@@ -121,373 +63,10 @@ RwStreamMaterializedView(name=[t1])
               "typeName": "BOOLEAN"
             }
           }
-        },
-        "input": {
-          "body": {
-            "@type": "type.googleapis.com/stream_plan.TableSourceNode",
-            "tableRefId": {
-              "schemaRefId": {
-                "databaseRefId": {
-                }
-              }
-            },
-            "columnIds": [0, 1]
-          }
-        }
-      }
-    }
-  }
-}
-]]>
-        </Resource>>
-    </TestCase>
-
-
-    <TestCase name="query 2">
-        <Resource name="sql">
-            <![CDATA[
-create materialized view T2 as select v1+v2 as V from t
-            ]]>
-        </Resource>
-        <Resource name="plan">
-            <![CDATA[
-RwStreamMaterializedView(name=[t2])
-  RwStreamProject(v=[+($0, $1)])
-    RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
-]]>
-        </Resource>
-        <Resource name="json">
-            <![CDATA[
-{
-  "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
-  "body": {
-    "@type": "type.googleapis.com/stream_plan.MViewNode",
-    "tableRefId": {
-      "schemaRefId": {
-        "databaseRefId": {
         }
       },
-      "tableId": 2
-    },
-    "columnDescs": [{
-      "columnType": {
-        "typeName": "INT32"
-      },
-      "encoding": "RAW"
-    }]
-  },
-  "input": {
-    "nodeType": "PROJECTION",
-    "body": {
-      "@type": "type.googleapis.com/stream_plan.ProjectNode",
-      "selectList": [{
-        "exprType": "ADD",
-        "body": {
-          "@type": "type.googleapis.com/expr.FunctionCall",
-          "children": [{
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr"
-            },
-            "returnType": {
-              "typeName": "INT32"
-            }
-          }, {
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr",
-              "columnIdx": 1
-            },
-            "returnType": {
-              "typeName": "INT32"
-            }
-          }]
-        },
-        "returnType": {
-          "typeName": "INT32"
-        }
-      }]
-    },
-    "input": {
-      "body": {
-        "@type": "type.googleapis.com/stream_plan.TableSourceNode",
-        "tableRefId": {
-          "schemaRefId": {
-            "databaseRefId": {
-            }
-          }
-        },
-        "columnIds": [0, 1]
-      }
-    }
-  }
-}
-]]>
-        </Resource>
-    </TestCase>
-
-
-    <TestCase name="query 3">
-        <Resource name="sql">
-            <![CDATA[
-create materialized view T3 as select v2, sum(v1) as V from t group by v2
-            ]]>
-        </Resource>
-        <Resource name="plan">
-            <![CDATA[
-RwStreamMaterializedView(name=[t3])
-  RwStreamProject(v2=[$0], v=[$1])
-    RwStreamFilter(condition=[<>($2, 0)])
-      RwStreamAgg(group=[{0}], v=[SUM($1)], Row Count=[COUNT()])
-        RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1])
-]]>
-        </Resource>
-        <Resource name="json">
-            <![CDATA[
-{
-  "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
-  "body": {
-    "@type": "type.googleapis.com/stream_plan.MViewNode",
-    "tableRefId": {
-      "schemaRefId": {
-        "databaseRefId": {
-        }
-      },
-      "tableId": 3
-    },
-    "columnDescs": [{
-      "columnType": {
-        "typeName": "INT32"
-      },
-      "encoding": "RAW"
-    }, {
-      "columnType": {
-        "typeName": "INT32"
-      },
-      "encoding": "RAW"
-    }]
-  },
-  "input": {
-    "nodeType": "PROJECTION",
-    "body": {
-      "@type": "type.googleapis.com/stream_plan.ProjectNode",
-      "selectList": [{
-        "exprType": "INPUT_REF",
-        "body": {
-          "@type": "type.googleapis.com/expr.InputRefExpr"
-        },
-        "returnType": {
-          "typeName": "INT32"
-        }
-      }, {
-        "exprType": "INPUT_REF",
-        "body": {
-          "@type": "type.googleapis.com/expr.InputRefExpr",
-          "columnIdx": 1
-        },
-        "returnType": {
-          "typeName": "INT32"
-        }
-      }]
-    },
-    "input": {
-      "nodeType": "FILTER",
-      "body": {
-        "@type": "type.googleapis.com/stream_plan.FilterNode",
-        "searchCondition": {
-          "exprType": "NOT_EQUAL",
-          "body": {
-            "@type": "type.googleapis.com/expr.FunctionCall",
-            "children": [{
-              "exprType": "INPUT_REF",
-              "body": {
-                "@type": "type.googleapis.com/expr.InputRefExpr",
-                "columnIdx": 2
-              },
-              "returnType": {
-                "typeName": "INT64"
-              }
-            }, {
-              "exprType": "CONSTANT_VALUE",
-              "body": {
-                "@type": "type.googleapis.com/expr.ConstantValue",
-                "body": "AAAAAAAAAAA="
-              },
-              "returnType": {
-                "typeName": "INT64"
-              }
-            }]
-          },
-          "returnType": {
-            "typeName": "BOOLEAN"
-          }
-        }
-      },
-      "input": {
-        "nodeType": "LOCAL_HASH_AGG",
-        "body": {
-          "@type": "type.googleapis.com/stream_plan.HashAggNode",
-          "groupKeys": [{
-          }],
-          "aggCalls": [{
-            "type": "SUM",
-            "args": [{
-              "input": {
-                "columnIdx": 1
-              },
-              "type": {
-                "typeName": "INT32"
-              }
-            }],
-            "returnType": {
-              "typeName": "INT32"
-            }
-          }, {
-            "type": "COUNT",
-            "returnType": {
-              "typeName": "INT64"
-            }
-          }]
-        },
-        "input": {
-          "body": {
-            "@type": "type.googleapis.com/stream_plan.TableSourceNode",
-            "tableRefId": {
-              "schemaRefId": {
-                "databaseRefId": {
-                }
-              }
-            },
-            "columnIds": [1, 0]
-          }
-        }
-      }
-    }
-  }
-}
-]]>
-        </Resource>
-    </TestCase>
-
-    <TestCase name="query 4">
-        <Resource name="sql">
-            <![CDATA[
-create materialized view T4 as select sum(v1)+sum(v2) as V from t
-            ]]>
-        </Resource>
-        <Resource name="plan">
-            <![CDATA[
-RwStreamMaterializedView(name=[t4])
-  RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($2, $0), $STREAM_NULL_BY_ROW_COUNT($2, $1))])
-    RwStreamAgg(group=[{}], agg#0=[SUM($0)], agg#1=[SUM($1)], Row Count=[COUNT()])
-      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
-]]>
-        </Resource>
-        <Resource name="json">
-            <![CDATA[
-{
-  "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
-  "body": {
-    "@type": "type.googleapis.com/stream_plan.MViewNode",
-    "tableRefId": {
-      "schemaRefId": {
-        "databaseRefId": {
-        }
-      },
-      "tableId": 4
-    },
-    "columnDescs": [{
-      "columnType": {
-        "typeName": "INT32"
-      },
-      "encoding": "RAW"
-    }]
-  },
-  "input": {
-    "nodeType": "PROJECTION",
-    "body": {
-      "@type": "type.googleapis.com/stream_plan.ProjectNode",
-      "selectList": [{
-        "exprType": "ADD",
-        "body": {
-          "@type": "type.googleapis.com/expr.FunctionCall",
-          "children": [{
-            "exprType": "STREAM_NULL_BY_ROW_COUNT",
-            "body": {
-              "@type": "type.googleapis.com/expr.FunctionCall",
-              "children": [{
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 2
-                },
-                "returnType": {
-                  "typeName": "INT64"
-                }
-              }, {
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr"
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                }
-              }]
-            },
-            "returnType": {
-              "typeName": "INT32"
-            }
-          }, {
-            "exprType": "STREAM_NULL_BY_ROW_COUNT",
-            "body": {
-              "@type": "type.googleapis.com/expr.FunctionCall",
-              "children": [{
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 2
-                },
-                "returnType": {
-                  "typeName": "INT64"
-                }
-              }, {
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 1
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                }
-              }]
-            },
-            "returnType": {
-              "typeName": "INT32"
-            }
-          }]
-        },
-        "returnType": {
-          "typeName": "INT32"
-        }
-      }]
-    },
-    "input": {
-      "nodeType": "LOCAL_SIMPLE_AGG",
-      "body": {
-        "@type": "type.googleapis.com/stream_plan.SimpleAggNode",
+      "simpleAggNode": {
         "aggCalls": [{
-          "type": "SUM",
-          "args": [{
-            "input": {
-            },
-            "type": {
-              "typeName": "INT32"
-            }
-          }],
-          "returnType": {
-            "typeName": "INT32"
-          }
-        }, {
           "type": "SUM",
           "args": [{
             "input": {
@@ -506,65 +85,9 @@ RwStreamMaterializedView(name=[t4])
             "typeName": "INT64"
           }
         }]
-      },
-      "input": {
-        "body": {
-          "@type": "type.googleapis.com/stream_plan.TableSourceNode",
-          "tableRefId": {
-            "schemaRefId": {
-              "databaseRefId": {
-              }
-            }
-          },
-          "columnIds": [0, 1]
-        }
       }
-    }
-  }
-}
-]]>
-        </Resource>
-    </TestCase>
-
-    <TestCase name="query 5">
-        <Resource name="sql">
-            <![CDATA[
-create materialized view T5 as select sum(v1+v2) as V from t
-            ]]>
-        </Resource>
-        <Resource name="plan">
-            <![CDATA[
-RwStreamMaterializedView(name=[t5])
-  RwStreamProject(v=[$STREAM_NULL_BY_ROW_COUNT($1, $0)])
-    RwStreamAgg(group=[{}], v=[SUM($0)], Row Count=[COUNT()])
-      RwStreamProject($f0=[+($0, $1)])
-        RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
-]]>
-        </Resource>
-        <Resource name="json">
-            <![CDATA[
-{
-  "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
-  "body": {
-    "@type": "type.googleapis.com/stream_plan.MViewNode",
-    "tableRefId": {
-      "schemaRefId": {
-        "databaseRefId": {
-        }
-      },
-      "tableId": 5
     },
-    "columnDescs": [{
-      "columnType": {
-        "typeName": "INT32"
-      },
-      "encoding": "RAW"
-    }]
-  },
-  "input": {
-    "nodeType": "PROJECTION",
-    "body": {
-      "@type": "type.googleapis.com/stream_plan.ProjectNode",
+    "projectNode": {
       "selectList": [{
         "exprType": "STREAM_NULL_BY_ROW_COUNT",
         "body": {
@@ -592,92 +115,120 @@ RwStreamMaterializedView(name=[t5])
           "typeName": "INT32"
         }
       }]
+    }
+  },
+  "mviewNode": {
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      },
+      "tableId": 1
     },
+    "columnDescs": [{
+      "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW"
+    }]
+  }
+}
+]]>
+        </Resource>>
+    </TestCase>
+
+
+    <TestCase name="query 2">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T2 as select v1+v2 as V from t
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[t2])
+  RwStreamProject(v=[+($0, $1)])
+    RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
+]]>
+        </Resource>
+        <Resource name="json">
+            <![CDATA[
+{
+  "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
+  "input": {
+    "nodeType": "PROJECTION",
     "input": {
-      "nodeType": "LOCAL_SIMPLE_AGG",
-      "body": {
-        "@type": "type.googleapis.com/stream_plan.SimpleAggNode",
-        "aggCalls": [{
-          "type": "SUM",
-          "args": [{
-            "input": {
+      "tableSourceNode": {
+        "tableRefId": {
+          "schemaRefId": {
+            "databaseRefId": {
+            }
+          }
+        },
+        "columnIds": [0, 1]
+      }
+    },
+    "projectNode": {
+      "selectList": [{
+        "exprType": "ADD",
+        "body": {
+          "@type": "type.googleapis.com/expr.FunctionCall",
+          "children": [{
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/expr.InputRefExpr"
             },
-            "type": {
+            "returnType": {
               "typeName": "INT32"
             }
-          }],
-          "returnType": {
-            "typeName": "INT32"
-          }
-        }, {
-          "type": "COUNT",
-          "returnType": {
-            "typeName": "INT64"
-          }
-        }]
-      },
-      "input": {
-        "nodeType": "PROJECTION",
-        "body": {
-          "@type": "type.googleapis.com/stream_plan.ProjectNode",
-          "selectList": [{
-            "exprType": "ADD",
+          }, {
+            "exprType": "INPUT_REF",
             "body": {
-              "@type": "type.googleapis.com/expr.FunctionCall",
-              "children": [{
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr"
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                }
-              }, {
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 1
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                }
-              }]
+              "@type": "type.googleapis.com/expr.InputRefExpr",
+              "columnIdx": 1
             },
             "returnType": {
               "typeName": "INT32"
             }
           }]
         },
-        "input": {
-          "body": {
-            "@type": "type.googleapis.com/stream_plan.TableSourceNode",
-            "tableRefId": {
-              "schemaRefId": {
-                "databaseRefId": {
-                }
-              }
-            },
-            "columnIds": [0, 1]
-          }
+        "returnType": {
+          "typeName": "INT32"
         }
-      }
+      }]
     }
+  },
+  "mviewNode": {
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      },
+      "tableId": 2
+    },
+    "columnDescs": [{
+      "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW"
+    }]
   }
 }
 ]]>
         </Resource>
     </TestCase>
 
-    <TestCase name="query 6">
+
+    <TestCase name="query 3">
         <Resource name="sql">
             <![CDATA[
-create materialized view T6 as select sum(v1) as V from t group by v2
+create materialized view T3 as select v2, sum(v1) as V from t group by v2
             ]]>
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[t6])
-  RwStreamProject(v=[$1])
+RwStreamMaterializedView(name=[t3])
+  RwStreamProject(v2=[$0], v=[$1])
     RwStreamFilter(condition=[<>($2, 0)])
       RwStreamAgg(group=[{0}], v=[SUM($1)], Row Count=[COUNT()])
         RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1])
@@ -687,41 +238,48 @@ RwStreamMaterializedView(name=[t6])
             <![CDATA[
 {
   "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
-  "body": {
-    "@type": "type.googleapis.com/stream_plan.MViewNode",
-    "tableRefId": {
-      "schemaRefId": {
-        "databaseRefId": {
-        }
-      },
-      "tableId": 6
-    },
-    "columnDescs": [{
-      "columnType": {
-        "typeName": "INT32"
-      },
-      "encoding": "RAW"
-    }]
-  },
   "input": {
     "nodeType": "PROJECTION",
-    "body": {
-      "@type": "type.googleapis.com/stream_plan.ProjectNode",
-      "selectList": [{
-        "exprType": "INPUT_REF",
-        "body": {
-          "@type": "type.googleapis.com/expr.InputRefExpr",
-          "columnIdx": 1
-        },
-        "returnType": {
-          "typeName": "INT32"
-        }
-      }]
-    },
     "input": {
       "nodeType": "FILTER",
-      "body": {
-        "@type": "type.googleapis.com/stream_plan.FilterNode",
+      "input": {
+        "nodeType": "HASH_AGG",
+        "input": {
+          "tableSourceNode": {
+            "tableRefId": {
+              "schemaRefId": {
+                "databaseRefId": {
+                }
+              }
+            },
+            "columnIds": [1, 0]
+          }
+        },
+        "hashAggNode": {
+          "groupKeys": [{
+          }],
+          "aggCalls": [{
+            "type": "SUM",
+            "args": [{
+              "input": {
+                "columnIdx": 1
+              },
+              "type": {
+                "typeName": "INT32"
+              }
+            }],
+            "returnType": {
+              "typeName": "INT32"
+            }
+          }, {
+            "type": "COUNT",
+            "returnType": {
+              "typeName": "INT64"
+            }
+          }]
+        }
+      },
+      "filterNode": {
         "searchCondition": {
           "exprType": "NOT_EQUAL",
           "body": {
@@ -750,11 +308,381 @@ RwStreamMaterializedView(name=[t6])
             "typeName": "BOOLEAN"
           }
         }
-      },
-      "input": {
-        "nodeType": "LOCAL_HASH_AGG",
+      }
+    },
+    "projectNode": {
+      "selectList": [{
+        "exprType": "INPUT_REF",
         "body": {
-          "@type": "type.googleapis.com/stream_plan.HashAggNode",
+          "@type": "type.googleapis.com/expr.InputRefExpr"
+        },
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }, {
+        "exprType": "INPUT_REF",
+        "body": {
+          "@type": "type.googleapis.com/expr.InputRefExpr",
+          "columnIdx": 1
+        },
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }]
+    }
+  },
+  "mviewNode": {
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      },
+      "tableId": 3
+    },
+    "columnDescs": [{
+      "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW"
+    }, {
+      "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW"
+    }]
+  }
+}
+]]>
+        </Resource>
+    </TestCase>
+
+    <TestCase name="query 4">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T4 as select sum(v1)+sum(v2) as V from t
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[t4])
+  RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($2, $0), $STREAM_NULL_BY_ROW_COUNT($2, $1))])
+    RwStreamAgg(group=[{}], agg#0=[SUM($0)], agg#1=[SUM($1)], Row Count=[COUNT()])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
+]]>
+        </Resource>
+        <Resource name="json">
+            <![CDATA[
+{
+  "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
+  "input": {
+    "nodeType": "PROJECTION",
+    "input": {
+      "nodeType": "SIMPLE_AGG",
+      "input": {
+        "tableSourceNode": {
+          "tableRefId": {
+            "schemaRefId": {
+              "databaseRefId": {
+              }
+            }
+          },
+          "columnIds": [0, 1]
+        }
+      },
+      "simpleAggNode": {
+        "aggCalls": [{
+          "type": "SUM",
+          "args": [{
+            "input": {
+            },
+            "type": {
+              "typeName": "INT32"
+            }
+          }],
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }, {
+          "type": "SUM",
+          "args": [{
+            "input": {
+              "columnIdx": 1
+            },
+            "type": {
+              "typeName": "INT32"
+            }
+          }],
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }, {
+          "type": "COUNT",
+          "returnType": {
+            "typeName": "INT64"
+          }
+        }]
+      }
+    },
+    "projectNode": {
+      "selectList": [{
+        "exprType": "ADD",
+        "body": {
+          "@type": "type.googleapis.com/expr.FunctionCall",
+          "children": [{
+            "exprType": "STREAM_NULL_BY_ROW_COUNT",
+            "body": {
+              "@type": "type.googleapis.com/expr.FunctionCall",
+              "children": [{
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr",
+                  "columnIdx": 2
+                },
+                "returnType": {
+                  "typeName": "INT64"
+                }
+              }, {
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr"
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                }
+              }]
+            },
+            "returnType": {
+              "typeName": "INT32"
+            }
+          }, {
+            "exprType": "STREAM_NULL_BY_ROW_COUNT",
+            "body": {
+              "@type": "type.googleapis.com/expr.FunctionCall",
+              "children": [{
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr",
+                  "columnIdx": 2
+                },
+                "returnType": {
+                  "typeName": "INT64"
+                }
+              }, {
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr",
+                  "columnIdx": 1
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                }
+              }]
+            },
+            "returnType": {
+              "typeName": "INT32"
+            }
+          }]
+        },
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }]
+    }
+  },
+  "mviewNode": {
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      },
+      "tableId": 4
+    },
+    "columnDescs": [{
+      "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW"
+    }]
+  }
+}
+]]>
+        </Resource>
+    </TestCase>
+
+    <TestCase name="query 5">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T5 as select sum(v1+v2) as V from t
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[t5])
+  RwStreamProject(v=[$STREAM_NULL_BY_ROW_COUNT($1, $0)])
+    RwStreamAgg(group=[{}], v=[SUM($0)], Row Count=[COUNT()])
+      RwStreamProject($f0=[+($0, $1)])
+        RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
+]]>
+        </Resource>
+        <Resource name="json">
+            <![CDATA[
+{
+  "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
+  "input": {
+    "nodeType": "PROJECTION",
+    "input": {
+      "nodeType": "SIMPLE_AGG",
+      "input": {
+        "nodeType": "PROJECTION",
+        "input": {
+          "tableSourceNode": {
+            "tableRefId": {
+              "schemaRefId": {
+                "databaseRefId": {
+                }
+              }
+            },
+            "columnIds": [0, 1]
+          }
+        },
+        "projectNode": {
+          "selectList": [{
+            "exprType": "ADD",
+            "body": {
+              "@type": "type.googleapis.com/expr.FunctionCall",
+              "children": [{
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr"
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                }
+              }, {
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr",
+                  "columnIdx": 1
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                }
+              }]
+            },
+            "returnType": {
+              "typeName": "INT32"
+            }
+          }]
+        }
+      },
+      "simpleAggNode": {
+        "aggCalls": [{
+          "type": "SUM",
+          "args": [{
+            "input": {
+            },
+            "type": {
+              "typeName": "INT32"
+            }
+          }],
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }, {
+          "type": "COUNT",
+          "returnType": {
+            "typeName": "INT64"
+          }
+        }]
+      }
+    },
+    "projectNode": {
+      "selectList": [{
+        "exprType": "STREAM_NULL_BY_ROW_COUNT",
+        "body": {
+          "@type": "type.googleapis.com/expr.FunctionCall",
+          "children": [{
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/expr.InputRefExpr",
+              "columnIdx": 1
+            },
+            "returnType": {
+              "typeName": "INT64"
+            }
+          }, {
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/expr.InputRefExpr"
+            },
+            "returnType": {
+              "typeName": "INT32"
+            }
+          }]
+        },
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }]
+    }
+  },
+  "mviewNode": {
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      },
+      "tableId": 5
+    },
+    "columnDescs": [{
+      "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW"
+    }]
+  }
+}
+]]>
+        </Resource>
+    </TestCase>
+
+    <TestCase name="query 6">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T6 as select sum(v1) as V from t group by v2
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[t6])
+  RwStreamProject(v=[$1])
+    RwStreamFilter(condition=[<>($2, 0)])
+      RwStreamAgg(group=[{0}], v=[SUM($1)], Row Count=[COUNT()])
+        RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1])
+]]>
+        </Resource>
+        <Resource name="json">
+            <![CDATA[
+{
+  "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
+  "input": {
+    "nodeType": "PROJECTION",
+    "input": {
+      "nodeType": "FILTER",
+      "input": {
+        "nodeType": "HASH_AGG",
+        "input": {
+          "tableSourceNode": {
+            "tableRefId": {
+              "schemaRefId": {
+                "databaseRefId": {
+                }
+              }
+            },
+            "columnIds": [1, 0]
+          }
+        },
+        "hashAggNode": {
           "groupKeys": [{
           }],
           "aggCalls": [{
@@ -776,21 +704,66 @@ RwStreamMaterializedView(name=[t6])
               "typeName": "INT64"
             }
           }]
-        },
-        "input": {
+        }
+      },
+      "filterNode": {
+        "searchCondition": {
+          "exprType": "NOT_EQUAL",
           "body": {
-            "@type": "type.googleapis.com/stream_plan.TableSourceNode",
-            "tableRefId": {
-              "schemaRefId": {
-                "databaseRefId": {
-                }
+            "@type": "type.googleapis.com/expr.FunctionCall",
+            "children": [{
+              "exprType": "INPUT_REF",
+              "body": {
+                "@type": "type.googleapis.com/expr.InputRefExpr",
+                "columnIdx": 2
+              },
+              "returnType": {
+                "typeName": "INT64"
               }
-            },
-            "columnIds": [1, 0]
+            }, {
+              "exprType": "CONSTANT_VALUE",
+              "body": {
+                "@type": "type.googleapis.com/expr.ConstantValue",
+                "body": "AAAAAAAAAAA="
+              },
+              "returnType": {
+                "typeName": "INT64"
+              }
+            }]
+          },
+          "returnType": {
+            "typeName": "BOOLEAN"
           }
         }
       }
+    },
+    "projectNode": {
+      "selectList": [{
+        "exprType": "INPUT_REF",
+        "body": {
+          "@type": "type.googleapis.com/expr.InputRefExpr",
+          "columnIdx": 1
+        },
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }]
     }
+  },
+  "mviewNode": {
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      },
+      "tableId": 6
+    },
+    "columnDescs": [{
+      "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW"
+    }]
   }
 }
 ]]>
@@ -816,26 +789,79 @@ RwStreamMaterializedView(name=[t7])
             <![CDATA[
 {
   "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
-  "body": {
-    "@type": "type.googleapis.com/stream_plan.MViewNode",
-    "tableRefId": {
-      "schemaRefId": {
-        "databaseRefId": {
-        }
-      },
-      "tableId": 7
-    },
-    "columnDescs": [{
-      "columnType": {
-        "typeName": "INT32"
-      },
-      "encoding": "RAW"
-    }]
-  },
   "input": {
     "nodeType": "PROJECTION",
-    "body": {
-      "@type": "type.googleapis.com/stream_plan.ProjectNode",
+    "input": {
+      "nodeType": "FILTER",
+      "input": {
+        "nodeType": "HASH_AGG",
+        "input": {
+          "tableSourceNode": {
+            "tableRefId": {
+              "schemaRefId": {
+                "databaseRefId": {
+                }
+              }
+            },
+            "columnIds": [1, 0]
+          }
+        },
+        "hashAggNode": {
+          "groupKeys": [{
+          }],
+          "aggCalls": [{
+            "type": "SUM",
+            "args": [{
+              "input": {
+                "columnIdx": 1
+              },
+              "type": {
+                "typeName": "INT32"
+              }
+            }],
+            "returnType": {
+              "typeName": "INT32"
+            }
+          }, {
+            "type": "COUNT",
+            "returnType": {
+              "typeName": "INT64"
+            }
+          }]
+        }
+      },
+      "filterNode": {
+        "searchCondition": {
+          "exprType": "NOT_EQUAL",
+          "body": {
+            "@type": "type.googleapis.com/expr.FunctionCall",
+            "children": [{
+              "exprType": "INPUT_REF",
+              "body": {
+                "@type": "type.googleapis.com/expr.InputRefExpr",
+                "columnIdx": 2
+              },
+              "returnType": {
+                "typeName": "INT64"
+              }
+            }, {
+              "exprType": "CONSTANT_VALUE",
+              "body": {
+                "@type": "type.googleapis.com/expr.ConstantValue",
+                "body": "AAAAAAAAAAA="
+              },
+              "returnType": {
+                "typeName": "INT64"
+              }
+            }]
+          },
+          "returnType": {
+            "typeName": "BOOLEAN"
+          }
+        }
+      }
+    },
+    "projectNode": {
       "selectList": [{
         "exprType": "ADD",
         "body": {
@@ -864,80 +890,22 @@ RwStreamMaterializedView(name=[t7])
           "typeName": "INT32"
         }
       }]
-    },
-    "input": {
-      "nodeType": "FILTER",
-      "body": {
-        "@type": "type.googleapis.com/stream_plan.FilterNode",
-        "searchCondition": {
-          "exprType": "NOT_EQUAL",
-          "body": {
-            "@type": "type.googleapis.com/expr.FunctionCall",
-            "children": [{
-              "exprType": "INPUT_REF",
-              "body": {
-                "@type": "type.googleapis.com/expr.InputRefExpr",
-                "columnIdx": 2
-              },
-              "returnType": {
-                "typeName": "INT64"
-              }
-            }, {
-              "exprType": "CONSTANT_VALUE",
-              "body": {
-                "@type": "type.googleapis.com/expr.ConstantValue",
-                "body": "AAAAAAAAAAA="
-              },
-              "returnType": {
-                "typeName": "INT64"
-              }
-            }]
-          },
-          "returnType": {
-            "typeName": "BOOLEAN"
-          }
+    }
+  },
+  "mviewNode": {
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
         }
       },
-      "input": {
-        "nodeType": "LOCAL_HASH_AGG",
-        "body": {
-          "@type": "type.googleapis.com/stream_plan.HashAggNode",
-          "groupKeys": [{
-          }],
-          "aggCalls": [{
-            "type": "SUM",
-            "args": [{
-              "input": {
-                "columnIdx": 1
-              },
-              "type": {
-                "typeName": "INT32"
-              }
-            }],
-            "returnType": {
-              "typeName": "INT32"
-            }
-          }, {
-            "type": "COUNT",
-            "returnType": {
-              "typeName": "INT64"
-            }
-          }]
-        },
-        "input": {
-          "body": {
-            "@type": "type.googleapis.com/stream_plan.TableSourceNode",
-            "tableRefId": {
-              "schemaRefId": {
-                "databaseRefId": {
-                }
-              }
-            },
-            "columnIds": [1, 0]
-          }
-        }
-      }
-    }
+      "tableId": 7
+    },
+    "columnDescs": [{
+      "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW"
+    }]
   }
 }
 ]]>
@@ -962,26 +930,75 @@ RwStreamMaterializedView(name=[t8])
             <![CDATA[
 {
   "nodeType": "MEMTABLE_MATERIALIZED_VIEW",
-  "body": {
-    "@type": "type.googleapis.com/stream_plan.MViewNode",
-    "tableRefId": {
-      "schemaRefId": {
-        "databaseRefId": {
-        }
-      },
-      "tableId": 8
-    },
-    "columnDescs": [{
-      "columnType": {
-        "typeName": "INT32"
-      },
-      "encoding": "RAW"
-    }]
-  },
   "input": {
     "nodeType": "PROJECTION",
-    "body": {
-      "@type": "type.googleapis.com/stream_plan.ProjectNode",
+    "input": {
+      "nodeType": "SIMPLE_AGG",
+      "input": {
+        "nodeType": "FILTER",
+        "input": {
+          "tableSourceNode": {
+            "tableRefId": {
+              "schemaRefId": {
+                "databaseRefId": {
+                }
+              }
+            },
+            "columnIds": [0, 1]
+          }
+        },
+        "filterNode": {
+          "searchCondition": {
+            "exprType": "GREATER_THAN",
+            "body": {
+              "@type": "type.googleapis.com/expr.FunctionCall",
+              "children": [{
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr"
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                }
+              }, {
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr",
+                  "columnIdx": 1
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                }
+              }]
+            },
+            "returnType": {
+              "typeName": "BOOLEAN"
+            }
+          }
+        }
+      },
+      "simpleAggNode": {
+        "aggCalls": [{
+          "type": "SUM",
+          "args": [{
+            "input": {
+            },
+            "type": {
+              "typeName": "INT32"
+            }
+          }],
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }, {
+          "type": "COUNT",
+          "returnType": {
+            "typeName": "INT64"
+          }
+        }]
+      }
+    },
+    "projectNode": {
       "selectList": [{
         "exprType": "ADD",
         "body": {
@@ -1027,76 +1044,22 @@ RwStreamMaterializedView(name=[t8])
           "typeName": "INT32"
         }
       }]
-    },
-    "input": {
-      "nodeType": "LOCAL_SIMPLE_AGG",
-      "body": {
-        "@type": "type.googleapis.com/stream_plan.SimpleAggNode",
-        "aggCalls": [{
-          "type": "SUM",
-          "args": [{
-            "input": {
-            },
-            "type": {
-              "typeName": "INT32"
-            }
-          }],
-          "returnType": {
-            "typeName": "INT32"
-          }
-        }, {
-          "type": "COUNT",
-          "returnType": {
-            "typeName": "INT64"
-          }
-        }]
-      },
-      "input": {
-        "nodeType": "FILTER",
-        "body": {
-          "@type": "type.googleapis.com/stream_plan.FilterNode",
-          "searchCondition": {
-            "exprType": "GREATER_THAN",
-            "body": {
-              "@type": "type.googleapis.com/expr.FunctionCall",
-              "children": [{
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr"
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                }
-              }, {
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 1
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                }
-              }]
-            },
-            "returnType": {
-              "typeName": "BOOLEAN"
-            }
-          }
-        },
-        "input": {
-          "body": {
-            "@type": "type.googleapis.com/stream_plan.TableSourceNode",
-            "tableRefId": {
-              "schemaRefId": {
-                "databaseRefId": {
-                }
-              }
-            },
-            "columnIds": [0, 1]
-          }
-        }
-      }
     }
+  },
+  "mviewNode": {
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      },
+      "tableId": 8
+    },
+    "columnDescs": [{
+      "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW"
+    }]
   }
 }
             ]]>

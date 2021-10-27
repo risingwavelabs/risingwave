@@ -1,6 +1,5 @@
 package com.risingwave.planner.rel.physical.streaming;
 
-import com.google.protobuf.Any;
 import com.risingwave.catalog.ColumnDesc;
 import com.risingwave.catalog.ColumnEncoding;
 import com.risingwave.catalog.TableCatalog;
@@ -53,7 +52,7 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
         materializedViewNodeBuilder.setTableRefId(Messages.getTableRefId(tableId)).build();
     return StreamNode.newBuilder()
         .setNodeType(StreamNode.StreamNodeType.MEMTABLE_MATERIALIZED_VIEW)
-        .setBody(Any.pack(materializedViewNode))
+        .setMviewNode(materializedViewNode)
         .setInput(((RisingWaveStreamingRel) input).serialize())
         .build();
   }

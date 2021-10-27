@@ -5,16 +5,16 @@ use crate::catalog::TableId;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{build_from_proto as build_expr_from_proto, AggKind};
-use crate::protobuf::Message as _;
 use crate::storage::*;
 use crate::stream_op::*;
-use crate::types::build_from_proto as build_type_from_proto;
+use crate::types::build_from_prost as build_type_from_prost;
 use futures::channel::mpsc::{channel, Receiver, Sender};
 use itertools::Itertools;
 use pb_convert::FromProtobuf;
-use risingwave_proto::expr::AggCall as AggCallProto;
-use risingwave_proto::stream_plan;
-use risingwave_proto::stream_service;
+use risingwave_pb::expr;
+use risingwave_pb::stream_plan;
+use risingwave_pb::stream_service;
+use risingwave_pb::ToProto;
 use std::convert::TryFrom;
 use tokio::task::JoinHandle;
 
@@ -95,13 +95,13 @@ impl StreamManager {
     }
 }
 
-fn build_agg_call_from_proto(agg_call_proto: &AggCallProto) -> Result<AggCall> {
+fn build_agg_call_from_prost(agg_call_proto: &expr::AggCall) -> Result<AggCall> {
     let args = {
-        let args = agg_call_proto.get_args();
+        let args = &agg_call_proto.get_args()[..];
         match args {
             [] => AggArgs::None,
             [arg] => AggArgs::Unary(
-                build_type_from_proto(arg.get_field_type())?,
+                build_type_from_prost(arg.get_type())?,
                 arg.get_input().column_idx as usize,
             ),
             _ => {
@@ -112,9 +112,9 @@ fn build_agg_call_from_proto(agg_call_proto: &AggCallProto) -> Result<AggCall> {
         }
     };
     Ok(AggCall {
-        kind: AggKind::try_from(agg_call_proto.get_field_type())?,
+        kind: AggKind::try_from(agg_call_proto.get_type())?,
         args,
-        return_type: build_type_from_proto(agg_call_proto.get_return_type())?,
+        return_type: build_type_from_prost(agg_call_proto.get_return_type())?,
     })
 }
 
@@ -150,35 +150,35 @@ impl StreamManagerCore {
 
         assert_eq!(downstreams.len(), outputs.len());
 
-        use stream_plan::Dispatcher_DispatcherType::*;
-        match dispatcher.field_type {
-            ROUND_ROBIN => {
+        use stream_plan::dispatcher::DispatcherType::*;
+        match dispatcher.get_type() {
+            RoundRobin => {
                 assert!(!outputs.is_empty());
                 Box::new(DispatchExecutor::new(
                     input,
                     RoundRobinDataDispatcher::new(outputs),
                 ))
             }
-            HASH => {
+            Hash => {
                 assert!(!outputs.is_empty());
                 Box::new(DispatchExecutor::new(
                     input,
                     HashDataDispatcher::new(outputs, vec![dispatcher.get_column_idx() as usize]),
                 ))
             }
-            BROADCAST => {
+            Broadcast => {
                 assert!(!outputs.is_empty());
                 Box::new(DispatchExecutor::new(
                     input,
                     BroadcastDispatcher::new(outputs),
                 ))
             }
-            SIMPLE => {
+            Simple => {
                 assert_eq!(outputs.len(), 1);
                 let output = outputs.into_iter().next().unwrap();
                 Box::new(DispatchExecutor::new(input, SimpleDispatcher::new(output)))
             }
-            BLACKHOLE => Box::new(DispatchExecutor::new(input, BlackHoleDispatcher::new())),
+            Blackhole => Box::new(DispatchExecutor::new(input, BlackHoleDispatcher::new())),
         }
     }
 
@@ -189,24 +189,26 @@ impl StreamManagerCore {
         merger: Box<dyn Executor>,
         table_manager: TableManagerRef,
     ) -> Result<Box<dyn Executor>> {
-        use stream_plan::StreamNode_StreamNodeType::*;
+        use stream_plan::stream_node::Node::*;
 
         // Create the input executor before creating itself
         // Note(eric): Maybe we should put a `Merger` executor in proto
-        let input = if node.has_input() {
-            self.create_nodes(node.get_input(), merger, table_manager.clone())?
-        } else {
-            merger
+        let input = {
+            if node.input.is_some() {
+                self.create_nodes(node.get_input(), merger, table_manager.clone())?
+            } else {
+                merger
+            }
         };
 
-        let executor: Result<Box<dyn Executor>> = match node.get_node_type() {
-            TABLE_INGRESS => {
-                let table_source_node =
-                    stream_plan::TableSourceNode::parse_from_bytes(node.get_body().get_value())
-                        .map_err(ErrorCode::ProtobufError)?;
-
-                let table_id = TableId::from_protobuf(table_source_node.get_table_ref_id())
-                    .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
+        let executor: Result<Box<dyn Executor>> = match node.get_node() {
+            TableSourceNode(table_source_node) => {
+                let table_id = TableId::from_protobuf(
+                    &table_source_node
+                        .get_table_ref_id()
+                        .to_proto::<risingwave_proto::plan::TableRefId>(),
+                )
+                .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
                 let table_ref = table_manager.clone().get_table(&table_id).unwrap();
                 if let SimpleTableRef::Columnar(table) = table_ref {
@@ -221,42 +223,35 @@ impl StreamManagerCore {
                     )))
                 }
             }
-            PROJECTION => {
-                let project_node =
-                    stream_plan::ProjectNode::parse_from_bytes(node.get_body().get_value())
-                        .map_err(ErrorCode::ProtobufError)?;
+            ProjectNode(project_node) => {
                 let project_exprs = project_node
                     .get_select_list()
                     .iter()
-                    .map(build_expr_from_proto)
+                    .map(|select| {
+                        build_expr_from_proto(
+                            &select.to_proto::<risingwave_proto::expr::ExprNode>(),
+                        )
+                    })
                     .collect::<Result<Vec<_>>>()?;
                 Ok(Box::new(ProjectExecutor::new(input, project_exprs)))
             }
-            FILTER => {
-                let filter_node =
-                    stream_plan::FilterNode::parse_from_bytes(node.get_body().get_value())
-                        .map_err(ErrorCode::ProtobufError)?;
-                let search_condition = build_expr_from_proto(filter_node.get_search_condition())?;
+            FilterNode(filter_node) => {
+                let search_condition = build_expr_from_proto(
+                    &filter_node
+                        .get_search_condition()
+                        .to_proto::<risingwave_proto::expr::ExprNode>(),
+                )?;
                 Ok(Box::new(FilterExecutor::new(input, search_condition)))
             }
-            LOCAL_SIMPLE_AGG => {
-                let aggr_node =
-                    stream_plan::SimpleAggNode::parse_from_bytes(node.get_body().get_value())
-                        .map_err(ErrorCode::ProtobufError)?;
+            SimpleAggNode(aggr_node) => {
                 let agg_calls: Vec<AggCall> = aggr_node
                     .get_agg_calls()
                     .iter()
-                    .map(build_agg_call_from_proto)
+                    .map(|agg_call| build_agg_call_from_prost(agg_call))
                     .try_collect()?;
                 Ok(Box::new(SimpleAggExecutor::new(input, agg_calls)?))
             }
-            GLOBAL_SIMPLE_AGG => todo!(),
-            // TODO: There will be only one hash aggregation, combining LOCAL and GLOBAL
-            LOCAL_HASH_AGG => {
-                let aggr_node =
-                    stream_plan::HashAggNode::parse_from_bytes(node.get_body().get_value())
-                        .map_err(ErrorCode::ProtobufError)?;
-
+            HashAggNode(aggr_node) => {
                 let keys = aggr_node
                     .get_group_keys()
                     .iter()
@@ -266,21 +261,24 @@ impl StreamManagerCore {
                 let agg_calls: Vec<AggCall> = aggr_node
                     .get_agg_calls()
                     .iter()
-                    .map(build_agg_call_from_proto)
+                    .map(|agg_call| build_agg_call_from_prost(agg_call))
                     .try_collect()?;
 
                 Ok(Box::new(HashAggExecutor::new(input, agg_calls, keys)))
             }
-            GLOBAL_HASH_AGG => todo!(),
-            MEMTABLE_MATERIALIZED_VIEW => {
-                // We use stream_plan.MaterializedViewNode instead of stream_plan.MemTableMaterializedViewNode to unify the interface.
-                let materialized_view_node =
-                    stream_plan::MViewNode::parse_from_bytes(node.get_body().get_value())
-                        .map_err(ErrorCode::ProtobufError)?;
-                let table_id = TableId::from_protobuf(materialized_view_node.get_table_ref_id())
-                    .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
+            MviewNode(materialized_view_node) => {
+                let table_id = TableId::from_protobuf(
+                    &materialized_view_node
+                        .get_table_ref_id()
+                        .to_proto::<risingwave_proto::plan::TableRefId>(),
+                )
+                .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
-                let columns = materialized_view_node.get_column_descs().to_vec();
+                let columns = materialized_view_node
+                    .get_column_descs()
+                    .iter()
+                    .map(|column_desc| column_desc.to_proto::<risingwave_proto::plan::ColumnDesc>())
+                    .collect();
                 let pks = materialized_view_node
                     .pk_indices
                     .iter()
@@ -297,8 +295,8 @@ impl StreamManagerCore {
                     )))
                 }
             }
-            others => todo!("unsupported StreamNodeType: {:?}", others),
         };
+
         executor
     }
 

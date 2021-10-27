@@ -2,7 +2,6 @@ package com.risingwave.planner.rel.physical.streaming;
 
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
-import com.google.protobuf.Any;
 import com.risingwave.planner.rel.logical.RwLogicalProject;
 import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
 import com.risingwave.proto.streaming.plan.ProjectNode;
@@ -41,7 +40,7 @@ public class RwStreamProject extends Project implements RisingWaveStreamingRel {
     }
     return StreamNode.newBuilder()
         .setNodeType(StreamNode.StreamNodeType.PROJECTION)
-        .setBody(Any.pack(projectNodeBuilder.build()))
+        .setProjectNode(projectNodeBuilder.build())
         .setInput(((RisingWaveStreamingRel) input).serialize())
         .build();
   }

@@ -1,4 +1,5 @@
 use crate::error::{ErrorCode, Result, RwError};
+use risingwave_pb::expr::agg_call::Type;
 use risingwave_proto::expr::AggCall_Type;
 use std::convert::TryFrom;
 
@@ -23,6 +24,21 @@ impl TryFrom<AggCall_Type> for AggKind {
             AggCall_Type::SUM => Ok(AggKind::Sum),
             AggCall_Type::AVG => Ok(AggKind::Avg),
             AggCall_Type::COUNT => Ok(AggKind::Count),
+            _ => Err(ErrorCode::InternalError("Unrecognized agg.".into()).into()),
+        }
+    }
+}
+
+impl TryFrom<risingwave_pb::expr::agg_call::Type> for AggKind {
+    type Error = RwError;
+
+    fn try_from(prost: risingwave_pb::expr::agg_call::Type) -> Result<Self> {
+        match prost {
+            Type::Min => Ok(AggKind::Min),
+            Type::Max => Ok(AggKind::Max),
+            Type::Sum => Ok(AggKind::Sum),
+            Type::Avg => Ok(AggKind::Avg),
+            Type::Count => Ok(AggKind::Count),
             _ => Err(ErrorCode::InternalError("Unrecognized agg.".into()).into()),
         }
     }

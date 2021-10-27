@@ -2,7 +2,6 @@ package com.risingwave.planner.rel.physical.streaming;
 
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
-import com.google.protobuf.Any;
 import com.risingwave.planner.rel.logical.RwLogicalFilter;
 import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
 import com.risingwave.proto.streaming.plan.FilterNode;
@@ -31,7 +30,7 @@ public class RwStreamFilter extends Filter implements RisingWaveStreamingRel {
         FilterNode.newBuilder().setSearchCondition(condition.accept(rexVisitor)).build();
     return StreamNode.newBuilder()
         .setNodeType(StreamNode.StreamNodeType.FILTER)
-        .setBody(Any.pack(filterNode))
+        .setFilterNode(filterNode)
         .setInput(((RisingWaveStreamingRel) input).serialize())
         .build();
   }
