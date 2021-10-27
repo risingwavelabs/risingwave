@@ -224,8 +224,8 @@ impl SimpleExecutor for HashAggExecutor {
                 new_ops.push(Op::UpdateInsert);
                 key_array_builders.iter_mut().zip(key.iter()).try_for_each(
                     |(key_col, datum)| {
-                        key_col.append_datum(datum.clone())?;
-                        key_col.append_datum(datum.clone())
+                        key_col.append_datum(datum)?;
+                        key_col.append_datum(datum)
                     },
                 )?;
             } else {
@@ -233,7 +233,7 @@ impl SimpleExecutor for HashAggExecutor {
                 key_array_builders
                     .iter_mut()
                     .zip(key.iter())
-                    .try_for_each(|(key_col, datum)| key_col.append_datum(datum.clone()))?;
+                    .try_for_each(|(key_col, datum)| key_col.append_datum(datum))?;
             }
 
             Ok(())

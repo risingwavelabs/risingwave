@@ -318,10 +318,10 @@ macro_rules! impl_array_builder {
       }
 
       /// Append a datum, return error while type not match.
-      pub fn append_datum(&mut self, datum: Datum) -> Result<()> {
+      pub fn append_datum(&mut self, datum: &Datum) -> Result<()> {
         match datum {
           None => self.append_null(),
-          Some(scalar) => match (self, scalar) {
+          Some(ref scalar) => match (self, scalar) {
             $( (Self::$variant_name(inner), ScalarImpl::$variant_name(v)) => inner.append(Some(v.as_scalar_ref())), )*
             _ => Err(RwError::from(InternalError("Invalid datum type".to_string()))),
           },

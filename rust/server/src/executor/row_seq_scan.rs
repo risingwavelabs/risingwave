@@ -100,7 +100,7 @@ impl Executor for RowSeqScanExecutor {
                                 let mut builder = data_type.clone().create_array_builder(1)?;
                                 let mut i = 0;
                                 while i < *occ_value {
-                                    builder.append_datum(datum.clone())?;
+                                    builder.append_datum(datum)?;
                                     i += 1;
                                 }
                                 let array = builder.finish()?;
@@ -127,7 +127,7 @@ impl Executor for RowSeqScanExecutor {
                             {
                                 // We can scan row by row here currently.
                                 let mut builder = data_type.clone().create_array_builder(1)?;
-                                builder.append_datum(datum.clone())?;
+                                builder.append_datum(datum)?;
                                 let array = builder.finish()?;
                                 Ok(Column::new(Arc::new(array), data_type.clone()))
                             } else {

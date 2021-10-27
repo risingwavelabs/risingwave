@@ -56,7 +56,7 @@ impl ChunkReader {
                         datum_vec
                             .into_iter()
                             .zip(&mut builders)
-                            .try_for_each(|(datum, builder)| builder.append_datum(datum))?
+                            .try_for_each(|(datum, builder)| builder.append_datum(&datum))?
                     }
                 }
                 None => {
