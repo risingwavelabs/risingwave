@@ -38,7 +38,7 @@ pub trait Table: Sync + Send {
 /// `Database` is a logical concept and stored as metadata information.
 pub trait TableManager: Sync + Send {
     /// Create a specific table.
-    fn create_table(&self, table_id: &TableId, column_count: usize) -> Result<()>;
+    fn create_table(&self, table_id: &TableId, columns: &[ColumnDesc]) -> Result<()>;
 
     /// Get a specific table.
     fn get_table(&self, table_id: &TableId) -> Result<SimpleTableRef>;

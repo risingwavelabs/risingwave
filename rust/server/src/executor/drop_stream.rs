@@ -7,13 +7,14 @@ use crate::catalog::TableId;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::Result;
 use crate::executor::{
-    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult,
+    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult, Schema,
 };
 use crate::source::SourceManagerRef;
 
 pub(super) struct DropStreamExecutor {
     table_id: TableId,
     source_manager: SourceManagerRef,
+    schema: Schema,
 }
 
 #[async_trait::async_trait]
@@ -32,6 +33,10 @@ impl Executor for DropStreamExecutor {
         info!("drop table executor cleaned!");
         Ok(())
     }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
 }
 
 impl BoxedExecutorBuilder for DropStreamExecutor {
@@ -47,6 +52,7 @@ impl BoxedExecutorBuilder for DropStreamExecutor {
         Ok(Box::new(Self {
             table_id,
             source_manager: source.global_task_env().source_manager_ref(),
+            schema: Schema { fields: vec![] },
         }))
     }
 }
@@ -59,7 +65,7 @@ mod tests {
 
     use crate::catalog::test_utils::mock_table_id;
     use crate::executor::drop_stream::DropStreamExecutor;
-    use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
+    use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder, Schema};
     use crate::source::{
         FileSourceConfig, MemSourceManager, SourceConfig, SourceFormat, SourceManager,
     };
@@ -80,6 +86,7 @@ mod tests {
         let mut executor = DropStreamExecutor {
             table_id: table_id.clone(),
             source_manager: source_manager.clone(),
+            schema: Schema { fields: vec![] },
         };
         let create_result = source_manager.create_source(
             &table_id,

@@ -4,8 +4,9 @@ use crate::catalog::TableId;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::executor::ExecutorResult::Done;
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
+use crate::executor::{Executor, ExecutorBuilder, ExecutorResult, Field, Schema};
 use crate::storage::*;
+use crate::types::build_from_proto;
 use pb_convert::FromProtobuf;
 use protobuf::Message;
 use risingwave_proto::plan::{PlanNode_PlanNodeType, SeqScanNode};
@@ -18,6 +19,7 @@ pub(super) struct SeqScanExecutor {
     column_indices: Vec<usize>,
     data: Vec<DataChunkRef>,
     chunk_idx: usize,
+    schema: Schema,
 }
 
 impl BoxedExecutorBuilder for SeqScanExecutor {
@@ -42,11 +44,20 @@ impl BoxedExecutorBuilder for SeqScanExecutor {
                 .map(|c| table_ref.index_of_column_id(*c))
                 .collect::<Result<Vec<usize>>>()?;
 
+            let fields = table_ref
+                .columns()
+                .iter()
+                .map(|c| Field {
+                    data_type: build_from_proto(c.get_column_type()).unwrap(),
+                })
+                .collect::<Vec<Field>>();
+
             Ok(Box::new(Self {
                 table: table_ref,
                 column_indices,
                 chunk_idx: 0,
                 data: Vec::new(),
+                schema: Schema { fields },
             }))
         } else {
             Err(RwError::from(InternalError(
@@ -87,6 +98,10 @@ impl Executor for SeqScanExecutor {
         info!("Table scan closed.");
         Ok(())
     }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
 }
 
 impl SeqScanExecutor {
@@ -95,12 +110,14 @@ impl SeqScanExecutor {
         column_indices: Vec<usize>,
         data: Vec<DataChunkRef>,
         chunk_idx: usize,
+        schema: Schema,
     ) -> Self {
         Self {
             table,
             column_indices,
             data,
             chunk_idx,
+            schema,
         }
     }
 }
@@ -110,14 +127,33 @@ mod tests {
     use super::*;
     use crate::array::{Array, I64Array};
     use crate::catalog::test_utils::mock_table_id;
-    use crate::types::Int64Type;
+    use crate::types::{DataTypeKind, Int64Type};
     use crate::*;
+    use pb_construct::make_proto;
+    use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};
+    use risingwave_proto::plan::{ColumnDesc, ColumnDesc_ColumnEncodingType};
 
     #[tokio::test]
     async fn test_seq_scan_executor() -> Result<()> {
         let table_id = mock_table_id();
-        let table = SimpleMemTable::new(&table_id, 5);
+        let column = make_proto!(ColumnDesc, {
+          column_type: make_proto!(DataTypeProto, {
+            type_name: DataType_TypeName::INT64
+          }),
+          encoding: ColumnDesc_ColumnEncodingType::RAW,
+          is_primary: false,
+          name: "test_col".to_string()
+        });
+        let columns = vec![column];
+        let table = SimpleMemTable::new(&table_id, &columns);
 
+        let fields = table
+            .columns()
+            .iter()
+            .map(|c| Field {
+                data_type: build_from_proto(c.get_column_type()).unwrap(),
+            })
+            .collect::<Vec<Field>>();
         let col1 = column_nonnull! { I64Array, Int64Type, [1, 3, 5, 7, 9] };
         let col2 = column_nonnull! { I64Array, Int64Type, [2, 4, 6, 8, 10] };
         let data_chunk1 = DataChunk::builder().columns(vec![col1]).build();
@@ -130,8 +166,12 @@ mod tests {
             column_indices: vec![0],
             data: vec![],
             chunk_idx: 0,
+            schema: Schema { fields },
         };
         assert!(seq_scan_executor.init().is_ok());
+
+        let fields = &seq_scan_executor.schema().fields;
+        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int64);
 
         let result_chunk1 = seq_scan_executor.execute().await?.batch_or()?;
         assert_eq!(result_chunk1.dimension(), 1);

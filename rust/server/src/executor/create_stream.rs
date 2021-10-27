@@ -2,7 +2,7 @@ use crate::catalog::TableId;
 use crate::error::ErrorCode::{InternalError, ProtobufError, ProtocolError};
 use crate::error::Result;
 use crate::error::RwError;
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
+use crate::executor::{Executor, ExecutorBuilder, ExecutorResult, Schema};
 use crate::source::{FileSourceConfig, KafkaSourceConfig, SourceFormat};
 use crate::source::{SourceColumnDesc, SourceConfig, SourceManagerRef};
 use crate::types::build_from_proto;
@@ -21,6 +21,7 @@ pub(super) struct CreateStreamExecutor {
     format: SourceFormat,
     columns: Vec<SourceColumnDesc>,
     source_manager: SourceManagerRef,
+    schema: Schema,
 }
 
 macro_rules! get_from_properties {
@@ -96,6 +97,7 @@ impl BoxedExecutorBuilder for CreateStreamExecutor {
             format,
             source_manager: source.global_task_env().source_manager_ref(),
             columns,
+            schema: Schema { fields: vec![] },
         }))
     }
 }
@@ -121,5 +123,9 @@ impl Executor for CreateStreamExecutor {
     fn clean(&mut self) -> Result<()> {
         info!("create stream executor cleaned!");
         Ok(())
+    }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
     }
 }

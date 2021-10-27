@@ -4,7 +4,7 @@ use crate::array::ArrayImpl::Bool;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::Result;
 use crate::executor::ExecutorResult::{Batch, Done};
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
+use crate::executor::{Executor, ExecutorBuilder, ExecutorResult, Schema};
 use crate::expr::{build_from_proto, BoxedExpression};
 use protobuf::Message;
 use risingwave_proto::plan::{FilterNode, PlanNode_PlanNodeType};
@@ -41,6 +41,10 @@ impl Executor for FilterExecutor {
     fn clean(&mut self) -> Result<()> {
         self.child.clean()
     }
+
+    fn schema(&self) -> &Schema {
+        self.child.schema()
+    }
 }
 
 impl BoxedExecutorBuilder for FilterExecutor {
@@ -66,7 +70,8 @@ mod tests {
     use crate::array::column::Column;
     use crate::array::{Array, DataChunk, PrimitiveArray};
     use crate::executor::test_utils::MockExecutor;
-    use crate::types::Int32Type;
+    use crate::executor::{Field, Schema};
+    use crate::types::{DataTypeKind, Int32Type};
     use pb_construct::make_proto;
     use protobuf::well_known_types::Any as AnyProto;
     use protobuf::RepeatedField;
@@ -83,13 +88,26 @@ mod tests {
         let col1 = create_column(&[Some(2), Some(2)]).unwrap();
         let col2 = create_column(&[Some(1), Some(2)]).unwrap();
         let data_chunk = DataChunk::builder().columns([col1, col2].to_vec()).build();
-        let mut mock_executor = MockExecutor::new();
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    data_type: Int32Type::create(false),
+                },
+                Field {
+                    data_type: Int32Type::create(false),
+                },
+            ],
+        };
+        let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(data_chunk);
         let expr = make_expression(EQUAL);
         let mut filter_executor = FilterExecutor {
             expr: build_from_proto(&expr).unwrap(),
             child: Box::new(mock_executor),
         };
+        let fields = &filter_executor.schema().fields;
+        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
+        assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Int32);
         let res = filter_executor.execute().await.unwrap();
         if let Batch(res) = res {
             let col1 = res.column_at(0).unwrap();

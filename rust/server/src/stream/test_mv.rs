@@ -13,7 +13,7 @@ use risingwave_pb::ToProst;
 use risingwave_pb::ToProto;
 use risingwave_proto::data::{DataType, DataType_TypeName};
 use risingwave_proto::expr::{ExprNode_Type, InputRefExpr};
-use risingwave_proto::plan::ColumnDesc_ColumnEncodingType;
+use risingwave_proto::plan::{ColumnDesc, ColumnDesc_ColumnEncodingType};
 
 use crate::array::column::Column;
 use crate::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder};
@@ -101,7 +101,24 @@ async fn test_stream_mv_proto() {
         &make_table_ref_id(0).to_proto::<risingwave_proto::plan::TableRefId>(),
     )
     .expect("Failed to convert table id");
-    let _res = table_manager.create_table(&table_id, 2);
+    let column1 = make_proto!(ColumnDesc, {
+      column_type: make_proto!(DataType, {
+        type_name: DataType_TypeName::INT32
+      }),
+      encoding: ColumnDesc_ColumnEncodingType::RAW,
+      is_primary: false,
+      name: "test_col".to_string()
+    });
+    let column2 = make_proto!(ColumnDesc, {
+      column_type: make_proto!(DataType, {
+        type_name: DataType_TypeName::INT32
+      }),
+      encoding: ColumnDesc_ColumnEncodingType::RAW,
+      is_primary: false,
+      name: "test_col".to_string()
+    });
+    let columns = vec![column1, column2];
+    let _res = table_manager.create_table(&table_id, &columns);
     let table_ref =
         (if let SimpleTableRef::Columnar(table_ref) = table_manager.get_table(&table_id).unwrap() {
             Ok(table_ref)

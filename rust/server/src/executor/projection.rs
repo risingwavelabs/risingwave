@@ -4,7 +4,7 @@ use crate::array::DataChunk;
 use crate::error::ErrorCode::ProtobufError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::executor::ExecutorResult::{Batch, Done};
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
+use crate::executor::{Executor, ExecutorBuilder, ExecutorResult, Field, Schema};
 use crate::expr::{build_from_proto, BoxedExpression};
 use protobuf::Message;
 use risingwave_proto::plan::{PlanNode_PlanNodeType, ProjectNode};
@@ -12,6 +12,7 @@ use risingwave_proto::plan::{PlanNode_PlanNodeType, ProjectNode};
 pub(super) struct ProjectionExecutor {
     expr: Vec<BoxedExpression>,
     child: BoxedExecutor,
+    schema: Schema,
 }
 
 #[async_trait::async_trait]
@@ -44,6 +45,10 @@ impl Executor for ProjectionExecutor {
         self.child.clean()?;
         Ok(())
     }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
 }
 
 impl BoxedExecutorBuilder for ProjectionExecutor {
@@ -67,9 +72,17 @@ impl BoxedExecutorBuilder for ProjectionExecutor {
             .map(build_from_proto)
             .collect::<Result<Vec<BoxedExpression>>>()?;
 
+        let fields = project_exprs
+            .iter()
+            .map(|expr| Field {
+                data_type: expr.return_type_ref(),
+            })
+            .collect::<Vec<Field>>();
+
         Ok(Box::new(Self {
             expr: project_exprs,
             child: child_node,
+            schema: Schema { fields },
         }))
     }
 }
@@ -79,8 +92,9 @@ mod tests {
     use super::*;
     use crate::array::{Array, I32Array};
     use crate::executor::test_utils::MockExecutor;
+    use crate::executor::{Field, Schema};
     use crate::expr::InputRefExpression;
-    use crate::types::Int32Type;
+    use crate::types::{DataTypeKind, Int32Type};
     use crate::*;
 
     #[tokio::test]
@@ -93,14 +107,35 @@ mod tests {
         let expr1 = InputRefExpression::new(type1, 0);
         let expr_vec = vec![Box::new(expr1) as BoxedExpression];
 
-        let mut mock_executor = MockExecutor::new();
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    data_type: Int32Type::create(false),
+                },
+                Field {
+                    data_type: Int32Type::create(false),
+                },
+            ],
+        };
+        let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(chunk);
+
+        let fields = expr_vec
+            .iter()
+            .map(|expr| Field {
+                data_type: expr.return_type_ref(),
+            })
+            .collect::<Vec<Field>>();
 
         let mut proj_executor = ProjectionExecutor {
             expr: expr_vec,
             child: Box::new(mock_executor),
+            schema: Schema { fields },
         };
         assert!(proj_executor.init().is_ok());
+
+        let fields = &proj_executor.schema().fields;
+        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
 
         let result_chunk = proj_executor.execute().await?.batch_or()?;
         assert!(proj_executor.clean().is_ok());

@@ -1,7 +1,7 @@
 use crate::array::DataChunk;
 use crate::error::Result;
 use crate::executor::ExecutorResult::Done;
-use crate::executor::{Executor, ExecutorResult};
+use crate::executor::{Executor, ExecutorResult, Schema};
 use std::collections::VecDeque;
 
 // MockExecutor is to mock the input of executor.
@@ -9,12 +9,14 @@ use std::collections::VecDeque;
 // (HashAgg, e.g), so that allow testing without instantiating real SeqScans and real storage.
 pub struct MockExecutor {
     chunks: VecDeque<DataChunk>,
+    schema: Schema,
 }
 
 impl MockExecutor {
-    pub fn new() -> Self {
+    pub fn new(schema: Schema) -> Self {
         Self {
             chunks: VecDeque::new(),
+            schema,
         }
     }
 
@@ -39,5 +41,9 @@ impl Executor for MockExecutor {
 
     fn clean(&mut self) -> Result<()> {
         Ok(())
+    }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
     }
 }

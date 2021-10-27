@@ -1,7 +1,7 @@
 use crate::error::ErrorCode::ProtobufError;
 use crate::error::Result;
 use crate::execution::exchange_source::{ExchangeSource, GrpcExchangeSource, LocalExchangeSource};
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
+use crate::executor::{Executor, ExecutorBuilder, ExecutorResult, Schema};
 use crate::task::GlobalTaskEnv;
 use crate::util::addr::get_host_port;
 use protobuf::Message;
@@ -131,6 +131,10 @@ impl<CS: CreateSource> Executor for GenericExchangeExecutor<CS> {
 
     fn clean(&mut self) -> Result<()> {
         Ok(())
+    }
+
+    fn schema(&self) -> &Schema {
+        todo!()
     }
 }
 

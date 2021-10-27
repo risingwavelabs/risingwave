@@ -1,7 +1,7 @@
 use crate::catalog::TableId;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::Result;
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
+use crate::executor::{Executor, ExecutorBuilder, ExecutorResult, Schema};
 use crate::storage::TableManagerRef;
 use pb_convert::FromProtobuf;
 use protobuf::Message;
@@ -12,6 +12,7 @@ use super::{BoxedExecutor, BoxedExecutorBuilder};
 pub(super) struct DropTableExecutor {
     table_id: TableId,
     table_manager: TableManagerRef,
+    schema: Schema,
 }
 
 impl BoxedExecutorBuilder for DropTableExecutor {
@@ -27,6 +28,7 @@ impl BoxedExecutorBuilder for DropTableExecutor {
         Ok(Box::new(Self {
             table_id,
             table_manager: source.global_task_env().table_manager_ref(),
+            schema: Schema { fields: vec![] },
         }))
     }
 }
@@ -46,5 +48,9 @@ impl Executor for DropTableExecutor {
     fn clean(&mut self) -> Result<()> {
         info!("drop table executor cleaned!");
         Ok(())
+    }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
     }
 }

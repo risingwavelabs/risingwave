@@ -4,7 +4,7 @@ use crate::catalog::TableId;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
+use crate::executor::{Executor, ExecutorBuilder, ExecutorResult, Field, Schema};
 use crate::storage::{MemRowTable, MemTableRowIter, Row, SimpleTableRef};
 use crate::types::build_from_proto;
 use crate::types::DataTypeRef;
@@ -27,6 +27,7 @@ pub(super) struct RowSeqScanExecutor {
     column_ids: Vec<usize>,
     /// If empty, then the row will be iterated in a different manner.
     has_pk: bool,
+    schema: Schema,
 }
 
 impl BoxedExecutorBuilder for RowSeqScanExecutor {
@@ -52,6 +53,13 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
                 .collect::<Result<Vec<_>>>()?;
             let pks = table_ref.get_pk();
 
+            let fields = data_types
+                .iter()
+                .map(|t| Field {
+                    data_type: t.clone(),
+                })
+                .collect::<Vec<Field>>();
+
             Ok(Box::new(Self {
                 data_types,
                 column_ids: seq_scan_node
@@ -61,6 +69,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
                     .collect::<Vec<_>>(),
                 iter: make_row_iter(table_ref)?,
                 has_pk: !pks.is_empty(),
+                schema: Schema { fields },
             }))
         } else {
             Err(RwError::from(InternalError(
@@ -146,5 +155,9 @@ impl Executor for RowSeqScanExecutor {
     fn clean(&mut self) -> Result<()> {
         info!("Table scan closed.");
         Ok(())
+    }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
     }
 }

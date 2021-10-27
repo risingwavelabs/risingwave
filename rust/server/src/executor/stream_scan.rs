@@ -11,7 +11,7 @@ use crate::catalog::TableId;
 use crate::error::ErrorCode;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
+use crate::executor::{Executor, ExecutorBuilder, ExecutorResult, Field, Schema};
 use crate::source::{ChunkReader, JSONParser, SourceColumnDesc, SourceFormat, SourceParser};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
@@ -22,6 +22,7 @@ pub struct StreamScanExecutor {
     reader: ChunkReader,
     columns: Vec<SourceColumnDesc>,
     done: bool,
+    schema: Schema,
 }
 
 impl StreamScanExecutor {
@@ -74,6 +75,13 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
             .map(|idx| source_desc.columns[*idx].clone())
             .collect::<Vec<SourceColumnDesc>>();
 
+        let fields = columns
+            .iter()
+            .map(|col| Field {
+                data_type: col.data_type.clone(),
+            })
+            .collect::<Vec<Field>>();
+
         let parser: Box<dyn SourceParser> = match source_desc.format {
             SourceFormat::Json => Box::new(JSONParser {}),
             _ => unimplemented!(),
@@ -83,6 +91,7 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
             reader: ChunkReader::new(&columns, source_desc.source.reader()?, parser),
             columns,
             done: false,
+            schema: Schema { fields },
         }))
     }
 }
@@ -106,6 +115,10 @@ impl Executor for StreamScanExecutor {
 
     fn clean(&mut self) -> Result<()> {
         async_std::task::block_on(self.reader.cancel())
+    }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
     }
 }
 

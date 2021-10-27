@@ -6,7 +6,7 @@ use crate::error::{Result, RwError};
 use crate::executor::join::JoinType;
 use crate::executor::ExecutorResult::{Batch, Done};
 use crate::executor::{
-    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult,
+    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult, Schema,
 };
 use crate::expr::{build_from_proto, BoxedExpression};
 use crate::types::DataType;
@@ -36,6 +36,7 @@ pub struct NestedLoopJoinExecutor {
     build_side_source: BoxedExecutor,
     /// Manage inner source and expression evaluation.
     state: NestedLoopJoinState,
+    schema: Schema,
 }
 
 type ProbeResult = Option<DataChunk>;
@@ -93,6 +94,10 @@ impl Executor for NestedLoopJoinExecutor {
     fn clean(&mut self) -> crate::error::Result<()> {
         self.probe_side_source.clean()
     }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
 }
 
 impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
@@ -115,6 +120,17 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                 let right_child =
                     ExecutorBuilder::new(right_plan, source.global_task_env().clone()).build()?;
 
+                let fields = vec![];
+                // TODO: fix this when exchange's schema is ready
+                // let fields = left_child
+                //   .schema()
+                //   .fields
+                //   .iter()
+                //   .chain(right_child.schema().fields.iter())
+                //   .map(|f| Field {
+                //     data_type: f.data_type.clone(),
+                //   })
+                //   .collect();
                 match join_type {
                     JoinType::Inner => {
                         // TODO: Support more join type.
@@ -128,6 +144,7 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                             probe_side_source: outer_table_source,
                             build_side_source: right_child,
                             state: join_state,
+                            schema: Schema { fields },
                         }))
                     }
 
@@ -399,7 +416,7 @@ mod tests {
     use crate::catalog::test_utils::mock_table_id;
     use crate::executor::join::nested_loop_join::{BuildTable, ProbeSideSource};
     use crate::executor::seq_scan::SeqScanExecutor;
-    use crate::executor::ExecutorResult;
+    use crate::executor::{ExecutorResult, Schema};
     use crate::storage::SimpleMemTable;
     use crate::types::Int32Type;
     use crate::types::ScalarRefImpl;
@@ -437,11 +454,14 @@ mod tests {
     #[test]
     fn test_convert_row_to_chunk() {
         let row = RowRef::new(vec![Some(ScalarRefImpl::Int32(3))]);
+        let columns = vec![];
+        let schema = Schema { fields: vec![] };
         let seq_scan_exec = SeqScanExecutor::new(
-            Arc::new(SimpleMemTable::new(&mock_table_id(), 0)),
+            Arc::new(SimpleMemTable::new(&mock_table_id(), &columns)),
             vec![],
             vec![],
             0,
+            schema,
         );
         let chunk = DataChunk::new(
             vec![Column::new(

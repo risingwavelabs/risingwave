@@ -9,7 +9,7 @@ use crate::executor::join::hash_join_state::{BuildTable, ProbeTable};
 use crate::executor::join::JoinType;
 use crate::executor::ExecutorResult::Batch;
 use crate::executor::{
-    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult,
+    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult, Schema,
 };
 use crate::types::build_from_proto as type_build_from_proto;
 use crate::types::DataTypeRef;
@@ -73,6 +73,7 @@ pub(super) struct HashJoinExecutor<K> {
     /// Build side
     right_child: BoxedExecutor,
     state: HashJoinState<K>,
+    schema: Schema,
 }
 
 impl EquiJoinParams {
@@ -143,6 +144,10 @@ impl<K: HashKey + Send + Sync> Executor for HashJoinExecutor<K> {
         self.right_child.clean()?;
         Ok(())
     }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
 }
 
 impl<K: HashKey> HashJoinExecutor<K> {
@@ -194,11 +199,17 @@ impl<K: HashKey> HashJoinExecutor<K> {
 }
 
 impl<K> HashJoinExecutor<K> {
-    fn new(left_child: BoxedExecutor, right_child: BoxedExecutor, params: EquiJoinParams) -> Self {
+    fn new(
+        left_child: BoxedExecutor,
+        right_child: BoxedExecutor,
+        params: EquiJoinParams,
+        schema: Schema,
+    ) -> Self {
         HashJoinExecutor {
             left_child,
             right_child,
             state: HashJoinState::Build(BuildTable::with_params(params)),
+            schema,
         }
     }
 }
@@ -207,6 +218,7 @@ pub struct HashJoinExecutorBuilder {
     params: EquiJoinParams,
     left_child: BoxedExecutor,
     right_child: BoxedExecutor,
+    schema: Schema,
 }
 
 struct HashJoinExecutorBuilderDispatcher<K> {
@@ -223,6 +235,7 @@ impl<K: HashKey> HashKeyDispatcher<K> for HashJoinExecutorBuilderDispatcher<K> {
             input.left_child,
             input.right_child,
             input.params,
+            input.schema,
         ))
     }
 }
@@ -283,10 +296,21 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
 
         let hash_key_kind = calc_hash_key_kind(&params.right_key_types);
 
+        let fields = vec![];
+        // TODO: fix this when exchange's schema is ready
+        // let fields = params
+        //   .output_columns
+        //   .iter()
+        //   .map(|c| match c {
+        //     Either::Left(idx) => left_child.schema().fields[*idx].clone(),
+        //     Either::Right(idx) => right_child.schema().fields[*idx].clone(),
+        //   })
+        //   .collect::<Vec<Field>>();
         let builder = HashJoinExecutorBuilder {
             params,
             left_child,
             right_child,
+            schema: Schema { fields },
         };
 
         Ok(hash_key_dispatch!(
@@ -308,8 +332,8 @@ mod tests {
     use crate::executor::join::hash_join::{EquiJoinParams, HashJoinExecutor};
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::MockExecutor;
-    use crate::executor::{BoxedExecutor, ExecutorResult};
-    use crate::types::{DataTypeRef, Float32Type, Float64Type, Int32Type};
+    use crate::executor::{BoxedExecutor, ExecutorResult, Field, Schema};
+    use crate::types::{DataTypeKind, DataTypeRef, Float32Type, Float64Type, Int32Type};
     use either::Either;
     use std::sync::Arc;
 
@@ -409,7 +433,17 @@ mod tests {
             }
         }
         fn create_left_executor(&self) -> BoxedExecutor {
-            let mut executor = MockExecutor::new();
+            let schema = Schema {
+                fields: vec![
+                    Field {
+                        data_type: Int32Type::create(false),
+                    },
+                    Field {
+                        data_type: Float32Type::create(false),
+                    },
+                ],
+            };
+            let mut executor = MockExecutor::new(schema);
 
             {
                 let column1 = Column::new(
@@ -451,7 +485,17 @@ mod tests {
         }
 
         fn create_right_executor(&self) -> BoxedExecutor {
-            let mut executor = MockExecutor::new();
+            let schema = Schema {
+                fields: vec![
+                    Field {
+                        data_type: Int32Type::create(false),
+                    },
+                    Field {
+                        data_type: Float64Type::create(false),
+                    },
+                ],
+            };
+            let mut executor = MockExecutor::new(schema);
 
             {
                 let column1 = Column::new(
@@ -562,10 +606,22 @@ mod tests {
                 output_data_types,
             };
 
+            let fields = params
+                .output_columns
+                .iter()
+                .map(|c| match c {
+                    Either::Left(idx) => left_child.schema().fields[*idx].clone(),
+                    Either::Right(idx) => right_child.schema().fields[*idx].clone(),
+                })
+                .collect::<Vec<Field>>();
+
+            let schema = Schema { fields };
+
             Box::new(HashJoinExecutor::<Key32>::new(
                 left_child,
                 right_child,
                 params,
+                schema,
             )) as BoxedExecutor
         }
 
@@ -574,6 +630,23 @@ mod tests {
             join_executor.init().expect("Failed to init join executor.");
 
             let mut data_chunk_merger = DataChunkMerger::new(self.output_data_types()).unwrap();
+
+            let fields = &join_executor.schema().fields;
+            match self.join_type {
+                JoinType::Inner
+                | JoinType::LeftOuter
+                | JoinType::RightOuter
+                | JoinType::FullOuter => {
+                    assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Float32);
+                    assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Float64);
+                }
+                JoinType::LeftAnti | JoinType::LeftSemi => {
+                    assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Float32)
+                }
+                JoinType::RightAnti | JoinType::RightSemi => {
+                    assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Float64)
+                }
+            };
 
             while let ExecutorResult::Batch(data_chunk) = join_executor.execute().await.unwrap() {
                 data_chunk_merger.append(&data_chunk).unwrap();

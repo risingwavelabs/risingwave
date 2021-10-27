@@ -50,12 +50,32 @@ mod tests {
     use crate::stream_op::Op;
     use crate::types::{DataTypeKind, DataTypeRef, Int32Type, StringType};
     use itertools::Itertools;
+    use pb_construct::make_proto;
+    use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};
+    use risingwave_proto::plan::{ColumnDesc, ColumnDesc_ColumnEncodingType};
     use std::sync::Arc;
 
     #[tokio::test]
     async fn test_table_source() -> Result<()> {
         let table_id = mock_table_id();
-        let table = SimpleMemTable::new(&table_id, 2);
+        let column1 = make_proto!(ColumnDesc, {
+          column_type: make_proto!(DataTypeProto, {
+            type_name: DataType_TypeName::INT32
+          }),
+          encoding: ColumnDesc_ColumnEncodingType::RAW,
+          is_primary: false,
+          name: "test_col".to_string()
+        });
+        let column2 = make_proto!(ColumnDesc, {
+          column_type: make_proto!(DataTypeProto, {
+            type_name: DataType_TypeName::VARCHAR
+          }),
+          encoding: ColumnDesc_ColumnEncodingType::RAW,
+          is_primary: false,
+          name: "test_col".to_string()
+        });
+        let columns = vec![column1, column2];
+        let table = SimpleMemTable::new(&table_id, &columns);
 
         let col1_type = Int32Type::create(false) as DataTypeRef;
         let col2_type = StringType::create(true, 10, DataTypeKind::Varchar);

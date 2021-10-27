@@ -7,7 +7,9 @@ use protobuf::Message;
 use risingwave_proto::plan::{LimitNode as LimitProto, PlanNode_PlanNodeType};
 use std::cmp::min;
 
-use super::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult};
+use super::{
+    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult, Schema,
+};
 
 /// Limit executor.
 pub(super) struct LimitExecutor {
@@ -105,6 +107,10 @@ impl Executor for LimitExecutor {
         self.child.clean()?;
         Ok(())
     }
+
+    fn schema(&self) -> &Schema {
+        self.child.schema()
+    }
 }
 
 #[cfg(test)]
@@ -114,7 +120,8 @@ mod tests {
     use crate::array::column::Column;
     use crate::array::{Array, BoolArray, DataChunk, PrimitiveArray};
     use crate::executor::test_utils::MockExecutor;
-    use crate::types::{BoolType, Int32Type};
+    use crate::executor::{Field, Schema};
+    use crate::types::{BoolType, DataTypeKind, Int32Type};
 
     use std::sync::Arc;
     use std::vec;
@@ -139,7 +146,12 @@ mod tests {
                 .as_slice(),
         )
         .unwrap();
-        let mut mock_executor = MockExecutor::new();
+        let schema = Schema {
+            fields: vec![Field {
+                data_type: Int32Type::create(false),
+            }],
+        };
+        let mut mock_executor = MockExecutor::new(schema);
 
         let data_chunk = DataChunk::builder().columns([col].to_vec()).build();
 
@@ -154,6 +166,8 @@ mod tests {
             skipped: 0,
             returned: 0,
         };
+        let fields = &limit_executor.schema().fields;
+        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
         let mut results = vec![];
         while let Batch(chunk) = limit_executor.execute().await.unwrap() {
             results.push(Arc::new(chunk));
@@ -263,7 +277,17 @@ mod tests {
             Arc::new(visable_array.into()),
             Arc::new(BoolType::new(false)),
         );
-        let mut mock_executor = MockExecutor::new();
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    data_type: Int32Type::create(false),
+                },
+                Field {
+                    data_type: BoolType::create(false),
+                },
+            ],
+        };
+        let mut mock_executor = MockExecutor::new(schema);
 
         let data_chunk = DataChunk::builder().columns([col0, col1].to_vec()).build();
 

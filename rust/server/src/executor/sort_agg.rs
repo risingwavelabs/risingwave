@@ -1,7 +1,7 @@
 use crate::array::{column::Column, DataChunk};
 use crate::error::ErrorCode::ProtobufError;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::executor::{BoxedExecutor, Executor, ExecutorBuilder, ExecutorResult};
+use crate::executor::{BoxedExecutor, Executor, ExecutorBuilder, ExecutorResult, Field, Schema};
 use crate::expr::{build_from_proto, BoxedExpression};
 use crate::types::DataType;
 use crate::vector_op::agg::{self, BoxedAggState, BoxedSortedGrouper, EqGroups};
@@ -23,6 +23,7 @@ pub(super) struct SortAggExecutor {
     sorted_groupers: Vec<BoxedSortedGrouper>,
     child: BoxedExecutor,
     child_done: bool,
+    schema: Schema,
 }
 
 impl BoxedExecutorBuilder for SortAggExecutor {
@@ -58,12 +59,20 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             .map(|e| agg::create_sorted_grouper(e.return_type()))
             .collect::<Result<Vec<BoxedSortedGrouper>>>()?;
 
+        let fields = group_exprs
+            .iter()
+            .map(|e| e.return_type_ref())
+            .chain(agg_states.iter().map(|e| e.return_type_ref()))
+            .map(|t| Field { data_type: t })
+            .collect::<Vec<Field>>();
+
         Ok(Box::new(Self {
             agg_states,
             group_exprs,
             sorted_groupers,
             child,
             child_done: false,
+            schema: Schema { fields },
         }))
     }
 }
@@ -149,6 +158,10 @@ impl Executor for SortAggExecutor {
     fn clean(&mut self) -> Result<()> {
         self.child.clean()
     }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
 }
 
 #[cfg(test)]
@@ -157,7 +170,8 @@ mod tests {
     use crate::array::{Array as _, I32Array, I64Array};
     use crate::array_nonnull;
     use crate::executor::test_utils::MockExecutor;
-    use crate::types::Int32Type;
+    use crate::executor::{Field, Schema};
+    use crate::types::{DataTypeKind, Int32Type};
     use pb_construct::make_proto;
     use protobuf::well_known_types::Any;
     use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};
@@ -173,7 +187,12 @@ mod tests {
         let chunk = DataChunk::builder()
             .columns(vec![Column::new(a, t32)])
             .build();
-        let mut child = MockExecutor::new();
+        let schema = Schema {
+            fields: vec![Field {
+                data_type: Int32Type::create(false),
+            }],
+        };
+        let mut child = MockExecutor::new(schema);
         child.add(chunk);
 
         let proto = make_proto!(AggCall, {
@@ -191,12 +210,21 @@ mod tests {
 
         let s = agg::create_agg_state(&proto)?;
 
+        let group_exprs: Vec<BoxedExpression> = vec![];
+        let agg_states = vec![s];
+        let fields = group_exprs
+            .iter()
+            .map(|e| e.return_type_ref())
+            .chain(agg_states.iter().map(|e| e.return_type_ref()))
+            .map(|t| Field { data_type: t })
+            .collect::<Vec<Field>>();
         let mut executor = SortAggExecutor {
-            agg_states: vec![s],
+            agg_states,
             group_exprs: vec![],
             sorted_groupers: vec![],
             child: Box::new(child),
             child_done: false,
+            schema: Schema { fields },
         };
 
         executor.init()?;
@@ -233,7 +261,20 @@ mod tests {
                 ),
             ])
             .build();
-        let mut child = MockExecutor::new();
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    data_type: Int32Type::create(false),
+                },
+                Field {
+                    data_type: Int32Type::create(false),
+                },
+                Field {
+                    data_type: Int32Type::create(false),
+                },
+            ],
+        };
+        let mut child = MockExecutor::new(schema);
         child.add(chunk);
         let chunk = DataChunk::builder()
             .columns(vec![
@@ -278,15 +319,28 @@ mod tests {
             .map(|e| agg::create_sorted_grouper(e.return_type()))
             .collect::<Result<Vec<BoxedSortedGrouper>>>()?;
 
+        let agg_states = vec![s];
+        let fields = group_exprs
+            .iter()
+            .map(|e| e.return_type_ref())
+            .chain(agg_states.iter().map(|e| e.return_type_ref()))
+            .map(|t| Field { data_type: t })
+            .collect::<Vec<Field>>();
+
         let mut executor = SortAggExecutor {
-            agg_states: vec![s],
+            agg_states,
             group_exprs,
             sorted_groupers,
             child: Box::new(child),
             child_done: false,
+            schema: Schema { fields },
         };
 
         executor.init()?;
+        let fields = &executor.schema().fields;
+        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
+        assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Int32);
+        assert_eq!(fields[2].data_type.data_type_kind(), DataTypeKind::Int64);
         let o = executor.execute().await?.batch_or()?;
         if let ExecutorResult::Batch(_) = executor.execute().await? {
             panic!("simple agg should have no more than 1 output.");

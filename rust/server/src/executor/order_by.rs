@@ -6,7 +6,7 @@ use crate::error::{
     ErrorCode::{InternalError, ProtobufError},
     Result,
 };
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
+use crate::executor::{Executor, ExecutorBuilder, ExecutorResult, Schema};
 use crate::types::DataTypeRef;
 use crate::util::sort_util::{
     compare_two_row, fetch_orders_from_order_by_node, HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE,
@@ -170,6 +170,10 @@ impl Executor for OrderByExecutor {
         self.child.clean()?;
         Ok(())
     }
+
+    fn schema(&self) -> &Schema {
+        self.child.schema()
+    }
 }
 
 #[cfg(test)]
@@ -178,8 +182,9 @@ mod tests {
     use crate::array::column::Column;
     use crate::array::{DataChunk, PrimitiveArray};
     use crate::executor::test_utils::MockExecutor;
+    use crate::executor::{Field, Schema};
     use crate::expr::InputRefExpression;
-    use crate::types::Int32Type;
+    use crate::types::{DataTypeKind, Int32Type};
     use crate::util::sort_util::OrderType;
 
     use std::sync::Arc;
@@ -195,7 +200,17 @@ mod tests {
         let col0 = create_column(&[Some(1), Some(2), Some(3)]).unwrap();
         let col1 = create_column(&[Some(3), Some(2), Some(1)]).unwrap();
         let data_chunk = DataChunk::builder().columns([col0, col1].to_vec()).build();
-        let mut mock_executor = MockExecutor::new();
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    data_type: Int32Type::create(false),
+                },
+                Field {
+                    data_type: Int32Type::create(false),
+                },
+            ],
+        };
+        let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(data_chunk);
         let input_ref_1 = InputRefExpression::new(Int32Type::create(false), 0usize);
         let input_ref_2 = InputRefExpression::new(Int32Type::create(false), 1usize);
@@ -219,6 +234,9 @@ mod tests {
             min_heap: BinaryHeap::new(),
             data_types: vec![],
         };
+        let fields = &order_by_executor.schema().fields;
+        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
+        assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Int32);
         let res = order_by_executor.execute().await.unwrap();
         assert!(matches!(res, ExecutorResult::Batch(_)));
         if let ExecutorResult::Batch(res) = res {

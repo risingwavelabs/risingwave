@@ -12,6 +12,7 @@ use crate::executor::join::HashJoinExecutorBuilder;
 pub use crate::executor::stream_scan::StreamScanExecutor;
 use crate::executor::values::ValuesExecutor;
 use crate::task::GlobalTaskEnv;
+use crate::types::DataTypeRef;
 use drop_table::*;
 use exchange::*;
 use filter::*;
@@ -61,11 +62,25 @@ impl ExecutorResult {
     }
 }
 
+/// the field in the schema of the executor's return data
+#[derive(Clone)]
+pub struct Field {
+    // TODO: field_name
+    data_type: DataTypeRef,
+}
+
+/// the schema of the executor's return data
+pub struct Schema {
+    fields: Vec<Field>,
+}
+
 #[async_trait::async_trait]
 pub trait Executor: Send {
     fn init(&mut self) -> Result<()>;
     async fn execute(&mut self) -> Result<ExecutorResult>;
     fn clean(&mut self) -> Result<()>;
+    /// this method will return the schema of the executor's return data
+    fn schema(&self) -> &Schema;
 }
 
 pub type BoxedExecutor = Box<dyn Executor>;

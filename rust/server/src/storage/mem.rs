@@ -6,6 +6,7 @@ use crate::storage::*;
 use crate::stream_op::StreamChunk;
 use futures::channel::mpsc;
 use futures::SinkExt;
+use risingwave_proto::plan::ColumnDesc;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
@@ -24,7 +25,7 @@ pub enum SimpleTableRef {
 }
 
 impl TableManager for SimpleTableManager {
-    fn create_table(&self, table_id: &TableId, column_count: usize) -> Result<()> {
+    fn create_table(&self, table_id: &TableId, columns: &[ColumnDesc]) -> Result<()> {
         let mut tables = self.get_tables()?;
 
         ensure!(
@@ -33,6 +34,7 @@ impl TableManager for SimpleTableManager {
             table_id
         );
 
+        let column_count = columns.len();
         ensure!(
             column_count > 0,
             "column count must be positive: {}",
@@ -40,7 +42,7 @@ impl TableManager for SimpleTableManager {
         );
         tables.insert(
             table_id.clone(),
-            SimpleTableRef::Columnar(Arc::new(SimpleMemTable::new(table_id, column_count))),
+            SimpleTableRef::Columnar(Arc::new(SimpleMemTable::new(table_id, columns))),
         );
         Ok(())
     }
@@ -108,6 +110,7 @@ struct SimpleMemTableInner {
 
 /// A simple in-memory table that organizes data in columnar format.
 pub struct SimpleMemTable {
+    columns: Vec<ColumnDesc>,
     table_id: TableId,
     inner: RwLock<SimpleMemTableInner>,
 }
@@ -123,11 +126,16 @@ impl SimpleMemTableInner {
 }
 
 impl SimpleMemTable {
-    pub fn new(table_id: &TableId, column_count: usize) -> Self {
+    pub fn new(table_id: &TableId, columns: &[ColumnDesc]) -> Self {
         Self {
+            columns: columns.to_vec(),
             table_id: table_id.clone(),
-            inner: RwLock::new(SimpleMemTableInner::new(column_count)),
+            inner: RwLock::new(SimpleMemTableInner::new(columns.len())),
         }
+    }
+
+    pub fn columns(&self) -> &Vec<ColumnDesc> {
+        &self.columns
     }
 }
 

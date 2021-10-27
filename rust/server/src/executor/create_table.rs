@@ -1,18 +1,19 @@
 use crate::catalog::TableId;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::Result;
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
+use crate::executor::{Executor, ExecutorBuilder, ExecutorResult, Schema};
 use crate::storage::TableManagerRef;
 use pb_convert::FromProtobuf;
 use protobuf::Message;
-use risingwave_proto::plan::{CreateTableNode, PlanNode_PlanNodeType};
+use risingwave_proto::plan::{ColumnDesc, CreateTableNode, PlanNode_PlanNodeType};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 
 pub(super) struct CreateTableExecutor {
     table_id: TableId,
-    column_count: usize,
+    columns: Vec<ColumnDesc>,
     table_manager: TableManagerRef,
+    schema: Schema,
 }
 
 impl BoxedExecutorBuilder for CreateTableExecutor {
@@ -25,12 +26,13 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
         let table_id = TableId::from_protobuf(node.get_table_ref_id())
             .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
-        let column_count = node.get_column_descs().len();
+        let columns = node.get_column_descs().to_vec();
 
         Ok(Box::new(Self {
             table_id,
-            column_count,
+            columns,
             table_manager: source.global_task_env().table_manager_ref(),
+            schema: Schema { fields: vec![] },
         }))
     }
 }
@@ -44,12 +46,16 @@ impl Executor for CreateTableExecutor {
 
     async fn execute(&mut self) -> Result<ExecutorResult> {
         self.table_manager
-            .create_table(&self.table_id, self.column_count)
+            .create_table(&self.table_id, &self.columns)
             .map(|_| ExecutorResult::Done)
     }
 
     fn clean(&mut self) -> Result<()> {
         info!("create table executor cleaned!");
         Ok(())
+    }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
     }
 }

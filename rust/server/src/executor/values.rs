@@ -5,7 +5,7 @@ use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::executor::ExecutorResult::Done;
 use crate::executor::{
-    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult,
+    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult, Field, Schema,
 };
 use crate::expr::{build_from_proto, BoxedExpression};
 use crate::types::{DataType, Int32Type};
@@ -17,6 +17,7 @@ use std::sync::Arc;
 pub(super) struct ValuesExecutor {
     rows: Vec<Vec<BoxedExpression>>,
     executed: bool,
+    schema: Schema,
 }
 
 #[async_trait::async_trait]
@@ -88,6 +89,10 @@ impl Executor for ValuesExecutor {
     fn clean(&mut self) -> Result<()> {
         Ok(())
     }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
 }
 
 impl BoxedExecutorBuilder for ValuesExecutor {
@@ -106,9 +111,19 @@ impl BoxedExecutorBuilder for ValuesExecutor {
             rows.push(expr_row);
         }
 
+        let fields = rows
+            .first()
+            .ok_or_else(|| RwError::from(InternalError("Can't values empty rows!".to_string())))?
+            .iter() // for each column
+            .map(|col| Field {
+                data_type: col.return_type_ref(),
+            })
+            .collect::<Vec<Field>>();
+
         Ok(Box::new(Self {
             rows,
             executed: false,
+            schema: Schema { fields },
         }))
     }
 }
@@ -118,7 +133,7 @@ mod tests {
     use super::*;
     use crate::array::Array;
     use crate::expr::LiteralExpression;
-    use crate::types::{Int16Type, Int32Type, Int64Type, ScalarImpl};
+    use crate::types::{DataTypeKind, Int16Type, Int32Type, Int64Type, ScalarImpl};
 
     #[tokio::test]
     async fn test_values_executor() -> Result<()> {
@@ -137,11 +152,25 @@ mod tests {
             )),
         ]];
 
+        let fields = exprs
+            .first()
+            .ok_or_else(|| RwError::from(InternalError("Can't values empty rows!".to_string())))?
+            .iter() // for each column
+            .map(|col| Field {
+                data_type: col.return_type_ref(),
+            })
+            .collect::<Vec<Field>>();
         let mut values_executor = ValuesExecutor {
             rows: exprs,
             executed: false,
+            schema: Schema { fields },
         };
         assert!(values_executor.init().is_ok());
+
+        let fields = &values_executor.schema().fields;
+        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int16);
+        assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Int32);
+        assert_eq!(fields[2].data_type.data_type_kind(), DataTypeKind::Int64);
 
         let result = values_executor.execute().await?.batch_or()?;
         assert!(values_executor.clean().is_ok());
