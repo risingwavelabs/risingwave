@@ -20,7 +20,6 @@ import java.util.stream.Collectors;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.plan.RelTraitSet;
-import org.apache.calcite.rel.RelDistribution;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.convert.ConverterRule;
@@ -107,37 +106,44 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
       super(config);
     }
 
-    /** Convert RwLogicalScan to RwStreamTableSource */
+    /** Convert RwLogicalScan to RwStreamTableSource and add an Exchange on top of it */
     @Override
     public @Nullable RelNode convert(RelNode rel) {
       RwLogicalScan source = (RwLogicalScan) rel;
 
       TableCatalog tableCatalog = source.getTable().unwrapOrThrow(TableCatalog.class);
-
-      boolean isSingle = isSingleMode(contextOf(source.getCluster()));
-
-      RelDistribution distTrait =
-          isSingle ? RwDistributions.SINGLETON : RwDistributions.RANDOM_DISTRIBUTED;
-
-      RelTraitSet newTraitSet =
-          source.getTraitSet().plus(RisingWaveStreamingRel.STREAMING).plus(distTrait);
+      RelTraitSet traits =
+          source
+              .getTraitSet()
+              .plus(RisingWaveStreamingRel.STREAMING)
+              .plus(RwDistributions.RANDOM_DISTRIBUTED);
 
       var streamTableSource =
           new RwStreamTableSource(
               source.getCluster(),
-              newTraitSet,
+              traits,
               Collections.emptyList(),
               source.getTable(),
               tableCatalog.getId(),
               source.getColumnIds());
 
+      // TODO: will be removed once single mode removed
+      boolean isSingle = isSingleMode(contextOf(source.getCluster()));
       if (isSingle) {
         return streamTableSource;
-      } else {
-        int[] distFields = {0};
-        RwDistributionTrait exchangeDistributionTrait = RwDistributions.hash(distFields);
-        return RwStreamExchange.create(streamTableSource, exchangeDistributionTrait);
       }
+
+      // Add an Exchange node on top of the TableSource operator.
+      //
+      // Currently, storage service does not guarantee a DELETE or UPDATE message comes from
+      // the node where this row being inserted. To accomplish that, an Exchange operator
+      // is added to redistribute rows by their first field.
+      //
+      // Distribution by first field may not always be a good solution, but for now, just
+      // simply do it.
+      int[] distFields = {0};
+      RwDistributionTrait exchangeDistributionTrait = RwDistributions.hash(distFields);
+      return RwStreamExchange.create(streamTableSource, exchangeDistributionTrait);
     }
   }
 }
