@@ -88,6 +88,7 @@ impl UTF8Array {
 }
 
 /// `UTF8ArrayBuilder` use `&str` to build an `UTF8Array`.
+#[derive(Debug)]
 pub struct UTF8ArrayBuilder {
     offset: Vec<usize>,
     bitmap: Vec<bool>,

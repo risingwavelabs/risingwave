@@ -127,6 +127,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
 }
 
 /// `PrimitiveArrayBuilder` constructs a `PrimitiveArray` from `Option<Primitive>`.
+#[derive(Debug)]
 pub struct PrimitiveArrayBuilder<T: PrimitiveArrayItemType> {
     bitmap: Vec<bool>,
     data: Vec<T>,

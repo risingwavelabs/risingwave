@@ -76,6 +76,7 @@ impl Array for BoolArray {
 }
 
 /// `BoolArrayBuilder` constructs a `BoolArray` from `Option<Bool>`.
+#[derive(Debug)]
 pub struct BoolArrayBuilder {
     bitmap: Vec<bool>,
     data: Vec<bool>,

@@ -293,6 +293,7 @@ for_all_variants! { impl_convert }
 macro_rules! array_builder_impl_enum {
   ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
     /// `ArrayBuilderImpl` embeds all possible array in `array` module.
+    #[derive(Debug)]
     pub enum ArrayBuilderImpl {
       $( $variant_name($builder) ),*
     }

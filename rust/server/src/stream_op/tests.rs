@@ -18,6 +18,7 @@ use risingwave_proto::plan::{ColumnDesc, ColumnDesc_ColumnEncodingType};
 use risingwave_proto::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 use smallvec::SmallVec;
 use std::collections::VecDeque;
+
 pub struct MockSource {
     chunks: VecDeque<StreamChunk>,
 }
@@ -360,7 +361,7 @@ async fn test_filter() {
                 Op::UpdateDelete,
                 Op::Insert,
                 Op::UpdateDelete,
-                Op::UpdateInsert
+                Op::UpdateInsert,
             ]
         );
     } else {
@@ -403,53 +404,52 @@ async fn test_local_hash_aggregation_count() {
     let mut hash_agg = HashAggExecutor::new(Box::new(source), agg_calls, keys);
 
     if let Message::Chunk(chunk) = hash_agg.next().await.unwrap() {
-        assert_eq!(chunk.ops.len(), 2);
-        assert_eq!(chunk.ops[0], Op::Insert);
-        assert_eq!(chunk.ops[1], Op::Insert);
+        // TODO: 1. refactor the whole test file in this style;
+        // TODO: 2. move tests to corresponding function files as testing part rather than gather into a test file
+        assert_eq!(chunk.ops, vec![Op::Insert, Op::Insert]);
+
         assert_eq!(chunk.columns.len(), 3);
-        let key_column = chunk.columns[0].array_ref().as_int64();
-        assert_eq!(key_column.value_at(0).unwrap(), 1);
-        assert_eq!(key_column.value_at(1).unwrap(), 2);
-        let agg_column = chunk.columns[1].array_ref().as_int64();
-        assert_eq!(agg_column.value_at(0).unwrap(), 1);
-        assert_eq!(agg_column.value_at(1).unwrap(), 2);
-        let row_count_column = chunk.columns[2].array_ref().as_int64();
-        assert_eq!(row_count_column.value_at(0).unwrap(), 1);
-        assert_eq!(row_count_column.value_at(1).unwrap(), 2);
+        // test key
+        assert_eq!(
+            chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+            vec![Some(1), Some(2)]
+        );
+        // test count first row
+        assert_eq!(
+            chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+            vec![Some(1), Some(2)]
+        );
+        // test count(*)
+        assert_eq!(
+            chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+            vec![Some(1), Some(2)]
+        );
     } else {
         unreachable!();
     }
 
     if let Message::Chunk(chunk) = hash_agg.next().await.unwrap() {
-        assert_eq!(chunk.ops.len(), 4);
         assert_eq!(
             chunk.ops,
-            vec![
-                Op::UpdateDelete,
-                Op::UpdateInsert,
-                Op::UpdateDelete,
-                Op::UpdateInsert
-            ]
+            vec![Op::Delete, Op::UpdateDelete, Op::UpdateInsert]
         );
+
         assert_eq!(chunk.columns.len(), 3);
-        let key_column = chunk.columns[0].array_ref().as_int64();
-        assert_eq!(key_column.len(), 4);
-        let key_column = (0..4)
-            .map(|idx| key_column.value_at(idx).unwrap())
-            .collect::<Vec<_>>();
-        assert_eq!(key_column, vec![1, 1, 2, 2]);
-        let agg_column = chunk.columns[1].array_ref().as_int64();
-        assert_eq!(agg_column.len(), 4);
-        let agg_column = (0..4)
-            .map(|idx| agg_column.value_at(idx).unwrap())
-            .collect::<Vec<_>>();
-        assert_eq!(agg_column, vec![1, 0, 2, 1]);
-        let row_count_column = chunk.columns[2].array_ref().as_int64();
-        assert_eq!(row_count_column.len(), 4);
-        let row_count_column = (0..4)
-            .map(|idx| row_count_column.value_at(idx).unwrap())
-            .collect::<Vec<_>>();
-        assert_eq!(row_count_column, vec![1, 0, 2, 1]);
+        // test key
+        assert_eq!(
+            chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+            vec![Some(1), Some(2), Some(2)]
+        );
+        // test count first row
+        assert_eq!(
+            chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+            vec![Some(1), Some(2), Some(1)]
+        );
+        // test count(*)
+        assert_eq!(
+            chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+            vec![Some(1), Some(2), Some(1)]
+        );
     } else {
         unreachable!();
     }
@@ -470,8 +470,8 @@ async fn test_global_hash_aggregation_count() {
         ops: vec![Op::Delete, Op::Delete, Op::Delete, Op::Insert],
         columns: vec![
             column_nonnull! { I64Array, Int64Type, [1, 2, 2, 3] },
-            column_nonnull! { I64Array, Int64Type, [1, 2, 1, 3] },
-            column_nonnull! { I64Array, Int64Type, [1, 2, 1, 3] },
+            column_nonnull! { I64Array, Int64Type, [1, 2, 2, 3] },
+            column_nonnull! { I64Array, Int64Type, [1, 2, 2, 3] },
         ],
         visibility: Some((vec![true, false, true, true]).try_into().unwrap()),
     };
@@ -480,6 +480,11 @@ async fn test_global_hash_aggregation_count() {
     // This is local hash aggregation, so we add another sum state
     let key_indices = vec![0];
     let agg_calls = vec![
+        AggCall {
+            kind: AggKind::RowCount,
+            args: AggArgs::None,
+            return_type: Int64Type::create(false),
+        },
         AggCall {
             kind: AggKind::Sum,
             args: AggArgs::Unary(Int64Type::create(false), 1),
@@ -495,59 +500,59 @@ async fn test_global_hash_aggregation_count() {
     let mut hash_agg = HashAggExecutor::new(Box::new(source), agg_calls, key_indices);
 
     if let Message::Chunk(chunk) = hash_agg.next().await.unwrap() {
-        assert_eq!(chunk.ops.len(), 2);
-        assert_eq!(chunk.ops[0], Op::Insert);
-        assert_eq!(chunk.ops[1], Op::Insert);
-        assert_eq!(chunk.columns.len(), 3);
-        let key_column = chunk.columns[0].array_ref().as_int64();
-        assert_eq!(key_column.value_at(0).unwrap(), 1);
-        assert_eq!(key_column.value_at(1).unwrap(), 2);
-        let agg_column = chunk.columns[1].array_ref().as_int64();
-        assert_eq!(agg_column.value_at(0).unwrap(), 1);
-        assert_eq!(agg_column.value_at(1).unwrap(), 4);
-        let row_sum_column = chunk.columns[2].array_ref().as_int64();
-        assert_eq!(row_sum_column.value_at(0).unwrap(), 1);
-        assert_eq!(row_sum_column.value_at(1).unwrap(), 4);
+        assert_eq!(chunk.ops, vec![Op::Insert, Op::Insert]);
+
+        assert_eq!(chunk.columns.len(), 4);
+        // test key_column
+        assert_eq!(
+            chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+            vec![Some(1), Some(2)]
+        );
+        assert_eq!(
+            chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+            vec![Some(1), Some(2)],
+        );
+        // test agg_column
+        assert_eq!(
+            chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+            vec![Some(1), Some(4)]
+        );
+        // test row_sum_column
+        assert_eq!(
+            chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+            vec![Some(1), Some(4)]
+        );
     } else {
         unreachable!();
     }
 
     if let Message::Chunk(chunk) = hash_agg.next().await.unwrap() {
-        assert_eq!(chunk.ops.len(), 5);
         assert_eq!(
             chunk.ops,
-            vec![
-                Op::UpdateDelete,
-                Op::UpdateInsert,
-                Op::UpdateDelete,
-                Op::UpdateInsert,
-                Op::Insert
-            ]
+            vec![Op::Delete, Op::UpdateDelete, Op::UpdateInsert, Op::Insert,]
         );
-        assert_eq!(chunk.columns.len(), 3);
-        let key_column = chunk.columns[0].array_ref().as_int64();
-        assert_eq!(key_column.len(), 5);
-        let key_column = (0..5)
-            .map(|idx| key_column.value_at(idx).unwrap())
-            .collect::<Vec<_>>();
-        assert_eq!(key_column, vec![1, 1, 2, 2, 3]);
-        let agg_column = chunk.columns[1].array_ref().as_int64();
-        assert_eq!(agg_column.len(), 5);
-        let agg_column = (0..5)
-            .map(|idx| agg_column.value_at(idx))
-            .collect::<Vec<_>>();
+
+        assert_eq!(chunk.columns.len(), 4);
+
+        // test key_column
         assert_eq!(
-            agg_column,
-            vec![Some(1), Some(0), Some(4), Some(3), Some(3)]
+            chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+            vec![Some(1), Some(2), Some(2), Some(3)]
         );
-        let row_sum_column = chunk.columns[2].array_ref().as_int64();
-        assert_eq!(row_sum_column.len(), 5);
-        let row_sum_column = (0..5)
-            .map(|idx| row_sum_column.value_at(idx))
-            .collect::<Vec<_>>();
+        // test row_count
         assert_eq!(
-            row_sum_column,
-            vec![Some(1), Some(0), Some(4), Some(3), Some(3)]
+            chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+            vec![Some(1), Some(2), Some(1), Some(1)]
+        );
+        // test agg_column
+        assert_eq!(
+            chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+            vec![Some(1), Some(4), Some(2), Some(3),]
+        );
+        // test row_sum_column
+        assert_eq!(
+            chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+            vec![Some(1), Some(4), Some(2), Some(3),]
         );
     } else {
         unreachable!();

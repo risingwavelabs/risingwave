@@ -17,6 +17,7 @@ pub struct IntervalArray {
     ms_buffer: Vec<i64>,
 }
 
+#[derive(Debug)]
 pub struct IntervalArrayBuilder {
     bitmap: Vec<bool>,
     months_buffer: Vec<i32>,

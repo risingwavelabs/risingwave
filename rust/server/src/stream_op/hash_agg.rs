@@ -7,7 +7,7 @@ use crate::array::*;
 use crate::buffer::Bitmap;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::impl_consume_barrier_default;
-use crate::types::Datum;
+use crate::types::{Datum, ScalarRefImpl};
 
 use super::AggCall;
 use async_trait::async_trait;
@@ -208,35 +208,53 @@ impl SimpleExecutor for HashAggExecutor {
 
             value.apply_batch(&ops, Some(&cur_vis_map), &all_agg_input_arrays)?;
 
-            // output the current state into builder
-            value.record_states(&mut builders)?;
+            let mut builder = value.agg_states[0].new_builder();
+            value.agg_states[0].get_output(&mut builder).unwrap();
+            let num = &builder.finish()?;
+            if let ScalarRefImpl::Int64(row_cnt) = num.value_at(0).unwrap() {
+                // output the current state into builder
+                if row_cnt == 0 {
+                    // remove the kv pair
+                    self.state_entries.remove(key);
+                    new_ops.push(Op::Delete);
+                    key_array_builders
+                        .iter_mut()
+                        .zip(key.iter())
+                        .try_for_each(|(key_col, datum)| key_col.append_datum(datum))?;
+                }
+                // same logic from [`super::SimpleAggExecutor`]
+                else if not_first_data {
+                    // output the current state into builder
+                    value.record_states(&mut builders)?;
+                    new_ops.push(Op::UpdateDelete);
+                    new_ops.push(Op::UpdateInsert);
+                    key_array_builders.iter_mut().zip(key.iter()).try_for_each(
+                        |(key_col, datum)| {
+                            key_col.append_datum(datum)?;
+                            key_col.append_datum(datum)
+                        },
+                    )?;
+                } else {
+                    // output the current state into builder
+                    value.record_states(&mut builders)?;
+                    new_ops.push(Op::Insert);
+                    key_array_builders
+                        .iter_mut()
+                        .zip(key.iter())
+                        .try_for_each(|(key_col, datum)| key_col.append_datum(datum))?;
+                }
 
-            agg_array_builders
-                .iter_mut()
-                .zip(builders.into_iter())
-                .try_for_each(|(agg_array_builder, builder)| {
-                    agg_array_builder.append_array(&builder.finish()?)
-                })?;
-
-            // same logic from [`super::SimpleAggExecutor`]
-            if not_first_data {
-                new_ops.push(Op::UpdateDelete);
-                new_ops.push(Op::UpdateInsert);
-                key_array_builders.iter_mut().zip(key.iter()).try_for_each(
-                    |(key_col, datum)| {
-                        key_col.append_datum(datum)?;
-                        key_col.append_datum(datum)
-                    },
-                )?;
-            } else {
-                new_ops.push(Op::Insert);
-                key_array_builders
+                agg_array_builders
                     .iter_mut()
-                    .zip(key.iter())
-                    .try_for_each(|(key_col, datum)| key_col.append_datum(datum))?;
-            }
+                    .zip(builders.into_iter())
+                    .try_for_each(|(agg_array_builder, builder)| {
+                        agg_array_builder.append_array(&builder.finish()?)
+                    })?;
 
-            Ok(())
+                Ok(())
+            } else {
+                panic!("Should be Int64 type as row_count is supposed to be here");
+            }
         })?;
 
         // all the columns of aggregated value

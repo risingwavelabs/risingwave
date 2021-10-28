@@ -85,6 +85,7 @@ impl Array for DecimalArray {
 }
 
 /// `DecimalArrayBuilder` constructs a `DecimalArray` from `Option<Decimal>`.
+#[derive(Debug)]
 pub struct DecimalArrayBuilder {
     bitmap: Vec<bool>,
     data: Vec<Decimal>,
