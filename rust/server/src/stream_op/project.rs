@@ -66,7 +66,7 @@ impl SimpleExecutor for ProjectExecutor {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use crate::array::I64Array;
     use crate::array::*;
     use crate::expr::binary_expr::new_binary_expr;

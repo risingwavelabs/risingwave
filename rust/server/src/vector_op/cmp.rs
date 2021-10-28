@@ -232,7 +232,7 @@ where
     Ok(l != r)
 }
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use rust_decimal::Decimal;
     use std::str::FromStr;

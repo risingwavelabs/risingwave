@@ -98,7 +98,7 @@ use crate::impl_consume_barrier_default;
 impl_consume_barrier_default!(MViewSinkExecutor, Executor);
 
 #[cfg(test)]
-mod test {
+mod tests {
     use crate::array::I32Array;
     use crate::catalog::TableId;
     use crate::error::ErrorCode::InternalError;

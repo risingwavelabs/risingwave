@@ -7,7 +7,7 @@ pub fn upper(s: &str, writer: BytesWriter) -> Result<BytesGuard> {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use crate::array::{Array, ArrayBuilder, UTF8ArrayBuilder};
 
     use super::*;

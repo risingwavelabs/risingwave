@@ -197,7 +197,7 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use std::sync::Arc;
 
     use super::*;

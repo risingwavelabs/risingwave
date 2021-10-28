@@ -11,14 +11,15 @@ git submodule update --init --recursive
 ```
 
 ## Environment
-* OS: MacOS or Linux
+* OS: macOS or Linux
 * Java 11
 * Rust
 * Go
 * cmake
 * protobuf
+* PostgreSQL
 
-To install compilers in MacOS, run:
+To install compilers in macOS, run:
 ```
 brew install java11
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -93,7 +94,7 @@ To run end-to-end tests with multiple compute-nodes, run the script:
 ./scripts/start_cluster.sh 3
 ```
 
-It will start processes in the background. After testing you can run the following script
+It will start processes in the background. After testing, you can run the following script
 to cleanup:
 
 ```sh

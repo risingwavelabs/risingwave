@@ -221,7 +221,7 @@ jobs:
           mode: start
           github-token: ${{ secrets.WUTAO_PAT }}
           ec2-image-id: ami-0e704ffdb6669cf91 # github-actions
-          ec2-instance-type: c5.2xlarge # 8 vCPU, 16GB Memory, EBS
+          ec2-instance-type: c5.2xlarge # 8 vCPU, 16 GB Memory, EBS
           subnet-id: subnet-59743123 # default
           security-group-id: sg-9ec32bfe # default (could have security issues)
 

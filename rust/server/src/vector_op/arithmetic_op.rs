@@ -299,7 +299,7 @@ where
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::deci_add;
     use rust_decimal::Decimal;
     use std::str::FromStr;
