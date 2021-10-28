@@ -9,6 +9,8 @@ use std::marker::PhantomData;
 pub trait Aggregator: Send + 'static {
     fn return_type_ref(&self) -> DataTypeRef;
 
+    ///`update` the aggregator with a row with type checked at runtime.
+    fn update_with_row(&mut self, input: &DataChunk, row_id: usize) -> Result<()>;
     /// `update` the aggregator with `Array` with input with type checked at runtime.
     ///
     /// This may be deprecated as it consumes whole array without sort or hash group info.
@@ -34,6 +36,46 @@ pub trait Aggregator: Send + 'static {
 }
 
 pub type BoxedAggState = Box<dyn Aggregator>;
+
+pub struct AggStateFactory {
+    input_type: DataTypeRef,
+    input_col_idx: usize,
+    agg_type: AggKind,
+    return_type: DataTypeRef,
+}
+
+impl AggStateFactory {
+    pub fn new(proto: &AggCall) -> Result<Self> {
+        ensure!(
+            proto.get_args().len() == 1,
+            "Agg expression can only have exactly one child"
+        );
+        let arg = &proto.get_args()[0];
+        let return_type = build_from_proto(proto.get_return_type())?;
+        let agg_type = AggKind::try_from(proto.get_field_type())?;
+        let input_type = build_from_proto(arg.get_field_type())?;
+        let input_col_idx = arg.get_input().get_column_idx() as usize;
+        Ok(Self {
+            input_type,
+            input_col_idx,
+            agg_type,
+            return_type,
+        })
+    }
+
+    pub fn create_agg_state(&self) -> Result<Box<dyn Aggregator>> {
+        create_agg_state_unary(
+            self.input_type.clone(),
+            self.input_col_idx,
+            &self.agg_type,
+            self.return_type.clone(),
+        )
+    }
+
+    pub fn get_return_type(&self) -> DataTypeRef {
+        self.return_type.clone()
+    }
+}
 
 pub fn create_agg_state(proto: &AggCall) -> Result<Box<dyn Aggregator>> {
     let return_type = build_from_proto(proto.get_return_type())?;
@@ -289,6 +331,17 @@ impl Aggregator for CountStar {
         }
         Ok(())
     }
+
+    fn update_with_row(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
+        if let Some(visibility) = input.visibility() {
+            if visibility.is_set(row_id)? {
+                self.result += 1;
+            }
+        } else {
+            self.result += 1;
+        }
+        Ok(())
+    }
 }
 
 struct GeneralAgg<T, F, R>
@@ -317,6 +370,14 @@ where
             f,
             _phantom: PhantomData,
         }
+    }
+    fn update_with_scalar_concrete(&mut self, input: &T, row_id: usize) -> Result<()> {
+        self.result = (self.f)(
+            self.result.as_ref().map(|x| x.as_scalar_ref()),
+            input.value_at(row_id),
+        )
+        .map(|x| x.to_owned_scalar());
+        Ok(())
     }
     fn update_concrete(&mut self, input: &T) -> Result<()> {
         let r = input
@@ -378,6 +439,20 @@ macro_rules! impl_aggregator {
             fn return_type_ref(&self) -> DataTypeRef {
                 self.return_type.clone()
             }
+            fn update_with_row(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
+                if let ArrayImpl::$input_variant(i) =
+                    input.column_at(self.input_col_idx)?.array_ref()
+                {
+                    self.update_with_scalar_concrete(i, row_id)
+                } else {
+                    Err(ErrorCode::InternalError(format!(
+                        "Input fail to match {}.",
+                        stringify!($input_variant)
+                    ))
+                    .into())
+                }
+            }
+
             fn update(&mut self, input: &DataChunk) -> Result<()> {
                 if let ArrayImpl::$input_variant(i) =
                     input.column_at(self.input_col_idx)?.array_ref()

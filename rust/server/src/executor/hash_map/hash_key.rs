@@ -1,4 +1,4 @@
-use crate::array::{Array, ArrayImpl, DataChunk};
+use crate::array::{Array, ArrayBuilderImpl, ArrayImpl, DataChunk};
 use crate::error::Result;
 use crate::types::{Datum, Scalar};
 use crate::types::{IntervalUnit, ScalarRef};
@@ -19,6 +19,8 @@ pub trait HashKeySerializer {
 }
 
 pub trait HashKeySerialize<'a>: ScalarRef<'a> + Default {
+    const N: usize;
+    // the type `S` should be [u8; N], to avoid using `feature(generic_const_exprs)` and `feature(associated_type_defaults)
     type S: AsRef<[u8]>;
     fn serialize(self) -> Self::S;
 }
@@ -50,6 +52,8 @@ pub trait HashKey: Hash + Eq + Sized + Send + Sync + 'static {
             .map(Self::S::into_hash_key)
             .collect())
     }
+
+    fn deserialize_to_builders(self, builders: &mut Vec<ArrayBuilderImpl>) -> Result<()>;
 
     fn has_null(&self) -> bool;
 }
@@ -139,8 +143,8 @@ pub type Key256 = FixedSizeKey<32>;
 pub type KeySerialized = SerializedKey;
 
 impl HashKeySerialize<'_> for bool {
-    type S = [u8; 1];
-
+    const N: usize = 1;
+    type S = [u8; Self::N];
     fn serialize(self) -> Self::S {
         if self {
             [1u8; 1]
@@ -151,7 +155,8 @@ impl HashKeySerialize<'_> for bool {
 }
 
 impl HashKeySerialize<'_> for i16 {
-    type S = [u8; 2];
+    const N: usize = 2;
+    type S = [u8; Self::N];
 
     fn serialize(self) -> Self::S {
         self.to_ne_bytes()
@@ -159,7 +164,8 @@ impl HashKeySerialize<'_> for i16 {
 }
 
 impl HashKeySerialize<'_> for i32 {
-    type S = [u8; 4];
+    const N: usize = 4;
+    type S = [u8; Self::N];
 
     fn serialize(self) -> Self::S {
         self.to_ne_bytes()
@@ -167,7 +173,8 @@ impl HashKeySerialize<'_> for i32 {
 }
 
 impl HashKeySerialize<'_> for i64 {
-    type S = [u8; 8];
+    const N: usize = 8;
+    type S = [u8; Self::N];
 
     fn serialize(self) -> Self::S {
         self.to_ne_bytes()
@@ -175,7 +182,8 @@ impl HashKeySerialize<'_> for i64 {
 }
 
 impl HashKeySerialize<'_> for f32 {
-    type S = [u8; 4];
+    const N: usize = 4;
+    type S = [u8; Self::N];
 
     fn serialize(self) -> Self::S {
         self.to_ne_bytes()
@@ -183,7 +191,8 @@ impl HashKeySerialize<'_> for f32 {
 }
 
 impl HashKeySerialize<'_> for f64 {
-    type S = [u8; 8];
+    const N: usize = 8;
+    type S = [u8; Self::N];
 
     fn serialize(self) -> Self::S {
         self.to_ne_bytes()
@@ -191,7 +200,8 @@ impl HashKeySerialize<'_> for f64 {
 }
 
 impl HashKeySerialize<'_> for Decimal {
-    type S = [u8; 16];
+    const N: usize = 16;
+    type S = [u8; Self::N];
 
     fn serialize(self) -> Self::S {
         Decimal::serialize(&self.normalize())
@@ -199,7 +209,8 @@ impl HashKeySerialize<'_> for Decimal {
 }
 
 impl HashKeySerialize<'_> for IntervalUnit {
-    type S = [u8; 16];
+    const N: usize = 16;
+    type S = [u8; Self::N];
 
     fn serialize(self) -> Self::S {
         let mut ret = [0; 16];
@@ -213,6 +224,7 @@ impl HashKeySerialize<'_> for IntervalUnit {
 
 impl<'a> HashKeySerialize<'a> for &'a str {
     type S = Vec<u8>;
+    const N: usize = 0;
 
     /// This should never be called
     fn serialize(self) -> Self::S {
@@ -277,6 +289,19 @@ impl<const N: usize> HashKeySerializer for FixedSizeKeySerializer<N> {
             key: self.buffer,
             null_bitmap: self.null_bitmap,
         }
+    }
+}
+
+pub struct FixedSizeKeyDeserializer<const N: usize> {
+    buffer: [u8; N],
+    null_bitmap: u8,
+    null_bitmap_idx: usize,
+    cur_addr: usize,
+}
+
+impl<const N: usize> FixedSizeKeyDeserializer<N> {
+    fn with_hash_key(key: FixedSizeKey<N>) -> Self {
+        key.into_deserializer()
     }
 }
 
@@ -345,11 +370,27 @@ impl ArrayImpl {
     }
 }
 
+impl<const N: usize> FixedSizeKey<N> {
+    fn into_deserializer(self) -> FixedSizeKeyDeserializer<N> {
+        FixedSizeKeyDeserializer::<N> {
+            cur_addr: 0,
+            null_bitmap_idx: 0,
+            buffer: self.key,
+            null_bitmap: self.null_bitmap,
+        }
+    }
+}
 impl<const N: usize> HashKey for FixedSizeKey<N> {
     type S = FixedSizeKeySerializer<N>;
 
     fn has_null(&self) -> bool {
         self.null_bitmap != 0xFF
+    }
+
+    fn deserialize_to_builders(self, _builders: &mut Vec<ArrayBuilderImpl>) -> Result<()> {
+        {
+            todo!()
+        }
     }
 }
 
@@ -358,6 +399,13 @@ impl HashKey for SerializedKey {
 
     fn has_null(&self) -> bool {
         self.has_null
+    }
+
+    fn deserialize_to_builders(self, builders: &mut Vec<ArrayBuilderImpl>) -> Result<()> {
+        self.key
+            .into_iter()
+            .zip(builders)
+            .try_for_each(|(datum, builder)| builder.append_datum(&datum))
     }
 }
 

@@ -16,6 +16,7 @@ use crate::types::DataTypeRef;
 use drop_table::*;
 use exchange::*;
 use filter::*;
+use hash_agg::*;
 use order_by::*;
 use projection::*;
 use row_seq_scan::*;
@@ -30,6 +31,7 @@ mod create_table;
 mod drop_table;
 mod exchange;
 mod filter;
+mod hash_agg;
 mod hash_map;
 mod insert;
 mod join;
@@ -70,6 +72,7 @@ pub struct Field {
 }
 
 /// the schema of the executor's return data
+#[derive(Clone)]
 pub struct Schema {
     fields: Vec<Field>,
 }
@@ -143,7 +146,8 @@ impl<'a> ExecutorBuilder<'a> {
           PlanNode_PlanNodeType::VALUE => ValuesExecutor,
           PlanNode_PlanNodeType::NESTED_LOOP_JOIN => NestedLoopJoinExecutor,
           PlanNode_PlanNodeType::HASH_JOIN => HashJoinExecutorBuilder,
-          PlanNode_PlanNodeType::DROP_STREAM => DropStreamExecutor
+          PlanNode_PlanNodeType::DROP_STREAM => DropStreamExecutor,
+          PlanNode_PlanNodeType::HASH_AGG => HashAggExecutorBuilder
         }
     }
 

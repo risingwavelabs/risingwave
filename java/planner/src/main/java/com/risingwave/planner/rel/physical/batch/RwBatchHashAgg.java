@@ -2,7 +2,6 @@ package com.risingwave.planner.rel.physical.batch;
 
 import com.google.protobuf.Any;
 import com.risingwave.planner.rel.physical.RwAggregate;
-import com.risingwave.proto.expr.InputRefExpr;
 import com.risingwave.proto.plan.HashAggNode;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.proto.plan.SimpleAggNode;
@@ -16,6 +15,7 @@ import org.apache.calcite.rel.hint.RelHint;
 import org.apache.calcite.util.ImmutableBitSet;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+/** Plan for adhoc HashAgg executor. */
 public class RwBatchHashAgg extends RwAggregate implements RisingWaveBatchPhyRel {
   public RwBatchHashAgg(
       RelOptCluster cluster,
@@ -40,7 +40,7 @@ public class RwBatchHashAgg extends RwAggregate implements RisingWaveBatchPhyRel
   private HashAggNode serializeHashAgg() {
     HashAggNode.Builder hashAggNodeBuilder = HashAggNode.newBuilder();
     for (int i = groupSet.nextSetBit(0); i >= 0; i = groupSet.nextSetBit(i + 1)) {
-      hashAggNodeBuilder.addGroupKeys(InputRefExpr.newBuilder().setColumnIdx(i).build());
+      hashAggNodeBuilder.addGroupKeys(i);
     }
     for (AggregateCall aggCall : aggCalls) {
       hashAggNodeBuilder.addAggCalls(serializeAggCall(aggCall));

@@ -148,7 +148,7 @@ message NestedLoopJoinNode {
 }
 
 message HashAggNode {
-    repeated expr.InputRefExpr group_keys = 1;
+    repeated uint32 group_keys = 1;
     repeated expr.AggCall agg_calls = 2;
 }
 
