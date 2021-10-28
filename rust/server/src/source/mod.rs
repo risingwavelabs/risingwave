@@ -1,18 +1,20 @@
-mod kafka;
-pub use kafka::*;
-mod file;
-pub use file::*;
-mod chunk_reader;
+use std::fmt::Debug;
+
+use async_trait::async_trait;
+
 pub use chunk_reader::*;
-mod manager;
+pub use file::*;
+pub use kafka::*;
 pub use manager::*;
-mod parser;
 pub use parser::*;
 
 use crate::error::Result;
-use crate::types::Datum;
-use async_trait::async_trait;
-use std::fmt::Debug;
+
+mod chunk_reader;
+mod file;
+mod kafka;
+mod manager;
+mod parser;
 
 #[derive(Clone, Debug)]
 pub enum SourceConfig {
@@ -48,9 +50,4 @@ pub trait Source: Send + Sync + 'static {
 pub trait SourceReader: Debug + Send + Sync + 'static {
     async fn next(&mut self) -> Result<Option<SourceMessage>>;
     async fn cancel(&mut self) -> Result<()>;
-}
-
-pub trait SourceParser: Send + Sync + 'static {
-    // parse needs to be a member method because some format like Protobuf needs to be pre-compiled
-    fn parse(&self, payload: &[u8], columns: &[SourceColumnDesc]) -> Result<Vec<Datum>>;
 }

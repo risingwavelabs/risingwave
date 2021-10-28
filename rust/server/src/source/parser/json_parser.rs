@@ -6,6 +6,7 @@ use crate::error::RwError;
 use crate::source::{SourceColumnDesc, SourceParser};
 use crate::types::{DataTypeKind, Datum, ScalarImpl, ScalarRef};
 
+/// Parser for JSON format
 pub struct JSONParser;
 
 impl SourceParser for JSONParser {
