@@ -1,4 +1,14 @@
+use std::convert::TryInto;
+use std::marker::PhantomData;
+use std::mem::swap;
+
+use either::Either;
+use protobuf::Message;
+
+use risingwave_proto::plan::{HashJoinNode, PlanNode_PlanNodeType};
+
 use crate::array::DataChunk;
+use crate::catalog::Schema;
 use crate::error::ErrorCode::ProtobufError;
 use crate::error::Result;
 use crate::executor::hash_map::hash_key_dispatch;
@@ -9,16 +19,10 @@ use crate::executor::join::hash_join_state::{BuildTable, ProbeTable};
 use crate::executor::join::JoinType;
 use crate::executor::ExecutorResult::Batch;
 use crate::executor::{
-    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult, Schema,
+    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult,
 };
 use crate::types::build_from_proto as type_build_from_proto;
 use crate::types::DataTypeRef;
-use either::Either;
-use protobuf::Message;
-use risingwave_proto::plan::{HashJoinNode, PlanNode_PlanNodeType};
-use std::convert::TryInto;
-use std::marker::PhantomData;
-use std::mem::swap;
 
 /// Parameters of equi-join.
 /// We use following sql as an example in comments:
@@ -323,19 +327,22 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use either::Either;
+
     use crate::array;
     use crate::array::column::Column;
     use crate::array::{ArrayBuilderImpl, DataChunk};
     use crate::array::{F32Array, F64Array, I32Array};
+    use crate::catalog::{Field, Schema};
     use crate::error::Result;
     use crate::executor::hash_map::Key32;
     use crate::executor::join::hash_join::{EquiJoinParams, HashJoinExecutor};
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::MockExecutor;
-    use crate::executor::{BoxedExecutor, ExecutorResult, Field, Schema};
+    use crate::executor::{BoxedExecutor, ExecutorResult};
     use crate::types::{DataTypeKind, DataTypeRef, Float32Type, Float64Type, Int32Type};
-    use either::Either;
-    use std::sync::Arc;
 
     struct DataChunkMerger {
         data_types: Vec<DataTypeRef>,

@@ -1,15 +1,19 @@
-use crate::error::ErrorCode::ProtobufError;
-use crate::error::Result;
-use crate::execution::exchange_source::{ExchangeSource, GrpcExchangeSource, LocalExchangeSource};
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult, Schema};
-use crate::task::GlobalTaskEnv;
-use crate::util::addr::get_host_port;
+use std::marker::PhantomData;
+use std::net::SocketAddr;
+
 use protobuf::Message;
+
 use risingwave_pb::ToProst;
 use risingwave_proto::plan::PlanNode_PlanNodeType;
 use risingwave_proto::task_service::{ExchangeNode, ExchangeSource as ProtoExchangeSource};
-use std::marker::PhantomData;
-use std::net::SocketAddr;
+
+use crate::catalog::Schema;
+use crate::error::ErrorCode::ProtobufError;
+use crate::error::Result;
+use crate::execution::exchange_source::{ExchangeSource, GrpcExchangeSource, LocalExchangeSource};
+use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
+use crate::task::GlobalTaskEnv;
+use crate::util::addr::get_host_port;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 
@@ -140,12 +144,14 @@ impl<CS: CreateSource> Executor for GenericExchangeExecutor<CS> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::Arc;
+
     use crate::array::column::Column;
     use crate::array::{DataChunk, I32Array};
     use crate::array_nonnull;
     use crate::types::Int32Type;
-    use std::sync::Arc;
+
+    use super::*;
 
     #[test]
     fn test_is_local_address() {

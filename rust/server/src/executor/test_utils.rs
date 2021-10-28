@@ -1,17 +1,21 @@
+use std::collections::VecDeque;
+use std::sync::Arc;
+
+use itertools::Itertools;
+
+use risingwave_proto::expr::ExprNode_Type;
+
 use crate::array::ArrayImpl;
 use crate::array::DataChunk;
 use crate::buffer::Bitmap;
+use crate::catalog::Schema;
 use crate::error::Result;
 use crate::executor::ExecutorResult::Batch;
 use crate::executor::ExecutorResult::Done;
-use crate::executor::{Executor, ExecutorResult, Schema};
+use crate::executor::{Executor, ExecutorResult};
 use crate::expr::binary_expr::new_binary_expr;
 use crate::expr::InputRefExpression;
 use crate::types::BoolType;
-use itertools::Itertools;
-use risingwave_proto::expr::ExprNode_Type;
-use std::collections::VecDeque;
-use std::sync::Arc;
 
 use super::BoxedExecutor;
 

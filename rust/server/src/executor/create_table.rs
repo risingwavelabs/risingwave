@@ -1,11 +1,14 @@
+use protobuf::Message;
+
+use pb_convert::FromProtobuf;
+use risingwave_proto::plan::{ColumnDesc, CreateTableNode, PlanNode_PlanNodeType};
+
+use crate::catalog::Schema;
 use crate::catalog::TableId;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::Result;
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult, Schema};
+use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::storage::TableManagerRef;
-use pb_convert::FromProtobuf;
-use protobuf::Message;
-use risingwave_proto::plan::{ColumnDesc, CreateTableNode, PlanNode_PlanNodeType};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 

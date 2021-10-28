@@ -1,7 +1,19 @@
+use drop_stream::*;
+use drop_table::*;
+use exchange::*;
+use filter::*;
+use hash_agg::*;
 use limit::*;
+use order_by::*;
+use projection::*;
 use risingwave_proto::plan::{PlanNode, PlanNode_PlanNodeType};
+use row_seq_scan::*;
+use seq_scan::*;
+use sort_agg::*;
+use top_n::*;
 
 use crate::array::DataChunk;
+use crate::catalog::Schema;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 use crate::executor::create_stream::CreateStreamExecutor;
@@ -12,22 +24,10 @@ use crate::executor::join::HashJoinExecutorBuilder;
 pub use crate::executor::stream_scan::StreamScanExecutor;
 use crate::executor::values::ValuesExecutor;
 use crate::task::GlobalTaskEnv;
-use crate::types::DataTypeRef;
-use drop_table::*;
-use exchange::*;
-use filter::*;
-use hash_agg::*;
-use order_by::*;
-use projection::*;
-use row_seq_scan::*;
-use seq_scan::*;
-use sort_agg::*;
-use top_n::*;
-mod drop_stream;
-use drop_stream::*;
 
 mod create_stream;
 mod create_table;
+mod drop_stream;
 mod drop_table;
 mod exchange;
 mod filter;
@@ -62,19 +62,6 @@ impl ExecutorResult {
             }
         }
     }
-}
-
-/// the field in the schema of the executor's return data
-#[derive(Clone)]
-pub struct Field {
-    // TODO: field_name
-    data_type: DataTypeRef,
-}
-
-/// the schema of the executor's return data
-#[derive(Clone)]
-pub struct Schema {
-    fields: Vec<Field>,
 }
 
 #[async_trait::async_trait]

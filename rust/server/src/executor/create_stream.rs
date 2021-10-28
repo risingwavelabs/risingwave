@@ -1,17 +1,21 @@
+use std::collections::HashMap;
+
+use protobuf::Message;
+
+use pb_convert::FromProtobuf;
+use risingwave_proto::plan::{
+    CreateStreamNode, CreateStreamNode_RowFormatType, PlanNode_PlanNodeType,
+};
+
+use crate::catalog::Schema;
 use crate::catalog::TableId;
 use crate::error::ErrorCode::{InternalError, ProtobufError, ProtocolError};
 use crate::error::Result;
 use crate::error::RwError;
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult, Schema};
+use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::source::{FileSourceConfig, KafkaSourceConfig, SourceFormat};
 use crate::source::{SourceColumnDesc, SourceConfig, SourceManagerRef};
 use crate::types::build_from_proto;
-use pb_convert::FromProtobuf;
-use protobuf::Message;
-use risingwave_proto::plan::{
-    CreateStreamNode, CreateStreamNode_RowFormatType, PlanNode_PlanNodeType,
-};
-use std::collections::HashMap;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 

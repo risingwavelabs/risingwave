@@ -1,15 +1,17 @@
+use std::cmp::min;
+
+use itertools::Itertools;
+use protobuf::Message;
+
+use risingwave_proto::plan::{LimitNode as LimitProto, PlanNode_PlanNodeType};
+
 use crate::array::DataChunk;
+use crate::catalog::Schema;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::Result;
 use crate::executor::ExecutorResult::{Batch, Done};
-use itertools::Itertools;
-use protobuf::Message;
-use risingwave_proto::plan::{LimitNode as LimitProto, PlanNode_PlanNodeType};
-use std::cmp::min;
 
-use super::{
-    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult, Schema,
-};
+use super::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult};
 
 /// Limit executor.
 pub(super) struct LimitExecutor {
@@ -115,16 +117,16 @@ impl Executor for LimitExecutor {
 
 #[cfg(test)]
 mod tests {
-
-    use super::*;
-    use crate::array::column::Column;
-    use crate::array::{Array, BoolArray, DataChunk, PrimitiveArray};
-    use crate::executor::test_utils::MockExecutor;
-    use crate::executor::{Field, Schema};
-    use crate::types::{BoolType, DataTypeKind, Int32Type};
-
     use std::sync::Arc;
     use std::vec;
+
+    use crate::array::column::Column;
+    use crate::array::{Array, BoolArray, DataChunk, PrimitiveArray};
+    use crate::catalog::{Field, Schema};
+    use crate::executor::test_utils::MockExecutor;
+    use crate::types::{BoolType, DataTypeKind, Int32Type};
+
+    use super::*;
 
     fn create_column(vec: &[Option<i32>]) -> Result<Column> {
         let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;

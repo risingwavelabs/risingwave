@@ -3,11 +3,12 @@ use protobuf::Message;
 use pb_convert::FromProtobuf;
 use risingwave_proto::plan::{DropStreamNode, PlanNode_PlanNodeType};
 
+use crate::catalog::Schema;
 use crate::catalog::TableId;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::Result;
 use crate::executor::{
-    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult, Schema,
+    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult,
 };
 use crate::source::SourceManagerRef;
 
@@ -64,8 +65,9 @@ mod tests {
     use risingwave_proto::plan::{PlanNode, PlanNode_PlanNodeType};
 
     use crate::catalog::test_utils::mock_table_id;
+    use crate::catalog::Schema;
     use crate::executor::drop_stream::DropStreamExecutor;
-    use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder, Schema};
+    use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
     use crate::source::{
         FileSourceConfig, MemSourceManager, SourceConfig, SourceFormat, SourceManager,
     };

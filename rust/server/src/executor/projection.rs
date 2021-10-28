@@ -1,13 +1,17 @@
-use super::{BoxedExecutor, BoxedExecutorBuilder};
+use protobuf::Message;
+
+use risingwave_proto::plan::{PlanNode_PlanNodeType, ProjectNode};
+
 use crate::array::column::Column;
 use crate::array::DataChunk;
+use crate::catalog::{Field, Schema};
 use crate::error::ErrorCode::ProtobufError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::executor::ExecutorResult::{Batch, Done};
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult, Field, Schema};
+use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::expr::{build_from_proto, BoxedExpression};
-use protobuf::Message;
-use risingwave_proto::plan::{PlanNode_PlanNodeType, ProjectNode};
+
+use super::{BoxedExecutor, BoxedExecutorBuilder};
 
 pub(super) struct ProjectionExecutor {
     expr: Vec<BoxedExpression>,
@@ -89,13 +93,14 @@ impl BoxedExecutorBuilder for ProjectionExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::array::{Array, I32Array};
+    use crate::catalog::{Field, Schema};
     use crate::executor::test_utils::MockExecutor;
-    use crate::executor::{Field, Schema};
     use crate::expr::InputRefExpression;
     use crate::types::{DataTypeKind, Int32Type};
     use crate::*;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_project_executor() -> Result<()> {

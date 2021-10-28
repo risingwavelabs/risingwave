@@ -2,18 +2,19 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::{mem, vec};
 
-use crate::error::ErrorCode::ProtobufError;
 use itertools::Itertools;
-
 use protobuf::Message;
+
 use risingwave_proto::plan::{HashAggNode, PlanNode_PlanNodeType};
 
 use crate::array::column::Column;
 use crate::array::{DataChunk, RwError};
+use crate::catalog::{Field, Schema};
+use crate::error::ErrorCode::ProtobufError;
 use crate::error::{ErrorCode, Result};
 use crate::executor::hash_map::{HashKey, PrecomputedBuildHasher, SerializedKey};
+use crate::executor::BoxedExecutor;
 use crate::executor::ExecutorResult::Batch;
-use crate::executor::{BoxedExecutor, Field, Schema};
 use crate::types::{DataType, DataTypeRef};
 use crate::vector_op::agg::AggStateFactory;
 use crate::vector_op::agg::BoxedAggState;
@@ -175,17 +176,17 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
 }
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::array::{I32Array, I64Array};
-    use crate::array_nonnull;
-    use crate::executor::test_utils::{diff_executor_output, MockExecutor};
-    use crate::executor::{Field, Schema};
-    use crate::types::{Int32Type, Int64Type};
-
     use pb_construct::make_proto;
-
     use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};
     use risingwave_proto::expr::{AggCall, AggCall_Arg, AggCall_Type, InputRefExpr};
+
+    use crate::array::{I32Array, I64Array};
+    use crate::array_nonnull;
+    use crate::catalog::{Field, Schema};
+    use crate::executor::test_utils::{diff_executor_output, MockExecutor};
+    use crate::types::{Int32Type, Int64Type};
+
+    use super::*;
 
     #[tokio::test]
     async fn execute_int32_grouped() {

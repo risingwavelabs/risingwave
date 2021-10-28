@@ -1,17 +1,21 @@
+use std::sync::Arc;
+
+use protobuf::Message;
+
+use risingwave_proto::plan::{PlanNode_PlanNodeType, ValuesNode};
+
 use crate::array::column::Column;
 use crate::array::I32Array;
 use crate::array::{ArrayBuilderImpl, DataChunk};
+use crate::catalog::{Field, Schema};
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::executor::ExecutorResult::Done;
 use crate::executor::{
-    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult, Field, Schema,
+    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult,
 };
 use crate::expr::{build_from_proto, BoxedExpression};
 use crate::types::{DataType, Int32Type};
-use protobuf::Message;
-use risingwave_proto::plan::{PlanNode_PlanNodeType, ValuesNode};
-use std::sync::Arc;
 
 /// `ValuesExecutor` implements Values executor.
 pub(super) struct ValuesExecutor {
@@ -130,10 +134,11 @@ impl BoxedExecutorBuilder for ValuesExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::array::Array;
     use crate::expr::LiteralExpression;
     use crate::types::{DataTypeKind, Int16Type, Int32Type, Int64Type, ScalarImpl};
+
+    use super::*;
 
     #[tokio::test]
     async fn test_values_executor() -> Result<()> {

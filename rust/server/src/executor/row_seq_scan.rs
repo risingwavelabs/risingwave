@@ -1,17 +1,20 @@
+use std::sync::Arc;
+
+use protobuf::Message;
+
+use pb_convert::FromProtobuf;
+use risingwave_proto::plan::{PlanNode_PlanNodeType, RowSeqScanNode};
+
 use crate::array::column::Column;
 use crate::array::DataChunk;
 use crate::catalog::TableId;
+use crate::catalog::{Field, Schema};
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
-
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult, Field, Schema};
+use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::storage::{MemRowTable, MemTableRowIter, Row, SimpleTableRef};
 use crate::types::build_from_proto;
 use crate::types::DataTypeRef;
-use pb_convert::FromProtobuf;
-use protobuf::Message;
-use risingwave_proto::plan::{PlanNode_PlanNodeType, RowSeqScanNode};
-use std::sync::Arc;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 

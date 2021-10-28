@@ -1,13 +1,17 @@
+use std::sync::Arc;
+
+use protobuf::Message as _;
+
+use risingwave_proto::plan::{PlanNode_PlanNodeType, SortAggNode};
+
 use crate::array::{column::Column, DataChunk};
+use crate::catalog::{Field, Schema};
 use crate::error::ErrorCode::ProtobufError;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::executor::{BoxedExecutor, Executor, ExecutorBuilder, ExecutorResult, Field, Schema};
+use crate::executor::{BoxedExecutor, Executor, ExecutorBuilder, ExecutorResult};
 use crate::expr::{build_from_proto, BoxedExpression};
 use crate::types::DataType;
 use crate::vector_op::agg::{self, BoxedAggState, BoxedSortedGrouper, EqGroups};
-use protobuf::Message as _;
-use risingwave_proto::plan::{PlanNode_PlanNodeType, SortAggNode};
-use std::sync::Arc;
 
 use super::BoxedExecutorBuilder;
 
@@ -166,18 +170,21 @@ impl Executor for SortAggExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::array::{Array as _, I32Array, I64Array};
-    use crate::array_nonnull;
-    use crate::executor::test_utils::MockExecutor;
-    use crate::executor::{Field, Schema};
-    use crate::types::{DataTypeKind, Int32Type};
-    use pb_construct::make_proto;
     use protobuf::well_known_types::Any;
+
+    use pb_construct::make_proto;
     use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};
     use risingwave_proto::expr::{
         AggCall, AggCall_Arg, AggCall_Type, ExprNode, ExprNode_Type, InputRefExpr,
     };
+
+    use crate::array::{Array as _, I32Array, I64Array};
+    use crate::array_nonnull;
+    use crate::catalog::{Field, Schema};
+    use crate::executor::test_utils::MockExecutor;
+    use crate::types::{DataTypeKind, Int32Type};
+
+    use super::*;
 
     #[tokio::test]
     #[allow(clippy::many_single_char_names)]

@@ -1,16 +1,20 @@
+use std::sync::Arc;
+
+use protobuf::Message;
+
+use pb_convert::FromProtobuf;
+use risingwave_proto::plan::{PlanNode_PlanNodeType, SeqScanNode};
+
 use crate::array::column::Column;
 use crate::array::{DataChunk, DataChunkRef};
 use crate::catalog::TableId;
+use crate::catalog::{Field, Schema};
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::executor::ExecutorResult::Done;
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult, Field, Schema};
+use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::storage::*;
 use crate::types::build_from_proto;
-use pb_convert::FromProtobuf;
-use protobuf::Message;
-use risingwave_proto::plan::{PlanNode_PlanNodeType, SeqScanNode};
-use std::sync::Arc;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 
@@ -124,14 +128,16 @@ impl SeqScanExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use pb_construct::make_proto;
+    use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};
+    use risingwave_proto::plan::{ColumnDesc, ColumnDesc_ColumnEncodingType};
+
     use crate::array::{Array, I64Array};
     use crate::catalog::test_utils::mock_table_id;
     use crate::types::{DataTypeKind, Int64Type};
     use crate::*;
-    use pb_construct::make_proto;
-    use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};
-    use risingwave_proto::plan::{ColumnDesc, ColumnDesc_ColumnEncodingType};
+
+    use super::*;
 
     #[tokio::test]
     async fn test_seq_scan_executor() -> Result<()> {

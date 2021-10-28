@@ -1,19 +1,23 @@
+use std::mem::swap;
+use std::sync::Arc;
+
+use protobuf::Message;
+
+use risingwave_proto::plan::{NestedLoopJoinNode, PlanNode_PlanNodeType};
+
 use crate::array::column::Column;
 use crate::array::data_chunk_iter::RowRef;
 use crate::array::DataChunk;
+use crate::catalog::Schema;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::executor::join::JoinType;
 use crate::executor::ExecutorResult::{Batch, Done};
 use crate::executor::{
-    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult, Schema,
+    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult,
 };
 use crate::expr::{build_from_proto, BoxedExpression};
 use crate::types::DataType;
-use protobuf::Message;
-use risingwave_proto::plan::{NestedLoopJoinNode, PlanNode_PlanNodeType};
-use std::mem::swap;
-use std::sync::Arc;
 
 /// Nested loop join executor.
 ///
@@ -408,19 +412,19 @@ impl BuildTable {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
 
     use crate::array::column::Column;
     use crate::array::data_chunk_iter::RowRef;
     use crate::array::*;
-
     use crate::catalog::test_utils::mock_table_id;
+    use crate::catalog::Schema;
     use crate::executor::join::nested_loop_join::{BuildTable, ProbeSideSource};
     use crate::executor::seq_scan::SeqScanExecutor;
-    use crate::executor::{ExecutorResult, Schema};
+    use crate::executor::ExecutorResult;
     use crate::storage::SimpleMemTable;
     use crate::types::Int32Type;
     use crate::types::ScalarRefImpl;
-    use std::sync::Arc;
 
     #[test]
     fn test_concatenate() {

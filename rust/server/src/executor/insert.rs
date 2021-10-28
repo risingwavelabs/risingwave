@@ -1,20 +1,22 @@
-use super::BoxedExecutor;
+use std::sync::Arc;
+
+use protobuf::Message;
+
+use pb_convert::FromProtobuf;
+use risingwave_proto::plan::{InsertNode, PlanNode_PlanNodeType};
+
 use crate::array::column::Column;
 use crate::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder};
 use crate::catalog::TableId;
+use crate::catalog::{Field, Schema};
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::executor::ExecutorResult::{Batch, Done};
-use crate::executor::{
-    BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult, Field, Schema,
-};
+use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult};
 use crate::storage::*;
-
 use crate::types::Int32Type;
-use pb_convert::FromProtobuf;
-use protobuf::Message;
-use risingwave_proto::plan::{InsertNode, PlanNode_PlanNodeType};
-use std::sync::Arc;
+
+use super::BoxedExecutor;
 
 /// `InsertExecutor` implements table insertion with values from its child executor.
 pub(super) struct InsertExecutor {
@@ -117,18 +119,21 @@ impl BoxedExecutorBuilder for InsertExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::array::{Array, I64Array};
-    use crate::catalog::test_utils::mock_table_id;
-    use crate::executor::test_utils::MockExecutor;
-    use crate::executor::{Field, Schema};
-    use crate::storage::{SimpleTableManager, TableManager};
-    use crate::types::{DataTypeKind, Int64Type};
-    use crate::*;
+    use std::sync::Arc;
+
     use pb_construct::make_proto;
     use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};
     use risingwave_proto::plan::{ColumnDesc, ColumnDesc_ColumnEncodingType};
-    use std::sync::Arc;
+
+    use crate::array::{Array, I64Array};
+    use crate::catalog::test_utils::mock_table_id;
+    use crate::catalog::{Field, Schema};
+    use crate::executor::test_utils::MockExecutor;
+    use crate::storage::{SimpleTableManager, TableManager};
+    use crate::types::{DataTypeKind, Int64Type};
+    use crate::*;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_insert_executor() -> Result<()> {

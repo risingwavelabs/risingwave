@@ -1,13 +1,16 @@
-use super::{BoxedExecutor, BoxedExecutorBuilder};
-use crate::array::ArrayImpl::Bool;
+use protobuf::Message;
 
+use risingwave_proto::plan::{FilterNode, PlanNode_PlanNodeType};
+
+use crate::array::ArrayImpl::Bool;
+use crate::catalog::Schema;
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::Result;
 use crate::executor::ExecutorResult::{Batch, Done};
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult, Schema};
+use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::expr::{build_from_proto, BoxedExpression};
-use protobuf::Message;
-use risingwave_proto::plan::{FilterNode, PlanNode_PlanNodeType};
+
+use super::{BoxedExecutor, BoxedExecutorBuilder};
 
 pub(super) struct FilterExecutor {
     expr: BoxedExpression,
@@ -66,22 +69,26 @@ impl BoxedExecutorBuilder for FilterExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::array::column::Column;
-    use crate::array::{Array, DataChunk, PrimitiveArray};
-    use crate::executor::test_utils::MockExecutor;
-    use crate::executor::{Field, Schema};
-    use crate::types::{DataTypeKind, Int32Type};
-    use pb_construct::make_proto;
+    use std::sync::Arc;
+
     use protobuf::well_known_types::Any as AnyProto;
     use protobuf::RepeatedField;
+
+    use pb_construct::make_proto;
     use risingwave_proto::data::DataType as DataTypeProto;
     use risingwave_proto::expr::ExprNode_Type::EQUAL;
     use risingwave_proto::expr::ExprNode_Type::INPUT_REF;
     use risingwave_proto::expr::FunctionCall;
     use risingwave_proto::expr::InputRefExpr;
     use risingwave_proto::expr::{ExprNode, ExprNode_Type};
-    use std::sync::Arc;
+
+    use crate::array::column::Column;
+    use crate::array::{Array, DataChunk, PrimitiveArray};
+    use crate::catalog::{Field, Schema};
+    use crate::executor::test_utils::MockExecutor;
+    use crate::types::{DataTypeKind, Int32Type};
+
+    use super::*;
 
     #[tokio::test]
     async fn test_filter_executor() {

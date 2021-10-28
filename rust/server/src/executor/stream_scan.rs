@@ -8,10 +8,11 @@ use risingwave_proto::plan::StreamScanNode;
 
 use crate::array::DataChunk;
 use crate::catalog::TableId;
+use crate::catalog::{Field, Schema};
 use crate::error::ErrorCode;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult, Field, Schema};
+use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::source::{ChunkReader, JSONParser, SourceColumnDesc, SourceFormat, SourceParser};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};

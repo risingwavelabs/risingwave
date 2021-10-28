@@ -1,6 +1,9 @@
 #[cfg(test)]
 pub mod test_utils;
 
+pub mod schema;
+pub use schema::*;
+
 use pb_convert_derive::FromProtobuf;
 
 #[derive(Clone, Debug, Hash, PartialOrd, PartialEq, Eq, FromProtobuf)]

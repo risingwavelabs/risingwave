@@ -1,24 +1,28 @@
-use super::{BoxedExecutor, BoxedExecutorBuilder};
-use crate::array::{
-    column::Column, Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, DataChunkRef,
-};
-use crate::error::{
-    ErrorCode::{InternalError, ProtobufError},
-    Result,
-};
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult, Schema};
-use crate::types::DataTypeRef;
-use crate::util::sort_util::{
-    compare_two_row, fetch_orders_from_order_by_node, HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE,
-};
-use protobuf::Message;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::iter::Iterator;
 use std::sync::Arc;
 use std::vec::Vec;
 
+use protobuf::Message;
+
 use risingwave_proto::plan::{OrderByNode as OrderByProto, PlanNode_PlanNodeType};
+
+use crate::array::{
+    column::Column, Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, DataChunkRef,
+};
+use crate::catalog::Schema;
+use crate::error::{
+    ErrorCode::{InternalError, ProtobufError},
+    Result,
+};
+use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
+use crate::types::DataTypeRef;
+use crate::util::sort_util::{
+    compare_two_row, fetch_orders_from_order_by_node, HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE,
+};
+
+use super::{BoxedExecutor, BoxedExecutorBuilder};
 
 pub(super) struct OrderByExecutor {
     child: BoxedExecutor,
@@ -178,16 +182,17 @@ impl Executor for OrderByExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::Arc;
+
     use crate::array::column::Column;
     use crate::array::{DataChunk, PrimitiveArray};
+    use crate::catalog::{Field, Schema};
     use crate::executor::test_utils::MockExecutor;
-    use crate::executor::{Field, Schema};
     use crate::expr::InputRefExpression;
     use crate::types::{DataTypeKind, Int32Type};
     use crate::util::sort_util::OrderType;
 
-    use std::sync::Arc;
+    use super::*;
 
     fn create_column(vec: &[Option<i32>]) -> Result<Column> {
         let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
