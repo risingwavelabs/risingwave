@@ -122,3 +122,97 @@ impl SimpleExecutor for FilterExecutor {
         Ok(Message::Chunk(new_chunk))
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::array::I64Array;
+    use crate::expr::binary_expr::new_binary_expr;
+    use crate::expr::InputRefExpression;
+    use crate::stream_op::test_utils::MockSource;
+    use crate::stream_op::{Executor, FilterExecutor, Message, Op, StreamChunk};
+    use crate::types::{BoolType, Int64Type};
+    use crate::*;
+    use itertools::Itertools;
+    use risingwave_proto::expr::ExprNode_Type;
+
+    #[tokio::test]
+    async fn test_filter() {
+        let chunk1 = StreamChunk {
+            ops: vec![Op::Insert, Op::Insert, Op::Insert, Op::Delete],
+            columns: vec![
+                column_nonnull! { I64Array, Int64Type, [1, 5, 6, 7] },
+                column_nonnull! { I64Array, Int64Type, [4, 2, 6, 5] },
+            ],
+            visibility: None,
+        };
+        let chunk2 = StreamChunk {
+            ops: vec![
+                Op::UpdateDelete, // true -> true
+                Op::UpdateInsert, // expect UpdateDelete, UpdateInsert
+                Op::UpdateDelete, // true -> false
+                Op::UpdateInsert, // expect Delete
+                Op::UpdateDelete, // false -> true
+                Op::UpdateInsert, // expect Insert
+                Op::UpdateDelete, // false -> false
+                Op::UpdateInsert, // expect nothing
+            ],
+            columns: vec![
+                column_nonnull! { I64Array, Int64Type, [5, 7, 5, 3, 3, 5, 3, 4] },
+                column_nonnull! { I64Array, Int64Type, [3, 5, 3, 5, 5, 3, 5, 6] },
+            ],
+            visibility: None,
+        };
+        let source = MockSource::new(vec![chunk1, chunk2]);
+
+        let left_type = Int64Type::create(false);
+        let left_expr = InputRefExpression::new(left_type, 0);
+        let right_type = Int64Type::create(false);
+        let right_expr = InputRefExpression::new(right_type, 1);
+        let test_expr = new_binary_expr(
+            ExprNode_Type::GREATER_THAN,
+            BoolType::create(false),
+            Box::new(left_expr),
+            Box::new(right_expr),
+        );
+        let mut filter = FilterExecutor::new(Box::new(source), test_expr);
+
+        if let Message::Chunk(chunk) = filter.next().await.unwrap() {
+            assert_eq!(
+                chunk.ops,
+                vec![Op::Insert, Op::Insert, Op::Insert, Op::Delete]
+            );
+            assert_eq!(chunk.columns.len(), 2);
+            assert_eq!(
+                chunk.visibility.unwrap().iter().collect_vec(),
+                vec![false, true, false, true]
+            );
+        } else {
+            unreachable!();
+        }
+
+        if let Message::Chunk(chunk) = filter.next().await.unwrap() {
+            assert_eq!(chunk.columns.len(), 2);
+            assert_eq!(
+                chunk.visibility.unwrap().iter().collect_vec(),
+                vec![true, true, true, false, false, true, false, false]
+            );
+            assert_eq!(
+                chunk.ops,
+                vec![
+                    Op::UpdateDelete,
+                    Op::UpdateInsert,
+                    Op::Delete,
+                    Op::UpdateInsert,
+                    Op::UpdateDelete,
+                    Op::Insert,
+                    Op::UpdateDelete,
+                    Op::UpdateInsert,
+                ]
+            );
+        } else {
+            unreachable!();
+        }
+
+        matches!(filter.next().await.unwrap(), Message::Terminate);
+    }
+}
