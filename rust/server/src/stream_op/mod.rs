@@ -33,6 +33,9 @@ use std::sync::Arc;
 mod integration_tests;
 
 #[cfg(test)]
+mod test_utils;
+
+#[cfg(test)]
 mod tests;
 
 pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
