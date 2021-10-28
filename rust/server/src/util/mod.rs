@@ -11,6 +11,7 @@ pub mod bit_util;
 #[macro_use]
 pub mod proto;
 pub mod addr;
+pub mod chunk_coalesce;
 pub mod hash_util;
 pub mod sort_util;
 

@@ -187,6 +187,16 @@ impl Bitmap {
         }
     }
 
+    /// Returns an iterator which starts from `offset`.
+    pub fn iter_from(&self, offset: usize) -> Result<BitmapIter<'_>> {
+        self.check_idx(offset)?;
+        Ok(BitmapIter {
+            bits: &self.bits,
+            idx: offset,
+            num_bits: self.num_bits,
+        })
+    }
+
     fn check_idx(&self, idx: usize) -> Result<()> {
         ensure!(idx < self.len());
         Ok(())
