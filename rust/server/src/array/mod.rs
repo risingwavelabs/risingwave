@@ -1,4 +1,4 @@
-//! `array2` defines all in-memory representations of vectorized execution framework.
+//! `Array` defines all in-memory representations of vectorized execution framework.
 
 mod bool_array;
 pub(crate) mod column;
