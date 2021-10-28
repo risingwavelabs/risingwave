@@ -1,8 +1,6 @@
-use super::ProjectExecutor;
 use crate::array::{Array, I32Array, I64Array};
 use crate::catalog::TableId;
 use crate::error::ErrorCode::InternalError;
-use crate::expr::binary_expr::new_binary_expr;
 use crate::expr::*;
 use crate::storage::{Row, SimpleTableManager, SimpleTableRef, TableManager};
 use crate::stream_op::test_utils::*;
@@ -13,7 +11,6 @@ use itertools::Itertools;
 use pb_construct::make_proto;
 use pb_convert::FromProtobuf;
 use risingwave_proto::data::{DataType, DataType_TypeName};
-use risingwave_proto::expr::ExprNode_Type;
 use risingwave_proto::plan::{ColumnDesc, ColumnDesc_ColumnEncodingType};
 use risingwave_proto::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 use smallvec::SmallVec;
@@ -207,64 +204,6 @@ async fn test_sink_no_key() {
     } else {
         unreachable!();
     }
-}
-
-#[tokio::test]
-async fn test_projection() {
-    let chunk1 = StreamChunk {
-        ops: vec![Op::Insert, Op::Insert, Op::Insert],
-        columns: vec![
-            column_nonnull! { I64Array, Int64Type, [1, 2, 3] },
-            column_nonnull! { I64Array, Int64Type, [4, 5, 6] },
-        ],
-        visibility: None,
-    };
-    let chunk2 = StreamChunk {
-        ops: vec![Op::Insert, Op::Delete],
-        columns: vec![
-            column_nonnull! { I64Array, Int64Type, [7, 3] },
-            column_nonnull! { I64Array, Int64Type, [8, 6] },
-        ],
-        visibility: Some((vec![true, true]).try_into().unwrap()),
-    };
-    let source = MockSource::new(vec![chunk1, chunk2]);
-
-    let left_type = Int64Type::create(false);
-    let left_expr = InputRefExpression::new(left_type, 0);
-    let right_type = Int64Type::create(false);
-    let right_expr = InputRefExpression::new(right_type, 1);
-    let test_expr = new_binary_expr(
-        ExprNode_Type::ADD,
-        Int64Type::create(false),
-        Box::new(left_expr),
-        Box::new(right_expr),
-    );
-
-    let mut project = ProjectExecutor::new(Box::new(source), vec![test_expr]);
-
-    if let Message::Chunk(chunk) = project.next().await.unwrap() {
-        assert_eq!(chunk.ops, vec![Op::Insert, Op::Insert, Op::Insert]);
-        assert_eq!(chunk.columns.len(), 1);
-        assert_eq!(
-            chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
-            vec![Some(5), Some(7), Some(9)]
-        );
-    } else {
-        unreachable!();
-    }
-
-    if let Message::Chunk(chunk) = project.next().await.unwrap() {
-        assert_eq!(chunk.ops, vec![Op::Insert, Op::Delete]);
-        assert_eq!(chunk.columns.len(), 1);
-        assert_eq!(
-            chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
-            vec![Some(15), Some(9)]
-        );
-    } else {
-        unreachable!();
-    }
-
-    matches!(project.next().await.unwrap(), Message::Terminate);
 }
 
 #[tokio::test]
