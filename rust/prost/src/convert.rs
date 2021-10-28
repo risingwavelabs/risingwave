@@ -1,4 +1,4 @@
-use bytes::{buf::IntoBuf, Bytes};
+use bytes::Bytes;
 
 pub trait ToProst: protobuf::Message {
     fn to_prost<T: prost::Message + Default>(&self) -> T;
@@ -7,7 +7,7 @@ pub trait ToProst: protobuf::Message {
 impl<F: protobuf::Message> ToProst for F {
     fn to_prost<T: prost::Message + Default>(&self) -> T {
         let bytes = self.write_to_bytes().unwrap();
-        T::decode(Bytes::from(bytes.as_slice()).into_buf()).unwrap()
+        T::decode(Bytes::from(bytes)).unwrap()
     }
 }
 

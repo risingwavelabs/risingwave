@@ -4,7 +4,7 @@ name = "risingwave-pb"
 version = "0.1.0"
 
 [dependencies]
-bytes = "0.4"
+bytes = "1"
 futures = "0.3"
 prost = "0.8"
 prost-helpers = { path = "helpers" }
