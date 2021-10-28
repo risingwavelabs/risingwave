@@ -30,7 +30,7 @@ import org.apache.calcite.rel.core.AggregateCall;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.sql.type.SqlTypeName;
 
-/** Rule for converting logical aggregation to single or distributed stream aggregation */
+/** Rule for converting logical aggregation to two phase stream aggregation */
 public class StreamingTwoPhaseAggRule extends RelRule<StreamingTwoPhaseAggRule.Config> {
 
   private StreamingTwoPhaseAggRule(Config config) {

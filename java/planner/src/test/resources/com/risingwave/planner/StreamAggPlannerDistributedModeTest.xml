@@ -1,0 +1,97 @@
+<Root>
+    <TestCase name="NoGroupByNoCountAgg">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T_no_group_no_count as select sum(v1) as V from t
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[t_no_group_no_count])
+  RwStreamProject(v=[$STREAM_NULL_BY_ROW_COUNT($1, $0)])
+    RwStreamAgg(group=[{}], v=[SUM($0)], Row Sum0=[$SUM0($1)])
+      RwStreamExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
+        RwStreamProject(v=[$STREAM_NULL_BY_ROW_COUNT($1, $0)], Row Count=[$1])
+          RwStreamAgg(group=[{}], v=[SUM($0)], Row Count=[COUNT()])
+            RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+              RwStreamTableSource(table=[[test_schema, t]], columns=[v1])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="NoGroupByHasCountAgg">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T_no_group_has_count as select Count(*), Sum(v1) as V from t
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[t_no_group_has_count])
+  RwStreamProject(EXPR$0=[$STREAM_NULL_BY_ROW_COUNT($2, $0)], v=[$STREAM_NULL_BY_ROW_COUNT($2, $1)])
+    RwStreamAgg(group=[{}], agg#0=[$SUM0($0)], v=[SUM($1)], Row Sum0=[$SUM0($0)])
+      RwStreamExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
+        RwStreamProject(EXPR$0=[$0], v=[$STREAM_NULL_BY_ROW_COUNT($0, $1)])
+          RwStreamAgg(group=[{}], EXPR$0=[COUNT()], v=[SUM($0)])
+            RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+              RwStreamTableSource(table=[[test_schema, t]], columns=[v1])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="HasGroupByHasCountAgg">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T_has_group_has_count as select v2, Count(*), Sum(v1) as V from t group by v2
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[t_has_group_has_count])
+  RwStreamProject(v2=[$0], EXPR$1=[$1], v=[$2])
+    RwStreamFilter(condition=[<>($3, 0)])
+      RwStreamAgg(group=[{0}], agg#0=[$SUM0($1)], v=[SUM($2)], Row Sum0=[$SUM0($1)])
+        RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+          RwStreamProject(v2=[$0], EXPR$1=[$1], v=[$STREAM_NULL_BY_ROW_COUNT($1, $2)])
+            RwStreamAgg(group=[{0}], EXPR$1=[COUNT()], v=[SUM($1)])
+              RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="HasGroupByNoCountAgg">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T_has_group_no_count as select v2, Sum(v1) as V from t group by v2
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[t_has_group_no_count])
+  RwStreamProject(v2=[$0], v=[$1])
+    RwStreamFilter(condition=[<>($2, 0)])
+      RwStreamAgg(group=[{0}], v=[SUM($1)], Row Sum0=[$SUM0($2)])
+        RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+          RwStreamProject(v2=[$0], v=[$STREAM_NULL_BY_ROW_COUNT($2, $1)], Row Count=[$2])
+            RwStreamAgg(group=[{0}], v=[SUM($1)], Row Count=[COUNT()])
+              RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="HasThreeGroupAgg">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T_has_three_group as select v1, v2, v3, Sum(v1), AVG(v2), COUNT(v3) as V from t group by v1, v2, v3
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[t_has_three_group])
+  RwStreamFilter(condition=[<>($5, 0)])
+    RwStreamAgg(group=[{0, 1, 2}], EXPR$3=[SUM($0)], EXPR$4=[AVG($1)], v=[COUNT()])
+      RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1, 2]}], collation=[[]])
+        RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+          RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3])
+]]>
+        </Resource>
+    </TestCase>
+</Root>

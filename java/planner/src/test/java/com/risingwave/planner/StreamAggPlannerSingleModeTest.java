@@ -16,7 +16,7 @@ import org.junit.jupiter.params.provider.ArgumentsSource;
 /** Tests for streaming job */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-public class StreamAggPlannerTest extends StreamPlanTestBase {
+public class StreamAggPlannerSingleModeTest extends StreamPlanTestBase {
   @BeforeAll
   public void initAll() {
     super.init();
@@ -27,7 +27,7 @@ public class StreamAggPlannerTest extends StreamPlanTestBase {
   }
 
   @ParameterizedTest(name = "{index} => {0}")
-  @DisplayName("Streaming Agg plan tests")
+  @DisplayName("Streaming Agg Plan in Single Mode tests")
   @ArgumentsSource(PlanTestCaseLoader.class)
   @Order(0)
   public void testStreamingPlan(@ToPlannerTestCase PlannerTestCase testCase) {
