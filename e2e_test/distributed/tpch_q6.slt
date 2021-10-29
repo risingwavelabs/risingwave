@@ -1,14 +1,13 @@
-# q6(FIXME: replace DOUBLE to Decimal)
 statement ok
 CREATE TABLE lineitem (
         l_orderkey BIGINT,
         l_partkey INTEGER,
         l_suppkey INTEGER,
         l_linenumber INTEGER,
-        l_quantity DOUBLE,
-        l_extendedprice DOUBLE,
-        l_discount DOUBLE,
-        l_tax DOUBLE,
+        l_quantity NUMERIC,
+        l_extendedprice NUMERIC,
+        l_discount NUMERIC,
+        l_tax NUMERIC,
         l_returnflag CHAR(1),
         l_linestatus CHAR(1),
         l_shipdate DATE,

@@ -1,5 +1,3 @@
-# Issues: https://github.com/singularity-data/risingwave/issues/995
-
 statement ok
 create table t1 (v1 int);
 
