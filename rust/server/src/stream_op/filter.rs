@@ -23,11 +23,18 @@ impl FilterExecutor {
     }
 }
 
-use crate::impl_consume_barrier_default;
-
-impl_consume_barrier_default!(FilterExecutor, Executor);
+#[async_trait]
+impl Executor for FilterExecutor {
+    async fn next(&mut self) -> Result<Message> {
+        super::simple_executor_next(self).await
+    }
+}
 
 impl SimpleExecutor for FilterExecutor {
+    fn input(&mut self) -> &mut dyn Executor {
+        &mut *self.input
+    }
+
     fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
         let StreamChunk {
             ops,

@@ -1,5 +1,4 @@
 use super::{Executor, Message, SimpleExecutor, StreamChunk};
-use crate::impl_consume_barrier_default;
 use crate::{
     array::{column::Column, DataChunk},
     error::Result,
@@ -23,9 +22,18 @@ impl ProjectExecutor {
     }
 }
 
-impl_consume_barrier_default!(ProjectExecutor, Executor);
+#[async_trait]
+impl Executor for ProjectExecutor {
+    async fn next(&mut self) -> Result<Message> {
+        super::simple_executor_next(self).await
+    }
+}
 
 impl SimpleExecutor for ProjectExecutor {
+    fn input(&mut self) -> &mut dyn Executor {
+        &mut *self.input
+    }
+
     fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
         let chunk = chunk.compact()?;
 

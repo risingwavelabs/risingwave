@@ -7,7 +7,6 @@ use super::{Executor, Message, Op, SimpleExecutor, StreamChunk};
 use crate::array::column::Column;
 use crate::array::*;
 use crate::error::{Result, RwError};
-use crate::impl_consume_barrier_default;
 use itertools::Itertools;
 
 use async_trait::async_trait;
@@ -93,9 +92,18 @@ impl SimpleAggExecutor {
     }
 }
 
-impl_consume_barrier_default!(SimpleAggExecutor, Executor);
+#[async_trait]
+impl Executor for SimpleAggExecutor {
+    async fn next(&mut self) -> Result<Message> {
+        super::simple_executor_next(self).await
+    }
+}
 
 impl SimpleExecutor for SimpleAggExecutor {
+    fn input(&mut self) -> &mut dyn Executor {
+        &mut *self.input
+    }
+
     fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
         let StreamChunk {
             ops,

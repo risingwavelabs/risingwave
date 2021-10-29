@@ -1,5 +1,6 @@
 use crate::array::column::Column;
 use crate::array::DataChunk;
+use crate::catalog::Schema;
 use crate::{buffer::Bitmap, error::Result};
 use risingwave_pb::data::Op as ProstOp;
 use risingwave_pb::data::{
@@ -228,35 +229,30 @@ impl Message {
 #[async_trait]
 pub trait Executor: Send + Sync + 'static {
     async fn next(&mut self) -> Result<Message>;
+
+    /// Return the schema of the executor.
+    fn schema(&self) -> &Schema {
+        todo!("A placeholder now")
+    }
 }
 
 /// `SimpleExecutor` accepts a single chunk as input.
 pub trait SimpleExecutor: Executor {
     fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message>;
+    fn input(&mut self) -> &mut dyn Executor;
 }
 
 /// Most executors don't care about the control messages, and therefore
-/// this macro provides a default implementation for them. The executor
-/// must have a field named `input`, so as to pass along messages, and
-/// implement the `SimpleExecutor` trait to provide a `consume_chunk`
-/// function
-#[macro_export]
-macro_rules! impl_consume_barrier_default {
-    ($type:ident, $trait: ident) => {
-        #[async_trait]
-        impl $trait for $type {
-            async fn next(&mut self) -> Result<Message> {
-                match self.input.next().await {
-                    Ok(message) => match message {
-                        Message::Chunk(chunk) => self.consume_chunk(chunk),
-                        Message::Barrier(epoch) => Ok(Message::Barrier(epoch)),
-                        Message::Terminate => Ok(Message::Terminate),
-                    },
-                    Err(e) => Err(e),
-                }
-            }
-        }
-    };
+/// this method provides a default implementation helper for them.
+async fn simple_executor_next<E: SimpleExecutor>(executor: &mut E) -> Result<Message> {
+    match executor.input().next().await {
+        Ok(message) => match message {
+            Message::Chunk(chunk) => executor.consume_chunk(chunk),
+            Message::Barrier(epoch) => Ok(Message::Barrier(epoch)),
+            Message::Terminate => Ok(Message::Terminate),
+        },
+        Err(e) => Err(e),
+    }
 }
 
 /// `StreamConsumer` is the last step in a fragment

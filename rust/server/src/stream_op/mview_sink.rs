@@ -22,7 +22,18 @@ impl MViewSinkExecutor {
     }
 }
 
+#[async_trait]
+impl Executor for MViewSinkExecutor {
+    async fn next(&mut self) -> Result<Message> {
+        super::simple_executor_next(self).await
+    }
+}
+
 impl SimpleExecutor for MViewSinkExecutor {
+    fn input(&mut self) -> &mut dyn Executor {
+        &mut *self.input
+    }
+
     fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
         let StreamChunk {
             ops,
@@ -92,10 +103,6 @@ impl SimpleExecutor for MViewSinkExecutor {
         Ok(Message::Chunk(chunk))
     }
 }
-
-use crate::impl_consume_barrier_default;
-
-impl_consume_barrier_default!(MViewSinkExecutor, Executor);
 
 #[cfg(test)]
 mod tests {

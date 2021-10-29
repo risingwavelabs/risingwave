@@ -6,7 +6,6 @@ use crate::array::column::Column;
 use crate::array::*;
 use crate::buffer::Bitmap;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::impl_consume_barrier_default;
 use crate::types::{Datum, ScalarRefImpl};
 
 use super::AggCall;
@@ -129,9 +128,18 @@ impl HashAggExecutor {
     }
 }
 
-impl_consume_barrier_default!(HashAggExecutor, Executor);
+#[async_trait]
+impl Executor for HashAggExecutor {
+    async fn next(&mut self) -> Result<Message> {
+        super::simple_executor_next(self).await
+    }
+}
 
 impl SimpleExecutor for HashAggExecutor {
+    fn input(&mut self) -> &mut dyn Executor {
+        &mut *self.input
+    }
+
     fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
         let StreamChunk {
             ops,
