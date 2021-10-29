@@ -100,7 +100,8 @@ pub fn build_from_proto(proto: &DataTypeProto) -> Result<DataTypeRef> {
       TIME => TimeType,
       TIMESTAMP => TimestampType,
       TIMESTAMPZ => TimestampWithTimeZoneType,
-      DECIMAL => DecimalType
+      DECIMAL => DecimalType,
+      INTERVAL => IntervalType
     }
 }
 

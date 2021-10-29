@@ -4,6 +4,7 @@ use crate::array::PrimitiveArrayItemType;
 use crate::error::ErrorCode::InternalError;
 use crate::error::ErrorCode::NumericValueOutOfRange;
 use crate::error::{Result, RwError};
+use crate::types::IntervalUnit;
 use num_traits::CheckedRem;
 use num_traits::{AsPrimitive, CheckedAdd, CheckedDiv, CheckedMul, CheckedSub, Float};
 
@@ -296,6 +297,46 @@ where
         Some(c) => Ok(c),
         None => Err(RwError::from(NumericValueOutOfRange)),
     }
+}
+
+pub fn interval_date_add<T1, T2, T3>(l: IntervalUnit, r: T2) -> Result<T3>
+where
+    T2: PrimitiveArrayItemType + AsPrimitive<T3>,
+    T3: PrimitiveArrayItemType + CheckedAdd,
+    // i32 is the return type of get_days()
+    i32: AsPrimitive<T3>,
+{
+    int_add::<_, _, T3>(l.get_days(), r)
+}
+
+pub fn date_interval_add<T2, T1, T3>(l: T2, r: IntervalUnit) -> Result<T3>
+where
+    T2: PrimitiveArrayItemType + AsPrimitive<T3>,
+    T3: PrimitiveArrayItemType + CheckedAdd,
+    // i32 is the return type of get_days()
+    i32: AsPrimitive<T3>,
+{
+    int_add::<_, _, T3>(l, r.get_days())
+}
+
+pub fn interval_date_sub<T1, T2, T3>(l: IntervalUnit, r: T2) -> Result<T3>
+where
+    T2: PrimitiveArrayItemType + AsPrimitive<T3>,
+    T3: PrimitiveArrayItemType + CheckedSub,
+    // i32 is the return type of get_days()
+    i32: AsPrimitive<T3>,
+{
+    int_sub::<_, _, T3>(l.get_days(), r)
+}
+
+pub fn date_interval_sub<T2, T1, T3>(l: T2, r: IntervalUnit) -> Result<T3>
+where
+    T2: PrimitiveArrayItemType + AsPrimitive<T3>,
+    T3: PrimitiveArrayItemType + CheckedSub,
+    // i32 is the return type of get_days()
+    i32: AsPrimitive<T3>,
+{
+    int_sub::<_, _, T3>(l, r.get_days())
 }
 
 #[cfg(test)]

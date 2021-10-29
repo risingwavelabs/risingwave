@@ -1,10 +1,10 @@
 use crate::array::{Array, BoolArray, DataTypeTrait, I32Array, UTF8Array};
+use crate::error::ErrorCode::InternalError;
+use crate::error::Result;
 use crate::expr::expr_tmpl::BinaryExpression;
 use crate::expr::BoxedExpression;
 use crate::types::DataTypeRef;
-use crate::types::{
-    DateType, DecimalType, Float32Type, Float64Type, Int16Type, Int32Type, Int64Type, TimestampType,
-};
+use crate::types::*;
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::cmp::*;
 use crate::vector_op::conjunction::{and, or};
@@ -12,6 +12,16 @@ use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
 use risingwave_proto::expr::ExprNode_Type;
 use std::marker::PhantomData;
+
+// this is a placeholder function that return bool in gen_binary_expr
+pub fn cmp_placeholder<T1, T2, T3>(_l: T1, _r: T2) -> Result<bool> {
+    Err(InternalError("The function is not supported".to_string()).into())
+}
+// this is a placeholder function that return T3 in gen_binary_expr
+pub fn atm_placeholder<T1, T2, T3>(_l: T1, _r: T2) -> Result<T3> {
+    Err(InternalError("The function is not supported".to_string()).into())
+}
+
 /// This macro helps create arithmetic expression.
 /// It receive all the combinations of `gen_binary_expr` and generate corresponding match cases
 /// In [], the parameters are for constructing new expression
@@ -85,7 +95,7 @@ macro_rules! comparison_impl {
 /// * `deci_f`: the scalar function for decimal with integer. In this scalar function, all inputs will be cast to decimal
 /// * `deci_f_f`: the scalar function for decimal with float. In this scalar function, all inputs will be cast to float
 macro_rules! gen_binary_expr {
-  ($macro:tt, $int_f:ident, $float_f:ident, $deci_f_f:ident, $deci_f:ident $(, $x:tt)* ) => {
+  ($macro:tt, $int_f:ident, $float_f:ident, $deci_f_f:ident, $deci_f:ident, $interval_date_f:ident, $date_interval_f:ident $(, $x:tt)* ) => {
     $macro! {
       [$($x),*],
       { Int16Type, Int16Type, Int16Type, $int_f },
@@ -125,7 +135,9 @@ macro_rules! gen_binary_expr {
       { Float32Type, DecimalType, DecimalType, $deci_f_f },
       { Float64Type, DecimalType, DecimalType, $deci_f_f },
       { TimestampType, TimestampType, Int64Type, $int_f },
-      { DateType, DateType, Int32Type, $int_f }
+      { DateType, DateType, Int32Type, $int_f },
+      { DateType, IntervalType, Int32Type, $date_interval_f },
+      { IntervalType, DateType, Int32Type, $interval_date_f }
     }
   };
 }
@@ -138,37 +150,37 @@ pub fn new_binary_expr(
 ) -> BoxedExpression {
     match expr_type {
         ExprNode_Type::EQUAL => {
-            gen_binary_expr! {comparison_impl, prim_eq, prim_eq, deci_f_eq, deci_eq, l, r, ret}
+            gen_binary_expr! {comparison_impl, prim_eq, prim_eq, deci_f_eq, deci_eq, cmp_placeholder, cmp_placeholder, l, r, ret}
         }
         ExprNode_Type::NOT_EQUAL => {
-            gen_binary_expr! {comparison_impl, prim_neq, prim_neq, deci_f_neq, deci_neq, l, r, ret}
+            gen_binary_expr! {comparison_impl, prim_neq, prim_neq, deci_f_neq, deci_neq, cmp_placeholder, cmp_placeholder, l, r, ret}
         }
         ExprNode_Type::LESS_THAN => {
-            gen_binary_expr! {comparison_impl, prim_lt, prim_lt, deci_f_lt, deci_lt, l, r, ret}
+            gen_binary_expr! {comparison_impl, prim_lt, prim_lt, deci_f_lt, deci_lt, cmp_placeholder, cmp_placeholder, l, r, ret}
         }
         ExprNode_Type::GREATER_THAN => {
-            gen_binary_expr! {comparison_impl, prim_gt, prim_gt, deci_f_gt, deci_gt, l, r, ret}
+            gen_binary_expr! {comparison_impl, prim_gt, prim_gt, deci_f_gt, deci_gt, cmp_placeholder, cmp_placeholder, l, r, ret}
         }
         ExprNode_Type::GREATER_THAN_OR_EQUAL => {
-            gen_binary_expr! {comparison_impl, prim_geq, prim_geq, deci_f_geq, deci_geq, l, r, ret}
+            gen_binary_expr! {comparison_impl, prim_geq, prim_geq, deci_f_geq, deci_geq, cmp_placeholder, cmp_placeholder, l, r, ret}
         }
         ExprNode_Type::LESS_THAN_OR_EQUAL => {
-            gen_binary_expr! {comparison_impl, prim_leq, prim_leq, deci_f_leq, deci_leq, l, r, ret}
+            gen_binary_expr! {comparison_impl, prim_leq, prim_leq, deci_f_leq, deci_leq, cmp_placeholder, cmp_placeholder, l, r, ret}
         }
         ExprNode_Type::ADD => {
-            gen_binary_expr! {arithmetic_impl, int_add, float_add, deci_f_add, deci_add, l, r, ret}
+            gen_binary_expr! {arithmetic_impl, int_add, float_add, deci_f_add, deci_add, interval_date_add, date_interval_add, l, r, ret}
         }
         ExprNode_Type::SUBTRACT => {
-            gen_binary_expr! {arithmetic_impl, int_sub, float_sub, deci_f_sub, deci_sub, l, r, ret}
+            gen_binary_expr! {arithmetic_impl, int_sub, float_sub, deci_f_sub, deci_sub, interval_date_sub, date_interval_sub, l, r, ret}
         }
         ExprNode_Type::MULTIPLY => {
-            gen_binary_expr! {arithmetic_impl, int_mul, float_mul, deci_f_mul, deci_mul, l, r, ret}
+            gen_binary_expr! {arithmetic_impl, int_mul, float_mul, deci_f_mul, deci_mul, atm_placeholder, atm_placeholder, l, r, ret}
         }
         ExprNode_Type::DIVIDE => {
-            gen_binary_expr! {arithmetic_impl, int_div, float_div, deci_f_div, deci_div, l, r, ret}
+            gen_binary_expr! {arithmetic_impl, int_div, float_div, deci_f_div, deci_div, atm_placeholder, atm_placeholder, l, r, ret}
         }
         ExprNode_Type::MODULUS => {
-            gen_binary_expr! {arithmetic_impl, prim_mod, prim_mod, deci_f_mod, deci_mod, l, r, ret}
+            gen_binary_expr! {arithmetic_impl, prim_mod, prim_mod, deci_f_mod, deci_mod, atm_placeholder, atm_placeholder, l, r, ret}
         }
         ExprNode_Type::AND => Box::new(BinaryExpression::<BoolArray, BoolArray, BoolArray, _> {
             expr_ia1: l,

@@ -17,7 +17,7 @@ use crate::buffer::Bitmap;
 pub use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 pub use crate::error::RwError;
-use crate::types::{BoolType, ScalarImpl};
+use crate::types::{BoolType, IntervalType, ScalarImpl};
 use crate::types::{
     DataTypeKind, DateType, DecimalType, Float32Type, Float64Type, Int16Type, Int32Type, Int64Type,
     TimestampType,
@@ -491,6 +491,10 @@ impl DataTypeTrait for TimestampType {
 impl DataTypeTrait for DateType {
     const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Date;
     type ArrayType = I32Array;
+}
+impl DataTypeTrait for IntervalType {
+    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Interval;
+    type ArrayType = IntervalArray;
 }
 #[cfg(test)]
 mod tests {

@@ -25,6 +25,27 @@ pub struct IntervalArrayBuilder {
     ms_buffer: Vec<i64>,
 }
 
+impl IntervalArrayBuilder {
+    pub fn new(capacity: usize) -> Result<Self> {
+        Ok(Self {
+            bitmap: Vec::with_capacity(capacity),
+            months_buffer: Vec::with_capacity(capacity),
+            days_buffer: Vec::with_capacity(capacity),
+            ms_buffer: Vec::with_capacity(capacity),
+        })
+    }
+}
+
+impl IntervalArray {
+    pub fn from_slice(data: &[Option<IntervalUnit>]) -> Result<Self> {
+        let mut builder = <Self as Array>::Builder::new(data.len())?;
+        for i in data {
+            builder.append(*i)?;
+        }
+        builder.finish()
+    }
+}
+
 impl Array for IntervalArray {
     type Builder = IntervalArrayBuilder;
     type RefItem<'a> = IntervalUnit;

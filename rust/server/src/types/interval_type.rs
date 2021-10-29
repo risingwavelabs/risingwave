@@ -1,3 +1,7 @@
+use risingwave_proto::data::DataType_TypeName;
+
+use crate::array::interval_array::IntervalArrayBuilder;
+
 use super::*;
 
 /// Every interval can be represented by a `IntervalUnit`.
@@ -40,5 +44,58 @@ impl IntervalUnit {
         let days = days;
         let ms = 0;
         IntervalUnit { months, days, ms }
+    }
+}
+#[derive(Debug, Eq, PartialEq)]
+pub struct IntervalType {
+    nullable: bool,
+}
+
+impl DataType for IntervalType {
+    fn data_type_kind(&self) -> DataTypeKind {
+        DataTypeKind::Interval
+    }
+
+    fn is_nullable(&self) -> bool {
+        self.nullable
+    }
+
+    fn create_array_builder(self: Arc<Self>, capacity: usize) -> Result<ArrayBuilderImpl> {
+        IntervalArrayBuilder::new(capacity).map(|x| x.into())
+    }
+
+    fn to_protobuf(&self) -> Result<DataTypeProto> {
+        let mut proto = DataTypeProto::new();
+        proto.set_type_name(DataType_TypeName::INTERVAL);
+        proto.set_is_nullable(self.nullable);
+
+        Ok(proto)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn data_size(&self) -> DataSize {
+        DataSize::Variable
+    }
+}
+
+impl IntervalType {
+    pub fn new(nullable: bool) -> Self {
+        Self { nullable }
+    }
+
+    pub fn create(nullable: bool) -> DataTypeRef {
+        Arc::new(Self::new(nullable))
+    }
+}
+
+impl<'a> TryFrom<&'a DataTypeProto> for IntervalType {
+    type Error = RwError;
+
+    fn try_from(proto: &'a DataTypeProto) -> Result<Self> {
+        ensure!(proto.get_type_name() == DataType_TypeName::INTERVAL);
+        Ok(IntervalType::new(proto.get_is_nullable()))
     }
 }

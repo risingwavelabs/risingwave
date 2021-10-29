@@ -1,11 +1,15 @@
 use super::*;
 use crate::array::column::Column;
+use crate::array::interval_array::IntervalArray;
 use crate::array::*;
-use crate::types::{BoolType, DecimalType, Int32Type, Scalar};
+use crate::types::{
+    BoolType, DateType, DecimalType, Int32Type, IntervalType, IntervalUnit, Scalar,
+};
 use pb_construct::make_proto;
 use protobuf::well_known_types::Any as AnyProto;
 use protobuf::RepeatedField;
 use risingwave_proto::data::DataType as DataTypeProto;
+use risingwave_proto::data::DataType_TypeName;
 use risingwave_proto::expr::ExprNode_Type::INPUT_REF;
 use risingwave_proto::expr::InputRefExpr;
 use risingwave_proto::expr::{ExprNode, ExprNode_Type, FunctionCall};
@@ -35,6 +39,8 @@ fn test_binary() {
     test_binary_decimal::<BoolArray, _>(|x, y| x <= y, ExprNode_Type::LESS_THAN_OR_EQUAL);
     test_binary_bool::<BoolArray, _>(|x, y| x && y, ExprNode_Type::AND);
     test_binary_bool::<BoolArray, _>(|x, y| x || y, ExprNode_Type::OR);
+    test_binary_interval::<I32Array, _>(|x, y| x.get_days() + y, ExprNode_Type::ADD);
+    test_binary_interval::<I32Array, _>(|x, y| x.get_days() - y, ExprNode_Type::SUBTRACT);
 }
 
 #[test]
@@ -87,7 +93,56 @@ where
     let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
     let expr = make_expression(
         kind,
-        risingwave_proto::data::DataType_TypeName::INT32,
+        &[DataType_TypeName::INT32, DataType_TypeName::INT32],
+        &[0, 1],
+    );
+    let mut vec_excutor = build_from_proto(&expr).unwrap();
+    let res = vec_excutor.eval(&data_chunk).unwrap();
+    let arr: &A = res.as_ref().into();
+    for (idx, item) in arr.iter().enumerate() {
+        let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
+        assert_eq!(x, item);
+    }
+}
+
+fn test_binary_interval<A, F>(f: F, kind: ExprNode_Type)
+where
+    A: Array,
+    for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
+    for<'a> <A as Array>::RefItem<'a>: PartialEq,
+    F: Fn(IntervalUnit, i32) -> <A as Array>::OwnedItem,
+{
+    let mut lhs = Vec::<Option<IntervalUnit>>::new();
+    let mut rhs = Vec::<Option<i32>>::new();
+    let mut target = Vec::<Option<<A as Array>::OwnedItem>>::new();
+    for i in 0..100 {
+        if i % 2 == 0 {
+            lhs.push(Some(IntervalUnit::from_ymd(i, i, i)));
+            rhs.push(None);
+            target.push(None);
+        } else {
+            lhs.push(Some(IntervalUnit::from_ymd(i, i, i)));
+            rhs.push(Some(i));
+            target.push(Some(f(IntervalUnit::from_ymd(i, i, i), i)));
+        }
+    }
+
+    let col1 = Column::new(
+        IntervalArray::from_slice(&lhs)
+            .map(|x| Arc::new(x.into()))
+            .unwrap(),
+        IntervalType::create(true),
+    );
+    let col2 = Column::new(
+        I32Array::from_slice(&rhs)
+            .map(|x| Arc::new(x.into()))
+            .unwrap(),
+        DateType::create(true),
+    );
+    let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
+    let expr = make_expression(
+        kind,
+        &[DataType_TypeName::INTERVAL, DataType_TypeName::DATE],
         &[0, 1],
     );
     let mut vec_excutor = build_from_proto(&expr).unwrap();
@@ -144,7 +199,7 @@ where
     let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
     let expr = make_expression(
         kind,
-        risingwave_proto::data::DataType_TypeName::DECIMAL,
+        &[DataType_TypeName::DECIMAL, DataType_TypeName::DECIMAL],
         &[0, 1],
     );
     let mut vec_excutor = build_from_proto(&expr).unwrap();
@@ -201,7 +256,7 @@ where
     let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
     let expr = make_expression(
         kind,
-        risingwave_proto::data::DataType_TypeName::DECIMAL,
+        &[DataType_TypeName::DECIMAL, DataType_TypeName::DECIMAL],
         &[0, 1],
     );
     let mut vec_excutor = build_from_proto(&expr).unwrap();
@@ -242,11 +297,7 @@ where
         BoolType::create(true),
     );
     let data_chunk = DataChunk::builder().columns(vec![col1]).build();
-    let expr = make_expression(
-        kind,
-        risingwave_proto::data::DataType_TypeName::DECIMAL,
-        &[0],
-    );
+    let expr = make_expression(kind, &[DataType_TypeName::BOOLEAN], &[0]);
     let mut vec_excutor = build_from_proto(&expr).unwrap();
     let res = vec_excutor.eval(&data_chunk).unwrap();
     let arr: &A = res.as_ref().into();
@@ -256,14 +307,10 @@ where
     }
 }
 
-fn make_expression(
-    kind: ExprNode_Type,
-    ret: risingwave_proto::data::DataType_TypeName,
-    indices: &[i32],
-) -> ExprNode {
+fn make_expression(kind: ExprNode_Type, rets: &[DataType_TypeName], indices: &[i32]) -> ExprNode {
     let mut exprs = Vec::new();
-    for idx in indices {
-        exprs.push(make_inputref(*idx, ret));
+    for (idx, ret) in indices.iter().zip(rets.iter()) {
+        exprs.push(make_inputref(*idx, *ret));
     }
     make_proto!(ExprNode, {
       expr_type: kind,
