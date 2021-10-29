@@ -1,4 +1,5 @@
 use crate::error::{ErrorCode, Result, RwError};
+use crate::stream::StreamManager;
 use crate::task::{TaskManager, TaskSinkId};
 use risingwave_pb::task_service::exchange_service_server::ExchangeService;
 use risingwave_pb::task_service::{TaskData, TaskSinkId as ProtoTaskSinkId};
@@ -11,11 +12,12 @@ use tonic::{Request, Response, Status};
 #[derive(Clone)]
 pub struct ExchangeServiceImpl {
     mgr: Arc<TaskManager>,
+    stream_mgr: Arc<StreamManager>,
 }
 
 impl ExchangeServiceImpl {
-    pub fn new(mgr: Arc<TaskManager>) -> Self {
-        ExchangeServiceImpl { mgr }
+    pub fn new(mgr: Arc<TaskManager>, stream_mgr: Arc<StreamManager>) -> Self {
+        ExchangeServiceImpl { mgr, stream_mgr }
     }
 }
 

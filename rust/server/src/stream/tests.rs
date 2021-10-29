@@ -127,7 +127,7 @@ async fn test_stream_proto() {
         .unwrap();
 
     let mut source = stream_manager.take_source();
-    let mut sink = stream_manager.take_sink(233);
+    let mut sink = stream_manager.take_sink((13, 233));
 
     let consumer = tokio::spawn(async move {
         for _epoch in 0..100 {

@@ -151,8 +151,15 @@ async fn test_stream_mv_proto() {
             port: 2333,
         }),
     };
+    let actor_info_proto2 = ActorInfo {
+        fragment_id: 233,
+        host: Some(HostAddress {
+            host: "127.0.0.1".into(),
+            port: 2334,
+        }),
+    };
     let actor_info_table = ActorInfoTable {
-        info: vec![actor_info_proto],
+        info: vec![actor_info_proto, actor_info_proto2],
     };
     stream_manager.update_actor_info(actor_info_table).unwrap();
     stream_manager.update_fragment(&[fragment_proto]).unwrap();
@@ -169,7 +176,7 @@ async fn test_stream_mv_proto() {
     .unwrap();
     let table_ref_mv = table_manager.get_table(&table_id_mv).unwrap();
 
-    let mut sink = stream_manager.take_sink(233);
+    let mut sink = stream_manager.take_sink((1, 233));
     if let Message::Chunk(_chunk) = sink.next().await.unwrap() {
         if let SimpleTableRef::Row(table_mv) = table_ref_mv {
             let mut value_vec = SmallVec::new();

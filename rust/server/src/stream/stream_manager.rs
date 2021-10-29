@@ -23,6 +23,7 @@ pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
 
 type ConsumableChannelPair = (Option<Sender<Message>>, Option<Receiver<Message>>);
 type ConsumableChannelVecPair = (Vec<Sender<Message>>, Vec<Receiver<Message>>);
+type UpDownFragmentIds = (u32, u32);
 
 pub struct StreamManagerCore {
     /// Each processor runs in a future. Upon receiving a `Terminate` message, they will exit.
@@ -30,12 +31,25 @@ pub struct StreamManagerCore {
     /// termination.
     handles: Vec<JoinHandle<Result<()>>>,
 
-    /// `channel_pool` store the senders and receivers for later `Processor`'s use. When `StreamManager`
+    /// Stores the senders and receivers for later `Processor`'s use.
     ///
     /// Each actor has several senders and several receivers. Senders and receivers are created during
     /// `update_fragment`. Upon `build_fragment`, all these channels will be taken out and built into
     /// the executors and outputs.
-    channel_pool: HashMap<u32, ConsumableChannelVecPair>,
+    /// One sender or one receiver can be uniquely determined by the upstream and downstream fragment id.
+    ///
+    /// There are three cases that we need local channels to pass around messages:
+    /// 1. pass `Message` between two local fragments
+    /// 2. The RPC client at the downstream fragment forwards received `Message` to one channel in
+    /// `ReceiverExecutor` or `MergerExecutor`.
+    /// 3. The RPC `Output` at the upstream fragment forwards received `Message` to `ExchangeServiceImpl`.
+    ///    The channel servers as a buffer because `ExchangeServiceImpl` is on the server-side and we will
+    ///    also introduce backpressure.
+    channel_pool: HashMap<UpDownFragmentIds, ConsumableChannelPair>,
+
+    /// The receiver is on the other side of rpc `Output`. The `ExchangeServiceImpl` take it
+    /// when it receives request for streaming data from downstream clients.
+    receivers_for_exchange_service: HashMap<UpDownFragmentIds, Receiver<Message>>,
 
     /// Stores all actor information.
     actors: HashMap<u32, stream_service::ActorInfo>,
@@ -59,6 +73,18 @@ impl StreamManager {
         StreamManager {
             core: Mutex::new(StreamManagerCore::new()),
         }
+    }
+
+    pub fn take_receiver(&self, ids: UpDownFragmentIds) -> Result<Receiver<Message>> {
+        let mut core = self.core.lock().unwrap();
+        core.receivers_for_exchange_service
+            .remove(&ids)
+            .ok_or_else(|| {
+                RwError::from(ErrorCode::InternalError(format!(
+                    "No receivers for rpc output from {} to {}",
+                    ids.0, ids.1
+                )))
+            })
     }
 
     pub fn update_fragment(&self, fragments: &[stream_plan::StreamFragment]) -> Result<()> {
@@ -90,9 +116,9 @@ impl StreamManager {
     }
 
     #[cfg(test)]
-    pub fn take_sink(&self, id: u32) -> Receiver<Message> {
+    pub fn take_sink(&self, ids: UpDownFragmentIds) -> Receiver<Message> {
         let mut core = self.core.lock().unwrap();
-        core.channel_pool.get_mut(&id).unwrap().1.remove(0)
+        core.channel_pool.get_mut(&ids).unwrap().1.take().unwrap()
     }
 }
 
@@ -125,6 +151,7 @@ impl StreamManagerCore {
         Self {
             handles: vec![],
             channel_pool: HashMap::new(),
+            receivers_for_exchange_service: HashMap::new(),
             actors: HashMap::new(),
             fragments: HashMap::new(),
             sender_placeholder: vec![],
@@ -139,21 +166,58 @@ impl StreamManagerCore {
         dispatcher: &stream_plan::Dispatcher,
         fragment_id: u32,
         downstreams: &[u32],
-    ) -> Box<dyn StreamConsumer> {
+    ) -> Result<Box<dyn StreamConsumer>> {
         // create downstream receivers
-        let outputs = self
-            .channel_pool
-            .get_mut(&fragment_id)
-            .map(|x| std::mem::take(&mut x.0))
-            .unwrap_or_default()
-            .into_iter()
-            .map(|tx| Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
-            .collect::<Vec<_>>();
+        let outputs = downstreams
+            .iter()
+            .map(|down_id| {
+                let up_down_ids = (fragment_id, *down_id);
+                let downstream_addr = self
+                    .actors
+                    .get(down_id)
+                    .ok_or_else(|| {
+                        RwError::from(ErrorCode::InternalError(format!(
+                            "channel between {} and {} does not exist",
+                            fragment_id, down_id
+                        )))
+                    })?
+                    .get_host()
+                    .get_host();
+                // FIXME use is_local_address instead of hardcoding
+                if downstream_addr == "127.0.0.1" {
+                    // if this is a local downstream fragment
+                    let tx = self
+                        .channel_pool
+                        .get_mut(&(fragment_id, *down_id))
+                        .ok_or_else(|| {
+                            RwError::from(ErrorCode::InternalError(format!(
+                                "channel between {} and {} does not exist",
+                                fragment_id, down_id
+                            )))
+                        })?
+                        .0
+                        .take()
+                        .ok_or_else(|| {
+                            RwError::from(ErrorCode::InternalError(format!(
+                                "sender from {} to {} does no exist",
+                                fragment_id, down_id
+                            )))
+                        })?;
+                    Ok(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
+                } else {
+                    // This channel is used for `RpcOutput` and `ExchangeServiceImpl`.
+                    let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+                    // later, `ExchangeServiceImpl` comes to get it
+                    self.receivers_for_exchange_service.insert(up_down_ids, rx);
+                    Ok(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
+                }
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         assert_eq!(downstreams.len(), outputs.len());
 
         use stream_plan::dispatcher::DispatcherType::*;
-        match dispatcher.get_type() {
+        let dispatcher: Box<dyn StreamConsumer> = match dispatcher.get_type() {
             RoundRobin => {
                 assert!(!outputs.is_empty());
                 Box::new(DispatchExecutor::new(
@@ -181,7 +245,8 @@ impl StreamManagerCore {
                 Box::new(DispatchExecutor::new(input, SimpleDispatcher::new(output)))
             }
             Blackhole => Box::new(DispatchExecutor::new(input, BlackHoleDispatcher::new())),
-        }
+        };
+        Ok(dispatcher)
     }
 
     /// Create a chain of nodes and return the head executor.
@@ -311,32 +376,48 @@ impl StreamManagerCore {
     fn create_merger(&mut self, fragment_id: u32, upstreams: &[u32]) -> Result<Box<dyn Executor>> {
         assert!(!upstreams.is_empty());
 
-        let mut rxs = self
-            .channel_pool
-            .get_mut(&fragment_id)
-            .map(|x| std::mem::take(&mut x.1))
-            .unwrap_or_default();
-
-        for upstream in upstreams {
-            // TODO: remove this
-            if *upstream == 0 {
-                // `fragment_id = 0` is used as mock input
-                rxs.push(self.mock_source.1.take().unwrap());
-                continue;
-            }
-
-            let actor = self
-                .actors
-                .get(upstream)
-                .expect("upstream actor not found in info table");
-            // FIXME: use `is_local_address` from `ExchangeExecutor`.
-            if actor.get_host().get_host() == "127.0.0.1" {
-                continue;
-            } else {
-                todo!("remote node is not supported in streaming engine");
-                // TODO: create gRPC connection
-            }
-        }
+        let mut rxs = upstreams
+            .iter()
+            .map(|up_id| {
+                if *up_id == 0 {
+                    Ok(self.mock_source.1.take().unwrap())
+                } else {
+                    let upstream_addr = self
+                        .actors
+                        .get(up_id)
+                        .ok_or_else(|| {
+                            RwError::from(ErrorCode::InternalError(
+                                "upstream actor not found in info table".into(),
+                            ))
+                        })?
+                        .get_host()
+                        .get_host();
+                    // FIXME use is_local_address instead of hardcoding
+                    if upstream_addr == "127.0.0.1" {
+                        Ok(self
+                            .channel_pool
+                            .get_mut(&(*up_id, fragment_id))
+                            .ok_or_else(|| {
+                                RwError::from(ErrorCode::InternalError(format!(
+                                    "channel between {} and {} does not exist",
+                                    up_id, fragment_id
+                                )))
+                            })?
+                            .1
+                            .take()
+                            .ok_or_else(|| {
+                                RwError::from(ErrorCode::InternalError(format!(
+                                    "receiver from {} to {} does no exist",
+                                    up_id, fragment_id
+                                )))
+                            })?)
+                    } else {
+                        // Will new and spawn a RPC client in the future pr
+                        todo!()
+                    }
+                }
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         assert_eq!(
             rxs.len(),
@@ -369,7 +450,7 @@ impl StreamManagerCore {
                 fragment.get_dispatcher(),
                 *fragment_id,
                 fragment.get_downstream_fragment_id(),
-            );
+            )?;
 
             let actor = Actor::new(dispatcher);
             tokio::spawn(actor.run());
@@ -414,14 +495,12 @@ impl StreamManagerCore {
         }
 
         for (current_id, fragment) in &self.fragments {
-            for downstream in fragment.get_downstream_fragment_id() {
+            for downstream_id in fragment.get_downstream_fragment_id() {
                 // At this time, the graph might not be complete, so we do not check if downstream has `current_id`
                 // as upstream.
                 let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                let current_channels = self.channel_pool.entry(*current_id).or_default();
-                current_channels.0.push(tx);
-                let downstream_channels = self.channel_pool.entry(*downstream).or_default();
-                downstream_channels.1.push(rx);
+                let up_down_ids = (*current_id, *downstream_id);
+                self.channel_pool.insert(up_down_ids, (Some(tx), Some(rx)));
             }
         }
         Ok(())

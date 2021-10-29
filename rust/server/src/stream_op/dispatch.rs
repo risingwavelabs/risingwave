@@ -32,6 +32,26 @@ impl Output for ChannelOutput {
     }
 }
 
+/// `RemoteOutput` forwards data to`ExchangeServiceImpl`
+pub struct RemoteOutput {
+    ch: Sender<Message>,
+}
+
+impl RemoteOutput {
+    pub fn new(ch: Sender<Message>) -> Self {
+        Self { ch }
+    }
+}
+
+#[async_trait]
+impl Output for RemoteOutput {
+    async fn send(&mut self, message: Message) -> Result<()> {
+        // local channel should never fail
+        self.ch.send(message).await.unwrap();
+        Ok(())
+    }
+}
+
 /// `DispatchExecutor` consumes messages and send them into downstream actors. Usually,
 /// data chunks will be dispatched with some specified policy, while control message
 /// such as barriers will be distributed to all receivers.

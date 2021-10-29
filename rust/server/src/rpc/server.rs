@@ -20,7 +20,7 @@ pub fn rpc_serve(addr: SocketAddr) -> (JoinHandle<()>, UnboundedSender<()>) {
     let source_mgr = Arc::new(MemSourceManager::new());
     let env = GlobalTaskEnv::new(store_mgr.clone(), source_mgr, task_mgr.clone(), addr);
     let task_srv = TaskServiceImpl::new(task_mgr.clone(), env);
-    let exchange_srv = ExchangeServiceImpl::new(task_mgr);
+    let exchange_srv = ExchangeServiceImpl::new(task_mgr, stream_mgr.clone());
     let stream_srv = StreamServiceImpl::new(stream_mgr, store_mgr);
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
