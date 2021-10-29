@@ -8,6 +8,8 @@ use crate::expr::{build_from_proto as build_expr_from_proto, AggKind};
 use crate::storage::*;
 use crate::stream_op::*;
 use crate::types::build_from_prost as build_type_from_prost;
+use crate::util::addr::{get_host_port, is_local_address};
+use async_std::net::SocketAddr;
 use futures::channel::mpsc::{channel, unbounded, Receiver, Sender, UnboundedSender};
 use itertools::Itertools;
 use pb_convert::FromProtobuf;
@@ -61,6 +63,13 @@ pub struct StreamManagerCore {
     /// Mock source, `fragment_id = 0`.
     /// TODO: remove this
     mock_source: ConsumableChannelPair,
+
+    /// Stores the local address
+    ///
+    /// It is used to test whether an actor is local or not,
+    /// thus determining whether we should setup channel or rpc connection between
+    /// two actors/fragments.
+    addr: SocketAddr,
 }
 
 /// `StreamManager` manages all stream executors in this project.
@@ -69,9 +78,9 @@ pub struct StreamManager {
 }
 
 impl StreamManager {
-    pub fn new() -> Self {
+    pub fn new(addr: SocketAddr) -> Self {
         StreamManager {
-            core: Mutex::new(StreamManagerCore::new()),
+            core: Mutex::new(StreamManagerCore::new(addr)),
         }
     }
 
@@ -146,7 +155,7 @@ fn build_agg_call_from_prost(agg_call_proto: &expr::AggCall) -> Result<AggCall> 
 }
 
 impl StreamManagerCore {
-    fn new() -> Self {
+    fn new(addr: SocketAddr) -> Self {
         let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
         Self {
             handles: vec![],
@@ -156,6 +165,7 @@ impl StreamManagerCore {
             fragments: HashMap::new(),
             sender_placeholder: vec![],
             mock_source: (Some(tx), Some(rx)),
+            addr,
         }
     }
 
@@ -172,7 +182,7 @@ impl StreamManagerCore {
             .iter()
             .map(|down_id| {
                 let up_down_ids = (fragment_id, *down_id);
-                let downstream_addr = self
+                let host_addr = self
                     .actors
                     .get(down_id)
                     .ok_or_else(|| {
@@ -181,10 +191,9 @@ impl StreamManagerCore {
                             fragment_id, down_id
                         )))
                     })?
-                    .get_host()
                     .get_host();
-                // FIXME use is_local_address instead of hardcoding
-                if downstream_addr == "127.0.0.1" {
+                let downstream_addr = format!("{}:{}", host_addr.get_host(), host_addr.get_port());
+                if is_local_address(&get_host_port(&downstream_addr)?, &self.addr) {
                     // if this is a local downstream fragment
                     let tx = self
                         .channel_pool
@@ -382,7 +391,7 @@ impl StreamManagerCore {
                 if *up_id == 0 {
                     Ok(self.mock_source.1.take().unwrap())
                 } else {
-                    let upstream_addr = self
+                    let host_addr = self
                         .actors
                         .get(up_id)
                         .ok_or_else(|| {
@@ -390,10 +399,10 @@ impl StreamManagerCore {
                                 "upstream actor not found in info table".into(),
                             ))
                         })?
-                        .get_host()
                         .get_host();
-                    // FIXME use is_local_address instead of hardcoding
-                    if upstream_addr == "127.0.0.1" {
+                    let upstream_addr =
+                        format!("{}:{}", host_addr.get_host(), host_addr.get_port());
+                    if is_local_address(&get_host_port(&upstream_addr)?, &self.addr) {
                         Ok(self
                             .channel_pool
                             .get_mut(&(*up_id, fragment_id))
@@ -504,11 +513,5 @@ impl StreamManagerCore {
             }
         }
         Ok(())
-    }
-}
-
-impl Default for StreamManager {
-    fn default() -> Self {
-        Self::new()
     }
 }

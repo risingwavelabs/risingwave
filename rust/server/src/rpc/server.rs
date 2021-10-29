@@ -16,7 +16,7 @@ use tokio::task::JoinHandle;
 pub fn rpc_serve(addr: SocketAddr) -> (JoinHandle<()>, UnboundedSender<()>) {
     let store_mgr = Arc::new(SimpleTableManager::new());
     let task_mgr = Arc::new(TaskManager::new());
-    let stream_mgr = Arc::new(StreamManager::new());
+    let stream_mgr = Arc::new(StreamManager::new(addr));
     let source_mgr = Arc::new(MemSourceManager::new());
     let env = GlobalTaskEnv::new(store_mgr.clone(), source_mgr, task_mgr.clone(), addr);
     let task_srv = TaskServiceImpl::new(task_mgr.clone(), env);

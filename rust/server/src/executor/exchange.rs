@@ -13,7 +13,7 @@ use crate::error::Result;
 use crate::execution::exchange_source::{ExchangeSource, GrpcExchangeSource, LocalExchangeSource};
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::task::GlobalTaskEnv;
-use crate::util::addr::get_host_port;
+use crate::util::addr::{get_host_port, is_local_address};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 
@@ -29,14 +29,6 @@ pub struct GenericExchangeExecutor<C> {
 
     // Mock-able CreateSource.
     source_creator: PhantomData<C>,
-}
-
-fn is_local_address(server_addr: &SocketAddr, peer_addr: &SocketAddr) -> bool {
-    let peer_ip = peer_addr.ip();
-    if peer_ip.is_loopback() || peer_ip.is_unspecified() || (peer_addr.ip() == server_addr.ip()) {
-        return peer_addr.port() == server_addr.port();
-    }
-    false
 }
 
 /// `CreateSource` determines the right type of `ExchangeSource` to create.
@@ -152,20 +144,6 @@ mod tests {
     use crate::types::Int32Type;
 
     use super::*;
-
-    #[test]
-    fn test_is_local_address() {
-        let check_local = |a: &str, b: &str| {
-            assert!(is_local_address(
-                &get_host_port(a).unwrap(),
-                &get_host_port(b).unwrap()
-            ));
-        };
-        check_local("127.0.0.1:3456", "0.0.0.0:3456");
-        check_local("10.11.12.13:3456", "10.11.12.13:3456");
-        check_local("10.11.12.13:3456", "0.0.0.0:3456");
-        check_local("10.11.12.13:3456", "127.0.0.1:3456");
-    }
 
     #[tokio::test]
     async fn test_exchange_multiple_sources() {

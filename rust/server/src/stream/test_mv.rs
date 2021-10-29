@@ -25,6 +25,7 @@ use crate::storage::{Row, SimpleTableManager, Table, TableManager};
 use crate::stream::StreamManager;
 use crate::stream_op::Message;
 use crate::types::{Int32Type, Scalar};
+use crate::util::addr::get_host_port;
 use futures::StreamExt;
 use smallvec::SmallVec;
 use std::sync::Arc;
@@ -45,6 +46,7 @@ fn make_table_ref_id(id: i32) -> TableRefId {
 
 #[tokio::test]
 async fn test_stream_mv_proto() {
+    let port = 2333;
     // Build example proto for a stream executor chain.
     // TableSource -> Project -> Materialized View
     // Select v1 from T(v1,v2).
@@ -142,20 +144,21 @@ async fn test_stream_mv_proto() {
     let append_chunk = DataChunk::builder().columns(columns).build();
 
     // Build stream actor.
-    let stream_manager = StreamManager::new();
+    let socket_addr = get_host_port(&format!("127.0.0.1:{}", port)).unwrap();
+    let stream_manager = StreamManager::new(socket_addr);
 
     let actor_info_proto = ActorInfo {
         fragment_id: 1,
         host: Some(HostAddress {
             host: "127.0.0.1".into(),
-            port: 2333,
+            port,
         }),
     };
     let actor_info_proto2 = ActorInfo {
         fragment_id: 233,
         host: Some(HostAddress {
             host: "127.0.0.1".into(),
-            port: 2334,
+            port,
         }),
     };
     let actor_info_table = ActorInfoTable {

@@ -8,15 +8,18 @@ use std::sync::Arc;
 
 use crate::storage::SimpleTableManager;
 use crate::stream_op::Message;
+use crate::util::addr::get_host_port;
 
 use super::*;
+
+const PORT: i32 = 2333;
 
 fn helper_make_local_actor(fragment_id: u32) -> ActorInfo {
     ActorInfo {
         fragment_id,
         host: Some(HostAddress {
             host: "127.0.0.1".into(),
-            port: 2333,
+            port: PORT,
         }),
     }
 }
@@ -36,7 +39,8 @@ fn helper_make_local_actor(fragment_id: u32) -> ActorInfo {
 /// ```
 #[tokio::test]
 async fn test_stream_proto() {
-    let stream_manager = StreamManager::new();
+    let socket_addr = get_host_port(&format!("127.0.0.1:{}", PORT)).unwrap();
+    let stream_manager = StreamManager::new(socket_addr);
     let info = [1, 3, 7, 11, 13, 233]
         .iter()
         .cloned()
