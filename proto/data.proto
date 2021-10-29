@@ -96,3 +96,31 @@ message DataChunk {
 
     repeated google.protobuf.Any columns = 2;
 }
+
+enum Op {
+    INSERT = 0;
+    DELETE = 1;
+    UPDATE_INSERT = 2;
+    UPDATE_DELETE = 3;
+}
+
+message StreamMessage {
+    oneof stream_message {
+        StreamChunk stream_chunk = 1;
+	  Barrier barrier = 2;
+	  Terminate terminate = 3;
+    }
+}
+
+message StreamChunk {
+    // for Column::from_protobuf(), may not need later
+    uint32 cardinality = 1;
+    repeated Op ops = 2;
+    repeated Column columns = 3;
+}
+
+message Barrier {
+    uint64 epoch = 1;
+}
+
+message Terminate {}

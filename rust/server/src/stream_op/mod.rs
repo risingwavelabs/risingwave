@@ -1,6 +1,13 @@
 use crate::array::column::Column;
 use crate::array::DataChunk;
 use crate::{buffer::Bitmap, error::Result};
+use risingwave_pb::data::Op as ProstOp;
+use risingwave_pb::data::{
+    stream_message::StreamMessage, Barrier, StreamChunk as ProstStreamChunk,
+    StreamMessage as ProstStreamMessage, Terminate,
+};
+use risingwave_pb::ToProst;
+use risingwave_pb::ToProto;
 
 mod actor;
 mod aggregation;
@@ -26,7 +33,9 @@ pub use project::*;
 pub use simple_agg::*;
 pub use table_source::*;
 
+use crate::error::{ErrorCode, RwError};
 use async_trait::async_trait;
+use prost::DecodeError;
 use std::sync::Arc;
 
 #[cfg(test)]
@@ -48,6 +57,32 @@ pub enum Op {
     Delete,
     UpdateDelete,
     UpdateInsert,
+}
+
+impl Op {
+    pub fn to_protobuf(self) -> ProstOp {
+        match self {
+            Op::Insert => ProstOp::Insert,
+            Op::Delete => ProstOp::Delete,
+            Op::UpdateInsert => ProstOp::UpdateInsert,
+            Op::UpdateDelete => ProstOp::UpdateDelete,
+        }
+    }
+
+    pub fn from_protobuf(prost: &i32) -> Result<Op> {
+        let op = match ProstOp::from_i32(*prost) {
+            Some(ProstOp::Insert) => Op::Insert,
+            Some(ProstOp::Delete) => Op::Delete,
+            Some(ProstOp::UpdateInsert) => Op::UpdateInsert,
+            Some(ProstOp::UpdateDelete) => Op::UpdateDelete,
+            None => {
+                return Err(RwError::from(ErrorCode::ProstError(DecodeError::new(
+                    "No such op type",
+                ))))
+            }
+        };
+        Ok(op)
+    }
 }
 
 pub type Ops<'a> = &'a [Op];
@@ -120,6 +155,39 @@ impl StreamChunk {
             }
         }
     }
+
+    pub fn to_protobuf(&self) -> Result<ProstStreamChunk> {
+        Ok(ProstStreamChunk {
+            cardinality: self.cardinality() as u32,
+            ops: self.ops.iter().map(|op| op.to_protobuf() as i32).collect(),
+            columns: self
+                .columns
+                .iter()
+                .map(|col| Ok(col.to_protobuf()?.to_prost::<risingwave_pb::data::Column>()))
+                .collect::<Result<Vec<_>>>()?,
+        })
+    }
+
+    pub fn from_protobuf(prost: &ProstStreamChunk) -> Result<Self> {
+        let cardinality = prost.get_cardinality() as usize;
+        let mut stream_chunk = StreamChunk {
+            ops: vec![],
+            columns: vec![],
+            visibility: None,
+        };
+        for op in prost.get_ops() {
+            stream_chunk.ops.push(Op::from_protobuf(op)?);
+        }
+
+        for column in prost.get_columns() {
+            let proto_column = column.to_proto::<risingwave_proto::data::Column>();
+            stream_chunk
+                .columns
+                .push(Column::from_protobuf(proto_column, cardinality)?);
+        }
+
+        Ok(stream_chunk)
+    }
 }
 
 #[derive(Debug)]
@@ -129,6 +197,31 @@ pub enum Message {
     // Note(eric): consider remove this. A stream is always terminated by an error or dropped by user
     Terminate,
     // TODO: Watermark
+}
+
+impl Message {
+    pub fn to_protobuf(&self) -> Result<StreamMessage> {
+        let prost = match self {
+            Self::Chunk(stream_chunk) => {
+                let prost_stream_chunk = stream_chunk.to_protobuf()?;
+                StreamMessage::StreamChunk(prost_stream_chunk)
+            }
+            Self::Barrier(epoch) => StreamMessage::Barrier(Barrier { epoch: *epoch }),
+            Self::Terminate => StreamMessage::Terminate(Terminate {}),
+        };
+        Ok(prost)
+    }
+
+    pub fn from_protobuf(prost: ProstStreamMessage) -> Result<Self> {
+        let res = match prost.get_stream_message() {
+            StreamMessage::StreamChunk(stream_chunk) => {
+                Message::Chunk(StreamChunk::from_protobuf(stream_chunk)?)
+            }
+            StreamMessage::Barrier(epoch) => Message::Barrier(epoch.get_epoch()),
+            StreamMessage::Terminate(..) => Message::Terminate,
+        };
+        Ok(res)
+    }
 }
 
 /// `Executor` supports handling of control messages.
