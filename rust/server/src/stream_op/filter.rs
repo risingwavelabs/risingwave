@@ -1,6 +1,7 @@
 use super::{Executor, Message, Op, SimpleExecutor, StreamChunk};
 use crate::{
     array::{Array, ArrayImpl, DataChunk},
+    catalog::Schema,
     error::Result,
     expr::BoxedExpression,
 };
@@ -27,6 +28,10 @@ impl FilterExecutor {
 impl Executor for FilterExecutor {
     async fn next(&mut self) -> Result<Message> {
         super::simple_executor_next(self).await
+    }
+
+    fn schema(&self) -> &Schema {
+        self.input.schema()
     }
 }
 
