@@ -8,7 +8,7 @@ use crate::expr::{build_from_proto as build_expr_from_proto, AggKind};
 use crate::storage::*;
 use crate::stream_op::*;
 use crate::types::build_from_prost as build_type_from_prost;
-use futures::channel::mpsc::{channel, Receiver, Sender};
+use futures::channel::mpsc::{channel, unbounded, Receiver, Sender, UnboundedSender};
 use itertools::Itertools;
 use pb_convert::FromProtobuf;
 use risingwave_pb::expr;
@@ -43,6 +43,7 @@ pub struct StreamManagerCore {
     /// Stores all fragment information.
     fragments: HashMap<u32, stream_plan::StreamFragment>,
 
+    sender_placeholder: Vec<UnboundedSender<Message>>,
     /// Mock source, `fragment_id = 0`.
     /// TODO: remove this
     mock_source: ConsumableChannelPair,
@@ -126,6 +127,7 @@ impl StreamManagerCore {
             channel_pool: HashMap::new(),
             actors: HashMap::new(),
             fragments: HashMap::new(),
+            sender_placeholder: vec![],
             mock_source: (Some(tx), Some(rx)),
         }
     }
@@ -213,9 +215,15 @@ impl StreamManagerCore {
                 let table_ref = table_manager.clone().get_table(&table_id).unwrap();
                 if let SimpleTableRef::Columnar(table) = table_ref {
                     let stream_receiver = table.create_stream()?;
+                    // TODO: The channel pair should be created by the Checkpoint manger. So this line may be removed later.
+                    let (_sender, barrier_receiver) = unbounded();
+                    // TODO: Take the ownership to avoid drop of this channel. This should be removed too.
+                    self.sender_placeholder.push(_sender);
+
                     Ok(Box::new(TableSourceExecutor::new(
                         table_id,
                         stream_receiver,
+                        barrier_receiver,
                     )))
                 } else {
                     Err(RwError::from(InternalError(

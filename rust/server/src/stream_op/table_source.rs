@@ -9,24 +9,43 @@ use std::fmt::{Debug, Formatter};
 /// `TableSourceExecutor` extracts changes from a Table
 pub struct TableSourceExecutor {
     table_id: TableId,
-    receiver: UnboundedReceiver<StreamChunk>,
+    data_receiver: UnboundedReceiver<StreamChunk>,
+    barrier_receiver: UnboundedReceiver<Message>,
 }
 
 impl TableSourceExecutor {
-    pub fn new(table_id: TableId, receiver: UnboundedReceiver<StreamChunk>) -> Self {
-        TableSourceExecutor { table_id, receiver }
+    pub fn new(
+        table_id: TableId,
+        data_receiver: UnboundedReceiver<StreamChunk>,
+        barrier_receiver: UnboundedReceiver<Message>,
+    ) -> Self {
+        TableSourceExecutor {
+            table_id,
+            data_receiver,
+            barrier_receiver,
+        }
     }
 }
 
 #[async_trait]
 impl Executor for TableSourceExecutor {
     async fn next(&mut self) -> Result<Message> {
-        let received = self.receiver.next().await;
-        if let Some(chunk) = received {
-            Ok(Message::Chunk(chunk))
-        } else {
-            panic!("table stream closed unexpectedly");
-        }
+        let msg = tokio::select! {
+          chunk = self.data_receiver.next() => {
+            chunk.map(Message::Chunk)
+          }
+          message = self.barrier_receiver.next() => {
+            message
+          }
+        };
+        let msg = msg.expect("table stream closed unexpectedly");
+
+        Ok(match msg {
+            Message::Chunk(chunk) => Message::Chunk(chunk),
+            Message::Barrier(x) => Message::Barrier(x),
+            // TODO: Maybe removed in the future
+            Message::Terminate => unreachable!("unreachable"),
+        })
     }
 }
 
@@ -49,6 +68,7 @@ mod tests {
     use crate::storage::{SimpleMemTable, Table};
     use crate::stream_op::Op;
     use crate::types::{DataTypeKind, DataTypeRef, Int32Type, StringType};
+    use futures::channel::mpsc::unbounded;
     use itertools::Itertools;
     use pb_construct::make_proto;
     use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};
@@ -101,25 +121,36 @@ mod tests {
         };
 
         let stream_recv = table.create_stream()?;
-        let mut source = TableSourceExecutor::new(table_id, stream_recv);
+        let (barrier_sender, barrier_receiver) = unbounded();
 
+        let mut source = TableSourceExecutor::new(table_id, stream_recv, barrier_receiver);
+
+        barrier_sender.unbounded_send(Message::Barrier(1)).unwrap();
         // Write 1st chunk
         let card = table.append(chunk1)?;
+        // barrier_sender.start_send(Message::Barrier(0))
+
         assert_eq!(3, card);
 
-        if let Message::Chunk(chunk) = source.next().await.unwrap() {
-            assert_eq!(2, chunk.columns.len());
-            assert_eq!(
-                col1_arr1.iter().collect_vec(),
-                chunk.columns[0].array_ref().iter().collect_vec(),
-            );
-            assert_eq!(
-                col2_arr1.iter().collect_vec(),
-                chunk.columns[1].array_ref().iter().collect_vec()
-            );
-            assert_eq!(vec![Op::Insert; 3], chunk.ops);
-        } else {
-            unreachable!();
+        for _ in 0..2 {
+            match source.next().await.unwrap() {
+                Message::Chunk(chunk) => {
+                    assert_eq!(2, chunk.columns.len());
+                    assert_eq!(
+                        col1_arr1.iter().collect_vec(),
+                        chunk.columns[0].array_ref().iter().collect_vec(),
+                    );
+                    assert_eq!(
+                        col2_arr1.iter().collect_vec(),
+                        chunk.columns[1].array_ref().iter().collect_vec()
+                    );
+                    assert_eq!(vec![Op::Insert; 3], chunk.ops);
+                }
+                Message::Barrier(x) => {
+                    assert_eq!(x, 1)
+                }
+                Message::Terminate => unreachable!(),
+            }
         }
 
         // Write 2nd chunk
