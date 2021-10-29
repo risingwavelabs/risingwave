@@ -67,8 +67,7 @@ impl BoxedExecutorBuilder for ProjectionExecutor {
                 "Child interpreting error",
             )))
         })?;
-        let child_node =
-            ExecutorBuilder::new(proto_child, source.global_task_env().clone()).build()?;
+        let child_node = source.clone_for_plan(proto_child).build()?;
 
         let project_exprs = project_node
             .get_select_list()

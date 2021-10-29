@@ -82,8 +82,7 @@ impl BoxedExecutorBuilder for TopNExecutor {
         let order_by_node = top_n_node.get_order_by();
         let order_pairs = fetch_orders_from_order_by_node(order_by_node).unwrap();
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
-            let child =
-                ExecutorBuilder::new(child_plan, source.global_task_env().clone()).build()?;
+            let child = source.clone_for_plan(child_plan).build()?;
             return Ok(Box::new(Self::new(
                 child,
                 order_pairs,

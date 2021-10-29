@@ -59,8 +59,7 @@ impl BoxedExecutorBuilder for FilterExecutor {
         let expr_node = filter_node.get_search_condition();
         let expr = build_from_proto(expr_node)?;
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
-            let child =
-                ExecutorBuilder::new(child_plan, source.global_task_env().clone()).build()?;
+            let child = source.clone_for_plan(child_plan).build()?;
             return Ok(Box::new(Self { expr, child }));
         }
         Err(InternalError("Filter must have one children".to_string()).into())

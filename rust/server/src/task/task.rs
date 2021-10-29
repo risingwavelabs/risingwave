@@ -139,7 +139,8 @@ impl TaskExecution {
             self.task_id,
             json_to_pretty_string(&self.plan.to_json()?)?
         );
-        let exec = ExecutorBuilder::new(self.plan.get_root(), self.env.clone()).build()?;
+        let exec =
+            ExecutorBuilder::new(self.plan.get_root(), &self.task_id, self.env.clone()).build()?;
         let (sender, receivers) = create_output_channel(self.plan.get_exchange_info())?;
         self.receivers
             .lock()

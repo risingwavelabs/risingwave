@@ -23,7 +23,7 @@ use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;
 use crate::executor::join::HashJoinExecutorBuilder;
 pub use crate::executor::stream_scan::StreamScanExecutor;
 use crate::executor::values::ValuesExecutor;
-use crate::task::GlobalTaskEnv;
+use crate::task::{GlobalTaskEnv, TaskId};
 
 mod create_stream;
 mod create_table;
@@ -82,6 +82,7 @@ pub trait BoxedExecutorBuilder {
 
 pub struct ExecutorBuilder<'a> {
     plan_node: &'a PlanNode,
+    task_id: &'a TaskId,
     env: GlobalTaskEnv,
 }
 
@@ -99,8 +100,12 @@ macro_rules! build_executor {
 }
 
 impl<'a> ExecutorBuilder<'a> {
-    pub fn new(plan_node: &'a PlanNode, env: GlobalTaskEnv) -> Self {
-        Self { plan_node, env }
+    pub fn new(plan_node: &'a PlanNode, task_id: &'a TaskId, env: GlobalTaskEnv) -> Self {
+        Self {
+            plan_node,
+            task_id,
+            env,
+        }
     }
 
     pub fn build(&self) -> Result<BoxedExecutor> {
@@ -112,6 +117,10 @@ impl<'a> ExecutorBuilder<'a> {
             ))
             .into()
         })
+    }
+
+    pub fn clone_for_plan(&self, plan_node: &'a PlanNode) -> Self {
+        ExecutorBuilder::new(plan_node, self.task_id, self.env.clone())
     }
 
     fn try_build(&self) -> Result<BoxedExecutor> {
@@ -144,5 +153,26 @@ impl<'a> ExecutorBuilder<'a> {
 
     pub fn global_task_env(&self) -> &GlobalTaskEnv {
         &self.env
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::executor::ExecutorBuilder;
+    use crate::task::{GlobalTaskEnv, TaskId};
+    use risingwave_proto::plan::PlanNode;
+
+    #[test]
+    fn test_clone_for_plan() {
+        let plan_node = PlanNode::new();
+        let task_id = &TaskId {
+            task_id: 1,
+            stage_id: 1,
+            query_id: "test_query_id".to_string(),
+        };
+        let builder = ExecutorBuilder::new(&plan_node, task_id, GlobalTaskEnv::for_test());
+        let child_plan = &PlanNode::new();
+        let cloned_builder = builder.clone_for_plan(child_plan);
+        assert_eq!(builder.task_id, cloned_builder.task_id);
     }
 }

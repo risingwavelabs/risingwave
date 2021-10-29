@@ -291,12 +291,12 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
 
         params.join_type = JoinType::from_proto(hash_join_node.get_join_type());
 
-        let left_child =
-            ExecutorBuilder::new(&context.plan_node.get_children()[0], context.env.clone())
-                .build()?;
-        let right_child =
-            ExecutorBuilder::new(&context.plan_node.get_children()[1], context.env.clone())
-                .build()?;
+        let left_child = context
+            .clone_for_plan(&context.plan_node.get_children()[0])
+            .build()?;
+        let right_child = context
+            .clone_for_plan(&context.plan_node.get_children()[1])
+            .build()?;
 
         let hash_key_kind = calc_hash_key_kind(&params.right_key_types);
 

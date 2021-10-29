@@ -101,7 +101,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
                 "Child interpreting error",
             )))
         })?;
-        let child = ExecutorBuilder::new(proto_child, source.global_task_env().clone()).build()?;
+        let child = source.clone_for_plan(proto_child).build()?;
 
         Ok(Box::new(Self {
             table_id,

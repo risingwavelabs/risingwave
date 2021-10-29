@@ -71,13 +71,18 @@ mod tests {
     use crate::source::{
         FileSourceConfig, MemSourceManager, SourceConfig, SourceFormat, SourceManager,
     };
-    use crate::task::GlobalTaskEnv;
+    use crate::task::{GlobalTaskEnv, TaskId};
 
     #[test]
     fn test_drop_stream() {
         let mut plan_node = PlanNode::new();
         plan_node.set_node_type(PlanNode_PlanNodeType::FILTER);
-        let builder = ExecutorBuilder::new(&plan_node, GlobalTaskEnv::for_test());
+        let task_id = &TaskId {
+            task_id: 0,
+            stage_id: 0,
+            query_id: "".to_string(),
+        };
+        let builder = ExecutorBuilder::new(&plan_node, task_id, GlobalTaskEnv::for_test());
         assert!(DropStreamExecutor::new_boxed_executor(&builder).is_err())
     }
 

@@ -36,8 +36,7 @@ impl BoxedExecutorBuilder for LimitExecutor {
         let offset = limit_node.get_offset() as usize;
 
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
-            let child =
-                ExecutorBuilder::new(child_plan, source.global_task_env().clone()).build()?;
+            let child = source.clone_for_plan(child_plan).build()?;
             return Ok(Box::new(Self {
                 child,
                 limit,

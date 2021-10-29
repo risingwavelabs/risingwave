@@ -40,7 +40,7 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             .get_children()
             .get(0)
             .ok_or_else(|| ErrorCode::InternalError(String::from("")))?;
-        let child = ExecutorBuilder::new(proto_child, source.global_task_env().clone()).build()?;
+        let child = source.clone_for_plan(proto_child).build()?;
 
         let sort_agg_node =
             SortAggNode::parse_from_bytes(source.plan_node().get_body().get_value())

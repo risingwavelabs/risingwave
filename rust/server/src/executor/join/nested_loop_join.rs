@@ -119,10 +119,8 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
         let right_plan_opt = source.plan_node().get_children().get(1);
         match (left_plan_opt, right_plan_opt) {
             (Some(left_plan), Some(right_plan)) => {
-                let left_child =
-                    ExecutorBuilder::new(left_plan, source.global_task_env().clone()).build()?;
-                let right_child =
-                    ExecutorBuilder::new(right_plan, source.global_task_env().clone()).build()?;
+                let left_child = source.clone_for_plan(left_plan).build()?;
+                let right_child = source.clone_for_plan(right_plan).build()?;
 
                 let fields = vec![];
                 // TODO: fix this when exchange's schema is ready
