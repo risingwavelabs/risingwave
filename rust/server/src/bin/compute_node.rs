@@ -1,7 +1,7 @@
 use clap::Parser;
 use log::info;
 use risingwave::rpc::server::rpc_serve;
-use risingwave::util::addr::get_host_port;
+use risingwave_common::util::addr::get_host_port;
 
 #[derive(Parser)]
 struct Opts {

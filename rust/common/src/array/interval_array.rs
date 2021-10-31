@@ -3,7 +3,7 @@ use std::hash::Hash;
 use crate::array::{Array, ArrayBuilder, ArrayIterator};
 use crate::buffer::Bitmap;
 use crate::error::Result;
-use crate::types::IntervalUnit;
+use crate::types::interval_type::IntervalUnit;
 use risingwave_proto::data::Buffer;
 
 use super::NULL_VAL_FOR_HASH;

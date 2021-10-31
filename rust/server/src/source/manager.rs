@@ -1,8 +1,9 @@
-use crate::catalog::TableId;
-use crate::error::ErrorCode::InternalError;
-use crate::error::{ErrorCode, Result, RwError};
 use crate::source::{FileSource, KafkaSource, Source, SourceConfig, SourceFormat};
-use crate::types::DataTypeRef;
+use risingwave_common::catalog::TableId;
+use risingwave_common::ensure;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::types::DataTypeRef;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 

@@ -106,16 +106,16 @@ impl SimpleExecutor for MViewSinkExecutor {
 
 #[cfg(test)]
 mod tests {
-    use crate::array::I32Array;
-    use crate::catalog::TableId;
-    use crate::error::ErrorCode::InternalError;
     use crate::storage::{Row, SimpleTableManager, SimpleTableRef, TableManager};
     use crate::stream_op::test_utils::*;
     use crate::stream_op::*;
-    use crate::types::{Int32Type, Scalar};
     use crate::*;
     use pb_construct::make_proto;
     use pb_convert::FromProtobuf;
+    use risingwave_common::array::I32Array;
+    use risingwave_common::catalog::TableId;
+    use risingwave_common::error::ErrorCode::InternalError;
+    use risingwave_common::types::{Int32Type, Scalar};
     use risingwave_proto::data::{DataType, DataType_TypeName};
     use risingwave_proto::plan::{ColumnDesc, ColumnDesc_ColumnEncodingType};
     use risingwave_proto::plan::{DatabaseRefId, SchemaRefId, TableRefId};

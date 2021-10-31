@@ -5,6 +5,7 @@ use crate::array::{ArrayBuilderImpl, ArrayImpl};
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{ErrorCode, Result, RwError};
+use crate::unpack_from_any;
 use crate::util::hash_util::finalize_hashers;
 use itertools::Itertools;
 use protobuf::Message;

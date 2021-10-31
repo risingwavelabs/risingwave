@@ -1,4 +1,4 @@
-use crate::error::{Result, RwError};
+use risingwave_common::error::{Result, RwError};
 
 use rdkafka::consumer::{Consumer, DefaultConsumerContext, StreamConsumer};
 use rdkafka::error::KafkaError;
@@ -6,10 +6,10 @@ use rdkafka::{ClientConfig, Message};
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-use crate::error::ErrorCode::InternalError;
 use crate::source::{Source, SourceConfig, SourceMessage, SourceReader};
 use chrono::Local;
 use rdkafka::util::AsyncRuntime;
+use risingwave_common::error::ErrorCode::InternalError;
 use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;

@@ -1,7 +1,19 @@
-use crate::array::column::Column;
-use crate::array::DataChunk;
-use crate::catalog::Schema;
-use crate::{buffer::Bitmap, error::Result};
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use prost::DecodeError;
+
+pub use actor::Actor;
+pub use aggregation::*;
+pub use dispatch::*;
+pub use filter::*;
+pub use hash_agg::*;
+pub use kafka_source::*;
+pub use merge::*;
+pub use mview_sink::*;
+pub use project::*;
+use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_pb::data::Op as ProstOp;
 use risingwave_pb::data::{
     stream_message::StreamMessage, Barrier, StreamChunk as ProstStreamChunk,
@@ -9,6 +21,13 @@ use risingwave_pb::data::{
 };
 use risingwave_pb::ToProst;
 use risingwave_pb::ToProto;
+pub use simple_agg::*;
+pub use table_source::*;
+
+use risingwave_common::array::column::Column;
+use risingwave_common::array::DataChunk;
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::Schema;
 
 mod actor;
 mod aggregation;
@@ -21,23 +40,6 @@ mod mview_sink;
 mod project;
 mod simple_agg;
 mod table_source;
-
-pub use actor::Actor;
-pub use aggregation::*;
-pub use dispatch::*;
-pub use filter::*;
-pub use hash_agg::*;
-pub use kafka_source::*;
-pub use merge::*;
-pub use mview_sink::*;
-pub use project::*;
-pub use simple_agg::*;
-pub use table_source::*;
-
-use crate::error::{ErrorCode, RwError};
-use async_trait::async_trait;
-use prost::DecodeError;
-use std::sync::Arc;
 
 #[cfg(test)]
 mod integration_tests;

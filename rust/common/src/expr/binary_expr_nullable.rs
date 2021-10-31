@@ -1,14 +1,13 @@
-use risingwave_proto::expr::ExprNode_Type;
-
-use crate::array::{BoolArray, DecimalArray, F32Array, F64Array, I16Array, I32Array};
-use crate::error::Result;
-use crate::{
-    array::I64Array, expr::expr_tmpl::BinaryNullableExpression, types::DataTypeKind,
-    types::DataTypeRef,
-};
 use std::marker::PhantomData;
 
+use crate::array::{BoolArray, DecimalArray, F32Array, F64Array, I16Array, I32Array, I64Array};
+use crate::error::Result;
+use crate::types::DataTypeKind;
+use crate::types::DataTypeRef;
+use risingwave_proto::expr::ExprNode_Type;
+
 use super::BoxedExpression;
+use crate::expr::expr_tmpl::BinaryNullableExpression;
 
 #[allow(unused_macros)]
 macro_rules! gen_across_binary {

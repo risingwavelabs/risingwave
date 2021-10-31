@@ -8,11 +8,11 @@ use serde_protobuf::de::Deserializer;
 use serde_protobuf::descriptor::Descriptors;
 use serde_value::Value;
 
-use crate::error::ErrorCode::ProtocolError;
-use crate::error::Result;
-use crate::error::RwError;
 use crate::source::{SourceColumnDesc, SourceParser};
-use crate::types::{DataTypeKind, Datum, ScalarImpl};
+use risingwave_common::error::ErrorCode::ProtocolError;
+use risingwave_common::error::Result;
+use risingwave_common::error::RwError;
+use risingwave_common::types::{DataTypeKind, Datum, ScalarImpl};
 
 /// Parser for Protobuf-encoded bytes.
 pub struct ProtobufParser {
@@ -137,9 +137,11 @@ mod tests {
     use serde_value::Value;
     use tempfile::Builder;
 
-    use crate::error::Result;
     use crate::source::{ProtobufParser, SourceColumnDesc, SourceParser};
-    use crate::types::{DataTypeKind, Float32Type, Int32Type, Int64Type, ScalarImpl, StringType};
+    use risingwave_common::error::Result;
+    use risingwave_common::types::{
+        DataTypeKind, Float32Type, Int32Type, Int64Type, ScalarImpl, StringType,
+    };
 
     static PROTO_FILE_DATA: &str = r#"
     syntax = "proto3";

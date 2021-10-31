@@ -1,8 +1,8 @@
-use crate::array::DataChunk;
-use crate::error::ErrorCode::{GrpcNetworkError, InternalError, TonicError};
-use crate::error::Result;
 use crate::task::{GlobalTaskEnv, TaskSink};
 use futures::StreamExt;
+use risingwave_common::array::DataChunk;
+use risingwave_common::error::ErrorCode::{GrpcNetworkError, InternalError, TonicError};
+use risingwave_common::error::Result;
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::{TaskData, TaskSinkId};
 use risingwave_pb::ToProto;
@@ -105,7 +105,7 @@ impl ExchangeSource for LocalExchangeSource {
 #[cfg(test)]
 mod tests {
     use crate::execution::exchange_source::{ExchangeSource, GrpcExchangeSource};
-    use crate::util::addr::get_host_port;
+    use risingwave_common::util::addr::get_host_port;
     use risingwave_pb::data::DataChunk;
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,

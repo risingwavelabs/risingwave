@@ -1,6 +1,6 @@
-use crate::array::DataChunk;
-use crate::error::{ErrorCode, Result};
 use crate::task::channel::{BoxChanReceiver, BoxChanSender, ChanReceiver, ChanSender};
+use risingwave_common::array::DataChunk;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_proto::plan::*;
 use std::sync::mpsc;
 

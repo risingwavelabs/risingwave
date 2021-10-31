@@ -33,6 +33,7 @@ protobuf-codegen-pure = "2.25.2"
 rdkafka = { version = "0.25", features = ["cmake-build"] }
 risingwave-pb = { path = "../prost" }
 risingwave-proto = { path = "../proto" }
+risingwave_common = { path = "../common" }
 rust_decimal = "1"
 rust_decimal_macros = "1"
 serde = { version = "1", features = ["derive"] }

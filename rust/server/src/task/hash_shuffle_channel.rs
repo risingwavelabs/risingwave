@@ -1,8 +1,8 @@
-use crate::array::DataChunk;
-use crate::error::ErrorCode::InternalError;
-use crate::error::{ErrorCode, Result};
 use crate::task::channel::{BoxChanReceiver, BoxChanSender, ChanReceiver, ChanSender};
-use crate::util::hash_util::CRC32FastBuilder;
+use risingwave_common::array::DataChunk;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_proto::plan::*;
 use std::option::Option;
 use std::sync::mpsc;
@@ -128,8 +128,8 @@ pub fn new_hash_shuffle_channel(shuffle: &ExchangeInfo) -> (BoxChanSender, Vec<B
 mod tests {
     use crate::risingwave_proto::plan::*;
     use crate::task::test_utils::{ResultChecker, TestRunner};
-    use crate::util::hash_util::CRC32FastBuilder;
     use rand::Rng;
+    use risingwave_common::util::hash_util::CRC32FastBuilder;
     use std::hash::BuildHasher;
 
     pub fn hash_shuffle_plan(plan: &mut PlanFragment, keys: Vec<u32>, num_sinks: u32) {

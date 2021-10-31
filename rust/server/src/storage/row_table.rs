@@ -1,6 +1,6 @@
-use crate::error::ErrorCode::InternalError;
-use crate::error::Result;
-use crate::types::{Datum, Scalar};
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::Result;
+use risingwave_common::types::{Datum, Scalar};
 use std::{
     cmp::Ordering,
     collections::BTreeMap,

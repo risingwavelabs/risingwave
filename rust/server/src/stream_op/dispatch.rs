@@ -1,10 +1,10 @@
 use super::{Message, Result, StreamChunk};
-use crate::array::DataChunk;
 use crate::stream_op::{Executor, StreamConsumer};
-use crate::util::hash_util::CRC32FastBuilder;
 use async_trait::async_trait;
 use futures::channel::mpsc::Sender;
 use futures::SinkExt;
+use risingwave_common::array::DataChunk;
+use risingwave_common::util::hash_util::CRC32FastBuilder;
 
 /// `Output` provides an interface for `Dispatcher` to send data into downstream fragments.
 #[async_trait]
@@ -283,10 +283,10 @@ impl StreamConsumer for SenderConsumer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array::column::Column;
-    use crate::array::{Array, ArrayBuilder, I32ArrayBuilder};
     use crate::stream_op::Op;
-    use crate::types::Int32Type;
+    use risingwave_common::array::column::Column;
+    use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder};
+    use risingwave_common::types::Int32Type;
     use std::hash::{BuildHasher, Hasher};
     use std::sync::{Arc, Mutex};
 

@@ -2,11 +2,11 @@
 
 use super::aggregation::*;
 use super::{Executor, Message, Op, SimpleExecutor, StreamChunk};
-use crate::array::column::Column;
-use crate::array::*;
-use crate::buffer::Bitmap;
-use crate::error::{ErrorCode, Result, RwError};
-use crate::types::{Datum, ScalarRefImpl};
+use risingwave_common::array::column::Column;
+use risingwave_common::array::*;
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::types::{Datum, ScalarRefImpl};
 
 use super::AggCall;
 use async_trait::async_trait;

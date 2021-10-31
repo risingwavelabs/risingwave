@@ -6,14 +6,14 @@ use protobuf::Message;
 use pb_convert::FromProtobuf;
 use risingwave_proto::plan::StreamScanNode;
 
-use crate::array::DataChunk;
-use crate::catalog::TableId;
-use crate::catalog::{Field, Schema};
-use crate::error::ErrorCode;
-use crate::error::ErrorCode::InternalError;
-use crate::error::{Result, RwError};
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::source::{ChunkReader, JSONParser, SourceColumnDesc, SourceFormat, SourceParser};
+use risingwave_common::array::DataChunk;
+use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::error::ErrorCode;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{Result, RwError};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 

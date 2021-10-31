@@ -6,16 +6,16 @@ use hash_agg::*;
 use limit::*;
 use order_by::*;
 use projection::*;
+use risingwave_common::array::DataChunk;
+use risingwave_common::catalog::Schema;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{Result, RwError};
 use risingwave_proto::plan::{PlanNode, PlanNode_PlanNodeType};
 use row_seq_scan::*;
 use seq_scan::*;
 use sort_agg::*;
 use top_n::*;
 
-use crate::array::DataChunk;
-use crate::catalog::Schema;
-use crate::error::ErrorCode::InternalError;
-use crate::error::{Result, RwError};
 use crate::executor::create_stream::CreateStreamExecutor;
 use crate::executor::create_table::CreateTableExecutor;
 use crate::executor::insert::InsertExecutor;
@@ -32,7 +32,6 @@ mod drop_table;
 mod exchange;
 mod filter;
 mod hash_agg;
-mod hash_map;
 mod insert;
 mod join;
 mod limit;
@@ -158,9 +157,10 @@ impl<'a> ExecutorBuilder<'a> {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_proto::plan::PlanNode;
+
     use crate::executor::ExecutorBuilder;
     use crate::task::{GlobalTaskEnv, TaskId};
-    use risingwave_proto::plan::PlanNode;
 
     #[test]
     fn test_clone_for_plan() {

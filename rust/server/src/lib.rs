@@ -18,27 +18,15 @@ extern crate risingwave_proto;
 extern crate thiserror;
 extern crate tokio;
 extern crate typed_builder;
+#[macro_use]
+extern crate risingwave_common;
 
-#[macro_use]
-mod error;
-#[macro_use]
-pub mod util;
-mod alloc;
-#[macro_use]
-mod array;
-mod buffer;
-mod catalog;
 mod execution;
 mod executor;
-mod expr;
 mod source;
 mod storage;
 mod stream;
 mod stream_op;
 mod task;
-#[cfg(test)]
-mod test_utils;
-mod types;
-mod vector_op;
 
 pub mod rpc;

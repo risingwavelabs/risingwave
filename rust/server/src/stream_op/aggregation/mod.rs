@@ -14,14 +14,14 @@ use super::{
     Op, Ops, StreamingCountAgg, StreamingFloatMaxAgg, StreamingFloatMinAgg, StreamingFloatSumAgg,
     StreamingMaxAgg, StreamingMinAgg, StreamingSumAgg,
 };
-use crate::array::{
+use risingwave_common::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, F32Array, F64Array, I16Array, I32Array,
     I64Array,
 };
-use crate::buffer::Bitmap;
-use crate::error::Result;
-use crate::expr::AggKind;
-use crate::types::{DataTypeKind, DataTypeRef};
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::error::Result;
+use risingwave_common::expr::AggKind;
+use risingwave_common::types::{DataTypeKind, DataTypeRef};
 
 /// `StreamingAggState` records a state of streaming expression. For example,
 /// there will be `StreamingAggCompare` and `StreamingAggSum`.
@@ -150,7 +150,7 @@ pub fn create_streaming_agg_state(
 mod tests {
     use super::*;
 
-    use crate::array::from_builder;
+    use risingwave_common::array::from_builder;
 
     pub fn get_output_from_state<O, S>(state: &mut S) -> O::ArrayType
     where

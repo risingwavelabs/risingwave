@@ -5,14 +5,14 @@
 use std::marker::PhantomData;
 use std::ops::Neg;
 
-use crate::array::Array;
-use crate::types::option_as_scalar_ref;
-
 use num_traits::{CheckedAdd, CheckedSub};
 
-use crate::array::*;
-use crate::buffer::Bitmap;
+use risingwave_common::array::Array;
+use risingwave_common::array::*;
+
 use crate::stream_op::*;
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::types::option_as_scalar_ref;
 
 use super::{StreamingAggFunction, StreamingAggState};
 
@@ -65,7 +65,7 @@ where
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         data: &A,
-    ) -> crate::error::Result<()> {
+    ) -> risingwave_common::error::Result<()> {
         self.sum_state.apply_batch_concrete(ops, visibility, data)?;
         self.count_state
             .apply_batch_concrete(ops, visibility, data)?;
@@ -127,18 +127,15 @@ impl_cast_div!(i64, i64, i64);
 
 #[cfg(test)]
 mod tests {
+    use crate::stream_op::{
+        aggregation::{tests::get_output_from_state, StreamingAggState},
+        Op,
+    };
+    use risingwave_common::array::ArrayBuilder;
+    use risingwave_common::array::{Array, F64Array, I64Array};
+    use risingwave_common::{array, array_nonnull};
 
     use super::StreamingAvgAgg;
-    use crate::array::ArrayBuilder;
-    use crate::{
-        array,
-        array::{Array, F64Array, I64Array},
-        array_nonnull,
-        stream_op::{
-            aggregation::{tests::get_output_from_state, StreamingAggState},
-            Op,
-        },
-    };
 
     #[test]
     fn test_average() {

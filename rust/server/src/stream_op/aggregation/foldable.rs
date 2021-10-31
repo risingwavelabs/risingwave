@@ -2,12 +2,12 @@
 
 use std::marker::PhantomData;
 
-use crate::array::*;
-use crate::buffer::Bitmap;
-use crate::error::{
+use risingwave_common::array::*;
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::error::{
     ErrorCode::NotImplementedError, ErrorCode::NumericValueOutOfRange, Result, RwError,
 };
-use crate::types::{option_as_scalar_ref, Scalar, ScalarRef};
+use risingwave_common::types::{option_as_scalar_ref, Scalar, ScalarRef};
 
 use super::{Op, Ops, StreamingAggFunction, StreamingAggState, StreamingAggStateImpl};
 
@@ -437,8 +437,8 @@ impl_fold_agg! { I64Array, Int64, UTF8Array }
 mod tests {
     use super::super::tests::get_output_from_state;
     use super::*;
-    use crate::array::I64Array;
-    use crate::{array, array_nonnull};
+    use risingwave_common::array::I64Array;
+    use risingwave_common::{array, array_nonnull};
 
     type TestStreamingSumAgg<R> =
         StreamingFoldAgg<R, R, PrimitiveSummable<<R as Array>::OwnedItem>>;

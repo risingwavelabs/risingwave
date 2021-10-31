@@ -5,16 +5,16 @@ use protobuf::Message;
 use pb_convert::FromProtobuf;
 use risingwave_proto::plan::{PlanNode_PlanNodeType, RowSeqScanNode};
 
-use crate::array::column::Column;
-use crate::array::DataChunk;
-use crate::catalog::TableId;
-use crate::catalog::{Field, Schema};
-use crate::error::ErrorCode::{InternalError, ProtobufError};
-use crate::error::{Result, RwError};
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::storage::{MemRowTable, MemTableRowIter, Row, SimpleTableRef};
-use crate::types::build_from_proto;
-use crate::types::DataTypeRef;
+use risingwave_common::array::column::Column;
+use risingwave_common::array::DataChunk;
+use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::error::ErrorCode::{InternalError, ProtobufError};
+use risingwave_common::error::{Result, RwError};
+use risingwave_common::types::build_from_proto;
+use risingwave_common::types::DataTypeRef;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 

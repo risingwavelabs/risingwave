@@ -1,8 +1,8 @@
-use crate::error::ErrorCode::TaskNotFound;
-use crate::error::{Result, RwError};
 use crate::task::env::GlobalTaskEnv;
 use crate::task::task::{TaskExecution, TaskId};
 use crate::task::TaskSink;
+use risingwave_common::error::ErrorCode::TaskNotFound;
+use risingwave_common::error::{Result, RwError};
 use risingwave_proto::plan::PlanFragment;
 use risingwave_proto::task_service::{TaskId as ProtoTaskId, TaskSinkId as ProtoSinkId};
 use std::collections::HashMap;

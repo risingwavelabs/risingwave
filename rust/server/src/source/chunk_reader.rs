@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use crate::array::column::Column;
-use crate::array::{ArrayBuilderImpl, DataChunk};
-use crate::error::Result;
 use crate::source::parser::SourceParser;
 use crate::source::{SourceColumnDesc, SourceMessage, SourceReader};
+use risingwave_common::array::column::Column;
+use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
+use risingwave_common::error::Result;
 
 /// `ChunkReader` is the intermediate layer between Executor and Source,
 /// responsible for reading data one by one from `SourceReader` by calling next() and generating `DataChunk`

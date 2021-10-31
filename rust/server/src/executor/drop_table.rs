@@ -3,12 +3,12 @@ use protobuf::Message;
 use pb_convert::FromProtobuf;
 use risingwave_proto::plan::{DropTableNode, PlanNode_PlanNodeType};
 
-use crate::catalog::Schema;
-use crate::catalog::TableId;
-use crate::error::ErrorCode::{InternalError, ProtobufError};
-use crate::error::Result;
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::storage::TableManagerRef;
+use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::TableId;
+use risingwave_common::error::ErrorCode::{InternalError, ProtobufError};
+use risingwave_common::error::Result;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 

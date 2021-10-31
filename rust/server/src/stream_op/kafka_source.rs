@@ -1,8 +1,8 @@
-use crate::error::Result;
 use crate::executor::StreamScanExecutor;
 use crate::stream_op::{Executor, Message, Op, StreamChunk};
 use async_trait::async_trait;
 use futures::FutureExt;
+use risingwave_common::error::Result;
 use std::fmt::{Debug, Formatter};
 
 pub struct KafkaSourceExecutor {

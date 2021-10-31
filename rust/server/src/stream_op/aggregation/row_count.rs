@@ -1,10 +1,10 @@
 //! This module implements `StreamingRowCountAgg`.
 
-use crate::array::*;
-use crate::buffer::Bitmap;
-use crate::error::Result;
 use crate::stream_op::{Op, Ops};
-use crate::types::{DataTypeRef, Int64Type};
+use risingwave_common::array::*;
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::error::Result;
+use risingwave_common::types::{DataTypeRef, Int64Type};
 
 use super::StreamingAggStateImpl;
 

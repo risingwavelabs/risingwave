@@ -3,8 +3,8 @@
 macro_rules! array {
   ($array:tt, [$( $value:expr ),*]) => {
     {
-      use crate::array::Array;
-      use crate::array::ArrayBuilder;
+      use $crate::array::Array;
+      use $crate::array::ArrayBuilder;
       let mut builder = <$array as Array>::Builder::new(0).unwrap();
       $(
         builder.append($value).unwrap();
@@ -19,8 +19,8 @@ macro_rules! array {
 macro_rules! array_nonnull {
   ($array:tt, [$( $value:expr ),*]) => {
     {
-      use crate::array::Array;
-      use crate::array::ArrayBuilder;
+      use $crate::array::Array;
+      use $crate::array::ArrayBuilder;
       let mut builder = <$array as Array>::Builder::new(0).unwrap();
       $(
         builder.append(Some($value)).unwrap();
@@ -47,8 +47,8 @@ macro_rules! column {
 macro_rules! column_nonnull {
   ($array:tt, $type:tt, [$( $value:expr ),*]) => {
     {
-      use crate::array::column::Column;
-      let arr = array_nonnull! { $array, [ $( $value ),* ] };
+      use $crate::array::column::Column;
+      let arr = $crate::array_nonnull! { $array, [ $( $value ),* ] };
       Column::new(std::sync::Arc::new(arr.into()), $type::create(false))
     }
   };

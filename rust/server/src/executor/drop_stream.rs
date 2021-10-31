@@ -3,14 +3,14 @@ use protobuf::Message;
 use pb_convert::FromProtobuf;
 use risingwave_proto::plan::{DropStreamNode, PlanNode_PlanNodeType};
 
-use crate::catalog::Schema;
-use crate::catalog::TableId;
-use crate::error::ErrorCode::{InternalError, ProtobufError};
-use crate::error::Result;
 use crate::executor::{
     BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult,
 };
 use crate::source::SourceManagerRef;
+use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::TableId;
+use risingwave_common::error::ErrorCode::{InternalError, ProtobufError};
+use risingwave_common::error::Result;
 
 pub(super) struct DropStreamExecutor {
     table_id: TableId,
@@ -64,14 +64,14 @@ mod tests {
 
     use risingwave_proto::plan::{PlanNode, PlanNode_PlanNodeType};
 
-    use crate::catalog::test_utils::mock_table_id;
-    use crate::catalog::Schema;
     use crate::executor::drop_stream::DropStreamExecutor;
     use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
     use crate::source::{
         FileSourceConfig, MemSourceManager, SourceConfig, SourceFormat, SourceManager,
     };
     use crate::task::{GlobalTaskEnv, TaskId};
+    use risingwave_common::catalog::test_utils::mock_table_id;
+    use risingwave_common::catalog::Schema;
 
     #[test]
     fn test_drop_stream() {

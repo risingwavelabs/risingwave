@@ -141,6 +141,9 @@ impl Bitmap {
         self.bits.is_empty()
     }
 
+    /// # Safety
+    ///
+    /// Makes clippy happy.
     pub unsafe fn is_set_unchecked(&self, idx: usize) -> bool {
         bit_util::get_bit_raw(self.bits.as_ptr(), idx)
     }

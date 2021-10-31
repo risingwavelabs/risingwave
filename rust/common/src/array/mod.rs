@@ -1,12 +1,12 @@
 //! `Array` defines all in-memory representations of vectorized execution framework.
 
 mod bool_array;
-pub(crate) mod column;
+pub mod column;
 mod column_proto_readers;
 mod data_chunk;
 pub mod data_chunk_iter;
 mod decimal_array;
-pub(crate) mod interval_array;
+pub mod interval_array;
 mod iterator;
 mod macros;
 mod primitive_array;
@@ -151,6 +151,10 @@ pub trait Array: Send + Sync + Sized + 'static + Into<ArrayImpl> {
         for (idx, state) in hashers.iter_mut().enumerate() {
             self.hash_at(idx, state);
         }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
@@ -374,6 +378,10 @@ macro_rules! impl_array {
         }
       }
 
+      pub fn is_empty(&self) -> bool {
+        self.len() == 0
+      }
+
       /// Get the null `Bitmap` of the array.
       pub fn null_bitmap(&self) -> &Bitmap {
         match self {
@@ -576,18 +584,14 @@ mod test_util {
     use itertools::Itertools;
     use std::hash::{BuildHasher, Hasher};
 
-    pub(crate) fn hash_finish<H: Hasher>(hashers: &mut Vec<H>) -> Vec<u64> {
+    pub fn hash_finish<H: Hasher>(hashers: &mut Vec<H>) -> Vec<u64> {
         return hashers
             .iter()
             .map(|hasher| hasher.finish())
             .collect::<Vec<u64>>();
     }
 
-    pub(crate) fn test_hash<H: BuildHasher, A: Array>(
-        arrs: Vec<A>,
-        expects: Vec<u64>,
-        hasher_builder: H,
-    ) {
+    pub fn test_hash<H: BuildHasher, A: Array>(arrs: Vec<A>, expects: Vec<u64>, hasher_builder: H) {
         let len = expects.len();
         let mut states_scalar = Vec::with_capacity(len);
         states_scalar.resize_with(len, || hasher_builder.build_hasher());

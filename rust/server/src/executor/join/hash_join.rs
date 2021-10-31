@@ -7,13 +7,6 @@ use protobuf::Message;
 
 use risingwave_proto::plan::{HashJoinNode, PlanNode_PlanNodeType};
 
-use crate::array::DataChunk;
-use crate::catalog::Schema;
-use crate::error::ErrorCode::ProtobufError;
-use crate::error::Result;
-use crate::executor::hash_map::hash_key_dispatch;
-use crate::executor::hash_map::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
-use crate::executor::hash_map::{HashKeyKind, Key128, Key16, Key256, Key32, Key64, KeySerialized};
 use crate::executor::join::hash_join::HashJoinState::{FirstProbe, Probe, ProbeRemaining};
 use crate::executor::join::hash_join_state::{BuildTable, ProbeTable};
 use crate::executor::join::JoinType;
@@ -21,8 +14,17 @@ use crate::executor::ExecutorResult::Batch;
 use crate::executor::{
     BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult,
 };
-use crate::types::build_from_proto as type_build_from_proto;
-use crate::types::DataTypeRef;
+use risingwave_common::array::DataChunk;
+use risingwave_common::catalog::Schema;
+use risingwave_common::collection::hash_map::hash_key_dispatch;
+use risingwave_common::collection::hash_map::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
+use risingwave_common::collection::hash_map::{
+    HashKeyKind, Key128, Key16, Key256, Key32, Key64, KeySerialized,
+};
+use risingwave_common::error::ErrorCode::ProtobufError;
+use risingwave_common::error::Result;
+use risingwave_common::types::build_from_proto as type_build_from_proto;
+use risingwave_common::types::DataTypeRef;
 
 /// Parameters of equi-join.
 /// We use following sql as an example in comments:
@@ -331,18 +333,20 @@ mod tests {
 
     use either::Either;
 
-    use crate::array;
-    use crate::array::column::Column;
-    use crate::array::{ArrayBuilderImpl, DataChunk};
-    use crate::array::{F32Array, F64Array, I32Array};
-    use crate::catalog::{Field, Schema};
-    use crate::error::Result;
-    use crate::executor::hash_map::Key32;
     use crate::executor::join::hash_join::{EquiJoinParams, HashJoinExecutor};
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::{BoxedExecutor, ExecutorResult};
-    use crate::types::{DataTypeKind, DataTypeRef, Float32Type, Float64Type, Int32Type};
+    use risingwave_common::array;
+    use risingwave_common::array::column::Column;
+    use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
+    use risingwave_common::array::{F32Array, F64Array, I32Array};
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::collection::hash_map::Key32;
+    use risingwave_common::error::Result;
+    use risingwave_common::types::{
+        DataTypeKind, DataTypeRef, Float32Type, Float64Type, Int32Type,
+    };
 
     struct DataChunkMerger {
         data_types: Vec<DataTypeRef>,
@@ -388,19 +392,17 @@ mod tests {
         }
     }
 
-    impl PartialEq for DataChunk {
-        fn eq(&self, other: &Self) -> bool {
-            assert!(self.visibility().is_none());
-            assert!(other.visibility().is_none());
+    fn is_data_chunk_eq(left: &DataChunk, right: &DataChunk) -> bool {
+        assert!(left.visibility().is_none());
+        assert!(right.visibility().is_none());
 
-            if self.cardinality() != other.cardinality() {
-                return false;
-            }
-
-            self.iter()
-                .zip(other.iter())
-                .all(|(row1, row2)| row1 == row2)
+        if left.cardinality() != right.cardinality() {
+            return false;
         }
+
+        left.iter()
+            .zip(right.iter())
+            .all(|(row1, row2)| row1 == row2)
     }
 
     struct TestFixture {
@@ -661,7 +663,8 @@ mod tests {
 
             let result_chunk = data_chunk_merger.finish().unwrap();
             // TODO: Replace this with unsorted comparison
-            assert_eq!(expected, result_chunk);
+            // assert_eq!(expected, result_chunk);
+            assert!(is_data_chunk_eq(&expected, &result_chunk));
         }
     }
 

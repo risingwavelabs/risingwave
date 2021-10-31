@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use crate::storage::SimpleTableManager;
 use crate::stream_op::Message;
-use crate::util::addr::get_host_port;
+use risingwave_common::util::addr::get_host_port;
 
 use super::*;
 

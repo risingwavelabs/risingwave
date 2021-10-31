@@ -2,13 +2,13 @@ use protobuf::Message;
 
 use risingwave_proto::plan::{FilterNode, PlanNode_PlanNodeType};
 
-use crate::array::ArrayImpl::Bool;
-use crate::catalog::Schema;
-use crate::error::ErrorCode::{InternalError, ProtobufError};
-use crate::error::Result;
 use crate::executor::ExecutorResult::{Batch, Done};
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
-use crate::expr::{build_from_proto, BoxedExpression};
+use risingwave_common::array::ArrayImpl::Bool;
+use risingwave_common::catalog::Schema;
+use risingwave_common::error::ErrorCode::{InternalError, ProtobufError};
+use risingwave_common::error::Result;
+use risingwave_common::expr::{build_from_proto, BoxedExpression};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 
@@ -81,11 +81,11 @@ mod tests {
     use risingwave_proto::expr::InputRefExpr;
     use risingwave_proto::expr::{ExprNode, ExprNode_Type};
 
-    use crate::array::column::Column;
-    use crate::array::{Array, DataChunk, PrimitiveArray};
-    use crate::catalog::{Field, Schema};
     use crate::executor::test_utils::MockExecutor;
-    use crate::types::{DataTypeKind, Int32Type};
+    use risingwave_common::array::column::Column;
+    use risingwave_common::array::{Array, DataChunk, PrimitiveArray};
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::{DataTypeKind, Int32Type};
 
     use super::*;
 

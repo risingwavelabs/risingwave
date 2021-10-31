@@ -5,19 +5,19 @@ use protobuf::Message;
 
 use risingwave_proto::plan::{NestedLoopJoinNode, PlanNode_PlanNodeType};
 
-use crate::array::column::Column;
-use crate::array::data_chunk_iter::RowRef;
-use crate::array::DataChunk;
-use crate::catalog::Schema;
-use crate::error::ErrorCode::{InternalError, ProtobufError};
-use crate::error::{Result, RwError};
 use crate::executor::join::JoinType;
 use crate::executor::ExecutorResult::{Batch, Done};
 use crate::executor::{
     BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult,
 };
-use crate::expr::{build_from_proto, BoxedExpression};
-use crate::types::DataType;
+use risingwave_common::array::column::Column;
+use risingwave_common::array::data_chunk_iter::RowRef;
+use risingwave_common::array::DataChunk;
+use risingwave_common::catalog::Schema;
+use risingwave_common::error::ErrorCode::{InternalError, ProtobufError};
+use risingwave_common::error::{Result, RwError};
+use risingwave_common::expr::{build_from_proto, BoxedExpression};
+use risingwave_common::types::DataType;
 
 /// Nested loop join executor.
 ///
@@ -59,11 +59,11 @@ enum NestedLoopJoinState {
 
 #[async_trait::async_trait]
 impl Executor for NestedLoopJoinExecutor {
-    fn init(&mut self) -> crate::error::Result<()> {
+    fn init(&mut self) -> risingwave_common::error::Result<()> {
         Ok(())
     }
 
-    async fn execute(&mut self) -> crate::error::Result<ExecutorResult> {
+    async fn execute(&mut self) -> risingwave_common::error::Result<ExecutorResult> {
         loop {
             let mut cur_state = NestedLoopJoinState::Done;
             swap(&mut cur_state, &mut self.state);
@@ -95,7 +95,7 @@ impl Executor for NestedLoopJoinExecutor {
             }
         }
     }
-    fn clean(&mut self) -> crate::error::Result<()> {
+    fn clean(&mut self) -> risingwave_common::error::Result<()> {
         self.probe_side_source.clean()
     }
 
@@ -412,17 +412,17 @@ impl BuildTable {
 mod tests {
     use std::sync::Arc;
 
-    use crate::array::column::Column;
-    use crate::array::data_chunk_iter::RowRef;
-    use crate::array::*;
-    use crate::catalog::test_utils::mock_table_id;
-    use crate::catalog::Schema;
     use crate::executor::join::nested_loop_join::{BuildTable, ProbeSideSource};
     use crate::executor::seq_scan::SeqScanExecutor;
     use crate::executor::ExecutorResult;
     use crate::storage::SimpleMemTable;
-    use crate::types::Int32Type;
-    use crate::types::ScalarRefImpl;
+    use risingwave_common::array::column::Column;
+    use risingwave_common::array::data_chunk_iter::RowRef;
+    use risingwave_common::array::*;
+    use risingwave_common::catalog::test_utils::mock_table_id;
+    use risingwave_common::catalog::Schema;
+    use risingwave_common::types::Int32Type;
+    use risingwave_common::types::ScalarRefImpl;
 
     #[test]
     fn test_concatenate() {

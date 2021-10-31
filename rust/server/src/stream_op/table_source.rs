@@ -1,9 +1,9 @@
-use crate::catalog::TableId;
-use crate::error::Result;
 use crate::stream_op::{Executor, Message, StreamChunk};
 use async_trait::async_trait;
 use futures::channel::mpsc::UnboundedReceiver;
 use futures::StreamExt;
+use risingwave_common::catalog::TableId;
+use risingwave_common::error::Result;
 use std::fmt::{Debug, Formatter};
 
 /// `TableSourceExecutor` extracts changes from a Table
@@ -60,17 +60,17 @@ impl Debug for TableSourceExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array::column::Column;
-    use crate::array::{ArrayImpl, DataChunk};
-    use crate::array::{I32Array, UTF8Array};
-    use crate::array_nonnull;
-    use crate::catalog::test_utils::mock_table_id;
     use crate::storage::{SimpleMemTable, Table};
     use crate::stream_op::Op;
-    use crate::types::{DataTypeKind, DataTypeRef, Int32Type, StringType};
     use futures::channel::mpsc::unbounded;
     use itertools::Itertools;
     use pb_construct::make_proto;
+    use risingwave_common::array::column::Column;
+    use risingwave_common::array::{ArrayImpl, DataChunk};
+    use risingwave_common::array::{I32Array, UTF8Array};
+    use risingwave_common::array_nonnull;
+    use risingwave_common::catalog::test_utils::mock_table_id;
+    use risingwave_common::types::{DataTypeKind, DataTypeRef, Int32Type, StringType};
     use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};
     use risingwave_proto::plan::{ColumnDesc, ColumnDesc_ColumnEncodingType};
     use std::sync::Arc;

@@ -1,10 +1,10 @@
-use crate::array::{Array, I64Array};
-use crate::expr::*;
 use crate::stream_op::test_utils::*;
 use crate::stream_op::*;
-use crate::types::Int64Type;
 use crate::*;
 use itertools::Itertools;
+use risingwave_common::array::{Array, I64Array};
+use risingwave_common::expr::*;
+use risingwave_common::types::Int64Type;
 
 #[tokio::test]
 async fn test_local_hash_aggregation_count() {

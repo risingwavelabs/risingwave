@@ -1,4 +1,4 @@
-use crate::error::Result;
+use risingwave_common::error::Result;
 use std::ops::{Index, IndexMut};
 
 /// Id of one row in chunked data.

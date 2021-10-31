@@ -6,6 +6,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use serde_with::skip_serializing_none;
 
+#[macro_export]
 macro_rules! unpack_from_any {
     ($source:expr, $node_type:ty) => {
         <$node_type>::parse_from_bytes($source.get_value()).map_err(ErrorCode::ProtobufError)?

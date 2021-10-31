@@ -101,6 +101,7 @@ mod tests {
     };
     use crate::error::{ErrorCode, Result};
     use crate::types::{BoolType, DataTypeKind, Int32Type, StringType};
+    use crate::unpack_from_any;
     use protobuf::Message;
     use risingwave_proto::data::Column as ColumnProto;
     use std::sync::Arc;

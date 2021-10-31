@@ -1,11 +1,11 @@
-use crate::array::{DataChunk, DataChunkRef};
-use crate::catalog::TableId;
-use crate::error::ErrorCode::InternalError;
-use crate::error::{Result, RwError};
 use crate::storage::*;
 use crate::stream_op::StreamChunk;
 use futures::channel::mpsc;
 use futures::SinkExt;
+use risingwave_common::array::{DataChunk, DataChunkRef};
+use risingwave_common::catalog::TableId;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{Result, RwError};
 use risingwave_proto::plan::ColumnDesc;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};

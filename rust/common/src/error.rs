@@ -128,9 +128,10 @@ impl PartialEq for ErrorCode {
 
 pub type Result<T> = std::result::Result<T, RwError>;
 
+#[macro_export]
 macro_rules! gen_error {
     ($error_code: expr) => {
-        return std::result::Result::Err(crate::error::RwError::from($error_code));
+        return std::result::Result::Err($crate::error::RwError::from($error_code));
     };
 }
 
@@ -172,23 +173,24 @@ macro_rules! gen_error {
 /// RwError(ErrorCode::MemoryError { layout });
 /// ```
 ///
+#[macro_export]
 macro_rules! ensure {
     ($cond:expr) => {
         if !$cond {
             let msg = stringify!($cond).to_string();
-            gen_error!(crate::error::ErrorCode::InternalError(msg));
+            gen_error!($crate::error::ErrorCode::InternalError(msg));
         }
     };
     ($cond:expr, $msg:literal) => {
         if !$cond {
             let msg = $msg.to_string();
-            gen_error!(crate::error::ErrorCode::InternalError(msg));
+            gen_error!($crate::error::ErrorCode::InternalError(msg));
         }
     };
     ($cond:expr, $fmt:literal, $($arg:tt)*) => {
         if !$cond {
             let msg = format!($fmt, $($arg)*);
-            gen_error!(crate::error::ErrorCode::InternalError(msg));
+            gen_error!($crate::error::ErrorCode::InternalError(msg));
         }
     };
     ($cond:expr, $error_code:expr) => {

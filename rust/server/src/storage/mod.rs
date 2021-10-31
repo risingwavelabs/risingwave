@@ -3,11 +3,11 @@ pub use mem::*;
 mod row_table;
 pub use row_table::*;
 
-use crate::array::{DataChunk, DataChunkRef};
-use crate::catalog::TableId;
-use crate::error::Result;
 use crate::stream_op::StreamChunk;
 use futures::channel::mpsc;
+use risingwave_common::array::{DataChunk, DataChunkRef};
+use risingwave_common::catalog::TableId;
+use risingwave_common::error::Result;
 use risingwave_proto::plan::ColumnDesc;
 use std::sync::Arc;
 

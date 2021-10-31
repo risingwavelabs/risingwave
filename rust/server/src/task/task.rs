@@ -1,13 +1,13 @@
 use std::sync::{Arc, Mutex};
 
-use crate::array::DataChunk;
-use crate::error::{ErrorCode, Result, RwError};
 use crate::executor::{BoxedExecutor, ExecutorBuilder, ExecutorResult};
 use crate::rpc::service::exchange_service::ExchangeWriter;
 use crate::task::channel::{create_output_channel, BoxChanReceiver, BoxChanSender};
 use crate::task::GlobalTaskEnv;
 use crate::task::TaskManager;
-use crate::util::{json_to_pretty_string, JsonFormatter};
+use risingwave_common::array::DataChunk;
+use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::util::{json_to_pretty_string, JsonFormatter};
 use risingwave_pb::ToProst;
 use risingwave_proto::common::Status;
 use risingwave_proto::plan::PlanFragment;

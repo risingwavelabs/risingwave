@@ -5,17 +5,17 @@ use itertools::Itertools;
 
 use risingwave_proto::expr::ExprNode_Type;
 
-use crate::array::ArrayImpl;
-use crate::array::DataChunk;
-use crate::buffer::Bitmap;
-use crate::catalog::Schema;
-use crate::error::Result;
 use crate::executor::ExecutorResult::Batch;
 use crate::executor::ExecutorResult::Done;
 use crate::executor::{Executor, ExecutorResult};
-use crate::expr::binary_expr::new_binary_expr;
-use crate::expr::InputRefExpression;
-use crate::types::BoolType;
+use risingwave_common::array::ArrayImpl;
+use risingwave_common::array::DataChunk;
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::Schema;
+use risingwave_common::error::Result;
+use risingwave_common::expr::binary_expr::new_binary_expr;
+use risingwave_common::expr::InputRefExpression;
+use risingwave_common::types::BoolType;
 
 use super::BoxedExecutor;
 

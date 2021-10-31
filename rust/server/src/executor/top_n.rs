@@ -7,14 +7,14 @@ use protobuf::Message;
 
 use risingwave_proto::plan::{PlanNode_PlanNodeType, TopNNode};
 
-use crate::array::{DataChunk, DataChunkRef};
-use crate::catalog::Schema;
-use crate::error::{
+use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
+use risingwave_common::array::{DataChunk, DataChunkRef};
+use risingwave_common::catalog::Schema;
+use risingwave_common::error::{
     ErrorCode::{InternalError, ProtobufError},
     Result,
 };
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
-use crate::util::sort_util::{fetch_orders_from_order_by_node, HeapElem, OrderPair};
+use risingwave_common::util::sort_util::{fetch_orders_from_order_by_node, HeapElem, OrderPair};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 
@@ -138,13 +138,13 @@ impl Executor for TopNExecutor {
 mod tests {
     use std::sync::Arc;
 
-    use crate::array::column::Column;
-    use crate::array::{Array, DataChunk, PrimitiveArray};
-    use crate::catalog::{Field, Schema};
     use crate::executor::test_utils::MockExecutor;
-    use crate::expr::InputRefExpression;
-    use crate::types::{DataTypeKind, Int32Type};
-    use crate::util::sort_util::OrderType;
+    use risingwave_common::array::column::Column;
+    use risingwave_common::array::{Array, DataChunk, PrimitiveArray};
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::expr::InputRefExpression;
+    use risingwave_common::types::{DataTypeKind, Int32Type};
+    use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
 

@@ -1,10 +1,11 @@
-use super::{Executor, Message, SimpleExecutor, StreamChunk};
-use crate::{
-    array::{column::Column, DataChunk},
-    error::Result,
-    expr::BoxedExpression,
-};
 use async_trait::async_trait;
+
+use risingwave_common::array::{column::Column, DataChunk};
+use risingwave_common::error::Result;
+
+use risingwave_common::expr::BoxedExpression;
+
+use super::{Executor, Message, SimpleExecutor, StreamChunk};
 
 /// `ProjectExecutor` project data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a new data chunk. And then, `ProjectExecutor` will insert, delete
@@ -75,16 +76,18 @@ impl SimpleExecutor for ProjectExecutor {
 
 #[cfg(test)]
 mod tests {
-    use crate::array::I64Array;
-    use crate::array::*;
-    use crate::expr::binary_expr::new_binary_expr;
-    use crate::expr::InputRefExpression;
+    use itertools::Itertools;
+
+    use risingwave_common::array::I64Array;
+    use risingwave_common::array::*;
+    use risingwave_proto::expr::ExprNode_Type;
+
     use crate::stream_op::test_utils::MockSource;
     use crate::stream_op::{Executor, Message, Op, ProjectExecutor, StreamChunk};
-    use crate::types::Int64Type;
     use crate::*;
-    use itertools::Itertools;
-    use risingwave_proto::expr::ExprNode_Type;
+    use risingwave_common::expr::binary_expr::new_binary_expr;
+    use risingwave_common::expr::InputRefExpression;
+    use risingwave_common::types::Int64Type;
 
     #[tokio::test]
     async fn test_projection() {

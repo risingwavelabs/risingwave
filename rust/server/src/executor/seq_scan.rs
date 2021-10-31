@@ -5,16 +5,16 @@ use protobuf::Message;
 use pb_convert::FromProtobuf;
 use risingwave_proto::plan::{PlanNode_PlanNodeType, SeqScanNode};
 
-use crate::array::column::Column;
-use crate::array::{DataChunk, DataChunkRef};
-use crate::catalog::TableId;
-use crate::catalog::{Field, Schema};
-use crate::error::ErrorCode::{InternalError, ProtobufError};
-use crate::error::{Result, RwError};
 use crate::executor::ExecutorResult::Done;
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::storage::*;
-use crate::types::build_from_proto;
+use risingwave_common::array::column::Column;
+use risingwave_common::array::{DataChunk, DataChunkRef};
+use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::error::ErrorCode::{InternalError, ProtobufError};
+use risingwave_common::error::{Result, RwError};
+use risingwave_common::types::build_from_proto;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 
@@ -132,10 +132,10 @@ mod tests {
     use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};
     use risingwave_proto::plan::{ColumnDesc, ColumnDesc_ColumnEncodingType};
 
-    use crate::array::{Array, I64Array};
-    use crate::catalog::test_utils::mock_table_id;
-    use crate::types::{DataTypeKind, Int64Type};
     use crate::*;
+    use risingwave_common::array::{Array, I64Array};
+    use risingwave_common::catalog::test_utils::mock_table_id;
+    use risingwave_common::types::{DataTypeKind, Int64Type};
 
     use super::*;
 

@@ -5,11 +5,11 @@ use protobuf::Message;
 
 use risingwave_proto::plan::{LimitNode as LimitProto, PlanNode_PlanNodeType};
 
-use crate::array::DataChunk;
-use crate::catalog::Schema;
-use crate::error::ErrorCode::{InternalError, ProtobufError};
-use crate::error::Result;
 use crate::executor::ExecutorResult::{Batch, Done};
+use risingwave_common::array::DataChunk;
+use risingwave_common::catalog::Schema;
+use risingwave_common::error::ErrorCode::{InternalError, ProtobufError};
+use risingwave_common::error::Result;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult};
 
@@ -119,11 +119,11 @@ mod tests {
     use std::sync::Arc;
     use std::vec;
 
-    use crate::array::column::Column;
-    use crate::array::{Array, BoolArray, DataChunk, PrimitiveArray};
-    use crate::catalog::{Field, Schema};
     use crate::executor::test_utils::MockExecutor;
-    use crate::types::{BoolType, DataTypeKind, Int32Type};
+    use risingwave_common::array::column::Column;
+    use risingwave_common::array::{Array, BoolArray, DataChunk, PrimitiveArray};
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::{BoolType, DataTypeKind, Int32Type};
 
     use super::*;
 

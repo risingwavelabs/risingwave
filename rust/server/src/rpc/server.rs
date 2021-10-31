@@ -45,7 +45,7 @@ pub fn rpc_serve(addr: SocketAddr) -> (JoinHandle<()>, UnboundedSender<()>) {
 #[cfg(test)]
 mod tests {
     use crate::rpc::server::rpc_serve;
-    use crate::util::addr::get_host_port;
+    use risingwave_common::util::addr::get_host_port;
 
     #[tokio::test]
     async fn test_server_shutdown() {

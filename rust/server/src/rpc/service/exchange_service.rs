@@ -1,6 +1,6 @@
-use crate::error::{ErrorCode, Result, RwError};
 use crate::stream::StreamManager;
 use crate::task::{TaskManager, TaskSinkId};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::task_service::exchange_service_server::ExchangeService;
 use risingwave_pb::task_service::{TaskData, TaskSinkId as ProtoTaskSinkId};
 use risingwave_pb::ToProto;

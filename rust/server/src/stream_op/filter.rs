@@ -1,11 +1,11 @@
-use super::{Executor, Message, Op, SimpleExecutor, StreamChunk};
-use crate::{
-    array::{Array, ArrayImpl, DataChunk},
-    catalog::Schema,
-    error::Result,
-    expr::BoxedExpression,
-};
 use async_trait::async_trait;
+
+use risingwave_common::array::{Array, ArrayImpl, DataChunk};
+use risingwave_common::error::Result;
+
+use risingwave_common::{catalog::Schema, expr::BoxedExpression};
+
+use super::{Executor, Message, Op, SimpleExecutor, StreamChunk};
 
 /// `FilterExecutor` filters data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a boolean array on whether each item should be retained. And then,
@@ -137,15 +137,18 @@ impl SimpleExecutor for FilterExecutor {
 
 #[cfg(test)]
 mod tests {
-    use crate::array::I64Array;
-    use crate::expr::binary_expr::new_binary_expr;
-    use crate::expr::InputRefExpression;
+    use itertools::Itertools;
+
+    use risingwave_common::array::I64Array;
+    use risingwave_proto::expr::ExprNode_Type;
+
     use crate::stream_op::test_utils::MockSource;
     use crate::stream_op::{Executor, FilterExecutor, Message, Op, StreamChunk};
-    use crate::types::{BoolType, Int64Type};
     use crate::*;
-    use itertools::Itertools;
-    use risingwave_proto::expr::ExprNode_Type;
+    use risingwave_common::column_nonnull;
+    use risingwave_common::expr::binary_expr::new_binary_expr;
+    use risingwave_common::expr::InputRefExpression;
+    use risingwave_common::types::{BoolType, Int64Type};
 
     #[tokio::test]
     async fn test_filter() {

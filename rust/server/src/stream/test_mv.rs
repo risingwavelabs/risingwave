@@ -15,18 +15,18 @@ use risingwave_proto::data::{DataType, DataType_TypeName};
 use risingwave_proto::expr::{ExprNode_Type, InputRefExpr};
 use risingwave_proto::plan::{ColumnDesc, ColumnDesc_ColumnEncodingType};
 
-use crate::array::column::Column;
-use crate::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder};
-use crate::catalog::TableId;
-use crate::error::ErrorCode::InternalError;
-use crate::error::RwError;
 use crate::storage::SimpleTableRef;
 use crate::storage::{Row, SimpleTableManager, Table, TableManager};
 use crate::stream::StreamManager;
 use crate::stream_op::Message;
-use crate::types::{Int32Type, Scalar};
-use crate::util::addr::get_host_port;
 use futures::StreamExt;
+use risingwave_common::array::column::Column;
+use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder};
+use risingwave_common::catalog::TableId;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::RwError;
+use risingwave_common::types::{Int32Type, Scalar};
+use risingwave_common::util::addr::get_host_port;
 use smallvec::SmallVec;
 use std::sync::Arc;
 

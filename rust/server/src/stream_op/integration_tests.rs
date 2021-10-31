@@ -1,15 +1,15 @@
-use crate::array::*;
-use crate::expr::*;
-use crate::types::*;
+use risingwave_common::array::*;
+use risingwave_common::expr::*;
+use risingwave_common::types::*;
 use std::sync::{Arc, Mutex};
 
 use super::ReceiverExecutor;
 use super::*;
-use crate::expr::binary_expr::new_binary_expr;
-use crate::expr::unary_expr::new_unary_expr;
 use approx::assert_relative_eq;
 use futures::channel::mpsc::channel;
 use futures::SinkExt;
+use risingwave_common::expr::binary_expr::new_binary_expr;
+use risingwave_common::expr::unary_expr::new_unary_expr;
 use risingwave_proto::expr::ExprNode_Type;
 
 pub struct MockConsumer {
@@ -161,7 +161,7 @@ async fn test_merger_sum_aggr() {
 }
 
 fn str_to_timestamp(elem: &str) -> i64 {
-    use crate::vector_op::cast::str_to_timestamp;
+    use risingwave_common::vector_op::cast::str_to_timestamp;
     str_to_timestamp(elem).unwrap()
 }
 

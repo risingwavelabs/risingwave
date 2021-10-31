@@ -1,6 +1,6 @@
-use crate::executor::hash_map::hash_key::HashKey;
-use crate::executor::hash_map::HashKeyKind::{Key128, Key16, Key256, Key32, Key64};
-use crate::executor::hash_map::MAX_FIXED_SIZE_KEY_ELEMENTS;
+use crate::collection::hash_map::hash_key::HashKey;
+use crate::collection::hash_map::HashKeyKind::{Key128, Key16, Key256, Key32, Key64};
+use crate::collection::hash_map::MAX_FIXED_SIZE_KEY_ELEMENTS;
 use crate::types::{DataSize, DataTypeRef};
 
 /// An enum to help to dynamically dispatch [`HashKey`] template.
@@ -76,6 +76,7 @@ pub fn calc_hash_key_kind(data_types: &[DataTypeRef]) -> HashKeyKind {
 /// use crate::executor::hash_map::HashKeyKind;
 /// use crate::executor::hash_map::{Key128, Key16, Key256, Key32, Key64, KeySerialized};
 /// ```
+#[macro_export]
 macro_rules! hash_key_dispatch {
     ($hash_key_kind: expr, $dispatcher: tt, $arg: expr) => {
         match $hash_key_kind {
@@ -89,11 +90,11 @@ macro_rules! hash_key_dispatch {
     };
 }
 
-pub(crate) use hash_key_dispatch;
+pub use hash_key_dispatch;
 
 #[cfg(test)]
 mod tests {
-    use crate::executor::hash_map::{calc_hash_key_kind, HashKeyKind};
+    use crate::collection::hash_map::{calc_hash_key_kind, HashKeyKind};
     use crate::types::{
         BoolType, DataTypeKind, DataTypeRef, DecimalType, Float32Type, Float64Type, Int16Type,
         Int32Type, Int64Type, StringType,

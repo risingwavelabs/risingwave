@@ -4,10 +4,10 @@ use async_std::fs::File as AsyncFile;
 use async_std::io::BufReader;
 use futures::{AsyncBufReadExt, AsyncWriteExt};
 
-use crate::error::ErrorCode::InternalError;
-use crate::error::Result;
-use crate::error::RwError;
 use crate::source::{Source, SourceConfig, SourceMessage, SourceReader};
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::Result;
+use risingwave_common::error::RwError;
 
 #[derive(Clone, Debug)]
 pub struct FileSourceConfig {

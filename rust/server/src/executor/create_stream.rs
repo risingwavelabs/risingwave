@@ -7,15 +7,16 @@ use risingwave_proto::plan::{
     CreateStreamNode, CreateStreamNode_RowFormatType, PlanNode_PlanNodeType,
 };
 
-use crate::catalog::Schema;
-use crate::catalog::TableId;
-use crate::error::ErrorCode::{InternalError, ProtobufError, ProtocolError};
-use crate::error::Result;
-use crate::error::RwError;
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::source::{FileSourceConfig, KafkaSourceConfig, SourceFormat};
 use crate::source::{SourceColumnDesc, SourceConfig, SourceManagerRef};
-use crate::types::build_from_proto;
+use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::TableId;
+use risingwave_common::ensure;
+use risingwave_common::error::ErrorCode::{InternalError, ProtobufError, ProtocolError};
+use risingwave_common::error::Result;
+use risingwave_common::error::RwError;
+use risingwave_common::types::build_from_proto;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 

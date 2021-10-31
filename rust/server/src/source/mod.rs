@@ -8,7 +8,7 @@ pub use kafka::*;
 pub use manager::*;
 pub use parser::*;
 
-use crate::error::Result;
+use risingwave_common::error::Result;
 
 mod chunk_reader;
 mod file;

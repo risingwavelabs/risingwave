@@ -4,14 +4,14 @@ use protobuf::Message as _;
 
 use risingwave_proto::plan::{PlanNode_PlanNodeType, SortAggNode};
 
-use crate::array::{column::Column, DataChunk};
-use crate::catalog::{Field, Schema};
-use crate::error::ErrorCode::ProtobufError;
-use crate::error::{ErrorCode, Result, RwError};
 use crate::executor::{BoxedExecutor, Executor, ExecutorBuilder, ExecutorResult};
-use crate::expr::{build_from_proto, BoxedExpression};
-use crate::types::DataType;
-use crate::vector_op::agg::{self, BoxedAggState, BoxedSortedGrouper, EqGroups};
+use risingwave_common::array::{column::Column, DataChunk};
+use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::error::ErrorCode::ProtobufError;
+use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::expr::{build_from_proto, BoxedExpression};
+use risingwave_common::types::DataType;
+use risingwave_common::vector_op::agg::{self, BoxedAggState, BoxedSortedGrouper, EqGroups};
 
 use super::BoxedExecutorBuilder;
 
@@ -178,11 +178,11 @@ mod tests {
         AggCall, AggCall_Arg, AggCall_Type, ExprNode, ExprNode_Type, InputRefExpr,
     };
 
-    use crate::array::{Array as _, I32Array, I64Array};
-    use crate::array_nonnull;
-    use crate::catalog::{Field, Schema};
     use crate::executor::test_utils::MockExecutor;
-    use crate::types::{DataTypeKind, Int32Type};
+    use risingwave_common::array::{Array as _, I32Array, I64Array};
+    use risingwave_common::array_nonnull;
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::{DataTypeKind, Int32Type};
 
     use super::*;
 
@@ -252,7 +252,7 @@ mod tests {
     #[tokio::test]
     #[allow(clippy::many_single_char_names)]
     async fn execute_sum_int32_grouped() -> Result<()> {
-        use crate::array::ArrayImpl;
+        use risingwave_common::array::ArrayImpl;
         let a: Arc<ArrayImpl> = Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into());
         let t32 = Int32Type::create(false);
         let chunk = DataChunk::builder()

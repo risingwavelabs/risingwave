@@ -1,18 +1,18 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use crate::catalog::TableId;
-use crate::error::ErrorCode::InternalError;
-use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::{build_from_proto as build_expr_from_proto, AggKind};
 use crate::storage::*;
 use crate::stream_op::*;
-use crate::types::build_from_prost as build_type_from_prost;
-use crate::util::addr::{get_host_port, is_local_address};
 use async_std::net::SocketAddr;
 use futures::channel::mpsc::{channel, unbounded, Receiver, Sender, UnboundedSender};
 use itertools::Itertools;
 use pb_convert::FromProtobuf;
+use risingwave_common::catalog::TableId;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::expr::{build_from_proto as build_expr_from_proto, AggKind};
+use risingwave_common::types::build_from_prost as build_type_from_prost;
+use risingwave_common::util::addr::{get_host_port, is_local_address};
 use risingwave_pb::expr;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_service;

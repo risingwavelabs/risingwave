@@ -2,14 +2,14 @@ use protobuf::Message;
 
 use risingwave_proto::plan::{PlanNode_PlanNodeType, ProjectNode};
 
-use crate::array::column::Column;
-use crate::array::DataChunk;
-use crate::catalog::{Field, Schema};
-use crate::error::ErrorCode::ProtobufError;
-use crate::error::{ErrorCode, Result, RwError};
 use crate::executor::ExecutorResult::{Batch, Done};
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
-use crate::expr::{build_from_proto, BoxedExpression};
+use risingwave_common::array::column::Column;
+use risingwave_common::array::DataChunk;
+use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::error::ErrorCode::ProtobufError;
+use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::expr::{build_from_proto, BoxedExpression};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 
@@ -92,12 +92,12 @@ impl BoxedExecutorBuilder for ProjectionExecutor {
 
 #[cfg(test)]
 mod tests {
-    use crate::array::{Array, I32Array};
-    use crate::catalog::{Field, Schema};
     use crate::executor::test_utils::MockExecutor;
-    use crate::expr::InputRefExpression;
-    use crate::types::{DataTypeKind, Int32Type};
     use crate::*;
+    use risingwave_common::array::{Array, I32Array};
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::expr::InputRefExpression;
+    use risingwave_common::types::{DataTypeKind, Int32Type};
 
     use super::*;
 

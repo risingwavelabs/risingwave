@@ -9,7 +9,7 @@ use std::default::Default;
 use std::hash::{BuildHasher, Hash, Hasher};
 
 /// Max element count in [`FixedSizeKeyWithHashCode`]
-pub(super) const MAX_FIXED_SIZE_KEY_ELEMENTS: usize = 8;
+pub const MAX_FIXED_SIZE_KEY_ELEMENTS: usize = 8;
 
 pub trait HashKeySerializer {
     type K: HashKey;
@@ -110,7 +110,7 @@ impl Hash for SerializedKey {
 /// We need this because we compute hash keys in vectorized fashion, and we store them in this
 /// hasher.
 #[derive(Default)]
-pub(in crate::executor) struct PrecomputedHasher {
+pub struct PrecomputedHasher {
     hash_code: u64,
 }
 
@@ -125,7 +125,7 @@ impl Hasher for PrecomputedHasher {
 }
 
 #[derive(Default)]
-pub(in crate::executor) struct PrecomputedBuildHasher;
+pub struct PrecomputedBuildHasher;
 
 impl BuildHasher for PrecomputedBuildHasher {
     type Hasher = PrecomputedHasher;
@@ -418,7 +418,7 @@ mod tests {
         ArrayRef, BoolArray, DataChunk, DecimalArray, F32Array, F64Array, I16Array, I32Array,
         I64Array, UTF8Array,
     };
-    use crate::executor::hash_map::{
+    use crate::collection::hash_map::{
         HashKey, Key128, Key16, Key256, Key32, Key64, KeySerialized, PrecomputedBuildHasher,
     };
     use crate::test_utils::rand_array::seed_rand_array_ref;
