@@ -394,16 +394,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ctrlc"
-version = "3.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a19c6cedffdc8c03a3346d723eb20bd85a13362bb96dc2ac000842c6381ec7bf"
-dependencies = [
- "nix",
- "winapi",
-]
-
-[[package]]
 name = "darling"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -894,15 +884,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "308cc39be01b73d0d18f82a0e7b2a3df85245f84af96fdddc5d202d27e47b86a"
 
 [[package]]
-name = "memoffset"
-version = "0.6.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59accc507f1338036a0477ef61afdae33cde60840f4dfe481319ce3ad116ddf9"
-dependencies = [
- "autocfg",
-]
-
-[[package]]
 name = "miniz_oxide"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -939,19 +920,6 @@ name = "multimap"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5ce46fe64a9d73be07dcbe690a38ce1b293be448fd8ce1e6c1b8062c9f72c6a"
-
-[[package]]
-name = "nix"
-version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f305c2c2e4c39a82f7bf0bf65fb557f9070ce06781d4f2454295cc34b1c43188"
-dependencies = [
- "bitflags",
- "cc",
- "cfg-if",
- "libc",
- "memoffset",
-]
 
 [[package]]
 name = "ntapi"
@@ -1112,7 +1080,6 @@ dependencies = [
  "protoc-rust",
  "quote",
  "syn",
- "thiserror",
 ]
 
 [[package]]
@@ -1332,7 +1299,6 @@ dependencies = [
 name = "prost-helpers"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "proc-macro-error",
  "proc-macro2",
  "quote",
@@ -1533,7 +1499,6 @@ dependencies = [
  "clap",
  "clap_derive",
  "crc32fast",
- "ctrlc",
  "either",
  "futures",
  "itertools",
@@ -1554,7 +1519,6 @@ dependencies = [
  "risingwave-proto",
  "risingwave_common",
  "rust_decimal",
- "rust_decimal_macros",
  "serde",
  "serde-protobuf",
  "serde-value",
@@ -1566,7 +1530,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tonic",
- "twox-hash",
  "typed-builder",
 ]
 
@@ -1575,7 +1538,6 @@ name = "risingwave-pb"
 version = "0.1.0"
 dependencies = [
  "bytes",
- "futures",
  "prost",
  "prost-helpers",
  "prost-types",
@@ -1589,7 +1551,6 @@ dependencies = [
 name = "risingwave-proto"
 version = "0.1.0"
 dependencies = [
- "futures",
  "protobuf",
  "protoc-rust",
 ]
@@ -1603,25 +1564,17 @@ name = "risingwave_common"
 version = "0.1.0-SNAPSHOT"
 dependencies = [
  "anyhow",
- "approx",
- "assert_matches",
- "async-std",
  "async-stream",
  "async-trait",
  "backtrace",
  "byteorder",
  "bytes",
  "chrono",
- "clap",
- "clap_derive",
  "crc32fast",
- "ctrlc",
  "either",
- "futures",
  "itertools",
  "lazy_static",
  "log",
- "log4rs",
  "num-traits",
  "paste",
  "pb-construct",
@@ -1629,20 +1582,13 @@ dependencies = [
  "pb-convert-derive",
  "prost",
  "protobuf",
- "protobuf-codegen-pure",
  "rand",
- "rdkafka",
  "risingwave-pb",
  "risingwave-proto",
  "rust_decimal",
- "rust_decimal_macros",
  "serde",
- "serde-protobuf",
- "serde-value",
  "serde_json",
  "serde_with",
- "smallvec",
- "tempfile",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -1664,16 +1610,6 @@ dependencies = [
  "arrayvec",
  "num-traits",
  "serde",
-]
-
-[[package]]
-name = "rust_decimal_macros"
-version = "1.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5732c6adfbb4bbf262b7625832174ef76ccec1786bf8badfcfd11c494214f1a9"
-dependencies = [
- "quote",
- "rust_decimal",
 ]
 
 [[package]]

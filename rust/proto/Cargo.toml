@@ -4,7 +4,6 @@ name = "risingwave-proto"
 version = "0.1.0"
 
 [dependencies]
-futures = "0.3"
 protobuf = "2"
 
 [build-dependencies]

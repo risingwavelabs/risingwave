@@ -15,7 +15,6 @@ phf = { version = "0.10", features = ["macros"] }
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "1", features = ["full"] }
-thiserror = "1"
 
 [dev-dependencies]
 protobuf = "2"
