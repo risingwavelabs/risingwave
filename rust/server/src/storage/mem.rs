@@ -131,6 +131,10 @@ impl SimpleMemTableInner {
             stream_sender: None,
         }
     }
+
+    fn is_stream_connected(&self) -> bool {
+        self.stream_sender.is_some()
+    }
 }
 
 impl SimpleMemTable {
@@ -159,6 +163,14 @@ impl Table for SimpleMemTable {
                 data.visibility().clone(),
             );
             futures::executor::block_on(async move { sender.send(chunk).await })
+                .or_else(|x| {
+                    // Disconnection means the receiver is dropped. So the sender shouble be dropped here too.
+                    if x.is_disconnected() {
+                        write_guard.stream_sender = None;
+                        return Ok(());
+                    }
+                    Err(x)
+                })
                 .expect("send changes failed");
         }
 
@@ -199,5 +211,10 @@ impl Table for SimpleMemTable {
                 column_id, self.table_id
             ))))
         }
+    }
+
+    fn is_stream_connected(&self) -> bool {
+        let read_guard = self.inner.read().unwrap();
+        read_guard.is_stream_connected()
     }
 }

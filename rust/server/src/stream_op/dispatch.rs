@@ -74,7 +74,7 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                 // TODO: clone here
                 output
                     .send(match msg {
-                        Message::Barrier(epoch) => Message::Barrier(epoch),
+                        Message::Barrier { epoch, stop } => Message::Barrier { epoch, stop },
                         Message::Terminate => Message::Terminate,
                         _ => unreachable!(),
                     })

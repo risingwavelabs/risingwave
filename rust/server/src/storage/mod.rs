@@ -31,6 +31,9 @@ pub trait Table: Sync + Send {
 
     /// Get the indices of the specific column.
     fn index_of_column_id(&self, column_id: i32) -> Result<usize>;
+
+    /// Get the status of stream connection of this table.
+    fn is_stream_connected(&self) -> bool;
 }
 
 /// `TableManager` is an abstraction of managing a collection of tables.

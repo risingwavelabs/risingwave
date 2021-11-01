@@ -146,7 +146,13 @@ async fn test_merger_sum_aggr() {
             };
             input.send(Message::Chunk(chunk)).await.unwrap();
         }
-        input.send(Message::Barrier(j)).await.unwrap();
+        input
+            .send(Message::Barrier {
+                epoch: j,
+                stop: false,
+            })
+            .await
+            .unwrap();
     }
     input.send(Message::Terminate).await.unwrap();
 
@@ -466,7 +472,13 @@ async fn test_tpch_q6() {
             .await
             .unwrap();
         if i % 10 == 0 {
-            input.send(Message::Barrier(i / 10)).await.unwrap();
+            input
+                .send(Message::Barrier {
+                    epoch: i / 10,
+                    stop: false,
+                })
+                .await
+                .unwrap();
         }
     }
 

@@ -82,7 +82,7 @@ impl Executor for MergeExecutor {
                     // Drop the terminated channel
                     self.terminated += 1;
                 }
-                Message::Barrier(epoch) => {
+                Message::Barrier { epoch, stop: _ } => {
                     // Move this channel into the `blocked` list
                     if self.blocked.is_empty() {
                         assert_eq!(self.next_epoch, None);
@@ -102,7 +102,7 @@ impl Executor for MergeExecutor {
                 assert!(self.active.is_empty());
                 self.active = std::mem::take(&mut self.blocked);
                 let epoch = self.next_epoch.take().unwrap();
-                return Ok(Message::Barrier(epoch));
+                return Ok(Message::Barrier { epoch, stop: false });
             }
             assert!(!self.active.is_empty())
         }
@@ -150,7 +150,9 @@ mod tests {
                     tx.send(Message::Chunk(build_test_chunk(epoch)))
                         .await
                         .unwrap();
-                    tx.send(Message::Barrier(epoch)).await.unwrap();
+                    tx.send(Message::Barrier { epoch, stop: false })
+                        .await
+                        .unwrap();
                     tokio::time::sleep(Duration::from_millis(1)).await;
                 }
                 tx.send(Message::Terminate).await.unwrap();
@@ -166,7 +168,7 @@ mod tests {
                 });
             }
             // expect a barrier
-            assert_matches!(merger.next().await.unwrap(), Message::Barrier(barrier_epoch) => {
+            assert_matches!(merger.next().await.unwrap(), Message::Barrier{epoch:barrier_epoch,stop:_} => {
               assert_eq!(barrier_epoch, epoch);
             });
         }

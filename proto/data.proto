@@ -121,6 +121,7 @@ message StreamChunk {
 
 message Barrier {
     uint64 epoch = 1;
+    bool stop = 2;
 }
 
 message Terminate {}

@@ -193,7 +193,7 @@ impl StreamChunk {
 #[derive(Debug)]
 pub enum Message {
     Chunk(StreamChunk),
-    Barrier(u64),
+    Barrier { epoch: u64, stop: bool },
     // Note(eric): consider remove this. A stream is always terminated by an error or dropped by user
     Terminate,
     // TODO: Watermark
@@ -206,7 +206,10 @@ impl Message {
                 let prost_stream_chunk = stream_chunk.to_protobuf()?;
                 StreamMessage::StreamChunk(prost_stream_chunk)
             }
-            Self::Barrier(epoch) => StreamMessage::Barrier(Barrier { epoch: *epoch }),
+            Self::Barrier { epoch, stop } => StreamMessage::Barrier(Barrier {
+                epoch: *epoch,
+                stop: *stop,
+            }),
             Self::Terminate => StreamMessage::Terminate(Terminate {}),
         };
         Ok(prost)
@@ -217,7 +220,10 @@ impl Message {
             StreamMessage::StreamChunk(stream_chunk) => {
                 Message::Chunk(StreamChunk::from_protobuf(stream_chunk)?)
             }
-            StreamMessage::Barrier(epoch) => Message::Barrier(epoch.get_epoch()),
+            StreamMessage::Barrier(epoch) => Message::Barrier {
+                epoch: epoch.get_epoch(),
+                stop: false,
+            },
             StreamMessage::Terminate(..) => Message::Terminate,
         };
         Ok(res)
@@ -247,7 +253,7 @@ async fn simple_executor_next<E: SimpleExecutor>(executor: &mut E) -> Result<Mes
     match executor.input().next().await {
         Ok(message) => match message {
             Message::Chunk(chunk) => executor.consume_chunk(chunk),
-            Message::Barrier(epoch) => Ok(Message::Barrier(epoch)),
+            Message::Barrier { epoch, stop } => Ok(Message::Barrier { epoch, stop }),
             Message::Terminate => Ok(Message::Terminate),
         },
         Err(e) => Err(e),

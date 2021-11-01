@@ -135,7 +135,13 @@ async fn test_stream_proto() {
 
     let consumer = tokio::spawn(async move {
         for _epoch in 0..100 {
-            assert!(matches!(sink.next().await.unwrap(), Message::Barrier(_)));
+            assert!(matches!(
+                sink.next().await.unwrap(),
+                Message::Barrier {
+                    epoch: _,
+                    stop: false
+                }
+            ));
         }
         assert!(matches!(sink.next().await.unwrap(), Message::Terminate));
     });
@@ -143,10 +149,13 @@ async fn test_stream_proto() {
     let timeout = tokio::time::Duration::from_millis(10);
 
     for epoch in 0..100 {
-        tokio::time::timeout(timeout, source.send(Message::Barrier(epoch)))
-            .await
-            .expect("timeout while sending barrier message")
-            .unwrap();
+        tokio::time::timeout(
+            timeout,
+            source.send(Message::Barrier { epoch, stop: false }),
+        )
+        .await
+        .expect("timeout while sending barrier message")
+        .unwrap();
     }
 
     tokio::time::timeout(timeout, source.send(Message::Terminate))

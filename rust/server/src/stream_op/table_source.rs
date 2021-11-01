@@ -9,7 +9,7 @@ use std::fmt::{Debug, Formatter};
 /// `TableSourceExecutor` extracts changes from a Table
 pub struct TableSourceExecutor {
     table_id: TableId,
-    data_receiver: UnboundedReceiver<StreamChunk>,
+    data_receiver: Option<UnboundedReceiver<StreamChunk>>,
     barrier_receiver: UnboundedReceiver<Message>,
 }
 
@@ -21,7 +21,7 @@ impl TableSourceExecutor {
     ) -> Self {
         TableSourceExecutor {
             table_id,
-            data_receiver,
+            data_receiver: Some(data_receiver),
             barrier_receiver,
         }
     }
@@ -30,22 +30,35 @@ impl TableSourceExecutor {
 #[async_trait]
 impl Executor for TableSourceExecutor {
     async fn next(&mut self) -> Result<Message> {
-        let msg = tokio::select! {
-          chunk = self.data_receiver.next() => {
-            chunk.map(Message::Chunk)
-          }
-          message = self.barrier_receiver.next() => {
-            message
-          }
-        };
-        let msg = msg.expect("table stream closed unexpectedly");
+        if let Some(data_receiver) = &mut self.data_receiver {
+            let msg = tokio::select! {
+              chunk =data_receiver.next() => {
+                chunk.map(Message::Chunk)
+              }
+              message = self.barrier_receiver.next() => {
+                message
+              }
+            };
+            let msg = msg.expect("table stream closed unexpectedly");
+            Ok(match msg {
+                Message::Chunk(chunk) => Message::Chunk(chunk),
+                Message::Barrier { epoch, stop } => {
+                    if stop {
+                        // Drop the receiver here, the source will encounter an error at the next send.
+                        self.data_receiver = None;
+                    }
 
-        Ok(match msg {
-            Message::Chunk(chunk) => Message::Chunk(chunk),
-            Message::Barrier(x) => Message::Barrier(x),
-            // TODO: Maybe removed in the future
-            Message::Terminate => unreachable!("unreachable"),
-        })
+                    Message::Barrier { epoch, stop }
+                }
+                // TODO: Maybe removed in the future
+                Message::Terminate => unreachable!("unreachable"),
+            })
+        } else {
+            Ok(Message::Barrier {
+                epoch: 0,
+                stop: true,
+            })
+        }
     }
 }
 
@@ -125,7 +138,12 @@ mod tests {
 
         let mut source = TableSourceExecutor::new(table_id, stream_recv, barrier_receiver);
 
-        barrier_sender.unbounded_send(Message::Barrier(1)).unwrap();
+        barrier_sender
+            .unbounded_send(Message::Barrier {
+                epoch: 1,
+                stop: false,
+            })
+            .unwrap();
         // Write 1st chunk
         let card = table.append(chunk1)?;
         // barrier_sender.start_send(Message::Barrier(0))
@@ -146,8 +164,8 @@ mod tests {
                     );
                     assert_eq!(vec![Op::Insert; 3], chunk.ops);
                 }
-                Message::Barrier(x) => {
-                    assert_eq!(x, 1)
+                Message::Barrier { epoch, stop: _ } => {
+                    assert_eq!(epoch, 1)
                 }
                 Message::Terminate => unreachable!(),
             }
@@ -171,6 +189,65 @@ mod tests {
         } else {
             unreachable!();
         }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_table_dropped() -> Result<()> {
+        let table_id = mock_table_id();
+        let column1 = make_proto!(ColumnDesc, {
+          column_type: make_proto!(DataTypeProto, {
+            type_name: DataType_TypeName::INT32
+          }),
+          encoding: ColumnDesc_ColumnEncodingType::RAW,
+          is_primary: false,
+          name: "test_col".to_string()
+        });
+        let column2 = make_proto!(ColumnDesc, {
+          column_type: make_proto!(DataTypeProto, {
+            type_name: DataType_TypeName::VARCHAR
+          }),
+          encoding: ColumnDesc_ColumnEncodingType::RAW,
+          is_primary: false,
+          name: "test_col".to_string()
+        });
+        let columns = vec![column1, column2];
+        let table = SimpleMemTable::new(&table_id, &columns);
+
+        let col1_type = Int32Type::create(false) as DataTypeRef;
+        let col2_type = StringType::create(true, 10, DataTypeKind::Varchar);
+
+        // Prepare test data chunks
+        let col1_arr1: Arc<ArrayImpl> = Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into());
+        let col2_arr1: Arc<ArrayImpl> =
+            Arc::new(array_nonnull! { UTF8Array, ["foo", "bar", "baz"] }.into());
+
+        let chunk1 = {
+            let col1 = Column::new(col1_arr1.clone(), col1_type.clone());
+            let col2 = Column::new(col2_arr1.clone(), col2_type.clone());
+            DataChunk::new(vec![col1, col2], None)
+        };
+
+        let stream_recv = table.create_stream()?;
+        let (barrier_sender, barrier_receiver) = unbounded();
+
+        let mut source = TableSourceExecutor::new(table_id, stream_recv, barrier_receiver);
+
+        table.append(chunk1.clone())?;
+
+        barrier_sender
+            .unbounded_send(Message::Barrier {
+                epoch: 1,
+                stop: true,
+            })
+            .unwrap();
+
+        source.next().await.unwrap();
+        source.next().await.unwrap();
+        table.append(chunk1)?;
+
+        assert!(!table.is_stream_connected());
 
         Ok(())
     }
