@@ -3,11 +3,7 @@
 ## Download
 Run:
 ```
-git clone --recursive https://github.com/singularity-data/risingwave.git
-```
-If you forgot adding `--recursive`, then try:
-```
-git submodule update --init --recursive
+git clone https://github.com/singularity-data/risingwave.git
 ```
 
 ## Environment
