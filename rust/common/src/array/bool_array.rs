@@ -10,7 +10,7 @@ use std::mem::size_of;
 #[derive(Debug)]
 pub struct BoolArray {
     bitmap: Bitmap,
-    data: Vec<bool>,
+    data: Bitmap,
 }
 
 impl BoolArray {
@@ -31,7 +31,7 @@ impl Array for BoolArray {
 
     fn value_at(&self, idx: usize) -> Option<bool> {
         if !self.is_null(idx) {
-            Some(self.data[idx])
+            Some(self.data.is_set(idx).unwrap())
         } else {
             None
         }
@@ -69,7 +69,7 @@ impl Array for BoolArray {
     #[inline(always)]
     fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
         if !self.is_null(idx) {
-            self.data[idx].hash(state);
+            self.data.is_set(idx).unwrap().hash(state);
         } else {
             NULL_VAL_FOR_HASH.hash(state);
         }
@@ -80,7 +80,7 @@ impl Array for BoolArray {
 #[derive(Debug)]
 pub struct BoolArrayBuilder {
     bitmap: BitmapBuilder,
-    data: Vec<bool>,
+    data: BitmapBuilder,
 }
 
 impl ArrayBuilder for BoolArrayBuilder {
@@ -89,7 +89,7 @@ impl ArrayBuilder for BoolArrayBuilder {
     fn new(capacity: usize) -> Result<Self> {
         Ok(Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
-            data: Vec::with_capacity(capacity),
+            data: BitmapBuilder::with_capacity(capacity),
         })
     }
 
@@ -97,11 +97,11 @@ impl ArrayBuilder for BoolArrayBuilder {
         match value {
             Some(x) => {
                 self.bitmap.append(true);
-                self.data.push(x);
+                self.data.append(x);
             }
             None => {
                 self.bitmap.append(false);
-                self.data.push(bool::default());
+                self.data.append(bool::default());
             }
         }
         Ok(())
@@ -111,14 +111,18 @@ impl ArrayBuilder for BoolArrayBuilder {
         for bit in other.bitmap.iter() {
             self.bitmap.append(bit);
         }
-        self.data.extend_from_slice(&other.data);
+
+        for bit in other.data.iter() {
+            self.data.append(bit);
+        }
+
         Ok(())
     }
 
     fn finish(mut self) -> Result<BoolArray> {
         Ok(BoolArray {
             bitmap: self.bitmap.finish(),
-            data: self.data,
+            data: self.data.finish(),
         })
     }
 }
