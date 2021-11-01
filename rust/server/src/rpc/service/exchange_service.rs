@@ -59,16 +59,21 @@ impl ExchangeServiceImpl {
         let proto_tsid = pb_tsid.to_proto();
         let tsid = TaskSinkId::from(&proto_tsid);
         debug!("Serve exchange RPC from {} [{:?}]", peer_addr, tsid);
-
-        let mut task_sink = self.mgr.take_sink(&proto_tsid)?;
-        let mut writer = GrpcExchangeWriter::new(tx);
-        task_sink.take_data(&mut writer).await?;
-
-        info!(
-            "Exchanged {} chunks from sink {:?}",
-            writer.written_chunks(),
-            tsid,
-        );
+        let mut task_sink = self.mgr.take_sink(&proto_tsid).unwrap();
+        tokio::spawn(async move {
+            let mut writer = GrpcExchangeWriter::new(tx.clone());
+            match task_sink.take_data(&mut writer).await {
+                Ok(_) => {
+                    info!(
+                        "Exchanged {} chunks from sink {:?}",
+                        writer.written_chunks(),
+                        tsid,
+                    );
+                    Ok(())
+                }
+                Err(e) => tx.send(Err(e.to_grpc_status())).await,
+            }
+        });
 
         Ok(Response::new(ReceiverStream::new(rx)))
     }
