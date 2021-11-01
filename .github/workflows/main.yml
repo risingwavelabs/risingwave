@@ -183,8 +183,7 @@ jobs:
           chmod +x ./rust/target/debug/compute-node
           ./scripts/start_cluster.sh 1
           python3 ./scripts/sqllogictest.py -p ${{ env.RW_PORT }} -db dev -f ./e2e_test/distributed/
-          # Temporarily not supported.
-          # python3 ./scripts/sqllogictest.py -p ${{ env.RW_PORT }} -db dev -f ./e2e_test/single/
+          python3 ./scripts/sqllogictest.py -p ${{ env.RW_PORT }} -db dev -f ./e2e_test/single/
           ./scripts/kill_cluster.sh
 
       - name: Run tests on Postgresql
