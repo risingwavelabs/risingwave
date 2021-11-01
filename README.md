@@ -2,7 +2,7 @@
 [![codecov](https://codecov.io/gh/singularity-data/risingwave/branch/master/graph/badge.svg?token=C5ZX0L0GWK)](https://codecov.io/gh/singularity-data/risingwave)
 ## Download
 Run:
-```
+```bash
 git clone https://github.com/singularity-data/risingwave.git
 ```
 
@@ -16,7 +16,7 @@ git clone https://github.com/singularity-data/risingwave.git
 * PostgreSQL
 
 To install compilers in macOS, run:
-```
+```bash
 brew install java11
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 brew install golang
@@ -46,20 +46,20 @@ binding, planning, optimization, and then passes the physical plan to the corres
 The compute server performs computation and then returns results to the frontend server.
 
 To start the frontend server, create one terminal and then type:
-```
+```bash
 cd java
 ./gradlew -p pgserver run
 ```
 
 To start the compute server, create one terminal and then type:
-```
+```bash
 make rust_build
 cd rust
 ./target/debug/compute-node --log4rs-config config/log4rs.yaml
 ```
 
 To start the Postgres shell, create one terminal and then type:
-```
+```bash
 psql -h localhost -p 4567 -d dev
 ```
 
@@ -70,14 +70,14 @@ Now you can use the Postgres shell to try out your SQL command!
 We support both unit tests (for Rust code only) and end-to-end tests.
 
 To run unit tests, run the following commands under the root directory:
-```
+```bash
 make rust_fmt
 make rust_check
 make rust_test
 ```
 
 To run end-to-end tests, start the frontend server and a compute server, and then run:
-```
+```bash
 make sqllogictest
 python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/distributed/
 ```
@@ -86,14 +86,14 @@ python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/distributed/
 
 To run end-to-end tests with multiple compute-nodes, run the script:
 
-```sh
+```bash
 ./scripts/start_cluster.sh 3
 ```
 
 It will start processes in the background. After testing, you can run the following script
-to cleanup:
+to clean-up:
 
-```sh
+```bash
 ./scripts/kill_cluster.sh
 ```
 
@@ -101,14 +101,14 @@ to cleanup:
 Before submitting your PR, you should format the code first.
 
 For Java code, please run:
-```
+```bash
 cd java
 ./gradlew spotlessApply
 ```
 
 For Rust code, please run:
 
-```
+```bash
 cd rust
 cargo fmt
 cargo clippy --all-targets --all-features
