@@ -5,14 +5,17 @@ use protobuf::Message;
 
 use risingwave_pb::ToProst;
 use risingwave_proto::plan::PlanNode_PlanNodeType;
-use risingwave_proto::task_service::{ExchangeNode, ExchangeSource as ProtoExchangeSource};
+use risingwave_proto::task_service::{
+    ExchangeNode, ExchangeNode_Field, ExchangeSource as ProtoExchangeSource,
+};
 
 use crate::execution::exchange_source::{ExchangeSource, GrpcExchangeSource, LocalExchangeSource};
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::task::GlobalTaskEnv;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::ProtobufError;
 use risingwave_common::error::Result;
+use risingwave_common::types::build_from_proto as type_build_from_proto;
 use risingwave_common::util::addr::{get_host_port, is_local_address};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
@@ -29,6 +32,7 @@ pub struct GenericExchangeExecutor<C> {
 
     // Mock-able CreateSource.
     source_creator: PhantomData<C>,
+    schema: Schema,
 }
 
 /// `CreateSource` determines the right type of `ExchangeSource` to create.
@@ -83,6 +87,13 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for GenericExchangeExecuto
 
         ensure!(!node.get_sources().is_empty());
         let sources: Vec<ProtoExchangeSource> = node.get_sources().to_vec();
+        let input_schema: Vec<ExchangeNode_Field> = node.get_input_schema().to_vec();
+        let fields = input_schema
+            .iter()
+            .map(|f| Field {
+                data_type: type_build_from_proto(f.get_data_type()).unwrap(),
+            })
+            .collect::<Vec<Field>>();
         Ok(Box::new(Self {
             sources,
             server_addr,
@@ -90,6 +101,7 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for GenericExchangeExecuto
             source_creator: PhantomData,
             source_idx: 0,
             current_source: None,
+            schema: Schema { fields },
         }))
     }
 }
@@ -130,7 +142,7 @@ impl<CS: CreateSource> Executor for GenericExchangeExecutor<CS> {
     }
 
     fn schema(&self) -> &Schema {
-        todo!()
+        &self.schema
     }
 }
 
@@ -189,6 +201,11 @@ mod tests {
             current_source: None,
             source_creator: PhantomData,
             env: GlobalTaskEnv::for_test(),
+            schema: Schema {
+                fields: vec![Field {
+                    data_type: Int32Type::create(false),
+                }],
+            },
         };
 
         let mut chunks: usize = 0;

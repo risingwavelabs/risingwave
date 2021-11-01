@@ -5,6 +5,7 @@ import static java.util.Objects.requireNonNull;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.protobuf.Any;
+import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.node.WorkerNode;
 import com.risingwave.planner.rel.physical.batch.RisingWaveBatchPhyRel;
 import com.risingwave.planner.rel.physical.batch.RwBatchExchange;
@@ -18,6 +19,7 @@ import com.risingwave.scheduler.exchange.DistributionSchema;
 import com.risingwave.scheduler.query.Query;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import org.apache.calcite.rel.type.RelDataTypeField;
 
 /**
  * A QueryStage is part of a distributed physical plan running in one local node. Operators in one
@@ -124,7 +126,7 @@ public class QueryStage {
                   () ->
                       new NoSuchElementException(
                           String.format("stage %s has not been scheduled", stageId.toString())));
-      builder.setBody(Any.pack(createExchange(stage)));
+      builder.setBody(Any.pack(createExchange(stage, relNode)));
     } else {
       for (var child : relNode.getInputs()) {
         builder.addChildren(rewriteIfExchange((RisingWaveBatchPhyRel) child));
@@ -133,7 +135,7 @@ public class QueryStage {
     return builder.build();
   }
 
-  private static ExchangeNode createExchange(ScheduledStage stage) {
+  private static ExchangeNode createExchange(ScheduledStage stage, RisingWaveBatchPhyRel relNode) {
     var builder = ExchangeNode.newBuilder().setSourceStageId(stage.getStageId().toStageIdProto());
     stage
         .getAssignments()
@@ -149,6 +151,16 @@ public class QueryStage {
               var source = ExchangeSource.newBuilder().setSinkId(sinkId).setHost(host).build();
               builder.addSources(source);
             });
+    var fieldList = relNode.getInput(0).getRowType().getFieldList();
+    for (RelDataTypeField field : fieldList) {
+      builder.addInputSchema(convert(field));
+    }
     return builder.build();
+  }
+
+  private static ExchangeNode.Field convert(RelDataTypeField field) {
+    return ExchangeNode.Field.newBuilder()
+        .setDataType(((RisingWaveDataType) field.getType()).getProtobufType())
+        .build();
   }
 }

@@ -15,7 +15,7 @@ use crate::executor::{
     BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult,
 };
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::collection::hash_map::hash_key_dispatch;
 use risingwave_common::collection::hash_map::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_common::collection::hash_map::{
@@ -302,16 +302,14 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
 
         let hash_key_kind = calc_hash_key_kind(&params.right_key_types);
 
-        let fields = vec![];
-        // TODO: fix this when exchange's schema is ready
-        // let fields = params
-        //   .output_columns
-        //   .iter()
-        //   .map(|c| match c {
-        //     Either::Left(idx) => left_child.schema().fields[*idx].clone(),
-        //     Either::Right(idx) => right_child.schema().fields[*idx].clone(),
-        //   })
-        //   .collect::<Vec<Field>>();
+        let fields = params
+            .output_columns
+            .iter()
+            .map(|c| match c {
+                Either::Left(idx) => left_child.schema().fields[*idx].clone(),
+                Either::Right(idx) => right_child.schema().fields[*idx].clone(),
+            })
+            .collect::<Vec<Field>>();
         let builder = HashJoinExecutorBuilder {
             params,
             left_child,

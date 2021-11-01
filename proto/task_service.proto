@@ -53,11 +53,17 @@ message ExchangeSource {
     HostAddress host = 2;
 }
 
-message ExchangeNode {
+message ExchangeNode {    
+    message Field {
+        // TODO: Add field name
+        data.DataType data_type = 1;
+    }
+
     repeated ExchangeSource sources = 1;
     // An exchange only links to one stage, but a stage could be
     // linked by multiple exchanges.
     StageId source_stage_id = 2;
+    repeated Field input_schema = 3;
 }
 
 message CreateTaskRequest {

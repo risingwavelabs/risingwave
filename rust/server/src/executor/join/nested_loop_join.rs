@@ -13,7 +13,7 @@ use crate::executor::{
 use risingwave_common::array::column::Column;
 use risingwave_common::array::data_chunk_iter::RowRef;
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::{InternalError, ProtobufError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::expr::{build_from_proto, BoxedExpression};
@@ -122,17 +122,15 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                 let left_child = source.clone_for_plan(left_plan).build()?;
                 let right_child = source.clone_for_plan(right_plan).build()?;
 
-                let fields = vec![];
-                // TODO: fix this when exchange's schema is ready
-                // let fields = left_child
-                //   .schema()
-                //   .fields
-                //   .iter()
-                //   .chain(right_child.schema().fields.iter())
-                //   .map(|f| Field {
-                //     data_type: f.data_type.clone(),
-                //   })
-                //   .collect();
+                let fields = left_child
+                    .schema()
+                    .fields
+                    .iter()
+                    .chain(right_child.schema().fields.iter())
+                    .map(|f| Field {
+                        data_type: f.data_type.clone(),
+                    })
+                    .collect();
                 match join_type {
                     JoinType::Inner => {
                         // TODO: Support more join type.
