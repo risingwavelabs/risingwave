@@ -7,6 +7,7 @@ use async_std::net::SocketAddr;
 use futures::channel::mpsc::{channel, unbounded, Receiver, Sender, UnboundedSender};
 use itertools::Itertools;
 use pb_convert::FromProtobuf;
+use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -16,6 +17,7 @@ use risingwave_common::util::addr::{get_host_port, is_local_address};
 use risingwave_pb::expr;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_service;
+use risingwave_pb::ToProst;
 use risingwave_pb::ToProto;
 use std::convert::TryFrom;
 use tokio::task::JoinHandle;
@@ -288,14 +290,17 @@ impl StreamManagerCore {
 
                 let table_ref = table_manager.clone().get_table(&table_id).unwrap();
                 if let SimpleTableRef::Columnar(table) = table_ref {
+                    let schema = Schema::try_from(
+                        table.columns().iter().map(ToProst::to_prost).collect_vec(),
+                    )?;
                     let stream_receiver = table.create_stream()?;
                     // TODO: The channel pair should be created by the Checkpoint manger. So this line may be removed later.
                     let (_sender, barrier_receiver) = unbounded();
                     // TODO: Take the ownership to avoid drop of this channel. This should be removed too.
                     self.sender_placeholder.push(_sender);
-
                     Ok(Box::new(TableSourceExecutor::new(
                         table_id,
+                        schema,
                         stream_receiver,
                         barrier_receiver,
                     )))

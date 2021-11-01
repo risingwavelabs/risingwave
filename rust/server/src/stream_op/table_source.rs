@@ -2,13 +2,14 @@ use crate::stream_op::{Executor, Message, StreamChunk};
 use async_trait::async_trait;
 use futures::channel::mpsc::UnboundedReceiver;
 use futures::StreamExt;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::Result;
 use std::fmt::{Debug, Formatter};
 
 /// `TableSourceExecutor` extracts changes from a Table
 pub struct TableSourceExecutor {
     table_id: TableId,
+    schema: Schema,
     data_receiver: Option<UnboundedReceiver<StreamChunk>>,
     barrier_receiver: UnboundedReceiver<Message>,
 }
@@ -16,11 +17,13 @@ pub struct TableSourceExecutor {
 impl TableSourceExecutor {
     pub fn new(
         table_id: TableId,
+        schema: Schema,
         data_receiver: UnboundedReceiver<StreamChunk>,
         barrier_receiver: UnboundedReceiver<Message>,
     ) -> Self {
         TableSourceExecutor {
             table_id,
+            schema,
             data_receiver: Some(data_receiver),
             barrier_receiver,
         }
@@ -60,6 +63,10 @@ impl Executor for TableSourceExecutor {
             })
         }
     }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
 }
 
 impl Debug for TableSourceExecutor {
@@ -83,6 +90,7 @@ mod tests {
     use risingwave_common::array::{I32Array, UTF8Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::test_utils::mock_table_id;
+    use risingwave_common::catalog::Field;
     use risingwave_common::types::{DataTypeKind, DataTypeRef, Int32Type, StringType};
     use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};
     use risingwave_proto::plan::{ColumnDesc, ColumnDesc_ColumnEncodingType};
@@ -133,10 +141,21 @@ mod tests {
             DataChunk::new(vec![col1, col2], None)
         };
 
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    data_type: col1_type.clone(),
+                },
+                Field {
+                    data_type: col2_type.clone(),
+                },
+            ],
+        };
+
         let stream_recv = table.create_stream()?;
         let (barrier_sender, barrier_receiver) = unbounded();
 
-        let mut source = TableSourceExecutor::new(table_id, stream_recv, barrier_receiver);
+        let mut source = TableSourceExecutor::new(table_id, schema, stream_recv, barrier_receiver);
 
         barrier_sender
             .unbounded_send(Message::Barrier {
@@ -229,10 +248,21 @@ mod tests {
             DataChunk::new(vec![col1, col2], None)
         };
 
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    data_type: col1_type.clone(),
+                },
+                Field {
+                    data_type: col2_type.clone(),
+                },
+            ],
+        };
+
         let stream_recv = table.create_stream()?;
         let (barrier_sender, barrier_receiver) = unbounded();
 
-        let mut source = TableSourceExecutor::new(table_id, stream_recv, barrier_receiver);
+        let mut source = TableSourceExecutor::new(table_id, schema, stream_recv, barrier_receiver);
 
         table.append(chunk1.clone())?;
 
