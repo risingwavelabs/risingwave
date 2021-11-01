@@ -1,3 +1,4 @@
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_common::types::{Datum, Scalar};
@@ -8,7 +9,6 @@ use std::{
 };
 
 use itertools::Itertools;
-use risingwave_proto::plan::ColumnDesc;
 use smallvec::SmallVec;
 
 #[derive(Clone, Debug, Default)]
@@ -56,7 +56,7 @@ struct MemRowTableInner {
 
 #[derive(Debug, Default)]
 pub struct MemRowTable {
-    fields: Vec<ColumnDesc>,
+    schema: Schema,
     inner: RwLock<MemRowTableInner>,
     pks: Vec<usize>,
 }
@@ -159,8 +159,8 @@ impl MemRowTable {
     }
 
     /// Return the schema of the table.
-    pub fn schema(&self) -> Vec<ColumnDesc> {
-        self.fields.clone()
+    pub fn schema(&self) -> &Schema {
+        &self.schema
     }
 
     /// Create an iterator to scan over all records.
@@ -171,9 +171,9 @@ impl MemRowTable {
     }
 
     /// Init.
-    pub(crate) fn new(fields: Vec<ColumnDesc>, pks: Vec<usize>) -> Self {
+    pub(crate) fn new(schema: Schema, pks: Vec<usize>) -> Self {
         let inner = RwLock::new(MemRowTableInner::default());
-        Self { fields, inner, pks }
+        Self { schema, inner, pks }
     }
     /// Get all primary key columns.
     pub fn get_pk(&self) -> Vec<usize> {
@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn test_row_table() {
-        let mut mem_table = MemRowTable::new(vec![], vec![]);
+        let mut mem_table = MemRowTable::new(Schema::default(), vec![]);
         // Insert (1,4)
         let row1 = mock_one_row();
         let _res1 = mem_table.insert_one_row(row1);

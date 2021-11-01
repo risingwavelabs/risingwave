@@ -3,9 +3,10 @@ use crate::stream_op::StreamChunk;
 use futures::channel::mpsc;
 use futures::SinkExt;
 use risingwave_common::array::{DataChunk, DataChunkRef};
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
+use risingwave_pb::ToProst;
 use risingwave_proto::plan::ColumnDesc;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
@@ -81,9 +82,16 @@ impl TableManager for SimpleTableManager {
         );
         let column_count = columns.len();
         ensure!(column_count > 0, "There must be more than one column in MV");
+        // TODO: Remove to_prost later.
+        let schema = Schema::try_from(
+            columns
+                .into_iter()
+                .map(|c| c.to_prost())
+                .collect::<Vec<_>>(),
+        )?;
         tables.insert(
             table_id.clone(),
-            SimpleTableRef::Row(Arc::new(MemRowTable::new(columns, pk_columns))),
+            SimpleTableRef::Row(Arc::new(MemRowTable::new(schema, pk_columns))),
         );
 
         Ok(())

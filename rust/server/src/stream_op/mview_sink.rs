@@ -2,6 +2,7 @@ use super::{Executor, Message, Result, SimpleExecutor, StreamChunk};
 use crate::storage::MemRowTableRef as MemTableRef;
 use crate::storage::Row;
 use async_trait::async_trait;
+use risingwave_common::catalog::Schema;
 use smallvec::SmallVec;
 
 /// `MViewSinkExecutor` writes data to a row-based memtable, so that data could
@@ -26,6 +27,10 @@ impl MViewSinkExecutor {
 impl Executor for MViewSinkExecutor {
     async fn next(&mut self) -> Result<Message> {
         super::simple_executor_next(self).await
+    }
+
+    fn schema(&self) -> &Schema {
+        self.table.schema()
     }
 }
 

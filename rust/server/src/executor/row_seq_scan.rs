@@ -9,11 +9,10 @@ use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::storage::{MemRowTable, MemTableRowIter, Row, SimpleTableRef};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
+use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
-use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::{InternalError, ProtobufError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::build_from_proto;
 use risingwave_common::types::DataTypeRef;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
@@ -49,19 +48,14 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
             .table_manager()
             .get_table(&table_id)?;
         if let SimpleTableRef::Row(table_ref) = table_ref {
-            let data_types = table_ref
-                .schema()
-                .into_iter()
-                .map(|f| build_from_proto(f.get_column_type()))
-                .collect::<Result<Vec<_>>>()?;
-            let pks = table_ref.get_pk();
-
-            let fields = data_types
+            let schema = table_ref.schema();
+            let data_types = schema
+                .fields
                 .iter()
-                .map(|t| Field {
-                    data_type: t.clone(),
-                })
-                .collect::<Vec<Field>>();
+                .map(|f| f.data_type.clone())
+                .collect::<Vec<_>>();
+            let pks = table_ref.get_pk();
+            let schema = schema.clone();
 
             Ok(Box::new(Self {
                 data_types,
@@ -72,7 +66,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
                     .collect::<Vec<_>>(),
                 iter: make_row_iter(table_ref)?,
                 has_pk: !pks.is_empty(),
-                schema: Schema { fields },
+                schema,
             }))
         } else {
             Err(RwError::from(InternalError(

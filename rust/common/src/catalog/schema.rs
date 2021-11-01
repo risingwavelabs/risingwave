@@ -4,14 +4,14 @@ use crate::error::{Result, RwError};
 use crate::types::{build_from_prost, DataTypeRef};
 
 /// the field in the schema of the executor's return data
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Field {
     // TODO: field_name
     pub data_type: DataTypeRef,
 }
 
 /// the schema of the executor's return data
-#[derive(Clone)]
+#[derive(Clone, Debug, Default)]
 pub struct Schema {
     pub fields: Vec<Field>,
 }
