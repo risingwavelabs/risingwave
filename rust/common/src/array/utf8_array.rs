@@ -1,6 +1,7 @@
 use super::NULL_VAL_FOR_HASH;
 use super::{Array, ArrayBuilder, ArrayIterator};
 use crate::buffer::Bitmap;
+use crate::buffer::BitmapBuilder;
 use crate::error::Result;
 use risingwave_proto::data::Buffer;
 use risingwave_proto::data::Buffer_CompressionType;
@@ -91,7 +92,7 @@ impl UTF8Array {
 #[derive(Debug)]
 pub struct UTF8ArrayBuilder {
     offset: Vec<usize>,
-    bitmap: Vec<bool>,
+    bitmap: BitmapBuilder,
     data: Vec<u8>,
 }
 
@@ -104,19 +105,19 @@ impl ArrayBuilder for UTF8ArrayBuilder {
         Ok(Self {
             offset,
             data: Vec::with_capacity(capacity),
-            bitmap: Vec::with_capacity(capacity),
+            bitmap: BitmapBuilder::with_capacity(capacity),
         })
     }
 
     fn append<'a>(&'a mut self, value: Option<&'a str>) -> Result<()> {
         match value {
             Some(x) => {
-                self.bitmap.push(true);
+                self.bitmap.append(true);
                 self.data.extend_from_slice(x.as_bytes());
                 self.offset.push(self.data.len())
             }
             None => {
-                self.bitmap.push(false);
+                self.bitmap.append(false);
                 self.offset.push(self.data.len())
             }
         }
@@ -124,7 +125,9 @@ impl ArrayBuilder for UTF8ArrayBuilder {
     }
 
     fn append_array(&mut self, other: &UTF8Array) -> Result<()> {
-        self.bitmap.extend(other.bitmap.iter());
+        for bit in other.bitmap.iter() {
+            self.bitmap.append(bit);
+        }
         self.data.extend_from_slice(&other.data);
         let start = *self.offset.last().unwrap();
         for other_offset in &other.offset[1..] {
@@ -133,9 +136,9 @@ impl ArrayBuilder for UTF8ArrayBuilder {
         Ok(())
     }
 
-    fn finish(self) -> Result<UTF8Array> {
+    fn finish(mut self) -> Result<UTF8Array> {
         Ok(UTF8Array {
-            bitmap: (self.bitmap).try_into()?,
+            bitmap: (self.bitmap).finish(),
             data: self.data,
             offset: self.offset,
         })
@@ -159,7 +162,7 @@ impl UTF8ArrayBuilder {
     /// is equivalent to appending an empty string.
     fn finish_partial(&mut self) -> Result<()> {
         self.offset.push(self.data.len());
-        self.bitmap.push(true);
+        self.bitmap.append(true);
         Ok(())
     }
 }

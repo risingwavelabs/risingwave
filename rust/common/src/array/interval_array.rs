@@ -2,6 +2,7 @@ use std::hash::Hash;
 
 use crate::array::{Array, ArrayBuilder, ArrayIterator};
 use crate::buffer::Bitmap;
+use crate::buffer::BitmapBuilder;
 use crate::error::Result;
 use crate::types::interval_type::IntervalUnit;
 use risingwave_proto::data::Buffer;
@@ -19,7 +20,7 @@ pub struct IntervalArray {
 
 #[derive(Debug)]
 pub struct IntervalArrayBuilder {
-    bitmap: Vec<bool>,
+    bitmap: BitmapBuilder,
     months_buffer: Vec<i32>,
     days_buffer: Vec<i32>,
     ms_buffer: Vec<i64>,
@@ -28,7 +29,7 @@ pub struct IntervalArrayBuilder {
 impl IntervalArrayBuilder {
     pub fn new(capacity: usize) -> Result<Self> {
         Ok(Self {
-            bitmap: Vec::with_capacity(capacity),
+            bitmap: BitmapBuilder::with_capacity(capacity),
             months_buffer: Vec::with_capacity(capacity),
             days_buffer: Vec::with_capacity(capacity),
             ms_buffer: Vec::with_capacity(capacity),
@@ -94,7 +95,7 @@ impl ArrayBuilder for IntervalArrayBuilder {
     type ArrayType = IntervalArray;
     fn new(capacity: usize) -> Result<Self> {
         Ok(Self {
-            bitmap: Vec::with_capacity(capacity),
+            bitmap: BitmapBuilder::with_capacity(capacity),
             months_buffer: Vec::with_capacity(capacity),
             days_buffer: Vec::with_capacity(capacity),
             ms_buffer: Vec::with_capacity(capacity),
@@ -104,14 +105,14 @@ impl ArrayBuilder for IntervalArrayBuilder {
     fn append(&mut self, value: Option<IntervalUnit>) -> Result<()> {
         match value {
             Some(x) => {
-                self.bitmap.push(true);
+                self.bitmap.append(true);
                 self.months_buffer.push(x.get_months());
                 self.days_buffer.push(x.get_days());
                 self.ms_buffer.push(x.get_ms());
             }
 
             None => {
-                self.bitmap.push(false);
+                self.bitmap.append(false);
                 self.months_buffer.push(0);
                 self.days_buffer.push(0);
                 self.ms_buffer.push(0);
@@ -121,16 +122,18 @@ impl ArrayBuilder for IntervalArrayBuilder {
     }
 
     fn append_array(&mut self, other: &IntervalArray) -> Result<()> {
-        self.bitmap.extend(other.bitmap.iter());
+        for bit in other.bitmap.iter() {
+            self.bitmap.append(bit);
+        }
         self.months_buffer.extend_from_slice(&other.months_buffer);
         self.days_buffer.extend_from_slice(&other.days_buffer);
         self.ms_buffer.extend_from_slice(&other.ms_buffer);
         Ok(())
     }
 
-    fn finish(self) -> Result<Self::ArrayType> {
+    fn finish(mut self) -> Result<Self::ArrayType> {
         Ok(IntervalArray {
-            bitmap: self.bitmap.try_into()?,
+            bitmap: self.bitmap.finish(),
             months_buffer: self.months_buffer,
             days_buffer: self.days_buffer,
             ms_buffer: self.ms_buffer,

@@ -2,6 +2,7 @@ use std::hash::{Hash, Hasher};
 
 use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
 use crate::buffer::Bitmap;
+use crate::buffer::BitmapBuilder;
 use crate::error::Result;
 use risingwave_proto::data::{Buffer as BufferProto, Buffer_CompressionType};
 use std::mem::size_of;
@@ -78,7 +79,7 @@ impl Array for BoolArray {
 /// `BoolArrayBuilder` constructs a `BoolArray` from `Option<Bool>`.
 #[derive(Debug)]
 pub struct BoolArrayBuilder {
-    bitmap: Vec<bool>,
+    bitmap: BitmapBuilder,
     data: Vec<bool>,
 }
 
@@ -87,7 +88,7 @@ impl ArrayBuilder for BoolArrayBuilder {
 
     fn new(capacity: usize) -> Result<Self> {
         Ok(Self {
-            bitmap: Vec::with_capacity(capacity),
+            bitmap: BitmapBuilder::with_capacity(capacity),
             data: Vec::with_capacity(capacity),
         })
     }
@@ -95,11 +96,11 @@ impl ArrayBuilder for BoolArrayBuilder {
     fn append(&mut self, value: Option<bool>) -> Result<()> {
         match value {
             Some(x) => {
-                self.bitmap.push(true);
+                self.bitmap.append(true);
                 self.data.push(x);
             }
             None => {
-                self.bitmap.push(false);
+                self.bitmap.append(false);
                 self.data.push(bool::default());
             }
         }
@@ -107,14 +108,16 @@ impl ArrayBuilder for BoolArrayBuilder {
     }
 
     fn append_array(&mut self, other: &BoolArray) -> Result<()> {
-        self.bitmap.extend(other.bitmap.iter());
+        for bit in other.bitmap.iter() {
+            self.bitmap.append(bit);
+        }
         self.data.extend_from_slice(&other.data);
         Ok(())
     }
 
-    fn finish(self) -> Result<BoolArray> {
+    fn finish(mut self) -> Result<BoolArray> {
         Ok(BoolArray {
-            bitmap: self.bitmap.try_into()?,
+            bitmap: self.bitmap.finish(),
             data: self.data,
         })
     }

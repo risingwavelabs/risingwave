@@ -2,6 +2,7 @@ use std::hash::{Hash, Hasher};
 
 use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
 use crate::buffer::Bitmap;
+use crate::buffer::BitmapBuilder;
 use crate::error::Result;
 
 use std::mem::size_of;
@@ -87,7 +88,7 @@ impl Array for DecimalArray {
 /// `DecimalArrayBuilder` constructs a `DecimalArray` from `Option<Decimal>`.
 #[derive(Debug)]
 pub struct DecimalArrayBuilder {
-    bitmap: Vec<bool>,
+    bitmap: BitmapBuilder,
     data: Vec<Decimal>,
 }
 
@@ -96,7 +97,7 @@ impl ArrayBuilder for DecimalArrayBuilder {
 
     fn new(capacity: usize) -> Result<Self> {
         Ok(Self {
-            bitmap: Vec::with_capacity(capacity),
+            bitmap: BitmapBuilder::with_capacity(capacity),
             data: Vec::with_capacity(capacity),
         })
     }
@@ -104,11 +105,11 @@ impl ArrayBuilder for DecimalArrayBuilder {
     fn append(&mut self, value: Option<Decimal>) -> Result<()> {
         match value {
             Some(x) => {
-                self.bitmap.push(true);
+                self.bitmap.append(true);
                 self.data.push(x);
             }
             None => {
-                self.bitmap.push(false);
+                self.bitmap.append(false);
                 self.data.push(Decimal::default());
             }
         }
@@ -116,14 +117,16 @@ impl ArrayBuilder for DecimalArrayBuilder {
     }
 
     fn append_array(&mut self, other: &DecimalArray) -> Result<()> {
-        self.bitmap.extend(other.bitmap.iter());
+        for bit in other.bitmap.iter() {
+            self.bitmap.append(bit);
+        }
         self.data.extend_from_slice(&other.data);
         Ok(())
     }
 
-    fn finish(self) -> Result<DecimalArray> {
+    fn finish(mut self) -> Result<DecimalArray> {
         Ok(DecimalArray {
-            bitmap: self.bitmap.try_into()?,
+            bitmap: self.bitmap.finish(),
             data: self.data,
         })
     }
