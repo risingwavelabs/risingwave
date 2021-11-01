@@ -1,5 +1,5 @@
 use super::{Message, Result, StreamChunk};
-use crate::stream_op::{Executor, StreamConsumer};
+use crate::stream_op::{Executor, Op, StreamConsumer};
 use async_trait::async_trait;
 use futures::channel::mpsc::Sender;
 use futures::SinkExt;
@@ -163,6 +163,9 @@ impl DataDispatcher for HashDataDispatcher {
     }
 
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()> {
+        // A chunk can be shuffled into multiple output chunks that to be sent to downstreams.
+        // In these output chunks, the only difference are visibility map, which is calculated
+        // by the hash value of each line in the input chunk.
         let num_outputs = self.outputs.len();
         let StreamChunk {
             ops,
@@ -170,14 +173,19 @@ impl DataDispatcher for HashDataDispatcher {
             visibility,
         } = chunk;
 
+        // Due to some functions only exist in data chunk but not in stream chunk,
+        // a new data chunk is temporally built.
         let data_chunk = {
             let data_chunk_builder = DataChunk::builder().columns(arrays.clone());
+            // if visibility is set, build the chunk by the visibility, else build chunk directly
             if let Some(visibility) = visibility {
                 data_chunk_builder.visibility(visibility).build()
             } else {
                 data_chunk_builder.build()
             }
         };
+
+        // get hash value of every line by its key
         let hash_builder = CRC32FastBuilder {};
         let hash_values = data_chunk
             .get_hash_values(&self.keys, hash_builder)
@@ -186,6 +194,7 @@ impl DataDispatcher for HashDataDispatcher {
             .map(|hash| *hash as usize % num_outputs)
             .collect::<Vec<_>>();
 
+        // get visibility map for every output chunk
         let mut vis_maps = vec![vec![]; num_outputs];
         hash_values.iter().for_each(|hash| {
             for (output_idx, vis_map) in vis_maps.iter_mut().enumerate() {
@@ -197,9 +206,32 @@ impl DataDispatcher for HashDataDispatcher {
             }
         });
 
+        // The 'update' message, noted by an UpdateDelete and a successive UpdateInsert,
+        // need to be rewritten to common Delete and Insert if they were dispatched to different fragments.
+        let mut last_hash_value_when_update_delete: usize = 0;
+        let mut new_ops: Vec<Op> = Vec::new();
+        for (hash_value, &op) in hash_values.into_iter().zip(ops.iter()) {
+            if op == Op::UpdateDelete {
+                last_hash_value_when_update_delete = hash_value;
+            } else if op == Op::UpdateInsert {
+                if hash_value != last_hash_value_when_update_delete {
+                    new_ops.push(Op::Delete);
+                    new_ops.push(Op::Insert);
+                } else {
+                    new_ops.push(Op::UpdateDelete);
+                    new_ops.push(Op::UpdateInsert);
+                }
+            } else {
+                new_ops.push(op);
+            }
+        }
+        let ops = new_ops;
+
+        // individually output StreamChunk integrated with vis_map
         for (vis_map, output) in vis_maps.into_iter().zip(self.outputs.iter_mut()) {
             let vis_map = (vis_map).try_into().unwrap();
             let new_stream_chunk = StreamChunk {
+                // columns is not changed in this function
                 ops: ops.clone(),
                 columns: arrays.clone(),
                 visibility: Some(vis_map),
