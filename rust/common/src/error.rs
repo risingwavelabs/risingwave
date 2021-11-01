@@ -138,38 +138,38 @@ macro_rules! gen_error {
 /// Util macro for generating error when condition check failed.
 ///
 /// # Case 1: Expression only.
-/// ```rust
+/// ```ignore
 /// ensure!(a < 0);
 /// ```
 /// This will generate following error:
-/// ```rust
+/// ```ignore
 /// RwError(ErrorCode::InternalError("a < 0"))
 /// ```
 ///
 /// # Case 2: Error message only.
-/// ```rust
+/// ```ignore
 /// ensure!(a < 0, "a should not be negative!");
 /// ```
 /// This will generate following error:
-/// ```rust
+/// ```ignore
 /// RwError(ErrorCode::InternalError("a should not be negative!"));
 /// ```
 ///
 /// # Case 3: Error message with argument.
-/// ```rust
+/// ```ignore
 /// ensure!(a < 0, "a should not be negative, value: {}", 1);
 /// ```
 /// This will generate following error:
-/// ```rust
+/// ```ignore
 /// RwError(ErrorCode::InternalError("a should not be negative, value: 1"));
 /// ```
 ///
 /// # Case 4: Error code.
-/// ```rust
+/// ```ignore
 /// ensure!(a < 0, ErrorCode::MemoryError { layout });
 /// ```
 /// This will generate following error:
-/// ```rust
+/// ```ignore
 /// RwError(ErrorCode::MemoryError { layout });
 /// ```
 ///
