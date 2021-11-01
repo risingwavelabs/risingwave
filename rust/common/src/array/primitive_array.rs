@@ -1,6 +1,7 @@
 use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
 use crate::array::ArrayImpl;
 use crate::buffer::Bitmap;
+use crate::buffer::BitmapBuilder;
 use crate::error::Result;
 use crate::for_all_native_types;
 use crate::types::{NativeType, Scalar, ScalarRef};
@@ -129,7 +130,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
 /// `PrimitiveArrayBuilder` constructs a `PrimitiveArray` from `Option<Primitive>`.
 #[derive(Debug)]
 pub struct PrimitiveArrayBuilder<T: PrimitiveArrayItemType> {
-    bitmap: Vec<bool>,
+    bitmap: BitmapBuilder,
     data: Vec<T>,
 }
 
@@ -138,7 +139,7 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
 
     fn new(capacity: usize) -> Result<Self> {
         Ok(Self {
-            bitmap: Vec::with_capacity(capacity),
+            bitmap: BitmapBuilder::with_capacity(capacity),
             data: Vec::with_capacity(capacity),
         })
     }
@@ -146,11 +147,11 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
     fn append(&mut self, value: Option<T>) -> Result<()> {
         match value {
             Some(x) => {
-                self.bitmap.push(true);
+                self.bitmap.append(true);
                 self.data.push(x);
             }
             None => {
-                self.bitmap.push(false);
+                self.bitmap.append(false);
                 self.data.push(T::default());
             }
         }
@@ -158,14 +159,16 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
     }
 
     fn append_array(&mut self, other: &PrimitiveArray<T>) -> Result<()> {
-        self.bitmap.extend(other.bitmap.iter());
+        for bit in other.bitmap.iter() {
+            self.bitmap.append(bit);
+        }
         self.data.extend_from_slice(&other.data);
         Ok(())
     }
 
-    fn finish(self) -> Result<PrimitiveArray<T>> {
+    fn finish(mut self) -> Result<PrimitiveArray<T>> {
         Ok(PrimitiveArray {
-            bitmap: self.bitmap.try_into()?,
+            bitmap: self.bitmap.finish(),
             data: self.data,
         })
     }

@@ -31,7 +31,7 @@ use crate::error::Result;
 use crate::util::bit_util;
 use risingwave_proto::data::Buffer as BufferProto;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct BitmapBuilder {
     len: usize,
     data: Vec<u8>,
