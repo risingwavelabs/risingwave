@@ -42,7 +42,16 @@ pub struct BitmapBuilder {
 }
 
 impl BitmapBuilder {
-    fn append(&mut self, bit_set: bool) -> &mut Self {
+    pub fn with_capacity(capacity: usize) -> BitmapBuilder {
+        BitmapBuilder {
+            len: 0,
+            data: Vec::with_capacity((capacity + 7) / 8),
+            num_high_bits: 0,
+            head: 0,
+        }
+    }
+
+    pub fn append(&mut self, bit_set: bool) -> &mut Self {
         self.head |= (bit_set as u8) << (self.len % 8);
         self.num_high_bits += bit_set as usize;
         self.len += 1;
@@ -52,7 +61,8 @@ impl BitmapBuilder {
         }
         self
     }
-    fn finish(&mut self) -> Bitmap {
+
+    pub fn finish(&mut self) -> Bitmap {
         if self.len % 8 != 0 {
             self.data.push(self.head);
         }
