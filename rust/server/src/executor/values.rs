@@ -110,7 +110,7 @@ impl BoxedExecutorBuilder for ValuesExecutor {
             let expr_row = row
                 .get_cells()
                 .iter()
-                .map(|c| build_from_proto(c))
+                .map(build_from_proto)
                 .collect::<Result<Vec<BoxedExpression>>>()?;
             rows.push(expr_row);
         }

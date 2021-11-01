@@ -34,7 +34,7 @@ fn produce(ast: &DeriveInput) -> TokenStream2 {
 
     // Is it a struct?
     if let syn::Data::Struct(DataStruct { ref fields, .. }) = ast.data {
-        let generated = fields.iter().map(|f| generate::implement(f));
+        let generated = fields.iter().map(generate::implement);
         quote! {
             impl #name {
                 #(#generated)*

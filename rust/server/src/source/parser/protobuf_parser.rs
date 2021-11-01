@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use itertools::Itertools;
 use protobuf::descriptor::FileDescriptorSet;
 use protobuf::RepeatedField;
 use rust_decimal::Decimal;
@@ -56,8 +57,8 @@ impl ProtobufParser {
     /// * `inputs`, `includes`: protobuf files path and include dir
     /// * `message_name`: a message name that needs to correspond
     pub fn new(includes: &[String], inputs: &[String], message_name: &str) -> Result<Self> {
-        let includes: Vec<&Path> = includes.iter().map(|p| Path::new(p)).collect();
-        let inputs: Vec<&Path> = inputs.iter().map(|p| Path::new(p)).collect();
+        let includes = includes.iter().map(Path::new).collect_vec();
+        let inputs = inputs.iter().map(Path::new).collect_vec();
 
         let parsed_result = protobuf_codegen_pure::parse_and_typecheck(&includes, &inputs)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;

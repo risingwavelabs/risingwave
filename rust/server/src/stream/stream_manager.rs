@@ -334,7 +334,7 @@ impl StreamManagerCore {
                 let agg_calls: Vec<AggCall> = aggr_node
                     .get_agg_calls()
                     .iter()
-                    .map(|agg_call| build_agg_call_from_prost(agg_call))
+                    .map(build_agg_call_from_prost)
                     .try_collect()?;
                 Ok(Box::new(SimpleAggExecutor::new(input, agg_calls)?))
             }
@@ -348,7 +348,7 @@ impl StreamManagerCore {
                 let agg_calls: Vec<AggCall> = aggr_node
                     .get_agg_calls()
                     .iter()
-                    .map(|agg_call| build_agg_call_from_prost(agg_call))
+                    .map(build_agg_call_from_prost)
                     .try_collect()?;
 
                 Ok(Box::new(HashAggExecutor::new(input, agg_calls, keys)))
