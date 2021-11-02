@@ -1,5 +1,8 @@
 use futures::SinkExt;
 use futures::StreamExt;
+use risingwave_pb::data::data_type::TypeName;
+use risingwave_pb::data::DataType;
+use risingwave_pb::plan::ColumnDesc;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::*;
 use risingwave_pb::stream_service::*;
@@ -65,6 +68,13 @@ async fn test_stream_proto() {
                     column_idx: 0,
                 }),
                 downstream_fragment_id: vec![3],
+                input_column_descs: vec![ColumnDesc {
+                    column_type: Some(DataType {
+                        type_name: TypeName::Int32 as i32,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }],
             },
             // create 1 -> (3) -> 7, 11
             StreamFragment {
@@ -79,6 +89,13 @@ async fn test_stream_proto() {
                     column_idx: 0,
                 }),
                 downstream_fragment_id: vec![7, 11],
+                input_column_descs: vec![ColumnDesc {
+                    column_type: Some(DataType {
+                        type_name: TypeName::Int32 as i32,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }],
             },
             // create 3 -> (7) -> 13
             StreamFragment {
@@ -93,6 +110,13 @@ async fn test_stream_proto() {
                     column_idx: 0,
                 }),
                 downstream_fragment_id: vec![13],
+                input_column_descs: vec![ColumnDesc {
+                    column_type: Some(DataType {
+                        type_name: TypeName::Int32 as i32,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }],
             },
             // create 3 -> (11) -> 13
             StreamFragment {
@@ -107,6 +131,13 @@ async fn test_stream_proto() {
                     column_idx: 0,
                 }),
                 downstream_fragment_id: vec![13],
+                input_column_descs: vec![ColumnDesc {
+                    column_type: Some(DataType {
+                        type_name: TypeName::Int32 as i32,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }],
             },
             // create 7, 11 -> (13) -> 233
             StreamFragment {
@@ -121,6 +152,13 @@ async fn test_stream_proto() {
                     column_idx: 0,
                 }),
                 downstream_fragment_id: vec![233],
+                input_column_descs: vec![ColumnDesc {
+                    column_type: Some(DataType {
+                        type_name: TypeName::Int32 as i32,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }],
             },
         ])
         .unwrap();

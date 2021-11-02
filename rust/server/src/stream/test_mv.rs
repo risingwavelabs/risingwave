@@ -98,6 +98,13 @@ async fn test_stream_mv_proto() {
             column_idx: 0,
         }),
         downstream_fragment_id: vec![233],
+        input_column_descs: vec![ColumnDesc {
+            column_type: Some(DataType {
+                type_name: TypeName::Int32 as i32,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }],
     };
 
     // Initialize storage.

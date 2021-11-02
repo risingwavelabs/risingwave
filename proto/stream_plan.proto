@@ -87,6 +87,8 @@ message StreamFragment {
   Dispatcher dispatcher = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_fragment_id = 5;
+  // The schema of input columns.
+  repeated plan.ColumnDesc input_column_descs = 6;
 }
 
 // Remark: we do not explicitly encode mergers in the proto as it is not necessary.
