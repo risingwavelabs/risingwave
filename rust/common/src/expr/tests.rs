@@ -5,6 +5,8 @@ use crate::array::*;
 use crate::types::{
     BoolType, DateType, DecimalType, Int32Type, IntervalType, IntervalUnit, Scalar,
 };
+use crate::vector_op::arithmetic_op::{date_interval_add, date_interval_sub};
+use crate::vector_op::cast::date_to_timestamp;
 use pb_construct::make_proto;
 use protobuf::well_known_types::Any as AnyProto;
 use protobuf::RepeatedField;
@@ -39,13 +41,20 @@ fn test_binary() {
     test_binary_decimal::<BoolArray, _>(|x, y| x <= y, ExprNode_Type::LESS_THAN_OR_EQUAL);
     test_binary_bool::<BoolArray, _>(|x, y| x && y, ExprNode_Type::AND);
     test_binary_bool::<BoolArray, _>(|x, y| x || y, ExprNode_Type::OR);
-    test_binary_interval::<I32Array, _>(|x, y| x.get_days() + y, ExprNode_Type::ADD);
-    test_binary_interval::<I32Array, _>(|x, y| x.get_days() - y, ExprNode_Type::SUBTRACT);
+    test_binary_interval::<I64Array, _>(
+        |x, y| date_interval_add::<i32, i32, i64>(x, y).unwrap(),
+        ExprNode_Type::ADD,
+    );
+    test_binary_interval::<I64Array, _>(
+        |x, y| date_interval_sub::<i32, i32, i64>(x, y).unwrap(),
+        ExprNode_Type::SUBTRACT,
+    );
 }
 
 #[test]
 fn test_unary() {
     test_unary_bool::<BoolArray, _>(|x| !x, ExprNode_Type::NOT);
+    test_unary_date::<I64Array, _>(|x| date_to_timestamp(x).unwrap(), ExprNode_Type::CAST);
 }
 
 fn test_binary_i32<A, F>(f: F, kind: ExprNode_Type)
@@ -110,39 +119,39 @@ where
     A: Array,
     for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
     for<'a> <A as Array>::RefItem<'a>: PartialEq,
-    F: Fn(IntervalUnit, i32) -> <A as Array>::OwnedItem,
+    F: Fn(i32, IntervalUnit) -> <A as Array>::OwnedItem,
 {
-    let mut lhs = Vec::<Option<IntervalUnit>>::new();
-    let mut rhs = Vec::<Option<i32>>::new();
+    let mut lhs = Vec::<Option<i32>>::new();
+    let mut rhs = Vec::<Option<IntervalUnit>>::new();
     let mut target = Vec::<Option<<A as Array>::OwnedItem>>::new();
     for i in 0..100 {
         if i % 2 == 0 {
-            lhs.push(Some(IntervalUnit::from_ymd(i, i, i)));
-            rhs.push(None);
+            rhs.push(Some(IntervalUnit::from_ymd(0, i, i)));
+            lhs.push(None);
             target.push(None);
         } else {
-            lhs.push(Some(IntervalUnit::from_ymd(i, i, i)));
-            rhs.push(Some(i));
-            target.push(Some(f(IntervalUnit::from_ymd(i, i, i), i)));
+            rhs.push(Some(IntervalUnit::from_ymd(0, i, i)));
+            lhs.push(Some(i));
+            target.push(Some(f(i, IntervalUnit::from_ymd(0, i, i))));
         }
     }
 
     let col1 = Column::new(
-        IntervalArray::from_slice(&lhs)
-            .map(|x| Arc::new(x.into()))
-            .unwrap(),
-        IntervalType::create(true),
-    );
-    let col2 = Column::new(
-        I32Array::from_slice(&rhs)
+        I32Array::from_slice(&lhs)
             .map(|x| Arc::new(x.into()))
             .unwrap(),
         DateType::create(true),
     );
+    let col2 = Column::new(
+        IntervalArray::from_slice(&rhs)
+            .map(|x| Arc::new(x.into()))
+            .unwrap(),
+        IntervalType::create(true),
+    );
     let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
     let expr = make_expression(
         kind,
-        &[DataType_TypeName::INTERVAL, DataType_TypeName::DATE],
+        &[DataType_TypeName::DATE, DataType_TypeName::INTERVAL],
         &[0, 1],
     );
     let mut vec_excutor = build_from_proto(&expr).unwrap();
@@ -307,6 +316,42 @@ where
     }
 }
 
+fn test_unary_date<A, F>(f: F, kind: ExprNode_Type)
+where
+    A: Array,
+    for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
+    for<'a> <A as Array>::RefItem<'a>: PartialEq,
+    F: Fn(i32) -> <A as Array>::OwnedItem,
+{
+    let mut input = Vec::<Option<i32>>::new();
+    let mut target = Vec::<Option<<A as Array>::OwnedItem>>::new();
+    for i in 0..100 {
+        if i % 2 == 0 {
+            input.push(Some(i));
+            target.push(Some(f(i)));
+        } else {
+            input.push(None);
+            target.push(None);
+        }
+    }
+
+    let col1 = Column::new(
+        I32Array::from_slice(&input)
+            .map(|x| Arc::new(x.into()))
+            .unwrap(),
+        DateType::create(true),
+    );
+    let data_chunk = DataChunk::builder().columns(vec![col1]).build();
+    let expr = make_expression(kind, &[DataType_TypeName::DATE], &[0]);
+    let mut vec_excutor = build_from_proto(&expr).unwrap();
+    let res = vec_excutor.eval(&data_chunk).unwrap();
+    let arr: &A = res.as_ref().into();
+    for (idx, item) in arr.iter().enumerate() {
+        let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
+        assert_eq!(x, item);
+    }
+}
+
 fn make_expression(kind: ExprNode_Type, rets: &[DataType_TypeName], indices: &[i32]) -> ExprNode {
     let mut exprs = Vec::new();
     for (idx, ret) in indices.iter().zip(rets.iter()) {
@@ -320,7 +365,7 @@ fn make_expression(kind: ExprNode_Type, rets: &[DataType_TypeName], indices: &[i
         })
       ).unwrap(),
       return_type: make_proto!(DataTypeProto, {
-        type_name: risingwave_proto::data::DataType_TypeName::BOOLEAN
+        type_name: risingwave_proto::data::DataType_TypeName::TIMESTAMP
       })
     })
 }

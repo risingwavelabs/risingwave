@@ -35,7 +35,7 @@ pub fn vec_cast(
 
 // The same as NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce().
 // Minus this magic number to store the number of days since 1970-01-01.
-const UNIX_EPOCH_DAYS: i32 = 719_163;
+pub const UNIX_EPOCH_DAYS: i32 = 719_163;
 
 #[inline(always)]
 pub fn str_to_date(elem: &str) -> Result<i32> {
@@ -64,6 +64,11 @@ pub fn str_to_timestampz(elem: &str) -> Result<i64> {
     DateTime::parse_from_str(elem, "%Y-%m-%d %H:%M:%S %:z")
         .map(|ret| ret.timestamp_nanos() / 1000)
         .map_err(|e| RwError::from(ParseError(e)))
+}
+
+#[inline(always)]
+pub fn date_to_timestamp(elem: i32) -> Result<i64> {
+    Ok((elem as i64) * 24 * 60 * 60 * 1000 * 1000)
 }
 
 fn vector_cast_op<'a, A1, A2, F>(a: &'a A1, f: F) -> Result<A2>

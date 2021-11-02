@@ -1,6 +1,12 @@
+use crate::types::IntervalUnit;
 use crate::vector_op::arithmetic_op::*;
+use crate::vector_op::cast::date_to_timestamp;
+use crate::vector_op::cast::UNIX_EPOCH_DAYS;
 use crate::vector_op::cmp::*;
 use crate::vector_op::conjunction::*;
+use chrono::Datelike;
+use chrono::NaiveDate;
+use chrono::NaiveDateTime;
 use rust_decimal::Decimal;
 use std::str::FromStr;
 #[test]
@@ -55,6 +61,39 @@ fn test_arithmetic() {
     assert!(float_sub::<i32, f32, f32>(1i32, 1f32).unwrap().abs() < f32::EPSILON);
     assert!(float_mul::<i32, f32, f32>(0i32, 1f32).unwrap().abs() < f32::EPSILON);
     assert!(float_div::<i32, f32, f32>(0i32, 1f32).unwrap().abs() < f32::EPSILON);
+    assert_eq!(
+        date_interval_add::<i32, i32, i64>(
+            NaiveDate::from_ymd(1994, 1, 1).num_days_from_ce() - UNIX_EPOCH_DAYS,
+            IntervalUnit::from_month(12)
+        )
+        .unwrap(),
+        NaiveDateTime::parse_from_str("1995-1-1 0:0:0", "%Y-%m-%d %H:%M:%S")
+            .unwrap()
+            .timestamp_nanos()
+            / 1000
+    );
+    assert_eq!(
+        interval_date_add::<i32, i32, i64>(
+            IntervalUnit::from_month(12),
+            NaiveDate::from_ymd(1994, 1, 1).num_days_from_ce() - UNIX_EPOCH_DAYS,
+        )
+        .unwrap(),
+        NaiveDateTime::parse_from_str("1995-1-1 0:0:0", "%Y-%m-%d %H:%M:%S")
+            .unwrap()
+            .timestamp_nanos()
+            / 1000
+    );
+    assert_eq!(
+        date_interval_sub::<i32, i32, i64>(
+            NaiveDate::from_ymd(1994, 1, 1).num_days_from_ce() - UNIX_EPOCH_DAYS,
+            IntervalUnit::from_month(12)
+        )
+        .unwrap(),
+        NaiveDateTime::parse_from_str("1993-1-1 0:0:0", "%Y-%m-%d %H:%M:%S")
+            .unwrap()
+            .timestamp_nanos()
+            / 1000
+    );
 }
 
 #[test]
@@ -90,4 +129,15 @@ fn test_conjunction() {
     assert!(not(false).unwrap());
     assert!(!and(true, false).unwrap());
     assert!(or(true, false).unwrap());
+}
+#[test]
+fn test_cast() {
+    assert_eq!(
+        date_to_timestamp(NaiveDate::from_ymd(1994, 1, 1).num_days_from_ce() - UNIX_EPOCH_DAYS)
+            .unwrap(),
+        NaiveDateTime::parse_from_str("1994-1-1 0:0:0", "%Y-%m-%d %H:%M:%S")
+            .unwrap()
+            .timestamp_nanos()
+            / 1000
+    )
 }

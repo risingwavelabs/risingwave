@@ -53,6 +53,14 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
+        (ExprNode_Type::CAST, DataTypeKind::Timestamp, DataTypeKind::Date) => {
+            Box::new(UnaryExpression::<I32Array, I64Array, _> {
+                expr_ia1: child_expr,
+                return_type,
+                func: cast::date_to_timestamp,
+                _phantom: PhantomData,
+            })
+        }
         (ExprNode_Type::NOT, _, _) => Box::new(UnaryExpression::<BoolArray, BoolArray, _> {
             expr_ia1: child_expr,
             return_type,
@@ -65,10 +73,8 @@ pub fn new_unary_expr(
             func: upper,
             _phantom: PhantomData,
         }),
-        (_, _, _) => {
-            unimplemented!(
-                "The expression using vectorized expression framework is not supported yet!"
-            )
+        (expr, ret, child) => {
+            unimplemented!("The expression {:?}({:?}) ->{:?} using vectorized expression framework is not supported yet!", expr, child, ret)
         }
     }
 }

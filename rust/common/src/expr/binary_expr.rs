@@ -134,10 +134,10 @@ macro_rules! gen_binary_expr {
       { DecimalType, DecimalType, DecimalType, $deci_f },
       { Float32Type, DecimalType, DecimalType, $deci_f_f },
       { Float64Type, DecimalType, DecimalType, $deci_f_f },
-      { TimestampType, TimestampType, Int64Type, $int_f },
+      { TimestampType, TimestampType, TimestampType, $int_f },
       { DateType, DateType, Int32Type, $int_f },
-      { DateType, IntervalType, Int32Type, $date_interval_f },
-      { IntervalType, DateType, Int32Type, $interval_date_f }
+      { DateType, IntervalType, TimestampType, $date_interval_f },
+      { IntervalType, DateType, TimestampType, $interval_date_f }
     }
   };
 }
@@ -171,7 +171,7 @@ pub fn new_binary_expr(
             gen_binary_expr! {arithmetic_impl, int_add, float_add, deci_f_add, deci_add, interval_date_add, date_interval_add, l, r, ret}
         }
         ExprNode_Type::SUBTRACT => {
-            gen_binary_expr! {arithmetic_impl, int_sub, float_sub, deci_f_sub, deci_sub, interval_date_sub, date_interval_sub, l, r, ret}
+            gen_binary_expr! {arithmetic_impl, int_sub, float_sub, deci_f_sub, deci_sub, atm_placeholder, date_interval_sub, l, r, ret}
         }
         ExprNode_Type::MULTIPLY => {
             gen_binary_expr! {arithmetic_impl, int_mul, float_mul, deci_f_mul, deci_mul, atm_placeholder, atm_placeholder, l, r, ret}

@@ -2,13 +2,15 @@ use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk};
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::expr::Expression;
-use crate::types::{build_from_proto, DataType, DataTypeKind, DataTypeRef, Datum, ScalarImpl};
+use crate::types::{
+    build_from_proto, DataType, DataTypeKind, DataTypeRef, Datum, IntervalUnit, ScalarImpl,
+};
 use std::convert::TryFrom;
 use std::convert::TryInto;
 
 use protobuf::Message;
 
-use risingwave_proto::data::DataType_TypeName;
+use risingwave_proto::data::{DataType_IntervalType, DataType_IntervalType::*, DataType_TypeName};
 use risingwave_proto::expr::{ConstantValue, ExprNode, ExprNode_Type};
 
 use rust_decimal::Decimal;
@@ -91,6 +93,29 @@ fn literal_type_match(return_type: DataTypeKind, literal: Option<&ScalarImpl>) -
         }
 
         None => true,
+    }
+}
+
+fn make_interval(bytes: &[u8], ty: DataType_IntervalType) -> Result<IntervalUnit> {
+    match ty {
+        // the unit is months
+        YEAR | YEAR_TO_MONTH | MONTH => {
+            let bytes = bytes.try_into().map_err(|e| {
+                InternalError(format!("Failed to deserialize i32, reason: {:?}", e))
+            })?;
+            let mouths = i32::from_be_bytes(bytes);
+            Ok(IntervalUnit::from_month(mouths))
+        }
+        // the unit is ms
+        DAY | DAY_TO_HOUR | DAY_TO_MINUTE | DAY_TO_SECOND | HOUR | HOUR_TO_MINUTE
+        | HOUR_TO_SECOND | MINUTE | MINUTE_TO_SECOND | SECOND => {
+            let bytes = bytes.try_into().map_err(|e| {
+                InternalError(format!("Failed to deserialize i64, reason: {:?}", e))
+            })?;
+            let ms = i64::from_be_bytes(bytes);
+            Ok(IntervalUnit::from_millis(ms))
+        }
+        INVALID => Err(InternalError(format!("Invalid interval type {:?}", ty)).into()),
     }
 }
 
@@ -180,6 +205,13 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
                     |e| InternalError(format!("Failed to deserialize decimal, reason: {:?}", e)),
                 )?,
             ),
+            DataType_TypeName::INTERVAL => {
+                let bytes = proto_value.get_body();
+                ScalarImpl::Interval(make_interval(
+                    bytes,
+                    proto.get_return_type().get_interval_type(),
+                )?)
+            }
             _ => {
                 return Err(InternalError(format!(
                     "Unrecognized type name: {:?}",
@@ -207,6 +239,7 @@ mod tests {
     use pb_construct::make_proto;
     use protobuf::well_known_types::Any as AnyProto;
     use risingwave_proto::data::DataType as DataTypeProto;
+    use risingwave_proto::data::DataType_IntervalType;
     use risingwave_proto::expr::ConstantValue;
     use risingwave_proto::expr::{ExprNode, ExprNode_Type};
 
@@ -241,6 +274,15 @@ mod tests {
         let bytes = Vec::new();
         let expr = LiteralExpression::try_from(&make_expression(bytes, t)).unwrap();
         assert_eq!(v, expr.literal());
+
+        let v = 32i32;
+        let t = DataType_TypeName::INTERVAL;
+        let bytes = v.to_be_bytes().to_vec();
+        let expr = LiteralExpression::try_from(&make_expression(bytes, t)).unwrap();
+        assert_eq!(
+            IntervalUnit::from_month(v).to_scalar_value(),
+            expr.literal().unwrap()
+        );
     }
 
     fn make_expression(bytes: Vec<u8>, data_type: DataType_TypeName) -> ExprNode {
@@ -250,7 +292,8 @@ mod tests {
             &make_proto!(ConstantValue, { body: bytes })
           ).unwrap(),
           return_type: make_proto!(DataTypeProto, {
-            type_name: data_type
+            type_name: data_type,
+            interval_type: DataType_IntervalType::MONTH
           })
         })
     }

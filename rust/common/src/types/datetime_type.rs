@@ -13,6 +13,20 @@ use std::default::Default;
 use std::mem::size_of;
 use std::sync::Arc;
 
+const LEAP_DAYS: &[i32] = &[0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+const NORMAL_DAYS: &[i32] = &[0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+fn is_leap_year(year: i32) -> bool {
+    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+}
+// return the days of the `year-month`
+pub fn get_mouth_days(year: i32, month: usize) -> i32 {
+    if is_leap_year(year) {
+        LEAP_DAYS[month]
+    } else {
+        NORMAL_DAYS[month]
+    }
+}
+
 /// Generate macros for TIME/TIMESTAMP/TIMESTAMP WITH TIMEZONE.
 /// FIXME: This code is adapted from numeric type. Maybe we should unify them
 macro_rules! make_datetime_type {

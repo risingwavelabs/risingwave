@@ -1,10 +1,13 @@
+use std::cmp::min;
 use std::ops::{Add, Div, Mul, Rem, Sub};
 
 use crate::array::PrimitiveArrayItemType;
 use crate::error::ErrorCode::InternalError;
 use crate::error::ErrorCode::NumericValueOutOfRange;
 use crate::error::{Result, RwError};
-use crate::types::IntervalUnit;
+use crate::types::{get_mouth_days, IntervalUnit};
+use crate::vector_op::cast::UNIX_EPOCH_DAYS;
+use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime};
 use num_traits::CheckedRem;
 use num_traits::{AsPrimitive, CheckedAdd, CheckedDiv, CheckedMul, CheckedSub, Float};
 
@@ -281,6 +284,7 @@ where
     }
 }
 
+#[inline(always)]
 pub fn deci_f_mod<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: TryInto<T3>,
@@ -299,44 +303,71 @@ where
     }
 }
 
+#[inline(always)]
 pub fn interval_date_add<T1, T2, T3>(l: IntervalUnit, r: T2) -> Result<T3>
 where
-    T2: PrimitiveArrayItemType + AsPrimitive<T3>,
-    T3: PrimitiveArrayItemType + CheckedAdd,
-    // i32 is the return type of get_days()
-    i32: AsPrimitive<T3>,
+    T2: PrimitiveArrayItemType + AsPrimitive<i32>,
+    T3: PrimitiveArrayItemType,
+    i64: AsPrimitive<T3>,
 {
-    int_add::<_, _, T3>(l.get_days(), r)
+    let mut date = NaiveDate::from_num_days_from_ce(r.as_() + UNIX_EPOCH_DAYS);
+    if l.get_months() != 0 {
+        // NaiveDate don't support add months. We need calculate manually
+        let mut day = date.day() as i32;
+        let mut month = date.month() as i32;
+        let mut year = date.year();
+        // Calculate the number of year in this interval
+        let interval_months = l.get_months();
+        let year_diff = interval_months / 12;
+        year += year_diff;
+
+        // Calculate the number of month in this interval except the added year
+        // The range of month_diff is (-12, 12) (The month is negative when the interval is negative)
+        let month_diff = interval_months - year_diff * 12;
+        // The range of new month is (-12, 24) ( original month:[1, 12] + month_diff:(-12, 12) )
+        month += month_diff;
+        // Process the overflow months
+        if month > 12 {
+            year += 1;
+            month -= 12;
+        } else if month <= 0 {
+            year -= 1;
+            month += 12;
+        }
+
+        // Fix the days after changing date.
+        // For example, 1970.1.31 + 1 month = 1970.2.28
+        day = min(day, get_mouth_days(year, month as usize));
+        date = NaiveDate::from_ymd(year, month as u32, day as u32);
+    }
+    let mut datetime = NaiveDateTime::new(date, NaiveTime::from_hms(0, 0, 0));
+    datetime = datetime
+        .checked_add_signed(Duration::days(l.get_days().into()))
+        .ok_or_else(|| InternalError("Date out of range".to_string()))?;
+    datetime = datetime
+        .checked_add_signed(Duration::milliseconds(l.get_ms()))
+        .ok_or_else(|| InternalError("Date out of range".to_string()))?;
+    Ok((datetime.timestamp_nanos() / 1000).as_())
 }
 
+#[inline(always)]
 pub fn date_interval_add<T2, T1, T3>(l: T2, r: IntervalUnit) -> Result<T3>
 where
-    T2: PrimitiveArrayItemType + AsPrimitive<T3>,
-    T3: PrimitiveArrayItemType + CheckedAdd,
-    // i32 is the return type of get_days()
-    i32: AsPrimitive<T3>,
+    T2: PrimitiveArrayItemType + AsPrimitive<i32>,
+    T3: PrimitiveArrayItemType,
+    i64: AsPrimitive<T3>,
 {
-    int_add::<_, _, T3>(l, r.get_days())
+    interval_date_add::<T1, T2, T3>(r, l)
 }
 
-pub fn interval_date_sub<T1, T2, T3>(l: IntervalUnit, r: T2) -> Result<T3>
-where
-    T2: PrimitiveArrayItemType + AsPrimitive<T3>,
-    T3: PrimitiveArrayItemType + CheckedSub,
-    // i32 is the return type of get_days()
-    i32: AsPrimitive<T3>,
-{
-    int_sub::<_, _, T3>(l.get_days(), r)
-}
-
+#[inline(always)]
 pub fn date_interval_sub<T2, T1, T3>(l: T2, r: IntervalUnit) -> Result<T3>
 where
-    T2: PrimitiveArrayItemType + AsPrimitive<T3>,
-    T3: PrimitiveArrayItemType + CheckedSub,
-    // i32 is the return type of get_days()
-    i32: AsPrimitive<T3>,
+    T2: PrimitiveArrayItemType + AsPrimitive<i32>,
+    T3: PrimitiveArrayItemType,
+    i64: AsPrimitive<T3>,
 {
-    int_sub::<_, _, T3>(l, r.get_days())
+    interval_date_add::<T1, T2, T3>(r.negative(), l)
 }
 
 #[cfg(test)]
