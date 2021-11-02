@@ -14,6 +14,7 @@ use risingwave_common::types::{Int32Type, Scalar};
 use risingwave_common::util::addr::get_host_port;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
+use risingwave_pb::expr::expr_node::Type::InputRef;
 use risingwave_pb::expr::ExprNode;
 use risingwave_pb::plan::column_desc::ColumnEncodingType;
 use risingwave_pb::plan::ColumnDesc;
@@ -26,7 +27,6 @@ use risingwave_pb::stream_plan::{
 use risingwave_pb::stream_service::{ActorInfo, ActorInfoTable};
 use risingwave_pb::task_service::HostAddress;
 use risingwave_pb::ToProto;
-use risingwave_proto::expr::ExprNode_Type::INPUT_REF;
 use smallvec::SmallVec;
 use std::sync::Arc;
 
@@ -61,7 +61,7 @@ async fn test_stream_mv_proto() {
         input: None,
     };
     let expr_proto = ExprNode {
-        expr_type: INPUT_REF as i32,
+        expr_type: InputRef as i32,
         body: None,
         return_type: Some(make_int32_type_pb()),
     };
