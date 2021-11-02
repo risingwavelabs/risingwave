@@ -200,7 +200,7 @@ pub enum Message {
 }
 
 impl Message {
-    pub fn to_protobuf(&self) -> Result<StreamMessage> {
+    pub fn to_protobuf(&self) -> Result<ProstStreamMessage> {
         let prost = match self {
             Self::Chunk(stream_chunk) => {
                 let prost_stream_chunk = stream_chunk.to_protobuf()?;
@@ -212,7 +212,10 @@ impl Message {
             }),
             Self::Terminate => StreamMessage::Terminate(Terminate {}),
         };
-        Ok(prost)
+        let prost_stream_msg = ProstStreamMessage {
+            stream_message: Some(prost),
+        };
+        Ok(prost_stream_msg)
     }
 
     pub fn from_protobuf(prost: ProstStreamMessage) -> Result<Self> {

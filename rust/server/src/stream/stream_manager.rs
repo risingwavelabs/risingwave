@@ -27,7 +27,7 @@ pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
 
 type ConsumableChannelPair = (Option<Sender<Message>>, Option<Receiver<Message>>);
 type ConsumableChannelVecPair = (Vec<Sender<Message>>, Vec<Receiver<Message>>);
-type UpDownFragmentIds = (u32, u32);
+pub type UpDownFragmentIds = (u32, u32);
 
 pub struct StreamManagerCore {
     /// Each processor runs in a future. Upon receiving a `Terminate` message, they will exit.
@@ -411,8 +411,11 @@ impl StreamManagerCore {
                         .get_host();
                     let upstream_addr =
                         format!("{}:{}", host_addr.get_host(), host_addr.get_port());
-                    if is_local_address(&get_host_port(&upstream_addr)?, &self.addr) {
-                        Ok(self
+                    let upstream_socket_addr = get_host_port(&upstream_addr)?;
+                    if !is_local_address(&upstream_socket_addr, &self.addr) {
+                        // Get the sender for `RemoteInput` to forward received messages to receivers in
+                        // `ReceiverExecutor` or `MergerExecutor`.
+                        let sender = self
                             .channel_pool
                             .get_mut(&(*up_id, fragment_id))
                             .ok_or_else(|| {
@@ -421,18 +424,48 @@ impl StreamManagerCore {
                                     up_id, fragment_id
                                 )))
                             })?
-                            .1
+                            .0
                             .take()
                             .ok_or_else(|| {
                                 RwError::from(ErrorCode::InternalError(format!(
-                                    "receiver from {} to {} does no exist",
+                                    "sender from {} to {} does no exist",
                                     up_id, fragment_id
                                 )))
-                            })?)
-                    } else {
-                        // Will new and spawn a RPC client in the future pr
-                        todo!()
+                            })?;
+                        // spawn the `RemoteInput`
+                        let up_id = *up_id;
+                        tokio::spawn(async move {
+                            let remote_input_res = RemoteInput::create(
+                                upstream_socket_addr,
+                                (up_id, fragment_id),
+                                sender,
+                            )
+                            .await;
+                            match remote_input_res {
+                                Ok(mut remote_input) => remote_input.run().await,
+                                Err(e) => {
+                                    info!("Spawn remote input fails:{}", e);
+                                }
+                            }
+                        });
                     }
+                    Ok(self
+                        .channel_pool
+                        .get_mut(&(*up_id, fragment_id))
+                        .ok_or_else(|| {
+                            RwError::from(ErrorCode::InternalError(format!(
+                                "channel between {} and {} does not exist",
+                                up_id, fragment_id
+                            )))
+                        })?
+                        .1
+                        .take()
+                        .ok_or_else(|| {
+                            RwError::from(ErrorCode::InternalError(format!(
+                                "receiver from {} to {} does no exist",
+                                up_id, fragment_id
+                            )))
+                        })?)
                 }
             })
             .collect::<Result<Vec<_>>>()?;

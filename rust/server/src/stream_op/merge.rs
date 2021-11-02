@@ -1,10 +1,102 @@
 use super::{Executor, Result};
+use crate::stream::UpDownFragmentIds;
 use async_trait::async_trait;
-use futures::channel::mpsc::Receiver;
+use futures::channel::mpsc::{Receiver, Sender};
 use futures::future::select_all;
-use futures::StreamExt;
+use futures::{SinkExt, StreamExt};
+use risingwave_common::error::ErrorCode::{GrpcNetworkError, InternalError, TonicError};
+use risingwave_pb::data::StreamMessage;
+use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
+use risingwave_pb::task_service::GetStreamRequest;
+use std::net::SocketAddr;
+use std::time::Duration;
+use tonic::transport::{Channel, Endpoint};
+use tonic::Request;
+use tonic::Streaming;
 
 use super::Message;
+
+/// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
+pub struct RemoteInput {
+    client: ExchangeServiceClient<Channel>,
+    stream: Streaming<StreamMessage>,
+    sender: Sender<Message>,
+
+    /// Address of the remote endpoint.
+    addr: SocketAddr,
+    up_down_ids: UpDownFragmentIds,
+}
+
+impl RemoteInput {
+    pub async fn create(
+        addr: SocketAddr,
+        up_down_ids: UpDownFragmentIds,
+        sender: Sender<Message>,
+    ) -> Result<Self> {
+        let mut client = ExchangeServiceClient::new(
+            Endpoint::from_shared(format!("http://{}", addr))
+                .map_err(|e| InternalError(format!("{}", e)))?
+                .connect_timeout(Duration::from_secs(5))
+                .connect()
+                .await
+                .map_err(|e| {
+                    GrpcNetworkError(format!("RemoteInput failed to connect to {}", addr), e)
+                })?,
+        );
+        let req = GetStreamRequest {
+            up_fragment_id: up_down_ids.0,
+            down_fragment_id: up_down_ids.1,
+        };
+        let stream = client
+            .get_stream(Request::new(req))
+            .await
+            .map_err(|e| {
+                TonicError(
+                    format!(
+            "failed to create stream from remote_input {} from fragment {} to fragment {}",
+            addr, up_down_ids.0, up_down_ids.1
+          ),
+                    e,
+                )
+            })?
+            .into_inner();
+        Ok(Self {
+            client,
+            stream,
+            sender,
+            addr,
+            up_down_ids,
+        })
+    }
+
+    pub async fn run(&mut self) {
+        loop {
+            let data = self.stream.next().await;
+            match data {
+                // the connection from rpc server is closed, then break the loop
+                None => break,
+                Some(data_res) => match data_res {
+                    Ok(stream_msg) => {
+                        let msg_res = Message::from_protobuf(stream_msg);
+                        match msg_res {
+                            Ok(msg) => {
+                                let _ = self.sender.send(msg).await;
+                            }
+                            Err(e) => {
+                                info!("RemoteInput forward message error:{}", e);
+                                break;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        info!("RemoteInput tonic error status:{}", e);
+                        break;
+                    }
+                },
+            }
+        }
+    }
+}
 
 /// `ReceiverExecutor` is used along with a channel. After creating a mpsc channel,
 /// there should be a `ReceiverExecutor` running in the background, so as to push
@@ -114,9 +206,21 @@ mod tests {
     use super::*;
     use crate::stream_op::{Op, StreamChunk};
     use assert_matches::assert_matches;
+    use futures::channel::mpsc::channel;
     use futures::SinkExt;
     use itertools::Itertools;
+    use risingwave_common::util::addr::get_host_port;
+    use risingwave_pb::data::Barrier;
+    use risingwave_pb::task_service::exchange_service_server::{
+        ExchangeService, ExchangeServiceServer,
+    };
+    use risingwave_pb::task_service::{TaskData, TaskSinkId};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::thread::sleep;
     use std::time::Duration;
+    use tokio_stream::wrappers::ReceiverStream;
+    use tonic::{Response, Status};
 
     fn build_test_chunk(epoch: u64) -> StreamChunk {
         let mut chunk = StreamChunk::default();
@@ -177,5 +281,96 @@ mod tests {
         for handle in handles {
             handle.await.unwrap();
         }
+    }
+
+    struct FakeExchangeService {
+        rpc_called: Arc<AtomicBool>,
+    }
+
+    #[async_trait::async_trait]
+    impl ExchangeService for FakeExchangeService {
+        type GetDataStream = ReceiverStream<std::result::Result<TaskData, Status>>;
+        type GetStreamStream = ReceiverStream<std::result::Result<StreamMessage, Status>>;
+
+        async fn get_data(
+            &self,
+            _: Request<TaskSinkId>,
+        ) -> std::result::Result<Response<Self::GetDataStream>, Status> {
+            unimplemented!()
+        }
+
+        async fn get_stream(
+            &self,
+            _request: Request<GetStreamRequest>,
+        ) -> std::result::Result<Response<Self::GetStreamStream>, Status> {
+            let (tx, rx) = tokio::sync::mpsc::channel(10);
+            self.rpc_called.store(true, Ordering::SeqCst);
+            // send stream_chunk
+            let stream_chunk = StreamChunk::default().to_protobuf().unwrap();
+            tx.send(Ok(StreamMessage {
+                stream_message: Some(
+                    risingwave_pb::data::stream_message::StreamMessage::StreamChunk(stream_chunk),
+                ),
+            }))
+            .await
+            .unwrap();
+            // send barrier
+            let barrier = Barrier {
+                epoch: 12345,
+                stop: false,
+            };
+            tx.send(Ok(StreamMessage {
+                stream_message: Some(risingwave_pb::data::stream_message::StreamMessage::Barrier(
+                    barrier,
+                )),
+            }))
+            .await
+            .unwrap();
+            Ok(Response::new(ReceiverStream::new(rx)))
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_stream_exchange_client() {
+        let rpc_called = Arc::new(AtomicBool::new(false));
+        let server_run = Arc::new(AtomicBool::new(false));
+        let addr = get_host_port("127.0.0.1:12346").unwrap();
+
+        // Start a server.
+        let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
+        let exchange_svc = ExchangeServiceServer::new(FakeExchangeService {
+            rpc_called: rpc_called.clone(),
+        });
+        let cp_server_run = server_run.clone();
+        let join_handle = tokio::spawn(async move {
+            cp_server_run.store(true, Ordering::SeqCst);
+            tonic::transport::Server::builder()
+                .add_service(exchange_svc)
+                .serve_with_shutdown(addr, async move {
+                    shutdown_recv.recv().await;
+                })
+                .await
+                .unwrap();
+        });
+
+        sleep(Duration::from_secs(1));
+        assert!(server_run.load(Ordering::SeqCst));
+        let (tx, mut rx) = channel(16);
+        let input_handle = tokio::spawn(async move {
+            let mut remote_input = RemoteInput::create(addr, (0, 0), tx).await.unwrap();
+            remote_input.run().await
+        });
+        assert_matches!(rx.next().await.unwrap(), Message::Chunk(chunk) => {
+          assert_eq!(chunk.ops.len() as u64, 0);
+          assert_eq!(chunk.columns.len() as u64, 0);
+          assert_eq!(chunk.visibility, None);
+        });
+        assert_matches!(rx.next().await.unwrap(), Message::Barrier{epoch:barrier_epoch,stop:_} => {
+          assert_eq!(barrier_epoch, 12345);
+        });
+        assert!(rpc_called.load(Ordering::SeqCst));
+        input_handle.await.unwrap();
+        shutdown_send.send(()).unwrap();
+        join_handle.await.unwrap();
     }
 }

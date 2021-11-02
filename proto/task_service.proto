@@ -99,6 +99,11 @@ message TaskData {
     data.DataChunk record_batch = 2;
 }
 
+message GetStreamRequest {
+    uint32 up_fragment_id = 1;
+    uint32 down_fragment_id = 2;
+}
+
 service TaskService {
     rpc Create(CreateTaskRequest) returns (CreateTaskResponse);
     rpc GetTaskInfo(GetTaskInfoRequest) returns (GetTaskInfoResponse);
@@ -107,4 +112,5 @@ service TaskService {
 
 service ExchangeService {
     rpc GetData(TaskSinkId) returns (stream TaskData);
+    rpc GetStream(GetStreamRequest) returns (stream data.StreamMessage);
 }

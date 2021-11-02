@@ -107,10 +107,11 @@ mod tests {
     use crate::execution::exchange_source::{ExchangeSource, GrpcExchangeSource};
     use risingwave_common::util::addr::get_host_port;
     use risingwave_pb::data::DataChunk;
+    use risingwave_pb::data::StreamMessage;
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
     };
-    use risingwave_pb::task_service::{TaskData, TaskSinkId};
+    use risingwave_pb::task_service::{GetStreamRequest, TaskData, TaskSinkId};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use std::thread::sleep;
@@ -125,6 +126,7 @@ mod tests {
     #[async_trait::async_trait]
     impl ExchangeService for FakeExchangeService {
         type GetDataStream = ReceiverStream<Result<TaskData, Status>>;
+        type GetStreamStream = ReceiverStream<std::result::Result<StreamMessage, Status>>;
 
         async fn get_data(
             &self,
@@ -141,6 +143,13 @@ mod tests {
                 .unwrap();
             }
             Ok(Response::new(ReceiverStream::new(rx)))
+        }
+
+        async fn get_stream(
+            &self,
+            _request: Request<GetStreamRequest>,
+        ) -> Result<Response<Self::GetStreamStream>, Status> {
+            unimplemented!()
         }
     }
 

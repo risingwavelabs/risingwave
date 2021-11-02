@@ -1,8 +1,12 @@
 use crate::stream::StreamManager;
+use crate::stream_op::Message;
 use crate::task::{TaskManager, TaskSinkId};
+use futures::channel::mpsc::Receiver;
+use futures::StreamExt;
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_pb::data::StreamMessage;
 use risingwave_pb::task_service::exchange_service_server::ExchangeService;
-use risingwave_pb::task_service::{TaskData, TaskSinkId as ProtoTaskSinkId};
+use risingwave_pb::task_service::{GetStreamRequest, TaskData, TaskSinkId as ProtoTaskSinkId};
 use risingwave_pb::ToProto;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -27,6 +31,7 @@ type ExchangeDataSender = tokio::sync::mpsc::Sender<std::result::Result<TaskData
 #[async_trait::async_trait]
 impl ExchangeService for ExchangeServiceImpl {
     type GetDataStream = ExchangeDataStream;
+    type GetStreamStream = ReceiverStream<std::result::Result<StreamMessage, Status>>;
 
     #[cfg(not(tarpaulin_include))]
     async fn get_data(
@@ -45,6 +50,31 @@ impl ExchangeService for ExchangeServiceImpl {
             }
         }
     }
+
+    async fn get_stream(
+        &self,
+        request: Request<GetStreamRequest>,
+    ) -> std::result::Result<Response<Self::GetStreamStream>, Status> {
+        let peer_addr = request
+            .remote_addr()
+            .ok_or_else(|| Status::unavailable("get_stream connection unestablished"))?;
+        let req = request.into_inner();
+        let up_down_ids = (req.up_fragment_id, req.down_fragment_id);
+        let receiver = self
+            .stream_mgr
+            .take_receiver(up_down_ids)
+            .map_err(|e| e.to_grpc_status())?;
+        match self.get_stream_impl(peer_addr, receiver).await {
+            Ok(resp) => Ok(resp),
+            Err(e) => {
+                error!(
+                    "Failed to server stream exchange RPC from {}: {}",
+                    peer_addr, e
+                );
+                Err(e.to_grpc_status())
+            }
+        }
+    }
 }
 
 impl ExchangeServiceImpl {
@@ -59,7 +89,7 @@ impl ExchangeServiceImpl {
         let proto_tsid = pb_tsid.to_proto();
         let tsid = TaskSinkId::from(&proto_tsid);
         debug!("Serve exchange RPC from {} [{:?}]", peer_addr, tsid);
-        let mut task_sink = self.mgr.take_sink(&proto_tsid).unwrap();
+        let mut task_sink = self.mgr.take_sink(&proto_tsid)?;
         tokio::spawn(async move {
             let mut writer = GrpcExchangeWriter::new(tx.clone());
             match task_sink.take_data(&mut writer).await {
@@ -75,6 +105,40 @@ impl ExchangeServiceImpl {
             }
         });
 
+        Ok(Response::new(ReceiverStream::new(rx)))
+    }
+
+    async fn get_stream_impl(
+        &self,
+        peer_addr: SocketAddr,
+        mut receiver: Receiver<Message>,
+    ) -> Result<Response<<Self as ExchangeService>::GetStreamStream>> {
+        let (tx, rx) = tokio::sync::mpsc::channel(10);
+        debug!("Serve stream exchange RPC from {}", peer_addr);
+        tokio::spawn(async move {
+            loop {
+                let msg = receiver.next().await;
+                match msg {
+                    // the sender is closed, we close the receiver and stop forwarding message
+                    None => break,
+                    Some(msg) => {
+                        let res = match msg.to_protobuf() {
+                            Ok(stream_msg) => Ok(stream_msg),
+                            Err(e) => Err(e.to_grpc_status()),
+                        };
+                        let _ = match tx.send(res).await.map_err(|e| {
+                            RwError::from(ErrorCode::InternalError(format!(
+                                "failed to send stream data: {}",
+                                e
+                            )))
+                        }) {
+                            Ok(_) => Ok(()),
+                            Err(e) => tx.send(Err(e.to_grpc_status())).await,
+                        };
+                    }
+                }
+            }
+        });
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 }
