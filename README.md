@@ -115,7 +115,7 @@ cargo clippy --all-targets --all-features
 ```
 
 ## Toolchain
-Currently, we are using nightly toolchain `nightly-2021-09-10`. If anyone needs to upgrade
+Currently, we are using nightly toolchain `nightly-2021-11-01`. If anyone needs to upgrade
 the toolchain, be sure to bump `rust-toolchain` file as well as GitHub workflow.
 
 ## Documentation

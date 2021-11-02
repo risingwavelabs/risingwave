@@ -255,7 +255,7 @@ jobs:
       - name: Install rust toolchain
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: nightly-2021-09-10
+          toolchain: nightly-2021-11-01
           components: rustfmt, clippy
 
       - name: Install cargo-tarpaulin
