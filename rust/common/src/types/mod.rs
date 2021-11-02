@@ -152,7 +152,9 @@ pub fn option_to_owned_scalar<S: Scalar>(scalar: &Option<S::ScalarRefType<'_>>) 
 ///
 /// `ScalarRef` is reciprocal to `Scalar`. Use `to_owned_scalar` to get an
 /// owned scalar.
-pub trait ScalarRef<'a>: Copy + std::fmt::Debug + 'a {
+pub trait ScalarRef<'a>:
+    Copy + std::fmt::Debug + 'a + TryFrom<ScalarRefImpl<'a>, Error = RwError> + Into<ScalarRefImpl<'a>>
+{
     /// `ScalarType` is the owned type of current `ScalarRef`.
   #[rustfmt::skip]
   // rustfmt will incorrectly remove GAT lifetime.
@@ -304,6 +306,34 @@ macro_rules! impl_convert {
 }
 
 for_all_scalar_variants! { impl_convert }
+
+macro_rules! impl_scalar_impl_ref_conversion {
+ ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+   impl ScalarImpl {
+     /// Converts [`ScalarImpl`] to [`ScalarRefImpl`]
+     pub fn as_scalar_ref_impl(&self) -> ScalarRefImpl<'_> {
+       match self {
+         $(
+           Self::$variant_name(inner) => ScalarRefImpl::<'_>::$variant_name(inner.as_scalar_ref())
+         ), *
+       }
+     }
+   }
+
+   impl<'a> ScalarRefImpl<'a> {
+     /// Converts [`ScalarRefImpl`] to [`ScalarImpl`]
+     pub fn into_scalar_impl(self) -> ScalarImpl {
+       match self {
+         $(
+           Self::$variant_name(inner) => ScalarImpl::$variant_name(inner.to_owned_scalar())
+         ), *
+       }
+     }
+   }
+};
+}
+
+for_all_scalar_variants! { impl_scalar_impl_ref_conversion }
 
 // FIXME: should implement Hash and Eq all by deriving
 // TODO: may take type information into consideration later

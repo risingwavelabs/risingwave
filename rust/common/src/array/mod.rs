@@ -459,6 +459,12 @@ where
     builder.finish()
 }
 
+impl PartialEq for ArrayImpl {
+    fn eq(&self, other: &Self) -> bool {
+        self.iter().eq(other.iter())
+    }
+}
+
 // This trait combine the array with its data type. It helps generate the across type expression
 pub trait DataTypeTrait {
     const DATA_TYPE_ENUM: DataTypeKind;

@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 #![warn(clippy::map_flatten)]
 #![warn(clippy::doc_markdown)]
+#![deny(unused_must_use)]
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
