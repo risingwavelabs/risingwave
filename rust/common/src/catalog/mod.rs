@@ -12,7 +12,7 @@ pub struct DatabaseId {
 }
 
 impl DatabaseId {
-    fn new(database_id: i32) -> Self {
+    pub fn new(database_id: i32) -> Self {
         DatabaseId { database_id }
     }
 }
@@ -25,7 +25,7 @@ pub struct SchemaId {
 }
 
 impl SchemaId {
-    fn new(database_ref_id: DatabaseId, schema_id: i32) -> Self {
+    pub fn new(database_ref_id: DatabaseId, schema_id: i32) -> Self {
         SchemaId {
             database_ref_id,
             schema_id,
@@ -41,7 +41,7 @@ pub struct TableId {
 }
 
 impl TableId {
-    fn new(schema_ref_id: SchemaId, table_id: i32) -> Self {
+    pub fn new(schema_ref_id: SchemaId, table_id: i32) -> Self {
         TableId {
             schema_ref_id,
             table_id,

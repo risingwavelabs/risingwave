@@ -1,6 +1,22 @@
-use pb_construct::make_proto;
+use crate::storage::SimpleTableRef;
+use crate::storage::{Row, SimpleTableManager, Table, TableManager};
+use crate::stream::StreamManager;
+use crate::stream_op::Message;
+use futures::StreamExt;
+use itertools::Itertools;
 use pb_convert::FromProtobuf;
-use protobuf::well_known_types::Any as AnyProto;
+use risingwave_common::array::column::Column;
+use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder};
+use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::RwError;
+use risingwave_common::types::{Int32Type, Scalar};
+use risingwave_common::util::addr::get_host_port;
+use risingwave_pb::data::data_type::TypeName;
+use risingwave_pb::data::DataType;
+use risingwave_pb::expr::ExprNode;
+use risingwave_pb::plan::column_desc::ColumnEncodingType;
+use risingwave_pb::plan::ColumnDesc;
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{
@@ -9,29 +25,16 @@ use risingwave_pb::stream_plan::{
 };
 use risingwave_pb::stream_service::{ActorInfo, ActorInfoTable};
 use risingwave_pb::task_service::HostAddress;
-use risingwave_pb::ToProst;
 use risingwave_pb::ToProto;
-use risingwave_proto::data::{DataType, DataType_TypeName};
-use risingwave_proto::expr::{ExprNode_Type, InputRefExpr};
-use risingwave_proto::plan::{ColumnDesc, ColumnDesc_ColumnEncodingType};
-
-use crate::storage::SimpleTableRef;
-use crate::storage::{Row, SimpleTableManager, Table, TableManager};
-use crate::stream::StreamManager;
-use crate::stream_op::Message;
-use futures::StreamExt;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder};
-use risingwave_common::catalog::TableId;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::RwError;
-use risingwave_common::types::{Int32Type, Scalar};
-use risingwave_common::util::addr::get_host_port;
+use risingwave_proto::expr::ExprNode_Type::INPUT_REF;
 use smallvec::SmallVec;
 use std::sync::Arc;
 
-fn make_int32_type_proto() -> risingwave_proto::data::DataType {
-    return make_proto!(DataType, { type_name: DataType_TypeName::INT32 });
+fn make_int32_type_pb() -> DataType {
+    DataType {
+        type_name: TypeName::Int32 as i32,
+        ..Default::default()
+    }
 }
 
 fn make_table_ref_id(id: i32) -> TableRefId {
@@ -57,31 +60,31 @@ async fn test_stream_mv_proto() {
         })),
         input: None,
     };
-    let expr_proto = make_proto!(risingwave_proto::expr::ExprNode,{
-        expr_type: ExprNode_Type::INPUT_REF,
-        body: AnyProto::pack(
-            &make_proto!(InputRefExpr,{
-                column_idx: 0
-            })
-        ).unwrap(),
-        return_type: make_int32_type_proto()
-    });
-    let column_desc_proto = make_proto!(risingwave_proto::plan::ColumnDesc,{
-        column_type: make_int32_type_proto(),
-        encoding: ColumnDesc_ColumnEncodingType::RAW,
-        name: "v1".to_string()
-    });
+    let expr_proto = ExprNode {
+        expr_type: INPUT_REF as i32,
+        body: None,
+        return_type: Some(make_int32_type_pb()),
+    };
+    let column_desc = ColumnDesc {
+        column_type: Some(DataType {
+            type_name: TypeName::Int32 as i32,
+            ..Default::default()
+        }),
+        encoding: ColumnEncodingType::Raw as i32,
+        is_primary: false,
+        name: "v1".to_string(),
+    };
 
     let project_proto = StreamNode {
         node: Some(Node::ProjectNode(ProjectNode {
-            select_list: vec![expr_proto.to_prost::<risingwave_pb::expr::ExprNode>()],
+            select_list: vec![expr_proto],
         })),
         input: Some(Box::new(source_proto)),
     };
     let mview_proto = StreamNode {
         node: Some(Node::MviewNode(MViewNode {
             table_ref_id: Some(make_table_ref_id(1)),
-            column_descs: vec![column_desc_proto.to_prost::<risingwave_pb::plan::ColumnDesc>()],
+            column_descs: vec![column_desc],
             pk_indices: vec![],
         })),
         input: Some(Box::new(project_proto)),
@@ -99,28 +102,30 @@ async fn test_stream_mv_proto() {
 
     // Initialize storage.
     let table_manager = Arc::new(SimpleTableManager::new());
-    let table_id = TableId::from_protobuf(
-        &make_table_ref_id(0).to_proto::<risingwave_proto::plan::TableRefId>(),
-    )
-    .expect("Failed to convert table id");
-    let column1 = make_proto!(ColumnDesc, {
-      column_type: make_proto!(DataType, {
-        type_name: DataType_TypeName::INT32
-      }),
-      encoding: ColumnDesc_ColumnEncodingType::RAW,
-      is_primary: false,
-      name: "test_col".to_string()
-    });
-    let column2 = make_proto!(ColumnDesc, {
-      column_type: make_proto!(DataType, {
-        type_name: DataType_TypeName::INT32
-      }),
-      encoding: ColumnDesc_ColumnEncodingType::RAW,
-      is_primary: false,
-      name: "test_col".to_string()
-    });
+    let table_id = TableId::new(SchemaId::new(DatabaseId::new(0), 0), 0);
+    let column1 = ColumnDesc {
+        column_type: Some(DataType {
+            type_name: TypeName::Int32 as i32,
+            ..Default::default()
+        }),
+        encoding: ColumnEncodingType::Raw as i32,
+        is_primary: false,
+        name: "test_col".to_string(),
+    };
+    let column2 = ColumnDesc {
+        column_type: Some(DataType {
+            type_name: TypeName::Int32 as i32,
+            ..Default::default()
+        }),
+        encoding: ColumnEncodingType::Raw as i32,
+        is_primary: false,
+        name: "test_col".to_string(),
+    };
     let columns = vec![column1, column2];
-    let _res = table_manager.create_table(&table_id, &columns);
+    let _res = table_manager.create_table(
+        &table_id,
+        &columns.iter().map(ToProto::to_proto).collect_vec(),
+    );
     let table_ref =
         (if let SimpleTableRef::Columnar(table_ref) = table_manager.get_table(&table_id).unwrap() {
             Ok(table_ref)
