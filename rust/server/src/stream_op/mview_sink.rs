@@ -186,7 +186,7 @@ mod tests {
                     },
                 ],
             };
-            let source = MockSource::new(schema, vec![chunk1, chunk2]);
+            let source = MockSource::with_chunks(schema, vec![chunk1, chunk2]);
             let mut sink_executor =
                 Box::new(MViewSinkExecutor::new(Box::new(source), table.clone(), pks));
 
@@ -288,7 +288,7 @@ mod tests {
                     },
                 ],
             };
-            let source = MockSource::new(schema, vec![chunk1, chunk2]);
+            let source = MockSource::with_chunks(schema, vec![chunk1, chunk2]);
             let mut sink_executor = Box::new(MViewSinkExecutor::new(
                 Box::new(source),
                 table.clone(),

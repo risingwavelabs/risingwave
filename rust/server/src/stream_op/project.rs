@@ -138,7 +138,7 @@ mod tests {
                 },
             ],
         };
-        let source = MockSource::new(schema, vec![chunk1, chunk2]);
+        let source = MockSource::with_chunks(schema, vec![chunk1, chunk2]);
 
         let left_type = Int64Type::create(false);
         let left_expr = InputRefExpression::new(left_type, 0);

@@ -341,7 +341,7 @@ mod tests {
                 data_type: Int64Type::create(false),
             }],
         };
-        let source = MockSource::new(schema, vec![chunk1, chunk2]);
+        let source = MockSource::with_chunks(schema, vec![chunk1, chunk2]);
 
         // This is local hash aggregation, so we add another row count state
         let keys = vec![0];
@@ -444,7 +444,7 @@ mod tests {
                 },
             ],
         };
-        let source = MockSource::new(schema, vec![chunk1, chunk2]);
+        let source = MockSource::with_chunks(schema, vec![chunk1, chunk2]);
 
         // This is local hash aggregation, so we add another sum state
         let key_indices = vec![0];

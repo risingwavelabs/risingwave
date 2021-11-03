@@ -3,23 +3,38 @@ use std::collections::VecDeque;
 
 pub struct MockSource {
     schema: Schema,
-    chunks: VecDeque<StreamChunk>,
+    msgs: VecDeque<Message>,
 }
 
 impl MockSource {
-    pub fn new(schema: Schema, chunks: Vec<StreamChunk>) -> Self {
+    pub fn new(schema: Schema) -> Self {
         Self {
             schema,
-            chunks: chunks.into_iter().collect(),
+            msgs: VecDeque::default(),
         }
+    }
+
+    pub fn with_chunks(schema: Schema, chunks: Vec<StreamChunk>) -> Self {
+        Self {
+            schema,
+            msgs: chunks.into_iter().map(Message::Chunk).collect(),
+        }
+    }
+
+    pub fn push_chunks(&mut self, chunks: impl Iterator<Item = StreamChunk>) {
+        self.msgs.extend(chunks.map(Message::Chunk));
+    }
+
+    pub fn push_barrier(&mut self, epoch: u64, stop: bool) {
+        self.msgs.push_back(Message::Barrier { epoch, stop });
     }
 }
 
 #[async_trait]
 impl Executor for MockSource {
     async fn next(&mut self) -> Result<Message> {
-        match self.chunks.pop_front() {
-            Some(chunk) => Ok(Message::Chunk(chunk)),
+        match self.msgs.pop_front() {
+            Some(msg) => Ok(msg),
             None => Ok(Message::Terminate),
         }
     }
