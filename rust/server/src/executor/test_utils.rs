@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 
-use risingwave_proto::expr::ExprNode_Type;
+use risingwave_pb::expr::expr_node::Type as ProstExprType;
 
 use crate::executor::ExecutorResult::Batch;
 use crate::executor::ExecutorResult::Done;
@@ -133,7 +133,7 @@ pub async fn diff_executor_output(mut actual: BoxedExecutor, mut expect: BoxedEx
         let except_expr = InputRefExpression::new(data_type.clone(), idx);
         let actual_expr = InputRefExpression::new(data_type.clone(), idy);
         let mut expr = new_binary_expr(
-            ExprNode_Type::EQUAL,
+            ProstExprType::Equal,
             Arc::new(BoolType::new(false)),
             Box::new(except_expr),
             Box::new(actual_expr),

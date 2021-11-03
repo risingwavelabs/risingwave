@@ -101,7 +101,7 @@ mod tests {
     use risingwave_common::array::I64Array;
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_proto::expr::ExprNode_Type;
+    use risingwave_pb::expr::expr_node::Type as ProstExprType;
 
     use crate::stream_op::test_utils::MockSource;
     use crate::stream_op::{Executor, Message, Op, ProjectExecutor, StreamChunk};
@@ -145,7 +145,7 @@ mod tests {
         let right_type = Int64Type::create(false);
         let right_expr = InputRefExpression::new(right_type, 1);
         let test_expr = new_binary_expr(
-            ExprNode_Type::ADD,
+            ProstExprType::Add,
             Int64Type::create(false),
             Box::new(left_expr),
             Box::new(right_expr),

@@ -9,55 +9,57 @@ use crate::vector_op::arithmetic_op::{date_interval_add, date_interval_sub};
 use crate::vector_op::cast::date_to_timestamp;
 use pb_construct::make_proto;
 use protobuf::well_known_types::Any as AnyProto;
-use protobuf::RepeatedField;
+use risingwave_pb::expr::expr_node::RexNode;
+use risingwave_pb::expr::expr_node::Type as ProstExprType;
+use risingwave_pb::expr::FunctionCall;
 use risingwave_proto::data::DataType as DataTypeProto;
 use risingwave_proto::data::DataType_TypeName;
+use risingwave_proto::expr::ExprNode;
 use risingwave_proto::expr::ExprNode_Type::INPUT_REF;
 use risingwave_proto::expr::InputRefExpr;
-use risingwave_proto::expr::{ExprNode, ExprNode_Type, FunctionCall};
 use rust_decimal::Decimal;
 
 #[test]
 fn test_binary() {
-    test_binary_i32::<I32Array, _>(|x, y| x + y, ExprNode_Type::ADD);
-    test_binary_i32::<I32Array, _>(|x, y| x - y, ExprNode_Type::SUBTRACT);
-    test_binary_i32::<I32Array, _>(|x, y| x * y, ExprNode_Type::MULTIPLY);
-    test_binary_i32::<I32Array, _>(|x, y| x / y, ExprNode_Type::DIVIDE);
-    test_binary_i32::<BoolArray, _>(|x, y| x == y, ExprNode_Type::EQUAL);
-    test_binary_i32::<BoolArray, _>(|x, y| x != y, ExprNode_Type::NOT_EQUAL);
-    test_binary_i32::<BoolArray, _>(|x, y| x > y, ExprNode_Type::GREATER_THAN);
-    test_binary_i32::<BoolArray, _>(|x, y| x >= y, ExprNode_Type::GREATER_THAN_OR_EQUAL);
-    test_binary_i32::<BoolArray, _>(|x, y| x < y, ExprNode_Type::LESS_THAN);
-    test_binary_i32::<BoolArray, _>(|x, y| x <= y, ExprNode_Type::LESS_THAN_OR_EQUAL);
-    test_binary_decimal::<DecimalArray, _>(|x, y| x + y, ExprNode_Type::ADD);
-    test_binary_decimal::<DecimalArray, _>(|x, y| x - y, ExprNode_Type::SUBTRACT);
-    test_binary_decimal::<DecimalArray, _>(|x, y| x * y, ExprNode_Type::MULTIPLY);
-    test_binary_decimal::<DecimalArray, _>(|x, y| x / y, ExprNode_Type::DIVIDE);
-    test_binary_decimal::<BoolArray, _>(|x, y| x == y, ExprNode_Type::EQUAL);
-    test_binary_decimal::<BoolArray, _>(|x, y| x != y, ExprNode_Type::NOT_EQUAL);
-    test_binary_decimal::<BoolArray, _>(|x, y| x > y, ExprNode_Type::GREATER_THAN);
-    test_binary_decimal::<BoolArray, _>(|x, y| x >= y, ExprNode_Type::GREATER_THAN_OR_EQUAL);
-    test_binary_decimal::<BoolArray, _>(|x, y| x < y, ExprNode_Type::LESS_THAN);
-    test_binary_decimal::<BoolArray, _>(|x, y| x <= y, ExprNode_Type::LESS_THAN_OR_EQUAL);
-    test_binary_bool::<BoolArray, _>(|x, y| x && y, ExprNode_Type::AND);
-    test_binary_bool::<BoolArray, _>(|x, y| x || y, ExprNode_Type::OR);
+    test_binary_i32::<I32Array, _>(|x, y| x + y, ProstExprType::Add);
+    test_binary_i32::<I32Array, _>(|x, y| x - y, ProstExprType::Subtract);
+    test_binary_i32::<I32Array, _>(|x, y| x * y, ProstExprType::Multiply);
+    test_binary_i32::<I32Array, _>(|x, y| x / y, ProstExprType::Divide);
+    test_binary_i32::<BoolArray, _>(|x, y| x == y, ProstExprType::Equal);
+    test_binary_i32::<BoolArray, _>(|x, y| x != y, ProstExprType::NotEqual);
+    test_binary_i32::<BoolArray, _>(|x, y| x > y, ProstExprType::GreaterThan);
+    test_binary_i32::<BoolArray, _>(|x, y| x >= y, ProstExprType::GreaterThanOrEqual);
+    test_binary_i32::<BoolArray, _>(|x, y| x < y, ProstExprType::LessThan);
+    test_binary_i32::<BoolArray, _>(|x, y| x <= y, ProstExprType::LessThanOrEqual);
+    test_binary_decimal::<DecimalArray, _>(|x, y| x + y, ProstExprType::Add);
+    test_binary_decimal::<DecimalArray, _>(|x, y| x - y, ProstExprType::Subtract);
+    test_binary_decimal::<DecimalArray, _>(|x, y| x * y, ProstExprType::Multiply);
+    test_binary_decimal::<DecimalArray, _>(|x, y| x / y, ProstExprType::Divide);
+    test_binary_decimal::<BoolArray, _>(|x, y| x == y, ProstExprType::Equal);
+    test_binary_decimal::<BoolArray, _>(|x, y| x != y, ProstExprType::NotEqual);
+    test_binary_decimal::<BoolArray, _>(|x, y| x > y, ProstExprType::GreaterThan);
+    test_binary_decimal::<BoolArray, _>(|x, y| x >= y, ProstExprType::GreaterThanOrEqual);
+    test_binary_decimal::<BoolArray, _>(|x, y| x < y, ProstExprType::LessThan);
+    test_binary_decimal::<BoolArray, _>(|x, y| x <= y, ProstExprType::LessThanOrEqual);
+    test_binary_bool::<BoolArray, _>(|x, y| x && y, ProstExprType::And);
+    test_binary_bool::<BoolArray, _>(|x, y| x || y, ProstExprType::Or);
     test_binary_interval::<I64Array, _>(
         |x, y| date_interval_add::<i32, i32, i64>(x, y).unwrap(),
-        ExprNode_Type::ADD,
+        ProstExprType::Add,
     );
     test_binary_interval::<I64Array, _>(
         |x, y| date_interval_sub::<i32, i32, i64>(x, y).unwrap(),
-        ExprNode_Type::SUBTRACT,
+        ProstExprType::Subtract,
     );
 }
 
 #[test]
 fn test_unary() {
-    test_unary_bool::<BoolArray, _>(|x| !x, ExprNode_Type::NOT);
-    test_unary_date::<I64Array, _>(|x| date_to_timestamp(x).unwrap(), ExprNode_Type::CAST);
+    test_unary_bool::<BoolArray, _>(|x| !x, ProstExprType::Not);
+    test_unary_date::<I64Array, _>(|x| date_to_timestamp(x).unwrap(), ProstExprType::Cast);
 }
 
-fn test_binary_i32<A, F>(f: F, kind: ExprNode_Type)
+fn test_binary_i32<A, F>(f: F, kind: ProstExprType)
 where
     A: Array,
     for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
@@ -105,7 +107,7 @@ where
         &[DataType_TypeName::INT32, DataType_TypeName::INT32],
         &[0, 1],
     );
-    let mut vec_excutor = build_from_proto(&expr).unwrap();
+    let mut vec_excutor = build_from_prost(&expr).unwrap();
     let res = vec_excutor.eval(&data_chunk).unwrap();
     let arr: &A = res.as_ref().into();
     for (idx, item) in arr.iter().enumerate() {
@@ -114,7 +116,7 @@ where
     }
 }
 
-fn test_binary_interval<A, F>(f: F, kind: ExprNode_Type)
+fn test_binary_interval<A, F>(f: F, kind: ProstExprType)
 where
     A: Array,
     for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
@@ -154,7 +156,7 @@ where
         &[DataType_TypeName::DATE, DataType_TypeName::INTERVAL],
         &[0, 1],
     );
-    let mut vec_excutor = build_from_proto(&expr).unwrap();
+    let mut vec_excutor = build_from_prost(&expr).unwrap();
     let res = vec_excutor.eval(&data_chunk).unwrap();
     let arr: &A = res.as_ref().into();
     for (idx, item) in arr.iter().enumerate() {
@@ -163,7 +165,7 @@ where
     }
 }
 
-fn test_binary_decimal<A, F>(f: F, kind: ExprNode_Type)
+fn test_binary_decimal<A, F>(f: F, kind: ProstExprType)
 where
     A: Array,
     for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
@@ -211,7 +213,7 @@ where
         &[DataType_TypeName::DECIMAL, DataType_TypeName::DECIMAL],
         &[0, 1],
     );
-    let mut vec_excutor = build_from_proto(&expr).unwrap();
+    let mut vec_excutor = build_from_prost(&expr).unwrap();
     let res = vec_excutor.eval(&data_chunk).unwrap();
     let arr: &A = res.as_ref().into();
     for (idx, item) in arr.iter().enumerate() {
@@ -220,7 +222,7 @@ where
     }
 }
 
-fn test_binary_bool<A, F>(f: F, kind: ExprNode_Type)
+fn test_binary_bool<A, F>(f: F, kind: ProstExprType)
 where
     A: Array,
     for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
@@ -268,7 +270,7 @@ where
         &[DataType_TypeName::DECIMAL, DataType_TypeName::DECIMAL],
         &[0, 1],
     );
-    let mut vec_excutor = build_from_proto(&expr).unwrap();
+    let mut vec_excutor = build_from_prost(&expr).unwrap();
     let res = vec_excutor.eval(&data_chunk).unwrap();
     let arr: &A = res.as_ref().into();
     for (idx, item) in arr.iter().enumerate() {
@@ -277,7 +279,7 @@ where
     }
 }
 
-fn test_unary_bool<A, F>(f: F, kind: ExprNode_Type)
+fn test_unary_bool<A, F>(f: F, kind: ProstExprType)
 where
     A: Array,
     for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
@@ -307,7 +309,7 @@ where
     );
     let data_chunk = DataChunk::builder().columns(vec![col1]).build();
     let expr = make_expression(kind, &[DataType_TypeName::BOOLEAN], &[0]);
-    let mut vec_excutor = build_from_proto(&expr).unwrap();
+    let mut vec_excutor = build_from_prost(&expr).unwrap();
     let res = vec_excutor.eval(&data_chunk).unwrap();
     let arr: &A = res.as_ref().into();
     for (idx, item) in arr.iter().enumerate() {
@@ -316,7 +318,7 @@ where
     }
 }
 
-fn test_unary_date<A, F>(f: F, kind: ExprNode_Type)
+fn test_unary_date<A, F>(f: F, kind: ProstExprType)
 where
     A: Array,
     for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
@@ -343,7 +345,7 @@ where
     );
     let data_chunk = DataChunk::builder().columns(vec![col1]).build();
     let expr = make_expression(kind, &[DataType_TypeName::DATE], &[0]);
-    let mut vec_excutor = build_from_proto(&expr).unwrap();
+    let mut vec_excutor = build_from_prost(&expr).unwrap();
     let res = vec_excutor.eval(&data_chunk).unwrap();
     let arr: &A = res.as_ref().into();
     for (idx, item) in arr.iter().enumerate() {
@@ -352,22 +354,29 @@ where
     }
 }
 
-fn make_expression(kind: ExprNode_Type, rets: &[DataType_TypeName], indices: &[i32]) -> ExprNode {
+fn make_expression(
+    kind: ProstExprType,
+    rets: &[DataType_TypeName],
+    indices: &[i32],
+) -> ProstExprNode {
     let mut exprs = Vec::new();
     for (idx, ret) in indices.iter().zip(rets.iter()) {
-        exprs.push(make_inputref(*idx, *ret));
+        exprs.push(make_inputref(*idx, *ret).to_prost::<ProstExprNode>());
     }
-    make_proto!(ExprNode, {
-      expr_type: kind,
-      body: AnyProto::pack(
-        &make_proto!(FunctionCall, {
-          children: RepeatedField::from_slice(exprs.as_slice())
-        })
-      ).unwrap(),
-      return_type: make_proto!(DataTypeProto, {
-        type_name: risingwave_proto::data::DataType_TypeName::TIMESTAMP
-      })
-    })
+    let function_call = FunctionCall { children: exprs };
+    let return_type = risingwave_pb::data::DataType {
+        type_name: risingwave_pb::data::data_type::TypeName::Timestamp as i32,
+        precision: 0,
+        scale: 0,
+        is_nullable: false,
+        interval_type: 0,
+    };
+    ProstExprNode {
+        expr_type: kind as i32,
+        body: None,
+        return_type: Some(return_type),
+        rex_node: Some(RexNode::FuncCall(function_call)),
+    }
 }
 
 fn make_inputref(idx: i32, ret: risingwave_proto::data::DataType_TypeName) -> ExprNode {

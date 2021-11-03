@@ -19,21 +19,23 @@ use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 
 use crate::expr::expr_factory::{
-    build_binary_expr, build_length_expr, build_like_expr, build_ltrim_expr, build_position_expr,
-    build_replace_expr, build_rtrim_expr, build_substr_expr, build_trim_expr, build_unary_expr,
+    build_binary_expr_prost, build_length_expr, build_like_expr, build_ltrim_expr,
+    build_position_expr, build_replace_expr, build_rtrim_expr, build_substr_expr, build_trim_expr,
+    build_unary_expr_prost,
 };
 
 use crate::types::{DataType, DataTypeRef};
+use risingwave_pb::expr::expr_node::Type::{
+    {Add, Divide, Modulus, Multiply, Subtract}, {And, Not, Or}, {Cast, Upper},
+    {Equal, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual, NotEqual},
+};
+use risingwave_pb::expr::ExprNode as ProstExprNode;
+use risingwave_pb::ToProst;
+use risingwave_pb::ToProto;
 use risingwave_proto::expr::{
     ExprNode,
-    ExprNode_Type::{ADD, DIVIDE, MODULUS, MULTIPLY, SUBTRACT},
-    ExprNode_Type::{AND, NOT, OR},
     ExprNode_Type::{
-        CAST, CONSTANT_VALUE, INPUT_REF, LENGTH, LIKE, LTRIM, POSITION, REPLACE, RTRIM, SUBSTR,
-        TRIM, UPPER,
-    },
-    ExprNode_Type::{
-        EQUAL, GREATER_THAN, GREATER_THAN_OR_EQUAL, LESS_THAN, LESS_THAN_OR_EQUAL, NOT_EQUAL,
+        CONSTANT_VALUE, INPUT_REF, LENGTH, LIKE, LTRIM, POSITION, REPLACE, RTRIM, SUBSTR, TRIM,
     },
 };
 use std::convert::TryFrom;
@@ -65,16 +67,6 @@ macro_rules! build_expression {
 pub fn build_from_proto(proto: &ExprNode) -> Result<BoxedExpression> {
     // TODO: Read from proto in a consistent way.
     match proto.get_expr_type() {
-        CAST | UPPER | NOT => return build_unary_expr(proto),
-        EQUAL
-        | NOT_EQUAL
-        | LESS_THAN
-        | LESS_THAN_OR_EQUAL
-        | GREATER_THAN
-        | GREATER_THAN_OR_EQUAL => return build_binary_expr(proto),
-        ADD | SUBTRACT | MULTIPLY | DIVIDE | MODULUS | AND | OR => {
-            return build_binary_expr(proto);
-        }
         SUBSTR => return build_substr_expr(proto),
         LENGTH => return build_length_expr(proto),
         REPLACE => return build_replace_expr(proto),
@@ -83,11 +75,25 @@ pub fn build_from_proto(proto: &ExprNode) -> Result<BoxedExpression> {
         LTRIM => return build_ltrim_expr(proto),
         RTRIM => return build_rtrim_expr(proto),
         POSITION => return build_position_expr(proto),
-        _ => (),
+        CONSTANT_VALUE => (),
+        INPUT_REF => (),
+        _other => return build_from_prost(&proto.to_prost::<ProstExprNode>()),
     };
     build_expression! {proto,
       CONSTANT_VALUE => LiteralExpression,
       INPUT_REF => InputRefExpression
+    }
+}
+
+pub fn build_from_prost(prost: &ProstExprNode) -> Result<BoxedExpression> {
+    match prost.get_expr_type() {
+        Cast | Upper | Not => build_unary_expr_prost(prost),
+        Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual => {
+            build_binary_expr_prost(prost)
+        }
+        Add | Subtract | Multiply | Divide | Modulus | And | Or => build_binary_expr_prost(prost),
+
+        _ => build_from_proto(&prost.to_proto::<ExprNode>()),
     }
 }
 

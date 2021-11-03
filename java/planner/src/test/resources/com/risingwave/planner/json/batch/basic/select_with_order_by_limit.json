@@ -11,6 +11,8 @@
         },
         "returnType": {
           "typeName": "INT32"
+        },
+        "inputRef": {
         }
       }]
     },

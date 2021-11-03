@@ -23,6 +23,8 @@
           },
           "returnType": {
             "typeName": "INT32"
+          },
+          "constant": {
           }
         }]
       }]

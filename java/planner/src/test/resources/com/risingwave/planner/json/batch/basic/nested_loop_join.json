@@ -13,6 +13,8 @@
           },
           "returnType": {
             "typeName": "INT32"
+          },
+          "inputRef": {
           }
         }, {
           "exprType": "INPUT_REF",
@@ -22,11 +24,39 @@
           },
           "returnType": {
             "typeName": "INT32"
+          },
+          "inputRef": {
+            "columnIdx": 3
           }
         }]
       },
       "returnType": {
         "typeName": "BOOLEAN"
+      },
+      "funcCall": {
+        "children": [{
+          "exprType": "INPUT_REF",
+          "body": {
+            "@type": "type.googleapis.com/expr.InputRefExpr"
+          },
+          "returnType": {
+            "typeName": "INT32"
+          },
+          "inputRef": {
+          }
+        }, {
+          "exprType": "INPUT_REF",
+          "body": {
+            "@type": "type.googleapis.com/expr.InputRefExpr",
+            "columnIdx": 3
+          },
+          "returnType": {
+            "typeName": "INT32"
+          },
+          "inputRef": {
+            "columnIdx": 3
+          }
+        }]
       }
     }
   },

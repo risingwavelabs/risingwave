@@ -235,6 +235,7 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
         .setExprType(ExprNode.Type.INPUT_REF)
         .setBody(Any.pack(inputRefExpr))
         .setReturnType(dataType)
+        .setInputRef(inputRefExpr)
         .build();
   }
 
@@ -271,16 +272,17 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
    */
   private static ExprNode makeConstantExpr(
       RexLiteral literal, DataType returnProtoDataType, DataType protoDataType) {
+    var constantValue =
+        ConstantValue.newBuilder()
+            .setBody(
+                ByteString.copyFrom(
+                    RexToProtoSerializer.getBytesRepresentation(literal, protoDataType)))
+            .build();
     return ExprNode.newBuilder()
         .setExprType(ExprNode.Type.CONSTANT_VALUE)
-        .setBody(
-            Any.pack(
-                ConstantValue.newBuilder()
-                    .setBody(
-                        ByteString.copyFrom(
-                            RexToProtoSerializer.getBytesRepresentation(literal, protoDataType)))
-                    .build()))
+        .setBody(Any.pack(constantValue))
         .setReturnType(returnProtoDataType)
+        .setConstant(constantValue)
         .build();
   }
 
@@ -291,6 +293,7 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
         .setExprType(exprType)
         .setReturnType(protoDataType)
         .setBody(Any.pack(body))
+        .setFuncCall(body)
         .build();
   }
 
@@ -320,6 +323,7 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
         .setExprType(exprType)
         .setReturnType(protoDataType)
         .setBody(Any.pack(body))
+        .setFuncCall(body)
         .build();
   }
 

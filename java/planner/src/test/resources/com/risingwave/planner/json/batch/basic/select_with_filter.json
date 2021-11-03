@@ -21,6 +21,8 @@
                   },
                   "returnType": {
                     "typeName": "INT32"
+                  },
+                  "inputRef": {
                   }
                 }, {
                   "exprType": "CONSTANT_VALUE",
@@ -30,11 +32,39 @@
                   },
                   "returnType": {
                     "typeName": "INT32"
+                  },
+                  "constant": {
+                    "body": "AAAAAQ=="
                   }
                 }]
               },
               "returnType": {
                 "typeName": "BOOLEAN"
+              },
+              "funcCall": {
+                "children": [{
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.InputRefExpr"
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "inputRef": {
+                  }
+                }, {
+                  "exprType": "CONSTANT_VALUE",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.ConstantValue",
+                    "body": "AAAAAQ=="
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "constant": {
+                    "body": "AAAAAQ=="
+                  }
+                }]
               }
             }, {
               "exprType": "GREATER_THAN",
@@ -48,6 +78,9 @@
                   },
                   "returnType": {
                     "typeName": "INT32"
+                  },
+                  "inputRef": {
+                    "columnIdx": 1
                   }
                 }, {
                   "exprType": "CONSTANT_VALUE",
@@ -57,16 +90,165 @@
                   },
                   "returnType": {
                     "typeName": "INT32"
+                  },
+                  "constant": {
+                    "body": "AAAAAQ=="
                   }
                 }]
               },
               "returnType": {
                 "typeName": "BOOLEAN"
+              },
+              "funcCall": {
+                "children": [{
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.InputRefExpr",
+                    "columnIdx": 1
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "inputRef": {
+                    "columnIdx": 1
+                  }
+                }, {
+                  "exprType": "CONSTANT_VALUE",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.ConstantValue",
+                    "body": "AAAAAQ=="
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "constant": {
+                    "body": "AAAAAQ=="
+                  }
+                }]
               }
             }]
           },
           "returnType": {
             "typeName": "BOOLEAN"
+          },
+          "funcCall": {
+            "children": [{
+              "exprType": "GREATER_THAN",
+              "body": {
+                "@type": "type.googleapis.com/expr.FunctionCall",
+                "children": [{
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.InputRefExpr"
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "inputRef": {
+                  }
+                }, {
+                  "exprType": "CONSTANT_VALUE",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.ConstantValue",
+                    "body": "AAAAAQ=="
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "constant": {
+                    "body": "AAAAAQ=="
+                  }
+                }]
+              },
+              "returnType": {
+                "typeName": "BOOLEAN"
+              },
+              "funcCall": {
+                "children": [{
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.InputRefExpr"
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "inputRef": {
+                  }
+                }, {
+                  "exprType": "CONSTANT_VALUE",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.ConstantValue",
+                    "body": "AAAAAQ=="
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "constant": {
+                    "body": "AAAAAQ=="
+                  }
+                }]
+              }
+            }, {
+              "exprType": "GREATER_THAN",
+              "body": {
+                "@type": "type.googleapis.com/expr.FunctionCall",
+                "children": [{
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.InputRefExpr",
+                    "columnIdx": 1
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "inputRef": {
+                    "columnIdx": 1
+                  }
+                }, {
+                  "exprType": "CONSTANT_VALUE",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.ConstantValue",
+                    "body": "AAAAAQ=="
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "constant": {
+                    "body": "AAAAAQ=="
+                  }
+                }]
+              },
+              "returnType": {
+                "typeName": "BOOLEAN"
+              },
+              "funcCall": {
+                "children": [{
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.InputRefExpr",
+                    "columnIdx": 1
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "inputRef": {
+                    "columnIdx": 1
+                  }
+                }, {
+                  "exprType": "CONSTANT_VALUE",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.ConstantValue",
+                    "body": "AAAAAQ=="
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "constant": {
+                    "body": "AAAAAQ=="
+                  }
+                }]
+              }
+            }]
           }
         }, {
           "exprType": "GREATER_THAN",
@@ -80,6 +262,9 @@
               },
               "returnType": {
                 "typeName": "FLOAT"
+              },
+              "inputRef": {
+                "columnIdx": 2
               }
             }, {
               "exprType": "CONSTANT_VALUE",
@@ -89,16 +274,353 @@
               },
               "returnType": {
                 "typeName": "INT32"
+              },
+              "constant": {
+                "body": "AAAAAQ=="
               }
             }]
           },
           "returnType": {
             "typeName": "BOOLEAN"
+          },
+          "funcCall": {
+            "children": [{
+              "exprType": "INPUT_REF",
+              "body": {
+                "@type": "type.googleapis.com/expr.InputRefExpr",
+                "columnIdx": 2
+              },
+              "returnType": {
+                "typeName": "FLOAT"
+              },
+              "inputRef": {
+                "columnIdx": 2
+              }
+            }, {
+              "exprType": "CONSTANT_VALUE",
+              "body": {
+                "@type": "type.googleapis.com/expr.ConstantValue",
+                "body": "AAAAAQ=="
+              },
+              "returnType": {
+                "typeName": "INT32"
+              },
+              "constant": {
+                "body": "AAAAAQ=="
+              }
+            }]
           }
         }]
       },
       "returnType": {
         "typeName": "BOOLEAN"
+      },
+      "funcCall": {
+        "children": [{
+          "exprType": "AND",
+          "body": {
+            "@type": "type.googleapis.com/expr.FunctionCall",
+            "children": [{
+              "exprType": "GREATER_THAN",
+              "body": {
+                "@type": "type.googleapis.com/expr.FunctionCall",
+                "children": [{
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.InputRefExpr"
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "inputRef": {
+                  }
+                }, {
+                  "exprType": "CONSTANT_VALUE",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.ConstantValue",
+                    "body": "AAAAAQ=="
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "constant": {
+                    "body": "AAAAAQ=="
+                  }
+                }]
+              },
+              "returnType": {
+                "typeName": "BOOLEAN"
+              },
+              "funcCall": {
+                "children": [{
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.InputRefExpr"
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "inputRef": {
+                  }
+                }, {
+                  "exprType": "CONSTANT_VALUE",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.ConstantValue",
+                    "body": "AAAAAQ=="
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "constant": {
+                    "body": "AAAAAQ=="
+                  }
+                }]
+              }
+            }, {
+              "exprType": "GREATER_THAN",
+              "body": {
+                "@type": "type.googleapis.com/expr.FunctionCall",
+                "children": [{
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.InputRefExpr",
+                    "columnIdx": 1
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "inputRef": {
+                    "columnIdx": 1
+                  }
+                }, {
+                  "exprType": "CONSTANT_VALUE",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.ConstantValue",
+                    "body": "AAAAAQ=="
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "constant": {
+                    "body": "AAAAAQ=="
+                  }
+                }]
+              },
+              "returnType": {
+                "typeName": "BOOLEAN"
+              },
+              "funcCall": {
+                "children": [{
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.InputRefExpr",
+                    "columnIdx": 1
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "inputRef": {
+                    "columnIdx": 1
+                  }
+                }, {
+                  "exprType": "CONSTANT_VALUE",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.ConstantValue",
+                    "body": "AAAAAQ=="
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "constant": {
+                    "body": "AAAAAQ=="
+                  }
+                }]
+              }
+            }]
+          },
+          "returnType": {
+            "typeName": "BOOLEAN"
+          },
+          "funcCall": {
+            "children": [{
+              "exprType": "GREATER_THAN",
+              "body": {
+                "@type": "type.googleapis.com/expr.FunctionCall",
+                "children": [{
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.InputRefExpr"
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "inputRef": {
+                  }
+                }, {
+                  "exprType": "CONSTANT_VALUE",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.ConstantValue",
+                    "body": "AAAAAQ=="
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "constant": {
+                    "body": "AAAAAQ=="
+                  }
+                }]
+              },
+              "returnType": {
+                "typeName": "BOOLEAN"
+              },
+              "funcCall": {
+                "children": [{
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.InputRefExpr"
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "inputRef": {
+                  }
+                }, {
+                  "exprType": "CONSTANT_VALUE",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.ConstantValue",
+                    "body": "AAAAAQ=="
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "constant": {
+                    "body": "AAAAAQ=="
+                  }
+                }]
+              }
+            }, {
+              "exprType": "GREATER_THAN",
+              "body": {
+                "@type": "type.googleapis.com/expr.FunctionCall",
+                "children": [{
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.InputRefExpr",
+                    "columnIdx": 1
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "inputRef": {
+                    "columnIdx": 1
+                  }
+                }, {
+                  "exprType": "CONSTANT_VALUE",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.ConstantValue",
+                    "body": "AAAAAQ=="
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "constant": {
+                    "body": "AAAAAQ=="
+                  }
+                }]
+              },
+              "returnType": {
+                "typeName": "BOOLEAN"
+              },
+              "funcCall": {
+                "children": [{
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.InputRefExpr",
+                    "columnIdx": 1
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "inputRef": {
+                    "columnIdx": 1
+                  }
+                }, {
+                  "exprType": "CONSTANT_VALUE",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.ConstantValue",
+                    "body": "AAAAAQ=="
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "constant": {
+                    "body": "AAAAAQ=="
+                  }
+                }]
+              }
+            }]
+          }
+        }, {
+          "exprType": "GREATER_THAN",
+          "body": {
+            "@type": "type.googleapis.com/expr.FunctionCall",
+            "children": [{
+              "exprType": "INPUT_REF",
+              "body": {
+                "@type": "type.googleapis.com/expr.InputRefExpr",
+                "columnIdx": 2
+              },
+              "returnType": {
+                "typeName": "FLOAT"
+              },
+              "inputRef": {
+                "columnIdx": 2
+              }
+            }, {
+              "exprType": "CONSTANT_VALUE",
+              "body": {
+                "@type": "type.googleapis.com/expr.ConstantValue",
+                "body": "AAAAAQ=="
+              },
+              "returnType": {
+                "typeName": "INT32"
+              },
+              "constant": {
+                "body": "AAAAAQ=="
+              }
+            }]
+          },
+          "returnType": {
+            "typeName": "BOOLEAN"
+          },
+          "funcCall": {
+            "children": [{
+              "exprType": "INPUT_REF",
+              "body": {
+                "@type": "type.googleapis.com/expr.InputRefExpr",
+                "columnIdx": 2
+              },
+              "returnType": {
+                "typeName": "FLOAT"
+              },
+              "inputRef": {
+                "columnIdx": 2
+              }
+            }, {
+              "exprType": "CONSTANT_VALUE",
+              "body": {
+                "@type": "type.googleapis.com/expr.ConstantValue",
+                "body": "AAAAAQ=="
+              },
+              "returnType": {
+                "typeName": "INT32"
+              },
+              "constant": {
+                "body": "AAAAAQ=="
+              }
+            }]
+          }
+        }]
       }
     }
   },

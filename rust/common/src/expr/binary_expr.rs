@@ -10,7 +10,7 @@ use crate::vector_op::cmp::*;
 use crate::vector_op::conjunction::{and, or};
 use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
-use risingwave_proto::expr::ExprNode_Type;
+use risingwave_pb::expr::expr_node::Type as ProstExprType;
 use std::marker::PhantomData;
 
 // this is a placeholder function that return bool in gen_binary_expr
@@ -143,53 +143,53 @@ macro_rules! gen_binary_expr {
 }
 
 pub fn new_binary_expr(
-    expr_type: ExprNode_Type,
+    expr_type: ProstExprType,
     ret: DataTypeRef,
     l: BoxedExpression,
     r: BoxedExpression,
 ) -> BoxedExpression {
     match expr_type {
-        ExprNode_Type::EQUAL => {
+        ProstExprType::Equal => {
             gen_binary_expr! {comparison_impl, prim_eq, prim_eq, deci_f_eq, deci_eq, cmp_placeholder, cmp_placeholder, l, r, ret}
         }
-        ExprNode_Type::NOT_EQUAL => {
+        ProstExprType::NotEqual => {
             gen_binary_expr! {comparison_impl, prim_neq, prim_neq, deci_f_neq, deci_neq, cmp_placeholder, cmp_placeholder, l, r, ret}
         }
-        ExprNode_Type::LESS_THAN => {
+        ProstExprType::LessThan => {
             gen_binary_expr! {comparison_impl, prim_lt, prim_lt, deci_f_lt, deci_lt, cmp_placeholder, cmp_placeholder, l, r, ret}
         }
-        ExprNode_Type::GREATER_THAN => {
+        ProstExprType::GreaterThan => {
             gen_binary_expr! {comparison_impl, prim_gt, prim_gt, deci_f_gt, deci_gt, cmp_placeholder, cmp_placeholder, l, r, ret}
         }
-        ExprNode_Type::GREATER_THAN_OR_EQUAL => {
+        ProstExprType::GreaterThanOrEqual => {
             gen_binary_expr! {comparison_impl, prim_geq, prim_geq, deci_f_geq, deci_geq, cmp_placeholder, cmp_placeholder, l, r, ret}
         }
-        ExprNode_Type::LESS_THAN_OR_EQUAL => {
+        ProstExprType::LessThanOrEqual => {
             gen_binary_expr! {comparison_impl, prim_leq, prim_leq, deci_f_leq, deci_leq, cmp_placeholder, cmp_placeholder, l, r, ret}
         }
-        ExprNode_Type::ADD => {
+        ProstExprType::Add => {
             gen_binary_expr! {arithmetic_impl, int_add, float_add, deci_f_add, deci_add, interval_date_add, date_interval_add, l, r, ret}
         }
-        ExprNode_Type::SUBTRACT => {
+        ProstExprType::Subtract => {
             gen_binary_expr! {arithmetic_impl, int_sub, float_sub, deci_f_sub, deci_sub, atm_placeholder, date_interval_sub, l, r, ret}
         }
-        ExprNode_Type::MULTIPLY => {
+        ProstExprType::Multiply => {
             gen_binary_expr! {arithmetic_impl, int_mul, float_mul, deci_f_mul, deci_mul, atm_placeholder, atm_placeholder, l, r, ret}
         }
-        ExprNode_Type::DIVIDE => {
+        ProstExprType::Divide => {
             gen_binary_expr! {arithmetic_impl, int_div, float_div, deci_f_div, deci_div, atm_placeholder, atm_placeholder, l, r, ret}
         }
-        ExprNode_Type::MODULUS => {
+        ProstExprType::Modulus => {
             gen_binary_expr! {arithmetic_impl, prim_mod, prim_mod, deci_f_mod, deci_mod, atm_placeholder, atm_placeholder, l, r, ret}
         }
-        ExprNode_Type::AND => Box::new(BinaryExpression::<BoolArray, BoolArray, BoolArray, _> {
+        ProstExprType::And => Box::new(BinaryExpression::<BoolArray, BoolArray, BoolArray, _> {
             expr_ia1: l,
             expr_ia2: r,
             return_type: ret,
             func: and,
             _phantom: PhantomData,
         }),
-        ExprNode_Type::OR => Box::new(BinaryExpression::<BoolArray, BoolArray, BoolArray, _> {
+        ProstExprType::Or => Box::new(BinaryExpression::<BoolArray, BoolArray, BoolArray, _> {
             expr_ia1: l,
             expr_ia2: r,
             return_type: ret,

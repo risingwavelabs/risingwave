@@ -47,6 +47,11 @@ message ExprNode {
   Type expr_type = 1;
   google.protobuf.Any body = 2;
   data.DataType return_type = 3;
+  oneof RexNode {
+    InputRefExpr input_ref = 4;
+    ConstantValue constant = 5;
+    FunctionCall func_call = 6;
+  }
 }
 
 message InputRefExpr {

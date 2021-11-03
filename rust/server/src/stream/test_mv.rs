@@ -63,6 +63,7 @@ async fn test_stream_mv_proto() {
         expr_type: InputRef as i32,
         body: None,
         return_type: Some(make_int32_type_pb()),
+        rex_node: None,
     };
     let column_desc = ColumnDesc {
         column_type: Some(DataType {

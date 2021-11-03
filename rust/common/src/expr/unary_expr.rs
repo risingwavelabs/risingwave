@@ -8,11 +8,11 @@ use crate::vector_op::rtrim::rtrim;
 use crate::vector_op::trim::trim;
 use crate::vector_op::upper::upper;
 use crate::vector_op::{cast, conjunction};
-use risingwave_proto::expr::ExprNode_Type;
+use risingwave_pb::expr::expr_node::Type as ProstType;
 use std::marker::PhantomData;
 
 pub fn new_unary_expr(
-    expr_type: ExprNode_Type,
+    expr_type: ProstType,
     return_type: DataTypeRef,
     child_expr: BoxedExpression,
 ) -> BoxedExpression {
@@ -21,7 +21,7 @@ pub fn new_unary_expr(
         return_type.data_type_kind(),
         child_expr.return_type().data_type_kind(),
     ) {
-        (ExprNode_Type::CAST, DataTypeKind::Date, DataTypeKind::Char) => {
+        (ProstType::Cast, DataTypeKind::Date, DataTypeKind::Char) => {
             Box::new(UnaryExpression::<UTF8Array, I32Array, _> {
                 expr_ia1: child_expr,
                 return_type,
@@ -29,7 +29,7 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
-        (ExprNode_Type::CAST, DataTypeKind::Time, DataTypeKind::Char) => {
+        (ProstType::Cast, DataTypeKind::Time, DataTypeKind::Char) => {
             Box::new(UnaryExpression::<UTF8Array, I64Array, _> {
                 expr_ia1: child_expr,
                 return_type,
@@ -37,7 +37,7 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
-        (ExprNode_Type::CAST, DataTypeKind::Timestamp, DataTypeKind::Char) => {
+        (ProstType::Cast, DataTypeKind::Timestamp, DataTypeKind::Char) => {
             Box::new(UnaryExpression::<UTF8Array, I64Array, _> {
                 expr_ia1: child_expr,
                 return_type,
@@ -45,7 +45,7 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
-        (ExprNode_Type::CAST, DataTypeKind::Timestampz, DataTypeKind::Char) => {
+        (ProstType::Cast, DataTypeKind::Timestampz, DataTypeKind::Char) => {
             Box::new(UnaryExpression::<UTF8Array, I64Array, _> {
                 expr_ia1: child_expr,
                 return_type,
@@ -53,7 +53,7 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
-        (ExprNode_Type::CAST, DataTypeKind::Timestamp, DataTypeKind::Date) => {
+        (ProstType::Cast, DataTypeKind::Timestamp, DataTypeKind::Date) => {
             Box::new(UnaryExpression::<I32Array, I64Array, _> {
                 expr_ia1: child_expr,
                 return_type,
@@ -61,13 +61,13 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
-        (ExprNode_Type::NOT, _, _) => Box::new(UnaryExpression::<BoolArray, BoolArray, _> {
+        (ProstType::Not, _, _) => Box::new(UnaryExpression::<BoolArray, BoolArray, _> {
             expr_ia1: child_expr,
             return_type,
             func: conjunction::not,
             _phantom: PhantomData,
         }),
-        (ExprNode_Type::UPPER, _, _) => Box::new(UnaryBytesExpression::<UTF8Array, _> {
+        (ProstType::Upper, _, _) => Box::new(UnaryBytesExpression::<UTF8Array, _> {
             expr_ia1: child_expr,
             return_type,
             func: upper,

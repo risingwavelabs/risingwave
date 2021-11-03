@@ -27,11 +27,30 @@
             "returnType": {
               "typeName": "CHAR",
               "precision": 10
+            },
+            "constant": {
+              "body": "MTk3MC0wMS0wMQ=="
             }
           }]
         },
         "returnType": {
           "typeName": "DATE"
+        },
+        "funcCall": {
+          "children": [{
+            "exprType": "CONSTANT_VALUE",
+            "body": {
+              "@type": "type.googleapis.com/expr.ConstantValue",
+              "body": "MTk3MC0wMS0wMQ=="
+            },
+            "returnType": {
+              "typeName": "CHAR",
+              "precision": 10
+            },
+            "constant": {
+              "body": "MTk3MC0wMS0wMQ=="
+            }
+          }]
         }
       }, {
         "exprType": "CAST",
@@ -46,11 +65,30 @@
             "returnType": {
               "typeName": "CHAR",
               "precision": 8
+            },
+            "constant": {
+              "body": "MDQ6MDU6MDY="
             }
           }]
         },
         "returnType": {
           "typeName": "TIME"
+        },
+        "funcCall": {
+          "children": [{
+            "exprType": "CONSTANT_VALUE",
+            "body": {
+              "@type": "type.googleapis.com/expr.ConstantValue",
+              "body": "MDQ6MDU6MDY="
+            },
+            "returnType": {
+              "typeName": "CHAR",
+              "precision": 8
+            },
+            "constant": {
+              "body": "MDQ6MDU6MDY="
+            }
+          }]
         }
       }, {
         "exprType": "CAST",
@@ -65,11 +103,30 @@
             "returnType": {
               "typeName": "CHAR",
               "precision": 19
+            },
+            "constant": {
+              "body": "MTk3MC0wMS0wMSAwNDowNTowNg=="
             }
           }]
         },
         "returnType": {
           "typeName": "TIMESTAMP"
+        },
+        "funcCall": {
+          "children": [{
+            "exprType": "CONSTANT_VALUE",
+            "body": {
+              "@type": "type.googleapis.com/expr.ConstantValue",
+              "body": "MTk3MC0wMS0wMSAwNDowNTowNg=="
+            },
+            "returnType": {
+              "typeName": "CHAR",
+              "precision": 19
+            },
+            "constant": {
+              "body": "MTk3MC0wMS0wMSAwNDowNTowNg=="
+            }
+          }]
         }
       }, {
         "exprType": "CAST",
@@ -84,11 +141,30 @@
             "returnType": {
               "typeName": "CHAR",
               "precision": 26
+            },
+            "constant": {
+              "body": "MTk3MC0wMS0wMSAwNDowNTowNiAtMDg6MDA="
             }
           }]
         },
         "returnType": {
           "typeName": "TIMESTAMPZ"
+        },
+        "funcCall": {
+          "children": [{
+            "exprType": "CONSTANT_VALUE",
+            "body": {
+              "@type": "type.googleapis.com/expr.ConstantValue",
+              "body": "MTk3MC0wMS0wMSAwNDowNTowNiAtMDg6MDA="
+            },
+            "returnType": {
+              "typeName": "CHAR",
+              "precision": 26
+            },
+            "constant": {
+              "body": "MTk3MC0wMS0wMSAwNDowNTowNiAtMDg6MDA="
+            }
+          }]
         }
       }]
     },
@@ -105,6 +181,9 @@
             },
             "returnType": {
               "typeName": "INT32"
+            },
+            "constant": {
+              "body": "AAAAAA=="
             }
           }]
         }]

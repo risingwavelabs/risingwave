@@ -70,22 +70,23 @@ impl BoxedExecutorBuilder for FilterExecutor {
 mod tests {
     use std::sync::Arc;
 
-    use protobuf::well_known_types::Any as AnyProto;
-    use protobuf::RepeatedField;
-
     use pb_construct::make_proto;
+    use protobuf::well_known_types::Any as AnyProto;
+    use risingwave_common::expr::build_from_prost;
+    use risingwave_pb::expr::expr_node::{RexNode, Type as ProstExprType};
+    use risingwave_pb::expr::ExprNode as ProstExprNode;
+    use risingwave_pb::expr::FunctionCall;
     use risingwave_proto::data::DataType as DataTypeProto;
-    use risingwave_proto::expr::ExprNode_Type::EQUAL;
+    use risingwave_proto::expr::ExprNode;
     use risingwave_proto::expr::ExprNode_Type::INPUT_REF;
-    use risingwave_proto::expr::FunctionCall;
     use risingwave_proto::expr::InputRefExpr;
-    use risingwave_proto::expr::{ExprNode, ExprNode_Type};
 
     use crate::executor::test_utils::MockExecutor;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{Array, DataChunk, PrimitiveArray};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataTypeKind, Int32Type};
+    use risingwave_pb::ToProst;
 
     use super::*;
 
@@ -106,9 +107,9 @@ mod tests {
         };
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(data_chunk);
-        let expr = make_expression(EQUAL);
+        let expr = make_expression(ProstExprType::Equal);
         let mut filter_executor = FilterExecutor {
-            expr: build_from_proto(&expr).unwrap(),
+            expr: build_from_prost(&expr).unwrap(),
             child: Box::new(mock_executor),
         };
         let fields = &filter_executor.schema().fields;
@@ -123,31 +124,39 @@ mod tests {
         }
     }
 
-    fn make_expression(kind: ExprNode_Type) -> ExprNode {
+    fn make_expression(kind: ProstExprType) -> ProstExprNode {
         let lhs = make_inputref(0);
         let rhs = make_inputref(1);
-        make_proto!(ExprNode, {
-          expr_type: kind,
-          body: AnyProto::pack(
-            &make_proto!(FunctionCall, {
-              children: RepeatedField::from_slice(&[lhs, rhs])
-            })
-          ).unwrap(),
-          return_type: make_proto!(DataTypeProto, {
-            type_name: risingwave_proto::data::DataType_TypeName::BOOLEAN
-          })
-        })
+        let function_call = FunctionCall {
+            children: vec![
+                lhs.to_prost::<ProstExprNode>(),
+                rhs.to_prost::<ProstExprNode>(),
+            ],
+        };
+        let return_type = risingwave_pb::data::DataType {
+            type_name: risingwave_pb::data::data_type::TypeName::Boolean as i32,
+            precision: 0,
+            scale: 0,
+            is_nullable: false,
+            interval_type: 0,
+        };
+        ProstExprNode {
+            expr_type: kind as i32,
+            body: None,
+            return_type: Some(return_type),
+            rex_node: Some(RexNode::FuncCall(function_call)),
+        }
     }
 
     fn make_inputref(idx: i32) -> ExprNode {
         make_proto!(ExprNode, {
-          expr_type: INPUT_REF,
-          body: AnyProto::pack(
-            &make_proto!(InputRefExpr, {column_idx: idx})
-          ).unwrap(),
-          return_type: make_proto!(DataTypeProto, {
-            type_name: risingwave_proto::data::DataType_TypeName::INT32
-          })
+            expr_type: INPUT_REF,
+            body: AnyProto::pack(
+              &make_proto!(InputRefExpr, {column_idx: idx})
+            ).unwrap(),
+            return_type: make_proto!(DataTypeProto, {
+              type_name: risingwave_proto::data::DataType_TypeName::INT32
+            })
         })
     }
 
