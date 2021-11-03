@@ -12,27 +12,20 @@ use super::NULL_VAL_FOR_HASH;
 #[derive(Debug)]
 pub struct IntervalArray {
     bitmap: Bitmap,
-    months_buffer: Vec<i32>,
-    days_buffer: Vec<i32>,
-    // milliseconds
-    ms_buffer: Vec<i64>,
+    interval_buffer: Vec<IntervalUnit>,
 }
 
 #[derive(Debug)]
 pub struct IntervalArrayBuilder {
     bitmap: BitmapBuilder,
-    months_buffer: Vec<i32>,
-    days_buffer: Vec<i32>,
-    ms_buffer: Vec<i64>,
+    interval_buffer: Vec<IntervalUnit>,
 }
 
 impl IntervalArrayBuilder {
     pub fn new(capacity: usize) -> Result<Self> {
         Ok(Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
-            months_buffer: Vec::with_capacity(capacity),
-            days_buffer: Vec::with_capacity(capacity),
-            ms_buffer: Vec::with_capacity(capacity),
+            interval_buffer: Vec::with_capacity(capacity),
         })
     }
 }
@@ -55,17 +48,14 @@ impl Array for IntervalArray {
 
     fn value_at(&self, idx: usize) -> Option<Self::RefItem<'_>> {
         if !self.is_null(idx) {
-            let months = self.months_buffer[idx];
-            let days = self.days_buffer[idx];
-            let ms = self.ms_buffer[idx];
-            Some(IntervalUnit::new(months, days, ms))
+            Some(self.interval_buffer[idx])
         } else {
             None
         }
     }
 
     fn len(&self) -> usize {
-        self.months_buffer.len()
+        self.interval_buffer.len()
     }
 
     fn iter(&self) -> Self::Iter<'_> {
@@ -82,9 +72,7 @@ impl Array for IntervalArray {
 
     fn hash_at<H: std::hash::Hasher>(&self, idx: usize, state: &mut H) {
         if !self.is_null(idx) {
-            self.months_buffer[idx].hash(state);
-            self.days_buffer[idx].hash(state);
-            self.ms_buffer[idx].hash(state);
+            self.interval_buffer[idx].hash(state);
         } else {
             NULL_VAL_FOR_HASH.hash(state);
         }
@@ -96,9 +84,7 @@ impl ArrayBuilder for IntervalArrayBuilder {
     fn new(capacity: usize) -> Result<Self> {
         Ok(Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
-            months_buffer: Vec::with_capacity(capacity),
-            days_buffer: Vec::with_capacity(capacity),
-            ms_buffer: Vec::with_capacity(capacity),
+            interval_buffer: Vec::with_capacity(capacity),
         })
     }
 
@@ -106,16 +92,12 @@ impl ArrayBuilder for IntervalArrayBuilder {
         match value {
             Some(x) => {
                 self.bitmap.append(true);
-                self.months_buffer.push(x.get_months());
-                self.days_buffer.push(x.get_days());
-                self.ms_buffer.push(x.get_ms());
+                self.interval_buffer.push(x);
             }
 
             None => {
                 self.bitmap.append(false);
-                self.months_buffer.push(0);
-                self.days_buffer.push(0);
-                self.ms_buffer.push(0);
+                self.interval_buffer.push(IntervalUnit::default());
             }
         };
         Ok(())
@@ -125,18 +107,15 @@ impl ArrayBuilder for IntervalArrayBuilder {
         for bit in other.bitmap.iter() {
             self.bitmap.append(bit);
         }
-        self.months_buffer.extend_from_slice(&other.months_buffer);
-        self.days_buffer.extend_from_slice(&other.days_buffer);
-        self.ms_buffer.extend_from_slice(&other.ms_buffer);
+        self.interval_buffer
+            .extend_from_slice(&other.interval_buffer);
         Ok(())
     }
 
     fn finish(mut self) -> Result<Self::ArrayType> {
         Ok(IntervalArray {
             bitmap: self.bitmap.finish(),
-            months_buffer: self.months_buffer,
-            days_buffer: self.days_buffer,
-            ms_buffer: self.ms_buffer,
+            interval_buffer: self.interval_buffer,
         })
     }
 }
@@ -145,6 +124,8 @@ impl ArrayBuilder for IntervalArrayBuilder {
 mod tests {
     use crate::array::interval_array::{IntervalArrayBuilder, IntervalUnit};
     use crate::array::{Array, ArrayBuilder};
+
+    use super::IntervalArray;
 
     #[test]
     fn test_interval_array() {
@@ -160,5 +141,13 @@ mod tests {
             assert_eq!(v.get_months(), 12);
             assert_eq!(v.get_days(), 0);
         }
+        let ret_arr =
+            IntervalArray::from_slice(&[Some(IntervalUnit::from_ymd(1, 0, 0)), None]).unwrap();
+        let v = ret_arr.value_at(0).unwrap();
+        assert_eq!(v.get_years(), 1);
+        assert_eq!(v.get_months(), 12);
+        assert_eq!(v.get_days(), 0);
+        let v = ret_arr.value_at(1);
+        assert_eq!(v, None);
     }
 }
