@@ -1,4 +1,5 @@
 use risingwave_common::array::*;
+use risingwave_common::catalog::Field;
 use risingwave_common::expr::*;
 use risingwave_common::types::*;
 use std::sync::{Arc, Mutex};
@@ -42,7 +43,12 @@ impl StreamConsumer for MockConsumer {
 async fn test_merger_sum_aggr() {
     // `make_actor` build an actor to do local aggregation
     let make_actor = |input_rx| {
-        let input = ReceiverExecutor::new(input_rx);
+        let schema = Schema {
+            fields: vec![Field {
+                data_type: Int64Type::create(false),
+            }],
+        };
+        let input = ReceiverExecutor::new(schema, input_rx);
         // for the local aggregator, we need two states: sum and row count
         let aggregator = SimpleAggExecutor::new(
             Box::new(input),
@@ -84,14 +90,19 @@ async fn test_merger_sum_aggr() {
 
     // create a round robin dispatcher, which dispatches messages to the actors
     let (mut input, rx) = channel(16);
-    let receiver_op = ReceiverExecutor::new(rx);
+    let schema = Schema {
+        fields: vec![Field {
+            data_type: Int64Type::create(false),
+        }],
+    };
+    let receiver_op = ReceiverExecutor::new(schema.clone(), rx);
     let dispatcher =
         DispatchExecutor::new(Box::new(receiver_op), RoundRobinDataDispatcher::new(inputs));
     let actor = Actor::new(Box::new(dispatcher));
     handles.push(tokio::spawn(actor.run()));
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
-    let merger = MergeExecutor::new(outputs);
+    let merger = MergeExecutor::new(schema, outputs);
 
     // for global aggregator, we need to sum data and sum row count
     let aggregator = SimpleAggExecutor::new(
@@ -315,10 +326,27 @@ fn make_tpchq6_expr() -> (
 async fn test_tpch_q6() {
     let (t_shipdate, t_discount, t_quantity, t_extended_price, _, _) = make_tpchq6_expr();
 
+    let schema = Schema {
+        fields: vec![
+            Field {
+                data_type: TimestampType::create(false, 10),
+            },
+            Field {
+                data_type: Float64Type::create(false),
+            },
+            Field {
+                data_type: Float64Type::create(false),
+            },
+            Field {
+                data_type: Float64Type::create(false),
+            },
+        ],
+    };
+
     // make an actor after dispatcher, which includes filter, projection, and local aggregator.
     let make_actor = |input_rx| {
         let (_, _, _, _, and, multiply) = make_tpchq6_expr();
-        let input = ReceiverExecutor::new(input_rx);
+        let input = ReceiverExecutor::new(schema.clone(), input_rx);
 
         let filter = FilterExecutor::new(Box::new(input), and);
         let projection = ProjectExecutor::new(Box::new(filter), vec![multiply]);
@@ -364,14 +392,14 @@ async fn test_tpch_q6() {
 
     // create a round robin dispatcher, which dispatches messages to the actors
     let (mut input, rx) = channel(16);
-    let receiver_op = ReceiverExecutor::new(rx);
+    let receiver_op = ReceiverExecutor::new(schema.clone(), rx);
     let dispatcher =
         DispatchExecutor::new(Box::new(receiver_op), RoundRobinDataDispatcher::new(inputs));
     let actor = Actor::new(Box::new(dispatcher));
     handles.push(tokio::spawn(actor.run()));
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
-    let merger = MergeExecutor::new(outputs);
+    let merger = MergeExecutor::new(schema.clone(), outputs);
 
     // create a global aggregator to sum data and sum row count
     let aggregator = SimpleAggExecutor::new(

@@ -394,7 +394,12 @@ impl StreamManagerCore {
         executor
     }
 
-    fn create_merger(&mut self, fragment_id: u32, upstreams: &[u32]) -> Result<Box<dyn Executor>> {
+    fn create_merger(
+        &mut self,
+        fragment_id: u32,
+        schema: Schema,
+        upstreams: &[u32],
+    ) -> Result<Box<dyn Executor>> {
         assert!(!upstreams.is_empty());
 
         let mut rxs = upstreams
@@ -484,9 +489,9 @@ impl StreamManagerCore {
 
         if upstreams.len() == 1 {
             // Only one upstream, use `ReceiverExecutor`.
-            Ok(Box::new(ReceiverExecutor::new(rxs.remove(0))))
+            Ok(Box::new(ReceiverExecutor::new(schema, rxs.remove(0))))
         } else {
-            Ok(Box::new(MergeExecutor::new(rxs)))
+            Ok(Box::new(MergeExecutor::new(schema, rxs)))
         }
     }
 
@@ -494,7 +499,10 @@ impl StreamManagerCore {
         for fragment_id in fragments {
             let fragment = self.fragments.remove(fragment_id).unwrap();
 
-            let merger = self.create_merger(*fragment_id, fragment.get_upstream_fragment_id())?;
+            let schema = Schema::try_from(fragment.get_input_column_descs().clone())?;
+
+            let merger =
+                self.create_merger(*fragment_id, schema, fragment.get_upstream_fragment_id())?;
 
             let executor =
                 self.create_nodes(fragment.get_nodes(), merger, table_manager.clone())?;

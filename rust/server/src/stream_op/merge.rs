@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use futures::channel::mpsc::{Receiver, Sender};
 use futures::future::select_all;
 use futures::{SinkExt, StreamExt};
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::{GrpcNetworkError, InternalError, TonicError};
 use risingwave_pb::data::StreamMessage;
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
@@ -102,12 +103,13 @@ impl RemoteInput {
 /// there should be a `ReceiverExecutor` running in the background, so as to push
 /// messages down to the executors.
 pub struct ReceiverExecutor {
+    schema: Schema,
     receiver: Receiver<Message>,
 }
 
 impl ReceiverExecutor {
-    pub fn new(receiver: Receiver<Message>) -> Self {
-        Self { receiver }
+    pub fn new(schema: Schema, receiver: Receiver<Message>) -> Self {
+        Self { schema, receiver }
     }
 }
 
@@ -117,11 +119,18 @@ impl Executor for ReceiverExecutor {
         let msg = self.receiver.next().await.unwrap(); // TODO: remove unwrap
         Ok(msg)
     }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
 }
 
 /// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
 /// will be stopped on barrier.
 pub struct MergeExecutor {
+    /// Schema of inputs
+    schema: Schema,
+
     /// Number of inputs
     num_inputs: usize,
 
@@ -140,8 +149,9 @@ pub struct MergeExecutor {
 }
 
 impl MergeExecutor {
-    pub fn new(inputs: Vec<Receiver<Message>>) -> Self {
+    pub fn new(schema: Schema, inputs: Vec<Receiver<Message>>) -> Self {
         Self {
+            schema,
             num_inputs: inputs.len(),
             active: inputs,
             blocked: vec![],
@@ -199,6 +209,10 @@ impl Executor for MergeExecutor {
             assert!(!self.active.is_empty())
         }
     }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
 }
 
 #[cfg(test)]
@@ -241,7 +255,7 @@ mod tests {
             txs.push(tx);
             rxs.push(rx);
         }
-        let mut merger = MergeExecutor::new(rxs);
+        let mut merger = MergeExecutor::new(Schema::default(), rxs);
 
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
