@@ -1,13 +1,14 @@
 syntax = "proto3";
 
-import "stream_plan.proto";
-import "common.proto";
-import "task_service.proto";
-
 package stream_service;
-option java_package = "com.risingwave.proto.streaming.streamnode";
+
 option java_multiple_files = true;
+option java_package = "com.risingwave.proto.streaming.streamnode";
 option optimize_for = SPEED;
+
+import "common.proto";
+import "stream_plan.proto";
+import "task_service.proto";
 
 // Describe the fragments which will be running on this node
 message UpdateFragmentRequest {
@@ -25,7 +26,7 @@ message ActorInfo {
   task_service.HostAddress host = 2;
 }
 
-message ActorInfoTable {
+message BroadcastActorInfoTableRequest {
   repeated ActorInfo info = 1;
 }
 
@@ -48,7 +49,7 @@ message BroadcastActorInfoTableResponse {
 service StreamService {
   rpc UpdateFragment(UpdateFragmentRequest) returns (UpdateFragmentResponse);
   rpc BuildFragment(BuildFragmentRequest) returns (BuildFragmentResponse);
-  rpc BroadcastActorInfoTable(ActorInfoTable) returns (BroadcastActorInfoTableResponse);
+  rpc BroadcastActorInfoTable(BroadcastActorInfoTableRequest) returns (BroadcastActorInfoTableResponse);
 }
 
 // TODO: Lifecycle management for actors.

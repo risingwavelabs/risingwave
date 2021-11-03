@@ -1,73 +1,72 @@
 syntax = "proto3";
 
-import "google/protobuf/any.proto";
-
 package data;
-option java_package = "com.risingwave.proto.data";
+
 option java_multiple_files = true;
+option java_package = "com.risingwave.proto.data";
 option optimize_for = SPEED;
 
+import "google/protobuf/any.proto";
+
 message Buffer {
-    enum CompressionType {
-        INVALID = 0;
-        NONE = 1;
-    }
-    
-    CompressionType compression = 1;
-    bytes body = 2;
+  enum CompressionType {
+    INVALID = 0;
+    NONE = 1;
+  }
+  CompressionType compression = 1;
+  bytes body = 2;
 }
 
 message DataType {
-    enum IntervalType {
-        INVALID = 0;
-        YEAR = 1;
-        MONTH = 2;
-        DAY = 3;
-        HOUR = 4;
-        MINUTE = 5;
-        SECOND = 6;
-        YEAR_TO_MONTH = 7;
-        DAY_TO_HOUR = 8;
-        DAY_TO_MINUTE = 9;
-        DAY_TO_SECOND = 10;
-        HOUR_TO_MINUTE = 11;
-        HOUR_TO_SECOND = 12;
-        MINUTE_TO_SECOND = 13;
-    }
-
-    enum TypeName {
-        UNKNOWN = 0;
-        INT16 = 1;
-        INT32 = 2;
-        INT64 = 3;
-        FLOAT = 4;
-        DOUBLE = 5;
-        BOOLEAN = 6;
-        CHAR = 7;
-        VARCHAR = 8;
-        DECIMAL = 9;
-        TIME = 10;
-        TIMESTAMP = 11;
-        INTERVAL = 12;
-        DATE = 13;
-        NULL = 14;
-        // Timestamp type with timezone
-        TIMESTAMPZ = 15;
-    }
-    TypeName type_name = 1;
-    // data length for char,
-    // max data length for varchar
-    // precision for time, decimal
-    uint32 precision = 2;
-    // scale for decimal
-    uint32 scale = 3;
-    bool is_nullable = 4;
-    IntervalType interval_type = 5;
+  enum IntervalType {
+    INVALID = 0;
+    YEAR = 1;
+    MONTH = 2;
+    DAY = 3;
+    HOUR = 4;
+    MINUTE = 5;
+    SECOND = 6;
+    YEAR_TO_MONTH = 7;
+    DAY_TO_HOUR = 8;
+    DAY_TO_MINUTE = 9;
+    DAY_TO_SECOND = 10;
+    HOUR_TO_MINUTE = 11;
+    HOUR_TO_SECOND = 12;
+    MINUTE_TO_SECOND = 13;
+  }
+  enum TypeName {
+    UNKNOWN = 0;
+    INT16 = 1;
+    INT32 = 2;
+    INT64 = 3;
+    FLOAT = 4;
+    DOUBLE = 5;
+    BOOLEAN = 6;
+    CHAR = 7;
+    VARCHAR = 8;
+    DECIMAL = 9;
+    TIME = 10;
+    TIMESTAMP = 11;
+    INTERVAL = 12;
+    DATE = 13;
+    NULL = 14;
+    // Timestamp type with timezone
+    TIMESTAMPZ = 15;
+  }
+  TypeName type_name = 1;
+  // data length for char,
+  // max data length for varchar
+  // precision for time, decimal
+  uint32 precision = 2;
+  // scale for decimal
+  uint32 scale = 3;
+  bool is_nullable = 4;
+  IntervalType interval_type = 5;
 }
 
 message ColumnCommon {
-    DataType column_type = 1;
-    Buffer null_bitmap = 2;
+  DataType column_type = 1;
+  Buffer null_bitmap = 2;
 }
 
 // FixedWidthColumn is a subtype of column where types are fixed-width,
@@ -76,52 +75,50 @@ message ColumnCommon {
 //  - Time types, timestamp/time/interval.
 //  - CHAR.
 message FixedWidthColumn {
-    ColumnCommon common_parts = 1;
-    Buffer values = 2;
-    uint64 value_width = 3;
+  ColumnCommon common_parts = 1;
+  Buffer values = 2;
+  uint64 value_width = 3;
 }
-
 
 // New column proto def to replace fixed width column. This def
 // aims to include all column type. Currently it do not support struct/array
 // but capable of extending in future by add other fields.
 message Column {
-    DataType column_type = 1;
-    Buffer null_bitmap = 2;
-    repeated Buffer values = 3;
+  DataType column_type = 1;
+  Buffer null_bitmap = 2;
+  repeated Buffer values = 3;
 }
 
 message DataChunk {
-    uint32 cardinality = 1;
-
-    repeated google.protobuf.Any columns = 2;
+  uint32 cardinality = 1;
+  repeated google.protobuf.Any columns = 2;
 }
 
 enum Op {
-    INSERT = 0;
-    DELETE = 1;
-    UPDATE_INSERT = 2;
-    UPDATE_DELETE = 3;
+  INSERT = 0;
+  DELETE = 1;
+  UPDATE_INSERT = 2;
+  UPDATE_DELETE = 3;
 }
 
 message StreamMessage {
-    oneof stream_message {
-        StreamChunk stream_chunk = 1;
-	  Barrier barrier = 2;
-	  Terminate terminate = 3;
-    }
+  oneof stream_message {
+    StreamChunk stream_chunk = 1;
+    Barrier barrier = 2;
+    Terminate terminate = 3;
+  }
 }
 
 message StreamChunk {
-    // for Column::from_protobuf(), may not need later
-    uint32 cardinality = 1;
-    repeated Op ops = 2;
-    repeated Column columns = 3;
+  // for Column::from_protobuf(), may not need later
+  uint32 cardinality = 1;
+  repeated Op ops = 2;
+  repeated Column columns = 3;
 }
 
 message Barrier {
-    uint64 epoch = 1;
-    bool stop = 2;
+  uint64 epoch = 1;
+  bool stop = 2;
 }
 
 message Terminate {}

@@ -114,6 +114,14 @@ cargo fmt
 cargo clippy --all-targets --all-features
 ```
 
+For Protobufs, we rely on [prototool](https://github.com/uber/prototool#prototool-format) and [buf](https://docs.buf.build/installation) for code formatting and linting.
+Please check out their documents for installation. To check if you violate the rule, please run the commands:
+
+```bash
+prototool format -d
+buf lint
+```
+
 ## Toolchain
 Currently, we are using nightly toolchain `nightly-2021-11-01`. If anyone needs to upgrade
 the toolchain, be sure to bump `rust-toolchain` file as well as GitHub workflow.

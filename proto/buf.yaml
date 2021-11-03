@@ -1,0 +1,13 @@
+version: v1
+lint:
+  use:
+    - DEFAULT
+  # enum_zero_value_suffix: INVALID # The zero value enum should be named "INVALID".
+  except:
+    - ENUM_VALUE_PREFIX # Enum variant doesn't have to prefix with enum name.
+    - ENUM_ZERO_VALUE_SUFFIX # TODO: Remove this.
+    - PACKAGE_VERSION_SUFFIX
+
+    # We guarantee that every file is one package. So this check isn't necessary.
+    - DIRECTORY_SAME_PACKAGE
+    - PACKAGE_DIRECTORY_MATCH

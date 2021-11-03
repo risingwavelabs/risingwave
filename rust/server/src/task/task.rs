@@ -13,7 +13,7 @@ use risingwave_proto::common::Status;
 use risingwave_proto::plan::PlanFragment;
 use risingwave_proto::task_service::TaskInfo_TaskStatus as TaskStatus;
 use risingwave_proto::task_service::TaskSinkId as ProtoSinkId;
-use risingwave_proto::task_service::{TaskData, TaskId as ProtoTaskId};
+use risingwave_proto::task_service::{GetDataResponse, TaskId as ProtoTaskId};
 use std::fmt::{Debug, Formatter};
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
@@ -85,10 +85,10 @@ impl TaskSink {
                 Some(c) => c,
             };
             let pb = chunk.to_protobuf()?;
-            let mut task_data = TaskData::new();
-            task_data.set_status(Status::default());
-            task_data.set_record_batch(pb);
-            writer.write(task_data.to_prost()).await?;
+            let mut resp = GetDataResponse::new();
+            resp.set_status(Status::default());
+            resp.set_record_batch(pb);
+            writer.write(resp.to_prost()).await?;
         }
         let possible_err = self.task_manager.get_error(&task_id)?;
         if let Some(err) = possible_err {

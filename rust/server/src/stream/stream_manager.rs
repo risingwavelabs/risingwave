@@ -113,9 +113,12 @@ impl StreamManager {
     }
 
     /// This function could only be called once during the lifecycle of `StreamManager` for now.
-    pub fn update_actor_info(&self, table: stream_service::ActorInfoTable) -> Result<()> {
+    pub fn update_actor_info(
+        &self,
+        req: stream_service::BroadcastActorInfoTableRequest,
+    ) -> Result<()> {
         let mut core = self.core.lock().unwrap();
-        core.update_actor_info(table)
+        core.update_actor_info(req)
     }
 
     /// This function could only be called once during the lifecycle of `StreamManager` for now.
@@ -517,8 +520,11 @@ impl StreamManagerCore {
         Ok(())
     }
 
-    fn update_actor_info(&mut self, table: stream_service::ActorInfoTable) -> Result<()> {
-        for actor in table.get_info() {
+    fn update_actor_info(
+        &mut self,
+        req: stream_service::BroadcastActorInfoTableRequest,
+    ) -> Result<()> {
+        for actor in req.get_info() {
             let ret = self.actors.insert(actor.get_fragment_id(), actor.clone());
             if ret.is_some() {
                 return Err(ErrorCode::InternalError(format!(

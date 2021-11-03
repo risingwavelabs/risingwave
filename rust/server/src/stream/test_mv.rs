@@ -17,14 +17,13 @@ use risingwave_pb::data::DataType;
 use risingwave_pb::expr::expr_node::Type::InputRef;
 use risingwave_pb::expr::ExprNode;
 use risingwave_pb::plan::column_desc::ColumnEncodingType;
-use risingwave_pb::plan::ColumnDesc;
-use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
+use risingwave_pb::plan::{ColumnDesc, DatabaseRefId, SchemaRefId, TableRefId};
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{
     dispatcher::DispatcherType, Dispatcher, MViewNode, ProjectNode, StreamFragment, StreamNode,
     TableSourceNode,
 };
-use risingwave_pb::stream_service::{ActorInfo, ActorInfoTable};
+use risingwave_pb::stream_service::{ActorInfo, BroadcastActorInfoTableRequest};
 use risingwave_pb::task_service::HostAddress;
 use risingwave_pb::ToProto;
 use smallvec::SmallVec;
@@ -173,7 +172,7 @@ async fn test_stream_mv_proto() {
             port,
         }),
     };
-    let actor_info_table = ActorInfoTable {
+    let actor_info_table = BroadcastActorInfoTableRequest {
         info: vec![actor_info_proto, actor_info_proto2],
     };
     stream_manager.update_actor_info(actor_info_table).unwrap();

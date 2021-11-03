@@ -6,7 +6,9 @@ use futures::StreamExt;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::data::StreamMessage;
 use risingwave_pb::task_service::exchange_service_server::ExchangeService;
-use risingwave_pb::task_service::{GetStreamRequest, TaskData, TaskSinkId as ProtoTaskSinkId};
+use risingwave_pb::task_service::{
+    GetDataRequest, GetDataResponse, GetStreamRequest, TaskSinkId as ProtoTaskSinkId,
+};
 use risingwave_pb::ToProto;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -25,8 +27,8 @@ impl ExchangeServiceImpl {
     }
 }
 
-type ExchangeDataStream = ReceiverStream<std::result::Result<TaskData, Status>>;
-type ExchangeDataSender = tokio::sync::mpsc::Sender<std::result::Result<TaskData, Status>>;
+type ExchangeDataStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
+type ExchangeDataSender = tokio::sync::mpsc::Sender<std::result::Result<GetDataResponse, Status>>;
 
 #[async_trait::async_trait]
 impl ExchangeService for ExchangeServiceImpl {
@@ -36,13 +38,16 @@ impl ExchangeService for ExchangeServiceImpl {
     #[cfg(not(tarpaulin_include))]
     async fn get_data(
         &self,
-        request: Request<ProtoTaskSinkId>,
+        request: Request<GetDataRequest>,
     ) -> std::result::Result<Response<Self::GetDataStream>, Status> {
         let peer_addr = request
             .remote_addr()
             .ok_or_else(|| Status::unavailable("connection unestablished"))?;
-        let task_sink_id = request.into_inner();
-        match self.get_data_impl(peer_addr, task_sink_id).await {
+        let req = request.into_inner();
+        match self
+            .get_data_impl(peer_addr, req.get_sink_id().clone())
+            .await
+        {
             Ok(resp) => Ok(resp),
             Err(e) => {
                 error!("Failed to serve exchange RPC from {}: {}", peer_addr, e);
@@ -145,7 +150,7 @@ impl ExchangeServiceImpl {
 
 #[async_trait::async_trait]
 pub trait ExchangeWriter: Send {
-    async fn write(&mut self, data: TaskData) -> Result<()>;
+    async fn write(&mut self, resp: GetDataResponse) -> Result<()>;
 }
 
 pub struct GrpcExchangeWriter {
@@ -168,7 +173,7 @@ impl GrpcExchangeWriter {
 
 #[async_trait::async_trait]
 impl ExchangeWriter for GrpcExchangeWriter {
-    async fn write(&mut self, data: TaskData) -> Result<()> {
+    async fn write(&mut self, data: GetDataResponse) -> Result<()> {
         self.written_chunks += 1;
         self.sender.send(Ok(data)).await.map_err(|e| {
             RwError::from(ErrorCode::InternalError(format!(
@@ -182,13 +187,22 @@ impl ExchangeWriter for GrpcExchangeWriter {
 #[cfg(test)]
 mod tests {
     use crate::rpc::service::exchange_service::{ExchangeWriter, GrpcExchangeWriter};
-    use risingwave_pb::task_service::TaskData;
+    use risingwave_pb::task_service::GetDataResponse;
 
     #[tokio::test]
     async fn test_exchange_writer() {
         let (tx, _rx) = tokio::sync::mpsc::channel(10);
         let mut writer = GrpcExchangeWriter::new(tx);
-        writer.write(TaskData::default()).await.unwrap();
+        writer.write(GetDataResponse::default()).await.unwrap();
         assert_eq!(writer.written_chunks(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_write_to_closed_channel() {
+        let (tx, rx) = tokio::sync::mpsc::channel(10);
+        drop(rx);
+        let mut writer = GrpcExchangeWriter::new(tx);
+        let res = writer.write(GetDataResponse::default()).await;
+        assert!(res.is_err());
     }
 }

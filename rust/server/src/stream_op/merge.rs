@@ -214,7 +214,7 @@ mod tests {
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
     };
-    use risingwave_pb::task_service::{TaskData, TaskSinkId};
+    use risingwave_pb::task_service::{GetDataRequest, GetDataResponse};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use std::thread::sleep;
@@ -289,12 +289,12 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ExchangeService for FakeExchangeService {
-        type GetDataStream = ReceiverStream<std::result::Result<TaskData, Status>>;
+        type GetDataStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
         type GetStreamStream = ReceiverStream<std::result::Result<StreamMessage, Status>>;
 
         async fn get_data(
             &self,
-            _: Request<TaskSinkId>,
+            _: Request<GetDataRequest>,
         ) -> std::result::Result<Response<Self::GetDataStream>, Status> {
             unimplemented!()
         }

@@ -15,7 +15,9 @@ use risingwave_proto::plan::{
     PlanNode_PlanNodeType as PlanNodeType, SeqScanNode, TableRefId, ValuesNode,
     ValuesNode_ExprTuple,
 };
-use risingwave_proto::task_service::{TaskData, TaskId as ProtoTaskId, TaskSinkId as ProtoSinkId};
+use risingwave_proto::task_service::{
+    GetDataResponse, TaskId as ProtoTaskId, TaskSinkId as ProtoSinkId,
+};
 
 fn get_num_sinks(plan: &PlanFragment) -> u32 {
     match plan.get_exchange_info().mode {
@@ -32,12 +34,12 @@ fn get_num_sinks(plan: &PlanFragment) -> u32 {
 // Write the execution results into a buffer for testing.
 // In a real server, the results will be flushed into a grpc sink.
 struct FakeExchangeWriter {
-    messages: Vec<TaskData>,
+    messages: Vec<GetDataResponse>,
 }
 
 #[async_trait::async_trait]
 impl ExchangeWriter for FakeExchangeWriter {
-    async fn write(&mut self, data: risingwave_pb::task_service::TaskData) -> Result<()> {
+    async fn write(&mut self, data: risingwave_pb::task_service::GetDataResponse) -> Result<()> {
         self.messages.push(data.to_proto());
         Ok(())
     }
@@ -65,7 +67,7 @@ impl TestRunner {
         SelectBuilder::new(self)
     }
 
-    pub async fn run(&mut self, plan: PlanFragment) -> Result<Vec<Vec<TaskData>>> {
+    pub async fn run(&mut self, plan: PlanFragment) -> Result<Vec<Vec<GetDataResponse>>> {
         self.run_task(&plan)?;
         self.collect_task_output(&plan).await
     }
@@ -75,7 +77,10 @@ impl TestRunner {
         task_manager.fire_task(self.env.clone(), &self.tid, plan.clone())
     }
 
-    pub async fn collect_task_output(&mut self, plan: &PlanFragment) -> Result<Vec<Vec<TaskData>>> {
+    pub async fn collect_task_output(
+        &mut self,
+        plan: &PlanFragment,
+    ) -> Result<Vec<Vec<GetDataResponse>>> {
         let task_manager = self.env.task_manager();
         let mut res = Vec::new();
         let sink_ids = 0..get_num_sinks(plan);
@@ -98,7 +103,7 @@ impl TestRunner {
         self.env.clone()
     }
 
-    fn validate_insert_result(result: &[TaskData], inserted_rows: usize) {
+    fn validate_insert_result(result: &[GetDataResponse], inserted_rows: usize) {
         ResultChecker::new()
             .add_i32_column(false, &[inserted_rows as i32])
             .check_result(result)
@@ -285,15 +290,15 @@ impl<'a> SelectBuilder<'a> {
         self
     }
 
-    pub async fn collect_task_output(&mut self) -> Vec<Vec<TaskData>> {
+    pub async fn collect_task_output(&mut self) -> Vec<Vec<GetDataResponse>> {
         self.runner.collect_task_output(&self.plan).await.unwrap()
     }
 
-    pub async fn run_and_collect_multiple_output(mut self) -> Vec<Vec<TaskData>> {
+    pub async fn run_and_collect_multiple_output(mut self) -> Vec<Vec<GetDataResponse>> {
         self.run_task().collect_task_output().await
     }
 
-    pub async fn run_and_collect_single_output(self) -> Vec<TaskData> {
+    pub async fn run_and_collect_single_output(self) -> Vec<GetDataResponse> {
         self.run_and_collect_multiple_output()
             .await
             .drain(0..=0)
@@ -334,7 +339,7 @@ impl ResultChecker {
         self
     }
 
-    pub fn check_result(&mut self, actual: &[TaskData]) {
+    pub fn check_result(&mut self, actual: &[GetDataResponse]) {
         // Ensure the testing data itself is correct.
         assert_eq!(self.columns.len(), self.col_types.len());
         for col in self.columns.iter() {
@@ -347,7 +352,7 @@ impl ResultChecker {
         self.columns.first().unwrap().len()
     }
 
-    fn try_check_result(&mut self, actual: &[TaskData]) -> Result<()> {
+    fn try_check_result(&mut self, actual: &[GetDataResponse]) -> Result<()> {
         assert_eq!(actual.len(), 1);
         let chunk = actual.get(0).unwrap().get_record_batch();
         assert_eq!(chunk.get_cardinality(), self.cardinality() as u32);

@@ -23,7 +23,7 @@ impl TaskServiceImpl {
 #[async_trait::async_trait]
 impl TaskService for TaskServiceImpl {
     #[cfg(not(tarpaulin_include))]
-    async fn create(
+    async fn create_task(
         &self,
         request: Request<CreateTaskRequest>,
     ) -> Result<Response<CreateTaskResponse>, Status> {
@@ -54,7 +54,7 @@ impl TaskService for TaskServiceImpl {
     }
 
     #[cfg(not(tarpaulin_include))]
-    async fn abort(
+    async fn abort_task(
         &self,
         _: Request<AbortTaskRequest>,
     ) -> Result<Response<AbortTaskResponse>, Status> {

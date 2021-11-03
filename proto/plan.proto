@@ -1,242 +1,238 @@
 syntax = "proto3";
 
-
-import "google/protobuf/any.proto";
-import "data.proto";
-import "expr.proto";
-
-
 package plan;
-option java_package = "com.risingwave.proto.plan";
+
 option java_multiple_files = true;
+option java_package = "com.risingwave.proto.plan";
 option optimize_for = SPEED;
 
+import "data.proto";
+import "expr.proto";
+import "google/protobuf/any.proto";
+
 message DatabaseRefId {
-    int32 database_id = 1;
+  int32 database_id = 1;
 }
 
 message SchemaRefId {
-    DatabaseRefId database_ref_id = 1;
-    int32 schema_id = 2;
+  DatabaseRefId database_ref_id = 1;
+  int32 schema_id = 2;
 }
 
 message TableRefId {
-    SchemaRefId schema_ref_id = 1;
-    int32 table_id = 2;
+  SchemaRefId schema_ref_id = 1;
+  int32 table_id = 2;
 }
 
 message ColumnDesc {
-    enum ColumnEncodingType {
-        INVALID = 0;
-        RAW = 1;
-        LZO = 2;
-        LZ4 = 3;
-        ZSTD = 4;
-        RUN_LENGTH = 5;
-        BYTE_DICT = 6;
-        DELTA = 7;
-    }
-    data.DataType column_type = 1;
-    ColumnEncodingType encoding = 2;
-    bool is_primary = 3;
-    string name = 4;
+  enum ColumnEncodingType {
+    INVALID = 0;
+    RAW = 1;
+    LZO = 2;
+    LZ4 = 3;
+    ZSTD = 4;
+    RUN_LENGTH = 5;
+    BYTE_DICT = 6;
+    DELTA = 7;
+  }
+  data.DataType column_type = 1;
+  ColumnEncodingType encoding = 2;
+  bool is_primary = 3;
+  string name = 4;
 }
 
 message SeqScanNode {
-    TableRefId table_ref_id = 1;
-    repeated int32 column_ids = 2;
+  TableRefId table_ref_id = 1;
+  repeated int32 column_ids = 2;
 }
 
 message RowSeqScanNode {
-    TableRefId table_ref_id = 1;
-    repeated int32 column_ids = 2;
+  TableRefId table_ref_id = 1;
+  repeated int32 column_ids = 2;
 }
 
 message StreamScanNode {
-    TableRefId table_ref_id = 1;
-    repeated int32 column_ids = 2;
+  TableRefId table_ref_id = 1;
+  repeated int32 column_ids = 2;
 }
 
 message ProjectNode {
-    repeated expr.ExprNode select_list = 1;
+  repeated expr.ExprNode select_list = 1;
 }
 
 message FilterNode {
-    expr.ExprNode search_condition = 1;
+  expr.ExprNode search_condition = 1;
 }
 
 message FilterScanNode {
-    TableRefId table_ref_id = 1;
-    repeated int32 column_ids = 2;
+  TableRefId table_ref_id = 1;
+  repeated int32 column_ids = 2;
 }
 
 message InsertNode {
-    TableRefId table_ref_id = 1;
-    repeated int32 column_ids = 2;
+  TableRefId table_ref_id = 1;
+  repeated int32 column_ids = 2;
 }
 
 message ValuesNode {
-    message ExprTuple {
-        repeated expr.ExprNode cells = 1;
-    }
-    repeated ExprTuple tuples = 1;
+  message ExprTuple {
+    repeated expr.ExprNode cells = 1;
+  }
+  repeated ExprTuple tuples = 1;
 }
 
 message CreateTableNode {
-    TableRefId table_ref_id = 1;
-    repeated ColumnDesc column_descs = 2;
-    // Other fields not included yet:
-    // primarykey_col_ids, dist_type, distkey_col_id, append_only
+  TableRefId table_ref_id = 1;
+  repeated ColumnDesc column_descs = 2;
+  // Other fields not included yet:
+  // primarykey_col_ids, dist_type, distkey_col_id, append_only
+
 }
 
 message OrderByNode {
-    enum OrderType {
-        INVALID = 0;
-        ASCENDING = 1;
-        DESCENDING = 2;
-    }
-    repeated OrderType order_types = 1;
-    repeated expr.ExprNode orders = 2;
+  enum OrderType {
+    INVALID = 0;
+    ASCENDING = 1;
+    DESCENDING = 2;
+  }
+  repeated OrderType order_types = 1;
+  repeated expr.ExprNode orders = 2;
 }
 
 message TopNNode {
-    OrderByNode order_by = 1;
-    uint32 limit = 2;
+  OrderByNode order_by = 1;
+  uint32 limit = 2;
 }
 
 message LimitNode {
-    uint32 limit = 1;
-    uint32 offset = 2;
+  uint32 limit = 1;
+  uint32 offset = 2;
 }
 
 message CreateStreamNode {
-    enum RowFormatType {
-      JSON = 0;
-      PROTOBUF = 1;
-      AVRO = 2;
-    }
-    TableRefId table_ref_id = 1;
-    repeated ColumnDesc column_descs = 2;
-    RowFormatType format = 3;
-    map<string, string> properties = 4;
+  enum RowFormatType {
+    JSON = 0;
+    PROTOBUF = 1;
+    AVRO = 2;
+  }
+  TableRefId table_ref_id = 1;
+  repeated ColumnDesc column_descs = 2;
+  RowFormatType format = 3;
+  map<string, string> properties = 4;
 }
 
 message DropStreamNode {
-    TableRefId table_ref_id = 1;
+  TableRefId table_ref_id = 1;
 }
 
 message DropTableNode {
-    TableRefId table_ref_id = 1;
+  TableRefId table_ref_id = 1;
 }
 
 enum JoinType {
-    // Note that it comes from Calcite's JoinRelType.
-    // DO NOT HAVE direction for SEMI and ANTI now.
-    INNER = 0;
-    LEFT_OUTER = 1;
-    RIGHT_OUTER = 2;
-    FULL_OUTER = 3;
-    LEFT_SEMI = 4;
-    LEFT_ANTI = 5;
-    RIGHT_SEMI = 6;
-    RIGHT_ANTI = 7;
+  // Note that it comes from Calcite's JoinRelType.
+  // DO NOT HAVE direction for SEMI and ANTI now.
+  INNER = 0;
+  LEFT_OUTER = 1;
+  RIGHT_OUTER = 2;
+  FULL_OUTER = 3;
+  LEFT_SEMI = 4;
+  LEFT_ANTI = 5;
+  RIGHT_SEMI = 6;
+  RIGHT_ANTI = 7;
 }
 
 message NestedLoopJoinNode {
-    JoinType join_type = 1;
-    expr.ExprNode join_cond = 2;
+  JoinType join_type = 1;
+  expr.ExprNode join_cond = 2;
 }
 
 message HashAggNode {
-    repeated uint32 group_keys = 1;
-    repeated expr.AggCall agg_calls = 2;
+  repeated uint32 group_keys = 1;
+  repeated expr.AggCall agg_calls = 2;
 }
 
 message SortAggNode {
-    repeated expr.ExprNode group_keys = 1;
-    repeated expr.AggCall agg_calls = 2;
+  repeated expr.ExprNode group_keys = 1;
+  repeated expr.AggCall agg_calls = 2;
 }
 
 message SimpleAggNode {
-    // When there is no group_by_key, we use SimpleAggNode
-    repeated expr.AggCall agg_calls = 1;
+  // When there is no group_by_key, we use SimpleAggNode
+  repeated expr.AggCall agg_calls = 1;
 }
 
 message HashJoinNode {
-    // TODO: We should remove this after adding schema for executor.
-   message InputRefAndDataType {
-       int32 column_idx = 1;
-       data.DataType data_type = 2;
-   }
-   JoinType join_type = 1;
-   repeated InputRefAndDataType left_key = 2;
-   repeated InputRefAndDataType left_output = 3;
-   repeated InputRefAndDataType right_key = 4;
-   repeated InputRefAndDataType right_output = 5;
+  // TODO: We should remove this after adding schema for executor.
+  message InputRefAndDataType {
+    int32 column_idx = 1;
+    data.DataType data_type = 2;
+  }
+  JoinType join_type = 1;
+  repeated InputRefAndDataType left_key = 2;
+  repeated InputRefAndDataType left_output = 3;
+  repeated InputRefAndDataType right_key = 4;
+  repeated InputRefAndDataType right_output = 5;
 }
 
 message PlanNode {
-    enum PlanNodeType {
-        INVALID = 0;
-        FILTER_SCAN = 1;
-        INSERT = 2;
-        SEQ_SCAN = 3;
-        PROJECT = 4;
-        CREATE_TABLE = 5;
-        DROP_TABLE = 6;
-        HASH_AGG = 7;
-        SIMPLE_AGG = 8;
-        FILTER = 9;
-        EXCHANGE = 10;
-        ORDER_BY = 11;
-        NESTED_LOOP_JOIN = 12;
-        CREATE_STREAM = 13;
-        STREAM_SCAN = 14;
-        TOP_N = 15;
-        SORT_AGG = 16;
-        ROW_SEQ_SCAN = 17;
-        LIMIT = 18;
-        VALUE = 19;
-        HASH_JOIN = 20;
-        DROP_STREAM = 21;
-    }
-    PlanNodeType node_type = 1;
-    google.protobuf.Any body = 2;
-    repeated PlanNode children = 3;
+  enum PlanNodeType {
+    INVALID = 0;
+    FILTER_SCAN = 1;
+    INSERT = 2;
+    SEQ_SCAN = 3;
+    PROJECT = 4;
+    CREATE_TABLE = 5;
+    DROP_TABLE = 6;
+    HASH_AGG = 7;
+    SIMPLE_AGG = 8;
+    FILTER = 9;
+    EXCHANGE = 10;
+    ORDER_BY = 11;
+    NESTED_LOOP_JOIN = 12;
+    CREATE_STREAM = 13;
+    STREAM_SCAN = 14;
+    TOP_N = 15;
+    SORT_AGG = 16;
+    ROW_SEQ_SCAN = 17;
+    LIMIT = 18;
+    VALUE = 19;
+    HASH_JOIN = 20;
+    DROP_STREAM = 21;
+  }
+  PlanNodeType node_type = 1;
+  google.protobuf.Any body = 2;
+  repeated PlanNode children = 3;
 }
 
 message ExchangeInfo {
-    enum DistributionMode {
-        // No partitioning at all, used for root segment which aggregates query results
-        SINGLE = 0;
-        BROADCAST = 1;
-        HASH = 2;
+  enum DistributionMode {
+    // No partitioning at all, used for root segment which aggregates query results
+    SINGLE = 0;
+    BROADCAST = 1;
+    HASH = 2;
+  }
+  message BroadcastInfo {
+    uint32 count = 1;
+  }
+  message HashInfo {
+    enum HashMethod {
+      CRC32 = 0;
     }
+    uint32 output_count = 1;
+    HashMethod hash_method = 2;
+    repeated uint32 keys = 3;
+  }
+  DistributionMode mode = 1;
+  oneof distribution {
+    BroadcastInfo broadcast_info = 2;
+    HashInfo hash_info = 3;
+  }
+  // TODO: Add fields to optimize for local buffer
 
-    message BroadcastInfo {
-        uint32 count = 1;
-    }
-
-    message HashInfo {
-        enum HashMethod {
-            CRC32 = 0;
-        }
-        uint32 output_count = 1;
-        HashMethod hash_method = 2;
-        repeated uint32 keys = 3;
-    }
-
-    DistributionMode mode = 1;
-
-    oneof distribution {
-        BroadcastInfo broadcast_info = 2;
-        HashInfo hash_info = 3;
-    }
-
-    // TODO: Add fields to optimize for local buffer
 }
 
 message PlanFragment {
-    PlanNode root = 1;
-    ExchangeInfo exchange_info = 2;
+  PlanNode root = 1;
+  ExchangeInfo exchange_info = 2;
 }

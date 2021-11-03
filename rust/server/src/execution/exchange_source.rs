@@ -4,7 +4,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::error::ErrorCode::{GrpcNetworkError, InternalError, TonicError};
 use risingwave_common::error::Result;
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
-use risingwave_pb::task_service::{TaskData, TaskSinkId};
+use risingwave_pb::task_service::{GetDataRequest, GetDataResponse, TaskSinkId};
 use risingwave_pb::ToProto;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -20,7 +20,7 @@ pub trait ExchangeSource: Send {
 /// Use grpc client as the source.
 pub struct GrpcExchangeSource {
     client: ExchangeServiceClient<Channel>,
-    stream: Streaming<TaskData>,
+    stream: Streaming<GetDataResponse>,
 
     // Address of the remote endpoint.
     addr: SocketAddr,
@@ -38,7 +38,9 @@ impl GrpcExchangeSource {
                 .map_err(|e| GrpcNetworkError(format!("failed to connect to {}", addr), e))?,
         );
         let stream = client
-            .get_data(sink_id.clone())
+            .get_data(GetDataRequest {
+                sink_id: Some(sink_id.clone()),
+            })
             .await
             .map_err(|e| {
                 TonicError(
@@ -111,7 +113,9 @@ mod tests {
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
     };
-    use risingwave_pb::task_service::{GetStreamRequest, TaskData, TaskSinkId};
+    use risingwave_pb::task_service::{
+        GetDataRequest, GetDataResponse, GetStreamRequest, TaskSinkId,
+    };
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use std::thread::sleep;
@@ -125,17 +129,17 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ExchangeService for FakeExchangeService {
-        type GetDataStream = ReceiverStream<Result<TaskData, Status>>;
+        type GetDataStream = ReceiverStream<Result<GetDataResponse, Status>>;
         type GetStreamStream = ReceiverStream<std::result::Result<StreamMessage, Status>>;
 
         async fn get_data(
             &self,
-            _: Request<TaskSinkId>,
+            _: Request<GetDataRequest>,
         ) -> Result<Response<Self::GetDataStream>, Status> {
             let (tx, rx) = tokio::sync::mpsc::channel(10);
             self.rpc_called.store(true, Ordering::SeqCst);
             for _ in [0..3] {
-                tx.send(Ok(TaskData {
+                tx.send(Ok(GetDataResponse {
                     status: None,
                     record_batch: Some(DataChunk::default()),
                 }))
@@ -191,5 +195,12 @@ mod tests {
         // Gracefully terminate the server.
         shutdown_send.send(()).unwrap();
         join_handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_unconnectable_node() {
+        let addr = get_host_port("127.0.0.1:1001").unwrap();
+        let res = GrpcExchangeSource::create(addr, TaskSinkId::default()).await;
+        assert!(res.is_err());
     }
 }

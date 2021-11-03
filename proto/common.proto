@@ -1,17 +1,15 @@
 syntax = "proto3";
 
 package common;
-option java_package = "com.risingwave.proto.common";
+
 option java_multiple_files = true;
+option java_package = "com.risingwave.proto.common";
 option optimize_for = SPEED;
 
-
 message Status {
-    enum Code {
-        OK = 0;
-    }
-
-    Code code = 1;
-
-    string message = 2;
+  enum Code {
+    OK = 0;
+  }
+  Code code = 1;
+  string message = 2;
 }

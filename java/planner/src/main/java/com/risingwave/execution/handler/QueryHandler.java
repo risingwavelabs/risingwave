@@ -5,7 +5,7 @@ import com.risingwave.execution.result.BatchDataChunkResult;
 import com.risingwave.pgwire.database.PgResult;
 import com.risingwave.planner.planner.batch.BatchPlanner;
 import com.risingwave.planner.rel.physical.batch.BatchPlan;
-import com.risingwave.proto.computenode.TaskData;
+import com.risingwave.proto.computenode.GetDataResponse;
 import com.risingwave.proto.computenode.TaskSinkId;
 import com.risingwave.rpc.ComputeClient;
 import com.risingwave.rpc.Messages;
@@ -16,6 +16,7 @@ import java.util.Iterator;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
 
+/** Handler of user queries. */
 @HandlerSignature(sqlKinds = {SqlKind.SELECT, SqlKind.INSERT, SqlKind.ORDER_BY})
 public class QueryHandler implements SqlHandler {
 
@@ -34,15 +35,15 @@ public class QueryHandler implements SqlHandler {
 
     TaskSinkId taskSinkId = Messages.buildTaskSinkId(resultLocation.getTaskId().toTaskIdProto());
     ComputeClient client = context.getComputeClientManager().getOrCreate(resultLocation.getNode());
-    Iterator<TaskData> taskDataIterator = client.getData(taskSinkId);
+    Iterator<GetDataResponse> taskDataIterator = client.getData(taskSinkId);
 
     // Convert task data to list to iterate it multiple times.
     // FIXME: use Iterator<TaskData>
-    ArrayList<TaskData> taskDataList = new ArrayList();
+    ArrayList<GetDataResponse> responses = new ArrayList();
     while (taskDataIterator.hasNext()) {
-      taskDataList.add(taskDataIterator.next());
+      responses.add(taskDataIterator.next());
     }
     return new BatchDataChunkResult(
-        SqlHandler.getStatementType(ast), taskDataList, plan.getRoot().getRowType());
+        SqlHandler.getStatementType(ast), responses, plan.getRoot().getRowType());
   }
 }

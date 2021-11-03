@@ -2,8 +2,8 @@ use crate::storage::TableManagerRef;
 use crate::stream::StreamManager;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::{
-    ActorInfoTable, BroadcastActorInfoTableResponse, BuildFragmentRequest, BuildFragmentResponse,
-    UpdateFragmentRequest, UpdateFragmentResponse,
+    BroadcastActorInfoTableRequest, BroadcastActorInfoTableResponse, BuildFragmentRequest,
+    BuildFragmentResponse, UpdateFragmentRequest, UpdateFragmentResponse,
 };
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
@@ -64,7 +64,7 @@ impl StreamService for StreamServiceImpl {
     #[cfg(not(tarpaulin_include))]
     async fn broadcast_actor_info_table(
         &self,
-        request: Request<ActorInfoTable>,
+        request: Request<BroadcastActorInfoTableRequest>,
     ) -> std::result::Result<Response<BroadcastActorInfoTableResponse>, Status> {
         let table = request.into_inner();
 

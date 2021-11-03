@@ -50,7 +50,7 @@ async fn test_stream_proto() {
         .map(helper_make_local_actor)
         .collect::<Vec<_>>();
     stream_manager
-        .update_actor_info(ActorInfoTable { info })
+        .update_actor_info(BroadcastActorInfoTableRequest { info })
         .unwrap();
 
     stream_manager

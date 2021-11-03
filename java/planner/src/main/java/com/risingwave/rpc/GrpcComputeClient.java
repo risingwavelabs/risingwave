@@ -5,7 +5,8 @@ import com.risingwave.common.exception.PgException;
 import com.risingwave.proto.computenode.CreateTaskRequest;
 import com.risingwave.proto.computenode.CreateTaskResponse;
 import com.risingwave.proto.computenode.ExchangeServiceGrpc;
-import com.risingwave.proto.computenode.TaskData;
+import com.risingwave.proto.computenode.GetDataRequest;
+import com.risingwave.proto.computenode.GetDataResponse;
 import com.risingwave.proto.computenode.TaskServiceGrpc;
 import com.risingwave.proto.computenode.TaskSinkId;
 import io.grpc.Channel;
@@ -14,6 +15,7 @@ import java.util.Iterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/** A ComputeClient implementation based on grpc. */
 public class GrpcComputeClient implements ComputeClient {
   private static final Logger LOGGER = LoggerFactory.getLogger(GrpcComputeClient.class);
 
@@ -30,7 +32,7 @@ public class GrpcComputeClient implements ComputeClient {
         TaskServiceGrpc.newBlockingStub(channel);
     CreateTaskResponse response;
     try {
-      response = blockingTaskStub.create(request);
+      response = blockingTaskStub.createTask(request);
     } catch (StatusRuntimeException e) {
       LOGGER.warn("RPC failed: {}", e.getStatus());
       throw rpcException("createTask", e);
@@ -39,13 +41,14 @@ public class GrpcComputeClient implements ComputeClient {
   }
 
   @Override
-  public Iterator<TaskData> getData(TaskSinkId taskSinkId) {
+  public Iterator<GetDataResponse> getData(TaskSinkId taskSinkId) {
     // Prepare Exchange service stub.
     ExchangeServiceGrpc.ExchangeServiceBlockingStub blockingExchangeStub =
         ExchangeServiceGrpc.newBlockingStub(channel);
-    Iterator<TaskData> taskDataIterator;
+    Iterator<GetDataResponse> taskDataIterator;
     try {
-      taskDataIterator = blockingExchangeStub.getData(taskSinkId);
+      taskDataIterator =
+          blockingExchangeStub.getData(GetDataRequest.newBuilder().setSinkId(taskSinkId).build());
     } catch (StatusRuntimeException e) {
       LOGGER.warn("RPC failed: {}", e.getStatus());
       throw rpcException("getData", e);

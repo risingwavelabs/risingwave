@@ -9,7 +9,7 @@ import com.risingwave.execution.result.rpc.PgValueReaders;
 import com.risingwave.pgwire.database.PgFieldDescriptor;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.pgwire.types.PgValue;
-import com.risingwave.proto.computenode.TaskData;
+import com.risingwave.proto.computenode.GetDataResponse;
 import com.risingwave.proto.data.DataChunk;
 import java.util.ArrayList;
 import java.util.List;
@@ -17,17 +17,17 @@ import org.apache.calcite.rel.type.RelDataType;
 
 /** A wrapper of grpc remote result. */
 public class BatchDataChunkResult extends AbstractQueryResult {
-  private final List<TaskData> data;
+  private final List<GetDataResponse> data;
 
   // A row in calcite is represented by a struct, and each column in the row
   // is represented by the field in the struct.
   public BatchDataChunkResult(
-      StatementType statementType, List<TaskData> data, RelDataType resultType) {
+      StatementType statementType, List<GetDataResponse> data, RelDataType resultType) {
     super(statementType, resultType, totalRowCount(data));
     this.data = ImmutableList.copyOf(data);
   }
 
-  private static int totalRowCount(List<TaskData> data) {
+  private static int totalRowCount(List<GetDataResponse> data) {
     return data.stream().mapToInt(batch -> batch.getRecordBatch().getCardinality()).sum();
   }
 

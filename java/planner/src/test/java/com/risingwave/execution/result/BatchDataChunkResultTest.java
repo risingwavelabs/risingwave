@@ -7,7 +7,7 @@ import com.risingwave.common.datatype.RisingWaveTypeFactory;
 import com.risingwave.pgwire.database.PgResult;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.pgwire.types.PgValue;
-import com.risingwave.proto.computenode.TaskData;
+import com.risingwave.proto.computenode.GetDataResponse;
 import com.risingwave.proto.data.Buffer;
 import com.risingwave.proto.data.Column;
 import com.risingwave.proto.data.DataChunk;
@@ -19,16 +19,16 @@ import org.apache.calcite.sql.type.SqlTypeName;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-public class BatchDataChunkResultTest {
+class BatchDataChunkResultTest {
 
   @Test
   public void testEmptyRemoteBatchPlanResult() {
-    ArrayList<TaskData> taskDataList = new ArrayList<>();
+    ArrayList<GetDataResponse> taskDataList = new ArrayList<>();
     RisingWaveTypeFactory typeFactory = new RisingWaveTypeFactory();
     var relDataTypes = Lists.newArrayList(typeFactory.createSqlType(SqlTypeName.INTEGER));
     var fieldNames = Lists.newArrayList("abc");
     for (int i = 0; i < 4; ++i) {
-      taskDataList.add(TaskData.newBuilder().build());
+      taskDataList.add(GetDataResponse.newBuilder().build());
     }
     BatchDataChunkResult ret =
         new BatchDataChunkResult(
@@ -55,13 +55,13 @@ public class BatchDataChunkResultTest {
 
   @Test
   public void testSimpleRemoteBatchPlanResult() {
-    ArrayList<TaskData> taskDataList = new ArrayList<TaskData>();
+    ArrayList<GetDataResponse> taskDataList = new ArrayList<GetDataResponse>();
     RisingWaveTypeFactory typeFactory = new RisingWaveTypeFactory();
     var relDataTypes = Lists.newArrayList(typeFactory.createSqlType(SqlTypeName.INTEGER));
     var fieldNames = Lists.newArrayList("abc");
     for (int i = 0; i < 4; ++i) {
-      TaskData data =
-          TaskData.newBuilder()
+      GetDataResponse data =
+          GetDataResponse.newBuilder()
               .setRecordBatch(
                   DataChunk.newBuilder()
                       .addColumns(

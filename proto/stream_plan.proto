@@ -1,14 +1,13 @@
 syntax = "proto3";
 
-import "google/protobuf/any.proto";
-import "expr.proto";
-import "data.proto";
-import "plan.proto";
-
 package stream_plan;
-option java_package = "com.risingwave.proto.streaming.plan";
+
 option java_multiple_files = true;
+option java_package = "com.risingwave.proto.streaming.plan";
 option optimize_for = SPEED;
+
+import "expr.proto";
+import "plan.proto";
 
 message TableSourceNode {
   plan.TableRefId table_ref_id = 1;
@@ -47,12 +46,12 @@ message StreamNode {
   // Some nodes we can reuse plan nodes from plan.proto.
   // TODO: should we enforce strong typed body on nodes?
   oneof node {
-      TableSourceNode table_source_node = 4;
-      ProjectNode project_node = 5;
-      FilterNode filter_node = 6;
-      MViewNode mview_node = 7;
-      SimpleAggNode simple_agg_node = 8;
-      HashAggNode hash_agg_node = 9;
+    TableSourceNode table_source_node = 4;
+    ProjectNode project_node = 5;
+    FilterNode filter_node = 6;
+    MViewNode mview_node = 7;
+    SimpleAggNode simple_agg_node = 8;
+    HashAggNode hash_agg_node = 9;
   }
   // Child node in plan aka. upstream nodes in the streaming DAG
   // Currently we assume the executors in one fragment are always chained list rather than tree
