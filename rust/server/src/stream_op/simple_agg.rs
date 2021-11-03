@@ -7,6 +7,7 @@ use super::{Executor, Message, Op, SimpleExecutor, StreamChunk};
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::*;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 
 use async_trait::async_trait;
@@ -51,6 +52,8 @@ pub use super::aggregation::StreamingRowCountAgg;
 /// Therefore, we "automatically" implemented a window function inside
 /// `SimpleAggExecutor`.
 pub struct SimpleAggExecutor {
+    schema: Schema,
+
     /// Aggregation states of the current operator
     states: Vec<Box<dyn StreamingAggStateImpl>>,
 
@@ -75,7 +78,16 @@ impl SimpleAggExecutor {
                 create_streaming_agg_state(agg.args.arg_types(), &agg.kind, &agg.return_type)
             })
             .try_collect()?;
+        let schema = Schema {
+            fields: agg_calls
+                .iter()
+                .map(|agg| Field {
+                    data_type: agg.return_type.clone(),
+                })
+                .collect_vec(),
+        };
         Ok(Self {
+            schema,
             states,
             input,
             first_data: true,
@@ -96,6 +108,10 @@ impl SimpleAggExecutor {
 impl Executor for SimpleAggExecutor {
     async fn next(&mut self) -> Result<Message> {
         super::simple_executor_next(self).await
+    }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
     }
 }
 

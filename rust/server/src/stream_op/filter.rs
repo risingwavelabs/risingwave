@@ -140,6 +140,7 @@ mod tests {
     use itertools::Itertools;
 
     use risingwave_common::array::I64Array;
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_proto::expr::ExprNode_Type;
 
     use crate::stream_op::test_utils::MockSource;
@@ -177,7 +178,17 @@ mod tests {
             ],
             visibility: None,
         };
-        let source = MockSource::new(vec![chunk1, chunk2]);
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    data_type: Int64Type::create(false),
+                },
+                Field {
+                    data_type: Int64Type::create(false),
+                },
+            ],
+        };
+        let source = MockSource::new(schema, vec![chunk1, chunk2]);
 
         let left_type = Int64Type::create(false);
         let left_expr = InputRefExpression::new(left_type, 0);

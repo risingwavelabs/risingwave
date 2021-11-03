@@ -5,6 +5,7 @@ use super::{Executor, Message, Op, SimpleExecutor, StreamChunk};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{Datum, ScalarRefImpl};
 
@@ -60,6 +61,7 @@ impl HashValue {
 }
 
 pub struct HashAggExecutor {
+    schema: Schema,
     /// Aggregation state of the current operator
     state_entries: HashMap<HashKey, HashValue>,
     /// The input of the current operator
@@ -73,7 +75,18 @@ pub struct HashAggExecutor {
 
 impl HashAggExecutor {
     pub fn new(input: Box<dyn Executor>, agg_calls: Vec<AggCall>, key_indices: Vec<usize>) -> Self {
+        let mut fields = Vec::with_capacity(key_indices.len() + agg_calls.len());
+        let input_schema = input.schema();
+        fields.extend(
+            key_indices
+                .iter()
+                .map(|idx| input_schema.fields[*idx].clone()),
+        );
+        fields.extend(agg_calls.iter().map(|agg| Field {
+            data_type: agg.return_type.clone(),
+        }));
         Self {
+            schema: Schema { fields },
             state_entries: HashMap::new(),
             input,
             agg_calls,
@@ -132,6 +145,10 @@ impl HashAggExecutor {
 impl Executor for HashAggExecutor {
     async fn next(&mut self) -> Result<Message> {
         super::simple_executor_next(self).await
+    }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
     }
 }
 
@@ -303,6 +320,7 @@ mod tests {
     use crate::*;
     use itertools::Itertools;
     use risingwave_common::array::{Array, I64Array};
+    use risingwave_common::catalog::Field;
     use risingwave_common::expr::*;
     use risingwave_common::types::Int64Type;
 
@@ -318,7 +336,12 @@ mod tests {
             columns: vec![column_nonnull! { I64Array, Int64Type, [1, 2, 2] }],
             visibility: Some((vec![true, false, true]).try_into().unwrap()),
         };
-        let source = MockSource::new(vec![chunk1, chunk2]);
+        let schema = Schema {
+            fields: vec![Field {
+                data_type: Int64Type::create(false),
+            }],
+        };
+        let source = MockSource::new(schema, vec![chunk1, chunk2]);
 
         // This is local hash aggregation, so we add another row count state
         let keys = vec![0];
@@ -408,7 +431,20 @@ mod tests {
             ],
             visibility: Some((vec![true, false, true, true]).try_into().unwrap()),
         };
-        let source = MockSource::new(vec![chunk1, chunk2]);
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    data_type: Int64Type::create(false),
+                },
+                Field {
+                    data_type: Int64Type::create(false),
+                },
+                Field {
+                    data_type: Int64Type::create(false),
+                },
+            ],
+        };
+        let source = MockSource::new(schema, vec![chunk1, chunk2]);
 
         // This is local hash aggregation, so we add another sum state
         let key_indices = vec![0];

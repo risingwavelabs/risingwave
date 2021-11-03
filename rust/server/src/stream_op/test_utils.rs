@@ -2,12 +2,14 @@ use crate::stream_op::*;
 use std::collections::VecDeque;
 
 pub struct MockSource {
+    schema: Schema,
     chunks: VecDeque<StreamChunk>,
 }
 
 impl MockSource {
-    pub fn new(chunks: Vec<StreamChunk>) -> Self {
+    pub fn new(schema: Schema, chunks: Vec<StreamChunk>) -> Self {
         Self {
+            schema,
             chunks: chunks.into_iter().collect(),
         }
     }
@@ -20,5 +22,9 @@ impl Executor for MockSource {
             Some(chunk) => Ok(Message::Chunk(chunk)),
             None => Ok(Message::Terminate),
         }
+    }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
     }
 }

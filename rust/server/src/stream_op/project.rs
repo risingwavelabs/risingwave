@@ -1,6 +1,8 @@
 use async_trait::async_trait;
 
+use itertools::Itertools;
 use risingwave_common::array::{column::Column, DataChunk};
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 
 use risingwave_common::expr::BoxedExpression;
@@ -11,6 +13,8 @@ use super::{Executor, Message, SimpleExecutor, StreamChunk};
 /// and returns a new data chunk. And then, `ProjectExecutor` will insert, delete
 /// or update element into next operator according to the result of the expression.
 pub struct ProjectExecutor {
+    schema: Schema,
+
     /// The input of the current operator
     input: Box<dyn Executor>,
     /// Expressions of the current projection.
@@ -19,7 +23,19 @@ pub struct ProjectExecutor {
 
 impl ProjectExecutor {
     pub fn new(input: Box<dyn Executor>, exprs: Vec<BoxedExpression>) -> Self {
-        Self { input, exprs }
+        let schema = Schema {
+            fields: exprs
+                .iter()
+                .map(|e| Field {
+                    data_type: e.return_type_ref(),
+                })
+                .collect_vec(),
+        };
+        Self {
+            schema,
+            input,
+            exprs,
+        }
     }
 }
 
@@ -27,6 +43,10 @@ impl ProjectExecutor {
 impl Executor for ProjectExecutor {
     async fn next(&mut self) -> Result<Message> {
         super::simple_executor_next(self).await
+    }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
     }
 }
 
@@ -80,6 +100,7 @@ mod tests {
 
     use risingwave_common::array::I64Array;
     use risingwave_common::array::*;
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_proto::expr::ExprNode_Type;
 
     use crate::stream_op::test_utils::MockSource;
@@ -107,7 +128,17 @@ mod tests {
             ],
             visibility: Some((vec![true, true]).try_into().unwrap()),
         };
-        let source = MockSource::new(vec![chunk1, chunk2]);
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    data_type: Int64Type::create(false),
+                },
+                Field {
+                    data_type: Int64Type::create(false),
+                },
+            ],
+        };
+        let source = MockSource::new(schema, vec![chunk1, chunk2]);
 
         let left_type = Int64Type::create(false);
         let left_expr = InputRefExpression::new(left_type, 0);

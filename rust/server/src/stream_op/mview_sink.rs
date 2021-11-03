@@ -118,7 +118,7 @@ mod tests {
     use pb_construct::make_proto;
     use pb_convert::FromProtobuf;
     use risingwave_common::array::I32Array;
-    use risingwave_common::catalog::TableId;
+    use risingwave_common::catalog::{Field, TableId};
     use risingwave_common::error::ErrorCode::InternalError;
     use risingwave_common::types::{Int32Type, Scalar};
     use risingwave_proto::data::{DataType, DataType_TypeName};
@@ -176,7 +176,17 @@ mod tests {
         let table_ref = store_mgr.get_table(&table_id).unwrap();
         if let SimpleTableRef::Row(table) = table_ref {
             // Prepare stream executors.
-            let source = MockSource::new(vec![chunk1, chunk2]);
+            let schema = Schema {
+                fields: vec![
+                    Field {
+                        data_type: Int32Type::create(false),
+                    },
+                    Field {
+                        data_type: Int32Type::create(false),
+                    },
+                ],
+            };
+            let source = MockSource::new(schema, vec![chunk1, chunk2]);
             let mut sink_executor =
                 Box::new(MViewSinkExecutor::new(Box::new(source), table.clone(), pks));
 
@@ -268,7 +278,17 @@ mod tests {
         // Prepare stream executors.
         let table_ref = store_mgr.get_table(&table_id).unwrap();
         if let SimpleTableRef::Row(table) = table_ref {
-            let source = MockSource::new(vec![chunk1, chunk2]);
+            let schema = Schema {
+                fields: vec![
+                    Field {
+                        data_type: Int32Type::create(false),
+                    },
+                    Field {
+                        data_type: Int32Type::create(false),
+                    },
+                ],
+            };
+            let source = MockSource::new(schema, vec![chunk1, chunk2]);
             let mut sink_executor = Box::new(MViewSinkExecutor::new(
                 Box::new(source),
                 table.clone(),
