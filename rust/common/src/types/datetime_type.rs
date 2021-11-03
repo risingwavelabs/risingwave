@@ -5,8 +5,9 @@ use crate::types::DataSize;
 use crate::types::DataType;
 use crate::types::DataTypeKind;
 use crate::types::DataTypeRef;
-use risingwave_proto::data::DataType as DataTypeProto;
-use risingwave_proto::data::DataType_TypeName;
+use risingwave_pb::data::data_type::TypeName;
+use risingwave_pb::data::DataType as DataTypeProto;
+use risingwave_pb::ToProto;
 use std::any::Any;
 use std::convert::TryFrom;
 use std::default::Default;
@@ -27,7 +28,7 @@ pub fn get_mouth_days(year: i32, month: usize) -> i32 {
     }
 }
 
-/// Generate macros for TIME/TIMESTAMP/TIMESTAMP WITH TIMEZONE.
+/// Generate macros for Time/Timestamp/Timestamp with Timezone.
 /// FIXME: This code is adapted from numeric type. Maybe we should unify them
 macro_rules! make_datetime_type {
     ($name:ident, $native_ty:ty, $data_ty:expr, $proto_ty: expr) => {
@@ -72,11 +73,18 @@ macro_rules! make_datetime_type {
                 Ok(PrimitiveArrayBuilder::<$native_ty>::new(capacity)?.into())
             }
 
-            fn to_protobuf(&self) -> Result<DataTypeProto> {
-                let mut proto = DataTypeProto::new();
-                proto.set_type_name($proto_ty);
-                proto.set_precision(self.precision);
-                proto.set_is_nullable(self.nullable);
+            fn to_protobuf(&self) -> Result<risingwave_proto::data::DataType> {
+                self.to_prost()
+                    .map(|x| x.to_proto::<risingwave_proto::data::DataType>())
+            }
+
+            fn to_prost(&self) -> Result<DataTypeProto> {
+                let proto = DataTypeProto {
+                    type_name: $proto_ty as i32,
+                    precision: self.precision,
+                    is_nullable: self.nullable,
+                    ..Default::default()
+                };
                 Ok(proto)
             }
 
@@ -103,16 +111,16 @@ macro_rules! make_datetime_type {
     };
 }
 
-make_datetime_type!(TimeType, i64, DataTypeKind::Time, DataType_TypeName::TIME);
+make_datetime_type!(TimeType, i64, DataTypeKind::Time, TypeName::Time);
 make_datetime_type!(
     TimestampType,
     i64,
     DataTypeKind::Timestamp,
-    DataType_TypeName::TIMESTAMP
+    TypeName::Timestamp
 );
 make_datetime_type!(
     TimestampWithTimeZoneType,
     i64,
     DataTypeKind::Timestampz,
-    DataType_TypeName::TIMESTAMPZ
+    TypeName::Timestampz
 );

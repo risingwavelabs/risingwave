@@ -6,8 +6,9 @@ use crate::types::DataType;
 use crate::types::DataTypeKind;
 use crate::types::DataTypeRef;
 use crate::types::PrimitiveDataType;
-use risingwave_proto::data::DataType as DataTypeProto;
-use risingwave_proto::data::DataType_TypeName;
+use risingwave_pb::data::data_type::TypeName;
+use risingwave_pb::data::DataType as DataTypeProto;
+use risingwave_pb::ToProto;
 use std::any::Any;
 use std::convert::TryFrom;
 use std::default::Default;
@@ -50,10 +51,17 @@ macro_rules! make_numeric_type {
                 Ok(PrimitiveArrayBuilder::<$native_ty>::new(capacity)?.into())
             }
 
-            fn to_protobuf(&self) -> Result<DataTypeProto> {
-                let mut proto = DataTypeProto::new();
-                proto.set_type_name($proto_ty);
-                proto.set_is_nullable(self.nullable);
+            fn to_protobuf(&self) -> Result<risingwave_proto::data::DataType> {
+                self.to_prost()
+                    .map(|x| x.to_proto::<risingwave_proto::data::DataType>())
+            }
+
+            fn to_prost(&self) -> Result<DataTypeProto> {
+                let proto = DataTypeProto {
+                    type_name: $proto_ty as i32,
+                    is_nullable: self.nullable,
+                    ..Default::default()
+                };
                 Ok(proto)
             }
 
@@ -84,34 +92,9 @@ macro_rules! make_numeric_type {
     };
 }
 
-make_numeric_type!(
-    Int16Type,
-    i16,
-    DataTypeKind::Int16,
-    DataType_TypeName::INT16
-);
-make_numeric_type!(
-    Int32Type,
-    i32,
-    DataTypeKind::Int32,
-    DataType_TypeName::INT32
-);
-make_numeric_type!(
-    Int64Type,
-    i64,
-    DataTypeKind::Int64,
-    DataType_TypeName::INT64
-);
-make_numeric_type!(
-    Float32Type,
-    f32,
-    DataTypeKind::Float32,
-    DataType_TypeName::FLOAT
-);
-make_numeric_type!(
-    Float64Type,
-    f64,
-    DataTypeKind::Float64,
-    DataType_TypeName::DOUBLE
-);
-make_numeric_type!(DateType, i32, DataTypeKind::Date, DataType_TypeName::DATE);
+make_numeric_type!(Int16Type, i16, DataTypeKind::Int16, TypeName::Int16);
+make_numeric_type!(Int32Type, i32, DataTypeKind::Int32, TypeName::Int32);
+make_numeric_type!(Int64Type, i64, DataTypeKind::Int64, TypeName::Int64);
+make_numeric_type!(Float32Type, f32, DataTypeKind::Float32, TypeName::Float);
+make_numeric_type!(Float64Type, f64, DataTypeKind::Float64, TypeName::Double);
+make_numeric_type!(DateType, i32, DataTypeKind::Date, TypeName::Date);

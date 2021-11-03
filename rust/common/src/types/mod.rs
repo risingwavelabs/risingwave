@@ -1,6 +1,6 @@
 use crate::error::{ErrorCode, Result, RwError};
-use risingwave_pb::ToProto;
-use risingwave_proto::data::DataType as DataTypeProto;
+use risingwave_pb::data::DataType as DataTypeProto;
+use risingwave_pb::ToProst;
 use rust_decimal::Decimal;
 use std::any::Any;
 use std::convert::TryFrom;
@@ -17,7 +17,7 @@ pub use scalar_impl::*;
 
 use crate::error::ErrorCode::InternalError;
 pub use native_type::*;
-use risingwave_proto::data::DataType_TypeName::*;
+use risingwave_pb::data::data_type::TypeName;
 use std::fmt::Debug;
 
 mod bool_type;
@@ -65,7 +65,8 @@ pub trait DataType: Debug + Sync + Send + 'static {
     fn data_type_kind(&self) -> DataTypeKind;
     fn is_nullable(&self) -> bool;
     fn create_array_builder(self: Arc<Self>, capacity: usize) -> Result<ArrayBuilderImpl>;
-    fn to_protobuf(&self) -> Result<DataTypeProto>;
+    fn to_protobuf(&self) -> Result<risingwave_proto::data::DataType>;
+    fn to_prost(&self) -> Result<DataTypeProto>;
     fn as_any(&self) -> &dyn Any;
     fn data_size(&self) -> DataSize;
 }
@@ -85,28 +86,28 @@ macro_rules! build_data_type {
   }
 }
 
-pub fn build_from_proto(proto: &DataTypeProto) -> Result<DataTypeRef> {
+pub fn build_from_prost(proto: &DataTypeProto) -> Result<DataTypeRef> {
     build_data_type! {
       proto,
-      INT16 => Int16Type,
-      INT32 => Int32Type,
-      INT64 => Int64Type,
-      FLOAT => Float32Type,
-      DOUBLE => Float64Type,
-      BOOLEAN => BoolType,
-      CHAR => StringType,
-      VARCHAR => StringType,
-      DATE => DateType,
-      TIME => TimeType,
-      TIMESTAMP => TimestampType,
-      TIMESTAMPZ => TimestampWithTimeZoneType,
-      DECIMAL => DecimalType,
-      INTERVAL => IntervalType
+      TypeName::Int16 => Int16Type,
+      TypeName::Int32 => Int32Type,
+      TypeName::Int64 => Int64Type,
+      TypeName::Float => Float32Type,
+      TypeName::Double => Float64Type,
+      TypeName::Boolean => BoolType,
+      TypeName::Char => StringType,
+      TypeName::Varchar => StringType,
+      TypeName::Date => DateType,
+      TypeName::Time => TimeType,
+      TypeName::Timestamp => TimestampType,
+      TypeName::Timestampz => TimestampWithTimeZoneType,
+      TypeName::Decimal => DecimalType,
+      TypeName::Interval => IntervalType
     }
 }
 
-pub fn build_from_prost(prost: &risingwave_pb::data::DataType) -> Result<DataTypeRef> {
-    build_from_proto(&prost.to_proto::<risingwave_proto::data::DataType>())
+pub fn build_from_proto(proto: &risingwave_proto::data::DataType) -> Result<DataTypeRef> {
+    build_from_prost(&proto.to_prost::<DataTypeProto>())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]

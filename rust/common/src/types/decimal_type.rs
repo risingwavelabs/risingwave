@@ -1,8 +1,9 @@
 use crate::array::{ArrayBuilder, ArrayBuilderImpl, DecimalArrayBuilder};
 use crate::error::{Result, RwError};
 use crate::types::{DataSize, DataType, DataTypeKind, DataTypeRef};
-use risingwave_proto::data::DataType as DataTypeProto;
-use risingwave_proto::data::DataType_TypeName;
+use risingwave_pb::data::data_type::TypeName;
+use risingwave_pb::data::DataType as DataTypeProto;
+use risingwave_pb::ToProto;
 use std::any::Any;
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -59,12 +60,18 @@ impl DataType for DecimalType {
         DecimalArrayBuilder::new(capacity).map(|x| x.into())
     }
 
-    fn to_protobuf(&self) -> Result<DataTypeProto> {
-        let mut proto = DataTypeProto::new();
-        proto.set_type_name(DataType_TypeName::DECIMAL);
-        proto.set_is_nullable(self.nullable);
-        proto.set_scale(self.scale);
-        proto.set_precision(self.precision);
+    fn to_protobuf(&self) -> Result<risingwave_proto::data::DataType> {
+        self.to_prost()
+            .map(|x| x.to_proto::<risingwave_proto::data::DataType>())
+    }
+    fn to_prost(&self) -> Result<DataTypeProto> {
+        let proto = DataTypeProto {
+            type_name: TypeName::Decimal as i32,
+            is_nullable: self.nullable,
+            scale: self.scale,
+            precision: self.precision,
+            ..Default::default()
+        };
         Ok(proto)
     }
 
@@ -81,7 +88,7 @@ impl<'a> TryFrom<&'a DataTypeProto> for DecimalType {
     type Error = RwError;
 
     fn try_from(proto: &'a DataTypeProto) -> Result<Self> {
-        ensure!(proto.get_type_name() == DataType_TypeName::DECIMAL);
+        ensure!(proto.get_type_name() == TypeName::Decimal);
         DecimalType::new(
             proto.get_is_nullable(),
             proto.get_precision(),
@@ -111,5 +118,24 @@ mod tests {
         assert!(larger_scale.is_err());
         let larger_precision = DecimalType::create(true, 40, 20);
         assert!(larger_precision.is_err());
+    }
+
+    #[test]
+    fn test_prost() {
+        let decimal_type = DecimalType {
+            nullable: true,
+            precision: 10,
+            scale: 5,
+        };
+        assert_eq!(
+            decimal_type.to_prost().unwrap(),
+            DataTypeProto {
+                type_name: TypeName::Decimal as i32,
+                is_nullable: true,
+                scale: 5,
+                precision: 10,
+                ..Default::default()
+            }
+        )
     }
 }

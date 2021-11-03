@@ -1,4 +1,4 @@
-use risingwave_proto::data::DataType_TypeName;
+use risingwave_pb::{data::data_type::TypeName, ToProto};
 
 use crate::array::interval_array::IntervalArrayBuilder;
 
@@ -87,11 +87,17 @@ impl DataType for IntervalType {
         IntervalArrayBuilder::new(capacity).map(|x| x.into())
     }
 
-    fn to_protobuf(&self) -> Result<DataTypeProto> {
-        let mut proto = DataTypeProto::new();
-        proto.set_type_name(DataType_TypeName::INTERVAL);
-        proto.set_is_nullable(self.nullable);
+    fn to_protobuf(&self) -> Result<risingwave_proto::data::DataType> {
+        self.to_prost()
+            .map(|x| x.to_proto::<risingwave_proto::data::DataType>())
+    }
 
+    fn to_prost(&self) -> Result<DataTypeProto> {
+        let proto = DataTypeProto {
+            type_name: TypeName::Boolean as i32,
+            is_nullable: self.nullable,
+            ..Default::default()
+        };
         Ok(proto)
     }
 
@@ -118,7 +124,7 @@ impl<'a> TryFrom<&'a DataTypeProto> for IntervalType {
     type Error = RwError;
 
     fn try_from(proto: &'a DataTypeProto) -> Result<Self> {
-        ensure!(proto.get_type_name() == DataType_TypeName::INTERVAL);
+        ensure!(proto.get_type_name() == TypeName::Interval);
         Ok(IntervalType::new(proto.get_is_nullable()))
     }
 }
