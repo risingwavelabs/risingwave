@@ -16,10 +16,10 @@ pub struct Schema {
     pub fields: Vec<Field>,
 }
 
-impl TryFrom<Vec<ColumnDesc>> for Schema {
+impl TryFrom<&Vec<ColumnDesc>> for Schema {
     type Error = RwError;
 
-    fn try_from(cols: Vec<ColumnDesc>) -> Result<Self> {
+    fn try_from(cols: &Vec<ColumnDesc>) -> Result<Self> {
         Ok(Self {
             fields: cols
                 .iter()

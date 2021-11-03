@@ -298,7 +298,7 @@ impl StreamManagerCore {
                 let table_ref = table_manager.clone().get_table(&table_id).unwrap();
                 if let SimpleTableRef::Columnar(table) = table_ref {
                     let schema = Schema::try_from(
-                        table.columns().iter().map(ToProst::to_prost).collect_vec(),
+                        &table.columns().iter().map(ToProst::to_prost).collect_vec(),
                     )?;
                     let stream_receiver = table.create_stream()?;
                     // TODO: The channel pair should be created by the Checkpoint manger. So this line may be removed later.
@@ -499,7 +499,7 @@ impl StreamManagerCore {
         for fragment_id in fragments {
             let fragment = self.fragments.remove(fragment_id).unwrap();
 
-            let schema = Schema::try_from(fragment.get_input_column_descs().clone())?;
+            let schema = Schema::try_from(fragment.get_input_column_descs())?;
 
             let merger =
                 self.create_merger(*fragment_id, schema, fragment.get_upstream_fragment_id())?;

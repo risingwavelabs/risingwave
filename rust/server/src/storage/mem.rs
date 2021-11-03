@@ -85,7 +85,7 @@ impl TableManager for SimpleTableManager {
         ensure!(column_count > 0, "There must be more than one column in MV");
         // TODO: Remove to_prost later.
         let schema = Schema::try_from(
-            columns
+            &columns
                 .into_iter()
                 .map(|c| c.to_prost())
                 .collect::<Vec<_>>(),
