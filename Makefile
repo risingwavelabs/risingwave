@@ -43,6 +43,9 @@ rust_test_with_coverage:
 rust_build:
 	cd rust && cargo build
 
+rust_clean:
+	cd rust && cargo clean
+
 rust_clean_build:
 	cd rust && cargo clean && cargo build
 
