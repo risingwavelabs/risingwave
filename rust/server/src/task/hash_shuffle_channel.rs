@@ -165,7 +165,7 @@ mod tests {
             }
             table_builder.run().await;
 
-            let mut builder = runner.prepare_scan().scan_all();
+            let mut builder = runner.prepare_scan().scan_all().await;
             let hashes = rows
                 .iter()
                 .map(|row| {

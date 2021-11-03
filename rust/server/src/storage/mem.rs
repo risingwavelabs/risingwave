@@ -1,5 +1,6 @@
 use crate::storage::*;
 use crate::stream_op::StreamChunk;
+use async_trait::async_trait;
 use futures::channel::mpsc;
 use futures::SinkExt;
 use risingwave_common::array::{DataChunk, DataChunkRef};
@@ -151,8 +152,9 @@ impl SimpleMemTable {
     }
 }
 
+#[async_trait]
 impl Table for SimpleMemTable {
-    fn append(&self, data: DataChunk) -> Result<usize> {
+    async fn append(&self, data: DataChunk) -> Result<usize> {
         let mut write_guard = self.inner.write().unwrap();
 
         if let Some(ref mut sender) = write_guard.stream_sender {
@@ -191,17 +193,17 @@ impl Table for SimpleMemTable {
         Ok(rx)
     }
 
-    fn get_data(&self) -> Result<Vec<DataChunkRef>> {
+    async fn get_data(&self) -> Result<Vec<DataChunkRef>> {
         let table = self.inner.read().unwrap();
         Ok(table.data.clone())
     }
 
-    fn get_column_ids(&self) -> Result<Arc<Vec<i32>>> {
+    async fn get_column_ids(&self) -> Result<Arc<Vec<i32>>> {
         let table = self.inner.read().unwrap();
         Ok(table.column_ids.clone())
     }
 
-    fn index_of_column_id(&self, column_id: i32) -> Result<usize> {
+    async fn index_of_column_id(&self, column_id: i32) -> Result<usize> {
         let table = self.inner.read().unwrap();
         if let Some(p) = table.column_ids.iter().position(|c| *c == column_id) {
             Ok(p)

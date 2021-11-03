@@ -457,7 +457,9 @@ mod tests {
         let columns = vec![];
         let schema = Schema { fields: vec![] };
         let seq_scan_exec = SeqScanExecutor::new(
+            true,
             Arc::new(SimpleMemTable::new(&mock_table_id(), &columns)),
+            vec![],
             vec![],
             vec![],
             0,

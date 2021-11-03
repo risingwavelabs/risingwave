@@ -182,7 +182,7 @@ async fn test_stream_mv_proto() {
         .unwrap();
 
     // Insert data and check if the materialized view has been updated.
-    let _res_app = table_ref.append(append_chunk);
+    let _res_app = table_ref.append(append_chunk).await;
     let table_id_mv = TableId::from_protobuf(
         &make_table_ref_id(1).to_proto::<risingwave_proto::plan::TableRefId>(),
     )

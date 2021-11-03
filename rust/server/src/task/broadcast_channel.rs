@@ -100,7 +100,7 @@ mod tests {
             }
             table_builder.run().await;
 
-            let mut builder = runner.prepare_scan().scan_all();
+            let mut builder = runner.prepare_scan().scan_all().await;
             broadcast_plan(builder.get_mut_plan(), num_sinks);
             let res = builder.run_and_collect_multiple_output().await;
             assert_eq!(num_sinks as usize, res.len());

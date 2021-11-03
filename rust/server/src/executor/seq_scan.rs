@@ -17,9 +17,12 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::build_from_proto;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
+use futures::future;
 
 pub(super) struct SeqScanExecutor {
+    first_execution: bool,
     table: Arc<SimpleMemTable>,
+    column_ids: Vec<i32>,
     column_indices: Vec<usize>,
     data: Vec<DataChunkRef>,
     chunk_idx: usize,
@@ -42,11 +45,7 @@ impl BoxedExecutorBuilder for SeqScanExecutor {
             .table_manager()
             .get_table(&table_id)?;
         if let SimpleTableRef::Columnar(table_ref) = table_ref {
-            let column_indices = seq_scan_node
-                .get_column_ids()
-                .iter()
-                .map(|c| table_ref.index_of_column_id(*c))
-                .collect::<Result<Vec<usize>>>()?;
+            let column_ids = seq_scan_node.get_column_ids();
 
             let fields = table_ref
                 .columns()
@@ -57,8 +56,10 @@ impl BoxedExecutorBuilder for SeqScanExecutor {
                 .collect::<Vec<Field>>();
 
             Ok(Box::new(Self {
+                first_execution: true,
                 table: table_ref,
-                column_indices,
+                column_ids: column_ids.to_vec(),
+                column_indices: vec![],
                 chunk_idx: 0,
                 data: Vec::new(),
                 schema: Schema { fields },
@@ -74,11 +75,25 @@ impl BoxedExecutorBuilder for SeqScanExecutor {
 #[async_trait::async_trait]
 impl Executor for SeqScanExecutor {
     fn init(&mut self) -> Result<()> {
-        self.data = self.table.get_data()?;
+        info!("SeqScanExecutor initing!");
         Ok(())
     }
 
     async fn execute(&mut self) -> Result<ExecutorResult> {
+        if self.first_execution {
+            self.first_execution = false;
+            self.data = self.table.get_data().await?;
+            self.column_indices = future::join_all(
+                self.column_ids
+                    .iter()
+                    .map(|c| self.table.index_of_column_id(*c)),
+            )
+            .await
+            .into_iter()
+            .map(|res| res.unwrap())
+            .collect();
+        }
+
         if self.chunk_idx >= self.data.len() {
             return Ok(Done);
         }
@@ -110,14 +125,18 @@ impl Executor for SeqScanExecutor {
 
 impl SeqScanExecutor {
     pub(crate) fn new(
+        first_execution: bool,
         table: Arc<SimpleMemTable>,
+        column_ids: Vec<i32>,
         column_indices: Vec<usize>,
         data: Vec<DataChunkRef>,
         chunk_idx: usize,
         schema: Schema,
     ) -> Self {
         Self {
+            first_execution,
             table,
+            column_ids,
             column_indices,
             data,
             chunk_idx,
@@ -164,12 +183,14 @@ mod tests {
         let col2 = column_nonnull! { I64Array, Int64Type, [2, 4, 6, 8, 10] };
         let data_chunk1 = DataChunk::builder().columns(vec![col1]).build();
         let data_chunk2 = DataChunk::builder().columns(vec![col2]).build();
-        table.append(data_chunk1)?;
-        table.append(data_chunk2)?;
+        table.append(data_chunk1).await?;
+        table.append(data_chunk2).await?;
 
         let mut seq_scan_executor = SeqScanExecutor {
+            first_execution: true,
             table: Arc::new(table),
-            column_indices: vec![0],
+            column_ids: vec![0],
+            column_indices: vec![],
             data: vec![],
             chunk_idx: 0,
             schema: Schema { fields },

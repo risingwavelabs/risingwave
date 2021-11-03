@@ -264,7 +264,7 @@ impl<'a> SelectBuilder<'a> {
     }
 
     // select * from t;
-    pub fn scan_all(mut self) -> Self {
+    pub async fn scan_all(mut self) -> SelectBuilder<'a> {
         let mut scan = SeqScanNode::default();
         let table_ref = self
             .runner
@@ -273,7 +273,7 @@ impl<'a> SelectBuilder<'a> {
             .get_table(&TableId::from_protobuf(&TableRefId::default()).unwrap())
             .unwrap();
         if let SimpleTableRef::Columnar(column_table_ref) = table_ref {
-            let column_ids = column_table_ref.get_column_ids().unwrap();
+            let column_ids = column_table_ref.get_column_ids().await.unwrap();
             for col_id in column_ids.iter() {
                 scan.mut_column_ids().push(*col_id);
             }

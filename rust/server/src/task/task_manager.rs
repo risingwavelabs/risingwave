@@ -105,6 +105,7 @@ mod tests {
         let res = runner
             .prepare_scan()
             .scan_all()
+            .await
             .run_and_collect_single_output()
             .await;
         ResultChecker::new()

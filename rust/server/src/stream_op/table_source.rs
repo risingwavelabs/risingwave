@@ -164,7 +164,7 @@ mod tests {
             })
             .unwrap();
         // Write 1st chunk
-        let card = table.append(chunk1)?;
+        let card = table.append(chunk1).await?;
         // barrier_sender.start_send(Message::Barrier(0))
 
         assert_eq!(3, card);
@@ -191,7 +191,7 @@ mod tests {
         }
 
         // Write 2nd chunk
-        let card = table.append(chunk2)?;
+        let card = table.append(chunk2).await?;
         assert_eq!(3, card);
 
         if let Message::Chunk(chunk) = source.next().await.unwrap() {
@@ -264,7 +264,7 @@ mod tests {
 
         let mut source = TableSourceExecutor::new(table_id, schema, stream_recv, barrier_receiver);
 
-        table.append(chunk1.clone())?;
+        table.append(chunk1.clone()).await?;
 
         barrier_sender
             .unbounded_send(Message::Barrier {
@@ -275,7 +275,7 @@ mod tests {
 
         source.next().await.unwrap();
         source.next().await.unwrap();
-        table.append(chunk1)?;
+        table.append(chunk1).await?;
 
         assert!(!table.is_stream_connected());
 

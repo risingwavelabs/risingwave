@@ -12,9 +12,10 @@ use risingwave_proto::plan::ColumnDesc;
 use std::sync::Arc;
 
 /// Table is an abstraction of the collection of columns and rows.
+#[async_trait::async_trait]
 pub trait Table: Sync + Send {
     /// Append an entry to the table.
-    fn append(&self, data: DataChunk) -> Result<usize>;
+    async fn append(&self, data: DataChunk) -> Result<usize>;
 
     /// Create a stream from the table.
     /// The stream includes all existing rows in tables and changed rows in future.
@@ -24,13 +25,13 @@ pub trait Table: Sync + Send {
     fn create_stream(&self) -> Result<mpsc::UnboundedReceiver<StreamChunk>>;
 
     /// Get data from the table.
-    fn get_data(&self) -> Result<Vec<DataChunkRef>>;
+    async fn get_data(&self) -> Result<Vec<DataChunkRef>>;
 
     /// Get the column ids of the table.
-    fn get_column_ids(&self) -> Result<Arc<Vec<i32>>>;
+    async fn get_column_ids(&self) -> Result<Arc<Vec<i32>>>;
 
     /// Get the indices of the specific column.
-    fn index_of_column_id(&self, column_id: i32) -> Result<usize>;
+    async fn index_of_column_id(&self, column_id: i32) -> Result<usize>;
 
     /// Get the status of stream connection of this table.
     fn is_stream_connected(&self) -> bool;

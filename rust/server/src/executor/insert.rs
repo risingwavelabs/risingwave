@@ -53,7 +53,7 @@ impl Executor for InsertExecutor {
         })?;
         let mut rows_inserted = 0;
         while let Batch(child_chunk) = self.child.execute().await? {
-            rows_inserted += table_ref.append(child_chunk)?;
+            rows_inserted += table_ref.append(child_chunk).await?;
         }
 
         // create ret value
@@ -207,7 +207,7 @@ mod tests {
             .table_manager
             .get_table(&insert_executor.table_id)?;
         if let SimpleTableRef::Columnar(table_ref) = table_ref {
-            let data_ref = table_ref.get_data()?;
+            let data_ref = table_ref.get_data().await?;
             assert_eq!(
                 data_ref[0]
                     .column_at(0)?
