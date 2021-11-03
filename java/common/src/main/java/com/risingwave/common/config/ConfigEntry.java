@@ -7,7 +7,9 @@ import com.risingwave.common.exception.PgException;
 import java.util.Properties;
 import javax.annotation.Nullable;
 
+/** Config entry represents a immutable config item. */
 public class ConfigEntry<T> {
+  // TODO: make config entry mutable and refactor [`Configurations.class`] API.
   private final String key;
   private final String doc;
   private final T defaultValue;
@@ -40,6 +42,10 @@ public class ConfigEntry<T> {
     return new Builder<>(key);
   }
 
+  public Parser<?> getParser() {
+    return parser;
+  }
+
   @Nullable
   public T getValue(Properties config) {
     String value = config.getProperty(key);
@@ -61,6 +67,10 @@ public class ConfigEntry<T> {
     }
   }
 
+  /**
+   * To build a config entry, using the config entry builder with default value and
+   * parser/validator.
+   */
   public static class Builder<T> {
     private final String key;
     private String doc = "";

@@ -5,11 +5,13 @@ import static java.util.Objects.requireNonNull;
 import com.google.common.collect.Lists;
 import java.util.List;
 
+/** Use to convert a string into corresponding type. Used in Config Entry. */
 public class Parsers {
   private Parsers() {}
 
   public static final Parser<Integer> INT_PARSER = Integer::parseInt;
 
+  // TODO: extend the boolean parser accept more input like `on`, `off`, `yes`, `no`, `1`, `0`.
   public static final Parser<Boolean> BOOLEAN_PARSER = Boolean::parseBoolean;
 
   /**

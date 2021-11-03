@@ -7,6 +7,7 @@ import static java.lang.reflect.Modifier.isPublic;
 import static java.lang.reflect.Modifier.isStatic;
 
 import com.google.common.base.MoreObjects;
+import com.google.common.collect.ImmutableMap;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import java.io.FileInputStream;
@@ -19,8 +20,26 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.stream.Collectors;
 
+/**
+ * Manage the configurations of all registered parameters. To add a parameters. For example,
+ * `enable_mergejoin`. Create a ConfigEntry in BatchPlannerConfigurations (with key =
+ * "enable_mergejoin"). Set up default value and corresponding parser/converter. Then 'SET
+ * enable_mergejoin to false` should take effects in session level.
+ */
 public class Configuration {
+
+  /**
+   * string key -> config value (T). TODO: Move the config data into session level context. Each
+   * session should own a config map to record the session level parameters. `SET` can change the
+   * value here.
+   */
   private final Map<String, Object> confData = new HashMap<>();
+
+  /**
+   * string key -> config entry. Server level config map. When each session can not find
+   * corresponding config, get the default value from registry. `SET` can not change the value here.
+   */
+  private static final ImmutableMap<String, ConfigEntry<?>> confRegistry = loadConfigRegistry();
 
   @SuppressWarnings({"unchecked"})
   public <T> T get(ConfigEntry<T> key) {
@@ -30,6 +49,33 @@ public class Configuration {
   public <T> void set(ConfigEntry<T> key, T value) {
     checkNotNull(value, "Value can't be null!");
     setRawValue(key, value);
+  }
+
+  /** Get config value by using the string key. Used in show parameter handler. */
+  public <T> T getByString(String stringKey) {
+    Object rawValue = confData.get(stringKey);
+    if (rawValue == null) {
+      // Find default value in config registry.
+      ConfigEntry<?> entry = confRegistry.get(stringKey);
+      if (entry == null) {
+        throw new PgException(
+            PgErrorCode.CONFIG_FILE_ERROR,
+            "Config %s is missing and has no default value!",
+            stringKey);
+      } else {
+        return (T) entry.getDefaultValue();
+      }
+    } else {
+      return (T) rawValue;
+    }
+  }
+
+  /** Set config value using string key and string value. Used in set parameter handler. */
+  public <T> void setByString(String stringKey, String value) {
+    checkNotNull(value, "Value can't be null!");
+    // Make sure the parameter is defined.
+    getByString(stringKey);
+    confData.put(stringKey, confRegistry.get(stringKey).getParser().convert(value));
   }
 
   @Override
@@ -86,6 +132,17 @@ public class Configuration {
     } catch (IOException e) {
       throw new PgException(INTERNAL_ERROR, e);
     }
+  }
+
+  private static ImmutableMap<String, ConfigEntry<?>> loadConfigRegistry() {
+    // Load batch planner options.
+    List<ConfigEntry<?>> configEntries = loadConfigEntries(BatchPlannerConfigurations.class);
+    var mapBuilder = new ImmutableMap.Builder<String, ConfigEntry<?>>();
+    configEntries.forEach(
+        entry -> {
+          mapBuilder.put(entry.getKey(), entry);
+        });
+    return mapBuilder.build();
   }
 
   private static List<ConfigEntry<?>> loadConfigEntries(Class<?> klass) {

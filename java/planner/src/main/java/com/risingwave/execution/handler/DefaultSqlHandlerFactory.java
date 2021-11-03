@@ -5,6 +5,7 @@ import com.risingwave.common.error.ExecutionError;
 import com.risingwave.common.exception.RisingWaveException;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.sql.node.SqlCreateStream;
+import com.risingwave.sql.node.SqlShowParameters;
 import java.lang.reflect.Constructor;
 import java.util.Arrays;
 import javax.inject.Singleton;
@@ -44,6 +45,11 @@ public class DefaultSqlHandlerFactory implements SqlHandlerFactory {
     // TODO(TaoWu): Use operator name to find the handler.
     if (ast instanceof SqlCreateStream) {
       return new CreateStreamHandler();
+    }
+
+    // TODO(Bowen): Use operator name to find the handler
+    if (ast instanceof SqlShowParameters) {
+      return new ShowParameterHandler();
     }
 
     Constructor<? extends SqlHandler> constructor = SQL_HANDLER_FACTORY.get(ast.getKind());

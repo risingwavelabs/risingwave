@@ -5,6 +5,7 @@ import com.risingwave.pgwire.database.PgResult;
 import com.risingwave.pgwire.msg.StatementType;
 import org.apache.calcite.sql.SqlNode;
 
+/** Interface for all kinds of handler. */
 public interface SqlHandler {
   PgResult handle(SqlNode ast, ExecutionContext context);
 
@@ -22,6 +23,8 @@ public interface SqlHandler {
         return StatementType.ORDER_BY;
       case OTHER:
         return StatementType.OTHER;
+      case SET_OPTION:
+        return StatementType.SET_OPTION;
       default:
         throw new UnsupportedOperationException(
             String.format("Unsupported statement type %s", ast.getKind()));

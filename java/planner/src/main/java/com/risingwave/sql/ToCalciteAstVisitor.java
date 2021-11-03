@@ -15,6 +15,7 @@ import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.planner.sql.RisingWaveOperatorTable;
 import com.risingwave.sql.node.SqlCreateStream;
+import com.risingwave.sql.node.SqlShowParameters;
 import com.risingwave.sql.node.SqlTableOption;
 import com.risingwave.sql.tree.AliasedRelation;
 import com.risingwave.sql.tree.AllColumns;
@@ -60,6 +61,8 @@ import com.risingwave.sql.tree.QualifiedNameReference;
 import com.risingwave.sql.tree.Query;
 import com.risingwave.sql.tree.QuerySpecification;
 import com.risingwave.sql.tree.SearchedCaseExpression;
+import com.risingwave.sql.tree.SetStatement;
+import com.risingwave.sql.tree.ShowSessionParameter;
 import com.risingwave.sql.tree.SingleColumn;
 import com.risingwave.sql.tree.SortItem;
 import com.risingwave.sql.tree.Statement;
@@ -97,6 +100,7 @@ import org.apache.calcite.sql.SqlOperator;
 import org.apache.calcite.sql.SqlOrderBy;
 import org.apache.calcite.sql.SqlSelect;
 import org.apache.calcite.sql.SqlSelectKeyword;
+import org.apache.calcite.sql.SqlSetOption;
 import org.apache.calcite.sql.SqlSyntax;
 import org.apache.calcite.sql.ddl.SqlDdlNodes;
 import org.apache.calcite.sql.fun.SqlCase;
@@ -710,7 +714,6 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
             .collect(Collectors.toList());
 
     var elseValue = node.getDefaultValue().accept(this, context);
-
     return SqlCase.createSwitched(
         SqlParserPos.ZERO,
         null,
@@ -732,6 +735,34 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
     var values =
         node.getValues().stream().map(v -> v.accept(this, context)).collect(Collectors.toList());
     return new SqlNodeList(values, SqlParserPos.ZERO);
+  }
+
+  @Override
+  public SqlNode visitSetStatement(SetStatement<?> node, Void context) {
+    var assignment = node.assignments().get(0);
+    if (node.scope() == node.scope().SESSION) {
+      return new SqlSetOption(
+          SqlParserPos.ZERO,
+          null,
+          new SqlIdentifier(
+              ((QualifiedNameReference) assignment.columnName()).getName().toString(),
+              SqlParserPos.ZERO),
+          ((Expression) assignment.expression()).accept(this, context));
+    } else {
+      return new SqlSetOption(
+          SqlParserPos.ZERO,
+          "SYSTEM",
+          new SqlIdentifier(
+              ((QualifiedNameReference) assignment.columnName()).getName().toString(),
+              SqlParserPos.ZERO),
+          new SqlIdentifier(assignment.expression().toString(), SqlParserPos.ZERO));
+    }
+  }
+
+  @Override
+  public SqlNode visitShowSessionParameter(ShowSessionParameter node, Void context) {
+    return new SqlShowParameters(
+        SqlParserPos.ZERO, new SqlIdentifier(node.parameter().toString(), SqlParserPos.ZERO));
   }
 
   @Override

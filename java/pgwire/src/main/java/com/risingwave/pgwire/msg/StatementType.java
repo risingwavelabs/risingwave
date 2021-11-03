@@ -18,5 +18,7 @@ public enum StatementType {
   // Introduce ORDER_BY statement type cuz Calcite unvalidated AST has SqlKind.ORDER_BY. Note that
   // Statement Type is not designed to be one to one mapping with SqlKind.
   ORDER_BY,
+  SET_OPTION,
+  SHOW_PARAMETERS,
   OTHER
 }
