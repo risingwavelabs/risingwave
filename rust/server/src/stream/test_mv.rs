@@ -1,11 +1,11 @@
-use crate::storage::SimpleTableRef;
-use crate::storage::{Row, SimpleTableManager, Table, TableManager};
-use crate::stream::StreamManager;
-use crate::stream_op::Message;
+use std::sync::Arc;
+
 use futures::StreamExt;
 use itertools::Itertools;
+
 use pb_convert::FromProtobuf;
 use risingwave_common::array::column::Column;
+use risingwave_common::array::data_chunk_iter::Row;
 use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder};
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
@@ -26,8 +26,11 @@ use risingwave_pb::stream_plan::{
 use risingwave_pb::stream_service::{ActorInfo, BroadcastActorInfoTableRequest};
 use risingwave_pb::task_service::HostAddress;
 use risingwave_pb::ToProto;
-use smallvec::SmallVec;
-use std::sync::Arc;
+
+use crate::storage::SimpleTableRef;
+use crate::storage::{SimpleTableManager, Table, TableManager};
+use crate::stream::StreamManager;
+use crate::stream_op::Message;
 
 fn make_int32_type_pb() -> DataType {
     DataType {
@@ -194,9 +197,7 @@ async fn test_stream_mv_proto() {
     let mut sink = stream_manager.take_sink((1, 233));
     if let Message::Chunk(_chunk) = sink.next().await.unwrap() {
         if let SimpleTableRef::Row(table_mv) = table_ref_mv {
-            let mut value_vec = SmallVec::new();
-            value_vec.push(Some(1.to_scalar_value()));
-            let value_row = Row(value_vec);
+            let value_row = Row(vec![Some(1.to_scalar_value())]);
             let res_row = table_mv.get(value_row);
             if let Ok(res_row_in) = res_row {
                 let datum = res_row_in.unwrap().0.get(0).unwrap().clone();

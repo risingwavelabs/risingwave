@@ -1,52 +1,15 @@
-use risingwave_common::catalog::Schema;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
-use risingwave_common::types::{Datum, Scalar};
 use std::{
-    cmp::Ordering,
     collections::BTreeMap,
     sync::{Arc, RwLock},
 };
 
-use itertools::Itertools;
-use smallvec::SmallVec;
-
-#[derive(Clone, Debug, Default)]
-pub struct Row(pub SmallVec<[Datum; 5]>);
+use risingwave_common::array::data_chunk_iter::Row;
+use risingwave_common::catalog::Schema;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::Result;
+use risingwave_common::types::Scalar;
 
 pub type MemTableRowIter = <BTreeMap<Row, Row> as IntoIterator>::IntoIter;
-
-impl PartialEq for Row {
-    fn eq(&self, other: &Self) -> bool {
-        if self.0.len() != other.0.len() {
-            return false;
-        }
-        self.0.iter().zip(other.0.iter()).all_equal()
-    }
-}
-
-impl PartialOrd for Row {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        if self.0.len() != other.0.len() {
-            return None;
-        }
-        for (x, y) in self.0.iter().zip(other.0.iter()) {
-            match x.partial_cmp(y) {
-                Some(Ordering::Equal) => continue,
-                order => return order,
-            }
-        }
-        Some(Ordering::Equal)
-    }
-}
-
-impl Eq for Row {}
-
-impl Ord for Row {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other).unwrap()
-    }
-}
 
 #[derive(Debug, Default)]
 struct MemRowTableInner {
@@ -95,7 +58,7 @@ impl MemRowTableInner {
         let value = self.data.get(&row);
         match value {
             None => {
-                let mut value_vec = SmallVec::new();
+                let mut value_vec = vec![];
                 let datum = Some(1.to_scalar_value());
                 value_vec.push(datum);
                 let value_row = Row(value_vec);
@@ -103,7 +66,7 @@ impl MemRowTableInner {
             }
             Some(res) => {
                 // Create a new value row of multiplicity+1.
-                let mut value_vec = SmallVec::new();
+                let mut value_vec = vec![];
                 let datum = res.0.get(0).unwrap().clone();
                 let occurrences = datum.unwrap();
                 let occ_value = occurrences.as_int32() + 1;
@@ -124,9 +87,7 @@ impl MemRowTableInner {
                 let occurrences = datum.unwrap();
                 let occ_value = occurrences.as_int32();
                 if *occ_value > 1 {
-                    let mut value_vec = SmallVec::new();
-                    value_vec.push(Some((occ_value - 1).to_scalar_value()));
-                    let value_row = Row(value_vec);
+                    let value_row = Row(vec![Some((occ_value - 1).to_scalar_value())]);
                     self.data.insert(row, value_row);
                 } else {
                     self.data.remove(&row);
@@ -210,10 +171,7 @@ impl MemRowTable {
 mod tests {
     use super::*;
     fn mock_one_row() -> Row {
-        let mut value_vec = SmallVec::new();
-        value_vec.push(Some(1.to_scalar_value()));
-        value_vec.push(Some(4.to_scalar_value()));
-        Row(value_vec)
+        Row(vec![Some(1.to_scalar_value()), Some(4.to_scalar_value())])
     }
 
     #[test]

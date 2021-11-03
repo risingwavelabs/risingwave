@@ -1,9 +1,10 @@
-use super::{Executor, Message, Result, SimpleExecutor, StreamChunk};
-use crate::storage::MemRowTableRef as MemTableRef;
-use crate::storage::Row;
 use async_trait::async_trait;
+use risingwave_common::array::data_chunk_iter::Row;
 use risingwave_common::catalog::Schema;
-use smallvec::SmallVec;
+
+use crate::storage::MemRowTableRef as MemTableRef;
+
+use super::{Executor, Message, Result, SimpleExecutor, StreamChunk};
 
 /// `MViewSinkExecutor` writes data to a row-based memtable, so that data could
 /// be queried by the AP engine.
@@ -63,7 +64,7 @@ impl SimpleExecutor for MViewSinkExecutor {
             }
 
             // assemble pk row
-            let mut pk_row = SmallVec::new();
+            let mut pk_row = vec![];
             for column_id in &self.pk_col {
                 let datum = columns[*column_id].array_ref().datum_at(idx);
                 pk_row.push(datum);
@@ -71,7 +72,7 @@ impl SimpleExecutor for MViewSinkExecutor {
             let pk_row = Row(pk_row);
 
             // assemble row
-            let mut row = SmallVec::new();
+            let mut row = vec![];
             for column in columns {
                 let datum = column.array_ref().datum_at(idx);
                 row.push(datum);
@@ -111,12 +112,10 @@ impl SimpleExecutor for MViewSinkExecutor {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::{Row, SimpleTableManager, SimpleTableRef, TableManager};
-    use crate::stream_op::test_utils::*;
-    use crate::stream_op::*;
-    use crate::*;
+
     use pb_construct::make_proto;
     use pb_convert::FromProtobuf;
+    use risingwave_common::array::data_chunk_iter::Row;
     use risingwave_common::array::I32Array;
     use risingwave_common::catalog::{Field, TableId};
     use risingwave_common::error::ErrorCode::InternalError;
@@ -124,7 +123,11 @@ mod tests {
     use risingwave_proto::data::{DataType, DataType_TypeName};
     use risingwave_proto::plan::{ColumnDesc, ColumnDesc_ColumnEncodingType};
     use risingwave_proto::plan::{DatabaseRefId, SchemaRefId, TableRefId};
-    use smallvec::SmallVec;
+
+    use crate::storage::{SimpleTableManager, SimpleTableRef, TableManager};
+    use crate::stream_op::test_utils::*;
+    use crate::stream_op::*;
+    use crate::*;
 
     #[tokio::test]
     async fn test_sink() {
@@ -192,9 +195,7 @@ mod tests {
 
             // First stream chunk. We check the existence of (3) -> (3,6)
             if let Message::Chunk(_chunk) = sink_executor.next().await.unwrap() {
-                let mut value_vec = SmallVec::new();
-                value_vec.push(Some(3.to_scalar_value()));
-                let value_row = Row(value_vec);
+                let value_row = Row(vec![Some(3.to_scalar_value())]);
                 let res_row = table.get(value_row);
                 if let Ok(res_row_in) = res_row {
                     let datum = res_row_in.unwrap().0.get(1).unwrap().clone();
@@ -211,9 +212,7 @@ mod tests {
             // Second stream chunk. We check the existence of (7) -> (7,8)
             if let Message::Chunk(_chunk) = sink_executor.next().await.unwrap() {
                 // From (7) -> (7,8)
-                let mut value_vec = SmallVec::new();
-                value_vec.push(Some(7.to_scalar_value()));
-                let value_row = Row(value_vec);
+                let value_row = Row(vec![Some(7.to_scalar_value())]);
                 let res_row = table.get(value_row);
                 if let Ok(res_row_in) = res_row {
                     let datum = res_row_in.unwrap().0.get(1).unwrap().clone();
@@ -297,10 +296,7 @@ mod tests {
 
             // First stream chunk. We check the existence of (1,4) -> (1)
             if let Message::Chunk(_chunk) = sink_executor.next().await.unwrap() {
-                let mut value_vec = SmallVec::new();
-                value_vec.push(Some(1.to_scalar_value()));
-                value_vec.push(Some(4.to_scalar_value()));
-                let value_row = Row(value_vec);
+                let value_row = Row(vec![Some(1.to_scalar_value()), Some(4.to_scalar_value())]);
                 let res_row = table.get(value_row);
                 if let Ok(res_row_in) = res_row {
                     let datum = res_row_in.unwrap().0.get(0).unwrap().clone();
@@ -316,10 +312,7 @@ mod tests {
 
             // Second stream chunk. We check the existence of (1,4) -> (2)
             if let Message::Chunk(_chunk) = sink_executor.next().await.unwrap() {
-                let mut value_vec = SmallVec::new();
-                value_vec.push(Some(1.to_scalar_value()));
-                value_vec.push(Some(4.to_scalar_value()));
-                let value_row = Row(value_vec);
+                let value_row = Row(vec![Some(1.to_scalar_value()), Some(4.to_scalar_value())]);
                 let res_row = table.get(value_row);
                 if let Ok(res_row_in) = res_row {
                     let datum = res_row_in.unwrap().0.get(0).unwrap().clone();

@@ -1,6 +1,6 @@
 use crate::array::column::Column;
 
-use crate::array::data_chunk_iter::{DataChunkIter, RowRef};
+use crate::array::data_chunk_iter::{DataChunkRefIter, RowRef};
 use crate::array::{ArrayBuilderImpl, ArrayImpl};
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
@@ -248,8 +248,8 @@ impl DataChunk {
     }
 
     /// Get an iterator for visible rows.
-    pub fn iter(&self) -> DataChunkIter<'_> {
-        DataChunkIter::new(self)
+    pub fn iter(&self) -> DataChunkRefIter<'_> {
+        DataChunkRefIter::new(self)
     }
 
     /// Random access a tuple in a data chunk. Return in a row format.

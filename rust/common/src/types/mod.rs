@@ -211,6 +211,18 @@ for_all_scalar_variants! { scalar_impl_enum }
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
 
+/// This trait is to implement `to_owned_datum` for `Option<ScalarImpl>`
+pub trait ToOwnedDatum {
+    /// implement `to_owned_datum` for `DatumRef` to covert to `Datum`
+    fn to_owned_datum(self) -> Datum;
+}
+
+impl ToOwnedDatum for DatumRef<'_> {
+    fn to_owned_datum(self) -> Datum {
+        self.map(ScalarRefImpl::into_scalar_impl)
+    }
+}
+
 // FIXME: `f32` is not `Eq`, and this is not safe. Consider using `ordered_float` in our project.
 impl Eq for ScalarImpl {}
 
