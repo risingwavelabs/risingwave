@@ -2,16 +2,27 @@ use crate::executor::StreamScanExecutor;
 use crate::stream_op::{Executor, Message, Op, StreamChunk};
 use async_trait::async_trait;
 use futures::FutureExt;
+use itertools::Itertools;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use std::fmt::{Debug, Formatter};
 
 pub struct KafkaSourceExecutor {
+    schema: Schema,
     executor: StreamScanExecutor,
 }
 
 impl KafkaSourceExecutor {
     pub fn new(executor: StreamScanExecutor) -> Self {
-        Self { executor }
+        let fields = executor
+            .columns()
+            .iter()
+            .map(|col| Field {
+                data_type: col.data_type.clone(),
+            })
+            .collect_vec();
+        let schema = Schema { fields };
+        Self { schema, executor }
     }
 }
 
@@ -29,6 +40,10 @@ impl Executor for KafkaSourceExecutor {
         } else {
             Ok(Message::Terminate)
         }
+    }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
     }
 }
 

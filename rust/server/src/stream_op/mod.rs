@@ -239,9 +239,7 @@ pub trait Executor: Send + Sync + 'static {
     async fn next(&mut self) -> Result<Message>;
 
     /// Return the schema of the executor.
-    fn schema(&self) -> &Schema {
-        todo!("A placeholder now")
-    }
+    fn schema(&self) -> &Schema;
 }
 
 /// `SimpleExecutor` accepts a single chunk as input.

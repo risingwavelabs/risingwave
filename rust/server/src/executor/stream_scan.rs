@@ -35,6 +35,10 @@ impl StreamScanExecutor {
             Some(chunk) => Ok(Some(chunk)),
         }
     }
+
+    pub fn columns(&self) -> &[SourceColumnDesc] {
+        self.columns.as_slice()
+    }
 }
 
 impl BoxedExecutorBuilder for StreamScanExecutor {
