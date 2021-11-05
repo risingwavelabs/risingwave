@@ -22,9 +22,12 @@ use risingwave_common::vector_op::agg::BoxedAggState;
 use super::{BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult};
 
 type AggHashMap<K> = HashMap<K, Vec<BoxedAggState>, PrecomputedBuildHasher>;
+
 pub(super) struct HashAggExecutorBuilder;
+
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for HashAggExecutorBuilder {
-    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+    async fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::HASH_AGG);
         ensure!(source.plan_node().get_children().len() == 1);
         let proto_child = source
@@ -32,7 +35,7 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
             .get_children()
             .get(0)
             .ok_or_else(|| ErrorCode::InternalError(String::from("")))?;
-        let child = source.clone_for_plan(proto_child).build()?;
+        let child = source.clone_for_plan(proto_child).build().await?;
 
         let hash_agg_node =
             HashAggNode::parse_from_bytes(source.plan_node().get_body().get_value())

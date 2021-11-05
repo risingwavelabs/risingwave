@@ -247,8 +247,9 @@ impl<K: HashKey> HashKeyDispatcher<K> for HashJoinExecutorBuilderDispatcher<K> {
 }
 
 /// Hash join executor builder.
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
-    fn new_boxed_executor(context: &ExecutorBuilder) -> Result<BoxedExecutor> {
+    async fn new_boxed_executor(context: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(context.plan_node().get_node_type() == PlanNode_PlanNodeType::HASH_JOIN);
         ensure!(context.plan_node().get_children().len() == 2);
 
@@ -295,10 +296,12 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
 
         let left_child = context
             .clone_for_plan(&context.plan_node.get_children()[0])
-            .build()?;
+            .build()
+            .await?;
         let right_child = context
             .clone_for_plan(&context.plan_node.get_children()[1])
-            .build()?;
+            .build()
+            .await?;
 
         let hash_key_kind = calc_hash_key_kind(&params.right_key_types);
 

@@ -18,8 +18,9 @@ pub(super) struct DropTableExecutor {
     schema: Schema,
 }
 
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for DropTableExecutor {
-    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+    async fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::DROP_TABLE);
 
         let node = DropTableNode::parse_from_bytes(source.plan_node().get_body().get_value())

@@ -30,8 +30,9 @@ pub(super) struct SortAggExecutor {
     schema: Schema,
 }
 
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for SortAggExecutor {
-    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+    async fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::SORT_AGG);
 
         ensure!(source.plan_node().get_children().len() == 1);
@@ -40,7 +41,7 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             .get_children()
             .get(0)
             .ok_or_else(|| ErrorCode::InternalError(String::from("")))?;
-        let child = source.clone_for_plan(proto_child).build()?;
+        let child = source.clone_for_plan(proto_child).build().await?;
 
         let sort_agg_node =
             SortAggNode::parse_from_bytes(source.plan_node().get_body().get_value())

@@ -35,8 +35,9 @@ pub(super) struct OrderByExecutor {
     data_types: Vec<DataTypeRef>,
 }
 
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for OrderByExecutor {
-    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+    async fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::ORDER_BY);
         ensure!(source.plan_node().get_children().len() == 1);
         let order_by_node =
@@ -44,7 +45,7 @@ impl BoxedExecutorBuilder for OrderByExecutor {
                 .map_err(ProtobufError)?;
         let order_pairs = fetch_orders_from_order_by_node(&order_by_node).unwrap();
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
-            let child = source.clone_for_plan(child_plan).build()?;
+            let child = source.clone_for_plan(child_plan).build().await?;
             return Ok(Box::new(Self {
                 order_pairs: Arc::new(order_pairs),
                 child,

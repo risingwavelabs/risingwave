@@ -40,8 +40,9 @@ impl Executor for DropStreamExecutor {
     }
 }
 
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for DropStreamExecutor {
-    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+    async fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::DROP_STREAM);
 
         let node = DropStreamNode::parse_from_bytes(source.plan_node().get_body().get_value())
@@ -73,8 +74,8 @@ mod tests {
     use risingwave_common::catalog::test_utils::mock_table_id;
     use risingwave_common::catalog::Schema;
 
-    #[test]
-    fn test_drop_stream() {
+    #[tokio::test]
+    async fn test_drop_stream() {
         let mut plan_node = PlanNode::new();
         plan_node.set_node_type(PlanNode_PlanNodeType::FILTER);
         let task_id = &TaskId {
@@ -83,7 +84,9 @@ mod tests {
             query_id: "".to_string(),
         };
         let builder = ExecutorBuilder::new(&plan_node, task_id, GlobalTaskEnv::for_test());
-        assert!(DropStreamExecutor::new_boxed_executor(&builder).is_err())
+        assert!(DropStreamExecutor::new_boxed_executor(&builder)
+            .await
+            .is_err())
     }
 
     #[tokio::test]

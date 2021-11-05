@@ -85,8 +85,9 @@ impl Executor for InsertExecutor {
     }
 }
 
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for InsertExecutor {
-    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+    async fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::INSERT);
         let insert_node = InsertNode::parse_from_bytes(source.plan_node().get_body().get_value())
             .map_err(ProtobufError)?;
@@ -101,7 +102,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
                 "Child interpreting error",
             )))
         })?;
-        let child = source.clone_for_plan(proto_child).build()?;
+        let child = source.clone_for_plan(proto_child).build().await?;
 
         Ok(Box::new(Self {
             table_id,

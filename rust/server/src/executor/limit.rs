@@ -26,8 +26,9 @@ pub(super) struct LimitExecutor {
     returned: usize,
 }
 
+#[async_trait::async_trait]
 impl BoxedExecutorBuilder for LimitExecutor {
-    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+    async fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::LIMIT);
         ensure!(source.plan_node().get_children().len() == 1);
         let limit_node = LimitProto::parse_from_bytes(source.plan_node().get_body().get_value())
@@ -36,7 +37,7 @@ impl BoxedExecutorBuilder for LimitExecutor {
         let offset = limit_node.get_offset() as usize;
 
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
-            let child = source.clone_for_plan(child_plan).build()?;
+            let child = source.clone_for_plan(child_plan).build().await?;
             return Ok(Box::new(Self {
                 child,
                 limit,
