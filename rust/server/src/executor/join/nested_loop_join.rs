@@ -12,7 +12,7 @@ use crate::executor::{
 };
 use risingwave_common::array::column::Column;
 use risingwave_common::array::data_chunk_iter::RowRef;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::{InternalError, ProtobufError};
 use risingwave_common::error::{Result, RwError};
@@ -241,45 +241,34 @@ impl ProbeSideSource {
 
     /// Create constant data chunk (one tuple repeat `capacity` times).
     fn convert_row_to_chunk(&self, row_ref: &RowRef<'_>, num_tuples: usize) -> Result<DataChunk> {
-        match &self.cur_chunk {
-            Batch(chunk) => {
-                let num_columns = chunk.columns().len();
-                assert_eq!(row_ref.size(), num_columns);
-                let mut array_builders = Vec::with_capacity(num_columns);
-                let mut data_types = Vec::with_capacity(num_columns);
-                // Create array builders and data types.
-                for column in chunk.columns() {
-                    array_builders.push(DataType::create_array_builder(
-                        column.data_type().clone(),
-                        num_tuples,
-                    )?);
-                    data_types.push(column.data_type().clone());
-                }
-
-                // Append scalar to these builders.
-                for _i in 0..num_tuples {
-                    for (col_idx, builder) in
-                        array_builders.iter_mut().enumerate().take(num_columns)
-                    {
-                        builder.append_datum_ref(row_ref.value_at(col_idx))?;
-                    }
-                }
-
-                // Finish each array builder and get Column.
-                let result_columns = array_builders
-                    .into_iter()
-                    .zip(data_types.iter())
-                    .map(|(builder, data_type)| {
-                        builder
-                            .finish()
-                            .map(|arr| Column::new(Arc::new(arr), data_type.clone()))
-                    })
-                    .collect::<Result<Vec<Column>>>()?;
-
-                Ok(DataChunk::new(result_columns, None))
+        let data_types = self.outer.schema().data_types_clone();
+        let num_columns = data_types.len();
+        let mut output_array_builders = data_types
+            .iter()
+            .map(|data_type| DataType::create_array_builder(data_type.clone(), num_tuples))
+            .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
+        for _i in 0..num_tuples {
+            for (col_idx, builder) in output_array_builders
+                .iter_mut()
+                .enumerate()
+                .take(num_columns)
+            {
+                builder.append_datum_ref(row_ref.value_at(col_idx))?;
             }
-            Done => unreachable!("Should never convert row to chunk while no more data to scan"),
         }
+
+        // Finish each array builder and get Column.
+        let result_columns = output_array_builders
+            .into_iter()
+            .zip(data_types.iter())
+            .map(|(builder, data_type)| {
+                builder
+                    .finish()
+                    .map(|arr| Column::new(Arc::new(arr), data_type.clone()))
+            })
+            .collect::<Result<Vec<Column>>>()?;
+
+        Ok(DataChunk::new(result_columns, None))
     }
 
     /// Try advance to next outer tuple. If it is Done but still invoked, it's
@@ -413,6 +402,7 @@ mod tests {
     use crate::executor::join::nested_loop_join::{BuildTable, ProbeSideSource};
     use crate::executor::seq_scan::SeqScanExecutor;
     use crate::executor::ExecutorResult;
+    use crate::risingwave_common::catalog::Field;
     use crate::storage::SimpleMemTable;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::data_chunk_iter::RowRef;
@@ -455,7 +445,11 @@ mod tests {
     fn test_convert_row_to_chunk() {
         let row = RowRef::new(vec![Some(ScalarRefImpl::Int32(3))]);
         let columns = vec![];
-        let schema = Schema { fields: vec![] };
+        let schema = Schema {
+            fields: vec![Field {
+                data_type: Arc::new(Int32Type::new(false)),
+            }],
+        };
         let seq_scan_exec = SeqScanExecutor::new(
             true,
             Arc::new(SimpleMemTable::new(&mock_table_id(), &columns)),
