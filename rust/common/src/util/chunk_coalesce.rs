@@ -25,6 +25,10 @@ pub struct DataChunkBuilder {
 }
 
 impl DataChunkBuilder {
+    pub fn new_with_default_size(data_types: Vec<DataTypeRef>) -> Self {
+        Self::new(data_types, DEFAULT_CHUNK_BUFFER_SIZE)
+    }
+
     pub fn new(data_types: Vec<DataTypeRef>, batch_size: usize) -> Self {
         Self {
             data_types,
