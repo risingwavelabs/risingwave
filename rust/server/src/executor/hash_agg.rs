@@ -16,8 +16,8 @@ use risingwave_common::collection::hash_map::{HashKey, PrecomputedBuildHasher, S
 use risingwave_common::error::ErrorCode::ProtobufError;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, DataTypeRef};
-use risingwave_common::vector_op::agg::AggStateFactory;
-use risingwave_common::vector_op::agg::BoxedAggState;
+use risingwave_common::vector_op::agg::{AggStateFactory, BoxedAggState};
+use risingwave_pb::ToProst;
 
 use super::{BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult};
 
@@ -47,7 +47,7 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
         let agg_factories = hash_agg_node
             .get_agg_calls()
             .iter()
-            .map(AggStateFactory::new)
+            .map(|x| AggStateFactory::new(&x.to_prost()))
             .collect::<Result<Vec<AggStateFactory>>>()?;
 
         let child_schema = child.schema();
@@ -233,7 +233,7 @@ mod tests {
           })].into()
         });
 
-        let agg_factory = AggStateFactory::new(&proto).unwrap();
+        let agg_factory = AggStateFactory::new(&proto.to_prost()).unwrap();
         let schema = Schema {
             fields: vec![
                 Field {

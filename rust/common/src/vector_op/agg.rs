@@ -2,7 +2,7 @@ use crate::array::*;
 use crate::error::{ErrorCode, Result};
 use crate::expr::AggKind;
 use crate::types::*;
-use risingwave_proto::expr::AggCall;
+use risingwave_pb::expr::AggCall;
 use std::marker::PhantomData;
 
 /// An `Aggregator` supports `update` data and `output` result.
@@ -40,25 +40,28 @@ pub type BoxedAggState = Box<dyn Aggregator>;
 pub struct AggStateFactory {
     input_type: DataTypeRef,
     input_col_idx: usize,
-    agg_type: AggKind,
+    agg_kind: AggKind,
     return_type: DataTypeRef,
 }
 
 impl AggStateFactory {
-    pub fn new(proto: &AggCall) -> Result<Self> {
+    pub fn new(prost: &AggCall) -> Result<Self> {
         ensure!(
-            proto.get_args().len() == 1,
+            prost.get_args().len() == 1,
             "Agg expression can only have exactly one child"
         );
-        let arg = &proto.get_args()[0];
-        let return_type = build_from_proto(proto.get_return_type())?;
-        let agg_type = AggKind::try_from(proto.get_field_type())?;
-        let input_type = build_from_proto(arg.get_field_type())?;
+        let arg = &prost.get_args()[0];
+        let return_type = build_from_prost(prost.get_return_type())?;
+        // let agg_type = AggKind::try_from(proto.get_field_type())?;
+        let agg_type = AggKind::try_from(prost.get_type())?;
+        // let input_type = Arc::new(arg.get_type());
+        let input_type = build_from_prost(arg.get_type())?;
+
         let input_col_idx = arg.get_input().get_column_idx() as usize;
         Ok(Self {
             input_type,
             input_col_idx,
-            agg_type,
+            agg_kind: agg_type,
             return_type,
         })
     }
@@ -67,7 +70,7 @@ impl AggStateFactory {
         create_agg_state_unary(
             self.input_type.clone(),
             self.input_col_idx,
-            &self.agg_type,
+            &self.agg_kind,
             self.return_type.clone(),
         )
     }
@@ -77,12 +80,12 @@ impl AggStateFactory {
     }
 }
 
-pub fn create_agg_state(proto: &AggCall) -> Result<Box<dyn Aggregator>> {
-    let return_type = build_from_proto(proto.get_return_type())?;
-    let agg_kind = AggKind::try_from(proto.get_field_type())?;
-    match proto.get_args() {
-        [arg] => {
-            let input_type = build_from_proto(arg.get_field_type())?;
+pub fn create_agg_state(prost: &AggCall) -> Result<Box<dyn Aggregator>> {
+    let return_type = build_from_prost(prost.get_return_type())?;
+    let agg_kind = AggKind::try_from(prost.get_type())?;
+    match &prost.get_args()[..] {
+        [ref arg] => {
+            let input_type = build_from_prost(arg.get_type())?;
             let input_col_idx = arg.get_input().get_column_idx() as usize;
             create_agg_state_unary(input_type, input_col_idx, &agg_kind, return_type)
         }
@@ -766,9 +769,8 @@ impl_sorted_grouper! { I64Array, Int64 }
 mod tests {
     use super::*;
     use crate::array::column::Column;
-    use pb_construct::make_proto;
-    use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};
-    use risingwave_proto::expr::{AggCall, AggCall_Type};
+    use risingwave_pb::data::{data_type::TypeName, DataType as DataTypeProst};
+    use risingwave_pb::expr::{agg_call::Type, AggCall};
     use rust_decimal::Decimal;
     use std::sync::Arc;
 
@@ -1009,14 +1011,15 @@ mod tests {
             group_value: None,
         };
         let mut g0_builder = I32ArrayBuilder::new(0).unwrap();
-        let proto = make_proto!(AggCall, {
-          field_type: AggCall_Type::COUNT,
-          return_type: make_proto!(DataTypeProto, {
-            type_name: DataType_TypeName::INT64
-          }),
-          args: vec![].into()
-        });
-        let mut a = create_agg_state(&proto).unwrap();
+        let prost = AggCall {
+            r#type: Type::Count as i32,
+            args: vec![],
+            return_type: Some(DataTypeProst {
+                type_name: TypeName::Int64 as i32,
+                ..Default::default()
+            }),
+        };
+        let mut a = create_agg_state(&prost).unwrap();
         let mut a_builder = a.return_type_ref().create_array_builder(0).unwrap();
         let t32 = Arc::new(Int32Type::new(true));
 
