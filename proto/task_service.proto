@@ -8,6 +8,7 @@ option optimize_for = SPEED;
 
 import "common.proto";
 import "data.proto";
+import "expr.proto";
 import "plan.proto";
 
 message QueryId {
@@ -63,6 +64,12 @@ message ExchangeNode {
   // linked by multiple exchanges.
   StageId source_stage_id = 2;
   repeated Field input_schema = 3;
+}
+
+message MergeSortExchangeNode {
+  ExchangeNode exchange_node = 1;
+  repeated plan.OrderType order_types = 2;
+  repeated expr.ExprNode orders = 3;
 }
 
 message CreateTaskRequest {

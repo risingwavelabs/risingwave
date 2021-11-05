@@ -42,7 +42,11 @@ impl BoxedExecutorBuilder for OrderByExecutor {
         let order_by_node =
             OrderByProto::parse_from_bytes(source.plan_node().get_body().get_value())
                 .map_err(ProtobufError)?;
-        let order_pairs = fetch_orders_from_order_by_node(&order_by_node).unwrap();
+        let order_pairs = fetch_orders_from_order_by_node(
+            order_by_node.get_order_types(),
+            order_by_node.get_orders(),
+        )
+        .unwrap();
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
             let child = source.clone_for_plan(child_plan).build()?;
             return Ok(Box::new(Self {

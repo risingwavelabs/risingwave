@@ -10,6 +10,7 @@ import com.risingwave.planner.rel.logical.RwLogicalSort;
 import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
 import com.risingwave.proto.expr.ExprNode;
 import com.risingwave.proto.plan.OrderByNode;
+import com.risingwave.proto.plan.OrderType;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.proto.plan.TopNNode;
 import java.util.List;
@@ -27,6 +28,7 @@ import org.apache.calcite.rex.RexNode;
 import org.apache.commons.lang3.SerializationException;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+/** Sort in Batch convention */
 public class RwBatchSort extends Sort implements RisingWaveBatchPhyRel {
   public RwBatchSort(
       RelOptCluster cluster, RelTraitSet traits, RelNode child, RelCollation collation) {
@@ -52,11 +54,11 @@ public class RwBatchSort extends Sort implements RisingWaveBatchPhyRel {
           getCluster().getRexBuilder().makeInputRef(input, relFieldCollation.getFieldIndex());
       ExprNode order = new RexToProtoSerializer().visitInputRef(inputRef);
       RelFieldCollation.Direction dir = relFieldCollation.getDirection();
-      OrderByNode.OrderType orderType;
+      OrderType orderType;
       if (dir == RelFieldCollation.Direction.ASCENDING) {
-        orderType = OrderByNode.OrderType.ASCENDING;
+        orderType = OrderType.ASCENDING;
       } else if (dir == RelFieldCollation.Direction.DESCENDING) {
-        orderType = OrderByNode.OrderType.DESCENDING;
+        orderType = OrderType.DESCENDING;
       } else {
         throw new SerializationException(String.format("%s direction not supported", dir));
       }
@@ -93,6 +95,7 @@ public class RwBatchSort extends Sort implements RisingWaveBatchPhyRel {
     return new RwBatchSort(getCluster(), traitSet, newInput, newCollation, offset, fetch);
   }
 
+  /** Rule for converting sort in logical convention to batch convention */
   public static class RwBatchSortConverterRule extends ConverterRule {
     public static final RwBatchSortConverterRule INSTANCE =
         Config.INSTANCE

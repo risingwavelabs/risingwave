@@ -90,12 +90,13 @@ message CreateTableNode {
 
 }
 
+enum OrderType {
+  INVALID = 0;
+  ASCENDING = 1;
+  DESCENDING = 2;
+}
+
 message OrderByNode {
-  enum OrderType {
-    INVALID = 0;
-    ASCENDING = 1;
-    DESCENDING = 2;
-  }
   repeated OrderType order_types = 1;
   repeated expr.ExprNode orders = 2;
 }
@@ -200,6 +201,7 @@ message PlanNode {
     VALUE = 19;
     HASH_JOIN = 20;
     DROP_STREAM = 21;
+    MERGE_SORT_EXCHANGE = 22;
   }
   PlanNodeType node_type = 1;
   google.protobuf.Any body = 2;

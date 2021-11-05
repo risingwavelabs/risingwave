@@ -2,7 +2,8 @@ use crate::array::{Array, ArrayImpl, DataChunk, DataChunkRef};
 use crate::error::{ErrorCode::InternalError, Result, RwError};
 use crate::expr::InputRefExpression;
 use crate::types::{ScalarPartialOrd, ScalarRef};
-use risingwave_proto::plan::{OrderByNode, OrderByNode_OrderType};
+use risingwave_proto::expr::ExprNode;
+use risingwave_proto::plan::OrderType as ProtoOrderType;
 use std::cmp::{Ord, Ordering};
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -124,16 +125,19 @@ pub fn compare_two_row(
     Ok(Ordering::Equal)
 }
 
-pub fn fetch_orders_from_order_by_node(order_by_node: &OrderByNode) -> Result<Vec<OrderPair>> {
-    ensure!(order_by_node.get_order_types().len() == order_by_node.get_orders().len());
+pub fn fetch_orders_from_order_by_node(
+    order_types: &[ProtoOrderType],
+    exprs: &[ExprNode],
+) -> Result<Vec<OrderPair>> {
+    ensure!(order_types.len() == exprs.len());
     let mut order_pairs = Vec::<OrderPair>::new();
-    for i in 0..order_by_node.get_order_types().len() {
-        let order = InputRefExpression::try_from(&order_by_node.get_orders()[i])?;
+    for i in 0..order_types.len() {
+        let order = InputRefExpression::try_from(&exprs[i])?;
         order_pairs.push(OrderPair {
-            order_type: match order_by_node.get_order_types()[i] {
-                OrderByNode_OrderType::ASCENDING => Ok(OrderType::Ascending),
-                OrderByNode_OrderType::DESCENDING => Ok(OrderType::Descending),
-                OrderByNode_OrderType::INVALID => Err(RwError::from(InternalError(String::from(
+            order_type: match order_types[i] {
+                ProtoOrderType::ASCENDING => Ok(OrderType::Ascending),
+                ProtoOrderType::DESCENDING => Ok(OrderType::Descending),
+                ProtoOrderType::INVALID => Err(RwError::from(InternalError(String::from(
                     "Invalid OrderType",
                 )))),
             }?,
