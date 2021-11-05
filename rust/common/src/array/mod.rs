@@ -339,7 +339,11 @@ macro_rules! impl_array_builder {
           None => self.append_null(),
           Some(scalar_ref) => match (self, scalar_ref) {
             $( (Self::$variant_name(inner), ScalarRefImpl::$variant_name(v)) => inner.append(Some(v)), )*
-            _ => Err(RwError::from(InternalError("Invalid scalar ref type".to_string()))),
+            (this_builder, this_scalar_ref) => Err(RwError::from(InternalError(format!(
+              "Failed to append datum, array builder type: {}, scalar ref type: {}",
+              this_builder.get_ident(),
+              this_scalar_ref.get_ident())
+            ))),
           },
         }
       }

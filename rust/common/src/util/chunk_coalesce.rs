@@ -71,32 +71,36 @@ impl DataChunkBuilder {
     ) -> Result<(Option<SlicedDataChunk>, Option<DataChunk>)> {
         self.ensure_builders()?;
 
-        let old_buffered_count = self.buffered_count;
         let buffer_row_idx_iter = self.buffered_count..self.batch_size;
-
+        let mut new_return_offset = input_chunk.offset;
         match input_chunk.data_chunk.visibility() {
-            Some(vis) => vis
-                .iter_from(input_chunk.offset)?
-                .enumerate()
-                .filter(|t| t.1)
-                .map(|t| t.0 + input_chunk.offset)
-                .zip(buffer_row_idx_iter)
-                .try_for_each(|(input_row_idx, _output_row_idx)| {
-                    self.append_one_row(&input_chunk.data_chunk, input_row_idx)
-                })?,
-            None => (input_chunk.offset..input_chunk.data_chunk.cardinality())
-                .zip(buffer_row_idx_iter)
-                .try_for_each(|(input_row_idx, _output_row_idx)| {
-                    self.append_one_row(&input_chunk.data_chunk, input_row_idx)
-                })?,
+            Some(vis) => {
+                for vis in vis.iter_from(input_chunk.offset)? {
+                    new_return_offset += 1;
+                    if !vis {
+                        continue;
+                    }
+
+                    self.append_one_row(&input_chunk.data_chunk, new_return_offset - 1)?;
+                    if self.buffered_count >= self.batch_size {
+                        break;
+                    }
+                }
+            }
+            None => {
+                (input_chunk.offset..input_chunk.data_chunk.capacity())
+                    .zip(buffer_row_idx_iter)
+                    .try_for_each(|(input_row_idx, _output_row_idx)| {
+                        new_return_offset += 1;
+                        self.append_one_row(&input_chunk.data_chunk, input_row_idx)
+                    })?;
+            }
         }
 
         ensure!(self.buffered_count <= self.batch_size);
-        let append_count = self.buffered_count - old_buffered_count;
 
-        let returned_input_chunk = if input_chunk.capacity() > append_count {
-            let new_offset = input_chunk.offset + append_count;
-            Some(input_chunk.with_new_offset_checked(new_offset)?)
+        let returned_input_chunk = if input_chunk.data_chunk.capacity() > new_return_offset {
+            Some(input_chunk.with_new_offset_checked(new_return_offset)?)
         } else {
             None
         };
@@ -152,6 +156,10 @@ impl DataChunkBuilder {
 
         DataChunk::try_from(columns)
     }
+
+    pub fn buffered_count(&self) -> usize {
+        self.buffered_count
+    }
 }
 
 impl SlicedDataChunk {
@@ -176,9 +184,10 @@ impl SlicedDataChunk {
 #[cfg(test)]
 mod tests {
     use crate::array;
-    use crate::array::column::Column;
     use crate::array::DataChunk;
     use crate::array::{I32Array, I64Array};
+    use crate::buffer::Bitmap;
+    use crate::column;
     use crate::types::{Int32Type, Int64Type};
     use crate::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
     use std::sync::Arc;
@@ -195,15 +204,13 @@ mod tests {
 
         // Append a chunk with 2 rows
         let input = {
-            let column1 = Column::new(
-                Arc::new(array! {I32Array, [Some(3), None]}.into()),
-                Arc::new(Int32Type::new(true)),
-            );
+            let column1 = column! {
+              I32Array, Int32Type, [Some(3), None]
+            };
 
-            let column2 = Column::new(
-                Arc::new(array! {I64Array, [None, Some(7i64)]}.into()),
-                Arc::new(Int64Type::new(true)),
-            );
+            let column2 = column! {
+              I64Array, Int64Type, [None, Some(7i64)]
+            };
 
             let chunk =
                 DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
@@ -218,15 +225,9 @@ mod tests {
 
         // Append a chunk with 4 rows
         let input = {
-            let column1 = Column::new(
-                Arc::new(array! {I32Array, [Some(3), None, Some(4), None]}.into()),
-                Arc::new(Int32Type::new(true)),
-            );
+            let column1 = column! {I32Array, Int32Type, [Some(3), None, Some(4), None]};
 
-            let column2 = Column::new(
-                Arc::new(array! {I64Array, [None, Some(7i64), Some(8i64), Some(9i64)]}.into()),
-                Arc::new(Int64Type::new(true)),
-            );
+            let column2 = column! {I64Array, Int64Type, [None, Some(7i64), Some(8i64), Some(9i64)]};
 
             let chunk =
                 DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
@@ -251,6 +252,67 @@ mod tests {
     }
 
     #[test]
+    fn test_append_chunk_with_bitmap() {
+        let mut builder = DataChunkBuilder::new(
+            vec![
+                Arc::new(Int32Type::new(true)),
+                Arc::new(Int64Type::new(true)),
+            ],
+            3,
+        );
+
+        // Append a chunk with 2 rows
+        let input = {
+            let column1 = column! {I32Array, Int32Type, [Some(3), None]};
+            let column2 = column! {I64Array, Int64Type, [None, Some(7i64)]};
+
+            let chunk =
+                DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
+            let bitmap = Bitmap::try_from(vec![true, false]).expect("Failed to create bitmap");
+            SlicedDataChunk::new_checked(chunk.with_visibility(bitmap))
+                .expect("Failed to create sliced data chunk")
+        };
+
+        let (returned_input, output) = builder
+            .append_chunk(input)
+            .expect("Failed to append chunk!");
+        assert!(returned_input.is_none());
+        assert!(output.is_none());
+        assert_eq!(1, builder.buffered_count());
+
+        // Append a chunk with 4 rows
+        let input = {
+            let column1 = column! { I32Array, Int32Type, [Some(3), None, Some(4), None] };
+
+            let column2 =
+                column! { I64Array, Int64Type, [None, Some(7i64), Some(8i64), Some(9i64)]};
+
+            let chunk =
+                DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
+            let bitmap =
+                Bitmap::try_from(vec![false, true, true, false]).expect("Failed to create bitmap!");
+            SlicedDataChunk::new_checked(chunk.with_visibility(bitmap))
+                .expect("Failed to create sliced data chunk")
+        };
+        let (returned_input, output) = builder
+            .append_chunk(input)
+            .expect("Failed to append chunk!");
+        assert_eq!(Some(3), returned_input.as_ref().map(|c| c.offset));
+        assert_eq!(Some(3), output.as_ref().map(DataChunk::cardinality));
+        assert_eq!(Some(3), output.as_ref().map(DataChunk::capacity));
+        assert!(output.unwrap().visibility().is_none());
+        assert_eq!(0, builder.buffered_count());
+
+        // Append last input
+        let (returned_input, output) = builder
+            .append_chunk(returned_input.unwrap())
+            .expect("Failed to append chunk!");
+        assert!(returned_input.is_none());
+        assert!(output.is_none());
+        assert_eq!(0, builder.buffered_count());
+    }
+
+    #[test]
     fn test_consume_all() {
         let mut builder = DataChunkBuilder::new(
             vec![
@@ -265,15 +327,9 @@ mod tests {
 
         // Append a chunk with 2 rows
         let input = {
-            let column1 = Column::new(
-                Arc::new(array! {I32Array, [Some(3), None]}.into()),
-                Arc::new(Int32Type::new(true)),
-            );
+            let column1 = column! {I32Array, Int32Type, [Some(3), None]};
 
-            let column2 = Column::new(
-                Arc::new(array! {I64Array, [None, Some(7i64)]}.into()),
-                Arc::new(Int64Type::new(true)),
-            );
+            let column2 = column! {I64Array, Int64Type, [None, Some(7i64)] };
 
             let chunk =
                 DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
