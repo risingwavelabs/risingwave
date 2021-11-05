@@ -28,10 +28,7 @@ public class RwStreamFilter extends Filter implements RisingWaveStreamingRel {
     RexToProtoSerializer rexVisitor = new RexToProtoSerializer();
     FilterNode filterNode =
         FilterNode.newBuilder().setSearchCondition(condition.accept(rexVisitor)).build();
-    return StreamNode.newBuilder()
-        .setFilterNode(filterNode)
-        .setInput(((RisingWaveStreamingRel) input).serialize())
-        .build();
+    return StreamNode.newBuilder().setFilterNode(filterNode).build();
   }
 
   @Override

@@ -48,12 +48,10 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
           .setIsPrimary(false);
       materializedViewNodeBuilder.addColumnDescs(columnDescBuilder);
     }
+    // TODO: serialize primary key columns.
     MViewNode materializedViewNode =
         materializedViewNodeBuilder.setTableRefId(Messages.getTableRefId(tableId)).build();
-    return StreamNode.newBuilder()
-        .setMviewNode(materializedViewNode)
-        .setInput(((RisingWaveStreamingRel) input).serialize())
-        .build();
+    return StreamNode.newBuilder().setMviewNode(materializedViewNode).build();
   }
 
   public void setTableId(TableCatalog.TableId tableId) {

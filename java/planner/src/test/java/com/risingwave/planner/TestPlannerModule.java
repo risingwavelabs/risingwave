@@ -1,4 +1,4 @@
-package com.risingwave.scheduler;
+package com.risingwave.planner;
 
 import akka.actor.typed.ActorSystem;
 import akka.actor.typed.SpawnProtocol;
@@ -16,11 +16,16 @@ import com.risingwave.node.DefaultWorkerNodeManager;
 import com.risingwave.node.WorkerNodeManager;
 import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.TestComputeClientManager;
+import com.risingwave.scheduler.QueryManager;
+import com.risingwave.scheduler.RemoteQueryManager;
 import com.risingwave.scheduler.actor.ActorFactory;
 import com.risingwave.scheduler.actor.DefaultActorFactory;
+import com.risingwave.scheduler.streaming.StreamManager;
+import com.risingwave.scheduler.streaming.StreamManagerImpl;
 import com.risingwave.scheduler.task.RemoteTaskManager;
 import com.risingwave.scheduler.task.TaskManager;
 
+/** Initialize the injection configuration for front end environments. */
 public class TestPlannerModule extends AbstractModule {
   private final String dbName;
   private final String schemaName;
@@ -37,6 +42,7 @@ public class TestPlannerModule extends AbstractModule {
     bind(QueryManager.class).to(RemoteQueryManager.class).in(Singleton.class);
     bind(WorkerNodeManager.class).to(DefaultWorkerNodeManager.class).in(Singleton.class);
     bind(SqlHandlerFactory.class).to(DefaultSqlHandlerFactory.class).in(Singleton.class);
+    bind(StreamManager.class).to(StreamManagerImpl.class).in(Singleton.class);
   }
 
   @Singleton

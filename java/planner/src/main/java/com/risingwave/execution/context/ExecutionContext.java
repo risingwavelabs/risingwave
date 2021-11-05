@@ -9,6 +9,7 @@ import com.risingwave.execution.handler.SqlHandlerFactory;
 import com.risingwave.node.WorkerNodeManager;
 import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.scheduler.QueryManager;
+import com.risingwave.scheduler.streaming.StreamManager;
 import org.apache.calcite.plan.Context;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptPlanner;
@@ -17,6 +18,7 @@ import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.tools.RelBuilder;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+/** The context used for one execution. */
 public class ExecutionContext implements Context {
   private final String database;
   private final String schema;
@@ -68,6 +70,10 @@ public class ExecutionContext implements Context {
     return frontendEnv.getQueryManager();
   }
 
+  public StreamManager getStreamManager() {
+    return frontendEnv.getStreamManager();
+  }
+
   public static ExecutionContext contextOf(RelOptCluster optCluster) {
     return contextOf(optCluster.getPlanner());
   }
@@ -100,6 +106,7 @@ public class ExecutionContext implements Context {
     }
   }
 
+  /** The builder class for constructing one `ExecutionContext`. */
   public static class Builder {
     private String database;
     private String schema;

@@ -11,6 +11,7 @@ import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.core.Exchange;
 
+/** The exchange node in a streaming plan. */
 public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel {
 
   protected RwStreamExchange(

@@ -9,8 +9,10 @@ import com.risingwave.execution.handler.SqlHandlerFactory;
 import com.risingwave.node.WorkerNodeManager;
 import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.scheduler.QueryManager;
+import com.risingwave.scheduler.streaming.StreamManager;
 import java.util.Objects;
 
+/** The front-end environment for leader node. */
 public class FrontendEnv {
   private final CatalogService catalogService;
   private final SqlHandlerFactory sqlHandlerFactory;
@@ -18,6 +20,7 @@ public class FrontendEnv {
   private final WorkerNodeManager nodeManager;
   private final Configuration conf;
   private final QueryManager queryManager;
+  private final StreamManager streamManager;
 
   @Inject
   public FrontendEnv(
@@ -26,7 +29,8 @@ public class FrontendEnv {
       ComputeClientManager clientManager,
       WorkerNodeManager nodeManager,
       Configuration conf,
-      QueryManager queryManager) {
+      QueryManager queryManager,
+      StreamManager streamManager) {
     this.catalogService = requireNonNull(catalogService, "catalogService");
     this.sqlHandlerFactory = requireNonNull(sqlHandlerFactory, "sqlHandlerFactory");
     this.clientManager = Objects.requireNonNull(clientManager);
@@ -34,6 +38,7 @@ public class FrontendEnv {
     this.nodeManager = nodeManager;
     this.conf = requireNonNull(conf, "conf");
     this.queryManager = requireNonNull(queryManager, "queryManager");
+    this.streamManager = requireNonNull(streamManager, "streamManager");
   }
 
   public CatalogService getCatalogService() {
@@ -58,5 +63,9 @@ public class FrontendEnv {
 
   public QueryManager getQueryManager() {
     return queryManager;
+  }
+
+  public StreamManager getStreamManager() {
+    return streamManager;
   }
 }

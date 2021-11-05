@@ -1,16 +1,18 @@
-package com.risingwave.planner;
+package com.risingwave.planner.planner.streaming;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.risingwave.common.config.LeaderServerConfigurations;
 import com.risingwave.execution.handler.CreateMaterializedViewHandler;
-import com.risingwave.planner.planner.streaming.StreamPlanner;
+import com.risingwave.planner.SqlTestBase;
 import com.risingwave.planner.rel.physical.streaming.StreamingPlan;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
+import com.risingwave.planner.rel.serialization.StreamingStageSerializer;
 import com.risingwave.planner.util.PlannerTestCase;
 import com.risingwave.planner.util.PlannerTestDdlLoader;
 import com.risingwave.proto.streaming.plan.StreamNode;
 import com.risingwave.rpc.Messages;
+import com.risingwave.scheduler.streaming.StreamFragmenter;
 import java.util.List;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlCreateMaterializedView;
@@ -18,6 +20,7 @@ import org.apache.calcite.sql.ddl.SqlCreateMaterializedView;
 /** Test base for stream plan. */
 public abstract class StreamPlanTestBase extends SqlTestBase {
   protected StreamPlanner streamPlanner;
+  protected StreamFragmenter streamFragmenter;
 
   protected void init() {
     super.initEnv();
@@ -28,6 +31,7 @@ public abstract class StreamPlanTestBase extends SqlTestBase {
             LeaderServerConfigurations.ClusterMode.Distributed);
     initTables();
     streamPlanner = new StreamPlanner();
+    streamFragmenter = new StreamFragmenter();
   }
 
   private void initTables() {
@@ -60,7 +64,7 @@ public abstract class StreamPlanTestBase extends SqlTestBase {
 
     // Do not error if no json test.
     if (testCase.getJson().isPresent()) {
-      StreamNode serializedProto = plan.getStreamingPlan().serialize();
+      StreamNode serializedProto = StreamingStageSerializer.serialize(plan.getStreamingPlan());
       String serializedJsonPlan = Messages.jsonFormat(serializedProto);
       assertEquals(testCase.getJson().get(), serializedJsonPlan, "Proto json not match!");
     }

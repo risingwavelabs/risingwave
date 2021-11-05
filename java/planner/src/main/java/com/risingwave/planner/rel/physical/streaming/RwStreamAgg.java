@@ -37,11 +37,7 @@ public class RwStreamAgg extends RwAggregate implements RisingWaveStreamingRel {
       for (AggregateCall aggCall : aggCalls) {
         simpleAggNodeBuilder.addAggCalls(serializeAggCall(aggCall));
       }
-      node =
-          StreamNode.newBuilder()
-              .setSimpleAggNode(simpleAggNodeBuilder.build())
-              .setInput(((RisingWaveStreamingRel) input).serialize())
-              .build();
+      node = StreamNode.newBuilder().setSimpleAggNode(simpleAggNodeBuilder.build()).build();
     } else {
       HashAggNode.Builder hashAggNodeBuilder = HashAggNode.newBuilder();
       for (int i = groupSet.nextSetBit(0); i >= 0; i = groupSet.nextSetBit(i + 1)) {
@@ -50,11 +46,7 @@ public class RwStreamAgg extends RwAggregate implements RisingWaveStreamingRel {
       for (AggregateCall aggCall : aggCalls) {
         hashAggNodeBuilder.addAggCalls(serializeAggCall(aggCall));
       }
-      node =
-          StreamNode.newBuilder()
-              .setHashAggNode(hashAggNodeBuilder.build())
-              .setInput(((RisingWaveStreamingRel) input).serialize())
-              .build();
+      node = StreamNode.newBuilder().setHashAggNode(hashAggNodeBuilder.build()).build();
     }
     return node;
   }

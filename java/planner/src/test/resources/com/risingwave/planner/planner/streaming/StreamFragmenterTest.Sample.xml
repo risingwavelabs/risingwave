@@ -1,0 +1,902 @@
+<Root>
+    <Resource>
+        <![CDATA[
+{
+  "nodes": {
+    "input": {
+      "input": {
+        "simpleAggNode": {
+          "aggCalls": [{
+            "type": "SUM",
+            "args": [{
+              "input": {
+              },
+              "type": {
+                "typeName": "INT32"
+              }
+            }],
+            "returnType": {
+              "typeName": "INT32"
+            }
+          }, {
+            "type": "SUM",
+            "args": [{
+              "input": {
+                "columnIdx": 1
+              },
+              "type": {
+                "typeName": "INT64"
+              }
+            }],
+            "returnType": {
+              "typeName": "INT64"
+            }
+          }]
+        }
+      },
+      "projectNode": {
+        "selectList": [{
+          "exprType": "ADD",
+          "body": {
+            "@type": "type.googleapis.com/expr.FunctionCall",
+            "children": [{
+              "exprType": "STREAM_NULL_BY_ROW_COUNT",
+              "body": {
+                "@type": "type.googleapis.com/expr.FunctionCall",
+                "children": [{
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.InputRefExpr",
+                    "columnIdx": 1
+                  },
+                  "returnType": {
+                    "typeName": "INT64"
+                  },
+                  "inputRef": {
+                    "columnIdx": 1
+                  }
+                }, {
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.InputRefExpr"
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "inputRef": {
+                  }
+                }]
+              },
+              "returnType": {
+                "typeName": "INT32"
+              },
+              "funcCall": {
+                "children": [{
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.InputRefExpr",
+                    "columnIdx": 1
+                  },
+                  "returnType": {
+                    "typeName": "INT64"
+                  },
+                  "inputRef": {
+                    "columnIdx": 1
+                  }
+                }, {
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.InputRefExpr"
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "inputRef": {
+                  }
+                }]
+              }
+            }, {
+              "exprType": "CONSTANT_VALUE",
+              "body": {
+                "@type": "type.googleapis.com/expr.ConstantValue",
+                "body": "AAAAAQ=="
+              },
+              "returnType": {
+                "typeName": "INT32"
+              },
+              "constant": {
+                "body": "AAAAAQ=="
+              }
+            }]
+          },
+          "returnType": {
+            "typeName": "INT32"
+          },
+          "funcCall": {
+            "children": [{
+              "exprType": "STREAM_NULL_BY_ROW_COUNT",
+              "body": {
+                "@type": "type.googleapis.com/expr.FunctionCall",
+                "children": [{
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.InputRefExpr",
+                    "columnIdx": 1
+                  },
+                  "returnType": {
+                    "typeName": "INT64"
+                  },
+                  "inputRef": {
+                    "columnIdx": 1
+                  }
+                }, {
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.InputRefExpr"
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "inputRef": {
+                  }
+                }]
+              },
+              "returnType": {
+                "typeName": "INT32"
+              },
+              "funcCall": {
+                "children": [{
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.InputRefExpr",
+                    "columnIdx": 1
+                  },
+                  "returnType": {
+                    "typeName": "INT64"
+                  },
+                  "inputRef": {
+                    "columnIdx": 1
+                  }
+                }, {
+                  "exprType": "INPUT_REF",
+                  "body": {
+                    "@type": "type.googleapis.com/expr.InputRefExpr"
+                  },
+                  "returnType": {
+                    "typeName": "INT32"
+                  },
+                  "inputRef": {
+                  }
+                }]
+              }
+            }, {
+              "exprType": "CONSTANT_VALUE",
+              "body": {
+                "@type": "type.googleapis.com/expr.ConstantValue",
+                "body": "AAAAAQ=="
+              },
+              "returnType": {
+                "typeName": "INT32"
+              },
+              "constant": {
+                "body": "AAAAAQ=="
+              }
+            }]
+          }
+        }]
+      }
+    },
+    "mviewNode": {
+      "tableRefId": {
+        "schemaRefId": {
+          "databaseRefId": {
+          }
+        },
+        "tableId": 1
+      },
+      "columnDescs": [{
+        "columnType": {
+          "typeName": "INT32"
+        },
+        "encoding": "RAW"
+      }]
+    }
+  },
+  "upstreamFragmentId": [1, 2, 3, 4],
+  "dispatcher": {
+    "type": "BLACKHOLE"
+  }
+}
+        ]]>
+    </Resource>
+    <Resource>
+        <![CDATA[
+{
+  "fragmentId": 1,
+  "nodes": {
+    "input": {
+      "input": {
+        "filterNode": {
+          "searchCondition": {
+            "exprType": "GREATER_THAN",
+            "body": {
+              "@type": "type.googleapis.com/expr.FunctionCall",
+              "children": [{
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr"
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                },
+                "inputRef": {
+                }
+              }, {
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr",
+                  "columnIdx": 1
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                },
+                "inputRef": {
+                  "columnIdx": 1
+                }
+              }]
+            },
+            "returnType": {
+              "typeName": "BOOLEAN"
+            },
+            "funcCall": {
+              "children": [{
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr"
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                },
+                "inputRef": {
+                }
+              }, {
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr",
+                  "columnIdx": 1
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                },
+                "inputRef": {
+                  "columnIdx": 1
+                }
+              }]
+            }
+          }
+        }
+      },
+      "simpleAggNode": {
+        "aggCalls": [{
+          "type": "SUM",
+          "args": [{
+            "input": {
+            },
+            "type": {
+              "typeName": "INT32"
+            }
+          }],
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }, {
+          "type": "COUNT",
+          "returnType": {
+            "typeName": "INT64"
+          }
+        }]
+      }
+    },
+    "projectNode": {
+      "selectList": [{
+        "exprType": "STREAM_NULL_BY_ROW_COUNT",
+        "body": {
+          "@type": "type.googleapis.com/expr.FunctionCall",
+          "children": [{
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/expr.InputRefExpr",
+              "columnIdx": 1
+            },
+            "returnType": {
+              "typeName": "INT64"
+            },
+            "inputRef": {
+              "columnIdx": 1
+            }
+          }, {
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/expr.InputRefExpr"
+            },
+            "returnType": {
+              "typeName": "INT32"
+            },
+            "inputRef": {
+            }
+          }]
+        },
+        "returnType": {
+          "typeName": "INT32"
+        },
+        "funcCall": {
+          "children": [{
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/expr.InputRefExpr",
+              "columnIdx": 1
+            },
+            "returnType": {
+              "typeName": "INT64"
+            },
+            "inputRef": {
+              "columnIdx": 1
+            }
+          }, {
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/expr.InputRefExpr"
+            },
+            "returnType": {
+              "typeName": "INT32"
+            },
+            "inputRef": {
+            }
+          }]
+        }
+      }, {
+        "exprType": "INPUT_REF",
+        "body": {
+          "@type": "type.googleapis.com/expr.InputRefExpr",
+          "columnIdx": 1
+        },
+        "returnType": {
+          "typeName": "INT64"
+        },
+        "inputRef": {
+          "columnIdx": 1
+        }
+      }]
+    }
+  },
+  "upstreamFragmentId": [5],
+  "dispatcher": {
+  },
+  "downstreamFragmentId": [0]
+}
+        ]]>
+    </Resource>
+    <Resource>
+        <![CDATA[
+{
+  "fragmentId": 2,
+  "nodes": {
+    "input": {
+      "input": {
+        "filterNode": {
+          "searchCondition": {
+            "exprType": "GREATER_THAN",
+            "body": {
+              "@type": "type.googleapis.com/expr.FunctionCall",
+              "children": [{
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr"
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                },
+                "inputRef": {
+                }
+              }, {
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr",
+                  "columnIdx": 1
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                },
+                "inputRef": {
+                  "columnIdx": 1
+                }
+              }]
+            },
+            "returnType": {
+              "typeName": "BOOLEAN"
+            },
+            "funcCall": {
+              "children": [{
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr"
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                },
+                "inputRef": {
+                }
+              }, {
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr",
+                  "columnIdx": 1
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                },
+                "inputRef": {
+                  "columnIdx": 1
+                }
+              }]
+            }
+          }
+        }
+      },
+      "simpleAggNode": {
+        "aggCalls": [{
+          "type": "SUM",
+          "args": [{
+            "input": {
+            },
+            "type": {
+              "typeName": "INT32"
+            }
+          }],
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }, {
+          "type": "COUNT",
+          "returnType": {
+            "typeName": "INT64"
+          }
+        }]
+      }
+    },
+    "projectNode": {
+      "selectList": [{
+        "exprType": "STREAM_NULL_BY_ROW_COUNT",
+        "body": {
+          "@type": "type.googleapis.com/expr.FunctionCall",
+          "children": [{
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/expr.InputRefExpr",
+              "columnIdx": 1
+            },
+            "returnType": {
+              "typeName": "INT64"
+            },
+            "inputRef": {
+              "columnIdx": 1
+            }
+          }, {
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/expr.InputRefExpr"
+            },
+            "returnType": {
+              "typeName": "INT32"
+            },
+            "inputRef": {
+            }
+          }]
+        },
+        "returnType": {
+          "typeName": "INT32"
+        },
+        "funcCall": {
+          "children": [{
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/expr.InputRefExpr",
+              "columnIdx": 1
+            },
+            "returnType": {
+              "typeName": "INT64"
+            },
+            "inputRef": {
+              "columnIdx": 1
+            }
+          }, {
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/expr.InputRefExpr"
+            },
+            "returnType": {
+              "typeName": "INT32"
+            },
+            "inputRef": {
+            }
+          }]
+        }
+      }, {
+        "exprType": "INPUT_REF",
+        "body": {
+          "@type": "type.googleapis.com/expr.InputRefExpr",
+          "columnIdx": 1
+        },
+        "returnType": {
+          "typeName": "INT64"
+        },
+        "inputRef": {
+          "columnIdx": 1
+        }
+      }]
+    }
+  },
+  "upstreamFragmentId": [5],
+  "dispatcher": {
+  },
+  "downstreamFragmentId": [0]
+}
+        ]]>
+    </Resource>
+    <Resource>
+        <![CDATA[
+{
+  "fragmentId": 3,
+  "nodes": {
+    "input": {
+      "input": {
+        "filterNode": {
+          "searchCondition": {
+            "exprType": "GREATER_THAN",
+            "body": {
+              "@type": "type.googleapis.com/expr.FunctionCall",
+              "children": [{
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr"
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                },
+                "inputRef": {
+                }
+              }, {
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr",
+                  "columnIdx": 1
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                },
+                "inputRef": {
+                  "columnIdx": 1
+                }
+              }]
+            },
+            "returnType": {
+              "typeName": "BOOLEAN"
+            },
+            "funcCall": {
+              "children": [{
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr"
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                },
+                "inputRef": {
+                }
+              }, {
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr",
+                  "columnIdx": 1
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                },
+                "inputRef": {
+                  "columnIdx": 1
+                }
+              }]
+            }
+          }
+        }
+      },
+      "simpleAggNode": {
+        "aggCalls": [{
+          "type": "SUM",
+          "args": [{
+            "input": {
+            },
+            "type": {
+              "typeName": "INT32"
+            }
+          }],
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }, {
+          "type": "COUNT",
+          "returnType": {
+            "typeName": "INT64"
+          }
+        }]
+      }
+    },
+    "projectNode": {
+      "selectList": [{
+        "exprType": "STREAM_NULL_BY_ROW_COUNT",
+        "body": {
+          "@type": "type.googleapis.com/expr.FunctionCall",
+          "children": [{
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/expr.InputRefExpr",
+              "columnIdx": 1
+            },
+            "returnType": {
+              "typeName": "INT64"
+            },
+            "inputRef": {
+              "columnIdx": 1
+            }
+          }, {
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/expr.InputRefExpr"
+            },
+            "returnType": {
+              "typeName": "INT32"
+            },
+            "inputRef": {
+            }
+          }]
+        },
+        "returnType": {
+          "typeName": "INT32"
+        },
+        "funcCall": {
+          "children": [{
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/expr.InputRefExpr",
+              "columnIdx": 1
+            },
+            "returnType": {
+              "typeName": "INT64"
+            },
+            "inputRef": {
+              "columnIdx": 1
+            }
+          }, {
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/expr.InputRefExpr"
+            },
+            "returnType": {
+              "typeName": "INT32"
+            },
+            "inputRef": {
+            }
+          }]
+        }
+      }, {
+        "exprType": "INPUT_REF",
+        "body": {
+          "@type": "type.googleapis.com/expr.InputRefExpr",
+          "columnIdx": 1
+        },
+        "returnType": {
+          "typeName": "INT64"
+        },
+        "inputRef": {
+          "columnIdx": 1
+        }
+      }]
+    }
+  },
+  "upstreamFragmentId": [5],
+  "dispatcher": {
+  },
+  "downstreamFragmentId": [0]
+}
+        ]]>
+    </Resource>
+    <Resource>
+        <![CDATA[
+{
+  "fragmentId": 4,
+  "nodes": {
+    "input": {
+      "input": {
+        "filterNode": {
+          "searchCondition": {
+            "exprType": "GREATER_THAN",
+            "body": {
+              "@type": "type.googleapis.com/expr.FunctionCall",
+              "children": [{
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr"
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                },
+                "inputRef": {
+                }
+              }, {
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr",
+                  "columnIdx": 1
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                },
+                "inputRef": {
+                  "columnIdx": 1
+                }
+              }]
+            },
+            "returnType": {
+              "typeName": "BOOLEAN"
+            },
+            "funcCall": {
+              "children": [{
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr"
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                },
+                "inputRef": {
+                }
+              }, {
+                "exprType": "INPUT_REF",
+                "body": {
+                  "@type": "type.googleapis.com/expr.InputRefExpr",
+                  "columnIdx": 1
+                },
+                "returnType": {
+                  "typeName": "INT32"
+                },
+                "inputRef": {
+                  "columnIdx": 1
+                }
+              }]
+            }
+          }
+        }
+      },
+      "simpleAggNode": {
+        "aggCalls": [{
+          "type": "SUM",
+          "args": [{
+            "input": {
+            },
+            "type": {
+              "typeName": "INT32"
+            }
+          }],
+          "returnType": {
+            "typeName": "INT32"
+          }
+        }, {
+          "type": "COUNT",
+          "returnType": {
+            "typeName": "INT64"
+          }
+        }]
+      }
+    },
+    "projectNode": {
+      "selectList": [{
+        "exprType": "STREAM_NULL_BY_ROW_COUNT",
+        "body": {
+          "@type": "type.googleapis.com/expr.FunctionCall",
+          "children": [{
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/expr.InputRefExpr",
+              "columnIdx": 1
+            },
+            "returnType": {
+              "typeName": "INT64"
+            },
+            "inputRef": {
+              "columnIdx": 1
+            }
+          }, {
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/expr.InputRefExpr"
+            },
+            "returnType": {
+              "typeName": "INT32"
+            },
+            "inputRef": {
+            }
+          }]
+        },
+        "returnType": {
+          "typeName": "INT32"
+        },
+        "funcCall": {
+          "children": [{
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/expr.InputRefExpr",
+              "columnIdx": 1
+            },
+            "returnType": {
+              "typeName": "INT64"
+            },
+            "inputRef": {
+              "columnIdx": 1
+            }
+          }, {
+            "exprType": "INPUT_REF",
+            "body": {
+              "@type": "type.googleapis.com/expr.InputRefExpr"
+            },
+            "returnType": {
+              "typeName": "INT32"
+            },
+            "inputRef": {
+            }
+          }]
+        }
+      }, {
+        "exprType": "INPUT_REF",
+        "body": {
+          "@type": "type.googleapis.com/expr.InputRefExpr",
+          "columnIdx": 1
+        },
+        "returnType": {
+          "typeName": "INT64"
+        },
+        "inputRef": {
+          "columnIdx": 1
+        }
+      }]
+    }
+  },
+  "upstreamFragmentId": [5],
+  "dispatcher": {
+  },
+  "downstreamFragmentId": [0]
+}
+        ]]>
+    </Resource>
+    <Resource>
+        <![CDATA[
+{
+  "fragmentId": 5,
+  "nodes": {
+    "tableSourceNode": {
+      "tableRefId": {
+        "schemaRefId": {
+          "databaseRefId": {
+          }
+        }
+      },
+      "columnIds": [0, 1]
+    }
+  },
+  "dispatcher": {
+    "type": "HASH"
+  },
+  "downstreamFragmentId": [1, 2, 3, 4]
+}
+        ]]>
+    </Resource>
+</Root>

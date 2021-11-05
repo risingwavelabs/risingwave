@@ -23,6 +23,8 @@ import com.risingwave.scheduler.QueryManager;
 import com.risingwave.scheduler.RemoteQueryManager;
 import com.risingwave.scheduler.actor.ActorFactory;
 import com.risingwave.scheduler.actor.DefaultActorFactory;
+import com.risingwave.scheduler.streaming.StreamManager;
+import com.risingwave.scheduler.streaming.StreamManagerImpl;
 import com.risingwave.scheduler.task.RemoteTaskManager;
 import com.risingwave.scheduler.task.TaskManager;
 import org.slf4j.Logger;
@@ -51,6 +53,7 @@ public class FrontendServerModule extends AbstractModule {
       bind(TaskManager.class).to(RemoteTaskManager.class).in(Singleton.class);
       bind(QueryManager.class).to(RemoteQueryManager.class).in(Singleton.class);
     }
+    bind(StreamManager.class).to(StreamManagerImpl.class).in(Singleton.class);
   }
 
   @Provides

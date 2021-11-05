@@ -6,7 +6,6 @@ import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.execution.context.FrontendEnv;
 import com.risingwave.execution.handler.SqlHandlerFactory;
 import com.risingwave.pgwire.database.PgResult;
-import com.risingwave.scheduler.TestPlannerModule;
 import com.risingwave.sql.parser.SqlParser;
 import org.apache.calcite.sql.SqlNode;
 

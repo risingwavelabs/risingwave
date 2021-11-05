@@ -1,5 +1,6 @@
-package com.risingwave.planner;
+package com.risingwave.planner.planner.streaming;
 
+import com.risingwave.common.config.LeaderServerConfigurations;
 import com.risingwave.planner.util.PlanTestCaseLoader;
 import com.risingwave.planner.util.PlannerTestCase;
 import com.risingwave.planner.util.ToPlannerTestCase;
@@ -15,14 +16,18 @@ import org.junit.jupiter.params.provider.ArgumentsSource;
 /** Tests for streaming job */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-public class StreamAggPlannerDistributedModeTest extends StreamPlanTestBase {
+public class StreamAggPlannerSingleModeTest extends StreamPlanTestBase {
   @BeforeAll
   public void initAll() {
     super.init();
+    executionContext
+        .getConf()
+        .set(
+            LeaderServerConfigurations.CLUSTER_MODE, LeaderServerConfigurations.ClusterMode.Single);
   }
 
   @ParameterizedTest(name = "{index} => {0}")
-  @DisplayName("Streaming Agg Plan in Distributed Mode tests")
+  @DisplayName("Streaming Agg Plan in Single Mode tests")
   @ArgumentsSource(PlanTestCaseLoader.class)
   @Order(0)
   public void testStreamingPlan(@ToPlannerTestCase PlannerTestCase testCase) {

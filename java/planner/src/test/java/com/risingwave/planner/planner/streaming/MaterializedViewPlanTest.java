@@ -1,9 +1,8 @@
-package com.risingwave.planner;
+package com.risingwave.planner.planner.streaming;
 
 import com.risingwave.common.config.LeaderServerConfigurations;
 import com.risingwave.execution.handler.CreateMaterializedViewHandler;
 import com.risingwave.planner.planner.batch.BatchPlanner;
-import com.risingwave.planner.planner.streaming.StreamFragmenter;
 import com.risingwave.planner.rel.physical.batch.BatchPlan;
 import com.risingwave.planner.rel.physical.streaming.StreamingPlan;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
@@ -106,8 +105,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     String tableName = createMaterializedView.name.getSimple();
     handler.convertPlanToCatalog(tableName, plan, executionContext);
 
-    StreamingPlan exchangePlan = StreamFragmenter.generateGraph(plan, executionContext);
-    String explainExchangePlan = ExplainWriter.explainPlan(exchangePlan.getStreamingPlan());
+    String explainExchangePlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
     String expectedPlan =
         "RwStreamMaterializedView(name=[t_distributed])\n"
             + "  RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($1, $0), 1)])\n"
@@ -141,8 +139,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     String tableName = createMaterializedView.name.getSimple();
     handler.convertPlanToCatalog(tableName, plan, executionContext);
 
-    StreamingPlan exchangePlan = StreamFragmenter.generateGraph(plan, executionContext);
-    String explainExchangePlan = ExplainWriter.explainPlan(exchangePlan.getStreamingPlan());
+    String explainExchangePlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
     String expectedPlan =
         "RwStreamMaterializedView(name=[t_agg])\n"
             + "  RwStreamProject(v1=[$0], v=[$1])\n"
