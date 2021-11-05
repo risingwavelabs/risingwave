@@ -32,3 +32,12 @@ impl TryFrom<&Vec<ColumnDesc>> for Schema {
         })
     }
 }
+
+impl Schema {
+    pub fn data_types_clone(&self) -> Vec<DataTypeRef> {
+        self.fields
+            .iter()
+            .map(|field| field.data_type.clone())
+            .collect()
+    }
+}
