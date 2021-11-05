@@ -55,9 +55,8 @@ impl Executor for ProjectionExecutor {
     }
 }
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for ProjectionExecutor {
-    async fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::PROJECT);
         ensure!(source.plan_node().get_children().len() == 1);
 
@@ -68,7 +67,7 @@ impl BoxedExecutorBuilder for ProjectionExecutor {
                 "Child interpreting error",
             )))
         })?;
-        let child_node = source.clone_for_plan(proto_child).build().await?;
+        let child_node = source.clone_for_plan(proto_child).build()?;
 
         let project_exprs = project_node
             .get_select_list()

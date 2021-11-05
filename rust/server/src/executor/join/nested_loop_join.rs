@@ -104,9 +104,8 @@ impl Executor for NestedLoopJoinExecutor {
     }
 }
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
-    async fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::NESTED_LOOP_JOIN);
         ensure!(source.plan_node().get_children().len() == 2);
 
@@ -120,8 +119,8 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
         let right_plan_opt = source.plan_node().get_children().get(1);
         match (left_plan_opt, right_plan_opt) {
             (Some(left_plan), Some(right_plan)) => {
-                let left_child = source.clone_for_plan(left_plan).build().await?;
-                let right_child = source.clone_for_plan(right_plan).build().await?;
+                let left_child = source.clone_for_plan(left_plan).build()?;
+                let right_child = source.clone_for_plan(right_plan).build()?;
 
                 let fields = left_child
                     .schema()

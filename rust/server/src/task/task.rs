@@ -139,6 +139,8 @@ impl TaskExecution {
             self.task_id,
             json_to_pretty_string(&self.plan.to_json()?)?
         );
+        let exec =
+            ExecutorBuilder::new(self.plan.get_root(), &self.task_id, self.env.clone()).build()?;
         let (sender, receivers) = create_output_channel(self.plan.get_exchange_info())?;
         self.receivers
             .lock()
@@ -147,25 +149,12 @@ impl TaskExecution {
 
         let failure = self.failure.clone();
         let task_id = self.task_id.clone();
-        let env = self.env.clone();
-        let plan_root = self.plan.get_root().clone();
         tokio::spawn(async move {
             debug!("Executing plan [{:?}]", task_id);
-            match ExecutorBuilder::new(&plan_root, &task_id, env)
-                .build()
-                .await
-            {
-                Ok(exec) => {
-                    if let Err(e) = TaskExecution::try_execute(exec, sender).await {
-                        // Prints the entire backtrace of error.
-                        error!("Execution failed [{:?}]: {:?}", &task_id, &e);
-                        *failure.lock().unwrap() = Some(e);
-                    }
-                }
-                Err(e) => {
-                    error!("Creating plan failed [{:?}]: {:?}", &task_id, &e);
-                    *failure.lock().unwrap() = Some(e);
-                }
+            if let Err(e) = TaskExecution::try_execute(exec, sender).await {
+                // Prints the entire backtrace of error.
+                error!("Execution failed [{:?}]: {:?}", &task_id, &e);
+                *failure.lock().unwrap() = Some(e);
             }
         });
         Ok(())

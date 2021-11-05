@@ -74,10 +74,9 @@ pub trait Executor: Send {
 
 pub type BoxedExecutor = Box<dyn Executor>;
 
-/// Every Executor should impl this trait to provide a static method to build a `BoxedExecutor` from proto and global environment
-#[async_trait::async_trait]
+/// every Executor should impl this trait to provide a static method to build a `BoxedExecutor` from proto and global environment
 pub trait BoxedExecutorBuilder {
-    async fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor>;
+    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor>;
 }
 
 pub struct ExecutorBuilder<'a> {
@@ -91,7 +90,7 @@ macro_rules! build_executor {
     match $source.plan_node().get_node_type() {
       $(
         $proto_type_name => {
-          <$data_type>::new_boxed_executor($source).await
+          <$data_type>::new_boxed_executor($source)
         },
       )*
       _ => Err(RwError::from(InternalError(format!("Unsupported plan node type: {:?}", $source.plan_node().get_node_type()))))
@@ -108,8 +107,8 @@ impl<'a> ExecutorBuilder<'a> {
         }
     }
 
-    pub async fn build(&self) -> Result<BoxedExecutor> {
-        self.try_build().await.map_err(|e| {
+    pub fn build(&self) -> Result<BoxedExecutor> {
+        self.try_build().map_err(|e| {
             InternalError(format!(
                 "[PlanNodeType: {:?}] Failed to build executor: {}",
                 self.plan_node.get_node_type(),
@@ -123,7 +122,7 @@ impl<'a> ExecutorBuilder<'a> {
         ExecutorBuilder::new(plan_node, self.task_id, self.env.clone())
     }
 
-    async fn try_build(&self) -> Result<BoxedExecutor> {
+    fn try_build(&self) -> Result<BoxedExecutor> {
         build_executor! { self,
           PlanNode_PlanNodeType::CREATE_TABLE => CreateTableExecutor,
           PlanNode_PlanNodeType::SEQ_SCAN => SeqScanExecutor,

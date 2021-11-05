@@ -41,13 +41,12 @@ impl StreamScanExecutor {
     }
 }
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for StreamScanExecutor {
     /// This function is designed for OLAP to initialize the `StreamScanExecutor`
     /// Things needed for initialization is
     /// 1. `StreamScanNode` whose definition can be shared by OLAP and Streaming
     /// 2. `SourceManager` whose definition can also be shared. But is it physically shared?
-    async fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         let stream_scan_node = unpack_from_any!(source.plan_node().get_body(), StreamScanNode);
 
         let table_id = TableId::from_protobuf(stream_scan_node.get_table_ref_id())

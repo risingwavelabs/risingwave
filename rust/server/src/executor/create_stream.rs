@@ -55,9 +55,8 @@ impl CreateStreamExecutor {
     }
 }
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for CreateStreamExecutor {
-    async fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::CREATE_STREAM);
 
         let node = CreateStreamNode::parse_from_bytes(source.plan_node().get_body().get_value())

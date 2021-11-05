@@ -29,9 +29,8 @@ pub(super) struct SeqScanExecutor {
     schema: Schema,
 }
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for SeqScanExecutor {
-    async fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
+    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::SEQ_SCAN);
 
         let seq_scan_node =
