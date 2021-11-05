@@ -200,6 +200,19 @@ jobs:
         if: ${{ failure() }}
         run: ./scripts/dump_cluster_logs.sh
 
+      - name: Collect Java coverages
+        if: ${{ success() }}
+        run: |
+          ./scripts/kill_cluster.sh
+          cd java && ./gradlew test jacocoE2eReport
+
+      - uses: codecov/codecov-action@v2
+        if: ${{ success() }}
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          directory: java
+          flags: java
+
   start-runner:
     name: Start self-hosted EC2 runner
     runs-on: ubuntu-latest

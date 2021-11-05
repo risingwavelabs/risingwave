@@ -14,7 +14,7 @@ java_check:
 	cd java && ./gradlew check
 
 java_coverage_report:
-	cd java && ./gradlew jacocoTestReport
+	cd java && ./gradlew jacocoRootReport
 
 sqllogictest:
 	cd go/sqllogictest && make

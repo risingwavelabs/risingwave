@@ -1,4 +1,3 @@
-
 buildscript {
     repositories {
         gradlePluginPortal()
@@ -8,7 +7,6 @@ buildscript {
         classpath("com.google.protobuf:protobuf-gradle-plugin:0.8.17")
     }
 }
-
 
 plugins {
     java
@@ -22,7 +20,6 @@ repositories {
     mavenCentral()
 }
 
-
 val javaVersion = JavaVersion.VERSION_11
 if (JavaVersion.current() != javaVersion) {
     throw GradleException("Only $javaVersion is supported!")
@@ -34,7 +31,54 @@ val appProjects = setOf("pgserver")
 apply(plugin = "git")
 // Absolute paths of all changed files
 val changedFiles: List<String> by extra
-println("Changed files: ${changedFiles}")
+println("Changed files: $changedFiles")
+
+apply(plugin = "jacoco")
+tasks.register<JacocoReport>("jacocoRootReport") {
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+    }
+    subprojects {
+        this@subprojects.plugins.withType<JacocoPlugin>().configureEach {
+            this@subprojects.tasks.matching {
+                !listOf(
+                    "catalog:test",
+                    "risingwave:test",
+                    "proto:test",
+                    "pgserver:test",
+                    "pgserver:run",
+                ).contains("${it.project.name}:${it.name}")
+            }.configureEach {
+                sourceSets(this@subprojects.the<SourceSetContainer>().named("main").get())
+                executionData(this)
+            }
+        }
+    }
+}
+
+apply(plugin = "jacoco")
+tasks.register<JacocoReport>("jacocoE2eReport") {
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+    }
+    subprojects {
+        this@subprojects.plugins.withType<JacocoPlugin>().configureEach {
+            this@subprojects.tasks.matching {
+                !listOf(
+                    "catalog:test",
+                    "risingwave:test",
+                    "proto:test",
+                    "pgserver:test"
+                ).contains("${it.project.name}:${it.name}")
+            }.configureEach {
+                sourceSets(this@subprojects.the<SourceSetContainer>().named("main").get())
+                executionData(this)
+            }
+        }
+    }
+}
 
 subprojects {
     group = "com.risingwave"
@@ -65,7 +109,8 @@ subprojects {
                 removeUnusedImports()
                 googleJavaFormat()
 
-                targetExclude("src/main/java/com/risingwave/sql/SqlFormatter.java",
+                targetExclude(
+                    "src/main/java/com/risingwave/sql/SqlFormatter.java",
                     "src/main/java/org/apache/calcite/**"
                 )
             }
@@ -74,28 +119,27 @@ subprojects {
             }
         }
 
-
         tasks.test {
             useJUnitPlatform()
         }
-
         apply(plugin = "jacoco")
         tasks.jacocoTestReport {
-            dependsOn(tasks.test) // tests are required to run before generating the report
             reports {
                 xml.required.set(true)
-                csv.required.set(false)
                 html.required.set(true)
             }
         }
-
         tasks.withType<JacocoReport> {
             afterEvaluate {
-                classDirectories.setFrom(files(classDirectories.files.map {
-                    fileTree(it).apply {
-                        exclude("**/antlr/**")
-                    }
-                }))
+                classDirectories.setFrom(
+                    files(
+                        classDirectories.files.map {
+                            fileTree(it).apply {
+                                exclude("**/antlr/**")
+                            }
+                        }
+                    )
+                )
             }
         }
     }
@@ -108,7 +152,6 @@ subprojects {
         toolVersion = "8.44"
         maxWarnings = 0
     }
-
 
     tasks.withType<Checkstyle> {
         val allSrcDirs = project.sourceSets
