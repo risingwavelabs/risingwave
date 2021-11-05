@@ -51,7 +51,7 @@ pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
 
 /// `Op` represents three operations in `StreamChunk`.
 /// `UpdateDelete` and `UpdateInsert` always appear in pairs.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub enum Op {
     Insert,
     Delete,
@@ -154,6 +154,16 @@ impl StreamChunk {
                 })
             }
         }
+    }
+
+    pub fn into_parts(self) -> (DataChunk, Vec<Op>) {
+        let StreamChunk {
+            ops,
+            columns,
+            visibility,
+        } = self;
+        let data_chunk = DataChunk::new(columns, visibility);
+        (data_chunk, ops)
     }
 
     pub fn to_protobuf(&self) -> Result<ProstStreamChunk> {

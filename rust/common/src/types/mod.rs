@@ -125,7 +125,14 @@ pub enum ArithmeticOperatorKind {
 /// `Scalar` is reciprocal to `ScalarRef`. Use `as_scalar_ref` to get a
 /// reference which has the same lifetime as `self`.
 pub trait Scalar:
-    Send + Sync + 'static + Clone + std::fmt::Debug + TryFrom<ScalarImpl> + Into<ScalarImpl>
+    std::fmt::Debug
+    + Send
+    + Sync
+    + 'static
+    + Clone
+    + std::fmt::Debug
+    + TryFrom<ScalarImpl>
+    + Into<ScalarImpl>
 {
     /// Type for reference of `Scalar`
     type ScalarRefType<'a>: ScalarRef<'a, ScalarType = Self> + 'a

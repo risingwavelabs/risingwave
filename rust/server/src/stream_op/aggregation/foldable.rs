@@ -15,7 +15,7 @@ use super::{Op, Ops, StreamingAggFunction, StreamingAggState, StreamingAggStateI
 ///
 /// `R`: Result (or output, stored) type.
 /// `I`: Input type.
-pub trait StreamingFoldable<R: Scalar, I: Scalar>: Send + Sync + 'static {
+pub trait StreamingFoldable<R: Scalar, I: Scalar>: std::fmt::Debug + Send + Sync + 'static {
     /// Called on `Insert` or `UpdateInsert`.
     fn accumulate(result: Option<&R>, input: Option<I::ScalarRefType<'_>>) -> Result<Option<R>>;
 
@@ -33,6 +33,7 @@ pub trait StreamingFoldable<R: Scalar, I: Scalar>: Send + Sync + 'static {
 /// `R`: Result (or output, stored) type.
 /// `I`: Input type.
 /// `S`: Sum function.
+#[derive(Debug)]
 pub struct StreamingFoldAgg<R, I, S>
 where
     R: Array,
@@ -43,8 +44,22 @@ where
     _phantom: PhantomData<(I, S, R)>,
 }
 
+impl<R, I, S> Clone for StreamingFoldAgg<R, I, S>
+where
+    R: Array,
+    I: Array,
+    S: StreamingFoldable<R::OwnedItem, I::OwnedItem>,
+{
+    fn clone(&self) -> Self {
+        Self {
+            result: self.result.clone(),
+            _phantom: PhantomData,
+        }
+    }
+}
 /// `PrimitiveSummable` sums two primitives by `accumulate` and `retract` functions.
 /// It produces the same type of output as input `S`.
+#[derive(Debug)]
 pub struct PrimitiveSummable<S>
 where
     S: Scalar
@@ -89,6 +104,7 @@ where
 
 /// `FloatPrimitiveSummable` sums two primitives by `accumulate` and `retract` functions.
 /// It produces the same type of output as input `S`.
+#[derive(Debug)]
 pub struct FloatPrimitiveSummable<S>
 where
     S: Scalar
@@ -144,6 +160,7 @@ where
 /// `Countable` do counts. The behavior of `Countable` is somehow counterintuitive.
 /// In SQL logic, if there is no item in aggregation, count will return `null`.
 /// However, this `Countable` will always return 0 if there is no item.
+#[derive(Debug)]
 pub struct Countable<S>
 where
     S: Scalar,
@@ -183,6 +200,7 @@ where
 
 /// `Minimizable` return minimum value overall.
 /// It produces the same type of output as input `S`.
+#[derive(Debug)]
 pub struct Minimizable<S>
 where
     S: Scalar + Ord,
@@ -212,6 +230,7 @@ where
 
 /// `FloatMinimizable` return minimum float value overall.
 /// It produces the same type of output as input `S`.
+#[derive(Debug)]
 pub struct FloatMinimizable<S>
 where
     S: Scalar + num_traits::Float,
@@ -249,6 +268,7 @@ where
 
 /// `Maximizable` return maximum value overall.
 /// It produces the same type of output as input `S`.
+#[derive(Debug)]
 pub struct Maximizable<S>
 where
     S: Scalar + Ord,
@@ -278,6 +298,7 @@ where
 
 /// `FloatMaximizable` return maximum float value overall.
 /// It produces the same type of output as input `S`.
+#[derive(Debug)]
 pub struct FloatMaximizable<S>
 where
     S: Scalar + num_traits::Float,

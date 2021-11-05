@@ -105,7 +105,7 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
 /// In some cases, we will need to store owned data. For example, when aggregating min
 /// and max, we need to store current maximum in the aggregator. In this case, we
 /// could use `A::OwnedItem` in aggregator struct.
-pub trait Array: Send + Sync + Sized + 'static + Into<ArrayImpl> {
+pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImpl> {
     /// A reference to item in array, as well as return type of `value_at`, which is
     /// reciprocal to `Self::OwnedItem`.
     type RefItem<'a>: ScalarRef<'a, ScalarType = Self::OwnedItem>
@@ -115,7 +115,7 @@ pub trait Array: Send + Sync + Sized + 'static + Into<ArrayImpl> {
     /// Owned type of item in array, which is reciprocal to `Self::RefItem`.
   #[rustfmt::skip]
   // rustfmt will incorrectly remove GAT lifetime.
-  type OwnedItem: for<'a> Scalar<ScalarRefType<'a> = Self::RefItem<'a>>;
+  type OwnedItem: Clone + std::fmt::Debug + for<'a> Scalar<ScalarRefType<'a> = Self::RefItem<'a>>;
 
     /// Corresponding builder of this array, which is reciprocal to `Array`.
     type Builder: ArrayBuilder<ArrayType = Self>;

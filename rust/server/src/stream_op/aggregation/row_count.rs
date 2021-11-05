@@ -12,6 +12,7 @@ use super::StreamingAggStateImpl;
 /// Note that if there are zero rows in aggregator, `0` will be emitted
 /// instead of `None`. Note that if you want to only count non-null value,
 /// use `StreamingCountAgg` instead.
+#[derive(Clone, Debug)]
 pub struct StreamingRowCountAgg {
     row_cnt: i64,
 }

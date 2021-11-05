@@ -1,13 +1,13 @@
 //! Global Streaming Hash Aggregators
 
 use super::aggregation::*;
-use super::{Executor, Message, Op, SimpleExecutor, StreamChunk};
+use super::{Executor, Message, Op, StreamChunk};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::{Datum, ScalarRefImpl};
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::Datum;
 
 use super::AggCall;
 use async_trait::async_trait;
@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 pub type HashKey = Vec<Datum>;
 
+#[derive(Clone, Debug)]
 struct HashValue {
     /// one or more aggregation states, all corresponding to the same key
     agg_states: Vec<Box<dyn StreamingAggStateImpl>>,
@@ -62,14 +63,24 @@ impl HashValue {
 
 pub struct HashAggExecutor {
     schema: Schema,
-    /// Aggregation state of the current operator
-    state_entries: HashMap<HashKey, HashValue>,
-    /// The input of the current operator
+
+    /// If `next_barrier_message` exists, we should send a Barrier while next called.
+    // TODO: This can be optimized while async gen fn stablized.
+    // TODO: Create a `Barrier` struct.
+    next_barrier_message: Option<(u64, bool)>,
+
+    /// Aggregation state before last barrier.
+    /// The map will be updated iff [`Message::Barrier`] was received.
+    /// TODO: We will use state backend instead later.
+    prev_state_entries: HashMap<HashKey, HashValue>,
+    /// Aggregation state after last barrier.
+    dirty_state_entries: HashMap<HashKey, (Option<HashValue>, HashValue)>,
+    /// The input of the current executor
     input: Box<dyn Executor>,
     /// A [`HashAggExecutor`] may have multiple [`AggCall`]s.
     agg_calls: Vec<AggCall>,
     /// Indices of the columns
-    /// all of the aggregation functions in this operator should depend on same group of keys
+    /// all of the aggregation functions in this executor should depend on same group of keys
     key_indices: Vec<usize>,
 }
 
@@ -87,7 +98,9 @@ impl HashAggExecutor {
         }));
         Self {
             schema: Schema { fields },
-            state_entries: HashMap::new(),
+            next_barrier_message: None,
+            prev_state_entries: HashMap::new(),
+            dirty_state_entries: HashMap::new(),
             input,
             agg_calls,
             key_indices,
@@ -97,7 +110,6 @@ impl HashAggExecutor {
     /// `keys` are Hash Keys of all the rows
     /// `visibility`, leave invisible ones out of aggregation
     /// `state_entries`, the current state to check whether a key has existed or not
-    #[allow(clippy::complexity)]
     fn get_unique_keys<'a, 'b>(
         &self,
         keys: &'a [HashKey],
@@ -141,23 +153,104 @@ impl HashAggExecutor {
     }
 }
 
-#[async_trait]
-impl Executor for HashAggExecutor {
-    async fn next(&mut self) -> Result<Message> {
-        super::simple_executor_next(self).await
+impl HashAggExecutor {
+    fn flush_data(&mut self) -> Result<StreamChunk> {
+        let dirty_state_entries = std::mem::take(&mut self.dirty_state_entries);
+        let dirty_cnt = dirty_state_entries.len();
+        // TODO: if the dirty_cnt is large, consider break to multiple chunks.
+        let data_types = self
+            .schema
+            .fields
+            .iter()
+            .map(|field| field.data_type.clone())
+            .collect_vec();
+        let mut agg_builders = data_types
+            .iter()
+            .map(|data_type| data_type.clone().create_array_builder(dirty_cnt))
+            .collect::<Result<Vec<_>>>()?;
+        let key_len = self.key_indices.len();
+        let mut new_ops = Vec::with_capacity(dirty_cnt);
+        for (key, (prev_value, cur_value)) in dirty_state_entries.into_iter() {
+            // These builders are for storing the aggregated value for each aggregation function.
+            match prev_value {
+                None => {
+                    // We assume the first state of aggregation is always `StreamingRowCountAgg`.
+                    let row_cnt = {
+                        let mut builder = ArrayBuilderImpl::Int64(I64ArrayBuilder::new(1)?);
+                        cur_value.agg_states[0].get_output(&mut builder)?;
+                        builder.finish()?.as_int64().value_at(0).unwrap()
+                    };
+                    if row_cnt != 0 {
+                        new_ops.push(Op::Insert);
+                        for (builder, datum) in agg_builders.iter_mut().zip(key.iter()) {
+                            builder.append_datum(datum)?;
+                        }
+                        for (builder, state) in agg_builders[key_len..]
+                            .iter_mut()
+                            .zip(cur_value.agg_states.iter())
+                        {
+                            state.get_output(builder)?;
+                        }
+                        self.prev_state_entries.insert(key, cur_value);
+                    }
+                }
+                Some(prev_value) => {
+                    // We assume the first state of aggregation is always `StreamingRowCountAgg`.
+                    let row_cnt = {
+                        let mut builder = ArrayBuilderImpl::Int64(I64ArrayBuilder::new(1)?);
+                        cur_value.agg_states[0].get_output(&mut builder)?;
+                        builder.finish()?.as_int64().value_at(0).unwrap()
+                    };
+                    if row_cnt == 0 {
+                        new_ops.push(Op::Delete);
+                        for (builder, datum) in agg_builders.iter_mut().zip(key.iter()) {
+                            builder.append_datum(datum)?;
+                        }
+                        for (builder, state) in agg_builders[key_len..]
+                            .iter_mut()
+                            .zip(prev_value.agg_states.iter())
+                        {
+                            state.get_output(builder)?;
+                        }
+                        self.prev_state_entries.remove(&key);
+                    } else {
+                        new_ops.push(Op::UpdateDelete);
+                        new_ops.push(Op::UpdateInsert);
+                        for (builder, datum) in agg_builders.iter_mut().zip(key.iter()) {
+                            builder.append_datum(datum)?;
+                            builder.append_datum(datum)?;
+                        }
+                        for (builder, prev_state, cur_state) in itertools::multizip((
+                            agg_builders[key_len..].iter_mut(),
+                            prev_value.agg_states.iter(),
+                            cur_value.agg_states.iter(),
+                        )) {
+                            prev_state.get_output(builder)?;
+                            cur_state.get_output(builder)?;
+                        }
+                        self.prev_state_entries.insert(key, cur_value);
+                    }
+                }
+            };
+        }
+
+        let columns: Vec<Column> = agg_builders
+            .into_iter()
+            .zip(data_types.into_iter())
+            .map(|(builder, data_type)| -> Result<_> {
+                Ok(Column::new(Arc::new(builder.finish()?), data_type))
+            })
+            .try_collect()?;
+        let chunk = StreamChunk {
+            columns,
+            ops: new_ops,
+            visibility: None,
+        };
+        Ok(chunk)
     }
 
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-}
-
-impl SimpleExecutor for HashAggExecutor {
-    fn input(&mut self) -> &mut dyn Executor {
-        &mut *self.input
-    }
-
-    fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
+    /// Apply the chunk to the dirty state.
+    fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
         let StreamChunk {
             ops,
             columns,
@@ -180,23 +273,16 @@ impl SimpleExecutor for HashAggExecutor {
 
         let (unique_keys, mut key_to_vis_maps) = self.get_unique_keys(&keys, &visibility)?;
 
-        // These builders are for storing the aggregated value for each aggregation function
-        let mut agg_array_builders: Vec<ArrayBuilderImpl> = self
-            .agg_calls
-            .iter()
-            .map(|agg_call| agg_call.return_type.clone().create_array_builder(0))
-            .try_collect()?;
-        let mut new_ops = Vec::new();
-
         unique_keys.into_iter().try_for_each(|key| -> Result<()> {
             let cur_vis_map = key_to_vis_maps.remove(key).ok_or_else(|| {
                 ErrorCode::InternalError(format!("Visibility does not exist for key {:?}", key))
             })?;
 
-            let not_first_data = self.state_entries.contains_key(key);
-
-            // check existence to avoid paying the cost of copy in `entry(...).or_insert()` everytime
-            if !not_first_data {
+            if self.dirty_state_entries.contains_key(key) {
+            } else if let Some(prev_value) = self.prev_state_entries.get(key) {
+                self.dirty_state_entries
+                    .insert(key.to_vec(), (Some(prev_value.clone()), prev_value.clone()));
+            } else {
                 let agg_states = self
                     .agg_calls
                     .iter()
@@ -209,15 +295,12 @@ impl SimpleExecutor for HashAggExecutor {
                     })
                     .collect::<Result<Vec<_>>>()?;
                 let hash_value = HashValue::new(agg_states);
-                self.state_entries.insert(key.to_vec(), hash_value);
-            }
+                self.dirty_state_entries
+                    .insert(key.to_vec(), (None, hash_value));
+            };
+
             // since we just checked existence, the key must exist so we `unwrap` directly
-            let value = self.state_entries.get_mut(key).unwrap();
-            let mut builders = value.new_builders();
-            if not_first_data {
-                // record the last state into builder
-                value.record_states(&mut builders)?;
-            }
+            let (_, value) = self.dirty_state_entries.get_mut(key).unwrap();
 
             let all_agg_input_arrays = self
                 .agg_calls
@@ -231,84 +314,40 @@ impl SimpleExecutor for HashAggExecutor {
                 })
                 .collect::<Vec<_>>();
 
-            value.apply_batch(&ops, Some(&cur_vis_map), &all_agg_input_arrays)?;
+            value.apply_batch(&ops, Some(&cur_vis_map), &all_agg_input_arrays)
+        })
+    }
+}
 
-            let mut builder = value.agg_states[0].new_builder();
-            value.agg_states[0].get_output(&mut builder).unwrap();
-            let num = &builder.finish()?;
-            if let ScalarRefImpl::Int64(row_cnt) = num.value_at(0).unwrap() {
-                // output the current state into builder
-                if row_cnt == 0 {
-                    // remove the kv pair
-                    self.state_entries.remove(key);
-                    new_ops.push(Op::Delete);
-                    key_array_builders
-                        .iter_mut()
-                        .zip(key.iter())
-                        .try_for_each(|(key_col, datum)| key_col.append_datum(datum))?;
+#[async_trait]
+impl Executor for HashAggExecutor {
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    async fn next(&mut self) -> Result<Message> {
+        if let Some((epoch, stop)) = self.next_barrier_message {
+            self.next_barrier_message = None;
+            return Ok(Message::Barrier { epoch, stop });
+        }
+        while let Ok(msg) = self.input.next().await {
+            match msg {
+                Message::Chunk(chunk) => self.apply_chunk(chunk)?,
+                Message::Barrier { epoch, stop } => {
+                    let dirty_cnt = self.dirty_state_entries.len();
+                    if dirty_cnt == 0 {
+                        // No fresh data need to flush, just forward the barrier.
+                        return Ok(Message::Barrier { epoch, stop });
+                    }
+                    // Cache the barrier_msg and send it later.
+                    self.next_barrier_message = Some((epoch, stop));
+                    let chunk = self.flush_data()?;
+                    return Ok(Message::Chunk(chunk));
                 }
-                // same logic from [`super::SimpleAggExecutor`]
-                else if not_first_data {
-                    // output the current state into builder
-                    value.record_states(&mut builders)?;
-                    new_ops.push(Op::UpdateDelete);
-                    new_ops.push(Op::UpdateInsert);
-                    key_array_builders.iter_mut().zip(key.iter()).try_for_each(
-                        |(key_col, datum)| {
-                            key_col.append_datum(datum)?;
-                            key_col.append_datum(datum)
-                        },
-                    )?;
-                } else {
-                    // output the current state into builder
-                    value.record_states(&mut builders)?;
-                    new_ops.push(Op::Insert);
-                    key_array_builders
-                        .iter_mut()
-                        .zip(key.iter())
-                        .try_for_each(|(key_col, datum)| key_col.append_datum(datum))?;
-                }
-
-                agg_array_builders
-                    .iter_mut()
-                    .zip(builders.into_iter())
-                    .try_for_each(|(agg_array_builder, builder)| {
-                        agg_array_builder.append_array(&builder.finish()?)
-                    })?;
-
-                Ok(())
-            } else {
-                panic!("Should be Int64 type as row_count is supposed to be here");
+                m @ Message::Terminate => return Ok(m),
             }
-        })?;
-
-        // all the columns of aggregated value
-        let agg_columns: Vec<Column> = agg_array_builders
-            .into_iter()
-            .zip(self.agg_calls.iter().map(|agg| agg.return_type.clone()))
-            .map(|(agg_array_builder, return_type)| {
-                Ok::<_, RwError>(Column::new(
-                    Arc::new(agg_array_builder.finish()?),
-                    return_type.clone(),
-                ))
-            })
-            .try_collect()?;
-
-        let mut new_columns: Vec<Column> = key_array_builders
-            .into_iter()
-            .zip(key_data_types.into_iter())
-            .map(|(builder, dt)| -> Result<Column> {
-                Ok(Column::new(Arc::new(builder.finish()?), dt))
-            })
-            .try_collect()?;
-        new_columns.extend(agg_columns.into_iter());
-
-        let chunk = StreamChunk {
-            ops: new_ops,
-            visibility: None,
-            columns: new_columns,
-        };
-        Ok(Message::Chunk(chunk))
+        }
+        todo!()
     }
 }
 
@@ -318,11 +357,13 @@ mod tests {
     use crate::stream_op::test_utils::*;
     use crate::stream_op::*;
     use crate::*;
+    use assert_matches::assert_matches;
     use itertools::Itertools;
-    use risingwave_common::array::{Array, I64Array};
+    use risingwave_common::array::data_chunk_iter::Row;
+    use risingwave_common::array::I64Array;
     use risingwave_common::catalog::Field;
     use risingwave_common::expr::*;
-    use risingwave_common::types::Int64Type;
+    use risingwave_common::types::{Int64Type, Scalar};
 
     #[tokio::test]
     async fn test_local_hash_aggregation_count() {
@@ -341,11 +382,20 @@ mod tests {
                 data_type: Int64Type::create(false),
             }],
         };
-        let source = MockSource::with_chunks(schema, vec![chunk1, chunk2]);
+        let mut source = MockSource::new(schema);
+        source.push_chunks([chunk1].into_iter());
+        source.push_barrier(1, false);
+        source.push_chunks([chunk2].into_iter());
+        source.push_barrier(2, false);
 
         // This is local hash aggregation, so we add another row count state
         let keys = vec![0];
         let agg_calls = vec![
+            AggCall {
+                kind: AggKind::RowCount,
+                args: AggArgs::None,
+                return_type: Int64Type::create(false),
+            },
             AggCall {
                 kind: AggKind::Count,
                 args: AggArgs::Unary(Int64Type::create(false), 0),
@@ -361,53 +411,48 @@ mod tests {
 
         let mut hash_agg = HashAggExecutor::new(Box::new(source), agg_calls, keys);
 
-        if let Message::Chunk(chunk) = hash_agg.next().await.unwrap() {
-            assert_eq!(chunk.ops, vec![Op::Insert, Op::Insert]);
+        let msg = hash_agg.next().await.unwrap();
+        if let Message::Chunk(chunk) = msg {
+            let (data_chunk, ops) = chunk.into_parts();
 
-            assert_eq!(chunk.columns.len(), 3);
-            // test key
-            assert_eq!(
-                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
-                vec![Some(1), Some(2)]
-            );
-            // test count first row
-            assert_eq!(
-                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
-                vec![Some(1), Some(2)]
-            );
-            // test count(*)
-            assert_eq!(
-                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
-                vec![Some(1), Some(2)]
-            );
+            assert_eq!(ops, vec![Op::Insert, Op::Insert]);
+
+            let rows = data_chunk.rows().map(Row::from).sorted().collect_vec();
+            let expected_rows = [
+                row_nonnull![1i64, 1i64, 1i64, 1i64],
+                row_nonnull![2i64, 2i64, 2i64, 2i64],
+            ]
+            .into_iter()
+            .sorted()
+            .collect_vec();
+
+            assert_eq!(rows, expected_rows);
         } else {
-            unreachable!();
+            unreachable!("unexpected message {:?}", msg);
         }
 
-        if let Message::Chunk(chunk) = hash_agg.next().await.unwrap() {
-            assert_eq!(
-                chunk.ops,
-                vec![Op::Delete, Op::UpdateDelete, Op::UpdateInsert]
-            );
+        assert_matches!(hash_agg.next().await.unwrap(), Message::Barrier { .. });
 
-            assert_eq!(chunk.columns.len(), 3);
-            // test key
-            assert_eq!(
-                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
-                vec![Some(1), Some(2), Some(2)]
-            );
-            // test count first row
-            assert_eq!(
-                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
-                vec![Some(1), Some(2), Some(1)]
-            );
-            // test count(*)
-            assert_eq!(
-                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
-                vec![Some(1), Some(2), Some(1)]
-            );
+        let msg = hash_agg.next().await.unwrap();
+        if let Message::Chunk(chunk) = msg {
+            let (data_chunk, ops) = chunk.into_parts();
+            let rows = ops
+                .into_iter()
+                .zip(data_chunk.rows().map(Row::from))
+                .sorted()
+                .collect_vec();
+            let expected_rows = [
+                (Op::Delete, row_nonnull![1i64, 1i64, 1i64, 1i64]),
+                (Op::UpdateDelete, row_nonnull![2i64, 2i64, 2i64, 2i64]),
+                (Op::UpdateInsert, row_nonnull![2i64, 1i64, 1i64, 1i64]),
+            ]
+            .into_iter()
+            .sorted()
+            .collect_vec();
+
+            assert_eq!(rows, expected_rows);
         } else {
-            unreachable!();
+            unreachable!("unexpected message {:?}", msg);
         }
     }
 
@@ -444,7 +489,12 @@ mod tests {
                 },
             ],
         };
-        let source = MockSource::with_chunks(schema, vec![chunk1, chunk2]);
+
+        let mut source = MockSource::new(schema);
+        source.push_chunks([chunk1].into_iter());
+        source.push_barrier(1, false);
+        source.push_chunks([chunk2].into_iter());
+        source.push_barrier(2, false);
 
         // This is local hash aggregation, so we add another sum state
         let key_indices = vec![0];
@@ -469,60 +519,47 @@ mod tests {
         let mut hash_agg = HashAggExecutor::new(Box::new(source), agg_calls, key_indices);
 
         if let Message::Chunk(chunk) = hash_agg.next().await.unwrap() {
-            assert_eq!(chunk.ops, vec![Op::Insert, Op::Insert]);
+            let (data_chunk, ops) = chunk.into_parts();
+            let rows = ops
+                .into_iter()
+                .zip(data_chunk.rows().map(Row::from))
+                .sorted()
+                .collect_vec();
 
-            assert_eq!(chunk.columns.len(), 4);
-            // test key_column
-            assert_eq!(
-                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
-                vec![Some(1), Some(2)]
-            );
-            assert_eq!(
-                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
-                vec![Some(1), Some(2)],
-            );
-            // test agg_column
-            assert_eq!(
-                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
-                vec![Some(1), Some(4)]
-            );
-            // test row_sum_column
-            assert_eq!(
-                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
-                vec![Some(1), Some(4)]
-            );
+            let expected_rows = [
+                (Op::Insert, row_nonnull![1i64, 1i64, 1i64, 1i64]),
+                (Op::Insert, row_nonnull![2i64, 2i64, 4i64, 4i64]),
+            ]
+            .into_iter()
+            .sorted()
+            .collect_vec();
+
+            assert_eq!(rows, expected_rows);
         } else {
             unreachable!();
         }
 
+        assert_matches!(hash_agg.next().await.unwrap(), Message::Barrier { .. });
+
         if let Message::Chunk(chunk) = hash_agg.next().await.unwrap() {
-            assert_eq!(
-                chunk.ops,
-                vec![Op::Delete, Op::UpdateDelete, Op::UpdateInsert, Op::Insert,]
-            );
+            let (data_chunk, ops) = chunk.into_parts();
+            let rows = ops
+                .into_iter()
+                .zip(data_chunk.rows().map(Row::from))
+                .sorted()
+                .collect_vec();
 
-            assert_eq!(chunk.columns.len(), 4);
+            let expected_rows = [
+                (Op::Delete, row_nonnull![1i64, 1i64, 1i64, 1i64]),
+                (Op::UpdateDelete, row_nonnull![2i64, 2i64, 4i64, 4i64]),
+                (Op::UpdateInsert, row_nonnull![2i64, 1i64, 2i64, 2i64]),
+                (Op::Insert, row_nonnull![3i64, 1i64, 3i64, 3i64]),
+            ]
+            .into_iter()
+            .sorted()
+            .collect_vec();
 
-            // test key_column
-            assert_eq!(
-                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
-                vec![Some(1), Some(2), Some(2), Some(3)]
-            );
-            // test row_count
-            assert_eq!(
-                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
-                vec![Some(1), Some(2), Some(1), Some(1)]
-            );
-            // test agg_column
-            assert_eq!(
-                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
-                vec![Some(1), Some(4), Some(2), Some(3),]
-            );
-            // test row_sum_column
-            assert_eq!(
-                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
-                vec![Some(1), Some(4), Some(2), Some(3),]
-            );
+            assert_eq!(rows, expected_rows);
         } else {
             unreachable!();
         }

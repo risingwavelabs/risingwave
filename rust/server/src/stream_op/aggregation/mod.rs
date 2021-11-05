@@ -1,4 +1,6 @@
 mod agg_call;
+use std::any::Any;
+
 pub use agg_call::*;
 
 mod foldable;
@@ -23,6 +25,8 @@ use risingwave_common::error::Result;
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::{DataTypeKind, DataTypeRef};
 
+use dyn_clone::{self, DynClone};
+
 /// `StreamingAggState` records a state of streaming expression. For example,
 /// there will be `StreamingAggCompare` and `StreamingAggSum`.
 pub trait StreamingAggState<A: Array>: Send + Sync + 'static {
@@ -42,7 +46,7 @@ pub trait StreamingAggFunction<B: ArrayBuilder>: Send + Sync + 'static {
 /// `StreamingAggStateImpl` erases the associated type information of
 /// `StreamingAggState` and `StreamingAggFunction`. You should manually
 /// implement this trait for necessary types.
-pub trait StreamingAggStateImpl: Send + Sync + 'static {
+pub trait StreamingAggStateImpl: Any + std::fmt::Debug + DynClone + Send + Sync + 'static {
     fn apply_batch(
         &mut self,
         ops: Ops<'_>,
@@ -54,6 +58,8 @@ pub trait StreamingAggStateImpl: Send + Sync + 'static {
 
     fn new_builder(&self) -> ArrayBuilderImpl;
 }
+
+dyn_clone::clone_trait_object!(StreamingAggStateImpl);
 
 /// [postgresql specification of aggregate functions](https://www.postgresql.org/docs/13/functions-aggregate.html)
 /// Most of the general-purpose aggregate functions have one input except for:

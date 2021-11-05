@@ -1,6 +1,18 @@
 use crate::stream_op::*;
 use std::collections::VecDeque;
 
+#[macro_export]
+
+/// `row_nonnull` builds a `Row` with concrete values.
+/// TODO: add macro row!, which requires a new trait `ToScalarValue`.
+macro_rules! row_nonnull {
+  [$( $value:expr ),*] => {
+    {
+      Row(vec![$(Some($value.to_scalar_value()), )*])
+    }
+  };
+}
+
 pub struct MockSource {
     schema: Schema,
     msgs: VecDeque<Message>,

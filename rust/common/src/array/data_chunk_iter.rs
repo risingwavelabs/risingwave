@@ -1,9 +1,16 @@
 use std::cmp::Ordering;
 
-use itertools::Itertools;
-
 use crate::array::DataChunk;
 use crate::types::{Datum, DatumRef, ToOwnedDatum};
+
+impl DataChunk {
+    pub fn rows(&self) -> DataChunkRefIter<'_> {
+        DataChunkRefIter {
+            chunk: self,
+            idx: 0,
+        }
+    }
+}
 
 pub struct DataChunkRefIter<'a> {
     chunk: &'a DataChunk,
@@ -63,17 +70,8 @@ impl From<RowRef<'_>> for Row {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Row(pub Vec<Datum>);
-
-impl PartialEq for Row {
-    fn eq(&self, other: &Self) -> bool {
-        if self.0.len() != other.0.len() {
-            return false;
-        }
-        self.0.iter().zip(other.0.iter()).all_equal()
-    }
-}
 
 impl PartialOrd for Row {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
@@ -89,8 +87,6 @@ impl PartialOrd for Row {
         Some(Ordering::Equal)
     }
 }
-
-impl Eq for Row {}
 
 impl Ord for Row {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
