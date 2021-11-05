@@ -70,7 +70,14 @@
           }
         }
       },
-      "columnIds": [0, 1, 2]
+      "columnIds": [0, 1, 2],
+      "columnType": [{
+        "typeName": "INT32"
+      }, {
+        "typeName": "INT32"
+      }, {
+        "typeName": "FLOAT"
+      }]
     }
   }, {
     "nodeType": "SEQ_SCAN",
@@ -83,7 +90,10 @@
         },
         "tableId": 2
       },
-      "columnIds": [0]
+      "columnIds": [0],
+      "columnType": [{
+        "typeName": "INT32"
+      }]
     }
   }]
 }

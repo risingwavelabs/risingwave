@@ -34,6 +34,7 @@ import org.apache.calcite.sql.SqlCall;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.util.ImmutableIntList;
 
+/** Table catalog definition. */
 public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.TableName>
     implements Table {
   private final AtomicInteger nextColumnId = new AtomicInteger(0);
@@ -107,6 +108,10 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
     return Optional.ofNullable(columnById.get(columnId));
   }
 
+  public Optional<ColumnCatalog> getColumn(int columnId) {
+    return getColumn(new ColumnCatalog.ColumnId(columnId, this.getId()));
+  }
+
   public Optional<ColumnCatalog> getColumn(String column) {
     checkNotNull(column, "column can't be null!");
     return Optional.ofNullable(
@@ -116,6 +121,10 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
   public ColumnCatalog getColumnChecked(ColumnCatalog.ColumnId columnId) {
     // TODO: Use PgErrorCode
     return getColumn(columnId).orElseThrow(() -> new RuntimeException("Column id not found!"));
+  }
+
+  public ColumnCatalog getColumnChecked(int columnId) {
+    return getColumnChecked(new ColumnCatalog.ColumnId(columnId, this.getId()));
   }
 
   public ColumnCatalog getColumnChecked(String column) {
@@ -212,6 +221,7 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
     return stream;
   }
 
+  /** Table id definition. */
   public static class TableId extends NonRootLikeBase<Integer, SchemaCatalog.SchemaId> {
 
     public TableId(Integer value, SchemaCatalog.SchemaId parent) {
@@ -219,6 +229,7 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
     }
   }
 
+  /** Table name definition. */
   public static class TableName extends NonRootLikeBase<String, SchemaCatalog.SchemaName> {
     public TableName(String value, SchemaCatalog.SchemaName parent) {
       super(value, parent);

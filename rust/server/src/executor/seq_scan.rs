@@ -14,7 +14,6 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::{InternalError, ProtobufError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::build_from_proto;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use futures::future;
@@ -44,16 +43,17 @@ impl BoxedExecutorBuilder for SeqScanExecutor {
             .global_task_env()
             .table_manager()
             .get_table(&table_id)?;
+
         if let SimpleTableRef::Columnar(table_ref) = table_ref {
             let column_ids = seq_scan_node.get_column_ids();
 
-            let fields = table_ref
-                .columns()
-                .iter()
-                .map(|c| Field {
-                    data_type: build_from_proto(c.get_column_type()).unwrap(),
-                })
-                .collect::<Vec<Field>>();
+            let schema = Schema::new(
+                seq_scan_node
+                    .get_column_type()
+                    .iter()
+                    .map(Field::try_from)
+                    .collect::<Result<Vec<Field>>>()?,
+            );
 
             Ok(Box::new(Self {
                 first_execution: true,
@@ -62,7 +62,7 @@ impl BoxedExecutorBuilder for SeqScanExecutor {
                 column_indices: vec![],
                 chunk_idx: 0,
                 data: Vec::new(),
-                schema: Schema { fields },
+                schema,
             }))
         } else {
             Err(RwError::from(InternalError(
@@ -175,9 +175,7 @@ mod tests {
         let fields = table
             .columns()
             .iter()
-            .map(|c| Field {
-                data_type: build_from_proto(c.get_column_type()).unwrap(),
-            })
+            .map(|c| Field::try_from(c.get_column_type()).unwrap())
             .collect::<Vec<Field>>();
         let col1 = column_nonnull! { I64Array, Int64Type, [1, 3, 5, 7, 9] };
         let col2 = column_nonnull! { I64Array, Int64Type, [2, 4, 6, 8, 10] };

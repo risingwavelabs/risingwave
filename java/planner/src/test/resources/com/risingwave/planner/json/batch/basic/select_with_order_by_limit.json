@@ -28,7 +28,14 @@
           }
         }
       },
-      "columnIds": [0, 1, 2]
+      "columnIds": [0, 1, 2],
+      "columnType": [{
+        "typeName": "INT32"
+      }, {
+        "typeName": "INT32"
+      }, {
+        "typeName": "FLOAT"
+      }]
     }
   }]
 }

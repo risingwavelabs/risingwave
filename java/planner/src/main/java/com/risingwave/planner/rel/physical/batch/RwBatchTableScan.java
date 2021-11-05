@@ -54,9 +54,17 @@ public class RwBatchTableScan extends RwScan implements RisingWaveBatchPhyRel {
 
   @Override
   public PlanNode serialize() {
+    var table = getTable().unwrapOrThrow(TableCatalog.class);
+
     TableRefId tableRefId = Messages.getTableRefId(tableId);
     SeqScanNode.Builder seqScanNodeBuilder = SeqScanNode.newBuilder().setTableRefId(tableRefId);
-    columnIds.forEach(c -> seqScanNodeBuilder.addColumnIds(c.getValue()));
+    columnIds.forEach(
+        c -> {
+          var columnId = c.getValue();
+          seqScanNodeBuilder.addColumnIds(columnId);
+          var dataType = table.getColumnChecked(columnId).getDesc().getDataType().getProtobufType();
+          seqScanNodeBuilder.addColumnType(dataType);
+        });
     return PlanNode.newBuilder()
         .setNodeType(PlanNode.PlanNodeType.SEQ_SCAN)
         .setBody(Any.pack(seqScanNodeBuilder.build()))

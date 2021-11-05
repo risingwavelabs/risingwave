@@ -44,6 +44,7 @@ message ColumnDesc {
 message SeqScanNode {
   TableRefId table_ref_id = 1;
   repeated int32 column_ids = 2;
+  repeated data.DataType column_type = 3;
 }
 
 message RowSeqScanNode {
