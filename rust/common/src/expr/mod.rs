@@ -28,15 +28,14 @@ use crate::types::{DataType, DataTypeRef};
 use risingwave_pb::expr::expr_node::Type::{
     {Add, Divide, Modulus, Multiply, Subtract}, {And, Not, Or}, {Cast, Upper},
     {Equal, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual, NotEqual},
+    {Length, Like, Ltrim, Position, Replace, Rtrim, Substr, Trim},
 };
 use risingwave_pb::expr::ExprNode as ProstExprNode;
 use risingwave_pb::ToProst;
 use risingwave_pb::ToProto;
 use risingwave_proto::expr::{
     ExprNode,
-    ExprNode_Type::{
-        CONSTANT_VALUE, INPUT_REF, LENGTH, LIKE, LTRIM, POSITION, REPLACE, RTRIM, SUBSTR, TRIM,
-    },
+    ExprNode_Type::{CONSTANT_VALUE, INPUT_REF},
 };
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -67,14 +66,6 @@ macro_rules! build_expression {
 pub fn build_from_proto(proto: &ExprNode) -> Result<BoxedExpression> {
     // TODO: Read from proto in a consistent way.
     match proto.get_expr_type() {
-        SUBSTR => return build_substr_expr(proto),
-        LENGTH => return build_length_expr(proto),
-        REPLACE => return build_replace_expr(proto),
-        LIKE => return build_like_expr(proto),
-        TRIM => return build_trim_expr(proto),
-        LTRIM => return build_ltrim_expr(proto),
-        RTRIM => return build_rtrim_expr(proto),
-        POSITION => return build_position_expr(proto),
         CONSTANT_VALUE => (),
         INPUT_REF => (),
         _other => return build_from_prost(&proto.to_prost::<ProstExprNode>()),
@@ -92,7 +83,14 @@ pub fn build_from_prost(prost: &ProstExprNode) -> Result<BoxedExpression> {
             build_binary_expr_prost(prost)
         }
         Add | Subtract | Multiply | Divide | Modulus | And | Or => build_binary_expr_prost(prost),
-
+        Substr => build_substr_expr(prost),
+        Length => build_length_expr(prost),
+        Replace => build_replace_expr(prost),
+        Like => build_like_expr(prost),
+        Trim => build_trim_expr(prost),
+        Ltrim => build_ltrim_expr(prost),
+        Rtrim => build_rtrim_expr(prost),
+        Position => build_position_expr(prost),
         _ => build_from_proto(&prost.to_proto::<ExprNode>()),
     }
 }
