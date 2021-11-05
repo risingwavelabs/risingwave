@@ -18,6 +18,7 @@ import com.risingwave.planner.sql.SqlConverter;
 import com.risingwave.proto.common.Status;
 import com.risingwave.proto.computenode.CreateTaskRequest;
 import com.risingwave.proto.computenode.CreateTaskResponse;
+import com.risingwave.proto.computenode.GetDataRequest;
 import com.risingwave.proto.computenode.TaskSinkId;
 import com.risingwave.proto.plan.CreateTableNode;
 import com.risingwave.proto.plan.ExchangeInfo;
@@ -48,7 +49,7 @@ public class CreateTableHandler implements SqlHandler {
         throw new PgException(PgErrorCode.INTERNAL_ERROR, "Create Task failed");
       }
       TaskSinkId taskSinkId = Messages.buildTaskSinkId(createTaskRequest.getTaskId());
-      client.getData(taskSinkId);
+      client.getData(GetDataRequest.newBuilder().setSinkId(taskSinkId).build());
     }
 
     return new DdlResult(StatementType.CREATE_TABLE, 0);

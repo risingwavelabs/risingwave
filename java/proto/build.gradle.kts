@@ -1,9 +1,11 @@
 import com.google.protobuf.gradle.*
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
     id("com.google.protobuf")
     // We need this to add generate source file to intellij
     id("idea")
+    kotlin("jvm") version "1.5.31"
 }
 
 dependencies {
@@ -13,6 +15,9 @@ dependencies {
     api("io.grpc:grpc-protobuf")
     api("io.grpc:grpc-stub")
     api("javax.annotation:javax.annotation-api")
+    api("io.grpc:grpc-kotlin-stub")
+    api("org.jetbrains.kotlinx:kotlinx-coroutines-core")
+    implementation(kotlin("stdlib-jdk8"))
 }
 
 sourceSets {
@@ -35,6 +40,9 @@ protobuf {
         id("grpc") {
             artifact = "io.grpc:protoc-gen-grpc-java:1.15.1"
         }
+        id("grpckt") {
+            artifact = "io.grpc:protoc-gen-grpc-kotlin:1.1.0:jdk7@jar"
+        }
     }
     generateProtoTasks {
         ofSourceSet("main").forEach {
@@ -46,7 +54,19 @@ protobuf {
             it.plugins {
                 // Apply the "grpc" plugin whose spec is defined above, without options.
                 id("grpc")
+                id("grpckt")
             }
         }
     }
+}
+repositories {
+    mavenCentral()
+}
+val compileKotlin: KotlinCompile by tasks
+compileKotlin.kotlinOptions {
+    jvmTarget = "11"
+}
+val compileTestKotlin: KotlinCompile by tasks
+compileTestKotlin.kotlinOptions {
+    jvmTarget = "11"
 }

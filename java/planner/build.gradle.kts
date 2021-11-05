@@ -1,5 +1,8 @@
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+
 plugins {
     antlr
+    kotlin("jvm") version "1.5.21"
 }
 
 // TODO: We need to figure out one way to manage all version in one place
@@ -15,6 +18,8 @@ dependencies {
     api(project(":catalog"))
     api(project(":pgwire"))
     implementation(project(":proto"))
+    implementation(kotlin("stdlib-jdk8"))
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")
     api("org.slf4j:slf4j-api")
     api("org.reflections:reflections")
     api("com.typesafe.akka:akka-actor-typed_${scalaBinaryVersion}")
@@ -37,4 +42,13 @@ dependencies {
 tasks.generateGrammarSource {
     arguments = arguments + listOf("-visitor")
     outputDirectory = File("build/generated-src/antlr/main/com/risingwave/sql/parser/antlr/v4")
+}
+
+val compileKotlin: KotlinCompile by tasks
+compileKotlin.kotlinOptions {
+    jvmTarget = "1.8"
+}
+val compileTestKotlin: KotlinCompile by tasks
+compileTestKotlin.kotlinOptions {
+    jvmTarget = "1.8"
 }

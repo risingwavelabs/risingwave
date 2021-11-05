@@ -12,6 +12,7 @@ import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.proto.common.Status;
 import com.risingwave.proto.computenode.CreateTaskRequest;
 import com.risingwave.proto.computenode.CreateTaskResponse;
+import com.risingwave.proto.computenode.GetDataRequest;
 import com.risingwave.proto.computenode.TaskSinkId;
 import com.risingwave.proto.plan.DropTableNode;
 import com.risingwave.proto.plan.ExchangeInfo;
@@ -43,7 +44,7 @@ public class DropTableHandler implements SqlHandler {
         throw new PgException(PgErrorCode.INTERNAL_ERROR, "Create Task failed");
       }
       TaskSinkId taskSinkId = Messages.buildTaskSinkId(createTaskRequest.getTaskId());
-      client.getData(taskSinkId);
+      client.getData(GetDataRequest.newBuilder().setSinkId(taskSinkId).build());
     }
 
     return new DdlResult(StatementType.DROP_TABLE, 0);

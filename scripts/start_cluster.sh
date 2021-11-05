@@ -14,8 +14,8 @@ wait_server() {
         while ! echo -n > /dev/tcp/localhost/"$1"; do
             sleep 0.5
             failed_times=$((failed_times+1))
-            if [ $failed_times -gt 30 ]; then
-                echo "ERROR: failed to start server $1 [timeout=15s]"
+            if [ $failed_times -gt 60 ]; then
+                echo "ERROR: failed to start server $1 [timeout=30s]"
                 exit 1
             fi
         done

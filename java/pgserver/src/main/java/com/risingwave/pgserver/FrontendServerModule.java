@@ -21,8 +21,6 @@ import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.ComputeClientManagerImpl;
 import com.risingwave.scheduler.QueryManager;
 import com.risingwave.scheduler.RemoteQueryManager;
-import com.risingwave.scheduler.actor.ActorFactory;
-import com.risingwave.scheduler.actor.DefaultActorFactory;
 import com.risingwave.scheduler.streaming.StreamManager;
 import com.risingwave.scheduler.streaming.StreamManagerImpl;
 import com.risingwave.scheduler.task.RemoteTaskManager;
@@ -49,7 +47,6 @@ public class FrontendServerModule extends AbstractModule {
     bind(ComputeClientManager.class).to(ComputeClientManagerImpl.class).in(Singleton.class);
     bind(WorkerNodeManager.class).to(DefaultWorkerNodeManager.class).in(Singleton.class);
     if (options.combineLeader) {
-      bind(ActorFactory.class).to(DefaultActorFactory.class).in(Singleton.class);
       bind(TaskManager.class).to(RemoteTaskManager.class).in(Singleton.class);
       bind(QueryManager.class).to(RemoteQueryManager.class).in(Singleton.class);
     }

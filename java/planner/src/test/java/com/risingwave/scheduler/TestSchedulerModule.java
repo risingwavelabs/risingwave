@@ -10,18 +10,16 @@ import com.risingwave.node.DefaultWorkerNodeManager;
 import com.risingwave.node.WorkerNodeManager;
 import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.TestComputeClientManager;
-import com.risingwave.scheduler.actor.ActorFactory;
-import com.risingwave.scheduler.actor.DefaultActorFactory;
 import com.risingwave.scheduler.task.RemoteTaskManager;
 import com.risingwave.scheduler.task.TaskManager;
 import java.io.IOException;
 import java.io.InputStream;
 import javax.inject.Singleton;
 
+/** Encapsulates the required components to test scheduler. */
 public class TestSchedulerModule extends AbstractModule {
   protected void configure() {
     bind(ComputeClientManager.class).to(TestComputeClientManager.class).in(Singleton.class);
-    bind(ActorFactory.class).to(DefaultActorFactory.class).in(Singleton.class);
     bind(TaskManager.class).to(RemoteTaskManager.class).in(Singleton.class);
     bind(QueryManager.class).to(RemoteQueryManager.class).in(Singleton.class);
     bind(WorkerNodeManager.class).to(DefaultWorkerNodeManager.class).in(Singleton.class);
