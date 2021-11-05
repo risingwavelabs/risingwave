@@ -1,31 +1,26 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::{mem, vec};
-
-use itertools::Itertools;
-use protobuf::Message;
-
-use risingwave_proto::plan::{HashAggNode, PlanNode_PlanNodeType};
-
+use super::{BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult};
 use crate::executor::BoxedExecutor;
 use crate::executor::ExecutorResult::Batch;
+use itertools::Itertools;
+use prost::Message;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, RwError};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::collection::hash_map::{HashKey, PrecomputedBuildHasher, SerializedKey};
-use risingwave_common::error::ErrorCode::ProtobufError;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, DataTypeRef};
 use risingwave_common::vector_op::agg::{AggStateFactory, BoxedAggState};
-use risingwave_pb::ToProst;
-
-use super::{BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult};
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::HashAggNode;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::{mem, vec};
 
 type AggHashMap<K> = HashMap<K, Vec<BoxedAggState>, PrecomputedBuildHasher>;
 pub(super) struct HashAggExecutorBuilder;
 impl BoxedExecutorBuilder for HashAggExecutorBuilder {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::HASH_AGG);
+        ensure!(source.plan_node().get_node_type() as i32 == PlanNodeType::HashAgg as i32);
         ensure!(source.plan_node().get_children().len() == 1);
         let proto_child = source
             .plan_node()
@@ -34,9 +29,8 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
             .ok_or_else(|| ErrorCode::InternalError(String::from("")))?;
         let child = source.clone_for_plan(proto_child).build()?;
 
-        let hash_agg_node =
-            HashAggNode::parse_from_bytes(source.plan_node().get_body().get_value())
-                .map_err(|e| RwError::from(ProtobufError(e)))?;
+        let hash_agg_node = HashAggNode::decode(&(source.plan_node()).get_body().value[..])
+            .map_err(|e| RwError::from(ErrorCode::ProstError(e)))?;
 
         let group_key_columns = hash_agg_node
             .get_group_keys()
@@ -47,7 +41,7 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
         let agg_factories = hash_agg_node
             .get_agg_calls()
             .iter()
-            .map(|x| AggStateFactory::new(&x.to_prost()))
+            .map(AggStateFactory::new)
             .collect::<Result<Vec<AggStateFactory>>>()?;
 
         let child_schema = child.schema();
@@ -174,19 +168,17 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
         &self.schema
     }
 }
+
 #[cfg(test)]
 mod tests {
-    use pb_construct::make_proto;
-    use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};
-    use risingwave_proto::expr::{AggCall, AggCall_Arg, AggCall_Type, InputRefExpr};
-
+    use super::*;
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
     use risingwave_common::array::{I32Array, I64Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{Int32Type, Int64Type};
-
-    use super::*;
+    use risingwave_pb::data::{data_type::TypeName, DataType as DataTypeProst};
+    use risingwave_pb::expr::{agg_call::Arg, agg_call::Type, AggCall, InputRefExpr};
 
     #[tokio::test]
     async fn execute_int32_grouped() {
@@ -220,20 +212,23 @@ mod tests {
             },
         );
 
-        let proto = make_proto!(AggCall, {
-          field_type: AggCall_Type::SUM,
-          return_type: make_proto!(DataTypeProto, {
-            type_name: DataType_TypeName::INT64
-          }),
-          args: vec![make_proto!(AggCall_Arg, {
-            input: make_proto!(InputRefExpr, {column_idx: 2}),
-            field_type: make_proto!(DataTypeProto, {
-              type_name: DataType_TypeName::INT32
-            })
-          })].into()
-        });
+        let prost = AggCall {
+            r#type: Type::Sum as i32,
+            args: vec![Arg {
+                input: Some(InputRefExpr { column_idx: 2 }),
+                r#type: Some(DataTypeProst {
+                    type_name: TypeName::Int32 as i32,
+                    ..Default::default()
+                }),
+            }],
+            return_type: Some(DataTypeProst {
+                type_name: TypeName::Int64 as i32,
+                ..Default::default()
+            }),
+        };
 
-        let agg_factory = AggStateFactory::new(&proto.to_prost()).unwrap();
+        let agg_factory = AggStateFactory::new(&prost).unwrap();
+
         let schema = Schema {
             fields: vec![
                 Field {
