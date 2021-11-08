@@ -3,7 +3,7 @@ buildscript {
         gradlePluginPortal()
     }
     dependencies {
-        classpath("com.diffplug.spotless:spotless-plugin-gradle:5.14.1")
+        classpath("com.diffplug.spotless:spotless-plugin-gradle:5.17.1")
         classpath("com.google.protobuf:protobuf-gradle-plugin:0.8.17")
     }
 }
