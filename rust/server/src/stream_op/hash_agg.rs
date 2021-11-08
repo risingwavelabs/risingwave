@@ -11,6 +11,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::Datum;
+use risingwave_pb::data::Barrier;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -66,7 +67,7 @@ pub struct HashAggExecutor {
     /// If `next_barrier_message` exists, we should send a Barrier while next called.
     // TODO: This can be optimized while async gen fn stablized.
     // TODO: Create a `Barrier` struct.
-    next_barrier_message: Option<(u64, bool)>,
+    next_barrier_message: Option<Barrier>,
 
     /// Aggregation state before last barrier.
     /// The map will be updated iff [`Message::Barrier`] was received.
@@ -325,9 +326,12 @@ impl Executor for HashAggExecutor {
     }
 
     async fn next(&mut self) -> Result<Message> {
-        if let Some((epoch, stop)) = self.next_barrier_message {
+        if let Some(barrier) = self.next_barrier_message.clone() {
             self.next_barrier_message = None;
-            return Ok(Message::Barrier { epoch, stop });
+            return Ok(Message::Barrier {
+                epoch: barrier.epoch,
+                stop: barrier.stop,
+            });
         }
         while let Ok(msg) = self.input.next().await {
             match msg {
@@ -339,7 +343,7 @@ impl Executor for HashAggExecutor {
                         return Ok(Message::Barrier { epoch, stop });
                     }
                     // Cache the barrier_msg and send it later.
-                    self.next_barrier_message = Some((epoch, stop));
+                    self.next_barrier_message = Some(Barrier { epoch, stop });
                     let chunk = self.flush_data()?;
                     return Ok(Message::Chunk(chunk));
                 }
