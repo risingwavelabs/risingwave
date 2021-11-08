@@ -112,17 +112,12 @@ impl SimpleExecutor for MViewSinkExecutor {
 
 #[cfg(test)]
 mod tests {
-
-    use pb_construct::make_proto;
-    use pb_convert::FromProtobuf;
     use risingwave_common::array::data_chunk_iter::Row;
     use risingwave_common::array::I32Array;
-    use risingwave_common::catalog::{Field, TableId};
-    use risingwave_common::error::ErrorCode::InternalError;
+    use risingwave_common::catalog::{DatabaseId, Field, SchemaId, TableId};
     use risingwave_common::types::{Int32Type, Scalar};
-    use risingwave_proto::data::{DataType, DataType_TypeName};
-    use risingwave_proto::plan::{ColumnDesc, ColumnDesc_ColumnEncodingType};
-    use risingwave_proto::plan::{DatabaseRefId, SchemaRefId, TableRefId};
+    use risingwave_pb::data::{data_type::TypeName, DataType};
+    use risingwave_pb::plan::{column_desc::ColumnEncodingType, ColumnDesc};
 
     use crate::storage::{SimpleTableManager, SimpleTableRef, TableManager};
     use crate::stream_op::test_utils::*;
@@ -133,29 +128,27 @@ mod tests {
     async fn test_sink() {
         // Prepare storage and memtable.
         let store_mgr = Arc::new(SimpleTableManager::new());
-        let table_ref_proto = make_proto!(TableRefId, {
-            schema_ref_id: make_proto!(SchemaRefId, {
-                database_ref_id: make_proto!(DatabaseRefId, {
-                    database_id: 0
-                })
-            }),
-            table_id: 1
-        });
-        let table_id = TableId::from_protobuf(&table_ref_proto)
-            .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))
-            .unwrap();
+        let table_id = TableId::new(SchemaId::new(DatabaseId::new(0), 0), 1);
         // Two columns of int32 type, the first column is PK.
-        let column_desc1 = make_proto!(ColumnDesc,{
-            column_type: make_proto!(DataType, { type_name: DataType_TypeName::INT32 }),
-            encoding: ColumnDesc_ColumnEncodingType::RAW,
-            name: "v1".to_string()
-        });
-        let column_desc2 = make_proto!(ColumnDesc,{
-            column_type: make_proto!(DataType, { type_name: DataType_TypeName::INT32 }),
-            encoding: ColumnDesc_ColumnEncodingType::RAW,
-            name: "v2".to_string()
-        });
-        let column_descs = vec![column_desc1, column_desc2];
+        let column_desc1 = ColumnDesc {
+            column_type: Some(DataType {
+                type_name: TypeName::Int32 as i32,
+                ..Default::default()
+            }),
+            encoding: ColumnEncodingType::Raw as i32,
+            name: "v1".to_string(),
+            is_primary: false,
+        };
+        let column_desc2 = ColumnDesc {
+            column_type: Some(DataType {
+                type_name: TypeName::Int32 as i32,
+                ..Default::default()
+            }),
+            encoding: ColumnEncodingType::Raw as i32,
+            name: "v2".to_string(),
+            is_primary: false,
+        };
+        let column_descs = vec![column_desc1.to_proto(), column_desc2.to_proto()];
         let pks = vec![0_usize];
         let _res = store_mgr.create_materialized_view(&table_id, column_descs, pks.clone());
         // Prepare source chunks.
@@ -233,29 +226,28 @@ mod tests {
     async fn test_sink_no_key() {
         // Prepare storage and memtable.
         let store_mgr = Arc::new(SimpleTableManager::new());
-        let table_ref_proto = make_proto!(TableRefId, {
-            schema_ref_id: make_proto!(SchemaRefId, {
-                database_ref_id: make_proto!(DatabaseRefId, {
-                    database_id: 0
-                })
-            }),
-            table_id: 1
-        });
-        let table_id = TableId::from_protobuf(&table_ref_proto)
-            .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))
-            .unwrap();
+        let table_id = TableId::new(SchemaId::new(DatabaseId::new(0), 0), 1);
+
         // Two columns of int32 type, no pk.
-        let column_desc1 = make_proto!(ColumnDesc,{
-            column_type: make_proto!(DataType, { type_name: DataType_TypeName::INT32 }),
-            encoding: ColumnDesc_ColumnEncodingType::RAW,
-            name: "v1".to_string()
-        });
-        let column_desc2 = make_proto!(ColumnDesc,{
-            column_type: make_proto!(DataType, { type_name: DataType_TypeName::INT32 }),
-            encoding: ColumnDesc_ColumnEncodingType::RAW,
-            name: "v2".to_string()
-        });
-        let column_descs = vec![column_desc1, column_desc2];
+        let column_desc1 = ColumnDesc {
+            column_type: Some(DataType {
+                type_name: TypeName::Int32 as i32,
+                ..Default::default()
+            }),
+            encoding: ColumnEncodingType::Raw as i32,
+            name: "v1".to_string(),
+            is_primary: false,
+        };
+        let column_desc2 = ColumnDesc {
+            column_type: Some(DataType {
+                type_name: TypeName::Int32 as i32,
+                ..Default::default()
+            }),
+            encoding: ColumnEncodingType::Raw as i32,
+            name: "v2".to_string(),
+            is_primary: false,
+        };
+        let column_descs = vec![column_desc1.to_proto(), column_desc2.to_proto()];
         let _res = store_mgr.create_materialized_view(&table_id, column_descs, vec![]);
         // Prepare source chunks.
         let chunk1 = StreamChunk {
