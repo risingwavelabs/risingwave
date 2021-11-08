@@ -1,17 +1,16 @@
 //! Global Streaming Hash Aggregators
 
 use super::aggregation::*;
+use super::AggCall;
 use super::{Executor, Message, Op, StreamChunk};
+use async_trait::async_trait;
+use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::Datum;
-
-use super::AggCall;
-use async_trait::async_trait;
-use itertools::Itertools;
 use std::collections::HashMap;
 use std::sync::Arc;
 

@@ -1,10 +1,6 @@
-use std::sync::Arc;
-
-use async_trait::async_trait;
-use prost::DecodeError;
-
 pub use actor::Actor;
 pub use aggregation::*;
+use async_trait::async_trait;
 pub use dispatch::*;
 pub use filter::*;
 pub use hash_agg::*;
@@ -12,6 +8,11 @@ pub use kafka_source::*;
 pub use merge::*;
 pub use mview_sink::*;
 pub use project::*;
+use prost::DecodeError;
+use risingwave_common::array::column::Column;
+use risingwave_common::array::DataChunk;
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_pb::data::Op as ProstOp;
@@ -22,12 +23,8 @@ use risingwave_pb::data::{
 use risingwave_pb::ToProst;
 use risingwave_pb::ToProto;
 pub use simple_agg::*;
+use std::sync::Arc;
 pub use table_source::*;
-
-use risingwave_common::array::column::Column;
-use risingwave_common::array::DataChunk;
-use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::Schema;
 
 mod actor;
 mod aggregation;

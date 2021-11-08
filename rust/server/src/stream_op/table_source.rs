@@ -84,7 +84,6 @@ mod tests {
     use crate::stream_op::Op;
     use futures::channel::mpsc::unbounded;
     use itertools::Itertools;
-    use pb_construct::make_proto;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{ArrayImpl, DataChunk};
     use risingwave_common::array::{I32Array, UTF8Array};
@@ -92,30 +91,33 @@ mod tests {
     use risingwave_common::catalog::test_utils::mock_table_id;
     use risingwave_common::catalog::Field;
     use risingwave_common::types::{DataTypeKind, DataTypeRef, Int32Type, StringType};
-    use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};
-    use risingwave_proto::plan::{ColumnDesc, ColumnDesc_ColumnEncodingType};
+    use risingwave_pb::data::{data_type::TypeName, DataType};
+    use risingwave_pb::plan::{column_desc::ColumnEncodingType, ColumnDesc};
+    use risingwave_pb::ToProto;
     use std::sync::Arc;
 
     #[tokio::test]
     async fn test_table_source() -> Result<()> {
         let table_id = mock_table_id();
-        let column1 = make_proto!(ColumnDesc, {
-          column_type: make_proto!(DataTypeProto, {
-            type_name: DataType_TypeName::INT32
-          }),
-          encoding: ColumnDesc_ColumnEncodingType::RAW,
-          is_primary: false,
-          name: "test_col".to_string()
-        });
-        let column2 = make_proto!(ColumnDesc, {
-          column_type: make_proto!(DataTypeProto, {
-            type_name: DataType_TypeName::VARCHAR
-          }),
-          encoding: ColumnDesc_ColumnEncodingType::RAW,
-          is_primary: false,
-          name: "test_col".to_string()
-        });
-        let columns = vec![column1, column2];
+        let column1 = ColumnDesc {
+            column_type: Some(DataType {
+                type_name: TypeName::Int32 as i32,
+                ..Default::default()
+            }),
+            encoding: ColumnEncodingType::Raw as i32,
+            name: "test_col".to_string(),
+            is_primary: false,
+        };
+        let column2 = ColumnDesc {
+            column_type: Some(DataType {
+                type_name: TypeName::Varchar as i32,
+                ..Default::default()
+            }),
+            encoding: ColumnEncodingType::Raw as i32,
+            name: "test_col".to_string(),
+            is_primary: false,
+        };
+        let columns = vec![column1.to_proto(), column2.to_proto()];
         let table = SimpleMemTable::new(&table_id, &columns);
 
         let col1_type = Int32Type::create(false) as DataTypeRef;
@@ -215,23 +217,26 @@ mod tests {
     #[tokio::test]
     async fn test_table_dropped() -> Result<()> {
         let table_id = mock_table_id();
-        let column1 = make_proto!(ColumnDesc, {
-          column_type: make_proto!(DataTypeProto, {
-            type_name: DataType_TypeName::INT32
-          }),
-          encoding: ColumnDesc_ColumnEncodingType::RAW,
-          is_primary: false,
-          name: "test_col".to_string()
-        });
-        let column2 = make_proto!(ColumnDesc, {
-          column_type: make_proto!(DataTypeProto, {
-            type_name: DataType_TypeName::VARCHAR
-          }),
-          encoding: ColumnDesc_ColumnEncodingType::RAW,
-          is_primary: false,
-          name: "test_col".to_string()
-        });
-        let columns = vec![column1, column2];
+
+        let column1 = ColumnDesc {
+            column_type: Some(DataType {
+                type_name: TypeName::Int32 as i32,
+                ..Default::default()
+            }),
+            encoding: ColumnEncodingType::Raw as i32,
+            name: "test_col".to_string(),
+            is_primary: false,
+        };
+        let column2 = ColumnDesc {
+            column_type: Some(DataType {
+                type_name: TypeName::Varchar as i32,
+                ..Default::default()
+            }),
+            encoding: ColumnEncodingType::Raw as i32,
+            name: "test_col".to_string(),
+            is_primary: false,
+        };
+        let columns = vec![column1.to_proto(), column2.to_proto()];
         let table = SimpleMemTable::new(&table_id, &columns);
 
         let col1_type = Int32Type::create(false) as DataTypeRef;

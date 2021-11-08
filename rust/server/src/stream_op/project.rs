@@ -4,7 +4,6 @@ use itertools::Itertools;
 use risingwave_common::array::{column::Column, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
-
 use risingwave_common::expr::BoxedExpression;
 
 use super::{Executor, Message, SimpleExecutor, StreamChunk};
@@ -96,19 +95,17 @@ impl SimpleExecutor for ProjectExecutor {
 
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
-
-    use risingwave_common::array::I64Array;
-    use risingwave_common::array::*;
-    use risingwave_common::catalog::{Field, Schema};
-    use risingwave_pb::expr::expr_node::Type as ProstExprType;
-
     use crate::stream_op::test_utils::MockSource;
     use crate::stream_op::{Executor, Message, Op, ProjectExecutor, StreamChunk};
     use crate::*;
+    use itertools::Itertools;
+    use risingwave_common::array::I64Array;
+    use risingwave_common::array::*;
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::expr::binary_expr::new_binary_expr;
     use risingwave_common::expr::InputRefExpression;
     use risingwave_common::types::Int64Type;
+    use risingwave_pb::expr::expr_node::Type as ProstExprType;
 
     #[tokio::test]
     async fn test_projection() {

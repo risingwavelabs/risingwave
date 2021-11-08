@@ -1,17 +1,16 @@
-use risingwave_common::array::*;
-use risingwave_common::catalog::Field;
-use risingwave_common::expr::*;
-use risingwave_common::types::*;
-use std::sync::{Arc, Mutex};
-
 use super::ReceiverExecutor;
 use super::*;
 use approx::assert_relative_eq;
 use futures::channel::mpsc::channel;
 use futures::SinkExt;
+use risingwave_common::array::*;
+use risingwave_common::catalog::Field;
 use risingwave_common::expr::binary_expr::new_binary_expr;
 use risingwave_common::expr::unary_expr::new_unary_expr;
+use risingwave_common::expr::*;
+use risingwave_common::types::*;
 use risingwave_pb::expr::expr_node::Type as ProstExprType;
+use std::sync::{Arc, Mutex};
 
 pub struct MockConsumer {
     input: Box<dyn Executor>,

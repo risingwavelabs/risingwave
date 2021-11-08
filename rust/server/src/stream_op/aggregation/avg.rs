@@ -5,12 +5,10 @@
 use std::marker::PhantomData;
 use std::ops::Neg;
 
+use crate::stream_op::*;
 use num_traits::{CheckedAdd, CheckedSub};
-
 use risingwave_common::array::Array;
 use risingwave_common::array::*;
-
-use crate::stream_op::*;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::option_as_scalar_ref;
 

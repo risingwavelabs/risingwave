@@ -2,7 +2,6 @@ use async_trait::async_trait;
 
 use risingwave_common::array::{Array, ArrayImpl, DataChunk};
 use risingwave_common::error::Result;
-
 use risingwave_common::{catalog::Schema, expr::BoxedExpression};
 
 use super::{Executor, Message, Op, SimpleExecutor, StreamChunk};
