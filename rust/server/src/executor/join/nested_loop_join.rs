@@ -17,6 +17,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::build_from_prost as expr_build_from_prost;
 use risingwave_common::expr::BoxedExpression;
 use risingwave_common::types::DataType;
+use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 use risingwave_pb::plan::{plan_node::PlanNodeType, NestedLoopJoinNode};
 
 /// Nested loop join executor.
@@ -41,9 +42,21 @@ pub struct NestedLoopJoinExecutor {
     /// Manage inner source and expression evaluation.
     state: NestedLoopJoinState,
     schema: Schema,
+    /// Return data chunk in batch.
+    chunk_builder: DataChunkBuilder,
+    /// Cache the chunk that has not been append during join probing.
+    /// Flush it in begin of execution.
+    last_chunk: Option<SlicedDataChunk>,
 }
 
-type ProbeResult = Option<DataChunk>;
+/// If current row finished probe, executor will advance to next row.
+/// If there is batched chunk generated in probing, return it. Note that:
+/// `None` do not mean no matched row find (it is written in [`chunk_builder`])
+struct ProbeResult {
+    cur_row_finished: bool,
+    chunk: Option<DataChunk>,
+}
+
 enum NestedLoopJoinState {
     /// [`Build`] should load all inner table into memory.
     Build,
@@ -64,6 +77,17 @@ impl Executor for NestedLoopJoinExecutor {
     }
 
     async fn execute(&mut self) -> risingwave_common::error::Result<ExecutorResult> {
+        if let Some(last_chunk) = self.last_chunk.take() {
+            let (left_data_chunk, return_chunk) = self.chunk_builder.append_chunk(last_chunk)?;
+            self.last_chunk = left_data_chunk;
+            if let Some(return_chunk_inner) = return_chunk {
+                return Ok(Batch(return_chunk_inner));
+            }
+        }
+        // Make sure all buffered chunk are flushed before generate more chunks.
+        // It's impossible that: left chunk not null and return chunk is null.
+        assert!(self.last_chunk.is_none());
+
         loop {
             let mut cur_state = NestedLoopJoinState::Done;
             swap(&mut cur_state, &mut self.state);
@@ -115,6 +139,8 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
 
         let join_type = JoinType::from_prost(nested_loop_join_node.get_join_type());
         let join_expr = expr_build_from_prost(nested_loop_join_node.get_join_cond())?;
+        // Note: Assume that optimizer has set up probe side and build side. Left is the probe side, right is
+        // the build side. This is the same for all join executors.
         let left_plan_opt = source.plan_node().get_children().get(0);
         let right_plan_opt = source.plan_node().get_children().get(1);
         match (left_plan_opt, right_plan_opt) {
@@ -131,6 +157,7 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                         data_type: f.data_type.clone(),
                     })
                     .collect();
+                let schema = Schema { fields };
                 match join_type {
                     JoinType::Inner => {
                         // TODO: Support more join type.
@@ -144,7 +171,15 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                             probe_side_source: outer_table_source,
                             build_side_source: right_child,
                             state: join_state,
-                            schema: Schema { fields },
+                            chunk_builder: DataChunkBuilder::new_with_default_size(
+                                schema
+                                    .fields
+                                    .iter()
+                                    .map(|field| field.data_type.clone())
+                                    .collect(),
+                            ),
+                            schema,
+                            last_chunk: None,
                         }))
                     }
 
@@ -170,29 +205,38 @@ impl NestedLoopJoinExecutor {
         if first_probe {
             self.probe_side_source.init().await?;
         }
-
         let cur_row = self.probe_side_source.current_row()?;
-        match cur_row {
-            Some((row, vis)) => {
-                // Only process visible tuple.
-                if vis {
-                    let probe_result =
-                        build_table.join(row, &self.probe_side_source, &mut self.join_expr)?;
-                    self.state = NestedLoopJoinState::Probe(build_table);
-                    if let Some(data_chunk) = probe_result {
-                        return Ok(Some(data_chunk));
-                    } else {
-                        self.probe_side_source.advance().await?;
-                    }
-                } else {
-                    // If not visible, proceed to next tuple.
+        if let Some((row, vis)) = cur_row {
+            // Only process visible tuple.
+            if vis {
+                // Dispatch to each kind of join type
+                let probe_result = match self.join_type {
+                    JoinType::Inner => build_table.do_inner_join(
+                        row,
+                        &mut self.chunk_builder,
+                        &mut self.join_expr,
+                        &self.probe_side_source,
+                        &mut self.last_chunk,
+                    ),
+                    _ => unimplemented!("Do not support other join types!"),
+                }?;
+
+                // Update the state after join.
+                self.state = NestedLoopJoinState::Probe(build_table);
+                if probe_result.cur_row_finished {
                     self.probe_side_source.advance().await?;
                 }
+                if let Some(inner_chunk) = probe_result.chunk {
+                    return Ok(Some(inner_chunk));
+                }
+            } else {
+                // If not visible, proceed to next tuple.
+                self.probe_side_source.advance().await?;
             }
-            // No more outer tuple means job finished.
-            None => self.state = NestedLoopJoinState::Done,
-        };
-
+        } else {
+            self.state = NestedLoopJoinState::Done;
+            return self.chunk_builder.consume_all();
+        }
         Ok(None)
     }
 
@@ -291,6 +335,10 @@ impl ProbeSideSource {
     fn clean(&mut self) -> Result<()> {
         self.outer.clean()
     }
+
+    fn get_schema(&self) -> &Schema {
+        self.outer.schema()
+    }
 }
 
 /// [`BuildTable`] contains the tuple to be probed. It is also called inner relation in join.
@@ -325,43 +373,6 @@ impl BuildTable {
         inner_source.clean()
     }
 
-    /// Find all joined results from `row`.
-    /// Note that we may need to `join` multiple times for the same single row.
-    /// If [`ProbeResult`] is None, All Join results for current `row` has been return and
-    /// executor should advance to next outer row.
-    /// Note: It do have to be a Option if the joined result is always batched,
-    /// for example 1024, executor can check the length of output result and knows whether probe has ended for current row.
-    /// But for now, the return [`ProbeResult`] is not materialized (may contains lots of invisible tuples).
-    /// In future consider return a results set (all tuples are materialized).
-    /// # Arguments
-    /// * `row` - Tuple to be be probed.
-    /// * `outer_source` - Help `row` convert into a chunk.
-    fn join(
-        &mut self,
-        row: RowRef<'_>,
-        outer_source: &ProbeSideSource,
-        join_expr: &mut BoxedExpression,
-    ) -> Result<ProbeResult> {
-        // Developer error if occur.
-        assert!(self.chunk_idx <= self.inner_table.len());
-        if self.chunk_idx < self.inner_table.len() {
-            let chunk = &self.inner_table[self.chunk_idx];
-            let constant_row_chunk = outer_source.convert_row_to_chunk(&row, chunk.capacity())?;
-            // Concatenate two chunk into a new one first.
-            let new_chunk = Self::concatenate(&constant_row_chunk, chunk)?;
-            let sel_vector = join_expr.eval(&new_chunk)?;
-            // Materialize the joined chunk result.
-            let joined_chunk = new_chunk
-                .with_visibility(sel_vector.as_bool().try_into()?)
-                .compact()?;
-            self.chunk_idx += 1;
-            Ok(Some(joined_chunk))
-        } else {
-            self.chunk_idx = 0;
-            Ok(None)
-        }
-    }
-
     /// The layout be like:
     /// [ `left` chunk     |  `right` chunk     ]
     /// # Arguments
@@ -392,6 +403,45 @@ impl BuildTable {
             }
         }
         Ok(DataChunk::new(concated_columns, vis))
+    }
+
+    fn do_inner_join(
+        &mut self,
+        probe_row: RowRef<'_>,
+        chunk_builder: &mut DataChunkBuilder,
+        join_expr: &mut BoxedExpression,
+        probe_side_source: &ProbeSideSource,
+        last_chunk: &mut Option<SlicedDataChunk>,
+    ) -> Result<ProbeResult> {
+        while self.chunk_idx < self.inner_table.len() {
+            let build_side_chunk = &self.inner_table[self.chunk_idx];
+            let const_row_chunk =
+                probe_side_source.convert_row_to_chunk(&probe_row, build_side_chunk.capacity())?;
+            let new_chunk = Self::concatenate(&const_row_chunk, build_side_chunk)?;
+            // join with current row
+            let sel_vector = join_expr.eval(&new_chunk)?;
+            let ret_chunk = new_chunk.with_visibility(sel_vector.as_bool().try_into()?);
+            // Note: we can avoid the append chunk in join -- Only do it in the begin of outer loop. But currently seems like
+            // it do not have too much gain. Will keep look on it.
+            if ret_chunk.capacity() > 0 {
+                let (mut left_data_chunk, return_data_chunk) =
+                    chunk_builder.append_chunk(SlicedDataChunk::new_checked(ret_chunk)?)?;
+                //Have checked last_input is None in before. Now swap the chunk into left chunk.
+                std::mem::swap(last_chunk, &mut left_data_chunk);
+                if let Some(inner_chunk) = return_data_chunk {
+                    return Ok(ProbeResult {
+                        cur_row_finished: self.chunk_idx >= self.inner_table.len(),
+                        chunk: Some(inner_chunk),
+                    });
+                }
+            }
+            self.chunk_idx += 1;
+        }
+        self.chunk_idx = 0;
+        Ok(ProbeResult {
+            cur_row_finished: true,
+            chunk: None,
+        })
     }
 }
 
