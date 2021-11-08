@@ -1,9 +1,7 @@
 use std::mem::swap;
 use std::sync::Arc;
 
-use protobuf::Message;
-
-use risingwave_proto::plan::{NestedLoopJoinNode, PlanNode_PlanNodeType};
+use prost::Message;
 
 use crate::executor::join::JoinType;
 use crate::executor::ExecutorResult::{Batch, Done};
@@ -14,10 +12,12 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::data_chunk_iter::RowRef;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::ErrorCode::{InternalError, ProtobufError};
-use risingwave_common::error::{Result, RwError};
-use risingwave_common::expr::{build_from_proto, BoxedExpression};
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::expr::build_from_prost as expr_build_from_prost;
+use risingwave_common::expr::BoxedExpression;
 use risingwave_common::types::DataType;
+use risingwave_pb::plan::{plan_node::PlanNodeType, NestedLoopJoinNode};
 
 /// Nested loop join executor.
 ///
@@ -106,15 +106,15 @@ impl Executor for NestedLoopJoinExecutor {
 
 impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::NESTED_LOOP_JOIN);
+        ensure!(source.plan_node().get_node_type() as i32 == PlanNodeType::NestedLoopJoin as i32);
         ensure!(source.plan_node().get_children().len() == 2);
 
         let nested_loop_join_node =
-            NestedLoopJoinNode::parse_from_bytes(source.plan_node().get_body().get_value())
-                .map_err(|e| RwError::from(ProtobufError(e)))?;
+            NestedLoopJoinNode::decode(&(source.plan_node()).get_body().value[..])
+                .map_err(|e| RwError::from(ErrorCode::ProstError(e)))?;
 
-        let join_type = JoinType::from_proto(nested_loop_join_node.get_join_type());
-        let join_expr = build_from_proto(nested_loop_join_node.get_join_cond())?;
+        let join_type = JoinType::from_prost(nested_loop_join_node.get_join_type());
+        let join_expr = expr_build_from_prost(nested_loop_join_node.get_join_cond())?;
         let left_plan_opt = source.plan_node().get_children().get(0);
         let right_plan_opt = source.plan_node().get_children().get(1);
         match (left_plan_opt, right_plan_opt) {

@@ -1,4 +1,5 @@
 use crate::executor::join::JoinType::Inner;
+use risingwave_pb::plan::JoinType as JoinTypeProst;
 use risingwave_proto::plan::JoinType as JoinTypeProto;
 
 mod chunked_data;
@@ -31,6 +32,19 @@ impl JoinType {
             self,
             JoinType::RightOuter | JoinType::RightAnti | JoinType::FullOuter | JoinType::RightSemi
         )
+    }
+
+    pub fn from_prost(prost: JoinTypeProst) -> Self {
+        match prost {
+            JoinTypeProst::Inner => JoinType::Inner,
+            JoinTypeProst::LeftOuter => JoinType::LeftOuter,
+            JoinTypeProst::LeftSemi => JoinType::LeftSemi,
+            JoinTypeProst::LeftAnti => JoinType::LeftAnti,
+            JoinTypeProst::RightOuter => JoinType::RightOuter,
+            JoinTypeProst::RightSemi => JoinType::RightSemi,
+            JoinTypeProst::RightAnti => JoinType::RightAnti,
+            JoinTypeProst::FullOuter => JoinType::FullOuter,
+        }
     }
 
     pub fn from_proto(proto: JoinTypeProto) -> Self {

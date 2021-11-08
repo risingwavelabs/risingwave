@@ -3,9 +3,7 @@ use std::marker::PhantomData;
 use std::mem::swap;
 
 use either::Either;
-use protobuf::Message;
-
-use risingwave_proto::plan::{HashJoinNode, PlanNode_PlanNodeType};
+use prost::Message;
 
 use crate::executor::join::hash_join::HashJoinState::{FirstProbe, Probe, ProbeRemaining};
 use crate::executor::join::hash_join_state::{BuildTable, ProbeTable};
@@ -14,17 +12,17 @@ use crate::executor::ExecutorResult::Batch;
 use crate::executor::{
     BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult,
 };
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{DataChunk, RwError};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::collection::hash_map::hash_key_dispatch;
 use risingwave_common::collection::hash_map::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_common::collection::hash_map::{
     HashKeyKind, Key128, Key16, Key256, Key32, Key64, KeySerialized,
 };
-use risingwave_common::error::ErrorCode::ProtobufError;
-use risingwave_common::error::Result;
-use risingwave_common::types::build_from_proto as type_build_from_proto;
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::build_from_prost as type_build_from_prost;
 use risingwave_common::types::DataTypeRef;
+use risingwave_pb::plan::{plan_node::PlanNodeType, HashJoinNode};
 
 /// Parameters of equi-join.
 /// We use following sql as an example in comments:
@@ -249,26 +247,25 @@ impl<K: HashKey> HashKeyDispatcher<K> for HashJoinExecutorBuilderDispatcher<K> {
 /// Hash join executor builder.
 impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
     fn new_boxed_executor(context: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(context.plan_node().get_node_type() == PlanNode_PlanNodeType::HASH_JOIN);
+        ensure!(context.plan_node().get_node_type() as i32 == PlanNodeType::HashJoin as i32);
         ensure!(context.plan_node().get_children().len() == 2);
 
-        let hash_join_node =
-            HashJoinNode::parse_from_bytes(context.plan_node().get_body().get_value())
-                .map_err(ProtobufError)?;
+        let hash_join_node = HashJoinNode::decode(&(context.plan_node()).get_body().value[..])
+            .map_err(|e| RwError::from(ErrorCode::ProstError(e)))?;
 
         let mut params = EquiJoinParams::default();
         for left_key in hash_join_node.get_left_key() {
             params.left_key_columns.push(left_key.column_idx as usize);
             params
                 .left_key_types
-                .push(type_build_from_proto(left_key.get_data_type())?);
+                .push(type_build_from_prost(left_key.get_data_type())?);
         }
 
         for right_key in hash_join_node.get_right_key() {
             params.right_key_columns.push(right_key.column_idx as usize);
             params
                 .right_key_types
-                .push(type_build_from_proto(right_key.get_data_type())?);
+                .push(type_build_from_prost(right_key.get_data_type())?);
         }
 
         ensure!(params.left_key_columns.len() == params.right_key_columns.len());
@@ -279,7 +276,7 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
                 .push(Either::Left(left_output.column_idx as usize));
             params
                 .output_data_types
-                .push(type_build_from_proto(left_output.get_data_type())?);
+                .push(type_build_from_prost(left_output.get_data_type())?);
         }
 
         for right_output in hash_join_node.get_right_output() {
@@ -288,10 +285,10 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
                 .push(Either::Right(right_output.column_idx as usize));
             params
                 .output_data_types
-                .push(type_build_from_proto(right_output.get_data_type())?);
+                .push(type_build_from_prost(right_output.get_data_type())?);
         }
 
-        params.join_type = JoinType::from_proto(hash_join_node.get_join_type());
+        params.join_type = JoinType::from_prost(hash_join_node.get_join_type());
 
         let left_child = context
             .clone_for_plan(&context.plan_node.get_children()[0])
