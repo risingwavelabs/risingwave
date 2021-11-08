@@ -165,16 +165,11 @@ message SimpleAggNode {
 }
 
 message HashJoinNode {
-  // TODO: We should remove this after adding schema for executor.
-  message InputRefAndDataType {
-    int32 column_idx = 1;
-    data.DataType data_type = 2;
-  }
   JoinType join_type = 1;
-  repeated InputRefAndDataType left_key = 2;
-  repeated InputRefAndDataType left_output = 3;
-  repeated InputRefAndDataType right_key = 4;
-  repeated InputRefAndDataType right_output = 5;
+  repeated int32 left_key = 2;
+  repeated int32 left_output = 3;
+  repeated int32 right_key = 4;
+  repeated int32 right_output = 5;
 }
 
 message PlanNode {

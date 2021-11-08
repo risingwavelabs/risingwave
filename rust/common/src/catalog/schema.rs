@@ -1,7 +1,8 @@
 use risingwave_pb::plan::ColumnDesc;
+use std::ops::Index;
 
 use crate::error::Result;
-use crate::types::{build_from_prost, build_from_proto, DataTypeRef};
+use crate::types::{build_from_prost, build_from_proto, DataType, DataTypeRef};
 use risingwave_proto::data::DataType as DataTypeProto;
 
 /// The field in the schema of the executor's return data
@@ -29,6 +30,10 @@ impl Schema {
             .collect()
     }
 
+    pub fn fields(&self) -> &[Field] {
+        &self.fields
+    }
+
     pub fn try_from<'a, I: IntoIterator<Item = &'a ColumnDesc>>(cols: I) -> Result<Self> {
         Ok(Self {
             fields: cols
@@ -48,5 +53,21 @@ impl Field {
         Ok(Field {
             data_type: build_from_proto(data_type)?,
         })
+    }
+
+    pub fn data_type(&self) -> DataTypeRef {
+        self.data_type.clone()
+    }
+
+    pub fn data_type_ref(&self) -> &dyn DataType {
+        self.data_type.as_ref()
+    }
+}
+
+impl Index<usize> for Schema {
+    type Output = Field;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.fields[index]
     }
 }

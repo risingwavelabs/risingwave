@@ -20,11 +20,11 @@ use risingwave_common::collection::hash_map::{
     HashKeyKind, Key128, Key16, Key256, Key32, Key64, KeySerialized,
 };
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::build_from_prost as type_build_from_prost;
 use risingwave_common::types::DataTypeRef;
 use risingwave_pb::plan::{plan_node::PlanNodeType, HashJoinNode};
 
 /// Parameters of equi-join.
+///
 /// We use following sql as an example in comments:
 /// ```sql
 /// select a.a1, a.a2, b.b1, b.b2 from a inner join b where a.a3 = b.b3 and a.a1 = b.b1
@@ -250,52 +250,52 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
         ensure!(context.plan_node().get_node_type() as i32 == PlanNodeType::HashJoin as i32);
         ensure!(context.plan_node().get_children().len() == 2);
 
-        let hash_join_node = HashJoinNode::decode(&(context.plan_node()).get_body().value[..])
-            .map_err(|e| RwError::from(ErrorCode::ProstError(e)))?;
-
-        let mut params = EquiJoinParams::default();
-        for left_key in hash_join_node.get_left_key() {
-            params.left_key_columns.push(left_key.column_idx as usize);
-            params
-                .left_key_types
-                .push(type_build_from_prost(left_key.get_data_type())?);
-        }
-
-        for right_key in hash_join_node.get_right_key() {
-            params.right_key_columns.push(right_key.column_idx as usize);
-            params
-                .right_key_types
-                .push(type_build_from_prost(right_key.get_data_type())?);
-        }
-
-        ensure!(params.left_key_columns.len() == params.right_key_columns.len());
-
-        for left_output in hash_join_node.get_left_output() {
-            params
-                .output_columns
-                .push(Either::Left(left_output.column_idx as usize));
-            params
-                .output_data_types
-                .push(type_build_from_prost(left_output.get_data_type())?);
-        }
-
-        for right_output in hash_join_node.get_right_output() {
-            params
-                .output_columns
-                .push(Either::Right(right_output.column_idx as usize));
-            params
-                .output_data_types
-                .push(type_build_from_prost(right_output.get_data_type())?);
-        }
-
-        params.join_type = JoinType::from_prost(hash_join_node.get_join_type());
-
         let left_child = context
             .clone_for_plan(&context.plan_node.get_children()[0])
             .build()?;
         let right_child = context
             .clone_for_plan(&context.plan_node.get_children()[1])
             .build()?;
+
+        let hash_join_node = HashJoinNode::decode(&(context.plan_node()).get_body().value[..])
+            .map_err(|e| RwError::from(ErrorCode::ProstError(e)))?;
+
+        let mut params = EquiJoinParams::default();
+        for left_key in hash_join_node.get_left_key() {
+            let left_key = *left_key as usize;
+            params.left_key_columns.push(left_key);
+            params
+                .left_key_types
+                .push(left_child.schema()[left_key].data_type());
+        }
+
+        for right_key in hash_join_node.get_right_key() {
+            let right_key = *right_key as usize;
+            params.right_key_columns.push(right_key);
+            params
+                .right_key_types
+                .push(right_child.schema()[right_key].data_type());
+        }
+
+        ensure!(params.left_key_columns.len() == params.right_key_columns.len());
+
+        for left_output in hash_join_node.get_left_output() {
+            let left_output = *left_output as usize;
+            params.output_columns.push(Either::Left(left_output));
+            params
+                .output_data_types
+                .push(left_child.schema()[left_output].data_type());
+        }
+
+        for right_output in hash_join_node.get_right_output() {
+            let right_output = *right_output as usize;
+            params.output_columns.push(Either::Right(right_output));
+            params
+                .output_data_types
+                .push(right_child.schema()[right_output].data_type());
+        }
+
+        params.join_type = JoinType::from_prost(hash_join_node.get_join_type());
 
         let hash_key_kind = calc_hash_key_kind(&params.right_key_types);
 
