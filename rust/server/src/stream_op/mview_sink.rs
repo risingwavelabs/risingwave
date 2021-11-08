@@ -1,10 +1,8 @@
-use async_trait::async_trait;
-use risingwave_common::array::data_chunk_iter::Row;
-use risingwave_common::catalog::Schema;
-
-use crate::storage::MemRowTableRef as MemTableRef;
-
 use super::{Executor, Message, Result, SimpleExecutor, StreamChunk};
+use crate::storage::MemRowTableRef as MemTableRef;
+use async_trait::async_trait;
+use risingwave_common::array::Row;
+use risingwave_common::catalog::Schema;
 
 /// `MViewSinkExecutor` writes data to a row-based memtable, so that data could
 /// be queried by the AP engine.
@@ -112,17 +110,16 @@ impl SimpleExecutor for MViewSinkExecutor {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::data_chunk_iter::Row;
-    use risingwave_common::array::I32Array;
-    use risingwave_common::catalog::{DatabaseId, Field, SchemaId, TableId};
-    use risingwave_common::types::{Int32Type, Scalar};
-    use risingwave_pb::data::{data_type::TypeName, DataType};
-    use risingwave_pb::plan::{column_desc::ColumnEncodingType, ColumnDesc};
-
     use crate::storage::{SimpleTableManager, SimpleTableRef, TableManager};
     use crate::stream_op::test_utils::*;
     use crate::stream_op::*;
     use crate::*;
+
+    use risingwave_common::array::{I32Array, Row};
+    use risingwave_common::catalog::{DatabaseId, Field, SchemaId, TableId};
+    use risingwave_common::types::{Int32Type, Scalar};
+    use risingwave_pb::data::{data_type::TypeName, DataType};
+    use risingwave_pb::plan::{column_desc::ColumnEncodingType, ColumnDesc};
 
     #[tokio::test]
     async fn test_sink() {

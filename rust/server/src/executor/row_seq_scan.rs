@@ -3,18 +3,17 @@ use std::sync::Arc;
 use protobuf::Message;
 
 use pb_convert::FromProtobuf;
+use risingwave_proto::plan::{PlanNode_PlanNodeType, RowSeqScanNode};
+
+use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
+use crate::storage::{MemRowTable, MemTableRowIter, SimpleTableRef};
 use risingwave_common::array::column::Column;
-use risingwave_common::array::data_chunk_iter::Row;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::{InternalError, ProtobufError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataTypeRef;
-use risingwave_proto::plan::{PlanNode_PlanNodeType, RowSeqScanNode};
-
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
-use crate::storage::{MemRowTable, MemTableRowIter, SimpleTableRef};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 

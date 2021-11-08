@@ -1,3 +1,7 @@
+use crate::storage::SimpleTableRef;
+use crate::storage::{SimpleTableManager, Table, TableManager};
+use crate::stream::StreamManager;
+use crate::stream_op::Message;
 use std::sync::Arc;
 
 use futures::StreamExt;
@@ -5,7 +9,7 @@ use itertools::Itertools;
 
 use pb_convert::FromProtobuf;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::data_chunk_iter::Row;
+use risingwave_common::array::Row;
 use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder};
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
@@ -26,11 +30,6 @@ use risingwave_pb::stream_plan::{
 use risingwave_pb::stream_service::{ActorInfo, BroadcastActorInfoTableRequest};
 use risingwave_pb::task_service::HostAddress;
 use risingwave_pb::ToProto;
-
-use crate::storage::SimpleTableRef;
-use crate::storage::{SimpleTableManager, Table, TableManager};
-use crate::stream::StreamManager;
-use crate::stream_op::Message;
 
 fn make_int32_type_pb() -> DataType {
     DataType {

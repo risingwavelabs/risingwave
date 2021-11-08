@@ -19,6 +19,14 @@ pub struct Schema {
 }
 
 impl Schema {
+    pub fn len(&self) -> usize {
+        self.fields.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.fields.is_empty()
+    }
+
     pub fn new(fields: Vec<Field>) -> Self {
         Self { fields }
     }

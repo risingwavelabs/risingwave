@@ -1,5 +1,4 @@
 use crate::array::column::Column;
-
 use crate::array::data_chunk_iter::{DataChunkRefIter, RowRef};
 use crate::array::{ArrayBuilderImpl, ArrayImpl};
 use crate::buffer::Bitmap;

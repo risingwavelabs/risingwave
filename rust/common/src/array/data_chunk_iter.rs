@@ -1,4 +1,6 @@
 use std::cmp::Ordering;
+use std::hash::Hash;
+use std::ops;
 
 use crate::array::DataChunk;
 use crate::types::{Datum, DatumRef, ToOwnedDatum};
@@ -60,6 +62,29 @@ impl<'a> RowRef<'a> {
     }
 }
 
+impl<'a> ops::Index<usize> for RowRef<'a> {
+    type Output = DatumRef<'a>;
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Row(pub Vec<Datum>);
+
+impl Row {
+    pub fn size(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl ops::Index<usize> for Row {
+    type Output = Datum;
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
 impl From<RowRef<'_>> for Row {
     fn from(row_ref: RowRef<'_>) -> Self {
         Row(row_ref
@@ -69,9 +94,6 @@ impl From<RowRef<'_>> for Row {
             .collect::<Vec<_>>())
     }
 }
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Row(pub Vec<Datum>);
 
 impl PartialOrd for Row {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {

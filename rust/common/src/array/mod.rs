@@ -25,6 +25,7 @@ use crate::types::{
 use crate::types::{Datum, DatumRef, Scalar, ScalarRef, ScalarRefImpl};
 pub use bool_array::{BoolArray, BoolArrayBuilder};
 pub use data_chunk::{DataChunk, DataChunkRef};
+pub use data_chunk_iter::{Row, RowRef};
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 use interval_array::{IntervalArray, IntervalArrayBuilder};
 pub use iterator::ArrayIterator;

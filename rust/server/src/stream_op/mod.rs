@@ -31,6 +31,7 @@ mod aggregation;
 mod dispatch;
 mod filter;
 mod hash_agg;
+mod hash_join;
 mod kafka_source;
 mod merge;
 mod mview_sink;

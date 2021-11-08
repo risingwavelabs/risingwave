@@ -9,6 +9,7 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_common::types::Scalar;
 
+pub type MemRowTableRef = Arc<MemRowTable>;
 pub type MemTableRowIter = <BTreeMap<Row, Row> as IntoIterator>::IntoIter;
 
 #[derive(Debug, Default)]
@@ -23,8 +24,6 @@ pub struct MemRowTable {
     inner: RwLock<MemRowTableInner>,
     pks: Vec<usize>,
 }
-
-pub type MemRowTableRef = Arc<MemRowTable>;
 
 impl MemRowTableInner {
     pub fn ingest(&mut self, batch: Vec<(Row, Option<Row>)>) -> Result<()> {
