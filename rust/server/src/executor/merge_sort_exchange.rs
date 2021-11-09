@@ -17,13 +17,12 @@ use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::Result;
 use risingwave_common::types::{build_from_prost as type_build_from_prost, ToOwnedDatum};
 use risingwave_common::util::sort_util::{
-    fetch_orders_from_order_by_node, HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE,
+    fetch_orders, HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE,
 };
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::task_service::exchange_node::Field as ExchangeNodeField;
 use risingwave_pb::task_service::ExchangeSource as ProstExchangeSource;
 use risingwave_pb::task_service::MergeSortExchangeNode;
-use risingwave_pb::ToProto;
 
 /// `MergeSortExchangeExecutor` takes inputs from multiple sources and
 /// The outputs of all the sources have been sorted in the same way.
@@ -98,6 +97,12 @@ impl<CS: 'static + CreateSource> Executor for MergeSortExchangeExecutor<CS> {
             self.first_execution = false;
         }
 
+        // If there is no rows in the heap,
+        // we run out of input data chunks and emit `Done`.
+        if self.min_heap.is_empty() {
+            return Ok(ExecutorResult::Done);
+        }
+
         // It is possible that we cannot produce this much as
         // we may run out of input data chunks from sources.
         let mut want_to_produce = K_PROCESSING_WINDOW_SIZE;
@@ -164,19 +169,9 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for MergeSortExchangeExecu
         ensure!(source.plan_node().get_node_type() == PlanNodeType::MergeSortExchange);
         let plan_node = source.plan_node();
         let server_addr = *source.env.server_address();
-        let sort_merge_node =
+        let sort_merge_node: MergeSortExchangeNode =
             MergeSortExchangeNode::decode(&(plan_node).get_body().value[..]).map_err(ProstError)?;
-        let order_pairs = Arc::new(
-            fetch_orders_from_order_by_node(
-                sort_merge_node
-                    .to_proto::<risingwave_proto::plan::OrderByNode>()
-                    .get_order_types(),
-                sort_merge_node
-                    .to_proto::<risingwave_proto::plan::OrderByNode>()
-                    .get_orders(),
-            )
-            .unwrap(),
-        );
+        let order_pairs = Arc::new(fetch_orders(sort_merge_node.get_column_orders()).unwrap());
 
         let exchange_node = sort_merge_node.get_exchange_node();
         let proto_sources: Vec<ProstExchangeSource> = exchange_node.get_sources().to_vec();
@@ -292,5 +287,9 @@ mod tests {
             assert_eq!(col0.array().as_int32().value_at(4), Some(3));
             assert_eq!(col0.array().as_int32().value_at(5), Some(3));
         }
+        assert!(matches!(
+            executor.execute().await.unwrap(),
+            ExecutorResult::Done
+        ));
     }
 }

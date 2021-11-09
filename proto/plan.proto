@@ -96,13 +96,18 @@ enum OrderType {
   DESCENDING = 2;
 }
 
+message ColumnOrder { // maybe other name
+  OrderType order_type = 1;
+  expr.InputRefExpr input_ref = 2;
+  data.DataType return_type = 3;
+}
+
 message OrderByNode {
-  repeated OrderType order_types = 1;
-  repeated expr.ExprNode orders = 2;
+  repeated ColumnOrder column_orders = 1;
 }
 
 message TopNNode {
-  OrderByNode order_by = 1;
+  repeated ColumnOrder column_orders = 1;
   uint32 limit = 2;
 }
 

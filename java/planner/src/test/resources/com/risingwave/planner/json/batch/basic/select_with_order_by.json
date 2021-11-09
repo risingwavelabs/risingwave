@@ -2,16 +2,12 @@
   "nodeType": "ORDER_BY",
   "body": {
     "@type": "type.googleapis.com/plan.OrderByNode",
-    "orderTypes": ["ASCENDING"],
-    "orders": [{
-      "exprType": "INPUT_REF",
-      "body": {
-        "@type": "type.googleapis.com/expr.InputRefExpr"
+    "columnOrders": [{
+      "orderType": "ASCENDING",
+      "inputRef": {
       },
       "returnType": {
         "typeName": "INT32"
-      },
-      "inputRef": {
       }
     }]
   },

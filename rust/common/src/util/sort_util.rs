@@ -1,12 +1,12 @@
 use crate::array::{Array, ArrayImpl, DataChunk, DataChunkRef};
 use crate::error::{ErrorCode::InternalError, Result, RwError};
 use crate::expr::InputRefExpression;
+use crate::types::build_from_prost;
 use crate::types::{ScalarPartialOrd, ScalarRef};
-use risingwave_pb::ToProst;
-use risingwave_proto::expr::ExprNode;
-use risingwave_proto::plan::OrderType as ProtoOrderType;
+use risingwave_pb::expr::InputRefExpr;
+use risingwave_pb::plan::ColumnOrder;
+use risingwave_pb::plan::OrderType as ProstOrderType;
 use std::cmp::{Ord, Ordering};
-use std::convert::TryFrom;
 use std::sync::Arc;
 
 pub const K_PROCESSING_WINDOW_SIZE: usize = 1024;
@@ -126,23 +126,22 @@ pub fn compare_two_row(
     Ok(Ordering::Equal)
 }
 
-pub fn fetch_orders_from_order_by_node(
-    order_types: &[ProtoOrderType],
-    exprs: &[ExprNode],
-) -> Result<Vec<OrderPair>> {
-    ensure!(order_types.len() == exprs.len());
+pub fn fetch_orders(column_orders: &[ColumnOrder]) -> Result<Vec<OrderPair>> {
     let mut order_pairs = Vec::<OrderPair>::new();
-    for i in 0..order_types.len() {
-        let order = InputRefExpression::try_from(&exprs[i].to_prost())?;
+    for column_order in column_orders {
+        let order_type: ProstOrderType = column_order.get_order_type();
+        let return_type = build_from_prost(column_order.get_return_type())?;
+        let input_ref: &InputRefExpr = column_order.get_input_ref();
+        let input_ref_expr = InputRefExpression::new(return_type, input_ref.column_idx as usize);
         order_pairs.push(OrderPair {
-            order_type: match order_types[i] {
-                ProtoOrderType::ASCENDING => Ok(OrderType::Ascending),
-                ProtoOrderType::DESCENDING => Ok(OrderType::Descending),
-                ProtoOrderType::INVALID => Err(RwError::from(InternalError(String::from(
+            order_type: match order_type {
+                ProstOrderType::Ascending => Ok(OrderType::Ascending),
+                ProstOrderType::Descending => Ok(OrderType::Descending),
+                ProstOrderType::Invalid => Err(RwError::from(InternalError(String::from(
                     "Invalid OrderType",
                 )))),
             }?,
-            order: Box::new(order),
+            order: Box::new(input_ref_expr),
         });
     }
     Ok(order_pairs)

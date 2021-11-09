@@ -68,8 +68,7 @@ message ExchangeNode {
 
 message MergeSortExchangeNode {
   ExchangeNode exchange_node = 1;
-  repeated plan.OrderType order_types = 2;
-  repeated expr.ExprNode orders = 3;
+  repeated plan.ColumnOrder column_orders = 2;
 }
 
 message CreateTaskRequest {

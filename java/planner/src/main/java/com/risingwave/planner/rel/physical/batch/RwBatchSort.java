@@ -5,14 +5,17 @@ import static com.risingwave.planner.planner.PlannerUtils.isSingleMode;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
 import com.google.protobuf.Any;
+import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.logical.RwLogicalSort;
-import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
-import com.risingwave.proto.expr.ExprNode;
+import com.risingwave.proto.data.DataType;
+import com.risingwave.proto.expr.InputRefExpr;
+import com.risingwave.proto.plan.ColumnOrder;
 import com.risingwave.proto.plan.OrderByNode;
 import com.risingwave.proto.plan.OrderType;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.proto.plan.TopNNode;
+import java.util.ArrayList;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptRule;
@@ -47,12 +50,14 @@ public class RwBatchSort extends Sort implements RisingWaveBatchPhyRel {
 
   @Override
   public PlanNode serialize() {
-    OrderByNode.Builder orderByNodeBuilder = OrderByNode.newBuilder();
+    List<ColumnOrder> columnOrders = new ArrayList<ColumnOrder>();
     List<RelFieldCollation> rfc = collation.getFieldCollations();
     for (RelFieldCollation relFieldCollation : rfc) {
       RexInputRef inputRef =
           getCluster().getRexBuilder().makeInputRef(input, relFieldCollation.getFieldIndex());
-      ExprNode order = new RexToProtoSerializer().visitInputRef(inputRef);
+      DataType returnType = ((RisingWaveDataType) inputRef.getType()).getProtobufType();
+      InputRefExpr inputRefExpr =
+          InputRefExpr.newBuilder().setColumnIdx(inputRef.getIndex()).build();
       RelFieldCollation.Direction dir = relFieldCollation.getDirection();
       OrderType orderType;
       if (dir == RelFieldCollation.Direction.ASCENDING) {
@@ -62,14 +67,20 @@ public class RwBatchSort extends Sort implements RisingWaveBatchPhyRel {
       } else {
         throw new SerializationException(String.format("%s direction not supported", dir));
       }
-      orderByNodeBuilder.addOrders(order).addOrderTypes(orderType);
+      ColumnOrder columnOrder =
+          ColumnOrder.newBuilder()
+              .setOrderType(orderType)
+              .setInputRef(inputRefExpr)
+              .setReturnType(returnType)
+              .build();
+      columnOrders.add(columnOrder);
     }
     if (fetch != null && offset == null) {
       // serialize to TopNNode
       // FIXME: it's may not optimal to use TopN here, we need to discuss it based on the scale of
       // fetch
       TopNNode.Builder topnNodeBuilder = TopNNode.newBuilder();
-      topnNodeBuilder.setOrderBy(orderByNodeBuilder.build()).setLimit(RexLiteral.intValue(fetch));
+      topnNodeBuilder.addAllColumnOrders(columnOrders).setLimit(RexLiteral.intValue(fetch));
       return PlanNode.newBuilder()
           .setNodeType(PlanNode.PlanNodeType.TOP_N)
           .setBody(Any.pack(topnNodeBuilder.build()))
@@ -77,6 +88,8 @@ public class RwBatchSort extends Sort implements RisingWaveBatchPhyRel {
           .build();
     } else {
       // serialize to OrderByNode
+      OrderByNode.Builder orderByNodeBuilder = OrderByNode.newBuilder();
+      orderByNodeBuilder.addAllColumnOrders(columnOrders);
       return PlanNode.newBuilder()
           .setNodeType(PlanNode.PlanNodeType.ORDER_BY)
           .setBody(Any.pack(orderByNodeBuilder.build()))

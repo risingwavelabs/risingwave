@@ -7,7 +7,6 @@ use prost::Message;
 
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::TopNNode;
-use risingwave_pb::ToProto;
 
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use risingwave_common::array::{DataChunk, DataChunkRef};
@@ -16,7 +15,7 @@ use risingwave_common::error::{
     ErrorCode::{InternalError, ProstError},
     Result,
 };
-use risingwave_common::util::sort_util::{fetch_orders_from_order_by_node, HeapElem, OrderPair};
+use risingwave_common::util::sort_util::{fetch_orders, HeapElem, OrderPair};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 
@@ -79,18 +78,9 @@ impl BoxedExecutorBuilder for TopNExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_node_type() == PlanNodeType::TopN);
         ensure!(source.plan_node().get_children().len() == 1);
-        let top_n_node =
+        let top_n_node: TopNNode =
             TopNNode::decode(&(source.plan_node()).get_body().value[..]).map_err(ProstError)?;
-        let order_by_node = top_n_node.get_order_by();
-        let order_pairs = fetch_orders_from_order_by_node(
-            order_by_node
-                .to_proto::<risingwave_proto::plan::OrderByNode>()
-                .get_order_types(),
-            order_by_node
-                .to_proto::<risingwave_proto::plan::OrderByNode>()
-                .get_orders(),
-        )
-        .unwrap();
+        let order_pairs = fetch_orders(top_n_node.get_column_orders()).unwrap();
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
             let child = source.clone_for_plan(child_plan).build()?;
             return Ok(Box::new(Self::new(

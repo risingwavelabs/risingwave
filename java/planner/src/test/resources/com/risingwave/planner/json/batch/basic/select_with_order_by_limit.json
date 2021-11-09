@@ -2,20 +2,14 @@
   "nodeType": "TOP_N",
   "body": {
     "@type": "type.googleapis.com/plan.TopNNode",
-    "orderBy": {
-      "orderTypes": ["ASCENDING"],
-      "orders": [{
-        "exprType": "INPUT_REF",
-        "body": {
-          "@type": "type.googleapis.com/expr.InputRefExpr"
-        },
-        "returnType": {
-          "typeName": "INT32"
-        },
-        "inputRef": {
-        }
-      }]
-    },
+    "columnOrders": [{
+      "orderType": "ASCENDING",
+      "inputRef": {
+      },
+      "returnType": {
+        "typeName": "INT32"
+      }
+    }],
     "limit": 1
   },
   "children": [{
