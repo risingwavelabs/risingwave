@@ -2,6 +2,7 @@ use crate::array::{Array, ArrayImpl, DataChunk, DataChunkRef};
 use crate::error::{ErrorCode::InternalError, Result, RwError};
 use crate::expr::InputRefExpression;
 use crate::types::{ScalarPartialOrd, ScalarRef};
+use risingwave_pb::ToProst;
 use risingwave_proto::expr::ExprNode;
 use risingwave_proto::plan::OrderType as ProtoOrderType;
 use std::cmp::{Ord, Ordering};
@@ -132,7 +133,7 @@ pub fn fetch_orders_from_order_by_node(
     ensure!(order_types.len() == exprs.len());
     let mut order_pairs = Vec::<OrderPair>::new();
     for i in 0..order_types.len() {
-        let order = InputRefExpression::try_from(&exprs[i])?;
+        let order = InputRefExpression::try_from(&exprs[i].to_prost())?;
         order_pairs.push(OrderPair {
             order_type: match order_types[i] {
                 ProtoOrderType::ASCENDING => Ok(OrderType::Ascending),

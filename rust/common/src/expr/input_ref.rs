@@ -1,14 +1,13 @@
 use std::convert::TryFrom;
 
-use protobuf::Message;
+use prost::Message;
 
-use risingwave_proto::expr::{ExprNode, ExprNode_Type, InputRefExpr};
+use risingwave_pb::expr::{expr_node::Type, ExprNode as ProstExprNode, InputRefExpr};
 
 use crate::array::{ArrayRef, DataChunk};
-use crate::error::ErrorCode::ProtobufError;
-use crate::error::{Result, RwError};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::Expression;
-use crate::types::{build_from_proto, DataType, DataTypeRef};
+use crate::types::{build_from_prost, DataType, DataTypeRef};
 
 /// `InputRefExpression` references to a column in input relation
 pub struct InputRefExpression {
@@ -40,16 +39,15 @@ impl InputRefExpression {
     }
 }
 
-impl<'a> TryFrom<&'a ExprNode> for InputRefExpression {
+impl<'a> TryFrom<&'a ProstExprNode> for InputRefExpression {
     type Error = RwError;
 
-    fn try_from(proto: &'a ExprNode) -> Result<Self> {
-        ensure!(proto.get_expr_type() == ExprNode_Type::INPUT_REF);
+    fn try_from(prost: &'a ProstExprNode) -> Result<Self> {
+        ensure!(prost.get_expr_type() == Type::InputRef);
 
-        let data_type = build_from_proto(proto.get_return_type())?;
-
-        let input_ref_node =
-            InputRefExpr::parse_from_bytes(proto.get_body().get_value()).map_err(ProtobufError)?;
+        let data_type = build_from_prost(prost.get_return_type())?;
+        let input_ref_node = InputRefExpr::decode(&prost.get_body().value[..])
+            .map_err(|e| RwError::from(ErrorCode::ProstError(e)))?;
         Ok(Self {
             return_type: data_type,
             idx: input_ref_node.column_idx as usize,

@@ -4,7 +4,6 @@ use crate::stream::StreamManager;
 use crate::stream_op::Message as StreamMessage;
 use futures::StreamExt;
 use itertools::Itertools;
-use pb_convert::FromProtobuf;
 use prost::Message;
 use prost_types::Any;
 use risingwave_common::array::column::Column;
@@ -189,11 +188,7 @@ async fn test_stream_mv_proto() {
 
     // Insert data and check if the materialized view has been updated.
     let _res_app = table_ref.append(append_chunk).await;
-    let table_id_mv = TableId::from_protobuf(
-        &make_table_ref_id(1).to_proto::<risingwave_proto::plan::TableRefId>(),
-    )
-    .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))
-    .unwrap();
+    let table_id_mv = TableId::new(SchemaId::new(DatabaseId::new(0), 0), 1);
     let table_ref_mv = table_manager.get_table(&table_id_mv).unwrap();
 
     let mut sink = stream_manager.take_sink((1, 233));

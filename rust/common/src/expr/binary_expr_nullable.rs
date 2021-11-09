@@ -4,7 +4,7 @@ use crate::array::{BoolArray, DecimalArray, F32Array, F64Array, I16Array, I32Arr
 use crate::error::Result;
 use crate::types::DataTypeKind;
 use crate::types::DataTypeRef;
-use risingwave_proto::expr::ExprNode_Type;
+use risingwave_pb::expr::expr_node::Type;
 
 use super::BoxedExpression;
 use crate::expr::expr_tmpl::BinaryNullableExpression;
@@ -43,13 +43,13 @@ fn stream_null_by_row_count<T1>(l: Option<i64>, r: Option<T1>) -> Result<Option<
 }
 
 pub fn new_nullable_binary_expr(
-    expr_type: ExprNode_Type,
+    expr_type: Type,
     ret: DataTypeRef,
     l: BoxedExpression,
     r: BoxedExpression,
 ) -> BoxedExpression {
     match expr_type {
-        ExprNode_Type::STREAM_NULL_BY_ROW_COUNT => match r.return_type().data_type_kind() {
+        Type::StreamNullByRowCount => match r.return_type().data_type_kind() {
             DataTypeKind::Boolean => {
                 gen_across_binary!(l, r, ret, BoolArray, stream_null_by_row_count)
             }
