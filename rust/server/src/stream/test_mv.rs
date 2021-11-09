@@ -1,13 +1,12 @@
 use crate::storage::SimpleTableRef;
 use crate::storage::{SimpleTableManager, Table, TableManager};
 use crate::stream::StreamManager;
-use crate::stream_op::Message;
-use std::sync::Arc;
-
+use crate::stream_op::Message as StreamMessage;
 use futures::StreamExt;
 use itertools::Itertools;
-
 use pb_convert::FromProtobuf;
+use prost::Message;
+use prost_types::Any;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::Row;
 use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder};
@@ -19,7 +18,7 @@ use risingwave_common::util::addr::get_host_port;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::expr::expr_node::Type::InputRef;
-use risingwave_pb::expr::ExprNode;
+use risingwave_pb::expr::{ExprNode, InputRefExpr};
 use risingwave_pb::plan::column_desc::ColumnEncodingType;
 use risingwave_pb::plan::{ColumnDesc, DatabaseRefId, SchemaRefId, TableRefId};
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -30,6 +29,7 @@ use risingwave_pb::stream_plan::{
 use risingwave_pb::stream_service::{ActorInfo, BroadcastActorInfoTableRequest};
 use risingwave_pb::task_service::HostAddress;
 use risingwave_pb::ToProto;
+use std::sync::Arc;
 
 fn make_int32_type_pb() -> DataType {
     DataType {
@@ -63,7 +63,10 @@ async fn test_stream_mv_proto() {
     };
     let expr_proto = ExprNode {
         expr_type: InputRef as i32,
-        body: None,
+        body: Some(Any {
+            type_url: "/".to_string(),
+            value: InputRefExpr { column_idx: 0 }.encode_to_vec(),
+        }),
         return_type: Some(make_int32_type_pb()),
         rex_node: None,
     };
@@ -194,7 +197,7 @@ async fn test_stream_mv_proto() {
     let table_ref_mv = table_manager.get_table(&table_id_mv).unwrap();
 
     let mut sink = stream_manager.take_sink((1, 233));
-    if let Message::Chunk(_chunk) = sink.next().await.unwrap() {
+    if let StreamMessage::Chunk(_chunk) = sink.next().await.unwrap() {
         if let SimpleTableRef::Row(table_mv) = table_ref_mv {
             let value_row = Row(vec![Some(1.to_scalar_value())]);
             let res_row = table_mv.get(value_row);
