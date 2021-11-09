@@ -1,27 +1,24 @@
 use super::*;
-use pb_construct::make_proto;
-use protobuf::well_known_types::Any as AnyProto;
+use prost::Message;
+use prost_types::Any;
+use risingwave_pb::data::data_type::TypeName;
+use risingwave_pb::data::DataType as DataTypeProst;
+use risingwave_pb::data::DataType;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type as ProstExprType;
+use risingwave_pb::expr::expr_node::Type::InputRef;
+use risingwave_pb::expr::ExprNode;
 use risingwave_pb::expr::FunctionCall;
-use risingwave_proto::data::DataType as DataTypeProto;
-use risingwave_proto::data::DataType_TypeName;
-use risingwave_proto::expr::ExprNode;
-use risingwave_proto::expr::ExprNode_Type::INPUT_REF;
-use risingwave_proto::expr::InputRefExpr;
+use risingwave_pb::expr::InputRefExpr;
 
-pub fn make_expression(
-    kind: ProstExprType,
-    rets: &[DataType_TypeName],
-    indices: &[i32],
-) -> ProstExprNode {
+pub fn make_expression(kind: ProstExprType, rets: &[TypeName], indices: &[i32]) -> ProstExprNode {
     let mut exprs = Vec::new();
     for (idx, ret) in indices.iter().zip(rets.iter()) {
-        exprs.push(make_inputref(*idx, *ret).to_prost::<ProstExprNode>());
+        exprs.push(make_inputref(*idx, *ret));
     }
     let function_call = FunctionCall { children: exprs };
-    let return_type = risingwave_pb::data::DataType {
-        type_name: risingwave_pb::data::data_type::TypeName::Timestamp as i32,
+    let return_type = DataTypeProst {
+        type_name: TypeName::Timestamp as i32,
         precision: 0,
         scale: 0,
         is_nullable: false,
@@ -35,14 +32,17 @@ pub fn make_expression(
     }
 }
 
-pub fn make_inputref(idx: i32, ret: risingwave_proto::data::DataType_TypeName) -> ExprNode {
-    make_proto!(ExprNode, {
-      expr_type: INPUT_REF,
-      body: AnyProto::pack(
-        &make_proto!(InputRefExpr, {column_idx: idx})
-      ).unwrap(),
-      return_type: make_proto!(DataTypeProto, {
-        type_name: ret
-      })
-    })
+pub fn make_inputref(idx: i32, ret: TypeName) -> ExprNode {
+    ExprNode {
+        expr_type: InputRef as i32,
+        body: Some(Any {
+            type_url: "/".to_string(),
+            value: InputRefExpr { column_idx: idx }.encode_to_vec(),
+        }),
+        return_type: Some(DataType {
+            type_name: ret as i32,
+            ..Default::default()
+        }),
+        rex_node: None,
+    }
 }

@@ -1,13 +1,12 @@
 use std::marker::PhantomData;
 
+use super::BoxedExpression;
 use crate::array::{BoolArray, DecimalArray, F32Array, F64Array, I16Array, I32Array, I64Array};
 use crate::error::Result;
+use crate::expr::expr_tmpl::BinaryNullableExpression;
 use crate::types::DataTypeKind;
 use crate::types::DataTypeRef;
 use risingwave_pb::expr::expr_node::Type;
-
-use super::BoxedExpression;
-use crate::expr::expr_tmpl::BinaryNullableExpression;
 
 #[allow(unused_macros)]
 macro_rules! gen_across_binary {

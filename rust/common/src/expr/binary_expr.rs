@@ -243,8 +243,8 @@ mod tests {
         BoolType, DateType, DecimalType, Int32Type, IntervalType, IntervalUnit, Scalar,
     };
     use crate::vector_op::arithmetic_op::{date_interval_add, date_interval_sub};
+    use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::expr::expr_node::Type as ProstExprType;
-    use risingwave_proto::data::DataType_TypeName;
     use rust_decimal::Decimal;
 
     #[test]
@@ -324,11 +324,7 @@ mod tests {
             Int32Type::create(true),
         );
         let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
-        let expr = make_expression(
-            kind,
-            &[DataType_TypeName::INT32, DataType_TypeName::INT32],
-            &[0, 1],
-        );
+        let expr = make_expression(kind, &[TypeName::Int32, TypeName::Int32], &[0, 1]);
         let mut vec_excutor = build_from_prost(&expr).unwrap();
         let res = vec_excutor.eval(&data_chunk).unwrap();
         let arr: &A = res.as_ref().into();
@@ -373,11 +369,7 @@ mod tests {
             IntervalType::create(true),
         );
         let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
-        let expr = make_expression(
-            kind,
-            &[DataType_TypeName::DATE, DataType_TypeName::INTERVAL],
-            &[0, 1],
-        );
+        let expr = make_expression(kind, &[TypeName::Date, TypeName::Interval], &[0, 1]);
         let mut vec_excutor = build_from_prost(&expr).unwrap();
         let res = vec_excutor.eval(&data_chunk).unwrap();
         let arr: &A = res.as_ref().into();
@@ -430,11 +422,7 @@ mod tests {
             DecimalType::create(true, 10, 5).unwrap(),
         );
         let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
-        let expr = make_expression(
-            kind,
-            &[DataType_TypeName::DECIMAL, DataType_TypeName::DECIMAL],
-            &[0, 1],
-        );
+        let expr = make_expression(kind, &[TypeName::Decimal, TypeName::Decimal], &[0, 1]);
         let mut vec_excutor = build_from_prost(&expr).unwrap();
         let res = vec_excutor.eval(&data_chunk).unwrap();
         let arr: &A = res.as_ref().into();
@@ -487,11 +475,7 @@ mod tests {
             BoolType::create(true),
         );
         let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
-        let expr = make_expression(
-            kind,
-            &[DataType_TypeName::DECIMAL, DataType_TypeName::DECIMAL],
-            &[0, 1],
-        );
+        let expr = make_expression(kind, &[TypeName::Decimal, TypeName::Decimal], &[0, 1]);
         let mut vec_excutor = build_from_prost(&expr).unwrap();
         let res = vec_excutor.eval(&data_chunk).unwrap();
         let arr: &A = res.as_ref().into();

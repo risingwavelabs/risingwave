@@ -11,7 +11,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::expr::{build_from_proto as build_expr_from_proto, AggKind};
+use risingwave_common::expr::{build_from_prost as build_expr_from_prost, AggKind};
 use risingwave_common::types::build_from_prost as build_type_from_prost;
 use risingwave_common::util::addr::{get_host_port, is_local_address};
 use risingwave_pb::expr;
@@ -321,20 +321,12 @@ impl StreamManagerCore {
                 let project_exprs = project_node
                     .get_select_list()
                     .iter()
-                    .map(|select| {
-                        build_expr_from_proto(
-                            &select.to_proto::<risingwave_proto::expr::ExprNode>(),
-                        )
-                    })
+                    .map(build_expr_from_prost)
                     .collect::<Result<Vec<_>>>()?;
                 Ok(Box::new(ProjectExecutor::new(input, project_exprs)))
             }
             FilterNode(filter_node) => {
-                let search_condition = build_expr_from_proto(
-                    &filter_node
-                        .get_search_condition()
-                        .to_proto::<risingwave_proto::expr::ExprNode>(),
-                )?;
+                let search_condition = build_expr_from_prost(filter_node.get_search_condition())?;
                 Ok(Box::new(FilterExecutor::new(input, search_condition)))
             }
             SimpleAggNode(aggr_node) => {

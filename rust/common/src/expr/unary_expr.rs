@@ -123,8 +123,8 @@ mod tests {
     use crate::expr::test_utils::make_expression;
     use crate::types::{BoolType, DateType, Scalar};
     use crate::vector_op::cast::date_to_timestamp;
+    use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::expr::expr_node::Type as ProstExprType;
-    use risingwave_proto::data::DataType_TypeName;
 
     #[test]
     fn test_unary() {
@@ -161,7 +161,7 @@ mod tests {
             BoolType::create(true),
         );
         let data_chunk = DataChunk::builder().columns(vec![col1]).build();
-        let expr = make_expression(kind, &[DataType_TypeName::BOOLEAN], &[0]);
+        let expr = make_expression(kind, &[TypeName::Boolean], &[0]);
         let mut vec_excutor = build_from_prost(&expr).unwrap();
         let res = vec_excutor.eval(&data_chunk).unwrap();
         let arr: &A = res.as_ref().into();
@@ -197,7 +197,7 @@ mod tests {
             DateType::create(true),
         );
         let data_chunk = DataChunk::builder().columns(vec![col1]).build();
-        let expr = make_expression(kind, &[DataType_TypeName::DATE], &[0]);
+        let expr = make_expression(kind, &[TypeName::Date], &[0]);
         let mut vec_excutor = build_from_prost(&expr).unwrap();
         let res = vec_excutor.eval(&data_chunk).unwrap();
         let arr: &A = res.as_ref().into();

@@ -27,8 +27,6 @@ use risingwave_pb::expr::expr_node::Type::{
     {Length, Like, Ltrim, Position, Replace, Rtrim, Substr, Trim},
 };
 use risingwave_pb::expr::ExprNode as ProstExprNode;
-use risingwave_pb::{ToProst, ToProto};
-use risingwave_proto::expr::ExprNode as ProtoExprNode;
 use std::convert::TryFrom;
 use std::sync::Arc;
 
@@ -41,10 +39,6 @@ pub trait Expression: Sync + Send {
 }
 
 pub type BoxedExpression = Box<dyn Expression>;
-
-pub fn build_from_proto(proto: &ProtoExprNode) -> Result<BoxedExpression> {
-    build_from_prost(&proto.to_prost::<ProstExprNode>())
-}
 
 pub fn build_from_prost(prost: &ProstExprNode) -> Result<BoxedExpression> {
     match prost.get_expr_type() {
@@ -61,21 +55,13 @@ pub fn build_from_prost(prost: &ProstExprNode) -> Result<BoxedExpression> {
         Ltrim => build_ltrim_expr(prost),
         Rtrim => build_rtrim_expr(prost),
         Position => build_position_expr(prost),
-        ConstantValue => LiteralExpression::try_from(&prost.to_proto::<ProtoExprNode>())
-            .map(|d| Box::new(d) as BoxedExpression),
+        ConstantValue => LiteralExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         InputRef => InputRefExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         _ => Err(InternalError(format!(
             "Unsupported expression type: {:?}",
             prost.get_expr_type()
         ))
         .into()),
-    }
-}
-
-pub fn build_from_proto_option(proto: Option<&ProtoExprNode>) -> Result<BoxedExpression> {
-    match proto {
-        Some(expr_node) => build_from_proto(expr_node),
-        None => Err(InternalError("Expression build error.".to_string()).into()),
     }
 }
 

@@ -52,9 +52,7 @@ impl AggStateFactory {
         );
         let arg = &prost.get_args()[0];
         let return_type = build_from_prost(prost.get_return_type())?;
-        // let agg_type = AggKind::try_from(proto.get_field_type())?;
         let agg_type = AggKind::try_from(prost.get_type())?;
-        // let input_type = Arc::new(arg.get_type());
         let input_type = build_from_prost(arg.get_type())?;
 
         let input_col_idx = arg.get_input().get_column_idx() as usize;

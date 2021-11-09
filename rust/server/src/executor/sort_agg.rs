@@ -170,17 +170,16 @@ impl Executor for SortAggExecutor {
 
 #[cfg(test)]
 mod tests {
-    use pb_construct::make_proto;
-    use protobuf::well_known_types::Any;
-    use risingwave_pb::data::{data_type::TypeName, DataType as DataTypeProst};
-    use risingwave_pb::expr::{agg_call::Arg, agg_call::Type, AggCall, InputRefExpr};
-
     use crate::executor::test_utils::MockExecutor;
+    use prost_types::Any as ProstAny;
     use risingwave_common::array::{Array as _, I32Array, I64Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::expr::build_from_proto;
+    use risingwave_common::expr::build_from_prost;
     use risingwave_common::types::{DataTypeKind, Int32Type};
+    use risingwave_pb::data::{data_type::TypeName, DataType as DataTypeProst};
+    use risingwave_pb::expr::expr_node::Type::InputRef;
+    use risingwave_pb::expr::{agg_call::Arg, agg_call::Type, AggCall, ExprNode, InputRefExpr};
 
     use super::*;
 
@@ -313,16 +312,21 @@ mod tests {
         let s = agg::create_agg_state(&prost)?;
 
         let group_exprs = (1..=2)
-      .map(|idx| {
-        build_from_proto(&make_proto!(risingwave_proto::expr::ExprNode, {
-          expr_type: risingwave_proto::expr::ExprNode_Type::INPUT_REF,
-          return_type: make_proto!(risingwave_proto::data::DataType, {
-            type_name: risingwave_proto::data::DataType_TypeName::INT32
-          }),
-          body: Any::pack(&make_proto!(risingwave_proto::expr::InputRefExpr, {column_idx: idx})).unwrap()
-        }))
-      })
-      .collect::<Result<Vec<BoxedExpression>>>()?;
+            .map(|idx| {
+                build_from_prost(&ExprNode {
+                    expr_type: InputRef as i32,
+                    body: Some(ProstAny {
+                        type_url: "/".to_string(),
+                        value: InputRefExpr { column_idx: idx }.encode_to_vec(),
+                    }),
+                    return_type: Some(DataTypeProst {
+                        type_name: TypeName::Int32 as i32,
+                        ..Default::default()
+                    }),
+                    rex_node: None,
+                })
+            })
+            .collect::<Result<Vec<BoxedExpression>>>()?;
         let sorted_groupers = group_exprs
             .iter()
             .map(|e| agg::create_sorted_grouper(e.return_type()))

@@ -1,24 +1,20 @@
 use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk};
-use crate::error::ErrorCode::{InternalError, ProtobufError};
-use crate::error::{Result, RwError};
+use crate::error::ErrorCode::InternalError;
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::Expression;
-use crate::types::{
-    build_from_proto, DataType, DataTypeKind, DataTypeRef, Datum, IntervalUnit, ScalarImpl,
+use crate::types::{build_from_prost as type_build_from_prost, Scalar};
+use crate::types::{DataType, DataTypeKind, DataTypeRef, Datum, IntervalUnit, ScalarImpl};
+use prost::Message;
+use risingwave_pb::data::{
+    data_type::IntervalType, data_type::IntervalType::*, data_type::TypeName,
 };
+use risingwave_pb::expr::{expr_node::Type, ConstantValue, ExprNode};
+use rust_decimal::Decimal;
 use std::convert::TryFrom;
 use std::convert::TryInto;
-
-use protobuf::Message;
-
-use risingwave_proto::data::{DataType_IntervalType, DataType_IntervalType::*, DataType_TypeName};
-use risingwave_proto::expr::{ConstantValue, ExprNode, ExprNode_Type};
-
-use rust_decimal::Decimal;
 use std::ops::Deref;
-use std::sync::Arc;
-
-use crate::types::Scalar;
 use std::str::FromStr;
+use std::sync::Arc;
 
 macro_rules! array_impl_literal_append {
   ([$arr_builder: ident, $literal: ident, $cardinality: ident], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
@@ -96,10 +92,10 @@ fn literal_type_match(return_type: DataTypeKind, literal: Option<&ScalarImpl>) -
     }
 }
 
-fn make_interval(bytes: &[u8], ty: DataType_IntervalType) -> Result<IntervalUnit> {
+fn make_interval(bytes: &[u8], ty: IntervalType) -> Result<IntervalUnit> {
     match ty {
         // the unit is months
-        YEAR | YEAR_TO_MONTH | MONTH => {
+        Year | YearToMonth | Month => {
             let bytes = bytes.try_into().map_err(|e| {
                 InternalError(format!("Failed to deserialize i32, reason: {:?}", e))
             })?;
@@ -107,15 +103,15 @@ fn make_interval(bytes: &[u8], ty: DataType_IntervalType) -> Result<IntervalUnit
             Ok(IntervalUnit::from_month(mouths))
         }
         // the unit is ms
-        DAY | DAY_TO_HOUR | DAY_TO_MINUTE | DAY_TO_SECOND | HOUR | HOUR_TO_MINUTE
-        | HOUR_TO_SECOND | MINUTE | MINUTE_TO_SECOND | SECOND => {
+        Day | DayToHour | DayToMinute | DayToSecond | Hour | HourToMinute | HourToSecond
+        | Minute | MinuteToSecond | Second => {
             let bytes = bytes.try_into().map_err(|e| {
                 InternalError(format!("Failed to deserialize i64, reason: {:?}", e))
             })?;
             let ms = i64::from_be_bytes(bytes);
             Ok(IntervalUnit::from_millis(ms))
         }
-        INVALID => Err(InternalError(format!("Invalid interval type {:?}", ty)).into()),
+        Invalid => Err(InternalError(format!("Invalid interval type {:?}", ty)).into()),
     }
 }
 
@@ -139,15 +135,14 @@ impl LiteralExpression {
 impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
     type Error = RwError;
 
-    fn try_from(proto: &'a ExprNode) -> Result<Self> {
-        ensure!(proto.expr_type == ExprNode_Type::CONSTANT_VALUE);
-        let data_type = build_from_proto(proto.get_return_type())?;
+    fn try_from(prost: &'a ExprNode) -> Result<Self> {
+        ensure!(prost.expr_type == Type::ConstantValue as i32);
+        let data_type = type_build_from_prost(prost.get_return_type())?;
 
-        let proto_value =
-            ConstantValue::parse_from_bytes(proto.get_body().get_value()).map_err(ProtobufError)?;
-
+        let prost_value = ConstantValue::decode(&prost.get_body().value[..])
+            .map_err(|e| RwError::from(ErrorCode::ProstError(e)))?;
         // when the body length is zero, the value is None
-        if proto_value.get_body().is_empty() {
+        if prost_value.get_body().is_empty() {
             return Ok(Self {
                 return_type: data_type,
                 literal: None,
@@ -155,67 +150,67 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
         }
 
         // TODO: We need to unify these
-        let value = match proto.get_return_type().get_type_name() {
-            DataType_TypeName::BOOLEAN => ScalarImpl::Bool(
-                i8::from_be_bytes(proto_value.get_body().try_into().map_err(|e| {
+        let value = match prost.get_return_type().get_type_name() {
+            TypeName::Boolean => ScalarImpl::Bool(
+                i8::from_be_bytes(prost_value.get_body().as_slice().try_into().map_err(|e| {
                     InternalError(format!("Failed to deserialize bool, reason: {:?}", e))
                 })?) == 1,
             ),
-            DataType_TypeName::INT16 => ScalarImpl::Int16(i16::from_be_bytes(
-                proto_value.get_body().try_into().map_err(|e| {
+            TypeName::Int16 => ScalarImpl::Int16(i16::from_be_bytes(
+                prost_value.get_body().as_slice().try_into().map_err(|e| {
                     InternalError(format!("Failed to deserialize i16, reason: {:?}", e))
                 })?,
             )),
-            DataType_TypeName::INT32 => ScalarImpl::Int32(i32::from_be_bytes(
-                proto_value.get_body().try_into().map_err(|e| {
+            TypeName::Int32 => ScalarImpl::Int32(i32::from_be_bytes(
+                prost_value.get_body().as_slice().try_into().map_err(|e| {
                     InternalError(format!("Failed to deserialize i32, reason: {:?}", e))
                 })?,
             )),
-            DataType_TypeName::INT64 => ScalarImpl::Int64(i64::from_be_bytes(
-                proto_value.get_body().try_into().map_err(|e| {
+            TypeName::Int64 => ScalarImpl::Int64(i64::from_be_bytes(
+                prost_value.get_body().as_slice().try_into().map_err(|e| {
                     InternalError(format!("Failed to deserialize i64, reason: {:?}", e))
                 })?,
             )),
-            DataType_TypeName::FLOAT => ScalarImpl::Float32(f32::from_be_bytes(
-                proto_value.get_body().try_into().map_err(|e| {
+            TypeName::Float => ScalarImpl::Float32(f32::from_be_bytes(
+                prost_value.get_body().as_slice().try_into().map_err(|e| {
                     InternalError(format!("Failed to deserialize f32, reason: {:?}", e))
                 })?,
             )),
-            DataType_TypeName::DOUBLE => ScalarImpl::Float64(f64::from_be_bytes(
-                proto_value.get_body().try_into().map_err(|e| {
+            TypeName::Double => ScalarImpl::Float64(f64::from_be_bytes(
+                prost_value.get_body().as_slice().try_into().map_err(|e| {
                     InternalError(format!("Failed to deserialize f64, reason: {:?}", e))
                 })?,
             )),
-            DataType_TypeName::CHAR => ScalarImpl::UTF8(
-                std::str::from_utf8(proto_value.get_body())
+            TypeName::Char => ScalarImpl::UTF8(
+                std::str::from_utf8(prost_value.get_body())
                     .map_err(|e| {
                         InternalError(format!("Failed to deserialize char, reason: {:?}", e))
                     })?
                     .to_string(),
             ),
-            DataType_TypeName::VARCHAR => ScalarImpl::UTF8(
-                std::str::from_utf8(proto_value.get_body())
+            TypeName::Varchar => ScalarImpl::UTF8(
+                std::str::from_utf8(prost_value.get_body())
                     .map_err(|e| {
                         InternalError(format!("Failed to deserialize varchar, reason: {:?}", e))
                     })?
                     .to_string(),
             ),
-            DataType_TypeName::DECIMAL => ScalarImpl::Decimal(
-                Decimal::from_str(std::str::from_utf8(proto_value.get_body()).unwrap()).map_err(
+            TypeName::Decimal => ScalarImpl::Decimal(
+                Decimal::from_str(std::str::from_utf8(prost_value.get_body()).unwrap()).map_err(
                     |e| InternalError(format!("Failed to deserialize decimal, reason: {:?}", e)),
                 )?,
             ),
-            DataType_TypeName::INTERVAL => {
-                let bytes = proto_value.get_body();
+            TypeName::Interval => {
+                let bytes = prost_value.get_body();
                 ScalarImpl::Interval(make_interval(
                     bytes,
-                    proto.get_return_type().get_interval_type(),
+                    prost.get_return_type().get_interval_type(),
                 )?)
             }
             _ => {
                 return Err(InternalError(format!(
                     "Unrecognized type name: {:?}",
-                    proto.get_return_type().get_type_name()
+                    prost.get_return_type().get_type_name()
                 ))
                 .into())
             }
@@ -236,47 +231,46 @@ mod tests {
     use crate::array::column::Column;
     use crate::array::PrimitiveArray;
     use crate::types::Int32Type;
-    use pb_construct::make_proto;
-    use protobuf::well_known_types::Any as AnyProto;
-    use risingwave_proto::data::DataType as DataTypeProto;
-    use risingwave_proto::data::DataType_IntervalType;
-    use risingwave_proto::expr::ConstantValue;
-    use risingwave_proto::expr::{ExprNode, ExprNode_Type};
+    use prost_types::Any;
+    use risingwave_pb::data::data_type::IntervalType;
+    use risingwave_pb::data::DataType;
+    use risingwave_pb::expr::ConstantValue;
+    use risingwave_pb::expr::{expr_node::Type, ExprNode};
 
     #[test]
     fn test() {
         let v = 1i32;
-        let t = DataType_TypeName::INT32;
+        let t = TypeName::Int32;
         let bytes = v.to_be_bytes().to_vec();
         let expr = LiteralExpression::try_from(&make_expression(bytes, t)).unwrap();
         assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
 
         let v = 1i64;
-        let t = DataType_TypeName::INT64;
+        let t = TypeName::Int64;
         let bytes = v.to_be_bytes().to_vec();
         let expr = LiteralExpression::try_from(&make_expression(bytes, t)).unwrap();
         assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
 
         let v = 1f32;
-        let t = DataType_TypeName::FLOAT;
+        let t = TypeName::Float;
         let bytes = v.to_be_bytes().to_vec();
         let expr = LiteralExpression::try_from(&make_expression(bytes, t)).unwrap();
         assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
 
         let v = 1f64;
-        let t = DataType_TypeName::DOUBLE;
+        let t = TypeName::Double;
         let bytes = v.to_be_bytes().to_vec();
         let expr = LiteralExpression::try_from(&make_expression(bytes, t)).unwrap();
         assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
 
         let v = None;
-        let t = DataType_TypeName::FLOAT;
+        let t = TypeName::Float;
         let bytes = Vec::new();
         let expr = LiteralExpression::try_from(&make_expression(bytes, t)).unwrap();
         assert_eq!(v, expr.literal());
 
         let v = 32i32;
-        let t = DataType_TypeName::INTERVAL;
+        let t = TypeName::Interval;
         let bytes = v.to_be_bytes().to_vec();
         let expr = LiteralExpression::try_from(&make_expression(bytes, t)).unwrap();
         assert_eq!(
@@ -285,17 +279,20 @@ mod tests {
         );
     }
 
-    fn make_expression(bytes: Vec<u8>, data_type: DataType_TypeName) -> ExprNode {
-        make_proto!(ExprNode, {
-          expr_type: ExprNode_Type::CONSTANT_VALUE,
-          body: AnyProto::pack(
-            &make_proto!(ConstantValue, { body: bytes })
-          ).unwrap(),
-          return_type: make_proto!(DataTypeProto, {
-            type_name: data_type,
-            interval_type: DataType_IntervalType::MONTH
-          })
-        })
+    fn make_expression(bytes: Vec<u8>, data_type: TypeName) -> ExprNode {
+        ExprNode {
+            expr_type: Type::ConstantValue as i32,
+            body: Some(Any {
+                type_url: "/".to_string(),
+                value: ConstantValue { body: bytes }.encode_to_vec(),
+            }),
+            return_type: Some(DataType {
+                type_name: data_type as i32,
+                interval_type: IntervalType::Month as i32,
+                ..Default::default()
+            }),
+            rex_node: None,
+        }
     }
 
     fn create_column(vec: &[Option<i32>]) -> Result<Column> {
