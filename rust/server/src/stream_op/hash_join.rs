@@ -83,6 +83,7 @@ impl Executor for HashJoinExecutor {
                     _ => unreachable!("Should not reach this barrier state"),
                   }
                 },
+                // TODO: we should wait terminate from both side, but terminate will be delete later.
                 Message::Terminate => Ok(Message::Terminate),
               },
               Err(e) => Err(e),
@@ -99,6 +100,7 @@ impl Executor for HashJoinExecutor {
                     _ => unreachable!("Should not reach this barrier state"),
                   }
                 },
+                // TODO: we should wait terminate from both side, but terminate will be delete later.
                 Message::Terminate => Ok(Message::Terminate),
               },
               Err(e) => Err(e),
@@ -352,7 +354,7 @@ mod tests {
             visibility: None,
         };
         let chunk_l2 = StreamChunk {
-            ops: vec![Op::Insert, Op::Delete],
+            ops: vec![Op::UpdateInsert, Op::UpdateDelete],
             columns: vec![
                 column_nonnull! { I64Array, Int64Type, [3, 3] },
                 column_nonnull! { I64Array, Int64Type, [8, 8] },
@@ -405,7 +407,7 @@ mod tests {
             params_r,
         );
 
-        // 1st join
+        // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
             assert_eq!(chunk.ops.len(), 0);
@@ -420,10 +422,10 @@ mod tests {
             unreachable!();
         }
 
-        // 2nd join
+        // push the 2nd left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
-            // assert_eq!(chunk.ops.len(), 0);
+            assert_eq!(chunk.ops.len(), 0);
             assert_eq!(chunk.columns.len(), 4);
             for i in 0..4 {
                 assert_eq!(
@@ -435,7 +437,7 @@ mod tests {
             unreachable!();
         }
 
-        // 3rd join
+        // push the 1st right chunk
         MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
             assert_eq!(chunk.ops, vec![Op::Insert]);
@@ -460,7 +462,7 @@ mod tests {
             unreachable!();
         }
 
-        // 4th join
+        // push the 2nd right chunk
         MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r2]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
             assert_eq!(chunk.ops, vec![Op::Delete]);
@@ -480,6 +482,177 @@ mod tests {
             assert_eq!(
                 chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
                 vec![Some(10)]
+            );
+        } else {
+            unreachable!();
+        }
+    }
+
+    #[tokio::test]
+    async fn test_hash_join_with_barrier() {
+        let chunk_l1 = StreamChunk {
+            ops: vec![Op::Insert, Op::Insert, Op::Insert],
+            columns: vec![
+                column_nonnull! { I64Array, Int64Type, [1, 2, 3] },
+                column_nonnull! { I64Array, Int64Type, [4, 5, 6] },
+            ],
+            visibility: None,
+        };
+        let chunk_l2 = StreamChunk {
+            ops: vec![Op::Insert, Op::Insert],
+            columns: vec![
+                column_nonnull! { I64Array, Int64Type, [6, 3] },
+                column_nonnull! { I64Array, Int64Type, [8, 8] },
+            ],
+            visibility: Some((vec![true, true]).try_into().unwrap()),
+        };
+        let chunk_r1 = StreamChunk {
+            ops: vec![Op::Insert, Op::Insert, Op::Insert],
+            columns: vec![
+                column_nonnull! { I64Array, Int64Type, [2, 4, 6] },
+                column_nonnull! { I64Array, Int64Type, [7, 8, 9] },
+            ],
+            visibility: None,
+        };
+        let chunk_r2 = StreamChunk {
+            ops: vec![Op::Insert, Op::Insert],
+            columns: vec![
+                column_nonnull! { I64Array, Int64Type, [3, 6] },
+                column_nonnull! { I64Array, Int64Type, [10, 11] },
+            ],
+            visibility: Some((vec![true, true]).try_into().unwrap()),
+        };
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    data_type: Int64Type::create(false),
+                },
+                Field {
+                    data_type: Int64Type::create(false),
+                },
+            ],
+        };
+
+        let (mut tx_l, rx_l) = unbounded_channel();
+        let (mut tx_r, rx_r) = unbounded_channel();
+
+        let source_l = MockAsyncSource::new(schema.clone(), rx_l);
+        let source_r = MockAsyncSource::new(schema.clone(), rx_r);
+
+        let join_type = JoinType::Equal;
+
+        let params_l = JoinParams::new(vec![0]);
+        let params_r = JoinParams::new(vec![0]);
+
+        let mut hash_join = HashJoinExecutor::new(
+            join_type,
+            Box::new(source_l),
+            Box::new(source_r),
+            params_l,
+            params_r,
+        );
+
+        // push the 1st left chunk
+        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(chunk.ops.len(), 0);
+            assert_eq!(chunk.columns.len(), 4);
+            for i in 0..4 {
+                assert_eq!(
+                    chunk.columns[i].array_ref().as_int64().iter().collect_vec(),
+                    vec![]
+                );
+            }
+        } else {
+            unreachable!();
+        }
+
+        // push a barrier to left side
+        MockAsyncSource::push_barrier(&mut tx_l, 0, false);
+
+        // push the 2nd left chunk
+        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
+
+        // join the first right chunk
+        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(chunk.ops, vec![Op::Insert]);
+            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(
+                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(2)]
+            );
+            assert_eq!(
+                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(5)]
+            );
+            assert_eq!(
+                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(2)]
+            );
+            assert_eq!(
+                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(7)]
+            );
+        } else {
+            unreachable!();
+        }
+
+        // push a barrier to right side
+        MockAsyncSource::push_barrier(&mut tx_r, 0, false);
+
+        // get the aligned barrier here
+        if let Message::Barrier { epoch, stop } = hash_join.next().await.unwrap() {
+            assert_eq!(epoch, 0);
+            assert!(!stop);
+        } else {
+            unreachable!();
+        }
+
+        // join the 2nd left chunk
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(chunk.ops, vec![Op::Insert]);
+            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(
+                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(6)]
+            );
+            assert_eq!(
+                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(8)]
+            );
+            assert_eq!(
+                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(6)]
+            );
+            assert_eq!(
+                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(9)]
+            );
+        } else {
+            unreachable!();
+        }
+
+        // push the 2nd right chunk
+        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r2]);
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(chunk.ops, vec![Op::Insert, Op::Insert, Op::Insert]);
+            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(
+                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(3), Some(3), Some(6)]
+            );
+            assert_eq!(
+                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(6), Some(8), Some(8)]
+            );
+            assert_eq!(
+                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(3), Some(3), Some(6)]
+            );
+            assert_eq!(
+                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(10), Some(10), Some(11)]
             );
         } else {
             unreachable!();
