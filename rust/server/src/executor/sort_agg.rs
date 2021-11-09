@@ -1,18 +1,18 @@
 use std::sync::Arc;
 
-use protobuf::Message as _;
+use prost::Message as _;
 
-use risingwave_proto::plan::{PlanNode_PlanNodeType, SortAggNode};
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::SortAggNode;
 
 use crate::executor::{BoxedExecutor, Executor, ExecutorBuilder, ExecutorResult};
 use risingwave_common::array::{column::Column, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::ErrorCode::ProtobufError;
+use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::expr::{build_from_proto, BoxedExpression};
+use risingwave_common::expr::{build_from_prost, BoxedExpression};
 use risingwave_common::types::DataType;
 use risingwave_common::vector_op::agg::{self, BoxedAggState, BoxedSortedGrouper, EqGroups};
-use risingwave_pb::ToProst;
 
 use super::BoxedExecutorBuilder;
 
@@ -33,7 +33,7 @@ pub(super) struct SortAggExecutor {
 
 impl BoxedExecutorBuilder for SortAggExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::SORT_AGG);
+        ensure!(source.plan_node().get_node_type() == PlanNodeType::SortAgg);
 
         ensure!(source.plan_node().get_children().len() == 1);
         let proto_child = source
@@ -43,20 +43,19 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             .ok_or_else(|| ErrorCode::InternalError(String::from("")))?;
         let child = source.clone_for_plan(proto_child).build()?;
 
-        let sort_agg_node =
-            SortAggNode::parse_from_bytes(source.plan_node().get_body().get_value())
-                .map_err(|e| RwError::from(ProtobufError(e)))?;
+        let sort_agg_node = SortAggNode::decode(&(source.plan_node()).get_body().value[..])
+            .map_err(|e| RwError::from(ProstError(e)))?;
 
         let agg_states = sort_agg_node
             .get_agg_calls()
             .iter()
-            .map(|x| agg::create_agg_state(&x.to_prost()))
+            .map(agg::create_agg_state)
             .collect::<Result<Vec<BoxedAggState>>>()?;
 
         let group_exprs = sort_agg_node
             .get_group_keys()
             .iter()
-            .map(build_from_proto)
+            .map(build_from_prost)
             .collect::<Result<Vec<BoxedExpression>>>()?;
 
         let sorted_groupers = group_exprs
@@ -171,18 +170,16 @@ impl Executor for SortAggExecutor {
 
 #[cfg(test)]
 mod tests {
-    use protobuf::well_known_types::Any;
-
     use pb_construct::make_proto;
-    use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};
-    use risingwave_proto::expr::{
-        AggCall, AggCall_Arg, AggCall_Type, ExprNode, ExprNode_Type, InputRefExpr,
-    };
+    use protobuf::well_known_types::Any;
+    use risingwave_pb::data::{data_type::TypeName, DataType as DataTypeProst};
+    use risingwave_pb::expr::{agg_call::Arg, agg_call::Type, AggCall, InputRefExpr};
 
     use crate::executor::test_utils::MockExecutor;
     use risingwave_common::array::{Array as _, I32Array, I64Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::expr::build_from_proto;
     use risingwave_common::types::{DataTypeKind, Int32Type};
 
     use super::*;
@@ -203,20 +200,22 @@ mod tests {
         let mut child = MockExecutor::new(schema);
         child.add(chunk);
 
-        let proto = make_proto!(AggCall, {
-          field_type: AggCall_Type::SUM,
-          return_type: make_proto!(DataTypeProto, {
-            type_name: DataType_TypeName::INT64
-          }),
-          args: vec![make_proto!(AggCall_Arg, {
-            input: make_proto!(InputRefExpr, {column_idx: 0}),
-            field_type: make_proto!(DataTypeProto, {
-              type_name: DataType_TypeName::INT32
-            })
-          })].into()
-        });
+        let prost = AggCall {
+            r#type: Type::Sum as i32,
+            args: vec![Arg {
+                input: Some(InputRefExpr { column_idx: 0 }),
+                r#type: Some(DataTypeProst {
+                    type_name: TypeName::Int32 as i32,
+                    ..Default::default()
+                }),
+            }],
+            return_type: Some(DataTypeProst {
+                type_name: TypeName::Int64 as i32,
+                ..Default::default()
+            }),
+        };
 
-        let s = agg::create_agg_state(&proto.to_prost())?;
+        let s = agg::create_agg_state(&prost)?;
 
         let group_exprs: Vec<BoxedExpression> = vec![];
         let agg_states = vec![s];
@@ -296,32 +295,34 @@ mod tests {
             .build();
         child.add(chunk);
 
-        let proto = make_proto!(AggCall, {
-          field_type: AggCall_Type::SUM,
-          return_type: make_proto!(DataTypeProto, {
-            type_name: DataType_TypeName::INT64
-          }),
-          args: vec![make_proto!(AggCall_Arg, {
-            input: make_proto!(InputRefExpr, {column_idx: 0}),
-            field_type: make_proto!(DataTypeProto, {
-              type_name: DataType_TypeName::INT32
-            })
-          })].into()
-        });
+        let prost = AggCall {
+            r#type: Type::Sum as i32,
+            args: vec![Arg {
+                input: Some(InputRefExpr { column_idx: 0 }),
+                r#type: Some(DataTypeProst {
+                    type_name: TypeName::Int32 as i32,
+                    ..Default::default()
+                }),
+            }],
+            return_type: Some(DataTypeProst {
+                type_name: TypeName::Int64 as i32,
+                ..Default::default()
+            }),
+        };
 
-        let s = agg::create_agg_state(&proto.to_prost())?;
+        let s = agg::create_agg_state(&prost)?;
 
         let group_exprs = (1..=2)
-            .map(|idx| {
-                build_from_proto(&make_proto!(ExprNode, {
-                  expr_type: ExprNode_Type::INPUT_REF,
-                  return_type: make_proto!(DataTypeProto, {
-                    type_name: DataType_TypeName::INT32
-                  }),
-                  body: Any::pack(&make_proto!(InputRefExpr, {column_idx: idx})).unwrap()
-                }))
-            })
-            .collect::<Result<Vec<BoxedExpression>>>()?;
+      .map(|idx| {
+        build_from_proto(&make_proto!(risingwave_proto::expr::ExprNode, {
+          expr_type: risingwave_proto::expr::ExprNode_Type::INPUT_REF,
+          return_type: make_proto!(risingwave_proto::data::DataType, {
+            type_name: risingwave_proto::data::DataType_TypeName::INT32
+          }),
+          body: Any::pack(&make_proto!(risingwave_proto::expr::InputRefExpr, {column_idx: idx})).unwrap()
+        }))
+      })
+      .collect::<Result<Vec<BoxedExpression>>>()?;
         let sorted_groupers = group_exprs
             .iter()
             .map(|e| agg::create_sorted_grouper(e.return_type()))

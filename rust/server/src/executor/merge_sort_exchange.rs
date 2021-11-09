@@ -1,4 +1,4 @@
-use protobuf::Message;
+use prost::Message;
 use std::collections::BinaryHeap;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
@@ -13,16 +13,17 @@ use crate::task::GlobalTaskEnv;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, DataChunkRef};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::ErrorCode::ProtobufError;
+use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::Result;
-use risingwave_common::types::{build_from_proto as type_build_from_proto, ToOwnedDatum};
+use risingwave_common::types::{build_from_prost as type_build_from_prost, ToOwnedDatum};
 use risingwave_common::util::sort_util::{
     fetch_orders_from_order_by_node, HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE,
 };
-use risingwave_proto::plan::PlanNode_PlanNodeType;
-use risingwave_proto::task_service::{
-    ExchangeNode_Field, ExchangeSource as ProtoExchangeSource, MergeSortExchangeNode,
-};
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::task_service::exchange_node::Field as ExchangeNodeField;
+use risingwave_pb::task_service::ExchangeSource as ProstExchangeSource;
+use risingwave_pb::task_service::MergeSortExchangeNode;
+use risingwave_pb::ToProto;
 
 /// `MergeSortExchangeExecutor` takes inputs from multiple sources and
 /// The outputs of all the sources have been sorted in the same way.
@@ -36,7 +37,7 @@ pub(super) struct MergeSortExchangeExecutor<C> {
     source_inputs: Vec<Option<DataChunkRef>>,
     order_pairs: Arc<Vec<OrderPair>>,
     min_heap: BinaryHeap<HeapElem>,
-    proto_sources: Vec<ProtoExchangeSource>,
+    proto_sources: Vec<ProstExchangeSource>,
     sources: Vec<Box<dyn ExchangeSource>>,
     /// Mock-able CreateSource.
     source_creator: PhantomData<C>,
@@ -160,28 +161,31 @@ impl<CS: 'static + CreateSource> Executor for MergeSortExchangeExecutor<CS> {
 
 impl<CS: 'static + CreateSource> BoxedExecutorBuilder for MergeSortExchangeExecutor<CS> {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::MERGE_SORT_EXCHANGE);
+        ensure!(source.plan_node().get_node_type() == PlanNodeType::MergeSortExchange);
         let plan_node = source.plan_node();
         let server_addr = *source.env.server_address();
         let sort_merge_node =
-            MergeSortExchangeNode::parse_from_bytes(plan_node.get_body().get_value())
-                .map_err(ProtobufError)?;
+            MergeSortExchangeNode::decode(&(plan_node).get_body().value[..]).map_err(ProstError)?;
         let order_pairs = Arc::new(
             fetch_orders_from_order_by_node(
-                sort_merge_node.get_order_types(),
-                sort_merge_node.get_orders(),
+                sort_merge_node
+                    .to_proto::<risingwave_proto::plan::OrderByNode>()
+                    .get_order_types(),
+                sort_merge_node
+                    .to_proto::<risingwave_proto::plan::OrderByNode>()
+                    .get_orders(),
             )
             .unwrap(),
         );
 
         let exchange_node = sort_merge_node.get_exchange_node();
-        let proto_sources: Vec<ProtoExchangeSource> = exchange_node.get_sources().to_vec();
+        let proto_sources: Vec<ProstExchangeSource> = exchange_node.get_sources().to_vec();
         ensure!(!exchange_node.get_sources().is_empty());
-        let input_schema: Vec<ExchangeNode_Field> = exchange_node.get_input_schema().to_vec();
+        let input_schema: Vec<ExchangeNodeField> = exchange_node.get_input_schema().to_vec();
         let fields = input_schema
             .iter()
             .map(|f| Field {
-                data_type: type_build_from_proto(f.get_data_type()).unwrap(),
+                data_type: type_build_from_prost(f.get_data_type()).unwrap(),
             })
             .collect::<Vec<Field>>();
 
@@ -236,7 +240,7 @@ mod tests {
         impl CreateSource for FakeCreateSource {
             async fn create_source(
                 _: GlobalTaskEnv,
-                _: &ProtoExchangeSource,
+                _: &ProstExchangeSource,
             ) -> Result<Box<dyn ExchangeSource>> {
                 let chunk = DataChunk::builder()
                     .columns(vec![Column::new(
@@ -248,10 +252,10 @@ mod tests {
             }
         }
 
-        let mut proto_sources: Vec<ProtoExchangeSource> = vec![];
+        let mut proto_sources: Vec<ProstExchangeSource> = vec![];
         let num_sources = 2;
         for _ in 0..num_sources {
-            proto_sources.push(ProtoExchangeSource::default());
+            proto_sources.push(ProstExchangeSource::default());
         }
         let input_ref_1 = InputRefExpression::new(Int32Type::create(false), 0usize);
         let order_pairs = Arc::new(vec![OrderPair {

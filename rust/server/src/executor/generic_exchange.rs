@@ -1,21 +1,19 @@
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 
-use protobuf::Message;
+use prost::Message;
 
-use risingwave_pb::ToProst;
-use risingwave_proto::plan::PlanNode_PlanNodeType;
-use risingwave_proto::task_service::{
-    ExchangeNode, ExchangeNode_Field, ExchangeSource as ProtoExchangeSource,
-};
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::task_service::exchange_node::Field as ExchangeNodeField;
+use risingwave_pb::task_service::{ExchangeNode, ExchangeSource as ProstExchangeSource};
 
 use crate::execution::exchange_source::{ExchangeSource, GrpcExchangeSource, LocalExchangeSource};
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::task::GlobalTaskEnv;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::ErrorCode::ProtobufError;
+use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::Result;
-use risingwave_common::types::build_from_proto as type_build_from_proto;
+use risingwave_common::types::build_from_prost as type_build_from_prost;
 use risingwave_common::util::addr::{get_host_port, is_local_address};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
@@ -23,7 +21,7 @@ use super::{BoxedExecutor, BoxedExecutorBuilder};
 pub(super) type ExchangeExecutor = GenericExchangeExecutor<DefaultCreateSource>;
 
 pub struct GenericExchangeExecutor<C> {
-    sources: Vec<ProtoExchangeSource>,
+    sources: Vec<ProstExchangeSource>,
     server_addr: SocketAddr,
     env: GlobalTaskEnv,
 
@@ -40,7 +38,7 @@ pub struct GenericExchangeExecutor<C> {
 pub trait CreateSource: Send {
     async fn create_source(
         env: GlobalTaskEnv,
-        value: &ProtoExchangeSource,
+        value: &ProstExchangeSource,
     ) -> Result<Box<dyn ExchangeSource>>;
 }
 
@@ -50,7 +48,7 @@ pub struct DefaultCreateSource {}
 impl CreateSource for DefaultCreateSource {
     async fn create_source(
         env: GlobalTaskEnv,
-        value: &ProtoExchangeSource,
+        value: &ProstExchangeSource,
     ) -> Result<Box<dyn ExchangeSource>> {
         let peer_addr = get_host_port(
             format!(
@@ -63,7 +61,7 @@ impl CreateSource for DefaultCreateSource {
         if is_local_address(env.server_address(), &peer_addr) {
             debug!("Exchange locally [{:?}]", value.get_sink_id());
             return Ok(Box::new(LocalExchangeSource::create(
-                value.get_sink_id().clone().to_prost(),
+                value.get_sink_id().clone(),
                 env,
             )?));
         }
@@ -73,25 +71,25 @@ impl CreateSource for DefaultCreateSource {
             value.get_sink_id()
         );
         Ok(Box::new(
-            GrpcExchangeSource::create(peer_addr, value.get_sink_id().clone().to_prost()).await?,
+            GrpcExchangeSource::create(peer_addr, value.get_sink_id().clone()).await?,
         ))
     }
 }
 
 impl<CS: 'static + CreateSource> BoxedExecutorBuilder for GenericExchangeExecutor<CS> {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::EXCHANGE);
-        let node = ExchangeNode::parse_from_bytes(source.plan_node().get_body().get_value())
-            .map_err(ProtobufError)?;
+        ensure!(source.plan_node().get_node_type() == PlanNodeType::Exchange);
+        let node =
+            ExchangeNode::decode(&(source.plan_node()).get_body().value[..]).map_err(ProstError)?;
         let server_addr = *source.env.server_address();
 
         ensure!(!node.get_sources().is_empty());
-        let sources: Vec<ProtoExchangeSource> = node.get_sources().to_vec();
-        let input_schema: Vec<ExchangeNode_Field> = node.get_input_schema().to_vec();
+        let sources: Vec<ProstExchangeSource> = node.get_sources().to_vec();
+        let input_schema: Vec<ExchangeNodeField> = node.get_input_schema().to_vec();
         let fields = input_schema
             .iter()
             .map(|f| Field {
-                data_type: type_build_from_proto(f.get_data_type()).unwrap(),
+                data_type: type_build_from_prost(f.get_data_type()).unwrap(),
             })
             .collect::<Vec<Field>>();
         Ok(Box::new(Self {
@@ -177,7 +175,7 @@ mod tests {
         impl CreateSource for FakeCreateSource {
             async fn create_source(
                 _: GlobalTaskEnv,
-                _: &ProtoExchangeSource,
+                _: &ProstExchangeSource,
             ) -> Result<Box<dyn ExchangeSource>> {
                 let chunk = DataChunk::builder()
                     .columns(vec![Column::new(
@@ -189,9 +187,9 @@ mod tests {
             }
         }
 
-        let mut sources: Vec<ProtoExchangeSource> = vec![];
+        let mut sources: Vec<ProstExchangeSource> = vec![];
         for _ in 0..3 {
-            sources.push(ProtoExchangeSource::default());
+            sources.push(ProstExchangeSource::default());
         }
 
         let mut executor = GenericExchangeExecutor::<FakeCreateSource> {

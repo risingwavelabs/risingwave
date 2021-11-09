@@ -2,8 +2,8 @@ use risingwave_pb::plan::ColumnDesc;
 use std::ops::Index;
 
 use crate::error::Result;
-use crate::types::{build_from_prost, build_from_proto, DataType, DataTypeRef};
-use risingwave_proto::data::DataType as DataTypeProto;
+use crate::types::{build_from_prost, DataType, DataTypeRef};
+use risingwave_pb::data::DataType as DataTypeProto;
 
 /// The field in the schema of the executor's return data
 #[derive(Clone, Debug)]
@@ -59,7 +59,7 @@ impl Schema {
 impl Field {
     pub fn try_from(data_type: &DataTypeProto) -> Result<Self> {
         Ok(Field {
-            data_type: build_from_proto(data_type)?,
+            data_type: build_from_prost(data_type)?,
         })
     }
 

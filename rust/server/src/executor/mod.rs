@@ -10,7 +10,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_proto::plan::{PlanNode, PlanNode_PlanNodeType};
+use risingwave_pb::plan::{plan_node::PlanNodeType, PlanNode};
 use row_seq_scan::*;
 use seq_scan::*;
 use sort_agg::*;
@@ -125,25 +125,25 @@ impl<'a> ExecutorBuilder<'a> {
 
     fn try_build(&self) -> Result<BoxedExecutor> {
         build_executor! { self,
-          PlanNode_PlanNodeType::CREATE_TABLE => CreateTableExecutor,
-          PlanNode_PlanNodeType::SEQ_SCAN => SeqScanExecutor,
-          PlanNode_PlanNodeType::ROW_SEQ_SCAN => RowSeqScanExecutor,
-          PlanNode_PlanNodeType::INSERT => InsertExecutor,
-          PlanNode_PlanNodeType::DROP_TABLE => DropTableExecutor,
-          PlanNode_PlanNodeType::EXCHANGE => ExchangeExecutor,
-          PlanNode_PlanNodeType::FILTER => FilterExecutor,
-          PlanNode_PlanNodeType::PROJECT => ProjectionExecutor,
-          PlanNode_PlanNodeType::SORT_AGG => SortAggExecutor,
-          PlanNode_PlanNodeType::ORDER_BY => OrderByExecutor,
-          PlanNode_PlanNodeType::CREATE_STREAM => CreateStreamExecutor,
-          PlanNode_PlanNodeType::STREAM_SCAN => StreamScanExecutor,
-          PlanNode_PlanNodeType::TOP_N => TopNExecutor,
-          PlanNode_PlanNodeType::LIMIT => LimitExecutor,
-          PlanNode_PlanNodeType::VALUE => ValuesExecutor,
-          PlanNode_PlanNodeType::NESTED_LOOP_JOIN => NestedLoopJoinExecutor,
-          PlanNode_PlanNodeType::HASH_JOIN => HashJoinExecutorBuilder,
-          PlanNode_PlanNodeType::DROP_STREAM => DropStreamExecutor,
-          PlanNode_PlanNodeType::HASH_AGG => HashAggExecutorBuilder
+          PlanNodeType::CreateTable => CreateTableExecutor,
+          PlanNodeType::SeqScan => SeqScanExecutor,
+          PlanNodeType::RowSeqScan => RowSeqScanExecutor,
+          PlanNodeType::Insert => InsertExecutor,
+          PlanNodeType::DropTable => DropTableExecutor,
+          PlanNodeType::Exchange => ExchangeExecutor,
+          PlanNodeType::Filter => FilterExecutor,
+          PlanNodeType::Project => ProjectionExecutor,
+          PlanNodeType::SortAgg => SortAggExecutor,
+          PlanNodeType::OrderBy => OrderByExecutor,
+          PlanNodeType::CreateStream => CreateStreamExecutor,
+          PlanNodeType::StreamScan => StreamScanExecutor,
+          PlanNodeType::TopN => TopNExecutor,
+          PlanNodeType::Limit => LimitExecutor,
+          PlanNodeType::Value => ValuesExecutor,
+          PlanNodeType::NestedLoopJoin => NestedLoopJoinExecutor,
+          PlanNodeType::HashJoin => HashJoinExecutorBuilder,
+          PlanNodeType::DropStream => DropStreamExecutor,
+          PlanNodeType::HashAgg => HashAggExecutorBuilder
         }
     }
 
@@ -158,21 +158,25 @@ impl<'a> ExecutorBuilder<'a> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_proto::plan::PlanNode;
+    use risingwave_pb::plan::PlanNode;
 
     use crate::executor::ExecutorBuilder;
     use crate::task::{GlobalTaskEnv, TaskId};
 
     #[test]
     fn test_clone_for_plan() {
-        let plan_node = PlanNode::new();
+        let plan_node = PlanNode {
+            ..Default::default()
+        };
         let task_id = &TaskId {
             task_id: 1,
             stage_id: 1,
             query_id: "test_query_id".to_string(),
         };
         let builder = ExecutorBuilder::new(&plan_node, task_id, GlobalTaskEnv::for_test());
-        let child_plan = &PlanNode::new();
+        let child_plan = &PlanNode {
+            ..Default::default()
+        };
         let cloned_builder = builder.clone_for_plan(child_plan);
         assert_eq!(builder.task_id, cloned_builder.task_id);
     }

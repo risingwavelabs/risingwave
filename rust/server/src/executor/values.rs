@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
-use protobuf::Message;
+use prost::Message;
 
-use risingwave_proto::plan::{PlanNode_PlanNodeType, ValuesNode};
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::ValuesNode;
 
 use crate::executor::ExecutorResult::Done;
 use crate::executor::{
@@ -12,9 +13,9 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::I32Array;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::ErrorCode::{InternalError, ProtobufError};
+use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::expr::{build_from_proto, BoxedExpression};
+use risingwave_common::expr::{build_from_prost, BoxedExpression};
 use risingwave_common::types::{DataType, Int32Type};
 
 /// `ValuesExecutor` implements Values executor.
@@ -101,16 +102,16 @@ impl Executor for ValuesExecutor {
 
 impl BoxedExecutorBuilder for ValuesExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::VALUE);
-        let value_node = ValuesNode::parse_from_bytes(source.plan_node().get_body().get_value())
-            .map_err(ProtobufError)?;
+        ensure!(source.plan_node().get_node_type() == PlanNodeType::Value);
+        let value_node =
+            ValuesNode::decode(&(source.plan_node()).get_body().value[..]).map_err(ProstError)?;
 
         let mut rows: Vec<Vec<BoxedExpression>> = Vec::with_capacity(value_node.get_tuples().len());
         for row in value_node.get_tuples() {
             let expr_row = row
                 .get_cells()
                 .iter()
-                .map(build_from_proto)
+                .map(build_from_prost)
                 .collect::<Result<Vec<BoxedExpression>>>()?;
             rows.push(expr_row);
         }

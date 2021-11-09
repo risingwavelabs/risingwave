@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
-use protobuf::Message;
+use prost::Message;
 
 use pb_convert::FromProtobuf;
-use risingwave_proto::plan::{PlanNode_PlanNodeType, RowSeqScanNode};
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::RowSeqScanNode;
+use risingwave_pb::ToProto;
 
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::storage::{MemRowTable, MemTableRowIter, SimpleTableRef};
@@ -11,7 +13,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::ErrorCode::{InternalError, ProtobufError};
+use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataTypeRef;
 
@@ -34,14 +36,17 @@ pub(super) struct RowSeqScanExecutor {
 
 impl BoxedExecutorBuilder for RowSeqScanExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::ROW_SEQ_SCAN);
+        ensure!(source.plan_node().get_node_type() == PlanNodeType::RowSeqScan);
 
-        let seq_scan_node =
-            RowSeqScanNode::parse_from_bytes(source.plan_node().get_body().get_value())
-                .map_err(|e| RwError::from(ProtobufError(e)))?;
+        let seq_scan_node = RowSeqScanNode::decode(&(source.plan_node()).get_body().value[..])
+            .map_err(|e| RwError::from(ProstError(e)))?;
 
-        let table_id = TableId::from_protobuf(seq_scan_node.get_table_ref_id())
-            .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
+        let table_id = TableId::from_protobuf(
+            seq_scan_node
+                .to_proto::<risingwave_proto::plan::RowSeqScanNode>()
+                .get_table_ref_id(),
+        )
+        .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
         let table_ref = source
             .global_task_env()

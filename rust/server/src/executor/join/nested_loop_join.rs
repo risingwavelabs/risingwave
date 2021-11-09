@@ -130,7 +130,7 @@ impl Executor for NestedLoopJoinExecutor {
 
 impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() as i32 == PlanNodeType::NestedLoopJoin as i32);
+        ensure!(source.plan_node().get_node_type() == PlanNodeType::NestedLoopJoin);
         ensure!(source.plan_node().get_children().len() == 2);
 
         let nested_loop_join_node =

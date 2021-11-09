@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 
-use protobuf::Message;
+use prost::Message;
 
 use pb_convert::FromProtobuf;
-use risingwave_proto::plan::{
-    CreateStreamNode, CreateStreamNode_RowFormatType, PlanNode_PlanNodeType,
-};
+use risingwave_pb::plan::create_stream_node::RowFormatType;
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::CreateStreamNode;
+use risingwave_pb::ToProto;
 
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::source::{FileSourceConfig, KafkaSourceConfig, SourceFormat};
@@ -13,10 +14,10 @@ use crate::source::{SourceColumnDesc, SourceConfig, SourceManagerRef};
 use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
 use risingwave_common::ensure;
-use risingwave_common::error::ErrorCode::{InternalError, ProtobufError, ProtocolError};
+use risingwave_common::error::ErrorCode::{InternalError, ProstError, ProtocolError};
 use risingwave_common::error::Result;
 use risingwave_common::error::RwError;
-use risingwave_common::types::build_from_proto;
+use risingwave_common::types::build_from_prost;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 
@@ -57,13 +58,16 @@ impl CreateStreamExecutor {
 
 impl BoxedExecutorBuilder for CreateStreamExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::CREATE_STREAM);
+        ensure!(source.plan_node().get_node_type() == PlanNodeType::CreateStream);
 
-        let node = CreateStreamNode::parse_from_bytes(source.plan_node().get_body().get_value())
-            .map_err(ProtobufError)?;
+        let node = CreateStreamNode::decode(&(source.plan_node()).get_body().value[..])
+            .map_err(ProstError)?;
 
-        let table_id = TableId::from_protobuf(node.get_table_ref_id())
-            .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
+        let table_id = TableId::from_protobuf(
+            node.to_proto::<risingwave_proto::plan::CreateStreamNode>()
+                .get_table_ref_id(),
+        )
+        .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
         let columns = node
             .get_column_descs()
@@ -72,7 +76,7 @@ impl BoxedExecutorBuilder for CreateStreamExecutor {
             .map(|(i, c)| {
                 Ok(SourceColumnDesc {
                     name: c.name.clone(),
-                    data_type: build_from_proto(c.get_column_type())?,
+                    data_type: build_from_prost(c.get_column_type())?,
                     // todo, column id should be passed from ColumnDesc
                     column_id: i as i32,
                 })
@@ -80,9 +84,9 @@ impl BoxedExecutorBuilder for CreateStreamExecutor {
             .collect::<Result<Vec<SourceColumnDesc>>>()?;
 
         let format = match node.get_format() {
-            CreateStreamNode_RowFormatType::JSON => SourceFormat::Json,
-            CreateStreamNode_RowFormatType::PROTOBUF => SourceFormat::Protobuf,
-            CreateStreamNode_RowFormatType::AVRO => SourceFormat::Avro,
+            RowFormatType::Json => SourceFormat::Json,
+            RowFormatType::Protobuf => SourceFormat::Protobuf,
+            RowFormatType::Avro => SourceFormat::Avro,
         };
 
         let properties = node.get_properties();

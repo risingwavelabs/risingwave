@@ -20,7 +20,7 @@ type AggHashMap<K> = HashMap<K, Vec<BoxedAggState>, PrecomputedBuildHasher>;
 pub(super) struct HashAggExecutorBuilder;
 impl BoxedExecutorBuilder for HashAggExecutorBuilder {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() as i32 == PlanNodeType::HashAgg as i32);
+        ensure!(source.plan_node().get_node_type() == PlanNodeType::HashAgg);
         ensure!(source.plan_node().get_children().len() == 1);
         let proto_child = source
             .plan_node()

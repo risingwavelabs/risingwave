@@ -1,15 +1,16 @@
-use protobuf::Message;
+use prost::Message;
 
-use risingwave_proto::plan::{PlanNode_PlanNodeType, ProjectNode};
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::ProjectNode;
 
 use crate::executor::ExecutorResult::{Batch, Done};
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::ErrorCode::ProtobufError;
+use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::expr::{build_from_proto, BoxedExpression};
+use risingwave_common::expr::{build_from_prost, BoxedExpression};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 
@@ -57,11 +58,11 @@ impl Executor for ProjectionExecutor {
 
 impl BoxedExecutorBuilder for ProjectionExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::PROJECT);
+        ensure!(source.plan_node().get_node_type() == PlanNodeType::Project);
         ensure!(source.plan_node().get_children().len() == 1);
 
-        let project_node = ProjectNode::parse_from_bytes(source.plan_node().get_body().get_value())
-            .map_err(ProtobufError)?;
+        let project_node =
+            ProjectNode::decode(&(source.plan_node()).get_body().value[..]).map_err(ProstError)?;
         let proto_child = source.plan_node.get_children().get(0).ok_or_else(|| {
             RwError::from(ErrorCode::InternalError(String::from(
                 "Child interpreting error",
@@ -72,7 +73,7 @@ impl BoxedExecutorBuilder for ProjectionExecutor {
         let project_exprs = project_node
             .get_select_list()
             .iter()
-            .map(build_from_proto)
+            .map(build_from_prost)
             .collect::<Result<Vec<BoxedExpression>>>()?;
 
         let fields = project_exprs

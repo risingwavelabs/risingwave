@@ -4,9 +4,11 @@ use std::iter::Iterator;
 use std::sync::Arc;
 use std::vec::Vec;
 
-use protobuf::Message;
+use prost::Message;
 
-use risingwave_proto::plan::{OrderByNode as OrderByProto, PlanNode_PlanNodeType};
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::OrderByNode as OrderByProto;
+use risingwave_pb::ToProto;
 
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use risingwave_common::array::{
@@ -14,7 +16,7 @@ use risingwave_common::array::{
 };
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{
-    ErrorCode::{InternalError, ProtobufError},
+    ErrorCode::{InternalError, ProstError},
     Result,
 };
 use risingwave_common::types::DataTypeRef;
@@ -37,14 +39,17 @@ pub(super) struct OrderByExecutor {
 
 impl BoxedExecutorBuilder for OrderByExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::ORDER_BY);
+        ensure!(source.plan_node().get_node_type() == PlanNodeType::OrderBy);
         ensure!(source.plan_node().get_children().len() == 1);
         let order_by_node =
-            OrderByProto::parse_from_bytes(source.plan_node().get_body().get_value())
-                .map_err(ProtobufError)?;
+            OrderByProto::decode(&(source.plan_node()).get_body().value[..]).map_err(ProstError)?;
         let order_pairs = fetch_orders_from_order_by_node(
-            order_by_node.get_order_types(),
-            order_by_node.get_orders(),
+            order_by_node
+                .to_proto::<risingwave_proto::plan::OrderByNode>()
+                .get_order_types(),
+            order_by_node
+                .to_proto::<risingwave_proto::plan::OrderByNode>()
+                .get_orders(),
         )
         .unwrap();
         if let Some(child_plan) = source.plan_node.get_children().get(0) {

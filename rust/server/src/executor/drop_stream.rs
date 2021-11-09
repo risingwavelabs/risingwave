@@ -1,7 +1,9 @@
-use protobuf::Message;
+use prost::Message;
 
 use pb_convert::FromProtobuf;
-use risingwave_proto::plan::{DropStreamNode, PlanNode_PlanNodeType};
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::DropStreamNode;
+use risingwave_pb::ToProto;
 
 use crate::executor::{
     BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult,
@@ -9,7 +11,7 @@ use crate::executor::{
 use crate::source::SourceManagerRef;
 use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::ErrorCode::{InternalError, ProtobufError};
+use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::Result;
 
 pub(super) struct DropStreamExecutor {
@@ -42,13 +44,16 @@ impl Executor for DropStreamExecutor {
 
 impl BoxedExecutorBuilder for DropStreamExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::DROP_STREAM);
+        ensure!(source.plan_node().get_node_type() == PlanNodeType::DropStream);
 
-        let node = DropStreamNode::parse_from_bytes(source.plan_node().get_body().get_value())
-            .map_err(ProtobufError)?;
+        let node = DropStreamNode::decode(&(source.plan_node()).get_body().value[..])
+            .map_err(ProstError)?;
 
-        let table_id = TableId::from_protobuf(node.get_table_ref_id())
-            .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
+        let table_id = TableId::from_protobuf(
+            node.to_proto::<risingwave_proto::plan::DropStreamNode>()
+                .get_table_ref_id(),
+        )
+        .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
         Ok(Box::new(Self {
             table_id,
@@ -62,7 +67,7 @@ impl BoxedExecutorBuilder for DropStreamExecutor {
 mod tests {
     use std::sync::Arc;
 
-    use risingwave_proto::plan::{PlanNode, PlanNode_PlanNodeType};
+    use risingwave_pb::plan::{plan_node::PlanNodeType, PlanNode};
 
     use crate::executor::drop_stream::DropStreamExecutor;
     use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
@@ -75,8 +80,10 @@ mod tests {
 
     #[test]
     fn test_drop_stream() {
-        let mut plan_node = PlanNode::new();
-        plan_node.set_node_type(PlanNode_PlanNodeType::FILTER);
+        let mut plan_node = PlanNode {
+            ..Default::default()
+        };
+        plan_node.set_node_type(PlanNodeType::Filter);
         let task_id = &TaskId {
             task_id: 0,
             stage_id: 0,

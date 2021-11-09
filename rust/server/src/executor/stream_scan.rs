@@ -1,18 +1,18 @@
 use std::fmt::{Debug, Formatter};
 
 use itertools::Itertools;
-use protobuf::Message;
+use prost::Message;
 
 use pb_convert::FromProtobuf;
-use risingwave_proto::plan::StreamScanNode;
+use risingwave_pb::plan::StreamScanNode;
+use risingwave_pb::ToProto;
 
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::source::{ChunkReader, JSONParser, SourceColumnDesc, SourceFormat, SourceParser};
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::TableId;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::ErrorCode;
-use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::{Result, RwError};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
@@ -47,10 +47,15 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
     /// 1. `StreamScanNode` whose definition can be shared by OLAP and Streaming
     /// 2. `SourceManager` whose definition can also be shared. But is it physically shared?
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        let stream_scan_node = unpack_from_any!(source.plan_node().get_body(), StreamScanNode);
+        let stream_scan_node = StreamScanNode::decode(&(source.plan_node()).get_body().value[..])
+            .map_err(ProstError)?;
 
-        let table_id = TableId::from_protobuf(stream_scan_node.get_table_ref_id())
-            .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
+        let table_id = TableId::from_protobuf(
+            stream_scan_node
+                .to_proto::<risingwave_proto::plan::StreamScanNode>()
+                .get_table_ref_id(),
+        )
+        .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
         let source_desc = source
             .global_task_env()

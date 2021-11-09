@@ -247,7 +247,7 @@ impl<K: HashKey> HashKeyDispatcher<K> for HashJoinExecutorBuilderDispatcher<K> {
 /// Hash join executor builder.
 impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
     fn new_boxed_executor(context: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(context.plan_node().get_node_type() as i32 == PlanNodeType::HashJoin as i32);
+        ensure!(context.plan_node().get_node_type() == PlanNodeType::HashJoin);
         ensure!(context.plan_node().get_children().len() == 2);
 
         let left_child = context

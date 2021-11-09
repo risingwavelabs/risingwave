@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
-use protobuf::Message;
+use prost::Message;
 
 use pb_convert::FromProtobuf;
-use risingwave_proto::plan::{PlanNode_PlanNodeType, SeqScanNode};
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::SeqScanNode;
+use risingwave_pb::ToProto;
 
 use crate::executor::ExecutorResult::Done;
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
@@ -12,7 +14,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, DataChunkRef};
 use risingwave_common::catalog::TableId;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::ErrorCode::{InternalError, ProtobufError};
+use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::{Result, RwError};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
@@ -30,14 +32,17 @@ pub(super) struct SeqScanExecutor {
 
 impl BoxedExecutorBuilder for SeqScanExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::SEQ_SCAN);
+        ensure!(source.plan_node().get_node_type() == PlanNodeType::SeqScan);
 
-        let seq_scan_node =
-            SeqScanNode::parse_from_bytes(source.plan_node().get_body().get_value())
-                .map_err(|e| RwError::from(ProtobufError(e)))?;
+        let seq_scan_node = SeqScanNode::decode(&(source.plan_node()).get_body().value[..])
+            .map_err(|e| RwError::from(ProstError(e)))?;
 
-        let table_id = TableId::from_protobuf(seq_scan_node.get_table_ref_id())
-            .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
+        let table_id = TableId::from_protobuf(
+            seq_scan_node
+                .to_proto::<risingwave_proto::plan::SeqScanNode>()
+                .get_table_ref_id(),
+        )
+        .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
         let table_ref = source
             .global_task_env()
@@ -147,9 +152,9 @@ impl SeqScanExecutor {
 
 #[cfg(test)]
 mod tests {
-    use pb_construct::make_proto;
-    use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};
-    use risingwave_proto::plan::{ColumnDesc, ColumnDesc_ColumnEncodingType};
+    use risingwave_pb::data::{data_type::TypeName, DataType as DataTypeProst};
+    use risingwave_pb::plan::{column_desc::ColumnEncodingType, ColumnDesc};
+    use risingwave_pb::ToProst;
 
     use crate::*;
     use risingwave_common::array::{Array, I64Array};
@@ -161,21 +166,34 @@ mod tests {
     #[tokio::test]
     async fn test_seq_scan_executor() -> Result<()> {
         let table_id = mock_table_id();
-        let column = make_proto!(ColumnDesc, {
-          column_type: make_proto!(DataTypeProto, {
-            type_name: DataType_TypeName::INT64
-          }),
-          encoding: ColumnDesc_ColumnEncodingType::RAW,
-          is_primary: false,
-          name: "test_col".to_string()
-        });
+        let column = ColumnDesc {
+            column_type: Some(DataTypeProst {
+                type_name: TypeName::Int64 as i32,
+                ..Default::default()
+            }),
+            encoding: ColumnEncodingType::Raw as i32,
+            is_primary: false,
+            name: "test_col".to_string(),
+        };
         let columns = vec![column];
-        let table = SimpleMemTable::new(&table_id, &columns);
+        let table = SimpleMemTable::new(
+            &table_id,
+            &columns
+                .iter()
+                .map(|c| c.to_proto::<risingwave_proto::plan::ColumnDesc>())
+                .collect::<Vec<risingwave_proto::plan::ColumnDesc>>()[..],
+        );
 
         let fields = table
             .columns()
             .iter()
-            .map(|c| Field::try_from(c.get_column_type()).unwrap())
+            .map(|c| {
+                Field::try_from(
+                    &c.get_column_type()
+                        .to_prost::<risingwave_pb::data::DataType>(),
+                )
+                .unwrap()
+            })
             .collect::<Vec<Field>>();
         let col1 = column_nonnull! { I64Array, Int64Type, [1, 3, 5, 7, 9] };
         let col2 = column_nonnull! { I64Array, Int64Type, [2, 4, 6, 8, 10] };

@@ -1,13 +1,15 @@
-use protobuf::Message;
+use prost::Message;
 
 use pb_convert::FromProtobuf;
-use risingwave_proto::plan::{DropTableNode, PlanNode_PlanNodeType};
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::DropTableNode;
+use risingwave_pb::ToProto;
 
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::storage::TableManagerRef;
 use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::ErrorCode::{InternalError, ProtobufError};
+use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::Result;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
@@ -20,13 +22,16 @@ pub(super) struct DropTableExecutor {
 
 impl BoxedExecutorBuilder for DropTableExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::DROP_TABLE);
+        ensure!(source.plan_node().get_node_type() == PlanNodeType::DropTable);
 
-        let node = DropTableNode::parse_from_bytes(source.plan_node().get_body().get_value())
-            .map_err(ProtobufError)?;
+        let node = DropTableNode::decode(&(source.plan_node()).get_body().value[..])
+            .map_err(ProstError)?;
 
-        let table_id = TableId::from_protobuf(node.get_table_ref_id())
-            .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
+        let table_id = TableId::from_protobuf(
+            node.to_proto::<risingwave_proto::plan::DropTableNode>()
+                .get_table_ref_id(),
+        )
+        .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
         Ok(Box::new(Self {
             table_id,

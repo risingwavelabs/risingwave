@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
-use protobuf::Message;
+use prost::Message;
 
 use pb_convert::FromProtobuf;
-use risingwave_proto::plan::{InsertNode, PlanNode_PlanNodeType};
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::InsertNode;
+use risingwave_pb::ToProto;
 
 use crate::executor::ExecutorResult::{Batch, Done};
 use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult};
@@ -12,7 +14,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder};
 use risingwave_common::catalog::TableId;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::ErrorCode::{InternalError, ProtobufError};
+use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::Int32Type;
 
@@ -87,12 +89,16 @@ impl Executor for InsertExecutor {
 
 impl BoxedExecutorBuilder for InsertExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::INSERT);
-        let insert_node = InsertNode::parse_from_bytes(source.plan_node().get_body().get_value())
-            .map_err(ProtobufError)?;
+        ensure!(source.plan_node().get_node_type() == PlanNodeType::Insert);
+        let insert_node =
+            InsertNode::decode(&(source.plan_node()).get_body().value[..]).map_err(ProstError)?;
 
-        let table_id = TableId::from_protobuf(insert_node.get_table_ref_id())
-            .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
+        let table_id = TableId::from_protobuf(
+            insert_node
+                .to_proto::<risingwave_proto::plan::InsertNode>()
+                .get_table_ref_id(),
+        )
+        .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
         let table_manager = source.global_task_env().table_manager_ref();
 

@@ -1,15 +1,16 @@
-use protobuf::Message;
+use prost::Message;
 
-use risingwave_proto::plan::{FilterNode, PlanNode_PlanNodeType};
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::FilterNode;
 
 use crate::executor::ExecutorResult::{Batch, Done};
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::ErrorCode::{InternalError, ProtobufError};
+use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::Result;
-use risingwave_common::expr::{build_from_proto, BoxedExpression};
+use risingwave_common::expr::{build_from_prost, BoxedExpression};
 use risingwave_common::util::chunk_coalesce::{
     DataChunkBuilder, SlicedDataChunk, DEFAULT_CHUNK_BUFFER_SIZE,
 };
@@ -88,12 +89,12 @@ impl FilterExecutor {
 
 impl BoxedExecutorBuilder for FilterExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::FILTER);
+        ensure!(source.plan_node().get_node_type() == PlanNodeType::Filter);
         ensure!(source.plan_node().get_children().len() == 1);
-        let filter_node = FilterNode::parse_from_bytes(source.plan_node().get_body().get_value())
-            .map_err(ProtobufError)?;
+        let filter_node =
+            FilterNode::decode(&(source.plan_node()).get_body().value[..]).map_err(ProstError)?;
         let expr_node = filter_node.get_search_condition();
-        let expr = build_from_proto(expr_node)?;
+        let expr = build_from_prost(expr_node)?;
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
             let child = source.clone_for_plan(child_plan).build()?;
             debug!("Child schema: {:?}", child.schema());

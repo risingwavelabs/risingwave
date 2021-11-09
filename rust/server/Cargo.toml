@@ -27,6 +27,7 @@ paste = "1"
 pb-convert = { path = "../utils/pb-convert" }
 pb-convert-derive = { path = "../utils/pb-convert-derive" }
 prost = "0.8"
+prost-types = "0.8"
 protobuf = "2"
 protobuf-codegen-pure = "2.25.2"
 rdkafka = { version = "0.25", features = ["cmake-build"] }

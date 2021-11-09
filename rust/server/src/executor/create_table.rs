@@ -1,13 +1,16 @@
-use protobuf::Message;
+use prost::Message;
 
 use pb_convert::FromProtobuf;
-use risingwave_proto::plan::{ColumnDesc, CreateTableNode, PlanNode_PlanNodeType};
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::{ColumnDesc, CreateTableNode};
+use risingwave_pb::ToProto;
+use risingwave_proto::plan::ColumnDesc as ProtoColumnDesc;
 
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::storage::TableManagerRef;
 use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::ErrorCode::{InternalError, ProtobufError};
+use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::Result;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
@@ -21,13 +24,16 @@ pub(super) struct CreateTableExecutor {
 
 impl BoxedExecutorBuilder for CreateTableExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNode_PlanNodeType::CREATE_TABLE);
+        ensure!(source.plan_node().get_node_type() == PlanNodeType::CreateTable);
 
-        let node = CreateTableNode::parse_from_bytes(source.plan_node().get_body().get_value())
-            .map_err(ProtobufError)?;
+        let node = CreateTableNode::decode(&(source.plan_node()).get_body().value[..])
+            .map_err(ProstError)?;
 
-        let table_id = TableId::from_protobuf(node.get_table_ref_id())
-            .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
+        let table_id = TableId::from_protobuf(
+            node.to_proto::<risingwave_proto::plan::CreateTableNode>()
+                .get_table_ref_id(),
+        )
+        .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
         let columns = node.get_column_descs().to_vec();
 
@@ -49,7 +55,14 @@ impl Executor for CreateTableExecutor {
 
     async fn execute(&mut self) -> Result<ExecutorResult> {
         self.table_manager
-            .create_table(&self.table_id, &self.columns)
+            .create_table(
+                &self.table_id,
+                &self
+                    .columns
+                    .iter()
+                    .map(|c| c.to_proto::<ProtoColumnDesc>())
+                    .collect::<Vec<ProtoColumnDesc>>()[..],
+            )
             .map(|_| ExecutorResult::Done)
     }
 
