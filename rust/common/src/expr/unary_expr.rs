@@ -114,3 +114,96 @@ pub fn new_rtrim_expr(expr_ia1: BoxedExpression, return_type: DataTypeRef) -> Bo
         _phantom: PhantomData,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::*;
+    use crate::array::column::Column;
+    use crate::array::*;
+    use crate::expr::test_utils::make_expression;
+    use crate::types::{BoolType, DateType, Scalar};
+    use crate::vector_op::cast::date_to_timestamp;
+    use risingwave_pb::expr::expr_node::Type as ProstExprType;
+    use risingwave_proto::data::DataType_TypeName;
+
+    #[test]
+    fn test_unary() {
+        test_unary_bool::<BoolArray, _>(|x| !x, ProstExprType::Not);
+        test_unary_date::<I64Array, _>(|x| date_to_timestamp(x).unwrap(), ProstExprType::Cast);
+    }
+
+    fn test_unary_bool<A, F>(f: F, kind: ProstExprType)
+    where
+        A: Array,
+        for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
+        for<'a> <A as Array>::RefItem<'a>: PartialEq,
+        F: Fn(bool) -> <A as Array>::OwnedItem,
+    {
+        let mut input = Vec::<Option<bool>>::new();
+        let mut target = Vec::<Option<<A as Array>::OwnedItem>>::new();
+        for i in 0..100 {
+            if i % 2 == 0 {
+                input.push(Some(true));
+                target.push(Some(f(true)));
+            } else if i % 3 == 0 {
+                input.push(Some(false));
+                target.push(Some(f(false)));
+            } else {
+                input.push(None);
+                target.push(None);
+            }
+        }
+
+        let col1 = Column::new(
+            BoolArray::from_slice(&input)
+                .map(|x| Arc::new(x.into()))
+                .unwrap(),
+            BoolType::create(true),
+        );
+        let data_chunk = DataChunk::builder().columns(vec![col1]).build();
+        let expr = make_expression(kind, &[DataType_TypeName::BOOLEAN], &[0]);
+        let mut vec_excutor = build_from_prost(&expr).unwrap();
+        let res = vec_excutor.eval(&data_chunk).unwrap();
+        let arr: &A = res.as_ref().into();
+        for (idx, item) in arr.iter().enumerate() {
+            let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
+            assert_eq!(x, item);
+        }
+    }
+
+    fn test_unary_date<A, F>(f: F, kind: ProstExprType)
+    where
+        A: Array,
+        for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
+        for<'a> <A as Array>::RefItem<'a>: PartialEq,
+        F: Fn(i32) -> <A as Array>::OwnedItem,
+    {
+        let mut input = Vec::<Option<i32>>::new();
+        let mut target = Vec::<Option<<A as Array>::OwnedItem>>::new();
+        for i in 0..100 {
+            if i % 2 == 0 {
+                input.push(Some(i));
+                target.push(Some(f(i)));
+            } else {
+                input.push(None);
+                target.push(None);
+            }
+        }
+
+        let col1 = Column::new(
+            I32Array::from_slice(&input)
+                .map(|x| Arc::new(x.into()))
+                .unwrap(),
+            DateType::create(true),
+        );
+        let data_chunk = DataChunk::builder().columns(vec![col1]).build();
+        let expr = make_expression(kind, &[DataType_TypeName::DATE], &[0]);
+        let mut vec_excutor = build_from_prost(&expr).unwrap();
+        let res = vec_excutor.eval(&data_chunk).unwrap();
+        let arr: &A = res.as_ref().into();
+        for (idx, item) in arr.iter().enumerate() {
+            let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
+            assert_eq!(x, item);
+        }
+    }
+}

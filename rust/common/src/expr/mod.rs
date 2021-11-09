@@ -80,4 +80,4 @@ pub fn build_from_proto_option(proto: Option<&ProtoExprNode>) -> Result<BoxedExp
 }
 
 #[cfg(test)]
-mod tests;
+mod test_utils;
