@@ -33,8 +33,8 @@ pub(super) struct InsertExecutor {
 
 #[async_trait::async_trait]
 impl Executor for InsertExecutor {
-    fn init(&mut self) -> Result<()> {
-        self.child.init()?;
+    async fn init(&mut self) -> Result<()> {
+        self.child.init().await?;
         info!("Insert executor");
         Ok(())
     }
@@ -76,8 +76,8 @@ impl Executor for InsertExecutor {
         }
     }
 
-    fn clean(&mut self) -> Result<()> {
-        self.child.clean()?;
+    async fn clean(&mut self) -> Result<()> {
+        self.child.clean().await?;
         info!("Cleaning insert executor.");
         Ok(())
     }
@@ -192,13 +192,13 @@ mod tests {
                 }],
             },
         };
-        assert!(insert_executor.init().is_ok());
+        insert_executor.init().await.unwrap();
 
         let fields = &insert_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
 
         let result = insert_executor.execute().await?.batch_or()?;
-        assert!(insert_executor.clean().is_ok());
+        insert_executor.clean().await.unwrap();
         assert_eq!(
             result
                 .column_at(0)?

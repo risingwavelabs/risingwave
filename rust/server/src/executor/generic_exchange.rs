@@ -106,7 +106,7 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for GenericExchangeExecuto
 
 #[async_trait::async_trait]
 impl<CS: CreateSource> Executor for GenericExchangeExecutor<CS> {
-    fn init(&mut self) -> Result<()> {
+    async fn init(&mut self) -> Result<()> {
         Ok(())
     }
 
@@ -135,7 +135,7 @@ impl<CS: CreateSource> Executor for GenericExchangeExecutor<CS> {
         Ok(ExecutorResult::Done)
     }
 
-    fn clean(&mut self) -> Result<()> {
+    async fn clean(&mut self) -> Result<()> {
         Ok(())
     }
 

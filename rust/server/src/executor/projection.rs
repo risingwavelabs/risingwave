@@ -22,8 +22,8 @@ pub(super) struct ProjectionExecutor {
 
 #[async_trait::async_trait]
 impl Executor for ProjectionExecutor {
-    fn init(&mut self) -> Result<()> {
-        self.child.init()?;
+    async fn init(&mut self) -> Result<()> {
+        self.child.init().await?;
         Ok(())
     }
 
@@ -46,8 +46,8 @@ impl Executor for ProjectionExecutor {
         }
     }
 
-    fn clean(&mut self) -> Result<()> {
-        self.child.clean()?;
+    async fn clean(&mut self) -> Result<()> {
+        self.child.clean().await?;
         Ok(())
     }
 
@@ -137,13 +137,13 @@ mod tests {
             child: Box::new(mock_executor),
             schema: Schema { fields },
         };
-        assert!(proj_executor.init().is_ok());
+        proj_executor.init().await.unwrap();
 
         let fields = &proj_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
 
         let result_chunk = proj_executor.execute().await?.batch_or()?;
-        assert!(proj_executor.clean().is_ok());
+        proj_executor.clean().await.unwrap();
         assert_eq!(result_chunk.dimension(), 1);
         assert_eq!(
             result_chunk
@@ -155,6 +155,7 @@ mod tests {
             vec![Some(1), Some(2), Some(33333), Some(4), Some(5)]
         );
 
+        proj_executor.clean().await.unwrap();
         Ok(())
     }
 }

@@ -79,7 +79,7 @@ impl<CS: 'static + CreateSource> MergeSortExchangeExecutorImpl<CS> {
 
 #[async_trait::async_trait]
 impl<CS: 'static + CreateSource> Executor for MergeSortExchangeExecutorImpl<CS> {
-    fn init(&mut self) -> Result<()> {
+    async fn init(&mut self) -> Result<()> {
         Ok(())
     }
 
@@ -158,7 +158,7 @@ impl<CS: 'static + CreateSource> Executor for MergeSortExchangeExecutorImpl<CS> 
         Ok(ExecutorResult::Batch(chunk))
     }
 
-    fn clean(&mut self) -> Result<()> {
+    async fn clean(&mut self) -> Result<()> {
         Ok(())
     }
 

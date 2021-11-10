@@ -43,7 +43,7 @@ impl BoxedExecutorBuilder for DropTableExecutor {
 
 #[async_trait::async_trait]
 impl Executor for DropTableExecutor {
-    fn init(&mut self) -> Result<()> {
+    async fn init(&mut self) -> Result<()> {
         Ok(())
     }
 
@@ -53,7 +53,7 @@ impl Executor for DropTableExecutor {
             .map(|_| ExecutorResult::Done)
     }
 
-    fn clean(&mut self) -> Result<()> {
+    async fn clean(&mut self) -> Result<()> {
         info!("drop table executor cleaned!");
         Ok(())
     }

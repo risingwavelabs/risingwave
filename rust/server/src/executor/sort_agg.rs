@@ -83,8 +83,8 @@ impl BoxedExecutorBuilder for SortAggExecutor {
 
 #[async_trait::async_trait]
 impl Executor for SortAggExecutor {
-    fn init(&mut self) -> Result<()> {
-        self.child.init()
+    async fn init(&mut self) -> Result<()> {
+        self.child.init().await
     }
 
     async fn execute(&mut self) -> Result<ExecutorResult> {
@@ -159,8 +159,8 @@ impl Executor for SortAggExecutor {
         Ok(ExecutorResult::Batch(ret))
     }
 
-    fn clean(&mut self) -> Result<()> {
-        self.child.clean()
+    async fn clean(&mut self) -> Result<()> {
+        self.child.clean().await
     }
 
     fn schema(&self) -> &Schema {
@@ -233,12 +233,12 @@ mod tests {
             schema: Schema { fields },
         };
 
-        executor.init()?;
+        executor.init().await?;
         let o = executor.execute().await?.batch_or()?;
         if let ExecutorResult::Batch(_) = executor.execute().await? {
             panic!("simple agg should have no more than 1 output.");
         }
-        executor.clean()?;
+        executor.clean().await?;
 
         let actual = o.column_at(0)?.array();
         let actual: &I64Array = actual.as_ref().into();
@@ -349,7 +349,7 @@ mod tests {
             schema: Schema { fields },
         };
 
-        executor.init()?;
+        executor.init().await?;
         let fields = &executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
         assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Int32);
@@ -358,7 +358,7 @@ mod tests {
         if let ExecutorResult::Batch(_) = executor.execute().await? {
             panic!("simple agg should have no more than 1 output.");
         }
-        executor.clean()?;
+        executor.clean().await?;
 
         let actual = o.column_at(2)?.array();
         let actual: &I64Array = actual.as_ref().into();

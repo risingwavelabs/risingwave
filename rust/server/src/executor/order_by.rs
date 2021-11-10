@@ -27,7 +27,6 @@ use super::{BoxedExecutor, BoxedExecutorBuilder};
 
 pub(super) struct OrderByExecutor {
     child: BoxedExecutor,
-    first_execution: bool,
     sorted_indices: Vec<Vec<usize>>,
     chunks: Vec<DataChunkRef>,
     vis_indices: Vec<usize>,
@@ -48,7 +47,6 @@ impl BoxedExecutorBuilder for OrderByExecutor {
             return Ok(Box::new(Self {
                 order_pairs: Arc::new(order_pairs),
                 child,
-                first_execution: true,
                 vis_indices: vec![],
                 chunks: vec![],
                 sorted_indices: vec![],
@@ -105,6 +103,7 @@ impl OrderByExecutor {
         Ok(())
     }
 
+    // TODO: remove this and replace with `schema()`
     fn fill_data_types(&mut self) {
         let mut data_types = Vec::new();
         for i in 0..self.chunks[0].dimension() {
@@ -116,18 +115,17 @@ impl OrderByExecutor {
 
 #[async_trait::async_trait]
 impl Executor for OrderByExecutor {
-    fn init(&mut self) -> Result<()> {
-        self.first_execution = true;
-        self.child.init()?;
+    async fn init(&mut self) -> Result<()> {
+        self.child.init().await?;
+
+        self.collect_child_data().await?;
+        self.fill_data_types();
+
+        self.child.clean().await?;
         Ok(())
     }
 
     async fn execute(&mut self) -> Result<ExecutorResult> {
-        if self.first_execution {
-            self.collect_child_data().await?;
-            self.fill_data_types();
-            self.first_execution = false;
-        }
         let mut builders = self
             .data_types
             .iter()
@@ -169,8 +167,7 @@ impl Executor for OrderByExecutor {
         Ok(ExecutorResult::Batch(chunk))
     }
 
-    fn clean(&mut self) -> Result<()> {
-        self.child.clean()?;
+    async fn clean(&mut self) -> Result<()> {
         Ok(())
     }
 
@@ -231,7 +228,6 @@ mod tests {
         let mut order_by_executor = OrderByExecutor {
             order_pairs: Arc::new(order_pairs),
             child: Box::new(mock_executor),
-            first_execution: true,
             vis_indices: vec![],
             chunks: vec![],
             sorted_indices: vec![],
@@ -241,6 +237,7 @@ mod tests {
         let fields = &order_by_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
         assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Int32);
+        order_by_executor.init().await.unwrap();
         let res = order_by_executor.execute().await.unwrap();
         assert!(matches!(res, ExecutorResult::Batch(_)));
         if let ExecutorResult::Batch(res) = res {
@@ -249,5 +246,6 @@ mod tests {
             assert_eq!(col0.array().as_int32().value_at(1), Some(2));
             assert_eq!(col0.array().as_int32().value_at(2), Some(1));
         }
+        order_by_executor.clean().await.unwrap();
     }
 }

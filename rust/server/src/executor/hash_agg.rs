@@ -65,7 +65,7 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
             child,
             groups: AggHashMap::<SerializedKey>::default(),
             group_key_types,
-            done: false,
+            result: None,
             schema: Schema { fields },
         }) as BoxedExecutor)
     }
@@ -78,10 +78,10 @@ pub(super) struct HashAggExecutor<K> {
     group_key_columns: Vec<usize>,
     /// child executor
     child: BoxedExecutor,
-    /// Hash map for each agg groups
+    /// hash map for each agg groups
     groups: AggHashMap<K>,
-    /// if all results have been outputed
-    done: bool,
+    /// the aggregated result set
+    result: Option<DataChunk>,
     /// the data types of key columns
     group_key_types: Vec<DataTypeRef>,
     schema: Schema,
@@ -89,14 +89,9 @@ pub(super) struct HashAggExecutor<K> {
 
 #[async_trait::async_trait]
 impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
-    fn init(&mut self) -> Result<()> {
-        self.child.init()
-    }
+    async fn init(&mut self) -> Result<()> {
+        self.child.init().await?;
 
-    async fn execute(&mut self) -> Result<ExecutorResult> {
-        if self.done {
-            return Ok(ExecutorResult::Done);
-        }
         while let Batch(chunk) = self.child.execute().await? {
             let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
             for (row_id, key) in keys.into_iter().enumerate() {
@@ -156,12 +151,23 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
             .collect::<Result<Vec<_>>>()?;
 
         let ret = DataChunk::builder().columns(columns).build();
-        self.done = true;
+        assert!(self.result.is_none());
+        self.result = Some(ret);
+
+        self.child.clean().await
+    }
+
+    async fn execute(&mut self) -> Result<ExecutorResult> {
+        if self.result.is_none() {
+            return Ok(ExecutorResult::Done);
+        }
+
+        let ret = self.result.take().unwrap();
         Ok(ExecutorResult::Batch(ret))
     }
 
-    fn clean(&mut self) -> Result<()> {
-        self.child.clean()
+    async fn clean(&mut self) -> Result<()> {
+        Ok(())
     }
 
     fn schema(&self) -> &Schema {
@@ -248,7 +254,7 @@ mod tests {
             child: Box::new(src_exec),
             groups: AggHashMap::<SerializedKey>::default(),
             group_key_types: vec![t32.clone(), t32.clone()],
-            done: false,
+            result: None,
             schema: schema.clone(),
         };
         // TODO: currently the order is fixed

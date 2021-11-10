@@ -79,7 +79,7 @@ impl BoxedExecutorBuilder for SeqScanExecutor {
 
 #[async_trait::async_trait]
 impl Executor for SeqScanExecutor {
-    fn init(&mut self) -> Result<()> {
+    async fn init(&mut self) -> Result<()> {
         info!("SeqScanExecutor initing!");
         Ok(())
     }
@@ -118,7 +118,7 @@ impl Executor for SeqScanExecutor {
         Ok(ExecutorResult::Batch(ret))
     }
 
-    fn clean(&mut self) -> Result<()> {
+    async fn clean(&mut self) -> Result<()> {
         info!("Table scan closed.");
         Ok(())
     }
@@ -211,10 +211,12 @@ mod tests {
             chunk_idx: 0,
             schema: Schema { fields },
         };
-        assert!(seq_scan_executor.init().is_ok());
+        seq_scan_executor.init().await.unwrap();
 
         let fields = &seq_scan_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int64);
+
+        seq_scan_executor.init().await.unwrap();
 
         let result_chunk1 = seq_scan_executor.execute().await?.batch_or()?;
         assert_eq!(result_chunk1.dimension(), 1);
@@ -239,8 +241,8 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
         );
-        assert!(seq_scan_executor.execute().await.is_ok());
-        assert!(seq_scan_executor.clean().is_ok());
+        seq_scan_executor.execute().await.unwrap();
+        seq_scan_executor.clean().await.unwrap();
 
         Ok(())
     }

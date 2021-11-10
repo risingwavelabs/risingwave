@@ -120,7 +120,7 @@ impl EquiJoinParams {
 
 #[async_trait::async_trait]
 impl<K: HashKey + Send + Sync> Executor for HashJoinExecutor<K> {
-    fn init(&mut self) -> Result<()> {
+    async fn init(&mut self) -> Result<()> {
         Ok(())
     }
 
@@ -154,9 +154,9 @@ impl<K: HashKey + Send + Sync> Executor for HashJoinExecutor<K> {
         }
     }
 
-    fn clean(&mut self) -> Result<()> {
-        self.left_child.clean()?;
-        self.right_child.clean()?;
+    async fn clean(&mut self) -> Result<()> {
+        self.left_child.clean().await?;
+        self.right_child.clean().await?;
         Ok(())
     }
 
@@ -167,7 +167,7 @@ impl<K: HashKey + Send + Sync> Executor for HashJoinExecutor<K> {
 
 impl<K: HashKey> HashJoinExecutor<K> {
     async fn build(&mut self, mut build_table: BuildTable) -> Result<()> {
-        self.right_child.init()?;
+        self.right_child.init().await?;
         while let Batch(chunk) = self.right_child.execute().await? {
             build_table.append_build_chunk(chunk)?;
         }
@@ -184,7 +184,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         mut probe_table: ProbeTable<K>,
     ) -> Result<Option<DataChunk>> {
         if first_probe {
-            self.left_child.init()?;
+            self.left_child.init().await?;
 
             match self.left_child.execute().await? {
                 ExecutorResult::Batch(data_chunk) => {
@@ -672,7 +672,10 @@ mod tests {
 
         async fn do_test(&self, expected: DataChunk) {
             let mut join_executor = self.create_join_executor();
-            join_executor.init().expect("Failed to init join executor.");
+            join_executor
+                .init()
+                .await
+                .expect("Failed to init join executor.");
 
             let mut data_chunk_merger = DataChunkMerger::new(self.output_data_types()).unwrap();
 

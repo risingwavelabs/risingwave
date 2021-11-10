@@ -83,7 +83,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
 
 #[async_trait::async_trait]
 impl Executor for RowSeqScanExecutor {
-    fn init(&mut self) -> Result<()> {
+    async fn init(&mut self) -> Result<()> {
         Ok(())
     }
 
@@ -154,7 +154,7 @@ impl Executor for RowSeqScanExecutor {
         }
     }
 
-    fn clean(&mut self) -> Result<()> {
+    async fn clean(&mut self) -> Result<()> {
         info!("Table scan closed.");
         Ok(())
     }

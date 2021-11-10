@@ -22,7 +22,6 @@ use risingwave_pb::plan::{plan_node::PlanNodeType, NestedLoopJoinNode};
 
 /// Nested loop join executor.
 ///
-///
 /// Currently the Nested Loop Join do not only consider INNER JOIN.
 /// OUTER/SEMI/ANTI JOIN will be added in future PR.
 ///
@@ -72,11 +71,11 @@ enum NestedLoopJoinState {
 
 #[async_trait::async_trait]
 impl Executor for NestedLoopJoinExecutor {
-    fn init(&mut self) -> risingwave_common::error::Result<()> {
+    async fn init(&mut self) -> Result<()> {
         Ok(())
     }
 
-    async fn execute(&mut self) -> risingwave_common::error::Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<ExecutorResult> {
         if let Some(last_chunk) = self.last_chunk.take() {
             let (left_data_chunk, return_chunk) = self.chunk_builder.append_chunk(last_chunk)?;
             self.last_chunk = left_data_chunk;
@@ -119,8 +118,8 @@ impl Executor for NestedLoopJoinExecutor {
             }
         }
     }
-    fn clean(&mut self) -> risingwave_common::error::Result<()> {
-        self.probe_side_source.clean()
+    async fn clean(&mut self) -> Result<()> {
+        self.probe_side_source.clean().await
     }
 
     fn schema(&self) -> &Schema {
@@ -271,7 +270,7 @@ impl ProbeSideSource {
     }
 
     async fn init(&mut self) -> Result<()> {
-        self.outer.init()?;
+        self.outer.init().await?;
         self.cur_chunk = self.outer.execute().await?;
         Ok(())
     }
@@ -333,8 +332,8 @@ impl ProbeSideSource {
         Ok(())
     }
 
-    fn clean(&mut self) -> Result<()> {
-        self.outer.clean()
+    async fn clean(&mut self) -> Result<()> {
+        self.outer.clean().await
     }
 
     fn get_schema(&self) -> &Schema {
@@ -369,11 +368,11 @@ impl BuildTable {
     ///   cuz
     /// only used in init.
     async fn init(&mut self, inner_source: &mut BoxedExecutor) -> Result<()> {
-        inner_source.init()?;
+        inner_source.init().await?;
         while let Batch(chunk) = inner_source.execute().await? {
             self.inner_table.push(chunk);
         }
-        inner_source.clean()
+        inner_source.clean().await
     }
 
     /// The layout be like:

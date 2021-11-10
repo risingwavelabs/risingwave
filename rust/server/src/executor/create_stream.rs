@@ -113,7 +113,7 @@ impl BoxedExecutorBuilder for CreateStreamExecutor {
 
 #[async_trait::async_trait]
 impl Executor for CreateStreamExecutor {
-    fn init(&mut self) -> Result<()> {
+    async fn init(&mut self) -> Result<()> {
         info!("create stream executor initing!");
         Ok(())
     }
@@ -129,7 +129,7 @@ impl Executor for CreateStreamExecutor {
         Ok(ExecutorResult::Done)
     }
 
-    fn clean(&mut self) -> Result<()> {
+    async fn clean(&mut self) -> Result<()> {
         info!("create stream executor cleaned!");
         Ok(())
     }

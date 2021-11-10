@@ -30,6 +30,10 @@ impl ChunkReader {
         }
     }
 
+    pub async fn init(&mut self) -> Result<()> {
+        self.reader.init().await
+    }
+
     pub async fn next_chunk(&mut self, max_chunk_size: usize) -> Result<Option<DataChunk>> {
         if self.done {
             return Ok(None);

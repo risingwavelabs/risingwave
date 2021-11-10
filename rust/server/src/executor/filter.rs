@@ -26,8 +26,8 @@ pub(super) struct FilterExecutor {
 
 #[async_trait::async_trait]
 impl Executor for FilterExecutor {
-    fn init(&mut self) -> Result<()> {
-        self.child.init()
+    async fn init(&mut self) -> Result<()> {
+        self.child.init().await
     }
 
     async fn execute(&mut self) -> Result<ExecutorResult> {
@@ -59,8 +59,8 @@ impl Executor for FilterExecutor {
         }
     }
 
-    fn clean(&mut self) -> Result<()> {
-        self.child.clean()
+    async fn clean(&mut self) -> Result<()> {
+        self.child.clean().await
     }
 
     fn schema(&self) -> &Schema {
@@ -167,6 +167,7 @@ mod tests {
         let fields = &filter_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
         assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Int32);
+        filter_executor.init().await.unwrap();
         let res = filter_executor.execute().await.unwrap();
         if let Batch(res) = res {
             let col1 = res.column_at(0).unwrap();
@@ -176,6 +177,7 @@ mod tests {
         } else {
             panic!("Filter executor returned no data!")
         }
+        filter_executor.clean().await.unwrap();
     }
 
     fn make_expression(kind: ProstExprType) -> ProstExprNode {

@@ -106,8 +106,8 @@ mod tests {
 
     use crate::source::{FileSource, FileSourceConfig, Source, SourceMessage};
 
-    #[test]
-    fn test_file_source() {
+    #[tokio::test]
+    async fn test_file_source() {
         let temp_file = Builder::new()
             .prefix("temp")
             .suffix(".txt")
@@ -127,7 +127,7 @@ mod tests {
         });
 
         let mut reader = source.reader().unwrap();
-        let message = async_std::task::block_on(async { reader.poll_message().await });
+        let message = reader.poll_message().await;
 
         if let SourceMessage::File(message) = message.unwrap().unwrap() {
             assert_eq!(&message.data[..], data.as_bytes())

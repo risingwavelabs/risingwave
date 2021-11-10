@@ -48,7 +48,7 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
 
 #[async_trait::async_trait]
 impl Executor for CreateTableExecutor {
-    fn init(&mut self) -> Result<()> {
+    async fn init(&mut self) -> Result<()> {
         info!("create table executor initing!");
         Ok(())
     }
@@ -66,7 +66,7 @@ impl Executor for CreateTableExecutor {
             .map(|_| ExecutorResult::Done)
     }
 
-    fn clean(&mut self) -> Result<()> {
+    async fn clean(&mut self) -> Result<()> {
         info!("create table executor cleaned!");
         Ok(())
     }

@@ -48,7 +48,7 @@ impl MockExecutor {
 
 #[async_trait::async_trait]
 impl Executor for MockExecutor {
-    fn init(&mut self) -> Result<()> {
+    async fn init(&mut self) -> Result<()> {
         Ok(())
     }
 
@@ -60,7 +60,7 @@ impl Executor for MockExecutor {
         Ok(ExecutorResult::Batch(chunk))
     }
 
-    fn clean(&mut self) -> Result<()> {
+    async fn clean(&mut self) -> Result<()> {
         Ok(())
     }
 
@@ -68,9 +68,11 @@ impl Executor for MockExecutor {
         &self.schema
     }
 }
+
 /// if the input from two child executor is same(considering order),
-/// it will also check the cloumns structure of chunks from child executor
+/// it will also check the columns structure of chunks from child executor
 /// use for executor unit test.
+///
 /// if want diff ignoring order, add a `order_by` executor in manual currently, when the `schema`
 /// method of `executor` is ready, an order-ignored version will be added.
 pub struct DiffExecutor {
@@ -83,8 +85,8 @@ pub async fn diff_executor_output(mut actual: BoxedExecutor, mut expect: BoxedEx
     let mut actual_cardinality = 0;
     let mut expects = vec![];
     let mut actuals = vec![];
-    expect.init().unwrap();
-    actual.init().unwrap();
+    expect.init().await.unwrap();
+    actual.init().await.unwrap();
     while let Batch(chunk) = expect.execute().await.unwrap() {
         let chunk = DataChunk::compact(chunk).unwrap();
         expect_cardinality += chunk.cardinality();
@@ -95,8 +97,8 @@ pub async fn diff_executor_output(mut actual: BoxedExecutor, mut expect: BoxedEx
         actual_cardinality += chunk.cardinality();
         actuals.push(Arc::new(chunk));
     }
-    expect.clean().unwrap();
-    actual.clean().unwrap();
+    expect.clean().await.unwrap();
+    actual.clean().await.unwrap();
     assert_eq!(actual_cardinality, expect_cardinality);
     if actual_cardinality == 0 {
         return;

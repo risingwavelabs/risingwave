@@ -108,10 +108,8 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
 
 #[async_trait::async_trait]
 impl Executor for StreamScanExecutor {
-    fn init(&mut self) -> Result<()> {
-        // TODO: make init() async
-        // self.reader.init().await?;
-        Ok(())
+    async fn init(&mut self) -> Result<()> {
+        self.reader.init().await
     }
 
     async fn execute(&mut self) -> Result<ExecutorResult> {
@@ -125,8 +123,8 @@ impl Executor for StreamScanExecutor {
         }
     }
 
-    fn clean(&mut self) -> Result<()> {
-        async_std::task::block_on(self.reader.cancel())
+    async fn clean(&mut self) -> Result<()> {
+        self.reader.cancel().await
     }
 
     fn schema(&self) -> &Schema {

@@ -27,8 +27,8 @@ pub(super) struct ValuesExecutor {
 
 #[async_trait::async_trait]
 impl Executor for ValuesExecutor {
-    fn init(&mut self) -> Result<()> {
-        info!("Values executor");
+    async fn init(&mut self) -> Result<()> {
+        info!("Values executor init");
         Ok(())
     }
 
@@ -91,7 +91,7 @@ impl Executor for ValuesExecutor {
         Ok(ExecutorResult::Batch(chunk))
     }
 
-    fn clean(&mut self) -> Result<()> {
+    async fn clean(&mut self) -> Result<()> {
         Ok(())
     }
 
@@ -171,15 +171,16 @@ mod tests {
             executed: false,
             schema: Schema { fields },
         };
-        assert!(values_executor.init().is_ok());
+        values_executor.init().await.unwrap();
 
         let fields = &values_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int16);
         assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Int32);
         assert_eq!(fields[2].data_type.data_type_kind(), DataTypeKind::Int64);
 
+        values_executor.init().await.unwrap();
         let result = values_executor.execute().await?.batch_or()?;
-        assert!(values_executor.clean().is_ok());
+        values_executor.clean().await.unwrap();
         assert_eq!(
             result
                 .column_at(0)?

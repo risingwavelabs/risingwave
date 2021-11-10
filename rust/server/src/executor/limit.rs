@@ -80,8 +80,8 @@ impl LimitExecutor {
 
 #[async_trait::async_trait]
 impl Executor for LimitExecutor {
-    fn init(&mut self) -> Result<()> {
-        self.child.init()?;
+    async fn init(&mut self) -> Result<()> {
+        self.child.init().await?;
         Ok(())
     }
 
@@ -105,8 +105,8 @@ impl Executor for LimitExecutor {
         Ok(Done)
     }
 
-    fn clean(&mut self) -> Result<()> {
-        self.child.clean()?;
+    async fn clean(&mut self) -> Result<()> {
+        self.child.clean().await?;
         Ok(())
     }
 
@@ -313,6 +313,8 @@ mod tests {
             skipped: 0,
             returned: 0,
         };
+        limit_executor.init().await.unwrap();
+
         let mut results = vec![];
         while let Batch(chunk) = limit_executor.execute().await.unwrap() {
             results.push(Arc::new(chunk.compact().unwrap()));
@@ -344,7 +346,9 @@ mod tests {
                     col0.array().as_int32().value_at(chunk_idx),
                     Some(expect as i32)
                 );
-            })
+            });
+
+        limit_executor.clean().await.unwrap();
     }
 
     #[tokio::test]

@@ -108,15 +108,18 @@ impl TopNExecutor {
 
 #[async_trait::async_trait]
 impl Executor for TopNExecutor {
-    fn init(&mut self) -> Result<()> {
-        self.child.init()?;
+    async fn init(&mut self) -> Result<()> {
+        self.child.init().await?;
+
+        while let ExecutorResult::Batch(chunk) = self.child.execute().await? {
+            self.top_n_heap.fit(Arc::new(chunk));
+        }
+        self.child.clean().await?;
+
         Ok(())
     }
 
     async fn execute(&mut self) -> Result<ExecutorResult> {
-        while let ExecutorResult::Batch(chunk) = self.child.execute().await? {
-            self.top_n_heap.fit(Arc::new(chunk));
-        }
         if let Some(chunk) = self.top_n_heap.dump() {
             Ok(ExecutorResult::Batch(chunk))
         } else {
@@ -124,8 +127,7 @@ impl Executor for TopNExecutor {
         }
     }
 
-    fn clean(&mut self) -> Result<()> {
-        self.child.clean()?;
+    async fn clean(&mut self) -> Result<()> {
         Ok(())
     }
 
@@ -187,6 +189,7 @@ mod tests {
         let fields = &top_n_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
         assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Int32);
+        top_n_executor.init().await.unwrap();
         let res = top_n_executor.execute().await.unwrap();
         assert!(matches!(res, ExecutorResult::Batch(_)));
         if let ExecutorResult::Batch(res) = res {
@@ -197,5 +200,6 @@ mod tests {
         }
         let res = top_n_executor.execute().await.unwrap();
         assert!(matches!(res, ExecutorResult::Done));
+        top_n_executor.clean().await.unwrap();
     }
 }

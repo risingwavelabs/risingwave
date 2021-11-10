@@ -65,12 +65,21 @@ impl ExecutorResult {
     }
 }
 
+/// `Executor` is an operator in the query execution.
 #[async_trait::async_trait]
 pub trait Executor: Send {
-    fn init(&mut self) -> Result<()>;
+    /// Initializes the executor.
+    async fn init(&mut self) -> Result<()>;
+
+    /// Executes the executor to get next chunk
     async fn execute(&mut self) -> Result<ExecutorResult>;
-    fn clean(&mut self) -> Result<()>;
-    /// this method will return the schema of the executor's return data
+
+    /// Finalizes the executor.
+    async fn clean(&mut self) -> Result<()>;
+
+    /// Returns the schema of the executor's return data.
+    ///
+    /// Schema must be available before `init`.
     fn schema(&self) -> &Schema;
 }
 
