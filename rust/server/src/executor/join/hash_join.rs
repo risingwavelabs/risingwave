@@ -5,7 +5,7 @@ use std::mem::swap;
 use either::Either;
 use prost::Message;
 
-use crate::executor::join::hash_join::HashJoinState::{FirstProbe, Probe, ProbeRemaining};
+use crate::executor::join::hash_join::HashJoinState::{Done, FirstProbe, Probe, ProbeRemaining};
 use crate::executor::join::hash_join_state::{BuildTable, ProbeTable};
 use crate::executor::join::JoinType;
 use crate::executor::ExecutorResult::Batch;
@@ -21,6 +21,7 @@ use risingwave_common::collection::hash_map::{
 };
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataTypeRef;
+use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_pb::plan::{plan_node::PlanNodeType, HashJoinNode};
 
 /// Parameters of equi-join.
@@ -46,26 +47,29 @@ pub(super) struct EquiJoinParams {
     output_columns: Vec<Either<usize, usize>>,
     /// Column types of outputs in equi join, e.g. the column types of `a1`, `a2`, `b1`, `b2`.
     output_data_types: Vec<DataTypeRef>,
+    /// Data chunk buffer size
+    batch_size: usize,
 }
 
 /// Different states when executing a hash join.
 enum HashJoinState<K> {
     /// Initial state of hash join.
+    ///
     /// In this state, the executor [`Executor::init`] build side input, and calls [`Executor::next`]
     /// of build side input till [`ExecutorResult::Done`] is returned to create `BuildTable`.
     Build(BuildTable),
     /// First state after finishing build state.
+    ///
     /// It's different from [`Probe`] in that we need to [`Executor::init`] probe side input.
     FirstProbe(ProbeTable<K>),
     /// State for executing join.
+    ///
     /// In this state, the executor calls [`Executor::init`]  method of probe side input, and executes
     /// joining with the chunk against build table to create output.
     Probe(ProbeTable<K>),
-    /// Optional state after [`Probe`].
-    /// This state is only required for join types which may produce outputs from build side, for
-    /// example, [`JoinType::RightOuter`].
+    /// State for executing join remaining.
     ///
-    /// See [`JoinType::need_join_remaining()`]
+    /// See [`JoinType::need_join_remaining`]
     ProbeRemaining(ProbeTable<K>),
     /// Final state of hash join.
     Done,
@@ -105,6 +109,11 @@ impl EquiJoinParams {
     pub(super) fn build_key_columns(&self) -> &[usize] {
         &self.right_key_columns
     }
+
+    #[inline(always)]
+    pub(super) fn batch_size(&self) -> usize {
+        self.batch_size
+    }
 }
 
 #[async_trait::async_trait]
@@ -133,7 +142,7 @@ impl<K: HashKey + Send + Sync> Executor for HashJoinExecutor<K> {
                     }
                 }
                 HashJoinState::ProbeRemaining(probe_table) => {
-                    let ret = self.probe_remaining(probe_table)?;
+                    let ret = self.probe_remaining(probe_table).await?;
                     if let Some(data_chunk) = ret {
                         return Ok(ExecutorResult::Batch(data_chunk));
                     }
@@ -174,31 +183,57 @@ impl<K: HashKey> HashJoinExecutor<K> {
     ) -> Result<Option<DataChunk>> {
         if first_probe {
             self.left_child.init()?;
+
+            match self.left_child.execute().await? {
+                ExecutorResult::Batch(data_chunk) => {
+                    probe_table.set_probe_data(data_chunk)?;
+                }
+                ExecutorResult::Done => {
+                    self.state = HashJoinState::Done;
+                    return Ok(None);
+                }
+            }
         }
 
-        match self.left_child.execute().await? {
-            ExecutorResult::Batch(data_chunk) => {
-                let ret = probe_table.join(data_chunk).map(Some);
+        loop {
+            if let Some(ret_data_chunk) = probe_table.join()? {
                 self.state = Probe(probe_table);
-                ret
-            }
-            ExecutorResult::Done => {
-                if probe_table.join_type().need_join_remaining() {
-                    // switch state
-                    self.state = ProbeRemaining(probe_table);
-                } else {
-                    self.state = HashJoinState::Done;
+                return Ok(Some(ret_data_chunk));
+            } else {
+                match self.left_child.execute().await? {
+                    ExecutorResult::Batch(data_chunk) => {
+                        probe_table.set_probe_data(data_chunk)?;
+                    }
+                    ExecutorResult::Done => {
+                        return if probe_table.join_type().need_join_remaining() {
+                            if let Some(ret_data_chunk) = probe_table.join_remaining()? {
+                                self.state = ProbeRemaining(probe_table);
+                                Ok(Some(ret_data_chunk))
+                            } else {
+                                self.state = Done;
+                                probe_table.consume_left()
+                            }
+                        } else {
+                            self.state = Done;
+                            probe_table.consume_left()
+                        }
+                    }
                 }
-
-                Ok(None)
             }
         }
     }
 
-    fn probe_remaining(&mut self, mut probe_table: ProbeTable<K>) -> Result<Option<DataChunk>> {
-        let ret = probe_table.join_remaining()?;
-        self.state = HashJoinState::Done;
-        Ok(ret)
+    async fn probe_remaining(
+        &mut self,
+        mut probe_table: ProbeTable<K>,
+    ) -> Result<Option<DataChunk>> {
+        if let Some(ret_data_chunk) = probe_table.join_remaining()? {
+            self.state = ProbeRemaining(probe_table);
+            Ok(Some(ret_data_chunk))
+        } else {
+            self.state = HashJoinState::Done;
+            probe_table.consume_left()
+        }
     }
 }
 
@@ -260,7 +295,10 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
         let hash_join_node = HashJoinNode::decode(&(context.plan_node()).get_body().value[..])
             .map_err(|e| RwError::from(ErrorCode::ProstError(e)))?;
 
-        let mut params = EquiJoinParams::default();
+        let mut params = EquiJoinParams {
+            batch_size: DEFAULT_CHUNK_BUFFER_SIZE,
+            ..Default::default()
+        };
         for left_key in hash_join_node.get_left_key() {
             let left_key = *left_key as usize;
             params.left_key_columns.push(left_key);
@@ -608,6 +646,7 @@ mod tests {
                 right_key_types: vec![self.right_types[0].clone()],
                 output_columns,
                 output_data_types,
+                batch_size: 2,
             };
 
             let fields = params
@@ -659,6 +698,8 @@ mod tests {
             let result_chunk = data_chunk_merger.finish().unwrap();
             // TODO: Replace this with unsorted comparison
             // assert_eq!(expected, result_chunk);
+            println!("Expected data chunk: {:?}", expected);
+            println!("Result data chunk: {:?}", result_chunk);
             assert!(is_data_chunk_eq(&expected, &result_chunk));
         }
     }

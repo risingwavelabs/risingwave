@@ -1,5 +1,5 @@
 use crate::array::column::Column;
-use crate::array::{ArrayBuilderImpl, DataChunk};
+use crate::array::{ArrayBuilderImpl, ArrayImpl, DataChunk};
 use crate::error::Result;
 use crate::types::DataTypeRef;
 use std::mem::swap;
@@ -81,7 +81,7 @@ impl DataChunkBuilder {
                         continue;
                     }
 
-                    self.append_one_row(&input_chunk.data_chunk, new_return_offset - 1)?;
+                    self.append_one_row_internal(&input_chunk.data_chunk, new_return_offset - 1)?;
                     if self.buffered_count >= self.batch_size {
                         break;
                     }
@@ -92,7 +92,7 @@ impl DataChunkBuilder {
                     .zip(buffer_row_idx_iter)
                     .try_for_each(|(input_row_idx, _output_row_idx)| {
                         new_return_offset += 1;
-                        self.append_one_row(&input_chunk.data_chunk, input_row_idx)
+                        self.append_one_row_internal(&input_chunk.data_chunk, input_row_idx)
                     })?;
             }
         }
@@ -114,6 +114,29 @@ impl DataChunkBuilder {
         Ok((returned_input_chunk, output_chunk))
     }
 
+    pub fn append_one_row<'a, I>(&mut self, row: I) -> Result<Option<DataChunk>>
+    where
+        I: IntoIterator<Item = Option<(&'a ArrayImpl, usize)>>,
+    {
+        ensure!(self.buffered_count < self.batch_size);
+        self.ensure_builders()?;
+
+        for (array_builder, column_opt) in self.array_builders.iter_mut().zip(row) {
+            match column_opt {
+                Some((array, row)) => array_builder.append_array_element(array, row)?,
+                None => array_builder.append_null()?,
+            }
+        }
+
+        self.buffered_count += 1;
+
+        if self.buffered_count == self.batch_size {
+            Ok(Some(self.build_data_chunk()?))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Returns all data in current buffer.
     ///
     /// If `buffered_count` is 0, `None` is returned.
@@ -125,7 +148,7 @@ impl DataChunkBuilder {
         }
     }
 
-    fn append_one_row(&mut self, data_chunk: &DataChunk, row_idx: usize) -> Result<()> {
+    fn append_one_row_internal(&mut self, data_chunk: &DataChunk, row_idx: usize) -> Result<()> {
         self.array_builders
             .iter_mut()
             .zip(data_chunk.columns())
