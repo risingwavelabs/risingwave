@@ -1,5 +1,5 @@
 use crate::array::column::Column;
-use crate::array::{ArrayBuilderImpl, ArrayImpl, DataChunk};
+use crate::array::{ArrayBuilderImpl, ArrayImpl, DataChunk, RowRef};
 use crate::error::Result;
 use crate::types::DataTypeRef;
 use std::mem::swap;
@@ -149,14 +149,31 @@ impl DataChunkBuilder {
     }
 
     fn append_one_row_internal(&mut self, data_chunk: &DataChunk, row_idx: usize) -> Result<()> {
+        self.append_one_row_ref_impl(data_chunk.row_at(row_idx)?.0)
+    }
+
+    fn append_one_row_ref_impl(&mut self, row_ref: RowRef<'_>) -> Result<()> {
         self.array_builders
             .iter_mut()
-            .zip(data_chunk.columns())
-            .try_for_each(|(array_builder, column)| {
-                array_builder.append_datum_ref(column.array_ref().value_at(row_idx))
-            })?;
+            .zip(row_ref.0)
+            .try_for_each(|(array_builder, scalar)| array_builder.append_datum_ref(scalar))?;
         self.buffered_count += 1;
         Ok(())
+    }
+
+    /// Used for append one row in some executors.
+    /// Return a Some(data chunk) if the buffer is full after append one row.
+    /// Otherwise None.
+    pub fn append_one_row_ref(&mut self, row_ref: RowRef<'_>) -> Result<Option<DataChunk>> {
+        ensure!(self.buffered_count < self.batch_size);
+        self.ensure_builders()?;
+
+        self.append_one_row_ref_impl(row_ref)?;
+        if self.buffered_count == self.batch_size {
+            Ok(Some(self.build_data_chunk()?))
+        } else {
+            Ok(None)
+        }
     }
 
     fn build_data_chunk(&mut self) -> Result<DataChunk> {
