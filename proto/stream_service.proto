@@ -41,6 +41,15 @@ message BuildFragmentResponse {
   repeated uint32 fragment_id = 2;
 }
 
+message DropFragmentsRequest {
+  uint32 request_id = 1;
+  repeated uint32 fragment_ids = 2;
+}
+
+message DropFragmentsResponse {
+  uint32 request_id = 1;
+  repeated uint32 fragment_ids = 2;
+}
 // Before starting streaming, the leader node broadcast the actor-host table to needed workers.
 message BroadcastActorInfoTableResponse {
   common.Status status = 1;
@@ -50,6 +59,7 @@ service StreamService {
   rpc UpdateFragment(UpdateFragmentRequest) returns (UpdateFragmentResponse);
   rpc BuildFragment(BuildFragmentRequest) returns (BuildFragmentResponse);
   rpc BroadcastActorInfoTable(BroadcastActorInfoTableRequest) returns (BroadcastActorInfoTableResponse);
+  rpc DropFragment(DropFragmentsRequest) returns (DropFragmentsResponse);
 }
 
 // TODO: Lifecycle management for actors.

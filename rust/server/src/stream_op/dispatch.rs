@@ -90,6 +90,7 @@ impl<Inner: DataDispatcher + Send + Sync + 'static> StreamConsumer for DispatchE
     async fn next(&mut self) -> Result<bool> {
         let msg = self.input.next().await?;
         let terminated = matches!(msg, Message::Terminate);
+
         self.dispatch(msg).await?;
         Ok(!terminated)
     }

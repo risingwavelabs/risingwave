@@ -33,7 +33,7 @@ pub struct StreamManagerCore {
     /// Each processor runs in a future. Upon receiving a `Terminate` message, they will exit.
     /// `handles` store join handles of these futures, and therefore we could wait their
     /// termination.
-    handles: Vec<JoinHandle<Result<()>>>,
+    handles: HashMap<u32, JoinHandle<Result<()>>>,
 
     /// Stores the senders and receivers for later `Processor`'s use.
     ///
@@ -85,6 +85,13 @@ impl StreamManager {
         StreamManager {
             core: Mutex::new(StreamManagerCore::new(addr)),
         }
+    }
+    pub fn drop_fragment(&self, fragments: &[u32]) -> Result<()> {
+        let mut core = self.core.lock().unwrap();
+        for id in fragments {
+            core.drop_fragment(*id);
+        }
+        Ok(())
     }
 
     pub fn take_receiver(&self, ids: UpDownFragmentIds) -> Result<Receiver<Message>> {
@@ -168,7 +175,7 @@ impl StreamManagerCore {
     fn new(addr: SocketAddr) -> Self {
         let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
         Self {
-            handles: vec![],
+            handles: HashMap::new(),
             channel_pool: HashMap::new(),
             receivers_for_exchange_service: HashMap::new(),
             actors: HashMap::new(),
@@ -511,14 +518,14 @@ impl StreamManagerCore {
             )?;
 
             let actor = Actor::new(dispatcher);
-            tokio::spawn(actor.run());
+            self.handles.insert(*fragment_id, tokio::spawn(actor.run()));
         }
 
         Ok(())
     }
 
     pub async fn wait_all(&mut self) -> Result<()> {
-        for handle in std::mem::take(&mut self.handles) {
+        for (_sid, handle) in std::mem::take(&mut self.handles) {
             handle.await.unwrap()?;
         }
         Ok(())
@@ -539,6 +546,20 @@ impl StreamManagerCore {
             }
         }
         Ok(())
+    }
+
+    /// `drop_fragment` is invoked by the leader node via RPC once the stop barrier arrives at the
+    ///  sink. All the actors in the fragments should stop themselves before this method is invoked.
+    fn drop_fragment(&mut self, fragment_id: u32) {
+        let handle = self.handles.remove(&fragment_id).unwrap();
+        self.channel_pool.retain(|(x, _), _| *x != fragment_id);
+        self.receivers_for_exchange_service
+            .retain(|(x, _), _| *x != fragment_id);
+
+        self.actors.remove(&fragment_id);
+        self.fragments.remove(&fragment_id);
+        // Task should have already stopped when this method is invoked.
+        handle.abort();
     }
 
     fn update_fragment(&mut self, fragments: &[stream_plan::StreamFragment]) -> Result<()> {
