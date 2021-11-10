@@ -69,8 +69,9 @@ dyn_clone::clone_trait_object!(StreamingAggStateImpl);
 /// 4. `string_agg ( value text, delimiter text ) -> text`
 /// 5. `string_agg ( value bytea, delimiter bytea ) -> bytea`
 /// We remark that there is difference between `count(*)` and `count(any)`:
-/// 1. `count(*)` computes the number of input rows. And the semantics of row count is equal to the semantics of `count(*)`
-/// 2. `count("any")` computes the number of input rows in which the input value is not null.
+/// 1. `count(*)` computes the number of input rows. And the semantics of row count is equal to the
+/// semantics of `count(*)` 2. `count("any")` computes the number of input rows in which the input
+/// value is not null.
 pub fn create_streaming_agg_state(
     input_types: &[DataTypeRef],
     agg_type: &AggKind,
@@ -139,7 +140,8 @@ pub fn create_streaming_agg_state(
         }
         [] => {
             match (agg_type, return_type.data_type_kind()) {
-                // `AggKind::Count` for partial/local Count(*) == RowCount while `AggKind::Sum` for final/global Count(*)
+                // `AggKind::Count` for partial/local Count(*) == RowCount while `AggKind::Sum` for
+                // final/global Count(*)
                 (AggKind::RowCount, DataTypeKind::Int64) => Box::new(StreamingRowCountAgg::new()),
                 // According to the function header comments and the link, Count(*) == RowCount
                 // `StreamingCountAgg` does not count `NULL`, so we use `StreamingRowCountAgg` here.

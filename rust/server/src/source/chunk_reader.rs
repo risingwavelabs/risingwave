@@ -7,7 +7,8 @@ use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
 use risingwave_common::error::Result;
 
 /// `ChunkReader` is the intermediate layer between Executor and Source,
-/// responsible for reading data one by one from `SourceReader` by calling next() and generating `DataChunk`
+/// responsible for reading data one by one from `SourceReader` by calling next() and generating
+/// `DataChunk`
 pub struct ChunkReader {
     reader: Box<dyn SourceReader>,
     parser: Box<dyn SourceParser>,

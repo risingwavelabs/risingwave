@@ -101,8 +101,9 @@ where
     }
 }
 // CastDiv trait enables division between primitive types.
-// We need this abstract because explicit conversion between some primitive types does not exist. (such as f64::From<i64>)
-// furthermore, extra check logic may be added into the division process in the feature.
+// We need this abstract because explicit conversion between some primitive types does not exist.
+// (such as f64::From<i64>) furthermore, extra check logic may be added into the division process in
+// the feature.
 pub trait CastDiv<Rhs, Output> {
     fn safe_div(self, r: Rhs) -> Output;
 }
@@ -191,7 +192,7 @@ mod tests {
             .unwrap();
         let array = get_output_from_state(&mut avg_agg);
 
-        //sum=10+1+2+3+3-1=18 count=5-1=4
+        // sum=10+1+2+3+3-1=18 count=5-1=4
         assert_eq!(array.value_at(0), Some(4.5_f64));
     }
 

@@ -207,7 +207,8 @@ impl DataDispatcher for HashDataDispatcher {
         });
 
         // The 'update' message, noted by an UpdateDelete and a successive UpdateInsert,
-        // need to be rewritten to common Delete and Insert if they were dispatched to different fragments.
+        // need to be rewritten to common Delete and Insert if they were dispatched to different
+        // fragments.
         let mut last_hash_value_when_update_delete: usize = 0;
         let mut new_ops: Vec<Op> = Vec::new();
         for (hash_value, &op) in hash_values.into_iter().zip(ops.iter()) {

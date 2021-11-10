@@ -58,13 +58,14 @@ impl DataChunkBuilder {
         Ok(())
     }
 
-    /// Returns not consumed input chunked data as sliced data chunk, and a data chunk of `batch_size`.
+    /// Returns not consumed input chunked data as sliced data chunk, and a data chunk of
+    /// `batch_size`.
     ///
     /// If `input_chunk` is not totally consumed, it's returned with a new offset, which is equal to
     /// `old_offset + consumed_rows`. Otherwise the first value is `None`.
     ///
-    /// If number of `batch_size` rows reached, it's returned as the second value of tuple. Otherwise
-    /// it's `None`.
+    /// If number of `batch_size` rows reached, it's returned as the second value of tuple.
+    /// Otherwise it's `None`.
     pub fn append_chunk(
         &mut self,
         input_chunk: SlicedDataChunk,

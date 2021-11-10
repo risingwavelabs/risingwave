@@ -172,7 +172,6 @@ macro_rules! gen_error {
 /// ```ignore
 /// RwError(ErrorCode::MemoryError { layout });
 /// ```
-///
 #[macro_export]
 macro_rules! ensure {
     ($cond:expr) => {

@@ -9,7 +9,7 @@ use std::marker::PhantomData;
 pub trait Aggregator: Send + 'static {
     fn return_type_ref(&self) -> DataTypeRef;
 
-    ///`update` the aggregator with a row with type checked at runtime.
+    /// `update` the aggregator with a row with type checked at runtime.
     fn update_with_row(&mut self, input: &DataChunk, row_id: usize) -> Result<()>;
     /// `update` the aggregator with `Array` with input with type checked at runtime.
     ///

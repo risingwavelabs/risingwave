@@ -143,7 +143,8 @@ impl DataChunk {
     /// `rechunk` creates a new vector of data chunk whose size is `each_size_limit`.
     /// When the total cardinality of all the chunks is not evenly divided by the `each_size_limit`,
     /// the last new chunk will be the remainder.
-    /// Currently, `rechunk` would ignore visibility map. May or may not support it later depending on the demand
+    /// Currently, `rechunk` would ignore visibility map. May or may not support it later depending
+    /// on the demand
     pub fn rechunk(chunks: &[DataChunkRef], each_size_limit: usize) -> Result<Vec<DataChunk>> {
         assert!(each_size_limit > 0);
         // Corner case: one of the `chunks` may have 0 length

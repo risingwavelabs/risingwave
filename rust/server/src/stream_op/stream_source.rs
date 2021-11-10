@@ -32,8 +32,8 @@ impl Executor for StreamSourceExecutor {
     async fn next(&mut self) -> Result<Message> {
         let received = self.executor.next_data_chunk().fuse().await?;
         if let Some(chunk) = received {
-            // `capacity` or `cardinality` should be both fine as we just read the data from external sources
-            // no visibility map yet
+            // `capacity` or `cardinality` should be both fine as we just read the data from
+            // external sources no visibility map yet
             let capacity = chunk.capacity();
             let ops = vec![Op::Insert; capacity];
             let stream_chunk = StreamChunk::new(ops, chunk.columns().to_vec(), None);

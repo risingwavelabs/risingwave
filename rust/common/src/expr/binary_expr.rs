@@ -32,7 +32,8 @@ pub fn atm_placeholder<T1, T2, T3>(_l: T1, _r: T2) -> Result<T3> {
 /// * $i1: left array type
 /// * $i2: right array type
 /// * $cast: The cast type in that the operation will calculate
-/// * $func: The scalar function for expression, it's a generic function and specialized by the type of `$i1, $i2, $cast`
+/// * $func: The scalar function for expression, it's a generic function and specialized by the type
+///   of `$i1, $i2, $cast`
 macro_rules! arithmetic_impl {
   ([$l:expr, $r:expr, $ret:expr], $( { $i1:ty, $i2:ty, $cast:ty, $func:ident} ),*) => {
     match ($l.return_type().data_type_kind(), $r.return_type().data_type_kind()) {
@@ -64,7 +65,8 @@ macro_rules! arithmetic_impl {
 /// * $i1: left array type
 /// * $i2: right array type
 /// * $cast: The cast type in that the operation will calculate
-/// * $func: The scalar function for expression, it's a generic function and specialized by the type of `$i1, $i2, $cast`
+/// * $func: The scalar function for expression, it's a generic function and specialized by the type
+///   of `$i1, $i2, $cast`
 macro_rules! comparison_impl {
   ([$l:expr, $r:expr, $ret:expr], $( { $i1:ty, $i2:ty, $cast:ty, $func: ident} ),*) => {
     match ($l.return_type().data_type_kind(), $r.return_type().data_type_kind()) {
@@ -87,13 +89,16 @@ macro_rules! comparison_impl {
 }
 
 /// `gen_binary_expr` list all possible combination of input type and out put type
-/// Specifically, the first type is left input, the second type is right input and the third is the cast type
-/// For different data type, the scalar function may be different. Therefore we need to pass all possible scalar function
+/// Specifically, the first type is left input, the second type is right input and the third is the
+/// cast type For different data type, the scalar function may be different. Therefore we need to
+/// pass all possible scalar function
 /// * `macro`: a macro helps create expression
 /// * `int_f`: the scalar function of integer
 /// * `float_f`: the scalar function of float
-/// * `deci_f`: the scalar function for decimal with integer. In this scalar function, all inputs will be cast to decimal
-/// * `deci_f_f`: the scalar function for decimal with float. In this scalar function, all inputs will be cast to float
+/// * `deci_f`: the scalar function for decimal with integer. In this scalar function, all inputs
+///   will be cast to decimal
+/// * `deci_f_f`: the scalar function for decimal with float. In this scalar function, all inputs
+///   will be cast to float
 macro_rules! gen_binary_expr {
   ($macro:tt, $int_f:ident, $float_f:ident, $deci_f_f:ident, $deci_f:ident, $interval_date_f:ident, $date_interval_f:ident $(, $x:tt)* ) => {
     $macro! {

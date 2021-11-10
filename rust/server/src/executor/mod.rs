@@ -75,7 +75,8 @@ pub trait Executor: Send {
 
 pub type BoxedExecutor = Box<dyn Executor>;
 
-/// Every Executor should impl this trait to provide a static method to build a `BoxedExecutor` from proto and global environment
+/// Every Executor should impl this trait to provide a static method to build a `BoxedExecutor` from
+/// proto and global environment
 pub trait BoxedExecutorBuilder {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor>;
 }

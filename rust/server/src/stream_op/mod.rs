@@ -206,7 +206,8 @@ impl StreamChunk {
 pub enum Message {
     Chunk(StreamChunk),
     Barrier { epoch: u64, stop: bool },
-    // Note(eric): consider remove this. A stream is always terminated by an error or dropped by user
+    // Note(eric): consider remove this. A stream is always terminated by an error or dropped by
+    // user
     Terminate,
     // TODO: Watermark
 }

@@ -287,8 +287,8 @@ impl PartialEq for Bitmap {
             return false;
         }
         // assume unset bits are always 0, and num_bits is always consistent with bits length.
-        // Note: If you new a Buffer without init, the PartialEq may have UB due to uninit mem cuz we are
-        // comparing bytes by bytes instead of bits by bits.
+        // Note: If you new a Buffer without init, the PartialEq may have UB due to uninit mem cuz
+        // we are comparing bytes by bytes instead of bits by bits.
         let length = (self.num_bits + 7) / 8;
         self.bits.as_slice()[..length] == other.bits.as_slice()[..length]
     }

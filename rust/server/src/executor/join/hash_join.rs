@@ -37,13 +37,14 @@ pub(super) struct EquiJoinParams {
     left_key_columns: Vec<usize>,
     /// Data types of left keys in equi join, e.g., the column types of `b1` and `b3` in `b`.
     left_key_types: Vec<DataTypeRef>,
-    /// Column indexes of right keys in equi join, e.g., the column indexes of `a1` and `a3` in `a`.
+    /// Column indexes of right keys in equi join, e.g., the column indexes of `a1` and `a3` in
+    /// `a`.
     right_key_columns: Vec<usize>,
     /// Data types of right keys in equi join, e.g., the column types of `a1` and `a3` in `a`.
     right_key_types: Vec<DataTypeRef>,
     /// Column indexes of outputs in equi join, e.g. the column indexes of `a1`, `a2`, `b1`, `b2`.
-    /// [`Either::Left`] is used to mark left side input, and [`Either::Right`] is used to mark right
-    /// side input.
+    /// [`Either::Left`] is used to mark left side input, and [`Either::Right`] is used to mark
+    /// right side input.
     output_columns: Vec<Either<usize, usize>>,
     /// Column types of outputs in equi join, e.g. the column types of `a1`, `a2`, `b1`, `b2`.
     output_data_types: Vec<DataTypeRef>,
@@ -55,8 +56,9 @@ pub(super) struct EquiJoinParams {
 enum HashJoinState<K> {
     /// Initial state of hash join.
     ///
-    /// In this state, the executor [`Executor::init`] build side input, and calls [`Executor::next`]
-    /// of build side input till [`ExecutorResult::Done`] is returned to create `BuildTable`.
+    /// In this state, the executor [`Executor::init`] build side input, and calls
+    /// [`Executor::next`] of build side input till [`ExecutorResult::Done`] is returned to
+    /// create `BuildTable`.
     Build(BuildTable),
     /// First state after finishing build state.
     ///
@@ -64,8 +66,8 @@ enum HashJoinState<K> {
     FirstProbe(ProbeTable<K>),
     /// State for executing join.
     ///
-    /// In this state, the executor calls [`Executor::init`]  method of probe side input, and executes
-    /// joining with the chunk against build table to create output.
+    /// In this state, the executor calls [`Executor::init`]  method of probe side input, and
+    /// executes joining with the chunk against build table to create output.
     Probe(ProbeTable<K>),
     /// State for executing join remaining.
     ///
@@ -459,7 +461,7 @@ mod tests {
     /// (6, null), (4, 7.5::REAL), (6, null), (null, 8::REAL), (7, null),
     /// (null, 9.1::REAL), (9, null), (3, 5.7::REAL), (9, null), (null, 9.6::REAL),
     /// (100, null), (null, 8.18::REAL), (200, null);
-    ///```
+    /// ```
     impl TestFixture {
         fn with_join_type(join_type: JoinType) -> Self {
             Self {
@@ -805,7 +807,7 @@ mod tests {
         test_fixture.do_test(expected_chunk).await;
     }
 
-    ///```sql
+    /// ```sql
     /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 full outer join t2 on t1.v1 = t2.v1;
     /// ```
     #[tokio::test]

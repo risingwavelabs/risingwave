@@ -69,7 +69,6 @@
 //!   #[pb_convert(pb_variant = "DOUBLE")]
 //!   FLOAT64,
 //! }
-//!
 //! ```
 //!
 //! And protobuf message definition:
@@ -90,7 +89,6 @@
 //! ```
 //!
 //! For a complete example, please refer to [`tests`].
-//!
 mod internal;
 
 extern crate anyhow;

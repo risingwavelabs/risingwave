@@ -12,7 +12,8 @@ use crate::types::{build_from_proto, DataType, DataTypeRef};
 use protobuf::well_known_types::Any as AnyProto;
 use risingwave_proto::data::{Column as ColumnProto, DataType_TypeName};
 
-/// Column is owned by `DataChunk`. It consists of logic data type and physical array implementation.
+/// Column is owned by `DataChunk`. It consists of logic data type and physical array
+/// implementation.
 #[derive(Clone, Debug)]
 pub struct Column {
     array: ArrayRef,
@@ -106,7 +107,8 @@ mod tests {
     use risingwave_proto::data::Column as ColumnProto;
     use std::sync::Arc;
 
-    // Convert a column to protobuf, then convert it back to column, and ensures the two are identical.
+    // Convert a column to protobuf, then convert it back to column, and ensures the two are
+    // identical.
     #[test]
     fn test_column_protobuf_conversion() -> Result<()> {
         let cardinality = 2048;

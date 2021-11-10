@@ -47,7 +47,8 @@ impl Executor for TableSourceExecutor {
                 Message::Chunk(chunk) => Message::Chunk(chunk),
                 Message::Barrier { epoch, stop } => {
                     if stop {
-                        // Drop the receiver here, the source will encounter an error at the next send.
+                        // Drop the receiver here, the source will encounter an error at the next
+                        // send.
                         self.data_receiver = None;
                     }
 

@@ -71,7 +71,8 @@ impl Executor for MockExecutor {
 /// if the input from two child executor is same(considering order),
 /// it will also check the cloumns structure of chunks from child executor
 /// use for executor unit test.
-/// if want diff ignoring order, add a `order_by` executor in manual currently, when the `schema` method of `executor` is ready, an order-ignored version will be added.
+/// if want diff ignoring order, add a `order_by` executor in manual currently, when the `schema`
+/// method of `executor` is ready, an order-ignored version will be added.
 pub struct DiffExecutor {
     actual: BoxedExecutor,
     expect: BoxedExecutor,

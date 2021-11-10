@@ -37,18 +37,19 @@ pub struct StreamManagerCore {
 
     /// Stores the senders and receivers for later `Processor`'s use.
     ///
-    /// Each actor has several senders and several receivers. Senders and receivers are created during
-    /// `update_fragment`. Upon `build_fragment`, all these channels will be taken out and built into
-    /// the executors and outputs.
-    /// One sender or one receiver can be uniquely determined by the upstream and downstream fragment id.
+    /// Each actor has several senders and several receivers. Senders and receivers are created
+    /// during `update_fragment`. Upon `build_fragment`, all these channels will be taken out and
+    /// built into the executors and outputs.
+    /// One sender or one receiver can be uniquely determined by the upstream and downstream
+    /// fragment id.
     ///
     /// There are three cases that we need local channels to pass around messages:
     /// 1. pass `Message` between two local fragments
     /// 2. The RPC client at the downstream fragment forwards received `Message` to one channel in
     /// `ReceiverExecutor` or `MergerExecutor`.
-    /// 3. The RPC `Output` at the upstream fragment forwards received `Message` to `ExchangeServiceImpl`.
-    ///    The channel servers as a buffer because `ExchangeServiceImpl` is on the server-side and we will
-    ///    also introduce backpressure.
+    /// 3. The RPC `Output` at the upstream fragment forwards received `Message` to
+    /// `ExchangeServiceImpl`.    The channel servers as a buffer because `ExchangeServiceImpl` is
+    /// on the server-side and we will    also introduce backpressure.
     channel_pool: HashMap<UpDownFragmentIds, ConsumableChannelPair>,
 
     /// The receiver is on the other side of rpc `Output`. The `ExchangeServiceImpl` take it
@@ -301,9 +302,11 @@ impl StreamManagerCore {
                         &table.columns().iter().map(ToProst::to_prost).collect_vec(),
                     )?;
                     let stream_receiver = table.create_stream()?;
-                    // TODO: The channel pair should be created by the Checkpoint manger. So this line may be removed later.
+                    // TODO: The channel pair should be created by the Checkpoint manger. So this
+                    // line may be removed later.
                     let (_sender, barrier_receiver) = unbounded();
-                    // TODO: Take the ownership to avoid drop of this channel. This should be removed too.
+                    // TODO: Take the ownership to avoid drop of this channel. This should be
+                    // removed too.
                     self.sender_placeholder.push(_sender);
                     Ok(Box::new(TableSourceExecutor::new(
                         table_id,
@@ -413,8 +416,9 @@ impl StreamManagerCore {
                         format!("{}:{}", host_addr.get_host(), host_addr.get_port());
                     let upstream_socket_addr = get_host_port(&upstream_addr)?;
                     if !is_local_address(&upstream_socket_addr, &self.addr) {
-                        // Get the sender for `RemoteInput` to forward received messages to receivers in
-                        // `ReceiverExecutor` or `MergerExecutor`.
+                        // Get the sender for `RemoteInput` to forward received messages to
+                        // receivers in `ReceiverExecutor` or
+                        // `MergerExecutor`.
                         let sender = self
                             .channel_pool
                             .get_mut(&(*up_id, fragment_id))
@@ -553,8 +557,8 @@ impl StreamManagerCore {
 
         for (current_id, fragment) in &self.fragments {
             for downstream_id in fragment.get_downstream_fragment_id() {
-                // At this time, the graph might not be complete, so we do not check if downstream has `current_id`
-                // as upstream.
+                // At this time, the graph might not be complete, so we do not check if downstream
+                // has `current_id` as upstream.
                 let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
                 let up_down_ids = (*current_id, *downstream_id);
                 self.channel_pool.insert(up_down_ids, (Some(tx), Some(rx)));

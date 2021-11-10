@@ -13,7 +13,8 @@ use super::{Executor, Message, Op, SimpleExecutor, StreamChunk};
 pub struct FilterExecutor {
     /// The input of the current executor
     input: Box<dyn Executor>,
-    /// Expression of the current filter, note that the filter must always have the same output for the same input.
+    /// Expression of the current filter, note that the filter must always have the same output for
+    /// the same input.
     expr: BoxedExpression,
 }
 

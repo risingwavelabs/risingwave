@@ -120,8 +120,8 @@ impl HashAggExecutor {
     {
         let total_num_rows = keys.len();
         // Each hash key, e.g. `key1` corresponds to a vis map that not only shadows
-        // all the rows whose keys are not `key1`, but also shadows those rows shadowed in the `input`
-        // The vis map of each hash key will be passed into StreamingAggStateImpl
+        // all the rows whose keys are not `key1`, but also shadows those rows shadowed in the
+        // `input` The vis map of each hash key will be passed into StreamingAggStateImpl
         let mut key_to_vis_maps = HashMap::new();
 
         // Give all the unique keys an order and iterate them later,

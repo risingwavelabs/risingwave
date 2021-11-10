@@ -139,8 +139,8 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
 
         let join_type = JoinType::from_prost(nested_loop_join_node.get_join_type());
         let join_expr = expr_build_from_prost(nested_loop_join_node.get_join_cond())?;
-        // Note: Assume that optimizer has set up probe side and build side. Left is the probe side, right is
-        // the build side. This is the same for all join executors.
+        // Note: Assume that optimizer has set up probe side and build side. Left is the probe side,
+        // right is the build side. This is the same for all join executors.
         let left_plan_opt = source.plan_node().get_children().get(0);
         let right_plan_opt = source.plan_node().get_children().get(1);
         match (left_plan_opt, right_plan_opt) {
@@ -196,7 +196,8 @@ impl NestedLoopJoinExecutor {
     /// # Arguments
     /// * `first_probe`: whether the first probing. Init outer source if yes.
     /// * `probe_table`: Table to be probed.
-    /// If nothing gained from `probe_table.join()`, Advance to next row until all outer tuples are exhausted.
+    /// If nothing gained from `probe_table.join()`, Advance to next row until all outer tuples are
+    /// exhausted.
     async fn probe(
         &mut self,
         first_probe: bool,
@@ -240,8 +241,8 @@ impl NestedLoopJoinExecutor {
         Ok(None)
     }
 
-    /// Similar to [`probe_remaining`] in [`HashJoin`]. It should be done when join operator has a row id matched
-    /// table and wants to support RIGHT OUTER/ RIGHT SEMI/ FULL OUTER.
+    /// Similar to [`probe_remaining`] in [`HashJoin`]. It should be done when join operator has a
+    /// row id matched table and wants to support RIGHT OUTER/ RIGHT SEMI/ FULL OUTER.
     fn probe_remaining(&mut self) -> Result<Option<DataChunk>> {
         todo!()
     }
@@ -342,11 +343,12 @@ impl ProbeSideSource {
 }
 
 /// [`BuildTable`] contains the tuple to be probed. It is also called inner relation in join.
-/// `inner_table` is a buffer for all data. For all probe key, directly fetch data in `inner_table` without call executor.
-/// The executor is only called when building `inner_table`.
+/// `inner_table` is a buffer for all data. For all probe key, directly fetch data in `inner_table`
+/// without call executor. The executor is only called when building `inner_table`.
 type InnerTable = Vec<DataChunk>;
 struct BuildTable {
-    /// Buffering of inner table. TODO: Spill to disk or more fine-grained memory management to avoid OOM.
+    /// Buffering of inner table. TODO: Spill to disk or more fine-grained memory management to
+    /// avoid OOM.
     inner_table: InnerTable,
     /// Pos of chunk in inner table. Tracks current probing progress.
     chunk_idx: usize,
@@ -363,7 +365,8 @@ impl BuildTable {
     /// Load all data of inner relation into buffer.
     /// Called in first probe so that do not need to invoke executor multiple roundtrip.
     /// # Arguments
-    /// * `inner_source` - The source executor to load inner table. It is designed to pass as param cuz
+    /// * `inner_source` - The source executor to load inner table. It is designed to pass as param
+    ///   cuz
     /// only used in init.
     async fn init(&mut self, inner_source: &mut BoxedExecutor) -> Result<()> {
         inner_source.init()?;
@@ -378,9 +381,9 @@ impl BuildTable {
     /// # Arguments
     /// * `left` Data chunk padded to the right half of result data chunk..
     /// * `right` Data chunk padded to the right half of result data chunk.
-    /// Note: Use this function with careful: It is not designed to be a general concatenate of two chunk:
-    /// Usually one side should be const row chunk and the other side is normal chunk. Currently only feasible to use in join
-    /// executor.
+    /// Note: Use this function with careful: It is not designed to be a general concatenate of two
+    /// chunk: Usually one side should be const row chunk and the other side is normal chunk.
+    /// Currently only feasible to use in join executor.
     /// If two normal chunk, the result is undefined.
     fn concatenate(left: &DataChunk, right: &DataChunk) -> Result<DataChunk> {
         assert_eq!(left.capacity(), right.capacity());
@@ -421,12 +424,13 @@ impl BuildTable {
             // join with current row
             let sel_vector = join_expr.eval(&new_chunk)?;
             let ret_chunk = new_chunk.with_visibility(sel_vector.as_bool().try_into()?);
-            // Note: we can avoid the append chunk in join -- Only do it in the begin of outer loop. But currently seems like
-            // it do not have too much gain. Will keep look on it.
+            // Note: we can avoid the append chunk in join -- Only do it in the begin of outer loop.
+            // But currently seems like it do not have too much gain. Will keep look on
+            // it.
             if ret_chunk.capacity() > 0 {
                 let (mut left_data_chunk, return_data_chunk) =
                     chunk_builder.append_chunk(SlicedDataChunk::new_checked(ret_chunk)?)?;
-                //Have checked last_input is None in before. Now swap the chunk into left chunk.
+                // Have checked last_input is None in before. Now swap the chunk into left chunk.
                 std::mem::swap(last_chunk, &mut left_data_chunk);
                 if let Some(inner_chunk) = return_data_chunk {
                     return Ok(ProbeResult {

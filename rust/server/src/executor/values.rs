@@ -55,8 +55,8 @@ impl Executor for ValuesExecutor {
             .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
 
         let one_row_array = I32Array::from_slice(&[Some(1)])?;
-        // We need a one row chunk rather than an empty chunk because constant expression's eval result
-        // is same size as input chunk cardinality.
+        // We need a one row chunk rather than an empty chunk because constant expression's eval
+        // result is same size as input chunk cardinality.
         let one_row_chunk = DataChunk::builder()
             .columns(vec![Column::new(
                 Arc::new(one_row_array.into()),

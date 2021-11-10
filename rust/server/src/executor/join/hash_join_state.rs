@@ -245,7 +245,8 @@ impl<K: HashKey> ProbeTable<K> {
                     self.append_one_row(None, Some(self.cur_probe_row_id))?
                 {
                     self.cur_probe_row_id += 1;
-                    // We must put the rest of `cur_build_row_id` here because we may reenter this method.
+                    // We must put the rest of `cur_build_row_id` here because we may reenter this
+                    // method.
                     if self.cur_probe_row_id < self.current_probe_data_chunk_size() {
                         self.cur_joined_build_row_id = self
                             .first_joined_row_id(self.current_probe_key_at(self.cur_probe_row_id));
@@ -396,7 +397,8 @@ impl<K: HashKey> ProbeTable<K> {
                     self.append_one_row(None, Some(self.cur_probe_row_id))?
                 {
                     self.cur_probe_row_id += 1;
-                    // We must put the rest of `cur_build_row_id` here because we may reenter this method.
+                    // We must put the rest of `cur_build_row_id` here because we may reenter this
+                    // method.
                     if self.cur_probe_row_id < self.current_probe_data_chunk_size() {
                         self.cur_joined_build_row_id = self
                             .first_joined_row_id(self.current_probe_key_at(self.cur_probe_row_id));

@@ -322,7 +322,8 @@ where
         year += year_diff;
 
         // Calculate the number of month in this interval except the added year
-        // The range of month_diff is (-12, 12) (The month is negative when the interval is negative)
+        // The range of month_diff is (-12, 12) (The month is negative when the interval is
+        // negative)
         let month_diff = interval_months - year_diff * 12;
         // The range of new month is (-12, 24) ( original month:[1, 12] + month_diff:(-12, 12) )
         month += month_diff;

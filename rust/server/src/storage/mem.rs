@@ -168,7 +168,8 @@ impl Table for SimpleMemTable {
             );
             futures::executor::block_on(async move { sender.send(chunk).await })
                 .or_else(|x| {
-                    // Disconnection means the receiver is dropped. So the sender shouble be dropped here too.
+                    // Disconnection means the receiver is dropped. So the sender shouble be dropped
+                    // here too.
                     if x.is_disconnected() {
                         write_guard.stream_sender = None;
                         return Ok(());

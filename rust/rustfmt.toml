@@ -1,2 +1,7 @@
+comment_width = 120
+format_code_in_doc_comments = true
+normalize_comments = true
+normalize_doc_attributes = true
 reorder_imports = true
 tab_spaces = 4
+wrap_comments = true

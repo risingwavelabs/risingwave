@@ -80,9 +80,9 @@ impl<CS: 'static + CreateSource> Executor for MergeSortExchangeExecutor<CS> {
         Ok(())
     }
 
-    /// Everytime `execute` is called, it tries to produce a chunk of size `K_PROCESSING_WINDOW_SIZE`.
-    /// It is possible that the chunk's size is smaller than the `K_PROCESSING_WINDOW_SIZE` as
-    /// the executor runs out of input from `sources`.
+    /// Everytime `execute` is called, it tries to produce a chunk of size
+    /// `K_PROCESSING_WINDOW_SIZE`. It is possible that the chunk's size is smaller than the
+    /// `K_PROCESSING_WINDOW_SIZE` as the executor runs out of input from `sources`.
     async fn execute(&mut self) -> Result<ExecutorResult> {
         // If this is the first time execution, we first get one chunk from each source
         // and put one row of each chunk into the heap
