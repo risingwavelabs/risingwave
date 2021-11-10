@@ -109,6 +109,8 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
 #[async_trait::async_trait]
 impl Executor for StreamScanExecutor {
     fn init(&mut self) -> Result<()> {
+        // TODO: make init() async
+        // self.reader.init().await?;
         Ok(())
     }
 

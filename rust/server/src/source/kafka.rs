@@ -26,11 +26,8 @@ pub struct KafkaSource {
     config: KafkaSourceConfig,
 }
 
-impl Source for KafkaSource {
-    fn new(config: SourceConfig) -> Result<Self>
-    where
-        Self: Sized,
-    {
+impl KafkaSource {
+    pub fn new(config: SourceConfig) -> Result<Self> {
         match config {
             SourceConfig::Kafka(kafka_config) => Ok(KafkaSource {
                 config: kafka_config,
@@ -40,7 +37,9 @@ impl Source for KafkaSource {
             ))),
         }
     }
+}
 
+impl Source for KafkaSource {
     fn reader(&self) -> Result<Box<dyn SourceReader>> {
         let mut client_config: ClientConfig = ClientConfig::new();
 
@@ -116,7 +115,12 @@ impl AsyncRuntime for AsyncStdRuntime {
 
 #[async_trait::async_trait]
 impl SourceReader for KafkaSourceReader {
-    async fn next(&mut self) -> Result<Option<SourceMessage>> {
+    async fn init(&mut self) -> Result<()> {
+        // do nothing
+        Ok(())
+    }
+
+    async fn poll_message(&mut self) -> Result<Option<SourceMessage>> {
         match self.consumer.recv().await {
             Err(e) => match e {
                 KafkaError::PartitionEOF(_) => Ok(None),
@@ -133,6 +137,10 @@ impl SourceReader for KafkaSourceReader {
                 })))
             }
         }
+    }
+
+    async fn next_message(&mut self) -> Result<SourceMessage> {
+        todo!()
     }
 
     async fn cancel(&mut self) -> Result<()> {

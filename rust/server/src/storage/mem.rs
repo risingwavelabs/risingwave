@@ -1,5 +1,5 @@
 use crate::storage::*;
-use crate::stream_op::StreamChunk;
+use crate::stream_op::{Op, StreamChunk};
 use async_trait::async_trait;
 use futures::channel::mpsc;
 use futures::SinkExt;
@@ -111,6 +111,7 @@ impl SimpleTableManager {
     }
 }
 
+#[derive(Debug)]
 struct SimpleMemTableInner {
     data: Vec<DataChunkRef>,
     column_ids: Arc<Vec<i32>>,
@@ -118,6 +119,7 @@ struct SimpleMemTableInner {
 }
 
 /// A simple in-memory table that organizes data in columnar format.
+#[derive(Debug)]
 pub struct SimpleMemTable {
     columns: Vec<ColumnDesc>,
     table_id: TableId,
@@ -157,8 +159,8 @@ impl Table for SimpleMemTable {
     async fn append(&self, data: DataChunk) -> Result<usize> {
         let mut write_guard = self.inner.write().unwrap();
 
+        // TODO: remove this
         if let Some(ref mut sender) = write_guard.stream_sender {
-            use crate::stream_op::Op;
             let chunk = StreamChunk::new(
                 vec![Op::Insert; data.cardinality()],
                 Vec::from(data.columns()),
@@ -178,6 +180,20 @@ impl Table for SimpleMemTable {
 
         let cardinality = data.cardinality();
         write_guard.data.push(Arc::new(data));
+        Ok(cardinality)
+    }
+
+    fn write(&self, chunk: &StreamChunk) -> Result<usize> {
+        let mut write_guard = self.inner.write().unwrap();
+
+        let (data_chunk, ops) = chunk.clone().into_parts();
+
+        for op in ops.iter() {
+            assert_eq!(*op, Op::Insert);
+        }
+
+        let cardinality = data_chunk.cardinality();
+        write_guard.data.push(Arc::new(data_chunk));
         Ok(cardinality)
     }
 

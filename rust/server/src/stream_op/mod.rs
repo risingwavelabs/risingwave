@@ -4,7 +4,6 @@ use async_trait::async_trait;
 pub use dispatch::*;
 pub use filter::*;
 pub use hash_agg::*;
-pub use kafka_source::*;
 pub use merge::*;
 pub use mview_sink::*;
 pub use project::*;
@@ -24,6 +23,7 @@ use risingwave_pb::ToProst;
 use risingwave_pb::ToProto;
 pub use simple_agg::*;
 use std::sync::Arc;
+pub use stream_source::*;
 pub use table_source::*;
 
 mod actor;
@@ -32,11 +32,11 @@ mod dispatch;
 mod filter;
 mod hash_agg;
 mod hash_join;
-mod kafka_source;
 mod merge;
 mod mview_sink;
 mod project;
 mod simple_agg;
+mod stream_source;
 mod table_source;
 
 #[cfg(test)]
@@ -118,6 +118,10 @@ impl StreamChunk {
             .first()
             .map(|col| col.array_ref().len())
             .unwrap_or(0)
+    }
+
+    pub fn columns(&self) -> &[Column] {
+        &self.columns
     }
 
     /// compact the `StreamChunck` with its visibility map

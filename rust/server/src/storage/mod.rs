@@ -17,6 +17,9 @@ pub trait Table: Sync + Send {
     /// Append an entry to the table.
     async fn append(&self, data: DataChunk) -> Result<usize>;
 
+    /// Write a batch of changes. For now, we use `StreamChunk` to represent a write batch
+    fn write(&self, chunk: &StreamChunk) -> Result<usize>;
+
     /// Create a stream from the table.
     /// The stream includes all existing rows in tables and changed rows in future.
     /// Note that only one stream is allowed for a table.

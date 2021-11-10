@@ -40,7 +40,12 @@ impl std::fmt::Debug for FileSourceReader {
 
 #[async_trait::async_trait]
 impl SourceReader for FileSourceReader {
-    async fn next(&mut self) -> Result<Option<SourceMessage>> {
+    async fn init(&mut self) -> Result<()> {
+        // do nothing
+        Ok(())
+    }
+
+    async fn poll_message(&mut self) -> Result<Option<SourceMessage>> {
         let mut contents = Vec::new();
         match self.file.read_until(b'\n', &mut contents).await {
             Err(e) => Err(RwError::from(InternalError(e.to_string()))),
@@ -57,6 +62,10 @@ impl SourceReader for FileSourceReader {
         }
     }
 
+    async fn next_message(&mut self) -> Result<SourceMessage> {
+        todo!()
+    }
+
     async fn cancel(&mut self) -> Result<()> {
         match self.file.get_ref().close().await {
             Ok(_) => Ok(()),
@@ -65,11 +74,8 @@ impl SourceReader for FileSourceReader {
     }
 }
 
-impl Source for FileSource {
-    fn new(config: SourceConfig) -> Result<Self>
-    where
-        Self: Sized,
-    {
+impl FileSource {
+    pub fn new(config: SourceConfig) -> Result<Self> {
         if let SourceConfig::File(config) = config {
             Ok(FileSource { config })
         } else {
@@ -78,7 +84,9 @@ impl Source for FileSource {
             )))
         }
     }
+}
 
+impl Source for FileSource {
     fn reader(&self) -> Result<Box<dyn SourceReader>> {
         match File::open(self.config.filename.as_str()) {
             Ok(file) => Ok(Box::new(FileSourceReader {
@@ -119,7 +127,7 @@ mod tests {
         });
 
         let mut reader = source.reader().unwrap();
-        let message = async_std::task::block_on(async { reader.next().await });
+        let message = async_std::task::block_on(async { reader.poll_message().await });
 
         if let SourceMessage::File(message) = message.unwrap().unwrap() {
             assert_eq!(&message.data[..], data.as_bytes())

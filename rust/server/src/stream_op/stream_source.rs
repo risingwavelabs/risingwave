@@ -7,12 +7,13 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use std::fmt::{Debug, Formatter};
 
-pub struct KafkaSourceExecutor {
+/// `StreamSourceExecutor` is a streaming source from external systems such as Kafka
+pub struct StreamSourceExecutor {
     schema: Schema,
     executor: StreamScanExecutor,
 }
 
-impl KafkaSourceExecutor {
+impl StreamSourceExecutor {
     pub fn new(executor: StreamScanExecutor) -> Self {
         let fields = executor
             .columns()
@@ -27,7 +28,7 @@ impl KafkaSourceExecutor {
 }
 
 #[async_trait]
-impl Executor for KafkaSourceExecutor {
+impl Executor for StreamSourceExecutor {
     async fn next(&mut self) -> Result<Message> {
         let received = self.executor.next_data_chunk().fuse().await?;
         if let Some(chunk) = received {
@@ -47,9 +48,9 @@ impl Executor for KafkaSourceExecutor {
     }
 }
 
-impl Debug for KafkaSourceExecutor {
+impl Debug for StreamSourceExecutor {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("KafkaSourceExecutor")
+        f.debug_struct("StreamSourceExecutor")
             .field("stream_scan_executor", &self.executor)
             .finish()
     }

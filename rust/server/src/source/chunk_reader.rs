@@ -41,7 +41,7 @@ impl ChunkReader {
             .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
 
         for i in 0..max_chunk_size {
-            let next_message = self.reader.next().await?;
+            let next_message = self.reader.poll_message().await?;
 
             match next_message {
                 Some(source_message) => {
@@ -52,6 +52,9 @@ impl ChunkReader {
                             .transpose()?,
                         SourceMessage::File(file_message) => {
                             Some(self.parser.parse(&file_message.data, &self.columns)?)
+                        }
+                        SourceMessage::Raw(_chunk) => {
+                            todo!("should output stream chunk");
                         }
                     } {
                         datum_vec
