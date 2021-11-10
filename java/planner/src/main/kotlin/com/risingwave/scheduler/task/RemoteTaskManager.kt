@@ -41,7 +41,7 @@ class RemoteTaskManager @Inject constructor(
     val client = clientManager.getOrCreate(node)
     val request: CreateTaskRequest = CreateTaskRequest.newBuilder()
       .setTaskId(task.taskId.toTaskIdProto())
-      .setPlan(task.queryStage.toPlanFragmentProto())
+      .setPlan(task.queryStage.toPlanFragmentProto(task.taskId.id))
       .build()
     return client.createTaskKt(request)
   }

@@ -21,4 +21,8 @@ public class ScheduledStage {
   public ImmutableMap<TaskId, WorkerNode> getAssignments() {
     return assignments;
   }
+
+  public QueryStage getStage() {
+    return this.stage;
+  }
 }

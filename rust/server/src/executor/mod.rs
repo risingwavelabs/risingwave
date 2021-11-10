@@ -4,6 +4,7 @@ use filter::*;
 use generic_exchange::*;
 use hash_agg::*;
 use limit::*;
+use merge_sort_exchange::*;
 use order_by::*;
 use projection::*;
 use risingwave_common::array::DataChunk;
@@ -144,7 +145,8 @@ impl<'a> ExecutorBuilder<'a> {
           PlanNodeType::NestedLoopJoin => NestedLoopJoinExecutor,
           PlanNodeType::HashJoin => HashJoinExecutorBuilder,
           PlanNodeType::DropStream => DropStreamExecutor,
-          PlanNodeType::HashAgg => HashAggExecutorBuilder
+          PlanNodeType::HashAgg => HashAggExecutorBuilder,
+          PlanNodeType::MergeSortExchange => MergeSortExchangeExecutor
         }
     }
 

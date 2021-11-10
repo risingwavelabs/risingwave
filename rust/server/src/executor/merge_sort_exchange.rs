@@ -7,7 +7,8 @@ use std::sync::Arc;
 use crate::execution::exchange_source::ExchangeSource;
 use crate::executor::CreateSource;
 use crate::executor::{
-    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult,
+    BoxedExecutor, BoxedExecutorBuilder, DefaultCreateSource, Executor, ExecutorBuilder,
+    ExecutorResult,
 };
 use crate::task::GlobalTaskEnv;
 use risingwave_common::array::column::Column;
@@ -24,12 +25,14 @@ use risingwave_pb::task_service::exchange_node::Field as ExchangeNodeField;
 use risingwave_pb::task_service::ExchangeSource as ProstExchangeSource;
 use risingwave_pb::task_service::MergeSortExchangeNode;
 
+pub(super) type MergeSortExchangeExecutor = MergeSortExchangeExecutorImpl<DefaultCreateSource>;
+
 /// `MergeSortExchangeExecutor` takes inputs from multiple sources and
 /// The outputs of all the sources have been sorted in the same way.
 ///
 /// The size of the output is determined both by `K_PROCESSING_WINDOW_SIZE`.
 /// TODO: Does not handle `visibility` for now.
-pub(super) struct MergeSortExchangeExecutor<C> {
+pub(super) struct MergeSortExchangeExecutorImpl<C> {
     server_addr: SocketAddr,
     env: GlobalTaskEnv,
     /// keeps one data chunk of each source if any
@@ -44,7 +47,7 @@ pub(super) struct MergeSortExchangeExecutor<C> {
     first_execution: bool,
 }
 
-impl<CS: 'static + CreateSource> MergeSortExchangeExecutor<CS> {
+impl<CS: 'static + CreateSource> MergeSortExchangeExecutorImpl<CS> {
     async fn get_source_chunk(&mut self, source_idx: usize) -> Result<()> {
         assert!(source_idx < self.source_inputs.len());
         let res = self.sources[source_idx].take_data().await?;
@@ -75,7 +78,7 @@ impl<CS: 'static + CreateSource> MergeSortExchangeExecutor<CS> {
 }
 
 #[async_trait::async_trait]
-impl<CS: 'static + CreateSource> Executor for MergeSortExchangeExecutor<CS> {
+impl<CS: 'static + CreateSource> Executor for MergeSortExchangeExecutorImpl<CS> {
     fn init(&mut self) -> Result<()> {
         Ok(())
     }
@@ -164,7 +167,7 @@ impl<CS: 'static + CreateSource> Executor for MergeSortExchangeExecutor<CS> {
     }
 }
 
-impl<CS: 'static + CreateSource> BoxedExecutorBuilder for MergeSortExchangeExecutor<CS> {
+impl<CS: 'static + CreateSource> BoxedExecutorBuilder for MergeSortExchangeExecutorImpl<CS> {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_node_type() == PlanNodeType::MergeSortExchange);
         let plan_node = source.plan_node();
@@ -258,7 +261,7 @@ mod tests {
             order_type: OrderType::Ascending,
         }]);
 
-        let mut executor = MergeSortExchangeExecutor::<FakeCreateSource> {
+        let mut executor = MergeSortExchangeExecutorImpl::<FakeCreateSource> {
             server_addr: SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
             env: GlobalTaskEnv::for_test(),
             source_inputs: vec![None; proto_sources.len()],

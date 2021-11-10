@@ -30,6 +30,7 @@ class StageExecution(
     private set // Read-only by outer users.
 
   suspend fun execute() {
+    // We remark that the task id is a consecutive number from 0 to stage.parallelism - 1.
     val tasks = IntStream.range(0, stage.parallelism)
       .mapToObj { idx: Int -> QueryTask(TaskId(stage.stageId, idx), stage) }
       .collect(ImmutableList.toImmutableList())
@@ -44,6 +45,7 @@ class StageExecution(
           val node = taskManager.schedule(task)
           scheduleTasks[task.taskId] = node
         } catch (e: Exception) {
+          log.info("doExecute error:$e")
           throw PgException(PgErrorCode.INTERNAL_ERROR, "task ${task.taskId} failed to schedule")
         }
       }

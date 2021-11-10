@@ -160,7 +160,15 @@ public class RwBatchSort extends Sort implements RisingWaveBatchPhyRel {
                 logicalSort.offset,
                 logicalSort.fetch);
 
-        return RwBatchExchange.create(batchSort, RwDistributions.SINGLETON);
+        var exchange = RwBatchExchange.create(batchSort, RwDistributions.SINGLETON);
+        if (logicalSort.fetch != null || logicalSort.offset != null) {
+          var limit =
+              new RwBatchLimit(
+                  rel.getCluster(), newTraits, exchange, logicalSort.offset, logicalSort.fetch);
+          return limit;
+        } else {
+          return exchange;
+        }
       }
     }
   }
