@@ -7,19 +7,8 @@
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 
-extern crate anyhow;
-extern crate backtrace;
-extern crate futures;
 #[macro_use]
 extern crate log;
-extern crate either;
-extern crate log4rs;
-extern crate pb_convert;
-extern crate protobuf;
-extern crate risingwave_proto;
-extern crate thiserror;
-extern crate tokio;
-extern crate typed_builder;
 #[macro_use]
 extern crate risingwave_common;
 

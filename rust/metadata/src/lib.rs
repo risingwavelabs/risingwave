@@ -7,19 +7,5 @@
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 
-extern crate anyhow;
-extern crate backtrace;
-extern crate either;
-extern crate futures;
-extern crate log;
-extern crate log4rs;
-extern crate pb_convert;
-extern crate protobuf;
-extern crate risingwave_common;
-extern crate risingwave_proto;
-extern crate thiserror;
-extern crate tokio;
-extern crate typed_builder;
-
 mod metadata;
 pub mod rpc;

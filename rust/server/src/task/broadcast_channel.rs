@@ -59,9 +59,9 @@ pub fn new_broadcast_channel(shuffle: &ExchangeInfo) -> (BoxChanSender, Vec<BoxC
 
 #[cfg(test)]
 mod tests {
-    use crate::risingwave_proto::plan::*;
     use crate::task::test_utils::{ResultChecker, TestRunner};
     use rand::Rng;
+    use risingwave_proto::plan::*;
 
     fn broadcast_plan(plan: &mut PlanFragment, num_sinks: u32) {
         let mut broadcast_info = ExchangeInfo_BroadcastInfo::default();

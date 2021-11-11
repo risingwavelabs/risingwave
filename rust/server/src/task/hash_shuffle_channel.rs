@@ -126,10 +126,10 @@ pub fn new_hash_shuffle_channel(shuffle: &ExchangeInfo) -> (BoxChanSender, Vec<B
 
 #[cfg(test)]
 mod tests {
-    use crate::risingwave_proto::plan::*;
     use crate::task::test_utils::{ResultChecker, TestRunner};
     use rand::Rng;
     use risingwave_common::util::hash_util::CRC32FastBuilder;
+    use risingwave_proto::plan::*;
     use std::hash::BuildHasher;
 
     pub fn hash_shuffle_plan(plan: &mut PlanFragment, keys: Vec<u32>, num_sinks: u32) {
