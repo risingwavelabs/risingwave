@@ -11,8 +11,8 @@ git clone https://github.com/singularity-data/risingwave.git
 * Java 11
 * Rust
 * Go
-* cmake
-* protobuf
+* CMake
+* Protocol Buffers
 * PostgreSQL
 
 To install compilers in macOS, run:
@@ -71,8 +71,6 @@ We support both unit tests (for Rust code only) and end-to-end tests.
 
 To run unit tests, run the following commands under the root directory:
 ```bash
-make rust_fmt
-make rust_check
 make rust_test
 ```
 
