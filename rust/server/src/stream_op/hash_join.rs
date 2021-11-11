@@ -1,3 +1,4 @@
+use super::barrier_align::{AlignedMessage, BarrierAligner};
 use super::{Executor, Message, Op, StreamChunk};
 use async_trait::async_trait;
 use risingwave_common::array::{Row, RowRef};
@@ -9,7 +10,6 @@ use risingwave_common::{
 };
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::select;
 
 pub enum JoinType {
     Equal,
@@ -38,10 +38,8 @@ struct JoinSide {
 pub struct HashJoinExecutor {
     /// The type of the join executor
     join_type: JoinType,
-    /// The input from the left executor
-    input_l: Box<dyn Executor>,
-    /// The input from the right executor
-    input_r: Box<dyn Executor>,
+    /// Barrier aligner that combines two input streams and aligns their barriers
+    aligner: BarrierAligner,
     // TODO: maybe remove `new_column_datatypes` and use schema
     /// the data types of the formed new colums
     new_column_datatypes: Vec<DataTypeRef>,
@@ -62,7 +60,7 @@ impl JoinParams {
 }
 
 #[derive(PartialEq)]
-pub enum BarrierWaitState {
+enum BarrierWaitState {
     Right,
     Left,
     Either,
@@ -71,40 +69,19 @@ pub enum BarrierWaitState {
 #[async_trait]
 impl Executor for HashJoinExecutor {
     async fn next(&mut self) -> Result<Message> {
-        select! {
-          message = self.input_l.next(), if self.state != BarrierWaitState::Right => {
-            match message {
-              Ok(message) => match message {
-                Message::Chunk(chunk) => self.consume_chunk_left(chunk),
-                // TODO: we should wait terminate from both side, but terminate will be delete later
-                Message::Barrier{epoch, stop:true} => Ok(Message::Barrier{epoch,stop:true}),
-                Message::Barrier{epoch, stop} => {
-                  match self.state {
-                    BarrierWaitState::Left => {self.state = BarrierWaitState::Either; Ok(Message::Barrier{epoch, stop})},
-                    BarrierWaitState::Either => {self.state = BarrierWaitState::Right; self.next().await},
-                    _ => unreachable!("Should not reach this barrier state"),
-                  }
-                },
-              },
-              Err(e) => Err(e),
-            }
-          },
-          message = self.input_r.next(), if self.state != BarrierWaitState::Left => {
-            match message {
-              Ok(message) => match message {
-                Message::Chunk(chunk) => self.consume_chunk_right(chunk),
-                Message::Barrier{epoch, stop:true} => Ok(Message::Barrier{epoch,stop:true}),
-                Message::Barrier{epoch, stop} => {
-                  match self.state {
-                    BarrierWaitState::Right => {self.state = BarrierWaitState::Either; Ok(Message::Barrier{epoch, stop})},
-                    BarrierWaitState::Either => {self.state = BarrierWaitState::Left; self.next().await},
-                    _ => unreachable!("Should not reach this barrier state"),
-                  }
-                },
-              },
-              Err(e) => Err(e),
-            }
-          }
+        match self.aligner.next().await {
+            AlignedMessage::Left(message) => match message {
+                Ok(chunk) => self.consume_chunk_left(chunk),
+                Err(e) => Err(e),
+            },
+            AlignedMessage::Right(message) => match message {
+                Ok(chunk) => self.consume_chunk_right(chunk),
+                Err(e) => Err(e),
+            },
+            AlignedMessage::Barrier(message) => match message {
+                Ok(Message::Barrier { epoch: _, stop: _ }) => message,
+                _ => unreachable!("Should not receive this message: {:?}", message),
+            },
         }
     }
 
@@ -150,11 +127,9 @@ impl HashJoinExecutor {
             .iter()
             .map(|filed| filed.data_type.clone())
             .collect();
-
         Self {
             join_type,
-            input_l,
-            input_r,
+            aligner: BarrierAligner::new(input_l, input_r),
             new_column_datatypes,
             schema: Schema {
                 fields: schema_fields,

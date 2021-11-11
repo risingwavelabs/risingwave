@@ -28,6 +28,7 @@ pub use table_source::*;
 
 mod actor;
 mod aggregation;
+mod barrier_align;
 mod dispatch;
 mod filter;
 mod hash_agg;
