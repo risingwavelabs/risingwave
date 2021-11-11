@@ -54,8 +54,6 @@ impl Executor for TableSourceExecutor {
 
                     Message::Barrier { epoch, stop }
                 }
-                // TODO: Maybe removed in the future
-                Message::Terminate => unreachable!("unreachable"),
             })
         } else {
             Ok(Message::Barrier {
@@ -189,7 +187,6 @@ mod tests {
                 Message::Barrier { epoch, stop: _ } => {
                     assert_eq!(epoch, 1)
                 }
-                Message::Terminate => unreachable!(),
             }
         }
 

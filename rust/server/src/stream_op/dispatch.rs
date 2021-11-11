@@ -75,7 +75,6 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                 output
                     .send(match msg {
                         Message::Barrier { epoch, stop } => Message::Barrier { epoch, stop },
-                        Message::Terminate => Message::Terminate,
                         _ => unreachable!(),
                     })
                     .await?;
@@ -89,8 +88,7 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
 impl<Inner: DataDispatcher + Send + Sync + 'static> StreamConsumer for DispatchExecutor<Inner> {
     async fn next(&mut self) -> Result<bool> {
         let msg = self.input.next().await?;
-        let terminated = matches!(msg, Message::Terminate);
-
+        let terminated = msg.is_terminate();
         self.dispatch(msg).await?;
         Ok(!terminated)
     }
@@ -308,7 +306,13 @@ impl SenderConsumer {
 impl StreamConsumer for SenderConsumer {
     async fn next(&mut self) -> Result<bool> {
         let message = self.input.next().await?;
-        let terminated = matches!(message, Message::Terminate);
+        let terminated = matches!(
+            message,
+            Message::Barrier {
+                epoch: _,
+                stop: true
+            }
+        );
         self.channel.send(message).await?;
         Ok(!terminated)
     }

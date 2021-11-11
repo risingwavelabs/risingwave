@@ -16,6 +16,7 @@ macro_rules! row_nonnull {
 
 pub struct MockSource {
     schema: Schema,
+    epoch: u64,
     msgs: VecDeque<Message>,
 }
 
@@ -23,6 +24,7 @@ impl MockSource {
     pub fn new(schema: Schema) -> Self {
         Self {
             schema,
+            epoch: 0,
             msgs: VecDeque::default(),
         }
     }
@@ -30,6 +32,7 @@ impl MockSource {
     pub fn with_chunks(schema: Schema, chunks: Vec<StreamChunk>) -> Self {
         Self {
             schema,
+            epoch: 0,
             msgs: chunks.into_iter().map(Message::Chunk).collect(),
         }
     }
@@ -46,9 +49,13 @@ impl MockSource {
 #[async_trait]
 impl Executor for MockSource {
     async fn next(&mut self) -> Result<Message> {
+        self.epoch += 1;
         match self.msgs.pop_front() {
             Some(msg) => Ok(msg),
-            None => Ok(Message::Terminate),
+            None => Ok(Message::Barrier {
+                epoch: self.epoch,
+                stop: true,
+            }),
         }
     }
 
@@ -60,12 +67,17 @@ impl Executor for MockSource {
 /// This source takes message from users asynchronously
 pub struct MockAsyncSource {
     schema: Schema,
+    epoch: u64,
     rx: UnboundedReceiver<Message>,
 }
 
 impl MockAsyncSource {
     pub fn new(schema: Schema, rx: UnboundedReceiver<Message>) -> Self {
-        Self { schema, rx }
+        Self {
+            schema,
+            rx,
+            epoch: 0,
+        }
     }
 
     pub fn push_chunks(
@@ -86,9 +98,13 @@ impl MockAsyncSource {
 #[async_trait]
 impl Executor for MockAsyncSource {
     async fn next(&mut self) -> Result<Message> {
+        self.epoch += 1;
         match self.rx.recv().await {
             Some(msg) => Ok(msg),
-            None => Ok(Message::Terminate),
+            None => Ok(Message::Barrier {
+                epoch: self.epoch,
+                stop: true,
+            }),
         }
     }
 

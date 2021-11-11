@@ -337,6 +337,9 @@ impl Executor for HashAggExecutor {
             match msg {
                 Message::Chunk(chunk) => self.apply_chunk(chunk)?,
                 Message::Barrier { epoch, stop } => {
+                    if stop {
+                        return Ok(Message::Barrier { epoch, stop });
+                    }
                     let dirty_cnt = self.dirty_state_entries.len();
                     if dirty_cnt == 0 {
                         // No fresh data need to flush, just forward the barrier.
@@ -347,7 +350,6 @@ impl Executor for HashAggExecutor {
                     let chunk = self.flush_data()?;
                     return Ok(Message::Chunk(chunk));
                 }
-                m @ Message::Terminate => return Ok(m),
             }
         }
         todo!()

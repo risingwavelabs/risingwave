@@ -180,8 +180,9 @@ impl Executor for MergeExecutor {
                     self.active.push(from);
                     return Ok(Message::Chunk(chunk));
                 }
-                Message::Terminate => {
+                Message::Barrier { epoch, stop: true } => {
                     // Drop the terminated channel
+                    self.next_epoch = Some(epoch);
                     self.terminated += 1;
                 }
                 Message::Barrier { epoch, stop: _ } => {
@@ -192,12 +193,16 @@ impl Executor for MergeExecutor {
                     } else {
                         assert_eq!(self.next_epoch, Some(epoch));
                     }
+
                     self.blocked.push(from);
                 }
             }
 
             if self.terminated == self.num_inputs {
-                return Ok(Message::Terminate);
+                return Ok(Message::Barrier {
+                    epoch: self.next_epoch.unwrap(),
+                    stop: true,
+                });
             }
             if self.blocked.len() == self.num_inputs {
                 // Emit the barrier to downstream once all barriers collected from upstream
@@ -273,7 +278,12 @@ mod tests {
                         .unwrap();
                     tokio::time::sleep(Duration::from_millis(1)).await;
                 }
-                tx.send(Message::Terminate).await.unwrap();
+                tx.send(Message::Barrier {
+                    epoch: 1000,
+                    stop: true,
+                })
+                .await
+                .unwrap();
             });
             handles.push(handle);
         }
@@ -290,7 +300,13 @@ mod tests {
               assert_eq!(barrier_epoch, epoch);
             });
         }
-        assert_matches!(merger.next().await.unwrap(), Message::Terminate);
+        assert_matches!(
+            merger.next().await.unwrap(),
+            Message::Barrier {
+                epoch: _,
+                stop: true
+            }
+        );
 
         for handle in handles {
             handle.await.unwrap();

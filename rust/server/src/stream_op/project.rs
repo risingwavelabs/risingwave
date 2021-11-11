@@ -171,7 +171,12 @@ mod tests {
         } else {
             unreachable!();
         }
-
-        matches!(project.next().await.unwrap(), Message::Terminate);
+        matches!(
+            project.next().await.unwrap(),
+            Message::Barrier {
+                epoch: _,
+                stop: true
+            }
+        );
     }
 }

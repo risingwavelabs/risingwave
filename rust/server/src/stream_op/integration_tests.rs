@@ -28,7 +28,10 @@ impl StreamConsumer for MockConsumer {
     async fn next(&mut self) -> Result<bool> {
         match self.input.next().await? {
             Message::Chunk(chunk) => self.data.lock().unwrap().push(chunk),
-            Message::Terminate => return Ok(false),
+            Message::Barrier {
+                epoch: _,
+                stop: true,
+            } => return Ok(false),
             _ => {} // do nothing
         }
         Ok(true)
@@ -164,7 +167,13 @@ async fn test_merger_sum_aggr() {
             .await
             .unwrap();
     }
-    input.send(Message::Terminate).await.unwrap();
+    input
+        .send(Message::Barrier {
+            epoch: 0,
+            stop: true,
+        })
+        .await
+        .unwrap();
 
     // wait for all actors
     for handle in handles {
@@ -513,7 +522,13 @@ async fn test_tpch_q6() {
         .send(Message::Chunk(make_chunk(Insert)))
         .await
         .unwrap();
-    input.send(Message::Terminate).await.unwrap();
+    input
+        .send(Message::Barrier {
+            epoch: 0,
+            stop: true,
+        })
+        .await
+        .unwrap();
 
     // wait for all actors
     for handle in handles {

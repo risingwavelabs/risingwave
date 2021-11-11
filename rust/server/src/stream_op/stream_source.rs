@@ -39,7 +39,12 @@ impl Executor for StreamSourceExecutor {
             let stream_chunk = StreamChunk::new(ops, chunk.columns().to_vec(), None);
             Ok(Message::Chunk(stream_chunk))
         } else {
-            Ok(Message::Terminate)
+            // TODO: the epoch 0 here is a placeholder. We will use a side channel to inject barrier
+            // message in the future.
+            Ok(Message::Barrier {
+                epoch: 0,
+                stop: true,
+            })
         }
     }
 

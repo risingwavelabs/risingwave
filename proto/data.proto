@@ -105,7 +105,6 @@ message StreamMessage {
   oneof stream_message {
     StreamChunk stream_chunk = 1;
     Barrier barrier = 2;
-    Terminate terminate = 3;
   }
 }
 

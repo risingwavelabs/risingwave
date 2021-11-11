@@ -76,6 +76,8 @@ impl Executor for HashJoinExecutor {
             match message {
               Ok(message) => match message {
                 Message::Chunk(chunk) => self.consume_chunk_left(chunk),
+                // TODO: we should wait terminate from both side, but terminate will be delete later
+                Message::Barrier{epoch, stop:true} => Ok(Message::Barrier{epoch,stop:true}),
                 Message::Barrier{epoch, stop} => {
                   match self.state {
                     BarrierWaitState::Left => {self.state = BarrierWaitState::Either; Ok(Message::Barrier{epoch, stop})},
@@ -83,8 +85,6 @@ impl Executor for HashJoinExecutor {
                     _ => unreachable!("Should not reach this barrier state"),
                   }
                 },
-                // TODO: we should wait terminate from both side, but terminate will be delete later.
-                Message::Terminate => Ok(Message::Terminate),
               },
               Err(e) => Err(e),
             }
@@ -93,6 +93,7 @@ impl Executor for HashJoinExecutor {
             match message {
               Ok(message) => match message {
                 Message::Chunk(chunk) => self.consume_chunk_right(chunk),
+                Message::Barrier{epoch, stop:true} => Ok(Message::Barrier{epoch,stop:true}),
                 Message::Barrier{epoch, stop} => {
                   match self.state {
                     BarrierWaitState::Right => {self.state = BarrierWaitState::Either; Ok(Message::Barrier{epoch, stop})},
@@ -100,8 +101,6 @@ impl Executor for HashJoinExecutor {
                     _ => unreachable!("Should not reach this barrier state"),
                   }
                 },
-                // TODO: we should wait terminate from both side, but terminate will be delete later.
-                Message::Terminate => Ok(Message::Terminate),
               },
               Err(e) => Err(e),
             }

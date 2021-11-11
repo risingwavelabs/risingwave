@@ -17,7 +17,7 @@ use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_pb::data::Op as ProstOp;
 use risingwave_pb::data::{
     stream_message::StreamMessage, Barrier, StreamChunk as ProstStreamChunk,
-    StreamMessage as ProstStreamMessage, Terminate,
+    StreamMessage as ProstStreamMessage,
 };
 use risingwave_pb::ToProst;
 use risingwave_pb::ToProto;
@@ -206,13 +206,19 @@ impl StreamChunk {
 pub enum Message {
     Chunk(StreamChunk),
     Barrier { epoch: u64, stop: bool },
-    // Note(eric): consider remove this. A stream is always terminated by an error or dropped by
-    // user
-    Terminate,
-    // TODO: Watermark
 }
 
 impl Message {
+    pub fn is_terminate(&self) -> bool {
+        matches!(
+            self,
+            Message::Barrier {
+                epoch: _,
+                stop: true
+            }
+        )
+    }
+
     pub fn to_protobuf(&self) -> Result<ProstStreamMessage> {
         let prost = match self {
             Self::Chunk(stream_chunk) => {
@@ -223,7 +229,6 @@ impl Message {
                 epoch: *epoch,
                 stop: *stop,
             }),
-            Self::Terminate => StreamMessage::Terminate(Terminate {}),
         };
         let prost_stream_msg = ProstStreamMessage {
             stream_message: Some(prost),
@@ -240,7 +245,6 @@ impl Message {
                 epoch: epoch.get_epoch(),
                 stop: false,
             },
-            StreamMessage::Terminate(..) => Message::Terminate,
         };
         Ok(res)
     }
@@ -268,7 +272,6 @@ async fn simple_executor_next<E: SimpleExecutor>(executor: &mut E) -> Result<Mes
         Ok(message) => match message {
             Message::Chunk(chunk) => executor.consume_chunk(chunk),
             Message::Barrier { epoch, stop } => Ok(Message::Barrier { epoch, stop }),
-            Message::Terminate => Ok(Message::Terminate),
         },
         Err(e) => Err(e),
     }

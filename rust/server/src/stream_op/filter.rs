@@ -239,6 +239,12 @@ mod tests {
             unreachable!();
         }
 
-        matches!(filter.next().await.unwrap(), Message::Terminate);
+        matches!(
+            filter.next().await.unwrap(),
+            Message::Barrier {
+                epoch: _,
+                stop: true
+            }
+        );
     }
 }

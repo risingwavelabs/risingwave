@@ -181,7 +181,13 @@ async fn test_stream_proto() {
                 }
             ));
         }
-        assert!(matches!(sink.next().await.unwrap(), Message::Terminate));
+        assert!(matches!(
+            sink.next().await.unwrap(),
+            Message::Barrier {
+                epoch: 0,
+                stop: true
+            }
+        ));
     });
 
     let timeout = tokio::time::Duration::from_millis(10);
@@ -196,10 +202,16 @@ async fn test_stream_proto() {
         .unwrap();
     }
 
-    tokio::time::timeout(timeout, source.send(Message::Terminate))
-        .await
-        .expect("timeout while sending terminate message")
-        .unwrap();
+    tokio::time::timeout(
+        timeout,
+        source.send(Message::Barrier {
+            epoch: 0,
+            stop: true,
+        }),
+    )
+    .await
+    .expect("timeout while sending terminate message")
+    .unwrap();
 
     tokio::time::timeout(timeout, consumer)
         .await
