@@ -38,7 +38,7 @@ rust_test:
 
 rust_test_with_coverage:
 	cd rust && mkdir -p proto
-	cd rust && RUSTFLAGS=-Dwarnings cargo tarpaulin --workspace --avoid-cfg-tarpaulin --exclude risingwave-proto --out Xml
+	cd rust && RUSTFLAGS=-Dwarnings cargo tarpaulin --workspace --exclude risingwave-proto --out Xml
 
 rust_build:
 	cd rust && cargo build

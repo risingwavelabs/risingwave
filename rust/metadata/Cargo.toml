@@ -29,7 +29,6 @@ protobuf = "2"
 risingwave-pb = { path = "../prost" }
 risingwave-proto = { path = "../proto" }
 risingwave_common = { path = "../common" }
-rocksdb = "0.17.0"
 rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }
 serde-value = "0.7.0"
