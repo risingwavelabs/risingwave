@@ -14,6 +14,8 @@ pub mod task_service;
 pub mod stream_plan;
 #[rustfmt::skip]
 pub mod stream_service;
+#[rustfmt::skip]
+pub mod hummock;
 
 mod convert;
 pub use convert::*;

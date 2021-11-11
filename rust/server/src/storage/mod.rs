@@ -2,6 +2,8 @@ mod mem;
 pub use mem::*;
 mod row_table;
 pub use row_table::*;
+mod hummock;
+pub use hummock::*;
 
 use crate::stream_op::StreamChunk;
 use futures::channel::mpsc;
