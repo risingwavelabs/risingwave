@@ -2,6 +2,7 @@
 members = [
   "batch",
   "common",
+  "metadata",
   "prost",
   "prost/helpers",
   "proto",

@@ -9,6 +9,7 @@ use backtrace::Backtrace;
 use protobuf::ProtobufError;
 use std::io::Error as IoError;
 use thiserror::Error;
+use tokio::task::JoinError;
 
 #[derive(Error, Debug)]
 pub enum ErrorCode {
@@ -38,6 +39,8 @@ pub enum ErrorCode {
     ProtocolError(String),
     #[error("Task not found")]
     TaskNotFound,
+    #[error("Item not found: {0}")]
+    ItemNotFound(String),
 }
 
 #[derive(Clone)]
@@ -52,7 +55,7 @@ impl RwError {
         let code = match *self.inner {
             ErrorCode::OK => tonic::Code::Ok,
             ErrorCode::NotImplementedError(_) => tonic::Code::Unimplemented,
-            ErrorCode::TaskNotFound => tonic::Code::NotFound,
+            ErrorCode::TaskNotFound | ErrorCode::ItemNotFound(_) => tonic::Code::NotFound,
             _ => tonic::Code::Internal,
         };
         tonic::Status::new(code, self.to_string())
@@ -67,6 +70,16 @@ impl From<ErrorCode> for RwError {
         }
     }
 }
+
+impl From<JoinError> for RwError {
+    fn from(join_error: JoinError) -> Self {
+        Self {
+            inner: Arc::new(ErrorCode::InternalError(join_error.to_string())),
+            backtrace: Arc::new(Backtrace::new()),
+        }
+    }
+}
+
 impl Debug for RwError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}, backtrace: {:?}", self.inner, self.backtrace)
@@ -107,6 +120,7 @@ impl ErrorCode {
             ErrorCode::TaskNotFound => 10,
             ErrorCode::ProstError(_) => 11,
             ErrorCode::GrpcNetworkError(_, _) => 12,
+            ErrorCode::ItemNotFound(_) => 13,
         }
     }
 }

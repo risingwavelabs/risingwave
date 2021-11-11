@@ -7,6 +7,7 @@ fn main() {
         "common.proto",
         "data.proto",
         "expr.proto",
+        "metadata.proto",
         "plan.proto",
         "task_service.proto",
         "stream_plan.proto",

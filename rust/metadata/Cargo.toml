@@ -1,0 +1,56 @@
+[package]
+name = "risingwave_metadata"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+async-stream = "0.3"
+async-trait = "0.1"
+backtrace = "0.3"
+byteorder = "1"
+bytes = "1"
+chrono = "0.4"
+clap = "3.0.0-beta.5"
+clap_derive = "3.0.0-beta.5"
+crc32fast = "1"
+either = "1"
+futures = "0.3"
+itertools = "0.10"
+lazy_static = "1.4.0"
+log = "0.4"
+log4rs = "1"
+num-traits = "0.2"
+paste = "1"
+pb-convert = { path = "../utils/pb-convert" }
+pb-convert-derive = { path = "../utils/pb-convert-derive" }
+prost = "0.8"
+protobuf = "2"
+risingwave-pb = { path = "../prost" }
+risingwave-proto = { path = "../proto" }
+risingwave_common = { path = "../common" }
+rocksdb = "0.17.0"
+rust_decimal = "1"
+serde = { version = "1", features = ["derive"] }
+serde-value = "0.7.0"
+serde_json = "1"
+serde_with = "1"
+smallvec = "1"
+thiserror = "1"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
+tokio-stream = "0.1.7"
+tonic = "0.5"
+typed-builder = "0.9"
+
+[dev-dependencies]
+approx = "0.5"
+assert_matches = "1.5"
+pb-construct = { path = "../utils/pb-construct" }
+rand = "0.8"
+tempfile = "3"
+
+[[bin]]
+name = "metadata-node"
+path = "src/bin/metadata_node.rs"
+
+[build-dependencies]

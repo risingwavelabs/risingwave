@@ -5,6 +5,8 @@ pub mod data;
 #[rustfmt::skip]
 pub mod expr;
 #[rustfmt::skip]
+pub mod metadata;
+#[rustfmt::skip]
 pub mod plan;
 #[rustfmt::skip]
 pub mod task_service;
