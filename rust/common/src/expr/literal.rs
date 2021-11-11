@@ -4,11 +4,12 @@ use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::Expression;
 use crate::types::{build_from_prost as type_build_from_prost, Scalar};
 use crate::types::{DataType, DataTypeKind, DataTypeRef, Datum, IntervalUnit, ScalarImpl};
-use prost::Message;
+use prost::DecodeError;
 use risingwave_pb::data::{
     data_type::IntervalType, data_type::IntervalType::*, data_type::TypeName,
 };
-use risingwave_pb::expr::{expr_node::Type, ConstantValue, ExprNode};
+use risingwave_pb::expr::expr_node::RexNode;
+use risingwave_pb::expr::{expr_node::Type, ExprNode};
 use rust_decimal::Decimal;
 use std::convert::TryFrom;
 use std::convert::TryInto;
@@ -137,89 +138,94 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
         ensure!(prost.expr_type == Type::ConstantValue as i32);
-        let data_type = type_build_from_prost(prost.get_return_type())?;
+        let ret_type = type_build_from_prost(prost.get_return_type())?;
 
-        let prost_value = ConstantValue::decode(&prost.get_body().value[..])
-            .map_err(|e| RwError::from(ErrorCode::ProstError(e)))?;
-        // when the body length is zero, the value is None
-        if prost_value.get_body().is_empty() {
-            return Ok(Self {
-                return_type: data_type,
-                literal: None,
-            });
+        if let RexNode::Constant(prost_value) = prost.get_rex_node() {
+            // when the body length is zero, the value is None
+            if prost_value.get_body().is_empty() {
+                return Ok(Self {
+                    return_type: ret_type,
+                    literal: None,
+                });
+            }
+
+            // TODO: We need to unify these
+            let value = match prost.get_return_type().get_type_name() {
+                TypeName::Boolean => ScalarImpl::Bool(
+                    i8::from_be_bytes(prost_value.get_body().as_slice().try_into().map_err(
+                        |e| InternalError(format!("Failed to deserialize bool, reason: {:?}", e)),
+                    )?) == 1,
+                ),
+                TypeName::Int16 => ScalarImpl::Int16(i16::from_be_bytes(
+                    prost_value.get_body().as_slice().try_into().map_err(|e| {
+                        InternalError(format!("Failed to deserialize i16, reason: {:?}", e))
+                    })?,
+                )),
+                TypeName::Int32 => ScalarImpl::Int32(i32::from_be_bytes(
+                    prost_value.get_body().as_slice().try_into().map_err(|e| {
+                        InternalError(format!("Failed to deserialize i32, reason: {:?}", e))
+                    })?,
+                )),
+                TypeName::Int64 => ScalarImpl::Int64(i64::from_be_bytes(
+                    prost_value.get_body().as_slice().try_into().map_err(|e| {
+                        InternalError(format!("Failed to deserialize i64, reason: {:?}", e))
+                    })?,
+                )),
+                TypeName::Float => ScalarImpl::Float32(f32::from_be_bytes(
+                    prost_value.get_body().as_slice().try_into().map_err(|e| {
+                        InternalError(format!("Failed to deserialize f32, reason: {:?}", e))
+                    })?,
+                )),
+                TypeName::Double => ScalarImpl::Float64(f64::from_be_bytes(
+                    prost_value.get_body().as_slice().try_into().map_err(|e| {
+                        InternalError(format!("Failed to deserialize f64, reason: {:?}", e))
+                    })?,
+                )),
+                TypeName::Char => ScalarImpl::UTF8(
+                    std::str::from_utf8(prost_value.get_body())
+                        .map_err(|e| {
+                            InternalError(format!("Failed to deserialize char, reason: {:?}", e))
+                        })?
+                        .to_string(),
+                ),
+                TypeName::Varchar => ScalarImpl::UTF8(
+                    std::str::from_utf8(prost_value.get_body())
+                        .map_err(|e| {
+                            InternalError(format!("Failed to deserialize varchar, reason: {:?}", e))
+                        })?
+                        .to_string(),
+                ),
+                TypeName::Decimal => ScalarImpl::Decimal(
+                    Decimal::from_str(std::str::from_utf8(prost_value.get_body()).unwrap())
+                        .map_err(|e| {
+                            InternalError(format!("Failed to deserialize decimal, reason: {:?}", e))
+                        })?,
+                ),
+                TypeName::Interval => {
+                    let bytes = prost_value.get_body();
+                    ScalarImpl::Interval(make_interval(
+                        bytes,
+                        prost.get_return_type().get_interval_type(),
+                    )?)
+                }
+                _ => {
+                    return Err(InternalError(format!(
+                        "Unrecognized type name: {:?}",
+                        prost.get_return_type().get_type_name()
+                    ))
+                    .into())
+                }
+            };
+
+            Ok(Self {
+                return_type: ret_type,
+                literal: Some(value),
+            })
+        } else {
+            Err(RwError::from(ErrorCode::ProstError(DecodeError::new(
+                "Cannot parse the RexNode",
+            ))))
         }
-
-        // TODO: We need to unify these
-        let value = match prost.get_return_type().get_type_name() {
-            TypeName::Boolean => ScalarImpl::Bool(
-                i8::from_be_bytes(prost_value.get_body().as_slice().try_into().map_err(|e| {
-                    InternalError(format!("Failed to deserialize bool, reason: {:?}", e))
-                })?) == 1,
-            ),
-            TypeName::Int16 => ScalarImpl::Int16(i16::from_be_bytes(
-                prost_value.get_body().as_slice().try_into().map_err(|e| {
-                    InternalError(format!("Failed to deserialize i16, reason: {:?}", e))
-                })?,
-            )),
-            TypeName::Int32 => ScalarImpl::Int32(i32::from_be_bytes(
-                prost_value.get_body().as_slice().try_into().map_err(|e| {
-                    InternalError(format!("Failed to deserialize i32, reason: {:?}", e))
-                })?,
-            )),
-            TypeName::Int64 => ScalarImpl::Int64(i64::from_be_bytes(
-                prost_value.get_body().as_slice().try_into().map_err(|e| {
-                    InternalError(format!("Failed to deserialize i64, reason: {:?}", e))
-                })?,
-            )),
-            TypeName::Float => ScalarImpl::Float32(f32::from_be_bytes(
-                prost_value.get_body().as_slice().try_into().map_err(|e| {
-                    InternalError(format!("Failed to deserialize f32, reason: {:?}", e))
-                })?,
-            )),
-            TypeName::Double => ScalarImpl::Float64(f64::from_be_bytes(
-                prost_value.get_body().as_slice().try_into().map_err(|e| {
-                    InternalError(format!("Failed to deserialize f64, reason: {:?}", e))
-                })?,
-            )),
-            TypeName::Char => ScalarImpl::UTF8(
-                std::str::from_utf8(prost_value.get_body())
-                    .map_err(|e| {
-                        InternalError(format!("Failed to deserialize char, reason: {:?}", e))
-                    })?
-                    .to_string(),
-            ),
-            TypeName::Varchar => ScalarImpl::UTF8(
-                std::str::from_utf8(prost_value.get_body())
-                    .map_err(|e| {
-                        InternalError(format!("Failed to deserialize varchar, reason: {:?}", e))
-                    })?
-                    .to_string(),
-            ),
-            TypeName::Decimal => ScalarImpl::Decimal(
-                Decimal::from_str(std::str::from_utf8(prost_value.get_body()).unwrap()).map_err(
-                    |e| InternalError(format!("Failed to deserialize decimal, reason: {:?}", e)),
-                )?,
-            ),
-            TypeName::Interval => {
-                let bytes = prost_value.get_body();
-                ScalarImpl::Interval(make_interval(
-                    bytes,
-                    prost.get_return_type().get_interval_type(),
-                )?)
-            }
-            _ => {
-                return Err(InternalError(format!(
-                    "Unrecognized type name: {:?}",
-                    prost.get_return_type().get_type_name()
-                ))
-                .into())
-            }
-        };
-
-        Ok(Self {
-            return_type: data_type,
-            literal: Some(value),
-        })
     }
 }
 
@@ -231,7 +237,6 @@ mod tests {
     use crate::array::column::Column;
     use crate::array::PrimitiveArray;
     use crate::types::Int32Type;
-    use prost_types::Any;
     use risingwave_pb::data::data_type::IntervalType;
     use risingwave_pb::data::DataType;
     use risingwave_pb::expr::ConstantValue;
@@ -282,16 +287,12 @@ mod tests {
     fn make_expression(bytes: Vec<u8>, data_type: TypeName) -> ExprNode {
         ExprNode {
             expr_type: Type::ConstantValue as i32,
-            body: Some(Any {
-                type_url: "/".to_string(),
-                value: ConstantValue { body: bytes }.encode_to_vec(),
-            }),
             return_type: Some(DataType {
                 type_name: data_type as i32,
                 interval_type: IntervalType::Month as i32,
                 ..Default::default()
             }),
-            rex_node: None,
+            rex_node: Some(RexNode::Constant(ConstantValue { body: bytes })),
         }
     }
 

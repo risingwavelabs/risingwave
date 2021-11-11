@@ -3,7 +3,6 @@ package com.risingwave.planner.rel.serialization;
 import static java.util.Objects.requireNonNull;
 
 import com.google.common.collect.ImmutableMap;
-import com.google.protobuf.Any;
 import com.google.protobuf.ByteString;
 import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.common.exception.PgErrorCode;
@@ -233,7 +232,6 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
     InputRefExpr inputRefExpr = InputRefExpr.newBuilder().setColumnIdx(columnIdx).build();
     return ExprNode.newBuilder()
         .setExprType(ExprNode.Type.INPUT_REF)
-        .setBody(Any.pack(inputRefExpr))
         .setReturnType(dataType)
         .setInputRef(inputRefExpr)
         .build();
@@ -280,7 +278,6 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
             .build();
     return ExprNode.newBuilder()
         .setExprType(ExprNode.Type.CONSTANT_VALUE)
-        .setBody(Any.pack(constantValue))
         .setReturnType(returnProtoDataType)
         .setConstant(constantValue)
         .build();
@@ -292,7 +289,6 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
     return ExprNode.newBuilder()
         .setExprType(exprType)
         .setReturnType(protoDataType)
-        .setBody(Any.pack(body))
         .setFuncCall(body)
         .build();
   }
@@ -322,7 +318,6 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
     return ExprNode.newBuilder()
         .setExprType(exprType)
         .setReturnType(protoDataType)
-        .setBody(Any.pack(body))
         .setFuncCall(body)
         .build();
   }

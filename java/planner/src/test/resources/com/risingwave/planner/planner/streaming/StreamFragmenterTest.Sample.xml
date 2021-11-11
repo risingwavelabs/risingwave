@@ -37,120 +37,18 @@
       "projectNode": {
         "selectList": [{
           "exprType": "ADD",
-          "body": {
-            "@type": "type.googleapis.com/expr.FunctionCall",
-            "children": [{
-              "exprType": "STREAM_NULL_BY_ROW_COUNT",
-              "body": {
-                "@type": "type.googleapis.com/expr.FunctionCall",
-                "children": [{
-                  "exprType": "INPUT_REF",
-                  "body": {
-                    "@type": "type.googleapis.com/expr.InputRefExpr",
-                    "columnIdx": 1
-                  },
-                  "returnType": {
-                    "typeName": "INT64"
-                  },
-                  "inputRef": {
-                    "columnIdx": 1
-                  }
-                }, {
-                  "exprType": "INPUT_REF",
-                  "body": {
-                    "@type": "type.googleapis.com/expr.InputRefExpr"
-                  },
-                  "returnType": {
-                    "typeName": "INT32"
-                  },
-                  "inputRef": {
-                  }
-                }]
-              },
-              "returnType": {
-                "typeName": "INT32"
-              },
-              "funcCall": {
-                "children": [{
-                  "exprType": "INPUT_REF",
-                  "body": {
-                    "@type": "type.googleapis.com/expr.InputRefExpr",
-                    "columnIdx": 1
-                  },
-                  "returnType": {
-                    "typeName": "INT64"
-                  },
-                  "inputRef": {
-                    "columnIdx": 1
-                  }
-                }, {
-                  "exprType": "INPUT_REF",
-                  "body": {
-                    "@type": "type.googleapis.com/expr.InputRefExpr"
-                  },
-                  "returnType": {
-                    "typeName": "INT32"
-                  },
-                  "inputRef": {
-                  }
-                }]
-              }
-            }, {
-              "exprType": "CONSTANT_VALUE",
-              "body": {
-                "@type": "type.googleapis.com/expr.ConstantValue",
-                "body": "AAAAAQ=="
-              },
-              "returnType": {
-                "typeName": "INT32"
-              },
-              "constant": {
-                "body": "AAAAAQ=="
-              }
-            }]
-          },
           "returnType": {
             "typeName": "INT32"
           },
           "funcCall": {
             "children": [{
               "exprType": "STREAM_NULL_BY_ROW_COUNT",
-              "body": {
-                "@type": "type.googleapis.com/expr.FunctionCall",
-                "children": [{
-                  "exprType": "INPUT_REF",
-                  "body": {
-                    "@type": "type.googleapis.com/expr.InputRefExpr",
-                    "columnIdx": 1
-                  },
-                  "returnType": {
-                    "typeName": "INT64"
-                  },
-                  "inputRef": {
-                    "columnIdx": 1
-                  }
-                }, {
-                  "exprType": "INPUT_REF",
-                  "body": {
-                    "@type": "type.googleapis.com/expr.InputRefExpr"
-                  },
-                  "returnType": {
-                    "typeName": "INT32"
-                  },
-                  "inputRef": {
-                  }
-                }]
-              },
               "returnType": {
                 "typeName": "INT32"
               },
               "funcCall": {
                 "children": [{
                   "exprType": "INPUT_REF",
-                  "body": {
-                    "@type": "type.googleapis.com/expr.InputRefExpr",
-                    "columnIdx": 1
-                  },
                   "returnType": {
                     "typeName": "INT64"
                   },
@@ -159,9 +57,6 @@
                   }
                 }, {
                   "exprType": "INPUT_REF",
-                  "body": {
-                    "@type": "type.googleapis.com/expr.InputRefExpr"
-                  },
                   "returnType": {
                     "typeName": "INT32"
                   },
@@ -171,10 +66,6 @@
               }
             }, {
               "exprType": "CONSTANT_VALUE",
-              "body": {
-                "@type": "type.googleapis.com/expr.ConstantValue",
-                "body": "AAAAAQ=="
-              },
               "returnType": {
                 "typeName": "INT32"
               },
@@ -219,41 +110,12 @@
         "filterNode": {
           "searchCondition": {
             "exprType": "GREATER_THAN",
-            "body": {
-              "@type": "type.googleapis.com/expr.FunctionCall",
-              "children": [{
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr"
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                },
-                "inputRef": {
-                }
-              }, {
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 1
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                },
-                "inputRef": {
-                  "columnIdx": 1
-                }
-              }]
-            },
             "returnType": {
               "typeName": "BOOLEAN"
             },
             "funcCall": {
               "children": [{
                 "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr"
-                },
                 "returnType": {
                   "typeName": "INT32"
                 },
@@ -261,10 +123,6 @@
                 }
               }, {
                 "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 1
-                },
                 "returnType": {
                   "typeName": "INT32"
                 },
@@ -300,42 +158,12 @@
     "projectNode": {
       "selectList": [{
         "exprType": "STREAM_NULL_BY_ROW_COUNT",
-        "body": {
-          "@type": "type.googleapis.com/expr.FunctionCall",
-          "children": [{
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr",
-              "columnIdx": 1
-            },
-            "returnType": {
-              "typeName": "INT64"
-            },
-            "inputRef": {
-              "columnIdx": 1
-            }
-          }, {
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr"
-            },
-            "returnType": {
-              "typeName": "INT32"
-            },
-            "inputRef": {
-            }
-          }]
-        },
         "returnType": {
           "typeName": "INT32"
         },
         "funcCall": {
           "children": [{
             "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr",
-              "columnIdx": 1
-            },
             "returnType": {
               "typeName": "INT64"
             },
@@ -344,9 +172,6 @@
             }
           }, {
             "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr"
-            },
             "returnType": {
               "typeName": "INT32"
             },
@@ -356,10 +181,6 @@
         }
       }, {
         "exprType": "INPUT_REF",
-        "body": {
-          "@type": "type.googleapis.com/expr.InputRefExpr",
-          "columnIdx": 1
-        },
         "returnType": {
           "typeName": "INT64"
         },
@@ -386,41 +207,12 @@
         "filterNode": {
           "searchCondition": {
             "exprType": "GREATER_THAN",
-            "body": {
-              "@type": "type.googleapis.com/expr.FunctionCall",
-              "children": [{
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr"
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                },
-                "inputRef": {
-                }
-              }, {
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 1
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                },
-                "inputRef": {
-                  "columnIdx": 1
-                }
-              }]
-            },
             "returnType": {
               "typeName": "BOOLEAN"
             },
             "funcCall": {
               "children": [{
                 "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr"
-                },
                 "returnType": {
                   "typeName": "INT32"
                 },
@@ -428,10 +220,6 @@
                 }
               }, {
                 "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 1
-                },
                 "returnType": {
                   "typeName": "INT32"
                 },
@@ -467,42 +255,12 @@
     "projectNode": {
       "selectList": [{
         "exprType": "STREAM_NULL_BY_ROW_COUNT",
-        "body": {
-          "@type": "type.googleapis.com/expr.FunctionCall",
-          "children": [{
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr",
-              "columnIdx": 1
-            },
-            "returnType": {
-              "typeName": "INT64"
-            },
-            "inputRef": {
-              "columnIdx": 1
-            }
-          }, {
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr"
-            },
-            "returnType": {
-              "typeName": "INT32"
-            },
-            "inputRef": {
-            }
-          }]
-        },
         "returnType": {
           "typeName": "INT32"
         },
         "funcCall": {
           "children": [{
             "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr",
-              "columnIdx": 1
-            },
             "returnType": {
               "typeName": "INT64"
             },
@@ -511,9 +269,6 @@
             }
           }, {
             "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr"
-            },
             "returnType": {
               "typeName": "INT32"
             },
@@ -523,10 +278,6 @@
         }
       }, {
         "exprType": "INPUT_REF",
-        "body": {
-          "@type": "type.googleapis.com/expr.InputRefExpr",
-          "columnIdx": 1
-        },
         "returnType": {
           "typeName": "INT64"
         },
@@ -553,41 +304,12 @@
         "filterNode": {
           "searchCondition": {
             "exprType": "GREATER_THAN",
-            "body": {
-              "@type": "type.googleapis.com/expr.FunctionCall",
-              "children": [{
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr"
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                },
-                "inputRef": {
-                }
-              }, {
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 1
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                },
-                "inputRef": {
-                  "columnIdx": 1
-                }
-              }]
-            },
             "returnType": {
               "typeName": "BOOLEAN"
             },
             "funcCall": {
               "children": [{
                 "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr"
-                },
                 "returnType": {
                   "typeName": "INT32"
                 },
@@ -595,10 +317,6 @@
                 }
               }, {
                 "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 1
-                },
                 "returnType": {
                   "typeName": "INT32"
                 },
@@ -634,42 +352,12 @@
     "projectNode": {
       "selectList": [{
         "exprType": "STREAM_NULL_BY_ROW_COUNT",
-        "body": {
-          "@type": "type.googleapis.com/expr.FunctionCall",
-          "children": [{
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr",
-              "columnIdx": 1
-            },
-            "returnType": {
-              "typeName": "INT64"
-            },
-            "inputRef": {
-              "columnIdx": 1
-            }
-          }, {
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr"
-            },
-            "returnType": {
-              "typeName": "INT32"
-            },
-            "inputRef": {
-            }
-          }]
-        },
         "returnType": {
           "typeName": "INT32"
         },
         "funcCall": {
           "children": [{
             "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr",
-              "columnIdx": 1
-            },
             "returnType": {
               "typeName": "INT64"
             },
@@ -678,9 +366,6 @@
             }
           }, {
             "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr"
-            },
             "returnType": {
               "typeName": "INT32"
             },
@@ -690,10 +375,6 @@
         }
       }, {
         "exprType": "INPUT_REF",
-        "body": {
-          "@type": "type.googleapis.com/expr.InputRefExpr",
-          "columnIdx": 1
-        },
         "returnType": {
           "typeName": "INT64"
         },
@@ -720,41 +401,12 @@
         "filterNode": {
           "searchCondition": {
             "exprType": "GREATER_THAN",
-            "body": {
-              "@type": "type.googleapis.com/expr.FunctionCall",
-              "children": [{
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr"
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                },
-                "inputRef": {
-                }
-              }, {
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 1
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                },
-                "inputRef": {
-                  "columnIdx": 1
-                }
-              }]
-            },
             "returnType": {
               "typeName": "BOOLEAN"
             },
             "funcCall": {
               "children": [{
                 "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr"
-                },
                 "returnType": {
                   "typeName": "INT32"
                 },
@@ -762,10 +414,6 @@
                 }
               }, {
                 "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 1
-                },
                 "returnType": {
                   "typeName": "INT32"
                 },
@@ -801,42 +449,12 @@
     "projectNode": {
       "selectList": [{
         "exprType": "STREAM_NULL_BY_ROW_COUNT",
-        "body": {
-          "@type": "type.googleapis.com/expr.FunctionCall",
-          "children": [{
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr",
-              "columnIdx": 1
-            },
-            "returnType": {
-              "typeName": "INT64"
-            },
-            "inputRef": {
-              "columnIdx": 1
-            }
-          }, {
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr"
-            },
-            "returnType": {
-              "typeName": "INT32"
-            },
-            "inputRef": {
-            }
-          }]
-        },
         "returnType": {
           "typeName": "INT32"
         },
         "funcCall": {
           "children": [{
             "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr",
-              "columnIdx": 1
-            },
             "returnType": {
               "typeName": "INT64"
             },
@@ -845,9 +463,6 @@
             }
           }, {
             "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr"
-            },
             "returnType": {
               "typeName": "INT32"
             },
@@ -857,10 +472,6 @@
         }
       }, {
         "exprType": "INPUT_REF",
-        "body": {
-          "@type": "type.googleapis.com/expr.InputRefExpr",
-          "columnIdx": 1
-        },
         "returnType": {
           "typeName": "INT64"
         },

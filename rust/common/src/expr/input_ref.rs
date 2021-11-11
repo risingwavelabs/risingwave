@@ -1,13 +1,12 @@
 use std::convert::TryFrom;
 
-use prost::Message;
-
-use risingwave_pb::expr::{expr_node::Type, ExprNode as ProstExprNode, InputRefExpr};
+use risingwave_pb::expr::expr_node::RexNode;
+use risingwave_pb::expr::{expr_node::Type, ExprNode as ProstExprNode};
 
 use crate::array::{ArrayRef, DataChunk};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::Expression;
-use crate::types::{build_from_prost, DataType, DataTypeRef};
+use crate::types::{build_from_prost as type_build_from_prost, DataType, DataTypeRef};
 
 /// `InputRefExpression` references to a column in input relation
 pub struct InputRefExpression {
@@ -45,12 +44,16 @@ impl<'a> TryFrom<&'a ProstExprNode> for InputRefExpression {
     fn try_from(prost: &'a ProstExprNode) -> Result<Self> {
         ensure!(prost.get_expr_type() == Type::InputRef);
 
-        let data_type = build_from_prost(prost.get_return_type())?;
-        let input_ref_node = InputRefExpr::decode(&prost.get_body().value[..])
-            .map_err(|e| RwError::from(ErrorCode::ProstError(e)))?;
-        Ok(Self {
-            return_type: data_type,
-            idx: input_ref_node.column_idx as usize,
-        })
+        let ret_type = type_build_from_prost(prost.get_return_type())?;
+        if let RexNode::InputRef(input_ref_node) = prost.get_rex_node() {
+            Ok(Self {
+                return_type: ret_type,
+                idx: input_ref_node.column_idx as usize,
+            })
+        } else {
+            Err(RwError::from(ErrorCode::NotImplementedError(
+                "expects a input ref node".to_string(),
+            )))
+        }
     }
 }

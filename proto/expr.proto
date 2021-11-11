@@ -7,7 +7,6 @@ option java_package = "com.risingwave.proto.expr";
 option optimize_for = SPEED;
 
 import "data.proto";
-import "google/protobuf/any.proto";
 
 message ExprNode {
   enum Type {
@@ -45,7 +44,6 @@ message ExprNode {
     STREAM_NULL_BY_ROW_COUNT = 1000;
   }
   Type expr_type = 1;
-  google.protobuf.Any body = 2;
   data.DataType return_type = 3;
   oneof RexNode {
     InputRefExpr input_ref = 4;

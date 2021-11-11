@@ -7,9 +7,11 @@ use protobuf::well_known_types::Any;
 use protobuf::Message;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::ToProto;
+use risingwave_pb::data::data_type::TypeName;
+use risingwave_pb::expr::expr_node::RexNode;
+use risingwave_pb::{ToProst, ToProto};
 use risingwave_proto::data::{Column, DataType, DataType_TypeName};
-use risingwave_proto::expr::{ConstantValue, ExprNode, ExprNode_Type};
+use risingwave_proto::expr::ConstantValue;
 use risingwave_proto::plan::{
     ColumnDesc, CreateTableNode, ExchangeInfo_DistributionMode, InsertNode, PlanFragment,
     PlanNode_PlanNodeType as PlanNodeType, SeqScanNode, TableRefId, ValuesNode,
@@ -215,15 +217,21 @@ impl<'a> TableBuilder<'a> {
     fn build_values(constants: Vec<ConstantValue>) -> ValuesNode_ExprTuple {
         let mut tuple = ValuesNode_ExprTuple::default();
         for constant in constants {
-            let mut node = ExprNode::default();
+            use risingwave_pb::data::DataType;
+            use risingwave_pb::expr::expr_node::Type;
+            use risingwave_pb::expr::{ConstantValue, ExprNode};
+            let node = ExprNode {
+                expr_type: Type::ConstantValue as i32,
+                return_type: Some(DataType {
+                    type_name: TypeName::Int32 as i32,
+                    ..Default::default()
+                }),
+                rex_node: Some(RexNode::Constant(ConstantValue {
+                    body: constant.to_prost(),
+                })),
+            };
 
-            node.set_expr_type(ExprNode_Type::CONSTANT_VALUE);
-            let mut typ = DataType::new();
-            typ.set_type_name(DataType_TypeName::INT32);
-            node.set_return_type(typ);
-            node.set_body(Any::pack(&constant).unwrap());
-
-            tuple.mut_cells().push(node);
+            tuple.mut_cells().push(node.to_proto());
         }
         tuple
     }

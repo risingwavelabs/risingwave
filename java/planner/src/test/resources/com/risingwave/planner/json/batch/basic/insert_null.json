@@ -18,9 +18,6 @@
       "tuples": [{
         "cells": [{
           "exprType": "CONSTANT_VALUE",
-          "body": {
-            "@type": "type.googleapis.com/expr.ConstantValue"
-          },
           "returnType": {
             "typeName": "INT32"
           },

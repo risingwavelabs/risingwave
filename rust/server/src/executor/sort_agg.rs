@@ -171,13 +171,13 @@ impl Executor for SortAggExecutor {
 #[cfg(test)]
 mod tests {
     use crate::executor::test_utils::MockExecutor;
-    use prost_types::Any as ProstAny;
     use risingwave_common::array::{Array as _, I32Array, I64Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::expr::build_from_prost;
     use risingwave_common::types::{DataTypeKind, Int32Type};
     use risingwave_pb::data::{data_type::TypeName, DataType as DataTypeProst};
+    use risingwave_pb::expr::expr_node::RexNode;
     use risingwave_pb::expr::expr_node::Type::InputRef;
     use risingwave_pb::expr::{agg_call::Arg, agg_call::Type, AggCall, ExprNode, InputRefExpr};
 
@@ -315,15 +315,11 @@ mod tests {
             .map(|idx| {
                 build_from_prost(&ExprNode {
                     expr_type: InputRef as i32,
-                    body: Some(ProstAny {
-                        type_url: "/".to_string(),
-                        value: InputRefExpr { column_idx: idx }.encode_to_vec(),
-                    }),
                     return_type: Some(DataTypeProst {
                         type_name: TypeName::Int32 as i32,
                         ..Default::default()
                     }),
-                    rex_node: None,
+                    rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: idx })),
                 })
             })
             .collect::<Result<Vec<BoxedExpression>>>()?;

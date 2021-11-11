@@ -34,41 +34,12 @@ RwStreamMaterializedView(name=[t1])
         "filterNode": {
           "searchCondition": {
             "exprType": "GREATER_THAN",
-            "body": {
-              "@type": "type.googleapis.com/expr.FunctionCall",
-              "children": [{
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr"
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                },
-                "inputRef": {
-                }
-              }, {
-                "exprType": "CONSTANT_VALUE",
-                "body": {
-                  "@type": "type.googleapis.com/expr.ConstantValue",
-                  "body": "AAAAAQ=="
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                },
-                "constant": {
-                  "body": "AAAAAQ=="
-                }
-              }]
-            },
             "returnType": {
               "typeName": "BOOLEAN"
             },
             "funcCall": {
               "children": [{
                 "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr"
-                },
                 "returnType": {
                   "typeName": "INT32"
                 },
@@ -76,10 +47,6 @@ RwStreamMaterializedView(name=[t1])
                 }
               }, {
                 "exprType": "CONSTANT_VALUE",
-                "body": {
-                  "@type": "type.googleapis.com/expr.ConstantValue",
-                  "body": "AAAAAQ=="
-                },
                 "returnType": {
                   "typeName": "INT32"
                 },
@@ -116,42 +83,12 @@ RwStreamMaterializedView(name=[t1])
     "projectNode": {
       "selectList": [{
         "exprType": "STREAM_NULL_BY_ROW_COUNT",
-        "body": {
-          "@type": "type.googleapis.com/expr.FunctionCall",
-          "children": [{
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr",
-              "columnIdx": 1
-            },
-            "returnType": {
-              "typeName": "INT64"
-            },
-            "inputRef": {
-              "columnIdx": 1
-            }
-          }, {
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr"
-            },
-            "returnType": {
-              "typeName": "INT32"
-            },
-            "inputRef": {
-            }
-          }]
-        },
         "returnType": {
           "typeName": "INT32"
         },
         "funcCall": {
           "children": [{
             "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr",
-              "columnIdx": 1
-            },
             "returnType": {
               "typeName": "INT64"
             },
@@ -160,9 +97,6 @@ RwStreamMaterializedView(name=[t1])
             }
           }, {
             "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr"
-            },
             "returnType": {
               "typeName": "INT32"
             },
@@ -225,41 +159,12 @@ RwStreamMaterializedView(name=[t2])
     "projectNode": {
       "selectList": [{
         "exprType": "ADD",
-        "body": {
-          "@type": "type.googleapis.com/expr.FunctionCall",
-          "children": [{
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr"
-            },
-            "returnType": {
-              "typeName": "INT32"
-            },
-            "inputRef": {
-            }
-          }, {
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr",
-              "columnIdx": 1
-            },
-            "returnType": {
-              "typeName": "INT32"
-            },
-            "inputRef": {
-              "columnIdx": 1
-            }
-          }]
-        },
         "returnType": {
           "typeName": "INT32"
         },
         "funcCall": {
           "children": [{
             "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr"
-            },
             "returnType": {
               "typeName": "INT32"
             },
@@ -267,10 +172,6 @@ RwStreamMaterializedView(name=[t2])
             }
           }, {
             "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr",
-              "columnIdx": 1
-            },
             "returnType": {
               "typeName": "INT32"
             },
@@ -362,44 +263,12 @@ RwStreamMaterializedView(name=[t3])
       "filterNode": {
         "searchCondition": {
           "exprType": "NOT_EQUAL",
-          "body": {
-            "@type": "type.googleapis.com/expr.FunctionCall",
-            "children": [{
-              "exprType": "INPUT_REF",
-              "body": {
-                "@type": "type.googleapis.com/expr.InputRefExpr",
-                "columnIdx": 2
-              },
-              "returnType": {
-                "typeName": "INT64"
-              },
-              "inputRef": {
-                "columnIdx": 2
-              }
-            }, {
-              "exprType": "CONSTANT_VALUE",
-              "body": {
-                "@type": "type.googleapis.com/expr.ConstantValue",
-                "body": "AAAAAAAAAAA="
-              },
-              "returnType": {
-                "typeName": "INT64"
-              },
-              "constant": {
-                "body": "AAAAAAAAAAA="
-              }
-            }]
-          },
           "returnType": {
             "typeName": "BOOLEAN"
           },
           "funcCall": {
             "children": [{
               "exprType": "INPUT_REF",
-              "body": {
-                "@type": "type.googleapis.com/expr.InputRefExpr",
-                "columnIdx": 2
-              },
               "returnType": {
                 "typeName": "INT64"
               },
@@ -408,10 +277,6 @@ RwStreamMaterializedView(name=[t3])
               }
             }, {
               "exprType": "CONSTANT_VALUE",
-              "body": {
-                "@type": "type.googleapis.com/expr.ConstantValue",
-                "body": "AAAAAAAAAAA="
-              },
               "returnType": {
                 "typeName": "INT64"
               },
@@ -426,9 +291,6 @@ RwStreamMaterializedView(name=[t3])
     "projectNode": {
       "selectList": [{
         "exprType": "INPUT_REF",
-        "body": {
-          "@type": "type.googleapis.com/expr.InputRefExpr"
-        },
         "returnType": {
           "typeName": "INT32"
         },
@@ -436,10 +298,6 @@ RwStreamMaterializedView(name=[t3])
         }
       }, {
         "exprType": "INPUT_REF",
-        "body": {
-          "@type": "type.googleapis.com/expr.InputRefExpr",
-          "columnIdx": 1
-        },
         "returnType": {
           "typeName": "INT32"
         },
@@ -541,168 +399,18 @@ RwStreamMaterializedView(name=[t4])
     "projectNode": {
       "selectList": [{
         "exprType": "ADD",
-        "body": {
-          "@type": "type.googleapis.com/expr.FunctionCall",
-          "children": [{
-            "exprType": "STREAM_NULL_BY_ROW_COUNT",
-            "body": {
-              "@type": "type.googleapis.com/expr.FunctionCall",
-              "children": [{
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 2
-                },
-                "returnType": {
-                  "typeName": "INT64"
-                },
-                "inputRef": {
-                  "columnIdx": 2
-                }
-              }, {
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr"
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                },
-                "inputRef": {
-                }
-              }]
-            },
-            "returnType": {
-              "typeName": "INT32"
-            },
-            "funcCall": {
-              "children": [{
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 2
-                },
-                "returnType": {
-                  "typeName": "INT64"
-                },
-                "inputRef": {
-                  "columnIdx": 2
-                }
-              }, {
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr"
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                },
-                "inputRef": {
-                }
-              }]
-            }
-          }, {
-            "exprType": "STREAM_NULL_BY_ROW_COUNT",
-            "body": {
-              "@type": "type.googleapis.com/expr.FunctionCall",
-              "children": [{
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 2
-                },
-                "returnType": {
-                  "typeName": "INT64"
-                },
-                "inputRef": {
-                  "columnIdx": 2
-                }
-              }, {
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 1
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                },
-                "inputRef": {
-                  "columnIdx": 1
-                }
-              }]
-            },
-            "returnType": {
-              "typeName": "INT32"
-            },
-            "funcCall": {
-              "children": [{
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 2
-                },
-                "returnType": {
-                  "typeName": "INT64"
-                },
-                "inputRef": {
-                  "columnIdx": 2
-                }
-              }, {
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 1
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                },
-                "inputRef": {
-                  "columnIdx": 1
-                }
-              }]
-            }
-          }]
-        },
         "returnType": {
           "typeName": "INT32"
         },
         "funcCall": {
           "children": [{
             "exprType": "STREAM_NULL_BY_ROW_COUNT",
-            "body": {
-              "@type": "type.googleapis.com/expr.FunctionCall",
-              "children": [{
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 2
-                },
-                "returnType": {
-                  "typeName": "INT64"
-                },
-                "inputRef": {
-                  "columnIdx": 2
-                }
-              }, {
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr"
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                },
-                "inputRef": {
-                }
-              }]
-            },
             "returnType": {
               "typeName": "INT32"
             },
             "funcCall": {
               "children": [{
                 "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 2
-                },
                 "returnType": {
                   "typeName": "INT64"
                 },
@@ -711,9 +419,6 @@ RwStreamMaterializedView(name=[t4])
                 }
               }, {
                 "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr"
-                },
                 "returnType": {
                   "typeName": "INT32"
                 },
@@ -723,44 +428,12 @@ RwStreamMaterializedView(name=[t4])
             }
           }, {
             "exprType": "STREAM_NULL_BY_ROW_COUNT",
-            "body": {
-              "@type": "type.googleapis.com/expr.FunctionCall",
-              "children": [{
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 2
-                },
-                "returnType": {
-                  "typeName": "INT64"
-                },
-                "inputRef": {
-                  "columnIdx": 2
-                }
-              }, {
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 1
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                },
-                "inputRef": {
-                  "columnIdx": 1
-                }
-              }]
-            },
             "returnType": {
               "typeName": "INT32"
             },
             "funcCall": {
               "children": [{
                 "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 2
-                },
                 "returnType": {
                   "typeName": "INT64"
                 },
@@ -769,10 +442,6 @@ RwStreamMaterializedView(name=[t4])
                 }
               }, {
                 "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 1
-                },
                 "returnType": {
                   "typeName": "INT32"
                 },
@@ -841,41 +510,12 @@ RwStreamMaterializedView(name=[t5])
         "projectNode": {
           "selectList": [{
             "exprType": "ADD",
-            "body": {
-              "@type": "type.googleapis.com/expr.FunctionCall",
-              "children": [{
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr"
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                },
-                "inputRef": {
-                }
-              }, {
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 1
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                },
-                "inputRef": {
-                  "columnIdx": 1
-                }
-              }]
-            },
             "returnType": {
               "typeName": "INT32"
             },
             "funcCall": {
               "children": [{
                 "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr"
-                },
                 "returnType": {
                   "typeName": "INT32"
                 },
@@ -883,10 +523,6 @@ RwStreamMaterializedView(name=[t5])
                 }
               }, {
                 "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 1
-                },
                 "returnType": {
                   "typeName": "INT32"
                 },
@@ -922,42 +558,12 @@ RwStreamMaterializedView(name=[t5])
     "projectNode": {
       "selectList": [{
         "exprType": "STREAM_NULL_BY_ROW_COUNT",
-        "body": {
-          "@type": "type.googleapis.com/expr.FunctionCall",
-          "children": [{
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr",
-              "columnIdx": 1
-            },
-            "returnType": {
-              "typeName": "INT64"
-            },
-            "inputRef": {
-              "columnIdx": 1
-            }
-          }, {
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr"
-            },
-            "returnType": {
-              "typeName": "INT32"
-            },
-            "inputRef": {
-            }
-          }]
-        },
         "returnType": {
           "typeName": "INT32"
         },
         "funcCall": {
           "children": [{
             "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr",
-              "columnIdx": 1
-            },
             "returnType": {
               "typeName": "INT64"
             },
@@ -966,9 +572,6 @@ RwStreamMaterializedView(name=[t5])
             }
           }, {
             "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr"
-            },
             "returnType": {
               "typeName": "INT32"
             },
@@ -1058,44 +661,12 @@ RwStreamMaterializedView(name=[t6])
       "filterNode": {
         "searchCondition": {
           "exprType": "NOT_EQUAL",
-          "body": {
-            "@type": "type.googleapis.com/expr.FunctionCall",
-            "children": [{
-              "exprType": "INPUT_REF",
-              "body": {
-                "@type": "type.googleapis.com/expr.InputRefExpr",
-                "columnIdx": 2
-              },
-              "returnType": {
-                "typeName": "INT64"
-              },
-              "inputRef": {
-                "columnIdx": 2
-              }
-            }, {
-              "exprType": "CONSTANT_VALUE",
-              "body": {
-                "@type": "type.googleapis.com/expr.ConstantValue",
-                "body": "AAAAAAAAAAA="
-              },
-              "returnType": {
-                "typeName": "INT64"
-              },
-              "constant": {
-                "body": "AAAAAAAAAAA="
-              }
-            }]
-          },
           "returnType": {
             "typeName": "BOOLEAN"
           },
           "funcCall": {
             "children": [{
               "exprType": "INPUT_REF",
-              "body": {
-                "@type": "type.googleapis.com/expr.InputRefExpr",
-                "columnIdx": 2
-              },
               "returnType": {
                 "typeName": "INT64"
               },
@@ -1104,10 +675,6 @@ RwStreamMaterializedView(name=[t6])
               }
             }, {
               "exprType": "CONSTANT_VALUE",
-              "body": {
-                "@type": "type.googleapis.com/expr.ConstantValue",
-                "body": "AAAAAAAAAAA="
-              },
               "returnType": {
                 "typeName": "INT64"
               },
@@ -1122,10 +689,6 @@ RwStreamMaterializedView(name=[t6])
     "projectNode": {
       "selectList": [{
         "exprType": "INPUT_REF",
-        "body": {
-          "@type": "type.googleapis.com/expr.InputRefExpr",
-          "columnIdx": 1
-        },
         "returnType": {
           "typeName": "INT32"
         },
@@ -1214,44 +777,12 @@ RwStreamMaterializedView(name=[t7])
       "filterNode": {
         "searchCondition": {
           "exprType": "NOT_EQUAL",
-          "body": {
-            "@type": "type.googleapis.com/expr.FunctionCall",
-            "children": [{
-              "exprType": "INPUT_REF",
-              "body": {
-                "@type": "type.googleapis.com/expr.InputRefExpr",
-                "columnIdx": 2
-              },
-              "returnType": {
-                "typeName": "INT64"
-              },
-              "inputRef": {
-                "columnIdx": 2
-              }
-            }, {
-              "exprType": "CONSTANT_VALUE",
-              "body": {
-                "@type": "type.googleapis.com/expr.ConstantValue",
-                "body": "AAAAAAAAAAA="
-              },
-              "returnType": {
-                "typeName": "INT64"
-              },
-              "constant": {
-                "body": "AAAAAAAAAAA="
-              }
-            }]
-          },
           "returnType": {
             "typeName": "BOOLEAN"
           },
           "funcCall": {
             "children": [{
               "exprType": "INPUT_REF",
-              "body": {
-                "@type": "type.googleapis.com/expr.InputRefExpr",
-                "columnIdx": 2
-              },
               "returnType": {
                 "typeName": "INT64"
               },
@@ -1260,10 +791,6 @@ RwStreamMaterializedView(name=[t7])
               }
             }, {
               "exprType": "CONSTANT_VALUE",
-              "body": {
-                "@type": "type.googleapis.com/expr.ConstantValue",
-                "body": "AAAAAAAAAAA="
-              },
               "returnType": {
                 "typeName": "INT64"
               },
@@ -1278,44 +805,12 @@ RwStreamMaterializedView(name=[t7])
     "projectNode": {
       "selectList": [{
         "exprType": "ADD",
-        "body": {
-          "@type": "type.googleapis.com/expr.FunctionCall",
-          "children": [{
-            "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr",
-              "columnIdx": 1
-            },
-            "returnType": {
-              "typeName": "INT32"
-            },
-            "inputRef": {
-              "columnIdx": 1
-            }
-          }, {
-            "exprType": "CONSTANT_VALUE",
-            "body": {
-              "@type": "type.googleapis.com/expr.ConstantValue",
-              "body": "AAAAAQ=="
-            },
-            "returnType": {
-              "typeName": "INT32"
-            },
-            "constant": {
-              "body": "AAAAAQ=="
-            }
-          }]
-        },
         "returnType": {
           "typeName": "INT32"
         },
         "funcCall": {
           "children": [{
             "exprType": "INPUT_REF",
-            "body": {
-              "@type": "type.googleapis.com/expr.InputRefExpr",
-              "columnIdx": 1
-            },
             "returnType": {
               "typeName": "INT32"
             },
@@ -1324,10 +819,6 @@ RwStreamMaterializedView(name=[t7])
             }
           }, {
             "exprType": "CONSTANT_VALUE",
-            "body": {
-              "@type": "type.googleapis.com/expr.ConstantValue",
-              "body": "AAAAAQ=="
-            },
             "returnType": {
               "typeName": "INT32"
             },
@@ -1393,41 +884,12 @@ RwStreamMaterializedView(name=[t8])
         "filterNode": {
           "searchCondition": {
             "exprType": "GREATER_THAN",
-            "body": {
-              "@type": "type.googleapis.com/expr.FunctionCall",
-              "children": [{
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr"
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                },
-                "inputRef": {
-                }
-              }, {
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 1
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                },
-                "inputRef": {
-                  "columnIdx": 1
-                }
-              }]
-            },
             "returnType": {
               "typeName": "BOOLEAN"
             },
             "funcCall": {
               "children": [{
                 "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr"
-                },
                 "returnType": {
                   "typeName": "INT32"
                 },
@@ -1435,10 +897,6 @@ RwStreamMaterializedView(name=[t8])
                 }
               }, {
                 "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 1
-                },
                 "returnType": {
                   "typeName": "INT32"
                 },
@@ -1474,120 +932,18 @@ RwStreamMaterializedView(name=[t8])
     "projectNode": {
       "selectList": [{
         "exprType": "ADD",
-        "body": {
-          "@type": "type.googleapis.com/expr.FunctionCall",
-          "children": [{
-            "exprType": "STREAM_NULL_BY_ROW_COUNT",
-            "body": {
-              "@type": "type.googleapis.com/expr.FunctionCall",
-              "children": [{
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 1
-                },
-                "returnType": {
-                  "typeName": "INT64"
-                },
-                "inputRef": {
-                  "columnIdx": 1
-                }
-              }, {
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr"
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                },
-                "inputRef": {
-                }
-              }]
-            },
-            "returnType": {
-              "typeName": "INT32"
-            },
-            "funcCall": {
-              "children": [{
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 1
-                },
-                "returnType": {
-                  "typeName": "INT64"
-                },
-                "inputRef": {
-                  "columnIdx": 1
-                }
-              }, {
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr"
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                },
-                "inputRef": {
-                }
-              }]
-            }
-          }, {
-            "exprType": "CONSTANT_VALUE",
-            "body": {
-              "@type": "type.googleapis.com/expr.ConstantValue",
-              "body": "AAAAAQ=="
-            },
-            "returnType": {
-              "typeName": "INT32"
-            },
-            "constant": {
-              "body": "AAAAAQ=="
-            }
-          }]
-        },
         "returnType": {
           "typeName": "INT32"
         },
         "funcCall": {
           "children": [{
             "exprType": "STREAM_NULL_BY_ROW_COUNT",
-            "body": {
-              "@type": "type.googleapis.com/expr.FunctionCall",
-              "children": [{
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 1
-                },
-                "returnType": {
-                  "typeName": "INT64"
-                },
-                "inputRef": {
-                  "columnIdx": 1
-                }
-              }, {
-                "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr"
-                },
-                "returnType": {
-                  "typeName": "INT32"
-                },
-                "inputRef": {
-                }
-              }]
-            },
             "returnType": {
               "typeName": "INT32"
             },
             "funcCall": {
               "children": [{
                 "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr",
-                  "columnIdx": 1
-                },
                 "returnType": {
                   "typeName": "INT64"
                 },
@@ -1596,9 +952,6 @@ RwStreamMaterializedView(name=[t8])
                 }
               }, {
                 "exprType": "INPUT_REF",
-                "body": {
-                  "@type": "type.googleapis.com/expr.InputRefExpr"
-                },
                 "returnType": {
                   "typeName": "INT32"
                 },
@@ -1608,10 +961,6 @@ RwStreamMaterializedView(name=[t8])
             }
           }, {
             "exprType": "CONSTANT_VALUE",
-            "body": {
-              "@type": "type.googleapis.com/expr.ConstantValue",
-              "body": "AAAAAQ=="
-            },
             "returnType": {
               "typeName": "INT32"
             },

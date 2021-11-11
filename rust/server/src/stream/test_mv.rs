@@ -4,8 +4,6 @@ use crate::stream::StreamManager;
 use crate::stream_op::Message as StreamMessage;
 use futures::StreamExt;
 use itertools::Itertools;
-use prost::Message;
-use prost_types::Any;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::Row;
 use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder};
@@ -16,6 +14,7 @@ use risingwave_common::types::{Int32Type, Scalar};
 use risingwave_common::util::addr::get_host_port;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
+use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::InputRef;
 use risingwave_pb::expr::{ExprNode, InputRefExpr};
 use risingwave_pb::plan::column_desc::ColumnEncodingType;
@@ -62,12 +61,8 @@ async fn test_stream_mv_proto() {
     };
     let expr_proto = ExprNode {
         expr_type: InputRef as i32,
-        body: Some(Any {
-            type_url: "/".to_string(),
-            value: InputRefExpr { column_idx: 0 }.encode_to_vec(),
-        }),
         return_type: Some(make_int32_type_pb()),
-        rex_node: None,
+        rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: 0 })),
     };
     let column_desc = ColumnDesc {
         column_type: Some(DataType {
