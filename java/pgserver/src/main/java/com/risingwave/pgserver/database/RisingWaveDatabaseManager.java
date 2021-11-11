@@ -2,11 +2,13 @@ package com.risingwave.pgserver.database;
 
 import com.risingwave.common.exception.PgException;
 import com.risingwave.execution.context.FrontendEnv;
+import com.risingwave.execution.context.SessionConfiguration;
 import com.risingwave.pgwire.database.Database;
 import com.risingwave.pgwire.database.DatabaseManager;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 
+/** Manages all database (session). */
 @Singleton
 public class RisingWaveDatabaseManager implements DatabaseManager {
   private final FrontendEnv frontendEnv;
@@ -18,6 +20,7 @@ public class RisingWaveDatabaseManager implements DatabaseManager {
 
   @Override
   public Database connect(String user, String database) throws PgException {
-    return new RisingWaveDatabase(frontendEnv, database, user);
+    return new RisingWaveDatabase(
+        frontendEnv, database, user, new SessionConfiguration(frontendEnv.getConfiguration()));
   }
 }

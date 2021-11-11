@@ -12,6 +12,7 @@ import com.risingwave.common.config.LeaderServerConfigurations;
 import com.risingwave.common.datatype.NumericTypeBase;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.execution.context.FrontendEnv;
+import com.risingwave.execution.context.SessionConfiguration;
 import com.risingwave.planner.TestPlannerModule;
 import com.risingwave.planner.planner.streaming.StreamPlanner;
 import com.risingwave.planner.rel.physical.streaming.StreamingPlan;
@@ -48,6 +49,7 @@ public class CreateMaterializedViewHandlerTest {
             .withDatabase(TEST_DB_NAME)
             .withSchema(TEST_SCHEMA_NAME)
             .withFrontendEnv(frontendEnv)
+            .withSessionConfig(new SessionConfiguration(frontendEnv.getConfiguration()))
             .build();
     String sql = "create table t(v1 int not null, v2 int not null, v3 float not null)";
     SqlNode ast = SqlParser.createCalciteStatement(sql);

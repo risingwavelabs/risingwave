@@ -12,6 +12,7 @@ import com.risingwave.common.config.Configuration;
 import com.risingwave.common.config.LeaderServerConfigurations;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.execution.context.FrontendEnv;
+import com.risingwave.execution.context.SessionConfiguration;
 import com.risingwave.planner.TestPlannerModule;
 import com.risingwave.proto.data.DataType;
 import com.risingwave.proto.plan.CreateStreamNode;
@@ -49,6 +50,7 @@ public class BasicStreamTest {
             .withDatabase(TEST_DB_NAME)
             .withSchema(TEST_SCHEMA_NAME)
             .withFrontendEnv(frontendEnv)
+            .withSessionConfig(new SessionConfiguration(frontendEnv.getConfiguration()))
             .build();
   }
 

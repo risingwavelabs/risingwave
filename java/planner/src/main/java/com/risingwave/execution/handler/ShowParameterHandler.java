@@ -17,7 +17,7 @@ public class ShowParameterHandler implements SqlHandler {
   @Override
   public SimpleQueryResult handle(SqlNode ast, ExecutionContext context) {
     var plan = (SqlShowParameters) ast;
-    var config = context.getConf();
+    var config = context.getSessionConfiguration();
     var ret = config.getByString(plan.getName().toString()).toString();
     var factory = new RisingWaveTypeFactory();
     // Currently all result are return in string format.

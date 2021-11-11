@@ -29,9 +29,8 @@ import java.util.stream.Collectors;
 public class Configuration {
 
   /**
-   * string key -> config value (T). TODO: Move the config data into session level context. Each
-   * session should own a config map to record the session level parameters. `SET` can change the
-   * value here.
+   * string key -> config value (T). Note that this config map is designed to store server-level
+   * parameters. Different from the map in `SessionConfiguration`.
    */
   private final Map<String, Object> confData = new HashMap<>();
 
@@ -51,31 +50,16 @@ public class Configuration {
     setRawValue(key, value);
   }
 
-  /** Get config value by using the string key. Used in show parameter handler. */
-  public <T> T getByString(String stringKey) {
-    Object rawValue = confData.get(stringKey);
-    if (rawValue == null) {
-      // Find default value in config registry.
-      ConfigEntry<?> entry = confRegistry.get(stringKey);
-      if (entry == null) {
-        throw new PgException(
-            PgErrorCode.CONFIG_FILE_ERROR,
-            "Config %s is missing and has no default value!",
-            stringKey);
-      } else {
-        return (T) entry.getDefaultValue();
-      }
+  public ConfigEntry<?> getConfigEntry(String stringKey) {
+    var configEntry = confRegistry.get(stringKey);
+    if (configEntry == null) {
+      throw new PgException(
+          PgErrorCode.CONFIG_FILE_ERROR,
+          "Config %s is missing and has no default value!",
+          stringKey);
     } else {
-      return (T) rawValue;
+      return configEntry;
     }
-  }
-
-  /** Set config value using string key and string value. Used in set parameter handler. */
-  public <T> void setByString(String stringKey, String value) {
-    checkNotNull(value, "Value can't be null!");
-    // Make sure the parameter is defined.
-    getByString(stringKey);
-    confData.put(stringKey, confRegistry.get(stringKey).getParser().convert(value));
   }
 
   @Override

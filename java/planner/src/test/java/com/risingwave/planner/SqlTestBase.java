@@ -4,6 +4,7 @@ import com.google.inject.Guice;
 import com.google.inject.Injector;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.execution.context.FrontendEnv;
+import com.risingwave.execution.context.SessionConfiguration;
 import com.risingwave.execution.handler.SqlHandlerFactory;
 import com.risingwave.pgwire.database.PgResult;
 import com.risingwave.sql.parser.SqlParser;
@@ -31,6 +32,7 @@ public abstract class SqlTestBase {
             .withDatabase(TEST_DB_NAME)
             .withSchema(TEST_SCHEMA_NAME)
             .withFrontendEnv(frontendEnv)
+            .withSessionConfig(new SessionConfiguration(frontendEnv.getConfiguration()))
             .build();
   }
 

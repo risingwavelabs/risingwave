@@ -23,11 +23,14 @@ public class ExecutionContext implements Context {
   private final String database;
   private final String schema;
   private final FrontendEnv frontendEnv;
+  private final SessionConfiguration sessionConfiguration;
 
   private ExecutionContext(Builder builder) {
     this.database = requireNonNull(builder.database, "Current database can't be null!");
     this.schema = requireNonNull(builder.schema, "Current schema can't be null!");
     this.frontendEnv = requireNonNull(builder.frontendEnv, "frontendEnv");
+    this.sessionConfiguration =
+        requireNonNull(builder.sessionConfiguration, "sessionConfiguration");
   }
 
   public static Builder builder() {
@@ -64,6 +67,10 @@ public class ExecutionContext implements Context {
 
   public Configuration getConf() {
     return frontendEnv.getConfiguration();
+  }
+
+  public SessionConfiguration getSessionConfiguration() {
+    return sessionConfiguration;
   }
 
   public QueryManager getQueryManager() {
@@ -111,6 +118,7 @@ public class ExecutionContext implements Context {
     private String database;
     private String schema;
     private FrontendEnv frontendEnv;
+    private SessionConfiguration sessionConfiguration;
 
     private Builder() {}
 
@@ -126,6 +134,11 @@ public class ExecutionContext implements Context {
 
     public Builder withFrontendEnv(FrontendEnv frontendEnv) {
       this.frontendEnv = frontendEnv;
+      return this;
+    }
+
+    public Builder withSessionConfig(SessionConfiguration sessionConfig) {
+      this.sessionConfiguration = sessionConfig;
       return this;
     }
 

@@ -15,7 +15,7 @@ public class SetParameterHandler implements SqlHandler {
     var setStat = (SqlSetOption) ast;
 
     // Store the config param into context.
-    var config = context.getConf();
+    var config = context.getSessionConfiguration();
     // Filter out the annoying "''" in configuration key.
     config.setByString(
         setStat.getName().getSimple(), setStat.getValue().toString().replace("'", ""));
