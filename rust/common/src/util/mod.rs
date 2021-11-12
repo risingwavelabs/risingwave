@@ -14,6 +14,7 @@ pub mod addr;
 pub mod chunk_coalesce;
 pub mod hash_util;
 pub mod sort_util;
+pub mod try_match;
 
 pub fn downcast_ref<S, T>(source: &S) -> Result<&T>
 where
