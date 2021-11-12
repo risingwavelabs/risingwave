@@ -1,7 +1,7 @@
 use super::*;
 
 use crate::rpc::service::exchange_service::ExchangeWriter;
-use crate::storage::{SimpleTableRef, Table};
+use crate::storage::{Table, TableTypes};
 use pb_convert::FromProtobuf;
 use protobuf::well_known_types::Any;
 use protobuf::Message;
@@ -280,8 +280,8 @@ impl<'a> SelectBuilder<'a> {
             .table_manager_ref()
             .get_table(&TableId::from_protobuf(&TableRefId::default()).unwrap())
             .unwrap();
-        if let SimpleTableRef::Columnar(column_table_ref) = table_ref {
-            let column_ids = column_table_ref.get_column_ids().await.unwrap();
+        if let TableTypes::BummockTable(column_table_ref) = table_ref {
+            let column_ids = column_table_ref.get_column_ids().unwrap();
             for col_id in column_ids.iter() {
                 scan.mut_column_ids().push(*col_id);
             }

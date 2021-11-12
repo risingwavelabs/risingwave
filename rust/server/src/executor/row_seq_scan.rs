@@ -8,7 +8,7 @@ use risingwave_pb::plan::RowSeqScanNode;
 use risingwave_pb::ToProto;
 
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
-use crate::storage::{MemRowTable, MemTableRowIter, SimpleTableRef};
+use crate::storage::{MemRowTable, MemTableRowIter, TableTypes};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::Schema;
@@ -52,7 +52,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
             .global_task_env()
             .table_manager()
             .get_table(&table_id)?;
-        if let SimpleTableRef::Row(table_ref) = table_ref {
+        if let TableTypes::Row(table_ref) = table_ref {
             let schema = table_ref.schema();
             let data_types = schema
                 .fields

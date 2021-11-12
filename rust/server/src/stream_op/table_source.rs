@@ -79,7 +79,7 @@ impl Debug for TableSourceExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::{SimpleMemTable, Table};
+    use crate::storage::{BummockTable, Table};
     use crate::stream_op::Op;
     use futures::channel::mpsc::unbounded;
     use itertools::Itertools;
@@ -117,7 +117,7 @@ mod tests {
             is_primary: false,
         };
         let columns = vec![column1.to_proto(), column2.to_proto()];
-        let table = SimpleMemTable::new(&table_id, &columns);
+        let table = BummockTable::new(&table_id, &columns);
 
         let col1_type = Int32Type::create(false) as DataTypeRef;
         let col2_type = StringType::create(true, 10, DataTypeKind::Varchar);
@@ -235,7 +235,7 @@ mod tests {
             is_primary: false,
         };
         let columns = vec![column1.to_proto(), column2.to_proto()];
-        let table = SimpleMemTable::new(&table_id, &columns);
+        let table = BummockTable::new(&table_id, &columns);
 
         let col1_type = Int32Type::create(false) as DataTypeRef;
         let col2_type = StringType::create(true, 10, DataTypeKind::Varchar);

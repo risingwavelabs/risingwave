@@ -1,5 +1,4 @@
-use crate::storage::SimpleTableRef;
-use crate::storage::{SimpleTableManager, Table, TableManager};
+use crate::storage::{SimpleTableManager, Table, TableManager, TableTypes};
 use crate::stream::StreamManager;
 use crate::stream_op::Message as StreamMessage;
 use futures::StreamExt;
@@ -128,12 +127,14 @@ async fn test_stream_mv_proto() {
         name: "test_col".to_string(),
     };
     let columns = vec![column1, column2];
-    let _res = table_manager.create_table(
-        &table_id,
-        &columns.iter().map(ToProto::to_proto).collect_vec(),
-    );
+    let _res = table_manager
+        .create_table(
+            &table_id,
+            &columns.iter().map(ToProto::to_proto).collect_vec(),
+        )
+        .await;
     let table_ref =
-        (if let SimpleTableRef::Columnar(table_ref) = table_manager.get_table(&table_id).unwrap() {
+        (if let TableTypes::BummockTable(table_ref) = table_manager.get_table(&table_id).unwrap() {
             Ok(table_ref)
         } else {
             Err(RwError::from(InternalError(
@@ -188,7 +189,7 @@ async fn test_stream_mv_proto() {
 
     let mut sink = stream_manager.take_sink((1, 233));
     if let StreamMessage::Chunk(_chunk) = sink.next().await.unwrap() {
-        if let SimpleTableRef::Row(table_mv) = table_ref_mv {
+        if let TableTypes::Row(table_mv) = table_ref_mv {
             let value_row = Row(vec![Some(1.to_scalar_value())]);
             let res_row = table_mv.get(value_row);
             if let Ok(res_row_in) = res_row {

@@ -304,7 +304,7 @@ impl StreamManagerCore {
                 .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
                 let table_ref = table_manager.clone().get_table(&table_id).unwrap();
-                if let SimpleTableRef::Columnar(table) = table_ref {
+                if let TableTypes::BummockTable(table) = table_ref {
                     let schema = Schema::try_from(
                         &table.columns().iter().map(ToProst::to_prost).collect_vec(),
                     )?;
@@ -382,7 +382,7 @@ impl StreamManagerCore {
                     .collect::<Vec<_>>();
                 table_manager.create_materialized_view(&table_id, columns, pks.clone())?;
                 let table_ref = table_manager.get_table(&table_id).unwrap();
-                if let SimpleTableRef::Row(table) = table_ref {
+                if let TableTypes::Row(table) = table_ref {
                     let executor = Box::new(MViewSinkExecutor::new(input, table, pks));
                     Ok(executor)
                 } else {

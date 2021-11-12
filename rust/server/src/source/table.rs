@@ -1,5 +1,5 @@
 use crate::source::{Source, SourceMessage, SourceReader};
-use crate::storage::{SimpleMemTable, Table};
+use crate::storage::{BummockTable, Table};
 use crate::stream_op::{Op, StreamChunk};
 use async_trait::async_trait;
 use risingwave_common::array::DataChunkRef;
@@ -15,14 +15,14 @@ use tokio::sync::broadcast::error::RecvError;
 /// view to construct the table and zero or more downstreams
 #[derive(Debug)]
 pub struct TableSource {
-    table: Arc<SimpleMemTable>,
+    table: Arc<BummockTable>,
 
     // Use broadcast channel here to support multiple receivers
     write_channel: broadcast::Sender<StreamChunk>,
 }
 
 impl TableSource {
-    pub fn new(table: Arc<SimpleMemTable>) -> Self {
+    pub fn new(table: Arc<BummockTable>) -> Self {
         let (tx, _rx) = broadcast::channel(100);
         TableSource {
             table,
@@ -52,7 +52,7 @@ impl Source for TableSource {
 
 /// `TableWriter` is for writing data into table.
 pub struct TableWriter {
-    table: Arc<SimpleMemTable>,
+    table: Arc<BummockTable>,
     tx: broadcast::Sender<StreamChunk>,
 }
 
@@ -72,7 +72,7 @@ impl TableWriter {
 /// operators.
 #[derive(Debug)]
 pub struct TableSourceReader {
-    table: Arc<SimpleMemTable>,
+    table: Arc<BummockTable>,
     snapshot: Vec<DataChunkRef>,
     rx: broadcast::Receiver<StreamChunk>,
 }
@@ -134,7 +134,7 @@ mod test {
 
     #[tokio::test]
     async fn test_table_source() {
-        let table = Arc::new(SimpleMemTable::new(&mock_table_id(), &[]));
+        let table = Arc::new(BummockTable::new(&mock_table_id(), &[]));
 
         // Some existing data
         let chunk0 = StreamChunk::new(

@@ -50,6 +50,7 @@ impl Executor for DropTableExecutor {
     async fn execute(&mut self) -> Result<ExecutorResult> {
         self.table_manager
             .drop_table(&self.table_id)
+            .await
             .map(|_| ExecutorResult::Done)
     }
 

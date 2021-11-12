@@ -18,11 +18,10 @@ use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::{Result, RwError};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
-use futures::future;
 
 pub(super) struct SeqScanExecutor {
     first_execution: bool,
-    table: Arc<SimpleMemTable>,
+    table: Arc<BummockTable>,
     column_ids: Vec<i32>,
     column_indices: Vec<usize>,
     data: Vec<DataChunkRef>,
@@ -49,7 +48,7 @@ impl BoxedExecutorBuilder for SeqScanExecutor {
             .table_manager()
             .get_table(&table_id)?;
 
-        if let SimpleTableRef::Columnar(table_ref) = table_ref {
+        if let TableTypes::BummockTable(table_ref) = table_ref {
             let column_ids = seq_scan_node.get_column_ids();
 
             let schema = Schema::new(
@@ -88,15 +87,13 @@ impl Executor for SeqScanExecutor {
         if self.first_execution {
             self.first_execution = false;
             self.data = self.table.get_data().await?;
-            self.column_indices = future::join_all(
-                self.column_ids
-                    .iter()
-                    .map(|c| self.table.index_of_column_id(*c)),
-            )
-            .await
-            .into_iter()
-            .map(|res| res.unwrap())
-            .collect();
+            self.column_indices = self
+                .column_ids
+                .iter()
+                .map(|c| self.table.index_of_column_id(*c))
+                .into_iter()
+                .map(|res| res.unwrap())
+                .collect();
         }
 
         if self.chunk_idx >= self.data.len() {
@@ -131,7 +128,7 @@ impl Executor for SeqScanExecutor {
 impl SeqScanExecutor {
     pub(crate) fn new(
         first_execution: bool,
-        table: Arc<SimpleMemTable>,
+        table: Arc<BummockTable>,
         column_ids: Vec<i32>,
         column_indices: Vec<usize>,
         data: Vec<DataChunkRef>,
@@ -176,7 +173,7 @@ mod tests {
             name: "test_col".to_string(),
         };
         let columns = vec![column];
-        let table = SimpleMemTable::new(
+        let table = BummockTable::new(
             &table_id,
             &columns
                 .iter()

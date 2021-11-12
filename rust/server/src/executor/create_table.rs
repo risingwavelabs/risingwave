@@ -63,6 +63,7 @@ impl Executor for CreateTableExecutor {
                     .map(|c| c.to_proto::<ProtoColumnDesc>())
                     .collect::<Vec<ProtoColumnDesc>>()[..],
             )
+            .await
             .map(|_| ExecutorResult::Done)
     }
 

@@ -44,7 +44,7 @@ impl Executor for InsertExecutor {
             return Ok(Done);
         }
 
-        let table_ref = (if let SimpleTableRef::Columnar(table_ref) =
+        let table_ref = (if let TableTypes::BummockTable(table_ref) =
             self.table_manager.get_table(&self.table_id)?
         {
             Ok(table_ref)
@@ -175,7 +175,7 @@ mod tests {
         });
         let columns = vec![column1, column2];
 
-        table_manager.create_table(&table_id, &columns)?;
+        table_manager.create_table(&table_id, &columns).await?;
         let col1 = column_nonnull! { I64Array, Int64Type, [1, 3, 5, 7, 9] };
         let col2 = column_nonnull! { I64Array, Int64Type, [2, 4, 6, 8, 10] };
         let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
@@ -212,7 +212,7 @@ mod tests {
         let table_ref = insert_executor
             .table_manager
             .get_table(&insert_executor.table_id)?;
-        if let SimpleTableRef::Columnar(table_ref) = table_ref {
+        if let TableTypes::BummockTable(table_ref) = table_ref {
             let data_ref = table_ref.get_data().await?;
             assert_eq!(
                 data_ref[0]
