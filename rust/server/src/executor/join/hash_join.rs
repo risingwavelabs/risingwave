@@ -1,6 +1,6 @@
 use std::convert::TryInto;
 use std::marker::PhantomData;
-use std::mem::swap;
+use std::mem::take;
 
 use either::Either;
 use prost::Message;
@@ -54,6 +54,8 @@ pub(super) struct EquiJoinParams {
 
 /// Different states when executing a hash join.
 enum HashJoinState<K> {
+    /// Invalid state
+    Invalid,
     /// Initial state of hash join.
     ///
     /// In this state, the executor [`Executor::init`] build side input, and calls
@@ -75,6 +77,12 @@ enum HashJoinState<K> {
     ProbeRemaining(ProbeTable<K>),
     /// Final state of hash join.
     Done,
+}
+
+impl<K> Default for HashJoinState<K> {
+    fn default() -> Self {
+        HashJoinState::Invalid
+    }
 }
 
 pub(super) struct HashJoinExecutor<K> {
@@ -121,16 +129,16 @@ impl EquiJoinParams {
 #[async_trait::async_trait]
 impl<K: HashKey + Send + Sync> Executor for HashJoinExecutor<K> {
     async fn init(&mut self) -> Result<()> {
+        match take(&mut self.state) {
+            HashJoinState::Build(build_table) => self.build(build_table).await?,
+            _ => unreachable!(),
+        }
         Ok(())
     }
 
     async fn execute(&mut self) -> Result<ExecutorResult> {
         loop {
-            let mut cur_state = HashJoinState::Done;
-            swap(&mut cur_state, &mut self.state);
-
-            match cur_state {
-                HashJoinState::Build(build_table) => self.build(build_table).await?,
+            match take(&mut self.state) {
                 HashJoinState::FirstProbe(probe_table) => {
                     let ret = self.probe(true, probe_table).await?;
                     if let Some(data_chunk) = ret {
@@ -150,6 +158,7 @@ impl<K: HashKey + Send + Sync> Executor for HashJoinExecutor<K> {
                     }
                 }
                 HashJoinState::Done => return Ok(ExecutorResult::Done),
+                _ => unreachable!(),
             }
         }
     }

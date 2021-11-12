@@ -73,6 +73,13 @@ enum NestedLoopJoinState {
 #[async_trait::async_trait]
 impl Executor for NestedLoopJoinExecutor {
     async fn init(&mut self) -> Result<()> {
+        match self.state {
+            NestedLoopJoinState::Build => {
+                self.build_table.load_data().await?;
+                self.state = NestedLoopJoinState::FirstProbe;
+            }
+            _ => unreachable!(),
+        }
         Ok(())
     }
 
@@ -90,10 +97,8 @@ impl Executor for NestedLoopJoinExecutor {
 
         loop {
             match self.state {
-                NestedLoopJoinState::Build => {
-                    self.build_table.load_data().await?;
-                    self.state = NestedLoopJoinState::FirstProbe;
-                }
+                NestedLoopJoinState::Build => unreachable!(),
+
                 NestedLoopJoinState::FirstProbe => {
                     let ret = self.probe(true).await?;
                     self.state = NestedLoopJoinState::Probe;
