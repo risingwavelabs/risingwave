@@ -86,7 +86,7 @@ impl Table for BummockTable {
 
         // only one row group before having disk swapping
         if appender.is_empty() {
-            (*appender).push(MemRowGroup::new(self.get_column_ids().unwrap().len()));
+            appender.push(MemRowGroup::new(self.get_column_ids().unwrap().len()));
         }
 
         let (ret_tuple_id, ret_cardinality) = (*appender)
@@ -110,7 +110,7 @@ impl Table for BummockTable {
         let mut appender = self.mem_dirty_segs.write().unwrap();
         // only one row group before having disk swapping
         if (appender).is_empty() {
-            (*appender).push(MemRowGroup::new(self.get_column_ids().unwrap().len()));
+            appender.push(MemRowGroup::new(self.get_column_ids().unwrap().len()));
         }
 
         let (ret_tuple_id, ret_cardinality) = (*appender)
@@ -258,5 +258,88 @@ impl BummockTable {
     // TODO: [xiangyhu] flush using persist::fs module
     async fn flush(&self) -> Result<()> {
         todo!();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::storage::{BummockTable, Table};
+
+    use risingwave_common::array::{Array, DataChunk, I64Array};
+    use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
+    use risingwave_common::error::Result;
+    use risingwave_common::types::Int64Type;
+    use risingwave_pb::data::{data_type::TypeName, DataType};
+    use risingwave_pb::plan::{column_desc::ColumnEncodingType, ColumnDesc};
+    use risingwave_pb::ToProto;
+
+    use std::sync::atomic::Ordering;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn test_table_basic_read_write() -> Result<()> {
+        // mock table id
+        let table_id = TableId::new(SchemaId::new(DatabaseId::new(0), 0), 1);
+
+        // mock column descriptors
+        let column_desc1 = ColumnDesc {
+            column_type: Some(DataType {
+                type_name: TypeName::Int32 as i32,
+                ..Default::default()
+            }),
+            encoding: ColumnEncodingType::Raw as i32,
+            name: "v1".to_string(),
+            is_primary: false,
+        };
+        let column_desc2 = ColumnDesc {
+            column_type: Some(DataType {
+                type_name: TypeName::Int32 as i32,
+                ..Default::default()
+            }),
+            encoding: ColumnEncodingType::Raw as i32,
+            name: "v2".to_string(),
+            is_primary: false,
+        };
+        let column_descs = vec![column_desc1.to_proto(), column_desc2.to_proto()];
+
+        // mock data chunks
+        let col1 = column_nonnull! { I64Array, Int64Type, [1, 3, 5, 7, 9] };
+        let col2 = column_nonnull! { I64Array, Int64Type, [2, 4, 6, 8, 10] };
+        let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
+
+        // create table
+        let bummock_table = Arc::new(BummockTable::new(&table_id, &column_descs));
+
+        // assert append success
+        let _ = bummock_table.append(data_chunk).await;
+        assert_eq!(bummock_table.columns().len(), 2);
+
+        // assert tuple id
+        assert_eq!(bummock_table.current_tuple_id.load(Ordering::Relaxed), 5);
+
+        // get data chunks
+        let data_ref = bummock_table.get_data().await.unwrap();
+        assert_eq!(
+            data_ref[0]
+                .column_at(0)
+                .unwrap()
+                .array()
+                .as_int64()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
+        );
+        assert_eq!(
+            data_ref[0]
+                .column_at(1)
+                .unwrap()
+                .array()
+                .as_int64()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
+        );
+
+        Ok(())
     }
 }
