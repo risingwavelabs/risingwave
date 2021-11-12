@@ -12,6 +12,9 @@ pub use row_count::*;
 mod avg;
 pub use avg::*;
 
+mod keyed_state;
+pub use keyed_state::*;
+
 use super::{
     Op, Ops, StreamingCountAgg, StreamingFloatMaxAgg, StreamingFloatMinAgg, StreamingFloatSumAgg,
     StreamingMaxAgg, StreamingMinAgg, StreamingSumAgg,
@@ -23,7 +26,7 @@ use risingwave_common::array::{
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::expr::AggKind;
-use risingwave_common::types::{DataTypeKind, DataTypeRef};
+use risingwave_common::types::{DataTypeKind, DataTypeRef, Datum};
 
 use dyn_clone::{self, DynClone};
 
@@ -56,6 +59,8 @@ pub trait StreamingAggStateImpl: Any + std::fmt::Debug + DynClone + Send + Sync 
 
     fn get_output(&self, builder: &mut ArrayBuilderImpl) -> Result<()>;
 
+    fn to_datum(&self) -> Datum;
+
     fn new_builder(&self) -> ArrayBuilderImpl;
 }
 
@@ -76,6 +81,7 @@ pub fn create_streaming_agg_state(
     input_types: &[DataTypeRef],
     agg_type: &AggKind,
     return_type: &DataTypeRef,
+    datum: Option<Datum>,
 ) -> Result<Box<dyn StreamingAggStateImpl>> {
     let state: Box<dyn StreamingAggStateImpl> = match input_types {
         [input_type] => {
@@ -83,69 +89,128 @@ pub fn create_streaming_agg_state(
                 input_type.data_type_kind(),
                 agg_type,
                 return_type.data_type_kind(),
+                datum,
             ) {
-                (_, AggKind::Count, DataTypeKind::Int64) => {
+                (_, AggKind::Count, DataTypeKind::Int64, Some(datum)) => {
+                    Box::new(StreamingCountAgg::<I64Array>::try_from(datum)?)
+                }
+                (_, AggKind::Count, DataTypeKind::Int64, None) => {
                     Box::new(StreamingCountAgg::<I64Array>::new())
                 }
-                (_, AggKind::Sum, DataTypeKind::Int64) => {
+                (_, AggKind::Sum, DataTypeKind::Int64, Some(datum)) => {
+                    Box::new(StreamingSumAgg::<I64Array>::try_from(datum)?)
+                }
+                (_, AggKind::Sum, DataTypeKind::Int64, None) => {
                     Box::new(StreamingSumAgg::<I64Array>::new())
                 }
-                (_, AggKind::Sum, DataTypeKind::Int32) => {
+                (_, AggKind::Sum, DataTypeKind::Int32, Some(datum)) => {
+                    Box::new(StreamingSumAgg::<I32Array>::try_from(datum)?)
+                }
+                (_, AggKind::Sum, DataTypeKind::Int32, None) => {
                     Box::new(StreamingSumAgg::<I32Array>::new())
                 }
-                (_, AggKind::Sum, DataTypeKind::Int16) => {
+                (_, AggKind::Sum, DataTypeKind::Int16, Some(datum)) => {
+                    Box::new(StreamingSumAgg::<I16Array>::try_from(datum)?)
+                }
+                (_, AggKind::Sum, DataTypeKind::Int16, None) => {
                     Box::new(StreamingSumAgg::<I16Array>::new())
                 }
-                (_, AggKind::Sum, DataTypeKind::Float64) => {
+                (_, AggKind::Sum, DataTypeKind::Float64, Some(datum)) => {
+                    Box::new(StreamingFloatSumAgg::<F64Array>::try_from(datum)?)
+                }
+                (_, AggKind::Sum, DataTypeKind::Float64, None) => {
                     Box::new(StreamingFloatSumAgg::<F64Array>::new())
                 }
-                (_, AggKind::Sum, DataTypeKind::Float32) => {
+                (_, AggKind::Sum, DataTypeKind::Float32, Some(datum)) => {
+                    Box::new(StreamingFloatSumAgg::<F32Array>::try_from(datum)?)
+                }
+                (_, AggKind::Sum, DataTypeKind::Float32, None) => {
                     Box::new(StreamingFloatSumAgg::<F32Array>::new())
                 }
-                (_, AggKind::Min, DataTypeKind::Int16) => {
+                (_, AggKind::Min, DataTypeKind::Int16, Some(datum)) => {
+                    Box::new(StreamingMinAgg::<I16Array>::try_from(datum)?)
+                }
+                (_, AggKind::Min, DataTypeKind::Int16, None) => {
                     Box::new(StreamingMinAgg::<I16Array>::new())
                 }
-                (_, AggKind::Min, DataTypeKind::Int32) => {
+                (_, AggKind::Min, DataTypeKind::Int32, Some(datum)) => {
+                    Box::new(StreamingMinAgg::<I32Array>::try_from(datum)?)
+                }
+                (_, AggKind::Min, DataTypeKind::Int32, None) => {
                     Box::new(StreamingMinAgg::<I32Array>::new())
                 }
-                (_, AggKind::Min, DataTypeKind::Int64) => {
+                (_, AggKind::Min, DataTypeKind::Int64, Some(datum)) => {
+                    Box::new(StreamingMinAgg::<I64Array>::try_from(datum)?)
+                }
+                (_, AggKind::Min, DataTypeKind::Int64, None) => {
                     Box::new(StreamingMinAgg::<I64Array>::new())
                 }
-                (_, AggKind::Min, DataTypeKind::Float32) => {
+                (_, AggKind::Min, DataTypeKind::Float32, Some(datum)) => {
+                    Box::new(StreamingFloatMinAgg::<F32Array>::try_from(datum)?)
+                }
+                (_, AggKind::Min, DataTypeKind::Float32, None) => {
                     Box::new(StreamingFloatMinAgg::<F32Array>::new())
                 }
-                (_, AggKind::Min, DataTypeKind::Float64) => {
+                (_, AggKind::Min, DataTypeKind::Float64, Some(datum)) => {
+                    Box::new(StreamingFloatMinAgg::<F64Array>::try_from(datum)?)
+                }
+                (_, AggKind::Min, DataTypeKind::Float64, None) => {
                     Box::new(StreamingFloatMinAgg::<F64Array>::new())
                 }
-                (_, AggKind::Max, DataTypeKind::Int16) => {
+                (_, AggKind::Max, DataTypeKind::Int16, Some(datum)) => {
+                    Box::new(StreamingMaxAgg::<I16Array>::try_from(datum)?)
+                }
+                (_, AggKind::Max, DataTypeKind::Int16, None) => {
                     Box::new(StreamingMaxAgg::<I16Array>::new())
                 }
-                (_, AggKind::Max, DataTypeKind::Int32) => {
+                (_, AggKind::Max, DataTypeKind::Int32, Some(datum)) => {
+                    Box::new(StreamingMaxAgg::<I32Array>::try_from(datum)?)
+                }
+                (_, AggKind::Max, DataTypeKind::Int32, None) => {
                     Box::new(StreamingMaxAgg::<I32Array>::new())
                 }
-                (_, AggKind::Max, DataTypeKind::Int64) => {
+                (_, AggKind::Max, DataTypeKind::Int64, Some(datum)) => {
+                    Box::new(StreamingMaxAgg::<I64Array>::try_from(datum)?)
+                }
+                (_, AggKind::Max, DataTypeKind::Int64, None) => {
                     Box::new(StreamingMaxAgg::<I64Array>::new())
                 }
-                (_, AggKind::Max, DataTypeKind::Float32) => {
+                (_, AggKind::Max, DataTypeKind::Float32, Some(datum)) => {
+                    Box::new(StreamingFloatMaxAgg::<F32Array>::try_from(datum)?)
+                }
+                (_, AggKind::Max, DataTypeKind::Float32, None) => {
                     Box::new(StreamingFloatMaxAgg::<F32Array>::new())
                 }
-                (_, AggKind::Max, DataTypeKind::Float64) => {
+                (_, AggKind::Max, DataTypeKind::Float64, Some(datum)) => {
+                    Box::new(StreamingFloatMaxAgg::<F64Array>::try_from(datum)?)
+                }
+                (_, AggKind::Max, DataTypeKind::Float64, None) => {
                     Box::new(StreamingFloatMaxAgg::<F64Array>::new())
                 }
-                (other_input, other_agg, other_return) => panic!(
+                (other_input, other_agg, other_return, _) => panic!(
                     "streaming state not implemented: {:?} {:?} {:?}",
                     other_input, other_agg, other_return
                 ),
             }
         }
         [] => {
-            match (agg_type, return_type.data_type_kind()) {
+            match (agg_type, return_type.data_type_kind(), datum) {
                 // `AggKind::Count` for partial/local Count(*) == RowCount while `AggKind::Sum` for
                 // final/global Count(*)
-                (AggKind::RowCount, DataTypeKind::Int64) => Box::new(StreamingRowCountAgg::new()),
+                (AggKind::RowCount, DataTypeKind::Int64, Some(datum)) => {
+                    Box::new(StreamingRowCountAgg::with_row_cnt(datum))
+                }
+                (AggKind::RowCount, DataTypeKind::Int64, None) => {
+                    Box::new(StreamingRowCountAgg::new())
+                }
                 // According to the function header comments and the link, Count(*) == RowCount
                 // `StreamingCountAgg` does not count `NULL`, so we use `StreamingRowCountAgg` here.
-                (AggKind::Count, DataTypeKind::Int64) => Box::new(StreamingRowCountAgg::new()),
+                (AggKind::Count, DataTypeKind::Int64, Some(datum)) => {
+                    Box::new(StreamingRowCountAgg::with_row_cnt(datum))
+                }
+                (AggKind::Count, DataTypeKind::Int64, None) => {
+                    Box::new(StreamingRowCountAgg::new())
+                }
                 _ => unimplemented!(),
             }
         }

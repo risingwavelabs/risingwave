@@ -7,7 +7,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::{
     ErrorCode::NotImplementedError, ErrorCode::NumericValueOutOfRange, Result, RwError,
 };
-use risingwave_common::types::{option_as_scalar_ref, Scalar, ScalarRef};
+use risingwave_common::types::{option_as_scalar_ref, Datum, Scalar, ScalarRef};
 
 use super::{Op, Ops, StreamingAggFunction, StreamingAggState, StreamingAggStateImpl};
 
@@ -408,6 +408,27 @@ where
     }
 }
 
+impl<R, I, S> TryFrom<Datum> for StreamingFoldAgg<R, I, S>
+where
+    R: Array,
+    I: Array,
+    S: StreamingFoldable<R::OwnedItem, I::OwnedItem>,
+{
+    type Error = RwError;
+
+    fn try_from(x: Datum) -> Result<Self> {
+        let mut result = None;
+        if let Some(scalar) = x {
+            result = Some(R::OwnedItem::try_from(scalar)?);
+        }
+
+        Ok(Self {
+            result,
+            _phantom: PhantomData,
+        })
+    }
+}
+
 macro_rules! impl_fold_agg {
   ($result:tt, $result_variant:tt, $input:tt) => {
     impl<S> StreamingAggStateImpl for StreamingFoldAgg<$result, $input, S>
@@ -432,6 +453,10 @@ macro_rules! impl_fold_agg {
             other_variant.get_ident()
           ),
         }
+      }
+
+      fn to_datum(&self) -> Datum {
+        self.result.map(Scalar::to_scalar_value)
       }
 
       fn new_builder(&self) -> ArrayBuilderImpl {

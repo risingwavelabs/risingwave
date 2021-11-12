@@ -4,7 +4,7 @@ use crate::stream_op::{Op, Ops};
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
-use risingwave_common::types::{DataTypeRef, Int64Type};
+use risingwave_common::types::{DataTypeRef, Datum, Int64Type, Scalar, ScalarImpl};
 
 use super::StreamingAggStateImpl;
 
@@ -19,7 +19,23 @@ pub struct StreamingRowCountAgg {
 
 impl StreamingRowCountAgg {
     pub fn new() -> Self {
-        Self { row_cnt: 0 }
+        StreamingRowCountAgg::with_row_cnt(None)
+    }
+
+    pub fn with_row_cnt(datum: Datum) -> Self {
+        let mut row_cnt = 0;
+        if let Some(cnt) = datum {
+            match cnt {
+                ScalarImpl::Int64(num) => {
+                    row_cnt = num;
+                }
+                other => panic!(
+          "type mismatch in streaming aggregator StreamingRowCountAgg init: expected i64, get {}",
+          other.get_ident()
+        ),
+            }
+        }
+        Self { row_cnt }
     }
 
     pub fn create_array_builder(capacity: usize) -> Result<ArrayBuilderImpl> {
@@ -65,11 +81,14 @@ impl StreamingAggStateImpl for StreamingRowCountAgg {
         match builder {
             ArrayBuilderImpl::Int64(builder) => builder.append(Some(self.row_cnt)),
             other_variant => panic!(
-        "type mismatch in streaming aggregator StreamingFoldAgg output: expected {}, get {}",
-        stringify!($result),
+        "type mismatch in streaming aggregator StreamingFoldAgg output: expected i64, get {}",
         other_variant.get_ident()
       ),
         }
+    }
+
+    fn to_datum(&self) -> Datum {
+        Some(self.row_cnt.to_scalar_value())
     }
 
     fn new_builder(&self) -> ArrayBuilderImpl {

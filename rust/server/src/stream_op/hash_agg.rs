@@ -72,7 +72,7 @@ pub struct HashAggExecutor {
     /// Aggregation state before last barrier.
     /// The map will be updated iff [`Message::Barrier`] was received.
     /// TODO: We will use state backend instead later.
-    prev_state_entries: HashMap<HashKey, HashValue>,
+    prev_state_entries: Box<dyn KeyedState>,
     /// Aggregation state after last barrier.
     dirty_state_entries: HashMap<HashKey, (Option<HashValue>, HashValue)>,
     /// The input of the current executor
@@ -99,7 +99,7 @@ impl HashAggExecutor {
         Self {
             schema: Schema { fields },
             next_barrier_message: None,
-            prev_state_entries: HashMap::new(),
+            prev_state_entries: Box::new(KeyedStateHeap::new()),
             dirty_state_entries: HashMap::new(),
             input,
             agg_calls,
@@ -154,7 +154,38 @@ impl HashAggExecutor {
 }
 
 impl HashAggExecutor {
-    fn flush_data(&mut self) -> Result<StreamChunk> {
+    fn key2row(key: &[Datum]) -> Row {
+        Row(key.to_vec())
+    }
+
+    fn value2row(value: &HashValue) -> Row {
+        Row(value.agg_states.iter().map(|x| x.to_datum()).collect_vec())
+    }
+
+    fn row2key(row: Row) -> HashKey {
+        row.0.to_vec()
+    }
+
+    fn row2value(&self, row: Row) -> Result<HashValue> {
+        let states = self
+            .agg_calls
+            .iter()
+            .zip(row.0.into_iter())
+            .map(|(agg, datum)| {
+                create_streaming_agg_state(
+                    agg.args.arg_types(),
+                    &agg.kind,
+                    &agg.return_type,
+                    Some(datum),
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(HashValue::new(states))
+    }
+}
+
+impl HashAggExecutor {
+    async fn flush_data(&mut self) -> Result<StreamChunk> {
         let dirty_state_entries = std::mem::take(&mut self.dirty_state_entries);
         let dirty_cnt = dirty_state_entries.len();
         // TODO: if the dirty_cnt is large, consider break to multiple chunks.
@@ -191,7 +222,12 @@ impl HashAggExecutor {
                         {
                             state.get_output(builder)?;
                         }
-                        self.prev_state_entries.insert(key, cur_value);
+                        self.prev_state_entries
+                            .put(
+                                HashAggExecutor::key2row(&key),
+                                HashAggExecutor::value2row(&cur_value),
+                            )
+                            .await?;
                     }
                 }
                 Some(prev_value) => {
@@ -212,7 +248,9 @@ impl HashAggExecutor {
                         {
                             state.get_output(builder)?;
                         }
-                        self.prev_state_entries.remove(&key);
+                        self.prev_state_entries
+                            .remove(&HashAggExecutor::key2row(&key))
+                            .await?;
                     } else {
                         new_ops.push(Op::UpdateDelete);
                         new_ops.push(Op::UpdateInsert);
@@ -228,7 +266,12 @@ impl HashAggExecutor {
                             prev_state.get_output(builder)?;
                             cur_state.get_output(builder)?;
                         }
-                        self.prev_state_entries.insert(key, cur_value);
+                        self.prev_state_entries
+                            .put(
+                                HashAggExecutor::key2row(&key),
+                                HashAggExecutor::value2row(&cur_value),
+                            )
+                            .await?;
                     }
                 }
             };
@@ -250,7 +293,7 @@ impl HashAggExecutor {
     }
 
     /// Apply the chunk to the dirty state.
-    fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
+    async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
         let StreamChunk {
             ops,
             columns,
@@ -273,15 +316,21 @@ impl HashAggExecutor {
 
         let (unique_keys, mut key_to_vis_maps) = self.get_unique_keys(&keys, &visibility)?;
 
-        unique_keys.into_iter().try_for_each(|key| -> Result<()> {
+        for key in unique_keys {
             let cur_vis_map = key_to_vis_maps.remove(key).ok_or_else(|| {
                 ErrorCode::InternalError(format!("Visibility does not exist for key {:?}", key))
             })?;
 
             if self.dirty_state_entries.contains_key(key) {
-            } else if let Some(prev_value) = self.prev_state_entries.get(key) {
+            } else if let Some(row) = self
+                .prev_state_entries
+                .get(&HashAggExecutor::key2row(key))
+                .await
+                .map_or(None, |x| x)
+            {
+                let prev_value = self.row2value(row.clone())?;
                 self.dirty_state_entries
-                    .insert(key.to_vec(), (Some(prev_value.clone()), prev_value.clone()));
+                    .insert(key.to_vec(), (Some(prev_value.clone()), prev_value));
             } else {
                 let agg_states = self
                     .agg_calls
@@ -291,6 +340,7 @@ impl HashAggExecutor {
                             agg.args.arg_types(),
                             &agg.kind,
                             &agg.return_type,
+                            None,
                         )
                     })
                     .collect::<Result<Vec<_>>>()?;
@@ -314,8 +364,9 @@ impl HashAggExecutor {
                 })
                 .collect::<Vec<_>>();
 
-            value.apply_batch(&ops, Some(&cur_vis_map), &all_agg_input_arrays)
-        })
+            value.apply_batch(&ops, Some(&cur_vis_map), &all_agg_input_arrays)?;
+        }
+        Ok(())
     }
 }
 
@@ -335,7 +386,7 @@ impl Executor for HashAggExecutor {
         }
         while let Ok(msg) = self.input.next().await {
             match msg {
-                Message::Chunk(chunk) => self.apply_chunk(chunk)?,
+                Message::Chunk(chunk) => self.apply_chunk(chunk).await?,
                 Message::Barrier { epoch, stop } => {
                     if stop {
                         return Ok(Message::Barrier { epoch, stop });
@@ -347,7 +398,7 @@ impl Executor for HashAggExecutor {
                     }
                     // Cache the barrier_msg and send it later.
                     self.next_barrier_message = Some(Barrier { epoch, stop });
-                    let chunk = self.flush_data()?;
+                    let chunk = self.flush_data().await?;
                     return Ok(Message::Chunk(chunk));
                 }
             }

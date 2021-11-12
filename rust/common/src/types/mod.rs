@@ -131,7 +131,7 @@ pub trait Scalar:
     + 'static
     + Clone
     + std::fmt::Debug
-    + TryFrom<ScalarImpl>
+    + TryFrom<ScalarImpl, Error = RwError>
     + Into<ScalarImpl>
 {
     /// Type for reference of `Scalar`

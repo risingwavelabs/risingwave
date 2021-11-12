@@ -75,7 +75,7 @@ impl SimpleAggExecutor {
         let states: Vec<_> = agg_calls
             .iter()
             .map(|agg| {
-                create_streaming_agg_state(agg.args.arg_types(), &agg.kind, &agg.return_type)
+                create_streaming_agg_state(agg.args.arg_types(), &agg.kind, &agg.return_type, None)
             })
             .try_collect()?;
         let schema = Schema {
