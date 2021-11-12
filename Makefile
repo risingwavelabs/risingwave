@@ -36,9 +36,11 @@ rust_test:
 	cd rust && mkdir -p proto
 	cd rust && RUSTFLAGS=-Dwarnings cargo test
 
+# Note: "--skip-clean" must be used along with "CARGO_TARGET_DIR=..."
+# See also https://github.com/xd009642/tarpaulin/issues/777
 rust_test_with_coverage:
 	cd rust && mkdir -p proto
-	cd rust && RUSTFLAGS=-Dwarnings cargo tarpaulin --workspace --exclude risingwave-proto --out Xml
+	cd rust && RUSTFLAGS=-Dwarnings CARGO_TARGET_DIR=target_tarpaulin cargo tarpaulin --workspace --exclude risingwave-proto --out Xml --skip-clean
 
 rust_build:
 	cd rust && cargo build

@@ -58,6 +58,7 @@ cpp/cmake-build
 java/**/build
 
 rust/**/target
+rust/**/target_tarpaulin
 rust/proto/src/*.rs
 rust/prost/src/*.rs
 !rust/proto/src/lib.rs
