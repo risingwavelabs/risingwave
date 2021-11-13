@@ -213,6 +213,28 @@ macro_rules! ensure {
     }
 }
 
+/// Util macro to generate error when the two arguments are not equal.
+#[macro_export]
+macro_rules! ensure_eq {
+    ($left:expr, $right:expr) => {
+        match (&$left, &$right) {
+            (left_val, right_val) => {
+                if !(left_val == right_val) {
+                    gen_error!($crate::error::ErrorCode::InternalError(format!(
+                        "{} == {} assertion failed ({} is {}, {} is {})",
+                        stringify!($left),
+                        stringify!($right),
+                        stringify!($left),
+                        &*left_val,
+                        stringify!($right),
+                        &*right_val,
+                    )));
+                }
+            }
+        }
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use std::convert::Into;
@@ -285,6 +307,21 @@ mod tests {
             })();
             assert_eq!(Err(RwError::from(expected_error)), error);
         }
+    }
+
+    #[test]
+    fn test_ensure_eq() {
+        fn ensure_a_equals_b() -> Result<()> {
+            let a = 1;
+            let b = 2;
+            ensure_eq!(a, b);
+            Ok(())
+        }
+        let err = ensure_a_equals_b().unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "internal error: a == b assertion failed (a is 1, b is 2)"
+        );
     }
 
     #[test]
