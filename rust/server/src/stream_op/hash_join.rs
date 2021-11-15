@@ -79,7 +79,7 @@ impl Executor for HashJoinExecutor {
                 Err(e) => Err(e),
             },
             AlignedMessage::Barrier(message) => match message {
-                Ok(Message::Barrier { epoch: _, stop: _ }) => message,
+                Ok(Message::Barrier(_)) => message,
                 _ => unreachable!("Should not receive this message: {:?}", message),
             },
         }
@@ -315,6 +315,7 @@ mod tests {
     use crate::*;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::Int64Type;
+    use risingwave_pb::data::Barrier;
     use tokio::sync::mpsc::unbounded_channel;
 
     #[tokio::test]
@@ -576,12 +577,13 @@ mod tests {
         MockAsyncSource::push_barrier(&mut tx_r, 0, false);
 
         // get the aligned barrier here
-        if let Message::Barrier { epoch, stop } = hash_join.next().await.unwrap() {
-            assert_eq!(epoch, 0);
-            assert!(!stop);
-        } else {
-            unreachable!();
-        }
+        assert!(matches!(
+            hash_join.next().await.unwrap(),
+            Message::Barrier(Barrier {
+                epoch: 0,
+                stop: false
+            })
+        ));
 
         // join the 2nd left chunk
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {

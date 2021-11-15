@@ -5,6 +5,7 @@ use futures::channel::mpsc::Sender;
 use futures::SinkExt;
 use risingwave_common::array::DataChunk;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
+use risingwave_pb::data::Barrier;
 
 /// `Output` provides an interface for `Dispatcher` to send data into downstream fragments.
 #[async_trait]
@@ -66,21 +67,18 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
     }
 
     async fn dispatch(&mut self, msg: Message) -> Result<()> {
-        if let Message::Chunk(chunk) = msg {
-            self.inner.dispatch_data(chunk).await
-        } else {
-            let outputs = self.inner.get_outputs();
-            for output in outputs {
-                // TODO: clone here
-                output
-                    .send(match msg {
-                        Message::Barrier { epoch, stop } => Message::Barrier { epoch, stop },
-                        _ => unreachable!(),
-                    })
-                    .await?;
+        match msg {
+            Message::Chunk(chunk) => {
+                self.inner.dispatch_data(chunk).await?;
             }
-            Ok(())
-        }
+            Message::Barrier(barrier) => {
+                let outputs = self.inner.get_outputs();
+                for output in outputs {
+                    output.send(Message::Barrier(barrier.clone())).await?;
+                }
+            }
+        };
+        Ok(())
     }
 }
 
@@ -308,10 +306,10 @@ impl StreamConsumer for SenderConsumer {
         let message = self.input.next().await?;
         let terminated = matches!(
             message,
-            Message::Barrier {
+            Message::Barrier(Barrier {
                 epoch: _,
                 stop: true
-            }
+            })
         );
         self.channel.send(message).await?;
         Ok(!terminated)

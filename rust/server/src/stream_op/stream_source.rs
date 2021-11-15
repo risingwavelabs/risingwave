@@ -5,6 +5,7 @@ use futures::FutureExt;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
+use risingwave_pb::data::Barrier;
 use std::fmt::{Debug, Formatter};
 
 /// `StreamSourceExecutor` is a streaming source from external systems such as Kafka
@@ -41,10 +42,10 @@ impl Executor for StreamSourceExecutor {
         } else {
             // TODO: the epoch 0 here is a placeholder. We will use a side channel to inject barrier
             // message in the future.
-            Ok(Message::Barrier {
+            Ok(Message::Barrier(Barrier {
                 epoch: 0,
                 stop: true,
-            })
+            }))
         }
     }
 

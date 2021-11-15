@@ -1,6 +1,7 @@
 use futures::SinkExt;
 use futures::StreamExt;
 use risingwave_pb::data::data_type::TypeName;
+use risingwave_pb::data::Barrier;
 use risingwave_pb::data::DataType;
 use risingwave_pb::plan::ColumnDesc;
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -175,18 +176,18 @@ async fn test_stream_proto() {
         for _epoch in 0..100 {
             assert!(matches!(
                 sink.next().await.unwrap(),
-                Message::Barrier {
+                Message::Barrier(Barrier {
                     epoch: _,
                     stop: false
-                }
+                })
             ));
         }
         assert!(matches!(
             sink.next().await.unwrap(),
-            Message::Barrier {
+            Message::Barrier(Barrier {
                 epoch: 0,
                 stop: true
-            }
+            })
         ));
     });
 
@@ -195,7 +196,7 @@ async fn test_stream_proto() {
     for epoch in 0..100 {
         tokio::time::timeout(
             timeout,
-            source.send(Message::Barrier { epoch, stop: false }),
+            source.send(Message::Barrier(Barrier { epoch, stop: false })),
         )
         .await
         .expect("timeout while sending barrier message")
@@ -204,10 +205,10 @@ async fn test_stream_proto() {
 
     tokio::time::timeout(
         timeout,
-        source.send(Message::Barrier {
+        source.send(Message::Barrier(Barrier {
             epoch: 0,
             stop: true,
-        }),
+        })),
     )
     .await
     .expect("timeout while sending terminate message")

@@ -379,25 +379,25 @@ impl Executor for HashAggExecutor {
     async fn next(&mut self) -> Result<Message> {
         if let Some(barrier) = self.next_barrier_message.clone() {
             self.next_barrier_message = None;
-            return Ok(Message::Barrier {
+            return Ok(Message::Barrier(Barrier {
                 epoch: barrier.epoch,
                 stop: barrier.stop,
-            });
+            }));
         }
         while let Ok(msg) = self.input.next().await {
             match msg {
                 Message::Chunk(chunk) => self.apply_chunk(chunk).await?,
-                Message::Barrier { epoch, stop } => {
-                    if stop {
-                        return Ok(Message::Barrier { epoch, stop });
+                Message::Barrier(barrier) => {
+                    if barrier.stop {
+                        return Ok(Message::Barrier(barrier));
                     }
                     let dirty_cnt = self.dirty_state_entries.len();
                     if dirty_cnt == 0 {
                         // No fresh data need to flush, just forward the barrier.
-                        return Ok(Message::Barrier { epoch, stop });
+                        return Ok(Message::Barrier(barrier));
                     }
                     // Cache the barrier_msg and send it later.
-                    self.next_barrier_message = Some(Barrier { epoch, stop });
+                    self.next_barrier_message = Some(barrier);
                     let chunk = self.flush_data().await?;
                     return Ok(Message::Chunk(chunk));
                 }

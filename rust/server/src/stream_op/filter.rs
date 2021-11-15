@@ -138,9 +138,9 @@ impl SimpleExecutor for FilterExecutor {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-
     use risingwave_common::array::I64Array;
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_pb::data::Barrier;
     use risingwave_pb::expr::expr_node::Type as ProstExprType;
 
     use crate::stream_op::test_utils::MockSource;
@@ -239,12 +239,12 @@ mod tests {
             unreachable!();
         }
 
-        matches!(
+        assert!(matches!(
             filter.next().await.unwrap(),
-            Message::Barrier {
+            Message::Barrier(Barrier {
                 epoch: _,
                 stop: true
-            }
-        );
+            })
+        ));
     }
 }

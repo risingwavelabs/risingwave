@@ -206,17 +206,17 @@ impl StreamChunk {
 #[derive(Debug)]
 pub enum Message {
     Chunk(StreamChunk),
-    Barrier { epoch: u64, stop: bool },
+    Barrier(Barrier),
 }
 
 impl Message {
     pub fn is_terminate(&self) -> bool {
         matches!(
             self,
-            Message::Barrier {
+            Message::Barrier(Barrier {
                 epoch: _,
                 stop: true
-            }
+            })
         )
     }
 
@@ -226,10 +226,7 @@ impl Message {
                 let prost_stream_chunk = stream_chunk.to_protobuf()?;
                 StreamMessage::StreamChunk(prost_stream_chunk)
             }
-            Self::Barrier { epoch, stop } => StreamMessage::Barrier(Barrier {
-                epoch: *epoch,
-                stop: *stop,
-            }),
+            Self::Barrier(barrier) => StreamMessage::Barrier(barrier.clone()),
         };
         let prost_stream_msg = ProstStreamMessage {
             stream_message: Some(prost),
@@ -242,10 +239,10 @@ impl Message {
             StreamMessage::StreamChunk(stream_chunk) => {
                 Message::Chunk(StreamChunk::from_protobuf(stream_chunk)?)
             }
-            StreamMessage::Barrier(epoch) => Message::Barrier {
+            StreamMessage::Barrier(epoch) => Message::Barrier(Barrier {
                 epoch: epoch.get_epoch(),
                 stop: false,
-            },
+            }),
         };
         Ok(res)
     }
@@ -272,7 +269,7 @@ async fn simple_executor_next<E: SimpleExecutor>(executor: &mut E) -> Result<Mes
     match executor.input().next().await {
         Ok(message) => match message {
             Message::Chunk(chunk) => executor.consume_chunk(chunk),
-            Message::Barrier { epoch, stop } => Ok(Message::Barrier { epoch, stop }),
+            Message::Barrier(_) => Ok(message),
         },
         Err(e) => Err(e),
     }

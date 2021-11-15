@@ -4,6 +4,7 @@ use futures::channel::mpsc::UnboundedReceiver;
 use futures::StreamExt;
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::Result;
+use risingwave_pb::data::Barrier;
 use std::fmt::{Debug, Formatter};
 
 /// `TableSourceExecutor` extracts changes from a Table
@@ -45,21 +46,21 @@ impl Executor for TableSourceExecutor {
             let msg = msg.expect("table stream closed unexpectedly");
             Ok(match msg {
                 Message::Chunk(chunk) => Message::Chunk(chunk),
-                Message::Barrier { epoch, stop } => {
-                    if stop {
+                Message::Barrier(barrier) => {
+                    if barrier.stop {
                         // Drop the receiver here, the source will encounter an error at the next
                         // send.
                         self.data_receiver = None;
                     }
 
-                    Message::Barrier { epoch, stop }
+                    Message::Barrier(barrier)
                 }
             })
         } else {
-            Ok(Message::Barrier {
+            Ok(Message::Barrier(Barrier {
                 epoch: 0,
                 stop: true,
-            })
+            }))
         }
     }
 
@@ -159,10 +160,10 @@ mod tests {
         let mut source = TableSourceExecutor::new(table_id, schema, stream_recv, barrier_receiver);
 
         barrier_sender
-            .unbounded_send(Message::Barrier {
+            .unbounded_send(Message::Barrier(Barrier {
                 epoch: 1,
                 stop: false,
-            })
+            }))
             .unwrap();
         // Write 1st chunk
         let card = table.append(chunk1).await?;
@@ -184,8 +185,8 @@ mod tests {
                     );
                     assert_eq!(vec![Op::Insert; 3], chunk.ops);
                 }
-                Message::Barrier { epoch, stop: _ } => {
-                    assert_eq!(epoch, 1)
+                Message::Barrier(barrier) => {
+                    assert_eq!(barrier.epoch, 1)
                 }
             }
         }
@@ -270,10 +271,10 @@ mod tests {
         table.append(chunk1.clone()).await?;
 
         barrier_sender
-            .unbounded_send(Message::Barrier {
+            .unbounded_send(Message::Barrier(Barrier {
                 epoch: 1,
                 stop: true,
-            })
+            }))
             .unwrap();
 
         source.next().await.unwrap();

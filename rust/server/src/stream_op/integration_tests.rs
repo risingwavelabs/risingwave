@@ -9,6 +9,7 @@ use risingwave_common::expr::binary_expr::new_binary_expr;
 use risingwave_common::expr::unary_expr::new_unary_expr;
 use risingwave_common::expr::*;
 use risingwave_common::types::*;
+use risingwave_pb::data::Barrier;
 use risingwave_pb::expr::expr_node::Type as ProstExprType;
 use std::sync::{Arc, Mutex};
 
@@ -28,10 +29,10 @@ impl StreamConsumer for MockConsumer {
     async fn next(&mut self) -> Result<bool> {
         match self.input.next().await? {
             Message::Chunk(chunk) => self.data.lock().unwrap().push(chunk),
-            Message::Barrier {
+            Message::Barrier(Barrier {
                 epoch: _,
                 stop: true,
-            } => return Ok(false),
+            }) => return Ok(false),
             _ => {} // do nothing
         }
         Ok(true)
@@ -160,18 +161,18 @@ async fn test_merger_sum_aggr() {
             input.send(Message::Chunk(chunk)).await.unwrap();
         }
         input
-            .send(Message::Barrier {
+            .send(Message::Barrier(Barrier {
                 epoch: j,
                 stop: false,
-            })
+            }))
             .await
             .unwrap();
     }
     input
-        .send(Message::Barrier {
+        .send(Message::Barrier(Barrier {
             epoch: 0,
             stop: true,
-        })
+        }))
         .await
         .unwrap();
 
@@ -509,10 +510,10 @@ async fn test_tpch_q6() {
             .unwrap();
         if i % 10 == 0 {
             input
-                .send(Message::Barrier {
+                .send(Message::Barrier(Barrier {
                     epoch: i / 10,
                     stop: false,
-                })
+                }))
                 .await
                 .unwrap();
         }
@@ -523,10 +524,10 @@ async fn test_tpch_q6() {
         .await
         .unwrap();
     input
-        .send(Message::Barrier {
+        .send(Message::Barrier(Barrier {
             epoch: 0,
             stop: true,
-        })
+        }))
         .await
         .unwrap();
 

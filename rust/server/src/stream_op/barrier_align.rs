@@ -41,7 +41,7 @@ impl BarrierAligner {
                 match message {
                   Ok(message) => match message {
                     Message::Chunk(chunk) => break AlignedMessage::Left(Ok(chunk)),
-                    Message::Barrier { epoch: _, stop: _ } => {
+                    Message::Barrier(_) => {
                       match self.state {
                         BarrierWaitState::Left => {
                           self.state = BarrierWaitState::Either;
@@ -61,7 +61,7 @@ impl BarrierAligner {
                 match message {
                   Ok(message) => match message {
                     Message::Chunk(chunk) => break AlignedMessage::Right(Ok(chunk)),
-                    Message::Barrier { epoch: _, stop: _ } => match self.state {
+                    Message::Barrier(_) => match self.state {
                       BarrierWaitState::Right => {
                         self.state = BarrierWaitState::Either;
                         break AlignedMessage::Barrier(Ok(message));
