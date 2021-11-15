@@ -3,8 +3,8 @@ use crate::task::fifo_channel::new_fifo_channel;
 use crate::task::hash_shuffle_channel::new_hash_shuffle_channel;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::Result;
-use risingwave_proto::plan::{
-    ExchangeInfo, ExchangeInfo_DistributionMode as ShuffleDistributionMode,
+use risingwave_pb::plan::{
+    exchange_info::DistributionMode as ShuffleDistributionMode, ExchangeInfo,
 };
 use std::option::Option;
 
@@ -32,8 +32,8 @@ pub fn create_output_channel(
     shuffle: &ExchangeInfo,
 ) -> Result<(BoxChanSender, Vec<BoxChanReceiver>)> {
     match shuffle.get_mode() {
-        ShuffleDistributionMode::SINGLE => Ok(new_fifo_channel()),
-        ShuffleDistributionMode::HASH => Ok(new_hash_shuffle_channel(shuffle)),
-        ShuffleDistributionMode::BROADCAST => Ok(new_broadcast_channel(shuffle)),
+        ShuffleDistributionMode::Single => Ok(new_fifo_channel()),
+        ShuffleDistributionMode::Hash => Ok(new_hash_shuffle_channel(shuffle)),
+        ShuffleDistributionMode::Broadcast => Ok(new_broadcast_channel(shuffle)),
     }
 }

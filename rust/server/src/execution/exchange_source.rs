@@ -90,9 +90,7 @@ pub struct LocalExchangeSource {
 
 impl LocalExchangeSource {
     pub fn create(sink_id: TaskSinkId, env: GlobalTaskEnv) -> Result<Self> {
-        let task_sink = env
-            .task_manager()
-            .take_sink(&sink_id.to_proto::<risingwave_proto::task_service::TaskSinkId>())?;
+        let task_sink = env.task_manager().take_sink(&sink_id)?;
         Ok(Self { task_sink })
     }
 }

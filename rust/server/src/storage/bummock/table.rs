@@ -266,7 +266,7 @@ mod tests {
     use crate::storage::{BummockTable, Table};
 
     use risingwave_common::array::{Array, DataChunk, I64Array};
-    use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
+    use risingwave_common::catalog::TableId;
     use risingwave_common::error::Result;
     use risingwave_common::types::Int64Type;
     use risingwave_pb::data::{data_type::TypeName, DataType};
@@ -279,7 +279,7 @@ mod tests {
     #[tokio::test]
     async fn test_table_basic_read_write() -> Result<()> {
         // mock table id
-        let table_id = TableId::new(SchemaId::new(DatabaseId::new(0), 0), 1);
+        let table_id = TableId::default();
 
         // mock column descriptors
         let column_desc1 = ColumnDesc {

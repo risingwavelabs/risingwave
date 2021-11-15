@@ -1,27 +1,28 @@
 use super::*;
-
 use crate::rpc::service::exchange_service::ExchangeWriter;
 use crate::storage::{Table, TableTypes};
-use pb_convert::FromProtobuf;
-use protobuf::well_known_types::Any;
-use protobuf::Message;
+use core::default::Default as CoreDefault;
+use itertools::Itertools;
+use prost::Message;
+use prost_types::Any;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_pb::data::data_type::TypeName;
+use risingwave_pb::data::{Column, DataType};
 use risingwave_pb::expr::expr_node::RexNode;
-use risingwave_pb::{ToProst, ToProto};
-use risingwave_proto::data::{Column, DataType, DataType_TypeName};
-use risingwave_proto::expr::ConstantValue;
-use risingwave_proto::plan::{
-    ColumnDesc, CreateTableNode, ExchangeInfo_DistributionMode, InsertNode, PlanFragment,
-    PlanNode_PlanNodeType as PlanNodeType, SeqScanNode, TableRefId, ValuesNode,
-    ValuesNode_ExprTuple,
+use risingwave_pb::expr::ConstantValue;
+use risingwave_pb::plan::{
+    plan_node::PlanNodeType, values_node::ExprTuple, ColumnDesc, CreateTableNode, ExchangeInfo,
+    InsertNode, PlanFragment, PlanNode, SeqScanNode, ValuesNode,
 };
-use risingwave_proto::task_service::{
-    GetDataResponse, TaskId as ProtoTaskId, TaskSinkId as ProtoSinkId,
+use risingwave_pb::task_service::{
+    GetDataResponse, QueryId, StageId, TaskId as ProstTaskId, TaskSinkId as ProstSinkId,
 };
+use risingwave_pb::ToProto;
 
 fn get_num_sinks(plan: &PlanFragment) -> u32 {
+    let plan = plan.to_proto::<risingwave_proto::plan::PlanFragment>();
+    use risingwave_proto::plan::ExchangeInfo_DistributionMode;
     match plan.get_exchange_info().mode {
         ExchangeInfo_DistributionMode::SINGLE => 1,
         ExchangeInfo_DistributionMode::HASH => {
@@ -42,19 +43,27 @@ struct FakeExchangeWriter {
 #[async_trait::async_trait]
 impl ExchangeWriter for FakeExchangeWriter {
     async fn write(&mut self, data: risingwave_pb::task_service::GetDataResponse) -> Result<()> {
-        self.messages.push(data.to_proto());
+        self.messages.push(data);
         Ok(())
     }
 }
 
 pub struct TestRunner {
-    tid: ProtoTaskId,
+    tid: ProstTaskId,
     env: GlobalTaskEnv,
 }
 
 impl TestRunner {
     pub fn new() -> Self {
-        let tid = ProtoTaskId::default();
+        let tid = ProstTaskId {
+            stage_id: Some(StageId {
+                query_id: Some(QueryId {
+                    trace_id: "".to_string(),
+                }),
+                stage_id: 0,
+            }),
+            task_id: 0,
+        };
         Self {
             tid,
             env: GlobalTaskEnv::for_test(),
@@ -87,9 +96,10 @@ impl TestRunner {
         let mut res = Vec::new();
         let sink_ids = 0..get_num_sinks(plan);
         for sink_id in sink_ids {
-            let mut proto_sink_id = ProtoSinkId::new();
-            proto_sink_id.set_sink_id(sink_id);
-            proto_sink_id.set_task_id(self.tid.clone());
+            let proto_sink_id = ProstSinkId {
+                task_id: Some(self.tid.clone()),
+                sink_id,
+            };
             let mut task_sink = task_manager.take_sink(&proto_sink_id)?;
             let mut writer = FakeExchangeWriter { messages: vec![] };
             task_sink.take_data(&mut writer).await.unwrap();
@@ -128,11 +138,13 @@ impl<'a> TableBuilder<'a> {
         }
     }
 
-    pub fn create_table(mut self, col_types: &[DataType_TypeName]) -> Self {
+    pub fn create_table(mut self, col_types: &[TypeName]) -> Self {
         for type_name in col_types {
-            let mut typ = DataType::new();
-            typ.set_type_name(*type_name);
-            typ.set_is_nullable(false);
+            let typ = DataType {
+                type_name: *type_name as i32,
+                is_nullable: false,
+                ..CoreDefault::default()
+            };
             self.col_types.push(typ);
         }
         self
@@ -141,16 +153,13 @@ impl<'a> TableBuilder<'a> {
     pub fn create_table_int32s(self, col_num: usize) -> Self {
         let mut col_types = vec![];
         for _ in 0..col_num {
-            col_types.push(DataType_TypeName::INT32);
+            col_types.push(TypeName::Int32);
         }
         self.create_table(col_types.as_slice())
     }
 
     pub fn set_nullable(&mut self, col_idx: usize) -> &mut Self {
-        self.col_types
-            .get_mut(col_idx)
-            .unwrap()
-            .set_is_nullable(true);
+        self.col_types.get_mut(col_idx).unwrap().is_nullable = true;
         self
     }
 
@@ -176,64 +185,90 @@ impl<'a> TableBuilder<'a> {
     }
 
     fn build_create_table_plan(&self) -> PlanFragment {
-        let mut plan = PlanFragment::default();
+        let create = CreateTableNode {
+            table_ref_id: None,
+            column_descs: self
+                .col_types
+                .iter()
+                .map(|typ| ColumnDesc {
+                    column_type: Some(typ.clone()),
+                    ..CoreDefault::default()
+                })
+                .collect_vec(),
+        };
 
-        let mut create = CreateTableNode::default();
-        for typ in self.col_types.iter() {
-            let mut col = ColumnDesc::default();
-            col.set_column_type(typ.clone());
-            create.mut_column_descs().push(col);
+        PlanFragment {
+            root: Some(PlanNode {
+                node_type: PlanNodeType::CreateTable as i32,
+                body: Some(Any {
+                    type_url: "/".to_string(),
+                    value: create.encode_to_vec(),
+                }),
+                children: vec![],
+            }),
+
+            exchange_info: Some(ExchangeInfo {
+                mode: 0,
+                distribution: None,
+            }),
         }
-
-        plan.mut_root().set_body(Any::pack(&create).unwrap());
-        plan.mut_root().set_node_type(PlanNodeType::CREATE_TABLE);
-        plan
     }
 
     fn build_insert_values_plan(&self) -> PlanFragment {
-        let mut plan = PlanFragment::default();
-        let mut insert = InsertNode::default();
-        let col_num = self.col_types.len();
-        for _ in 0..col_num {
-            insert.mut_column_ids().push(0);
-        }
+        let insert = InsertNode {
+            table_ref_id: None,
+            column_ids: vec![0; self.col_types.len()],
+        };
 
-        let mut child_plan = PlanFragment::default();
-        let mut values = ValuesNode::default();
-        for tuple in self.tuples.iter() {
-            values
-                .tuples
-                .push(TableBuilder::build_values(tuple.clone()));
-        }
-        child_plan.mut_root().set_body(Any::pack(&values).unwrap());
-        child_plan.mut_root().set_node_type(PlanNodeType::VALUE);
+        PlanFragment {
+            root: Some(PlanNode {
+                node_type: PlanNodeType::Insert as i32,
+                body: Some(Any {
+                    type_url: "/".to_string(),
+                    value: insert.encode_to_vec(),
+                }),
+                children: vec![PlanNode {
+                    node_type: PlanNodeType::Value as i32,
+                    body: Some(Any {
+                        type_url: "/".to_string(),
+                        value: ValuesNode {
+                            tuples: self
+                                .tuples
+                                .iter()
+                                .map(|tuple| TableBuilder::build_values(tuple.clone()))
+                                .collect_vec(),
+                        }
+                        .encode_to_vec(),
+                    }),
+                    children: vec![],
+                }],
+            }),
 
-        plan.mut_root().children.push(child_plan.take_root());
-        plan.mut_root().set_body(Any::pack(&insert).unwrap());
-        plan.mut_root().set_node_type(PlanNodeType::INSERT);
-        plan
+            exchange_info: Some(ExchangeInfo {
+                mode: 0,
+                distribution: None,
+            }),
+        }
     }
 
-    fn build_values(constants: Vec<ConstantValue>) -> ValuesNode_ExprTuple {
-        let mut tuple = ValuesNode_ExprTuple::default();
-        for constant in constants {
-            use risingwave_pb::data::DataType;
-            use risingwave_pb::expr::expr_node::Type;
-            use risingwave_pb::expr::{ConstantValue, ExprNode};
-            let node = ExprNode {
-                expr_type: Type::ConstantValue as i32,
-                return_type: Some(DataType {
-                    type_name: TypeName::Int32 as i32,
-                    ..Default::default()
-                }),
-                rex_node: Some(RexNode::Constant(ConstantValue {
-                    body: constant.to_prost(),
-                })),
-            };
-
-            tuple.mut_cells().push(node.to_proto());
+    fn build_values(constants: Vec<ConstantValue>) -> ExprTuple {
+        use risingwave_pb::expr::expr_node::Type;
+        use risingwave_pb::expr::ExprNode;
+        ExprTuple {
+            cells: constants
+                .into_iter()
+                .map(|constant| ExprNode {
+                    expr_type: Type::ConstantValue as i32,
+                    return_type: Some(DataType {
+                        type_name: TypeName::Int32 as i32,
+                        ..CoreDefault::default()
+                    }),
+                    rex_node: Some(RexNode::Constant(ConstantValue {
+                        body: constant.body,
+                    })),
+                })
+                .collect_vec(),
         }
-        tuple
     }
 }
 
@@ -247,9 +282,10 @@ impl ConstantBuilder {
     }
 
     fn add_i32(&mut self, v: &i32) -> &mut Self {
-        let mut constant = ConstantValue::default();
-        constant.set_body(Vec::from(v.to_be_bytes()));
-        self.values.push(constant);
+        self.values.push(ConstantValue {
+            body: Vec::from(v.to_be_bytes()),
+        });
+
         self
     }
 
@@ -267,26 +303,53 @@ impl<'a> SelectBuilder<'a> {
     fn new(runner: &'a mut TestRunner) -> Self {
         Self {
             runner,
-            plan: PlanFragment::default(),
+            plan: PlanFragment {
+                root: Some(PlanNode {
+                    node_type: 0,
+                    body: Some(Any {
+                        type_url: "/".to_string(),
+                        value: vec![],
+                    }),
+                    children: vec![],
+                }),
+                exchange_info: Some(ExchangeInfo {
+                    mode: 0,
+                    distribution: None,
+                }),
+            },
         }
     }
 
     // select * from t;
     pub async fn scan_all(mut self) -> SelectBuilder<'a> {
-        let mut scan = SeqScanNode::default();
         let table_ref = self
             .runner
             .get_global_env()
             .table_manager_ref()
-            .get_table(&TableId::from_protobuf(&TableRefId::default()).unwrap())
+            .get_table(&TableId::default())
             .unwrap();
         if let TableTypes::BummockTable(column_table_ref) = table_ref {
             let column_ids = column_table_ref.get_column_ids().unwrap();
-            for col_id in column_ids.iter() {
-                scan.mut_column_ids().push(*col_id);
-            }
-            self.plan.mut_root().set_body(Any::pack(&scan).unwrap());
-            self.plan.mut_root().set_node_type(PlanNodeType::SEQ_SCAN);
+            let scan = SeqScanNode {
+                table_ref_id: None,
+                column_ids: column_ids.iter().copied().collect_vec(),
+                column_type: vec![],
+            };
+
+            self.plan = PlanFragment {
+                root: Some(PlanNode {
+                    node_type: PlanNodeType::SeqScan as i32,
+                    body: Some(Any {
+                        type_url: "".to_string(),
+                        value: scan.encode_to_vec(),
+                    }),
+                    children: vec![],
+                }),
+                exchange_info: Some(ExchangeInfo {
+                    mode: 0,
+                    distribution: None,
+                }),
+            };
             self
         } else {
             todo!()
@@ -335,10 +398,11 @@ impl ResultChecker {
     // We still do not support nullable testing very well.
     // TODO: vals &[i32] => vals &[Option<i32>]
     pub fn add_i32_column(&mut self, is_nullable: bool, vals: &[i32]) -> &mut ResultChecker {
-        let mut typ = DataType::default();
-        typ.set_type_name(DataType_TypeName::INT32);
-        typ.set_is_nullable(is_nullable);
-        self.col_types.push(typ);
+        self.col_types.push(DataType {
+            type_name: TypeName::Int32 as i32,
+            is_nullable,
+            ..CoreDefault::default()
+        });
         let mut constants = ConstantBuilder::new();
         for v in vals {
             constants.add_i32(v);
@@ -367,12 +431,12 @@ impl ResultChecker {
         assert_eq!(chunk.get_columns().len(), self.col_types.len());
 
         for i in 0..chunk.get_columns().len() {
-            let col = unpack_from_any!(chunk.get_columns()[i], Column);
+            let col = Column::decode(&chunk.get_columns()[i].value[..]).unwrap();
+
             self.check_column_meta(i, &col);
             self.check_column_null_bitmap(&col);
 
             // TODO: Write an iterator for FixedWidthColumn
-            // let value_width = col.get_value_width() as usize;
             let value_width = Self::get_value_width(&col);
             assert_eq!(value_width, 4); // Temporarily hard-coded.
             let column_bytes = col.get_values()[0].get_body();
@@ -388,7 +452,7 @@ impl ResultChecker {
 
     fn get_value_width(col: &Column) -> usize {
         match col.get_column_type().get_type_name() {
-            DataType_TypeName::INT32 => 4,
+            TypeName::Int32 => 4,
             _ => 0,
         }
     }

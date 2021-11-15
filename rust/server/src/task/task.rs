@@ -1,3 +1,4 @@
+use std::fmt::{Debug, Formatter};
 use std::sync::{Arc, Mutex};
 
 use crate::executor::{BoxedExecutor, ExecutorBuilder, ExecutorResult};
@@ -8,13 +9,12 @@ use crate::task::TaskManager;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::{json_to_pretty_string, JsonFormatter};
+use risingwave_pb::plan::PlanFragment;
+use risingwave_pb::task_service::task_info::TaskStatus;
+use risingwave_pb::task_service::TaskSinkId as ProstSinkId;
+use risingwave_pb::task_service::{GetDataResponse, TaskId as ProstTaskId};
 use risingwave_pb::ToProst;
-use risingwave_proto::common::Status;
-use risingwave_proto::plan::PlanFragment;
-use risingwave_proto::task_service::TaskInfo_TaskStatus as TaskStatus;
-use risingwave_proto::task_service::TaskSinkId as ProtoSinkId;
-use risingwave_proto::task_service::{GetDataResponse, TaskId as ProtoTaskId};
-use std::fmt::{Debug, Formatter};
+use risingwave_pb::ToProto;
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub struct TaskId {
@@ -47,21 +47,21 @@ pub(in crate) enum TaskState {
     Failed,
 }
 
-impl From<&ProtoTaskId> for TaskId {
-    fn from(proto: &ProtoTaskId) -> Self {
+impl From<&ProstTaskId> for TaskId {
+    fn from(prost: &ProstTaskId) -> Self {
         TaskId {
-            task_id: proto.get_task_id(),
-            stage_id: proto.get_stage_id().get_stage_id(),
-            query_id: String::from(proto.get_stage_id().get_query_id().get_trace_id()),
+            task_id: prost.get_task_id(),
+            stage_id: prost.get_stage_id().get_stage_id(),
+            query_id: String::from(prost.get_stage_id().get_query_id().get_trace_id()),
         }
     }
 }
 
-impl From<&ProtoSinkId> for TaskSinkId {
-    fn from(proto: &ProtoSinkId) -> Self {
+impl From<&ProstSinkId> for TaskSinkId {
+    fn from(prost: &ProstSinkId) -> Self {
         TaskSinkId {
-            task_id: TaskId::from(proto.get_task_id()),
-            sink_id: proto.get_sink_id(),
+            task_id: TaskId::from(prost.get_task_id()),
+            sink_id: prost.get_sink_id(),
         }
     }
 }
@@ -69,7 +69,7 @@ impl From<&ProtoSinkId> for TaskSinkId {
 pub struct TaskSink {
     task_manager: Arc<TaskManager>,
     receiver: BoxChanReceiver,
-    sink_id: ProtoSinkId,
+    sink_id: ProstSinkId,
 }
 
 impl TaskSink {
@@ -85,10 +85,11 @@ impl TaskSink {
                 Some(c) => c,
             };
             let pb = chunk.to_protobuf()?;
-            let mut resp = GetDataResponse::new();
-            resp.set_status(Status::default());
-            resp.set_record_batch(pb);
-            writer.write(resp.to_prost()).await?;
+            let resp = GetDataResponse {
+                record_batch: Some(pb.to_prost()),
+                ..Default::default()
+            };
+            writer.write(resp).await?;
         }
         let possible_err = self.task_manager.get_error(&task_id)?;
         if let Some(err) = possible_err {
@@ -116,11 +117,11 @@ pub struct TaskExecution {
 }
 
 impl TaskExecution {
-    pub fn new(proto_tid: &ProtoTaskId, plan: PlanFragment, env: GlobalTaskEnv) -> Self {
+    pub fn new(prost_tid: &ProstTaskId, plan: PlanFragment, env: GlobalTaskEnv) -> Self {
         TaskExecution {
-            task_id: TaskId::from(proto_tid),
+            task_id: TaskId::from(prost_tid),
             plan,
-            state: Mutex::new(TaskStatus::PENDING),
+            state: Mutex::new(TaskStatus::Pending),
             receivers: Mutex::new(Vec::new()),
             env,
             failure: Arc::new(Mutex::new(None)),
@@ -133,18 +134,20 @@ impl TaskExecution {
 
     /// `get_data` consumes the data produced by `async_execute`.
     pub fn async_execute(&self) -> Result<()> {
-        *self.state.lock().unwrap() = TaskStatus::RUNNING;
         debug!(
             "Prepare executing plan [{:?}]: {}",
             self.task_id,
-            json_to_pretty_string(&self.plan.to_json()?)?
+            json_to_pretty_string(
+                &self
+                    .plan
+                    .to_proto::<risingwave_proto::plan::PlanFragment>()
+                    .to_json()?
+            )?
         );
+        *self.state.lock().unwrap() = TaskStatus::Running;
         let exec = ExecutorBuilder::new(
-            &self
-                .plan
-                .get_root()
-                .to_prost::<risingwave_pb::plan::PlanNode>(),
-            &self.task_id,
+            self.plan.root.as_ref().unwrap(),
+            &self.task_id.clone(),
             self.env.clone(),
         )
         .build()?;
@@ -153,7 +156,6 @@ impl TaskExecution {
             .lock()
             .unwrap()
             .extend(receivers.into_iter().map(Some));
-
         let failure = self.failure.clone();
         let task_id = self.task_id.clone();
         tokio::spawn(async move {
@@ -183,7 +185,7 @@ impl TaskExecution {
         Ok(())
     }
 
-    pub fn get_task_sink(&self, sink_id: &ProtoSinkId) -> Result<TaskSink> {
+    pub fn get_task_sink(&self, sink_id: &ProstSinkId) -> Result<TaskSink> {
         let task_id = TaskId::from(sink_id.get_task_id());
         let receiver = self.receivers.lock().unwrap()[sink_id.get_sink_id() as usize]
             .take()
@@ -207,7 +209,7 @@ impl TaskExecution {
     }
 
     pub fn check_if_running(&self) -> Result<()> {
-        if *self.state.lock().unwrap() != TaskStatus::RUNNING {
+        if *self.state.lock().unwrap() != TaskStatus::Running {
             return Err(ErrorCode::InternalError(format!(
                 "task {:?} is not running",
                 self.get_task_id()

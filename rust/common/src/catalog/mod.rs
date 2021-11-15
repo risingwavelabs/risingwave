@@ -6,7 +6,7 @@ pub use schema::*;
 
 use pb_convert_derive::FromProtobuf;
 
-#[derive(Clone, Debug, Hash, PartialOrd, PartialEq, Eq, FromProtobuf)]
+#[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq, FromProtobuf)]
 #[pb_convert(pb_type = "risingwave_proto::plan::DatabaseRefId")]
 pub struct DatabaseId {
     database_id: i32,
@@ -18,7 +18,7 @@ impl DatabaseId {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialOrd, PartialEq, Eq, FromProtobuf)]
+#[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq, FromProtobuf)]
 #[pb_convert(pb_type = "risingwave_proto::plan::SchemaRefId")]
 pub struct SchemaId {
     database_ref_id: DatabaseId,
@@ -34,7 +34,7 @@ impl SchemaId {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialOrd, PartialEq, Eq, FromProtobuf)]
+#[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq, FromProtobuf)]
 #[pb_convert(pb_type = "risingwave_proto::plan::TableRefId")]
 pub struct TableId {
     schema_ref_id: SchemaId,

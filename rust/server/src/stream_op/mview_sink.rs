@@ -116,7 +116,7 @@ mod tests {
     use crate::*;
 
     use risingwave_common::array::{I32Array, Row};
-    use risingwave_common::catalog::{DatabaseId, Field, SchemaId, TableId};
+    use risingwave_common::catalog::{Field, SchemaId, TableId};
     use risingwave_common::types::{Int32Type, Scalar};
     use risingwave_pb::data::{data_type::TypeName, DataType};
     use risingwave_pb::plan::{column_desc::ColumnEncodingType, ColumnDesc};
@@ -125,7 +125,7 @@ mod tests {
     async fn test_sink() {
         // Prepare storage and memtable.
         let store_mgr = Arc::new(SimpleTableManager::new());
-        let table_id = TableId::new(SchemaId::new(DatabaseId::new(0), 0), 1);
+        let table_id = TableId::new(SchemaId::default(), 1);
         // Two columns of int32 type, the first column is PK.
         let column_desc1 = ColumnDesc {
             column_type: Some(DataType {
@@ -223,7 +223,7 @@ mod tests {
     async fn test_sink_no_key() {
         // Prepare storage and memtable.
         let store_mgr = Arc::new(SimpleTableManager::new());
-        let table_id = TableId::new(SchemaId::new(DatabaseId::new(0), 0), 1);
+        let table_id = TableId::new(SchemaId::default(), 1);
 
         // Two columns of int32 type, no pk.
         let column_desc1 = ColumnDesc {

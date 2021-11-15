@@ -6,7 +6,7 @@ use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::Row;
 use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder};
-use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
+use risingwave_common::catalog::{SchemaId, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::RwError;
 use risingwave_common::types::{Int32Type, Scalar};
@@ -107,7 +107,7 @@ async fn test_stream_mv_proto() {
 
     // Initialize storage.
     let table_manager = Arc::new(SimpleTableManager::new());
-    let table_id = TableId::new(SchemaId::new(DatabaseId::new(0), 0), 0);
+    let table_id = TableId::default();
     let column1 = ColumnDesc {
         column_type: Some(DataType {
             type_name: TypeName::Int32 as i32,
@@ -184,7 +184,7 @@ async fn test_stream_mv_proto() {
 
     // Insert data and check if the materialized view has been updated.
     let _res_app = table_ref.append(append_chunk).await;
-    let table_id_mv = TableId::new(SchemaId::new(DatabaseId::new(0), 0), 1);
+    let table_id_mv = TableId::new(SchemaId::default(), 1);
     let table_ref_mv = table_manager.get_table(&table_id_mv).unwrap();
 
     let mut sink = stream_manager.take_sink((1, 233));

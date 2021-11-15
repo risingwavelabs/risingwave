@@ -1,13 +1,15 @@
 use crate::task::channel::{BoxChanReceiver, BoxChanSender, ChanReceiver, ChanSender};
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_proto::plan::*;
+use risingwave_pb::plan::exchange_info::BroadcastInfo;
+use risingwave_pb::plan::*;
+use risingwave_pb::{ToProst, ToProto};
 use std::sync::mpsc;
 
 /// `BroadcastSender` sends the same chunk to a number of `BroadcastReceiver`s.
 pub struct BroadcastSender {
     senders: Vec<mpsc::Sender<DataChunk>>,
-    broadcast_info: ExchangeInfo_BroadcastInfo,
+    broadcast_info: BroadcastInfo,
 }
 
 #[async_trait::async_trait]
@@ -37,7 +39,9 @@ impl ChanReceiver for BroadcastReceiver {
 }
 
 pub fn new_broadcast_channel(shuffle: &ExchangeInfo) -> (BoxChanSender, Vec<BoxChanReceiver>) {
-    let broadcast_info = shuffle.get_broadcast_info();
+    let shuffle_proto = shuffle.to_proto::<risingwave_proto::plan::ExchangeInfo>();
+    let broadcast_info = shuffle_proto.get_broadcast_info();
+
     let output_count = broadcast_info.count as usize;
     let mut senders = Vec::with_capacity(output_count);
     let mut receivers = Vec::with_capacity(output_count);
@@ -48,7 +52,7 @@ pub fn new_broadcast_channel(shuffle: &ExchangeInfo) -> (BoxChanSender, Vec<BoxC
     }
     let channel_sender = Box::new(BroadcastSender {
         senders,
-        broadcast_info: broadcast_info.clone(),
+        broadcast_info: broadcast_info.clone().to_prost(),
     }) as BoxChanSender;
     let channel_receivers = receivers
         .into_iter()
@@ -61,17 +65,18 @@ pub fn new_broadcast_channel(shuffle: &ExchangeInfo) -> (BoxChanSender, Vec<BoxC
 mod tests {
     use crate::task::test_utils::{ResultChecker, TestRunner};
     use rand::Rng;
-    use risingwave_proto::plan::*;
+    use risingwave_pb::plan::ExchangeInfo;
+    use risingwave_pb::plan::*;
 
     fn broadcast_plan(plan: &mut PlanFragment, num_sinks: u32) {
-        let mut broadcast_info = ExchangeInfo_BroadcastInfo::default();
-        broadcast_info.set_count(num_sinks);
-        let distribution = ExchangeInfo_oneof_distribution::broadcast_info(broadcast_info.clone());
-        let mut exchange_info = ExchangeInfo::default();
-        exchange_info.set_broadcast_info(broadcast_info);
-        exchange_info.mode = ExchangeInfo_DistributionMode::BROADCAST;
-        exchange_info.distribution = Some(distribution);
-        plan.set_exchange_info(exchange_info);
+        let broadcast_info = exchange_info::BroadcastInfo { count: num_sinks };
+        let distribution: exchange_info::Distribution =
+            exchange_info::Distribution::BroadcastInfo(broadcast_info);
+
+        plan.exchange_info = Some(ExchangeInfo {
+            mode: exchange_info::DistributionMode::Broadcast as i32,
+            distribution: Some(distribution),
+        });
     }
 
     #[tokio::test(flavor = "multi_thread")]

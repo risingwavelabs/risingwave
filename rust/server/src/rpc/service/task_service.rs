@@ -4,7 +4,6 @@ use risingwave_pb::task_service::{
     AbortTaskRequest, AbortTaskResponse, CreateTaskRequest, CreateTaskResponse, GetTaskInfoRequest,
     GetTaskInfoResponse,
 };
-use risingwave_pb::ToProto;
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
@@ -29,13 +28,9 @@ impl TaskService for TaskServiceImpl {
     ) -> Result<Response<CreateTaskResponse>, Status> {
         let req = request.into_inner();
 
-        let plan = req.get_plan().to_proto();
-        let res = self.mgr.fire_task(
-            self.env.clone(),
-            &req.get_task_id()
-                .to_proto::<risingwave_proto::task_service::TaskId>(),
-            plan,
-        );
+        let res = self
+            .mgr
+            .fire_task(self.env.clone(), req.get_task_id(), req.get_plan().clone());
         match res {
             Ok(_) => Ok(Response::new(CreateTaskResponse { status: None })),
             Err(e) => {

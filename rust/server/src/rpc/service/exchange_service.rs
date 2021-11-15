@@ -9,7 +9,6 @@ use risingwave_pb::task_service::exchange_service_server::ExchangeService;
 use risingwave_pb::task_service::{
     GetDataRequest, GetDataResponse, GetStreamRequest, TaskSinkId as ProtoTaskSinkId,
 };
-use risingwave_pb::ToProto;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -91,10 +90,9 @@ impl ExchangeServiceImpl {
     ) -> Result<Response<<Self as ExchangeService>::GetDataStream>> {
         let (tx, rx) = tokio::sync::mpsc::channel(10);
 
-        let proto_tsid = pb_tsid.to_proto();
-        let tsid = TaskSinkId::from(&proto_tsid);
+        let tsid = TaskSinkId::from(&pb_tsid);
         debug!("Serve exchange RPC from {} [{:?}]", peer_addr, tsid);
-        let mut task_sink = self.mgr.take_sink(&proto_tsid)?;
+        let mut task_sink = self.mgr.take_sink(&pb_tsid)?;
         tokio::spawn(async move {
             let mut writer = GrpcExchangeWriter::new(tx.clone());
             match task_sink.take_data(&mut writer).await {

@@ -3,8 +3,9 @@ use crate::task::task::{TaskExecution, TaskId};
 use crate::task::TaskSink;
 use risingwave_common::error::ErrorCode::TaskNotFound;
 use risingwave_common::error::{Result, RwError};
-use risingwave_proto::plan::PlanFragment;
-use risingwave_proto::task_service::{TaskId as ProtoTaskId, TaskSinkId as ProtoSinkId};
+use risingwave_pb::plan::PlanFragment;
+use risingwave_pb::task_service::{TaskId as ProstTaskId, TaskSinkId as ProstSinkId};
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -23,10 +24,11 @@ impl TaskManager {
     pub fn fire_task(
         &self,
         env: GlobalTaskEnv,
-        tid: &ProtoTaskId,
+        tid: &ProstTaskId,
         plan: PlanFragment,
     ) -> Result<()> {
         let task = TaskExecution::new(tid, plan, env);
+
         task.async_execute()?;
         self.tasks
             .lock()
@@ -36,7 +38,7 @@ impl TaskManager {
         Ok(())
     }
 
-    pub fn take_sink(&self, sink_id: &ProtoSinkId) -> Result<TaskSink> {
+    pub fn take_sink(&self, sink_id: &ProstSinkId) -> Result<TaskSink> {
         let task_id = TaskId::from(sink_id.get_task_id());
         self.tasks
             .lock()
@@ -47,7 +49,7 @@ impl TaskManager {
     }
 
     #[cfg(test)]
-    pub fn remove_task(&self, sid: &ProtoTaskId) -> Result<Option<Box<TaskExecution>>> {
+    pub fn remove_task(&self, sid: &ProstTaskId) -> Result<Option<Box<TaskExecution>>> {
         let task_id = TaskId::from(sid);
         match self.tasks.lock().unwrap().remove(&task_id) {
             Some(t) => Ok(Some(t)),
@@ -83,10 +85,9 @@ impl Default for TaskManager {
 mod tests {
     use crate::task::test_utils::{ResultChecker, TestRunner};
     use crate::task::{GlobalTaskEnv, TaskId, TaskManager};
-    use pb_construct::make_proto;
-    use risingwave_proto::plan::{PlanFragment, PlanNode_PlanNodeType};
-    use risingwave_proto::task_service::TaskId as ProtoTaskId;
-    use risingwave_proto::task_service::TaskSinkId as ProtoTaskSinkId;
+    use risingwave_pb::plan::{plan_node::PlanNodeType, ExchangeInfo, PlanFragment, PlanNode};
+    use risingwave_pb::task_service::TaskSinkId as ProstTaskSinkId;
+    use risingwave_pb::task_service::{QueryId, StageId, TaskId as ProstTaskId};
     use tonic::Code;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -119,11 +120,30 @@ mod tests {
     async fn test_bad_node_type() {
         let env = GlobalTaskEnv::for_test();
         let manager = TaskManager::new();
-        let mut plan = PlanFragment::default();
-        plan.mut_root()
-            .set_node_type(PlanNode_PlanNodeType::INVALID);
+        let plan = PlanFragment {
+            root: Some(PlanNode {
+                node_type: PlanNodeType::Invalid as i32,
+                ..Default::default()
+            }),
+            exchange_info: Some(ExchangeInfo {
+                mode: 0,
+                distribution: None,
+            }),
+        };
         assert!(manager
-            .fire_task(env, &ProtoTaskId::default(), plan)
+            .fire_task(
+                env,
+                &ProstTaskId {
+                    stage_id: Some(StageId {
+                        query_id: Some(QueryId {
+                            trace_id: "".to_string()
+                        }),
+                        stage_id: 0
+                    }),
+                    task_id: 0
+                },
+                plan
+            )
             .is_err());
     }
 
@@ -145,7 +165,18 @@ mod tests {
             Code::NotFound
         );
 
-        let sink_id = make_proto!(ProtoTaskSinkId, {});
+        let sink_id = ProstTaskSinkId {
+            task_id: Some(risingwave_pb::task_service::TaskId {
+                stage_id: Some(StageId {
+                    query_id: Some(QueryId {
+                        trace_id: "".to_string(),
+                    }),
+                    stage_id: 0,
+                }),
+                task_id: 0,
+            }),
+            sink_id: 0,
+        };
         match manager.take_sink(&sink_id) {
             Err(e) => assert_eq!(e.to_grpc_status().code(), Code::NotFound),
             Ok(_) => unreachable!(),

@@ -3,27 +3,27 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
-use risingwave_proto::plan::*;
+use risingwave_pb::plan::exchange_info::hash_info::HashMethod;
+use risingwave_pb::plan::exchange_info::HashInfo;
+use risingwave_pb::plan::*;
+use risingwave_pb::{ToProst, ToProto};
 use std::option::Option;
 use std::sync::mpsc;
 
 pub struct HashShuffleSender {
     senders: Vec<mpsc::Sender<DataChunk>>,
-    hash_info: ExchangeInfo_HashInfo,
+    hash_info: exchange_info::HashInfo,
 }
 
 pub struct HashShuffleReceiver {
     receiver: mpsc::Receiver<DataChunk>,
 }
 
-fn generate_hash_values(
-    chunk: &DataChunk,
-    hash_info: &ExchangeInfo_HashInfo,
-) -> Result<Vec<usize>> {
+fn generate_hash_values(chunk: &DataChunk, hash_info: &HashInfo) -> Result<Vec<usize>> {
     let output_count = hash_info.output_count as usize;
 
-    let hasher_builder = match hash_info.hash_method {
-        ExchangeInfo_HashInfo_HashMethod::CRC32 => CRC32FastBuilder {},
+    let hasher_builder = match hash_info.get_hash_method() {
+        HashMethod::Crc32 => CRC32FastBuilder {},
     };
 
     let hash_values = chunk
@@ -44,7 +44,7 @@ fn generate_hash_values(
 
 fn generate_new_data_chunks(
     chunk: &DataChunk,
-    hash_info: &ExchangeInfo_HashInfo,
+    hash_info: &exchange_info::HashInfo,
     hash_values: &[usize],
 ) -> Result<Vec<DataChunk>> {
     let output_count = hash_info.output_count as usize;
@@ -104,7 +104,9 @@ impl ChanReceiver for HashShuffleReceiver {
 }
 
 pub fn new_hash_shuffle_channel(shuffle: &ExchangeInfo) -> (BoxChanSender, Vec<BoxChanReceiver>) {
-    let hash_info = shuffle.get_hash_info();
+    let shuffle_proto = shuffle.to_proto::<risingwave_proto::plan::ExchangeInfo>();
+    let hash_info = shuffle_proto.get_hash_info();
+
     let output_count = hash_info.output_count as usize;
     let mut senders = Vec::with_capacity(output_count);
     let mut receivers = Vec::with_capacity(output_count);
@@ -115,7 +117,7 @@ pub fn new_hash_shuffle_channel(shuffle: &ExchangeInfo) -> (BoxChanSender, Vec<B
     }
     let channel_sender = Box::new(HashShuffleSender {
         senders,
-        hash_info: hash_info.clone(),
+        hash_info: hash_info.to_prost(),
     }) as BoxChanSender;
     let channel_receivers = receivers
         .into_iter()
@@ -129,20 +131,28 @@ mod tests {
     use crate::task::test_utils::{ResultChecker, TestRunner};
     use rand::Rng;
     use risingwave_common::util::hash_util::CRC32FastBuilder;
-    use risingwave_proto::plan::*;
+    use risingwave_pb::plan::exchange_info::hash_info::HashMethod;
+    use risingwave_pb::plan::exchange_info::DistributionMode;
+    use risingwave_pb::plan::exchange_info::HashInfo;
+    use risingwave_pb::plan::*;
     use std::hash::BuildHasher;
 
     pub fn hash_shuffle_plan(plan: &mut PlanFragment, keys: Vec<u32>, num_sinks: u32) {
-        let mut hash_info = ExchangeInfo_HashInfo::default();
-        hash_info.set_hash_method(ExchangeInfo_HashInfo_HashMethod::CRC32);
-        hash_info.set_keys(keys);
-        hash_info.set_output_count(num_sinks);
-        let distribution = ExchangeInfo_oneof_distribution::hash_info(hash_info.clone());
-        let mut exchange_info = ExchangeInfo::default();
-        exchange_info.set_hash_info(hash_info);
-        exchange_info.distribution = Some(distribution);
-        exchange_info.mode = ExchangeInfo_DistributionMode::HASH;
-        plan.set_exchange_info(exchange_info);
+        let hash_info = HashInfo {
+            output_count: num_sinks,
+            hash_method: HashMethod::Crc32 as i32,
+            keys,
+        };
+
+        let distribution: exchange_info::Distribution =
+            exchange_info::Distribution::HashInfo(hash_info);
+
+        let exchange_info = ExchangeInfo {
+            mode: DistributionMode::Hash as i32,
+            distribution: Some(distribution),
+        };
+
+        plan.exchange_info = Some(exchange_info);
     }
 
     #[tokio::test(flavor = "multi_thread")]
