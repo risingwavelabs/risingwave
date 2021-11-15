@@ -1,4 +1,5 @@
-use super::expr_tmpl::{UnaryBytesExpression, UnaryExpression};
+/// For expression that only accept one value as input (e.g. CAST)
+use super::template::{UnaryBytesExpression, UnaryExpression};
 use crate::array::{BoolArray, I32Array, I64Array, UTF8Array};
 use crate::expr::BoxedExpression;
 use crate::types::{DataTypeKind, DataTypeRef};

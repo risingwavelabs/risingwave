@@ -1,5 +1,6 @@
+/// For expression that accept 3 arguments + 1 bytes writer as input.
 use crate::array::{I32Array, UTF8Array};
-use crate::expr::expr_tmpl::TernaryBytesExpression;
+use crate::expr::template::TernaryBytesExpression;
 use crate::expr::BoxedExpression;
 use crate::types::DataTypeRef;
 use crate::vector_op::replace::replace;

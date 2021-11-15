@@ -1,5 +1,6 @@
+/// For expression that only accept two arguments + 1 bytes writer as input.
 use crate::array::{I32Array, UTF8Array};
-use crate::expr::expr_tmpl::BinaryBytesExpression;
+use crate::expr::template::BinaryBytesExpression;
 use crate::expr::BoxedExpression;
 use crate::types::DataTypeRef;
 use crate::vector_op::substr::*;

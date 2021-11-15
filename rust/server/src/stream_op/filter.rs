@@ -146,7 +146,7 @@ mod tests {
     use crate::stream_op::{Executor, FilterExecutor, Message, Op, StreamChunk};
     use crate::*;
     use risingwave_common::column_nonnull;
-    use risingwave_common::expr::binary_expr::new_binary_expr;
+    use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
     use risingwave_common::expr::InputRefExpression;
     use risingwave_common::types::{BoolType, Int64Type};
 

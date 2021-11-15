@@ -13,7 +13,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_common::expr::binary_expr::new_binary_expr;
+use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_common::expr::InputRefExpression;
 use risingwave_common::types::BoolType;
 

@@ -1,7 +1,8 @@
+/// For expression that only accept two non null arguments as input.
 use crate::array::{Array, BoolArray, DataTypeTrait, I32Array, UTF8Array};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
-use crate::expr::expr_tmpl::BinaryExpression;
+use crate::expr::template::BinaryExpression;
 use crate::expr::BoxedExpression;
 use crate::types::DataTypeRef;
 use crate::types::*;

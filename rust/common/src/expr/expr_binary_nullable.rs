@@ -1,9 +1,10 @@
+/// For expression that only accept two nullable arguments as input.
 use std::marker::PhantomData;
 
 use super::BoxedExpression;
 use crate::array::{BoolArray, DecimalArray, F32Array, F64Array, I16Array, I32Array, I64Array};
 use crate::error::Result;
-use crate::expr::expr_tmpl::BinaryNullableExpression;
+use crate::expr::template::BinaryNullableExpression;
 use crate::types::DataTypeKind;
 use crate::types::DataTypeRef;
 use risingwave_pb::expr::expr_node::Type;

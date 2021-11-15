@@ -102,7 +102,7 @@ mod tests {
     use risingwave_common::array::I64Array;
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::expr::binary_expr::new_binary_expr;
+    use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
     use risingwave_common::expr::InputRefExpression;
     use risingwave_common::types::Int64Type;
     use risingwave_pb::expr::expr_node::Type as ProstExprType;

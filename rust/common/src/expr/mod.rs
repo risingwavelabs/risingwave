@@ -1,25 +1,25 @@
 mod agg;
-pub mod binary_expr;
-mod binary_expr_bytes;
-mod binary_expr_nullable;
-pub mod expr_factory;
-mod expr_tmpl;
-mod input_ref;
-mod literal;
-mod ternary_expr_bytes;
-pub mod unary_expr;
+pub mod build_expr_from_prost;
+mod expr_binary_bytes;
+pub mod expr_binary_nonnull;
+mod expr_binary_nullable;
+mod expr_input_ref;
+mod expr_literal;
+mod expr_ternary_bytes;
+pub mod expr_unary_nonnull;
+mod template;
 use crate::array::{ArrayRef, DataChunk};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
-use crate::expr::expr_factory::{
+use crate::expr::build_expr_from_prost::{
     build_binary_expr_prost, build_length_expr, build_like_expr, build_ltrim_expr,
     build_position_expr, build_replace_expr, build_rtrim_expr, build_substr_expr, build_trim_expr,
     build_unary_expr_prost,
 };
 use crate::types::{DataType, DataTypeRef};
 pub use agg::AggKind;
-pub use input_ref::InputRefExpression;
-pub use literal::*;
+pub use expr_input_ref::InputRefExpression;
+pub use expr_literal::*;
 use risingwave_pb::expr::expr_node::Type::{
     {Add, Divide, Modulus, Multiply, Subtract}, {And, Not, Or}, {Cast, Upper},
     {ConstantValue, InputRef},

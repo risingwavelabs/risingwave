@@ -1,3 +1,4 @@
+/// Template macro to generate code for unary/binary/ternary expression.
 use crate::array::{
     Array, ArrayBuilder, ArrayImpl, ArrayRef, BytesGuard, BytesWriter, DataChunk, UTF8ArrayBuilder,
 };

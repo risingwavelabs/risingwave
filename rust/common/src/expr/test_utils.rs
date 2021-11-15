@@ -11,7 +11,7 @@ use risingwave_pb::expr::{ExprNode, InputRefExpr};
 pub fn make_expression(kind: ProstExprType, rets: &[TypeName], indices: &[i32]) -> ProstExprNode {
     let mut exprs = Vec::new();
     for (idx, ret) in indices.iter().zip(rets.iter()) {
-        exprs.push(make_inputref(*idx, *ret));
+        exprs.push(make_input_ref(*idx, *ret));
     }
     let function_call = FunctionCall { children: exprs };
     let return_type = DataTypeProst {
@@ -28,7 +28,7 @@ pub fn make_expression(kind: ProstExprType, rets: &[TypeName], indices: &[i32]) 
     }
 }
 
-pub fn make_inputref(idx: i32, ret: TypeName) -> ExprNode {
+pub fn make_input_ref(idx: i32, ret: TypeName) -> ExprNode {
     ExprNode {
         expr_type: InputRef as i32,
         return_type: Some(DataType {
