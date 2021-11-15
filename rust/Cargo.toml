@@ -8,6 +8,7 @@ members = [
   "proto",
   "server",
   "stream",
+  "utils/memcomparable",
   "utils/pb-construct",
   "utils/pb-convert",
   "utils/pb-convert-derive",

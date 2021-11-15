@@ -1,0 +1,16 @@
+[package]
+name = "memcomparable"
+version = "0.1.0"
+edition = "2021"
+description = "Memcomparable format."
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bytes = "1.0"
+serde = "1.0"
+thiserror = "1.0"
+
+[dev-dependencies]
+rand = "0.8"
+serde = { version = "1.0", features = ["derive"] }
