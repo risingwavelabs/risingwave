@@ -239,23 +239,15 @@ macro_rules! gen_expr_nullable {
                 if !visible {
                   continue;
                 }
-                if let ($(Some([<v_ $arg:lower>]), )*) = ($([<v_ $arg:lower>], )*) {
-                  let ret = (self.func)($(Some([<v_$arg:lower>]),)*)?;
-                  output_array.append(option_as_scalar_ref(&ret))?;
-                } else {
-                  output_array.append(None)?;
-                }
+                let ret = (self.func)($([<v_$arg:lower>],)*)?;
+                output_array.append(option_as_scalar_ref(&ret))?;
               }
               output_array.finish()?.into()
             }
             None => {
               for ($([<v_ $arg:lower>], )*) in multizip(($([<arr_ $arg:lower>].iter(), )*)) {
-                if let ($(Some([<v_ $arg:lower>]), )*) = ($([<v_ $arg:lower>], )*) {
-                  let ret = (self.func)($(Some([<v_$arg:lower>]),)*)?;
-                  output_array.append(option_as_scalar_ref(&ret))?;
-                } else {
-                  output_array.append(None)?;
-                }
+                let ret = (self.func)($([<v_$arg:lower>],)*)?;
+                output_array.append(option_as_scalar_ref(&ret))?;
               }
               output_array.finish()?.into()
             }
