@@ -2,6 +2,11 @@
 
 use std::{cmp, ptr};
 
+use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
+use risingwave_pb::hummock::Checksum;
+
+use super::{HummockError, HummockResult};
+
 unsafe fn u64(ptr: *const u8) -> u64 {
     ptr::read_unaligned(ptr as *const u64)
 }
@@ -38,4 +43,16 @@ pub fn crc32_checksum(data: &[u8]) -> u64 {
     let mut hasher = crc32fast::Hasher::new();
     hasher.update(data);
     hasher.finalize() as u64
+}
+
+pub fn verify_checksum(chksum: &Checksum, data: &[u8]) -> HummockResult<()> {
+    match chksum.algo() {
+        ChecksumAlg::Crc32c => {
+            if crc32_checksum(data) != chksum.get_sum() {
+                return Err(HummockError::ChecksumMismatch);
+            }
+        }
+        _ => todo!(),
+    }
+    Ok(())
 }

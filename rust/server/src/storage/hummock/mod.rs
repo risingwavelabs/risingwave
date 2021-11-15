@@ -2,3 +2,5 @@
 
 mod table;
 pub use table::*;
+mod error;
+pub use error::*;

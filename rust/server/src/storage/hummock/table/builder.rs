@@ -48,7 +48,7 @@ pub struct TableBuilderOptions {
 /// The SST format is as follows:
 ///
 /// ```plain
-/// | Block | Block | Block | Block | Index Block | Index Block |
+/// | Block | Block | Block | Block | Index |
 /// ```
 ///
 /// Inside each block, the block header records the base key of the block. And then, each entry
@@ -63,7 +63,6 @@ pub struct TableBuilder {
     base_offset: u32,
     entry_offsets: Vec<u32>,
     table_index: TableIndex,
-    key_hashes: Vec<u32>,
     options: TableBuilderOptions,
 }
 
@@ -74,7 +73,6 @@ impl TableBuilder {
             // approximately 16MB index + table size
             buf: BytesMut::with_capacity((16 << 20) + options.table_size as usize),
             table_index: TableIndex::default(),
-            key_hashes: Vec::with_capacity(1024),
             base_key: Bytes::new(),
             base_offset: 0,
             entry_offsets: vec![],
@@ -92,7 +90,6 @@ impl TableBuilder {
     }
 
     fn add_helper(&mut self, key: &[u8], value: &[u8]) {
-        self.key_hashes.push(farmhash::fingerprint32(key));
         let diff_key = if self.base_key.is_empty() {
             self.base_key = key.to_vec().into();
             key
@@ -203,7 +200,6 @@ impl TableBuilder {
         // append checksum
         let cs = self.build_checksum(&bytes);
         self.write_checksum(cs);
-        // TODO: eliminate clone if we do not need builder any more after finish
         self.buf.freeze()
     }
 
@@ -215,17 +211,14 @@ impl TableBuilder {
     }
 
     fn write_checksum(&mut self, checksum: Checksum) {
-        let mut res = BytesMut::new();
-        checksum.encode(&mut res).unwrap();
-        let len = res.len();
-        assert!(len < u32::MAX as usize);
-        self.buf.put_slice(&res);
-        self.buf.put_u32(len as u32);
+        let old_len = self.buf.len();
+        checksum.encode(&mut self.buf).unwrap();
+        self.buf.put_u32((self.buf.len() - old_len) as u32);
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use itertools::Itertools;
 
@@ -258,8 +251,7 @@ mod tests {
         assert_eq!(header.diff, 23334);
     }
 
-    #[test]
-    fn test_build() {
+    pub fn generate_table() -> Bytes {
         let opt = TableBuilderOptions {
             bloom_false_positive: 0.0,
             block_size: 0,
@@ -282,6 +274,11 @@ mod tests {
             );
         }
 
-        b.finish();
+        b.finish()
+    }
+
+    #[test]
+    fn test_build() {
+        generate_table();
     }
 }
