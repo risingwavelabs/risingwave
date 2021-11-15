@@ -1,7 +1,7 @@
+use crate::stream_op::Barrier;
 use futures::SinkExt;
 use futures::StreamExt;
 use risingwave_pb::data::data_type::TypeName;
-use risingwave_pb::data::Barrier;
 use risingwave_pb::data::DataType;
 use risingwave_pb::plan::ColumnDesc;
 use risingwave_pb::stream_plan::stream_node::Node;

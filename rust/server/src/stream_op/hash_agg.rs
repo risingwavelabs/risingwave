@@ -2,7 +2,7 @@
 
 use super::aggregation::*;
 use super::AggCall;
-use super::{Executor, Message, Op, StreamChunk};
+use super::{Barrier, Executor, Message, Op, StreamChunk};
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
@@ -11,7 +11,6 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::Datum;
-use risingwave_pb::data::Barrier;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -377,7 +376,7 @@ impl Executor for HashAggExecutor {
     }
 
     async fn next(&mut self) -> Result<Message> {
-        if let Some(barrier) = self.next_barrier_message.clone() {
+        if let Some(barrier) = self.next_barrier_message {
             self.next_barrier_message = None;
             return Ok(Message::Barrier(Barrier {
                 epoch: barrier.epoch,

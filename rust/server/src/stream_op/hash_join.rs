@@ -78,10 +78,7 @@ impl Executor for HashJoinExecutor {
                 Ok(chunk) => self.consume_chunk_right(chunk),
                 Err(e) => Err(e),
             },
-            AlignedMessage::Barrier(message) => match message {
-                Ok(Message::Barrier(_)) => message,
-                _ => unreachable!("Should not receive this message: {:?}", message),
-            },
+            AlignedMessage::Barrier(barrier) => Ok(Message::Barrier(barrier)),
         }
     }
 
@@ -311,11 +308,10 @@ mod tests {
 
     use super::{HashJoinExecutor, JoinParams, JoinType};
     use crate::stream_op::test_utils::MockAsyncSource;
-    use crate::stream_op::{Executor, Message, Op, StreamChunk};
+    use crate::stream_op::{Barrier, Executor, Message, Op, StreamChunk};
     use crate::*;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::Int64Type;
-    use risingwave_pb::data::Barrier;
     use tokio::sync::mpsc::unbounded_channel;
 
     #[tokio::test]

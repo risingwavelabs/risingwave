@@ -105,7 +105,6 @@ mod tests {
     use risingwave_common::expr::binary_expr::new_binary_expr;
     use risingwave_common::expr::InputRefExpression;
     use risingwave_common::types::Int64Type;
-    use risingwave_pb::data::Barrier;
     use risingwave_pb::expr::expr_node::Type as ProstExprType;
 
     #[tokio::test]
@@ -172,12 +171,7 @@ mod tests {
         } else {
             unreachable!();
         }
-        assert!(matches!(
-            project.next().await.unwrap(),
-            Message::Barrier(Barrier {
-                epoch: _,
-                stop: true
-            })
-        ));
+
+        assert!(project.next().await.unwrap().is_terminate());
     }
 }

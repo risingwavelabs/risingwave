@@ -16,7 +16,7 @@ use risingwave_common::error::Result;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_pb::data::Op as ProstOp;
 use risingwave_pb::data::{
-    stream_message::StreamMessage, Barrier, StreamChunk as ProstStreamChunk,
+    stream_message::StreamMessage, Barrier as ProstBarrier, StreamChunk as ProstStreamChunk,
     StreamMessage as ProstStreamMessage,
 };
 use risingwave_pb::ToProst;
@@ -85,6 +85,24 @@ impl Op {
 }
 
 pub type Ops<'a> = &'a [Op];
+
+#[derive(Default, Debug, Clone, Copy)]
+pub struct Barrier {
+    pub epoch: u64,
+    pub stop: bool,
+}
+
+impl Barrier {
+    fn to_protobuf(self) -> ProstBarrier {
+        let Barrier { epoch, stop } = self;
+        ProstBarrier { epoch, stop }
+    }
+
+    fn from_protobuf(prost: &ProstBarrier) -> Self {
+        let ProstBarrier { epoch, stop } = *prost;
+        Barrier { epoch, stop }
+    }
+}
 
 /// `StreamChunk` is used to pass data between executors.
 #[derive(Default, Debug, Clone)]
@@ -210,6 +228,8 @@ pub enum Message {
 }
 
 impl Message {
+    /// Return true if the message is a stop barrier, meaning the stream
+    /// will not continue, false otherwise.
     pub fn is_terminate(&self) -> bool {
         matches!(
             self,
@@ -226,7 +246,7 @@ impl Message {
                 let prost_stream_chunk = stream_chunk.to_protobuf()?;
                 StreamMessage::StreamChunk(prost_stream_chunk)
             }
-            Self::Barrier(barrier) => StreamMessage::Barrier(barrier.clone()),
+            Self::Barrier(barrier) => StreamMessage::Barrier(barrier.to_protobuf()),
         };
         let prost_stream_msg = ProstStreamMessage {
             stream_message: Some(prost),

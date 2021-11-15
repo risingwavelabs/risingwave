@@ -1,4 +1,4 @@
-use super::{Executor, Message, StreamChunk};
+use super::{Barrier, Executor, Message, StreamChunk};
 use risingwave_common::error::Result;
 use tokio::select;
 
@@ -12,8 +12,7 @@ enum BarrierWaitState {
 pub enum AlignedMessage {
     Left(Result<StreamChunk>),
     Right(Result<StreamChunk>),
-    // TODO: change this to `Result<Barrier>` when we have a `Barrier`
-    Barrier(Result<Message>),
+    Barrier(Barrier),
 }
 
 pub struct BarrierAligner {
@@ -41,11 +40,11 @@ impl BarrierAligner {
                 match message {
                   Ok(message) => match message {
                     Message::Chunk(chunk) => break AlignedMessage::Left(Ok(chunk)),
-                    Message::Barrier(_) => {
+                    Message::Barrier(barrier) => {
                       match self.state {
                         BarrierWaitState::Left => {
                           self.state = BarrierWaitState::Either;
-                          break AlignedMessage::Barrier(Ok(message));
+                          break AlignedMessage::Barrier(barrier);
                         }
                         BarrierWaitState::Either => {
                           self.state = BarrierWaitState::Right;
@@ -61,10 +60,10 @@ impl BarrierAligner {
                 match message {
                   Ok(message) => match message {
                     Message::Chunk(chunk) => break AlignedMessage::Right(Ok(chunk)),
-                    Message::Barrier(_) => match self.state {
+                    Message::Barrier(barrier) => match self.state {
                       BarrierWaitState::Right => {
                         self.state = BarrierWaitState::Either;
-                        break AlignedMessage::Barrier(Ok(message));
+                        break AlignedMessage::Barrier(barrier);
                       }
                       BarrierWaitState::Either => {
                         self.state = BarrierWaitState::Left;

@@ -9,7 +9,6 @@ use risingwave_common::expr::binary_expr::new_binary_expr;
 use risingwave_common::expr::unary_expr::new_unary_expr;
 use risingwave_common::expr::*;
 use risingwave_common::types::*;
-use risingwave_pb::data::Barrier;
 use risingwave_pb::expr::expr_node::Type as ProstExprType;
 use std::sync::{Arc, Mutex};
 

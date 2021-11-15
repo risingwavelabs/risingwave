@@ -1,4 +1,4 @@
-use super::{Executor, Result};
+use super::{Barrier, Executor, Result};
 use crate::stream::UpDownFragmentIds;
 use async_trait::async_trait;
 use futures::channel::mpsc::{Receiver, Sender};
@@ -7,7 +7,7 @@ use futures::{SinkExt, StreamExt};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::ToRwResult;
-use risingwave_pb::data::{Barrier, StreamMessage};
+use risingwave_pb::data::StreamMessage;
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::GetStreamRequest;
 use std::net::SocketAddr;
@@ -223,7 +223,6 @@ mod tests {
     use futures::SinkExt;
     use itertools::Itertools;
     use risingwave_common::util::addr::get_host_port;
-    use risingwave_pb::data::Barrier;
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
     };
@@ -345,7 +344,7 @@ mod tests {
             };
             tx.send(Ok(StreamMessage {
                 stream_message: Some(risingwave_pb::data::stream_message::StreamMessage::Barrier(
-                    barrier,
+                    barrier.to_protobuf(),
                 )),
             }))
             .await

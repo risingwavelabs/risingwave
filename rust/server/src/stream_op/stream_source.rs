@@ -1,11 +1,10 @@
 use crate::executor::StreamScanExecutor;
-use crate::stream_op::{Executor, Message, Op, StreamChunk};
+use crate::stream_op::{Barrier, Executor, Message, Op, StreamChunk};
 use async_trait::async_trait;
 use futures::FutureExt;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
-use risingwave_pb::data::Barrier;
 use std::fmt::{Debug, Formatter};
 
 /// `StreamSourceExecutor` is a streaming source from external systems such as Kafka

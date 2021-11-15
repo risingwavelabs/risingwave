@@ -1,10 +1,9 @@
-use crate::stream_op::{Executor, Message, StreamChunk};
+use crate::stream_op::{Barrier, Executor, Message, StreamChunk};
 use async_trait::async_trait;
 use futures::channel::mpsc::UnboundedReceiver;
 use futures::StreamExt;
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::Result;
-use risingwave_pb::data::Barrier;
 use std::fmt::{Debug, Formatter};
 
 /// `TableSourceExecutor` extracts changes from a Table
