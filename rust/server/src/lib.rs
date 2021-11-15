@@ -6,11 +6,13 @@
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
+#![feature(test)]
 
 #[macro_use]
 extern crate log;
 #[macro_use]
 extern crate risingwave_common;
+extern crate test;
 
 mod execution;
 mod executor;

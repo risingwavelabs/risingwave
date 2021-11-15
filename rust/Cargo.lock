@@ -890,6 +890,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "mem_cmp"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf29e432e02999285b35a0dca13624beb953d31f0c2d1a3cd5d36743f2f70d67"
+
+[[package]]
 name = "memchr"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1519,6 +1525,7 @@ dependencies = [
  "lazy_static",
  "log",
  "log4rs",
+ "mem_cmp",
  "num-traits",
  "paste",
  "pb-construct",
@@ -1544,6 +1551,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
+ "tokio-test",
  "tonic",
  "typed-builder",
 ]
@@ -1970,6 +1978,19 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+]
+
+[[package]]
+name = "tokio-test"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53474327ae5e166530d17f2d956afcb4f8a004de581b3cae10f12006bc8163e3"
+dependencies = [
+ "async-stream",
+ "bytes",
+ "futures-core",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]

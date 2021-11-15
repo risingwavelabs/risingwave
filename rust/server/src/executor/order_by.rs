@@ -10,6 +10,8 @@ use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::OrderByNode as OrderByProto;
 
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
+use crate::risingwave_common::expr::Expression;
+use mem_cmp::*;
 use risingwave_common::array::{
     column::Column, Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, DataChunkRef,
 };
@@ -19,6 +21,7 @@ use risingwave_common::error::{
     Result,
 };
 use risingwave_common::types::DataTypeRef;
+use risingwave_common::util::encoding_for_comparison::{encode_chunk, is_type_encodable};
 use risingwave_common::util::sort_util::{
     compare_two_row, fetch_orders, HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE,
 };
@@ -33,6 +36,9 @@ pub(super) struct OrderByExecutor {
     min_heap: BinaryHeap<HeapElem>,
     order_pairs: Arc<Vec<OrderPair>>,
     data_types: Vec<DataTypeRef>,
+    encoded_keys: Vec<Vec<Vec<u8>>>,
+    encodable: bool,
+    disable_encoding: bool,
 }
 
 impl BoxedExecutorBuilder for OrderByExecutor {
@@ -52,6 +58,9 @@ impl BoxedExecutorBuilder for OrderByExecutor {
                 sorted_indices: vec![],
                 min_heap: BinaryHeap::new(),
                 data_types: vec![],
+                encoded_keys: vec![],
+                encodable: false,
+                disable_encoding: false,
             }));
         }
         Err(InternalError("OrderBy must have one child".to_string()).into())
@@ -82,19 +91,36 @@ impl OrderByExecutor {
             self.vis_indices[idx] += 1;
         }
     }
-    fn get_order_index_from(&self, chunk: &DataChunk) -> Vec<usize> {
-        let mut index: Vec<usize> = (0..chunk.cardinality()).collect();
+    fn get_order_index_from(&self, idx: usize) -> Vec<usize> {
+        let mut index: Vec<usize> = (0..self.chunks[idx].cardinality()).collect();
         index.sort_by(|ia, ib| {
-            compare_two_row(self.order_pairs.as_ref(), chunk, *ia, chunk, *ib)
+            if self.disable_encoding || !self.encodable {
+                compare_two_row(
+                    self.order_pairs.as_ref(),
+                    self.chunks[idx].as_ref(),
+                    *ia,
+                    self.chunks[idx].as_ref(),
+                    *ib,
+                )
                 .unwrap_or(Ordering::Equal)
+            } else {
+                let lhs_key = &self.encoded_keys[idx][*ia];
+                let rhs_key = &self.encoded_keys[idx][*ib];
+                lhs_key.as_slice().mem_cmp(rhs_key.as_slice())
+            }
         });
         index
     }
 
     async fn collect_child_data(&mut self) -> Result<()> {
         while let ExecutorResult::Batch(chunk) = self.child.execute().await? {
-            self.sorted_indices.push(self.get_order_index_from(&chunk));
+            if !self.disable_encoding && self.encodable {
+                self.encoded_keys
+                    .push(encode_chunk(&chunk, self.order_pairs.clone()));
+            }
             self.chunks.push(Arc::new(chunk));
+            self.sorted_indices
+                .push(self.get_order_index_from(self.chunks.len() - 1));
         }
         self.vis_indices = vec![0usize; self.chunks.len()];
         for idx in 0..self.chunks.len() {
@@ -118,6 +144,13 @@ impl Executor for OrderByExecutor {
     async fn init(&mut self) -> Result<()> {
         self.child.init().await?;
 
+        if !self.disable_encoding {
+            self.encodable = self
+                .order_pairs
+                .iter()
+                .all(|pair| is_type_encodable(pair.order.return_type_ref()))
+        }
+
         self.collect_child_data().await?;
         self.fill_data_types();
 
@@ -138,13 +171,13 @@ impl Executor for OrderByExecutor {
                 let chunk_arr = self.chunks[top.chunk_idx].column_at(idx)?.array();
                 let chunk_arr = chunk_arr.as_ref();
                 macro_rules! gen_match {
-            ($b: ident, $a: ident, [$( $tt: ident), *]) => {
-                match ($b, $a) {
-                    $((ArrayBuilderImpl::$tt($b), ArrayImpl::$tt($a)) => Ok($b.append($a.value_at(top.elem_idx))),)*
-                        _ => Err(InternalError(String::from("Unmatched array and array builder types"))),
-                }?
-            }
-        }
+                    ($b: ident, $a: ident, [$( $tt: ident), *]) => {
+                        match ($b, $a) {
+                            $((ArrayBuilderImpl::$tt($b), ArrayImpl::$tt($a)) => Ok($b.append($a.value_at(top.elem_idx))),)*
+                                _ => Err(InternalError(String::from("Unmatched array and array builder types"))),
+                        }?
+                    }
+                }
                 let _ = gen_match!(
                     builder,
                     chunk_arr,
@@ -181,25 +214,68 @@ mod tests {
     use std::sync::Arc;
 
     use crate::executor::test_utils::MockExecutor;
-    use risingwave_common::array::column::Column;
-    use risingwave_common::array::{DataChunk, PrimitiveArray};
+    use itertools::Itertools;
+    use rand::{
+        distributions::{Alphanumeric, Standard, Uniform},
+        Rng,
+    };
+    use risingwave_common::array::{
+        column::Column, BoolArray, DataChunk, PrimitiveArray, UTF8Array,
+    };
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::expr::InputRefExpression;
-    use risingwave_common::types::{DataTypeKind, Int32Type};
+    use risingwave_common::types::{
+        BoolType, DataTypeKind, Float32Type, Float64Type, Int16Type, Int32Type, StringType,
+    };
     use risingwave_common::util::sort_util::OrderType;
+    use test::Bencher;
 
     use super::*;
 
-    fn create_column(vec: &[Option<i32>]) -> Result<Column> {
+    fn create_column_i32(vec: &[Option<i32>]) -> Result<Column> {
         let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
         let data_type = Int32Type::create(false);
         Ok(Column::new(array, data_type))
     }
 
+    fn create_column_i16(vec: &[Option<i16>]) -> Result<Column> {
+        let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
+        let data_type = Int16Type::create(false);
+        Ok(Column::new(array, data_type))
+    }
+
+    fn create_column_bool(vec: &[Option<bool>]) -> Result<Column> {
+        let array = BoolArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
+        let data_type = BoolType::create(false);
+        Ok(Column::new(array, data_type))
+    }
+
+    fn create_column_f32(vec: &[Option<f32>]) -> Result<Column> {
+        let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
+        let data_type = Float32Type::create(false);
+        Ok(Column::new(array, data_type))
+    }
+
+    fn create_column_f64(vec: &[Option<f64>]) -> Result<Column> {
+        let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
+        let data_type = Float64Type::create(false);
+        Ok(Column::new(array, data_type))
+    }
+
+    fn create_column_string(vec: &[Option<String>]) -> Result<Column> {
+        let str_vec = vec
+            .iter()
+            .map(|s| s.as_ref().map(|s| s.as_str()))
+            .collect_vec();
+        let array = UTF8Array::from_slice(&str_vec).map(|x| Arc::new(x.into()))?;
+        let data_type = StringType::create(false, 0, DataTypeKind::Varchar);
+        Ok(Column::new(array, data_type))
+    }
+
     #[tokio::test]
     async fn test_simple_order_by_executor() {
-        let col0 = create_column(&[Some(1), Some(2), Some(3)]).unwrap();
-        let col1 = create_column(&[Some(3), Some(2), Some(1)]).unwrap();
+        let col0 = create_column_i32(&[Some(1), Some(2), Some(3)]).unwrap();
+        let col1 = create_column_i32(&[Some(3), Some(2), Some(1)]).unwrap();
         let data_chunk = DataChunk::builder().columns([col0, col1].to_vec()).build();
         let schema = Schema {
             fields: vec![
@@ -233,6 +309,9 @@ mod tests {
             sorted_indices: vec![],
             min_heap: BinaryHeap::new(),
             data_types: vec![],
+            encoded_keys: vec![],
+            encodable: false,
+            disable_encoding: false,
         };
         let fields = &order_by_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
@@ -247,5 +326,241 @@ mod tests {
             assert_eq!(col0.array().as_int32().value_at(2), Some(1));
         }
         order_by_executor.clean().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_encoding_for_float() {
+        let col0 =
+            create_column_f32(&[Some(-2.2), Some(-1.1), Some(1.1), Some(2.2), Some(3.3)]).unwrap();
+        let col1 =
+            create_column_f64(&[Some(3.3), Some(2.2), Some(1.1), Some(-1.1), Some(-2.2)]).unwrap();
+        let data_chunk = DataChunk::builder().columns([col0, col1].to_vec()).build();
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    data_type: Float32Type::create(false),
+                },
+                Field {
+                    data_type: Float64Type::create(false),
+                },
+            ],
+        };
+        let mut mock_executor = MockExecutor::new(schema);
+        mock_executor.add(data_chunk);
+        let input_ref_1 = InputRefExpression::new(Float32Type::create(false), 0usize);
+        let input_ref_2 = InputRefExpression::new(Float64Type::create(false), 1usize);
+        let order_pairs = vec![
+            OrderPair {
+                order: Box::new(input_ref_2),
+                order_type: OrderType::Ascending,
+            },
+            OrderPair {
+                order: Box::new(input_ref_1),
+                order_type: OrderType::Ascending,
+            },
+        ];
+        let mut order_by_executor = OrderByExecutor {
+            order_pairs: Arc::new(order_pairs),
+            child: Box::new(mock_executor),
+            vis_indices: vec![],
+            chunks: vec![],
+            sorted_indices: vec![],
+            min_heap: BinaryHeap::new(),
+            data_types: vec![],
+            encoded_keys: vec![],
+            encodable: false,
+            disable_encoding: false,
+        };
+        let fields = &order_by_executor.schema().fields;
+        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Float32);
+        assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Float64);
+        order_by_executor.init().await.unwrap();
+        let res = order_by_executor.execute().await.unwrap();
+        assert!(matches!(res, ExecutorResult::Batch(_)));
+        if let ExecutorResult::Batch(res) = res {
+            let col0 = res.column_at(0).unwrap();
+            assert_eq!(col0.array().as_float32().value_at(0), Some(3.3));
+            assert_eq!(col0.array().as_float32().value_at(1), Some(2.2));
+            assert_eq!(col0.array().as_float32().value_at(2), Some(1.1));
+            assert_eq!(col0.array().as_float32().value_at(3), Some(-1.1));
+            assert_eq!(col0.array().as_float32().value_at(4), Some(-2.2));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_bsc_for_string() {
+        let col0 = create_column_string(&[
+            Some("1.1".to_string()),
+            Some("2.2".to_string()),
+            Some("3.3".to_string()),
+        ])
+        .unwrap();
+        let col1 = create_column_string(&[
+            Some("3.3".to_string()),
+            Some("2.2".to_string()),
+            Some("1.1".to_string()),
+        ])
+        .unwrap();
+        let data_chunk = DataChunk::builder().columns([col0, col1].to_vec()).build();
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    data_type: StringType::create(false, 0, DataTypeKind::Varchar),
+                },
+                Field {
+                    data_type: StringType::create(false, 0, DataTypeKind::Varchar),
+                },
+            ],
+        };
+        let mut mock_executor = MockExecutor::new(schema);
+        mock_executor.add(data_chunk);
+        let input_ref_1 =
+            InputRefExpression::new(StringType::create(false, 0, DataTypeKind::Varchar), 0usize);
+        let input_ref_2 =
+            InputRefExpression::new(StringType::create(false, 0, DataTypeKind::Varchar), 1usize);
+        let order_pairs = vec![
+            OrderPair {
+                order: Box::new(input_ref_2),
+                order_type: OrderType::Ascending,
+            },
+            OrderPair {
+                order: Box::new(input_ref_1),
+                order_type: OrderType::Ascending,
+            },
+        ];
+        let mut order_by_executor = OrderByExecutor {
+            order_pairs: Arc::new(order_pairs),
+            child: Box::new(mock_executor),
+            vis_indices: vec![],
+            chunks: vec![],
+            sorted_indices: vec![],
+            min_heap: BinaryHeap::new(),
+            data_types: vec![],
+            encoded_keys: vec![],
+            encodable: false,
+            disable_encoding: false,
+        };
+        let fields = &order_by_executor.schema().fields;
+        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Varchar);
+        assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Varchar);
+        order_by_executor.init().await.unwrap();
+        let res = order_by_executor.execute().await.unwrap();
+        assert!(matches!(res, ExecutorResult::Batch(_)));
+        if let ExecutorResult::Batch(res) = res {
+            let col0 = res.column_at(0).unwrap();
+            assert_eq!(col0.array().as_utf8().value_at(0), Some("3.3"));
+            assert_eq!(col0.array().as_utf8().value_at(1), Some("2.2"));
+            assert_eq!(col0.array().as_utf8().value_at(2), Some("1.1"));
+        }
+    }
+
+    fn benchmark_1e4(b: &mut Bencher, enable_encoding: bool) {
+        // gen random vec for i16 float bool and str
+        let scale = 10000;
+        let width = 10;
+        let int_vec: Vec<Option<i16>> = rand::thread_rng()
+            .sample_iter(Standard)
+            .take(scale)
+            .map(Some)
+            .collect_vec();
+        let bool_vec: Vec<Option<bool>> = rand::thread_rng()
+            .sample_iter(Standard)
+            .take(scale)
+            .map(Some)
+            .collect_vec();
+        let float_vec: Vec<Option<f32>> = rand::thread_rng()
+            .sample_iter(Standard)
+            .take(scale)
+            .map(Some)
+            .collect_vec();
+        let mut str_vec = Vec::<Option<String>>::new();
+        for _ in 0..scale {
+            let len = rand::thread_rng().sample(Uniform::<usize>::new(1, width));
+            let s: String = rand::thread_rng()
+                .sample_iter(&Alphanumeric)
+                .take(len)
+                .map(char::from)
+                .collect();
+            str_vec.push(Some(s));
+        }
+        b.iter(|| {
+            let col0 = create_column_i16(int_vec.as_slice()).unwrap();
+            let col1 = create_column_bool(bool_vec.as_slice()).unwrap();
+            let col2 = create_column_f32(float_vec.as_slice()).unwrap();
+            let col3 = create_column_string(str_vec.as_slice()).unwrap();
+            let data_chunk = DataChunk::builder()
+                .columns([col0, col1, col2, col3].to_vec())
+                .build();
+            let schema = Schema {
+                fields: vec![
+                    Field {
+                        data_type: Int16Type::create(false),
+                    },
+                    Field {
+                        data_type: BoolType::create(false),
+                    },
+                    Field {
+                        data_type: Float32Type::create(false),
+                    },
+                    Field {
+                        data_type: StringType::create(false, 0, DataTypeKind::Varchar),
+                    },
+                ],
+            };
+            let mut mock_executor = MockExecutor::new(schema);
+            mock_executor.add(data_chunk);
+            let input_ref_0 = InputRefExpression::new(Int16Type::create(false), 0usize);
+            let input_ref_1 = InputRefExpression::new(BoolType::create(false), 1usize);
+            let input_ref_2 = InputRefExpression::new(Float32Type::create(false), 2usize);
+            let input_ref_3 = InputRefExpression::new(
+                StringType::create(false, 0, DataTypeKind::Varchar),
+                3usize,
+            );
+            let order_pairs = vec![
+                OrderPair {
+                    order: Box::new(input_ref_1),
+                    order_type: OrderType::Ascending,
+                },
+                OrderPair {
+                    order: Box::new(input_ref_0),
+                    order_type: OrderType::Descending,
+                },
+                OrderPair {
+                    order: Box::new(input_ref_3),
+                    order_type: OrderType::Descending,
+                },
+                OrderPair {
+                    order: Box::new(input_ref_2),
+                    order_type: OrderType::Ascending,
+                },
+            ];
+            let mut order_by_executor = OrderByExecutor {
+                order_pairs: Arc::new(order_pairs),
+                child: Box::new(mock_executor),
+                vis_indices: vec![],
+                chunks: vec![],
+                sorted_indices: vec![],
+                min_heap: BinaryHeap::new(),
+                data_types: vec![],
+                encoded_keys: vec![],
+                encodable: false,
+                disable_encoding: !enable_encoding,
+            };
+            let future = order_by_executor.init();
+            tokio_test::block_on(future).unwrap();
+            let future = order_by_executor.execute();
+            let res = tokio_test::block_on(future).unwrap();
+            assert!(matches!(res, ExecutorResult::Batch(_)));
+        });
+    }
+
+    #[bench]
+    fn benchmark_bsc_1e4(b: &mut Bencher) {
+        benchmark_1e4(b, true);
+    }
+
+    #[bench]
+    fn benchmark_baseline_1e4(b: &mut Bencher) {
+        benchmark_1e4(b, false);
     }
 }

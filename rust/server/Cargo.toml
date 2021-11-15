@@ -23,6 +23,7 @@ itertools = "0.10"
 lazy_static = "1.4.0"
 log = "0.4"
 log4rs = "1"
+mem_cmp = "0.1.4"
 num-traits = "0.2"
 paste = "1"
 pb-convert = {path = "../utils/pb-convert"}
@@ -45,6 +46,7 @@ smallvec = "1"
 thiserror = "1"
 tokio = {version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"]}
 tokio-stream = "0.1.7"
+tokio-test = "0.4.2"
 tonic = "0.5"
 typed-builder = "0.9"
 

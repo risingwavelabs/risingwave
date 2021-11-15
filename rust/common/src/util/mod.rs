@@ -12,6 +12,7 @@ pub mod bit_util;
 pub mod proto;
 pub mod addr;
 pub mod chunk_coalesce;
+pub mod encoding_for_comparison;
 pub mod hash_util;
 pub mod sort_util;
 pub mod try_match;

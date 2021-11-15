@@ -108,7 +108,7 @@ pub fn compare_two_row(
         macro_rules! gen_match {
         ($lhs: ident, $rhs: ident, [$( $tt: ident), *]) => {
             match ($lhs, $rhs) {
-                $((ArrayImpl::$tt(lhs_inner), ArrayImpl::$tt(rhs_inner)) => Ok(compare_value_in_array( lhs_inner, lhs_idx, rhs_inner, rhs_idx, &order_pair.order_type)),)*
+                $((ArrayImpl::$tt(lhs_inner), ArrayImpl::$tt(rhs_inner)) => Ok(compare_value_in_array(lhs_inner, lhs_idx, rhs_inner, rhs_idx, &order_pair.order_type)),)*
                 _ => Err(InternalError(String::from("Unmatched array types"))),
             }?
         }
