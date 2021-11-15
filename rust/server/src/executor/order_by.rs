@@ -11,6 +11,7 @@ use risingwave_pb::plan::OrderByNode as OrderByProto;
 
 use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
 use crate::risingwave_common::expr::Expression;
+use itertools::Itertools;
 use mem_cmp::*;
 use risingwave_common::array::{
     column::Column, Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, DataChunkRef,
@@ -20,7 +21,6 @@ use risingwave_common::error::{
     ErrorCode::{InternalError, ProstError},
     Result,
 };
-use risingwave_common::types::DataTypeRef;
 use risingwave_common::util::encoding_for_comparison::{encode_chunk, is_type_encodable};
 use risingwave_common::util::sort_util::{
     compare_two_row, fetch_orders, HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE,
@@ -35,7 +35,6 @@ pub(super) struct OrderByExecutor {
     vis_indices: Vec<usize>,
     min_heap: BinaryHeap<HeapElem>,
     order_pairs: Arc<Vec<OrderPair>>,
-    data_types: Vec<DataTypeRef>,
     encoded_keys: Vec<Vec<Vec<u8>>>,
     encodable: bool,
     disable_encoding: bool,
@@ -57,7 +56,6 @@ impl BoxedExecutorBuilder for OrderByExecutor {
                 chunks: vec![],
                 sorted_indices: vec![],
                 min_heap: BinaryHeap::new(),
-                data_types: vec![],
                 encoded_keys: vec![],
                 encodable: false,
                 disable_encoding: false,
@@ -128,15 +126,6 @@ impl OrderByExecutor {
         }
         Ok(())
     }
-
-    // TODO: remove this and replace with `schema()`
-    fn fill_data_types(&mut self) {
-        let mut data_types = Vec::new();
-        for i in 0..self.chunks[0].dimension() {
-            data_types.push(self.chunks[0].column_at(i).unwrap().data_type().clone());
-        }
-        self.data_types = data_types;
-    }
 }
 
 #[async_trait::async_trait]
@@ -152,15 +141,19 @@ impl Executor for OrderByExecutor {
         }
 
         self.collect_child_data().await?;
-        self.fill_data_types();
 
         self.child.clean().await?;
         Ok(())
     }
 
     async fn execute(&mut self) -> Result<ExecutorResult> {
-        let mut builders = self
-            .data_types
+        let data_types = self
+            .schema()
+            .fields()
+            .iter()
+            .map(|f| f.data_type.clone())
+            .collect_vec();
+        let mut builders = data_types
             .iter()
             .map(|t| t.clone().create_array_builder(K_PROCESSING_WINDOW_SIZE))
             .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
@@ -190,8 +183,7 @@ impl Executor for OrderByExecutor {
         if chunk_size == 0 {
             return Ok(ExecutorResult::Done);
         }
-        let columns = self
-            .data_types
+        let columns = data_types
             .iter()
             .zip(builders)
             .map(|(d, b)| Ok(Column::new(Arc::new(b.finish()?), d.clone())))
@@ -308,7 +300,6 @@ mod tests {
             chunks: vec![],
             sorted_indices: vec![],
             min_heap: BinaryHeap::new(),
-            data_types: vec![],
             encoded_keys: vec![],
             encodable: false,
             disable_encoding: false,
@@ -366,7 +357,6 @@ mod tests {
             chunks: vec![],
             sorted_indices: vec![],
             min_heap: BinaryHeap::new(),
-            data_types: vec![],
             encoded_keys: vec![],
             encodable: false,
             disable_encoding: false,
@@ -435,7 +425,6 @@ mod tests {
             chunks: vec![],
             sorted_indices: vec![],
             min_heap: BinaryHeap::new(),
-            data_types: vec![],
             encoded_keys: vec![],
             encodable: false,
             disable_encoding: false,
@@ -541,7 +530,6 @@ mod tests {
                 chunks: vec![],
                 sorted_indices: vec![],
                 min_heap: BinaryHeap::new(),
-                data_types: vec![],
                 encoded_keys: vec![],
                 encodable: false,
                 disable_encoding: !enable_encoding,

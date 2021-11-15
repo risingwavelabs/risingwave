@@ -65,3 +65,6 @@ rust/prost/src/*.rs
 *.iml
 
 go/bin/
+
+# rusty-tags
+**/rusty-tags.vi
