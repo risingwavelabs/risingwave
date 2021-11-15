@@ -1,6 +1,6 @@
 use crate::task::channel::{BoxChanReceiver, BoxChanSender, ChanReceiver, ChanSender};
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::plan::exchange_info::BroadcastInfo;
 use risingwave_pb::plan::*;
 use risingwave_pb::{ToProst, ToProto};
@@ -16,9 +16,9 @@ pub struct BroadcastSender {
 impl ChanSender for BroadcastSender {
     async fn send(&mut self, chunk: DataChunk) -> Result<()> {
         self.senders.iter().try_for_each(|sender| {
-            sender.send(chunk.clone()).map_err(|e| {
-                ErrorCode::InternalError(format!("chunk was sent to a closed channel {}", e)).into()
-            })
+            sender
+                .send(chunk.clone())
+                .to_rw_result_with("BroadcastSender::send")
         })
     }
 }

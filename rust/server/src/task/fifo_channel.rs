@@ -1,6 +1,6 @@
 use crate::task::channel::{BoxChanReceiver, BoxChanSender, ChanReceiver, ChanSender};
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{Result, ToRwResult};
 use std::option::Option;
 use std::sync::mpsc;
 
@@ -15,9 +15,9 @@ pub struct FifoReceiver {
 #[async_trait::async_trait]
 impl ChanSender for FifoSender {
     async fn send(&mut self, chunk: DataChunk) -> Result<()> {
-        self.sender.send(chunk).map_err(|e| {
-            ErrorCode::InternalError(format!("chunk was sent to a closed channel {}", e)).into()
-        })
+        self.sender
+            .send(chunk)
+            .to_rw_result_with("FifoSender::send")
     }
 }
 

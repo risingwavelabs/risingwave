@@ -1,7 +1,7 @@
 use crate::task::channel::{BoxChanReceiver, BoxChanSender, ChanReceiver, ChanSender};
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_pb::plan::exchange_info::hash_info::HashMethod;
 use risingwave_pb::plan::exchange_info::HashInfo;
@@ -84,10 +84,9 @@ impl ChanSender for HashShuffleSender {
                 sink_id,
                 new_data_chunk.cardinality()
             );
-            let res: Result<()> = self.senders[sink_id].send(new_data_chunk).map_err(|e| {
-                ErrorCode::InternalError(format!("chunk was sent to a closed channel {}", e)).into()
-            });
-            res?;
+            self.senders[sink_id]
+                .send(new_data_chunk)
+                .to_rw_result_with("HashShuffleSender::send")?;
         }
         Ok(())
     }

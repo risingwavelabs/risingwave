@@ -5,7 +5,8 @@ use futures::channel::mpsc::{Receiver, Sender};
 use futures::future::select_all;
 use futures::{SinkExt, StreamExt};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::ErrorCode::{GrpcNetworkError, InternalError, TonicError};
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::ToRwResult;
 use risingwave_pb::data::{Barrier, StreamMessage};
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::GetStreamRequest;
@@ -40,9 +41,7 @@ impl RemoteInput {
                 .connect_timeout(Duration::from_secs(5))
                 .connect()
                 .await
-                .map_err(|e| {
-                    GrpcNetworkError(format!("RemoteInput failed to connect to {}", addr), e)
-                })?,
+                .to_rw_result_with(format!("RemoteInput failed to connect to {}", addr))?,
         );
         let req = GetStreamRequest {
             up_fragment_id: up_down_ids.0,
@@ -51,15 +50,10 @@ impl RemoteInput {
         let stream = client
             .get_stream(Request::new(req))
             .await
-            .map_err(|e| {
-                TonicError(
-                    format!(
-            "failed to create stream from remote_input {} from fragment {} to fragment {}",
-            addr, up_down_ids.0, up_down_ids.1
-          ),
-                    e,
-                )
-            })?
+            .to_rw_result_with(format!(
+                "failed to create stream from remote_input {} from fragment {} to fragment {}",
+                addr, up_down_ids.0, up_down_ids.1
+            ))?
             .into_inner();
         Ok(Self {
             client,

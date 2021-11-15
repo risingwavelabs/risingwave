@@ -14,7 +14,7 @@ use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::{InternalError, ProstError};
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_common::types::DataTypeRef;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
@@ -46,7 +46,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
                 .to_proto::<risingwave_proto::plan::RowSeqScanNode>()
                 .get_table_ref_id(),
         )
-        .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
+        .to_rw_result_with("Failed to parse table id")?;
 
         let table_ref = source
             .global_task_env()

@@ -1,8 +1,8 @@
 use crate::task::{GlobalTaskEnv, TaskSink};
 use futures::StreamExt;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::ErrorCode::{GrpcNetworkError, InternalError, TonicError};
-use risingwave_common::error::Result;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::{GetDataRequest, GetDataResponse, TaskSinkId};
 use risingwave_pb::ToProto;
@@ -35,23 +35,18 @@ impl GrpcExchangeSource {
                 .connect_timeout(Duration::from_secs(5))
                 .connect()
                 .await
-                .map_err(|e| GrpcNetworkError(format!("failed to connect to {}", addr), e))?,
+                .to_rw_result_with(format!("failed to connect to {}", addr))?,
         );
         let stream = client
             .get_data(GetDataRequest {
                 sink_id: Some(sink_id.clone()),
             })
             .await
-            .map_err(|e| {
-                TonicError(
-                    format!(
-                        "failed to create stream {} for sink_id={}",
-                        addr,
-                        sink_id.get_sink_id()
-                    ),
-                    e,
-                )
-            })?
+            .to_rw_result_with(format!(
+                "failed to create stream {} for sink_id={}",
+                addr,
+                sink_id.get_sink_id()
+            ))?
             .into_inner();
         Ok(Self {
             client,
@@ -69,12 +64,8 @@ impl ExchangeSource for GrpcExchangeSource {
             None => return Ok(None),
             Some(r) => r,
         };
-        let task_data = res.map_err(|e| {
-            TonicError(
-                format!("failed to take data from stream ({:?})", self.addr),
-                e,
-            )
-        })?;
+        let task_data =
+            res.to_rw_result_with(format!("failed to take data from stream ({:?})", self.addr))?;
         Ok(Some(DataChunk::from_protobuf(
             &task_data
                 .get_record_batch()

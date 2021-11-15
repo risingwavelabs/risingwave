@@ -3,7 +3,7 @@ use crate::stream_op::Message;
 use crate::task::{TaskManager, TaskSinkId};
 use futures::channel::mpsc::Receiver;
 use futures::StreamExt;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
 use risingwave_pb::data::StreamMessage;
 use risingwave_pb::task_service::exchange_service_server::ExchangeService;
 use risingwave_pb::task_service::{
@@ -173,12 +173,10 @@ impl GrpcExchangeWriter {
 impl ExchangeWriter for GrpcExchangeWriter {
     async fn write(&mut self, data: GetDataResponse) -> Result<()> {
         self.written_chunks += 1;
-        self.sender.send(Ok(data)).await.map_err(|e| {
-            RwError::from(ErrorCode::InternalError(format!(
-                "failed to write data to ExchangeWriter: {}",
-                e
-            )))
-        })
+        self.sender
+            .send(Ok(data))
+            .await
+            .to_rw_result_with("failed to write data to ExchangeWriter")
     }
 }
 

@@ -27,10 +27,6 @@ pub enum ErrorCode {
     NotImplementedError(String),
     #[error(transparent)]
     IoError(IoError),
-    #[error("Grpc failure: {0}: {1}")]
-    TonicError(String, tonic::Status),
-    #[error("Grpc network failure: {0}: {1}")]
-    GrpcNetworkError(String, tonic::transport::Error),
     #[error("Parse string error: {0}")]
     ParseError(chrono::format::ParseError),
     #[error("Out of range")]
@@ -113,13 +109,11 @@ impl ErrorCode {
             ErrorCode::ProtobufError(_) => 3,
             ErrorCode::NotImplementedError(_) => 4,
             ErrorCode::IoError(_) => 5,
-            ErrorCode::TonicError(_, _) => 6,
             ErrorCode::ParseError(_) => 7,
             ErrorCode::NumericValueOutOfRange => 8,
             ErrorCode::ProtocolError(_) => 9,
             ErrorCode::TaskNotFound => 10,
             ErrorCode::ProstError(_) => 11,
-            ErrorCode::GrpcNetworkError(_, _) => 12,
             ErrorCode::ItemNotFound(_) => 13,
         }
     }
@@ -147,6 +141,59 @@ macro_rules! gen_error {
     ($error_code: expr) => {
         return std::result::Result::Err($crate::error::RwError::from($error_code));
     };
+}
+
+/// A helper to convert a third-party error to string.
+pub trait ToErrorStr {
+    fn to_error_str(self) -> String;
+}
+
+pub trait ToRwResult<T, E> {
+    fn to_rw_result(self) -> Result<T>;
+
+    fn to_rw_result_with(self, context: impl Into<String>) -> Result<T>;
+}
+
+impl<T, E: ToErrorStr> ToRwResult<T, E> for std::result::Result<T, E> {
+    fn to_rw_result(self) -> Result<T> {
+        self.map_err(|e| ErrorCode::InternalError(e.to_error_str()).into())
+    }
+
+    fn to_rw_result_with(self, context: impl Into<String>) -> Result<T> {
+        self.map_err(|e| {
+            ErrorCode::InternalError(format!("{}: {}", context.into(), e.to_error_str())).into()
+        })
+    }
+}
+
+impl ToErrorStr for tonic::Status {
+    fn to_error_str(self) -> String {
+        format!("grpc tonic error: {}", self)
+    }
+}
+
+impl ToErrorStr for tonic::transport::Error {
+    fn to_error_str(self) -> String {
+        format!("tonic transport error: {}", self)
+    }
+}
+
+impl<T> ToErrorStr for std::sync::mpsc::SendError<T> {
+    fn to_error_str(self) -> String {
+        self.to_string()
+    }
+}
+
+impl<T> ToErrorStr for tokio::sync::mpsc::error::SendError<T> {
+    fn to_error_str(self) -> String {
+        self.to_string()
+    }
+}
+
+impl ToErrorStr for anyhow::Error {
+    fn to_error_str(self) -> String {
+        self.to_string()
+    }
 }
 
 /// Util macro for generating error when condition check failed.
@@ -336,6 +383,17 @@ mod tests {
         check_grpc_error(
             ErrorCode::NotImplementedError(String::new()),
             Code::Unimplemented,
+        );
+    }
+
+    #[test]
+    fn test_to_rw_result() {
+        let res: core::result::Result<(), anyhow::Error> = Err(anyhow::Error::new(
+            std::io::Error::new(std::io::ErrorKind::Interrupted, "abc"),
+        ));
+        assert_eq!(
+            res.to_rw_result().unwrap_err().to_string(),
+            "internal error: abc"
         );
     }
 }
