@@ -7,7 +7,7 @@ git clone https://github.com/singularity-data/risingwave.git
 ```
 
 ## Environment
-* OS: macOS or Linux
+* OS: macOS, Linux, or Windows (WSL or Cygwin)
 * Java 11
 * Rust
 * Go
@@ -27,23 +27,20 @@ brew install postgresql
 Note that we only tested our code against Java 11. So please use the specific version!
 
 ## Development
-You should have already seen multiple folders in our repo, including `java`, `rust`,
-and `e2e_test`.
-
-The `java` folder contains the system's frontend code. The frontend includes parser, binder, planner,
+You should have already seen multiple folders in our repo:
+- The `java` folder contains the system's frontend code. The frontend includes parser, binder, planner,
 optimizer, and other components. We use Calcite to serve as our query optimizer.
-
-The `rust` folder contains the system's backend code. The backend includes the streaming engine, OLAP
+- The `rust` folder contains the system's backend code. The backend includes the streaming engine, OLAP
 engine, and storage engine.
-
-The `e2e_test` folder contains the latest end-to-end test cases.
+- The `e2e_test` folder contains the latest end-to-end test cases.
 
 ## Deployment
-To run the system, you need to use at least three terminals, one for frontend server, one for compute server,
-and one for Postgres shell. The Postgres shell is responsible for sending user command to the frontend server
-and displaying results returned by the database. The frontend server receives the user command, performs parsing,
-binding, planning, optimization, and then passes the physical plan to the corresponding compute server(s).
-The compute server performs computation and then returns results to the frontend server.
+To run the system, you need to use at least three terminals:
+- The Postgres shell is responsible for sending user command to the frontend server and displaying
+results returned by the database.
+- The frontend server receives the user command, performs parsing, binding, planning, optimization,
+and then passes the physical plan to the corresponding compute server(s).
+- The compute server performs computation and then returns results to the frontend server.
 
 To start the frontend server, create one terminal and then type:
 ```bash
