@@ -72,6 +72,7 @@ impl<CS: 'static + CreateSource> MergeSortExchangeExecutorImpl<CS> {
                 chunk: chunk_ref.clone(),
                 chunk_idx: source_idx,
                 elem_idx: row_idx,
+                encoded_chunk: None,
             });
         }
     }

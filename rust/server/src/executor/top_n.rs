@@ -45,6 +45,7 @@ impl TopNHeap {
                     chunk: Arc::new(c),
                     chunk_idx: 0usize, // useless
                     elem_idx: 0usize,
+                    encoded_chunk: None,
                 };
                 self.insert(elem);
             });

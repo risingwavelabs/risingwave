@@ -3,6 +3,7 @@ use crate::error::{ErrorCode::InternalError, Result, RwError};
 use crate::expr::InputRefExpression;
 use crate::types::build_from_prost;
 use crate::types::{ScalarPartialOrd, ScalarRef};
+use mem_cmp::*;
 use risingwave_pb::expr::InputRefExpr;
 use risingwave_pb::plan::ColumnOrder;
 use risingwave_pb::plan::OrderType as ProstOrderType;
@@ -28,22 +29,35 @@ pub struct HeapElem {
     pub chunk: DataChunkRef,
     pub chunk_idx: usize,
     pub elem_idx: usize,
+    /// DataChunk can be encoded to accelerate the comparison.
+    /// Use risingwave_common::util::encoding_for_comparison::encode_chunk
+    /// to perform encoding, otherwise the comparison will be performed
+    /// column by column.
+    pub encoded_chunk: Option<Arc<Vec<Vec<u8>>>>,
 }
 
 impl Ord for HeapElem {
     fn cmp(&self, other: &Self) -> Ordering {
-        match compare_two_row(
-            self.order_pairs.as_ref(),
-            self.chunk.as_ref(),
-            self.elem_idx,
-            other.chunk.as_ref(),
-            other.elem_idx,
-        )
-        .unwrap()
+        if let (Some(lhs_encoded_chunk), Some(rhs_encoded_chunk)) =
+            (self.encoded_chunk.as_ref(), other.encoded_chunk.as_ref())
         {
-            Ordering::Less => Ordering::Greater,
-            Ordering::Equal => Ordering::Equal,
-            Ordering::Greater => Ordering::Less,
+            lhs_encoded_chunk[self.elem_idx]
+                .as_slice()
+                .mem_cmp(rhs_encoded_chunk[other.elem_idx].as_slice())
+        } else {
+            match compare_two_row(
+                self.order_pairs.as_ref(),
+                self.chunk.as_ref(),
+                self.elem_idx,
+                other.chunk.as_ref(),
+                other.elem_idx,
+            )
+            .unwrap()
+            {
+                Ordering::Less => Ordering::Greater,
+                Ordering::Equal => Ordering::Equal,
+                Ordering::Greater => Ordering::Less,
+            }
         }
     }
 }

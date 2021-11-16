@@ -35,7 +35,7 @@ pub(super) struct OrderByExecutor {
     vis_indices: Vec<usize>,
     min_heap: BinaryHeap<HeapElem>,
     order_pairs: Arc<Vec<OrderPair>>,
-    encoded_keys: Vec<Vec<Vec<u8>>>,
+    encoded_keys: Vec<Arc<Vec<Vec<u8>>>>,
     encodable: bool,
     disable_encoding: bool,
 }
@@ -76,11 +76,17 @@ impl OrderByExecutor {
                 None => false,
             };
             if !skip {
+                let elem_idx = self.sorted_indices[idx][self.vis_indices[idx]];
                 let elem = HeapElem {
                     order_pairs: self.order_pairs.clone(),
                     chunk: self.chunks[idx].clone(),
                     chunk_idx: idx,
-                    elem_idx: self.sorted_indices[idx][self.vis_indices[idx]],
+                    elem_idx,
+                    encoded_chunk: if self.encodable && !self.disable_encoding {
+                        Some(self.encoded_keys[idx].clone())
+                    } else {
+                        None
+                    },
                 };
                 self.min_heap.push(elem);
                 self.vis_indices[idx] += 1;
@@ -109,7 +115,6 @@ impl OrderByExecutor {
         });
         index
     }
-
     async fn collect_child_data(&mut self) -> Result<()> {
         while let ExecutorResult::Batch(chunk) = self.child.execute().await? {
             if !self.disable_encoding && self.encodable {

@@ -209,12 +209,12 @@ fn encode_array(array: &ArrayImpl, order: &OrderType) -> Result<EncodedColumn> {
 /// user-defined order as input, yield encoded binary string with order preserved for each tuple in
 /// the datachunk. We only support encoding for Bool, Int16, Int32, Int64, Float32, Float64, UTF8 by
 /// now.
-pub fn encode_chunk(chunk: &DataChunk, order_pairs: Arc<Vec<OrderPair>>) -> Vec<Vec<u8>> {
+pub fn encode_chunk(chunk: &DataChunk, order_pairs: Arc<Vec<OrderPair>>) -> Arc<Vec<Vec<u8>>> {
     let encoded_columns = order_pairs
         .iter()
         .map(|o| encode_array(o.order.eval_immut(chunk).unwrap().as_ref(), &o.order_type).unwrap())
         .collect_vec();
-    let mut encoded_chunk: Vec<Vec<u8>> = vec![vec![]; chunk.capacity()];
+    let mut encoded_chunk = vec![vec![]; chunk.capacity()];
     for encoded_column in encoded_columns {
         for (i, encoded_row) in encoded_chunk.iter_mut().enumerate() {
             let width = encoded_column.width;
@@ -222,5 +222,5 @@ pub fn encode_chunk(chunk: &DataChunk, order_pairs: Arc<Vec<OrderPair>>) -> Vec<
             encoded_row.extend_from_slice(&encoded_column.buf[offset..offset + width]);
         }
     }
-    encoded_chunk
+    Arc::new(encoded_chunk)
 }
