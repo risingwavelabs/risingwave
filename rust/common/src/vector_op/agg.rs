@@ -38,7 +38,8 @@ pub trait Aggregator: Send + 'static {
 pub type BoxedAggState = Box<dyn Aggregator>;
 
 pub struct AggStateFactory {
-    input_type: DataTypeRef,
+    // When agg func is count(*), the args is empty and input type is None.
+    input_type: Option<DataTypeRef>,
     input_col_idx: usize,
     agg_kind: AggKind,
     return_type: DataTypeRef,
@@ -46,61 +47,56 @@ pub struct AggStateFactory {
 
 impl AggStateFactory {
     pub fn new(prost: &AggCall) -> Result<Self> {
-        ensure!(
-            prost.get_args().len() == 1,
-            "Agg expression can only have exactly one child"
-        );
-        let arg = &prost.get_args()[0];
         let return_type = build_from_prost(prost.get_return_type())?;
-        let agg_type = AggKind::try_from(prost.get_type())?;
-        let input_type = build_from_prost(arg.get_type())?;
-
-        let input_col_idx = arg.get_input().get_column_idx() as usize;
-        Ok(Self {
-            input_type,
-            input_col_idx,
-            agg_kind: agg_type,
-            return_type,
-        })
+        let agg_kind = AggKind::try_from(prost.get_type())?;
+        match &prost.get_args()[..] {
+            [ref arg] => {
+                let input_type = build_from_prost(arg.get_type())?;
+                let input_col_idx = arg.get_input().get_column_idx() as usize;
+                Ok(Self {
+                    input_type: Some(input_type),
+                    input_col_idx,
+                    agg_kind,
+                    return_type,
+                })
+            }
+            [] => match (&agg_kind, return_type.data_type_kind()) {
+                (AggKind::Count, DataTypeKind::Int64) => Ok(Self {
+                    input_type: None,
+                    input_col_idx: 0,
+                    agg_kind,
+                    return_type,
+                }),
+                _ => Err(ErrorCode::InternalError(format!(
+                    "Agg {:?} without args not supported",
+                    agg_kind
+                ))
+                .into()),
+            },
+            _ => Err(
+                ErrorCode::InternalError("Agg with more than 1 input not supported.".into()).into(),
+            ),
+        }
     }
 
     pub fn create_agg_state(&self) -> Result<Box<dyn Aggregator>> {
-        create_agg_state_unary(
-            self.input_type.clone(),
-            self.input_col_idx,
-            &self.agg_kind,
-            self.return_type.clone(),
-        )
+        if let Some(input_type) = self.input_type.clone() {
+            create_agg_state_unary(
+                input_type,
+                self.input_col_idx,
+                &self.agg_kind,
+                self.return_type.clone(),
+            )
+        } else {
+            Ok(Box::new(CountStar {
+                return_type: self.return_type.clone(),
+                result: 0,
+            }))
+        }
     }
 
     pub fn get_return_type(&self) -> DataTypeRef {
         self.return_type.clone()
-    }
-}
-
-pub fn create_agg_state(prost: &AggCall) -> Result<Box<dyn Aggregator>> {
-    let return_type = build_from_prost(prost.get_return_type())?;
-    let agg_kind = AggKind::try_from(prost.get_type())?;
-    match &prost.get_args()[..] {
-        [ref arg] => {
-            let input_type = build_from_prost(arg.get_type())?;
-            let input_col_idx = arg.get_input().get_column_idx() as usize;
-            create_agg_state_unary(input_type, input_col_idx, &agg_kind, return_type)
-        }
-        [] => match (&agg_kind, return_type.data_type_kind()) {
-            (AggKind::Count, DataTypeKind::Int64) => Ok(Box::new(CountStar {
-                return_type,
-                result: 0,
-            })),
-            _ => Err(ErrorCode::InternalError(format!(
-                "Agg {:?} without args not supported",
-                agg_kind
-            ))
-            .into()),
-        },
-        _ => {
-            Err(ErrorCode::InternalError("Agg with more than 1 input not supported.".into()).into())
-        }
     }
 }
 
@@ -1017,7 +1013,10 @@ mod tests {
                 ..Default::default()
             }),
         };
-        let mut a = create_agg_state(&prost).unwrap();
+        let mut a = AggStateFactory::new(&prost)
+            .unwrap()
+            .create_agg_state()
+            .unwrap();
         let mut a_builder = a.return_type_ref().create_array_builder(0).unwrap();
         let t32 = Arc::new(Int32Type::new(true));
 

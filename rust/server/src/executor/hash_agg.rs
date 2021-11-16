@@ -321,4 +321,52 @@ mod tests {
         );
         diff_executor_output(actual_exec, Box::new(expect_exec)).await;
     }
+
+    #[tokio::test]
+    async fn execute_count_star() {
+        let col = Arc::new(array_nonnull! { I32Array, [0,1,0,1,1,0,1,0] }.into());
+        let t32 = Int32Type::create(false);
+        let t64 = Int64Type::create(false);
+        let src_exec = MockExecutor::with_chunk(
+            DataChunk::builder()
+                .columns(vec![Column::new(col, t32.clone())])
+                .build(),
+            Schema {
+                fields: vec![Field {
+                    data_type: t32.clone(),
+                }],
+            },
+        );
+
+        let agg_call = AggCall {
+            r#type: Type::Count as i32,
+            args: vec![],
+            return_type: Some(DataTypeProst {
+                type_name: TypeName::Int64 as i32,
+                ..Default::default()
+            }),
+        };
+
+        let agg_prost = HashAggNode {
+            group_keys: vec![],
+            agg_calls: vec![agg_call],
+        };
+
+        let actual_exec =
+            HashAggExecutorBuilder::deserialize(&agg_prost, Box::new(src_exec)).unwrap();
+        let schema = Schema {
+            fields: vec![Field {
+                data_type: t32.clone(),
+            }],
+        };
+        let res = Arc::new(array_nonnull! { I64Array, [8] }.into());
+
+        let expect_exec = MockExecutor::with_chunk(
+            DataChunk::builder()
+                .columns(vec![Column::new(res, t64.clone())])
+                .build(),
+            schema,
+        );
+        diff_executor_output(actual_exec, Box::new(expect_exec)).await;
+    }
 }

@@ -12,7 +12,9 @@ use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::{build_from_prost, BoxedExpression};
 use risingwave_common::types::DataType;
-use risingwave_common::vector_op::agg::{self, BoxedAggState, BoxedSortedGrouper, EqGroups};
+use risingwave_common::vector_op::agg::{
+    self, AggStateFactory, BoxedAggState, BoxedSortedGrouper, EqGroups,
+};
 
 use super::BoxedExecutorBuilder;
 
@@ -49,7 +51,7 @@ impl BoxedExecutorBuilder for SortAggExecutor {
         let agg_states = sort_agg_node
             .get_agg_calls()
             .iter()
-            .map(agg::create_agg_state)
+            .map(|x| AggStateFactory::new(x)?.create_agg_state())
             .collect::<Result<Vec<BoxedAggState>>>()?;
 
         let group_exprs = sort_agg_node
@@ -214,7 +216,7 @@ mod tests {
             }),
         };
 
-        let s = agg::create_agg_state(&prost)?;
+        let s = AggStateFactory::new(&prost)?.create_agg_state()?;
 
         let group_exprs: Vec<BoxedExpression> = vec![];
         let agg_states = vec![s];
@@ -309,7 +311,7 @@ mod tests {
             }),
         };
 
-        let s = agg::create_agg_state(&prost)?;
+        let s = AggStateFactory::new(&prost)?.create_agg_state()?;
 
         let group_exprs = (1..=2)
             .map(|idx| {
