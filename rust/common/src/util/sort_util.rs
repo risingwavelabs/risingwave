@@ -22,6 +22,7 @@ pub struct OrderPair {
     pub order: Box<InputRefExpression>,
 }
 
+#[derive(Clone)]
 pub struct HeapElem {
     pub order_pairs: Arc<Vec<OrderPair>>,
     pub chunk: DataChunkRef,

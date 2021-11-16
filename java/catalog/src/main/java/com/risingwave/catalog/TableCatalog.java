@@ -48,6 +48,8 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
   private final Integer columnId;
   private final ImmutableMap<String, String> properties;
   private final String rowFormat;
+  // TODO: Need to be used as streaming job optimizes on append-only input specially.
+  private final boolean appendOnly = false;
 
   TableCatalog(
       TableId id,

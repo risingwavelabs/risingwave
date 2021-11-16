@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use crate::storage::*;
 use crate::stream_op::*;
@@ -14,6 +14,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::{build_from_prost as build_expr_from_prost, AggKind};
 use risingwave_common::types::build_from_prost as build_type_from_prost;
 use risingwave_common::util::addr::{get_host_port, is_local_address};
+use risingwave_common::util::sort_util::fetch_orders;
 use risingwave_pb::expr;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_service;
@@ -361,6 +362,21 @@ impl StreamManagerCore {
                     .try_collect()?;
 
                 Ok(Box::new(HashAggExecutor::new(input, agg_calls, keys)))
+            }
+            AppendOnlyTopNNode(top_n_node) => {
+                let column_orders = &top_n_node.column_orders;
+                let order_paris = fetch_orders(column_orders)?;
+                let limit = if top_n_node.limit == 0 {
+                    None
+                } else {
+                    Some(top_n_node.limit as usize)
+                };
+                Ok(Box::new(AppendOnlyTopNExecutor::new(
+                    input,
+                    Arc::new(order_paris),
+                    limit,
+                    top_n_node.offset as usize,
+                )))
             }
             MviewNode(materialized_view_node) => {
                 let table_id = TableId::from_protobuf(

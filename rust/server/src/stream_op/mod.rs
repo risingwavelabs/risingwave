@@ -25,6 +25,7 @@ pub use simple_agg::*;
 use std::sync::Arc;
 pub use stream_source::*;
 pub use table_source::*;
+pub use top_n::*;
 
 mod actor;
 mod aggregation;
@@ -39,6 +40,7 @@ mod project;
 mod simple_agg;
 mod stream_source;
 mod table_source;
+mod top_n;
 
 #[cfg(test)]
 mod integration_tests;
