@@ -100,6 +100,7 @@ impl SimpleExecutor for AppendOnlyTopNExecutor {
                 // used in olap. useless here
                 chunk_idx: 0usize,
                 elem_idx: row_idx,
+                encoded_chunk: None,
             };
 
             if lower_heap.len() < self.offset {
