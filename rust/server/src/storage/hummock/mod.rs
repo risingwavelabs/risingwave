@@ -2,5 +2,8 @@
 
 mod table;
 pub use table::*;
+mod bloom;
 mod error;
+mod format;
+
 pub use error::*;

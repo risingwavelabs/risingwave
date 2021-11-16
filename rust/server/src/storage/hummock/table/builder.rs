@@ -5,6 +5,8 @@
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 
 use super::utils::{bytes_diff, crc32_checksum};
+use crate::storage::hummock::bloom::Bloom;
+use crate::storage::hummock::format::user_key;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use prost::Message;
 use risingwave_pb::hummock::{
@@ -63,6 +65,7 @@ pub struct TableBuilder {
     base_offset: u32,
     entry_offsets: Vec<u32>,
     table_index: TableIndex,
+    key_hashes: Vec<u32>,
     options: TableBuilderOptions,
 }
 
@@ -75,6 +78,7 @@ impl TableBuilder {
             table_index: TableIndex::default(),
             base_key: Bytes::new(),
             base_offset: 0,
+            key_hashes: Vec::with_capacity(1024),
             entry_offsets: vec![],
             options,
         }
@@ -90,6 +94,7 @@ impl TableBuilder {
     }
 
     fn add_helper(&mut self, key: &[u8], value: &[u8]) {
+        self.key_hashes.push(farmhash::fingerprint32(user_key(key)));
         let diff_key = if self.base_key.is_empty() {
             self.base_key = key.to_vec().into();
             key
@@ -190,7 +195,10 @@ impl TableBuilder {
         let mut bytes = BytesMut::new();
         // TODO: move boundaries and build index if we need to encrypt or compress
         if self.options.bloom_false_positive > 0.0 {
-            todo!("bloom filter is not supported yet");
+            let bits_per_key =
+                Bloom::bloom_bits_per_key(self.key_hashes.len(), self.options.bloom_false_positive);
+            let bloom = Bloom::build_from_key_hashes(&self.key_hashes, bits_per_key);
+            self.table_index.bloom_filter = bloom.to_vec();
         }
         // append index to buffer
         self.table_index.encode(&mut bytes).unwrap();
