@@ -115,6 +115,8 @@ mod tests {
             assert_eq!(num_sinks as usize, res.len());
             for (_, col) in res.into_iter().enumerate() {
                 let mut res_checker = ResultChecker::new();
+                let row_id_column = (0..rows.len() as i64).collect::<Vec<_>>();
+                res_checker.add_i64_column(false, &row_id_column);
                 for column in &columns {
                     res_checker.add_i32_column(false, column.as_slice());
                 }

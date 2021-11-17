@@ -192,16 +192,20 @@ mod tests {
             table_builder.run().await;
 
             let mut builder = runner.prepare_scan().scan_all().await;
+            let mut row_id_columns = vec![vec![]; num_sinks as usize];
             let hashes = rows
                 .iter()
-                .map(|row| {
+                .enumerate()
+                .map(|(row_idx, row)| {
                     let hash_builder = CRC32FastBuilder {};
                     let mut hasher = hash_builder.build_hasher();
                     keys.iter().for_each(|key| {
                         let bs = row[*key as usize].to_le_bytes();
                         hasher.update(&bs);
                     });
-                    hasher.finalize() % num_sinks
+                    let sink_idx = hasher.finalize() % num_sinks;
+                    row_id_columns[sink_idx as usize].push(row_idx as i64);
+                    sink_idx
                 })
                 .collect::<Vec<u32>>();
             let mut each_sink_output_columns = vec![vec![vec![]; num_columns]; num_sinks as usize];
@@ -211,11 +215,19 @@ mod tests {
                     output_columns[col_idx].push(*num);
                 }
             });
-            hash_shuffle_plan(builder.get_mut_plan(), keys, num_sinks);
+            hash_shuffle_plan(
+                builder.get_mut_plan(),
+                // `idx + 1` because we need to skip the first column as it is the column for row
+                // ids.
+                keys.iter().map(|idx| idx + 1).collect(),
+                num_sinks,
+            );
             let res = builder.run_and_collect_multiple_output().await;
             assert_eq!(num_sinks as usize, res.len());
             for (sink_id, col) in res.into_iter().enumerate() {
                 let mut res_checker = ResultChecker::new();
+                let row_id_column = &row_id_columns[sink_id];
+                res_checker.add_i64_column(false, row_id_column);
                 for column in each_sink_output_columns[sink_id].iter() {
                     res_checker.add_i32_column(false, column.as_slice());
                 }

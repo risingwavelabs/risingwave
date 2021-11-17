@@ -37,7 +37,7 @@
           }
         }
       },
-      "columnIds": [0, 1, 2],
+      "columnIds": [1, 2, 3],
       "columnType": [{
         "typeName": "INT32"
       }, {
@@ -57,7 +57,7 @@
         },
         "tableId": 2
       },
-      "columnIds": [0],
+      "columnIds": [1],
       "columnType": [{
         "typeName": "INT32"
       }]

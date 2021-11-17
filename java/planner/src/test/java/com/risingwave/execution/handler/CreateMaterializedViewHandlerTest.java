@@ -71,19 +71,19 @@ public class CreateMaterializedViewHandlerTest {
 
     Assertions.assertEquals(catalog.isMaterializedView(), true);
 
-    Assertions.assertEquals(catalog.getAllColumnCatalogs().size(), 3);
+    Assertions.assertEquals(catalog.getAllColumns().size(), 3);
 
-    ColumnCatalog column0 = catalog.getAllColumnCatalogs().get(0);
+    ColumnCatalog column0 = catalog.getAllColumns().get(0);
     Assertions.assertEquals(column0.getDesc().getDataType() instanceof NumericTypeBase, true);
     Assertions.assertEquals(
         ((NumericTypeBase) column0.getDesc().getDataType()).getSqlTypeName(), SqlTypeName.INTEGER);
 
-    ColumnCatalog column1 = catalog.getAllColumnCatalogs().get(1);
+    ColumnCatalog column1 = catalog.getAllColumns().get(1);
     Assertions.assertEquals(column1.getDesc().getDataType() instanceof NumericTypeBase, true);
     Assertions.assertEquals(
         ((NumericTypeBase) column1.getDesc().getDataType()).getSqlTypeName(), SqlTypeName.INTEGER);
 
-    ColumnCatalog column2 = catalog.getAllColumnCatalogs().get(2);
+    ColumnCatalog column2 = catalog.getAllColumns().get(2);
     Assertions.assertEquals(column2.getDesc().getDataType() instanceof NumericTypeBase, true);
     Assertions.assertEquals(
         ((NumericTypeBase) column2.getDesc().getDataType()).getSqlTypeName(), SqlTypeName.FLOAT);
@@ -103,9 +103,9 @@ public class CreateMaterializedViewHandlerTest {
 
     Assertions.assertEquals(catalog.isMaterializedView(), true);
 
-    Assertions.assertEquals(catalog.getAllColumnCatalogs().size(), 1);
+    Assertions.assertEquals(catalog.getAllColumns().size(), 1);
 
-    ColumnCatalog column0 = catalog.getAllColumnCatalogs().get(0);
+    ColumnCatalog column0 = catalog.getAllColumns().get(0);
     Assertions.assertEquals(column0.getDesc().getDataType() instanceof NumericTypeBase, true);
     Assertions.assertEquals(
         ((NumericTypeBase) column0.getDesc().getDataType()).getSqlTypeName(), SqlTypeName.INTEGER);

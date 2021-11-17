@@ -76,7 +76,7 @@ public class RwLogicalScan extends RwScan implements RisingWaveLogicalRel {
           source.getHints(),
           source.getTable(),
           tableCatalog.getId(),
-          tableCatalog.getAllColumnIdsSorted());
+          tableCatalog.getAllColumnIds());
     }
   }
 }

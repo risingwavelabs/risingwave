@@ -60,7 +60,7 @@ public class CreateStreamHandler implements SqlHandler {
   private static PlanFragment ddlSerializer(TableCatalog table) {
     TableCatalog.TableId tableId = table.getId();
     CreateStreamNode.Builder createStreamNodeBuilder = CreateStreamNode.newBuilder();
-    for (ColumnCatalog columnCatalog : table.getAllColumnCatalogs()) {
+    for (ColumnCatalog columnCatalog : table.getAllColumns()) {
       com.risingwave.proto.plan.ColumnDesc.Builder columnDescBuilder =
           com.risingwave.proto.plan.ColumnDesc.newBuilder();
 

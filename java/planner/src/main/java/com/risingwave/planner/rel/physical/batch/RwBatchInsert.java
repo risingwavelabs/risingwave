@@ -12,7 +12,6 @@ import com.risingwave.proto.plan.InsertNode;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.rpc.Messages;
 import java.util.List;
-import java.util.Optional;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptTable;
@@ -73,21 +72,25 @@ public class RwBatchInsert extends TableModify implements RisingWaveBatchPhyRel 
   @Override
   public PlanNode serialize() {
     TableCatalog tableCatalog = getTable().unwrapOrThrow(TableCatalog.class);
-    ImmutableList<ColumnCatalog.ColumnId> columnIds =
-        Optional.ofNullable(getUpdateColumnList())
-            .map(
-                columns ->
-                    columns.stream()
-                        .map(tableCatalog::getColumnChecked)
-                        .map(ColumnCatalog::getId)
-                        .collect(ImmutableList.toImmutableList()))
-            .orElseGet(ImmutableList::of);
+    ImmutableList<Integer> columnIds;
+    if (getUpdateColumnList() != null) {
+      columnIds =
+          getUpdateColumnList().stream()
+              .map(tableCatalog::getColumnChecked)
+              .map(ColumnCatalog::getId)
+              .map(ColumnCatalog.ColumnId::getValue)
+              .collect(ImmutableList.toImmutableList());
+    } else {
+      columnIds =
+          tableCatalog.getAllColumns().stream()
+              .map(c -> c.getId().getValue())
+              .collect(ImmutableList.toImmutableList());
+    }
 
     InsertNode.Builder insertNodeBuilder =
         InsertNode.newBuilder().setTableRefId(Messages.getTableRefId(tableCatalog.getId()));
-    for (ColumnCatalog columnCatalog : tableCatalog.getAllColumnCatalogs()) {
-      insertNodeBuilder.addColumnIds(columnCatalog.getId().getValue());
-    }
+
+    insertNodeBuilder.addAllColumnIds(columnIds);
 
     return PlanNode.newBuilder()
         .setNodeType(PlanNode.PlanNodeType.INSERT)

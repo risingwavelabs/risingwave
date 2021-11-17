@@ -139,6 +139,11 @@ impl<'a> TableBuilder<'a> {
     }
 
     pub fn create_table(mut self, col_types: &[TypeName]) -> Self {
+        self.col_types.push(DataType {
+            type_name: TypeName::Int64 as i32,
+            is_nullable: false,
+            ..CoreDefault::default()
+        });
         for type_name in col_types {
             let typ = DataType {
                 type_name: *type_name as i32,
@@ -155,7 +160,7 @@ impl<'a> TableBuilder<'a> {
         for _ in 0..col_num {
             col_types.push(TypeName::Int32);
         }
-        self.create_table(col_types.as_slice())
+        self.create_table(&col_types)
     }
 
     pub fn set_nullable(&mut self, col_idx: usize) -> &mut Self {
@@ -164,7 +169,7 @@ impl<'a> TableBuilder<'a> {
     }
 
     pub fn insert_i32s(mut self, i32s: &[i32]) -> Self {
-        assert_eq!(i32s.len(), self.col_types.len());
+        assert_eq!(i32s.len(), self.col_types.len() - 1);
         let mut tuple = ConstantBuilder::new();
         for v in i32s {
             tuple.add_i32(v);
@@ -282,6 +287,14 @@ impl ConstantBuilder {
     }
 
     fn add_i32(&mut self, v: &i32) -> &mut Self {
+        self.values.push(ConstantValue {
+            body: Vec::from(v.to_be_bytes()),
+        });
+
+        self
+    }
+
+    fn add_i64(&mut self, v: &i64) -> &mut Self {
         self.values.push(ConstantValue {
             body: Vec::from(v.to_be_bytes()),
         });
@@ -411,6 +424,20 @@ impl ResultChecker {
         self
     }
 
+    pub fn add_i64_column(&mut self, is_nullable: bool, vals: &[i64]) -> &mut ResultChecker {
+        self.col_types.push(DataType {
+            type_name: TypeName::Int64 as i32,
+            is_nullable,
+            ..CoreDefault::default()
+        });
+        let mut constants = ConstantBuilder::new();
+        for v in vals {
+            constants.add_i64(v);
+        }
+        self.columns.push(constants.build());
+        self
+    }
+
     pub fn check_result(&mut self, actual: &[GetDataResponse]) {
         // Ensure the testing data itself is correct.
         assert_eq!(self.columns.len(), self.col_types.len());
@@ -438,7 +465,6 @@ impl ResultChecker {
 
             // TODO: Write an iterator for FixedWidthColumn
             let value_width = Self::get_value_width(&col);
-            assert_eq!(value_width, 4); // Temporarily hard-coded.
             let column_bytes = col.get_values()[0].get_body();
             for j in 0..self.cardinality() {
                 let actual_value = &column_bytes[j * value_width..(j + 1) * value_width];
@@ -453,6 +479,7 @@ impl ResultChecker {
     fn get_value_width(col: &Column) -> usize {
         match col.get_column_type().get_type_name() {
             TypeName::Int32 => 4,
+            TypeName::Int64 => 8,
             _ => 0,
         }
     }

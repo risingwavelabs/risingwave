@@ -110,6 +110,7 @@ mod tests {
             .run_and_collect_single_output()
             .await;
         ResultChecker::new()
+            .add_i64_column(false, &[0, 1, 2, 3])
             .add_i32_column(false, &[1, 2, 3, 4])
             .add_i32_column(false, &[4, 3, 4, 3])
             .add_i32_column(false, &[2, 3, 4, 5])

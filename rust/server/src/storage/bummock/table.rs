@@ -10,8 +10,8 @@ use risingwave_common::array::{DataChunk, DataChunkRef};
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{Result, RwError};
 use risingwave_proto::plan::ColumnDesc;
-use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, AtomicUsize};
 use std::sync::Arc;
 use std::sync::RwLock;
 
@@ -50,6 +50,9 @@ pub struct BummockTable {
 
     /// synchronization protection
     rwlock: Arc<RwLock<i32>>,
+
+    /// current implicit row id
+    next_row_id: AtomicUsize,
 }
 
 #[async_trait::async_trait]
@@ -183,7 +186,12 @@ impl BummockTable {
                                                       * time */
             current_tuple_id: AtomicU64::new(0),
             rwlock: Arc::new(RwLock::new(1)),
+            next_row_id: AtomicUsize::new(0),
         }
+    }
+
+    pub fn next_row_id(&self) -> usize {
+        self.next_row_id.fetch_add(1, Ordering::Relaxed)
     }
 
     pub fn columns(&self) -> &Vec<ColumnDesc> {

@@ -58,14 +58,14 @@ public class CreateTableHandler implements SqlHandler {
   private static PlanFragment ddlSerializer(TableCatalog table) {
     TableCatalog.TableId tableId = table.getId();
     CreateTableNode.Builder createTableNodeBuilder = CreateTableNode.newBuilder();
-    for (ColumnCatalog columnCatalog : table.getAllColumnCatalogs()) {
-      com.risingwave.proto.plan.ColumnDesc.Builder columnDescBuilder =
-          com.risingwave.proto.plan.ColumnDesc.newBuilder();
-      columnDescBuilder
-          .setEncoding(com.risingwave.proto.plan.ColumnDesc.ColumnEncodingType.RAW)
-          .setColumnType(columnCatalog.getDesc().getDataType().getProtobufType())
-          .setIsPrimary(false);
-      createTableNodeBuilder.addColumnDescs(columnDescBuilder);
+    for (ColumnCatalog columnCatalog : table.getAllColumns(true)) {
+      var columnDesc =
+          com.risingwave.proto.plan.ColumnDesc.newBuilder()
+              .setEncoding(com.risingwave.proto.plan.ColumnDesc.ColumnEncodingType.RAW)
+              .setColumnType(columnCatalog.getDesc().getDataType().getProtobufType())
+              .setIsPrimary(false)
+              .build();
+      createTableNodeBuilder.addColumnDescs(columnDesc);
     }
     CreateTableNode creatTableNode =
         createTableNodeBuilder.setTableRefId(Messages.getTableRefId(tableId)).build();

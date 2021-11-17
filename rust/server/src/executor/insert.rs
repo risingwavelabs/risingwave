@@ -11,12 +11,14 @@ use crate::executor::ExecutorResult::{Batch, Done};
 use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult};
 use crate::storage::*;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder};
+use risingwave_common::array::{
+    ArrayBuilder, ArrayImpl, DataChunk, I64ArrayBuilder, PrimitiveArrayBuilder,
+};
 use risingwave_common::catalog::TableId;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::Int32Type;
+use risingwave_common::types::{Int32Type, Int64Type};
 
 use super::BoxedExecutor;
 
@@ -29,6 +31,24 @@ pub(super) struct InsertExecutor {
     child: BoxedExecutor,
     executed: bool,
     schema: Schema,
+}
+
+impl InsertExecutor {
+    /// Generate next row-id
+    fn next_row_id(&self) -> Result<usize> {
+        let table_ref = (if let TableTypes::BummockTable(table_ref) =
+            self.table_manager.get_table(&self.table_id)?
+        {
+            Ok(table_ref)
+        } else {
+            Err(RwError::from(InternalError(
+                "Only columnar table support insert".to_string(),
+            )))
+        })?;
+
+        // TODO: include node_id in the row id to ensure unique in cluster
+        Ok(table_ref.next_row_id())
+    }
 }
 
 #[async_trait::async_trait]
@@ -55,7 +75,28 @@ impl Executor for InsertExecutor {
         })?;
         let mut rows_inserted = 0;
         while let Batch(child_chunk) = self.child.execute().await? {
-            rows_inserted += table_ref.append(child_chunk).await?;
+            let len = child_chunk.capacity();
+            assert!(child_chunk.visibility().is_none());
+
+            let mut columns = Vec::with_capacity(child_chunk.columns().len() + 1);
+
+            // add row-id column as first column
+            let mut builder = I64ArrayBuilder::new(len).unwrap();
+            for _ in 0..len {
+                builder.append(Some(self.next_row_id()? as i64)).unwrap();
+            }
+            let rowid_column = Column::new(
+                Arc::new(ArrayImpl::from(builder.finish().unwrap())),
+                Int64Type::create(false),
+            );
+            columns.insert(0, rowid_column);
+
+            for col in child_chunk.columns().iter() {
+                columns.push(col.clone());
+            }
+
+            let chunk = DataChunk::new(columns, None);
+            rows_inserted += table_ref.append(chunk).await?;
         }
 
         // create ret value
@@ -135,8 +176,7 @@ mod tests {
     use crate::storage::{SimpleTableManager, TableManager};
     use crate::*;
     use risingwave_common::array::{Array, I64Array};
-    use risingwave_common::catalog::test_utils::mock_table_id;
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::catalog::{Field, Schema, SchemaId};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::{DataTypeKind, Int64Type};
 
@@ -144,8 +184,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_executor() -> Result<()> {
-        let table_id = mock_table_id();
         let table_manager = Arc::new(SimpleTableManager::new());
+        // Schema for mock executor.
         let schema = Schema {
             fields: vec![
                 Field {
@@ -156,14 +196,16 @@ mod tests {
                 },
             ],
         };
-        let mut mock_executor = MockExecutor::new(schema);
+        let mut mock_executor = MockExecutor::new(schema.clone());
+
+        // Column descriptions for creating table.
         let column1 = make_proto!(ColumnDesc, {
           column_type: make_proto!(DataTypeProto, {
             type_name: DataType_TypeName::INT64
           }),
           encoding: ColumnDesc_ColumnEncodingType::RAW,
           is_primary: false,
-          name: "test_col".to_string()
+          name: "row_id".to_string()
         });
         let column2 = make_proto!(ColumnDesc, {
           column_type: make_proto!(DataTypeProto, {
@@ -173,17 +215,28 @@ mod tests {
           is_primary: false,
           name: "test_col".to_string()
         });
-        let columns = vec![column1, column2];
+        let column3 = make_proto!(ColumnDesc, {
+          column_type: make_proto!(DataTypeProto, {
+            type_name: DataType_TypeName::INT64
+          }),
+          encoding: ColumnDesc_ColumnEncodingType::RAW,
+          is_primary: false,
+          name: "test_col".to_string()
+        });
+        let columns = vec![column1, column2, column3];
 
-        table_manager.create_table(&table_id, &columns).await?;
         let col1 = column_nonnull! { I64Array, Int64Type, [1, 3, 5, 7, 9] };
         let col2 = column_nonnull! { I64Array, Int64Type, [2, 4, 6, 8, 10] };
-        let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
-        mock_executor.add(data_chunk);
+        let data_chunk: DataChunk = DataChunk::builder().columns(vec![col1, col2]).build();
+        mock_executor.add(data_chunk.clone());
+
+        // Create the first table.
+        let table_id = TableId::new(SchemaId::default(), 0);
+        table_manager.create_table(&table_id, &columns).await?;
 
         let mut insert_executor = InsertExecutor {
-            table_id,
-            table_manager,
+            table_id: table_id.clone(),
+            table_manager: table_manager.clone(),
             child: Box::new(mock_executor),
             executed: false,
             schema: Schema {
@@ -193,10 +246,8 @@ mod tests {
             },
         };
         insert_executor.init().await.unwrap();
-
         let fields = &insert_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
-
         let result = insert_executor.execute().await?.batch_or()?;
         insert_executor.clean().await.unwrap();
         assert_eq!(
@@ -208,7 +259,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![Some(5)]
         );
-
         let table_ref = insert_executor
             .table_manager
             .get_table(&insert_executor.table_id)?;
@@ -222,11 +272,21 @@ mod tests {
                             .as_int64()
                             .iter()
                             .collect::<Vec<_>>(),
+                        vec![Some(0), Some(1), Some(2), Some(3), Some(4)]
+                    );
+
+                    assert_eq!(
+                        data_ref[0]
+                            .column_at(1)?
+                            .array()
+                            .as_int64()
+                            .iter()
+                            .collect::<Vec<_>>(),
                         vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
                     );
                     assert_eq!(
                         data_ref[0]
-                            .column_at(1)?
+                            .column_at(2)?
                             .array()
                             .as_int64()
                             .iter()
@@ -241,6 +301,135 @@ mod tests {
         } else {
             panic!("invalid table type found.")
         }
+        // First insertion test ends.
+
+        // Insert to the same table by a new executor. The result should have growing row ids from
+        // the last one seen.
+        let mut mock_executor = MockExecutor::new(schema.clone());
+        mock_executor.add(data_chunk.clone());
+        let mut insert_executor = InsertExecutor {
+            table_id: table_id.clone(),
+            table_manager: table_manager.clone(),
+            child: Box::new(mock_executor),
+            executed: false,
+            schema: Schema {
+                fields: vec![Field {
+                    data_type: Int32Type::create(false),
+                }],
+            },
+        };
+        insert_executor.init().await.unwrap();
+        let fields = &insert_executor.schema().fields;
+        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
+        let result = insert_executor.execute().await?.batch_or()?;
+        insert_executor.clean().await.unwrap();
+        assert_eq!(
+            result
+                .column_at(0)?
+                .array()
+                .as_int32()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![Some(5)]
+        );
+        let table_ref = insert_executor
+            .table_manager
+            .get_table(&insert_executor.table_id)?;
+        if let TableTypes::BummockTable(table_ref) = table_ref {
+            match table_ref.get_data().await? {
+                BummockResult::Data(data_ref) => {
+                    assert_eq!(
+                        data_ref[1]
+                            .column_at(0)?
+                            .array()
+                            .as_int64()
+                            .iter()
+                            .collect::<Vec<_>>(),
+                        vec![Some(5), Some(6), Some(7), Some(8), Some(9)]
+                    );
+                }
+                BummockResult::DataEof => {
+                    panic!("Empty data returned.")
+                }
+            }
+        } else {
+            panic!("invalid table type found.")
+        }
+        // Second insertion test ends.
+
+        // Insert into another table. It should have new row ids starting from 0.
+        let table_id2 = TableId::new(SchemaId::default(), 1);
+        let mut mock_executor = MockExecutor::new(schema.clone());
+        mock_executor.add(data_chunk);
+        let mut insert_executor = InsertExecutor {
+            table_id: table_id2.clone(),
+            table_manager: table_manager.clone(),
+            child: Box::new(mock_executor),
+            executed: false,
+            schema: Schema {
+                fields: vec![Field {
+                    data_type: Int32Type::create(false),
+                }],
+            },
+        };
+        table_manager.create_table(&table_id2, &columns).await?;
+        insert_executor.init().await.unwrap();
+        let fields = &insert_executor.schema().fields;
+        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
+        let result = insert_executor.execute().await?.batch_or()?;
+        insert_executor.clean().await.unwrap();
+        assert_eq!(
+            result
+                .column_at(0)?
+                .array()
+                .as_int32()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![Some(5)]
+        );
+        let table_ref = insert_executor
+            .table_manager
+            .get_table(&insert_executor.table_id)?;
+        if let TableTypes::BummockTable(table_ref) = table_ref {
+            match table_ref.get_data().await? {
+                BummockResult::Data(data_ref) => {
+                    assert_eq!(
+                        data_ref[0]
+                            .column_at(0)?
+                            .array()
+                            .as_int64()
+                            .iter()
+                            .collect::<Vec<_>>(),
+                        vec![Some(0), Some(1), Some(2), Some(3), Some(4)]
+                    );
+
+                    assert_eq!(
+                        data_ref[0]
+                            .column_at(1)?
+                            .array()
+                            .as_int64()
+                            .iter()
+                            .collect::<Vec<_>>(),
+                        vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
+                    );
+                    assert_eq!(
+                        data_ref[0]
+                            .column_at(2)?
+                            .array()
+                            .as_int64()
+                            .iter()
+                            .collect::<Vec<_>>(),
+                        vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
+                    );
+                }
+                BummockResult::DataEof => {
+                    panic!("Empty data returned.")
+                }
+            }
+        } else {
+            panic!("invalid table type found.")
+        }
+        // Third insertion test ends.
 
         Ok(())
     }

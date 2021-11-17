@@ -28,7 +28,7 @@ RwStreamMaterializedView(name=[t1])
                 }
               }
             },
-            "columnIds": [0, 1]
+            "columnIds": [1, 2]
           }
         },
         "filterNode": {
@@ -153,7 +153,7 @@ RwStreamMaterializedView(name=[t2])
             }
           }
         },
-        "columnIds": [0, 1]
+        "columnIds": [1, 2]
       }
     },
     "projectNode": {
@@ -233,7 +233,7 @@ RwStreamMaterializedView(name=[t3])
                 }
               }
             },
-            "columnIds": [1, 0]
+            "columnIds": [2, 1]
           }
         },
         "hashAggNode": {
@@ -359,7 +359,7 @@ RwStreamMaterializedView(name=[t4])
               }
             }
           },
-          "columnIds": [0, 1]
+          "columnIds": [1, 2]
         }
       },
       "simpleAggNode": {
@@ -504,7 +504,7 @@ RwStreamMaterializedView(name=[t5])
                 }
               }
             },
-            "columnIds": [0, 1]
+            "columnIds": [1, 2]
           }
         },
         "projectNode": {
@@ -631,7 +631,7 @@ RwStreamMaterializedView(name=[t6])
                 }
               }
             },
-            "columnIds": [1, 0]
+            "columnIds": [2, 1]
           }
         },
         "hashAggNode": {
@@ -747,7 +747,7 @@ RwStreamMaterializedView(name=[t7])
                 }
               }
             },
-            "columnIds": [1, 0]
+            "columnIds": [2, 1]
           }
         },
         "hashAggNode": {
@@ -878,7 +878,7 @@ RwStreamMaterializedView(name=[t8])
                 }
               }
             },
-            "columnIds": [0, 1]
+            "columnIds": [1, 2]
           }
         },
         "filterNode": {

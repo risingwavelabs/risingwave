@@ -500,7 +500,7 @@
           }
         }
       },
-      "columnIds": [0, 1]
+      "columnIds": [1, 2]
     }
   },
   "dispatcher": {

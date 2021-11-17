@@ -22,7 +22,7 @@
           }
         }
       },
-      "columnIds": [0, 1, 2],
+      "columnIds": [1, 2, 3],
       "columnType": [{
         "typeName": "INT32"
       }, {

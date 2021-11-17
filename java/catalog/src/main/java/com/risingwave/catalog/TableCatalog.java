@@ -5,6 +5,8 @@ import static java.util.Objects.requireNonNull;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.risingwave.common.datatype.RisingWaveDataType;
+import com.risingwave.common.datatype.RisingWaveTypeFactory;
 import com.risingwave.common.entity.EntityBase;
 import com.risingwave.common.entity.NonRootLikeBase;
 import com.risingwave.common.error.MetaServiceError;
@@ -12,9 +14,7 @@ import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.common.exception.RisingWaveException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentMap;
@@ -32,13 +32,17 @@ import org.apache.calcite.schema.Statistics;
 import org.apache.calcite.schema.Table;
 import org.apache.calcite.sql.SqlCall;
 import org.apache.calcite.sql.SqlNode;
+import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.util.ImmutableIntList;
 
 /** Table catalog definition. */
 public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.TableName>
     implements Table {
-  private final AtomicInteger nextColumnId = new AtomicInteger(0);
+  private static final int ROWID_COLUMN_ID = 0;
+  private static final String ROWID_COLUMN = "_row_id";
+  private final AtomicInteger nextColumnId = new AtomicInteger(ROWID_COLUMN_ID);
   private final List<ColumnCatalog> columns;
+  private final ColumnCatalog rowIdColumn;
   private final ConcurrentMap<ColumnCatalog.ColumnId, ColumnCatalog> columnById;
   private final ConcurrentMap<ColumnCatalog.ColumnName, ColumnCatalog> columnByName;
   private final boolean materializedView;
@@ -63,6 +67,9 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
       ImmutableMap<String, String> properties,
       String rowFormat) {
     super(id, name);
+    if (!stream) {
+      this.nextColumnId.getAndIncrement();
+    }
     this.columns = new ArrayList<>(columns);
     this.columnById = EntityBase.groupBy(columns, ColumnCatalog::getId);
     this.columnByName = EntityBase.groupBy(columns, ColumnCatalog::getEntityName);
@@ -73,6 +80,12 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
     this.columnId = columnId;
     this.properties = properties;
     this.rowFormat = rowFormat;
+    this.rowIdColumn = buildRowIdColumn();
+    if (!stream) {
+      // Put row-id column in map but do not put it in list of columns.
+      this.columnById.put(rowIdColumn.getId(), rowIdColumn);
+      this.columnByName.put(rowIdColumn.getEntityName(), rowIdColumn);
+    }
   }
 
   public boolean isMaterializedView() {
@@ -87,31 +100,25 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
     return distributionType;
   }
 
-  public Integer getColumnId() {
-    return columnId;
-  }
-
   public ImmutableList<ColumnCatalog.ColumnId> getAllColumnIds() {
-    return ImmutableList.copyOf(columnById.keySet());
+    return columns.stream().map(EntityBase::getId).collect(ImmutableList.toImmutableList());
   }
 
-  public ImmutableList<ColumnCatalog.ColumnId> getAllColumnIdsSorted() {
-    ColumnCatalog.ColumnId[] columnIds = columnById.keySet().toArray(new ColumnCatalog.ColumnId[0]);
-    Arrays.sort(columnIds, Comparator.comparingInt(NonRootLikeBase::getValue));
-    return ImmutableList.copyOf(columnIds);
+  public ImmutableList<ColumnCatalog> getAllColumns() {
+    return getAllColumns(false);
   }
 
-  public ImmutableList<ColumnCatalog> getAllColumnCatalogs() {
-    return ImmutableList.copyOf(columns);
+  public ImmutableList<ColumnCatalog> getAllColumns(boolean includeHidden) {
+    if (!includeHidden) {
+      return ImmutableList.copyOf(columns);
+    } else {
+      return ImmutableList.<ColumnCatalog>builder().add(getRowIdColumn()).addAll(columns).build();
+    }
   }
 
   public Optional<ColumnCatalog> getColumn(ColumnCatalog.ColumnId columnId) {
     checkNotNull(columnId, "column id can't be null!");
     return Optional.ofNullable(columnById.get(columnId));
-  }
-
-  public Optional<ColumnCatalog> getColumn(int columnId) {
-    return getColumn(new ColumnCatalog.ColumnId(columnId, this.getId()));
   }
 
   public Optional<ColumnCatalog> getColumn(String column) {
@@ -123,10 +130,6 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
   public ColumnCatalog getColumnChecked(ColumnCatalog.ColumnId columnId) {
     // TODO: Use PgErrorCode
     return getColumn(columnId).orElseThrow(() -> new RuntimeException("Column id not found!"));
-  }
-
-  public ColumnCatalog getColumnChecked(int columnId) {
-    return getColumnChecked(new ColumnCatalog.ColumnId(columnId, this.getId()));
   }
 
   public ColumnCatalog getColumnChecked(String column) {
@@ -221,6 +224,18 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
 
   public boolean isStream() {
     return stream;
+  }
+
+  private ColumnCatalog buildRowIdColumn() {
+    final var typeFactory = new RisingWaveTypeFactory();
+    return new ColumnCatalog(
+        new ColumnCatalog.ColumnId(ROWID_COLUMN_ID, getId()),
+        new ColumnCatalog.ColumnName(ROWID_COLUMN, getEntityName()),
+        new ColumnDesc((RisingWaveDataType) typeFactory.createSqlType(SqlTypeName.BIGINT)));
+  }
+
+  public ColumnCatalog getRowIdColumn() {
+    return rowIdColumn;
   }
 
   /** Table id definition. */
