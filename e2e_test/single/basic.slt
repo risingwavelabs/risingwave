@@ -1,6 +1,0 @@
-# Git do not allow a empty folder. This file just keep the exist of `single`.
-
-query I
-select 1+1
-----
-2
