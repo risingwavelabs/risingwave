@@ -50,12 +50,12 @@ impl Deserializer<'_> {
     }
 }
 
+// Format Reference:
+// https://github.com/facebook/mysql-5.6/wiki/MyRocks-record-format#memcomparable-format
+// https://haxisnake.github.io/2020/11/06/TIDB源码学习笔记-基本类型编解码方案/
 impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     type Error = Error;
 
-    // Look at the input data to decide what Serde data model type to
-    // deserialize as. Not all data formats are able to support this operation.
-    // Formats that support `deserialize_any` are known as self-describing.
     fn deserialize_any<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
@@ -401,6 +401,17 @@ impl<'de, 'a> VariantAccess<'de> for &'a mut Deserializer<'de> {
     }
 }
 
+impl Deserializer<'_> {
+    /// Deserialize a decimal value. Returns `(mantissa, scale)`.
+    pub fn deserialize_decimal(&mut self) -> Result<(i128, u8)> {
+        let scale = self.input.get_u8();
+        let hi = self.input.get_i32() ^ (1 << 31);
+        let lo = self.input.get_u64();
+        let mantissa = ((hi as i128) << 64) | (lo as i128);
+        Ok((mantissa, scale))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -535,5 +546,23 @@ mod tests {
             from_slice::<String>(&[0, 0, 0, 0, 0, 0, 0, 0, 10]),
             Err(Error::InvalidBytesEncoding(10))
         );
+    }
+
+    #[test]
+    fn test_decimal() {
+        let (mantissa, scale) = (-12_3456_7890_1234, 4);
+        let (mantissa0, scale0) = deserialize_decimal(&serialize_decimal(mantissa, scale));
+        assert_eq!((mantissa, scale), (mantissa0, scale0));
+    }
+
+    fn serialize_decimal(mantissa: i128, scale: u8) -> Vec<u8> {
+        let mut serializer = crate::Serializer::default();
+        serializer.serialize_decimal(mantissa, scale).unwrap();
+        serializer.into_inner()
+    }
+
+    fn deserialize_decimal(bytes: &[u8]) -> (i128, u8) {
+        let mut deserializer = Deserializer::from_slice(bytes);
+        deserializer.deserialize_decimal().unwrap()
     }
 }

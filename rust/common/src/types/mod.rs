@@ -2,6 +2,7 @@ use crate::error::{ErrorCode, Result, RwError};
 use risingwave_pb::data::DataType as DataTypeProto;
 use risingwave_pb::ToProst;
 use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -374,5 +375,47 @@ impl std::hash::Hash for ScalarImpl {
       };
     }
         for_all_native_types! { impl_all_hash, self }
+    }
+}
+
+impl ScalarImpl {
+    /// Serialize the scalar.
+    pub fn serialize(&self, ser: &mut memcomparable::Serializer) -> memcomparable::Result<()> {
+        match self {
+            &Self::Int16(v) => v.serialize(ser)?,
+            &Self::Int32(v) => v.serialize(ser)?,
+            &Self::Int64(v) => v.serialize(ser)?,
+            &Self::Float32(v) => v.serialize(ser)?,
+            &Self::Float64(v) => v.serialize(ser)?,
+            Self::UTF8(v) => v.serialize(ser)?,
+            &Self::Bool(v) => v.serialize(ser)?,
+            &Self::Decimal(v) => ser.serialize_decimal(v.mantissa(), v.scale() as u8)?,
+            Self::Interval(v) => v.serialize(ser)?,
+        };
+        Ok(())
+    }
+
+    /// Deserialize the scalar.
+    pub fn deserialize(
+        ty: DataTypeKind,
+        de: &mut memcomparable::Deserializer<'_>,
+    ) -> memcomparable::Result<Self> {
+        use DataTypeKind as Ty;
+        Ok(match ty {
+            Ty::Int16 => Self::Int16(i16::deserialize(de)?),
+            Ty::Int32 => Self::Int32(i32::deserialize(de)?),
+            Ty::Int64 => Self::Int64(i64::deserialize(de)?),
+            Ty::Float32 => Self::Float32(f32::deserialize(de)?),
+            Ty::Float64 => Self::Float64(f64::deserialize(de)?),
+            Ty::Char | Ty::Varchar => Self::UTF8(String::deserialize(de)?),
+            Ty::Boolean => Self::Bool(bool::deserialize(de)?),
+            Ty::Decimal => Self::Decimal({
+                let (mantissa, scale) = de.deserialize_decimal()?;
+                Decimal::from_i128_with_scale(mantissa, scale as u32)
+            }),
+            Ty::Interval | Ty::Date | Ty::Time | Ty::Timestamp | Ty::Timestampz => {
+                Self::Interval(IntervalUnit::deserialize(de)?)
+            }
+        })
     }
 }

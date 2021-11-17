@@ -1609,6 +1609,7 @@ dependencies = [
  "lazy_static",
  "log",
  "mem_cmp",
+ "memcomparable",
  "num-traits",
  "paste",
  "pb-construct",

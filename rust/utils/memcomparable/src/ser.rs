@@ -28,6 +28,9 @@ pub fn to_vec(value: &impl Serialize) -> Result<Vec<u8>> {
     Ok(serializer.output)
 }
 
+// Format Reference:
+// https://github.com/facebook/mysql-5.6/wiki/MyRocks-record-format#memcomparable-format
+// https://haxisnake.github.io/2020/11/06/TIDB源码学习笔记-基本类型编解码方案/
 impl<'a> ser::Serializer for &'a mut Serializer {
     type Ok = ();
     type Error = Error;
@@ -360,6 +363,24 @@ impl<'a> ser::SerializeStructVariant for &'a mut Serializer {
     }
 }
 
+impl Serializer {
+    /// Serialize a decimal value.
+    ///
+    /// - `mantissa`: From `rust_decimal::Decimal::mantissa()`. A 96-bits signed integer.
+    /// - `scale`: From `rust_decimal::Decimal::scale()`. A power of 10 ranging from 0 to 28.
+    ///
+    /// The decimal will be encoded to 13 bytes.
+    /// It is memcomparable only when two decimals have the same scale.
+    pub fn serialize_decimal(&mut self, mantissa: i128, scale: u8) -> Result<()> {
+        // TODO(wrj): variable-length encoding
+        // https://github.com/pingcap/tidb/blob/fec2938c1379270bf9939822c1abfe3d7244c174/types/mydecimal.go#L1133
+        self.output.put_u8(scale);
+        self.output.put_i32((mantissa >> 64) as i32 ^ (1 << 31));
+        self.output.put_u64(mantissa as u64);
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -521,5 +542,19 @@ mod tests {
             .take(len)
             .map(char::from)
             .collect()
+    }
+
+    #[test]
+    fn test_decimal() {
+        let a = serialize_decimal(12_3456_7890_1234, 4);
+        let b = serialize_decimal(0, 4);
+        let c = serialize_decimal(-12_3456_7890_1234, 4);
+        assert!(a > b && b > c);
+    }
+
+    fn serialize_decimal(mantissa: i128, scale: u8) -> Vec<u8> {
+        let mut serializer = Serializer::default();
+        serializer.serialize_decimal(mantissa, scale).unwrap();
+        serializer.into_inner()
     }
 }
