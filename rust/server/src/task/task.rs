@@ -1,3 +1,4 @@
+use risingwave_common::array::DataChunk;
 use std::fmt::{Debug, Formatter};
 use std::sync::{Arc, Mutex};
 
@@ -6,7 +7,6 @@ use crate::rpc::service::exchange_service::ExchangeWriter;
 use crate::task::channel::{create_output_channel, BoxChanReceiver, BoxChanSender};
 use crate::task::GlobalTaskEnv;
 use crate::task::TaskManager;
-use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::{json_to_pretty_string, JsonFormatter};
 use risingwave_pb::plan::PlanFragment;
@@ -78,7 +78,7 @@ impl TaskSink {
         let task_id = TaskId::from(self.sink_id.get_task_id());
         self.task_manager.check_if_task_running(&task_id)?;
         loop {
-            let chunk = match self.receiver.recv().await {
+            let chunk = match self.receiver.recv().await? {
                 None => {
                     break;
                 }
@@ -102,7 +102,7 @@ impl TaskSink {
     pub async fn direct_take_data(&mut self) -> Result<Option<DataChunk>> {
         let task_id = TaskId::from(self.sink_id.get_task_id());
         self.task_manager.check_if_task_running(&task_id)?;
-        Ok(self.receiver.recv().await)
+        self.receiver.recv().await
     }
 }
 
@@ -172,14 +172,15 @@ impl TaskExecution {
     async fn try_execute(mut root: BoxedExecutor, mut sender: BoxChanSender) -> Result<()> {
         root.init().await?;
         loop {
-            let exec_res = root.execute().await?;
-            let chunk = match exec_res {
+            match root.execute().await? {
                 ExecutorResult::Done => {
+                    sender.send(None).await?;
                     break;
                 }
-                ExecutorResult::Batch(chunk) => chunk,
+                ExecutorResult::Batch(chunk) => {
+                    sender.send(Some(chunk)).await?;
+                }
             };
-            sender.send(chunk).await?;
         }
         root.clean().await?;
         Ok(())

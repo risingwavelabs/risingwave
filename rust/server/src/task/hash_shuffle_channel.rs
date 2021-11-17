@@ -8,15 +8,15 @@ use risingwave_pb::plan::exchange_info::HashInfo;
 use risingwave_pb::plan::*;
 use risingwave_pb::{ToProst, ToProto};
 use std::option::Option;
-use std::sync::mpsc;
+use tokio::sync::mpsc;
 
 pub struct HashShuffleSender {
-    senders: Vec<mpsc::Sender<DataChunk>>,
+    senders: Vec<mpsc::UnboundedSender<Option<DataChunk>>>,
     hash_info: exchange_info::HashInfo,
 }
 
 pub struct HashShuffleReceiver {
-    receiver: mpsc::Receiver<DataChunk>,
+    receiver: mpsc::UnboundedReceiver<Option<DataChunk>>,
 }
 
 fn generate_hash_values(chunk: &DataChunk, hash_info: &HashInfo) -> Result<Vec<usize>> {
@@ -74,7 +74,16 @@ fn generate_new_data_chunks(
 
 #[async_trait::async_trait]
 impl ChanSender for HashShuffleSender {
-    async fn send(&mut self, chunk: DataChunk) -> Result<()> {
+    async fn send(&mut self, chunk: Option<DataChunk>) -> Result<()> {
+        match chunk {
+            Some(c) => self.send_chunk(c).await,
+            None => self.send_done().await,
+        }
+    }
+}
+
+impl HashShuffleSender {
+    async fn send_chunk(&mut self, chunk: DataChunk) -> Result<()> {
         let hash_values = generate_hash_values(&chunk, &self.hash_info)?;
         let new_data_chunks = generate_new_data_chunks(&chunk, &self.hash_info, &hash_values)?;
 
@@ -85,20 +94,27 @@ impl ChanSender for HashShuffleSender {
                 new_data_chunk.cardinality()
             );
             self.senders[sink_id]
-                .send(new_data_chunk)
+                .send(Some(new_data_chunk))
                 .to_rw_result_with("HashShuffleSender::send")?;
         }
         Ok(())
+    }
+
+    async fn send_done(&mut self) -> Result<()> {
+        self.senders
+            .iter_mut()
+            .try_for_each(|s| s.send(None).to_rw_result_with("HashShuffleSender::send"))
     }
 }
 
 #[async_trait::async_trait]
 impl ChanReceiver for HashShuffleReceiver {
-    async fn recv(&mut self) -> Option<DataChunk> {
-        match self.receiver.recv() {
-            Err(_) => None, // Sender is dropped.
-            Ok(chunk) => Some(chunk),
-        }
+    async fn recv(&mut self) -> Result<Option<DataChunk>> {
+        self.receiver
+            .recv()
+            .await
+            .ok_or_else(|| InternalError("broken hash_shuffle_channel".to_string()).into())
+        // We never call on a closed channel.
     }
 }
 
@@ -110,7 +126,7 @@ pub fn new_hash_shuffle_channel(shuffle: &ExchangeInfo) -> (BoxChanSender, Vec<B
     let mut senders = Vec::with_capacity(output_count);
     let mut receivers = Vec::with_capacity(output_count);
     for _ in 0..output_count {
-        let (s, r) = mpsc::channel();
+        let (s, r) = mpsc::unbounded_channel();
         senders.push(s);
         receivers.push(r);
     }
@@ -127,6 +143,7 @@ pub fn new_hash_shuffle_channel(shuffle: &ExchangeInfo) -> (BoxChanSender, Vec<B
 
 #[cfg(test)]
 mod tests {
+    use crate::task::hash_shuffle_channel::new_hash_shuffle_channel;
     use crate::task::test_utils::{ResultChecker, TestRunner};
     use rand::Rng;
     use risingwave_common::util::hash_util::CRC32FastBuilder;
@@ -210,5 +227,22 @@ mod tests {
         test_case(2, 2, 5, vec![0]).await;
         test_case(10, 10, 5, vec![0, 3, 5]).await;
         test_case(100, 100, 7, vec![0, 2, 51, 98]).await;
+    }
+
+    #[tokio::test]
+    async fn test_recv_fail_on_closed_channel() {
+        let (sender, mut receivers) = new_hash_shuffle_channel(&ExchangeInfo {
+            mode: DistributionMode::Hash as i32,
+            distribution: Some(exchange_info::Distribution::HashInfo(HashInfo {
+                output_count: 3,
+                hash_method: HashMethod::Crc32 as i32,
+                keys: vec![],
+            })),
+        });
+        assert_eq!(receivers.len(), 3);
+        drop(sender);
+
+        let receiver = receivers.get_mut(0).unwrap();
+        assert!(receiver.recv().await.is_err());
     }
 }

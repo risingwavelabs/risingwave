@@ -6,20 +6,20 @@ use risingwave_common::error::Result;
 use risingwave_pb::plan::{
     exchange_info::DistributionMode as ShuffleDistributionMode, ExchangeInfo,
 };
-use std::option::Option;
 
 #[async_trait::async_trait]
 pub trait ChanSender: Send {
-    // `send` will block until there's enough resource to process the chunk.
-    // Currently, `send` will only be called from single thread.
-    async fn send(&mut self, chunk: DataChunk) -> Result<()>;
+    /// This function will block until there's enough resource to process the chunk.
+    /// Currently, it will only be called from single thread.
+    /// `None` is sent as a mark of the ending of channel.
+    async fn send(&mut self, chunk: Option<DataChunk>) -> Result<()>;
 }
 
 #[async_trait::async_trait]
 pub trait ChanReceiver: Send {
-    // Returns `None` if there's no more data to read.
-    // Otherwise it will wait until there's data.
-    async fn recv(&mut self) -> Option<DataChunk>;
+    /// Returns `None` if there's no more data to read.
+    /// Otherwise it will wait until there's data.
+    async fn recv(&mut self) -> Result<Option<DataChunk>>;
 }
 
 pub type BoxChanSender = Box<dyn ChanSender>;

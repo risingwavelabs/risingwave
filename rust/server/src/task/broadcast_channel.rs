@@ -1,20 +1,21 @@
 use crate::task::channel::{BoxChanReceiver, BoxChanSender, ChanReceiver, ChanSender};
 use risingwave_common::array::DataChunk;
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::plan::exchange_info::BroadcastInfo;
 use risingwave_pb::plan::*;
 use risingwave_pb::{ToProst, ToProto};
-use std::sync::mpsc;
+use tokio::sync::mpsc;
 
 /// `BroadcastSender` sends the same chunk to a number of `BroadcastReceiver`s.
 pub struct BroadcastSender {
-    senders: Vec<mpsc::Sender<DataChunk>>,
+    senders: Vec<mpsc::UnboundedSender<Option<DataChunk>>>,
     broadcast_info: BroadcastInfo,
 }
 
 #[async_trait::async_trait]
 impl ChanSender for BroadcastSender {
-    async fn send(&mut self, chunk: DataChunk) -> Result<()> {
+    async fn send(&mut self, chunk: Option<DataChunk>) -> Result<()> {
         self.senders.iter().try_for_each(|sender| {
             sender
                 .send(chunk.clone())
@@ -25,16 +26,17 @@ impl ChanSender for BroadcastSender {
 
 /// One or more `BroadcastReceiver`s corresponds to a single `BroadcastReceiver`
 pub struct BroadcastReceiver {
-    receiver: mpsc::Receiver<DataChunk>,
+    receiver: mpsc::UnboundedReceiver<Option<DataChunk>>,
 }
 
 #[async_trait::async_trait]
 impl ChanReceiver for BroadcastReceiver {
-    async fn recv(&mut self) -> Option<DataChunk> {
-        match self.receiver.recv() {
-            Err(_) => None, // Sender is dropped.
-            Ok(chunk) => Some(chunk),
-        }
+    async fn recv(&mut self) -> Result<Option<DataChunk>> {
+        self.receiver
+            .recv()
+            .await
+            .ok_or_else(|| InternalError("broken broadcast_channel".to_string()).into())
+        // We never call on a closed channel.
     }
 }
 
@@ -46,7 +48,7 @@ pub fn new_broadcast_channel(shuffle: &ExchangeInfo) -> (BoxChanSender, Vec<BoxC
     let mut senders = Vec::with_capacity(output_count);
     let mut receivers = Vec::with_capacity(output_count);
     for _ in 0..output_count {
-        let (s, r) = mpsc::channel();
+        let (s, r) = mpsc::unbounded_channel();
         senders.push(s);
         receivers.push(r);
     }
@@ -63,8 +65,10 @@ pub fn new_broadcast_channel(shuffle: &ExchangeInfo) -> (BoxChanSender, Vec<BoxC
 
 #[cfg(test)]
 mod tests {
+    use crate::task::broadcast_channel::new_broadcast_channel;
     use crate::task::test_utils::{ResultChecker, TestRunner};
     use rand::Rng;
+    use risingwave_pb::plan::exchange_info::BroadcastInfo;
     use risingwave_pb::plan::ExchangeInfo;
     use risingwave_pb::plan::*;
 
@@ -122,5 +126,20 @@ mod tests {
         test_case(2, 2, 5).await;
         test_case(10, 10, 5).await;
         test_case(100, 100, 7).await;
+    }
+
+    #[tokio::test]
+    async fn test_recv_fail_on_closed_channel() {
+        let (sender, mut receivers) = new_broadcast_channel(&ExchangeInfo {
+            mode: exchange_info::DistributionMode::Broadcast as i32,
+            distribution: Some(exchange_info::Distribution::BroadcastInfo(BroadcastInfo {
+                count: 3,
+            })),
+        });
+        assert_eq!(receivers.len(), 3);
+        drop(sender);
+
+        let receiver = receivers.get_mut(0).unwrap();
+        assert!(receiver.recv().await.is_err());
     }
 }

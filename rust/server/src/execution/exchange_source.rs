@@ -89,7 +89,7 @@ impl LocalExchangeSource {
 #[async_trait::async_trait]
 impl ExchangeSource for LocalExchangeSource {
     async fn take_data(&mut self) -> Result<Option<DataChunk>> {
-        Ok(self.task_sink.direct_take_data().await?)
+        self.task_sink.direct_take_data().await
     }
 }
 
