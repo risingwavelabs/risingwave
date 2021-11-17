@@ -38,9 +38,9 @@ impl Header {
 #[derive(Debug, Clone)]
 pub struct TableBuilderOptions {
     /// target size of the table
-    pub table_size: u64,
+    pub table_size: u32,
     /// size of each block in bytes in SST
-    pub block_size: usize,
+    pub block_size: u32,
     /// false positive probability of bloom filter
     pub bloom_false_positive: f64,
 }
@@ -183,7 +183,7 @@ impl TableBuilder {
         let estimated_size = block_size +
                                   4 + // index length
                                   5 * self.table_index.offsets.len() as u32; // TODO: why 5?
-        estimated_size as u64 > self.options.table_size
+        estimated_size as u32 > self.options.table_size
     }
 
     /// Finalize the table
@@ -228,6 +228,7 @@ impl TableBuilder {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
+    use crate::storage::hummock::Table;
     use itertools::Itertools;
 
     const TEST_KEYS_COUNT: usize = 100000;
@@ -283,6 +284,50 @@ pub(super) mod tests {
         }
 
         b.finish()
+    }
+
+    fn key(prefix: &[u8], i: usize) -> Bytes {
+        Bytes::from([prefix, format!("{:04}", i).as_bytes()].concat())
+    }
+
+    fn test_with_bloom_filter(with_blooms: bool) {
+        let key_count = 1000;
+
+        let opt = TableBuilderOptions {
+            bloom_false_positive: if with_blooms { 0.01 } else { 0.0 },
+            block_size: 0,
+            table_size: 0,
+        };
+
+        let mut b = TableBuilder::new(opt);
+
+        for i in 0..key_count {
+            b.add(
+                format!("key_test_{}", i).as_bytes(),
+                "23332333"
+                    .as_bytes()
+                    .iter()
+                    .cycle()
+                    .cloned()
+                    .take(i + 1)
+                    .collect_vec()
+                    .as_slice(),
+            );
+        }
+
+        let table = b.finish();
+        let table = Table::load(0, table, with_blooms).unwrap();
+        assert_eq!(table.has_bloom_filter, with_blooms);
+        for i in 0..key_count {
+            let hash = farmhash::fingerprint32(user_key(format!("key_test_{}", i).as_bytes()));
+            assert!(!table.surely_not_have(hash));
+        }
+    }
+
+    #[test]
+    fn test_bloom_filter() {
+        test_with_bloom_filter(false);
+        test_with_bloom_filter(true);
     }
 
     #[test]

@@ -6,14 +6,12 @@ mod builder;
 pub use builder::*;
 mod utils;
 
+use super::{HummockError, HummockResult};
+use crate::storage::hummock::bloom::Bloom;
 use bytes::{Buf, Bytes};
 use prost::Message;
-
 use risingwave_pb::hummock::{Checksum, TableIndex};
-
 use utils::verify_checksum;
-
-use super::{HummockError, HummockResult};
 
 pub struct Block;
 
@@ -67,13 +65,13 @@ pub struct Table {
 
 impl Table {
     /// Open an existing SST from a pre-loaded [`Bytes`].
-    fn load(id: u64, content: Bytes) -> HummockResult<Self> {
+    fn load(id: u64, content: Bytes, has_bloom_filter: bool) -> HummockResult<Self> {
         Ok(Table {
             id,
             estimated_size: 0,
             index: Self::decode_index(&content[..])?,
             content,
-            has_bloom_filter: false,
+            has_bloom_filter,
         })
     }
 
@@ -159,6 +157,26 @@ impl Table {
     pub fn id(&self) -> u64 {
         self.id
     }
+
+    fn fetch_index(&self) -> &TableIndex {
+        &self.index
+        // TODO: encryption
+    }
+
+    /// Judge whether the hash is in the table with the given false positive rate.
+    /// Note: it means that :
+    /// - if the return value is true, then the table surely does not have the value;
+    /// - if the return value is false, then the table may or may not have the value actually,
+    /// a.k.a. we don't know the answer.
+    pub fn surely_not_have(&self, hash: u32) -> bool {
+        if self.has_bloom_filter {
+            let index = self.fetch_index();
+            let bloom = Bloom::new(&index.bloom_filter);
+            !bloom.may_contain(hash)
+        } else {
+            false
+        }
+    }
 }
 
 #[cfg(test)]
@@ -167,7 +185,7 @@ mod tests {
     #[test]
     fn test_table_load() {
         let table = super::builder::tests::generate_table();
-        let table = Table::load(0, table).unwrap();
+        let table = Table::load(0, table, false).unwrap();
         for i in 0..10 {
             table.block(i).unwrap();
         }
