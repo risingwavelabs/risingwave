@@ -188,7 +188,12 @@ async fn test_stream_mv_proto() {
     let table_ref_mv = table_manager.get_table(&table_id_mv).unwrap();
 
     let mut sink = stream_manager.take_sink((1, 233));
-    if let StreamMessage::Chunk(_chunk) = sink.next().await.unwrap() {
+
+    // Wait for the first chunk is processed in order to avoid race condition
+    // between data and message in `TableSourceExecutor`.
+    sink.next().await.unwrap();
+    stream_manager.send_stop_barrier();
+    if let StreamMessage::Barrier(_) = sink.next().await.unwrap() {
         if let TableTypes::Row(table_mv) = table_ref_mv {
             let value_row = Row(vec![Some(1.to_scalar_value())]);
             let res_row = table_mv.get(value_row);

@@ -1,3 +1,4 @@
+use super::Barrier;
 use super::{Executor, Message, Result, SimpleExecutor, StreamChunk};
 use crate::storage::MemRowTableRef as MemTableRef;
 use async_trait::async_trait;
@@ -10,6 +11,8 @@ pub struct MViewSinkExecutor {
     input: Box<dyn Executor>,
     table: MemTableRef,
     pk_col: Vec<usize>,
+    ingest_op: Vec<(Row, Option<Row>)>,
+    row_batch: Vec<(Row, bool)>,
 }
 
 impl MViewSinkExecutor {
@@ -18,14 +21,33 @@ impl MViewSinkExecutor {
             input,
             table,
             pk_col,
+            ingest_op: vec![],
+            row_batch: vec![],
         }
+    }
+
+    fn flush(&mut self, barrier: Barrier) -> Result<Message> {
+        let pk_num = &self.pk_col.len();
+        if *pk_num > 0 {
+            self.table.ingest(std::mem::take(&mut self.ingest_op))?;
+        } else {
+            self.table
+                .insert_batch(std::mem::take(&mut self.row_batch))?;
+        }
+        Ok(Message::Barrier(barrier))
     }
 }
 
 #[async_trait]
 impl Executor for MViewSinkExecutor {
     async fn next(&mut self) -> Result<Message> {
-        super::simple_executor_next(self).await
+        match self.input().next().await {
+            Ok(message) => match message {
+                Message::Chunk(chunk) => self.consume_chunk(chunk),
+                Message::Barrier(b) => self.flush(b),
+            },
+            Err(e) => Err(e),
+        }
     }
 
     fn schema(&self) -> &Schema {
@@ -45,9 +67,6 @@ impl SimpleExecutor for MViewSinkExecutor {
             visibility,
             ..
         } = &chunk;
-
-        let mut ingest_op = vec![];
-        let mut row_batch = vec![];
 
         let pk_num = &self.pk_col.len();
 
@@ -81,27 +100,22 @@ impl SimpleExecutor for MViewSinkExecutor {
             if *pk_num > 0 {
                 match op {
                     Insert | UpdateInsert => {
-                        ingest_op.push((pk_row, Some(row)));
+                        self.ingest_op.push((pk_row, Some(row)));
                     }
                     Delete | UpdateDelete => {
-                        ingest_op.push((pk_row, None));
+                        self.ingest_op.push((pk_row, None));
                     }
                 }
             } else {
                 match op {
                     Insert | UpdateInsert => {
-                        row_batch.push((row, true));
+                        self.row_batch.push((row, true));
                     }
                     Delete | UpdateDelete => {
-                        row_batch.push((row, false));
+                        self.row_batch.push((row, false));
                     }
                 }
             }
-        }
-        if *pk_num > 0 {
-            self.table.ingest(ingest_op)?;
-        } else {
-            self.table.insert_batch(row_batch)?;
         }
 
         Ok(Message::Chunk(chunk))
@@ -179,12 +193,21 @@ mod tests {
                     },
                 ],
             };
-            let source = MockSource::with_chunks(schema, vec![chunk1, chunk2]);
+            let source = MockSource::with_messages(
+                schema,
+                vec![
+                    Message::Chunk(chunk1),
+                    Message::Barrier(Barrier::default()),
+                    Message::Chunk(chunk2),
+                    Message::Barrier(Barrier::default()),
+                ],
+            );
             let mut sink_executor =
                 Box::new(MViewSinkExecutor::new(Box::new(source), table.clone(), pks));
 
+            sink_executor.next().await.unwrap();
             // First stream chunk. We check the existence of (3) -> (3,6)
-            if let Message::Chunk(_chunk) = sink_executor.next().await.unwrap() {
+            if let Message::Barrier(_) = sink_executor.next().await.unwrap() {
                 let value_row = Row(vec![Some(3.to_scalar_value())]);
                 let res_row = table.get(value_row);
                 if let Ok(res_row_in) = res_row {
@@ -199,8 +222,9 @@ mod tests {
                 unreachable!();
             }
 
+            sink_executor.next().await.unwrap();
             // Second stream chunk. We check the existence of (7) -> (7,8)
-            if let Message::Chunk(_chunk) = sink_executor.next().await.unwrap() {
+            if let Message::Barrier(_) = sink_executor.next().await.unwrap() {
                 // From (7) -> (7,8)
                 let value_row = Row(vec![Some(7.to_scalar_value())]);
                 let res_row = table.get(value_row);
@@ -276,15 +300,24 @@ mod tests {
                     },
                 ],
             };
-            let source = MockSource::with_chunks(schema, vec![chunk1, chunk2]);
+            let source = MockSource::with_messages(
+                schema,
+                vec![
+                    Message::Chunk(chunk1),
+                    Message::Barrier(Barrier::default()),
+                    Message::Chunk(chunk2),
+                    Message::Barrier(Barrier::default()),
+                ],
+            );
             let mut sink_executor = Box::new(MViewSinkExecutor::new(
                 Box::new(source),
                 table.clone(),
                 vec![],
             ));
 
+            sink_executor.next().await.unwrap();
             // First stream chunk. We check the existence of (1,4) -> (1)
-            if let Message::Chunk(_chunk) = sink_executor.next().await.unwrap() {
+            if let Message::Barrier(_) = sink_executor.next().await.unwrap() {
                 let value_row = Row(vec![Some(1.to_scalar_value()), Some(4.to_scalar_value())]);
                 let res_row = table.get(value_row);
                 if let Ok(res_row_in) = res_row {
@@ -299,8 +332,9 @@ mod tests {
                 unreachable!();
             }
 
+            sink_executor.next().await.unwrap();
             // Second stream chunk. We check the existence of (1,4) -> (2)
-            if let Message::Chunk(_chunk) = sink_executor.next().await.unwrap() {
+            if let Message::Barrier(_) = sink_executor.next().await.unwrap() {
                 let value_row = Row(vec![Some(1.to_scalar_value()), Some(4.to_scalar_value())]);
                 let res_row = table.get(value_row);
                 if let Ok(res_row_in) = res_row {

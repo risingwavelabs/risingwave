@@ -87,6 +87,13 @@ impl StreamManager {
             core: Mutex::new(StreamManagerCore::new(addr)),
         }
     }
+
+    /// TODO: this method should be removed or modified in the future
+    pub fn send_stop_barrier(&self) {
+        let core = self.core.lock().unwrap();
+        core.send_stop_barrier();
+    }
+
     pub fn drop_fragment(&self, fragments: &[u32]) -> Result<()> {
         let mut core = self.core.lock().unwrap();
         for id in fragments {
@@ -274,6 +281,18 @@ impl StreamManagerCore {
             Blackhole => Box::new(DispatchExecutor::new(input, BlackHoleDispatcher::new())),
         };
         Ok(dispatcher)
+    }
+
+    /// TODO: this method should be removed or modified in the future
+    fn send_stop_barrier(&self) {
+        for sender in &self.sender_placeholder {
+            sender
+                .unbounded_send(Message::Barrier(Barrier {
+                    epoch: 0,
+                    stop: true,
+                }))
+                .unwrap();
+        }
     }
 
     /// Create a chain of nodes and return the head executor.

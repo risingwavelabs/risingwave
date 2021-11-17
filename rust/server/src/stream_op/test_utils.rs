@@ -29,6 +29,14 @@ impl MockSource {
         }
     }
 
+    pub fn with_messages(schema: Schema, msgs: Vec<Message>) -> Self {
+        Self {
+            schema,
+            epoch: 0,
+            msgs: msgs.into(),
+        }
+    }
+
     pub fn with_chunks(schema: Schema, chunks: Vec<StreamChunk>) -> Self {
         Self {
             schema,
