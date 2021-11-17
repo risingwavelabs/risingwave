@@ -65,11 +65,14 @@ pub struct Table {
 
 impl Table {
     /// Open an existing SST from a pre-loaded [`Bytes`].
-    fn load(id: u64, content: Bytes, has_bloom_filter: bool) -> HummockResult<Self> {
+    fn load(id: u64, content: Bytes) -> HummockResult<Self> {
+        let index = Self::decode_index(&content[..])?;
+        let has_bloom_filter = !index.bloom_filter.is_empty();
+        let estimated_size = index.estimated_size;
         Ok(Table {
             id,
-            estimated_size: 0,
-            index: Self::decode_index(&content[..])?,
+            estimated_size,
+            index,
             content,
             has_bloom_filter,
         })
@@ -185,7 +188,7 @@ mod tests {
     #[test]
     fn test_table_load() {
         let table = super::builder::tests::generate_table();
-        let table = Table::load(0, table, false).unwrap();
+        let table = Table::load(0, table).unwrap();
         for i in 0..10 {
             table.block(i).unwrap();
         }

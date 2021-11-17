@@ -316,7 +316,7 @@ pub(super) mod tests {
         }
 
         let table = b.finish();
-        let table = Table::load(0, table, with_blooms).unwrap();
+        let table = Table::load(0, table).unwrap();
         assert_eq!(table.has_bloom_filter, with_blooms);
         for i in 0..key_count {
             let hash = farmhash::fingerprint32(user_key(format!("key_test_{}", i).as_bytes()));
