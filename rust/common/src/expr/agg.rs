@@ -3,7 +3,7 @@ use risingwave_pb::expr::agg_call::Type;
 use std::convert::TryFrom;
 
 /// Kind of aggregation function
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum AggKind {
     Min,
     Max,

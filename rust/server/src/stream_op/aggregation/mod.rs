@@ -15,6 +15,9 @@ pub use avg::*;
 mod keyed_state;
 pub use keyed_state::*;
 
+mod hash_kv;
+pub use hash_kv::*;
+
 use super::{
     Op, Ops, StreamingCountAgg, StreamingFloatMaxAgg, StreamingFloatMinAgg, StreamingFloatSumAgg,
     StreamingMaxAgg, StreamingMinAgg, StreamingSumAgg,
@@ -65,6 +68,14 @@ pub trait StreamingAggStateImpl: Any + std::fmt::Debug + DynClone + Send + Sync 
 }
 
 dyn_clone::clone_trait_object!(StreamingAggStateImpl);
+
+pub fn get_one_output_from_state_impl<B: ArrayBuilder + Into<ArrayBuilderImpl>>(
+    state: &dyn StreamingAggStateImpl,
+) -> Result<ArrayImpl> {
+    let mut builder: ArrayBuilderImpl = B::new(1).unwrap().into();
+    state.get_output(&mut builder)?;
+    Ok(builder.finish().unwrap())
+}
 
 /// [postgresql specification of aggregate functions](https://www.postgresql.org/docs/13/functions-aggregate.html)
 /// Most of the general-purpose aggregate functions have one input except for:

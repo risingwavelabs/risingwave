@@ -3,6 +3,7 @@ use risingwave_common::types::DataTypeRef;
 use std::slice;
 
 /// An aggregation function may accept 0, 1 or 2 arguments.
+#[derive(Clone)]
 pub enum AggArgs {
     /// `None` is used for aggregation function accepts 0 arguments, such as [`AggKind::RowCount`].
     None,
@@ -35,6 +36,7 @@ impl AggArgs {
 }
 
 /// Represents an aggregation function.
+#[derive(Clone)]
 pub struct AggCall {
     /// Aggregation Kind for constructing [`StreamingAggStateImpl`]
     pub kind: AggKind,
