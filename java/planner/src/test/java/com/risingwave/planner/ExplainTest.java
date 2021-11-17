@@ -32,6 +32,7 @@ public class ExplainTest extends SqlTestBase {
     var iterator = results.createIterator();
 
     assertTrue(iterator.next());
+    assertTrue(iterator.next());
     var row = iterator.getRow();
     assertEquals(1, row.size());
     assertTrue(row.get(0).encodeInText().contains("Scan"));

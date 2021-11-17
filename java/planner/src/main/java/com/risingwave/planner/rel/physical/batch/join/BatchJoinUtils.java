@@ -1,4 +1,4 @@
-package com.risingwave.planner.rules.physical.batch.join;
+package com.risingwave.planner.rel.physical.batch.join;
 
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
@@ -7,8 +7,8 @@ import org.apache.calcite.rel.core.JoinInfo;
 import org.apache.calcite.rel.core.JoinRelType;
 
 /** Utilities for batch join planning. */
-public class BatchJoinRules {
-  private BatchJoinRules() {}
+public class BatchJoinUtils {
+  private BatchJoinUtils() {}
 
   public static boolean isEquiJoin(JoinInfo joinInfo) {
     return joinInfo.nonEquiConditions.isEmpty() && !joinInfo.leftKeys.isEmpty();

@@ -2,7 +2,9 @@ package com.risingwave.planner.rel.physical.batch;
 
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
+import com.google.common.collect.ImmutableList;
 import com.google.protobuf.Any;
+import com.risingwave.planner.rel.common.dist.RwDistributionTraitDef;
 import com.risingwave.planner.rel.logical.RwLogicalProject;
 import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
 import com.risingwave.proto.plan.PlanNode;
@@ -17,8 +19,10 @@ import org.apache.calcite.rel.core.Project;
 import org.apache.calcite.rel.hint.RelHint;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.util.Pair;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+/** physical project operator */
 public class RwBatchProject extends Project implements RisingWaveBatchPhyRel {
   public RwBatchProject(
       RelOptCluster cluster,
@@ -51,6 +55,27 @@ public class RwBatchProject extends Project implements RisingWaveBatchPhyRel {
         .build();
   }
 
+  @Override
+  public RelNode convertToDistributed() {
+    return copy(
+        getTraitSet().replace(BATCH_DISTRIBUTED),
+        RelOptRule.convert(input, input.getTraitSet().replace(BATCH_DISTRIBUTED)),
+        getProjects(),
+        getRowType());
+  }
+
+  @Override
+  public Pair<RelTraitSet, List<RelTraitSet>> deriveTraits(
+      final RelTraitSet childTraits, final int childId) {
+    var newTraits = traitSet;
+    var dist = childTraits.getTrait(RwDistributionTraitDef.getInstance());
+    if (dist != null) {
+      newTraits = newTraits.plus(dist);
+    }
+    return Pair.of(newTraits, ImmutableList.of(childTraits));
+  }
+
+  /** Project converter rule between logical and physical. */
   public static class BatchProjectConverterRule extends ConverterRule {
     public static final BatchProjectConverterRule INSTANCE =
         Config.INSTANCE

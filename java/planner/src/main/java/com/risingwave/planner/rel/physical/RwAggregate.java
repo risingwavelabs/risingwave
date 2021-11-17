@@ -4,11 +4,15 @@ import static com.google.common.base.Preconditions.checkArgument;
 
 import com.google.common.collect.ImmutableMap;
 import com.risingwave.common.datatype.RisingWaveDataType;
+import com.risingwave.planner.rel.common.dist.RwDistributionTrait;
+import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.proto.expr.AggCall;
 import com.risingwave.proto.expr.InputRefExpr;
+import java.util.Collections;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelTraitSet;
+import org.apache.calcite.rel.RelDistribution;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.Aggregate;
 import org.apache.calcite.rel.core.AggregateCall;
@@ -31,6 +35,18 @@ public abstract class RwAggregate extends Aggregate {
           .put(SqlKind.MAX, AggCall.Type.MAX)
           .build();
 
+  /** derive Distribution trait for agg from input side. */
+  public static RwDistributionTrait aggDistributionDerive(
+      RwAggregate agg, RwDistributionTrait inputDistribution) {
+    if (inputDistribution.getType() == RelDistribution.Type.HASH_DISTRIBUTED) {
+      var disKeys = inputDistribution.getKeys();
+      if (disKeys.size() != 0 && Collections.max(disKeys) >= agg.getGroupCount()) {
+        return RwDistributions.RANDOM_DISTRIBUTED;
+      }
+    }
+    return inputDistribution;
+  }
+
   public RwAggregate(
       RelOptCluster cluster,
       RelTraitSet traitSet,
@@ -40,6 +56,10 @@ public abstract class RwAggregate extends Aggregate {
       @Nullable List<ImmutableBitSet> groupSets,
       List<AggregateCall> aggCalls) {
     super(cluster, traitSet, hints, input, groupSet, groupSets, aggCalls);
+  }
+
+  public int[] getGroupKeys() {
+    return groupSet.toArray();
   }
 
   protected AggCall serializeAggCall(AggregateCall call) {

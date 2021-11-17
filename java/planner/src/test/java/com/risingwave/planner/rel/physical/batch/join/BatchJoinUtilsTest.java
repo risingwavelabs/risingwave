@@ -1,6 +1,6 @@
-package com.risingwave.planner.rules.physical.batch.join;
+package com.risingwave.planner.rel.physical.batch.join;
 
-import static com.risingwave.planner.rules.physical.batch.join.BatchJoinRules.getJoinTypeProto;
+import static com.risingwave.planner.rel.physical.batch.join.BatchJoinUtils.getJoinTypeProto;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.risingwave.proto.plan.JoinType;
@@ -8,7 +8,7 @@ import org.apache.calcite.rel.core.JoinRelType;
 import org.junit.jupiter.api.Test;
 
 /** To make code coverage happy. */
-class BatchJoinRulesTest {
+class BatchJoinUtilsTest {
 
   @Test
   void getJoinTypeProtoTest() {

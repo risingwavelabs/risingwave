@@ -3,6 +3,7 @@ package com.risingwave.planner.planner.streaming;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.JOIN_REORDER;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.LOGICAL_CBO;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.LOGICAL_REWRITE;
+import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.STREAMING;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.SUBQUERY_REWRITE;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 import static com.risingwave.planner.rules.BatchRuleSets.LOGICAL_CONVERTER_RULES;
@@ -72,7 +73,7 @@ public class StreamPlanner implements Planner<StreamingPlan> {
   }
 
   private static OptimizerProgram buildLogicalOptimizerProgram() {
-    ChainedOptimizerProgram.Builder builder = ChainedOptimizerProgram.builder();
+    ChainedOptimizerProgram.Builder builder = ChainedOptimizerProgram.builder(STREAMING);
     // We use partial rules from batch planner until getting a RisingWave logical plan.
     builder.addLast(SUBQUERY_REWRITE, SubQueryRewriteProgram.INSTANCE);
 

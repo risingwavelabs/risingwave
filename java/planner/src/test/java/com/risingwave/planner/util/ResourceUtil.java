@@ -19,6 +19,8 @@ public class ResourceUtil {
   public static final String NAME_ATTR = "name";
   public static final String SQL_TAG = "sql";
   public static final String PLAN_TAG = "plan";
+  public static final String PHY_PLAN_TAG = "physical";
+  public static final String DIST_PLAN_TAG = "distributed";
   public static final String JSON_TAG = "json";
   public static final String PATH_TAG = "path";
 

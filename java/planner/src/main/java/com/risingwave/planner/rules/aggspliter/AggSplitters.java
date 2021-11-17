@@ -1,11 +1,10 @@
-package com.risingwave.planner.rules.physical.batch.aggregate;
+package com.risingwave.planner.rules.aggspliter;
 
-import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.rel.core.Aggregate;
+import org.apache.calcite.rex.RexBuilder;
 
 public class AggSplitters {
-  public static AggSplitter from(RelOptRuleCall optCall, Aggregate agg, int aggCallIdx) {
-    var rexBuilder = optCall.rel(0).getCluster().getRexBuilder();
+  public static AggSplitter from(RexBuilder rexBuilder, Aggregate agg, int aggCallIdx) {
     var groupCount = agg.getGroupCount();
     var originalAggCall = agg.getAggCallList().get(aggCallIdx - groupCount);
     switch (originalAggCall.getAggregation().getKind()) {

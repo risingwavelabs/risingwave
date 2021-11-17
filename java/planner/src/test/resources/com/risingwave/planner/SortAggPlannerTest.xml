@@ -25,7 +25,7 @@ order by
 	l_linestatus;
             ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="distributed">
             <![CDATA[
 RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0, 1]])
   RwBatchSort(sort0=[$0], sort1=[$1], dir0=[ASC], dir1=[ASC])
@@ -54,7 +54,7 @@ where
 	and l_quantity < 24;
             ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="distributed">
             <![CDATA[
 RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
   RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])

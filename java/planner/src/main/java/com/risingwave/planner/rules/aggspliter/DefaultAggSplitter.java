@@ -1,4 +1,4 @@
-package com.risingwave.planner.rules.physical.batch.aggregate;
+package com.risingwave.planner.rules.aggspliter;
 
 import org.apache.calcite.rel.core.AggregateCall;
 import org.apache.calcite.rex.RexBuilder;

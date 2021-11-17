@@ -1,11 +1,10 @@
-package com.risingwave.planner.rules.physical.batch.aggregate;
+package com.risingwave.planner.rules.aggspliter;
 
 import com.google.common.collect.Streams;
 import com.risingwave.planner.rel.logical.RwLogicalAggregate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
-import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.rel.RelCollation;
 import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelNode;
@@ -15,18 +14,21 @@ import org.apache.calcite.util.ImmutableBitSet;
 import org.apache.calcite.util.ImmutableIntList;
 
 /** Aggregation Helper Functions */
-public class AggRules {
+// duplicate with com.risingwave.planner.rules.distributed.agg.SplitUtils
+// compatible with historical streaming code(StreamingTwoPhaseAggRule)
+public class LogicalAggSplitUtils {
   /**
    * @param logicalAgg Logical Aggregation
-   * @param call The rule call context
    * @return A list of AggSplitter
    */
-  public static List<AggSplitter> getAggSplitters(
-      RwLogicalAggregate logicalAgg, RelOptRuleCall call) {
+  public static List<AggSplitter> getAggSplitters(RwLogicalAggregate logicalAgg) {
     return Streams.mapWithIndex(
             logicalAgg.getAggCallList().stream(),
             (aggCall, idx) ->
-                AggSplitters.from(call, logicalAgg, (int) (idx + logicalAgg.getGroupCount())))
+                AggSplitters.from(
+                    logicalAgg.getCluster().getRexBuilder(),
+                    logicalAgg,
+                    (int) (idx + logicalAgg.getGroupCount())))
         .collect(Collectors.toList());
   }
 

@@ -6,6 +6,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.protobuf.Any;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
+import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.logical.RwLogicalInsert;
 import com.risingwave.proto.plan.InsertNode;
 import com.risingwave.proto.plan.PlanNode;
@@ -57,6 +58,16 @@ public class RwBatchInsert extends TableModify implements RisingWaveBatchPhyRel 
         getCatalogReader(),
         sole(inputs),
         getUpdateColumnList());
+  }
+
+  @Override
+  public RelNode convertToDistributed() {
+    return copy(
+        getTraitSet().replace(BATCH_DISTRIBUTED).plus(RwDistributions.SINGLETON),
+        ImmutableList.of(
+            RelOptRule.convert(
+                input,
+                input.getTraitSet().replace(BATCH_DISTRIBUTED).plus(RwDistributions.SINGLETON))));
   }
 
   @Override

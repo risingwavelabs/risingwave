@@ -14,14 +14,19 @@ import org.apache.calcite.tools.Program;
 import org.apache.calcite.tools.Programs;
 import org.apache.calcite.tools.RuleSet;
 
+/** Calcite's Volcano CBO Optimizer */
 public class VolcanoOptimizerProgram implements OptimizerProgram {
   private final ImmutableList<RelOptRule> rules;
   private final RelTrait[] requitedOutputTraits;
+  private boolean topDownOpt;
 
   private VolcanoOptimizerProgram(
-      ImmutableList<RelOptRule> rules, ImmutableList<RelTrait> requitedOutputTraits) {
+      ImmutableList<RelOptRule> rules,
+      ImmutableList<RelTrait> requitedOutputTraits,
+      boolean topDownOpt) {
     this.rules = rules;
     this.requitedOutputTraits = requitedOutputTraits.toArray(new RelTrait[0]);
+    this.topDownOpt = topDownOpt;
   }
 
   @Override
@@ -30,6 +35,7 @@ public class VolcanoOptimizerProgram implements OptimizerProgram {
 
     // Ugly part of calcite...
     VolcanoPlanner planner = (VolcanoPlanner) root.getCluster().getPlanner();
+    planner.setTopDownOpt(topDownOpt);
 
     Program optProgram = Programs.ofRules(rules);
 
@@ -40,9 +46,11 @@ public class VolcanoOptimizerProgram implements OptimizerProgram {
     return new Builder();
   }
 
+  /** Builder of the VolcanoOptimizerProgram */
   public static class Builder {
     private final List<RelOptRule> rules = new ArrayList<>();
     private final List<RelTrait> requiredOutputTraits = new ArrayList<>();
+    private boolean topDownOpt = false;
 
     public Builder addRules(RuleSet ruleSet) {
       ruleSet.forEach(rules::add);
@@ -54,9 +62,14 @@ public class VolcanoOptimizerProgram implements OptimizerProgram {
       return this;
     }
 
+    public Builder setTopDownOpt(boolean value) {
+      topDownOpt = value;
+      return this;
+    }
+
     public VolcanoOptimizerProgram build() {
       return new VolcanoOptimizerProgram(
-          ImmutableList.copyOf(rules), ImmutableList.copyOf(requiredOutputTraits));
+          ImmutableList.copyOf(rules), ImmutableList.copyOf(requiredOutputTraits), topDownOpt);
     }
   }
 }

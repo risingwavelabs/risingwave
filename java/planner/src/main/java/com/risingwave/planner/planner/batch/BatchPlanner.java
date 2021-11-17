@@ -1,18 +1,19 @@
 package com.risingwave.planner.planner.batch;
 
-import static com.risingwave.planner.planner.PlannerUtils.isSingleMode;
+import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase;
+import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.DISTRIBUTED;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.JOIN_REORDER;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.LOGICAL_CBO;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.LOGICAL_REWRITE;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.PHYSICAL;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.SUBQUERY_REWRITE;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
+import static com.risingwave.planner.rules.BatchRuleSets.DISTRIBUTED_CONVERTER_RULES;
+import static com.risingwave.planner.rules.BatchRuleSets.DISTRIBUTION_RULES;
 import static com.risingwave.planner.rules.BatchRuleSets.LOGICAL_CONVERTER_RULES;
 import static com.risingwave.planner.rules.BatchRuleSets.LOGICAL_OPTIMIZATION_RULES;
 import static com.risingwave.planner.rules.BatchRuleSets.LOGICAL_REWRITE_RULES;
-import static com.risingwave.planner.rules.BatchRuleSets.PHYSICAL_AGG_RULES;
 import static com.risingwave.planner.rules.BatchRuleSets.PHYSICAL_CONVERTER_RULES;
-import static com.risingwave.planner.rules.BatchRuleSets.PHYSICAL_JOIN_RULES;
 
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.planner.planner.Planner;
@@ -41,20 +42,39 @@ public class BatchPlanner implements Planner<BatchPlan> {
 
   @Override
   public BatchPlan plan(SqlNode ast, ExecutionContext context) {
+    return planDistributed(ast, context);
+  }
+
+  private RelNode plan(SqlNode ast, ExecutionContext context, OptimizerPhase optimizeLevel) {
     SqlConverter sqlConverter = SqlConverter.builder(context).build();
     RelNode rawPlan = sqlConverter.toRel(ast).rel;
 
-    OptimizerProgram optimizerProgram = buildOptimizerProgram(!isSingleMode(context));
+    OptimizerProgram optimizerProgram = buildOptimizerProgram(optimizeLevel);
+    return optimizerProgram.optimize(rawPlan, context);
+  }
 
-    RelNode result = optimizerProgram.optimize(rawPlan, context);
+  public RelNode planLogical(SqlNode ast, ExecutionContext context) {
+    RelNode result = plan(ast, context, LOGICAL_CBO);
+    log.info("Create logical plan:\n {}", ExplainWriter.explainPlan(result));
+    return result;
+  }
+
+  public BatchPlan planPhysical(SqlNode ast, ExecutionContext context) {
+    RelNode result = plan(ast, context, PHYSICAL);
     RisingWaveBatchPhyRel root = (RisingWaveBatchPhyRel) result;
     log.info("Create physical plan:\n {}", ExplainWriter.explainPlan(root));
-
     return new BatchPlan(root);
   }
 
-  private static OptimizerProgram buildOptimizerProgram(boolean isDistributed) {
-    ChainedOptimizerProgram.Builder builder = ChainedOptimizerProgram.builder();
+  public BatchPlan planDistributed(SqlNode ast, ExecutionContext context) {
+    RelNode result = plan(ast, context, DISTRIBUTED);
+    RisingWaveBatchPhyRel root = (RisingWaveBatchPhyRel) result;
+    log.info("Create distributed plan:\n {}", ExplainWriter.explainPlan(root));
+    return new BatchPlan(root);
+  }
+
+  private static OptimizerProgram buildOptimizerProgram(OptimizerPhase optimizeLevel) {
+    ChainedOptimizerProgram.Builder builder = ChainedOptimizerProgram.builder(optimizeLevel);
 
     builder.addLast(SUBQUERY_REWRITE, SubQueryRewriteProgram.INSTANCE);
 
@@ -75,15 +95,19 @@ public class BatchPlanner implements Planner<BatchPlan> {
     var physical =
         VolcanoOptimizerProgram.builder()
             .addRules(PHYSICAL_CONVERTER_RULES)
-            .addRules(PHYSICAL_AGG_RULES)
-            .addRules(PHYSICAL_JOIN_RULES)
-            .addRequiredOutputTraits(RisingWaveBatchPhyRel.BATCH_PHYSICAL);
-
-    if (isDistributed) {
-      physical.addRequiredOutputTraits(RwDistributions.SINGLETON);
-    }
-
+            .addRequiredOutputTraits(RisingWaveBatchPhyRel.BATCH_PHYSICAL)
+            .setTopDownOpt(true);
     builder.addLast(PHYSICAL, physical.build());
+
+    var distributed =
+        VolcanoOptimizerProgram.builder()
+            .addRules(DISTRIBUTED_CONVERTER_RULES)
+            .addRules(DISTRIBUTION_RULES)
+            .addRequiredOutputTraits(RisingWaveBatchPhyRel.BATCH_DISTRIBUTED)
+            .addRequiredOutputTraits(RwDistributions.SINGLETON)
+            .setTopDownOpt(true);
+
+    builder.addLast(DISTRIBUTED, distributed.build());
 
     return builder.build();
   }

@@ -8,18 +8,24 @@ import com.risingwave.planner.rel.logical.RwLogicalProject;
 import com.risingwave.planner.rel.logical.RwLogicalScan;
 import com.risingwave.planner.rel.logical.RwLogicalSort;
 import com.risingwave.planner.rel.logical.RwLogicalValues;
+import com.risingwave.planner.rel.physical.batch.RisingWaveBatchPhyRel;
 import com.risingwave.planner.rel.physical.batch.RwBatchFilter;
+import com.risingwave.planner.rel.physical.batch.RwBatchHashAgg;
 import com.risingwave.planner.rel.physical.batch.RwBatchInsert;
+import com.risingwave.planner.rel.physical.batch.RwBatchMaterializedViewScan;
 import com.risingwave.planner.rel.physical.batch.RwBatchProject;
 import com.risingwave.planner.rel.physical.batch.RwBatchSort;
+import com.risingwave.planner.rel.physical.batch.RwBatchSortAgg;
+import com.risingwave.planner.rel.physical.batch.RwBatchStreamScan;
+import com.risingwave.planner.rel.physical.batch.RwBatchTableScan;
 import com.risingwave.planner.rel.physical.batch.RwBatchValues;
+import com.risingwave.planner.rel.physical.batch.join.RwBatchHashJoin;
+import com.risingwave.planner.rel.physical.batch.join.RwBatchNestLoopJoin;
+import com.risingwave.planner.rules.distributed.agg.TwoPhaseAggRule;
+import com.risingwave.planner.rules.distributed.join.BroadcastJoinRule;
+import com.risingwave.planner.rules.distributed.join.ShuffleJoinRule;
 import com.risingwave.planner.rules.logical.ProjectToTableScanRule;
-import com.risingwave.planner.rules.physical.batch.BatchExpandConverterRule;
 import com.risingwave.planner.rules.physical.batch.BatchScanConverterRule;
-import com.risingwave.planner.rules.physical.batch.aggregate.BatchHashAggRule;
-import com.risingwave.planner.rules.physical.batch.aggregate.BatchSortAggRule;
-import com.risingwave.planner.rules.physical.batch.join.BatchHashJoinRule;
-import com.risingwave.planner.rules.physical.batch.join.BatchNestedLoopJoinRule;
 import org.apache.calcite.rel.rules.CoreRules;
 import org.apache.calcite.rel.rules.PruneEmptyRules;
 import org.apache.calcite.tools.RuleSet;
@@ -109,20 +115,34 @@ public class BatchRuleSets {
 
   public static final RuleSet PHYSICAL_CONVERTER_RULES =
       RuleSets.ofList(
-          BatchExpandConverterRule.Config.DEFAULT.toRule(),
           RwBatchFilter.BatchFilterConverterRule.INSTANCE,
           RwBatchProject.BatchProjectConverterRule.INSTANCE,
           BatchScanConverterRule.INSTANCE,
           RwBatchSort.RwBatchSortConverterRule.INSTANCE,
           RwBatchInsert.BatchInsertConverterRule.INSTANCE,
-          RwBatchValues.BatchValuesConverterRule.INSTANCE);
+          RwBatchValues.BatchValuesConverterRule.INSTANCE,
+          RwBatchHashJoin.BatchHashJoinConverterRule.INSTANCE,
+          RwBatchNestLoopJoin.BatchNestLoopJoinConverterRule.INSTANCE,
+          RwBatchHashAgg.BatchHashAggConverterRule.INSTANCE,
+          RwBatchSortAgg.BatchSortAggConverterRule.INSTANCE);
 
-  public static final RuleSet PHYSICAL_AGG_RULES =
+  public static final RuleSet DISTRIBUTED_CONVERTER_RULES =
       RuleSets.ofList(
-          BatchHashAggRule.Config.DEFAULT.toRule(), BatchSortAggRule.Config.DEFAULT.toRule());
+          RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchFilter.class),
+          RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchProject.class),
+          RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchSort.class),
+          RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchValues.class),
+          RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchInsert.class),
+          RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchTableScan.class),
+          RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchStreamScan.class),
+          RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchMaterializedViewScan.class));
 
-  public static final RuleSet PHYSICAL_JOIN_RULES =
+  public static final RuleSet DISTRIBUTION_RULES =
       RuleSets.ofList(
-          BatchHashJoinRule.Config.DEFAULT.toRule(),
-          BatchNestedLoopJoinRule.Config.DEFAULT.toRule());
+          BroadcastJoinRule.INSTANCE,
+          ShuffleJoinRule.INSTANCE,
+          // FIXME: currently cardinality estimation is inaccurate without enough statistics to
+          // determine shuffleAgg or 2phaseAgg
+          //          ShuffleAggRule.INSTANCE,
+          TwoPhaseAggRule.INSTANCE);
 }

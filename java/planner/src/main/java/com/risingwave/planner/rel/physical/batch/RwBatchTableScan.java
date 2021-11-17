@@ -1,8 +1,5 @@
 package com.risingwave.planner.rel.physical.batch;
 
-import static com.risingwave.execution.context.ExecutionContext.contextOf;
-import static com.risingwave.planner.planner.PlannerUtils.isSingleMode;
-
 import com.google.common.collect.ImmutableList;
 import com.google.protobuf.Any;
 import com.risingwave.catalog.ColumnCatalog;
@@ -18,7 +15,7 @@ import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.plan.RelTraitSet;
-import org.apache.calcite.rel.RelDistribution;
+import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.hint.RelHint;
 
 /** Executor to scan from a columnar table */
@@ -41,15 +38,20 @@ public class RwBatchTableScan extends RwScan implements RisingWaveBatchPhyRel {
       ImmutableList<ColumnCatalog.ColumnId> columnIds) {
     TableCatalog tableCatalog = table.unwrapOrThrow(TableCatalog.class);
 
-    RelDistribution distTrait =
-        isSingleMode(contextOf(cluster))
-            ? RwDistributions.SINGLETON
-            : RwDistributions.RANDOM_DISTRIBUTED;
-
-    RelTraitSet newTraitSet = traitSet.plus(RisingWaveBatchPhyRel.BATCH_PHYSICAL).plus(distTrait);
+    RelTraitSet newTraitSet = traitSet.plus(RisingWaveBatchPhyRel.BATCH_PHYSICAL);
 
     return new RwBatchTableScan(
         cluster, newTraitSet, Collections.emptyList(), table, tableCatalog.getId(), columnIds);
+  }
+
+  public RwBatchTableScan copy(RelTraitSet traitSet) {
+    return new RwBatchTableScan(
+        getCluster(), traitSet, getHints(), getTable(), getTableId(), getColumnIds());
+  }
+
+  @Override
+  public RelNode convertToDistributed() {
+    return copy(getTraitSet().plus(BATCH_DISTRIBUTED).plus(RwDistributions.RANDOM_DISTRIBUTED));
   }
 
   @Override

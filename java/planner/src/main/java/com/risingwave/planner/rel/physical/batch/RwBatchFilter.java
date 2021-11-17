@@ -2,11 +2,14 @@ package com.risingwave.planner.rel.physical.batch;
 
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
+import com.google.common.collect.ImmutableList;
 import com.google.protobuf.Any;
+import com.risingwave.planner.rel.common.dist.RwDistributionTraitDef;
 import com.risingwave.planner.rel.logical.RwLogicalFilter;
 import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
 import com.risingwave.proto.plan.FilterNode;
 import com.risingwave.proto.plan.PlanNode;
+import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelTraitSet;
@@ -15,8 +18,10 @@ import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.convert.ConverterRule;
 import org.apache.calcite.rel.core.Filter;
 import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.util.Pair;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+/** physical filter operator */
 public class RwBatchFilter extends Filter implements RisingWaveBatchPhyRel {
   protected RwBatchFilter(
       RelOptCluster cluster, RelTraitSet traits, RelNode child, RexNode condition) {
@@ -46,6 +51,26 @@ public class RwBatchFilter extends Filter implements RisingWaveBatchPhyRel {
     return super.explainTerms(pw);
   }
 
+  @Override
+  public RelNode convertToDistributed() {
+    return copy(
+        getTraitSet().replace(BATCH_DISTRIBUTED),
+        RelOptRule.convert(input, input.getTraitSet().replace(BATCH_DISTRIBUTED)),
+        getCondition());
+  }
+
+  @Override
+  public Pair<RelTraitSet, List<RelTraitSet>> deriveTraits(
+      final RelTraitSet childTraits, final int childId) {
+    var newTraits = traitSet;
+    var dist = childTraits.getTrait(RwDistributionTraitDef.getInstance());
+    if (dist != null) {
+      newTraits = newTraits.plus(dist);
+    }
+    return Pair.of(newTraits, ImmutableList.of(childTraits));
+  }
+
+  /** Filter converter rule between logical and physical. */
   public static class BatchFilterConverterRule extends ConverterRule {
     public static final BatchFilterConverterRule INSTANCE =
         Config.INSTANCE

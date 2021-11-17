@@ -1,4 +1,4 @@
-package com.risingwave.planner.rules.physical.batch.aggregate;
+package com.risingwave.planner.rules.aggspliter;
 
 import static com.google.common.base.Verify.verify;
 

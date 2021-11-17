@@ -1,18 +1,29 @@
 package com.risingwave.planner.rel.physical.batch;
 
+import static com.risingwave.common.config.BatchPlannerConfigurations.ENABLE_HASH_AGG;
+import static com.risingwave.execution.context.ExecutionContext.contextOf;
+import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
+
+import com.google.common.collect.ImmutableList;
 import com.google.protobuf.Any;
+import com.risingwave.planner.rel.common.dist.RwDistributionTraitDef;
+import com.risingwave.planner.rel.logical.RwLogicalAggregate;
 import com.risingwave.planner.rel.physical.RwAggregate;
 import com.risingwave.proto.plan.HashAggNode;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.proto.plan.SimpleAggNode;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
+import org.apache.calcite.plan.RelOptRule;
+import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.convert.ConverterRule;
 import org.apache.calcite.rel.core.Aggregate;
 import org.apache.calcite.rel.core.AggregateCall;
 import org.apache.calcite.rel.hint.RelHint;
 import org.apache.calcite.util.ImmutableBitSet;
+import org.apache.calcite.util.Pair;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 /** Plan for adhoc HashAgg executor. */
@@ -78,5 +89,58 @@ public class RwBatchHashAgg extends RwAggregate implements RisingWaveBatchPhyRel
       List<AggregateCall> aggCalls) {
     return new RwBatchHashAgg(
         getCluster(), traitSet, getHints(), input, groupSet, getGroupSets(), aggCalls);
+  }
+
+  @Override
+  public Pair<RelTraitSet, List<RelTraitSet>> deriveTraits(
+      final RelTraitSet childTraits, final int childId) {
+    var newTraits = traitSet;
+    var dist = childTraits.getTrait(RwDistributionTraitDef.getInstance());
+    if (dist != null) {
+      newTraits = newTraits.plus(aggDistributionDerive(this, dist));
+    }
+    return Pair.of(newTraits, ImmutableList.of(input.getTraitSet()));
+  }
+
+  /** HashAgg converter rule between logical and physical. */
+  public static class BatchHashAggConverterRule extends ConverterRule {
+    public static final RwBatchHashAgg.BatchHashAggConverterRule INSTANCE =
+        Config.INSTANCE
+            .withInTrait(LOGICAL)
+            .withOutTrait(BATCH_PHYSICAL)
+            .withRuleFactory(RwBatchHashAgg.BatchHashAggConverterRule::new)
+            .withOperandSupplier(t -> t.operand(RwLogicalAggregate.class).anyInputs())
+            .withDescription("Converting logical agg to batch hash agg.")
+            .as(Config.class)
+            .toRule(RwBatchHashAgg.BatchHashAggConverterRule.class);
+
+    protected BatchHashAggConverterRule(Config config) {
+      super(config);
+    }
+
+    @Override
+    public boolean matches(RelOptRuleCall call) {
+      var agg = (RwLogicalAggregate) call.rel(0);
+      // we treat simple agg(without groups) as a special sortAgg.
+      if (agg.isSimpleAgg()) {
+        return false;
+      }
+      return contextOf(call).getConf().get(ENABLE_HASH_AGG);
+    }
+
+    @Override
+    public @Nullable RelNode convert(RelNode rel) {
+      var agg = (RwLogicalAggregate) rel;
+      RelTraitSet requiredInputTraits = agg.getInput().getTraitSet().replace(BATCH_PHYSICAL);
+      RelNode newInput = RelOptRule.convert(agg.getInput(), requiredInputTraits);
+      return new RwBatchHashAgg(
+          rel.getCluster(),
+          agg.getTraitSet().plus(BATCH_PHYSICAL),
+          agg.getHints(),
+          newInput,
+          agg.getGroupSet(),
+          agg.getGroupSets(),
+          agg.getAggCallList());
+    }
   }
 }

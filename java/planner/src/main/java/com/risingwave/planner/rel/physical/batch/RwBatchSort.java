@@ -1,11 +1,11 @@
 package com.risingwave.planner.rel.physical.batch;
 
-import static com.risingwave.execution.context.ExecutionContext.contextOf;
-import static com.risingwave.planner.planner.PlannerUtils.isSingleMode;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
+import com.google.common.collect.ImmutableList;
 import com.google.protobuf.Any;
 import com.risingwave.common.datatype.RisingWaveDataType;
+import com.risingwave.planner.rel.common.dist.RwDistributionTraitDef;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.logical.RwLogicalSort;
 import com.risingwave.proto.data.DataType;
@@ -28,10 +28,12 @@ import org.apache.calcite.rel.core.Sort;
 import org.apache.calcite.rex.RexInputRef;
 import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.util.Pair;
 import org.apache.commons.lang3.SerializationException;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 /** Sort in Batch convention */
+// TODO: convert to distributed plan when offset != NULL
 public class RwBatchSort extends Sort implements RisingWaveBatchPhyRel {
   public RwBatchSort(
       RelOptCluster cluster, RelTraitSet traits, RelNode child, RelCollation collation) {
@@ -46,6 +48,15 @@ public class RwBatchSort extends Sort implements RisingWaveBatchPhyRel {
       @Nullable RexNode offset,
       @Nullable RexNode fetch) {
     super(cluster, traits, child, collation, offset, fetch);
+    if (offset != null) {
+      throw new UnsupportedOperationException("sort with offset is not support");
+    }
+  }
+
+  public static RwBatchSort create(RelNode input, RelCollation collection) {
+    RelOptCluster cluster = input.getCluster();
+    RelTraitSet traitSet = input.getTraitSet().plus(BATCH_PHYSICAL).plus(collection);
+    return new RwBatchSort(cluster, traitSet, input, collection);
   }
 
   @Override
@@ -108,6 +119,48 @@ public class RwBatchSort extends Sort implements RisingWaveBatchPhyRel {
     return new RwBatchSort(getCluster(), traitSet, newInput, newCollation, offset, fetch);
   }
 
+  @Override
+  public boolean isEnforcer() {
+    if (getTraitSet().contains(BATCH_DISTRIBUTED)) {
+      return false;
+    } else {
+      return super.isEnforcer();
+    }
+  }
+
+  @Override
+  public RelNode convertToDistributed() {
+    if (fetch == null) {
+      return copy(
+          getTraitSet().replace(BATCH_DISTRIBUTED),
+          RelOptRule.convert(input, input.getTraitSet().replace(BATCH_DISTRIBUTED)),
+          getCollation());
+    }
+    if (offset == null) {
+      return copy(
+          getTraitSet().replace(BATCH_DISTRIBUTED).plus(RwDistributions.SINGLETON),
+          RelOptRule.convert(
+              input,
+              input.getTraitSet().replace(BATCH_DISTRIBUTED).plus(RwDistributions.SINGLETON)),
+          getCollation());
+    }
+    throw new UnsupportedOperationException("sort with offset is not support");
+  }
+
+  @Override
+  public Pair<RelTraitSet, List<RelTraitSet>> deriveTraits(
+      final RelTraitSet childTraits, final int childId) {
+    if (fetch != null) {
+      return null;
+    }
+    var newTraits = traitSet;
+    var dist = childTraits.getTrait(RwDistributionTraitDef.getInstance());
+    if (dist != null) {
+      newTraits = newTraits.plus(dist);
+    }
+    return Pair.of(newTraits, ImmutableList.of(childTraits));
+  }
+
   /** Rule for converting sort in logical convention to batch convention */
   public static class RwBatchSortConverterRule extends ConverterRule {
     public static final RwBatchSortConverterRule INSTANCE =
@@ -133,49 +186,15 @@ public class RwBatchSort extends Sort implements RisingWaveBatchPhyRel {
       var newTraits =
           logicalSort.getTraitSet().plus(BATCH_PHYSICAL).plus(logicalSort.getCollation());
 
-      if (isSingleMode(contextOf(rel.getCluster()))) {
-        var newInput = RelOptRule.convert(logicalSort.getInput(), requiredInputTraits);
+      var newInput = RelOptRule.convert(logicalSort.getInput(), requiredInputTraits);
 
-        return new RwBatchSort(
-            rel.getCluster(),
-            newTraits,
-            newInput,
-            logicalSort.getCollation(),
-            logicalSort.offset,
-            logicalSort.fetch);
-      } else {
-        var distTrait = RwDistributions.hash(getDistributionFields(logicalSort));
-        requiredInputTraits = requiredInputTraits.plus(distTrait);
-
-        var newInput = RelOptRule.convert(logicalSort.getInput(), requiredInputTraits);
-
-        newTraits = newTraits.plus(distTrait);
-
-        var batchSort =
-            new RwBatchSort(
-                rel.getCluster(),
-                newTraits,
-                newInput,
-                logicalSort.getCollation(),
-                logicalSort.offset,
-                logicalSort.fetch);
-
-        var exchange = RwBatchExchange.create(batchSort, RwDistributions.SINGLETON);
-        if (logicalSort.fetch != null || logicalSort.offset != null) {
-          var limit =
-              new RwBatchLimit(
-                  rel.getCluster(), newTraits, exchange, logicalSort.offset, logicalSort.fetch);
-          return limit;
-        } else {
-          return exchange;
-        }
-      }
+      return new RwBatchSort(
+          rel.getCluster(),
+          newTraits,
+          newInput,
+          logicalSort.getCollation(),
+          logicalSort.offset,
+          logicalSort.fetch);
     }
-  }
-
-  private static int[] getDistributionFields(Sort sort) {
-    return sort.getCollation().getFieldCollations().stream()
-        .mapToInt(RelFieldCollation::getFieldIndex)
-        .toArray();
   }
 }

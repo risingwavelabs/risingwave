@@ -5,7 +5,7 @@
 select * from t
             ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physical">
             <![CDATA[
 RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
 ]]>
@@ -18,7 +18,7 @@ RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
 insert into t values(1,4,2), (2,3,3), (3,4,4), (4,3,5)
             ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physical">
             <![CDATA[
 RwBatchInsert(table=[[test_schema, t]], operation=[INSERT], flattened=[false])
   RwBatchValues(tuples=[[{ 1, 4, 2 }, { 2, 3, 3 }, { 3, 4, 4 }, { 4, 3, 5 }]])
@@ -34,7 +34,7 @@ RwBatchInsert(table=[[test_schema, t]], operation=[INSERT], flattened=[false])
 select v3, v1+v2, v1-v2, v1*v2, v1/v2 from t
             ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physical">
             <![CDATA[
 RwBatchProject(v3=[$2], EXPR$1=[+($0, $1)], EXPR$2=[-($0, $1)], EXPR$3=[*($0, $1)], EXPR$4=[/($0, $1)])
   RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
@@ -48,7 +48,7 @@ RwBatchProject(v3=[$2], EXPR$1=[+($0, $1)], EXPR$2=[-($0, $1)], EXPR$3=[*($0, $1
 select * from t where v1 > 1 and v2 > 1 and v3 > 1
             ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physical">
             <![CDATA[
 RwBatchFilter(condition=[AND(>($0, 1), >($1, 1), >($2, 1))])
   RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
@@ -63,7 +63,7 @@ RwBatchFilter(condition=[AND(>($0, 1), >($1, 1), >($2, 1))])
 select sum(v3) from t
             ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physical">
             <![CDATA[
 RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)])
   RwBatchTableScan(table=[[test_schema, t]], columns=[v3])
@@ -77,7 +77,7 @@ RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)])
 select sum(v3), sum(v2), max(v1), min(v3) from t
             ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physical">
             <![CDATA[
 RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)], EXPR$2=[MAX($2)], EXPR$3=[MIN($0)])
   RwBatchTableScan(table=[[test_schema, t]], columns=[v3,v2,v1])
@@ -91,7 +91,7 @@ RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)], EXPR$2=[MAX($2)],
 select sum(v1), sum(v2) from t group by v1
             ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physical">
             <![CDATA[
 RwBatchProject(EXPR$0=[$1], EXPR$1=[$2])
   RwBatchHashAgg(group=[{0}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
@@ -106,7 +106,7 @@ RwBatchProject(EXPR$0=[$1], EXPR$1=[$2])
 select sum(v1+v2),sum(v1+v3) from t
             ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physical">
             <![CDATA[
 RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
   RwBatchProject($f0=[+($0, $1)], $f1=[+($0, $2)])
@@ -121,7 +121,7 @@ RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
 select sum(v1), sum(v3) from t
             ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physical">
             <![CDATA[
 RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
   RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v3])
@@ -135,7 +135,7 @@ RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
 select min(v1) from t
             ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physical">
             <![CDATA[
 RwBatchSortAgg(group=[{}], EXPR$0=[MIN($0)])
   RwBatchTableScan(table=[[test_schema, t]], columns=[v1])
@@ -149,7 +149,7 @@ RwBatchSortAgg(group=[{}], EXPR$0=[MIN($0)])
 select max(v1) from t
             ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physical">
             <![CDATA[
 RwBatchSortAgg(group=[{}], EXPR$0=[MAX($0)])
   RwBatchTableScan(table=[[test_schema, t]], columns=[v1])
@@ -163,7 +163,7 @@ RwBatchSortAgg(group=[{}], EXPR$0=[MAX($0)])
 select max(v1) from t where v2>3
     ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physical">
             <![CDATA[
 RwBatchSortAgg(group=[{}], EXPR$0=[MAX($0)])
   RwBatchProject(v1=[$0])
@@ -179,7 +179,7 @@ RwBatchSortAgg(group=[{}], EXPR$0=[MAX($0)])
 select avg(v2) from t
             ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physical">
             <![CDATA[
 RwBatchSortAgg(group=[{}], EXPR$0=[AVG($0)])
   RwBatchTableScan(table=[[test_schema, t]], columns=[v2])
@@ -193,7 +193,7 @@ RwBatchSortAgg(group=[{}], EXPR$0=[AVG($0)])
 select sum(v1), v2 from t group by v2
             ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physical">
             <![CDATA[
 RwBatchProject(EXPR$0=[$1], v2=[$0])
   RwBatchHashAgg(group=[{0}], EXPR$0=[SUM($1)])
@@ -208,7 +208,7 @@ RwBatchProject(EXPR$0=[$1], v2=[$0])
 select * from t order by v1;
 ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physical">
             <![CDATA[
 RwBatchSort(sort0=[$0], dir0=[ASC])
   RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
@@ -224,7 +224,7 @@ RwBatchSort(sort0=[$0], dir0=[ASC])
 select * from t order by v1 limit 1;
 ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physical">
             <![CDATA[
 RwBatchSort(sort0=[$0], dir0=[ASC], fetch=[1])
   RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
@@ -241,7 +241,7 @@ RwBatchSort(sort0=[$0], dir0=[ASC], fetch=[1])
 select 100.0::DOUBLE/8.0::DOUBLE
 ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physical">
             <![CDATA[
 RwBatchProject(EXPR$0=[/(100.0:DOUBLE, 8.0:DOUBLE)])
   RwBatchValues(tuples=[[{ 0 }]])
@@ -254,7 +254,7 @@ RwBatchProject(EXPR$0=[/(100.0:DOUBLE, 8.0:DOUBLE)])
             select v1 from t2 where v1 >= '1970-01-01'
 ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physical">
             <![CDATA[
 RwBatchFilter(condition=[>=($0, 1970-01-01)])
   RwBatchTableScan(table=[[test_schema, t2]], columns=[v1])
@@ -267,7 +267,7 @@ RwBatchFilter(condition=[>=($0, 1970-01-01)])
             select * from t, t3 where t.v1 > t3.v1;
 ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physical">
             <![CDATA[
 RwBatchNestLoopJoin(condition=[>($0, $3)], joinType=[inner])
   RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
@@ -283,7 +283,7 @@ RwBatchNestLoopJoin(condition=[>($0, $3)], joinType=[inner])
             insert into t4 values(NULL);
 ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physical">
             <![CDATA[
 RwBatchInsert(table=[[test_schema, t4]], operation=[INSERT], flattened=[false])
   RwBatchValues(tuples=[[{ null }]])
@@ -298,14 +298,11 @@ RwBatchInsert(table=[[test_schema, t4]], operation=[INSERT], flattened=[false])
             select * from t, t3 where t.v1 = t3.v1;
 ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physical">
             <![CDATA[
 RwBatchHashJoin(condition=[=($0, $3)], joinType=[inner])
-  RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-    RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
-  RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-    RwBatchTableScan(table=[[test_schema, t3]], columns=[v1])
-]]>
+  RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
+  RwBatchTableScan(table=[[test_schema, t3]], columns=[v1])]]>
         </Resource>
         <Resource name="json" path="batch/basic/hash_inner_join">
         </Resource>

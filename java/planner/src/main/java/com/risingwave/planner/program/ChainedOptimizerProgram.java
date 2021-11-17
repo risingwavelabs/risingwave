@@ -17,16 +17,20 @@ import org.apache.calcite.rel.RelNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/** chain OptimizerPrograms together, and do them one by one */
 public class ChainedOptimizerProgram implements OptimizerProgram {
   private static final Logger LOGGER = LoggerFactory.getLogger(ChainedOptimizerProgram.class);
   private final ImmutableList<OptimizerPhase> phases;
   private final ImmutableMap<OptimizerPhase, OptimizerProgram> optimizers;
+  private OptimizerPhase optimizeLevel;
 
   private ChainedOptimizerProgram(
       ImmutableList<OptimizerPhase> phases,
-      ImmutableMap<OptimizerPhase, OptimizerProgram> optimizers) {
+      ImmutableMap<OptimizerPhase, OptimizerProgram> optimizers,
+      OptimizerPhase optimizeLevel) {
     this.phases = phases;
     this.optimizers = optimizers;
+    this.optimizeLevel = optimizeLevel;
   }
 
   @Override
@@ -48,21 +52,25 @@ public class ChainedOptimizerProgram implements OptimizerProgram {
         LOGGER.error("Failed to optimize plan at phase {}.", phase, e);
         throw RisingWaveException.from(PlannerError.INTERNAL, e);
       }
+      if (this.optimizeLevel == phase) {
+        return result;
+      }
     }
-
     return result;
   }
 
-  public static Builder builder() {
-    return new Builder();
+  public static Builder builder(OptimizerPhase optimizeLevel) {
+    return new Builder(optimizeLevel);
   }
 
+  /** OptimizerPhase in the chain */
   public enum OptimizerPhase {
     SUBQUERY_REWRITE("Subquery rewrite"),
     LOGICAL_REWRITE("Logical rewrite"),
     JOIN_REORDER("Join reorder"),
     LOGICAL_CBO("CBO for logical optimization"),
     PHYSICAL("Physical planning"),
+    DISTRIBUTED("distributed planning"),
     STREAMING("Streaming fragment generation");
 
     private final String description;
@@ -72,9 +80,15 @@ public class ChainedOptimizerProgram implements OptimizerProgram {
     }
   }
 
+  /** Builder of ChainedOptimizerProgram */
   public static class Builder {
     private List<OptimizerPhase> phases = new ArrayList<>();
     private Map<OptimizerPhase, OptimizerProgram> optimizers = new HashMap<>();
+    private OptimizerPhase optimizeLevel;
+
+    public Builder(OptimizerPhase optimizeLevel) {
+      this.optimizeLevel = optimizeLevel;
+    }
 
     public Builder addLast(OptimizerPhase phase, OptimizerProgram program) {
       phases.add(phase);
@@ -84,7 +98,7 @@ public class ChainedOptimizerProgram implements OptimizerProgram {
 
     public ChainedOptimizerProgram build() {
       return new ChainedOptimizerProgram(
-          ImmutableList.copyOf(phases), ImmutableMap.copyOf(optimizers));
+          ImmutableList.copyOf(phases), ImmutableMap.copyOf(optimizers), this.optimizeLevel);
     }
   }
 }

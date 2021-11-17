@@ -3,9 +3,9 @@ package com.risingwave.planner.rules.streaming.aggregate;
 import static com.risingwave.execution.context.ExecutionContext.contextOf;
 import static com.risingwave.planner.planner.PlannerUtils.isDistributedMode;
 import static com.risingwave.planner.rel.physical.streaming.RisingWaveStreamingRel.STREAMING;
-import static com.risingwave.planner.rules.physical.batch.aggregate.AggRules.getAggSplitters;
-import static com.risingwave.planner.rules.physical.batch.aggregate.AggRules.getGlobalAggCalls;
-import static com.risingwave.planner.rules.physical.batch.aggregate.AggRules.getLocalAggCalls;
+import static com.risingwave.planner.rules.aggspliter.LogicalAggSplitUtils.getAggSplitters;
+import static com.risingwave.planner.rules.aggspliter.LogicalAggSplitUtils.getGlobalAggCalls;
+import static com.risingwave.planner.rules.aggspliter.LogicalAggSplitUtils.getLocalAggCalls;
 import static com.risingwave.planner.rules.streaming.aggregate.StreamingAggRuleUtility.addCountOrSumIfNotExist;
 import static com.risingwave.planner.rules.streaming.aggregate.StreamingAggRuleUtility.createCountStarAggCall;
 import static com.risingwave.planner.rules.streaming.aggregate.StreamingAggRuleUtility.createFilterAfterAggregate;
@@ -17,8 +17,8 @@ import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.logical.RwLogicalAggregate;
 import com.risingwave.planner.rel.physical.streaming.RwStreamAgg;
 import com.risingwave.planner.rel.physical.streaming.RwStreamProject;
-import com.risingwave.planner.rules.physical.batch.aggregate.AggRules;
-import com.risingwave.planner.rules.physical.batch.aggregate.AggSplitter;
+import com.risingwave.planner.rules.aggspliter.AggSplitter;
+import com.risingwave.planner.rules.aggspliter.LogicalAggSplitUtils;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -65,7 +65,7 @@ public class StreamingTwoPhaseAggRule extends RelRule<StreamingTwoPhaseAggRule.C
     var rexBuilder = logicalAgg.getCluster().getRexBuilder();
     final var originalRowType = logicalAgg.getRowType();
     final var groupCount = logicalAgg.getGroupCount();
-    var splitters = getAggSplitters(logicalAgg, call);
+    var splitters = getAggSplitters(logicalAgg);
 
     var localAggCalls =
         getLocalAggCalls(logicalAgg, splitters).stream()
@@ -168,7 +168,7 @@ public class StreamingTwoPhaseAggRule extends RelRule<StreamingTwoPhaseAggRule.C
         call.transformTo(streamNullByRowCountProject);
       } else {
         List<RexNode> calculateExpressions =
-            AggRules.getLastCalcs(logicalAgg, streamNullByRowCountProject, splitters);
+            LogicalAggSplitUtils.getLastCalcs(logicalAgg, streamNullByRowCountProject, splitters);
         RwStreamProject project =
             createProjectForNonTrivialAggregate(
                 logicalAgg, streamNullByRowCountProject, calculateExpressions);
@@ -197,7 +197,8 @@ public class StreamingTwoPhaseAggRule extends RelRule<StreamingTwoPhaseAggRule.C
         if (allLastCalcAreTrivial) {
           call.transformTo(project);
         } else {
-          List<RexNode> calculateExpressions = AggRules.getLastCalcs(logicalAgg, filter, splitters);
+          List<RexNode> calculateExpressions =
+              LogicalAggSplitUtils.getLastCalcs(logicalAgg, filter, splitters);
           RwStreamProject projectForNonTrivialAggregate =
               createProjectForNonTrivialAggregate(logicalAgg, project, calculateExpressions);
           call.transformTo(projectForNonTrivialAggregate);
@@ -206,7 +207,8 @@ public class StreamingTwoPhaseAggRule extends RelRule<StreamingTwoPhaseAggRule.C
         if (allLastCalcAreTrivial) {
           call.transformTo(filter);
         } else {
-          List<RexNode> calculateExpressions = AggRules.getLastCalcs(logicalAgg, filter, splitters);
+          List<RexNode> calculateExpressions =
+              LogicalAggSplitUtils.getLastCalcs(logicalAgg, filter, splitters);
           RwStreamProject projectForNonTrivialAggregate =
               createProjectForNonTrivialAggregate(logicalAgg, filter, calculateExpressions);
           call.transformTo(projectForNonTrivialAggregate);

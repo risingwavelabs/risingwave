@@ -6,13 +6,19 @@ import java.util.Optional;
 public class PlannerTestCase {
   private final String name;
   private final String sql;
-  private final String plan;
+  // compatible with stream plan test
+  @Deprecated private final Optional<String> plan;
+  private final Optional<String> phyPlan;
+  private final Optional<String> distPlan;
   private final Optional<String> json;
 
-  public PlannerTestCase(String name, String sql, String plan, String json) {
+  public PlannerTestCase(
+      String name, String sql, String plan, String phyPlan, String distPlan, String json) {
     this.name = name;
     this.sql = sql;
-    this.plan = plan;
+    this.plan = Optional.ofNullable(plan);
+    this.phyPlan = Optional.ofNullable(phyPlan);
+    this.distPlan = Optional.ofNullable(distPlan);
     this.json = Optional.ofNullable(json);
   }
 
@@ -20,8 +26,16 @@ public class PlannerTestCase {
     return sql;
   }
 
-  public String getPlan() {
+  public Optional<String> getPlan() {
     return plan;
+  }
+
+  public Optional<String> getPhyPlan() {
+    return phyPlan;
+  }
+
+  public Optional<String> getDistPlan() {
+    return distPlan;
   }
 
   public Optional<String> getJson() {

@@ -39,6 +39,7 @@ public class RwBatchExchange extends Exchange implements RisingWaveBatchPhyRel {
     checkConvention();
     verify(
         traitSet.contains(distribution), "Trait set: %s, distribution: %s", traitSet, distribution);
+    verify(traitSet.contains(BATCH_DISTRIBUTED), "Trait set: %s", traitSet);
 
     this.uniqueId = super.getId();
   }
@@ -108,8 +109,13 @@ public class RwBatchExchange extends Exchange implements RisingWaveBatchPhyRel {
 
   public static RwBatchExchange create(RelNode input, RwDistributionTrait distribution) {
     RelOptCluster cluster = input.getCluster();
-    RelTraitSet traitSet = input.getTraitSet().plus(BATCH_PHYSICAL).plus(distribution);
+    RelTraitSet traitSet = input.getTraitSet().plus(BATCH_DISTRIBUTED).plus(distribution);
     return new RwBatchExchange(cluster, traitSet, input, distribution);
+  }
+
+  @Override
+  public boolean isEnforcer() {
+    return true;
   }
 
   // Every call will return the same id.

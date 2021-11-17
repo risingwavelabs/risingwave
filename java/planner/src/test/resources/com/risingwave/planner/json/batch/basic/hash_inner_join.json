@@ -8,8 +8,39 @@
     "rightOutput": [0]
   },
   "children": [{
-    "nodeType": "EXCHANGE"
+    "nodeType": "SEQ_SCAN",
+    "body": {
+      "@type": "type.googleapis.com/plan.SeqScanNode",
+      "tableRefId": {
+        "schemaRefId": {
+          "databaseRefId": {
+          }
+        }
+      },
+      "columnIds": [0, 1, 2],
+      "columnType": [{
+        "typeName": "INT32"
+      }, {
+        "typeName": "INT32"
+      }, {
+        "typeName": "FLOAT"
+      }]
+    }
   }, {
-    "nodeType": "EXCHANGE"
+    "nodeType": "SEQ_SCAN",
+    "body": {
+      "@type": "type.googleapis.com/plan.SeqScanNode",
+      "tableRefId": {
+        "schemaRefId": {
+          "databaseRefId": {
+          }
+        },
+        "tableId": 2
+      },
+      "columnIds": [0],
+      "columnType": [{
+        "typeName": "INT32"
+      }]
+    }
   }]
 }

@@ -5,7 +5,7 @@
 insert into customer values (149601, 'Customer#000149601', 'rsARKllazC', 18, '28-585-834-9749', 3932.16, 'BUILDING', 'arefully special deposits. silent deposits haggle. special, final deposits about the carefully unusual packa')
             ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physical">
             <![CDATA[
 RwBatchInsert(table=[[test_schema, customer]], operation=[INSERT], flattened=[false])
   RwBatchValues(tuples=[[{ 149601, 'Customer#000149601', 'rsARKllazC', 18, '28-585-834-9749', 3932.16, 'BUILDING', 'arefully special deposits. silent deposits haggle. special, final deposits about the carefully unusual packa' }]])
@@ -18,7 +18,7 @@ RwBatchInsert(table=[[test_schema, customer]], operation=[INSERT], flattened=[fa
 select * from supplier
             ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physical">
             <![CDATA[
 RwBatchTableScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_name,s_address,s_nationkey,s_phone,s_acctbal,s_comment])
 ]]>
@@ -50,7 +50,7 @@ order by
 	l_linestatus;
             ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physical">
             <![CDATA[
 RwBatchSort(sort0=[$0], sort1=[$1], dir0=[ASC], dir1=[ASC])
   RwBatchHashAgg(group=[{0, 1}], sum_qty=[SUM($2)], sum_base_price=[SUM($3)], sum_disc_price=[SUM($4)], sum_charge=[SUM($5)], avg_qty=[AVG($2)], avg_price=[AVG($3)], avg_disc=[AVG($6)], count_order=[COUNT()])
@@ -74,7 +74,7 @@ where
 	and l_quantity < 24;
             ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physical">
             <![CDATA[
 RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
   RwBatchProject($f0=[*($1, $2)])

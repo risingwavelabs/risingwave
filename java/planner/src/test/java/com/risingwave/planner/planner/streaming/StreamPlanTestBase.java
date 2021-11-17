@@ -54,7 +54,7 @@ public abstract class StreamPlanTestBase extends SqlTestBase {
     StreamingPlan plan = streamPlanner.plan(ast, executionContext);
 
     String explainedPlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
-    assertEquals(testCase.getPlan(), explainedPlan, "Plans do not match!");
+    assertEquals(testCase.getPlan().get(), explainedPlan, "Plans do not match!");
 
     // We must pass the stream plan through MV handler to assign a TableId.
     CreateMaterializedViewHandler handler = new CreateMaterializedViewHandler();
