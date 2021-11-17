@@ -1,5 +1,5 @@
 use crate::source::{Source, SourceMessage, SourceReader};
-use crate::storage::{BummockTable, Table};
+use crate::storage::{BummockResult, BummockTable, Table};
 use crate::stream_op::{Op, StreamChunk};
 use async_trait::async_trait;
 use risingwave_common::array::DataChunkRef;
@@ -81,10 +81,17 @@ pub struct TableSourceReader {
 impl SourceReader for TableSourceReader {
     async fn init(&mut self) -> Result<()> {
         // In the completed design, should wait until first barrier to get the snapshot
-        let mut snapshot = self.table.get_data().await?;
-        snapshot.reverse(); // first element should be popped first
-        self.snapshot = snapshot;
-        Ok(())
+        match self.table.get_data().await? {
+            BummockResult::Data(mut snapshot) => {
+                snapshot.reverse(); // first element should be popped first
+                self.snapshot = snapshot;
+                Ok(())
+            }
+            BummockResult::DataEof => {
+                // TODO, handle eof here
+                Ok(())
+            }
+        }
     }
 
     async fn poll_message(&mut self) -> Result<Option<SourceMessage>> {

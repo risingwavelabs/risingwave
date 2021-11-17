@@ -86,7 +86,12 @@ impl Executor for SeqScanExecutor {
     async fn execute(&mut self) -> Result<ExecutorResult> {
         if self.first_execution {
             self.first_execution = false;
-            self.data = self.table.get_data().await?;
+            if let BummockResult::Data(data) = self.table.get_data().await? {
+                self.data = data;
+            } else {
+                return Ok(Done);
+            }
+
             self.column_indices = self
                 .column_ids
                 .iter()

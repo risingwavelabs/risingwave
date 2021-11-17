@@ -15,6 +15,8 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::RwLock;
 
+use super::BummockResult;
+
 #[derive(Debug)]
 pub struct BummockTable {
     /// Table identifier.
@@ -135,15 +137,15 @@ impl Table for BummockTable {
         Ok(rx)
     }
 
-    async fn get_data(&self) -> Result<Vec<DataChunkRef>> {
-        Ok(self
-            .mem_dirty_segs
-            .read()
-            .unwrap()
-            .last()
-            .unwrap()
-            .get_data()
-            .unwrap())
+    async fn get_data(&self) -> Result<BummockResult> {
+        // TODO, traverse other segs as well
+        let segs = self.mem_dirty_segs.read().unwrap();
+        match segs.is_empty() {
+            true => Ok(BummockResult::DataEof),
+            false => Ok(BummockResult::Data(
+                segs.last().unwrap().get_data().unwrap(),
+            )),
+        }
     }
 
     fn get_column_ids(&self) -> Result<Arc<Vec<i32>>> {
@@ -263,7 +265,7 @@ impl BummockTable {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::{BummockTable, Table};
+    use crate::storage::{BummockResult, BummockTable, Table};
 
     use risingwave_common::array::{Array, DataChunk, I64Array};
     use risingwave_common::catalog::TableId;
@@ -278,10 +280,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_table_basic_read_write() -> Result<()> {
-        // mock table id
         let table_id = TableId::default();
 
-        // mock column descriptors
         let column_desc1 = ColumnDesc {
             column_type: Some(DataType {
                 type_name: TypeName::Int32 as i32,
@@ -302,44 +302,47 @@ mod tests {
         };
         let column_descs = vec![column_desc1.to_proto(), column_desc2.to_proto()];
 
-        // mock data chunks
         let col1 = column_nonnull! { I64Array, Int64Type, [1, 3, 5, 7, 9] };
         let col2 = column_nonnull! { I64Array, Int64Type, [2, 4, 6, 8, 10] };
         let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
 
-        // create table
         let bummock_table = Arc::new(BummockTable::new(&table_id, &column_descs));
 
-        // assert append success
+        assert!(matches!(
+            bummock_table.get_data().await?,
+            BummockResult::DataEof
+        ));
+
         let _ = bummock_table.append(data_chunk).await;
         assert_eq!(bummock_table.columns().len(), 2);
 
-        // assert tuple id
         assert_eq!(bummock_table.current_tuple_id.load(Ordering::Relaxed), 5);
 
-        // get data chunks
-        let data_ref = bummock_table.get_data().await.unwrap();
-        assert_eq!(
-            data_ref[0]
-                .column_at(0)
-                .unwrap()
-                .array()
-                .as_int64()
-                .iter()
-                .collect::<Vec<_>>(),
-            vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
-        );
-        assert_eq!(
-            data_ref[0]
-                .column_at(1)
-                .unwrap()
-                .array()
-                .as_int64()
-                .iter()
-                .collect::<Vec<_>>(),
-            vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
-        );
-
+        match bummock_table.get_data().await? {
+            BummockResult::Data(v) => {
+                assert_eq!(
+                    v[0].column_at(0)
+                        .unwrap()
+                        .array()
+                        .as_int64()
+                        .iter()
+                        .collect::<Vec<_>>(),
+                    vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
+                );
+                assert_eq!(
+                    v[0].column_at(1)
+                        .unwrap()
+                        .array()
+                        .as_int64()
+                        .iter()
+                        .collect::<Vec<_>>(),
+                    vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
+                );
+            }
+            BummockResult::DataEof => {
+                panic!("Empty data returned.")
+            }
+        }
         Ok(())
     }
 }

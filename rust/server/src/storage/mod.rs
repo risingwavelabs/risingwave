@@ -3,12 +3,13 @@ pub use bummock::*;
 
 mod row_table;
 pub use row_table::*;
+
 mod hummock;
 
 use crate::stream_op::StreamChunk;
 use futures::channel::mpsc;
+use risingwave_common::array::DataChunk;
 use risingwave_common::array::InternalError;
-use risingwave_common::array::{DataChunk, DataChunkRef};
 use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
@@ -26,7 +27,7 @@ pub trait Table: Sync + Send {
     async fn append(&self, data: DataChunk) -> Result<usize>;
 
     /// Get data from the table.
-    async fn get_data(&self) -> Result<Vec<DataChunkRef>>;
+    async fn get_data(&self) -> Result<BummockResult>;
 
     /// Write a batch of changes. For now, we use `StreamChunk` to represent a write batch
     /// An assertion is put to assert only insertion operations are allowed.

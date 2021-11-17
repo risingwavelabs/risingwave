@@ -213,25 +213,31 @@ mod tests {
             .table_manager
             .get_table(&insert_executor.table_id)?;
         if let TableTypes::BummockTable(table_ref) = table_ref {
-            let data_ref = table_ref.get_data().await?;
-            assert_eq!(
-                data_ref[0]
-                    .column_at(0)?
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
-                vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
-            );
-            assert_eq!(
-                data_ref[0]
-                    .column_at(1)?
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
-                vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
-            );
+            match table_ref.get_data().await? {
+                BummockResult::Data(data_ref) => {
+                    assert_eq!(
+                        data_ref[0]
+                            .column_at(0)?
+                            .array()
+                            .as_int64()
+                            .iter()
+                            .collect::<Vec<_>>(),
+                        vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
+                    );
+                    assert_eq!(
+                        data_ref[0]
+                            .column_at(1)?
+                            .array()
+                            .as_int64()
+                            .iter()
+                            .collect::<Vec<_>>(),
+                        vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
+                    );
+                }
+                BummockResult::DataEof => {
+                    panic!("Empty data returned.")
+                }
+            }
         } else {
             panic!("invalid table type found.")
         }
