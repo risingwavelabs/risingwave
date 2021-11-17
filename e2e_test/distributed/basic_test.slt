@@ -23,6 +23,11 @@ select * from t where v1 > 1 and v2 = 3
 2 3 3
 4 3 5
 
+query III
+select * from t where v1 in (1, 2)
+----
+1 4 2 
+2 3 3
 
 query I
 select min(v2) from t
