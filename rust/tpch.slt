@@ -1,0 +1,73 @@
+statement ok
+CREATE TABLE lineitem (
+        l_orderkey BIGINT,
+        l_partkey INTEGER,
+        l_suppkey INTEGER,
+        l_linenumber INTEGER,
+        l_quantity NUMERIC,
+        l_extendedprice NUMERIC,
+        l_discount NUMERIC,
+        l_tax NUMERIC,
+        l_returnflag CHAR(1),
+        l_linestatus CHAR(1),
+        l_shipdate DATE,
+        l_commitdate DATE,
+        l_receiptdate DATE,
+        l_shipinstruct CHAR(25),
+        l_shipmode CHAR(10),
+        l_comment VARCHAR(44));
+
+statement ok
+insert into lineitem values                                                                                                                                               
+ (9, 127857, 5394, 1, 25, 84818.25, 0.09, 0.05, 'N', 'C', '1998-10-20', '1998-09-10', '1998-11-15', 'COLLECT COD', 'SHIP', 'es haggle blithely above the silent ac'),        
+ (9, 127857, 5394, 1, 25, 84818.30, 0.05, 0.05, 'N', 'C', '1994-02-01', '1998-09-10', '1998-11-15', 'COLLECT COD', 'SHIP', 'es haggle blithely above the silent ac'),
+ (9, 127857, 5394, 1, 20, 84818.25, 0.05, 0.05, 'N', 'C', '1994-02-01', '1998-09-10', '1998-11-15', 'COLLECT COD', 'SHIP', 'es haggle blithely above the silent ac'),
+ (9, 127857, 5394, 1, 20, 84818.25, 0.10, 0.05, 'N', 'C', '1994-02-01', '1998-09-10', '1998-11-15', 'COLLECT COD', 'SHIP', 'es haggle blithely above the silent ac'),        
+ (9, 127857, 5394, 1, 20, 84818.50, 0.08, 0.05, 'N', 'D', '1994-02-01', '1998-09-10', '1998-11-15', 'COLLECT COD', 'SHIP', 'es haggle blithely above the silent ac'),
+ (9, 127857, 5394, 1, 20, 84818.25, 0.08, 0.05, 'N', 'D', '1994-02-01', '1998-09-10', '1998-11-15', 'COLLECT COD', 'SHIP', 'es haggle blithely above the silent ac'),
+ (9, 127857, 5394, 1, 25, 84818.25, 0.03, 0.05, 'N', 'D', '1994-02-01', '1998-09-10', '1998-11-15', 'COLLECT COD', 'SHIP', 'es haggle blithely above the silent ac');        
+
+# tpchq6
+query R
+select
+	sum(l_extendedprice * l_discount) as revenue
+from
+	lineitem
+where
+	l_shipdate >= date '1994-01-01'
+	and l_shipdate < date '1994-01-01' + interval '1' year
+	and l_discount between 0.08 - 0.01 and 0.08 + 0.01
+	and l_quantity < 24;
+----
+13570.9400
+
+# tpchq1
+# Todo: replace date '1998-9-21' with date '1998-12-01' - interval '71' day
+query TTRRRRRRRI
+select
+	l_returnflag,
+	l_linestatus,
+	sum(l_quantity) as sum_qty,
+	sum(l_extendedprice) as sum_base_price,
+	sum(l_extendedprice * (1 - l_discount)) as sum_disc_price,
+	sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge,
+	avg(l_quantity) as avg_qty,
+	avg(l_extendedprice) as avg_price,
+	avg(l_discount) as avg_disc,
+	count(*) as count_order
+from
+	lineitem
+where
+	l_shipdate <= date '1998-9-21'
+group by
+	l_returnflag,
+	l_linestatus
+order by
+	l_returnflag,
+	l_linestatus;
+----
+N C 65 254454.80 237491.1475 249365.704875 21.666666666666666666666666667 84818.26666666666666666666667 0.0666666666666666666666666667 3
+N D 65 254455.00 238339.5125 250256.488125 21.666666666666666666666666667 84818.33333333333333333333333 0.0633333333333333333333333333 3
+
+statement ok
+drop table lineitem

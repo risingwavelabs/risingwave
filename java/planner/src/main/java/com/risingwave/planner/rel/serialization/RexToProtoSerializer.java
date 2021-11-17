@@ -183,6 +183,15 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
                         "RexLiteral return a null value in byte array serialization!"));
                 break;
               }
+            case DAY:
+              {
+                bb = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN);
+                bb.putLong(
+                    requireNonNull(
+                        val.getValueAs(Long.class),
+                        "RexLiteral return a null value in byte array serialization!"));
+                break;
+              }
             default:
               throw new PgException(PgErrorCode.INTERNAL_ERROR, "Unsupported type: %s", dataType);
           }

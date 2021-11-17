@@ -307,4 +307,19 @@ RwBatchHashJoin(condition=[=($0, $3)], joinType=[inner])
         <Resource name="json" path="batch/basic/hash_inner_join">
         </Resource>
     </TestCase>
+    <TestCase name="select interval">
+        <Resource name="sql">
+            <![CDATA[
+            select date '2021-10-1' + interval '1' year + interval '1' day;
+]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchProject(EXPR$0=[+(+(2021-10-01, 12:INTERVAL YEAR), 86400000:INTERVAL DAY)])
+  RwBatchValues(tuples=[[{ 0 }]])
+]]>
+        </Resource>
+        <Resource name="json" path="batch/basic/select_interval">
+        </Resource>
+    </TestCase>
 </Root>

@@ -1,0 +1,75 @@
+{
+  "nodeType": "PROJECT",
+  "body": {
+    "@type": "type.googleapis.com/plan.ProjectNode",
+    "selectList": [{
+      "exprType": "ADD",
+      "returnType": {
+        "typeName": "TIMESTAMP"
+      },
+      "funcCall": {
+        "children": [{
+          "exprType": "ADD",
+          "returnType": {
+            "typeName": "TIMESTAMP"
+          },
+          "funcCall": {
+            "children": [{
+              "exprType": "CAST",
+              "returnType": {
+                "typeName": "DATE"
+              },
+              "funcCall": {
+                "children": [{
+                  "exprType": "CONSTANT_VALUE",
+                  "returnType": {
+                    "typeName": "CHAR",
+                    "precision": 10
+                  },
+                  "constant": {
+                    "body": "MjAyMS0xMC0wMQ=="
+                  }
+                }]
+              }
+            }, {
+              "exprType": "CONSTANT_VALUE",
+              "returnType": {
+                "typeName": "INTERVAL",
+                "intervalType": "YEAR"
+              },
+              "constant": {
+                "body": "AAAADA=="
+              }
+            }]
+          }
+        }, {
+          "exprType": "CONSTANT_VALUE",
+          "returnType": {
+            "typeName": "INTERVAL",
+            "intervalType": "DAY"
+          },
+          "constant": {
+            "body": "AAAAAAUmXAA="
+          }
+        }]
+      }
+    }]
+  },
+  "children": [{
+    "nodeType": "VALUE",
+    "body": {
+      "@type": "type.googleapis.com/plan.ValuesNode",
+      "tuples": [{
+        "cells": [{
+          "exprType": "CONSTANT_VALUE",
+          "returnType": {
+            "typeName": "INT32"
+          },
+          "constant": {
+            "body": "AAAAAA=="
+          }
+        }]
+      }]
+    }
+  }]
+}
