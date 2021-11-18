@@ -252,7 +252,7 @@ jobs:
       - name: Install rust toolchain
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: nightly-2021-11-01
+          toolchain: nightly-2021-11-15
           components: rustfmt, clippy
 
       - name: Cache Cargo home

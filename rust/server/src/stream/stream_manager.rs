@@ -122,7 +122,6 @@ impl StreamManager {
     /// This function was called while [`StreamManager`] exited.
     ///
     /// Suspend was allowed here.
-    #[allow(must_not_suspend)]
     pub async fn wait_all(&self) -> Result<()> {
         let mut core = self.core.lock().unwrap();
         core.wait_all().await
