@@ -43,27 +43,24 @@ public abstract class BatchPlanTestBase extends SqlTestBase {
 
     SqlNode ast = parseSql(sql);
     BatchPlan phyPlan = batchPlanner.planPhysical(ast, executionContext);
+    ast = parseSql(sql);
     BatchPlan distPlan = batchPlanner.planDistributed(ast, executionContext);
 
-    // Do not error if no phy test.
     if (testCase.getPlan().isPresent()) {
       String explainedPlan = ExplainWriter.explainPlan(phyPlan.getRoot());
       assertEquals(testCase.getPlan().get(), explainedPlan, "Plan not match!");
     }
 
-    // Do not error if no phy test.
     if (testCase.getPhyPlan().isPresent()) {
       String explainedPlan = ExplainWriter.explainPlan(phyPlan.getRoot());
       assertEquals(testCase.getPhyPlan().get(), explainedPlan, "Plan not match!");
     }
 
-    // Do not error if no dist test.
     if (testCase.getDistPlan().isPresent()) {
       String explainedPlan = ExplainWriter.explainPlan(distPlan.getRoot());
       assertEquals(testCase.getDistPlan().get(), explainedPlan, "Plan not match!");
     }
 
-    // Do not error if no json test.
     if (testCase.getJson().isPresent()) {
       try {
         String serializedJsonPlan = Messages.jsonFormat(phyPlan.getRoot().serialize());
