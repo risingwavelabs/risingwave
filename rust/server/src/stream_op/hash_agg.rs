@@ -5,7 +5,6 @@ use super::{AggCall, Barrier, Executor, Message, Op, StreamChunk};
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::I64ArrayBuilder;
 use risingwave_common::array::{Array, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
@@ -23,7 +22,10 @@ use std::sync::Arc;
 /// * Upon a barrier is received, the executor will call `.flush` on the storage backend, so that
 ///   all modifications will be flushed to the storage backend. Meanwhile, the executor will go
 ///   through `modified_keys`, and produce a stream chunk based on the state changes.
-pub struct HashAggExecutor {
+pub struct HashAggExecutor<StateBackend>
+where
+    StateBackend: KeyedState<RowSerializer, AggStateSerializer>,
+{
     /// Schema of the executor.
     schema: Schema,
 
@@ -34,7 +36,7 @@ pub struct HashAggExecutor {
 
     /// Aggregation state before last barrier.
     /// The map will be updated iff [`Message::Barrier`] was received.
-    state_entries: InMemoryKeyedState<RowSerializer, AggStateSerializer>,
+    state_entries: StateBackend,
 
     /// Keys modified in one epoch. This HashMap stores the states before an epoch begins.
     modified_states: HashMap<HashKey, Option<HashValue>>,
@@ -50,25 +52,39 @@ pub struct HashAggExecutor {
     key_indices: Vec<usize>,
 }
 
-impl HashAggExecutor {
-    pub fn new(input: Box<dyn Executor>, agg_calls: Vec<AggCall>, key_indices: Vec<usize>) -> Self {
-        let mut fields = Vec::with_capacity(key_indices.len() + agg_calls.len());
-        let input_schema = input.schema();
-        fields.extend(
-            key_indices
-                .iter()
-                .map(|idx| input_schema.fields[*idx].clone()),
-        );
-        fields.extend(agg_calls.iter().map(|agg| Field {
-            data_type: agg.return_type.clone(),
-        }));
-        let schema = Schema { fields };
+/// Generate [`HashAgg`]'s schema from `input`, `agg_calls` and `key_indices`.
+pub fn generate_hash_agg_schema(
+    input: &dyn Executor,
+    agg_calls: &[AggCall],
+    key_indices: &[usize],
+) -> Schema {
+    let mut fields = Vec::with_capacity(key_indices.len() + agg_calls.len());
+    let input_schema = input.schema();
+    fields.extend(
+        key_indices
+            .iter()
+            .map(|idx| input_schema.fields[*idx].clone()),
+    );
+    fields.extend(agg_calls.iter().map(|agg| Field {
+        data_type: agg.return_type.clone(),
+    }));
+    Schema { fields }
+}
+
+impl<StateBackend> HashAggExecutor<StateBackend>
+where
+    StateBackend: KeyedState<RowSerializer, AggStateSerializer>,
+{
+    pub fn new(
+        input: Box<dyn Executor>,
+        agg_calls: Vec<AggCall>,
+        key_indices: Vec<usize>,
+        state_entries: StateBackend,
+        schema: Schema,
+    ) -> Self {
         Self {
             next_barrier_message: None,
-            state_entries: InMemoryKeyedState::new(
-                RowSerializer::new(schema.clone()),
-                AggStateSerializer::new(agg_calls.clone()),
-            ),
+            state_entries,
             input,
             agg_calls,
             schema,
@@ -132,7 +148,10 @@ impl HashAggExecutor {
     }
 }
 
-impl HashAggExecutor {
+impl<StateBackend> HashAggExecutor<StateBackend>
+where
+    StateBackend: KeyedState<RowSerializer, AggStateSerializer>,
+{
     /// Flush the bufferred chunk to the storage backend, and get the edits of the states.
     async fn flush_data(&mut self) -> Result<StreamChunk> {
         let dirty_cnt = self.modified_states.len();
@@ -174,7 +193,7 @@ impl HashAggExecutor {
 
             // We assume the first state of aggregation is always `StreamingRowCountAgg`.
             let row_cnt = {
-                get_one_output_from_state_impl::<I64ArrayBuilder>(&*cur_states.agg_states[0])?
+                get_one_output_from_state_impl(&*cur_states.agg_states[0])?
                     .as_int64()
                     .value_at(0)
                     .unwrap()
@@ -352,7 +371,10 @@ impl HashAggExecutor {
 }
 
 #[async_trait]
-impl Executor for HashAggExecutor {
+impl<StateBackend> Executor for HashAggExecutor<StateBackend>
+where
+    StateBackend: KeyedState<RowSerializer, AggStateSerializer>,
+{
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -402,8 +424,56 @@ mod tests {
     use risingwave_common::expr::*;
     use risingwave_common::types::{Int64Type, Scalar};
 
+    fn create_in_memory_keyed_state(
+        schema: &Schema,
+        agg_calls: &[AggCall],
+    ) -> impl KeyedState<RowSerializer, AggStateSerializer> {
+        InMemoryKeyedState::new(
+            RowSerializer::new(schema.clone()),
+            AggStateSerializer::new(agg_calls.to_vec()),
+        )
+    }
+
+    fn create_serialized_keyed_state(
+        schema: &Schema,
+        agg_calls: &[AggCall],
+    ) -> impl KeyedState<RowSerializer, AggStateSerializer> {
+        SerializedKeyedState::new(
+            RowSerializer::new(schema.clone()),
+            AggStateSerializer::new(agg_calls.to_vec()),
+        )
+    }
+
+    // --- Test HashAgg with in-memory KeyedState ---
+
     #[tokio::test]
-    async fn test_local_hash_aggregation_count() {
+    async fn test_local_hash_aggregation_count_in_memory() {
+        test_local_hash_aggregation_count(create_in_memory_keyed_state).await
+    }
+
+    #[tokio::test]
+    async fn test_global_hash_aggregation_count_in_memory() {
+        test_global_hash_aggregation_count(create_in_memory_keyed_state).await
+    }
+
+    // --- Test HashAgg with in-memory KeyedState with serialization ---
+    // TODO: remove this when we have Hummock state backend
+
+    #[tokio::test]
+    async fn test_local_hash_aggregation_count_in_memory_serialized() {
+        test_local_hash_aggregation_count(create_serialized_keyed_state).await
+    }
+
+    #[tokio::test]
+    async fn test_global_hash_aggregation_count_in_memory_serialized() {
+        test_global_hash_aggregation_count(create_serialized_keyed_state).await
+    }
+
+    async fn test_local_hash_aggregation_count<F, KS>(create_keyed_state: F)
+    where
+        F: Fn(&Schema, &[AggCall]) -> KS,
+        KS: KeyedState<RowSerializer, AggStateSerializer>,
+    {
         let chunk1 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert, Op::Insert],
             columns: vec![column_nonnull! { I64Array, Int64Type, [1, 2, 2] }],
@@ -446,7 +516,10 @@ mod tests {
             },
         ];
 
-        let mut hash_agg = HashAggExecutor::new(Box::new(source), agg_calls, keys);
+        let schema = generate_hash_agg_schema(&source, &agg_calls, &keys);
+        let keyed_state = create_keyed_state(&schema, &agg_calls);
+        let mut hash_agg =
+            HashAggExecutor::new(Box::new(source), agg_calls, keys, keyed_state, schema);
 
         let msg = hash_agg.next().await.unwrap();
         if let Message::Chunk(chunk) = msg {
@@ -493,8 +566,11 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_global_hash_aggregation_count() {
+    async fn test_global_hash_aggregation_count<F, KS>(create_keyed_state: F)
+    where
+        F: Fn(&Schema, &[AggCall]) -> KS,
+        KS: KeyedState<RowSerializer, AggStateSerializer>,
+    {
         let chunk1 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert, Op::Insert],
             columns: vec![
@@ -553,7 +629,16 @@ mod tests {
                 return_type: Int64Type::create(false),
             },
         ];
-        let mut hash_agg = HashAggExecutor::new(Box::new(source), agg_calls, key_indices);
+
+        let schema = generate_hash_agg_schema(&source, &agg_calls, &key_indices);
+        let keyed_state = create_keyed_state(&schema, &agg_calls);
+        let mut hash_agg = HashAggExecutor::new(
+            Box::new(source),
+            agg_calls,
+            key_indices,
+            keyed_state,
+            schema,
+        );
 
         if let Message::Chunk(chunk) = hash_agg.next().await.unwrap() {
             let (data_chunk, ops) = chunk.into_parts();

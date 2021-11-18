@@ -434,6 +434,12 @@ macro_rules! impl_array {
         }
       }
 
+      /// If the array only have one single element, convert it to `Datum`.
+      pub fn to_datum(&self) -> Datum {
+        assert_eq!(self.len(), 1);
+        self.datum_at(0)
+      }
+
       /// Get the enum-wrapped `ScalarRefImpl` out of the `Array`.
       pub fn value_at(&self, idx: usize) -> DatumRef<'_> {
         match self {

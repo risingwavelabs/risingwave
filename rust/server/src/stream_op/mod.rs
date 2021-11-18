@@ -272,7 +272,7 @@ impl Message {
 
 /// `Executor` supports handling of control messages.
 #[async_trait]
-pub trait Executor: Send + Sync + 'static {
+pub trait Executor: Send + 'static {
     async fn next(&mut self) -> Result<Message>;
 
     /// Return the schema of the executor.
@@ -299,7 +299,7 @@ async fn simple_executor_next<E: SimpleExecutor>(executor: &mut E) -> Result<Mes
 
 /// `StreamConsumer` is the last step in a fragment
 #[async_trait]
-pub trait StreamConsumer: Send + Sync + 'static {
+pub trait StreamConsumer: Send + 'static {
     /// Run next stream chunk. returns whether the stream is terminated
     async fn next(&mut self) -> Result<bool>;
 }

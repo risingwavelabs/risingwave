@@ -8,15 +8,15 @@ pub trait SchemaedSerializable: Send + Sync + 'static {
     type Output: Clone + Send + Sync + 'static;
 
     /// Serialize a value to `Vec<u8>`.
-    fn schemaed_serialize(data: &Self::Output) -> Vec<u8>;
+    fn schemaed_serialize(&self, data: &Self::Output) -> Vec<u8>;
 
     /// Deserialize a value from `&[u8]`.
-    fn schemaed_deserialize(data: &[u8]) -> Self::Output;
+    fn schemaed_deserialize(&self, data: &[u8]) -> Self::Output;
 }
 
 /// A trait for keyed state store
 #[async_trait]
-pub trait KeyedState<K, V>: Send + 'static
+pub trait KeyedState<K, V>: Send + Sync + 'static
 where
     K: SchemaedSerializable<Output = Row>,
     V: SchemaedSerializable,
@@ -83,6 +83,61 @@ where
 
     fn delete(&mut self, key: &Row) {
         self.state_entries.remove(key);
+    }
+
+    async fn flush(&mut self) -> Result<()> {
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+pub struct SerializedKeyedState<K, V>
+where
+    K: SchemaedSerializable<Output = Row>,
+    V: SchemaedSerializable,
+{
+    key_schema: K,
+    value_schema: V,
+    state_entries: HashMap<Vec<u8>, Vec<u8>>,
+}
+
+impl<K, V> SerializedKeyedState<K, V>
+where
+    K: SchemaedSerializable<Output = Row>,
+    V: SchemaedSerializable,
+{
+    pub fn new(key_schema: K, value_schema: V) -> SerializedKeyedState<K, V> {
+        Self {
+            state_entries: HashMap::new(),
+            key_schema,
+            value_schema,
+        }
+    }
+}
+
+#[async_trait]
+impl<K, V> KeyedState<K, V> for SerializedKeyedState<K, V>
+where
+    K: SchemaedSerializable<Output = Row>,
+    V: SchemaedSerializable,
+{
+    async fn get(&self, key: &Row) -> Result<Option<V::Output>> {
+        Ok(self
+            .state_entries
+            .get(&self.key_schema.schemaed_serialize(key))
+            .map(|x| self.value_schema.schemaed_deserialize(x)))
+    }
+
+    fn put(&mut self, key: Row, value: V::Output) {
+        self.state_entries.insert(
+            self.key_schema.schemaed_serialize(&key),
+            self.value_schema.schemaed_serialize(&value),
+        );
+    }
+
+    fn delete(&mut self, key: &Row) {
+        self.state_entries
+            .remove(&self.key_schema.schemaed_serialize(key));
     }
 
     async fn flush(&mut self) -> Result<()> {

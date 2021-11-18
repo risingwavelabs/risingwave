@@ -69,10 +69,8 @@ pub trait StreamingAggStateImpl: Any + std::fmt::Debug + DynClone + Send + Sync 
 
 dyn_clone::clone_trait_object!(StreamingAggStateImpl);
 
-pub fn get_one_output_from_state_impl<B: ArrayBuilder + Into<ArrayBuilderImpl>>(
-    state: &dyn StreamingAggStateImpl,
-) -> Result<ArrayImpl> {
-    let mut builder: ArrayBuilderImpl = B::new(1).unwrap().into();
+pub fn get_one_output_from_state_impl(state: &dyn StreamingAggStateImpl) -> Result<ArrayImpl> {
+    let mut builder: ArrayBuilderImpl = state.new_builder();
     state.get_output(&mut builder)?;
     Ok(builder.finish().unwrap())
 }

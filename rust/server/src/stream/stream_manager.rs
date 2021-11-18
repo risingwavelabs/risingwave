@@ -380,7 +380,18 @@ impl StreamManagerCore {
                     .map(build_agg_call_from_prost)
                     .try_collect()?;
 
-                Ok(Box::new(HashAggExecutor::new(input, agg_calls, keys)))
+                let schema = generate_hash_agg_schema(&*input, &agg_calls, &keys);
+
+                Ok(Box::new(HashAggExecutor::new(
+                    input,
+                    agg_calls.clone(),
+                    keys,
+                    InMemoryKeyedState::new(
+                        RowSerializer::new(schema.clone()),
+                        AggStateSerializer::new(agg_calls),
+                    ),
+                    schema,
+                )))
             }
             AppendOnlyTopNNode(top_n_node) => {
                 let column_orders = &top_n_node.column_orders;
