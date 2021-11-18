@@ -4,7 +4,7 @@ pub use bummock::*;
 mod row_table;
 pub use row_table::*;
 
-mod hummock;
+pub mod hummock;
 
 use crate::stream_op::StreamChunk;
 use futures::channel::mpsc;

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use crate::storage::hummock::{HummockOptions, HummockStorage};
 use crate::storage::*;
 use crate::stream_op::*;
 use async_std::net::SocketAddr;
@@ -74,6 +75,9 @@ pub struct StreamManagerCore {
     /// thus determining whether we should setup channel or rpc connection between
     /// two actors/fragments.
     addr: SocketAddr,
+
+    /// The state store of Hummuck
+    state_store: HummockStorage,
 }
 
 /// `StreamManager` manages all stream executors in this project.
@@ -190,6 +194,7 @@ impl StreamManagerCore {
             sender_placeholder: vec![],
             mock_source: (Some(tx), Some(rx)),
             addr,
+            state_store: HummockStorage::new(HummockOptions::default()),
         }
     }
 
