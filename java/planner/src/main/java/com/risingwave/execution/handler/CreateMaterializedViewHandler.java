@@ -6,11 +6,17 @@ import com.risingwave.catalog.SchemaCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.execution.result.DdlResult;
+import com.risingwave.node.WorkerNodeManager;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.planner.planner.streaming.StreamPlanner;
 import com.risingwave.planner.rel.physical.streaming.RwStreamMaterializedView;
 import com.risingwave.planner.rel.physical.streaming.StreamingPlan;
+import com.risingwave.proto.streaming.streamnode.BroadcastActorInfoTableRequest;
+import com.risingwave.proto.streaming.streamnode.BuildFragmentRequest;
+import com.risingwave.proto.streaming.streamnode.UpdateFragmentRequest;
+import com.risingwave.rpc.Messages;
 import com.risingwave.scheduler.streaming.StreamFragmenter;
+import com.risingwave.scheduler.streaming.StreamManager;
 import com.risingwave.scheduler.streaming.graph.StreamGraph;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
@@ -45,8 +51,34 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     TableCatalog catalog = convertPlanToCatalog(tableName, plan, context);
     plan.getStreamingPlan().setTableId(catalog.getId());
 
-    // Serialize the stream plan into stream fragments.
+    // Generate a stream graph that represents the dependencies between stream fragments.
     StreamGraph streamGraph = StreamFragmenter.generateGraph(plan, context);
+
+    // Schedule fragments among workers.
+    WorkerNodeManager nodeManager = context.getWorkerNodeManager();
+    var clientManager = context.getComputeClientManager();
+    StreamManager streamManager = context.getStreamManager();
+    var streamRequests = streamManager.scheduleStreamGraph(streamGraph);
+    var actorInfo = streamManager.getActorInfo();
+
+    for (var streamRequest : streamRequests) {
+      var node = streamRequest.getWorkerNode();
+      var client = clientManager.getOrCreate(node);
+
+      BroadcastActorInfoTableRequest actorInfoTableRequest = actorInfo.serialize();
+      log.debug("ActorInfoTable:\n" + Messages.jsonFormat(actorInfoTableRequest));
+      client.broadcastActorInfoTable(actorInfoTableRequest);
+
+      int updateRequestId = streamManager.nextScheduleId();
+      UpdateFragmentRequest updateFragmentRequest = streamRequest.serialize(updateRequestId);
+      log.debug("UpdateFragmentRequest:\n" + Messages.jsonFormat(updateFragmentRequest));
+      client.updateFragment(updateFragmentRequest);
+
+      int buildRequestId = streamManager.nextScheduleId();
+      BuildFragmentRequest buildFragmentRequest = streamRequest.buildRequest(buildRequestId);
+      log.debug("BuildFragmentRequest:\n" + Messages.jsonFormat(buildFragmentRequest));
+      client.buildFragment(buildFragmentRequest);
+    }
 
     return new DdlResult(StatementType.CREATE_MATERIALIZED_VIEW, 0);
   }

@@ -60,6 +60,17 @@ public class StreamGraph {
     }
 
     public StreamGraph build() {
+      // Dirty trick to match backend.
+      // For source fragments, add mock upstream 0.
+      for (Integer id : fragments.keySet()) {
+        StreamFragment fragment = fragments.get(id);
+        if (fragment.getUpstreamSet().size() == 0) {
+          StreamFragment.FragmentBuilder builder = fragment.toBuilder();
+          builder.addUpstream(0);
+          fragments.put(id, builder.build());
+        }
+      }
+      // Build stream graph.
       return new StreamGraph(fragments);
     }
   }

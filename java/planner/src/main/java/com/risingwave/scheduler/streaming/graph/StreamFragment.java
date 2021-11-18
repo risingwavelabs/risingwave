@@ -36,6 +36,14 @@ public class StreamFragment {
     return this.id;
   }
 
+  public ImmutableSet<Integer> getUpstreamSet() {
+    return this.upstreamSet;
+  }
+
+  public ImmutableSet<Integer> getDownstreamSet() {
+    return this.downstreamSet;
+  }
+
   public RisingWaveStreamingRel getRoot() {
     return this.root;
   }
