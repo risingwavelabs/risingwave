@@ -11,8 +11,27 @@ use risingwave_common::{
 use std::collections::HashMap;
 use std::sync::Arc;
 
-pub enum JoinType {
-    Equal,
+// The `JoinType` and `SideType` are to mimic a enum, because currently
+// enum is not supported in const generic.
+// TODO: Use enum to replace this once `feature(adt_const_params)` get completed
+// https://github.com/rust-lang/rust/issues/44580
+// https://blog.rust-lang.org/inside-rust/2021/09/06/Splitting-const-generics.html
+type JoinTypePrimitive = u8;
+#[allow(non_snake_case, non_upper_case_globals)]
+mod JoinType {
+    use super::JoinTypePrimitive;
+    pub const Inner: JoinTypePrimitive = 0;
+    pub const LeftOuter: JoinTypePrimitive = 1;
+    pub const RightOuter: JoinTypePrimitive = 2;
+    pub const FullOuter: JoinTypePrimitive = 3;
+}
+
+type SideTypePrimitive = u8;
+#[allow(non_snake_case, non_upper_case_globals)]
+mod SideType {
+    use super::SideTypePrimitive;
+    pub const Left: SideTypePrimitive = 0;
+    pub const Right: SideTypePrimitive = 1;
 }
 
 type HashKeyType = Row;
@@ -21,6 +40,12 @@ type HashValueType = Vec<Row>;
 pub struct JoinParams {
     /// Indices of the join columns
     key_indices: Vec<usize>,
+}
+
+impl JoinParams {
+    pub fn new(key_indices: Vec<usize>) -> Self {
+        Self { key_indices }
+    }
 }
 
 struct JoinSide {
@@ -33,11 +58,10 @@ struct JoinSide {
     /// The start position for the side in output new columns
     start_pos: usize,
 }
+
 /// `HashJoinExecutor` takes two input streams and runs equal hash join on them.
 /// The output columns are the concatenation of left and right columns.
-pub struct HashJoinExecutor {
-    /// The type of the join executor
-    join_type: JoinType,
+pub struct HashJoinExecutor<const T: JoinTypePrimitive> {
     /// Barrier aligner that combines two input streams and aligns their barriers
     aligner: BarrierAligner,
     // TODO: maybe remove `new_column_datatypes` and use schema
@@ -49,25 +73,10 @@ pub struct HashJoinExecutor {
     side_l: JoinSide,
     /// The parameters of the right join executor
     side_r: JoinSide,
-    /// The barrier state of the executor
-    state: BarrierWaitState,
-}
-
-impl JoinParams {
-    pub fn new(key_indices: Vec<usize>) -> Self {
-        Self { key_indices }
-    }
-}
-
-#[derive(PartialEq)]
-enum BarrierWaitState {
-    Right,
-    Left,
-    Either,
 }
 
 #[async_trait]
-impl Executor for HashJoinExecutor {
+impl<const T: JoinTypePrimitive> Executor for HashJoinExecutor<T> {
     async fn next(&mut self) -> Result<Message> {
         match self.aligner.next().await {
             AlignedMessage::Left(message) => match message {
@@ -87,9 +96,8 @@ impl Executor for HashJoinExecutor {
     }
 }
 
-impl HashJoinExecutor {
+impl<const T: JoinTypePrimitive> HashJoinExecutor<T> {
     fn new(
-        join_type: JoinType,
         input_l: Box<dyn Executor>,
         input_r: Box<dyn Executor>,
         params_l: JoinParams,
@@ -124,8 +132,8 @@ impl HashJoinExecutor {
             .iter()
             .map(|filed| filed.data_type.clone())
             .collect();
+
         Self {
-            join_type,
             aligner: BarrierAligner::new(input_l, input_r),
             new_column_datatypes,
             schema: Schema {
@@ -143,7 +151,6 @@ impl HashJoinExecutor {
                 col_types: col_r_datatypes,
                 start_pos: side_l_column_n,
             },
-            state: BarrierWaitState::Either,
         }
     }
 
@@ -194,32 +201,16 @@ impl HashJoinExecutor {
     }
 
     fn consume_chunk_left(&mut self, chunk: StreamChunk) -> Result<Message> {
-        match self.join_type {
-            JoinType::Equal => Self::eq_join_oneside(
-                chunk,
-                &self.new_column_datatypes,
-                &mut self.side_l,
-                &self.side_r,
-            ),
-        }
+        self.eq_join_oneside::<{ SideType::Left }>(chunk)
     }
 
     fn consume_chunk_right(&mut self, chunk: StreamChunk) -> Result<Message> {
-        match self.join_type {
-            JoinType::Equal => Self::eq_join_oneside(
-                chunk,
-                &self.new_column_datatypes,
-                &mut self.side_r,
-                &self.side_l,
-            ),
-        }
+        self.eq_join_oneside::<{ SideType::Right }>(chunk)
     }
 
-    fn eq_join_oneside(
+    fn eq_join_oneside<const S: SideTypePrimitive>(
+        &mut self,
         chunk: StreamChunk,
-        new_column_datatypes: &[DataTypeRef],
-        side_update: &mut JoinSide,
-        side_match: &JoinSide,
     ) -> Result<Message> {
         let chunk = chunk.compact()?;
         let StreamChunk {
@@ -237,6 +228,12 @@ impl HashJoinExecutor {
             }
         };
 
+        let (side_update, side_match) = if S == SideType::Left {
+            (&mut self.side_l, &mut self.side_r)
+        } else {
+            (&mut self.side_r, &mut self.side_l)
+        };
+
         Self::update_ht(
             &data_chunk,
             &ops,
@@ -249,7 +246,8 @@ impl HashJoinExecutor {
         let capacity = data_chunk.capacity();
         let mut new_ops = Vec::with_capacity(capacity);
 
-        let new_column_builders = new_column_datatypes
+        let new_column_builders = self
+            .new_column_datatypes
             .iter()
             .map(|datatype| datatype.clone().create_array_builder(capacity));
 
@@ -279,13 +277,11 @@ impl HashJoinExecutor {
         let new_arrays = new_column_builders
             .into_iter()
             .map(|builder| builder.finish())
-            .collect::<Vec<_>>()
-            .into_iter()
             .collect::<Result<Vec<_>>>()?;
 
         let new_columns = new_arrays
             .into_iter()
-            .zip(new_column_datatypes.iter())
+            .zip(self.new_column_datatypes.iter())
             .map(|(array_impl, data_type)| Column::new(Arc::new(array_impl), data_type.to_owned()))
             .collect::<Vec<_>>();
 
@@ -365,13 +361,10 @@ mod tests {
         let source_l = MockAsyncSource::new(schema.clone(), rx_l);
         let source_r = MockAsyncSource::new(schema.clone(), rx_r);
 
-        let join_type = JoinType::Equal;
-
         let params_l = JoinParams::new(vec![0]);
         let params_r = JoinParams::new(vec![0]);
 
-        let mut hash_join = HashJoinExecutor::new(
-            join_type,
+        let mut hash_join = HashJoinExecutor::<{ JoinType::Inner }>::new(
             Box::new(source_l),
             Box::new(source_r),
             params_l,
@@ -510,13 +503,10 @@ mod tests {
         let source_l = MockAsyncSource::new(schema.clone(), rx_l);
         let source_r = MockAsyncSource::new(schema.clone(), rx_r);
 
-        let join_type = JoinType::Equal;
-
         let params_l = JoinParams::new(vec![0]);
         let params_r = JoinParams::new(vec![0]);
 
-        let mut hash_join = HashJoinExecutor::new(
-            join_type,
+        let mut hash_join = HashJoinExecutor::<{ JoinType::Inner }>::new(
             Box::new(source_l),
             Box::new(source_r),
             params_l,
