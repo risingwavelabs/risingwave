@@ -23,32 +23,31 @@ pub struct Block;
 /// The table format has already been explained (in a simple way) in [`TableBuilder`]. Here we
 /// explain this in more detail:
 ///
-/// Generally, a table is consisted of two parts: table data and index content. Table data is simply
-/// a sequence of blocks. Index is the prost-encoded `TableIndex` data and essential information to
-/// determine the length and checksum. Index is currently located at the end of the SST, and I think
-/// we can later split one table into two files: table content `.sst` and index content `.idx`.
+/// Generally, a table is consisted of two parts:
+/// - Table data is simply a sequence of blocks.
+/// - Metadata is the prost-encoded `TableIndex` data and essential information to determine the
+/// checksum.
 ///
 /// ```plain
-/// | Block | Block | Block | Block | Block | Index |
+/// Table data format:
+/// | Block | Block | Block | Block | Block |
 /// ```
 ///
-/// Let's look at the index first.
-///
 /// ```plain
-/// |       variable      |      4B      | variable |       4B        |
-/// | Prost-encoded Index | Index Length | Checksum | Checksum Length |
+/// Metadata format
+/// |       variable      | variable |       4B        |
+/// | Prost-encoded Index | Checksum | Checksum Length |
 /// ```
 ///
 /// The reader will begin reading the table from the tail of the file. First read checksum length,
-/// then decode checksum for the index, and then read index length, and finally load the
-/// prost-encoded [`TableIndex`].
+/// then decode checksum for the index, and finally load the prost-encoded [`TableIndex`].
 ///
 /// After reading the index, we could know where each block is located, the bloom filter for the
 /// table, and the first key of each block. Inside each block, we apply prefix-compression and store
 /// key-value pairs.
 pub struct Table {
-    /// content of an SST
-    content: Bytes,
+    /// concatenated blocks of an SST
+    blocks: Bytes,
 
     /// SST id
     id: u64,
@@ -56,8 +55,8 @@ pub struct Table {
     /// estimated size, only used on encryption or compression
     estimated_size: u32,
 
-    /// index of SST
-    index: TableIndex,
+    /// metadata of SST
+    meta: TableIndex,
 
     /// true if there's bloom filter in table
     has_bloom_filter: bool,
@@ -65,20 +64,20 @@ pub struct Table {
 
 impl Table {
     /// Open an existing SST from a pre-loaded [`Bytes`].
-    fn load(id: u64, content: Bytes) -> HummockResult<Self> {
-        let index = Self::decode_index(&content[..])?;
-        let has_bloom_filter = !index.bloom_filter.is_empty();
-        let estimated_size = index.estimated_size;
+    fn load(id: u64, blocks: Bytes, meta: Bytes) -> HummockResult<Self> {
+        let meta = Self::decode_meta(&meta[..])?;
+        let has_bloom_filter = !meta.bloom_filter.is_empty();
+        let estimated_size = meta.estimated_size;
         Ok(Table {
             id,
             estimated_size,
-            index,
-            content,
+            meta,
+            blocks,
             has_bloom_filter,
         })
     }
 
-    fn decode_index(content: &[u8]) -> HummockResult<TableIndex> {
+    fn decode_meta(content: &[u8]) -> HummockResult<TableIndex> {
         let mut read_pos = content.len();
 
         // read checksum length from last 4 bytes
@@ -91,24 +90,19 @@ impl Table {
         let buf = &content[read_pos..read_pos + checksum_len];
         let chksum = Checksum::decode(buf)?;
 
-        // read index size from footer
-        read_pos -= 4;
-        let mut buf = &content[read_pos..read_pos + 4];
-        let index_len = buf.get_u32() as usize;
-
-        // read index
-        read_pos -= index_len;
-        let data = &content[read_pos..read_pos + index_len];
+        // read data
+        let data = &content[0..read_pos];
         verify_checksum(&chksum, data)?;
 
         Ok(TableIndex::decode(data)?)
     }
 
-    fn block(&self, idx: usize) -> HummockResult<Bytes> {
-        let block_offset = &self.index.offsets[idx];
+    /// Get the required block
+    async fn block(&self, idx: usize) -> HummockResult<Bytes> {
+        let block_offset = &self.meta.offsets[idx];
 
         let offset = block_offset.offset as usize;
-        let data = &self.content[offset..offset + block_offset.len as usize];
+        let data = &self.blocks[offset..offset + block_offset.len as usize];
 
         let mut read_pos = data.len() - 4; // first read checksum length
         let checksum_len = (&data[read_pos..read_pos + 4]).get_u32() as usize;
@@ -134,26 +128,26 @@ impl Table {
             entry_offsets.push(entry_offsets_ptr.get_u32_le());
         }
 
-        // The checksum is calculated for actual data + entry index + index length
-        let data = self.content.slice(offset..offset + read_pos + 4);
+        // The checksum is calculated for the blocks
+        let data = self.blocks.slice(offset..offset + read_pos + 4);
 
         verify_checksum(&chksum, &data[..])?;
 
         Ok(data)
     }
 
-    fn index_key(&self) -> u64 {
+    fn meta_key(&self) -> u64 {
         self.id
     }
 
     /// Get number of keys in SST
     pub fn key_count(&self) -> u32 {
-        self.index.key_count
+        self.meta.key_count
     }
 
     /// Get size of SST
     pub fn size(&self) -> u64 {
-        self.content.len() as u64
+        self.blocks.len() as u64
     }
 
     /// Get SST id
@@ -161,8 +155,8 @@ impl Table {
         self.id
     }
 
-    fn fetch_index(&self) -> &TableIndex {
-        &self.index
+    fn fetch_meta(&self) -> &TableIndex {
+        &self.meta
         // TODO: encryption
     }
 
@@ -173,8 +167,8 @@ impl Table {
     /// a.k.a. we don't know the answer.
     pub fn surely_not_have(&self, hash: u32) -> bool {
         if self.has_bloom_filter {
-            let index = self.fetch_index();
-            let bloom = Bloom::new(&index.bloom_filter);
+            let meta = self.fetch_meta();
+            let bloom = Bloom::new(&meta.bloom_filter);
             !bloom.may_contain(hash)
         } else {
             false
@@ -185,12 +179,12 @@ impl Table {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn test_table_load() {
-        let table = super::builder::tests::generate_table();
-        let table = Table::load(0, table).unwrap();
+    #[tokio::test]
+    async fn test_table_load() {
+        let (blocks, meta) = super::builder::tests::generate_table();
+        let table = Table::load(0, blocks, meta).unwrap();
         for i in 0..10 {
-            table.block(i).unwrap();
+            table.block(i).await.unwrap();
         }
     }
 }

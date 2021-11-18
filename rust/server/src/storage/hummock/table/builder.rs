@@ -64,7 +64,7 @@ pub struct TableBuilder {
     base_key: Bytes,
     base_offset: u32,
     entry_offsets: Vec<u32>,
-    table_index: TableIndex,
+    meta: TableIndex,
     key_hashes: Vec<u32>,
     options: TableBuilderOptions,
 }
@@ -74,8 +74,8 @@ impl TableBuilder {
     pub fn new(options: TableBuilderOptions) -> Self {
         Self {
             // approximately 16MB index + table size
-            buf: BytesMut::with_capacity((16 << 20) + options.table_size as usize),
-            table_index: TableIndex::default(),
+            buf: BytesMut::with_capacity(options.table_size as usize),
+            meta: TableIndex::default(),
             base_key: Bytes::new(),
             base_offset: 0,
             key_hashes: Vec::with_capacity(1024),
@@ -116,31 +116,31 @@ impl TableBuilder {
         self.buf.extend_from_slice(value);
 
         let sst_size = value.len() + diff_key.len() + 4;
-        self.table_index.estimated_size += sst_size as u32;
+        self.meta.estimated_size += sst_size as u32;
     }
 
+    /// Append encoded block bytes to the buffer
     fn finish_block(&mut self) {
-        if self.entry_offsets.is_empty() {
-            return;
-        }
+        assert!(!self.entry_offsets.is_empty());
+
         for offset in &self.entry_offsets {
             self.buf.put_u32_le(*offset);
         }
         self.buf.put_u32(self.entry_offsets.len() as u32);
 
         let cs = self.build_checksum(&self.buf[self.base_offset as usize..]);
-        self.write_checksum(cs);
+        write_checksum(cs, &mut self.buf);
 
-        self.add_block_to_index();
+        self.add_block_to_meta();
     }
 
-    fn add_block_to_index(&mut self) {
+    fn add_block_to_meta(&mut self) {
         let block = BlockOffset {
             key: self.base_key.to_vec(),
             offset: self.base_offset,
             len: self.buf.len() as u32 - self.base_offset,
         };
-        self.table_index.offsets.push(block);
+        self.meta.offsets.push(block);
     }
 
     fn should_finish_block(&self, key: &[u8], value: &[u8]) -> bool {
@@ -182,33 +182,40 @@ impl TableBuilder {
                                  4; // checksum length
         let estimated_size = block_size +
                                   4 + // index length
-                                  5 * self.table_index.offsets.len() as u32; // TODO: why 5?
+                                  5 * self.meta.offsets.len() as u32; // TODO: why 5?
         estimated_size as u32 > self.options.table_size
     }
 
     /// Finalize the table
-    pub fn finish(mut self) -> Bytes {
+    pub fn finish_to_blocks_and_meta(mut self) -> (Bytes, Bytes) {
+        let mut meta = BytesMut::new();
+
+        // append blocks
         self.finish_block();
-        if self.buf.is_empty() {
-            return Bytes::new();
-        }
-        let mut bytes = BytesMut::new();
+
         // TODO: move boundaries and build index if we need to encrypt or compress
+
+        // initial Bloom filter
         if self.options.bloom_false_positive > 0.0 {
             let bits_per_key =
                 Bloom::bloom_bits_per_key(self.key_hashes.len(), self.options.bloom_false_positive);
             let bloom = Bloom::build_from_key_hashes(&self.key_hashes, bits_per_key);
-            self.table_index.bloom_filter = bloom.to_vec();
+            self.meta.bloom_filter = bloom.to_vec();
         }
-        // append index to buffer
-        self.table_index.encode(&mut bytes).unwrap();
-        assert!(bytes.len() < u32::MAX as usize);
-        self.buf.put_slice(&bytes);
-        self.buf.put_u32(bytes.len() as u32);
-        // append checksum
-        let cs = self.build_checksum(&bytes);
-        self.write_checksum(cs);
-        self.buf.freeze()
+
+        // encode index
+        let mut raw_index = BytesMut::new();
+        self.meta.encode(&mut raw_index).unwrap();
+        assert!(raw_index.len() < u32::MAX as usize);
+
+        // append raw index to metadata
+        meta.put_slice(&raw_index);
+
+        // append checksum to metadata
+        let cs = self.build_checksum(&raw_index);
+        write_checksum(cs, &mut meta);
+
+        (self.buf.freeze(), meta.freeze())
     }
 
     fn build_checksum(&self, data: &[u8]) -> Checksum {
@@ -217,12 +224,14 @@ impl TableBuilder {
             algo: ChecksumAlg::Crc32c as i32,
         }
     }
+}
 
-    fn write_checksum(&mut self, checksum: Checksum) {
-        let old_len = self.buf.len();
-        checksum.encode(&mut self.buf).unwrap();
-        self.buf.put_u32((self.buf.len() - old_len) as u32);
-    }
+fn write_checksum(checksum: Checksum, target: &mut BytesMut) {
+    let old_len = target.len();
+    let mut cs = BytesMut::new();
+    checksum.encode(&mut cs).unwrap();
+    target.put(cs);
+    target.put_u32((target.len() - old_len) as u32);
 }
 
 #[cfg(test)]
@@ -234,6 +243,7 @@ pub(super) mod tests {
     const TEST_KEYS_COUNT: usize = 100000;
 
     #[test]
+    #[should_panic]
     fn test_empty() {
         let opt = TableBuilderOptions {
             bloom_false_positive: 0.1,
@@ -243,7 +253,7 @@ pub(super) mod tests {
 
         let b = TableBuilder::new(opt);
 
-        b.finish();
+        b.finish_to_blocks_and_meta();
     }
 
     #[test]
@@ -260,7 +270,7 @@ pub(super) mod tests {
         assert_eq!(header.diff, 23334);
     }
 
-    pub fn generate_table() -> Bytes {
+    pub fn generate_table() -> (Bytes, Bytes) {
         let opt = TableBuilderOptions {
             bloom_false_positive: 0.0,
             block_size: 0,
@@ -283,7 +293,7 @@ pub(super) mod tests {
             );
         }
 
-        b.finish()
+        b.finish_to_blocks_and_meta()
     }
 
     fn key(prefix: &[u8], i: usize) -> Bytes {
@@ -315,8 +325,8 @@ pub(super) mod tests {
             );
         }
 
-        let table = b.finish();
-        let table = Table::load(0, table).unwrap();
+        let (blocks, meta) = b.finish_to_blocks_and_meta();
+        let table = Table::load(0, blocks, meta).unwrap();
         assert_eq!(table.has_bloom_filter, with_blooms);
         for i in 0..key_count {
             let hash = farmhash::fingerprint32(user_key(format!("key_test_{}", i).as_bytes()));
