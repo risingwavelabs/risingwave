@@ -113,7 +113,7 @@ RwStreamMaterializedView(name=[t1])
         "databaseRefId": {
         }
       },
-      "tableId": 1
+      "tableId": "1"
     },
     "columnDescs": [{
       "columnType": {
@@ -189,7 +189,7 @@ RwStreamMaterializedView(name=[t2])
         "databaseRefId": {
         }
       },
-      "tableId": 2
+      "tableId": "2"
     },
     "columnDescs": [{
       "columnType": {
@@ -313,7 +313,7 @@ RwStreamMaterializedView(name=[t3])
         "databaseRefId": {
         }
       },
-      "tableId": 3
+      "tableId": "3"
     },
     "columnDescs": [{
       "columnType": {
@@ -461,7 +461,7 @@ RwStreamMaterializedView(name=[t4])
         "databaseRefId": {
         }
       },
-      "tableId": 4
+      "tableId": "4"
     },
     "columnDescs": [{
       "columnType": {
@@ -588,7 +588,7 @@ RwStreamMaterializedView(name=[t5])
         "databaseRefId": {
         }
       },
-      "tableId": 5
+      "tableId": "5"
     },
     "columnDescs": [{
       "columnType": {
@@ -704,7 +704,7 @@ RwStreamMaterializedView(name=[t6])
         "databaseRefId": {
         }
       },
-      "tableId": 6
+      "tableId": "6"
     },
     "columnDescs": [{
       "columnType": {
@@ -836,7 +836,7 @@ RwStreamMaterializedView(name=[t7])
         "databaseRefId": {
         }
       },
-      "tableId": 7
+      "tableId": "7"
     },
     "columnDescs": [{
       "columnType": {
@@ -978,7 +978,7 @@ RwStreamMaterializedView(name=[t8])
         "databaseRefId": {
         }
       },
-      "tableId": 8
+      "tableId": "8"
     },
     "columnDescs": [{
       "columnType": {

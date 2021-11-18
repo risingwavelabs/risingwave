@@ -35,7 +35,7 @@ fn make_int32_type_pb() -> DataType {
     }
 }
 
-fn make_table_ref_id(id: i32) -> TableRefId {
+fn make_table_ref_id(id: u64) -> TableRefId {
     TableRefId {
         schema_ref_id: Some(SchemaRefId {
             database_ref_id: Some(DatabaseRefId { database_id: 0 }),

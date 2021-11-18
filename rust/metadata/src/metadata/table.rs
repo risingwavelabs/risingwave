@@ -171,7 +171,7 @@ mod test {
                 let table = ColumnTable {
                     table_ref_id: Some(TableRefId {
                         schema_ref_id: None,
-                        table_id: i as i32,
+                        table_id: i as u64,
                     }),
                     column_count: (i + 1) as u32,
                     table_name: format!("table_{}", i),
@@ -188,12 +188,12 @@ mod test {
                 .get_table(
                     &TableRefId {
                         schema_ref_id: None,
-                        table_id: i as i32,
+                        table_id: i as u64,
                     },
                     version,
                 )
                 .await?;
-            assert_eq!(table.table_ref_id.unwrap().table_id, i as i32);
+            assert_eq!(table.table_ref_id.unwrap().table_id, i as u64);
             assert_eq!(table.table_name, format!("table_{}", i));
             assert_eq!(table.column_count, (i + 1) as u32);
             assert_eq!(table.version, version.into_inner());
@@ -219,7 +219,7 @@ mod test {
             assert!(meta_manager
                 .drop_table(&TableRefId {
                     schema_ref_id: None,
-                    table_id: i as i32
+                    table_id: i as u64
                 })
                 .await
                 .is_ok());
@@ -257,7 +257,7 @@ mod test {
                 let table = RowTable {
                     table_ref_id: Some(TableRefId {
                         schema_ref_id: None,
-                        table_id: i as i32,
+                        table_id: i as u64,
                     }),
                     columns: vec![],
                     pk_columns: vec![],
@@ -274,12 +274,12 @@ mod test {
                 .get_materialized_view(
                     &TableRefId {
                         schema_ref_id: None,
-                        table_id: i as i32,
+                        table_id: i as u64,
                     },
                     version,
                 )
                 .await?;
-            assert_eq!(table.table_ref_id.unwrap().table_id, i as i32);
+            assert_eq!(table.table_ref_id.unwrap().table_id, i as u64);
             assert_eq!(table.version, version.into_inner());
         }
 
@@ -303,7 +303,7 @@ mod test {
             assert!(meta_manager
                 .drop_materialized_view(&TableRefId {
                     schema_ref_id: None,
-                    table_id: i as i32
+                    table_id: i as u64
                 })
                 .await
                 .is_ok());

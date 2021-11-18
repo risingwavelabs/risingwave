@@ -47,7 +47,7 @@
 //! #[derive(FromProtobuf, IntoProtobuf)]
 //! #[pb_convert(pb_type = "proto::DatabaseRefId")]
 //! pub struct DatabaseId {
-//!   database_id: i32,
+//!   database_id: u64,
 //! }
 //!
 //! #[derive(IntoProtobuf, FromProtobuf)]
@@ -56,7 +56,7 @@
 //!   database_ref_id: DatabaseId,
 //!   // Use `s_id` in protobuf message.
 //!   #[pb_convert(pb_field = "s_id")]
-//!   schema_id: i32,
+//!   schema_id: u64,
 //!   // `other_field` will be ignored when covnerting from/to protobuf message.
 //!   #[pb_convert(skip=true)]
 //!   other_field: i32
