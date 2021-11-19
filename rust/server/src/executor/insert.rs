@@ -167,17 +167,13 @@ impl BoxedExecutorBuilder for InsertExecutor {
 mod tests {
     use std::sync::Arc;
 
-    use pb_construct::make_proto;
-    use risingwave_proto::data::{DataType as DataTypeProto, DataType_TypeName};
-    use risingwave_proto::plan::{ColumnDesc, ColumnDesc_ColumnEncodingType};
-
     use crate::executor::test_utils::MockExecutor;
     use crate::storage::{SimpleTableManager, TableManager};
     use crate::*;
     use risingwave_common::array::{Array, I64Array};
     use risingwave_common::catalog::{Field, Schema, SchemaId};
     use risingwave_common::column_nonnull;
-    use risingwave_common::types::{DataTypeKind, Int64Type};
+    use risingwave_common::types::{DataTypeKind, DecimalType, Int64Type};
 
     use super::*;
 
@@ -197,32 +193,20 @@ mod tests {
         };
         let mut mock_executor = MockExecutor::new(schema.clone());
 
-        // Column descriptions for creating table.
-        let column1 = make_proto!(ColumnDesc, {
-          column_type: make_proto!(DataTypeProto, {
-            type_name: DataType_TypeName::INT64
-          }),
-          encoding: ColumnDesc_ColumnEncodingType::RAW,
-          is_primary: false,
-          name: "row_id".to_string()
-        });
-        let column2 = make_proto!(ColumnDesc, {
-          column_type: make_proto!(DataTypeProto, {
-            type_name: DataType_TypeName::INT64
-          }),
-          encoding: ColumnDesc_ColumnEncodingType::RAW,
-          is_primary: false,
-          name: "test_col".to_string()
-        });
-        let column3 = make_proto!(ColumnDesc, {
-          column_type: make_proto!(DataTypeProto, {
-            type_name: DataType_TypeName::INT64
-          }),
-          encoding: ColumnDesc_ColumnEncodingType::RAW,
-          is_primary: false,
-          name: "test_col".to_string()
-        });
-        let columns = vec![column1, column2, column3];
+        // Schema for creating table.
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
+                },
+                Field {
+                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
+                },
+                Field {
+                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
+                },
+            ],
+        };
 
         let col1 = column_nonnull! { I64Array, Int64Type, [1, 3, 5, 7, 9] };
         let col2 = column_nonnull! { I64Array, Int64Type, [2, 4, 6, 8, 10] };
@@ -231,7 +215,7 @@ mod tests {
 
         // Create the first table.
         let table_id = TableId::new(SchemaId::default(), 0);
-        table_manager.create_table(&table_id, &columns).await?;
+        table_manager.create_table(&table_id, &schema).await?;
 
         let mut insert_executor = InsertExecutor {
             table_id: table_id.clone(),
@@ -371,7 +355,7 @@ mod tests {
                 }],
             },
         };
-        table_manager.create_table(&table_id2, &columns).await?;
+        table_manager.create_table(&table_id2, &schema).await?;
         insert_executor.init().await.unwrap();
         let fields = &insert_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);

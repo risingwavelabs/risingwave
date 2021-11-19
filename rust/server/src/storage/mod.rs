@@ -56,7 +56,7 @@ pub trait Table: Sync + Send {
 /// `Database` is a logical concept and stored as metadata information.
 pub trait TableManager: Sync + Send {
     /// Create a specific table.
-    async fn create_table(&self, table_id: &TableId, columns: &[ColumnDesc]) -> Result<()>;
+    async fn create_table(&self, table_id: &TableId, schema: &Schema) -> Result<()>;
 
     /// Get a specific table.
     fn get_table(&self, table_id: &TableId) -> Result<TableTypes>;
@@ -89,7 +89,7 @@ pub struct SimpleTableManager {
 
 #[async_trait::async_trait]
 impl TableManager for SimpleTableManager {
-    async fn create_table(&self, table_id: &TableId, columns: &[ColumnDesc]) -> Result<()> {
+    async fn create_table(&self, table_id: &TableId, schema: &Schema) -> Result<()> {
         let mut tables = self.get_tables()?;
 
         ensure!(
@@ -98,7 +98,7 @@ impl TableManager for SimpleTableManager {
             table_id
         );
 
-        let column_count = columns.len();
+        let column_count = schema.fields.len();
         ensure!(
             column_count > 0,
             "column count must be positive: {}",
@@ -106,7 +106,7 @@ impl TableManager for SimpleTableManager {
         );
         tables.insert(
             table_id.clone(),
-            TableTypes::BummockTable(Arc::new(BummockTable::new(table_id, columns))),
+            TableTypes::BummockTable(Arc::new(BummockTable::new(table_id, schema))),
         );
         Ok(())
     }

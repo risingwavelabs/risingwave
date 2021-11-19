@@ -153,49 +153,26 @@ impl SeqScanExecutor {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_pb::data::{data_type::TypeName, DataType as DataTypeProst};
-    use risingwave_pb::plan::{column_desc::ColumnEncodingType, ColumnDesc};
-    use risingwave_pb::ToProst;
 
     use crate::*;
     use risingwave_common::array::{Array, I64Array};
     use risingwave_common::catalog::test_utils::mock_table_id;
-    use risingwave_common::types::{DataTypeKind, Int64Type};
+    use risingwave_common::catalog::Field;
+    use risingwave_common::types::{DataTypeKind, DecimalType, Int64Type};
 
     use super::*;
 
     #[tokio::test]
     async fn test_seq_scan_executor() -> Result<()> {
         let table_id = mock_table_id();
-        let column = ColumnDesc {
-            column_type: Some(DataTypeProst {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            encoding: ColumnEncodingType::Raw as i32,
-            is_primary: false,
-            name: "test_col".to_string(),
+        let schema = Schema {
+            fields: vec![Field {
+                data_type: Arc::new(DecimalType::new(false, 10, 5)?),
+            }],
         };
-        let columns = vec![column];
-        let table = BummockTable::new(
-            &table_id,
-            &columns
-                .iter()
-                .map(|c| c.to_proto::<risingwave_proto::plan::ColumnDesc>())
-                .collect::<Vec<risingwave_proto::plan::ColumnDesc>>()[..],
-        );
+        let table = BummockTable::new(&table_id, &schema);
 
-        let fields = table
-            .columns()
-            .iter()
-            .map(|c| {
-                Field::try_from(
-                    &c.get_column_type()
-                        .to_prost::<risingwave_pb::data::DataType>(),
-                )
-                .unwrap()
-            })
-            .collect::<Vec<Field>>();
+        let fields = table.schema().fields.to_owned();
         let col1 = column_nonnull! { I64Array, Int64Type, [1, 3, 5, 7, 9] };
         let col2 = column_nonnull! { I64Array, Int64Type, [2, 4, 6, 8, 10] };
         let data_chunk1 = DataChunk::builder().columns(vec![col1]).build();
@@ -215,7 +192,7 @@ mod tests {
         seq_scan_executor.init().await.unwrap();
 
         let fields = &seq_scan_executor.schema().fields;
-        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int64);
+        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Decimal);
 
         seq_scan_executor.init().await.unwrap();
 

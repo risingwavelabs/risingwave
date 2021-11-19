@@ -2,15 +2,15 @@ use prost::Message;
 
 use pb_convert::FromProtobuf;
 use risingwave_common::array::DataChunk;
+use risingwave_common::types::build_from_prost;
 use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::{ColumnDesc, CreateTableNode};
+use risingwave_pb::plan::CreateTableNode;
 use risingwave_pb::ToProto;
-use risingwave_proto::plan::ColumnDesc as ProtoColumnDesc;
 
 use crate::executor::{Executor, ExecutorBuilder};
 use crate::storage::TableManagerRef;
-use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::Result;
 
@@ -18,7 +18,6 @@ use super::{BoxedExecutor, BoxedExecutorBuilder};
 
 pub(super) struct CreateTableExecutor {
     table_id: TableId,
-    columns: Vec<ColumnDesc>,
     table_manager: TableManagerRef,
     schema: Schema,
 }
@@ -36,13 +35,20 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
         )
         .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
-        let columns = node.get_column_descs().to_vec();
+        let fields = node
+            .get_column_descs()
+            .iter()
+            .map(|col| {
+                Ok(Field {
+                    data_type: build_from_prost(col.get_column_type())?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         Ok(Box::new(Self {
             table_id,
-            columns,
             table_manager: source.global_task_env().table_manager_ref(),
-            schema: Schema { fields: vec![] },
+            schema: Schema { fields },
         }))
     }
 }
@@ -56,14 +62,7 @@ impl Executor for CreateTableExecutor {
 
     async fn execute(&mut self) -> Result<Option<DataChunk>> {
         self.table_manager
-            .create_table(
-                &self.table_id,
-                &self
-                    .columns
-                    .iter()
-                    .map(|c| c.to_proto::<ProtoColumnDesc>())
-                    .collect::<Vec<ProtoColumnDesc>>()[..],
-            )
+            .create_table(&self.table_id, &self.schema)
             .await
             .map(|_| None)
     }

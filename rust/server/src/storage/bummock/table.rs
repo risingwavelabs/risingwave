@@ -7,9 +7,8 @@ use futures::channel::mpsc;
 use futures::SinkExt;
 use risingwave_common::array::InternalError;
 use risingwave_common::array::{DataChunk, DataChunkRef};
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::{Result, RwError};
-use risingwave_proto::plan::ColumnDesc;
 use std::sync::atomic::Ordering;
 use std::sync::atomic::{AtomicU64, AtomicUsize};
 use std::sync::Arc;
@@ -22,8 +21,8 @@ pub struct BummockTable {
     /// Table identifier.
     table_id: TableId,
 
-    /// Collections of column descriptors.
-    column_descs: Vec<ColumnDesc>,
+    /// Table Schema
+    schema: Schema,
 
     /// Current tuple id.
     current_tuple_id: AtomicU64,
@@ -152,7 +151,7 @@ impl Table for BummockTable {
     }
 
     fn get_column_ids(&self) -> Result<Arc<Vec<i32>>> {
-        Ok(Arc::new((0..self.column_descs.len() as i32).collect()))
+        Ok(Arc::new((0..self.schema.fields.len() as i32).collect()))
     }
 
     fn index_of_column_id(&self, column_id: i32) -> Result<usize> {
@@ -173,10 +172,10 @@ impl Table for BummockTable {
 }
 
 impl BummockTable {
-    pub fn new(table_id: &TableId, column_descs: &[ColumnDesc]) -> Self {
+    pub fn new(table_id: &TableId, schema: &Schema) -> Self {
         Self {
             table_id: table_id.clone(),
-            column_descs: column_descs.to_vec(),
+            schema: schema.to_owned(),
             stream_sender: RwLock::new(None),
             mem_clean_segs: Vec::new(),
             mem_free_segs: Vec::with_capacity(0), // empty before we have memory pool
@@ -194,8 +193,8 @@ impl BummockTable {
         self.next_row_id.fetch_add(1, Ordering::Relaxed)
     }
 
-    pub fn columns(&self) -> &Vec<ColumnDesc> {
-        &self.column_descs
+    pub fn schema(&self) -> &Schema {
+        &self.schema
     }
 
     /// Get a tuple with `tuple_id`. This is a basic operation to fetch a tuple.
@@ -276,12 +275,9 @@ mod tests {
     use crate::storage::{BummockResult, BummockTable, Table};
 
     use risingwave_common::array::{Array, DataChunk, I64Array};
-    use risingwave_common::catalog::TableId;
+    use risingwave_common::catalog::{Field, Schema, TableId};
     use risingwave_common::error::Result;
-    use risingwave_common::types::Int64Type;
-    use risingwave_pb::data::{data_type::TypeName, DataType};
-    use risingwave_pb::plan::{column_desc::ColumnEncodingType, ColumnDesc};
-    use risingwave_pb::ToProto;
+    use risingwave_common::types::{DecimalType, Int64Type};
 
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
@@ -290,31 +286,22 @@ mod tests {
     async fn test_table_basic_read_write() -> Result<()> {
         let table_id = TableId::default();
 
-        let column_desc1 = ColumnDesc {
-            column_type: Some(DataType {
-                type_name: TypeName::Int32 as i32,
-                ..Default::default()
-            }),
-            encoding: ColumnEncodingType::Raw as i32,
-            name: "v1".to_string(),
-            is_primary: false,
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
+                },
+                Field {
+                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
+                },
+            ],
         };
-        let column_desc2 = ColumnDesc {
-            column_type: Some(DataType {
-                type_name: TypeName::Int32 as i32,
-                ..Default::default()
-            }),
-            encoding: ColumnEncodingType::Raw as i32,
-            name: "v2".to_string(),
-            is_primary: false,
-        };
-        let column_descs = vec![column_desc1.to_proto(), column_desc2.to_proto()];
 
         let col1 = column_nonnull! { I64Array, Int64Type, [1, 3, 5, 7, 9] };
         let col2 = column_nonnull! { I64Array, Int64Type, [2, 4, 6, 8, 10] };
         let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
 
-        let bummock_table = Arc::new(BummockTable::new(&table_id, &column_descs));
+        let bummock_table = Arc::new(BummockTable::new(&table_id, &schema));
 
         assert!(matches!(
             bummock_table.get_data().await?,
@@ -322,7 +309,7 @@ mod tests {
         ));
 
         let _ = bummock_table.append(data_chunk).await;
-        assert_eq!(bummock_table.columns().len(), 2);
+        assert_eq!(bummock_table.schema().fields.len(), 2);
 
         assert_eq!(bummock_table.current_tuple_id.load(Ordering::Relaxed), 5);
 

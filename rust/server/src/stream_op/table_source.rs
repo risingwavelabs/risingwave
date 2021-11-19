@@ -88,36 +88,24 @@ mod tests {
     use risingwave_common::array::{I32Array, UTF8Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::test_utils::mock_table_id;
-    use risingwave_common::catalog::Field;
-    use risingwave_common::types::{DataTypeKind, DataTypeRef, Int32Type, StringType};
-    use risingwave_pb::data::{data_type::TypeName, DataType};
-    use risingwave_pb::plan::{column_desc::ColumnEncodingType, ColumnDesc};
-    use risingwave_pb::ToProto;
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::{DataTypeKind, DataTypeRef, DecimalType, Int32Type, StringType};
     use std::sync::Arc;
 
     #[tokio::test]
     async fn test_table_source() -> Result<()> {
         let table_id = mock_table_id();
-        let column1 = ColumnDesc {
-            column_type: Some(DataType {
-                type_name: TypeName::Int32 as i32,
-                ..Default::default()
-            }),
-            encoding: ColumnEncodingType::Raw as i32,
-            name: "test_col".to_string(),
-            is_primary: false,
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
+                },
+                Field {
+                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
+                },
+            ],
         };
-        let column2 = ColumnDesc {
-            column_type: Some(DataType {
-                type_name: TypeName::Varchar as i32,
-                ..Default::default()
-            }),
-            encoding: ColumnEncodingType::Raw as i32,
-            name: "test_col".to_string(),
-            is_primary: false,
-        };
-        let columns = vec![column1.to_proto(), column2.to_proto()];
-        let table = BummockTable::new(&table_id, &columns);
+        let table = BummockTable::new(&table_id, &schema);
 
         let col1_type = Int32Type::create(false) as DataTypeRef;
         let col2_type = StringType::create(true, 10, DataTypeKind::Varchar);
@@ -216,26 +204,17 @@ mod tests {
     async fn test_table_dropped() -> Result<()> {
         let table_id = mock_table_id();
 
-        let column1 = ColumnDesc {
-            column_type: Some(DataType {
-                type_name: TypeName::Int32 as i32,
-                ..Default::default()
-            }),
-            encoding: ColumnEncodingType::Raw as i32,
-            name: "test_col".to_string(),
-            is_primary: false,
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
+                },
+                Field {
+                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
+                },
+            ],
         };
-        let column2 = ColumnDesc {
-            column_type: Some(DataType {
-                type_name: TypeName::Varchar as i32,
-                ..Default::default()
-            }),
-            encoding: ColumnEncodingType::Raw as i32,
-            name: "test_col".to_string(),
-            is_primary: false,
-        };
-        let columns = vec![column1.to_proto(), column2.to_proto()];
-        let table = BummockTable::new(&table_id, &columns);
+        let table = BummockTable::new(&table_id, &schema);
 
         let col1_type = Int32Type::create(false) as DataTypeRef;
         let col2_type = StringType::create(true, 10, DataTypeKind::Varchar);

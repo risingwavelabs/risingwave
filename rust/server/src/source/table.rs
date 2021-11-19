@@ -136,12 +136,16 @@ mod test {
     use itertools::Itertools;
     use risingwave_common::array::{Array, I64Array};
     use risingwave_common::catalog::test_utils::mock_table_id;
+    use risingwave_common::catalog::Schema;
     use risingwave_common::column_nonnull;
     use risingwave_common::types::Int64Type;
 
     #[tokio::test]
     async fn test_table_source() {
-        let table = Arc::new(BummockTable::new(&mock_table_id(), &[]));
+        let table = Arc::new(BummockTable::new(
+            &mock_table_id(),
+            &Schema { fields: vec![] },
+        ));
 
         // Some existing data
         let chunk0 = StreamChunk::new(

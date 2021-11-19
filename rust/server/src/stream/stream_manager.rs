@@ -19,7 +19,6 @@ use risingwave_common::util::sort_util::fetch_orders;
 use risingwave_pb::expr;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_service;
-use risingwave_pb::ToProst;
 use risingwave_pb::ToProto;
 use std::convert::TryFrom;
 use tokio::task::JoinHandle;
@@ -329,9 +328,7 @@ impl StreamManagerCore {
 
                 let table_ref = table_manager.clone().get_table(&table_id).unwrap();
                 if let TableTypes::BummockTable(table) = table_ref {
-                    let schema = Schema::try_from(
-                        &table.columns().iter().map(ToProst::to_prost).collect_vec(),
-                    )?;
+                    let schema = table.schema().to_owned();
                     let stream_receiver = table.create_stream()?;
                     // TODO: The channel pair should be created by the Checkpoint manger. So this
                     // line may be removed later.

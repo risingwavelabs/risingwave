@@ -2,14 +2,13 @@ use crate::storage::{SimpleTableManager, Table, TableManager, TableTypes};
 use crate::stream::StreamManager;
 use crate::stream_op::Message as StreamMessage;
 use futures::StreamExt;
-use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::Row;
 use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder};
-use risingwave_common::catalog::{SchemaId, TableId};
+use risingwave_common::catalog::{Field, Schema, SchemaId, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::RwError;
-use risingwave_common::types::{Int32Type, Scalar};
+use risingwave_common::types::{DecimalType, Int32Type, Scalar};
 use risingwave_common::util::addr::get_host_port;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
@@ -25,7 +24,6 @@ use risingwave_pb::stream_plan::{
 };
 use risingwave_pb::stream_service::{ActorInfo, BroadcastActorInfoTableRequest};
 use risingwave_pb::task_service::HostAddress;
-use risingwave_pb::ToProto;
 use std::sync::Arc;
 
 fn make_int32_type_pb() -> DataType {
@@ -108,31 +106,17 @@ async fn test_stream_mv_proto() {
     // Initialize storage.
     let table_manager = Arc::new(SimpleTableManager::new());
     let table_id = TableId::default();
-    let column1 = ColumnDesc {
-        column_type: Some(DataType {
-            type_name: TypeName::Int32 as i32,
-            ..Default::default()
-        }),
-        encoding: ColumnEncodingType::Raw as i32,
-        is_primary: false,
-        name: "test_col".to_string(),
+    let schema = Schema {
+        fields: vec![
+            Field {
+                data_type: Arc::new(DecimalType::new(false, 10, 5).unwrap()),
+            },
+            Field {
+                data_type: Arc::new(DecimalType::new(false, 10, 5).unwrap()),
+            },
+        ],
     };
-    let column2 = ColumnDesc {
-        column_type: Some(DataType {
-            type_name: TypeName::Int32 as i32,
-            ..Default::default()
-        }),
-        encoding: ColumnEncodingType::Raw as i32,
-        is_primary: false,
-        name: "test_col".to_string(),
-    };
-    let columns = vec![column1, column2];
-    let _res = table_manager
-        .create_table(
-            &table_id,
-            &columns.iter().map(ToProto::to_proto).collect_vec(),
-        )
-        .await;
+    let _res = table_manager.create_table(&table_id, &schema).await;
     let table_ref =
         (if let TableTypes::BummockTable(table_ref) = table_manager.get_table(&table_id).unwrap() {
             Ok(table_ref)
