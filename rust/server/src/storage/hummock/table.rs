@@ -64,7 +64,7 @@ pub struct Table {
 
 impl Table {
     /// Open an existing SST from a pre-loaded [`Bytes`].
-    fn load(id: u64, blocks: Bytes, meta: Bytes) -> HummockResult<Self> {
+    pub fn load(id: u64, blocks: Bytes, meta: Bytes) -> HummockResult<Self> {
         let meta = Self::decode_meta(&meta[..])?;
         let has_bloom_filter = !meta.bloom_filter.is_empty();
         let estimated_size = meta.estimated_size;

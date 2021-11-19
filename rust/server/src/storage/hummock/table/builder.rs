@@ -7,6 +7,7 @@
 use super::utils::{bytes_diff, crc32_checksum};
 use crate::storage::hummock::bloom::Bloom;
 use crate::storage::hummock::format::user_key;
+use crate::storage::hummock::HummockValue;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use prost::Message;
 use risingwave_pb::hummock::{
@@ -89,33 +90,41 @@ impl TableBuilder {
         self.buf.is_empty()
     }
 
+    /// Calculate the difference of two keys
     fn key_diff<'a>(&self, key: &'a [u8]) -> &'a [u8] {
         bytes_diff(&self.base_key, key)
     }
 
-    fn add_helper(&mut self, key: &[u8], value: &[u8]) {
+    /// Add single KV pair to the table builder
+    fn add_helper(&mut self, key: &[u8], value: HummockValue<Vec<u8>>) {
         self.key_hashes.push(farmhash::fingerprint32(user_key(key)));
+
         let diff_key = if self.base_key.is_empty() {
             self.base_key = key.to_vec().into();
             key
         } else {
             self.key_diff(key)
         };
+
         assert!(key.len() - diff_key.len() <= u16::MAX as usize);
         assert!(diff_key.len() <= u16::MAX as usize);
+
         let h = Header {
             overlap: (key.len() - diff_key.len()) as u16,
             diff: diff_key.len() as u16,
         };
+
         assert!(self.buf.len() <= u32::MAX as usize);
+
         self.entry_offsets
             .push(self.buf.len() as u32 - self.base_offset);
 
         h.encode(&mut self.buf);
         self.buf.put_slice(diff_key);
-        self.buf.extend_from_slice(value);
 
-        let sst_size = value.len() + diff_key.len() + 4;
+        value.encode(&mut self.buf);
+
+        let sst_size = value.encoded_len() + diff_key.len() + 4;
         self.meta.estimated_size += sst_size as u32;
     }
 
@@ -143,7 +152,7 @@ impl TableBuilder {
         self.meta.offsets.push(block);
     }
 
-    fn should_finish_block(&self, key: &[u8], value: &[u8]) -> bool {
+    fn should_finish_block(&self, key: &[u8], value: &HummockValue<Vec<u8>>) -> bool {
         if self.entry_offsets.is_empty() {
             return false;
         }
@@ -152,18 +161,19 @@ impl TableBuilder {
             8 + // sum64 in checksum proto
             4; // checksum length
         assert!(entries_offsets_size < u32::MAX as usize);
+
         let estimated_size = (self.buf.len() as u32)
             - self.base_offset + 6 /* header size for entry */
             + key.len() as u32
-            + value.len() as u32
+            + value.encoded_len() as u32
             + entries_offsets_size as u32;
         assert!(self.buf.len() + (estimated_size as usize) < u32::MAX as usize);
         estimated_size > self.options.block_size as u32
     }
 
     /// Add key-value pair to table
-    pub fn add(&mut self, key: &[u8], value: &[u8]) {
-        if self.should_finish_block(key, value) {
+    pub fn add(&mut self, key: &[u8], value: HummockValue<Vec<u8>>) {
+        if self.should_finish_block(key, &value) {
             self.finish_block();
             self.base_key.clear();
             assert!(self.buf.len() < u32::MAX as usize);
@@ -186,7 +196,7 @@ impl TableBuilder {
         estimated_size as u32 > self.options.table_size
     }
 
-    /// Finalize the table
+    /// Finalize the table to be blocks and metadata
     pub fn finish_to_blocks_and_meta(mut self) -> (Bytes, Bytes) {
         let mut meta = BytesMut::new();
 
@@ -226,6 +236,7 @@ impl TableBuilder {
     }
 }
 
+/// Write checksum to the target
 fn write_checksum(checksum: Checksum, target: &mut BytesMut) {
     let old_len = target.len();
     let mut cs = BytesMut::new();
@@ -282,14 +293,15 @@ pub(super) mod tests {
         for i in 0..10000 {
             b.add(
                 format!("key_test_{}", i).as_bytes(),
-                "23332333"
-                    .as_bytes()
-                    .iter()
-                    .cycle()
-                    .cloned()
-                    .take(i + 1)
-                    .collect_vec()
-                    .as_slice(),
+                HummockValue::Put(
+                    "23332333"
+                        .as_bytes()
+                        .iter()
+                        .cycle()
+                        .cloned()
+                        .take(i + 1)
+                        .collect_vec(),
+                ),
             );
         }
 
@@ -314,14 +326,15 @@ pub(super) mod tests {
         for i in 0..key_count {
             b.add(
                 format!("key_test_{}", i).as_bytes(),
-                "23332333"
-                    .as_bytes()
-                    .iter()
-                    .cycle()
-                    .cloned()
-                    .take(i + 1)
-                    .collect_vec()
-                    .as_slice(),
+                HummockValue::Put(
+                    "23332333"
+                        .as_bytes()
+                        .iter()
+                        .cycle()
+                        .cloned()
+                        .take(i + 1)
+                        .collect_vec(),
+                ),
             );
         }
 

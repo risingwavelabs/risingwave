@@ -1,3 +1,4 @@
+use prost::DecodeError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -9,7 +10,13 @@ pub enum HummockError {
     #[error("Invalid Block")]
     InvalidBlock,
     #[error("Decode Error {0}")]
-    DecodeError(#[from] prost::DecodeError),
+    DecodeError(String),
+}
+
+impl From<prost::DecodeError> for HummockError {
+    fn from(e: DecodeError) -> Self {
+        Self::DecodeError(e.to_string())
+    }
 }
 
 pub type HummockResult<T> = std::result::Result<T, HummockError>;

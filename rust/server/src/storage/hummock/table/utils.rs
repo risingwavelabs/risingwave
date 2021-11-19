@@ -39,12 +39,14 @@ pub fn bytes_diff<'a, 'b>(base: &'a [u8], target: &'b [u8]) -> &'b [u8] {
     }
 }
 
+/// Calculate the CRC32 of the given data
 pub fn crc32_checksum(data: &[u8]) -> u64 {
     let mut hasher = crc32fast::Hasher::new();
     hasher.update(data);
     hasher.finalize() as u64
 }
 
+/// Verify the checksum of the data equals the given checksum
 pub fn verify_checksum(chksum: &Checksum, data: &[u8]) -> HummockResult<()> {
     match chksum.algo() {
         ChecksumAlg::Crc32c => {
