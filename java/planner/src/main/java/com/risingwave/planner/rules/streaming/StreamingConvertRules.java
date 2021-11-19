@@ -5,6 +5,7 @@ import static org.apache.calcite.rel.rules.CoreRules.AGGREGATE_PROJECT_MERGE;
 import com.risingwave.planner.rel.physical.streaming.RwStreamFilter;
 import com.risingwave.planner.rel.physical.streaming.RwStreamProject;
 import com.risingwave.planner.rel.physical.streaming.RwStreamTableSource;
+import com.risingwave.planner.rel.physical.streaming.join.RwStreamHashJoin;
 import com.risingwave.planner.rules.streaming.aggregate.StreamingShuffleAggRule;
 import com.risingwave.planner.rules.streaming.aggregate.StreamingSingleModeAggRule;
 import com.risingwave.planner.rules.streaming.aggregate.StreamingTwoPhaseAggRule;
@@ -20,6 +21,7 @@ public class StreamingConvertRules {
           RwStreamFilter.StreamFilterConverterRule.INSTANCE,
           RwStreamProject.StreamProjectConverterRule.INSTANCE,
           RwStreamTableSource.StreamTableSourceConverterRule.INSTANCE,
+          RwStreamHashJoin.StreamHashJoinConverterRule.INSTANCE,
           StreamingExpandConverterRule.Config.DEFAULT.toRule());
 
   public static final RuleSet STREAMING_AGG_RULES =

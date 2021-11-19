@@ -298,22 +298,29 @@ impl StreamManagerCore {
         }
     }
 
-    /// Create a chain of nodes and return the head executor.
+    /// Create a chain(tree) of nodes and return the head executor.
     fn create_nodes(
         &mut self,
         node: &stream_plan::StreamNode,
-        merger: Box<dyn Executor>,
+        mergers: Vec<Box<dyn Executor>>,
         table_manager: TableManagerRef,
     ) -> Result<Box<dyn Executor>> {
         use stream_plan::stream_node::Node::*;
 
         // Create the input executor before creating itself
         // Note(eric): Maybe we should put a `Merger` executor in proto
-        let input = {
-            if node.input.is_some() {
-                self.create_nodes(node.get_input(), merger, table_manager.clone())?
+        let mut input: Vec<Box<dyn Executor>> = {
+            if !node.input.is_empty() {
+                assert_eq!(node.input.len(), mergers.len());
+                node.input
+                    .iter()
+                    .zip(mergers.into_iter())
+                    .map(|(input, merger)| {
+                        self.create_nodes(input, vec![merger], table_manager.clone())
+                    })
+                    .collect::<Result<Vec<_>>>()?
             } else {
-                merger
+                mergers
             }
         };
 
@@ -354,11 +361,17 @@ impl StreamManagerCore {
                     .iter()
                     .map(build_expr_from_prost)
                     .collect::<Result<Vec<_>>>()?;
-                Ok(Box::new(ProjectExecutor::new(input, project_exprs)))
+                Ok(Box::new(ProjectExecutor::new(
+                    input.remove(0),
+                    project_exprs,
+                )))
             }
             FilterNode(filter_node) => {
                 let search_condition = build_expr_from_prost(filter_node.get_search_condition())?;
-                Ok(Box::new(FilterExecutor::new(input, search_condition)))
+                Ok(Box::new(FilterExecutor::new(
+                    input.remove(0),
+                    search_condition,
+                )))
             }
             SimpleAggNode(aggr_node) => {
                 let agg_calls: Vec<AggCall> = aggr_node
@@ -366,7 +379,10 @@ impl StreamManagerCore {
                     .iter()
                     .map(build_agg_call_from_prost)
                     .try_collect()?;
-                Ok(Box::new(SimpleAggExecutor::new(input, agg_calls)?))
+                Ok(Box::new(SimpleAggExecutor::new(
+                    input.remove(0),
+                    agg_calls,
+                )?))
             }
             HashAggNode(aggr_node) => {
                 let keys = aggr_node
@@ -381,10 +397,10 @@ impl StreamManagerCore {
                     .map(build_agg_call_from_prost)
                     .try_collect()?;
 
-                let schema = generate_hash_agg_schema(&*input, &agg_calls, &keys);
+                let schema = generate_hash_agg_schema(&*input[0], &agg_calls, &keys);
 
                 Ok(Box::new(HashAggExecutor::new(
-                    input,
+                    input.remove(0),
                     agg_calls.clone(),
                     keys,
                     InMemoryKeyedState::new(
@@ -403,10 +419,32 @@ impl StreamManagerCore {
                     Some(top_n_node.limit as usize)
                 };
                 Ok(Box::new(AppendOnlyTopNExecutor::new(
-                    input,
+                    input.remove(0),
                     Arc::new(order_paris),
                     limit,
                     top_n_node.offset as usize,
+                )))
+            }
+            HashJoinNode(hash_join_node) => {
+                let source_r = input.remove(1);
+                let source_l = input.remove(0);
+                let params_l = JoinParams::new(
+                    hash_join_node
+                        .get_left_key()
+                        .iter()
+                        .map(|key| *key as usize)
+                        .collect::<Vec<_>>(),
+                );
+                let params_r = JoinParams::new(
+                    hash_join_node
+                        .get_right_key()
+                        .iter()
+                        .map(|key| *key as usize)
+                        .collect::<Vec<_>>(),
+                );
+
+                Ok(Box::new(HashJoinExecutor::<{ JoinType::Inner }>::new(
+                    source_l, source_r, params_l, params_r,
                 )))
             }
             MviewNode(materialized_view_node) => {
@@ -430,7 +468,7 @@ impl StreamManagerCore {
                 table_manager.create_materialized_view(&table_id, columns, pks.clone())?;
                 let table_ref = table_manager.get_table(&table_id).unwrap();
                 if let TableTypes::Row(table) = table_ref {
-                    let executor = Box::new(MViewSinkExecutor::new(input, table, pks));
+                    let executor = Box::new(MViewSinkExecutor::new(input.remove(0), table, pks));
                     Ok(executor)
                 } else {
                     Err(RwError::from(InternalError(
@@ -551,11 +589,20 @@ impl StreamManagerCore {
 
             let schema = Schema::try_from(fragment.get_input_column_descs())?;
 
-            let merger =
-                self.create_merger(*fragment_id, schema, fragment.get_upstream_fragment_id())?;
+            let mergers: Vec<Box<dyn Executor>> = fragment
+                .mergers
+                .iter()
+                .map(|merger| {
+                    self.create_merger(
+                        *fragment_id,
+                        schema.clone(),
+                        merger.get_upstream_fragment_id(),
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?;
 
             let executor =
-                self.create_nodes(fragment.get_nodes(), merger, table_manager.clone())?;
+                self.create_nodes(fragment.get_nodes(), mergers, table_manager.clone())?;
 
             let dispatcher = self.create_dispatcher(
                 executor,

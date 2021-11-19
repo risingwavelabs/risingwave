@@ -49,6 +49,12 @@ message AppendOnlyTopNNode {
   uint64 offset = 3;
 }
 
+message HashJoinNode {
+  plan.JoinType join_type = 1;
+  repeated int32 left_key = 2;
+  repeated int32 right_key = 3;
+}
+
 message StreamNode {
   // Some nodes we can reuse plan nodes from plan.proto.
   // TODO: should we enforce strong typed body on nodes?
@@ -60,10 +66,10 @@ message StreamNode {
     SimpleAggNode simple_agg_node = 8;
     HashAggNode hash_agg_node = 9;
     AppendOnlyTopNNode append_only_top_n_node = 10;
+    HashJoinNode hash_join_node = 11;
   }
   // Child node in plan aka. upstream nodes in the streaming DAG
-  // Currently we assume the executors in one fragment are always chained list rather than tree
-  StreamNode input = 3;
+  repeated StreamNode input = 3;
 }
 
 // A dispatcher redistribute messages.
@@ -90,7 +96,7 @@ message StreamFragment {
   StreamNode nodes = 2;
   // We assume the given upstream fragment are always previously defined,
   // i.e, the create stream requests must arrive in order.
-  repeated uint32 upstream_fragment_id = 3;
+  repeated Merger mergers = 3;
   Dispatcher dispatcher = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_fragment_id = 5;
@@ -98,5 +104,9 @@ message StreamFragment {
   repeated plan.ColumnDesc input_column_descs = 6;
 }
 
-// Remark: we do not explicitly encode mergers in the proto as it is not necessary.
-// A fragment with multiple upstreams will automatically attach a merger in the front.
+// Remark: we DO need to explicitly encode mergers in the proto as it is necessary.
+// A fragment can have multiple logical upstream and each logical upstream can have multiple physical fragments.
+// For example, join.
+message Merger {
+  repeated uint32 upstream_fragment_id = 1;
+}

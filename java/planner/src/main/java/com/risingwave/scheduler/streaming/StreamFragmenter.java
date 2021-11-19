@@ -147,7 +147,7 @@ public class StreamFragmenter {
           // Add fragment and dependencies.
           graphBuilder.addFragment(fragmentId, builder.build());
           for (int lastId : lastStageFragmentList) {
-            graphBuilder.addDependency(fragmentId, lastId);
+            graphBuilder.addDependency(currentStage.getStageId(), fragmentId, lastId);
           }
           currentStageFragmentList.add(fragmentId);
 
@@ -162,7 +162,7 @@ public class StreamFragmenter {
           builder.addSimpleDispatcher();
           // Add fragment and dependencies.
           graphBuilder.addFragment(fragmentId, builder.build());
-          graphBuilder.addDependency(fragmentId, lastStageFragmentId);
+          graphBuilder.addDependency(currentStage.getStageId(), fragmentId, lastStageFragmentId);
           currentStageFragmentList.add(fragment.getId());
         }
       }
@@ -185,7 +185,7 @@ public class StreamFragmenter {
         // Add fragment and dependencies.
         graphBuilder.addFragment(fragmentId, builder.build());
         for (int lastId : lastStageFragmentList) {
-          graphBuilder.addDependency(fragmentId, lastId);
+          graphBuilder.addDependency(currentStage.getStageId(), fragmentId, lastId);
         }
         currentStageFragmentList.add(fragmentId);
       }

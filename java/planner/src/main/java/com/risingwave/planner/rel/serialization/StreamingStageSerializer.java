@@ -1,16 +1,18 @@
 package com.risingwave.planner.rel.serialization;
 
-import com.risingwave.common.exception.PgErrorCode;
-import com.risingwave.common.exception.PgException;
 import com.risingwave.planner.rel.physical.streaming.RisingWaveStreamingRel;
 import com.risingwave.planner.rel.physical.streaming.RwStreamExchange;
 import com.risingwave.proto.streaming.plan.StreamNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * A <code>StreamingStageSerializer</code> generates the proto of partial nodes in the while stream
  * plan.
  */
 public class StreamingStageSerializer {
+  private static final Logger LOGGER = LoggerFactory.getLogger(StreamingStageSerializer.class);
+
   /**
    * Serialize the root node to proto recursively until reach the next stage (separated by <code>
    * RwStreamExchange</code>).
@@ -26,18 +28,33 @@ public class StreamingStageSerializer {
     } else {
       StreamNode node = stageRoot.serialize();
       StreamNode.Builder builder = node.toBuilder();
-      // Remark 2021.11.05: we have not considered join yet.
-      if (stageRoot.getInputs().size() == 1) {
+      if (stageRoot.getInputs().size() == 0) {
+        LOGGER.info("serialize root has 0 inputs, do nothing");
+      } else if (stageRoot.getInputs().size() == 1) {
         RisingWaveStreamingRel child = (RisingWaveStreamingRel) stageRoot.getInputs().get(0);
         // Stop the serialization when encountering exchange.
         if (!(child instanceof RwStreamExchange)) {
           // Only serialize the child if only one non-exchange child exists.
           StreamNode childSerialization = serialize(child);
-          builder.setInput(childSerialization);
+          builder.addInput(childSerialization);
         }
-      } else if (stageRoot.getInputs().size() >= 2) {
-        throw new PgException(
-            PgErrorCode.INTERNAL_ERROR, "Stage serializer for tree plans not implemented yet.");
+      } else if (stageRoot.getInputs().size() == 2) {
+        RisingWaveStreamingRel leftChild = (RisingWaveStreamingRel) stageRoot.getInputs().get(0);
+        // Stop the serialization when encountering exchange.
+        if (!(leftChild instanceof RwStreamExchange)) {
+          // Only serialize the child if only one non-exchange child exists.
+          StreamNode childSerialization = serialize(leftChild);
+          builder.addInput(childSerialization);
+        }
+        RisingWaveStreamingRel rightChild = (RisingWaveStreamingRel) stageRoot.getInputs().get(1);
+        // Stop the serialization when encountering exchange.
+        if (!(rightChild instanceof RwStreamExchange)) {
+          // Only serialize the child if only one non-exchange child exists.
+          StreamNode childSerialization = serialize(rightChild);
+          builder.addInput(childSerialization);
+        }
+      } else {
+        throw new AssertionError("Plan node with more than 2 children");
       }
       return builder.build();
     }

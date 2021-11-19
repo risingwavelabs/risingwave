@@ -17,10 +17,10 @@ RwStreamMaterializedView(name=[t1])
         <Resource name="json">
             <![CDATA[
 {
-  "input": {
-    "input": {
-      "input": {
-        "input": {
+  "input": [{
+    "input": [{
+      "input": [{
+        "input": [{
           "tableSourceNode": {
             "tableRefId": {
               "schemaRefId": {
@@ -30,7 +30,7 @@ RwStreamMaterializedView(name=[t1])
             },
             "columnIds": [1, 2]
           }
-        },
+        }],
         "filterNode": {
           "searchCondition": {
             "exprType": "GREATER_THAN",
@@ -57,7 +57,7 @@ RwStreamMaterializedView(name=[t1])
             }
           }
         }
-      },
+      }],
       "simpleAggNode": {
         "aggCalls": [{
           "type": "SUM",
@@ -79,7 +79,7 @@ RwStreamMaterializedView(name=[t1])
           }
         }]
       }
-    },
+    }],
     "projectNode": {
       "selectList": [{
         "exprType": "STREAM_NULL_BY_ROW_COUNT",
@@ -106,7 +106,7 @@ RwStreamMaterializedView(name=[t1])
         }
       }]
     }
-  },
+  }],
   "mviewNode": {
     "tableRefId": {
       "schemaRefId": {
@@ -144,8 +144,8 @@ RwStreamMaterializedView(name=[t2])
         <Resource name="json">
             <![CDATA[
 {
-  "input": {
-    "input": {
+  "input": [{
+    "input": [{
       "tableSourceNode": {
         "tableRefId": {
           "schemaRefId": {
@@ -155,7 +155,7 @@ RwStreamMaterializedView(name=[t2])
         },
         "columnIds": [1, 2]
       }
-    },
+    }],
     "projectNode": {
       "selectList": [{
         "exprType": "ADD",
@@ -182,7 +182,7 @@ RwStreamMaterializedView(name=[t2])
         }
       }]
     }
-  },
+  }],
   "mviewNode": {
     "tableRefId": {
       "schemaRefId": {
@@ -222,10 +222,10 @@ RwStreamMaterializedView(name=[t3])
         <Resource name="json">
             <![CDATA[
 {
-  "input": {
-    "input": {
-      "input": {
-        "input": {
+  "input": [{
+    "input": [{
+      "input": [{
+        "input": [{
           "tableSourceNode": {
             "tableRefId": {
               "schemaRefId": {
@@ -235,7 +235,7 @@ RwStreamMaterializedView(name=[t3])
             },
             "columnIds": [2, 1]
           }
-        },
+        }],
         "hashAggNode": {
           "groupKeys": [{
           }],
@@ -259,7 +259,7 @@ RwStreamMaterializedView(name=[t3])
             }
           }]
         }
-      },
+      }],
       "filterNode": {
         "searchCondition": {
           "exprType": "NOT_EQUAL",
@@ -287,7 +287,7 @@ RwStreamMaterializedView(name=[t3])
           }
         }
       }
-    },
+    }],
     "projectNode": {
       "selectList": [{
         "exprType": "INPUT_REF",
@@ -306,7 +306,7 @@ RwStreamMaterializedView(name=[t3])
         }
       }]
     }
-  },
+  }],
   "mviewNode": {
     "tableRefId": {
       "schemaRefId": {
@@ -349,9 +349,9 @@ RwStreamMaterializedView(name=[t4])
         <Resource name="json">
             <![CDATA[
 {
-  "input": {
-    "input": {
-      "input": {
+  "input": [{
+    "input": [{
+      "input": [{
         "tableSourceNode": {
           "tableRefId": {
             "schemaRefId": {
@@ -361,7 +361,7 @@ RwStreamMaterializedView(name=[t4])
           },
           "columnIds": [1, 2]
         }
-      },
+      }],
       "simpleAggNode": {
         "aggCalls": [{
           "type": "SUM",
@@ -395,7 +395,7 @@ RwStreamMaterializedView(name=[t4])
           }
         }]
       }
-    },
+    }],
     "projectNode": {
       "selectList": [{
         "exprType": "ADD",
@@ -454,7 +454,7 @@ RwStreamMaterializedView(name=[t4])
         }
       }]
     }
-  },
+  }],
   "mviewNode": {
     "tableRefId": {
       "schemaRefId": {
@@ -493,10 +493,10 @@ RwStreamMaterializedView(name=[t5])
         <Resource name="json">
             <![CDATA[
 {
-  "input": {
-    "input": {
-      "input": {
-        "input": {
+  "input": [{
+    "input": [{
+      "input": [{
+        "input": [{
           "tableSourceNode": {
             "tableRefId": {
               "schemaRefId": {
@@ -506,7 +506,7 @@ RwStreamMaterializedView(name=[t5])
             },
             "columnIds": [1, 2]
           }
-        },
+        }],
         "projectNode": {
           "selectList": [{
             "exprType": "ADD",
@@ -533,7 +533,7 @@ RwStreamMaterializedView(name=[t5])
             }
           }]
         }
-      },
+      }],
       "simpleAggNode": {
         "aggCalls": [{
           "type": "SUM",
@@ -554,7 +554,7 @@ RwStreamMaterializedView(name=[t5])
           }
         }]
       }
-    },
+    }],
     "projectNode": {
       "selectList": [{
         "exprType": "STREAM_NULL_BY_ROW_COUNT",
@@ -581,7 +581,7 @@ RwStreamMaterializedView(name=[t5])
         }
       }]
     }
-  },
+  }],
   "mviewNode": {
     "tableRefId": {
       "schemaRefId": {
@@ -620,10 +620,10 @@ RwStreamMaterializedView(name=[t6])
         <Resource name="json">
             <![CDATA[
 {
-  "input": {
-    "input": {
-      "input": {
-        "input": {
+  "input": [{
+    "input": [{
+      "input": [{
+        "input": [{
           "tableSourceNode": {
             "tableRefId": {
               "schemaRefId": {
@@ -633,7 +633,7 @@ RwStreamMaterializedView(name=[t6])
             },
             "columnIds": [2, 1]
           }
-        },
+        }],
         "hashAggNode": {
           "groupKeys": [{
           }],
@@ -657,7 +657,7 @@ RwStreamMaterializedView(name=[t6])
             }
           }]
         }
-      },
+      }],
       "filterNode": {
         "searchCondition": {
           "exprType": "NOT_EQUAL",
@@ -685,7 +685,7 @@ RwStreamMaterializedView(name=[t6])
           }
         }
       }
-    },
+    }],
     "projectNode": {
       "selectList": [{
         "exprType": "INPUT_REF",
@@ -697,7 +697,7 @@ RwStreamMaterializedView(name=[t6])
         }
       }]
     }
-  },
+  }],
   "mviewNode": {
     "tableRefId": {
       "schemaRefId": {
@@ -736,10 +736,10 @@ RwStreamMaterializedView(name=[t7])
         <Resource name="json">
             <![CDATA[
 {
-  "input": {
-    "input": {
-      "input": {
-        "input": {
+  "input": [{
+    "input": [{
+      "input": [{
+        "input": [{
           "tableSourceNode": {
             "tableRefId": {
               "schemaRefId": {
@@ -749,7 +749,7 @@ RwStreamMaterializedView(name=[t7])
             },
             "columnIds": [2, 1]
           }
-        },
+        }],
         "hashAggNode": {
           "groupKeys": [{
           }],
@@ -773,7 +773,7 @@ RwStreamMaterializedView(name=[t7])
             }
           }]
         }
-      },
+      }],
       "filterNode": {
         "searchCondition": {
           "exprType": "NOT_EQUAL",
@@ -801,7 +801,7 @@ RwStreamMaterializedView(name=[t7])
           }
         }
       }
-    },
+    }],
     "projectNode": {
       "selectList": [{
         "exprType": "ADD",
@@ -829,7 +829,7 @@ RwStreamMaterializedView(name=[t7])
         }
       }]
     }
-  },
+  }],
   "mviewNode": {
     "tableRefId": {
       "schemaRefId": {
@@ -867,10 +867,10 @@ RwStreamMaterializedView(name=[t8])
         <Resource name="json">
             <![CDATA[
 {
-  "input": {
-    "input": {
-      "input": {
-        "input": {
+  "input": [{
+    "input": [{
+      "input": [{
+        "input": [{
           "tableSourceNode": {
             "tableRefId": {
               "schemaRefId": {
@@ -880,7 +880,7 @@ RwStreamMaterializedView(name=[t8])
             },
             "columnIds": [1, 2]
           }
-        },
+        }],
         "filterNode": {
           "searchCondition": {
             "exprType": "GREATER_THAN",
@@ -907,7 +907,7 @@ RwStreamMaterializedView(name=[t8])
             }
           }
         }
-      },
+      }],
       "simpleAggNode": {
         "aggCalls": [{
           "type": "SUM",
@@ -928,7 +928,7 @@ RwStreamMaterializedView(name=[t8])
           }
         }]
       }
-    },
+    }],
     "projectNode": {
       "selectList": [{
         "exprType": "ADD",
@@ -971,7 +971,7 @@ RwStreamMaterializedView(name=[t8])
         }
       }]
     }
-  },
+  }],
   "mviewNode": {
     "tableRefId": {
       "schemaRefId": {

@@ -19,8 +19,8 @@ use risingwave_pb::plan::column_desc::ColumnEncodingType;
 use risingwave_pb::plan::{ColumnDesc, DatabaseRefId, SchemaRefId, TableRefId};
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{
-    dispatcher::DispatcherType, Dispatcher, MViewNode, ProjectNode, StreamFragment, StreamNode,
-    TableSourceNode,
+    dispatcher::DispatcherType, Dispatcher, MViewNode, Merger, ProjectNode, StreamFragment,
+    StreamNode, TableSourceNode,
 };
 use risingwave_pb::stream_service::{ActorInfo, BroadcastActorInfoTableRequest};
 use risingwave_pb::task_service::HostAddress;
@@ -54,7 +54,7 @@ async fn test_stream_mv_proto() {
             table_ref_id: Some(make_table_ref_id(0)),
             column_ids: vec![0, 1],
         })),
-        input: None,
+        input: vec![],
     };
     let expr_proto = ExprNode {
         expr_type: InputRef as i32,
@@ -75,7 +75,7 @@ async fn test_stream_mv_proto() {
         node: Some(Node::ProjectNode(ProjectNode {
             select_list: vec![expr_proto],
         })),
-        input: Some(Box::new(source_proto)),
+        input: vec![source_proto],
     };
     let mview_proto = StreamNode {
         node: Some(Node::MviewNode(MViewNode {
@@ -83,12 +83,14 @@ async fn test_stream_mv_proto() {
             column_descs: vec![column_desc],
             pk_indices: vec![],
         })),
-        input: Some(Box::new(project_proto)),
+        input: vec![project_proto],
     };
     let fragment_proto = StreamFragment {
         fragment_id: 1,
         nodes: Some(mview_proto),
-        upstream_fragment_id: vec![0],
+        mergers: vec![Merger {
+            upstream_fragment_id: vec![0],
+        }],
         dispatcher: Some(Dispatcher {
             r#type: DispatcherType::Simple as i32,
             column_idx: 0,

@@ -1,12 +1,16 @@
 package com.risingwave.scheduler.streaming.graph;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.risingwave.planner.rel.physical.streaming.RisingWaveStreamingRel;
 import com.risingwave.planner.rel.serialization.StreamingStageSerializer;
+import com.risingwave.proto.streaming.plan.Merger;
 import com.risingwave.proto.streaming.plan.StreamNode;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import org.apache.calcite.util.Pair;
 
 /**
  * The internal representation of a fragment of stream DAG. Each <code>StreamFragment</code> can be
@@ -16,19 +20,23 @@ public class StreamFragment {
   private final int id;
   private final StreamDispatcher dispatcher;
   private final RisingWaveStreamingRel root;
-  private final ImmutableSet<Integer> upstreamSet;
+  private final ImmutableList<Pair<Integer, ImmutableSet<Integer>>> upstreamSets;
   private final ImmutableSet<Integer> downstreamSet;
 
   public StreamFragment(
       int id,
       StreamDispatcher dispatcher,
       RisingWaveStreamingRel root,
-      Set<Integer> upstreamSet,
+      List<Pair<Integer, Set<Integer>>> upstreamSets,
       Set<Integer> downstreamSet) {
     this.id = id;
     this.dispatcher = dispatcher;
     this.root = root;
-    this.upstreamSet = ImmutableSet.copyOf(upstreamSet);
+    List<Pair<Integer, ImmutableSet<Integer>>> upStreamImmutableSets = new ArrayList<>();
+    for (var p : upstreamSets) {
+      upStreamImmutableSets.add(new Pair<>(p.left, ImmutableSet.copyOf(p.right)));
+    }
+    this.upstreamSets = ImmutableList.copyOf(upStreamImmutableSets);
     this.downstreamSet = ImmutableSet.copyOf(downstreamSet);
   }
 
@@ -36,8 +44,8 @@ public class StreamFragment {
     return this.id;
   }
 
-  public ImmutableSet<Integer> getUpstreamSet() {
-    return this.upstreamSet;
+  public ImmutableList<Pair<Integer, ImmutableSet<Integer>>> getUpstreamSets() {
+    return this.upstreamSets;
   }
 
   public ImmutableSet<Integer> getDownstreamSet() {
@@ -55,7 +63,11 @@ public class StreamFragment {
     builder.setDispatcher(dispatcher.serialize());
     builder.setNodes(node);
     builder.setFragmentId(id);
-    builder.addAllUpstreamFragmentId(upstreamSet);
+    for (var p : upstreamSets) {
+      Merger.Builder mergerBuilder = Merger.newBuilder();
+      mergerBuilder.addAllUpstreamFragmentId(p.right);
+      builder.addMergers(mergerBuilder.build());
+    }
     builder.addAllDownstreamFragmentId(downstreamSet);
     return builder.build();
   }
@@ -89,8 +101,11 @@ public class StreamFragment {
       }
     }
     // Add upstream and downstream.
-    for (int id : this.upstreamSet) {
-      builder.addUpstream(id);
+    for (var merger : this.upstreamSets) {
+      var upstreamStageId = merger.left;
+      for (var upstreamFragmentId : merger.right) {
+        builder.addUpstream(upstreamStageId, upstreamFragmentId);
+      }
     }
     for (int id : this.downstreamSet) {
       builder.addDownstream(id);
@@ -103,7 +118,9 @@ public class StreamFragment {
     private int id;
     private RisingWaveStreamingRel root;
     private StreamDispatcher dispatcher = null;
-    private final Set<Integer> upstreamSet = new HashSet<>();
+    // The first element of pair is upstream stage id
+    // The second element of pair is a set of upstream fragment ids that belong to the same stage
+    private final List<Pair<Integer, Set<Integer>>> upstreamSets = new ArrayList<>();
     private final Set<Integer> downstreamSet = new HashSet<>();
 
     public FragmentBuilder(int id, RisingWaveStreamingRel root) {
@@ -131,8 +148,16 @@ public class StreamFragment {
       dispatcher = StreamDispatcher.createBlackHoleDispatcher();
     }
 
-    public void addUpstream(int id) {
-      upstreamSet.add(id);
+    public void addUpstream(int upstreamStageId, int upstreamFragmentId) {
+      for (int idx = 0; idx < upstreamSets.size(); idx++) {
+        var stageId = upstreamSets.get(idx).left;
+        if (upstreamStageId == stageId) {
+          upstreamSets.get(idx).right.add(upstreamFragmentId);
+          return;
+        }
+      }
+      upstreamSets.add(new Pair<>(upstreamStageId, new HashSet<>()));
+      upstreamSets.get(upstreamSets.size() - 1).right.add(upstreamFragmentId);
     }
 
     public void addDownstream(int id) {
@@ -140,7 +165,7 @@ public class StreamFragment {
     }
 
     public StreamFragment build() {
-      return new StreamFragment(id, dispatcher, root, upstreamSet, downstreamSet);
+      return new StreamFragment(id, dispatcher, root, upstreamSets, downstreamSet);
     }
   }
 }

@@ -47,7 +47,7 @@ public class StreamGraph {
       fragments.put(id, fragment);
     }
 
-    public void addDependency(int upstream, int downstream) {
+    public void addDependency(int upstreamStageId, int upstream, int downstream) {
       StreamFragment upFragment = fragments.get(upstream);
       StreamFragment.FragmentBuilder upBuilder = upFragment.toBuilder();
       upBuilder.addDownstream(downstream);
@@ -55,7 +55,7 @@ public class StreamGraph {
 
       StreamFragment downFragment = fragments.get(downstream);
       StreamFragment.FragmentBuilder downBuilder = downFragment.toBuilder();
-      downBuilder.addUpstream(upstream);
+      downBuilder.addUpstream(upstreamStageId, upstream);
       fragments.put(downstream, downBuilder.build());
     }
 
@@ -64,9 +64,9 @@ public class StreamGraph {
       // For source fragments, add mock upstream 0.
       for (Integer id : fragments.keySet()) {
         StreamFragment fragment = fragments.get(id);
-        if (fragment.getUpstreamSet().size() == 0) {
+        if (fragment.getUpstreamSets().size() == 0) {
           StreamFragment.FragmentBuilder builder = fragment.toBuilder();
-          builder.addUpstream(0);
+          builder.addUpstream(-1, 0);
           fragments.put(id, builder.build());
         }
       }

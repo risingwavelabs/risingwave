@@ -61,9 +61,11 @@ async fn test_stream_proto() {
                 fragment_id: 1,
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
-                    input: None,
+                    input: vec![],
                 }),
-                upstream_fragment_id: vec![0],
+                mergers: vec![Merger {
+                    upstream_fragment_id: vec![0],
+                }],
                 dispatcher: Some(Dispatcher {
                     r#type: dispatcher::DispatcherType::RoundRobin as i32,
                     column_idx: 0,
@@ -82,9 +84,11 @@ async fn test_stream_proto() {
                 fragment_id: 3,
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
-                    input: None,
+                    input: vec![],
                 }),
-                upstream_fragment_id: vec![1],
+                mergers: vec![Merger {
+                    upstream_fragment_id: vec![1],
+                }],
                 dispatcher: Some(Dispatcher {
                     r#type: dispatcher::DispatcherType::RoundRobin as i32,
                     column_idx: 0,
@@ -103,9 +107,11 @@ async fn test_stream_proto() {
                 fragment_id: 7,
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
-                    input: None,
+                    input: vec![],
                 }),
-                upstream_fragment_id: vec![3],
+                mergers: vec![Merger {
+                    upstream_fragment_id: vec![3],
+                }],
                 dispatcher: Some(Dispatcher {
                     r#type: dispatcher::DispatcherType::RoundRobin as i32,
                     column_idx: 0,
@@ -124,9 +130,11 @@ async fn test_stream_proto() {
                 fragment_id: 11,
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
-                    input: None,
+                    input: vec![],
                 }),
-                upstream_fragment_id: vec![3],
+                mergers: vec![Merger {
+                    upstream_fragment_id: vec![3],
+                }],
                 dispatcher: Some(Dispatcher {
                     r#type: dispatcher::DispatcherType::Simple as i32,
                     column_idx: 0,
@@ -145,9 +153,11 @@ async fn test_stream_proto() {
                 fragment_id: 13,
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
-                    input: None,
+                    input: vec![],
                 }),
-                upstream_fragment_id: vec![7, 11],
+                mergers: vec![Merger {
+                    upstream_fragment_id: vec![7, 11],
+                }],
                 dispatcher: Some(Dispatcher {
                     r#type: dispatcher::DispatcherType::Simple as i32,
                     column_idx: 0,

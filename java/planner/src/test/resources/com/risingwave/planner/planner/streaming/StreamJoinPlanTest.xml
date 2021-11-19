@@ -1,0 +1,19 @@
+<Root>
+    <TestCase name="query 1 hash join">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T1 as select * from t, t3 where t.v1 = t3.v1;
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[t1])
+  RwStreamHashJoin(condition=[=($0, $3)], joinType=[inner])
+    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3])
+    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+      RwStreamTableSource(table=[[test_schema, t3]], columns=[v1])
+]]>
+        </Resource>
+    </TestCase>
+</Root>

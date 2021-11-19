@@ -18,7 +18,7 @@ use std::sync::Arc;
 // https://blog.rust-lang.org/inside-rust/2021/09/06/Splitting-const-generics.html
 type JoinTypePrimitive = u8;
 #[allow(non_snake_case, non_upper_case_globals)]
-mod JoinType {
+pub mod JoinType {
     use super::JoinTypePrimitive;
     pub const Inner: JoinTypePrimitive = 0;
     pub const LeftOuter: JoinTypePrimitive = 1;
@@ -97,7 +97,7 @@ impl<const T: JoinTypePrimitive> Executor for HashJoinExecutor<T> {
 }
 
 impl<const T: JoinTypePrimitive> HashJoinExecutor<T> {
-    fn new(
+    pub fn new(
         input_l: Box<dyn Executor>,
         input_r: Box<dyn Executor>,
         params_l: JoinParams,

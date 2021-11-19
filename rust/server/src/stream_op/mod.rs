@@ -4,6 +4,7 @@ use async_trait::async_trait;
 pub use dispatch::*;
 pub use filter::*;
 pub use hash_agg::*;
+pub use hash_join::*;
 pub use merge::*;
 pub use mview_sink::*;
 pub use project::*;

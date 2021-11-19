@@ -1,0 +1,26 @@
+<Root>
+    <Resource>
+        <![CDATA[
+create table t(v1 int not null, v2 int not null, v3 float not null)
+        ]]>
+    </Resource>
+
+    <Resource>
+        <![CDATA[
+create table t2(v1 date not null)
+        ]]>
+    </Resource>
+
+    <Resource>
+        <![CDATA[
+create table t3(v1 int not null)
+        ]]>
+    </Resource>
+
+    <Resource>
+        <![CDATA[
+create table t4(v1 int)
+        ]]>
+    </Resource>
+
+</Root>
