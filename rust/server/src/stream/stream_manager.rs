@@ -339,10 +339,24 @@ impl StreamManagerCore {
                     let stream_receiver = table.create_stream()?;
                     // TODO: The channel pair should be created by the Checkpoint manger. So this
                     // line may be removed later.
-                    let (_sender, barrier_receiver) = unbounded();
+                    use futures::SinkExt;
+                    let (mut sender, barrier_receiver) = unbounded();
+                    // FIXME: We should trigger barrier from meta service. Currently, we use a timer
+                    // to trigger barrier periodically.
+                    tokio::spawn(async move {
+                        loop {
+                            sender
+                                .send(Message::Barrier(Barrier {
+                                    epoch: 1,
+                                    stop: false,
+                                }))
+                                .await
+                                .unwrap();
+                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                        }
+                    });
                     // TODO: Take the ownership to avoid drop of this channel. This should be
-                    // removed too.
-                    self.sender_placeholder.push(_sender);
+                    // removed too. self.sender_placeholder.push(sender);
                     Ok(Box::new(TableSourceExecutor::new(
                         table_id,
                         schema,

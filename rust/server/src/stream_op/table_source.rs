@@ -35,7 +35,7 @@ impl Executor for TableSourceExecutor {
     async fn next(&mut self) -> Result<Message> {
         if let Some(data_receiver) = &mut self.data_receiver {
             let msg = tokio::select! {
-              chunk =data_receiver.next() => {
+              chunk = data_receiver.next() => {
                 chunk.map(Message::Chunk)
               }
               message = self.barrier_receiver.next() => {
