@@ -24,7 +24,12 @@ impl EpochService for EpochServiceImpl {
     ) -> Result<Response<GetEpochResponse>, Status> {
         let _req = request.into_inner();
         Ok(Response::new(GetEpochResponse {
-            epoch: self.mmc.epoch_generator.generate().unwrap().into_inner(),
+            epoch: self
+                .mmc
+                .epoch_generator
+                .generate()
+                .map_err(|e| e.to_grpc_status())?
+                .into_inner(),
         }))
     }
 }

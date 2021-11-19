@@ -1,4 +1,4 @@
-use crate::metadata::{Config, MemEpochGenerator, MemStore, MetaManager};
+use crate::metadata::{Config, MemEpochGenerator, MemStore, MetaManager, StoredIdGenerator};
 use crate::rpc::service::catalog_service::CatalogServiceImpl;
 use crate::rpc::service::epoch_service::EpochServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
@@ -11,10 +11,12 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
 pub async fn rpc_serve(addr: SocketAddr) -> (JoinHandle<()>, UnboundedSender<()>) {
+    let meta_store_ref = Arc::new(MemStore::new());
     let meta_manager = Arc::new(
         MetaManager::new(
-            Box::new(MemStore::new()),
+            meta_store_ref.clone(),
             Box::new(MemEpochGenerator::new()),
+            Box::new(StoredIdGenerator::new(meta_store_ref).await),
             Config::default(),
         )
         .await,

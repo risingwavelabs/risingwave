@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Display, Formatter};
 use std::str;
 use std::str::FromStr;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 pub const DEFAULT_COLUMN_FAMILY: &str = "default";
 
@@ -29,7 +29,7 @@ pub trait MetaStore: Sync + Send {
     async fn delete_all_cf(&self, cf: &str, key: &[u8]) -> Result<()>;
 }
 
-pub type MetaStoreRef = Box<dyn MetaStore>;
+pub type MetaStoreRef = Arc<dyn MetaStore>;
 
 // TODO: introduce sled/etcd as storage engine here.
 #[derive(Clone)]

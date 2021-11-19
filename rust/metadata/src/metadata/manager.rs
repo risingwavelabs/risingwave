@@ -1,11 +1,14 @@
 use crate::metadata::watermark::Watermark;
-use crate::metadata::{Config, Epoch, EpochGeneratorRef, MetaStoreRef, SINGLE_VERSION_EPOCH};
+use crate::metadata::{
+    Config, Epoch, EpochGeneratorRef, IdGeneratorRef, MetaStoreRef, SINGLE_VERSION_EPOCH,
+};
 use protobuf::Message;
 use risingwave_proto::metadata::EpochState;
 
 pub struct MetaManager {
     pub meta_store_ref: MetaStoreRef,
     pub epoch_generator: EpochGeneratorRef,
+    pub id_generator: IdGeneratorRef,
     pub config: Config,
 
     // Frontend state fields.
@@ -21,11 +24,13 @@ impl MetaManager {
     pub async fn new(
         meta_store_ref: MetaStoreRef,
         epoch_generator: EpochGeneratorRef,
+        id_generator: IdGeneratorRef,
         config: Config,
     ) -> Self {
         let mut manager = MetaManager {
             meta_store_ref,
             epoch_generator,
+            id_generator,
             config,
 
             catalog_wm: Watermark::new(),

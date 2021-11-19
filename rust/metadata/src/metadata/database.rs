@@ -76,15 +76,18 @@ impl DatabaseMetaManager for MetaManager {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::metadata::{Config, MemEpochGenerator, MemStore};
+    use crate::metadata::{Config, MemEpochGenerator, MemStore, StoredIdGenerator};
     use futures::future;
     use risingwave_pb::metadata::Database;
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_database_manager() -> Result<()> {
+        let meta_store_ref = Arc::new(MemStore::new());
         let meta_manager = MetaManager::new(
-            Box::new(MemStore::new()),
+            meta_store_ref.clone(),
             Box::new(MemEpochGenerator::new()),
+            Box::new(StoredIdGenerator::new(meta_store_ref).await),
             Config::default(),
         )
         .await;

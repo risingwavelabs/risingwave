@@ -75,6 +75,16 @@ service EpochService {
   rpc GetEpoch(GetEpochRequest) returns (GetEpochResponse);
 }
 
+message GetIdRequest {}
+
+message GetIdResponse {
+  int32 id = 1;
+}
+
+service IdGeneratorService {
+  rpc GetId(GetIdRequest) returns (GetIdResponse);
+}
+
 enum CatalogType {
   DATABASE = 0;
   SCHEMA = 1;

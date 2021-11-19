@@ -67,14 +67,17 @@ impl ClusterMetaManager for MetaManager {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::metadata::{Config, MemEpochGenerator, MemStore};
+    use crate::metadata::{Config, MemEpochGenerator, MemStore, StoredIdGenerator};
     use risingwave_pb::metadata::cluster::Node;
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_cluster_manager() -> Result<()> {
+        let meta_store_ref = Arc::new(MemStore::new());
         let meta_manager = MetaManager::new(
-            Box::new(MemStore::new()),
+            meta_store_ref.clone(),
             Box::new(MemEpochGenerator::new()),
+            Box::new(StoredIdGenerator::new(meta_store_ref).await),
             Config::default(),
         )
         .await;
