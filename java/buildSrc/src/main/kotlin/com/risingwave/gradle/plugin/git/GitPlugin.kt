@@ -19,10 +19,6 @@ fun Project.getExecOutput(command: String): List<String> {
   return result
 }
 
-fun Project.getCurrentBranch(): String {
-  return this.getExecOutput("git branch --show-current")[0]
-}
-
 fun Project.getMergeBase(target: String, source: String): String {
   return this.getExecOutput("git merge-base $target $source")[0]
 }
@@ -47,7 +43,7 @@ fun Project.getChangedFiles(): List<String> {
     "origin/$ghprbTargetBranch"
   }
   val sourceBranch = if (ghprbSourceBranch?.isBlank() != false) {
-    this.getCurrentBranch()
+    "HEAD"
   } else {
     "origin/$ghprbSourceBranch"
   }
