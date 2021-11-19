@@ -84,7 +84,7 @@
           "databaseRefId": {
           }
         },
-        "tableId": "1"
+        "tableId": 1
       },
       "columnDescs": [{
         "columnType": {

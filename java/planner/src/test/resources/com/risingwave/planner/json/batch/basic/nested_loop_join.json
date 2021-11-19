@@ -55,7 +55,7 @@
           "databaseRefId": {
           }
         },
-        "tableId": "2"
+        "tableId": 2
       },
       "columnIds": [1],
       "columnType": [{

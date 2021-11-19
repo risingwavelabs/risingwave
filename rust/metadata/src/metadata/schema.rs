@@ -123,12 +123,12 @@ mod test {
                 .get_schema(
                     &SchemaRefId {
                         database_ref_id: None,
-                        schema_id: i as u64,
+                        schema_id: i as i32,
                     },
                     version,
                 )
                 .await?;
-            assert_eq!(schema.schema_ref_id.unwrap().schema_id, i as u64);
+            assert_eq!(schema.schema_ref_id.unwrap().schema_id, i as i32);
             assert_eq!(schema.schema_name, format!("schema_{}", i));
             assert_eq!(schema.version, version.into_inner());
         }

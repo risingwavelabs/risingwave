@@ -113,12 +113,12 @@ mod test {
             let database = meta_manager
                 .get_database(
                     &DatabaseRefId {
-                        database_id: i as u64,
+                        database_id: i as i32,
                     },
                     version,
                 )
                 .await?;
-            assert_eq!(database.database_ref_id.unwrap().database_id, i as u64);
+            assert_eq!(database.database_ref_id.unwrap().database_id, i as i32);
             assert_eq!(database.database_name, format!("database_{}", i));
             assert_eq!(database.version, version.into_inner());
         }
