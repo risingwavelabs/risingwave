@@ -48,23 +48,6 @@ mod test_utils;
 mod top_n;
 mod values;
 
-pub enum ExecutorResult {
-    Batch(DataChunk),
-    Done,
-}
-
-impl ExecutorResult {
-    #[cfg(test)] // Remove when this is useful in non-test code.
-    fn batch_or(self) -> Result<DataChunk> {
-        match self {
-            ExecutorResult::Batch(chunk) => Ok(chunk),
-            ExecutorResult::Done => {
-                Err(InternalError("result is Done, not Batch".to_string()).into())
-            }
-        }
-    }
-}
-
 /// `Executor` is an operator in the query execution.
 #[async_trait::async_trait]
 pub trait Executor: Send {
@@ -72,7 +55,7 @@ pub trait Executor: Send {
     async fn init(&mut self) -> Result<()>;
 
     /// Executes the executor to get next chunk
-    async fn execute(&mut self) -> Result<ExecutorResult>;
+    async fn execute(&mut self) -> Result<Option<DataChunk>>;
 
     /// Finalizes the executor.
     async fn clean(&mut self) -> Result<()>;

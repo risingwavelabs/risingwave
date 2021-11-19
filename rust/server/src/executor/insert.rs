@@ -7,8 +7,7 @@ use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::InsertNode;
 use risingwave_pb::ToProto;
 
-use crate::executor::ExecutorResult::{Batch, Done};
-use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult};
+use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
 use crate::storage::*;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
@@ -59,9 +58,9 @@ impl Executor for InsertExecutor {
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<Option<DataChunk>> {
         if self.executed {
-            return Ok(Done);
+            return Ok(None);
         }
 
         let table_ref = (if let TableTypes::BummockTable(table_ref) =
@@ -74,7 +73,7 @@ impl Executor for InsertExecutor {
             )))
         })?;
         let mut rows_inserted = 0;
-        while let Batch(child_chunk) = self.child.execute().await? {
+        while let Some(child_chunk) = self.child.execute().await? {
             let len = child_chunk.capacity();
             assert!(child_chunk.visibility().is_none());
 
@@ -113,7 +112,7 @@ impl Executor for InsertExecutor {
                 .build();
 
             self.executed = true;
-            Ok(ExecutorResult::Batch(ret_chunk))
+            Ok(Some(ret_chunk))
         }
     }
 
@@ -248,7 +247,7 @@ mod tests {
         insert_executor.init().await.unwrap();
         let fields = &insert_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
-        let result = insert_executor.execute().await?.batch_or()?;
+        let result = insert_executor.execute().await?.unwrap();
         insert_executor.clean().await.unwrap();
         assert_eq!(
             result
@@ -321,7 +320,7 @@ mod tests {
         insert_executor.init().await.unwrap();
         let fields = &insert_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
-        let result = insert_executor.execute().await?.batch_or()?;
+        let result = insert_executor.execute().await?.unwrap();
         insert_executor.clean().await.unwrap();
         assert_eq!(
             result
@@ -376,7 +375,7 @@ mod tests {
         insert_executor.init().await.unwrap();
         let fields = &insert_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
-        let result = insert_executor.execute().await?.batch_or()?;
+        let result = insert_executor.execute().await?.unwrap();
         insert_executor.clean().await.unwrap();
         assert_eq!(
             result

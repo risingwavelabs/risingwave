@@ -5,10 +5,7 @@ use prost::Message;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::ValuesNode;
 
-use crate::executor::ExecutorResult::Done;
-use crate::executor::{
-    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult,
-};
+use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::I32Array;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
@@ -32,9 +29,9 @@ impl Executor for ValuesExecutor {
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<Option<DataChunk>> {
         if self.executed {
-            return Ok(Done);
+            return Ok(None);
         }
 
         let cardinality = self.rows.len();
@@ -88,7 +85,7 @@ impl Executor for ValuesExecutor {
         let chunk = DataChunk::builder().columns(columns).build();
 
         self.executed = true;
-        Ok(ExecutorResult::Batch(chunk))
+        Ok(Some(chunk))
     }
 
     async fn clean(&mut self) -> Result<()> {
@@ -179,7 +176,7 @@ mod tests {
         assert_eq!(fields[2].data_type.data_type_kind(), DataTypeKind::Int64);
 
         values_executor.init().await.unwrap();
-        let result = values_executor.execute().await?.batch_or()?;
+        let result = values_executor.execute().await?.unwrap();
         values_executor.clean().await.unwrap();
         assert_eq!(
             result

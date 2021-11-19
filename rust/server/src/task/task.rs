@@ -2,7 +2,7 @@ use risingwave_common::array::DataChunk;
 use std::fmt::{Debug, Formatter};
 use std::sync::{Arc, Mutex};
 
-use crate::executor::{BoxedExecutor, ExecutorBuilder, ExecutorResult};
+use crate::executor::{BoxedExecutor, ExecutorBuilder};
 use crate::rpc::service::exchange_service::ExchangeWriter;
 use crate::task::channel::{create_output_channel, BoxChanReceiver, BoxChanSender};
 use crate::task::GlobalTaskEnv;
@@ -173,11 +173,11 @@ impl TaskExecution {
         root.init().await?;
         loop {
             match root.execute().await? {
-                ExecutorResult::Done => {
+                Option::None => {
                     sender.send(None).await?;
                     break;
                 }
-                ExecutorResult::Batch(chunk) => {
+                Option::Some(chunk) => {
                     sender.send(Some(chunk)).await?;
                 }
             };

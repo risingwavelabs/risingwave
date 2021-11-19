@@ -7,7 +7,7 @@ use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::RowSeqScanNode;
 use risingwave_pb::ToProto;
 
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
+use crate::executor::{Executor, ExecutorBuilder};
 use crate::storage::{MemRowTable, MemTableRowIter, TableTypes};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
@@ -87,7 +87,7 @@ impl Executor for RowSeqScanExecutor {
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<Option<DataChunk>> {
         match self.iter.next() {
             Some((key_row, value_row)) => {
                 if !self.has_pk {
@@ -123,7 +123,7 @@ impl Executor for RowSeqScanExecutor {
                         .collect::<Result<Vec<_>>>()?;
 
                     let data_chunk = DataChunk::builder().columns(columns).build();
-                    Ok(ExecutorResult::Batch(data_chunk))
+                    Ok(Some(data_chunk))
                 } else {
                     // Scan through value pairs.
                     // Make rust analyzer happy.
@@ -147,10 +147,10 @@ impl Executor for RowSeqScanExecutor {
                         })
                         .collect::<Result<Vec<_>>>()?;
                     let data_chunk = DataChunk::builder().columns(columns).build();
-                    Ok(ExecutorResult::Batch(data_chunk))
+                    Ok(Some(data_chunk))
                 }
             }
-            None => Ok(ExecutorResult::Done),
+            None => Ok(None),
         }
     }
 

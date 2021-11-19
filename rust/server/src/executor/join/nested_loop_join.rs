@@ -3,10 +3,7 @@ use std::sync::Arc;
 use prost::Message;
 
 use crate::executor::join::JoinType;
-use crate::executor::ExecutorResult::{Batch, Done};
-use crate::executor::{
-    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult,
-};
+use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::data_chunk_iter::RowRef;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
@@ -83,12 +80,12 @@ impl Executor for NestedLoopJoinExecutor {
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<Option<DataChunk>> {
         if let Some(last_chunk) = self.last_chunk.take() {
             let (left_data_chunk, return_chunk) = self.chunk_builder.append_chunk(last_chunk)?;
             self.last_chunk = left_data_chunk;
             if let Some(return_chunk_inner) = return_chunk {
-                return Ok(Batch(return_chunk_inner));
+                return Ok(Some(return_chunk_inner));
             }
         }
         // Make sure all buffered chunk are flushed before generate more chunks.
@@ -103,13 +100,13 @@ impl Executor for NestedLoopJoinExecutor {
                     let ret = self.probe(true).await?;
                     self.state = NestedLoopJoinState::Probe;
                     if let Some(data_chunk) = ret {
-                        return Ok(ExecutorResult::Batch(data_chunk));
+                        return Ok(Some(data_chunk));
                     }
                 }
                 NestedLoopJoinState::Probe => {
                     let ret = self.probe(false).await?;
                     if let Some(data_chunk) = ret {
-                        return Ok(ExecutorResult::Batch(data_chunk));
+                        return Ok(Some(data_chunk));
                     }
                 }
 
@@ -117,7 +114,7 @@ impl Executor for NestedLoopJoinExecutor {
                     unimplemented!("Probe remaining is not support for nested loop join yet")
                 }
 
-                NestedLoopJoinState::Done => return Ok(ExecutorResult::Done),
+                NestedLoopJoinState::Done => return Ok(None),
             }
         }
     }
@@ -351,19 +348,19 @@ impl NestedLoopJoinExecutor {
 /// when exhaust current chunk) for executor to simplify logic.
 struct ProbeSideSource {
     outer: BoxedExecutor,
-    cur_chunk: ExecutorResult,
+    cur_chunk: Option<DataChunk>,
     /// The row index to read in current chunk.
     idx: usize,
 }
 
 impl ProbeSideSource {
     /// Note the difference between `new` and `init`. `new` do not load data but `init` will
-    /// call executor. The `ExecutorResult::Done` do not really means there is no more data in outer
+    /// call executor. The `Done` do not really means there is no more data in outer
     /// table, it is just used for init (Otherwise we have to use Option).
     fn new(outer: BoxedExecutor) -> Self {
         Self {
             outer,
-            cur_chunk: ExecutorResult::Done,
+            cur_chunk: None,
             idx: 0,
         }
     }
@@ -377,8 +374,8 @@ impl ProbeSideSource {
     /// Return the current outer tuple.
     fn current_row(&self) -> Result<Option<(RowRef<'_>, bool)>> {
         match &self.cur_chunk {
-            Batch(chunk) => Some(chunk.row_at(self.idx)).transpose(),
-            Done => Ok(None),
+            Some(chunk) => Some(chunk.row_at(self.idx)).transpose(),
+            None => Ok(None),
         }
     }
 
@@ -387,12 +384,12 @@ impl ProbeSideSource {
     async fn advance(&mut self) -> Result<()> {
         self.idx += 1;
         match &self.cur_chunk {
-            Batch(chunk) => {
+            Some(chunk) => {
                 if self.idx >= chunk.capacity() {
                     self.cur_chunk = self.outer.execute().await?;
                 }
             }
-            Done => {
+            None => {
                 unreachable!("Should never advance while no more data to scan")
             }
         };
@@ -438,7 +435,7 @@ impl BuildTable {
     /// only used in init.
     async fn load_data(&mut self) -> Result<()> {
         self.data_source.init().await?;
-        while let Batch(chunk) = self.data_source.execute().await? {
+        while let Some(chunk) = self.data_source.execute().await? {
             self.inner_table.push(chunk);
         }
         self.data_source.clean().await

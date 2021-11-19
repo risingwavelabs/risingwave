@@ -5,7 +5,7 @@ use prost::Message as _;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::SortAggNode;
 
-use crate::executor::{BoxedExecutor, Executor, ExecutorBuilder, ExecutorResult};
+use crate::executor::{BoxedExecutor, Executor, ExecutorBuilder};
 use risingwave_common::array::{column::Column, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::ProstError;
@@ -89,9 +89,9 @@ impl Executor for SortAggExecutor {
         self.child.init().await
     }
 
-    async fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<Option<DataChunk>> {
         if self.child_done {
-            return Ok(ExecutorResult::Done);
+            return Ok(None);
         }
 
         let cardinality = 1;
@@ -106,7 +106,7 @@ impl Executor for SortAggExecutor {
             .map(|e| DataType::create_array_builder(e.return_type_ref(), cardinality))
             .collect::<Result<Vec<_>>>()?;
 
-        while let ExecutorResult::Batch(child_chunk) = self.child.execute().await? {
+        while let Some(child_chunk) = self.child.execute().await? {
             let group_arrays = self
                 .group_exprs
                 .iter_mut()
@@ -158,7 +158,7 @@ impl Executor for SortAggExecutor {
 
         let ret = DataChunk::builder().columns(columns).build();
 
-        Ok(ExecutorResult::Batch(ret))
+        Ok(Some(ret))
     }
 
     async fn clean(&mut self) -> Result<()> {
@@ -236,8 +236,8 @@ mod tests {
         };
 
         executor.init().await?;
-        let o = executor.execute().await?.batch_or()?;
-        if let ExecutorResult::Batch(_) = executor.execute().await? {
+        let o = executor.execute().await?.unwrap();
+        if executor.execute().await?.is_some() {
             panic!("simple agg should have no more than 1 output.");
         }
         executor.clean().await?;
@@ -352,8 +352,8 @@ mod tests {
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
         assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Int32);
         assert_eq!(fields[2].data_type.data_type_kind(), DataTypeKind::Int64);
-        let o = executor.execute().await?.batch_or()?;
-        if let ExecutorResult::Batch(_) = executor.execute().await? {
+        let o = executor.execute().await?.unwrap();
+        if executor.execute().await?.is_some() {
             panic!("simple agg should have no more than 1 output.");
         }
         executor.clean().await?;

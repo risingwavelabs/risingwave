@@ -8,10 +8,7 @@ use prost::Message;
 use crate::executor::join::hash_join::HashJoinState::{Done, FirstProbe, Probe, ProbeRemaining};
 use crate::executor::join::hash_join_state::{BuildTable, ProbeTable};
 use crate::executor::join::JoinType;
-use crate::executor::ExecutorResult::Batch;
-use crate::executor::{
-    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult,
-};
+use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 use risingwave_common::array::{DataChunk, RwError};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::collection::hash_map::hash_key_dispatch;
@@ -59,8 +56,8 @@ enum HashJoinState<K> {
     /// Initial state of hash join.
     ///
     /// In this state, the executor [`Executor::init`] build side input, and calls
-    /// [`Executor::next`] of build side input till [`ExecutorResult::Done`] is returned to
-    /// create `BuildTable`.
+    /// [`Executor::next`] of build side input till [`None`] is returned to create
+    /// `BuildTable`.
     Build(BuildTable),
     /// First state after finishing build state.
     ///
@@ -136,28 +133,28 @@ impl<K: HashKey + Send + Sync> Executor for HashJoinExecutor<K> {
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<Option<DataChunk>> {
         loop {
             match take(&mut self.state) {
                 HashJoinState::FirstProbe(probe_table) => {
                     let ret = self.probe(true, probe_table).await?;
                     if let Some(data_chunk) = ret {
-                        return Ok(ExecutorResult::Batch(data_chunk));
+                        return Ok(Some(data_chunk));
                     }
                 }
                 HashJoinState::Probe(probe_table) => {
                     let ret = self.probe(false, probe_table).await?;
                     if let Some(data_chunk) = ret {
-                        return Ok(ExecutorResult::Batch(data_chunk));
+                        return Ok(Some(data_chunk));
                     }
                 }
                 HashJoinState::ProbeRemaining(probe_table) => {
                     let ret = self.probe_remaining(probe_table).await?;
                     if let Some(data_chunk) = ret {
-                        return Ok(ExecutorResult::Batch(data_chunk));
+                        return Ok(Some(data_chunk));
                     }
                 }
-                HashJoinState::Done => return Ok(ExecutorResult::Done),
+                HashJoinState::Done => return Ok(None),
                 _ => unreachable!(),
             }
         }
@@ -177,7 +174,7 @@ impl<K: HashKey + Send + Sync> Executor for HashJoinExecutor<K> {
 impl<K: HashKey> HashJoinExecutor<K> {
     async fn build(&mut self, mut build_table: BuildTable) -> Result<()> {
         self.right_child.init().await?;
-        while let Batch(chunk) = self.right_child.execute().await? {
+        while let Some(chunk) = self.right_child.execute().await? {
             build_table.append_build_chunk(chunk)?;
         }
 
@@ -196,10 +193,10 @@ impl<K: HashKey> HashJoinExecutor<K> {
             self.left_child.init().await?;
 
             match self.left_child.execute().await? {
-                ExecutorResult::Batch(data_chunk) => {
+                Some(data_chunk) => {
                     probe_table.set_probe_data(data_chunk)?;
                 }
-                ExecutorResult::Done => {
+                None => {
                     self.state = HashJoinState::Done;
                     return Ok(None);
                 }
@@ -212,10 +209,10 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 return Ok(Some(ret_data_chunk));
             } else {
                 match self.left_child.execute().await? {
-                    ExecutorResult::Batch(data_chunk) => {
+                    Some(data_chunk) => {
                         probe_table.set_probe_data(data_chunk)?;
                     }
-                    ExecutorResult::Done => {
+                    None => {
                         return if probe_table.join_type().need_join_remaining() {
                             if let Some(ret_data_chunk) = probe_table.join_remaining()? {
                                 self.state = ProbeRemaining(probe_table);
@@ -380,7 +377,7 @@ mod tests {
     use crate::executor::join::hash_join::{EquiJoinParams, HashJoinExecutor};
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::MockExecutor;
-    use crate::executor::{BoxedExecutor, ExecutorResult};
+    use crate::executor::BoxedExecutor;
     use risingwave_common::array;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
@@ -705,7 +702,7 @@ mod tests {
                 }
             };
 
-            while let ExecutorResult::Batch(data_chunk) = join_executor.execute().await.unwrap() {
+            while let Some(data_chunk) = join_executor.execute().await.unwrap() {
                 data_chunk_merger.append(&data_chunk).unwrap();
             }
 

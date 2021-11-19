@@ -1,12 +1,13 @@
 use prost::Message;
 
 use pb_convert::FromProtobuf;
+use risingwave_common::array::DataChunk;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::{ColumnDesc, CreateTableNode};
 use risingwave_pb::ToProto;
 use risingwave_proto::plan::ColumnDesc as ProtoColumnDesc;
 
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
+use crate::executor::{Executor, ExecutorBuilder};
 use crate::storage::TableManagerRef;
 use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
@@ -53,7 +54,7 @@ impl Executor for CreateTableExecutor {
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<Option<DataChunk>> {
         self.table_manager
             .create_table(
                 &self.table_id,
@@ -64,7 +65,7 @@ impl Executor for CreateTableExecutor {
                     .collect::<Vec<ProtoColumnDesc>>()[..],
             )
             .await
-            .map(|_| ExecutorResult::Done)
+            .map(|_| None)
     }
 
     async fn clean(&mut self) -> Result<()> {

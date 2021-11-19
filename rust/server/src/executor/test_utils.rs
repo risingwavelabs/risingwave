@@ -5,9 +5,7 @@ use itertools::Itertools;
 
 use risingwave_pb::expr::expr_node::Type as ProstExprType;
 
-use crate::executor::ExecutorResult::Batch;
-use crate::executor::ExecutorResult::Done;
-use crate::executor::{Executor, ExecutorResult};
+use crate::executor::Executor;
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::Bitmap;
@@ -52,12 +50,12 @@ impl Executor for MockExecutor {
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<Option<DataChunk>> {
         if self.chunks.is_empty() {
-            return Ok(Done);
+            return Ok(None);
         }
         let chunk = self.chunks.pop_front().unwrap();
-        Ok(ExecutorResult::Batch(chunk))
+        Ok(Some(chunk))
     }
 
     async fn clean(&mut self) -> Result<()> {
@@ -87,12 +85,12 @@ pub async fn diff_executor_output(mut actual: BoxedExecutor, mut expect: BoxedEx
     let mut actuals = vec![];
     expect.init().await.unwrap();
     actual.init().await.unwrap();
-    while let Batch(chunk) = expect.execute().await.unwrap() {
+    while let Some(chunk) = expect.execute().await.unwrap() {
         let chunk = DataChunk::compact(chunk).unwrap();
         expect_cardinality += chunk.cardinality();
         expects.push(Arc::new(chunk));
     }
-    while let Batch(chunk) = actual.execute().await.unwrap() {
+    while let Some(chunk) = actual.execute().await.unwrap() {
         let chunk = DataChunk::compact(chunk).unwrap();
         actual_cardinality += chunk.cardinality();
         actuals.push(Arc::new(chunk));

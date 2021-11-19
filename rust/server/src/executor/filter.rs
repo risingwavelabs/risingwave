@@ -3,8 +3,7 @@ use prost::Message;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::FilterNode;
 
-use crate::executor::ExecutorResult::{Batch, Done};
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
+use crate::executor::{Executor, ExecutorBuilder};
 use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
@@ -30,7 +29,7 @@ impl Executor for FilterExecutor {
         self.child.init().await
     }
 
-    async fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<Option<DataChunk>> {
         loop {
             let tmp_last_input = self.last_input.take();
 
@@ -41,7 +40,7 @@ impl Executor for FilterExecutor {
                 self.last_input = left_data_chunk;
 
                 if let Some(data_chunk) = return_data_chunk {
-                    return Ok(ExecutorResult::Batch(data_chunk));
+                    return Ok(Some(data_chunk));
                 }
             } else {
                 let child_input = self.fetch_one_chunk().await?;
@@ -50,9 +49,9 @@ impl Executor for FilterExecutor {
                 } else {
                     // We should return here since nothing come from child.
                     return if let Some(left) = self.chunk_builder.consume_all()? {
-                        Ok(Batch(left))
+                        Ok(Some(left))
                     } else {
-                        Ok(Done)
+                        Ok(None)
                     };
                 }
             }
@@ -71,7 +70,7 @@ impl Executor for FilterExecutor {
 impl FilterExecutor {
     /// Fetch one chunk from child.
     async fn fetch_one_chunk(&mut self) -> Result<Option<DataChunk>> {
-        if let Batch(data_chunk) = self.child.execute().await? {
+        if let Some(data_chunk) = self.child.execute().await? {
             let data_chunk = data_chunk.compact()?;
             let vis_array = self.expr.eval(&data_chunk)?;
             return if let Bool(vis) = vis_array.as_ref() {
@@ -167,7 +166,7 @@ mod tests {
         assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Int32);
         filter_executor.init().await.unwrap();
         let res = filter_executor.execute().await.unwrap();
-        if let Batch(res) = res {
+        if let Some(res) = res {
             let col1 = res.column_at(0).unwrap();
             let array = col1.array();
             let col1 = array.as_int32();

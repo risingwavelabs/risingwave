@@ -9,7 +9,7 @@ use prost::Message;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::OrderByNode as OrderByProto;
 
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
+use crate::executor::{Executor, ExecutorBuilder};
 use crate::risingwave_common::expr::Expression;
 use itertools::Itertools;
 use mem_cmp::*;
@@ -116,7 +116,7 @@ impl OrderByExecutor {
         index
     }
     async fn collect_child_data(&mut self) -> Result<()> {
-        while let ExecutorResult::Batch(chunk) = self.child.execute().await? {
+        while let Some(chunk) = self.child.execute().await? {
             if !self.disable_encoding && self.encodable {
                 self.encoded_keys
                     .push(encode_chunk(&chunk, self.order_pairs.clone()));
@@ -151,7 +151,7 @@ impl Executor for OrderByExecutor {
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<Option<DataChunk>> {
         let data_types = self
             .schema()
             .fields()
@@ -186,7 +186,7 @@ impl Executor for OrderByExecutor {
             self.push_heap_for_chunk(top.chunk_idx);
         }
         if chunk_size == 0 {
-            return Ok(ExecutorResult::Done);
+            return Ok(None);
         }
         let columns = data_types
             .iter()
@@ -194,7 +194,7 @@ impl Executor for OrderByExecutor {
             .map(|(d, b)| Ok(Column::new(Arc::new(b.finish()?), d.clone())))
             .collect::<Result<Vec<_>>>()?;
         let chunk = DataChunk::builder().columns(columns).build();
-        Ok(ExecutorResult::Batch(chunk))
+        Ok(Some(chunk))
     }
 
     async fn clean(&mut self) -> Result<()> {
@@ -314,8 +314,8 @@ mod tests {
         assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Int32);
         order_by_executor.init().await.unwrap();
         let res = order_by_executor.execute().await.unwrap();
-        assert!(matches!(res, ExecutorResult::Batch(_)));
-        if let ExecutorResult::Batch(res) = res {
+        assert!(matches!(res, Some(_)));
+        if let Some(res) = res {
             let col0 = res.column_at(0).unwrap();
             assert_eq!(col0.array().as_int32().value_at(0), Some(3));
             assert_eq!(col0.array().as_int32().value_at(1), Some(2));
@@ -371,8 +371,8 @@ mod tests {
         assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Float64);
         order_by_executor.init().await.unwrap();
         let res = order_by_executor.execute().await.unwrap();
-        assert!(matches!(res, ExecutorResult::Batch(_)));
-        if let ExecutorResult::Batch(res) = res {
+        assert!(matches!(res, Some(_)));
+        if let Some(res) = res {
             let col0 = res.column_at(0).unwrap();
             assert_eq!(col0.array().as_float32().value_at(0), Some(3.3));
             assert_eq!(col0.array().as_float32().value_at(1), Some(2.2));
@@ -439,8 +439,8 @@ mod tests {
         assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Varchar);
         order_by_executor.init().await.unwrap();
         let res = order_by_executor.execute().await.unwrap();
-        assert!(matches!(res, ExecutorResult::Batch(_)));
-        if let ExecutorResult::Batch(res) = res {
+        assert!(matches!(res, Some(_)));
+        if let Some(res) = res {
             let col0 = res.column_at(0).unwrap();
             assert_eq!(col0.array().as_utf8().value_at(0), Some("3.3"));
             assert_eq!(col0.array().as_utf8().value_at(1), Some("2.2"));
@@ -543,7 +543,7 @@ mod tests {
             tokio_test::block_on(future).unwrap();
             let future = order_by_executor.execute();
             let res = tokio_test::block_on(future).unwrap();
-            assert!(matches!(res, ExecutorResult::Batch(_)));
+            assert!(matches!(res, Some(_)));
         });
     }
 

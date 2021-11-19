@@ -8,7 +8,6 @@ use crate::execution::exchange_source::ExchangeSource;
 use crate::executor::CreateSource;
 use crate::executor::{
     BoxedExecutor, BoxedExecutorBuilder, DefaultCreateSource, Executor, ExecutorBuilder,
-    ExecutorResult,
 };
 use crate::task::GlobalTaskEnv;
 use risingwave_common::array::column::Column;
@@ -87,7 +86,7 @@ impl<CS: 'static + CreateSource> Executor for MergeSortExchangeExecutorImpl<CS> 
     /// Everytime `execute` is called, it tries to produce a chunk of size
     /// `K_PROCESSING_WINDOW_SIZE`. It is possible that the chunk's size is smaller than the
     /// `K_PROCESSING_WINDOW_SIZE` as the executor runs out of input from `sources`.
-    async fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<Option<DataChunk>> {
         // If this is the first time execution, we first get one chunk from each source
         // and put one row of each chunk into the heap
         if self.first_execution {
@@ -104,7 +103,7 @@ impl<CS: 'static + CreateSource> Executor for MergeSortExchangeExecutorImpl<CS> 
         // If there is no rows in the heap,
         // we run out of input data chunks and emit `Done`.
         if self.min_heap.is_empty() {
-            return Ok(ExecutorResult::Done);
+            return Ok(None);
         }
 
         // It is possible that we cannot produce this much as
@@ -156,7 +155,7 @@ impl<CS: 'static + CreateSource> Executor for MergeSortExchangeExecutorImpl<CS> 
             })
             .collect::<Result<Vec<_>>>()?;
         let chunk = DataChunk::builder().columns(columns).build();
-        Ok(ExecutorResult::Batch(chunk))
+        Ok(Some(chunk))
     }
 
     async fn clean(&mut self) -> Result<()> {
@@ -280,8 +279,8 @@ mod tests {
         };
 
         let res = executor.execute().await.unwrap();
-        assert!(matches!(res, ExecutorResult::Batch(_)));
-        if let ExecutorResult::Batch(res) = res {
+        assert!(matches!(res, Some(_)));
+        if let Some(res) = res {
             assert_eq!(res.capacity(), 3 * num_sources);
             let col0 = res.column_at(0).unwrap();
             assert_eq!(col0.array().as_int32().value_at(0), Some(1));
@@ -291,9 +290,6 @@ mod tests {
             assert_eq!(col0.array().as_int32().value_at(4), Some(3));
             assert_eq!(col0.array().as_int32().value_at(5), Some(3));
         }
-        assert!(matches!(
-            executor.execute().await.unwrap(),
-            ExecutorResult::Done
-        ));
+        assert!(matches!(executor.execute().await.unwrap(), None));
     }
 }

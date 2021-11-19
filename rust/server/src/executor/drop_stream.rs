@@ -1,13 +1,12 @@
 use prost::Message;
 
 use pb_convert::FromProtobuf;
+use risingwave_common::array::DataChunk;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::DropStreamNode;
 use risingwave_pb::ToProto;
 
-use crate::executor::{
-    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult,
-};
+use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 use crate::source::SourceManagerRef;
 use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
@@ -26,10 +25,10 @@ impl Executor for DropStreamExecutor {
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<Option<DataChunk>> {
         self.source_manager
             .drop_source(&self.table_id)
-            .map(|_| ExecutorResult::Done)
+            .map(|_| None)
     }
 
     async fn clean(&mut self) -> Result<()> {

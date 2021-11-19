@@ -8,7 +8,7 @@ use prost::Message;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::TopNNode;
 
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
+use crate::executor::{Executor, ExecutorBuilder};
 use risingwave_common::array::{DataChunk, DataChunkRef};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{
@@ -112,7 +112,7 @@ impl Executor for TopNExecutor {
     async fn init(&mut self) -> Result<()> {
         self.child.init().await?;
 
-        while let ExecutorResult::Batch(chunk) = self.child.execute().await? {
+        while let Some(chunk) = self.child.execute().await? {
             self.top_n_heap.fit(Arc::new(chunk));
         }
         self.child.clean().await?;
@@ -120,11 +120,11 @@ impl Executor for TopNExecutor {
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<Option<DataChunk>> {
         if let Some(chunk) = self.top_n_heap.dump() {
-            Ok(ExecutorResult::Batch(chunk))
+            Ok(Some(chunk))
         } else {
-            Ok(ExecutorResult::Done)
+            Ok(None)
         }
     }
 
@@ -192,15 +192,15 @@ mod tests {
         assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Int32);
         top_n_executor.init().await.unwrap();
         let res = top_n_executor.execute().await.unwrap();
-        assert!(matches!(res, ExecutorResult::Batch(_)));
-        if let ExecutorResult::Batch(res) = res {
+        assert!(matches!(res, Some(_)));
+        if let Some(res) = res {
             assert_eq!(res.cardinality(), 2);
             let col0 = res.column_at(0).unwrap();
             assert_eq!(col0.array().as_int32().value_at(0), Some(3));
             assert_eq!(col0.array().as_int32().value_at(1), Some(2));
         }
         let res = top_n_executor.execute().await.unwrap();
-        assert!(matches!(res, ExecutorResult::Done));
+        assert!(matches!(res, None));
         top_n_executor.clean().await.unwrap();
     }
 }

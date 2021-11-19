@@ -7,7 +7,7 @@ use pb_convert::FromProtobuf;
 use risingwave_pb::plan::StreamScanNode;
 use risingwave_pb::ToProto;
 
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
+use crate::executor::{Executor, ExecutorBuilder};
 use crate::source::{ChunkReader, JSONParser, SourceColumnDesc, SourceFormat, SourceParser};
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::TableId;
@@ -112,14 +112,14 @@ impl Executor for StreamScanExecutor {
         self.reader.init().await
     }
 
-    async fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<Option<DataChunk>> {
         if self.done {
-            return Ok(ExecutorResult::Done);
+            return Ok(None);
         }
         let next_chunk = self.next_data_chunk().await?;
         match next_chunk {
-            Some(chunk) => Ok(ExecutorResult::Batch(chunk)),
-            None => Ok(ExecutorResult::Done),
+            Some(chunk) => Ok(Some(chunk)),
+            None => Ok(None),
         }
     }
 

@@ -6,13 +6,12 @@ use prost::Message;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::LimitNode as LimitProto;
 
-use crate::executor::ExecutorResult::{Batch, Done};
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::Result;
 
-use super::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult};
+use super::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 
 /// Limit executor.
 pub(super) struct LimitExecutor {
@@ -85,11 +84,11 @@ impl Executor for LimitExecutor {
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<Option<DataChunk>> {
         if self.returned == self.limit {
-            return Ok(Done);
+            return Ok(None);
         }
-        while let Batch(chunk) = self.child.execute().await? {
+        while let Some(chunk) = self.child.execute().await? {
             let cardinality = chunk.cardinality();
             if cardinality + self.skipped <= self.offset {
                 self.skipped += cardinality;
@@ -97,12 +96,12 @@ impl Executor for LimitExecutor {
             }
             if self.skipped == self.offset && cardinality + self.returned <= self.limit {
                 self.returned += cardinality;
-                return Ok(Batch(chunk));
+                return Ok(Some(chunk));
             }
             let chunk = self.process_chunk(chunk)?;
-            return Ok(Batch(chunk));
+            return Ok(Some(chunk));
         }
-        Ok(Done)
+        Ok(None)
     }
 
     async fn clean(&mut self) -> Result<()> {
@@ -171,7 +170,7 @@ mod tests {
         let fields = &limit_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
         let mut results = vec![];
-        while let Batch(chunk) = limit_executor.execute().await.unwrap() {
+        while let Some(chunk) = limit_executor.execute().await.unwrap() {
             results.push(Arc::new(chunk));
         }
         let chunks =
@@ -316,7 +315,7 @@ mod tests {
         limit_executor.init().await.unwrap();
 
         let mut results = vec![];
-        while let Batch(chunk) = limit_executor.execute().await.unwrap() {
+        while let Some(chunk) = limit_executor.execute().await.unwrap() {
             results.push(Arc::new(chunk.compact().unwrap()));
         }
         let chunks =

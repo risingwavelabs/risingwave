@@ -7,8 +7,7 @@ use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::SeqScanNode;
 use risingwave_pb::ToProto;
 
-use crate::executor::ExecutorResult::Done;
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
+use crate::executor::{Executor, ExecutorBuilder};
 use crate::storage::*;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, DataChunkRef};
@@ -83,13 +82,13 @@ impl Executor for SeqScanExecutor {
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<Option<DataChunk>> {
         if self.first_execution {
             self.first_execution = false;
             if let BummockResult::Data(data) = self.table.get_data().await? {
                 self.data = data;
             } else {
-                return Ok(Done);
+                return Ok(None);
             }
 
             self.column_indices = self
@@ -102,7 +101,7 @@ impl Executor for SeqScanExecutor {
         }
 
         if self.chunk_idx >= self.data.len() {
-            return Ok(Done);
+            return Ok(None);
         }
 
         let cur_chunk = &self.data[self.chunk_idx];
@@ -117,7 +116,7 @@ impl Executor for SeqScanExecutor {
         let ret = DataChunk::builder().columns(columns).build();
 
         self.chunk_idx += 1;
-        Ok(ExecutorResult::Batch(ret))
+        Ok(Some(ret))
     }
 
     async fn clean(&mut self) -> Result<()> {
@@ -220,7 +219,7 @@ mod tests {
 
         seq_scan_executor.init().await.unwrap();
 
-        let result_chunk1 = seq_scan_executor.execute().await?.batch_or()?;
+        let result_chunk1 = seq_scan_executor.execute().await?.unwrap();
         assert_eq!(result_chunk1.dimension(), 1);
         assert_eq!(
             result_chunk1
@@ -232,7 +231,7 @@ mod tests {
             vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
         );
 
-        let result_chunk2 = seq_scan_executor.execute().await?.batch_or()?;
+        let result_chunk2 = seq_scan_executor.execute().await?.unwrap();
         assert_eq!(result_chunk2.dimension(), 1);
         assert_eq!(
             result_chunk2

@@ -3,8 +3,7 @@ use prost::Message;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::ProjectNode;
 
-use crate::executor::ExecutorResult::{Batch, Done};
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
+use crate::executor::{Executor, ExecutorBuilder};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
@@ -27,10 +26,10 @@ impl Executor for ProjectionExecutor {
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<Option<DataChunk>> {
         let child_output = self.child.execute().await?;
         match child_output {
-            Batch(child_chunk) => {
+            Some(child_chunk) => {
                 let arrays: Vec<Column> = self
                     .expr
                     .iter_mut()
@@ -40,9 +39,9 @@ impl Executor for ProjectionExecutor {
                     })
                     .collect::<Result<Vec<_>>>()?;
                 let ret = DataChunk::builder().columns(arrays).build();
-                Ok(Batch(ret))
+                Ok(Some(ret))
             }
-            Done => Ok(Done),
+            None => Ok(None),
         }
     }
 
@@ -142,7 +141,7 @@ mod tests {
         let fields = &proj_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
 
-        let result_chunk = proj_executor.execute().await?.batch_or()?;
+        let result_chunk = proj_executor.execute().await?.unwrap();
         proj_executor.clean().await.unwrap();
         assert_eq!(result_chunk.dimension(), 1);
         assert_eq!(

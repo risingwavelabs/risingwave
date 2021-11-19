@@ -2,13 +2,14 @@ use std::marker::PhantomData;
 use std::net::SocketAddr;
 
 use prost::Message;
+use risingwave_common::array::DataChunk;
 
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::task_service::exchange_node::Field as ExchangeNodeField;
 use risingwave_pb::task_service::{ExchangeNode, ExchangeSource as ProstExchangeSource};
 
 use crate::execution::exchange_source::{ExchangeSource, GrpcExchangeSource, LocalExchangeSource};
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
+use crate::executor::{Executor, ExecutorBuilder};
 use crate::task::GlobalTaskEnv;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::ProstError;
@@ -110,7 +111,7 @@ impl<CS: CreateSource> Executor for GenericExchangeExecutor<CS> {
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<Option<DataChunk>> {
         loop {
             if self.source_idx >= self.sources.len() {
                 break;
@@ -128,11 +129,11 @@ impl<CS: CreateSource> Executor for GenericExchangeExecutor<CS> {
                 }
                 Some(res) => {
                     self.current_source = Some(source);
-                    return Ok(ExecutorResult::Batch(res));
+                    return Ok(Some(res));
                 }
             }
         }
-        Ok(ExecutorResult::Done)
+        Ok(None)
     }
 
     async fn clean(&mut self) -> Result<()> {
@@ -210,8 +211,8 @@ mod tests {
         loop {
             let res = executor.execute().await.unwrap();
             match res {
-                ExecutorResult::Batch(_) => chunks += 1,
-                ExecutorResult::Done => break,
+                Some(_) => chunks += 1,
+                None => break,
             }
         }
         assert_eq!(chunks, 3);

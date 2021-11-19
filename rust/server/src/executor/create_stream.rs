@@ -3,12 +3,13 @@ use std::collections::HashMap;
 use prost::Message;
 
 use pb_convert::FromProtobuf;
+use risingwave_common::array::DataChunk;
 use risingwave_pb::plan::create_stream_node::RowFormatType;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::CreateStreamNode;
 use risingwave_pb::ToProto;
 
-use crate::executor::{Executor, ExecutorBuilder, ExecutorResult};
+use crate::executor::{Executor, ExecutorBuilder};
 use crate::source::{FileSourceConfig, KafkaSourceConfig, SourceFormat};
 use crate::source::{SourceColumnDesc, SourceConfig, SourceManagerRef};
 use risingwave_common::catalog::Schema;
@@ -118,7 +119,7 @@ impl Executor for CreateStreamExecutor {
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<Option<DataChunk>> {
         self.source_manager.create_source(
             &self.table_id,
             self.format.clone(),
@@ -126,7 +127,7 @@ impl Executor for CreateStreamExecutor {
             self.columns.clone(),
         )?;
 
-        Ok(ExecutorResult::Done)
+        Ok(None)
     }
 
     async fn clean(&mut self) -> Result<()> {

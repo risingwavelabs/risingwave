@@ -1,6 +1,5 @@
-use super::{BoxedExecutorBuilder, Executor, ExecutorBuilder, ExecutorResult};
+use super::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
 use crate::executor::BoxedExecutor;
-use crate::executor::ExecutorResult::Batch;
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::array::column::Column;
@@ -143,7 +142,7 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
     async fn init(&mut self) -> Result<()> {
         self.child.init().await?;
 
-        while let Batch(chunk) = self.child.execute().await? {
+        while let Some(chunk) = self.child.execute().await? {
             let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
             for (row_id, key) in keys.into_iter().enumerate() {
                 let mut err_flag = None;
@@ -206,13 +205,13 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
         self.child.clean().await
     }
 
-    async fn execute(&mut self) -> Result<ExecutorResult> {
+    async fn execute(&mut self) -> Result<Option<DataChunk>> {
         if self.result.is_none() {
-            return Ok(ExecutorResult::Done);
+            return Ok(None);
         }
 
         let ret = self.result.take().unwrap();
-        Ok(ExecutorResult::Batch(ret))
+        Ok(Some(ret))
     }
 
     async fn clean(&mut self) -> Result<()> {
