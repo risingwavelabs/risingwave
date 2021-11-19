@@ -107,9 +107,9 @@ impl Executor for RowSeqScanExecutor {
                             if let (Some(data_type), Some(datum)) =
                                 (self.data_types.get(*column_id), row.get(*column_id))
                             {
-                                // We can scan row by row here currently.
                                 let mut builder = data_type.clone().create_array_builder(1)?;
                                 let mut i = 0;
+                                // Put duplicate tuples in the same chunk.
                                 while i < *occ_value {
                                     builder.append_datum(datum)?;
                                     i += 1;
@@ -161,5 +161,261 @@ impl Executor for RowSeqScanExecutor {
 
     fn schema(&self) -> &Schema {
         &self.schema
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::Array;
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::Scalar;
+    use risingwave_pb::data::{data_type::TypeName, DataType as DataTypeProst};
+    use risingwave_pb::plan::{column_desc::ColumnEncodingType, ColumnDesc};
+    use risingwave_pb::ToProst;
+
+    use super::*;
+
+    fn mock_first_row() -> Row {
+        Row(vec![
+            Some((1_i64).to_scalar_value()),
+            Some((4_i64).to_scalar_value()),
+        ])
+    }
+
+    fn mock_second_row() -> Row {
+        Row(vec![
+            Some((2_i64).to_scalar_value()),
+            Some((5_i64).to_scalar_value()),
+        ])
+    }
+
+    fn mock_first_key_row() -> Row {
+        Row(vec![Some((1_i64).to_scalar_value())])
+    }
+
+    fn mock_second_key_row() -> Row {
+        Row(vec![Some((2_i64).to_scalar_value())])
+    }
+
+    #[tokio::test]
+    async fn test_row_seq_scan_one_row() -> Result<()> {
+        // In this test we test if the memtable can be correctly scanned for one_row insertions.
+        let column1 = ColumnDesc {
+            column_type: Some(DataTypeProst {
+                type_name: TypeName::Int64 as i32,
+                ..Default::default()
+            }),
+            encoding: ColumnEncodingType::Raw as i32,
+            is_primary: false,
+            name: "test_col1".to_string(),
+        };
+        let column2 = ColumnDesc {
+            column_type: Some(DataTypeProst {
+                type_name: TypeName::Int64 as i32,
+                ..Default::default()
+            }),
+            encoding: ColumnEncodingType::Raw as i32,
+            is_primary: false,
+            name: "test_col2".to_string(),
+        };
+        let columns = vec![column1, column2];
+
+        let columns_revise = &columns
+            .iter()
+            .map(|c| c.to_proto::<risingwave_proto::plan::ColumnDesc>())
+            .collect::<Vec<risingwave_proto::plan::ColumnDesc>>()[..];
+
+        let fields = columns_revise
+            .iter()
+            .map(|c| {
+                Field::try_from(
+                    &c.get_column_type()
+                        .to_prost::<risingwave_pb::data::DataType>(),
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        let schema = Schema::new(fields);
+
+        let data_types = schema
+            .fields
+            .iter()
+            .map(|f| f.data_type.clone())
+            .collect::<Vec<_>>();
+
+        let mem_table = MemRowTable::new(schema.clone(), vec![]);
+        let row1 = mock_first_row();
+        let row2 = mock_first_row();
+        let row3 = mock_second_row();
+
+        mem_table.insert_one_row(row1).unwrap();
+        mem_table.insert_one_row(row2).unwrap();
+        mem_table.insert_one_row(row3).unwrap();
+
+        let mut row_scan_executor = RowSeqScanExecutor {
+            data_types,
+            column_ids: vec![0, 1],
+            iter: mem_table.iter()?,
+            has_pk: false,
+            schema,
+        };
+
+        row_scan_executor.init().await.unwrap();
+
+        let res_chunk = row_scan_executor.execute().await?.unwrap();
+        assert_eq!(res_chunk.dimension(), 2);
+        assert_eq!(
+            res_chunk
+                .column_at(0)?
+                .array()
+                .as_int64()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![Some(1), Some(1)]
+        );
+        assert_eq!(
+            res_chunk
+                .column_at(1)?
+                .array()
+                .as_int64()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![Some(4), Some(4)]
+        );
+
+        let res_chunk2 = row_scan_executor.execute().await?.unwrap();
+        assert_eq!(res_chunk2.dimension(), 2);
+        assert_eq!(
+            res_chunk2
+                .column_at(0)?
+                .array()
+                .as_int64()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![Some(2)]
+        );
+        assert_eq!(
+            res_chunk2
+                .column_at(1)?
+                .array()
+                .as_int64()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![Some(5)]
+        );
+        row_scan_executor.clean().await.unwrap();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_row_seq_scan() -> Result<()> {
+        // In this test we test if the memtable can be correctly scanned for K-V pair insertions.
+        let column1 = ColumnDesc {
+            column_type: Some(DataTypeProst {
+                type_name: TypeName::Int64 as i32,
+                ..Default::default()
+            }),
+            encoding: ColumnEncodingType::Raw as i32,
+            is_primary: true,
+            name: "test_col1".to_string(),
+        };
+        let column2 = ColumnDesc {
+            column_type: Some(DataTypeProst {
+                type_name: TypeName::Int64 as i32,
+                ..Default::default()
+            }),
+            encoding: ColumnEncodingType::Raw as i32,
+            is_primary: false,
+            name: "test_col2".to_string(),
+        };
+        let columns = vec![column1, column2];
+
+        let columns_revise = &columns
+            .iter()
+            .map(|c| c.to_proto::<risingwave_proto::plan::ColumnDesc>())
+            .collect::<Vec<risingwave_proto::plan::ColumnDesc>>()[..];
+
+        let fields = columns_revise
+            .iter()
+            .map(|c| {
+                Field::try_from(
+                    &c.get_column_type()
+                        .to_prost::<risingwave_pb::data::DataType>(),
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        let schema = Schema::new(fields);
+
+        let data_types = schema
+            .fields
+            .iter()
+            .map(|f| f.data_type.clone())
+            .collect::<Vec<_>>();
+
+        let mem_table = MemRowTable::new(schema.clone(), vec![]);
+        let row1 = mock_first_row();
+        let key1 = mock_first_key_row();
+        let row2 = mock_second_row();
+        let key2 = mock_second_key_row();
+
+        mem_table.insert(key1, row1).unwrap();
+        mem_table.insert(key2, row2).unwrap();
+
+        let mut row_scan_executor = RowSeqScanExecutor {
+            data_types,
+            column_ids: vec![0, 1],
+            iter: mem_table.iter()?,
+            has_pk: true,
+            schema,
+        };
+
+        row_scan_executor.init().await.unwrap();
+
+        let res_chunk = row_scan_executor.execute().await?.unwrap();
+        assert_eq!(res_chunk.dimension(), 2);
+        assert_eq!(
+            res_chunk
+                .column_at(0)?
+                .array()
+                .as_int64()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![Some(1)]
+        );
+        assert_eq!(
+            res_chunk
+                .column_at(1)?
+                .array()
+                .as_int64()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![Some(4)]
+        );
+
+        let res_chunk2 = row_scan_executor.execute().await?.unwrap();
+        assert_eq!(res_chunk2.dimension(), 2);
+        assert_eq!(
+            res_chunk2
+                .column_at(0)?
+                .array()
+                .as_int64()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![Some(2)]
+        );
+        assert_eq!(
+            res_chunk2
+                .column_at(1)?
+                .array()
+                .as_int64()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![Some(5)]
+        );
+        row_scan_executor.clean().await.unwrap();
+        Ok(())
     }
 }

@@ -143,12 +143,12 @@ impl MemRowTable {
     /// A temporary solution for the case when no key specified.
     /// We set the whole row as key, and the multiplicity as value.
     /// This works for three fn in `MemRowTable`: `insert_one_row`, `delete_one_row`.
-    pub fn insert_one_row(&mut self, row: Row) -> Result<()> {
+    pub fn insert_one_row(&self, row: Row) -> Result<()> {
         let mut inner = self.inner.write().unwrap();
         inner.insert_one_row(row)
     }
 
-    pub fn delete_one_row(&mut self, row: Row) -> Result<()> {
+    pub fn delete_one_row(&self, row: Row) -> Result<()> {
         let mut inner = self.inner.write().unwrap();
         inner.delete_one_row(row)
     }
@@ -175,7 +175,7 @@ mod tests {
 
     #[test]
     fn test_row_table() {
-        let mut mem_table = MemRowTable::new(Schema::default(), vec![]);
+        let mem_table = MemRowTable::new(Schema::default(), vec![]);
         // Insert (1,4)
         let row1 = mock_one_row();
         let _res1 = mem_table.insert_one_row(row1);
