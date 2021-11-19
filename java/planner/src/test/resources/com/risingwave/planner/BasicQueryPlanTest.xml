@@ -322,4 +322,19 @@ RwBatchProject(EXPR$0=[+(+(2021-10-01, 12:INTERVAL YEAR), 86400000:INTERVAL DAY)
         <Resource name="json" path="batch/basic/select_interval">
         </Resource>
     </TestCase>
+    <TestCase name="extract function">
+        <Resource name="sql">
+            <![CDATA[
+            select extract(day from date '1999-1-2');
+]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchProject(EXPR$0=[EXTRACT(FLAG(DAY), 1999-01-02)])
+  RwBatchValues(tuples=[[{ 0 }]])
+]]>
+        </Resource>
+        <Resource name="json" path="batch/basic/extract">
+        </Resource>
+    </TestCase>
 </Root>

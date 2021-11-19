@@ -22,7 +22,10 @@ public class SymbolType extends PrimitiveTypeBase {
 
   @Override
   public DataType getProtobufType() {
-    throw new UnsupportedOperationException("Serializing symbol");
+    return DataType.newBuilder()
+        .setTypeName(DataType.TypeName.SYMBOL)
+        .setIsNullable(nullable)
+        .build();
   }
 
   @Override

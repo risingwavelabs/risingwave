@@ -50,6 +50,7 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
           .put(SqlKind.AND, ExprNode.Type.AND)
           .put(SqlKind.OR, ExprNode.Type.OR)
           .put(SqlKind.NOT, ExprNode.Type.NOT)
+          .put(SqlKind.EXTRACT, ExprNode.Type.EXTRACT)
           .build();
   private static final ImmutableMap<String, ExprNode.Type> STRING_TO_FUNC_MAPPING =
       ImmutableMap.<String, ExprNode.Type>builder()
@@ -195,6 +196,11 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
             default:
               throw new PgException(PgErrorCode.INTERNAL_ERROR, "Unsupported type: %s", dataType);
           }
+          break;
+        }
+      case SYMBOL:
+        {
+          bb = ByteBuffer.wrap(val.getValue().toString().getBytes(StandardCharsets.UTF_8));
           break;
         }
       default:

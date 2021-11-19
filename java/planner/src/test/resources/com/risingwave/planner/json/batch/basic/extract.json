@@ -1,0 +1,57 @@
+{
+  "nodeType": "PROJECT",
+  "body": {
+    "@type": "type.googleapis.com/plan.ProjectNode",
+    "selectList": [{
+      "exprType": "EXTRACT",
+      "returnType": {
+        "typeName": "INT64"
+      },
+      "funcCall": {
+        "children": [{
+          "exprType": "CONSTANT_VALUE",
+          "returnType": {
+            "typeName": "SYMBOL"
+          },
+          "constant": {
+            "body": "REFZ"
+          }
+        }, {
+          "exprType": "CAST",
+          "returnType": {
+            "typeName": "DATE"
+          },
+          "funcCall": {
+            "children": [{
+              "exprType": "CONSTANT_VALUE",
+              "returnType": {
+                "typeName": "CHAR",
+                "precision": 10
+              },
+              "constant": {
+                "body": "MTk5OS0wMS0wMg=="
+              }
+            }]
+          }
+        }]
+      }
+    }]
+  },
+  "children": [{
+    "nodeType": "VALUE",
+    "body": {
+      "@type": "type.googleapis.com/plan.ValuesNode",
+      "tuples": [{
+        "cells": [{
+          "exprType": "CONSTANT_VALUE",
+          "returnType": {
+            "typeName": "INT32"
+          },
+          "constant": {
+            "body": "AAAAAA=="
+          }
+        }]
+      }]
+    }
+  }]
+}
