@@ -91,7 +91,13 @@ impl StreamManager {
         }
     }
 
-    /// TODO: this method should be removed or modified in the future
+    // TODO: We will refine this method when the meta service is ready.
+    pub fn send_barrier(&self, epoch: u64) {
+        let core = self.core.lock().unwrap();
+        core.send_barrier(epoch);
+    }
+
+    // TODO: We will refine this method when the meta service is ready.
     pub fn send_stop_barrier(&self) {
         let core = self.core.lock().unwrap();
         core.send_stop_barrier();
@@ -125,7 +131,7 @@ impl StreamManager {
     /// This function was called while [`StreamManager`] exited.
     ///
     /// Suspend was allowed here.
-    pub async fn wait_all(&self) -> Result<()> {
+    pub async fn wait_all(self) -> Result<()> {
         let mut core = self.core.lock().unwrap();
         core.wait_all().await
     }
@@ -286,7 +292,17 @@ impl StreamManagerCore {
         Ok(dispatcher)
     }
 
-    /// TODO: this method should be removed or modified in the future
+    /// broadcast a barrier to all senders with specific epoch.
+    // TODO: We will refine this method when the meta service is ready.
+    fn send_barrier(&self, epoch: u64) {
+        for sender in &self.sender_placeholder {
+            sender
+                .unbounded_send(Message::Barrier(Barrier { epoch, stop: false }))
+                .unwrap();
+        }
+    }
+
+    // TODO: We will refine this method when the meta service is ready.
     fn send_stop_barrier(&self) {
         for sender in &self.sender_placeholder {
             sender
@@ -339,24 +355,8 @@ impl StreamManagerCore {
                     let stream_receiver = table.create_stream()?;
                     // TODO: The channel pair should be created by the Checkpoint manger. So this
                     // line may be removed later.
-                    use futures::SinkExt;
-                    let (mut sender, barrier_receiver) = unbounded();
-                    // FIXME: We should trigger barrier from meta service. Currently, we use a timer
-                    // to trigger barrier periodically.
-                    tokio::spawn(async move {
-                        loop {
-                            sender
-                                .send(Message::Barrier(Barrier {
-                                    epoch: 1,
-                                    stop: false,
-                                }))
-                                .await
-                                .unwrap();
-                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                        }
-                    });
-                    // TODO: Take the ownership to avoid drop of this channel. This should be
-                    // removed too. self.sender_placeholder.push(sender);
+                    let (sender, barrier_receiver) = unbounded();
+                    self.sender_placeholder.push(sender);
                     Ok(Box::new(TableSourceExecutor::new(
                         table_id,
                         schema,

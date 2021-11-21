@@ -17,6 +17,19 @@ pub fn rpc_serve(addr: SocketAddr) -> (JoinHandle<()>, UnboundedSender<()>) {
     let store_mgr = Arc::new(SimpleTableManager::new());
     let task_mgr = Arc::new(TaskManager::new());
     let stream_mgr = Arc::new(StreamManager::new(addr));
+
+    // FIXME: We should trigger barrier from meta service. Currently, we use a timer to
+    // trigger barrier periodically.
+    let stream_mgr1 = stream_mgr.clone();
+    tokio::spawn(async move {
+        let mut epoch = 0u64;
+        loop {
+            stream_mgr1.send_barrier(epoch);
+            epoch += 1;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    });
+
     let source_mgr = Arc::new(MemSourceManager::new());
     let env = GlobalTaskEnv::new(store_mgr.clone(), source_mgr, task_mgr.clone(), addr);
     let task_srv = TaskServiceImpl::new(task_mgr.clone(), env);
