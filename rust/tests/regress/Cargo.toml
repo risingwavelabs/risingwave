@@ -1,0 +1,16 @@
+[package]
+name = "risingwave_regress_test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+clap = "3.0.0-beta.5"
+clap_derive = "3.0.0-beta.5"
+log = "0.4"
+log4rs = "1"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "process"] }
+
+[[bin]]
+name = "risingwave_regress_test"
+path = "src/bin/main.rs"

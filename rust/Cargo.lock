@@ -1681,6 +1681,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_regress_test"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "clap_derive",
+ "log",
+ "log4rs",
+ "tokio",
+]
+
+[[package]]
 name = "risingwave_stream"
 version = "0.1.0"
 
