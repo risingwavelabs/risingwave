@@ -9,31 +9,17 @@ use crate::types::DataTypeKind;
 use crate::types::DataTypeRef;
 use risingwave_pb::expr::expr_node::Type;
 
-#[allow(unused_macros)]
-macro_rules! gen_across_binary {
-  ($l:expr, $r:expr, $ret: expr, $OA: ty, $f:ident) => {
-    match (
-      $l.return_type().data_type_kind(),
-      $r.return_type().data_type_kind(),
-    ) {
-      // integer
-      (DataTypeKind::Int64, DataTypeKind::Int64) => {
+// TODO: consider implement it using generic function.
+macro_rules! gen_stream_null_by_row_count_expr {
+    ($l:expr, $r:expr, $ret: expr, $OA:ty) => {
         Box::new(BinaryNullableExpression::<I64Array, $OA, $OA, _> {
-          expr_ia1: $l,
-          expr_ia2: $r,
-          return_type: $ret,
-          func: $f,
-          _phantom: PhantomData,
+            expr_ia1: $l,
+            expr_ia2: $r,
+            return_type: $ret,
+            func: stream_null_by_row_count,
+            _phantom: PhantomData,
         })
-      }
-      tp => {
-        unimplemented!(
-          "The expression {:?} using vectorized expression framework is not supported yet!",
-          tp
-        )
-      }
-    }
-  };
+    };
 }
 
 //  stream_null_by_row_count is mainly used for a spcial case of the conditional aggregation.
@@ -51,34 +37,30 @@ pub fn new_nullable_binary_expr(
     r: BoxedExpression,
 ) -> BoxedExpression {
     match expr_type {
-        Type::StreamNullByRowCount => match r.return_type().data_type_kind() {
-            DataTypeKind::Boolean => {
-                gen_across_binary!(l, r, ret, BoolArray, stream_null_by_row_count)
+        Type::StreamNullByRowCount => match l.return_type().data_type_kind() {
+            DataTypeKind::Int64 => match r.return_type().data_type_kind() {
+                DataTypeKind::Boolean => gen_stream_null_by_row_count_expr!(l, r, ret, BoolArray),
+                DataTypeKind::Int16 => gen_stream_null_by_row_count_expr!(l, r, ret, I16Array),
+                DataTypeKind::Int32 => gen_stream_null_by_row_count_expr!(l, r, ret, I32Array),
+                DataTypeKind::Int64 => gen_stream_null_by_row_count_expr!(l, r, ret, I64Array),
+                DataTypeKind::Float32 => gen_stream_null_by_row_count_expr!(l, r, ret, F32Array),
+                DataTypeKind::Float64 => gen_stream_null_by_row_count_expr!(l, r, ret, F64Array),
+                DataTypeKind::Decimal => {
+                    gen_stream_null_by_row_count_expr!(l, r, ret, DecimalArray)
+                }
+                DataTypeKind::Date => gen_stream_null_by_row_count_expr!(l, r, ret, DecimalArray),
+                _ => {
+                    unimplemented!(
+                        "The output type isn't supported by stream_null_by_row_count function."
+                    )
+                }
+            },
+            tp => {
+                unimplemented!(
+                    "The first argument of StreamNullByRowCount must be Int64 but not {:?}",
+                    tp
+                )
             }
-            DataTypeKind::Int16 => {
-                gen_across_binary!(l, r, ret, I16Array, stream_null_by_row_count)
-            }
-            DataTypeKind::Int32 => {
-                gen_across_binary!(l, r, ret, I32Array, stream_null_by_row_count)
-            }
-            DataTypeKind::Int64 => {
-                gen_across_binary!(l, r, ret, I64Array, stream_null_by_row_count)
-            }
-            DataTypeKind::Float32 => {
-                gen_across_binary!(l, r, ret, F32Array, stream_null_by_row_count)
-            }
-            DataTypeKind::Float64 => {
-                gen_across_binary!(l, r, ret, F64Array, stream_null_by_row_count)
-            }
-            DataTypeKind::Decimal => {
-                gen_across_binary!(l, r, ret, DecimalArray, stream_null_by_row_count)
-            }
-            DataTypeKind::Date => {
-                gen_across_binary!(l, r, ret, DecimalArray, stream_null_by_row_count)
-            }
-            _ => unimplemented!(
-                "The output type isn't supported by stream_null_by_row_count function."
-            ),
         },
         tp => {
             unimplemented!(
