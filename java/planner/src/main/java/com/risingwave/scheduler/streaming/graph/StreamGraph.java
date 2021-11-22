@@ -37,6 +37,14 @@ public class StreamGraph {
     return list;
   }
 
+  public List<Integer> getAllFragmentId() {
+    List<Integer> list = new ArrayList<>();
+    for (var fragment : fragments.values()) {
+      list.add(fragment.getId());
+    }
+    return list;
+  }
+
   /** The builder class of a <code>StreamGraph</code>. */
   public static class GraphBuilder {
     private final Map<Integer, StreamFragment> fragments = new HashMap<>();
@@ -60,16 +68,6 @@ public class StreamGraph {
     }
 
     public StreamGraph build() {
-      // Dirty trick to match backend.
-      // For source fragments, add mock upstream 0.
-      for (Integer id : fragments.keySet()) {
-        StreamFragment fragment = fragments.get(id);
-        if (fragment.getUpstreamSets().size() == 0) {
-          StreamFragment.FragmentBuilder builder = fragment.toBuilder();
-          builder.addUpstream(-1, 0);
-          fragments.put(id, builder.build());
-        }
-      }
       // Build stream graph.
       return new StreamGraph(fragments);
     }

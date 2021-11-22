@@ -59,7 +59,7 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     var clientManager = context.getComputeClientManager();
     StreamManager streamManager = context.getStreamManager();
     var streamRequests = streamManager.scheduleStreamGraph(streamGraph);
-    var actorInfo = streamManager.getActorInfo();
+    var actorInfo = streamManager.getActorInfo(streamGraph.getAllFragmentId());
 
     for (var streamRequest : streamRequests) {
       var node = streamRequest.getWorkerNode();

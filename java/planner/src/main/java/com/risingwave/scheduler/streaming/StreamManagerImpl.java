@@ -77,12 +77,17 @@ public class StreamManagerImpl implements StreamManager {
   }
 
   @Override
-  public ActorInfoTable getActorInfo() {
+  public ActorInfoTable getActorInfo(List<Integer> actorIdList) {
+    HashSet<Integer> relevantIdSet = new HashSet<>();
+    relevantIdSet.addAll(actorIdList);
+
     ActorInfoTable.Builder builder = ActorInfoTable.newBuilder();
     for (var node : fragmentAllocation.keySet()) {
       Set<Integer> fragmentIdSet = new HashSet<Integer>();
       for (var fragment : fragmentAllocation.get(node)) {
-        fragmentIdSet.add(fragment.getId());
+        if (relevantIdSet.contains(fragment.getId())) {
+          fragmentIdSet.add(fragment.getId());
+        }
       }
       builder.addWorkerNode(node, fragmentIdSet);
     }

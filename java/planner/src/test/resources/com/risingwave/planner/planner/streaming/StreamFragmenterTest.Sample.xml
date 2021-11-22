@@ -514,9 +514,6 @@
       "columnIds": [1, 2]
     }
   },
-  "mergers": [{
-    "upstreamFragmentId": [0]
-  }],
   "dispatcher": {
     "type": "HASH"
   },

@@ -11,5 +11,5 @@ public interface StreamManager {
 
   int nextScheduleId();
 
-  ActorInfoTable getActorInfo();
+  ActorInfoTable getActorInfo(List<Integer> actorIdList);
 }
