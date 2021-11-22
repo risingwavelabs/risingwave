@@ -90,6 +90,46 @@ SELECT *
  0 NULL zero 2 4
  0 NULL zero NULL 0
 
+query IITII rowsort
+SELECT * 
+  FROM J1_TBL LEFT OUTER JOIN J2_TBL ON (J1_TBL.i <= J2_TBL.k);
+----
+ 1 4 one 2 2
+ 1 4 one 2 4
+ 2 3 two 2 2
+ 2 3 two  2 4
+ 3 2 three 2 4
+ 4 1 four 2 4
+ 0 NULL zero  2 2
+ 0 NULL zero 2 4
+ 0 NULL zero NULL 0
+ 5 0 five NULL NULL 
+ 6 6 six NULL NULL
+ 7 7 seven NULL NULL
+ 8 8 eight NULL NULL 
+ NULL 0 zero NULL NULL
+ NULL NULL null NULL NULL
+
+query IITII rowsort
+SELECT * 
+  FROM J1_TBL RIGHT OUTER JOIN J2_TBL ON (J1_TBL.i <= J2_TBL.k);
+----
+ 1 4 one 2 2
+ 2 3 two 2 2
+ 0 NULL zero  2 2
+ 1 4 one 2 4
+ 2 3 two  2 4
+ 3 2 three 2 4
+ 4 1 four 2 4
+ 0 NULL zero 2 4
+ 0 NULL zero NULL 0
+ NULL NULL NULL 1 -1
+ NULL NULL NULL 3 -3
+ NULL NULL NULL 5 -5
+ NULL NULL NULL 5 -5
+ NULL NULL NULL 0 NULL
+ NULL NULL NULL NULL NULL
+
 statement ok
 drop table J1_TBL
 
