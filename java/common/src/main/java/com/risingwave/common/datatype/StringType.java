@@ -79,6 +79,11 @@ public class StringType extends PrimitiveTypeBase {
   }
 
   @Override
+  public int getPrecision() {
+    return maxSize;
+  }
+
+  @Override
   public DataType getProtobufType() {
     DataType.TypeName typeName =
         sqlTypeName == SqlTypeName.CHAR ? DataType.TypeName.CHAR : DataType.TypeName.VARCHAR;
@@ -115,9 +120,10 @@ public class StringType extends PrimitiveTypeBase {
       return false;
     }
 
-    // TODO: We should check collation
     var other = (StringType) o;
     return Objects.equal(getCharset(), other.getCharset())
+        && maxSize == other.getMaxSize()
+        && fixedSize == other.isFixedSize()
         && Objects.equal(getCollation(), other.getCollation());
   }
 

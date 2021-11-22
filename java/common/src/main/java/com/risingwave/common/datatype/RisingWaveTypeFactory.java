@@ -24,6 +24,7 @@ import org.apache.calcite.sql.SqlCollation;
 import org.apache.calcite.sql.SqlIntervalQualifier;
 import org.apache.calcite.sql.type.SqlTypeName;
 
+/** Overrides Calcite to construct RisingWaveDataType. */
 public class RisingWaveTypeFactory extends JavaTypeFactoryImpl {
   public RisingWaveTypeFactory() {
     super(new RisingWaveDataTypeSystem());
@@ -42,10 +43,14 @@ public class RisingWaveTypeFactory extends JavaTypeFactoryImpl {
         type.getClass(),
         type);
     if (type instanceof RisingWaveDataType) {
-      return ((RisingWaveDataType) type).withNullability(nullable);
+      return canonize(((RisingWaveDataType) type).withNullability(nullable));
     } else {
       return super.createTypeWithNullability(type, nullable);
     }
+  }
+
+  protected RisingWaveDataType canonize(RisingWaveDataType type) {
+    return (RisingWaveDataType) super.canonize(type);
   }
 
   @Override
@@ -117,35 +122,35 @@ public class RisingWaveTypeFactory extends JavaTypeFactoryImpl {
       SqlTypeName sqlType, OptionalInt precision, OptionalInt scale) {
     switch (sqlType) {
       case BOOLEAN:
-        return new BooleanType();
+        return canonize(new BooleanType());
       case SMALLINT:
-        return new NumericTypeBase(SqlTypeName.SMALLINT, 2);
+        return canonize(new NumericTypeBase(SqlTypeName.SMALLINT, 2));
       case INTEGER:
-        return new NumericTypeBase(SqlTypeName.INTEGER, 4);
+        return canonize(new NumericTypeBase(SqlTypeName.INTEGER, 4));
       case BIGINT:
-        return new NumericTypeBase(SqlTypeName.BIGINT, 8);
+        return canonize(new NumericTypeBase(SqlTypeName.BIGINT, 8));
       case FLOAT:
-        return new NumericTypeBase(SqlTypeName.FLOAT, 4);
+        return canonize(new NumericTypeBase(SqlTypeName.FLOAT, 4));
       case DOUBLE:
-        return new NumericTypeBase(SqlTypeName.DOUBLE, 8);
+        return canonize(new NumericTypeBase(SqlTypeName.DOUBLE, 8));
       case DECIMAL:
-        return new DecimalType(precision, scale);
+        return canonize(new DecimalType(precision, scale));
       case CHAR:
-        return new StringType(SqlTypeName.CHAR, precision);
+        return canonize(new StringType(SqlTypeName.CHAR, precision));
       case VARCHAR:
-        return new StringType(SqlTypeName.VARCHAR, precision);
+        return canonize(new StringType(SqlTypeName.VARCHAR, precision));
       case TIME:
-        return new TimeType(precision);
+        return canonize(new TimeType(precision));
       case TIMESTAMP:
-        return new TimestampType(precision, SqlTypeName.TIMESTAMP);
+        return canonize(new TimestampType(precision, SqlTypeName.TIMESTAMP));
       case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-        return new TimestampType(precision, SqlTypeName.TIMESTAMP_WITH_LOCAL_TIME_ZONE);
+        return canonize(new TimestampType(precision, SqlTypeName.TIMESTAMP_WITH_LOCAL_TIME_ZONE));
       case DATE:
-        return new DateType();
+        return canonize(new DateType());
       case NULL:
         return NullType.SINGLETON;
       case SYMBOL:
-        return new SymbolType();
+        return canonize(new SymbolType());
       default:
         throw new PgException(PgErrorCode.INTERNAL_ERROR, "Unrecognized sql type: %s", sqlType);
     }
