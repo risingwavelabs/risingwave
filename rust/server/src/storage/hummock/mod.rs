@@ -87,8 +87,8 @@ impl HummockStorage {
         }
     }
 
-    /// Ingest KV pairs into the storage engine
-    pub async fn ingest_kv_pairs(
+    /// Write batch to storage.
+    pub async fn write_batch(
         &mut self,
         kv_pairs: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
     ) -> HummockResult<()> {

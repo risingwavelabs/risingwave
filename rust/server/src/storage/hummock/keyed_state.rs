@@ -59,7 +59,7 @@ where
 
     async fn flush(&mut self) -> Result<()> {
         self.storage
-            .ingest_kv_pairs(self.mem_table.drain().map(|(key, value)| {
+            .write_batch(self.mem_table.drain().map(|(key, value)| {
                 (
                     self.key_schema.schemaed_serialize(&key),
                     match value {
