@@ -9,6 +9,8 @@ pub mod hummock;
 mod test_row_table;
 pub use test_row_table::*;
 
+mod object;
+
 use crate::stream_op::StreamChunk;
 use futures::channel::mpsc;
 use risingwave_common::array::DataChunk;
