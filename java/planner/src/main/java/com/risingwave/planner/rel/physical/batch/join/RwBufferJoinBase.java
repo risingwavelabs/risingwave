@@ -15,6 +15,7 @@ import org.apache.calcite.rel.core.JoinRelType;
 import org.apache.calcite.rel.hint.RelHint;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.util.Pair;
+import org.apache.calcite.util.mapping.MappingType;
 import org.apache.calcite.util.mapping.Mappings;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
@@ -46,7 +47,11 @@ public abstract class RwBufferJoinBase extends Join implements RisingWaveBatchPh
         int leftFieldCount = left.getRowType().getFieldCount();
         int rightFiledCount = right.getRowType().getFieldCount();
         Mappings.TargetMapping mapping =
-            Mappings.createShiftMapping(rightFiledCount, leftFieldCount, 0, rightFiledCount);
+            Mappings.create(
+                MappingType.SURJECTION, rightFiledCount, leftFieldCount + rightFiledCount);
+        for (int i = 0; i < rightFiledCount; i++) {
+          mapping.set(i, i + leftFieldCount);
+        }
         newTraits = newTraits.plus(dist.apply(mapping));
       }
     }
