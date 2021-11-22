@@ -11,28 +11,29 @@ use risingwave_pb::expr::expr_node::Type;
 
 #[allow(unused_macros)]
 macro_rules! gen_across_binary {
-    ($l:expr, $r:expr, $ret: expr, $OA: ty, $f:ident) => {
-        match (
-            $l.return_type().data_type_kind(),
-            $r.return_type().data_type_kind(),
-        ) {
-            // integer
-            (DataTypeKind::Int64, DataTypeKind::Int64) => {
-                Box::new(BinaryNullableExpression::<I64Array, $OA, $OA, _> {
-                    expr_ia1: $l,
-                    expr_ia2: $r,
-                    return_type: $ret,
-                    func: $f,
-                    _phantom: PhantomData,
-                })
-            }
-            _ => {
-                unimplemented!(
-                    "The expression using vectorized expression framework is not supported yet!"
-                )
-            }
-        }
-    };
+  ($l:expr, $r:expr, $ret: expr, $OA: ty, $f:ident) => {
+    match (
+      $l.return_type().data_type_kind(),
+      $r.return_type().data_type_kind(),
+    ) {
+      // integer
+      (DataTypeKind::Int64, DataTypeKind::Int64) => {
+        Box::new(BinaryNullableExpression::<I64Array, $OA, $OA, _> {
+          expr_ia1: $l,
+          expr_ia2: $r,
+          return_type: $ret,
+          func: $f,
+          _phantom: PhantomData,
+        })
+      }
+      tp => {
+        unimplemented!(
+          "The expression {:?} using vectorized expression framework is not supported yet!",
+          tp
+        )
+      }
+    }
+  };
 }
 
 //  stream_null_by_row_count is mainly used for a spcial case of the conditional aggregation.
@@ -79,9 +80,10 @@ pub fn new_nullable_binary_expr(
                 "The output type isn't supported by stream_null_by_row_count function."
             ),
         },
-        _ => {
+        tp => {
             unimplemented!(
-                "The expression using vectorized expression framework is not supported yet!"
+                "The expression {:?} using vectorized expression framework is not supported yet!",
+                tp
             )
         }
     }

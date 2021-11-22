@@ -202,9 +202,10 @@ pub fn new_binary_expr(
             func: or,
             _phantom: PhantomData,
         }),
-        _ => {
+        tp => {
             unimplemented!(
-                "The expression using vectorized expression framework is not supported yet!"
+                "The expression {:?} using vectorized expression framework is not supported yet!",
+                tp
             )
         }
     }

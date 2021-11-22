@@ -5,6 +5,7 @@ use crate::expr::expr_binary_bytes::new_substr_start;
 use crate::expr::expr_binary_nonnull::new_binary_expr;
 use crate::expr::expr_binary_nonnull::new_like_default;
 use crate::expr::expr_binary_nonnull::new_position_expr;
+use crate::expr::expr_binary_nullable::new_nullable_binary_expr;
 use crate::expr::expr_ternary_bytes::new_replace_expr;
 use crate::expr::expr_ternary_bytes::new_substr_start_end;
 use crate::expr::expr_unary_nonnull::new_length_default;
@@ -43,6 +44,19 @@ pub fn build_binary_expr_prost(prost: &ProstExprNode) -> Result<BoxedExpression>
     let left_expr = expr_build_from_prost(&children[0])?;
     let right_expr = expr_build_from_prost(&children[1])?;
     Ok(new_binary_expr(
+        prost.get_expr_type(),
+        ret_type,
+        left_expr,
+        right_expr,
+    ))
+}
+
+pub fn build_nullable_binary_expr_prost(prost: &ProstExprNode) -> Result<BoxedExpression> {
+    let (children, ret_type) = get_return_type_and_children(prost)?;
+    ensure!(children.len() == 2);
+    let left_expr = expr_build_from_prost(&children[0])?;
+    let right_expr = expr_build_from_prost(&children[1])?;
+    Ok(new_nullable_binary_expr(
         prost.get_expr_type(),
         ret_type,
         left_expr,
