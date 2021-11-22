@@ -11,6 +11,8 @@ pub enum HummockError {
     InvalidBlock,
     #[error("Decode Error {0}")]
     DecodeError(String),
+    #[error("Mock Error {0}")]
+    MockError(String),
 }
 
 impl From<prost::DecodeError> for HummockError {

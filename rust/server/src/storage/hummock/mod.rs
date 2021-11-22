@@ -10,6 +10,10 @@ mod cloud;
 mod error;
 mod format;
 mod keyed_state;
+
+#[cfg(test)]
+mod mock_fs;
+
 use crate::storage::hummock::cloud::upload;
 pub use error::*;
 
