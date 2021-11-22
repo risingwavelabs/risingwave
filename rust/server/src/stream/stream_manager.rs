@@ -64,6 +64,7 @@ pub struct StreamManagerCore {
     fragments: HashMap<u32, stream_plan::StreamFragment>,
 
     sender_placeholder: Vec<UnboundedSender<Message>>,
+
     /// Mock source, `fragment_id = 0`.
     /// TODO: remove this
     mock_source: ConsumableChannelPair,
@@ -633,12 +634,13 @@ impl StreamManagerCore {
             let mergers: Vec<Box<dyn Executor>> = fragment
                 .mergers
                 .iter()
-                .map(|merger| {
-                    self.create_merger(
-                        *fragment_id,
-                        schema.clone(),
-                        merger.get_upstream_fragment_id(),
-                    )
+                .filter_map(|merger| {
+                    let upstream_ids = merger.get_upstream_fragment_id();
+                    if upstream_ids.is_empty() {
+                        None
+                    } else {
+                        Some(self.create_merger(*fragment_id, schema.clone(), upstream_ids))
+                    }
                 })
                 .collect::<Result<Vec<_>>>()?;
 
