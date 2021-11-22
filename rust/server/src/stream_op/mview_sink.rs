@@ -1,6 +1,6 @@
 use super::Barrier;
 use super::{Executor, Message, Result, SimpleExecutor, StreamChunk};
-use crate::storage::MemRowTableRef as MemTableRef;
+use crate::storage::RowTableRef;
 use async_trait::async_trait;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::Schema;
@@ -9,14 +9,14 @@ use risingwave_common::catalog::Schema;
 /// be queried by the AP engine.
 pub struct MViewSinkExecutor {
     input: Box<dyn Executor>,
-    table: MemTableRef,
+    table: RowTableRef,
     pk_col: Vec<usize>,
     ingest_op: Vec<(Row, Option<Row>)>,
     row_batch: Vec<(Row, bool)>,
 }
 
 impl MViewSinkExecutor {
-    pub fn new(input: Box<dyn Executor>, table: MemTableRef, pk_col: Vec<usize>) -> Self {
+    pub fn new(input: Box<dyn Executor>, table: RowTableRef, pk_col: Vec<usize>) -> Self {
         Self {
             input,
             table,
@@ -124,7 +124,7 @@ impl SimpleExecutor for MViewSinkExecutor {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::{SimpleTableManager, TableManager, TableTypes};
+    use crate::storage::{RowTable, SimpleTableManager, TableManager, TableTypes};
     use crate::stream_op::test_utils::*;
     use crate::stream_op::*;
     use crate::*;
@@ -181,7 +181,7 @@ mod tests {
         };
 
         let table_ref = store_mgr.get_table(&table_id).unwrap();
-        if let TableTypes::Row(table) = table_ref {
+        if let TableTypes::TestRow(table) = table_ref {
             // Prepare stream executors.
             let schema = Schema {
                 fields: vec![
@@ -289,7 +289,7 @@ mod tests {
         };
         // Prepare stream executors.
         let table_ref = store_mgr.get_table(&table_id).unwrap();
-        if let TableTypes::Row(table) = table_ref {
+        if let TableTypes::TestRow(table) = table_ref {
             let schema = Schema {
                 fields: vec![
                     Field {

@@ -6,6 +6,9 @@ pub use row_table::*;
 
 pub mod hummock;
 
+mod test_row_table;
+pub use test_row_table::*;
+
 use crate::stream_op::StreamChunk;
 use futures::channel::mpsc;
 use risingwave_common::array::DataChunk;
@@ -78,6 +81,7 @@ pub trait TableManager: Sync + Send {
 pub enum TableTypes {
     Row(Arc<MemRowTable>),
     BummockTable(Arc<BummockTable>),
+    TestRow(Arc<TestRowTable>),
 }
 
 /// A simple implementation of in memory table for local tests.
@@ -130,6 +134,38 @@ impl TableManager for SimpleTableManager {
         Ok(())
     }
 
+    #[cfg(test)]
+    fn create_materialized_view(
+        &self,
+        table_id: &TableId,
+        columns: Vec<ColumnDesc>,
+        pk_columns: Vec<usize>,
+    ) -> Result<()> {
+        let mut tables = self.get_tables()?;
+
+        ensure!(
+            !tables.contains_key(table_id),
+            "Table id already exists: {:?}",
+            table_id
+        );
+        let column_count = columns.len();
+        ensure!(column_count > 0, "There must be more than one column in MV");
+        // TODO: Remove to_prost later.
+        let schema = Schema::try_from(
+            &columns
+                .into_iter()
+                .map(|c| c.to_prost())
+                .collect::<Vec<_>>(),
+        )?;
+        tables.insert(
+            table_id.clone(),
+            TableTypes::TestRow(Arc::new(TestRowTable::new(schema, pk_columns))),
+        );
+
+        Ok(())
+    }
+
+    #[cfg(not(test))]
     fn create_materialized_view(
         &self,
         table_id: &TableId,

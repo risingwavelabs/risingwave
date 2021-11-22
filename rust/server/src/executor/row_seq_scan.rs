@@ -8,7 +8,7 @@ use risingwave_pb::plan::RowSeqScanNode;
 use risingwave_pb::ToProto;
 
 use crate::executor::{Executor, ExecutorBuilder};
-use crate::storage::{MemRowTable, MemTableRowIter, TableTypes};
+use crate::storage::{MemRowTable, MemTableRowIter, RowTable, TableTypes};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::Schema;

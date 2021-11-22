@@ -100,7 +100,7 @@ impl StreamManager {
     // TODO: We will refine this method when the meta service is ready.
     pub fn send_stop_barrier(&self) {
         let core = self.core.lock().unwrap();
-        core.send_stop_barrier();
+        core.send_stop_barrier()
     }
 
     pub fn drop_fragment(&self, fragments: &[u32]) -> Result<()> {
@@ -134,6 +134,20 @@ impl StreamManager {
     pub async fn wait_all(self) -> Result<()> {
         let mut core = self.core.lock().unwrap();
         core.wait_all().await
+    }
+
+    #[cfg(test)]
+    pub async fn wait_actors(&self, actor_ids: &[u32]) -> Result<()> {
+        let handles = self
+            .core
+            .lock()
+            .unwrap()
+            .remove_actor_handles(actor_ids)
+            .await?;
+        for handle in handles {
+            handle.await.unwrap()?
+        }
+        Ok(())
     }
 
     /// This function could only be called once during the lifecycle of `StreamManager` for now.
@@ -481,13 +495,26 @@ impl StreamManagerCore {
                     .collect::<Vec<_>>();
                 table_manager.create_materialized_view(&table_id, columns, pks.clone())?;
                 let table_ref = table_manager.get_table(&table_id).unwrap();
-                if let TableTypes::Row(table) = table_ref {
-                    let executor = Box::new(MViewSinkExecutor::new(input.remove(0), table, pks));
-                    Ok(executor)
-                } else {
-                    Err(RwError::from(InternalError(
+                match table_ref {
+                    TableTypes::Row(table) => {
+                        let executor = Box::new(MViewSinkExecutor::new(
+                            input.remove(0),
+                            table as Arc<dyn RowTable>,
+                            pks,
+                        ));
+                        Ok(executor)
+                    }
+                    TableTypes::TestRow(table) => {
+                        let executor = Box::new(MViewSinkExecutor::new(
+                            input.remove(0),
+                            table as Arc<dyn RowTable>,
+                            pks,
+                        ));
+                        Ok(executor)
+                    }
+                    _ => Err(RwError::from(InternalError(
                         "Materialized view creation internal error".to_string(),
-                    )))
+                    ))),
                 }
             }
         };
@@ -637,6 +664,23 @@ impl StreamManagerCore {
             handle.await.unwrap()?;
         }
         Ok(())
+    }
+
+    pub async fn remove_actor_handles(
+        &mut self,
+        actor_ids: &[u32],
+    ) -> Result<Vec<JoinHandle<Result<()>>>> {
+        actor_ids
+            .iter()
+            .map(|actor_id| {
+                self.handles.remove(actor_id).ok_or_else(|| {
+                    RwError::from(ErrorCode::InternalError(format!(
+                        "No such actor with actor id:{}",
+                        actor_id
+                    )))
+                })
+            })
+            .collect::<Result<Vec<_>>>()
     }
 
     fn update_actor_info(

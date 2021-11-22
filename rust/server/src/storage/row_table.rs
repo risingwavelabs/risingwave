@@ -9,11 +9,36 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_common::types::Scalar;
 
+pub type RowTableRef = Arc<dyn RowTable>;
+
 pub type MemRowTableRef = Arc<MemRowTable>;
 pub type MemTableRowIter = <BTreeMap<Row, Row> as IntoIterator>::IntoIter;
 
+pub trait RowTable: Sync + Send {
+    /// Ingest a batch of rows. Insert when `Option` is `Some` and delete when `Option` is None.
+    fn ingest(&self, batch: Vec<(Row, Option<Row>)>) -> Result<()>;
+
+    /// Insert a key value pair.
+    fn insert(&self, key: Row, value: Row) -> Result<()>;
+
+    /// Delete a row by key.
+    fn delete(&self, key: Row) -> Result<()>;
+
+    /// Get a row by key.
+    fn get(&self, key: Row) -> Result<Option<Row>>;
+
+    /// Return the schema of the table.
+    fn schema(&self) -> &Schema;
+
+    /// Get all primary key columns.
+    fn get_pk(&self) -> Vec<usize>;
+
+    /// `insert_batch` takes a batch of (row,bool) where bool is an indicator.
+    fn insert_batch(&self, batch: Vec<(Row, bool)>) -> Result<()>;
+}
+
 #[derive(Debug, Default)]
-struct MemRowTableInner {
+pub(crate) struct MemRowTableInner {
     /// data represents a mapping from primary key to row data.
     data: BTreeMap<Row, Row>,
 }
@@ -98,31 +123,6 @@ impl MemRowTableInner {
 }
 
 impl MemRowTable {
-    pub fn ingest(&self, batch: Vec<(Row, Option<Row>)>) -> Result<()> {
-        let mut inner = self.inner.write().unwrap();
-        inner.ingest(batch)
-    }
-
-    pub fn insert(&self, key: Row, value: Row) -> Result<()> {
-        let mut inner = self.inner.write().unwrap();
-        inner.insert(key, value)
-    }
-
-    pub fn delete(&self, key: Row) -> Result<()> {
-        let mut inner = self.inner.write().unwrap();
-        inner.delete(key)
-    }
-
-    pub fn get(&self, key: Row) -> Result<Option<Row>> {
-        let inner = self.inner.read().unwrap();
-        inner.get(key)
-    }
-
-    /// Return the schema of the table.
-    pub fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
     /// Create an iterator to scan over all records.
     pub fn iter(&self) -> Result<MemTableRowIter> {
         let inner = self.inner.read().unwrap();
@@ -134,10 +134,6 @@ impl MemRowTable {
     pub(crate) fn new(schema: Schema, pks: Vec<usize>) -> Self {
         let inner = RwLock::new(MemRowTableInner::default());
         Self { schema, inner, pks }
-    }
-    /// Get all primary key columns.
-    pub fn get_pk(&self) -> Vec<usize> {
-        self.pks.clone()
     }
 
     /// A temporary solution for the case when no key specified.
@@ -152,9 +148,38 @@ impl MemRowTable {
         let mut inner = self.inner.write().unwrap();
         inner.delete_one_row(row)
     }
+}
 
-    /// `insert_batch` takes a batch of (row,bool) where bool is an indicator.
-    pub fn insert_batch(&self, batch: Vec<(Row, bool)>) -> Result<()> {
+impl RowTable for MemRowTable {
+    fn ingest(&self, batch: Vec<(Row, Option<Row>)>) -> Result<()> {
+        let mut inner = self.inner.write().unwrap();
+        inner.ingest(batch)
+    }
+
+    fn insert(&self, key: Row, value: Row) -> Result<()> {
+        let mut inner = self.inner.write().unwrap();
+        inner.insert(key, value)
+    }
+
+    fn delete(&self, key: Row) -> Result<()> {
+        let mut inner = self.inner.write().unwrap();
+        inner.delete(key)
+    }
+
+    fn get(&self, key: Row) -> Result<Option<Row>> {
+        let inner = self.inner.read().unwrap();
+        inner.get(key)
+    }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    fn get_pk(&self) -> Vec<usize> {
+        self.pks.clone()
+    }
+
+    fn insert_batch(&self, batch: Vec<(Row, bool)>) -> Result<()> {
         let mut inner = self.inner.write().unwrap();
         for (key, value) in batch {
             match value {

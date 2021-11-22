@@ -1,6 +1,7 @@
-use crate::storage::{SimpleTableManager, Table, TableManager, TableTypes};
+use crate::storage::{
+    RowTable, SimpleTableManager, Table, TableManager, TableTypes, TestRowTableEvent,
+};
 use crate::stream::StreamManager;
-use crate::stream_op::Message as StreamMessage;
 use futures::StreamExt;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::Row;
@@ -43,7 +44,7 @@ fn make_table_ref_id(id: i32) -> TableRefId {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_stream_mv_proto() {
     let port = 2333;
     // Build example proto for a stream executor chain.
@@ -173,23 +174,20 @@ async fn test_stream_mv_proto() {
     let table_id_mv = TableId::new(SchemaId::default(), 1);
     let table_ref_mv = table_manager.get_table(&table_id_mv).unwrap();
 
-    let mut sink = stream_manager.take_sink((1, 233));
-
-    // Wait for the first chunk is processed in order to avoid race condition
-    // between data and message in `TableSourceExecutor`.
-    sink.next().await.unwrap();
+    // We remark that normal barrier generation initiates in `rpc_serve`. In tests,
+    // we don't have a `server`. Without explicit sending a stop barrier, `MViewSinkExecutor`
+    // won't flush. Thus we can get NO event from `TestRowTable` and get stuck.
     stream_manager.send_stop_barrier();
-    if let StreamMessage::Barrier(_) = sink.next().await.unwrap() {
-        if let TableTypes::Row(table_mv) = table_ref_mv {
-            let value_row = Row(vec![Some(1.to_scalar_value())]);
-            let res_row = table_mv.get(value_row);
-            if let Ok(res_row_in) = res_row {
-                let datum = res_row_in.unwrap().0.get(0).unwrap().clone();
-                let d_value = datum.unwrap().as_int32() + 1;
-                assert_eq!(d_value, 2);
-            } else {
-                unreachable!();
-            }
+    if let TableTypes::TestRow(test_row_table) = table_ref_mv {
+        let rx = test_row_table.get_receiver();
+        let event = rx.lock().await.next().await.unwrap();
+        assert!(matches!(event, TestRowTableEvent::InsertBatch(..)));
+        let value_row = Row(vec![Some(1.to_scalar_value())]);
+        let res_row = test_row_table.get(value_row);
+        if let Ok(res_row_in) = res_row {
+            let datum = res_row_in.unwrap().0.get(0).unwrap().clone();
+            let d_value = datum.unwrap().into_int32();
+            assert_eq!(d_value, 1);
         } else {
             unreachable!();
         }
