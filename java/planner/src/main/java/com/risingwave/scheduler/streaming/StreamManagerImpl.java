@@ -50,11 +50,15 @@ public class StreamManagerImpl implements StreamManager {
 
     // Build returning list.
     List<StreamRequest> requestList = new ArrayList<>();
+    HashSet<Integer> relevantIdSet = new HashSet<>();
+    relevantIdSet.addAll(graph.getAllFragmentId());
     for (WorkerNode node : fragmentAllocation.keySet()) {
       StreamRequest.Builder builder = StreamRequest.newBuilder();
       builder.setWorkerNode(node);
       for (var fragment : fragmentAllocation.get(node)) {
-        builder.addStreamFragment(fragment);
+        if (relevantIdSet.contains(fragment.getId())) {
+          builder.addStreamFragment(fragment);
+        }
       }
       requestList.add(builder.build());
     }

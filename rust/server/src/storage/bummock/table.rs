@@ -28,7 +28,7 @@ pub struct BummockTable {
     current_tuple_id: AtomicU64,
 
     /// Stream sender.
-    stream_sender: RwLock<Option<mpsc::UnboundedSender<StreamChunk>>>,
+    stream_sender: RwLock<Vec<Option<mpsc::UnboundedSender<StreamChunk>>>>,
 
     /// Represents the cached in-memory parts of the table.
     /// Note: Remotely partitioned (merged) segments will be segmented here.
@@ -61,7 +61,9 @@ impl Table for BummockTable {
         let mut is_send_messages_success = true;
 
         // TODO, this looks like not necessary when we have table source stream.
-        if let Some(ref mut sender) = *(self.stream_sender.write().unwrap()) {
+        self.stream_sender.write().unwrap().iter().for_each(|ch| {
+            let sender = &mut ch.as_ref().unwrap();
+
             use crate::stream_op::Op;
             let chunk = StreamChunk::new(
                 vec![Op::Insert; data.cardinality()],
@@ -80,10 +82,10 @@ impl Table for BummockTable {
                     Err(x)
                 })
                 .expect("send changes failed");
-        }
+        });
 
         if !is_send_messages_success {
-            *(self.stream_sender.write().unwrap()) = None;
+            self.stream_sender.write().unwrap().clear();
         }
 
         let mut appender = self.mem_dirty_segs.write().unwrap();
@@ -128,14 +130,9 @@ impl Table for BummockTable {
 
     fn create_stream(&self) -> Result<mpsc::UnboundedReceiver<StreamChunk>> {
         let _write_guard = self.rwlock.write().unwrap();
-        ensure!(
-            self.stream_sender.read().unwrap().is_none(),
-            "stream of table {:?} exists",
-            self.table_id
-        );
         let (tx, rx) = mpsc::unbounded();
         let mut s = self.stream_sender.write().unwrap();
-        *s = Some(tx);
+        s.push(Some(tx));
         Ok(rx)
     }
 
@@ -167,7 +164,7 @@ impl Table for BummockTable {
     }
 
     fn is_stream_connected(&self) -> bool {
-        self.stream_sender.read().unwrap().is_some()
+        self.stream_sender.read().unwrap().len() > 0
     }
 }
 
@@ -176,7 +173,7 @@ impl BummockTable {
         Self {
             table_id: table_id.clone(),
             schema: schema.to_owned(),
-            stream_sender: RwLock::new(None),
+            stream_sender: RwLock::new(vec![]),
             mem_clean_segs: Vec::new(),
             mem_free_segs: Vec::with_capacity(0), // empty before we have memory pool
             mem_dirty_segs: RwLock::new(Vec::new()),
