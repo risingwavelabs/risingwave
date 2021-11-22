@@ -21,17 +21,17 @@ pub(super) struct DropStreamExecutor {
 
 #[async_trait::async_trait]
 impl Executor for DropStreamExecutor {
-    async fn init(&mut self) -> Result<()> {
+    async fn open(&mut self) -> Result<()> {
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<Option<DataChunk>> {
+    async fn next(&mut self) -> Result<Option<DataChunk>> {
         self.source_manager
             .drop_source(&self.table_id)
             .map(|_| None)
     }
 
-    async fn clean(&mut self) -> Result<()> {
+    async fn close(&mut self) -> Result<()> {
         info!("drop table executor cleaned!");
         Ok(())
     }
@@ -112,9 +112,9 @@ mod tests {
         assert!(create_result.is_ok());
 
         assert!(source_manager.get_source(&table_id).is_ok());
-        executor.init().await.unwrap();
-        executor.execute().await.unwrap();
+        executor.open().await.unwrap();
+        executor.next().await.unwrap();
         assert!(source_manager.get_source(&table_id).is_err());
-        executor.clean().await.unwrap();
+        executor.close().await.unwrap();
     }
 }

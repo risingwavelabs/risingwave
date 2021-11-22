@@ -139,10 +139,10 @@ impl<K> HashAggExecutor<K> {
 
 #[async_trait::async_trait]
 impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
-    async fn init(&mut self) -> Result<()> {
-        self.child.init().await?;
+    async fn open(&mut self) -> Result<()> {
+        self.child.open().await?;
 
-        while let Some(chunk) = self.child.execute().await? {
+        while let Some(chunk) = self.child.next().await? {
             let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
             for (row_id, key) in keys.into_iter().enumerate() {
                 let mut err_flag = None;
@@ -202,10 +202,10 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
         assert!(self.result.is_none());
         self.result = Some(ret);
 
-        self.child.clean().await
+        self.child.close().await
     }
 
-    async fn execute(&mut self) -> Result<Option<DataChunk>> {
+    async fn next(&mut self) -> Result<Option<DataChunk>> {
         if self.result.is_none() {
             return Ok(None);
         }
@@ -214,7 +214,7 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
         Ok(Some(ret))
     }
 
-    async fn clean(&mut self) -> Result<()> {
+    async fn close(&mut self) -> Result<()> {
         Ok(())
     }
 

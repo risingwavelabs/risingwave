@@ -79,14 +79,14 @@ impl<CS: 'static + CreateSource> MergeSortExchangeExecutorImpl<CS> {
 
 #[async_trait::async_trait]
 impl<CS: 'static + CreateSource> Executor for MergeSortExchangeExecutorImpl<CS> {
-    async fn init(&mut self) -> Result<()> {
+    async fn open(&mut self) -> Result<()> {
         Ok(())
     }
 
     /// Everytime `execute` is called, it tries to produce a chunk of size
     /// `K_PROCESSING_WINDOW_SIZE`. It is possible that the chunk's size is smaller than the
     /// `K_PROCESSING_WINDOW_SIZE` as the executor runs out of input from `sources`.
-    async fn execute(&mut self) -> Result<Option<DataChunk>> {
+    async fn next(&mut self) -> Result<Option<DataChunk>> {
         // If this is the first time execution, we first get one chunk from each source
         // and put one row of each chunk into the heap
         if self.first_execution {
@@ -158,7 +158,7 @@ impl<CS: 'static + CreateSource> Executor for MergeSortExchangeExecutorImpl<CS> 
         Ok(Some(chunk))
     }
 
-    async fn clean(&mut self) -> Result<()> {
+    async fn close(&mut self) -> Result<()> {
         Ok(())
     }
 
@@ -278,7 +278,7 @@ mod tests {
             first_execution: true,
         };
 
-        let res = executor.execute().await.unwrap();
+        let res = executor.next().await.unwrap();
         assert!(matches!(res, Some(_)));
         if let Some(res) = res {
             assert_eq!(res.capacity(), 3 * num_sources);
@@ -290,6 +290,6 @@ mod tests {
             assert_eq!(col0.array().as_int32().value_at(4), Some(3));
             assert_eq!(col0.array().as_int32().value_at(5), Some(3));
         }
-        assert!(matches!(executor.execute().await.unwrap(), None));
+        assert!(matches!(executor.next().await.unwrap(), None));
     }
 }

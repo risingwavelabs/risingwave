@@ -116,7 +116,7 @@ impl OrderByExecutor {
         index
     }
     async fn collect_child_data(&mut self) -> Result<()> {
-        while let Some(chunk) = self.child.execute().await? {
+        while let Some(chunk) = self.child.next().await? {
             if !self.disable_encoding && self.encodable {
                 self.encoded_keys
                     .push(encode_chunk(&chunk, self.order_pairs.clone()));
@@ -135,8 +135,8 @@ impl OrderByExecutor {
 
 #[async_trait::async_trait]
 impl Executor for OrderByExecutor {
-    async fn init(&mut self) -> Result<()> {
-        self.child.init().await?;
+    async fn open(&mut self) -> Result<()> {
+        self.child.open().await?;
 
         if !self.disable_encoding {
             self.encodable = self
@@ -147,11 +147,11 @@ impl Executor for OrderByExecutor {
 
         self.collect_child_data().await?;
 
-        self.child.clean().await?;
+        self.child.close().await?;
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<Option<DataChunk>> {
+    async fn next(&mut self) -> Result<Option<DataChunk>> {
         let data_types = self
             .schema()
             .fields()
@@ -197,7 +197,7 @@ impl Executor for OrderByExecutor {
         Ok(Some(chunk))
     }
 
-    async fn clean(&mut self) -> Result<()> {
+    async fn close(&mut self) -> Result<()> {
         Ok(())
     }
 
@@ -312,8 +312,8 @@ mod tests {
         let fields = &order_by_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
         assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Int32);
-        order_by_executor.init().await.unwrap();
-        let res = order_by_executor.execute().await.unwrap();
+        order_by_executor.open().await.unwrap();
+        let res = order_by_executor.next().await.unwrap();
         assert!(matches!(res, Some(_)));
         if let Some(res) = res {
             let col0 = res.column_at(0).unwrap();
@@ -321,7 +321,7 @@ mod tests {
             assert_eq!(col0.array().as_int32().value_at(1), Some(2));
             assert_eq!(col0.array().as_int32().value_at(2), Some(1));
         }
-        order_by_executor.clean().await.unwrap();
+        order_by_executor.close().await.unwrap();
     }
 
     #[tokio::test]
@@ -369,8 +369,8 @@ mod tests {
         let fields = &order_by_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Float32);
         assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Float64);
-        order_by_executor.init().await.unwrap();
-        let res = order_by_executor.execute().await.unwrap();
+        order_by_executor.open().await.unwrap();
+        let res = order_by_executor.next().await.unwrap();
         assert!(matches!(res, Some(_)));
         if let Some(res) = res {
             let col0 = res.column_at(0).unwrap();
@@ -437,8 +437,8 @@ mod tests {
         let fields = &order_by_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Varchar);
         assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Varchar);
-        order_by_executor.init().await.unwrap();
-        let res = order_by_executor.execute().await.unwrap();
+        order_by_executor.open().await.unwrap();
+        let res = order_by_executor.next().await.unwrap();
         assert!(matches!(res, Some(_)));
         if let Some(res) = res {
             let col0 = res.column_at(0).unwrap();
@@ -539,9 +539,9 @@ mod tests {
                 encodable: false,
                 disable_encoding: !enable_encoding,
             };
-            let future = order_by_executor.init();
+            let future = order_by_executor.open();
             tokio_test::block_on(future).unwrap();
-            let future = order_by_executor.execute();
+            let future = order_by_executor.next();
             let res = tokio_test::block_on(future).unwrap();
             assert!(matches!(res, Some(_)));
         });

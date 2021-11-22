@@ -24,12 +24,12 @@ pub(super) struct ValuesExecutor {
 
 #[async_trait::async_trait]
 impl Executor for ValuesExecutor {
-    async fn init(&mut self) -> Result<()> {
+    async fn open(&mut self) -> Result<()> {
         info!("Values executor init");
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<Option<DataChunk>> {
+    async fn next(&mut self) -> Result<Option<DataChunk>> {
         if self.executed {
             return Ok(None);
         }
@@ -88,7 +88,7 @@ impl Executor for ValuesExecutor {
         Ok(Some(chunk))
     }
 
-    async fn clean(&mut self) -> Result<()> {
+    async fn close(&mut self) -> Result<()> {
         Ok(())
     }
 
@@ -168,16 +168,16 @@ mod tests {
             executed: false,
             schema: Schema { fields },
         };
-        values_executor.init().await.unwrap();
+        values_executor.open().await.unwrap();
 
         let fields = &values_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int16);
         assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Int32);
         assert_eq!(fields[2].data_type.data_type_kind(), DataTypeKind::Int64);
 
-        values_executor.init().await.unwrap();
-        let result = values_executor.execute().await?.unwrap();
-        values_executor.clean().await.unwrap();
+        values_executor.open().await.unwrap();
+        let result = values_executor.next().await?.unwrap();
+        values_executor.close().await.unwrap();
         assert_eq!(
             result
                 .column_at(0)?

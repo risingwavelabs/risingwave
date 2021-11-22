@@ -114,12 +114,12 @@ impl BoxedExecutorBuilder for CreateStreamExecutor {
 
 #[async_trait::async_trait]
 impl Executor for CreateStreamExecutor {
-    async fn init(&mut self) -> Result<()> {
+    async fn open(&mut self) -> Result<()> {
         info!("create stream executor initing!");
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<Option<DataChunk>> {
+    async fn next(&mut self) -> Result<Option<DataChunk>> {
         self.source_manager.create_source(
             &self.table_id,
             self.format.clone(),
@@ -130,7 +130,7 @@ impl Executor for CreateStreamExecutor {
         Ok(None)
     }
 
-    async fn clean(&mut self) -> Result<()> {
+    async fn close(&mut self) -> Result<()> {
         info!("create stream executor cleaned!");
         Ok(())
     }

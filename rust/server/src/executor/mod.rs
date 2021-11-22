@@ -52,13 +52,13 @@ mod values;
 #[async_trait::async_trait]
 pub trait Executor: Send {
     /// Initializes the executor.
-    async fn init(&mut self) -> Result<()>;
+    async fn open(&mut self) -> Result<()>;
 
     /// Executes the executor to get next chunk
-    async fn execute(&mut self) -> Result<Option<DataChunk>>;
+    async fn next(&mut self) -> Result<Option<DataChunk>>;
 
     /// Finalizes the executor.
-    async fn clean(&mut self) -> Result<()>;
+    async fn close(&mut self) -> Result<()>;
 
     /// Returns the schema of the executor's return data.
     ///

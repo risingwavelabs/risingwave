@@ -83,11 +83,11 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
 
 #[async_trait::async_trait]
 impl Executor for RowSeqScanExecutor {
-    async fn init(&mut self) -> Result<()> {
+    async fn open(&mut self) -> Result<()> {
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<Option<DataChunk>> {
+    async fn next(&mut self) -> Result<Option<DataChunk>> {
         match self.iter.next() {
             Some((key_row, value_row)) => {
                 if !self.has_pk {
@@ -154,7 +154,7 @@ impl Executor for RowSeqScanExecutor {
         }
     }
 
-    async fn clean(&mut self) -> Result<()> {
+    async fn close(&mut self) -> Result<()> {
         info!("Table scan closed.");
         Ok(())
     }

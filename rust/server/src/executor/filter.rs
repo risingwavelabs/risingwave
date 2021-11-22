@@ -25,11 +25,11 @@ pub(super) struct FilterExecutor {
 
 #[async_trait::async_trait]
 impl Executor for FilterExecutor {
-    async fn init(&mut self) -> Result<()> {
-        self.child.init().await
+    async fn open(&mut self) -> Result<()> {
+        self.child.open().await
     }
 
-    async fn execute(&mut self) -> Result<Option<DataChunk>> {
+    async fn next(&mut self) -> Result<Option<DataChunk>> {
         loop {
             let tmp_last_input = self.last_input.take();
 
@@ -58,8 +58,8 @@ impl Executor for FilterExecutor {
         }
     }
 
-    async fn clean(&mut self) -> Result<()> {
-        self.child.clean().await
+    async fn close(&mut self) -> Result<()> {
+        self.child.close().await
     }
 
     fn schema(&self) -> &Schema {
@@ -70,7 +70,7 @@ impl Executor for FilterExecutor {
 impl FilterExecutor {
     /// Fetch one chunk from child.
     async fn fetch_one_chunk(&mut self) -> Result<Option<DataChunk>> {
-        if let Some(data_chunk) = self.child.execute().await? {
+        if let Some(data_chunk) = self.child.next().await? {
             let data_chunk = data_chunk.compact()?;
             let vis_array = self.expr.eval(&data_chunk)?;
             return if let Bool(vis) = vis_array.as_ref() {
@@ -164,8 +164,8 @@ mod tests {
         let fields = &filter_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
         assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Int32);
-        filter_executor.init().await.unwrap();
-        let res = filter_executor.execute().await.unwrap();
+        filter_executor.open().await.unwrap();
+        let res = filter_executor.next().await.unwrap();
         if let Some(res) = res {
             let col1 = res.column_at(0).unwrap();
             let array = col1.array();
@@ -174,7 +174,7 @@ mod tests {
         } else {
             panic!("Filter executor returned no data!")
         }
-        filter_executor.clean().await.unwrap();
+        filter_executor.close().await.unwrap();
     }
 
     fn make_expression(kind: ProstExprType) -> ProstExprNode {

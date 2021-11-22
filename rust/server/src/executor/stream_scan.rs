@@ -108,11 +108,11 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
 
 #[async_trait::async_trait]
 impl Executor for StreamScanExecutor {
-    async fn init(&mut self) -> Result<()> {
+    async fn open(&mut self) -> Result<()> {
         self.reader.init().await
     }
 
-    async fn execute(&mut self) -> Result<Option<DataChunk>> {
+    async fn next(&mut self) -> Result<Option<DataChunk>> {
         if self.done {
             return Ok(None);
         }
@@ -123,7 +123,7 @@ impl Executor for StreamScanExecutor {
         }
     }
 
-    async fn clean(&mut self) -> Result<()> {
+    async fn close(&mut self) -> Result<()> {
         self.reader.cancel().await
     }
 

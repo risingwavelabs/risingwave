@@ -170,9 +170,9 @@ impl TaskExecution {
     }
 
     async fn try_execute(mut root: BoxedExecutor, mut sender: BoxChanSender) -> Result<()> {
-        root.init().await?;
+        root.open().await?;
         loop {
-            match root.execute().await? {
+            match root.next().await? {
                 Option::None => {
                     sender.send(None).await?;
                     break;
@@ -182,7 +182,7 @@ impl TaskExecution {
                 }
             };
         }
-        root.clean().await?;
+        root.close().await?;
         Ok(())
     }
 

@@ -79,16 +79,16 @@ impl LimitExecutor {
 
 #[async_trait::async_trait]
 impl Executor for LimitExecutor {
-    async fn init(&mut self) -> Result<()> {
-        self.child.init().await?;
+    async fn open(&mut self) -> Result<()> {
+        self.child.open().await?;
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<Option<DataChunk>> {
+    async fn next(&mut self) -> Result<Option<DataChunk>> {
         if self.returned == self.limit {
             return Ok(None);
         }
-        while let Some(chunk) = self.child.execute().await? {
+        while let Some(chunk) = self.child.next().await? {
             let cardinality = chunk.cardinality();
             if cardinality + self.skipped <= self.offset {
                 self.skipped += cardinality;
@@ -104,8 +104,8 @@ impl Executor for LimitExecutor {
         Ok(None)
     }
 
-    async fn clean(&mut self) -> Result<()> {
-        self.child.clean().await?;
+    async fn close(&mut self) -> Result<()> {
+        self.child.close().await?;
         Ok(())
     }
 
@@ -170,7 +170,7 @@ mod tests {
         let fields = &limit_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
         let mut results = vec![];
-        while let Some(chunk) = limit_executor.execute().await.unwrap() {
+        while let Some(chunk) = limit_executor.next().await.unwrap() {
             results.push(Arc::new(chunk));
         }
         let chunks =
@@ -312,10 +312,10 @@ mod tests {
             skipped: 0,
             returned: 0,
         };
-        limit_executor.init().await.unwrap();
+        limit_executor.open().await.unwrap();
 
         let mut results = vec![];
-        while let Some(chunk) = limit_executor.execute().await.unwrap() {
+        while let Some(chunk) = limit_executor.next().await.unwrap() {
             results.push(Arc::new(chunk.compact().unwrap()));
         }
         let chunks =
@@ -347,7 +347,7 @@ mod tests {
                 );
             });
 
-        limit_executor.clean().await.unwrap();
+        limit_executor.close().await.unwrap();
     }
 
     #[tokio::test]

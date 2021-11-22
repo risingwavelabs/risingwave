@@ -77,12 +77,12 @@ impl BoxedExecutorBuilder for SeqScanExecutor {
 
 #[async_trait::async_trait]
 impl Executor for SeqScanExecutor {
-    async fn init(&mut self) -> Result<()> {
+    async fn open(&mut self) -> Result<()> {
         info!("SeqScanExecutor initing!");
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<Option<DataChunk>> {
+    async fn next(&mut self) -> Result<Option<DataChunk>> {
         if self.first_execution {
             self.first_execution = false;
             if let BummockResult::Data(data) = self.table.get_data().await? {
@@ -119,7 +119,7 @@ impl Executor for SeqScanExecutor {
         Ok(Some(ret))
     }
 
-    async fn clean(&mut self) -> Result<()> {
+    async fn close(&mut self) -> Result<()> {
         info!("Table scan closed.");
         Ok(())
     }
@@ -189,14 +189,14 @@ mod tests {
             chunk_idx: 0,
             schema: Schema { fields },
         };
-        seq_scan_executor.init().await.unwrap();
+        seq_scan_executor.open().await.unwrap();
 
         let fields = &seq_scan_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Decimal);
 
-        seq_scan_executor.init().await.unwrap();
+        seq_scan_executor.open().await.unwrap();
 
-        let result_chunk1 = seq_scan_executor.execute().await?.unwrap();
+        let result_chunk1 = seq_scan_executor.next().await?.unwrap();
         assert_eq!(result_chunk1.dimension(), 1);
         assert_eq!(
             result_chunk1
@@ -208,7 +208,7 @@ mod tests {
             vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
         );
 
-        let result_chunk2 = seq_scan_executor.execute().await?.unwrap();
+        let result_chunk2 = seq_scan_executor.next().await?.unwrap();
         assert_eq!(result_chunk2.dimension(), 1);
         assert_eq!(
             result_chunk2
@@ -219,8 +219,8 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
         );
-        seq_scan_executor.execute().await.unwrap();
-        seq_scan_executor.clean().await.unwrap();
+        seq_scan_executor.next().await.unwrap();
+        seq_scan_executor.close().await.unwrap();
 
         Ok(())
     }

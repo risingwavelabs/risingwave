@@ -69,7 +69,7 @@ enum NestedLoopJoinState {
 
 #[async_trait::async_trait]
 impl Executor for NestedLoopJoinExecutor {
-    async fn init(&mut self) -> Result<()> {
+    async fn open(&mut self) -> Result<()> {
         match self.state {
             NestedLoopJoinState::Build => {
                 self.build_table.load_data().await?;
@@ -80,7 +80,7 @@ impl Executor for NestedLoopJoinExecutor {
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<Option<DataChunk>> {
+    async fn next(&mut self) -> Result<Option<DataChunk>> {
         if let Some(last_chunk) = self.last_chunk.take() {
             let (left_data_chunk, return_chunk) = self.chunk_builder.append_chunk(last_chunk)?;
             self.last_chunk = left_data_chunk;
@@ -118,7 +118,7 @@ impl Executor for NestedLoopJoinExecutor {
             }
         }
     }
-    async fn clean(&mut self) -> Result<()> {
+    async fn close(&mut self) -> Result<()> {
         Ok(())
     }
 
@@ -366,8 +366,8 @@ impl ProbeSideSource {
     }
 
     async fn init(&mut self) -> Result<()> {
-        self.outer.init().await?;
-        self.cur_chunk = self.outer.execute().await?;
+        self.outer.open().await?;
+        self.cur_chunk = self.outer.next().await?;
         Ok(())
     }
 
@@ -386,7 +386,7 @@ impl ProbeSideSource {
         match &self.cur_chunk {
             Some(chunk) => {
                 if self.idx >= chunk.capacity() {
-                    self.cur_chunk = self.outer.execute().await?;
+                    self.cur_chunk = self.outer.next().await?;
                 }
             }
             None => {
@@ -397,7 +397,7 @@ impl ProbeSideSource {
     }
 
     async fn clean(&mut self) -> Result<()> {
-        self.outer.clean().await
+        self.outer.close().await
     }
 
     fn get_schema(&self) -> &Schema {
@@ -434,11 +434,11 @@ impl BuildTable {
     ///   cuz
     /// only used in init.
     async fn load_data(&mut self) -> Result<()> {
-        self.data_source.init().await?;
-        while let Some(chunk) = self.data_source.execute().await? {
+        self.data_source.open().await?;
+        while let Some(chunk) = self.data_source.next().await? {
             self.inner_table.push(chunk);
         }
-        self.data_source.clean().await
+        self.data_source.close().await
     }
 }
 

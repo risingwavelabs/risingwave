@@ -52,13 +52,13 @@ impl InsertExecutor {
 
 #[async_trait::async_trait]
 impl Executor for InsertExecutor {
-    async fn init(&mut self) -> Result<()> {
-        self.child.init().await?;
+    async fn open(&mut self) -> Result<()> {
+        self.child.open().await?;
         info!("Insert executor");
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<Option<DataChunk>> {
+    async fn next(&mut self) -> Result<Option<DataChunk>> {
         if self.executed {
             return Ok(None);
         }
@@ -73,7 +73,7 @@ impl Executor for InsertExecutor {
             )))
         })?;
         let mut rows_inserted = 0;
-        while let Some(child_chunk) = self.child.execute().await? {
+        while let Some(child_chunk) = self.child.next().await? {
             let len = child_chunk.capacity();
             assert!(child_chunk.visibility().is_none());
 
@@ -116,8 +116,8 @@ impl Executor for InsertExecutor {
         }
     }
 
-    async fn clean(&mut self) -> Result<()> {
-        self.child.clean().await?;
+    async fn close(&mut self) -> Result<()> {
+        self.child.close().await?;
         info!("Cleaning insert executor.");
         Ok(())
     }
@@ -228,11 +228,11 @@ mod tests {
                 }],
             },
         };
-        insert_executor.init().await.unwrap();
+        insert_executor.open().await.unwrap();
         let fields = &insert_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
-        let result = insert_executor.execute().await?.unwrap();
-        insert_executor.clean().await.unwrap();
+        let result = insert_executor.next().await?.unwrap();
+        insert_executor.close().await.unwrap();
         assert_eq!(
             result
                 .column_at(0)?
@@ -301,11 +301,11 @@ mod tests {
                 }],
             },
         };
-        insert_executor.init().await.unwrap();
+        insert_executor.open().await.unwrap();
         let fields = &insert_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
-        let result = insert_executor.execute().await?.unwrap();
-        insert_executor.clean().await.unwrap();
+        let result = insert_executor.next().await?.unwrap();
+        insert_executor.close().await.unwrap();
         assert_eq!(
             result
                 .column_at(0)?
@@ -356,11 +356,11 @@ mod tests {
             },
         };
         table_manager.create_table(&table_id2, &schema).await?;
-        insert_executor.init().await.unwrap();
+        insert_executor.open().await.unwrap();
         let fields = &insert_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
-        let result = insert_executor.execute().await?.unwrap();
-        insert_executor.clean().await.unwrap();
+        let result = insert_executor.next().await?.unwrap();
+        insert_executor.close().await.unwrap();
         assert_eq!(
             result
                 .column_at(0)?

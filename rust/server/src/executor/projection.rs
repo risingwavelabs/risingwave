@@ -21,13 +21,13 @@ pub(super) struct ProjectionExecutor {
 
 #[async_trait::async_trait]
 impl Executor for ProjectionExecutor {
-    async fn init(&mut self) -> Result<()> {
-        self.child.init().await?;
+    async fn open(&mut self) -> Result<()> {
+        self.child.open().await?;
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<Option<DataChunk>> {
-        let child_output = self.child.execute().await?;
+    async fn next(&mut self) -> Result<Option<DataChunk>> {
+        let child_output = self.child.next().await?;
         match child_output {
             Some(child_chunk) => {
                 let arrays: Vec<Column> = self
@@ -45,8 +45,8 @@ impl Executor for ProjectionExecutor {
         }
     }
 
-    async fn clean(&mut self) -> Result<()> {
-        self.child.clean().await?;
+    async fn close(&mut self) -> Result<()> {
+        self.child.close().await?;
         Ok(())
     }
 
@@ -136,13 +136,13 @@ mod tests {
             child: Box::new(mock_executor),
             schema: Schema { fields },
         };
-        proj_executor.init().await.unwrap();
+        proj_executor.open().await.unwrap();
 
         let fields = &proj_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
 
-        let result_chunk = proj_executor.execute().await?.unwrap();
-        proj_executor.clean().await.unwrap();
+        let result_chunk = proj_executor.next().await?.unwrap();
+        proj_executor.close().await.unwrap();
         assert_eq!(result_chunk.dimension(), 1);
         assert_eq!(
             result_chunk
@@ -154,7 +154,7 @@ mod tests {
             vec![Some(1), Some(2), Some(33333), Some(4), Some(5)]
         );
 
-        proj_executor.clean().await.unwrap();
+        proj_executor.close().await.unwrap();
         Ok(())
     }
 }

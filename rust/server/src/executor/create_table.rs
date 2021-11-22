@@ -55,19 +55,19 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
 
 #[async_trait::async_trait]
 impl Executor for CreateTableExecutor {
-    async fn init(&mut self) -> Result<()> {
+    async fn open(&mut self) -> Result<()> {
         info!("create table executor initing!");
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<Option<DataChunk>> {
+    async fn next(&mut self) -> Result<Option<DataChunk>> {
         self.table_manager
             .create_table(&self.table_id, &self.schema)
             .await
             .map(|_| None)
     }
 
-    async fn clean(&mut self) -> Result<()> {
+    async fn close(&mut self) -> Result<()> {
         info!("create table executor cleaned!");
         Ok(())
     }

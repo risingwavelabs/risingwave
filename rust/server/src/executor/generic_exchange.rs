@@ -107,11 +107,11 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for GenericExchangeExecuto
 
 #[async_trait::async_trait]
 impl<CS: CreateSource> Executor for GenericExchangeExecutor<CS> {
-    async fn init(&mut self) -> Result<()> {
+    async fn open(&mut self) -> Result<()> {
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<Option<DataChunk>> {
+    async fn next(&mut self) -> Result<Option<DataChunk>> {
         loop {
             if self.source_idx >= self.sources.len() {
                 break;
@@ -136,7 +136,7 @@ impl<CS: CreateSource> Executor for GenericExchangeExecutor<CS> {
         Ok(None)
     }
 
-    async fn clean(&mut self) -> Result<()> {
+    async fn close(&mut self) -> Result<()> {
         Ok(())
     }
 
@@ -209,7 +209,7 @@ mod tests {
 
         let mut chunks: usize = 0;
         loop {
-            let res = executor.execute().await.unwrap();
+            let res = executor.next().await.unwrap();
             match res {
                 Some(_) => chunks += 1,
                 None => break,

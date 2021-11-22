@@ -44,18 +44,18 @@ impl BoxedExecutorBuilder for DropTableExecutor {
 
 #[async_trait::async_trait]
 impl Executor for DropTableExecutor {
-    async fn init(&mut self) -> Result<()> {
+    async fn open(&mut self) -> Result<()> {
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<Option<DataChunk>> {
+    async fn next(&mut self) -> Result<Option<DataChunk>> {
         self.table_manager
             .drop_table(&self.table_id)
             .await
             .map(|_| None)
     }
 
-    async fn clean(&mut self) -> Result<()> {
+    async fn close(&mut self) -> Result<()> {
         info!("drop table executor cleaned!");
         Ok(())
     }

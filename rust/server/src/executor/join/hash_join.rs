@@ -125,7 +125,7 @@ impl EquiJoinParams {
 
 #[async_trait::async_trait]
 impl<K: HashKey + Send + Sync> Executor for HashJoinExecutor<K> {
-    async fn init(&mut self) -> Result<()> {
+    async fn open(&mut self) -> Result<()> {
         match take(&mut self.state) {
             HashJoinState::Build(build_table) => self.build(build_table).await?,
             _ => unreachable!(),
@@ -133,7 +133,7 @@ impl<K: HashKey + Send + Sync> Executor for HashJoinExecutor<K> {
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<Option<DataChunk>> {
+    async fn next(&mut self) -> Result<Option<DataChunk>> {
         loop {
             match take(&mut self.state) {
                 HashJoinState::FirstProbe(probe_table) => {
@@ -160,9 +160,9 @@ impl<K: HashKey + Send + Sync> Executor for HashJoinExecutor<K> {
         }
     }
 
-    async fn clean(&mut self) -> Result<()> {
-        self.left_child.clean().await?;
-        self.right_child.clean().await?;
+    async fn close(&mut self) -> Result<()> {
+        self.left_child.close().await?;
+        self.right_child.close().await?;
         Ok(())
     }
 
@@ -173,8 +173,8 @@ impl<K: HashKey + Send + Sync> Executor for HashJoinExecutor<K> {
 
 impl<K: HashKey> HashJoinExecutor<K> {
     async fn build(&mut self, mut build_table: BuildTable) -> Result<()> {
-        self.right_child.init().await?;
-        while let Some(chunk) = self.right_child.execute().await? {
+        self.right_child.open().await?;
+        while let Some(chunk) = self.right_child.next().await? {
             build_table.append_build_chunk(chunk)?;
         }
 
@@ -190,9 +190,9 @@ impl<K: HashKey> HashJoinExecutor<K> {
         mut probe_table: ProbeTable<K>,
     ) -> Result<Option<DataChunk>> {
         if first_probe {
-            self.left_child.init().await?;
+            self.left_child.open().await?;
 
-            match self.left_child.execute().await? {
+            match self.left_child.next().await? {
                 Some(data_chunk) => {
                     probe_table.set_probe_data(data_chunk)?;
                 }
@@ -208,7 +208,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 self.state = Probe(probe_table);
                 return Ok(Some(ret_data_chunk));
             } else {
-                match self.left_child.execute().await? {
+                match self.left_child.next().await? {
                     Some(data_chunk) => {
                         probe_table.set_probe_data(data_chunk)?;
                     }
@@ -679,7 +679,7 @@ mod tests {
         async fn do_test(&self, expected: DataChunk) {
             let mut join_executor = self.create_join_executor();
             join_executor
-                .init()
+                .open()
                 .await
                 .expect("Failed to init join executor.");
 
@@ -702,7 +702,7 @@ mod tests {
                 }
             };
 
-            while let Some(data_chunk) = join_executor.execute().await.unwrap() {
+            while let Some(data_chunk) = join_executor.next().await.unwrap() {
                 data_chunk_merger.append(&data_chunk).unwrap();
             }
 

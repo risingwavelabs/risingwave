@@ -46,11 +46,11 @@ impl MockExecutor {
 
 #[async_trait::async_trait]
 impl Executor for MockExecutor {
-    async fn init(&mut self) -> Result<()> {
+    async fn open(&mut self) -> Result<()> {
         Ok(())
     }
 
-    async fn execute(&mut self) -> Result<Option<DataChunk>> {
+    async fn next(&mut self) -> Result<Option<DataChunk>> {
         if self.chunks.is_empty() {
             return Ok(None);
         }
@@ -58,7 +58,7 @@ impl Executor for MockExecutor {
         Ok(Some(chunk))
     }
 
-    async fn clean(&mut self) -> Result<()> {
+    async fn close(&mut self) -> Result<()> {
         Ok(())
     }
 
@@ -83,20 +83,20 @@ pub async fn diff_executor_output(mut actual: BoxedExecutor, mut expect: BoxedEx
     let mut actual_cardinality = 0;
     let mut expects = vec![];
     let mut actuals = vec![];
-    expect.init().await.unwrap();
-    actual.init().await.unwrap();
-    while let Some(chunk) = expect.execute().await.unwrap() {
+    expect.open().await.unwrap();
+    actual.open().await.unwrap();
+    while let Some(chunk) = expect.next().await.unwrap() {
         let chunk = DataChunk::compact(chunk).unwrap();
         expect_cardinality += chunk.cardinality();
         expects.push(Arc::new(chunk));
     }
-    while let Some(chunk) = actual.execute().await.unwrap() {
+    while let Some(chunk) = actual.next().await.unwrap() {
         let chunk = DataChunk::compact(chunk).unwrap();
         actual_cardinality += chunk.cardinality();
         actuals.push(Arc::new(chunk));
     }
-    expect.clean().await.unwrap();
-    actual.clean().await.unwrap();
+    expect.close().await.unwrap();
+    actual.close().await.unwrap();
     assert_eq!(actual_cardinality, expect_cardinality);
     if actual_cardinality == 0 {
         return;
