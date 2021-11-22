@@ -261,9 +261,9 @@ mod tests {
             schema,
         };
 
-        row_scan_executor.init().await.unwrap();
+        row_scan_executor.open().await.unwrap();
 
-        let res_chunk = row_scan_executor.execute().await?.unwrap();
+        let res_chunk = row_scan_executor.next().await?.unwrap();
         assert_eq!(res_chunk.dimension(), 2);
         assert_eq!(
             res_chunk
@@ -284,7 +284,7 @@ mod tests {
             vec![Some(4), Some(4)]
         );
 
-        let res_chunk2 = row_scan_executor.execute().await?.unwrap();
+        let res_chunk2 = row_scan_executor.next().await?.unwrap();
         assert_eq!(res_chunk2.dimension(), 2);
         assert_eq!(
             res_chunk2
@@ -304,7 +304,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![Some(5)]
         );
-        row_scan_executor.clean().await.unwrap();
+        row_scan_executor.close().await.unwrap();
         Ok(())
     }
 
@@ -372,9 +372,9 @@ mod tests {
             schema,
         };
 
-        row_scan_executor.init().await.unwrap();
+        row_scan_executor.open().await.unwrap();
 
-        let res_chunk = row_scan_executor.execute().await?.unwrap();
+        let res_chunk = row_scan_executor.next().await?.unwrap();
         assert_eq!(res_chunk.dimension(), 2);
         assert_eq!(
             res_chunk
@@ -395,7 +395,7 @@ mod tests {
             vec![Some(4)]
         );
 
-        let res_chunk2 = row_scan_executor.execute().await?.unwrap();
+        let res_chunk2 = row_scan_executor.next().await?.unwrap();
         assert_eq!(res_chunk2.dimension(), 2);
         assert_eq!(
             res_chunk2
@@ -415,7 +415,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![Some(5)]
         );
-        row_scan_executor.clean().await.unwrap();
+        row_scan_executor.close().await.unwrap();
         Ok(())
     }
 }

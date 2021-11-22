@@ -26,6 +26,7 @@ use risingwave_pb::stream_plan::{
 use risingwave_pb::stream_service::{ActorInfo, BroadcastActorInfoTableRequest};
 use risingwave_pb::task_service::HostAddress;
 use std::sync::Arc;
+use std::time::Duration;
 
 fn make_int32_type_pb() -> DataType {
     DataType {
@@ -44,7 +45,7 @@ fn make_table_ref_id(id: i32) -> TableRefId {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn test_stream_mv_proto() {
     let port = 2333;
     // Build example proto for a stream executor chain.
@@ -177,6 +178,9 @@ async fn test_stream_mv_proto() {
     // We remark that normal barrier generation initiates in `rpc_serve`. In tests,
     // we don't have a `server`. Without explicit sending a stop barrier, `MViewSinkExecutor`
     // won't flush. Thus we can get NO event from `TestRowTable` and get stuck.
+    // FIXME: We have to make sure that `append_chunk` has been processed by the actor first,
+    // then we can send the stop barrier.
+    tokio::time::sleep(Duration::from_millis(500)).await;
     stream_manager.send_stop_barrier();
     if let TableTypes::TestRow(test_row_table) = table_ref_mv {
         let rx = test_row_table.get_receiver();
