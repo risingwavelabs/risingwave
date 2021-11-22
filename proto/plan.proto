@@ -54,7 +54,9 @@ message RowSeqScanNode {
 
 message StreamScanNode {
   TableRefId table_ref_id = 1;
-  repeated int32 column_ids = 2;
+  // timestamp_ms is used for offset synchronization of high level consumer groups, this field will be deprecated if a more elegant approach is available in the future
+  int64 timestamp_ms = 2;
+  repeated int32 column_ids = 3;
 }
 
 message ProjectNode {
@@ -87,7 +89,6 @@ message CreateTableNode {
   repeated ColumnDesc column_descs = 2;
   // Other fields not included yet:
   // primarykey_col_ids, dist_type, distkey_col_id, append_only
-
 }
 
 enum OrderType {

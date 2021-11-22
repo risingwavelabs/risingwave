@@ -2,16 +2,16 @@ use prost::Message;
 
 use pb_convert::FromProtobuf;
 use risingwave_common::array::DataChunk;
+use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::TableId;
+use risingwave_common::error::ErrorCode::{InternalError, ProstError};
+use risingwave_common::error::Result;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::DropStreamNode;
 use risingwave_pb::ToProto;
 
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 use crate::source::SourceManagerRef;
-use risingwave_common::catalog::Schema;
-use risingwave_common::catalog::TableId;
-use risingwave_common::error::ErrorCode::{InternalError, ProstError};
-use risingwave_common::error::Result;
 
 pub(super) struct DropStreamExecutor {
     table_id: TableId,
@@ -64,18 +64,11 @@ impl BoxedExecutorBuilder for DropStreamExecutor {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use risingwave_pb::plan::{plan_node::PlanNodeType, PlanNode};
 
     use crate::executor::drop_stream::DropStreamExecutor;
-    use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
-    use crate::source::{
-        FileSourceConfig, MemSourceManager, SourceConfig, SourceFormat, SourceManager,
-    };
+    use crate::executor::{BoxedExecutorBuilder, ExecutorBuilder};
     use crate::task::{GlobalTaskEnv, TaskId};
-    use risingwave_common::catalog::test_utils::mock_table_id;
-    use risingwave_common::catalog::Schema;
 
     #[test]
     fn test_drop_stream() {
@@ -90,31 +83,5 @@ mod tests {
         };
         let builder = ExecutorBuilder::new(&plan_node, task_id, GlobalTaskEnv::for_test());
         assert!(DropStreamExecutor::new_boxed_executor(&builder).is_err())
-    }
-
-    #[tokio::test]
-    async fn test_drop_stream_execute() {
-        let source_manager = Arc::new(MemSourceManager::new());
-        let table_id = mock_table_id();
-        let mut executor = DropStreamExecutor {
-            table_id: table_id.clone(),
-            source_manager: source_manager.clone(),
-            schema: Schema { fields: vec![] },
-        };
-        let create_result = source_manager.create_source(
-            &table_id,
-            SourceFormat::Json,
-            &SourceConfig::File(FileSourceConfig {
-                filename: "/tmp/data.txt".to_string(),
-            }),
-            vec![],
-        );
-        assert!(create_result.is_ok());
-
-        assert!(source_manager.get_source(&table_id).is_ok());
-        executor.open().await.unwrap();
-        executor.next().await.unwrap();
-        assert!(source_manager.get_source(&table_id).is_err());
-        executor.close().await.unwrap();
     }
 }

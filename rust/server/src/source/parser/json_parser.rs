@@ -1,12 +1,14 @@
 use rust_decimal::Decimal;
 use serde_json::Value;
 
-use crate::source::{SourceColumnDesc, SourceParser};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::RwError;
 use risingwave_common::types::{DataTypeKind, Datum, ScalarImpl, ScalarRef};
 
+use crate::source::{SourceColumnDesc, SourceParser};
+
 /// Parser for JSON format
+#[derive(Debug)]
 pub struct JSONParser;
 
 impl SourceParser for JSONParser {
@@ -58,11 +60,12 @@ impl SourceParser for JSONParser {
 
 #[cfg(test)]
 mod tests {
-    use crate::source::{JSONParser, SourceColumnDesc, SourceParser};
     use risingwave_common::types::{
         BoolType, DataTypeKind, Float32Type, Float64Type, Int16Type, Int32Type, Int64Type,
         ScalarImpl, StringType,
     };
+
+    use crate::source::{JSONParser, SourceColumnDesc, SourceParser};
 
     #[test]
     fn test_json_parser() {

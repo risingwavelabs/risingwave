@@ -58,7 +58,9 @@ public class RwBatchStreamScan extends RwScan implements RisingWaveBatchPhyRel {
   public PlanNode serialize() {
     TableRefId tableRefId = Messages.getTableRefId(tableId);
     StreamScanNode.Builder streamScanNodeBuilder =
-        StreamScanNode.newBuilder().setTableRefId(tableRefId);
+        StreamScanNode.newBuilder()
+            .setTableRefId(tableRefId)
+            .setTimestampMs(System.currentTimeMillis());
     columnIds.forEach(c -> streamScanNodeBuilder.addColumnIds(c.getValue()));
     return PlanNode.newBuilder()
         .setNodeType(PlanNode.PlanNodeType.STREAM_SCAN)

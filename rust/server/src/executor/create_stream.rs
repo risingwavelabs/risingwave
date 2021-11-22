@@ -1,17 +1,10 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use prost::Message;
 
 use pb_convert::FromProtobuf;
 use risingwave_common::array::DataChunk;
-use risingwave_pb::plan::create_stream_node::RowFormatType;
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::CreateStreamNode;
-use risingwave_pb::ToProto;
-
-use crate::executor::{Executor, ExecutorBuilder};
-use crate::source::{FileSourceConfig, KafkaSourceConfig, SourceFormat};
-use crate::source::{SourceColumnDesc, SourceConfig, SourceManagerRef};
 use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
 use risingwave_common::ensure;
@@ -19,6 +12,17 @@ use risingwave_common::error::ErrorCode::{InternalError, ProstError, ProtocolErr
 use risingwave_common::error::Result;
 use risingwave_common::error::RwError;
 use risingwave_common::types::build_from_prost;
+use risingwave_pb::plan::create_stream_node::RowFormatType;
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::CreateStreamNode;
+use risingwave_pb::ToProto;
+
+use crate::executor::{Executor, ExecutorBuilder};
+use crate::source::parser::JSONParser;
+use crate::source::SourceFormat;
+use crate::source::{
+    HighLevelKafkaSourceConfig, SourceColumnDesc, SourceConfig, SourceManagerRef, SourceParser,
+};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 
@@ -26,8 +30,10 @@ pub(super) struct CreateStreamExecutor {
     table_id: TableId,
     config: SourceConfig,
     format: SourceFormat,
+    parser: Option<Arc<dyn SourceParser>>,
     columns: Vec<SourceColumnDesc>,
     source_manager: SourceManagerRef,
+    properties: HashMap<String, String>,
     schema: Schema,
 }
 
@@ -41,18 +47,13 @@ macro_rules! get_from_properties {
 
 impl CreateStreamExecutor {
     fn extract_kafka_config(properties: &HashMap<String, String>) -> Result<SourceConfig> {
-        Ok(SourceConfig::Kafka(KafkaSourceConfig {
+        Ok(SourceConfig::Kafka(HighLevelKafkaSourceConfig {
             bootstrap_servers: get_from_properties!(properties, "kafka_bootstrap_servers")
                 .split(',')
                 .map(|s| s.to_string())
                 .collect::<Vec<String>>(),
             topic: get_from_properties!(properties, "kafka_topic").clone(),
             properties: Default::default(),
-        }))
-    }
-    fn extract_file_config(properties: &HashMap<String, String>) -> Result<SourceConfig> {
-        Ok(SourceConfig::File(FileSourceConfig {
-            filename: get_from_properties!(properties, "local_file_path").clone(),
         }))
     }
 }
@@ -94,7 +95,6 @@ impl BoxedExecutorBuilder for CreateStreamExecutor {
 
         let config = match get_from_properties!(properties, "upstream_source").as_str() {
             "kafka" => CreateStreamExecutor::extract_kafka_config(properties),
-            "file" => CreateStreamExecutor::extract_file_config(properties),
             other => Err(RwError::from(ProtocolError(format!(
                 "source type {} not supported",
                 other
@@ -108,6 +108,8 @@ impl BoxedExecutorBuilder for CreateStreamExecutor {
             source_manager: source.global_task_env().source_manager_ref(),
             columns,
             schema: Schema { fields: vec![] },
+            properties: properties.clone(),
+            parser: None,
         }))
     }
 }
@@ -115,7 +117,14 @@ impl BoxedExecutorBuilder for CreateStreamExecutor {
 #[async_trait::async_trait]
 impl Executor for CreateStreamExecutor {
     async fn open(&mut self) -> Result<()> {
-        info!("create stream executor initing!");
+        let parser: Arc<dyn SourceParser> = match self.format {
+            SourceFormat::Json => Ok(Arc::new(JSONParser {})),
+            _ => Err(RwError::from(InternalError(
+                "format not support".to_string(),
+            ))),
+        }?;
+
+        self.parser = Some(parser);
         Ok(())
     }
 
@@ -123,6 +132,7 @@ impl Executor for CreateStreamExecutor {
         self.source_manager.create_source(
             &self.table_id,
             self.format.clone(),
+            self.parser.clone().unwrap(),
             &self.config,
             self.columns.clone(),
         )?;
@@ -131,7 +141,6 @@ impl Executor for CreateStreamExecutor {
     }
 
     async fn close(&mut self) -> Result<()> {
-        info!("create stream executor cleaned!");
         Ok(())
     }
 

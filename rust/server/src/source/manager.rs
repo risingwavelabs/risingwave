@@ -1,19 +1,22 @@
-use crate::source::{FileSource, KafkaSource, Source, SourceConfig, SourceFormat};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, MutexGuard};
+
 use risingwave_common::catalog::TableId;
 use risingwave_common::ensure;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataTypeRef;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard};
 
-pub type SourceRef = Arc<dyn Source>;
+use crate::source::{HighLevelKafkaSource, Source, SourceConfig, SourceFormat, SourceParser};
+
+pub type SourceRef = Arc<Source>;
 
 pub trait SourceManager: Sync + Send {
     fn create_source(
         &self,
         source_id: &TableId,
         format: SourceFormat,
+        parser: Arc<dyn SourceParser>,
         config: &SourceConfig,
         columns: Vec<SourceColumnDesc>,
     ) -> Result<()>;
@@ -21,6 +24,8 @@ pub trait SourceManager: Sync + Send {
     fn drop_source(&self, source_id: &TableId) -> Result<()>;
 }
 
+/// `SourceColumnDesc` is used to describe a column in the Source and is used as the column
+/// counterpart in `StreamScan`
 #[derive(Clone, Debug)]
 pub struct SourceColumnDesc {
     pub name: String,
@@ -28,6 +33,7 @@ pub struct SourceColumnDesc {
     pub column_id: i32,
 }
 
+/// `SourceDesc` is used to describe a `Source`
 #[derive(Clone)]
 pub struct SourceDesc {
     pub source: SourceRef,
@@ -46,6 +52,7 @@ impl SourceManager for MemSourceManager {
         &self,
         table_id: &TableId,
         format: SourceFormat,
+        parser: Arc<dyn SourceParser>,
         config: &SourceConfig,
         columns: Vec<SourceColumnDesc>,
     ) -> Result<()> {
@@ -57,13 +64,16 @@ impl SourceManager for MemSourceManager {
             table_id
         );
 
-        let source: Arc<dyn Source> = match config {
-            SourceConfig::Kafka(_) => Arc::new(KafkaSource::new(config.clone())?),
-            SourceConfig::File(_) => Arc::new(FileSource::new(config.clone())?),
+        let source = match config {
+            SourceConfig::Kafka(config) => Source::HighLevelKafka(HighLevelKafkaSource::new(
+                config.clone(),
+                Arc::new(columns.clone()),
+                parser.clone(),
+            )),
         };
 
         let desc = SourceDesc {
-            source,
+            source: Arc::new(source),
             format,
             columns,
         };

@@ -4,23 +4,23 @@ use itertools::Itertools;
 use prost::Message;
 
 use pb_convert::FromProtobuf;
-use risingwave_pb::plan::StreamScanNode;
-use risingwave_pb::ToProto;
-
-use crate::executor::{Executor, ExecutorBuilder};
-use crate::source::{ChunkReader, JSONParser, SourceColumnDesc, SourceFormat, SourceParser};
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::TableId;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::{Result, RwError};
+use risingwave_pb::plan::StreamScanNode;
+use risingwave_pb::ToProto;
+
+use crate::executor::{Executor, ExecutorBuilder};
+use crate::source::{
+    BatchSourceReader, HighLevelKafkaSourceReaderContext, Source, SourceColumnDesc, SourceImpl,
+};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 
-const K_STREAM_SCAN_CHUNK_SIZE: usize = 1024;
-
 pub struct StreamScanExecutor {
-    reader: ChunkReader,
+    reader: Box<dyn BatchSourceReader>,
     columns: Vec<SourceColumnDesc>,
     done: bool,
     schema: Schema,
@@ -30,7 +30,7 @@ impl StreamScanExecutor {
     /// This function returns `DataChunkRef` because it will be used by both olap and streaming.
     /// The streaming side may customize a bit from `DataChunk` to `StreamChunk`.
     pub async fn next_data_chunk(&mut self) -> Result<Option<DataChunk>> {
-        match self.reader.next_chunk(K_STREAM_SCAN_CHUNK_SIZE).await? {
+        match self.reader.next().await? {
             None => Ok(None),
             Some(chunk) => Ok(Some(chunk)),
         }
@@ -92,13 +92,17 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
             })
             .collect::<Vec<Field>>();
 
-        let parser: Box<dyn SourceParser> = match source_desc.format {
-            SourceFormat::Json => Box::new(JSONParser {}),
-            _ => unimplemented!(),
+        let reader: Box<dyn BatchSourceReader> = match source_desc.source.as_ref() {
+            Source::HighLevelKafka(k) => {
+                Box::new(k.batch_reader(HighLevelKafkaSourceReaderContext {
+                    query_id: Some(source.task_id.clone().query_id),
+                    bound_timestamp_ms: Some(stream_scan_node.timestamp_ms),
+                })?)
+            }
         };
 
         Ok(Box::new(Self {
-            reader: ChunkReader::new(&columns, source_desc.source.reader()?, parser),
+            reader,
             columns,
             done: false,
             schema: Schema { fields },
@@ -109,7 +113,7 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
 #[async_trait::async_trait]
 impl Executor for StreamScanExecutor {
     async fn open(&mut self) -> Result<()> {
-        self.reader.init().await
+        self.reader.open().await
     }
 
     async fn next(&mut self) -> Result<Option<DataChunk>> {
@@ -124,7 +128,7 @@ impl Executor for StreamScanExecutor {
     }
 
     async fn close(&mut self) -> Result<()> {
-        self.reader.cancel().await
+        self.reader.close().await
     }
 
     fn schema(&self) -> &Schema {
@@ -135,7 +139,6 @@ impl Executor for StreamScanExecutor {
 impl Debug for StreamScanExecutor {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StreamScanExecutor")
-            .field("reader", &self.reader)
             .field("columns", &self.columns)
             .field("done", &self.done)
             .finish()
