@@ -10,6 +10,7 @@ mod bloom;
 mod cloud;
 mod error;
 mod format;
+mod iterator;
 mod keyed_state;
 
 #[cfg(test)]

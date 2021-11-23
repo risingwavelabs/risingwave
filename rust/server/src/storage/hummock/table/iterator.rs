@@ -196,13 +196,12 @@ mod tests {
     use bytes::{Bytes, BytesMut};
     use itertools::Itertools;
 
-    use crate::storage::hummock::{
-        iterator::SeekPos, HummockValue, Table, TableBuilder, TableBuilderOptions,
-    };
+    use crate::storage::hummock::HummockValue;
 
-    use super::BlockIterator;
+    use super::super::{Table, TableBuilder, TableBuilderOptions};
 
-    // use super::*;
+    use super::*;
+
     #[test]
     fn basic_test() {
         let opt = TableBuilderOptions {
