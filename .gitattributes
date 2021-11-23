@@ -1,0 +1,4 @@
+# regression test target file
+*.data linguist-generated=true
+*.source linguist-generated=true
+*.sql linguist-generated=true
