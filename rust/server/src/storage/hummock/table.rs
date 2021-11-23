@@ -2,10 +2,9 @@
 
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 
+pub mod block_iterator;
 mod builder;
-pub mod iterator;
-use std::sync::Arc;
-
+pub use block_iterator::*;
 pub use builder::*;
 mod utils;
 
@@ -14,6 +13,7 @@ use crate::storage::hummock::bloom::Bloom;
 use bytes::{Buf, Bytes};
 use prost::Message;
 use risingwave_pb::hummock::{Checksum, TableMeta};
+use std::sync::Arc;
 use utils::verify_checksum;
 
 /// Block contains several entries. It can be obtained from an SST.

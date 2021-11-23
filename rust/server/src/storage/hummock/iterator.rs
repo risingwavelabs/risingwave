@@ -1,11 +1,10 @@
-use bytes::Bytes;
-
 use super::HummockResult;
 
 mod concat;
 pub use concat::*;
 mod merge;
 pub use merge::*;
+
 #[cfg(test)]
 mod tests;
 
@@ -17,7 +16,7 @@ use async_trait::async_trait;
 pub trait HummockIterator {
     /// Get the next key/value pair in the table. If `None` is returned, the iterator must be
     /// rewinded to retrive new values.
-    async fn next(&mut self) -> HummockResult<Option<(Bytes, Bytes)>>;
+    async fn next(&mut self) -> HummockResult<Option<(&[u8], &[u8])>>;
 
     /// Reset the position of the iterator
     async fn rewind(&mut self);
@@ -27,7 +26,7 @@ pub trait HummockIterator {
 }
 
 pub enum HummockIteratorImpl {
-    // The basic unit of iterators is the TableIterator.
+    // Will support later
     // Table(TableIterator),
     Concat(ConcatIterator),
     Merge(MergeIterator),
