@@ -41,6 +41,7 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
           .put(SqlKind.MINUS, ExprNode.Type.SUBTRACT)
           .put(SqlKind.TIMES, ExprNode.Type.MULTIPLY)
           .put(SqlKind.DIVIDE, ExprNode.Type.DIVIDE)
+          .put(SqlKind.MOD, ExprNode.Type.MODULUS)
           .put(SqlKind.EQUALS, ExprNode.Type.EQUAL)
           .put(SqlKind.NOT_EQUALS, ExprNode.Type.NOT_EQUAL)
           .put(SqlKind.LESS_THAN, ExprNode.Type.LESS_THAN)
