@@ -578,11 +578,19 @@ impl BuildTable {
 mod tests {
     use std::sync::Arc;
 
-    use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;
+    use crate::executor::join::nested_loop_join::{
+        BuildTable, NestedLoopJoinExecutor, NestedLoopJoinState, ProbeSideSource,
+    };
+    use crate::executor::join::JoinType;
+    use crate::executor::test_utils::MockExecutor;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::*;
-    use risingwave_common::types::Int32Type;
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::expr::InputRefExpression;
+    use risingwave_common::types::{Int32Type, ScalarRefImpl};
+    use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 
+    /// Test combine two chunk into one.
     #[test]
     fn test_concatenate() {
         let num_of_columns: usize = 2;
@@ -609,6 +617,42 @@ mod tests {
         assert_eq!(
             chunk.visibility().clone().unwrap(),
             (bool_vec).try_into().unwrap()
+        );
+    }
+
+    /// Test the function of convert row into constant row chunk (one row repeat multiple times).
+    #[test]
+    fn test_convert_row_to_chunk() {
+        let row = RowRef::new(vec![Some(ScalarRefImpl::Int32(3))]);
+        let probe_side_schema = Schema {
+            fields: vec![Field {
+                data_type: Arc::new(Int32Type::new(false)),
+            }],
+        };
+        let probe_source = Box::new(MockExecutor::new(probe_side_schema.clone()));
+        let build_source = Box::new(MockExecutor::new(probe_side_schema.clone()));
+        // Note that only probe side schema of this executor is meaningful. All other fields are
+        // meaningless. They are just used to pass Rust checker.
+        let source = NestedLoopJoinExecutor {
+            join_expr: Box::new(InputRefExpression::new(Int32Type::create(false), 0)),
+            join_type: JoinType::Inner,
+            state: NestedLoopJoinState::Build,
+            chunk_builder: DataChunkBuilder::new_with_default_size(
+                probe_side_schema.data_types_clone(),
+            ),
+            schema: Schema { fields: vec![] },
+            last_chunk: None,
+            probe_side_schema: probe_side_schema.data_types_clone(),
+            probe_side_source: ProbeSideSource::new(probe_source),
+            build_table: BuildTable::new(build_source),
+            probe_remain_chunk_idx: 0,
+            probe_remain_row_idx: 0,
+        };
+        let const_row_chunk = source.convert_row_to_chunk(&row, 5).unwrap();
+        assert_eq!(const_row_chunk.capacity(), 5);
+        assert_eq!(
+            const_row_chunk.row_at(2).unwrap().0.value_at(0),
+            Some(ScalarRefImpl::Int32(3))
         );
     }
 }
