@@ -29,6 +29,16 @@ impl ObjectStore<String> for InMemObjectStore {
         let total_size = self.get_object(path, |v| v.len()).await?;
         Ok(ObjectMetadata { total_size })
     }
+
+    async fn close(&self, _path: &String) -> Result<()> {
+        // `InMemObjectStore` is for testing purpose only. No need to do this.
+        Ok(())
+    }
+
+    async fn delete(&self, path: &String) -> Result<()> {
+        self.objects.lock().await.remove(path);
+        Ok(())
+    }
 }
 
 impl InMemObjectStore {
@@ -83,6 +93,13 @@ mod tests {
 
         // Overflow.
         s3.read(&"/abc".to_string(), BlockLocation { offset: 4, size: 4 })
+            .await
+            .unwrap_err();
+
+        s3.delete(&"/abc".to_string()).await.unwrap();
+
+        // No such object.
+        s3.read(&"/abc".to_string(), BlockLocation { offset: 0, size: 3 })
             .await
             .unwrap_err();
     }
