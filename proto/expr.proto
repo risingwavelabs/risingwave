@@ -43,6 +43,7 @@ message ExprNode {
     POSITION = 209;
     LTRIM = 210;
     RTRIM = 211;
+    CASE = 212;
     STREAM_NULL_BY_ROW_COUNT = 1000;
   }
   Type expr_type = 1;

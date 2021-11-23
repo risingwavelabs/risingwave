@@ -6,6 +6,7 @@ use crate::expr::expr_binary_nonnull::new_binary_expr;
 use crate::expr::expr_binary_nonnull::new_like_default;
 use crate::expr::expr_binary_nonnull::new_position_expr;
 use crate::expr::expr_binary_nullable::new_nullable_binary_expr;
+use crate::expr::expr_case::{CaseExpression, WhenClause};
 use crate::expr::expr_ternary_bytes::new_replace_expr;
 use crate::expr::expr_ternary_bytes::new_substr_start_end;
 use crate::expr::expr_unary_nonnull::new_length_default;
@@ -14,7 +15,7 @@ use crate::expr::expr_unary_nonnull::new_rtrim_expr;
 use crate::expr::expr_unary_nonnull::new_trim_expr;
 use crate::expr::expr_unary_nonnull::new_unary_expr;
 use crate::expr::BoxedExpression;
-use crate::types::{build_from_prost as type_build_from_prost, DataTypeRef};
+use crate::types::{build_from_prost as type_build_from_prost, DataTypeKind, DataTypeRef};
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::ExprNode as ProstExprNode;
 
@@ -135,4 +136,97 @@ pub fn build_like_expr(prost: &ProstExprNode) -> Result<BoxedExpression> {
     let expr_ia1 = expr_build_from_prost(&children[0])?;
     let expr_ia2 = expr_build_from_prost(&children[1])?;
     Ok(new_like_default(expr_ia1, expr_ia2, ret_type))
+}
+
+pub fn build_case_expr(prost: &ProstExprNode) -> Result<BoxedExpression> {
+    let (children, ret_type) = get_return_type_and_children(prost)?;
+    // children: (when, then)+, (else_clause)?
+    let len = children.len();
+    let else_clause = if len % 2 == 1 {
+        let else_clause = expr_build_from_prost(&children[len - 1])?;
+        if else_clause.return_type().data_type_kind() != ret_type.data_type_kind() {
+            return Err(RwError::from(ErrorCode::ProtocolError(
+                "the return type of else and case not match".to_string(),
+            )));
+        }
+        Some(else_clause)
+    } else {
+        None
+    };
+    let mut when_clauses = vec![];
+    for i in 0..len / 2 {
+        let when_index = i * 2;
+        let then_index = i * 2 + 1;
+        let when_expr = expr_build_from_prost(&children[when_index])?;
+        let then_expr = expr_build_from_prost(&children[then_index])?;
+        if when_expr.return_type().data_type_kind() != DataTypeKind::Boolean {
+            return Err(RwError::from(ErrorCode::ProtocolError(
+                "the return type of when clause and condition not match".to_string(),
+            )));
+        }
+        if then_expr.return_type().data_type_kind() != ret_type.data_type_kind() {
+            return Err(RwError::from(ErrorCode::ProtocolError(
+                "the return type of then clause and case not match".to_string(),
+            )));
+        }
+        let when_clause = WhenClause::new(when_expr, then_expr);
+        when_clauses.push(when_clause);
+    }
+    Ok(Box::new(CaseExpression::new(
+        ret_type,
+        when_clauses,
+        else_clause,
+    )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_case_expr;
+    use risingwave_pb::data::{data_type::IntervalType, data_type::TypeName, DataType};
+    use risingwave_pb::expr::{
+        expr_node::{RexNode, Type},
+        ConstantValue, ExprNode, FunctionCall,
+    };
+
+    #[test]
+    fn test_build_case_expr() {
+        let call = FunctionCall {
+            children: vec![
+                ExprNode {
+                    expr_type: Type::ConstantValue as i32,
+                    return_type: Some(DataType {
+                        type_name: TypeName::Boolean as i32,
+                        precision: 0,
+                        scale: 0,
+                        is_nullable: false,
+                        interval_type: IntervalType::Invalid as i32,
+                    }),
+                    rex_node: Some(RexNode::Constant(ConstantValue { body: vec![] })),
+                },
+                ExprNode {
+                    expr_type: Type::ConstantValue as i32,
+                    return_type: Some(DataType {
+                        type_name: TypeName::Int32 as i32,
+                        precision: 0,
+                        scale: 0,
+                        is_nullable: false,
+                        interval_type: IntervalType::Invalid as i32,
+                    }),
+                    rex_node: Some(RexNode::Constant(ConstantValue { body: vec![] })),
+                },
+            ],
+        };
+        let p = ExprNode {
+            expr_type: Type::Case as i32,
+            return_type: Some(DataType {
+                type_name: TypeName::Int32 as i32,
+                precision: 0,
+                scale: 0,
+                is_nullable: false,
+                interval_type: IntervalType::Invalid as i32,
+            }),
+            rex_node: Some(RexNode::FuncCall(call)),
+        };
+        assert!(build_case_expr(&p).is_ok());
+    }
 }

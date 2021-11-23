@@ -3,6 +3,7 @@ pub mod build_expr_from_prost;
 mod expr_binary_bytes;
 pub mod expr_binary_nonnull;
 mod expr_binary_nullable;
+mod expr_case;
 mod expr_input_ref;
 mod expr_literal;
 mod expr_ternary_bytes;
@@ -50,6 +51,7 @@ pub fn build_from_prost(prost: &ProstExprNode) -> Result<BoxedExpression> {
         Position => build_position_expr(prost),
         ConstantValue => LiteralExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         InputRef => InputRefExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
+        Case => build_case_expr(prost),
         _ => Err(InternalError(format!(
             "Unsupported expression type: {:?}",
             prost.get_expr_type()

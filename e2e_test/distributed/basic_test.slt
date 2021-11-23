@@ -101,6 +101,22 @@ select * from t order by v2 desc, v1 limit 2
 1 4 2
 3 4 4
 
+query I
+select case when v1 <= 2 then 0 else 1 end from t
+----
+0
+0
+1
+1
+
+query T
+select case when v2 <= 3 then 'foo' else 'bar' end from t
+----
+bar
+foo
+bar
+foo
+
 statement ok
 drop table t
 
