@@ -1,6 +1,9 @@
 // Copyright 2020 TiKV Project Authors. Licensed under Apache-2.0.
 
-use std::{cmp, ptr};
+use std::{
+    cmp::{self},
+    ptr,
+};
 
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_pb::hummock::Checksum;

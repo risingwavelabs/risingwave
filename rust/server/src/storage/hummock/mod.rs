@@ -2,6 +2,7 @@
 
 mod table;
 use bytes::{Buf, BufMut};
+use std::fmt::Debug;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 pub use table::*;
@@ -20,9 +21,19 @@ pub use error::*;
 pub const VALUE_DELETE: u8 = 1 << 0;
 pub const VALUE_PUT: u8 = 0;
 
+#[derive(Debug)]
 pub enum HummockValue<T> {
     Put(T),
     Delete,
+}
+
+impl PartialEq for HummockValue<Vec<u8>> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Put(l0), Self::Put(r0)) => l0 == r0,
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+        }
+    }
 }
 
 impl HummockValue<Vec<u8>> {

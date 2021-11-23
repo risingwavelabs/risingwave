@@ -3,6 +3,9 @@
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 
 mod builder;
+pub mod iterator;
+use std::sync::Arc;
+
 pub use builder::*;
 mod utils;
 
@@ -13,7 +16,30 @@ use prost::Message;
 use risingwave_pb::hummock::{Checksum, TableIndex};
 use utils::verify_checksum;
 
-pub struct Block;
+/// Block contains several entries. It can be obtained from an SST.
+#[derive(Default)]
+pub struct Block {
+    offset: usize,
+    data: Bytes,
+    checksum: Checksum,
+    entries_index_start: usize,
+    entry_offsets: Vec<u32>,
+    checksum_len: usize,
+}
+
+impl Block {
+    fn size(&self) -> u64 {
+        3 * std::mem::size_of::<usize>() as u64
+            + self.data.len() as u64
+            + self.checksum_len as u64
+            + self.entry_offsets.len() as u64 * std::mem::size_of::<u32>() as u64
+    }
+
+    fn verify_checksum(&self) -> HummockResult<()> {
+        // let checksum = prost::Message::decode(self.checksum.clone())?;
+        verify_checksum(&self.checksum, &self.data)
+    }
+}
 
 /// [`Table`] stores data of an SST. It is immutable once created and initialized. For now, we
 /// assume that all content of SST is preloaded into the memory before creating the [`Table`]
@@ -88,17 +114,16 @@ impl Table {
         // read checksum
         read_pos -= checksum_len;
         let buf = &content[read_pos..read_pos + checksum_len];
-        let chksum = Checksum::decode(buf)?;
+        let checksum = Checksum::decode(buf)?;
 
         // read data
         let data = &content[0..read_pos];
-        verify_checksum(&chksum, data)?;
+        verify_checksum(&checksum, data)?;
 
         Ok(TableIndex::decode(data)?)
     }
 
-    /// Get the required block
-    async fn block(&self, idx: usize) -> HummockResult<Bytes> {
+    fn block(&self, idx: usize) -> HummockResult<Arc<Block>> {
         let block_offset = &self.meta.offsets[idx];
 
         let offset = block_offset.offset as usize;
@@ -113,7 +138,7 @@ impl Table {
 
         // read checksum
         read_pos -= checksum_len;
-        let chksum = Checksum::decode(&data[read_pos..read_pos + checksum_len])?;
+        let checksum = Checksum::decode(&data[read_pos..read_pos + checksum_len])?;
 
         // read num entries
         read_pos -= 4;
@@ -131,9 +156,18 @@ impl Table {
         // The checksum is calculated for the blocks
         let data = self.blocks.slice(offset..offset + read_pos + 4);
 
-        verify_checksum(&chksum, &data[..])?;
+        let blk = Arc::new(Block {
+            offset,
+            entries_index_start,
+            data,
+            entry_offsets,
+            checksum_len,
+            checksum,
+        });
 
-        Ok(data)
+        // verify_checksum(&checksum, &data[..])?;
+
+        Ok(blk)
     }
 
     fn meta_key(&self) -> u64 {
@@ -184,7 +218,7 @@ mod tests {
         let (blocks, meta) = super::builder::tests::generate_table();
         let table = Table::load(0, blocks, meta).unwrap();
         for i in 0..10 {
-            table.block(i).await.unwrap();
+            table.block(i).unwrap();
         }
     }
 }
