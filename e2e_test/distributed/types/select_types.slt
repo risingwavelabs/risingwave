@@ -1,0 +1,96 @@
+# description: Selection of all supported data types.
+
+subtest IntegerTypes
+
+query I
+select 1::INT
+----
+1
+
+query I
+select 1::INTEGER
+----
+1
+
+# (int2, int4 and int8 are extensions we don't support yet.)
+
+query I
+select 1::SMALLINT
+----
+1
+
+query I
+select 1::BIGINT
+----
+1
+
+query B
+select true::BOOLEAN
+----
+true
+
+subtest FloatingPointTypes
+
+query R
+select 1.1::FLOAT
+----
+1.1
+
+query R
+select 1.1::DOUBLE PRECISION
+----
+1.1
+
+query R
+select 1.1::REAL
+----
+1.1
+
+# TODO: Unsupported.
+# query I
+# select '123.4'::DECIMAL(4,1)
+# ----
+# 123.4
+
+query R
+select '123.4'::NUMERIC(4,1)
+----
+123.4
+
+subtest DateTimeTypes
+
+query T
+select '2008-01-01 00:00:01'::TIMESTAMP;
+----
+2008-01-01 00:00:01 +0000 +0000
+
+query T
+select '2008-01-01'::DATE;
+----
+2008-01-01 00:00:00 +0000 +0000
+
+subtest StringTypes
+
+statement ok
+create table t (v_varchar varchar)
+
+statement ok
+insert into t values ('hello')
+
+# TODO: Unsupported.
+# statement ok
+# insert into t values ("hello")
+
+query T
+select * from t;
+----
+hello
+
+statement ok
+drop table t
+
+# TODO: Fix the failure.
+# query T
+# select '2008-01-01'::VARCHAR;
+# ----
+# 2008-01-01
