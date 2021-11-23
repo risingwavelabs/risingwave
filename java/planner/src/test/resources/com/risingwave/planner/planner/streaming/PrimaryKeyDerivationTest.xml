@@ -41,7 +41,7 @@ RwStreamMaterializedView(name=[t_aggregate])
             ]]>
         </Resource>
     </TestCase>
-    <TestCase name="query 2">
+    <TestCase name="query 3">
         <Resource name="sql">
             <![CDATA[
 create materialized view T_inner_join as select * from t as t1 join t as t2 on t1.v1 = t2.v2;
@@ -53,8 +53,9 @@ RwStreamMaterializedView(name=[t_inner_join])
   RwStreamHashJoin(condition=[=($0, $5)], joinType=[inner])
     RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
       RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
-    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
+    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
+      RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+        RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
 ]]>
         </Resource>
         <Resource name="primaryKey">

@@ -3,6 +3,7 @@ package com.risingwave.planner.rel.physical.streaming.join;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 import static com.risingwave.planner.rel.physical.batch.join.BatchJoinUtils.isEquiJoin;
 
+import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.logical.RwLogicalJoin;
 import com.risingwave.planner.rel.physical.batch.join.BatchJoinUtils;
 import com.risingwave.planner.rel.physical.streaming.RisingWaveStreamingRel;
@@ -103,13 +104,17 @@ public class RwStreamHashJoin extends Join implements RisingWaveStreamingRel {
       var join = (RwLogicalJoin) rel;
 
       var left = join.getLeft();
-      var leftTraits = left.getTraitSet().plus(STREAMING);
+      var leftKeys = join.analyzeCondition().leftKeys;
+      var leftDistTrait = RwDistributions.hash(leftKeys);
+      var leftTraits = left.getTraitSet().plus(STREAMING).plus(leftDistTrait);
       leftTraits = leftTraits.simplify();
 
       var newLeft = convert(left, leftTraits);
 
       var right = join.getRight();
-      var rightTraits = right.getTraitSet().plus(STREAMING);
+      var rightKeys = join.analyzeCondition().rightKeys;
+      var rightDistTrait = RwDistributions.hash(rightKeys);
+      var rightTraits = right.getTraitSet().plus(STREAMING).plus(rightDistTrait);
       rightTraits = rightTraits.simplify();
 
       var newRight = convert(right, rightTraits);
