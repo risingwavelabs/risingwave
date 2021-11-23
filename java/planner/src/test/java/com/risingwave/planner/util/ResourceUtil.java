@@ -23,6 +23,7 @@ public class ResourceUtil {
   public static final String DIST_PLAN_TAG = "distributed";
   public static final String JSON_TAG = "json";
   public static final String PATH_TAG = "path";
+  public static final String PRIMARY_KEY_TAG = "primaryKey";
 
   public static URL findFile(Class<?> clazz, final String suffix) {
     // The reference file for class "com.foo.Bar" is "com/foo/Bar.xml"

@@ -1,5 +1,6 @@
 package com.risingwave.planner.rel.physical.streaming;
 
+import com.google.common.collect.ImmutableList;
 import com.risingwave.catalog.ColumnDesc;
 import com.risingwave.catalog.ColumnEncoding;
 import com.risingwave.catalog.TableCatalog;
@@ -16,6 +17,8 @@ import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.SingleRel;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.util.Pair;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * We need to explicitly specify a materialized view node in a streaming plan.
@@ -23,16 +26,29 @@ import org.apache.calcite.util.Pair;
  * <p>A sequential streaming plan (no parallel degree) roots with a materialized view node.
  */
 public class RwStreamMaterializedView extends SingleRel implements RisingWaveStreamingRel {
+  private static final Logger LOGGER = LoggerFactory.getLogger(RwStreamMaterializedView.class);
+
   // TODO: define more attributes corresponding to TableCatalog.
   private TableCatalog.TableId tableId;
 
   private final SqlIdentifier name;
 
+  private final ImmutableList<Integer> primaryKeyIndices;
+
   public RwStreamMaterializedView(
-      RelOptCluster cluster, RelTraitSet traits, RelNode input, SqlIdentifier name) {
+      RelOptCluster cluster,
+      RelTraitSet traits,
+      RelNode input,
+      SqlIdentifier name,
+      ImmutableList<Integer> primaryKeyIndices) {
     super(cluster, traits, input);
     checkConvention();
     this.name = name;
+    this.primaryKeyIndices = primaryKeyIndices;
+  }
+
+  public List<Integer> getPrimaryKeyIndices() {
+    return this.primaryKeyIndices;
   }
 
   /** Serialize to protobuf */
@@ -48,6 +64,8 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
           .setIsPrimary(false);
       materializedViewNodeBuilder.addColumnDescs(columnDescBuilder);
     }
+    LOGGER.debug("RwStreamMaterializedView primary key indices:" + this.getPrimaryKeyIndices());
+    materializedViewNodeBuilder.addAllPkIndices(this.getPrimaryKeyIndices());
     // TODO: serialize primary key columns.
     MViewNode materializedViewNode =
         materializedViewNodeBuilder.setTableRefId(Messages.getTableRefId(tableId)).build();
@@ -74,6 +92,7 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
   public List<Pair<String, ColumnDesc>> getColumns() {
     List<Pair<String, ColumnDesc>> list = new ArrayList<>();
     var rowType = getRowType();
+    LOGGER.debug("RwStreamMaterializedView getColumns rowType:" + rowType);
     for (int i = 0; i < rowType.getFieldCount(); i++) {
       var field = rowType.getFieldList().get(i);
       ColumnDesc columnDesc =
@@ -81,5 +100,10 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
       list.add(Pair.of(field.getName(), columnDesc));
     }
     return list;
+  }
+
+  @Override
+  public <T> RwStreamingRelVisitor.Result<T> accept(RwStreamingRelVisitor<T> visitor) {
+    throw new UnsupportedOperationException();
   }
 }

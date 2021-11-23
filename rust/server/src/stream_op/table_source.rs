@@ -10,6 +10,7 @@ use std::fmt::{Debug, Formatter};
 pub struct TableSourceExecutor {
     table_id: TableId,
     schema: Schema,
+    column_ids: Vec<usize>,
     data_receiver: Option<UnboundedReceiver<StreamChunk>>,
     barrier_receiver: UnboundedReceiver<Message>,
 }
@@ -18,12 +19,14 @@ impl TableSourceExecutor {
     pub fn new(
         table_id: TableId,
         schema: Schema,
+        column_ids: Vec<usize>,
         data_receiver: UnboundedReceiver<StreamChunk>,
         barrier_receiver: UnboundedReceiver<Message>,
     ) -> Self {
         TableSourceExecutor {
             table_id,
             schema,
+            column_ids,
             data_receiver: Some(data_receiver),
             barrier_receiver,
         }
@@ -44,7 +47,16 @@ impl Executor for TableSourceExecutor {
             };
             let msg = msg.expect("table stream closed unexpectedly");
             Ok(match msg {
-                Message::Chunk(chunk) => Message::Chunk(chunk),
+                Message::Chunk(chunk) => {
+                    let new_columns = self
+                        .column_ids
+                        .iter()
+                        .map(|column_id| chunk.columns[*column_id].clone())
+                        .collect::<Vec<_>>();
+                    let new_chunk =
+                        StreamChunk::new(chunk.ops.clone(), new_columns, chunk.visibility);
+                    Message::Chunk(new_chunk)
+                }
                 Message::Barrier(barrier) => {
                     if barrier.stop {
                         // Drop the receiver here, the source will encounter an error at the next
@@ -140,11 +152,13 @@ mod tests {
                 },
             ],
         };
+        let column_ids = vec![0, 1];
 
         let stream_recv = table.create_stream()?;
         let (barrier_sender, barrier_receiver) = unbounded();
 
-        let mut source = TableSourceExecutor::new(table_id, schema, stream_recv, barrier_receiver);
+        let mut source =
+            TableSourceExecutor::new(table_id, schema, column_ids, stream_recv, barrier_receiver);
 
         barrier_sender
             .unbounded_send(Message::Barrier(Barrier {
@@ -240,11 +254,13 @@ mod tests {
                 },
             ],
         };
+        let column_ids = vec![0, 1];
 
         let stream_recv = table.create_stream()?;
         let (barrier_sender, barrier_receiver) = unbounded();
 
-        let mut source = TableSourceExecutor::new(table_id, schema, stream_recv, barrier_receiver);
+        let mut source =
+            TableSourceExecutor::new(table_id, schema, column_ids, stream_recv, barrier_receiver);
 
         table.append(chunk1.clone()).await?;
 

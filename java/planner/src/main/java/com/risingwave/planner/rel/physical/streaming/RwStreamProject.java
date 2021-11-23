@@ -47,6 +47,11 @@ public class RwStreamProject extends Project implements RisingWaveStreamingRel {
     return new RwStreamProject(getCluster(), traitSet, getHints(), input, projects, rowType);
   }
 
+  @Override
+  public <T> RwStreamingRelVisitor.Result<T> accept(RwStreamingRelVisitor<T> visitor) {
+    return visitor.visit(this);
+  }
+
   /** Rule for converting logical project to stream project */
   public static class StreamProjectConverterRule extends ConverterRule {
     public static final RwStreamProject.StreamProjectConverterRule INSTANCE =

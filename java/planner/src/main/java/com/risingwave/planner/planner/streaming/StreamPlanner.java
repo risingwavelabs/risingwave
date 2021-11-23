@@ -18,6 +18,7 @@ import com.risingwave.planner.program.JoinReorderProgram;
 import com.risingwave.planner.program.OptimizerProgram;
 import com.risingwave.planner.program.SubQueryRewriteProgram;
 import com.risingwave.planner.program.VolcanoOptimizerProgram;
+import com.risingwave.planner.rel.physical.streaming.PrimaryKeyDerivationVisitor;
 import com.risingwave.planner.rel.physical.streaming.RisingWaveStreamingRel;
 import com.risingwave.planner.rel.physical.streaming.RwStreamMaterializedView;
 import com.risingwave.planner.rel.physical.streaming.StreamingPlan;
@@ -61,15 +62,20 @@ public class StreamPlanner implements Planner<StreamingPlan> {
 
   private RwStreamMaterializedView generateStreamingPlan(
       RelNode logicalPlan, ExecutionContext context, SqlIdentifier name) {
-    OptimizerProgram streamingOptimizerProgram = buildStreamingOptimizerProgram();
-    RelNode rawStreamingPlan = streamingOptimizerProgram.optimize(logicalPlan, context);
-    RwStreamMaterializedView materializedViewPlan = addMaterializedViewNode(rawStreamingPlan, name);
+    OptimizerProgram program = buildStreamingOptimizerProgram();
+    RisingWaveStreamingRel rawPlan =
+        (RisingWaveStreamingRel) program.optimize(logicalPlan, context);
+    RwStreamMaterializedView materializedViewPlan = addMaterializedViewNode(rawPlan, name);
     log.debug("Create streaming plan:\n" + ExplainWriter.explainPlan(materializedViewPlan));
     return materializedViewPlan;
   }
 
-  private RwStreamMaterializedView addMaterializedViewNode(RelNode root, SqlIdentifier name) {
-    return new RwStreamMaterializedView(root.getCluster(), root.getTraitSet(), root, name);
+  private RwStreamMaterializedView addMaterializedViewNode(
+      RisingWaveStreamingRel root, SqlIdentifier name) {
+    var visitor = new PrimaryKeyDerivationVisitor();
+    var p = root.accept(visitor);
+    return new RwStreamMaterializedView(
+        p.node.getCluster(), p.node.getTraitSet(), p.node, name, p.info);
   }
 
   private static OptimizerProgram buildLogicalOptimizerProgram() {

@@ -36,6 +36,11 @@ public class RwStreamFilter extends Filter implements RisingWaveStreamingRel {
     return new RwStreamFilter(getCluster(), traitSet, input, condition);
   }
 
+  @Override
+  public <T> RwStreamingRelVisitor.Result<T> accept(RwStreamingRelVisitor<T> visitor) {
+    return visitor.visit(this);
+  }
+
   /** Rule for converting logical filter to stream filter */
   public static class StreamFilterConverterRule extends ConverterRule {
     public static final StreamFilterConverterRule INSTANCE =

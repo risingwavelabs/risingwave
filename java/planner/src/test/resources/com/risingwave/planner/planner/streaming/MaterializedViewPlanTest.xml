@@ -137,8 +137,13 @@ create materialized view T2 as select v1+v2 as V from t
         <Resource name="plan">
             <![CDATA[
 RwStreamMaterializedView(name=[t2])
-  RwStreamProject(v=[+($0, $1)])
-    RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
+  RwStreamProject(v=[+($0, $1)], _row_id=[$2])
+    RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,_row_id])
+]]>
+        </Resource>
+        <Resource name="primaryKey">
+            <![CDATA[
+[1]
 ]]>
         </Resource>
         <Resource name="json">
@@ -153,7 +158,7 @@ RwStreamMaterializedView(name=[t2])
             }
           }
         },
-        "columnIds": [1, 2]
+        "columnIds": [1, 2, 0]
       }
     }],
     "projectNode": {
@@ -180,6 +185,14 @@ RwStreamMaterializedView(name=[t2])
             }
           }]
         }
+      }, {
+        "exprType": "INPUT_REF",
+        "returnType": {
+          "typeName": "INT64"
+        },
+        "inputRef": {
+          "columnIdx": 2
+        }
       }]
     }
   }],
@@ -196,7 +209,13 @@ RwStreamMaterializedView(name=[t2])
         "typeName": "INT32"
       },
       "encoding": "RAW"
-    }]
+    }, {
+      "columnType": {
+        "typeName": "INT64"
+      },
+      "encoding": "RAW"
+    }],
+    "pkIndices": [1]
   }
 }
 ]]>
@@ -325,7 +344,8 @@ RwStreamMaterializedView(name=[t3])
         "typeName": "INT32"
       },
       "encoding": "RAW"
-    }]
+    }],
+    "pkIndices": [0]
   }
 }
 ]]>
@@ -711,7 +731,8 @@ RwStreamMaterializedView(name=[t6])
         "typeName": "INT32"
       },
       "encoding": "RAW"
-    }]
+    }],
+    "pkIndices": [0]
   }
 }
 ]]>
@@ -843,7 +864,8 @@ RwStreamMaterializedView(name=[t7])
         "typeName": "INT32"
       },
       "encoding": "RAW"
-    }]
+    }],
+    "pkIndices": [0]
   }
 }
 ]]>

@@ -56,6 +56,16 @@ public abstract class StreamPlanTestBase extends SqlTestBase {
     String explainedPlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
     assertEquals(testCase.getPlan().get(), explainedPlan, "Plans do not match!");
 
+    // Do not error if no primary key test.
+    // TODO: Finally all should have primary key test, but we gradually support it
+    if (testCase.getPrimaryKey().isPresent()) {
+      String primaryKey = testCase.getPrimaryKey().get();
+      assertEquals(
+          primaryKey,
+          plan.getStreamingPlan().getPrimaryKeyIndices().toString(),
+          "Primary key not match!");
+    }
+
     // We must pass the stream plan through MV handler to assign a TableId.
     CreateMaterializedViewHandler handler = new CreateMaterializedViewHandler();
     SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;

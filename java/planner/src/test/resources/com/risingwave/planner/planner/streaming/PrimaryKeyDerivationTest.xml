@@ -1,0 +1,66 @@
+<Root>
+    <TestCase name="query 1">
+    <Resource name="sql">
+        <![CDATA[
+create materialized view t_q1 as select * from t;
+            ]]>
+    </Resource>
+    <Resource name="plan">
+        <![CDATA[
+RwStreamMaterializedView(name=[t_q1])
+  RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+    RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
+]]>
+    </Resource>
+        <Resource name="primaryKey">
+            <![CDATA[
+[3]
+            ]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="query 2">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T_aggregate as select v1, C from ( select v1, v2, count(*) as C from t group by v1, v2);
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[t_aggregate])
+  RwStreamProject(v1=[$0], c=[$2])
+    RwStreamFilter(condition=[<>($2, 0)])
+      RwStreamAgg(group=[{0, 1}], c=[COUNT()])
+        RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+          RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+            RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
+]]>
+        </Resource>
+        <Resource name="primaryKey">
+            <![CDATA[
+[0, 1]
+            ]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="query 2">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T_inner_join as select * from t as t1 join t as t2 on t1.v1 = t2.v2;
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[t_inner_join])
+  RwStreamHashJoin(condition=[=($0, $5)], joinType=[inner])
+    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
+    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
+]]>
+        </Resource>
+        <Resource name="primaryKey">
+            <![CDATA[
+[3, 7]
+            ]]>
+        </Resource>
+    </TestCase>
+</Root>

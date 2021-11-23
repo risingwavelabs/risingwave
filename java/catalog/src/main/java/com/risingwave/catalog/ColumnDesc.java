@@ -2,7 +2,7 @@ package com.risingwave.catalog;
 
 import com.risingwave.common.datatype.RisingWaveDataType;
 
-/** */
+/** Column Description */
 public class ColumnDesc {
   private final RisingWaveDataType dataType;
   private final boolean primary;

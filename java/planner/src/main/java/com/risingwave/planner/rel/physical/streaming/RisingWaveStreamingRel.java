@@ -35,4 +35,6 @@ public interface RisingWaveStreamingRel extends RisingWaveRel {
   default void checkConvention() {
     verify(getTraitSet().contains(STREAMING), "Not streaming plan: %s", getClass().getName());
   }
+
+  <T> RwStreamingRelVisitor.Result<T> accept(RwStreamingRelVisitor<T> visitor);
 }

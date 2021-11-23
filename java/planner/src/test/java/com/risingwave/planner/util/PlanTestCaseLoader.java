@@ -58,6 +58,7 @@ public class PlanTestCaseLoader implements ArgumentsProvider {
     String phyPlan = null;
     String distPlan = null;
     String json = null;
+    String primaryKey = null;
     NodeList resources = element.getElementsByTagName(ResourceUtil.RESOURCE_TAG);
     for (int i = 0; i < resources.getLength(); i++) {
       Element res = (Element) resources.item(i);
@@ -70,6 +71,8 @@ public class PlanTestCaseLoader implements ArgumentsProvider {
         phyPlan = ResourceUtil.getText(res).trim();
       } else if (ResourceUtil.DIST_PLAN_TAG.equals(name)) {
         distPlan = ResourceUtil.getText(res).trim();
+      } else if (ResourceUtil.PRIMARY_KEY_TAG.equals(name)) {
+        primaryKey = ResourceUtil.getText(res).trim();
       } else if (ResourceUtil.JSON_TAG.equals(name)) {
         if (res.hasAttribute(ResourceUtil.PATH_TAG)) {
           String path = res.getAttribute(ResourceUtil.PATH_TAG);
@@ -85,6 +88,6 @@ public class PlanTestCaseLoader implements ArgumentsProvider {
     //  verifyNotNull(plan, "Plan content not found in test case: %s!", testCaseName);
     //  verifyNotNull(json, "Json plan content not found in test case: %s!", testCaseName);
 
-    return new PlannerTestCase(testCaseName, sql, plan, phyPlan, distPlan, json);
+    return new PlannerTestCase(testCaseName, sql, plan, phyPlan, distPlan, json, primaryKey);
   }
 }

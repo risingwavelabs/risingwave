@@ -365,6 +365,11 @@ impl StreamManagerCore {
                 .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
                 let table_ref = table_manager.clone().get_table(&table_id).unwrap();
+                let column_ids = table_source_node
+                    .get_column_ids()
+                    .iter()
+                    .map(|column_id| *column_id as usize)
+                    .collect::<Vec<_>>();
                 if let TableTypes::BummockTable(table) = table_ref {
                     let schema = table.schema().to_owned();
                     let stream_receiver = table.create_stream()?;
@@ -375,6 +380,7 @@ impl StreamManagerCore {
                     Ok(Box::new(TableSourceExecutor::new(
                         table_id,
                         schema,
+                        column_ids,
                         stream_receiver,
                         barrier_receiver,
                     )))

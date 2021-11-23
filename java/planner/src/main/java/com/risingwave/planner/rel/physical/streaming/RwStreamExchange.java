@@ -49,4 +49,9 @@ public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel
     var dist = traitSet.canonize(distribution);
     return new RwStreamExchange(cluster, traitSet, input, dist);
   }
+
+  @Override
+  public <T> RwStreamingRelVisitor.Result<T> accept(RwStreamingRelVisitor<T> visitor) {
+    return visitor.visit(this);
+  }
 }

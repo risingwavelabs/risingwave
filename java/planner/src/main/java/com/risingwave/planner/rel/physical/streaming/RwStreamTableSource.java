@@ -46,6 +46,14 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
     this.columnIds = columnIds;
   }
 
+  public TableCatalog.TableId getTableId() {
+    return tableId;
+  }
+
+  public ImmutableList<ColumnCatalog.ColumnId> getColumnIds() {
+    return columnIds;
+  }
+
   /** Serialize to protobuf */
   @Override
   public StreamNode serialize() {
@@ -85,6 +93,11 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
       pw.item("columns", columnNames);
     }
     return pw;
+  }
+
+  @Override
+  public <T> RwStreamingRelVisitor.Result<T> accept(RwStreamingRelVisitor<T> visitor) {
+    return visitor.visit(this);
   }
 
   /**

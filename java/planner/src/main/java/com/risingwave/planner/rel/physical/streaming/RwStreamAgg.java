@@ -61,4 +61,9 @@ public class RwStreamAgg extends RwAggregate implements RisingWaveStreamingRel {
     return new RwStreamAgg(
         getCluster(), traitSet, getHints(), input, groupSet, groupSets, aggCalls);
   }
+
+  @Override
+  public <T> RwStreamingRelVisitor.Result<T> accept(RwStreamingRelVisitor<T> visitor) {
+    return visitor.visit(this);
+  }
 }

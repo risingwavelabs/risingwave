@@ -21,6 +21,7 @@ import org.apache.calcite.schema.Table;
 import org.apache.calcite.util.ImmutableIntList;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+/** Schema Catalog Definition */
 public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCatalog.SchemaName>
     implements Schema {
   private final AtomicInteger nextTableId = new AtomicInteger(0);
@@ -60,7 +61,6 @@ public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCata
             createTableInfo.isStream(),
             ImmutableIntList.of(),
             DataDistributionType.ALL,
-            0,
             createTableInfo.getProperties(),
             createTableInfo.getRowFormat());
 
@@ -163,12 +163,14 @@ public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCata
     return toCalciteSchemaWrapper().plus();
   }
 
+  /** Schema Id Definition */
   public static class SchemaId extends NonRootLikeBase<Integer, DatabaseCatalog.DatabaseId> {
     public SchemaId(Integer value, DatabaseCatalog.DatabaseId parent) {
       super(value, parent);
     }
   }
 
+  /** Schema Name Definition */
   public static class SchemaName extends NonRootLikeBase<String, DatabaseCatalog.DatabaseName> {
     public SchemaName(String value, DatabaseCatalog.DatabaseName parent) {
       super(value, parent);

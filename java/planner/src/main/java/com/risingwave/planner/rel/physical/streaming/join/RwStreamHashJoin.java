@@ -6,6 +6,7 @@ import static com.risingwave.planner.rel.physical.batch.join.BatchJoinUtils.isEq
 import com.risingwave.planner.rel.logical.RwLogicalJoin;
 import com.risingwave.planner.rel.physical.batch.join.BatchJoinUtils;
 import com.risingwave.planner.rel.physical.streaming.RisingWaveStreamingRel;
+import com.risingwave.planner.rel.physical.streaming.RwStreamingRelVisitor;
 import com.risingwave.proto.streaming.plan.HashJoinNode;
 import com.risingwave.proto.streaming.plan.StreamNode;
 import java.util.Collections;
@@ -67,6 +68,11 @@ public class RwStreamHashJoin extends Join implements RisingWaveStreamingRel {
       boolean semiJoinDone) {
     return new RwStreamHashJoin(
         getCluster(), traitSet, getHints(), left, right, conditionExpr, joinType);
+  }
+
+  @Override
+  public <T> RwStreamingRelVisitor.Result<T> accept(RwStreamingRelVisitor<T> visitor) {
+    return visitor.visit(this);
   }
 
   /** Rule for converting logical join to stream hash join */
