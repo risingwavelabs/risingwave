@@ -75,3 +75,55 @@ where
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::storage::hummock::HummockOptions;
+    use crate::stream_op::RowSerializer;
+    use risingwave_common::catalog::Schema;
+    use risingwave_common::types::ScalarImpl::Int64;
+
+    fn generate_hummock_keyed_state() -> HummockKeyedState<RowSerializer, RowSerializer> {
+        let schema_new = || RowSerializer::new(Schema::default());
+        HummockKeyedState::new(
+            schema_new(),
+            schema_new(),
+            HummockStorage::new(HummockOptions::default()),
+        )
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn test_hummock_keyed_state_absent_val() {
+        let hummock_keyed_state = generate_hummock_keyed_state();
+        hummock_keyed_state.get(&Row(vec![])).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_hummock_keyed_state_present_val() {
+        let mut hummock_keyed_state = generate_hummock_keyed_state();
+        let row_val = |x| Row(vec![Some(Int64(x))]);
+        let empty_row_key = Row(vec![]);
+        let some_row_key = Row(vec![Some(Int64(101))]);
+        hummock_keyed_state.put(empty_row_key.clone(), row_val(-1));
+        hummock_keyed_state.put(empty_row_key.clone(), row_val(1));
+        hummock_keyed_state.put(some_row_key.clone(), row_val(2));
+        assert_eq!(
+            hummock_keyed_state.get(&empty_row_key).await.unwrap(),
+            Some(row_val(1))
+        );
+        hummock_keyed_state.delete(&empty_row_key);
+        assert_eq!(hummock_keyed_state.get(&empty_row_key).await.unwrap(), None);
+        assert_eq!(
+            hummock_keyed_state.get(&some_row_key).await.unwrap(),
+            Some(row_val(2))
+        );
+        hummock_keyed_state.put(empty_row_key.clone(), row_val(3));
+        assert_eq!(
+            hummock_keyed_state.get(&empty_row_key).await.unwrap(),
+            Some(row_val(3))
+        );
+    }
+}
