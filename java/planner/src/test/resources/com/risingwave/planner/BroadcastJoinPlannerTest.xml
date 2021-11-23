@@ -1,0 +1,70 @@
+<Root>
+    <TestCase name="broadcast inner join">
+        <Resource name="sql">
+            <![CDATA[
+SELECT * FROM t1 INNER JOIN t2 ON t1.v1 > t2.v1
+            ]]>
+        </Resource>
+        <Resource name="distributed">
+            <![CDATA[
+RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
+  RwBatchNestLoopJoin(condition=[>($0, $3)], joinType=[inner])
+    RwBatchTableScan(table=[[test_schema, t1]], columns=[v1,v2,v3])
+    RwBatchExchange(distribution=[RwDistributionTrait{type=BROADCAST_DISTRIBUTED, keys=[]}], collation=[[]])
+      RwBatchTableScan(table=[[test_schema, t2]], columns=[v1,v2])
+            ]]>
+        </Resource>
+    </TestCase>
+
+    <TestCase name="broadcast left join">
+        <Resource name="sql">
+            <![CDATA[
+SELECT * FROM t1 LEFT JOIN t2 ON t1.v1 > t2.v1
+            ]]>
+        </Resource>
+        <Resource name="distributed">
+            <![CDATA[
+RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
+  RwBatchNestLoopJoin(condition=[>($0, $3)], joinType=[left])
+    RwBatchTableScan(table=[[test_schema, t1]], columns=[v1,v2,v3])
+    RwBatchExchange(distribution=[RwDistributionTrait{type=BROADCAST_DISTRIBUTED, keys=[]}], collation=[[]])
+      RwBatchTableScan(table=[[test_schema, t2]], columns=[v1,v2])
+            ]]>
+        </Resource>
+    </TestCase>
+
+    <TestCase name="broadcast right join">
+        <Resource name="sql">
+            <![CDATA[
+SELECT * FROM t1 RIGHT JOIN t2 ON t1.v1 > t2.v1
+            ]]>
+        </Resource>
+        <Resource name="distributed">
+            <![CDATA[
+RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
+  RwBatchNestLoopJoin(condition=[>($0, $3)], joinType=[right])
+    RwBatchExchange(distribution=[RwDistributionTrait{type=BROADCAST_DISTRIBUTED, keys=[]}], collation=[[]])
+      RwBatchTableScan(table=[[test_schema, t1]], columns=[v1,v2,v3])
+    RwBatchTableScan(table=[[test_schema, t2]], columns=[v1,v2])
+            ]]>
+        </Resource>
+    </TestCase>
+
+    <TestCase name="broadcast outer join">
+        <Resource name="sql">
+            <![CDATA[
+SELECT * FROM t1 FULL OUTER JOIN t2 ON t1.v1 > t2.v1
+            ]]>
+        </Resource>
+        <Resource name="distributed">
+            <![CDATA[
+RwBatchNestLoopJoin(condition=[>($0, $3)], joinType=[full])
+  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
+    RwBatchTableScan(table=[[test_schema, t1]], columns=[v1,v2,v3])
+  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
+    RwBatchTableScan(table=[[test_schema, t2]], columns=[v1,v2])
+            ]]>
+        </Resource>
+    </TestCase>
+
+</Root>

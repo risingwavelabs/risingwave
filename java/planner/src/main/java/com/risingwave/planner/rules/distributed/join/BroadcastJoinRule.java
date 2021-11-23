@@ -46,18 +46,22 @@ public class BroadcastJoinRule extends ConverterRule {
     var leftTraits = left.getTraitSet().plus(BATCH_DISTRIBUTED);
     var right = join.getRight();
     var rightTraits = right.getTraitSet().plus(BATCH_DISTRIBUTED);
+    var joinTraits = join.getTraitSet().plus(BATCH_DISTRIBUTED);
     if (joinType.generatesNullsOnLeft() && joinType.generatesNullsOnRight()) {
       // full outer, stand alone
       leftTraits = leftTraits.plus(RwDistributions.SINGLETON);
       rightTraits = rightTraits.plus(RwDistributions.SINGLETON);
+      joinTraits = joinTraits.plus(RwDistributions.SINGLETON);
     } else if (joinType.generatesNullsOnLeft()) {
       // right outer, broadcast left, shard right
       leftTraits = leftTraits.plus(RwDistributions.BROADCAST_DISTRIBUTED);
       rightTraits = rightTraits.plus(RwDistributions.RANDOM_DISTRIBUTED);
+      joinTraits = joinTraits.plus(RwDistributions.RANDOM_DISTRIBUTED);
     } else {
       // broadcast right(smaller), shard left
       leftTraits = leftTraits.plus(RwDistributions.RANDOM_DISTRIBUTED);
       rightTraits = rightTraits.plus(RwDistributions.BROADCAST_DISTRIBUTED);
+      joinTraits = joinTraits.plus(RwDistributions.RANDOM_DISTRIBUTED);
     }
 
     leftTraits = leftTraits.simplify();
@@ -66,11 +70,6 @@ public class BroadcastJoinRule extends ConverterRule {
     var newRight = convert(right, rightTraits);
     // other trait will generate by derive method of join
     return join.copy(
-        join.getTraitSet().plus(BATCH_DISTRIBUTED),
-        join.getCondition(),
-        newLeft,
-        newRight,
-        joinType,
-        join.isSemiJoinDone());
+        joinTraits, join.getCondition(), newLeft, newRight, joinType, join.isSemiJoinDone());
   }
 }

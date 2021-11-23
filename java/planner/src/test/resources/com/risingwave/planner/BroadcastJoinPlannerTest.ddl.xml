@@ -1,0 +1,13 @@
+<Root>
+    <Resource>
+        <![CDATA[
+create table t1(v1 int, v2 int, v3 int)
+        ]]>
+    </Resource>
+
+    <Resource>
+        <![CDATA[
+create table t2(v1 int, v2 int)
+        ]]>
+    </Resource>
+</Root>
