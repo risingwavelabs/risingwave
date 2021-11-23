@@ -181,7 +181,7 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
                         InternalError(format!("Failed to deserialize f64, reason: {:?}", e))
                     })?,
                 )),
-                TypeName::Char => ScalarImpl::UTF8(
+                TypeName::Char | TypeName::Symbol => ScalarImpl::UTF8(
                     std::str::from_utf8(prost_value.get_body())
                         .map_err(|e| {
                             InternalError(format!("Failed to deserialize char, reason: {:?}", e))

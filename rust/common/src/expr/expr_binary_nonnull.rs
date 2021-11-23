@@ -1,5 +1,5 @@
 /// For expression that only accept two non null arguments as input.
-use crate::array::{Array, BoolArray, DataTypeTrait, I32Array, UTF8Array};
+use crate::array::{Array, BoolArray, DataTypeTrait, I32Array, I64Array, UTF8Array};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 use crate::expr::template::BinaryExpression;
@@ -9,6 +9,7 @@ use crate::types::*;
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::cmp::*;
 use crate::vector_op::conjunction::{and, or};
+use crate::vector_op::extract::{extract_from_date, extract_from_timestamp};
 use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
 use risingwave_pb::expr::expr_node::Type as ProstExprType;
@@ -148,6 +149,31 @@ macro_rules! gen_binary_expr {
   };
 }
 
+fn build_extract_expr(ret: DataTypeRef, l: BoxedExpression, r: BoxedExpression) -> BoxedExpression {
+    match r.return_type().data_type_kind() {
+        DataTypeKind::Date => Box::new(BinaryExpression::<UTF8Array, I32Array, I64Array, _> {
+            expr_ia1: l,
+            expr_ia2: r,
+            return_type: ret,
+            func: extract_from_date,
+            _phantom: PhantomData,
+        }),
+        DataTypeKind::Timestamp => Box::new(BinaryExpression::<UTF8Array, I64Array, I64Array, _> {
+            expr_ia1: l,
+            expr_ia2: r,
+            return_type: ret,
+            func: extract_from_timestamp,
+            _phantom: PhantomData,
+        }),
+        _ => {
+            unimplemented!(
+                "Extract ( {:?} ) is not supported yet!",
+                r.return_type().data_type_kind()
+            )
+        }
+    }
+}
+
 pub fn new_binary_expr(
     expr_type: ProstExprType,
     ret: DataTypeRef,
@@ -202,6 +228,7 @@ pub fn new_binary_expr(
             func: or,
             _phantom: PhantomData,
         }),
+        ProstExprType::Extract => build_extract_expr(ret, l, r),
         tp => {
             unimplemented!(
                 "The expression {:?} using vectorized expression framework is not supported yet!",

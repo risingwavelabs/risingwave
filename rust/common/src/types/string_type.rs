@@ -72,7 +72,7 @@ impl<'a> TryFrom<&'a DataTypeProto> for StringType {
 
     fn try_from(proto: &'a DataTypeProto) -> Result<Self> {
         match proto.get_type_name() {
-            TypeName::Char => Ok(Self {
+            TypeName::Char | TypeName::Symbol => Ok(Self {
                 nullable: proto.is_nullable,
                 width: proto.precision as usize,
                 kind: DataTypeKind::Char,

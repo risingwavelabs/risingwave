@@ -25,6 +25,10 @@ public class SymbolType extends PrimitiveTypeBase {
     return DataType.newBuilder()
         .setTypeName(DataType.TypeName.SYMBOL)
         .setIsNullable(nullable)
+        // the value of symbol is an enum of TimeUnitRange.
+        // We will serialize it in string with max width 11
+        // In TimeUnitRange, the longest word is 'MACROSECOND',
+        .setPrecision(11)
         .build();
   }
 

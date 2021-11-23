@@ -96,6 +96,7 @@ pub fn build_from_prost(proto: &DataTypeProto) -> Result<DataTypeRef> {
       TypeName::Float => Float32Type,
       TypeName::Double => Float64Type,
       TypeName::Boolean => BoolType,
+      TypeName::Symbol => StringType,
       TypeName::Char => StringType,
       TypeName::Varchar => StringType,
       TypeName::Date => DateType,

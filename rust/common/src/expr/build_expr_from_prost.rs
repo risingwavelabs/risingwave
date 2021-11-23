@@ -181,7 +181,9 @@ pub fn build_case_expr(prost: &ProstExprNode) -> Result<BoxedExpression> {
 
 #[cfg(test)]
 mod tests {
-    use super::build_case_expr;
+    use std::vec;
+
+    use super::*;
     use risingwave_pb::data::{data_type::IntervalType, data_type::TypeName, DataType};
     use risingwave_pb::expr::{
         expr_node::{RexNode, Type},
@@ -228,5 +230,73 @@ mod tests {
             rex_node: Some(RexNode::FuncCall(call)),
         };
         assert!(build_case_expr(&p).is_ok());
+    }
+
+    #[test]
+    fn test_build_extract_expr() {
+        let left = ExprNode {
+            expr_type: Type::ConstantValue as i32,
+            return_type: Some(DataType {
+                type_name: TypeName::Symbol as i32,
+                precision: 11,
+                scale: 0,
+                is_nullable: false,
+                interval_type: IntervalType::Invalid as i32,
+            }),
+            rex_node: Some(RexNode::Constant(ConstantValue {
+                body: "DAY".as_bytes().to_vec(),
+            })),
+        };
+        let right_date = ExprNode {
+            expr_type: Type::ConstantValue as i32,
+            return_type: Some(DataType {
+                type_name: TypeName::Date as i32,
+                precision: 0,
+                scale: 0,
+                is_nullable: false,
+                interval_type: IntervalType::Invalid as i32,
+            }),
+            rex_node: Some(RexNode::Constant(ConstantValue { body: vec![] })),
+        };
+        let right_time = ExprNode {
+            expr_type: Type::ConstantValue as i32,
+            return_type: Some(DataType {
+                type_name: TypeName::Timestamp as i32,
+                precision: 0,
+                scale: 0,
+                is_nullable: false,
+                interval_type: IntervalType::Invalid as i32,
+            }),
+            rex_node: Some(RexNode::Constant(ConstantValue { body: vec![] })),
+        };
+
+        let expr = ExprNode {
+            expr_type: Type::Extract as i32,
+            return_type: Some(DataType {
+                type_name: TypeName::Int64 as i32,
+                precision: 0,
+                scale: 0,
+                is_nullable: false,
+                interval_type: IntervalType::Invalid as i32,
+            }),
+            rex_node: Some(RexNode::FuncCall(FunctionCall {
+                children: vec![left.clone(), right_date],
+            })),
+        };
+        assert!(build_binary_expr_prost(&expr).is_ok());
+        let expr = ExprNode {
+            expr_type: Type::Extract as i32,
+            return_type: Some(DataType {
+                type_name: TypeName::Int64 as i32,
+                precision: 0,
+                scale: 0,
+                is_nullable: false,
+                interval_type: IntervalType::Invalid as i32,
+            }),
+            rex_node: Some(RexNode::FuncCall(FunctionCall {
+                children: vec![left, right_time],
+            })),
+        };
+        assert!(build_binary_expr_prost(&expr).is_ok());
     }
 }

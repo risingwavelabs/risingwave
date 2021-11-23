@@ -11,7 +11,8 @@
         "children": [{
           "exprType": "CONSTANT_VALUE",
           "returnType": {
-            "typeName": "SYMBOL"
+            "typeName": "SYMBOL",
+            "precision": 11
           },
           "constant": {
             "body": "REFZ"
