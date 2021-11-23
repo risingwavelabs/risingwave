@@ -12,7 +12,7 @@ message BlockOffset {
   uint32 len = 3;
 }
 
-message TableIndex {
+message TableMeta {
   repeated BlockOffset offsets = 1;
   bytes bloom_filter = 2;
   uint32 estimated_size = 3;

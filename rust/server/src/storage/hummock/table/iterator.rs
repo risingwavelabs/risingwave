@@ -202,12 +202,13 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn basic_test() {
+    // use super::*;
+    #[tokio::test]
+    async fn basic_test() {
         let opt = TableBuilderOptions {
             bloom_false_positive: 0.0,
             block_size: 16384,
-            table_size: 0,
+            table_capacity: 0,
         };
 
         let mut b = TableBuilder::new(opt);
@@ -224,9 +225,9 @@ mod tests {
                 ),
             );
         }
-        let (blocks, meta) = b.finish_to_blocks_and_meta();
+        let (blocks, meta) = b.finish();
         let table = Table::load(0, blocks, meta).unwrap();
-        let block = table.block(0).unwrap();
+        let block = table.block(0).await.unwrap();
 
         let mut blk_iter = BlockIterator::new(block);
         let mut idx = 0;

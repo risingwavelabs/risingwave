@@ -15,10 +15,10 @@ impl MockFileSystem {
         }
     }
 
-    /// Write contents to the mock file system.
+    /// Write content to the mock file system.
     /// Create the path recursively if necessary.
     /// Error conditions:
-    /// - The file exists.
+    /// - The file already exists.
     pub async fn write(&mut self, path: String, content: Bytes) -> HummockResult<()> {
         // TODO: support file descriptor flags
         if self.files.contains_key(&*path) {

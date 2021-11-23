@@ -36,7 +36,7 @@ impl<'a, T: AsMut<[u8]>> BitSliceMut for T {
     }
 }
 
-/// Bloom implements bloom filter functionalities over a bit-slice of data.
+/// Bloom implements Bloom filter functionalities over a bit-slice of data.
 pub struct Bloom<'a> {
     /// data of filter in bits
     filter: &'a [u8],
@@ -45,27 +45,27 @@ pub struct Bloom<'a> {
 }
 
 impl<'a> Bloom<'a> {
-    /// Create a bloom filter from a byte slice
+    /// Create a Bloom filter from a byte slice
     pub fn new(buf: &'a [u8]) -> Self {
         let filter = &buf[..buf.len() - 1];
         let k = buf[buf.len() - 1];
         Self { filter, k }
     }
 
-    /// Get bloom filter bits per key from entries count and FPR
+    /// Get Bloom filter bits per key from entries count and FPR
     pub fn bloom_bits_per_key(entries: usize, false_positive_rate: f64) -> usize {
         let size = -1.0 * (entries as f64) * false_positive_rate.ln() / f64::consts::LN_2.powi(2);
         let locs = (f64::consts::LN_2 * size / (entries as f64)).ceil();
         locs as usize
     }
 
-    /// Build bloom filter from key hashes
+    /// Build Bloom filter from key hashes
     pub fn build_from_key_hashes(keys: &[u32], bits_per_key: usize) -> Bytes {
         // 0.69 is approximately ln(2)
         let k = ((bits_per_key as f64) * 0.69) as u32;
         // limit k in [1, 30]
         let k = k.min(30).max(1);
-        // For small len(keys), we set a minimum bloom filter length to avoid high FPR
+        // For small len(keys), we set a minimum Bloom filter length to avoid high FPR
         let nbits = (keys.len() * bits_per_key).max(64);
         let nbytes = (nbits + 7) / 8;
         // nbits is always multiplication of 8
@@ -85,10 +85,10 @@ impl<'a> Bloom<'a> {
         filter.freeze()
     }
 
-    /// Check if a bloom filter may contain some data
+    /// Check if a Bloom filter may contain some data
     pub fn may_contain(&self, mut h: u32) -> bool {
         if self.k > 30 {
-            // potential new encoding for short bloom filters
+            // potential new encoding for short Bloom filters
             true
         } else {
             let nbits = self.filter.bit_len();

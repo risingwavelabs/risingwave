@@ -13,7 +13,7 @@ use super::{HummockError, HummockResult};
 use crate::storage::hummock::bloom::Bloom;
 use bytes::{Buf, Bytes};
 use prost::Message;
-use risingwave_pb::hummock::{Checksum, TableIndex};
+use risingwave_pb::hummock::{Checksum, TableMeta};
 use utils::verify_checksum;
 
 /// Block contains several entries. It can be obtained from an SST.
@@ -41,36 +41,7 @@ impl Block {
     }
 }
 
-/// [`Table`] stores data of an SST. It is immutable once created and initialized. For now, we
-/// assume that all content of SST is preloaded into the memory before creating the [`Table`]
-/// object. In the future, we should decide on the I/O interface and block cache implementation, and
-/// then implement on-demand block loading.
-///
-/// The table format has already been explained (in a simple way) in [`TableBuilder`]. Here we
-/// explain this in more detail:
-///
-/// Generally, a table is consisted of two parts:
-/// - Table data is simply a sequence of blocks.
-/// - Metadata is the prost-encoded `TableIndex` data and essential information to determine the
-/// checksum.
-///
-/// ```plain
-/// Table data format:
-/// | Block | Block | Block | Block | Block |
-/// ```
-///
-/// ```plain
-/// Metadata format
-/// |       variable      | variable |       4B        |
-/// | Prost-encoded Index | Checksum | Checksum Length |
-/// ```
-///
-/// The reader will begin reading the table from the tail of the file. First read checksum length,
-/// then decode checksum for the index, and finally load the prost-encoded [`TableIndex`].
-///
-/// After reading the index, we could know where each block is located, the bloom filter for the
-/// table, and the first key of each block. Inside each block, we apply prefix-compression and store
-/// key-value pairs.
+/// [`Table`] represents a loaded SST file with the info we have about it.
 pub struct Table {
     /// concatenated blocks of an SST
     blocks: Bytes,
@@ -82,16 +53,15 @@ pub struct Table {
     estimated_size: u32,
 
     /// metadata of SST
-    meta: TableIndex,
+    meta: TableMeta,
 
-    /// true if there's bloom filter in table
+    /// true if there's Bloom filter in table
     has_bloom_filter: bool,
 }
 
 impl Table {
     /// Open an existing SST from a pre-loaded [`Bytes`].
-    pub fn load(id: u64, blocks: Bytes, meta: Bytes) -> HummockResult<Self> {
-        let meta = Self::decode_meta(&meta[..])?;
+    pub fn load(id: u64, blocks: Bytes, meta: TableMeta) -> HummockResult<Self> {
         let has_bloom_filter = !meta.bloom_filter.is_empty();
         let estimated_size = meta.estimated_size;
         Ok(Table {
@@ -103,7 +73,14 @@ impl Table {
         })
     }
 
-    fn decode_meta(content: &[u8]) -> HummockResult<TableIndex> {
+    /// Decode bytes to table metadata instance.
+    ///
+    /// Metadata format:
+    /// ```plain
+    /// |       variable      | variable |       4B        |
+    /// |  Prost-encoded Meta | Checksum | Checksum Length |
+    /// ```
+    fn decode_meta(content: &[u8]) -> HummockResult<TableMeta> {
         let mut read_pos = content.len();
 
         // read checksum length from last 4 bytes
@@ -120,10 +97,16 @@ impl Table {
         let data = &content[0..read_pos];
         verify_checksum(&checksum, data)?;
 
-        Ok(TableIndex::decode(data)?)
+        Ok(TableMeta::decode(data)?)
     }
 
-    fn block(&self, idx: usize) -> HummockResult<Arc<Block>> {
+    /// Get the required block.
+    /// After reading the metadata, we could know where each block is located, the Bloom filter for
+    /// the table, and the first key of each block.
+    /// Inside each block, we apply prefix-compression and store key-value pairs.
+    /// The block header records the base key of the block. And then, each entry
+    /// records the difference to the last key, and the value.
+    async fn block(&self, idx: usize) -> HummockResult<Arc<Block>> {
         let block_offset = &self.meta.offsets[idx];
 
         let offset = block_offset.offset as usize;
@@ -153,7 +136,6 @@ impl Table {
             entry_offsets.push(entry_offsets_ptr.get_u32_le());
         }
 
-        // The checksum is calculated for the blocks
         let data = self.blocks.slice(offset..offset + read_pos + 4);
 
         let blk = Arc::new(Block {
@@ -170,7 +152,8 @@ impl Table {
         Ok(blk)
     }
 
-    fn meta_key(&self) -> u64 {
+    /// Get table ID
+    fn table_id(&self) -> u64 {
         self.id
     }
 
@@ -189,7 +172,8 @@ impl Table {
         self.id
     }
 
-    fn fetch_meta(&self) -> &TableIndex {
+    /// Get table metadata
+    fn meta(&self) -> &TableMeta {
         &self.meta
         // TODO: encryption
     }
@@ -201,7 +185,7 @@ impl Table {
     /// a.k.a. we don't know the answer.
     pub fn surely_not_have(&self, hash: u32) -> bool {
         if self.has_bloom_filter {
-            let meta = self.fetch_meta();
+            let meta = self.meta();
             let bloom = Bloom::new(&meta.bloom_filter);
             !bloom.may_contain(hash)
         } else {
@@ -213,12 +197,13 @@ impl Table {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[tokio::test]
     async fn test_table_load() {
         let (blocks, meta) = super::builder::tests::generate_table();
         let table = Table::load(0, blocks, meta).unwrap();
         for i in 0..10 {
-            table.block(i).unwrap();
+            table.block(i).await.unwrap();
         }
     }
 }

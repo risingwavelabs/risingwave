@@ -239,7 +239,7 @@ impl BummockTable {
 
         // mark them deleted in the dbmp
 
-        // stamp the row group if transaction boundry is hit
+        // stamp the row group if transaction boundary is hit
 
         todo!();
     }

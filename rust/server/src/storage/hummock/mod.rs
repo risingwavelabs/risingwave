@@ -81,7 +81,7 @@ pub struct HummockOptions {
     pub table_size: u32,
     /// size of each block in bytes in SST
     pub block_size: u32,
-    /// false positive probability of bloom filter
+    /// false positive probability of Bloom filter
     pub bloom_false_positive: f64,
 }
 
@@ -106,7 +106,7 @@ impl HummockStorage {
     ) -> HummockResult<()> {
         let get_builder = |options: &HummockOptions| {
             TableBuilder::new(TableBuilderOptions {
-                table_size: options.table_size,
+                table_capacity: options.table_size,
                 block_size: options.block_size,
                 bloom_false_positive: options.bloom_false_positive,
             })
@@ -120,7 +120,7 @@ impl HummockStorage {
         // Producing only one table regardless of capacity for now.
         // TODO: update kv pairs to multi tables when size of the kv pairs is larger than
         // TODO: the capacity of a single table.
-        let (blocks, meta) = table_builder.finish_to_blocks_and_meta();
+        let (blocks, meta) = table_builder.finish();
         let old_thread_count = self.unique_id.fetch_add(1, Ordering::SeqCst);
         let table = Table::load(old_thread_count, blocks, meta).unwrap();
 
