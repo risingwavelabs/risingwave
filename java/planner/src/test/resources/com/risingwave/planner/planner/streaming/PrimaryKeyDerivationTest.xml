@@ -2,12 +2,12 @@
     <TestCase name="query 1">
     <Resource name="sql">
         <![CDATA[
-create materialized view t_q1 as select * from t;
+create materialized view t_select as select * from t;
             ]]>
     </Resource>
     <Resource name="plan">
         <![CDATA[
-RwStreamMaterializedView(name=[t_q1])
+RwStreamMaterializedView(name=[t_select])
   RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
     RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
 ]]>
@@ -21,13 +21,13 @@ RwStreamMaterializedView(name=[t_q1])
     <TestCase name="query 2">
         <Resource name="sql">
             <![CDATA[
-create materialized view T_aggregate as select v1, C from ( select v1, v2, count(*) as C from t group by v1, v2);
+create materialized view T_select_aggregate as select v1, C from ( select v1, v2, count(*) as C from t group by v1, v2);
             ]]>
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[t_aggregate])
-  RwStreamProject(v1=[$0], c=[$2])
+RwStreamMaterializedView(name=[t_select_aggregate])
+  RwStreamProject(v1=[$0], c=[$2], v2=[$1])
     RwStreamFilter(condition=[<>($2, 0)])
       RwStreamAgg(group=[{0, 1}], c=[COUNT()])
         RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
@@ -37,7 +37,7 @@ RwStreamMaterializedView(name=[t_aggregate])
         </Resource>
         <Resource name="primaryKey">
             <![CDATA[
-[0, 1]
+[0, 2]
             ]]>
         </Resource>
     </TestCase>
@@ -62,6 +62,200 @@ RwStreamMaterializedView(name=[t_inner_join])
             <![CDATA[
 [3, 7]
             ]]>
+        </Resource>
+    </TestCase>
+
+    <TestCase name="query 4">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T_left_join as select * from t as t1 left join t as t2 on t1.v2 = t2.v1;
+]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[t_left_join])
+  RwStreamHashJoin(condition=[=($1, $4)], joinType=[left])
+    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
+      RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+        RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
+    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
+]]>
+        </Resource>
+        <Resource name="primaryKey">
+            <![CDATA[
+[3, 7]
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="query 5">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T_right_join as select * from t as t1 right join t as t2 on t1.v2 = t2.v1;
+]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[t_right_join])
+  RwStreamHashJoin(condition=[=($1, $4)], joinType=[right])
+    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
+      RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+        RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
+    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
+]]>
+        </Resource>
+        <Resource name="primaryKey">
+            <![CDATA[
+[7, 3]
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="query 6">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T_full_join as select * from t as t1 full join t as t2 on t1.v2 = t2.v1;
+]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[t_full_join])
+  RwStreamHashJoin(condition=[=($1, $4)], joinType=[full])
+    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
+      RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+        RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
+    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
+]]>
+        </Resource>
+        <Resource name="primaryKey">
+            <![CDATA[
+[3, 7]
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="query 7">
+        <Resource name="sql">
+        <![CDATA[
+create materialized view T_left_group_inner_join as select * from (select v1, v2, count(*) from t group by v1, v2) as t1 join t as t2 on t1.v2 = t2.v1;
+]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[t_left_group_inner_join])
+  RwStreamHashJoin(condition=[=($1, $3)], joinType=[inner])
+    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
+      RwStreamFilter(condition=[<>($2, 0)])
+        RwStreamAgg(group=[{0, 1}], EXPR$2=[COUNT()])
+          RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+            RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+              RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
+    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
+]]>
+        </Resource>
+        <Rseource name="primaryKey">
+            <![CDATA[
+[4, 5, 6]
+]]>
+        </Rseource>
+    </TestCase>
+    <TestCase name="query 8">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T_left_group_right_group_inner_join as select * from
+(select v1, v2, count(*) from t group by v1, v2) as t1
+join
+(select v1, v2, avg(v3) from t group by v1, v2) as t2 on t1.v2 = t2.v1;
+]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[t_left_group_right_group_inner_join])
+  RwStreamHashJoin(condition=[=($1, $3)], joinType=[inner])
+    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
+      RwStreamFilter(condition=[<>($2, 0)])
+        RwStreamAgg(group=[{0, 1}], EXPR$2=[COUNT()])
+          RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+            RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+              RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
+    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+      RwStreamProject(v1=[$0], v2=[$1], EXPR$2=[$2])
+        RwStreamFilter(condition=[<>($3, 0)])
+          RwStreamAgg(group=[{0, 1}], EXPR$2=[AVG($2)], Row Count=[COUNT()])
+            RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+              RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3])
+]]>
+        </Resource>
+        <Resource name="primaryKey">
+            <![CDATA[
+[0, 1, 3, 4]
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="query 9">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T_two_condition_inner_join as
+select * from t as t1 join t as t2 on t1.v1 = t2.v2 and t1.v2 = t2.v1;
+]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[t_two_condition_inner_join])
+  RwStreamHashJoin(condition=[AND(=($0, $5), =($1, $4))], joinType=[inner])
+    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+      RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+        RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
+    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+      RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+        RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
+]]>
+        </Resource>
+        <Resource name="primaryKey">
+            <![CDATA[
+[3, 7]
+]]>
+        </Resource>
+    </TestCase>
+
+    <TestCase name="query 10">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T_wrong_case as
+select t1.v1 from
+(select v1, v2, sum(v3) from t group by v1, v2) as t1
+join
+(select v1, v2, avg(v3) from t group by v1, v2) as t2
+on t1.v1 = t2.v1;
+]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[t_wrong_case])
+  RwStreamProject(v1=[$0], v2=[$1], v10=[$3], v20=[$4])
+    RwStreamHashJoin(condition=[=($0, $3)], joinType=[inner])
+      RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+        RwStreamProject(v1=[$0], v2=[$1], EXPR$2=[$2])
+          RwStreamFilter(condition=[<>($3, 0)])
+            RwStreamAgg(group=[{0, 1}], EXPR$2=[SUM($2)], Row Count=[COUNT()])
+              RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+                RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                  RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3])
+      RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+        RwStreamProject(v1=[$0], v2=[$1], EXPR$2=[$2])
+          RwStreamFilter(condition=[<>($3, 0)])
+            RwStreamAgg(group=[{0, 1}], EXPR$2=[AVG($2)], Row Count=[COUNT()])
+              RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+                RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                  RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3])
+]]>
+        </Resource>
+        <Resource name="primaryKey">
+            <![CDATA[
+[0, 1, 2, 3]
+]]>
         </Resource>
     </TestCase>
 </Root>

@@ -1,8 +1,10 @@
 package com.risingwave.planner.rel.physical.streaming;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
+import com.risingwave.planner.rel.common.dist.RwDistributionTrait;
 import com.risingwave.planner.rel.physical.streaming.join.RwStreamHashJoin;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -11,127 +13,219 @@ import java.util.List;
 import org.apache.calcite.rex.RexInputRef;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexShuttle;
+import org.apache.calcite.util.Permutation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/**
- * This visitor is used to construct the new plan and also the primary key for each operator. We
- * remark that we denote primary key by a list instead of a set as the order of the keys matters in
- * certain cases. For example, select v1, v2, count(*) from t group by v1, v2. In this case, the
- * order of v1, v2 does not matter. However, select v1, v2, count(*) from t group by v1, v2 order by
- * v2. In this case, the order has to be [v2, v1] but not [v1, v2].
- */
-public class PrimaryKeyDerivationVisitor implements RwStreamingRelVisitor<ImmutableList<Integer>> {
+/** This visitor is used to construct the new plan and also the primary key for each operator. */
+public class PrimaryKeyDerivationVisitor
+    implements RwStreamingRelVisitor<PrimaryKeyDerivationVisitor.PrimaryKeyIndicesAndPositionMap> {
   private static final Logger LOGGER = LoggerFactory.getLogger(PrimaryKeyDerivationVisitor.class);
 
   /**
-   * @param node We want to find node's primary key
-   * @return Result contains both the new node and its primary key indices
+   * This class contains two things:
+   *
+   * <p>1. A list to indicate the indices of primary key among all the columns represented by the
+   * row type. We remark that we denote primary key by a list instead of a set as the order of the
+   * keys matters in certain cases. For example, select v1, v2, count(*) from t group by v1, v2. In
+   * this case, the order of v1, v2 does not matter. However, select v1, v2, count(*) from t group
+   * by v1, v2 order by v2. In this case, the order has to be [v2, v1] but not [v1, v2].
+   *
+   * <p>2. A map for the new child to tell its parent that some original columns have been changed
+   * into some other position. See comments for hash join.
    */
-  RwStreamingRelVisitor.Result<ImmutableList<Integer>> passThrough(RisingWaveStreamingRel node) {
-    assert node.getInputs().size() == 1;
-    RisingWaveStreamingRel input = (RisingWaveStreamingRel) node.getInput(0);
-    var p = input.accept(this);
-    RisingWaveStreamingRel newNode;
-    if (p.node != input) {
-      newNode = (RisingWaveStreamingRel) node.copy(node.getTraitSet(), ImmutableList.of(p.node));
-    } else {
-      newNode = node;
+  public class PrimaryKeyIndicesAndPositionMap {
+    private final ImmutableList<Integer> primaryKeyIndices;
+    // Since the new child can reorder its columns in its row type and thus mess up the index of
+    // input ref in parent operator,
+    // we need to a positionMap to renumber the index in input ref.
+    private final ImmutableMap<Integer, Integer> positionMap;
+
+    public PrimaryKeyIndicesAndPositionMap(
+        ImmutableList<Integer> primaryKeyIndices, ImmutableMap<Integer, Integer> positionMap) {
+      this.primaryKeyIndices = primaryKeyIndices;
+      this.positionMap = positionMap;
     }
-    return new Result<>(newNode, p.info);
+
+    public ImmutableList<Integer> getPrimaryKeyIndices() {
+      return primaryKeyIndices;
+    }
+
+    public ImmutableMap<Integer, Integer> getPositionMap() {
+      return positionMap;
+    }
   }
 
   /**
    * FIXME: If we select some columns instead of * from the join result, there will be a project on
-   * top of that. However, this project may remove some keys returned by Join. It cannot know that
-   * it still needs to remove that key, as child can indeed produce more key after
-   * RwStreamRelVisitor has visited the child. Hence, this function is solely designed for select *
-   * from xxx join xxx; Here are some explicit or implicit assumptions/conditions enforced by
-   * calcite: 1. The hash join's row type is derived by concatenating the row type of left input and
-   * row type of right input. See Join's deriveRowType. 2. The leftKeys and rightKeys of JoinInfo
-   * are one-to-one correspondent. 3. The leftKeys and rightKeys refer to the position of the row
-   * type of join. RightKeys do NOT refer to the positions in the row type of right child. 4. The
-   * newly added columns of children are always appended at last.
+   * top of the join operator. This project removes some columns returned by Join. It cannot know
+   * that it still needs to remove that column if that column is returned as primary key from the
+   * new child, in this case the join operator, as the new child can indeed add some new columns as
+   * part of the primary key. Hence, this function is solely designed for select * from xxx join
+   * xxx;
+   *
+   * <p>We need another one to specifically address project -> join.
+   *
+   * <p>Here are some explicit or implicit assumptions/conditions enforced by calcite:
+   *
+   * <p>1. The hash join's row type is derived by concatenating the row type of left input and row
+   * type of right input. See Join's deriveRowType.
+   *
+   * <p>2. The leftKeys and rightKeys of JoinInfo are one-to-one correspondent.
+   *
+   * <p>3. The leftKeys and rightKeys refer to the position of the output row type of join.
+   * RightKeys do NOT refer to the positions in the output row type of right child.
+   *
+   * <p>The invariant we try to maintain in this primary key derivation process is that the newly
+   * added columns of children are always appended at last. So it will not mess up the index in
+   * original InputRef RexNodes of some upstream operator.
+   *
+   * <p>However, this invariant can only be maintained for non-Join operator. If the new left child
+   * of a join operator has newly added columns in its row type, then these columns will be in the
+   * middle of the output row type of join operator. And the row type of the new right child will be
+   * appended behind that. Therefore, it brings additional complexity. This is why we introduce
+   * positionMap.
    *
    * @param hashJoin Join's primary key derivation rule is: outer_input.key() || inner_input.key()
    * @return New join and its output primary key.
    */
   @Override
-  public RwStreamingRelVisitor.Result<ImmutableList<Integer>> visit(RwStreamHashJoin hashJoin) {
+  public RwStreamingRelVisitor.Result<PrimaryKeyIndicesAndPositionMap> visit(
+      RwStreamHashJoin hashJoin) {
     LOGGER.debug("visit RwStreamHashJoin");
     RisingWaveStreamingRel leftInput = (RisingWaveStreamingRel) hashJoin.getInput(0);
     var originalLeftFieldCount = leftInput.getRowType().getFieldCount();
     var leftRes = leftInput.accept(this);
+    var leftPositionMap = leftRes.info.getPositionMap();
     var newLeftFieldCount = leftRes.node.getRowType().getFieldCount();
     RisingWaveStreamingRel rightInput = (RisingWaveStreamingRel) hashJoin.getInput(1);
+    var originalRightFieldCount = rightInput.getRowType().getFieldCount();
     var rightRes = rightInput.accept(this);
+    var rightPositionMap = leftRes.info.getPositionMap();
+    var originalTotalFieldCount = originalLeftFieldCount + originalRightFieldCount;
 
     var joinInfo = hashJoin.analyzeCondition();
     var joinCondition = hashJoin.getCondition();
-    var leftToRightJoinKeyIndices = new HashMap<Integer, Integer>();
-    var rightJoinKeyIndices = new HashSet<Integer>();
-    for (var p : joinInfo.pairs()) {
-      leftToRightJoinKeyIndices.putIfAbsent(p.source, p.target);
-    }
+
     var joinType = hashJoin.getJoinType();
     LOGGER.debug("originalLeftInput row type:" + leftInput.getRowType());
     LOGGER.debug("newLeftInput row type:" + leftRes.node.getRowType());
     LOGGER.debug("originalRightInput row type:" + rightInput.getRowType());
     LOGGER.debug("newLeftInput row type:" + rightRes.node.getRowType());
 
-    LOGGER.debug("leftToRightJoinKeyIndices:" + leftToRightJoinKeyIndices);
-    LOGGER.debug("rightJoinKeyIndices:" + rightJoinKeyIndices);
+    // Since the left child may add new columns, this would invalidate rightJoinKeyIndices.
+    // Therefore, we need to renumber it. Besides, the new children may itself has reordered
+    // its columns.
+    // We need to reindex for both of these two cases.
+    RexShuttle inputRefReplaceShuttle =
+        new RexShuttle() {
+          @Override
+          public RexNode visitInputRef(RexInputRef inputRef) {
+            var index = inputRef.getIndex();
+            // We remark that this index will not refer to any new column added by the new left
+            // child
+            // and the new right child.
+            if (index >= originalLeftFieldCount) {
+              // This index refers to some column from right child.
+              // We remark again that this index is for the row type of the join, left row type ||
+              // right row type.
+              // So we need to first translate it as a true `right index`.
+              var rightIndex = index - originalLeftFieldCount;
+              var newRightIndex = rightPositionMap.getOrDefault(rightIndex, rightIndex);
+              return new RexInputRef(newRightIndex + newLeftFieldCount, inputRef.getType());
+            } else {
+              // This index refers to some column from left child.
+              var newIndex = leftPositionMap.getOrDefault(index, index);
+              return new RexInputRef(newIndex, inputRef.getType());
+            }
+          }
+        };
+    RexNode newJoinCondition = joinCondition.accept(inputRefReplaceShuttle);
+    var newJoinPositionMap = new HashMap<Integer, Integer>();
+    for (int i = originalLeftFieldCount; i < originalTotalFieldCount; i++) {
+      newJoinPositionMap.putIfAbsent(i, i + newLeftFieldCount - originalLeftFieldCount);
+    }
+    LOGGER.debug("new join position map:" + newJoinPositionMap);
+    LOGGER.debug("join condition:" + joinCondition);
+    LOGGER.debug("new join condition:" + newJoinCondition);
+    var newHashJoin =
+        new RwStreamHashJoin(
+            hashJoin.getCluster(),
+            hashJoin.getTraitSet(),
+            hashJoin.getHints(),
+            leftRes.node,
+            rightRes.node,
+            newJoinCondition,
+            joinType);
 
     List<Integer> primaryKeyIndices = new ArrayList<Integer>();
+    LOGGER.debug("visit join type:" + joinType);
     switch (joinType) {
       case INNER:
-        // Since the left child may add new columns, this would invalidate rightJoinKeyIndices.
-        // Therefore, we need to renumber it.
-        RexShuttle inputRefReplaceShuttle =
-            new RexShuttle() {
-              @Override
-              public RexNode visitInputRef(RexInputRef inputRef) {
-                var index = inputRef.getIndex();
-                if (index >= originalLeftFieldCount) {
-                  return new RexInputRef(
-                      index + newLeftFieldCount - originalLeftFieldCount, inputRef.getType());
-                } else {
-                  return inputRef;
-                }
-              }
-            };
-        RexNode newJoinCondition = joinCondition.accept(inputRefReplaceShuttle);
-        LOGGER.debug("join condition:" + joinCondition);
-        LOGGER.debug("new join condition:" + newJoinCondition);
-        var newHashJoin =
-            new RwStreamHashJoin(
-                hashJoin.getCluster(),
-                hashJoin.getTraitSet(),
-                hashJoin.getHints(),
-                leftRes.node,
-                rightRes.node,
-                newJoinCondition,
-                joinType);
+      case LEFT:
+      case FULL:
+        // We remark that we can process INNER, LEFT and FULL in the same way as in both cases
+        // we put the primary key indices of left child first, and right child second.
+        var rightJoinKeyIndices = new HashSet<Integer>();
+        var leftToRightJoinKeyIndices = new HashMap<Integer, Integer>();
+        for (var p : joinInfo.pairs()) {
+          // We remark that target is left key index, source is right key index
+          leftToRightJoinKeyIndices.putIfAbsent(p.source, p.target);
+        }
+        LOGGER.debug("leftToRightJoinKeyIndices:" + leftToRightJoinKeyIndices);
+        LOGGER.debug("rightJoinKeyIndices:" + rightJoinKeyIndices);
+
         // First add all the output key from new left child
-        for (var newLeftPrimaryKeyIndices : leftRes.info) {
-          primaryKeyIndices.add(newLeftPrimaryKeyIndices);
-          if (leftToRightJoinKeyIndices.containsKey(newLeftPrimaryKeyIndices)) {
-            rightJoinKeyIndices.add(leftToRightJoinKeyIndices.get(newLeftPrimaryKeyIndices));
+        for (var newLeftPrimaryKeyIndex : leftRes.info.getPrimaryKeyIndices()) {
+          primaryKeyIndices.add(newLeftPrimaryKeyIndex);
+          if (leftToRightJoinKeyIndices.containsKey(newLeftPrimaryKeyIndex)) {
+            rightJoinKeyIndices.add(leftToRightJoinKeyIndices.get(newLeftPrimaryKeyIndex));
           }
         }
         // It is possible that the output key of left child may be a join key
         // We do NOT want to add the same join key twice when we process new right child.
         // But we DO need to add other non-join-key primary key from the new right child.
-        for (var rightPrimaryKeyIndex : rightRes.info) {
-          if (!rightJoinKeyIndices.contains(rightPrimaryKeyIndex + originalLeftFieldCount)) {
-            primaryKeyIndices.add(rightPrimaryKeyIndex + newLeftFieldCount);
+        for (var newRightPrimaryKeyIndex : rightRes.info.getPrimaryKeyIndices()) {
+          if (!rightJoinKeyIndices.contains(newRightPrimaryKeyIndex + originalLeftFieldCount)) {
+            primaryKeyIndices.add(newRightPrimaryKeyIndex + newLeftFieldCount);
           }
         }
-        LOGGER.debug("primary key indices:" + primaryKeyIndices);
-        return new Result<>(newHashJoin, ImmutableList.copyOf(primaryKeyIndices));
+        break;
+      case RIGHT:
+        var leftJoinKeyIndices = new HashSet<Integer>();
+        var rightToLeftJoinKeyIndices = new HashMap<Integer, Integer>();
+        for (var p : joinInfo.pairs()) {
+          // We remark that target is left key index, source is right key index.
+          rightToLeftJoinKeyIndices.putIfAbsent(p.target, p.source);
+        }
+        LOGGER.debug("rightToLeftJoinKeyIndices:" + rightToLeftJoinKeyIndices);
+        LOGGER.debug("leftJoinKeyIndices:" + leftJoinKeyIndices);
+
+        // We put the primary key of right child first, and left child second.
+        for (var newRightPrimaryKeyIndex : rightRes.info.getPrimaryKeyIndices()) {
+          primaryKeyIndices.add(newRightPrimaryKeyIndex + newLeftFieldCount);
+          if (rightToLeftJoinKeyIndices.containsKey(
+              newRightPrimaryKeyIndex + originalLeftFieldCount)) {
+            leftJoinKeyIndices.add(
+                rightToLeftJoinKeyIndices.get(newRightPrimaryKeyIndex + originalLeftFieldCount));
+          }
+        }
+
+        for (var newLeftPrimaryKeyIndex : leftRes.info.getPrimaryKeyIndices()) {
+          if (!leftJoinKeyIndices.contains(newLeftPrimaryKeyIndex)) {
+            primaryKeyIndices.add(newLeftPrimaryKeyIndex);
+          }
+        }
+        break;
       default:
         throw new IllegalArgumentException("Only support inner hash join now");
     }
+    LOGGER.debug("primary key indices:" + primaryKeyIndices);
+    var info =
+        new PrimaryKeyIndicesAndPositionMap(
+            ImmutableList.copyOf(primaryKeyIndices), ImmutableMap.copyOf(newJoinPositionMap));
+    LOGGER.debug("leave RwStreamHashJoin");
+    return new Result<>(newHashJoin, info);
   }
 
   /**
@@ -139,14 +233,17 @@ public class PrimaryKeyDerivationVisitor implements RwStreamingRelVisitor<Immuta
    * @return Original aggregate
    */
   @Override
-  public RwStreamingRelVisitor.Result<ImmutableList<Integer>> visit(RwStreamAgg aggregate) {
+  public RwStreamingRelVisitor.Result<PrimaryKeyIndicesAndPositionMap> visit(
+      RwStreamAgg aggregate) {
     LOGGER.debug("visit RwStreamAgg");
     var groupSet = aggregate.getGroupSet();
     // If the aggregate is a simple aggregate, it has no primary key or let's say it has a one and
     // only unique key.
     // This is fine because we would have only one row.
     var groupList = ImmutableList.copyOf(groupSet);
-    return new Result<ImmutableList<Integer>>(aggregate, groupList);
+    var info = new PrimaryKeyIndicesAndPositionMap(groupList, ImmutableMap.of());
+    LOGGER.debug("leave RwStreamAgg");
+    return new Result<>(aggregate, info);
   }
 
   /**
@@ -155,8 +252,26 @@ public class PrimaryKeyDerivationVisitor implements RwStreamingRelVisitor<Immuta
    * @return Exchange and its output primary key
    */
   @Override
-  public RwStreamingRelVisitor.Result<ImmutableList<Integer>> visit(RwStreamExchange exchange) {
-    return passThrough(exchange);
+  public RwStreamingRelVisitor.Result<PrimaryKeyIndicesAndPositionMap> visit(
+      RwStreamExchange exchange) {
+    LOGGER.debug("visit RwStreamExchange");
+    var input = (RisingWaveStreamingRel) exchange.getInput(0);
+    var p = input.accept(this);
+
+    int[] target = new int[p.node.getRowType().getFieldCount()];
+    for (int i = 0; i < target.length; i++) {
+      target[i] = i;
+    }
+    for (var originalToNew : p.info.getPositionMap().entrySet()) {
+      target[originalToNew.getKey()] = originalToNew.getValue();
+    }
+    Permutation permutation = new Permutation(target);
+    var newDistribution = (RwDistributionTrait) exchange.getDistribution().apply(permutation);
+    var newExchange = RwStreamExchange.create(p.node, newDistribution);
+    var info =
+        new PrimaryKeyIndicesAndPositionMap(p.info.getPrimaryKeyIndices(), ImmutableMap.of());
+    LOGGER.debug("leave RwStreamExchange");
+    return new Result<>(newExchange, info);
   }
 
   /**
@@ -165,8 +280,34 @@ public class PrimaryKeyDerivationVisitor implements RwStreamingRelVisitor<Immuta
    * @return Filter and its output primary key
    */
   @Override
-  public RwStreamingRelVisitor.Result<ImmutableList<Integer>> visit(RwStreamFilter filter) {
-    return passThrough(filter);
+  public RwStreamingRelVisitor.Result<PrimaryKeyIndicesAndPositionMap> visit(
+      RwStreamFilter filter) {
+    LOGGER.debug("visit RwStreamFilter");
+    var input = (RisingWaveStreamingRel) filter.getInput();
+    var p = input.accept(this);
+    var positionMap = p.info.getPositionMap();
+
+    var condition = filter.getCondition();
+    RexShuttle inputRefReplaceShuttle =
+        new RexShuttle() {
+          @Override
+          public RexNode visitInputRef(RexInputRef inputRef) {
+            var index = inputRef.getIndex();
+            if (positionMap.containsKey(index)) {
+              return new RexInputRef(positionMap.get(index), inputRef.getType());
+            } else {
+              return inputRef;
+            }
+          }
+        };
+    var newCondition = condition.accept(inputRefReplaceShuttle);
+    var newFilter =
+        new RwStreamFilter(
+            filter.getCluster(), filter.getTraitSet(), filter.getInput(), newCondition);
+    var info =
+        new PrimaryKeyIndicesAndPositionMap(p.info.getPrimaryKeyIndices(), ImmutableMap.of());
+    LOGGER.debug("leave RwStreamFilter");
+    return new Result<>(newFilter, info);
   }
 
   /**
@@ -176,7 +317,8 @@ public class PrimaryKeyDerivationVisitor implements RwStreamingRelVisitor<Immuta
    * @return New project and its output primary key
    */
   @Override
-  public RwStreamingRelVisitor.Result<ImmutableList<Integer>> visit(RwStreamProject project) {
+  public RwStreamingRelVisitor.Result<PrimaryKeyIndicesAndPositionMap> visit(
+      RwStreamProject project) {
     LOGGER.debug("visit RwStreamProject");
     var rexBuilder = project.getCluster().getRexBuilder();
     var originalInputRowType = project.getInput().getRowType();
@@ -184,17 +326,32 @@ public class PrimaryKeyDerivationVisitor implements RwStreamingRelVisitor<Immuta
 
     RisingWaveStreamingRel input = (RisingWaveStreamingRel) project.getInput();
     var p = input.accept(this);
+    var positionMap = p.info.getPositionMap();
     var newInputRowType = p.node.getRowType();
-    var newInputPrimaryKeyIndices = p.info;
+    var newInputPrimaryKeyIndices = p.info.getPrimaryKeyIndices();
     var newOutputPrimaryKeyIndices = new ArrayList<Integer>();
     LOGGER.debug("newInputRowType:" + newInputRowType);
 
     RwStreamProject newProject;
 
-    // When the current project misses some primary keys from its child's, we need to change the
-    // current project.
-    // More specifically, we always need to add new columns in the new project and never delete one.
-    var newProjects = new ArrayList<>(project.getProjects());
+    RexShuttle inputRefReplaceShuttle =
+        new RexShuttle() {
+          @Override
+          public RexNode visitInputRef(RexInputRef inputRef) {
+            var index = inputRef.getIndex();
+            if (positionMap.containsKey(index)) {
+              return new RexInputRef(positionMap.get(index), inputRef.getType());
+            } else {
+              return inputRef;
+            }
+          }
+        };
+    var oldProjectExpressions = new ArrayList<RexNode>();
+    for (var oldProjectExpression : project.getProjects()) {
+      oldProjectExpressions.add(oldProjectExpression.accept(inputRefReplaceShuttle));
+    }
+    LOGGER.debug("oldProjectExpressions:" + oldProjectExpressions);
+    var newProjects = new ArrayList<>(oldProjectExpressions);
     var newFields = new ArrayList<>(project.getRowType().getFieldList());
 
     // We try to find whether the primary key of its child has been put into new project's projects:
@@ -203,11 +360,6 @@ public class PrimaryKeyDerivationVisitor implements RwStreamingRelVisitor<Immuta
     // column in new project.
     for (int idx = 0; idx < newInputPrimaryKeyIndices.size(); idx++) {
       var primaryKeyIndex = newInputPrimaryKeyIndices.get(idx);
-      // This primary key is in some old project expression, we have already added
-      if (primaryKeyIndex < project.getProjects().size()) {
-        newOutputPrimaryKeyIndices.add(primaryKeyIndex);
-        continue;
-      }
       boolean exist = false;
       for (int newIdx = 0; newIdx < newProjects.size(); newIdx++) {
         var newProjectRex = newProjects.get(newIdx);
@@ -215,6 +367,7 @@ public class PrimaryKeyDerivationVisitor implements RwStreamingRelVisitor<Immuta
           var inputRefIndex = ((RexInputRef) newProjectRex).getIndex();
           if (primaryKeyIndex == inputRefIndex) {
             exist = true;
+            newOutputPrimaryKeyIndices.add(newIdx);
             break;
           }
         }
@@ -237,9 +390,13 @@ public class PrimaryKeyDerivationVisitor implements RwStreamingRelVisitor<Immuta
             rexBuilder.getTypeFactory().createStructType(newFields));
     LOGGER.debug("newInputPrimaryKeyIndices:" + newInputPrimaryKeyIndices);
     LOGGER.debug("newOutputPrimaryKeyIndices:" + newOutputPrimaryKeyIndices);
-    LOGGER.debug("child:" + p.node);
+    LOGGER.debug("newProject's child:" + p.node);
     LOGGER.debug("newProject:" + newProject);
-    return new Result<>(newProject, ImmutableList.copyOf(newOutputPrimaryKeyIndices));
+    var info =
+        new PrimaryKeyIndicesAndPositionMap(
+            ImmutableList.copyOf(newOutputPrimaryKeyIndices), ImmutableMap.of());
+    LOGGER.debug("leave RwStreamProject");
+    return new Result<>(newProject, info);
   }
 
   /**
@@ -247,7 +404,7 @@ public class PrimaryKeyDerivationVisitor implements RwStreamingRelVisitor<Immuta
    * @return A new Table source with possibly row id column added
    */
   @Override
-  public RwStreamingRelVisitor.Result<ImmutableList<Integer>> visit(
+  public RwStreamingRelVisitor.Result<PrimaryKeyIndicesAndPositionMap> visit(
       RwStreamTableSource tableSource) {
     LOGGER.debug("visit RwStreamTableSource");
     var tableCatalog = tableSource.getTable().unwrapOrThrow(TableCatalog.class);
@@ -261,7 +418,8 @@ public class PrimaryKeyDerivationVisitor implements RwStreamingRelVisitor<Immuta
       var columnId = columnIds.get(idx);
       if (columnId.equals(rowIdColumn)) {
         LOGGER.debug("Already has row id column, no need to read again");
-        return new Result<>(tableSource, ImmutableList.of(idx));
+        var info = new PrimaryKeyIndicesAndPositionMap(ImmutableList.of(idx), ImmutableMap.of());
+        return new Result<>(tableSource, info);
       }
     }
     // The other one is that we add the row id column to the back, otherwise it will mess up the
@@ -279,7 +437,9 @@ public class PrimaryKeyDerivationVisitor implements RwStreamingRelVisitor<Immuta
             tableSource.getTable(),
             tableSource.getTableId(),
             columns);
-    var primaryKey = ImmutableList.of(columns.size() - 1);
-    return new Result<ImmutableList<Integer>>(newTableSource, primaryKey);
+    var info =
+        new PrimaryKeyIndicesAndPositionMap(
+            ImmutableList.of(columns.size() - 1), ImmutableMap.of());
+    return new Result<>(newTableSource, info);
   }
 }

@@ -36,6 +36,9 @@ import org.slf4j.LoggerFactory;
 /** The planner for streaming job */
 public class StreamPlanner implements Planner<StreamingPlan> {
   private static final Logger log = LoggerFactory.getLogger(StreamPlanner.class);
+
+  // TODO: need finer-grained control to enable or disable certain rules
+  // or optimizer programs for tests.
   private final boolean testMode;
 
   public StreamPlanner() {
@@ -82,7 +85,7 @@ public class StreamPlanner implements Planner<StreamingPlan> {
     var visitor = new PrimaryKeyDerivationVisitor();
     var p = root.accept(visitor);
     return new RwStreamMaterializedView(
-        p.node.getCluster(), p.node.getTraitSet(), p.node, name, p.info);
+        p.node.getCluster(), p.node.getTraitSet(), p.node, name, p.info.getPrimaryKeyIndices());
   }
 
   private OptimizerProgram buildLogicalOptimizerProgram() {

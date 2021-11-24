@@ -631,11 +631,16 @@ create materialized view T6 as select sum(v1) as V from t group by v2
         <Resource name="plan">
             <![CDATA[
 RwStreamMaterializedView(name=[t6])
-  RwStreamProject(v=[$1])
+  RwStreamProject(v=[$1], v2=[$0])
     RwStreamFilter(condition=[<>($2, 0)])
       RwStreamAgg(group=[{0}], v=[SUM($1)], Row Count=[COUNT()])
         RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1])
 ]]>
+        </Resource>
+        <Resource name="primaryKey">
+            <![CDATA[
+[1]
+            ]]>
         </Resource>
         <Resource name="json">
             <![CDATA[
@@ -715,6 +720,13 @@ RwStreamMaterializedView(name=[t6])
         "inputRef": {
           "columnIdx": 1
         }
+      }, {
+        "exprType": "INPUT_REF",
+        "returnType": {
+          "typeName": "INT32"
+        },
+        "inputRef": {
+        }
       }]
     }
   }],
@@ -731,8 +743,13 @@ RwStreamMaterializedView(name=[t6])
         "typeName": "INT32"
       },
       "encoding": "RAW"
+    }, {
+      "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW"
     }],
-    "pkIndices": [0]
+    "pkIndices": [1]
   }
 }
 ]]>
@@ -748,11 +765,16 @@ create materialized view T7 as select sum(v1)+1 as V from t group by v2
         <Resource name="plan">
             <![CDATA[
 RwStreamMaterializedView(name=[t7])
-  RwStreamProject(v=[+($1, 1)])
+  RwStreamProject(v=[+($1, 1)], v2=[$0])
     RwStreamFilter(condition=[<>($2, 0)])
       RwStreamAgg(group=[{0}], agg#0=[SUM($1)], Row Count=[COUNT()])
         RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1])
 ]]>
+        </Resource>
+        <Resource name="primaryKey">
+            <![CDATA[
+[1]
+            ]]>
         </Resource>
         <Resource name="json">
             <![CDATA[
@@ -848,6 +870,13 @@ RwStreamMaterializedView(name=[t7])
             }
           }]
         }
+      }, {
+        "exprType": "INPUT_REF",
+        "returnType": {
+          "typeName": "INT32"
+        },
+        "inputRef": {
+        }
       }]
     }
   }],
@@ -864,8 +893,13 @@ RwStreamMaterializedView(name=[t7])
         "typeName": "INT32"
       },
       "encoding": "RAW"
+    }, {
+      "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW"
     }],
-    "pkIndices": [0]
+    "pkIndices": [1]
   }
 }
 ]]>
