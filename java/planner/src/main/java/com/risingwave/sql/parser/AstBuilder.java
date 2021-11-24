@@ -351,11 +351,19 @@ class AstBuilder extends SqlBaseBaseVisitor<Node> {
   @Override
   public Node visitCreateStream(SqlBaseParser.CreateStreamContext context) {
     List<Node> tableElements = Lists2.map(context.tableElement(), this::visit);
+
+    String rowSchemaLocation = "";
+
+    if (context.rowSchemaLocation != null) {
+      rowSchemaLocation = context.rowSchemaLocation.getText();
+    }
+
     return new CreateStream(
         context.name.getText(),
         tableElements,
         extractGenericProperties(context.withProperties()),
-        context.rowFormat.getText());
+        context.rowFormat.getText(),
+        rowSchemaLocation);
   }
 
   @Override

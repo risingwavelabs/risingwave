@@ -161,7 +161,9 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
                 .collect(Collectors.toList()));
     SqlNodeList properties = visitGenericProperties(node.getProperties(), context);
     SqlCharStringLiteral rowFormat = SqlLiteral.createCharString(node.getRowFormat(), pos);
-    return new SqlCreateStream(pos, name, columnList, properties, rowFormat);
+    SqlCharStringLiteral rowSchemaLocation =
+        SqlLiteral.createCharString(node.getRowSchemaLocation(), pos);
+    return new SqlCreateStream(pos, name, columnList, properties, rowFormat, rowSchemaLocation);
   }
 
   @Override

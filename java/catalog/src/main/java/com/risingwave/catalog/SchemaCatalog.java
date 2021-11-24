@@ -71,7 +71,8 @@ public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCata
             ImmutableIntList.of(),
             DataDistributionType.ALL,
             createTableInfo.getProperties(),
-            createTableInfo.getRowFormat());
+            createTableInfo.getRowFormat(),
+            createTableInfo.getRowSchemaLocation());
 
     createTableInfo.getColumns().forEach(pair -> table.addColumn(pair.getKey(), pair.getValue()));
 
@@ -102,7 +103,8 @@ public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCata
             ImmutableIntList.of(),
             DataDistributionType.ALL,
             createTableInfo.getProperties(),
-            createTableInfo.getRowFormat());
+            createTableInfo.getRowFormat(),
+            createTableInfo.getRowSchemaLocation());
 
     createTableInfo.getColumns().forEach(pair -> table.addColumn(pair.getKey(), pair.getValue()));
 

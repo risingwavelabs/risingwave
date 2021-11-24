@@ -5,21 +5,25 @@ import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.apache.commons.lang3.builder.ToStringBuilder;
 
+/** CreateStream is a node that represents the CREATE STREAM statement. */
 public final class CreateStream extends Statement {
   private final String name;
   private final List<Node> tableElements;
   private final GenericProperties<Expression> properties;
   private final String rowFormat;
+  private final String rowSchemaLocation;
 
   public CreateStream(
       String streamName,
       List<Node> tableElements,
       GenericProperties<Expression> props,
-      String rowFormat) {
+      String rowFormat,
+      String rowSchemaLocation) {
     this.name = streamName;
     this.tableElements = tableElements;
     this.properties = props;
     this.rowFormat = rowFormat;
+    this.rowSchemaLocation = rowSchemaLocation;
   }
 
   public String getName() {
@@ -78,5 +82,9 @@ public final class CreateStream extends Statement {
         .append(properties)
         .append(rowFormat)
         .build();
+  }
+
+  public String getRowSchemaLocation() {
+    return rowSchemaLocation;
   }
 }

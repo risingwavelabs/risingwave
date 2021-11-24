@@ -89,6 +89,8 @@ public class CreateStreamHandler implements SqlHandler {
         throw new PgException(PgErrorCode.PROTOCOL_VIOLATION, "unsupported row format");
     }
 
+    createStreamNodeBuilder.setSchemaLocation(table.getRowSchemaLocation());
+
     CreateStreamNode creatStreamNode =
         createStreamNodeBuilder.setTableRefId(Messages.getTableRefId(tableId)).build();
 
@@ -139,6 +141,8 @@ public class CreateStreamHandler implements SqlHandler {
     createStreamInfoBuilder.setProperties(properties);
     createStreamInfoBuilder.setStream(true);
     createStreamInfoBuilder.setRowFormat(sql.getRowFormat().getValueAs(String.class));
+    createStreamInfoBuilder.setRowSchemaLocation(
+        sql.getRowSchemaLocation().getValueAs(String.class));
 
     CreateTableInfo streamInfo = createStreamInfoBuilder.build();
     // Build a plan distribute to compute node.

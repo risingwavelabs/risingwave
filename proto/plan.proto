@@ -129,6 +129,7 @@ message CreateStreamNode {
   repeated ColumnDesc column_descs = 2;
   RowFormatType format = 3;
   map<string, string> properties = 4;
+  string schema_location = 5;
 }
 
 message DropStreamNode {

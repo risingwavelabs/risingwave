@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import org.apache.calcite.util.Pair;
 
+/** CreateTableInfo is a class that contains information about the table to be */
 public class CreateTableInfo {
   private final String name;
   private final ImmutableList<Pair<String, ColumnDesc>> columns;
@@ -18,6 +19,7 @@ public class CreateTableInfo {
   private final boolean mv;
   private final boolean stream;
   private final String rowFormat;
+  private final String rowSchemaLocation;
 
   private CreateTableInfo(
       String tableName,
@@ -26,7 +28,8 @@ public class CreateTableInfo {
       boolean appendOnly,
       boolean mv,
       boolean stream,
-      String rowFormat) {
+      String rowFormat,
+      String rowSchemaLocation) {
     this.name = tableName;
     this.columns = columns;
     this.properties = properties;
@@ -34,6 +37,7 @@ public class CreateTableInfo {
     this.mv = mv;
     this.stream = stream;
     this.rowFormat = rowFormat;
+    this.rowSchemaLocation = rowSchemaLocation;
   }
 
   public String getName() {
@@ -68,6 +72,11 @@ public class CreateTableInfo {
     return rowFormat;
   }
 
+  public String getRowSchemaLocation() {
+    return rowSchemaLocation;
+  }
+
+  /** Builder class for CreateTableInfo. */
   public static class Builder {
     private final String tableName;
     private final List<Pair<String, ColumnDesc>> columns = new ArrayList<>();
@@ -76,6 +85,7 @@ public class CreateTableInfo {
     private boolean mv = false;
     private boolean stream = false;
     private String rowFormat = "";
+    private String rowSchemaLocation = "";
 
     private Builder(String tableName) {
       this.tableName = requireNonNull(tableName, "table name can't be null!");
@@ -93,6 +103,11 @@ public class CreateTableInfo {
 
     public Builder setMv(boolean mv) {
       this.mv = mv;
+      return this;
+    }
+
+    public Builder setRowSchemaLocation(String rowSchemaLocation) {
+      this.rowSchemaLocation = rowSchemaLocation;
       return this;
     }
 
@@ -116,7 +131,8 @@ public class CreateTableInfo {
           appendOnly,
           mv,
           stream,
-          rowFormat);
+          rowFormat,
+          rowSchemaLocation);
     }
   }
 }

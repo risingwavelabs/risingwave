@@ -54,6 +54,7 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
   // TODO: Need to be used as streaming job optimizes on append-only input specially.
   private final boolean appendOnly = false;
   private Long version;
+  private final String rowSchemaLocation;
 
   TableCatalog(
       TableId id,
@@ -64,7 +65,8 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
       ImmutableIntList primaryKeyColumnIds,
       DataDistributionType distributionType,
       ImmutableMap<String, String> properties,
-      String rowFormat) {
+      String rowFormat,
+      String rowSchemaLocation) {
     super(id, name);
     // We remark that we should only insert implicit row id for OLAP table, not MV, not Stream.
     // If an MV happen to have some implicit row id as its pk, it will be added in an explicit
@@ -82,6 +84,7 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
     this.properties = properties;
     this.rowFormat = rowFormat;
     this.rowIdColumn = buildRowIdColumn();
+    this.rowSchemaLocation = rowSchemaLocation;
     if (!stream && !materializedView) {
       // Put row-id column in map but do not put it in list of columns.
       this.columnById.put(rowIdColumn.getId(), rowIdColumn);
@@ -229,6 +232,10 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
 
   public String getRowFormat() {
     return rowFormat;
+  }
+
+  public String getRowSchemaLocation() {
+    return rowSchemaLocation;
   }
 
   public boolean isStream() {

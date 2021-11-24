@@ -23,6 +23,7 @@ public class SqlCreateStream extends SqlCreate {
   private final SqlNodeList columnList;
   private final SqlNodeList propertyList;
   private final SqlCharStringLiteral rowFormat;
+  private final SqlCharStringLiteral rowSchemaLocation;
 
   public SqlIdentifier getName() {
     return name;
@@ -40,6 +41,10 @@ public class SqlCreateStream extends SqlCreate {
     return rowFormat;
   }
 
+  public SqlCharStringLiteral getRowSchemaLocation() {
+    return rowSchemaLocation;
+  }
+
   private static final SqlOperator OPERATOR =
       new SqlSpecialOperator("CREATE STREAM", SqlKind.OTHER_DDL);
 
@@ -48,12 +53,14 @@ public class SqlCreateStream extends SqlCreate {
       SqlIdentifier name,
       @Nullable SqlNodeList columnList,
       SqlNodeList propertyList,
-      SqlCharStringLiteral rowFormat) {
+      SqlCharStringLiteral rowFormat,
+      SqlCharStringLiteral rowSchemaLocation) {
     super(OPERATOR, pos, false, true);
     this.name = requireNonNull(name, "name");
     this.columnList = columnList;
     this.propertyList = requireNonNull(propertyList, "propertyList");
     this.rowFormat = requireNonNull(rowFormat, "rowFormat");
+    this.rowSchemaLocation = requireNonNull(rowSchemaLocation, "rowSchemaLocation");
   }
 
   @Override

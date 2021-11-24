@@ -2,6 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use prost::Message;
+use tempfile::Builder;
+use tokio::fs;
+use url::Url;
 
 use pb_convert::FromProtobuf;
 use risingwave_common::array::DataChunk;
@@ -21,10 +24,14 @@ use crate::executor::{Executor, ExecutorBuilder};
 use crate::source::parser::JSONParser;
 use crate::source::SourceFormat;
 use crate::source::{
-    HighLevelKafkaSourceConfig, SourceColumnDesc, SourceConfig, SourceManagerRef, SourceParser,
+    HighLevelKafkaSourceConfig, ProtobufParser, SourceColumnDesc, SourceConfig, SourceManagerRef,
+    SourceParser,
 };
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
+
+static PROTO_MESSAGE_KEY: &str = "proto.message";
+static TEMP_PROTOBUF_FILENAME: &str = "rw.proto";
 
 pub(super) struct CreateStreamExecutor {
     table_id: TableId,
@@ -34,6 +41,7 @@ pub(super) struct CreateStreamExecutor {
     columns: Vec<SourceColumnDesc>,
     source_manager: SourceManagerRef,
     properties: HashMap<String, String>,
+    schema_location: String,
     schema: Schema,
 }
 
@@ -93,6 +101,16 @@ impl BoxedExecutorBuilder for CreateStreamExecutor {
 
         let properties = node.get_properties();
 
+        let schema_location = node.get_schema_location();
+
+        if let SourceFormat::Protobuf = format {
+            if schema_location.is_empty() {
+                return Err(RwError::from(ProtocolError(
+                    "protobuf file location not provided".to_string(),
+                )));
+            }
+        }
+
         let config = match get_from_properties!(properties, "upstream_source").as_str() {
             "kafka" => CreateStreamExecutor::extract_kafka_config(properties),
             other => Err(RwError::from(ProtocolError(format!(
@@ -109,8 +127,65 @@ impl BoxedExecutorBuilder for CreateStreamExecutor {
             columns,
             schema: Schema { fields: vec![] },
             properties: properties.clone(),
+            schema_location: schema_location.clone(),
             parser: None,
         }))
+    }
+}
+
+impl CreateStreamExecutor {
+    async fn extract_protobuf_parser(
+        schema_location: &str,
+        message_name: &str,
+    ) -> Result<ProtobufParser> {
+        let location = schema_location;
+        let url = Url::parse(location).map_err(|e| RwError::from(InternalError(e.to_string())))?;
+        match url.scheme() {
+            "file" => {
+                let path = url.to_file_path().map_err(|_| {
+                    RwError::from(InternalError(format!("path {} illegal", location)))
+                })?;
+
+                if path.is_dir() {
+                    return Err(RwError::from(ProtocolError(
+                        "schema file location is dir".to_string(),
+                    )));
+                }
+
+                let temp_dir = Builder::new()
+                    .rand_bytes(10)
+                    .tempdir()
+                    .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+
+                let target = temp_dir.path().join(TEMP_PROTOBUF_FILENAME);
+
+                fs::copy(path, target.as_path())
+                    .await
+                    .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+
+                let dirname = temp_dir.path().to_str().ok_or_else(|| {
+                    RwError::from(InternalError(
+                        "convert temp path dir to str failed".to_string(),
+                    ))
+                })?;
+
+                let filename = target.to_str().ok_or_else(|| {
+                    RwError::from(InternalError(
+                        "convert temp path filename to str failed".to_string(),
+                    ))
+                })?;
+
+                ProtobufParser::new(
+                    &[dirname.to_string()],
+                    &[filename.to_string()],
+                    message_name,
+                )
+            }
+            scheme => Err(RwError::from(ProtocolError(format!(
+                "path scheme {} is not supported now",
+                scheme
+            )))),
+        }
     }
 }
 
@@ -118,7 +193,25 @@ impl BoxedExecutorBuilder for CreateStreamExecutor {
 impl Executor for CreateStreamExecutor {
     async fn open(&mut self) -> Result<()> {
         let parser: Arc<dyn SourceParser> = match self.format {
-            SourceFormat::Json => Ok(Arc::new(JSONParser {})),
+            SourceFormat::Json => {
+                let parser: Arc<dyn SourceParser> = Arc::new(JSONParser {});
+                Ok(parser)
+            }
+            SourceFormat::Protobuf => {
+                let message_name = self.properties.get(PROTO_MESSAGE_KEY).ok_or_else(|| {
+                    RwError::from(ProtocolError(format!(
+                        "{} not found in properties",
+                        PROTO_MESSAGE_KEY
+                    )))
+                })?;
+
+                let parser: Arc<dyn SourceParser> = Arc::new(
+                    Self::extract_protobuf_parser(self.schema_location.as_str(), message_name)
+                        .await?,
+                );
+
+                Ok(parser)
+            }
             _ => Err(RwError::from(InternalError(
                 "format not support".to_string(),
             ))),

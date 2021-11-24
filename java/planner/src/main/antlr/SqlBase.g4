@@ -498,7 +498,9 @@ createStmt
     | CREATE ( OR REPLACE )? (MATERIALIZED)? VIEW name=qname AS query                #createView
     | CREATE ( OR REPLACE )? STREAM (IF NOT EXISTS)? name=ident
         '(' tableElement (',' tableElement)* ')'
-        withProperties? ROW FORMAT rowFormat=ident                                   #createStream
+        withProperties?
+        ROW FORMAT rowFormat=ident
+        (ROW SCHEMA LOCATION rowSchemaLocation=ident)?                               #createStream
     ;
 
 functionArgument
@@ -687,7 +689,7 @@ nonReserved
     | REPLACE | RETURNING | SWAP | GC | DANGLING | ARTIFACTS | DECOMMISSION | LEADING | TRAILING | BOTH | TRIM
     | CURRENT_SCHEMA | PROMOTE | CHARACTER | VARYING
     | DISCARD | PLANS | SEQUENCES | TEMPORARY | TEMP | METADATA
-    | STREAM
+    | STREAM | LOCATION
     ;
 
 AUTHORIZATION: 'AUTHORIZATION';
@@ -954,6 +956,8 @@ RETURN: 'RETURN';
 SUMMARY: 'SUMMARY';
 
 METADATA: 'METADATA';
+
+LOCATION: 'LOCATION';
 
 EQ  : '=';
 NEQ : '<>' | '!=';

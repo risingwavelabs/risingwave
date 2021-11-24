@@ -1,11 +1,15 @@
-use crate::executor::StreamScanExecutor;
-use crate::stream_op::{Barrier, Executor, Message, Op, StreamChunk};
+use std::fmt::{Debug, Formatter};
+
 use async_trait::async_trait;
 use futures::FutureExt;
 use itertools::Itertools;
+
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
-use std::fmt::{Debug, Formatter};
+
+use crate::executor::Executor as BatchExecutor;
+use crate::executor::StreamScanExecutor;
+use crate::stream_op::{Barrier, Executor, Message, Op, StreamChunk};
 
 /// `StreamSourceExecutor` is a streaming source from external systems such as Kafka
 pub struct StreamSourceExecutor {
@@ -30,7 +34,7 @@ impl StreamSourceExecutor {
 #[async_trait]
 impl Executor for StreamSourceExecutor {
     async fn next(&mut self) -> Result<Message> {
-        let received = self.executor.next_data_chunk().fuse().await?;
+        let received = self.executor.next().fuse().await?;
         if let Some(chunk) = received {
             // `capacity` or `cardinality` should be both fine as we just read the data from
             // external sources no visibility map yet

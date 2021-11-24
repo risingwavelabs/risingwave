@@ -27,15 +27,6 @@ pub struct StreamScanExecutor {
 }
 
 impl StreamScanExecutor {
-    /// This function returns `DataChunkRef` because it will be used by both olap and streaming.
-    /// The streaming side may customize a bit from `DataChunk` to `StreamChunk`.
-    pub async fn next_data_chunk(&mut self) -> Result<Option<DataChunk>> {
-        match self.reader.next().await? {
-            None => Ok(None),
-            Some(chunk) => Ok(Some(chunk)),
-        }
-    }
-
     pub fn columns(&self) -> &[SourceColumnDesc] {
         self.columns.as_slice()
     }
@@ -117,14 +108,7 @@ impl Executor for StreamScanExecutor {
     }
 
     async fn next(&mut self) -> Result<Option<DataChunk>> {
-        if self.done {
-            return Ok(None);
-        }
-        let next_chunk = self.next_data_chunk().await?;
-        match next_chunk {
-            Some(chunk) => Ok(Some(chunk)),
-            None => Ok(None),
-        }
+        self.reader.next().await
     }
 
     async fn close(&mut self) -> Result<()> {
