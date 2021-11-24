@@ -1,8 +1,12 @@
 package com.risingwave.scheduler.streaming.graph;
 
 import com.google.common.collect.ImmutableMap;
+import com.risingwave.catalog.ColumnDesc;
+import com.risingwave.catalog.ColumnEncoding;
+import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
+import com.risingwave.planner.rel.physical.streaming.RisingWaveStreamingRel;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -68,6 +72,32 @@ public class StreamGraph {
     }
 
     public StreamGraph build() {
+      // Add upstream input schema for each fragment.
+      for (StreamFragment fragment : fragments.values()) {
+        // For now we do not consider join. In this case we extract the schema from the output of
+        // the first upstream fragment.
+        if (fragment.getUpstreamSets().size() > 0) {
+          // A lengthy expression to retrieve an arbitrary (0) upstream fragment.
+          int upStreamExampleId = fragment.getUpstreamSets().get(0).right.asList().get(0);
+          StreamFragment upStreamExampleFragment = fragments.get(upStreamExampleId);
+          RisingWaveStreamingRel exampleRoot = upStreamExampleFragment.getRoot();
+          // Add every column from its upstream root node.
+          // Here root node would suffice as the streaming plan is still reversed.
+          // E.g. Source -> Filter -> Proj. The root will be project and the schema of project is
+          // what we needed.
+          var rowType = exampleRoot.getRowType();
+          List<ColumnDesc> schema = new ArrayList<>();
+          for (int i = 0; i < rowType.getFieldCount(); i++) {
+            var field = rowType.getFieldList().get(i);
+            ColumnDesc columnDesc =
+                new ColumnDesc((RisingWaveDataType) field.getType(), false, ColumnEncoding.RAW);
+            schema.add(columnDesc);
+          }
+          StreamFragment.FragmentBuilder builder = fragment.toBuilder();
+          builder.addInputSchema(schema);
+          fragments.put(fragment.getId(), builder.build());
+        }
+      }
       // Build stream graph.
       return new StreamGraph(fragments);
     }

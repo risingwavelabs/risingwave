@@ -2,6 +2,7 @@ package com.risingwave.scheduler.streaming.graph;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+import com.risingwave.catalog.ColumnDesc;
 import com.risingwave.planner.rel.physical.streaming.RisingWaveStreamingRel;
 import com.risingwave.planner.rel.serialization.StreamingStageSerializer;
 import com.risingwave.proto.streaming.plan.Merger;
@@ -20,15 +21,22 @@ public class StreamFragment {
   private final int id;
   private final StreamDispatcher dispatcher;
   private final RisingWaveStreamingRel root;
+  // For each pair in the upstreamSets:
+  // The first element of pair is upstream stage id.
+  // The second element of pair is a set of upstream fragment ids that belong to the same stage.
   private final ImmutableList<Pair<Integer, ImmutableSet<Integer>>> upstreamSets;
   private final ImmutableSet<Integer> downstreamSet;
+  // A temporary solution for input schema of stream fragment.
+  // Assuming there is no join, a schema is a list of columns.
+  private final ImmutableList<ColumnDesc> inputSchema;
 
   public StreamFragment(
       int id,
       StreamDispatcher dispatcher,
       RisingWaveStreamingRel root,
       List<Pair<Integer, Set<Integer>>> upstreamSets,
-      Set<Integer> downstreamSet) {
+      Set<Integer> downstreamSet,
+      List<ColumnDesc> inputSchema) {
     this.id = id;
     this.dispatcher = dispatcher;
     this.root = root;
@@ -38,6 +46,7 @@ public class StreamFragment {
     }
     this.upstreamSets = ImmutableList.copyOf(upStreamImmutableSets);
     this.downstreamSet = ImmutableSet.copyOf(downstreamSet);
+    this.inputSchema = ImmutableList.copyOf(inputSchema);
   }
 
   public int getId() {
@@ -69,6 +78,17 @@ public class StreamFragment {
       builder.addMergers(mergerBuilder.build());
     }
     builder.addAllDownstreamFragmentId(downstreamSet);
+    // Also serialize input schema.
+    // TODO: move proto.plan.ColumnDesc serialization to catalog.ColumnDesc.
+    for (ColumnDesc columnDesc : inputSchema) {
+      com.risingwave.proto.plan.ColumnDesc.Builder columnDescBuilder =
+          com.risingwave.proto.plan.ColumnDesc.newBuilder();
+      columnDescBuilder
+          .setEncoding(com.risingwave.proto.plan.ColumnDesc.ColumnEncodingType.RAW)
+          .setColumnType(columnDesc.getDataType().getProtobufType())
+          .setIsPrimary(columnDesc.isPrimary());
+      builder.addInputColumnDescs(columnDescBuilder.build());
+    }
     return builder.build();
   }
 
@@ -118,10 +138,9 @@ public class StreamFragment {
     private int id;
     private RisingWaveStreamingRel root;
     private StreamDispatcher dispatcher = null;
-    // The first element of pair is upstream stage id
-    // The second element of pair is a set of upstream fragment ids that belong to the same stage
     private final List<Pair<Integer, Set<Integer>>> upstreamSets = new ArrayList<>();
     private final Set<Integer> downstreamSet = new HashSet<>();
+    private final List<ColumnDesc> inputSchema = new ArrayList<>();
 
     public FragmentBuilder(int id, RisingWaveStreamingRel root) {
       this.id = id;
@@ -164,8 +183,13 @@ public class StreamFragment {
       downstreamSet.add(id);
     }
 
+    public void addInputSchema(List<ColumnDesc> schema) {
+      inputSchema.clear();
+      inputSchema.addAll(schema);
+    }
+
     public StreamFragment build() {
-      return new StreamFragment(id, dispatcher, root, upstreamSets, downstreamSet);
+      return new StreamFragment(id, dispatcher, root, upstreamSets, downstreamSet, inputSchema);
     }
   }
 }

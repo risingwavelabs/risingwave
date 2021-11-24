@@ -17,8 +17,6 @@ import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.SingleRel;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.util.Pair;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * We need to explicitly specify a materialized view node in a streaming plan.
@@ -26,8 +24,6 @@ import org.slf4j.LoggerFactory;
  * <p>A sequential streaming plan (no parallel degree) roots with a materialized view node.
  */
 public class RwStreamMaterializedView extends SingleRel implements RisingWaveStreamingRel {
-  private static final Logger LOGGER = LoggerFactory.getLogger(RwStreamMaterializedView.class);
-
   // TODO: define more attributes corresponding to TableCatalog.
   private TableCatalog.TableId tableId;
 
@@ -55,6 +51,7 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
   @Override
   public StreamNode serialize() {
     MViewNode.Builder materializedViewNodeBuilder = MViewNode.newBuilder();
+    // Add columns.
     for (Pair<String, ColumnDesc> pair : getColumns()) {
       com.risingwave.proto.plan.ColumnDesc.Builder columnDescBuilder =
           com.risingwave.proto.plan.ColumnDesc.newBuilder();
@@ -64,11 +61,12 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
           .setIsPrimary(false);
       materializedViewNodeBuilder.addColumnDescs(columnDescBuilder);
     }
-    LOGGER.debug("RwStreamMaterializedView primary key indices:" + this.getPrimaryKeyIndices());
+    // Set primary key columns.
     materializedViewNodeBuilder.addAllPkIndices(this.getPrimaryKeyIndices());
-    // TODO: serialize primary key columns.
-    MViewNode materializedViewNode =
-        materializedViewNodeBuilder.setTableRefId(Messages.getTableRefId(tableId)).build();
+    // Set table ref id.
+    materializedViewNodeBuilder.setTableRefId(Messages.getTableRefId(tableId));
+    // Build and return.
+    MViewNode materializedViewNode = materializedViewNodeBuilder.build();
     return StreamNode.newBuilder().setMviewNode(materializedViewNode).build();
   }
 
@@ -92,7 +90,6 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
   public List<Pair<String, ColumnDesc>> getColumns() {
     List<Pair<String, ColumnDesc>> list = new ArrayList<>();
     var rowType = getRowType();
-    LOGGER.debug("RwStreamMaterializedView getColumns rowType:" + rowType);
     for (int i = 0; i < rowType.getFieldCount(); i++) {
       var field = rowType.getFieldList().get(i);
       ColumnDesc columnDesc =
