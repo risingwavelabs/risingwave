@@ -1,6 +1,7 @@
 use anyhow::Context;
 use clap::Parser;
 use clap::ValueHint;
+use path_absolutize::*;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::path::{Path, PathBuf};
 
@@ -27,9 +28,6 @@ pub(crate) struct Opts {
     /// Schedule file containing each parallel schedule.
     #[clap(name = "SCHEDULE", short = 's', long = "schedule", parse(from_os_str), value_hint = ValueHint::FilePath)]
     schedule: PathBuf,
-    /// Launcher of psql command.
-    #[clap(short = 'l', long = "launcher", value_hint =ValueHint::CommandName)]
-    launcher: Option<String>,
     /// Location for customized log file.
     #[clap(long, parse(from_os_str), default_value = "config/log4rs.yaml", value_hint=ValueHint::FilePath)]
     log4rs_config: PathBuf,
@@ -44,36 +42,43 @@ impl Opts {
         self.log4rs_config.as_path()
     }
 
-    pub(crate) fn canonicalized_input_dir(&self) -> anyhow::Result<PathBuf> {
-        self.input_dir.canonicalize().with_context(|| {
-            format!(
-                "Failed to canonicalize input dir: {:?}",
-                self.input_dir.as_path()
-            )
-        })
+    pub(crate) fn absolutized_input_dir(&self) -> anyhow::Result<PathBuf> {
+        self.input_dir
+            .absolutize()
+            .map(|c| c.into_owned())
+            .with_context(|| {
+                format!(
+                    "Failed to canonicalize input dir: {:?}",
+                    self.input_dir.as_path()
+                )
+            })
     }
 
-    pub(crate) fn canonicalized_output_dir(&self) -> anyhow::Result<PathBuf> {
-        self.output_dir.canonicalize().with_context(|| {
-            format!(
-                "Failed to canonicalize output dir: {:?}",
-                self.output_dir.as_path()
-            )
-        })
+    pub(crate) fn absolutized_output_dir(&self) -> anyhow::Result<PathBuf> {
+        self.output_dir
+            .absolutize()
+            .map(|c| c.into_owned())
+            .with_context(|| {
+                format!(
+                    "Failed to canonicalize output dir: {:?}",
+                    self.output_dir.as_path()
+                )
+            })
     }
 
     pub(crate) fn database_name(&self) -> &str {
         self.pg_db_name.as_str()
     }
 
-    pub(crate) fn launcher_cmd(&self) -> String {
-        self.launcher
-            .as_ref()
-            .cloned()
-            .unwrap_or_else(|| "".to_string())
-    }
-
     pub(crate) fn schedule_file_path(&self) -> &Path {
         self.schedule.as_path()
+    }
+
+    pub(crate) fn host(&self) -> String {
+        self.pg_server_host.to_string()
+    }
+
+    pub(crate) fn port(&self) -> u16 {
+        self.pg_server_port
     }
 }

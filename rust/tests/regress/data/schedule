@@ -1,0 +1,10 @@
+# -----
+# Regress test schedule file adapted from postgres.
+# -----
+
+# run tablespace by itself, and first, because it forces a checkpoint;
+# we'd prefer not to have checkpoints later in the tests because that
+# interferes with crash-recovery testing.
+# test: tablespace
+
+test: boolean

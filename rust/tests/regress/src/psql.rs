@@ -1,6 +1,6 @@
 use crate::Opts;
 use anyhow::{bail, Context};
-use log::info;
+use log::{debug, info};
 use tokio::process::Command;
 
 const PG_DB_NAME: &str = "postgres";
@@ -22,18 +22,18 @@ impl Psql {
     pub(crate) async fn init(&self) -> anyhow::Result<()> {
         info!("Initializing instances.");
 
-        for db in [self.opts.database_name(), PG_DB_NAME] {
-            Psql::drop_database_if_exists(db).await?;
-            Psql::create_database(db).await?;
+        for _db in [self.opts.database_name(), PG_DB_NAME] {
+            // self.drop_database_if_exists(db).await?;
+            // self.create_database(db).await?;
         }
 
         Ok(())
     }
 
-    pub(crate) async fn create_database<S: AsRef<str>>(db: S) -> anyhow::Result<()> {
+    pub(crate) async fn create_database<S: AsRef<str>>(&self, db: S) -> anyhow::Result<()> {
         info!("Creating database {}", db.as_ref());
 
-        let mut cmd = PsqlCommandBuilder::new(PG_DB_NAME)
+        let mut cmd = PsqlCommandBuilder::new(PG_DB_NAME, &self.opts)
             .add_cmd(format!(
                 r#"CREATE DATABASE "{}" TEMPLATE=template0 LC_COLLATE='C' LC_CTYPE='C'"#,
                 db.as_ref()
@@ -52,13 +52,14 @@ impl Psql {
         }
     }
 
-    pub(crate) async fn drop_database_if_exists<S: AsRef<str>>(db: S) -> anyhow::Result<()> {
+    pub(crate) async fn drop_database_if_exists<S: AsRef<str>>(&self, db: S) -> anyhow::Result<()> {
         info!("Dropping database {} if exists", db.as_ref());
 
-        let mut cmd = PsqlCommandBuilder::new("postgres")
-            .add_cmd("SET client_min_messages = warning")
+        let mut cmd = PsqlCommandBuilder::new("postgres", &self.opts)
             .add_cmd(format!(r#"DROP DATABASE IF EXISTS "{}""#, db.as_ref()))
             .build();
+
+        debug!("Dropping database command is: {:?}", cmd);
 
         let status = cmd
             .status()
@@ -75,9 +76,11 @@ impl Psql {
 }
 
 impl PsqlCommandBuilder {
-    pub(crate) fn new<S: ToString>(database: S) -> Self {
+    pub(crate) fn new<S: ToString>(database: S, opts: &Opts) -> Self {
         let mut cmd = Command::new("psql");
-        cmd.arg("-X");
+        cmd.arg("-X")
+            .args(["-h", opts.host().as_str()])
+            .args(["-p", format!("{}", opts.port()).as_str()]);
 
         Self {
             database: database.to_string(),
@@ -98,14 +101,13 @@ impl PsqlCommandBuilder {
         }
 
         // Append comand
-        self.cmd
-            .args(["-c", format!(r#""{}""#, escaped_cmd).as_str()]);
+        self.cmd.args(["-c", &escaped_cmd]);
 
         self
     }
 
     pub(crate) fn build(mut self) -> Command {
-        self.cmd.arg(format!(r#""{}""#, self.database));
+        self.cmd.arg(&self.database);
         self.cmd
     }
 }

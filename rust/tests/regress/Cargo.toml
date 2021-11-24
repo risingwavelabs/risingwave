@@ -4,11 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1"
+anyhow = { version = "1", features = ["backtrace"] }
 clap = "3.0.0-beta.5"
 clap_derive = "3.0.0-beta.5"
 log = "0.4"
 log4rs = "1"
+path-absolutize = "3.0"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "process"] }
 
 [[bin]]

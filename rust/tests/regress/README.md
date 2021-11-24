@@ -13,10 +13,21 @@ in rust.
 
 # How to add a new test
 
-TODO.
+Just add another line in your schedule file with your test cast name.
+```
+tests: boolean
+```
 
 # How to run
 
 * Install `psql` and ensure that it's in your path.
 * Start risingwave cluster.
-* Run `./risingwave_regress_test -h 127.0.01 -p 1234`. (Not ready yet)
+* Enter `rust` folder of your workspace.
+* Run 
+```bash
+RUST_BACKTRACE=1 target/debug/risingwave_regress_test -h 127.0.0.1 \
+  -p 4567 \
+  --input `pwd`/tests/regress/data \
+  --output `pwd`/tests/regress/output \
+  --schedule `pwd`/tests/regress/data/schedule
+```

@@ -168,14 +168,17 @@ impl Schedule {
 
 impl TestCase {
     async fn run(self) -> anyhow::Result<TestResult> {
-        let mut command = Command::new(self.opts.launcher_cmd());
+        let mut command = Command::new("psql");
         command.args([
-            r#""psql""#,
             "-X",
             "-a",
             "-q",
+            "-h",
+            self.opts.host().as_str(),
+            "-p",
+            format!("{}", self.opts.port()).as_str(),
             "-d",
-            format!(r#""{}""#, self.opts.database_name()).as_str(),
+            self.opts.database_name(),
             "-v",
             "HIDE_TABLEAM=on",
             "-v",
@@ -209,7 +212,10 @@ impl TestCase {
         );
         command.stderr(output_file);
 
-        info!("Starting to execute test case: {}", self.test_name);
+        info!(
+            "Starting to execute test case: {}, command: {:?}",
+            self.test_name, command
+        );
         let status = command
             .spawn()
             .with_context(|| format!("Failed to spawn child for test cast: {}", self.test_name))?

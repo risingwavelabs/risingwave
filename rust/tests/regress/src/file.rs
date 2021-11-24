@@ -20,8 +20,9 @@ impl FileManager {
     /// - Create necessary directories.
     /// - Convert source files.
     pub(crate) fn init(&self) -> anyhow::Result<()> {
-        ensure_dir(self.opts.canonicalized_output_dir()?)?;
-        ensure_dir(self.opts.canonicalized_output_dir()?.join("results"))?;
+        ensure_dir(self.opts.absolutized_output_dir()?)?;
+        ensure_dir(self.opts.absolutized_output_dir()?.join("results"))?;
+        ensure_dir(self.opts.absolutized_output_dir()?.join("sql"))?;
         ensure_dir(self.test_table_space_dir()?)?;
         ensure_dir(self.result_dir()?)?;
 
@@ -33,7 +34,7 @@ impl FileManager {
     pub(crate) fn source_of(&self, test_name: &str) -> anyhow::Result<PathBuf> {
         let mut path = self
             .opts
-            .canonicalized_input_dir()?
+            .absolutized_input_dir()?
             .join("sql")
             .join(format!("{}.sql", test_name));
 
@@ -43,7 +44,7 @@ impl FileManager {
 
         path = self
             .opts
-            .canonicalized_output_dir()?
+            .absolutized_output_dir()?
             .join("sql")
             .join(format!("{}.sql", test_name));
 
@@ -58,7 +59,7 @@ impl FileManager {
     pub(crate) fn output_of(&self, test_name: &str) -> anyhow::Result<PathBuf> {
         Ok(self
             .opts
-            .canonicalized_output_dir()?
+            .absolutized_output_dir()?
             .join("results")
             .join(format!("{}.out", test_name)))
     }
@@ -67,7 +68,7 @@ impl FileManager {
     pub(crate) fn expected_output_of(&self, test_name: &str) -> anyhow::Result<PathBuf> {
         let mut path = self
             .opts
-            .canonicalized_input_dir()?
+            .absolutized_input_dir()?
             .join("expected")
             .join(format!("{}.out", test_name));
 
@@ -77,7 +78,7 @@ impl FileManager {
 
         path = self
             .opts
-            .canonicalized_output_dir()?
+            .absolutized_output_dir()?
             .join("expected")
             .join(format!("{}.sql", test_name));
 
@@ -106,10 +107,10 @@ impl FileManager {
         dest_subdir: &str,
         suffix: &str,
     ) -> anyhow::Result<()> {
-        let output_subdir_path = self.opts.canonicalized_output_dir()?.join(dest_subdir);
+        let output_subdir_path = self.opts.absolutized_output_dir()?.join(dest_subdir);
         ensure_dir(&output_subdir_path)?;
 
-        let input_subdir_path: PathBuf = self.opts.canonicalized_input_dir()?.join(input_subdir);
+        let input_subdir_path: PathBuf = self.opts.absolutized_input_dir()?.join(input_subdir);
 
         let dir_entries = read_dir(&input_subdir_path)
             .with_context(|| format!("Failed to read dir {:?}", input_subdir_path))?;
@@ -120,7 +121,7 @@ impl FileManager {
 
             if path.is_file() && extension == Some("source") {
                 let filename = path.file_prefix().unwrap();
-                let output_filename = format!("{:?}.{:?}", filename, suffix);
+                let output_filename = format!("{}.{}", filename.to_str().unwrap(), suffix);
                 let output_path = output_subdir_path.join(output_filename);
                 info!("Converting {:?} to {:?}", path, output_path);
                 self.replace_placeholder(path, output_path)?;
@@ -140,8 +141,8 @@ impl FileManager {
     /// * `@abs_builddir@`: Absolute path of output directory.
     /// * `@testtablespace@`: Absolute path of tablespace for test.
     fn replace_placeholder<P: AsRef<Path>>(&self, input: P, output: P) -> anyhow::Result<()> {
-        let abs_input_dir = self.opts.canonicalized_input_dir()?;
-        let abs_output_dir = self.opts.canonicalized_output_dir()?;
+        let abs_input_dir = self.opts.absolutized_input_dir()?;
+        let abs_output_dir = self.opts.absolutized_output_dir()?;
         let test_tablespace = self.test_table_space_dir()?;
 
         let reader = BufReader::new(
@@ -153,6 +154,7 @@ impl FileManager {
 
         let mut writer = BufWriter::new(
             File::with_options()
+                .write(true)
                 .create_new(true)
                 .open(&output)
                 .with_context(|| format!("Failed to create output file: {:?}", output.as_ref()))?,
@@ -172,14 +174,12 @@ impl FileManager {
 
     fn test_table_space_dir(&self) -> anyhow::Result<PathBuf> {
         self.opts
-            .canonicalized_output_dir()
+            .absolutized_output_dir()
             .map(|p| p.join("testtablespace"))
     }
 
     fn result_dir(&self) -> anyhow::Result<PathBuf> {
-        self.opts
-            .canonicalized_output_dir()
-            .map(|p| p.join("result"))
+        self.opts.absolutized_output_dir().map(|p| p.join("result"))
     }
 }
 
