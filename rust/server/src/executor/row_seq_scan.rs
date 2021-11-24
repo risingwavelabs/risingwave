@@ -89,66 +89,30 @@ impl Executor for RowSeqScanExecutor {
 
     async fn next(&mut self) -> Result<Option<DataChunk>> {
         match self.iter.next() {
-            Some((key_row, value_row)) => {
-                if !self.has_pk {
-                    // If no pk, then return keys with multiple times specified by value.
-                    let value_arr = value_row.0;
-                    let value_datum = value_arr.get(0).unwrap().clone();
-                    let occurrences = value_datum.unwrap();
-                    let occ_value = occurrences.as_int32();
-
-                    let row = key_row as Row;
-                    let row = row.0;
-
-                    let columns = self
-                        .column_ids
-                        .iter()
-                        .map(|column_id| {
-                            if let (Some(data_type), Some(datum)) =
-                                (self.data_types.get(*column_id), row.get(*column_id))
-                            {
-                                let mut builder = data_type.create_array_builder(1)?;
-                                let mut i = 0;
-                                // Put duplicate tuples in the same chunk.
-                                while i < *occ_value {
-                                    builder.append_datum(datum)?;
-                                    i += 1;
-                                }
-                                let array = builder.finish()?;
-                                Ok(Column::new(Arc::new(array), data_type.clone()))
-                            } else {
-                                Err(RwError::from(InternalError("No column found".to_string())))
-                            }
-                        })
-                        .collect::<Result<Vec<_>>>()?;
-
-                    let data_chunk = DataChunk::builder().columns(columns).build();
-                    Ok(Some(data_chunk))
-                } else {
-                    // Scan through value pairs.
-                    // Make rust analyzer happy.
-                    let row = value_row as Row;
-                    let row = row.0;
-                    let columns = self
-                        .column_ids
-                        .iter()
-                        .map(|column_id| {
-                            if let (Some(data_type), Some(datum)) =
-                                (self.data_types.get(*column_id), row.get(*column_id))
-                            {
-                                // We can scan row by row here currently.
-                                let mut builder = data_type.create_array_builder(1)?;
-                                builder.append_datum(datum)?;
-                                let array = builder.finish()?;
-                                Ok(Column::new(Arc::new(array), data_type.clone()))
-                            } else {
-                                Err(RwError::from(InternalError("No column found".to_string())))
-                            }
-                        })
-                        .collect::<Result<Vec<_>>>()?;
-                    let data_chunk = DataChunk::builder().columns(columns).build();
-                    Ok(Some(data_chunk))
-                }
+            Some((_key_row, value_row)) => {
+                // Scan through value pairs.
+                // Make rust analyzer happy.
+                let row = value_row as Row;
+                let row = row.0;
+                let columns = self
+                    .column_ids
+                    .iter()
+                    .map(|column_id| {
+                        if let (Some(data_type), Some(datum)) =
+                            (self.data_types.get(*column_id), row.get(*column_id))
+                        {
+                            // We can scan row by row here currently.
+                            let mut builder = data_type.create_array_builder(1)?;
+                            builder.append_datum(datum)?;
+                            let array = builder.finish()?;
+                            Ok(Column::new(Arc::new(array), data_type.clone()))
+                        } else {
+                            Err(RwError::from(InternalError("No column found".to_string())))
+                        }
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                let data_chunk = DataChunk::builder().columns(columns).build();
+                Ok(Some(data_chunk))
             }
             None => Ok(None),
         }
