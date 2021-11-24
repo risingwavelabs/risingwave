@@ -107,7 +107,7 @@ impl Executor for RowSeqScanExecutor {
                             if let (Some(data_type), Some(datum)) =
                                 (self.data_types.get(*column_id), row.get(*column_id))
                             {
-                                let mut builder = data_type.clone().create_array_builder(1)?;
+                                let mut builder = data_type.create_array_builder(1)?;
                                 let mut i = 0;
                                 // Put duplicate tuples in the same chunk.
                                 while i < *occ_value {
@@ -137,7 +137,7 @@ impl Executor for RowSeqScanExecutor {
                                 (self.data_types.get(*column_id), row.get(*column_id))
                             {
                                 // We can scan row by row here currently.
-                                let mut builder = data_type.clone().create_array_builder(1)?;
+                                let mut builder = data_type.create_array_builder(1)?;
                                 builder.append_datum(datum)?;
                                 let array = builder.finish()?;
                                 Ok(Column::new(Arc::new(array), data_type.clone()))

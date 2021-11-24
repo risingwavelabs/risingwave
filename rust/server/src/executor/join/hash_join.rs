@@ -397,8 +397,7 @@ mod tests {
     impl DataChunkMerger {
         fn new(data_types: Vec<DataTypeRef>) -> Result<Self> {
             let array_builders = data_types
-                .clone()
-                .into_iter()
+                .iter()
                 .map(|data_type| data_type.create_array_builder(1024))
                 .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
 

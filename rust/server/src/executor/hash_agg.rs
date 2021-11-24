@@ -12,7 +12,7 @@ use risingwave_common::collection::hash_map::{
     HashKeyKind, Key128, Key16, Key256, Key32, Key64, KeySerialized,
 };
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataType, DataTypeRef};
+use risingwave_common::types::DataTypeRef;
 use risingwave_common::vector_op::agg::{AggStateFactory, BoxedAggState};
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::HashAggNode;
@@ -170,14 +170,16 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
         let mut group_builders = self
             .group_key_types
             .iter()
-            .map(|datatype| DataType::create_array_builder(datatype.as_ref(), cardinality))
+            .map(|datatype| datatype.create_array_builder(cardinality))
             .collect::<Result<Vec<_>>>()?;
 
         let mut agg_builders = self
             .agg_factories
             .iter()
             .map(|agg_factory| {
-                DataType::create_array_builder(agg_factory.get_return_type().as_ref(), cardinality)
+                agg_factory
+                    .get_return_type()
+                    .create_array_builder(cardinality)
             })
             .collect::<Result<Vec<_>>>()?;
 

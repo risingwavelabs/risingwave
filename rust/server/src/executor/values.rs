@@ -13,7 +13,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::expr::{build_from_prost, BoxedExpression};
-use risingwave_common::types::{DataType, Int32Type};
+use risingwave_common::types::Int32Type;
 
 /// `ValuesExecutor` implements Values executor.
 pub(super) struct ValuesExecutor {
@@ -43,13 +43,13 @@ impl Executor for ValuesExecutor {
             .ok_or_else(|| RwError::from(InternalError("Can't values empty rows!".to_string())))?
             .iter() // for each column
             .map(|col| {
-                DataType::create_array_builder(col.return_type_ref().as_ref(), cardinality).map_err(
-                    |_| {
+                col.return_type()
+                    .create_array_builder(cardinality)
+                    .map_err(|_| {
                         RwError::from(InternalError(
                             "Creat array builder failed when values".to_string(),
                         ))
-                    },
-                )
+                    })
             })
             .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
 

@@ -634,7 +634,7 @@ mod tests {
             .iter()
             .map(|idx| {
                 data.columns()[*idx]
-                    .data_type()
+                    .data_type_ref()
                     .create_array_builder(1024)
                     .unwrap()
             })

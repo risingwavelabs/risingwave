@@ -14,7 +14,7 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::build_from_prost as expr_build_from_prost;
 use risingwave_common::expr::BoxedExpression;
-use risingwave_common::types::{DataType, DataTypeRef};
+use risingwave_common::types::DataTypeRef;
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 use risingwave_pb::plan::{plan_node::PlanNodeType, NestedLoopJoinNode};
 
@@ -150,7 +150,7 @@ impl NestedLoopJoinExecutor {
         let num_columns = data_types.len();
         let mut output_array_builders = data_types
             .iter()
-            .map(|data_type| DataType::create_array_builder(data_type.as_ref(), num_tuples))
+            .map(|data_type| data_type.create_array_builder(num_tuples))
             .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
         for _i in 0..num_tuples {
             for (col_idx, builder) in output_array_builders

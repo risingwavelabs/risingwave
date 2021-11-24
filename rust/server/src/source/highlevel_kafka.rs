@@ -295,11 +295,7 @@ trait KafkaSourceChunkBuilder {
     ) -> Result<Vec<Column>> {
         let mut builders = column_descs
             .iter()
-            .map(|k| {
-                k.data_type
-                    .clone()
-                    .create_array_builder(DEFAULT_CHUNK_BUFFER_SIZE)
-            })
+            .map(|k| k.data_type.create_array_builder(DEFAULT_CHUNK_BUFFER_SIZE))
             .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
 
         for row in rows {

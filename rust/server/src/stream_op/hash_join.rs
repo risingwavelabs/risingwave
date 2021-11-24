@@ -249,7 +249,7 @@ impl<const T: JoinTypePrimitive> HashJoinExecutor<T> {
         let new_column_builders = self
             .new_column_datatypes
             .iter()
-            .map(|datatype| datatype.clone().create_array_builder(capacity));
+            .map(|datatype| datatype.create_array_builder(capacity));
 
         let mut new_column_builders = new_column_builders
             .into_iter()

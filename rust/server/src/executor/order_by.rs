@@ -160,7 +160,7 @@ impl Executor for OrderByExecutor {
             .collect_vec();
         let mut builders = data_types
             .iter()
-            .map(|t| t.clone().create_array_builder(K_PROCESSING_WINDOW_SIZE))
+            .map(|t| t.create_array_builder(K_PROCESSING_WINDOW_SIZE))
             .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
         let mut chunk_size = 0usize;
         while !self.min_heap.is_empty() && chunk_size < K_PROCESSING_WINDOW_SIZE {

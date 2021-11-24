@@ -169,9 +169,7 @@ where
 
         let mut builders = datatypes
             .iter()
-            // TODO: remove the `ty.clone()` in the future. `create_array_builder` only needs to
-            // accept `&self` instead of `Arc<Self>`.
-            .map(|ty| ty.clone().create_array_builder(dirty_cnt * 2).unwrap())
+            .map(|ty| ty.create_array_builder(dirty_cnt * 2).unwrap())
             .collect_vec();
 
         // --- Retrive modified states and put the changes into the builders ---

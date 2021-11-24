@@ -49,7 +49,7 @@ impl DataChunkBuilder {
             self.array_builders = self
                 .data_types
                 .iter()
-                .map(|data_type| data_type.clone().create_array_builder(self.batch_size))
+                .map(|data_type| data_type.create_array_builder(self.batch_size))
                 .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
 
             self.buffered_count = 0;

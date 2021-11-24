@@ -11,7 +11,6 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::{build_from_prost, BoxedExpression};
-use risingwave_common::types::DataType;
 use risingwave_common::vector_op::agg::{
     self, AggStateFactory, BoxedAggState, BoxedSortedGrouper, EqGroups,
 };
@@ -98,12 +97,12 @@ impl Executor for SortAggExecutor {
         let mut group_builders = self
             .group_exprs
             .iter()
-            .map(|e| DataType::create_array_builder(e.return_type(), cardinality))
+            .map(|e| e.return_type().create_array_builder(cardinality))
             .collect::<Result<Vec<_>>>()?;
         let mut array_builders = self
             .agg_states
             .iter()
-            .map(|e| DataType::create_array_builder(e.return_type_ref().as_ref(), cardinality))
+            .map(|e| e.return_type_ref().create_array_builder(cardinality))
             .collect::<Result<Vec<_>>>()?;
 
         while let Some(child_chunk) = self.child.next().await? {

@@ -180,7 +180,7 @@ impl DataChunk {
         let mut new_chunk_require = std::cmp::min(total_capacity, each_size_limit);
         let mut array_builders: Vec<ArrayBuilderImpl> = column_types
             .iter()
-            .map(|col_type| col_type.clone().create_array_builder(new_chunk_require))
+            .map(|col_type| col_type.create_array_builder(new_chunk_require))
             .try_collect()?;
         let mut new_chunks = Vec::with_capacity(num_chunks);
         while chunk_idx < chunks.len() {
@@ -193,7 +193,7 @@ impl DataChunk {
                 .zip(chunks[chunk_idx].columns())
                 .try_for_each(|(builder, column)| {
                     let mut array_builder = column
-                        .data_type()
+                        .data_type_ref()
                         .create_array_builder(end_row_idx - start_row_idx + 1)?;
                     for row_idx in start_row_idx..=end_row_idx {
                         array_builder.append_datum_ref(column.array_ref().value_at(row_idx))?;
@@ -225,7 +225,7 @@ impl DataChunk {
 
                 array_builders = column_types
                     .iter()
-                    .map(|col_type| col_type.clone().create_array_builder(new_chunk_require))
+                    .map(|col_type| col_type.create_array_builder(new_chunk_require))
                     .try_collect()?;
                 new_chunk_require = std::cmp::min(total_capacity, each_size_limit);
             }

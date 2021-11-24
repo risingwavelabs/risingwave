@@ -117,7 +117,6 @@ impl<CS: 'static + CreateSource> Executor for MergeSortExchangeExecutorImpl<CS> 
             .map(|field| {
                 field
                     .data_type
-                    .clone()
                     .create_array_builder(K_PROCESSING_WINDOW_SIZE)
             })
             .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
