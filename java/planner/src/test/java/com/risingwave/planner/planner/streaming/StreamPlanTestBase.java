@@ -30,7 +30,7 @@ public abstract class StreamPlanTestBase extends SqlTestBase {
             LeaderServerConfigurations.CLUSTER_MODE,
             LeaderServerConfigurations.ClusterMode.Distributed);
     initTables();
-    streamPlanner = new StreamPlanner();
+    streamPlanner = new StreamPlanner(true);
     streamFragmenter = new StreamFragmenter();
   }
 

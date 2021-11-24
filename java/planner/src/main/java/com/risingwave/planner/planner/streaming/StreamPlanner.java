@@ -36,8 +36,15 @@ import org.slf4j.LoggerFactory;
 /** The planner for streaming job */
 public class StreamPlanner implements Planner<StreamingPlan> {
   private static final Logger log = LoggerFactory.getLogger(StreamPlanner.class);
+  private final boolean testMode;
 
-  public StreamPlanner() {}
+  public StreamPlanner() {
+    this(false);
+  }
+
+  public StreamPlanner(boolean testMode) {
+    this.testMode = testMode;
+  }
 
   /**
    * The stream planner takes the whole create materialized view AST as input.
@@ -78,7 +85,7 @@ public class StreamPlanner implements Planner<StreamingPlan> {
         p.node.getCluster(), p.node.getTraitSet(), p.node, name, p.info);
   }
 
-  private static OptimizerProgram buildLogicalOptimizerProgram() {
+  private OptimizerProgram buildLogicalOptimizerProgram() {
     ChainedOptimizerProgram.Builder builder = ChainedOptimizerProgram.builder(STREAMING);
     // We use partial rules from batch planner until getting a RisingWave logical plan.
     builder.addLast(SUBQUERY_REWRITE, SubQueryRewriteProgram.INSTANCE);
@@ -86,7 +93,9 @@ public class StreamPlanner implements Planner<StreamingPlan> {
     builder.addLast(
         LOGICAL_REWRITE, HepOptimizerProgram.builder().addRules(LOGICAL_REWRITE_RULES).build());
 
-    builder.addLast(JOIN_REORDER, JoinReorderProgram.INSTANCE);
+    if (!this.testMode) {
+      builder.addLast(JOIN_REORDER, JoinReorderProgram.INSTANCE);
+    }
 
     builder.addLast(
         LOGICAL_CBO,
