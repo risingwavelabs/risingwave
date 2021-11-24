@@ -6,14 +6,14 @@ use itertools::Itertools;
 
 use super::{Block, Header, HEADER_SIZE};
 
-enum SeekPos {
+pub enum SeekPos {
     Origin,
     Current,
 }
 
 /// Block iterator iterates on an SST block
 // TODO: support custom comparator
-struct BlockIterator {
+pub struct BlockIterator {
     /// current index of iterator
     idx: isize,
     /// base key of the block
@@ -146,6 +146,11 @@ impl BlockIterator {
         } else {
             None
         }
+    }
+
+    /// Check whether the iterator is at a valid position
+    pub fn is_valid(&self) -> bool {
+        self.idx >= 0 && self.idx < self.entry_offsets().len() as isize
     }
 
     /// Move to the next position

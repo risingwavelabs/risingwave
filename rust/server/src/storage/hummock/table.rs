@@ -2,19 +2,21 @@
 
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 
-pub mod block_iterator;
+mod block_iterator;
 mod builder;
 pub use block_iterator::*;
 pub use builder::*;
+mod table_iterator;
+pub use table_iterator::*;
 mod utils;
+use utils::verify_checksum;
 
-use super::{HummockError, HummockResult};
-use crate::storage::hummock::bloom::Bloom;
+use std::sync::Arc;
+
+use super::{Bloom, HummockError, HummockResult};
 use bytes::{Buf, Bytes};
 use prost::Message;
 use risingwave_pb::hummock::{Checksum, TableMeta};
-use std::sync::Arc;
-use utils::verify_checksum;
 
 /// Block contains several entries. It can be obtained from an SST.
 #[derive(Default)]
@@ -176,15 +178,21 @@ impl Table {
             false
         }
     }
+
+    /// Number of blocks in the current table
+    pub fn block_count(&self) -> usize {
+        self.meta.offsets.len()
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::builder::tests::*;
     use super::*;
 
     #[tokio::test]
     async fn test_table_load() {
-        let (blocks, meta) = super::builder::tests::generate_table();
+        let (blocks, meta) = generate_table(default_builder_opt_for_test());
         let table = Table::load(0, blocks, meta).unwrap();
         for i in 0..10 {
             table.block(i).await.unwrap();

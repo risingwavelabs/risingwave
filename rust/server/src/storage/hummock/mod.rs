@@ -1,79 +1,26 @@
 //! Hummock is the state store of the streaming system.
 
-mod table;
-use bytes::{Buf, BufMut};
-use std::fmt::Debug;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-pub use table::*;
+
+use iterator::*;
+mod table;
+use table::*;
 mod bloom;
+use bloom::*;
 mod cloud;
 mod error;
 mod format;
 mod iterator;
 mod keyed_state;
+mod value;
+use value::*;
 
 #[cfg(test)]
 mod mock_fs;
 
 use crate::storage::hummock::cloud::upload;
 pub use error::*;
-
-pub const VALUE_DELETE: u8 = 1 << 0;
-pub const VALUE_PUT: u8 = 0;
-
-#[derive(Debug)]
-pub enum HummockValue<T> {
-    Put(T),
-    Delete,
-}
-
-impl PartialEq for HummockValue<Vec<u8>> {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Put(l0), Self::Put(r0)) => l0 == r0,
-            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
-        }
-    }
-}
-
-impl HummockValue<Vec<u8>> {
-    pub fn encoded_len(&self) -> usize {
-        match self {
-            HummockValue::Put(val) => 1 + val.len(),
-            HummockValue::Delete => 1,
-        }
-    }
-
-    /// Encode the object
-    pub fn encode(&self, buffer: &mut impl BufMut) {
-        match self {
-            HummockValue::Put(val) => {
-                // set flag
-                buffer.put_u8(VALUE_PUT);
-                buffer.put_slice(val.as_slice());
-            }
-            HummockValue::Delete => {
-                // set flag
-                buffer.put_u8(VALUE_DELETE);
-            }
-        }
-    }
-
-    /// Decode the object
-    pub fn decode(buffer: &mut impl Buf) -> HummockResult<Self> {
-        if buffer.remaining() == 0 {
-            return Err(HummockError::DecodeError("empty value".to_string()));
-        }
-        match buffer.get_u8() {
-            VALUE_PUT => Ok(Self::Put(Vec::from(buffer.chunk()))),
-            VALUE_DELETE => Ok(Self::Delete),
-            _ => Err(HummockError::DecodeError(
-                "non-empty but format error".to_string(),
-            )),
-        }
-    }
-}
 
 #[derive(Default, Debug, Clone)]
 pub struct HummockOptions {

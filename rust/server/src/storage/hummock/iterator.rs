@@ -1,4 +1,4 @@
-use super::HummockResult;
+use super::{HummockResult, HummockValue};
 
 mod concat;
 pub use concat::*;
@@ -16,10 +16,10 @@ use async_trait::async_trait;
 pub trait HummockIterator {
     /// Get the next key/value pair in the table. If `None` is returned, the iterator must be
     /// rewinded to retrive new values.
-    async fn next(&mut self) -> HummockResult<Option<(&[u8], &[u8])>>;
+    async fn next(&mut self) -> HummockResult<Option<(&[u8], HummockValue<&[u8]>)>>;
 
     /// Reset the position of the iterator
-    async fn rewind(&mut self);
+    async fn rewind(&mut self) -> HummockResult<()>;
 
     /// Seek to a key
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()>;
