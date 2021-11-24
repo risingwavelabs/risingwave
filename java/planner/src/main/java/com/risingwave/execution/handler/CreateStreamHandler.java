@@ -40,7 +40,7 @@ import org.apache.calcite.sql.validate.SqlValidator;
 public class CreateStreamHandler implements SqlHandler {
   @Override
   public DdlResult handle(SqlNode ast, ExecutionContext context) {
-    PlanFragment planFragment = executeDdl(ast, context);
+    PlanFragment planFragment = execute(ast, context);
     ComputeClientManager clientManager = context.getComputeClientManager();
 
     for (var node : context.getWorkerNodeManager().allNodes()) {
@@ -57,7 +57,7 @@ public class CreateStreamHandler implements SqlHandler {
     return new DdlResult(StatementType.CREATE_STREAM, 0);
   }
 
-  private static PlanFragment ddlSerializer(TableCatalog table) {
+  private static PlanFragment serialize(TableCatalog table) {
     TableCatalog.TableId tableId = table.getId();
     CreateStreamNode.Builder createStreamNodeBuilder = CreateStreamNode.newBuilder();
     for (ColumnCatalog columnCatalog : table.getAllColumns()) {
@@ -105,7 +105,7 @@ public class CreateStreamHandler implements SqlHandler {
   }
 
   @VisibleForTesting
-  protected PlanFragment executeDdl(SqlNode ast, ExecutionContext context) {
+  protected PlanFragment execute(SqlNode ast, ExecutionContext context) {
     SqlCreateStream sql = (SqlCreateStream) ast;
 
     SchemaCatalog.SchemaName schemaName = context.getCurrentSchema();
@@ -143,6 +143,6 @@ public class CreateStreamHandler implements SqlHandler {
     CreateTableInfo streamInfo = createStreamInfoBuilder.build();
     // Build a plan distribute to compute node.
     TableCatalog table = context.getCatalogService().createTable(schemaName, streamInfo);
-    return ddlSerializer(table);
+    return serialize(table);
   }
 }

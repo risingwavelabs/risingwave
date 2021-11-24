@@ -153,7 +153,6 @@ impl SeqScanExecutor {
 
 #[cfg(test)]
 mod tests {
-
     use crate::*;
     use risingwave_common::array::{Array, I64Array};
     use risingwave_common::catalog::test_utils::mock_table_id;
@@ -170,9 +169,18 @@ mod tests {
                 data_type: Arc::new(DecimalType::new(false, 10, 5)?),
             }],
         };
-        let table = BummockTable::new(&table_id, &schema);
+        let table_columns = schema
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(i, f)| TableColumnDesc {
+                data_type: f.data_type.clone(),
+                column_id: i as i32, // use column index as column id
+            })
+            .collect();
+        let table = BummockTable::new(&table_id, table_columns);
 
-        let fields = table.schema().fields.to_owned();
+        let fields = table.schema().fields;
         let col1 = column_nonnull! { I64Array, Int64Type, [1, 3, 5, 7, 9] };
         let col2 = column_nonnull! { I64Array, Int64Type, [2, 4, 6, 8, 10] };
         let data_chunk1 = DataChunk::builder().columns(vec![col1]).build();

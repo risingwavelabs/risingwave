@@ -24,6 +24,7 @@ message TableRefId {
   int32 table_id = 2;
 }
 
+// ColumnDesc defines a column in a table
 message ColumnDesc {
   enum ColumnEncodingType {
     INVALID = 0;
@@ -39,6 +40,7 @@ message ColumnDesc {
   ColumnEncodingType encoding = 2;
   bool is_primary = 3;
   string name = 4;
+  int32 column_id = 5;
 }
 
 message SeqScanNode {

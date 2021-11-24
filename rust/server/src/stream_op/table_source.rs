@@ -91,7 +91,7 @@ impl Debug for TableSourceExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::{BummockTable, Table};
+    use crate::storage::{BummockTable, Table, TableColumnDesc};
     use crate::stream_op::Op;
     use futures::channel::mpsc::unbounded;
     use itertools::Itertools;
@@ -107,17 +107,17 @@ mod tests {
     #[tokio::test]
     async fn test_table_source() -> Result<()> {
         let table_id = mock_table_id();
-        let schema = Schema {
-            fields: vec![
-                Field {
-                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
-                },
-                Field {
-                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
-                },
-            ],
-        };
-        let table = BummockTable::new(&table_id, &schema);
+        let table_columns = vec![
+            TableColumnDesc {
+                column_id: 0,
+                data_type: Arc::new(DecimalType::new(false, 10, 5)?),
+            },
+            TableColumnDesc {
+                column_id: 1,
+                data_type: Arc::new(DecimalType::new(false, 10, 5)?),
+            },
+        ];
+        let table = BummockTable::new(&table_id, table_columns);
 
         let col1_type = Int32Type::create(false) as DataTypeRef;
         let col2_type = StringType::create(true, 10, DataTypeKind::Varchar);
@@ -218,17 +218,17 @@ mod tests {
     async fn test_table_dropped() -> Result<()> {
         let table_id = mock_table_id();
 
-        let schema = Schema {
-            fields: vec![
-                Field {
-                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
-                },
-                Field {
-                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
-                },
-            ],
-        };
-        let table = BummockTable::new(&table_id, &schema);
+        let table_columns = vec![
+            TableColumnDesc {
+                column_id: 0,
+                data_type: Arc::new(DecimalType::new(false, 10, 5)?),
+            },
+            TableColumnDesc {
+                column_id: 1,
+                data_type: Arc::new(DecimalType::new(false, 10, 5)?),
+            },
+        ];
+        let table = BummockTable::new(&table_id, table_columns);
 
         let col1_type = Int32Type::create(false) as DataTypeRef;
         let col2_type = StringType::create(true, 10, DataTypeKind::Varchar);

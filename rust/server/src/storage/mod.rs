@@ -18,6 +18,7 @@ use risingwave_common::array::InternalError;
 use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
+use risingwave_common::types::DataTypeRef;
 use risingwave_pb::ToProst;
 use risingwave_proto::plan::ColumnDesc;
 use std::collections::HashMap;
@@ -46,7 +47,7 @@ pub trait Table: Sync + Send {
     fn create_stream(&self) -> Result<mpsc::UnboundedReceiver<StreamChunk>>;
 
     /// Get the column ids of the table.
-    fn get_column_ids(&self) -> Result<Arc<Vec<i32>>>;
+    fn get_column_ids(&self) -> Vec<i32>;
 
     /// Get the indices of the specific column.
     fn index_of_column_id(&self, column_id: i32) -> Result<usize>;
@@ -61,7 +62,11 @@ pub trait Table: Sync + Send {
 /// `Database` is a logical concept and stored as metadata information.
 pub trait TableManager: Sync + Send {
     /// Create a specific table.
-    async fn create_table(&self, table_id: &TableId, schema: &Schema) -> Result<()>;
+    async fn create_table(
+        &self,
+        table_id: &TableId,
+        table_columns: Vec<TableColumnDesc>,
+    ) -> Result<()>;
 
     /// Get a specific table.
     fn get_table(&self, table_id: &TableId) -> Result<TableTypes>;
@@ -86,6 +91,12 @@ pub enum TableTypes {
     TestRow(Arc<TestRowTable>),
 }
 
+#[derive(Clone, Debug)]
+pub struct TableColumnDesc {
+    pub data_type: DataTypeRef,
+    pub column_id: i32,
+}
+
 /// A simple implementation of in memory table for local tests.
 /// It will be replaced in near future when replaced by locally
 /// on-disk files.
@@ -95,7 +106,11 @@ pub struct SimpleTableManager {
 
 #[async_trait::async_trait]
 impl TableManager for SimpleTableManager {
-    async fn create_table(&self, table_id: &TableId, schema: &Schema) -> Result<()> {
+    async fn create_table(
+        &self,
+        table_id: &TableId,
+        table_columns: Vec<TableColumnDesc>,
+    ) -> Result<()> {
         let mut tables = self.get_tables()?;
 
         ensure!(
@@ -104,7 +119,7 @@ impl TableManager for SimpleTableManager {
             table_id
         );
 
-        let column_count = schema.fields.len();
+        let column_count = table_columns.len();
         ensure!(
             column_count > 0,
             "column count must be positive: {}",
@@ -112,7 +127,7 @@ impl TableManager for SimpleTableManager {
         );
         tables.insert(
             table_id.clone(),
-            TableTypes::BummockTable(Arc::new(BummockTable::new(table_id, schema))),
+            TableTypes::BummockTable(Arc::new(BummockTable::new(table_id, table_columns))),
         );
         Ok(())
     }

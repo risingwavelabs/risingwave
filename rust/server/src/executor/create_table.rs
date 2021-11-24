@@ -8,9 +8,9 @@ use risingwave_pb::plan::CreateTableNode;
 use risingwave_pb::ToProto;
 
 use crate::executor::{Executor, ExecutorBuilder};
-use crate::storage::TableManagerRef;
+use crate::storage::{TableColumnDesc, TableManagerRef};
+use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
-use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::Result;
 
@@ -19,7 +19,7 @@ use super::{BoxedExecutor, BoxedExecutorBuilder};
 pub(super) struct CreateTableExecutor {
     table_id: TableId,
     table_manager: TableManagerRef,
-    schema: Schema,
+    table_columns: Vec<TableColumnDesc>,
 }
 
 impl BoxedExecutorBuilder for CreateTableExecutor {
@@ -35,12 +35,13 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
         )
         .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
-        let fields = node
+        let table_columns = node
             .get_column_descs()
             .iter()
             .map(|col| {
-                Ok(Field {
+                Ok(TableColumnDesc {
                     data_type: build_from_prost(col.get_column_type())?,
+                    column_id: col.get_column_id(),
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -48,7 +49,7 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
         Ok(Box::new(Self {
             table_id,
             table_manager: source.global_task_env().table_manager_ref(),
-            schema: Schema { fields },
+            table_columns,
         }))
     }
 }
@@ -57,14 +58,15 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
 impl Executor for CreateTableExecutor {
     async fn open(&mut self) -> Result<()> {
         info!("create table executor initing!");
+        let table_columns = std::mem::take(&mut self.table_columns);
+        self.table_manager
+            .create_table(&self.table_id, table_columns)
+            .await?;
         Ok(())
     }
 
     async fn next(&mut self) -> Result<Option<DataChunk>> {
-        self.table_manager
-            .create_table(&self.table_id, &self.schema)
-            .await
-            .map(|_| None)
+        Ok(None)
     }
 
     async fn close(&mut self) -> Result<()> {
@@ -73,6 +75,6 @@ impl Executor for CreateTableExecutor {
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        panic!("create table executor does not have schema!");
     }
 }

@@ -8,7 +8,6 @@ use risingwave_pb::data::DataType as DataTypeProto;
 /// The field in the schema of the executor's return data
 #[derive(Clone, Debug)]
 pub struct Field {
-    // TODO: field_name
     pub data_type: DataTypeRef,
 }
 
@@ -57,6 +56,10 @@ impl Schema {
 }
 
 impl Field {
+    pub fn new(data_type: DataTypeRef) -> Self {
+        Self { data_type }
+    }
+
     pub fn try_from(data_type: &DataTypeProto) -> Result<Self> {
         Ok(Field {
             data_type: build_from_prost(data_type)?,

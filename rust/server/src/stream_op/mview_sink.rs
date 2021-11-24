@@ -129,6 +129,7 @@ mod tests {
             encoding: ColumnEncodingType::Raw as i32,
             name: "v1".to_string(),
             is_primary: false,
+            column_id: 0,
         };
         let column_desc2 = ColumnDesc {
             column_type: Some(DataType {
@@ -138,6 +139,7 @@ mod tests {
             encoding: ColumnEncodingType::Raw as i32,
             name: "v2".to_string(),
             is_primary: false,
+            column_id: 1,
         };
         let column_descs = vec![column_desc1.to_proto(), column_desc2.to_proto()];
         let pks = vec![0_usize];

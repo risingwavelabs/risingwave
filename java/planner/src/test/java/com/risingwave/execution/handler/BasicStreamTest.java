@@ -61,7 +61,7 @@ public class BasicStreamTest {
     SqlNode ast = SqlParser.createCalciteStatement(sql);
     PlanFragment ret =
         ((CreateStreamHandler) sqlHandlerFactory.create(ast, executionContext))
-            .executeDdl(ast, executionContext);
+            .execute(ast, executionContext);
     PlanNode root = ret.getRoot();
     assertEquals(root.getNodeType(), PlanNode.PlanNodeType.CREATE_STREAM);
 
@@ -88,7 +88,7 @@ public class BasicStreamTest {
     SqlNode ast = SqlParser.createCalciteStatement(sql);
     PlanFragment ret =
         ((DropTableHandler) sqlHandlerFactory.create(ast, executionContext))
-            .executeDdl(ast, executionContext);
+            .execute(ast, executionContext);
     PlanNode root = ret.getRoot();
     assertEquals(root.getNodeType(), PlanNode.PlanNodeType.DROP_STREAM);
   }

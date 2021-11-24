@@ -193,7 +193,7 @@ mod tests {
         };
         let mut mock_executor = MockExecutor::new(schema.clone());
 
-        // Schema for creating table.
+        // Schema of first table
         let schema = Schema {
             fields: vec![
                 Field {
@@ -208,6 +208,16 @@ mod tests {
             ],
         };
 
+        let table_columns: Vec<_> = schema
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(i, f)| TableColumnDesc {
+                data_type: f.data_type.clone(),
+                column_id: i as i32, // use column index as column id
+            })
+            .collect();
+
         let col1 = column_nonnull! { I64Array, Int64Type, [1, 3, 5, 7, 9] };
         let col2 = column_nonnull! { I64Array, Int64Type, [2, 4, 6, 8, 10] };
         let data_chunk: DataChunk = DataChunk::builder().columns(vec![col1, col2]).build();
@@ -215,7 +225,9 @@ mod tests {
 
         // Create the first table.
         let table_id = TableId::new(SchemaId::default(), 0);
-        table_manager.create_table(&table_id, &schema).await?;
+        table_manager
+            .create_table(&table_id, table_columns.to_vec())
+            .await?;
 
         let mut insert_executor = InsertExecutor {
             table_id: table_id.clone(),
@@ -355,7 +367,9 @@ mod tests {
                 }],
             },
         };
-        table_manager.create_table(&table_id2, &schema).await?;
+        table_manager
+            .create_table(&table_id2, table_columns)
+            .await?;
         insert_executor.open().await.unwrap();
         let fields = &insert_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);

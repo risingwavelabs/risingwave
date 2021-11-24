@@ -1,12 +1,13 @@
 use crate::storage::{
-    RowTable, SimpleTableManager, Table, TableManager, TableTypes, TestRowTableEvent,
+    RowTable, SimpleTableManager, Table, TableColumnDesc, TableManager, TableTypes,
+    TestRowTableEvent,
 };
 use crate::stream::StreamManager;
 use futures::StreamExt;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::Row;
 use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder};
-use risingwave_common::catalog::{Field, Schema, SchemaId, TableId};
+use risingwave_common::catalog::{SchemaId, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::RwError;
 use risingwave_common::types::{DecimalType, Int32Type, Scalar};
@@ -71,6 +72,7 @@ async fn test_stream_mv_proto() {
         encoding: ColumnEncodingType::Raw as i32,
         is_primary: false,
         name: "v1".to_string(),
+        column_id: 0,
     };
 
     let project_proto = StreamNode {
@@ -110,17 +112,17 @@ async fn test_stream_mv_proto() {
     // Initialize storage.
     let table_manager = Arc::new(SimpleTableManager::new());
     let table_id = TableId::default();
-    let schema = Schema {
-        fields: vec![
-            Field {
-                data_type: Arc::new(DecimalType::new(false, 10, 5).unwrap()),
-            },
-            Field {
-                data_type: Arc::new(DecimalType::new(false, 10, 5).unwrap()),
-            },
-        ],
-    };
-    let _res = table_manager.create_table(&table_id, &schema).await;
+    let table_columns = vec![
+        TableColumnDesc {
+            column_id: 0,
+            data_type: Arc::new(DecimalType::new(false, 10, 5).unwrap()),
+        },
+        TableColumnDesc {
+            column_id: 1,
+            data_type: Arc::new(DecimalType::new(false, 10, 5).unwrap()),
+        },
+    ];
+    let _res = table_manager.create_table(&table_id, table_columns).await;
     let table_ref =
         (if let TableTypes::BummockTable(table_ref) = table_manager.get_table(&table_id).unwrap() {
             Ok(table_ref)

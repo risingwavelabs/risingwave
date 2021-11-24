@@ -38,7 +38,7 @@ import org.apache.calcite.sql.validate.SqlValidator;
 public class CreateTableHandler implements SqlHandler {
   @Override
   public DdlResult handle(SqlNode ast, ExecutionContext context) {
-    PlanFragment planFragment = executeDdl(ast, context);
+    PlanFragment planFragment = execute(ast, context);
     ComputeClientManager clientManager = context.getComputeClientManager();
 
     for (var node : context.getWorkerNodeManager().allNodes()) {
@@ -55,15 +55,16 @@ public class CreateTableHandler implements SqlHandler {
     return new DdlResult(StatementType.CREATE_TABLE, 0);
   }
 
-  private static PlanFragment ddlSerializer(TableCatalog table) {
+  private static PlanFragment serialize(TableCatalog table) {
     TableCatalog.TableId tableId = table.getId();
     CreateTableNode.Builder createTableNodeBuilder = CreateTableNode.newBuilder();
-    for (ColumnCatalog columnCatalog : table.getAllColumns(true)) {
+    for (ColumnCatalog c : table.getAllColumns(true)) {
       var columnDesc =
           com.risingwave.proto.plan.ColumnDesc.newBuilder()
               .setEncoding(com.risingwave.proto.plan.ColumnDesc.ColumnEncodingType.RAW)
-              .setColumnType(columnCatalog.getDesc().getDataType().getProtobufType())
-              .setIsPrimary(false)
+              .setColumnType(c.getDesc().getDataType().getProtobufType())
+              .setIsPrimary(table.getPrimaryKeyColumnIds().contains(c.getId().getValue()))
+              .setColumnId(c.getId().getValue())
               .build();
       createTableNodeBuilder.addColumnDescs(columnDesc);
     }
@@ -83,7 +84,7 @@ public class CreateTableHandler implements SqlHandler {
   }
 
   @VisibleForTesting
-  protected PlanFragment executeDdl(SqlNode ast, ExecutionContext context) {
+  protected PlanFragment execute(SqlNode ast, ExecutionContext context) {
     SqlCreateTable sql = (SqlCreateTable) ast;
 
     SchemaCatalog.SchemaName schemaName = context.getCurrentSchema();
@@ -106,6 +107,6 @@ public class CreateTableHandler implements SqlHandler {
     CreateTableInfo tableInfo = createTableInfoBuilder.build();
     // Build a plan distribute to compute node.
     TableCatalog table = context.getCatalogService().createTable(schemaName, tableInfo);
-    return ddlSerializer(table);
+    return serialize(table);
   }
 }

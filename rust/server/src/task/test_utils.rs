@@ -139,6 +139,7 @@ impl<'a> TableBuilder<'a> {
     }
 
     pub fn create_table(mut self, col_types: &[TypeName]) -> Self {
+        // the implicit row_id column
         self.col_types.push(DataType {
             type_name: TypeName::Int64 as i32,
             is_nullable: false,
@@ -195,8 +196,10 @@ impl<'a> TableBuilder<'a> {
             column_descs: self
                 .col_types
                 .iter()
-                .map(|typ| ColumnDesc {
+                .enumerate()
+                .map(|(i, typ)| ColumnDesc {
                     column_type: Some(typ.clone()),
+                    column_id: i as i32, // use index as column_id
                     ..CoreDefault::default()
                 })
                 .collect_vec(),
@@ -342,7 +345,7 @@ impl<'a> SelectBuilder<'a> {
             .get_table(&TableId::default())
             .unwrap();
         if let TableTypes::BummockTable(column_table_ref) = table_ref {
-            let column_ids = column_table_ref.get_column_ids().unwrap();
+            let column_ids = column_table_ref.get_column_ids();
             let scan = SeqScanNode {
                 table_ref_id: None,
                 column_ids: column_ids.iter().copied().collect_vec(),

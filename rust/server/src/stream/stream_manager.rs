@@ -371,7 +371,6 @@ impl StreamManagerCore {
                     .map(|column_id| *column_id as usize)
                     .collect::<Vec<_>>();
                 if let TableTypes::BummockTable(table) = table_ref {
-                    let schema = table.schema().to_owned();
                     let stream_receiver = table.create_stream()?;
                     // TODO: The channel pair should be created by the Checkpoint manger. So this
                     // line may be removed later.
@@ -379,7 +378,7 @@ impl StreamManagerCore {
                     self.sender_placeholder.push(sender);
                     Ok(Box::new(TableSourceExecutor::new(
                         table_id,
-                        schema,
+                        table.schema(),
                         column_ids,
                         stream_receiver,
                         barrier_receiver,

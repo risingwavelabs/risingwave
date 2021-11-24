@@ -208,6 +208,7 @@ mod tests {
             encoding: ColumnEncodingType::Raw as i32,
             is_primary: true,
             name: "test_col1".to_string(),
+            column_id: 0,
         };
         let column2 = ColumnDesc {
             column_type: Some(DataTypeProst {
@@ -217,6 +218,7 @@ mod tests {
             encoding: ColumnEncodingType::Raw as i32,
             is_primary: false,
             name: "test_col2".to_string(),
+            column_id: 1,
         };
         let columns = vec![column1, column2];
 

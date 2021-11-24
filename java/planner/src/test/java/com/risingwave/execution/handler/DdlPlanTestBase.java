@@ -64,11 +64,11 @@ public class DdlPlanTestBase {
     if (ast.getKind() == SqlKind.CREATE_TABLE) {
       ret =
           ((CreateTableHandler) sqlHandlerFactory.create(ast, executionContext))
-              .executeDdl(ast, executionContext);
+              .execute(ast, executionContext);
     } else if (ast.getKind() == SqlKind.DROP_TABLE) {
       ret =
           ((DropTableHandler) sqlHandlerFactory.create(ast, executionContext))
-              .executeDdl(ast, executionContext);
+              .execute(ast, executionContext);
     } else {
       throw new UnsupportedOperationException("unsupported ddl in test");
     }

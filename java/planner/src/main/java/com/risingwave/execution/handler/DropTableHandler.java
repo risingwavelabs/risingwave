@@ -33,7 +33,7 @@ import org.apache.calcite.sql.ddl.SqlDropTable;
 public class DropTableHandler implements SqlHandler {
   @Override
   public PgResult handle(SqlNode ast, ExecutionContext context) {
-    PlanFragment planFragment = executeDdl(ast, context);
+    PlanFragment planFragment = execute(ast, context);
     ComputeClientManager clientManager = context.getComputeClientManager();
 
     for (var node : context.getWorkerNodeManager().allNodes()) {
@@ -50,7 +50,7 @@ public class DropTableHandler implements SqlHandler {
     return new DdlResult(StatementType.DROP_TABLE, 0);
   }
 
-  private static PlanFragment ddlSerializer(TableCatalog table) {
+  private static PlanFragment serialize(TableCatalog table) {
     TableCatalog.TableId tableId = table.getId();
     DropTableNode dropTableNode =
         DropTableNode.newBuilder().setTableRefId(Messages.getTableRefId(tableId)).build();
@@ -69,12 +69,12 @@ public class DropTableHandler implements SqlHandler {
   }
 
   @VisibleForTesting
-  protected PlanFragment executeDdl(SqlNode ast, ExecutionContext context) {
+  protected PlanFragment execute(SqlNode ast, ExecutionContext context) {
     SqlDropTable sql = (SqlDropTable) ast;
     TableCatalog.TableName tableName =
         TableCatalog.TableName.of(context.getDatabase(), context.getSchema(), sql.name.getSimple());
     TableCatalog table = context.getCatalogService().getTable(tableName);
     context.getCatalogService().dropTable(tableName);
-    return ddlSerializer(table);
+    return serialize(table);
   }
 }

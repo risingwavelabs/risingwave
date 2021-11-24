@@ -1,13 +1,13 @@
-use crate::storage::PartitionedRowGroupRef;
 use crate::storage::StagedRowGroupRef;
 use crate::storage::Table;
 use crate::storage::{MemRowGroup, MemRowGroupRef};
+use crate::storage::{PartitionedRowGroupRef, TableColumnDesc};
 use crate::stream_op::{Op, StreamChunk};
 use futures::channel::mpsc;
 use futures::SinkExt;
 use risingwave_common::array::InternalError;
 use risingwave_common::array::{DataChunk, DataChunkRef};
-use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
 use std::sync::atomic::Ordering;
 use std::sync::atomic::{AtomicU64, AtomicUsize};
@@ -21,8 +21,8 @@ pub struct BummockTable {
     /// Table identifier.
     table_id: TableId,
 
-    /// Table Schema
-    schema: Schema,
+    /// Table Column Definitions
+    table_columns: Vec<TableColumnDesc>,
 
     /// Current tuple id.
     current_tuple_id: AtomicU64,
@@ -92,7 +92,7 @@ impl Table for BummockTable {
 
         // only one row group before having disk swapping
         if appender.is_empty() {
-            appender.push(MemRowGroup::new(self.get_column_ids().unwrap().len()));
+            appender.push(MemRowGroup::new(self.get_column_ids().len()));
         }
 
         let (ret_tuple_id, ret_cardinality) = (*appender)
@@ -116,7 +116,7 @@ impl Table for BummockTable {
         let mut appender = self.mem_dirty_segs.write().unwrap();
         // only one row group before having disk swapping
         if (appender).is_empty() {
-            appender.push(MemRowGroup::new(self.get_column_ids().unwrap().len()));
+            appender.push(MemRowGroup::new(self.get_column_ids().len()));
         }
 
         let (ret_tuple_id, ret_cardinality) = (*appender)
@@ -147,12 +147,12 @@ impl Table for BummockTable {
         }
     }
 
-    fn get_column_ids(&self) -> Result<Arc<Vec<i32>>> {
-        Ok(Arc::new((0..self.schema.fields.len() as i32).collect()))
+    fn get_column_ids(&self) -> Vec<i32> {
+        self.table_columns.iter().map(|c| c.column_id).collect()
     }
 
     fn index_of_column_id(&self, column_id: i32) -> Result<usize> {
-        let column_ids = self.get_column_ids().unwrap();
+        let column_ids = self.get_column_ids();
         if let Some(p) = column_ids.iter().position(|c| *c == column_id) {
             Ok(p)
         } else {
@@ -169,16 +169,16 @@ impl Table for BummockTable {
 }
 
 impl BummockTable {
-    pub fn new(table_id: &TableId, schema: &Schema) -> Self {
+    pub fn new(table_id: &TableId, table_columns: Vec<TableColumnDesc>) -> Self {
         Self {
             table_id: table_id.clone(),
-            schema: schema.to_owned(),
+            table_columns,
             stream_sender: RwLock::new(vec![]),
             mem_clean_segs: Vec::new(),
             mem_free_segs: Vec::with_capacity(0), // empty before we have memory pool
             mem_dirty_segs: RwLock::new(Vec::new()),
             staged_segs: Vec::with_capacity(0), // empty before introducing IO next time
-            partitioned_segs: Vec::with_capacity(0), /* emptry before introducing compaction next
+            partitioned_segs: Vec::with_capacity(0), /* empty before introducing compaction next
                                                       * time */
             current_tuple_id: AtomicU64::new(0),
             rwlock: Arc::new(RwLock::new(1)),
@@ -190,8 +190,13 @@ impl BummockTable {
         self.next_row_id.fetch_add(1, Ordering::Relaxed)
     }
 
-    pub fn schema(&self) -> &Schema {
-        &self.schema
+    pub fn schema(&self) -> Schema {
+        Schema::new(
+            self.table_columns
+                .iter()
+                .map(|c| Field::new(c.data_type.clone()))
+                .collect(),
+        )
     }
 
     /// Get a tuple with `tuple_id`. This is a basic operation to fetch a tuple.
@@ -269,7 +274,7 @@ impl BummockTable {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::{BummockResult, BummockTable, Table};
+    use crate::storage::{BummockResult, BummockTable, Table, TableColumnDesc};
 
     use risingwave_common::array::{Array, DataChunk, I64Array};
     use risingwave_common::catalog::{Field, Schema, TableId};
@@ -294,11 +299,21 @@ mod tests {
             ],
         };
 
+        let table_columns = schema
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(i, f)| TableColumnDesc {
+                data_type: f.data_type.clone(),
+                column_id: i as i32, // use column index as column id
+            })
+            .collect();
+
         let col1 = column_nonnull! { I64Array, Int64Type, [1, 3, 5, 7, 9] };
         let col2 = column_nonnull! { I64Array, Int64Type, [2, 4, 6, 8, 10] };
         let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
 
-        let bummock_table = Arc::new(BummockTable::new(&table_id, &schema));
+        let bummock_table = Arc::new(BummockTable::new(&table_id, table_columns));
 
         assert!(matches!(
             bummock_table.get_data().await?,
@@ -306,7 +321,7 @@ mod tests {
         ));
 
         let _ = bummock_table.append(data_chunk).await;
-        assert_eq!(bummock_table.schema().fields.len(), 2);
+        assert_eq!(bummock_table.table_columns.len(), 2);
 
         assert_eq!(bummock_table.current_tuple_id.load(Ordering::Relaxed), 5);
 
