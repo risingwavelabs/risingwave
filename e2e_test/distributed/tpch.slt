@@ -42,7 +42,6 @@ where
 13570.9400
 
 # tpchq1
-# Todo: replace date '1998-9-21' with date '1998-12-01' - interval '71' day
 # Todo: The precision is different from PostgresSql
 # query TTRRRRRRRI
 # select
@@ -59,7 +58,7 @@ where
 # from
 # 	lineitem
 # where
-# 	l_shipdate <= date '1998-9-21'
+# 	l_shipdate <= date '1998-12-01' - interval '71' day
 # group by
 # 	l_returnflag,
 # 	l_linestatus

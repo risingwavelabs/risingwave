@@ -38,4 +38,15 @@ public class RisingWaveOverrideOperatorTable extends ReflectiveSqlOperatorTable 
           RwReturnTypes.NULLABLE_SUM,
           InferTypes.FIRST_KNOWN,
           OperandTypes.PLUS_OPERATOR);
+
+  /** Infix arithmetic minus operator, '<code>-</code>'. */
+  public static final SqlBinaryOperator MINUS =
+      new SqlMonotonicBinaryOperator(
+          "-",
+          SqlKind.MINUS,
+          40,
+          true,
+          RwReturnTypes.NULLABLE_SUM,
+          InferTypes.FIRST_KNOWN,
+          OperandTypes.MINUS_OPERATOR);
 }

@@ -4,12 +4,13 @@ import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rel.type.RelDataTypeSystemImpl;
 import org.apache.calcite.sql.type.SqlTypeName;
+import org.apache.calcite.sql.type.SqlTypeUtil;
 
+/** Customized DataTypeSystem implementation. */
 public class RisingWaveDataTypeSystem extends RelDataTypeSystemImpl {
   public RelDataType deriveDateWithIntervalType(
       RelDataTypeFactory typeFactory, RelDataType type1, RelDataType type2) {
-    if (type1.getSqlTypeName() == SqlTypeName.DATE
-        && type2.getSqlTypeName() == SqlTypeName.INTERVAL_YEAR) {
+    if (SqlTypeUtil.isDate(type1) && SqlTypeUtil.isInterval(type2)) {
       // No precision here. DATE +-*/ with INTERVAL infer 0 precision timestamp.
       return typeFactory.createSqlType(SqlTypeName.TIMESTAMP);
     } else {

@@ -272,3 +272,8 @@ query I
 select cast(1 as smallint) + cast(2 as int)
 ----
 3
+
+query T
+select date '1998-12-01' - interval '71' day;
+----
+1998-09-21 00:00:00 +0000 +0000

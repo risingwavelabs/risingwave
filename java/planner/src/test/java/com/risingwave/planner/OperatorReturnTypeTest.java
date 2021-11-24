@@ -22,6 +22,7 @@ public class OperatorReturnTypeTest extends SqlTestBase {
     "INTEGER NOT NULL, select cast(1 as smallint) + 2",
     "INTEGER NOT NULL, select 2 + cast(1 as smallint)",
     "TIMESTAMP(0) NOT NULL, select date '1994-01-01' + interval '1' year",
+    "TIMESTAMP(0) NOT NULL, select date '1998-12-01' - interval '71' day",
   })
   @DisplayName("Operator return type tests")
   public void testReturnType(String expectedType, String sql) {
