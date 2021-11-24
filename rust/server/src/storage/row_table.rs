@@ -1,16 +1,18 @@
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, RwLock},
-};
+use std::collections::btree_map::{BTreeMap, Entry};
+use std::sync::{Arc, RwLock};
 
 use risingwave_common::array::data_chunk_iter::Row;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
+use risingwave_common::types::Datum;
 
 pub type RowTableRef = Arc<dyn RowTable>;
 
 pub type MemRowTableRef = Arc<MemRowTable>;
 pub type MemTableRowIter = <BTreeMap<Row, Row> as IntoIterator>::IntoIter;
+
+pub type Cell = Datum;
+pub type CellId = i32;
 
 pub trait RowTable: Sync + Send {
     /// Ingest a batch of rows. Insert when `Option` is `Some` and delete when `Option` is None.
@@ -19,11 +21,20 @@ pub trait RowTable: Sync + Send {
     /// Insert a key value pair.
     fn insert(&self, key: Row, value: Row) -> Result<()>;
 
+    /// Insert a (key, cell id) -> cell pair.
+    fn insert_cell(&self, key: Row, cell_id: CellId, cell: Cell) -> Result<()>;
+
     /// Delete a row by key.
     fn delete(&self, key: Row) -> Result<()>;
 
+    /// Delete a cell by (key, cell id)
+    fn delete_cell(&self, key: Row, cell_id: CellId) -> Result<()>;
+
     /// Get a row by key.
     fn get(&self, key: Row) -> Result<Option<Row>>;
+
+    /// Get a cell by (key, cell id)
+    fn get_cell(&self, key: Row, cell_id: CellId) -> Result<Option<Cell>>;
 
     /// Return the schema of the table.
     fn schema(&self) -> &Schema;
@@ -35,7 +46,7 @@ pub trait RowTable: Sync + Send {
 #[derive(Debug, Default)]
 pub(crate) struct MemRowTableInner {
     /// data represents a mapping from primary key to row data.
-    data: BTreeMap<Row, Row>,
+    data: BTreeMap<(Row, CellId), Cell>,
 }
 
 #[derive(Debug, Default)]
@@ -49,25 +60,53 @@ impl MemRowTableInner {
     pub fn ingest(&mut self, batch: Vec<(Row, Option<Row>)>) -> Result<()> {
         for (key, value) in batch {
             match value {
-                Some(value) => self.insert(key, value)?,
-                None => self.delete(key)?,
+                Some(value) => self.insert_row(key, value)?,
+                None => self.delete_row(key)?,
             }
         }
         Ok(())
     }
 
-    pub fn insert(&mut self, key: Row, value: Row) -> Result<()> {
+    pub fn insert_cell(&mut self, key: (Row, CellId), value: Cell) -> Result<()> {
         self.data.insert(key, value);
         Ok(())
     }
 
-    pub fn delete(&mut self, key: Row) -> Result<()> {
+    pub fn delete_cell(&mut self, key: (Row, CellId)) -> Result<()> {
         self.data.remove(&key);
         Ok(())
     }
 
-    pub fn get(&self, key: Row) -> Result<Option<Row>> {
+    pub fn get_cell(&self, key: (Row, CellId)) -> Result<Option<Cell>> {
         Ok(self.data.get(&key).map(Clone::clone))
+    }
+
+    pub fn insert_row(&mut self, key: Row, value: Row) -> Result<()> {
+        for (cell_id, cell) in value.0.iter().enumerate() {
+            self.insert_cell((key.clone(), cell_id as CellId), cell.clone())?;
+        }
+        Ok(())
+    }
+
+    pub fn delete_row(&mut self, key: Row) -> Result<()> {
+        // slow but easy to impl, fine as mock?
+        self.data.retain(|(k, _), _| *k != key);
+        Ok(())
+    }
+
+    pub fn get_row(&self, key: Row) -> Result<Option<Row>> {
+        let mut cells = vec![];
+        for ((k, cell_id), cell) in self.data.range((key.clone(), 0)..) {
+            if *k != key {
+                break;
+            }
+            assert_eq!(*cell_id, cells.len() as CellId);
+            cells.push(cell.clone());
+        }
+        if cells.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Row(cells)))
     }
 }
 
@@ -75,7 +114,18 @@ impl MemRowTable {
     /// Create an iterator to scan over all records.
     pub fn iter(&self) -> Result<MemTableRowIter> {
         let inner = self.inner.read().unwrap();
-        let snapshot = inner.data.clone();
+        let cells = inner.data.iter().collect::<Vec<_>>();
+        let snapshot = cells
+            .iter()
+            .fold(BTreeMap::new(), |mut m, ((key, _), cell)| {
+                match m.entry(key.clone()) {
+                    Entry::Vacant(v) => {
+                        v.insert(Row(vec![(*cell).clone()]));
+                    }
+                    Entry::Occupied(mut o) => o.get_mut().0.push((*cell).clone()),
+                }
+                m
+            });
         Ok(snapshot.into_iter())
     }
 
@@ -94,17 +144,33 @@ impl RowTable for MemRowTable {
 
     fn insert(&self, key: Row, value: Row) -> Result<()> {
         let mut inner = self.inner.write().unwrap();
-        inner.insert(key, value)
+        assert_eq!(value.0.len(), self.schema.fields().len());
+        inner.insert_row(key, value)
+    }
+
+    fn insert_cell(&self, key: Row, cell_id: CellId, cell: Cell) -> Result<()> {
+        let mut inner = self.inner.write().unwrap();
+        inner.insert_cell((key, cell_id), cell)
     }
 
     fn delete(&self, key: Row) -> Result<()> {
         let mut inner = self.inner.write().unwrap();
-        inner.delete(key)
+        inner.delete_row(key)
+    }
+
+    fn delete_cell(&self, key: Row, cell_id: CellId) -> Result<()> {
+        let mut inner = self.inner.write().unwrap();
+        inner.delete_cell((key, cell_id))
     }
 
     fn get(&self, key: Row) -> Result<Option<Row>> {
         let inner = self.inner.read().unwrap();
-        inner.get(key)
+        inner.get_row(key)
+    }
+
+    fn get_cell(&self, key: Row, cell_id: CellId) -> Result<Option<Cell>> {
+        let inner = self.inner.read().unwrap();
+        inner.get_cell((key, cell_id))
     }
 
     fn schema(&self) -> &Schema {

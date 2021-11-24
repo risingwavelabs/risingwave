@@ -6,11 +6,15 @@ use risingwave_common::error::Result;
 use std::sync::{Arc, RwLock};
 use tokio::sync::Mutex;
 
+use super::{Cell, CellId};
+
 pub enum TestRowTableEvent {
     Ingest(Vec<(Row, Option<Row>)>),
-    Insert((Row, Row)),
+    Insert(Row, Row),
     Delete(Row),
     InsertBatch(Vec<(Row, bool)>),
+    InsertCell(Row, CellId, Cell),
+    DeleteCell(Row, CellId),
 }
 
 pub struct TestRowTable {
@@ -51,16 +55,16 @@ impl RowTable for TestRowTable {
 
     fn insert(&self, key: Row, value: Row) -> Result<()> {
         let mut inner = self.inner.write().unwrap();
-        inner.insert(key.clone(), value.clone())?;
+        inner.insert_row(key.clone(), value.clone())?;
         self.sender
-            .unbounded_send(TestRowTableEvent::Insert((key, value)))
+            .unbounded_send(TestRowTableEvent::Insert(key, value))
             .unwrap();
         Ok(())
     }
 
     fn delete(&self, key: Row) -> Result<()> {
         let mut inner = self.inner.write().unwrap();
-        inner.delete(key.clone())?;
+        inner.delete_row(key.clone())?;
         self.sender
             .unbounded_send(TestRowTableEvent::Delete(key))
             .unwrap();
@@ -69,7 +73,7 @@ impl RowTable for TestRowTable {
 
     fn get(&self, key: Row) -> Result<Option<Row>> {
         let inner = self.inner.read().unwrap();
-        inner.get(key)
+        inner.get_row(key)
     }
 
     fn schema(&self) -> &Schema {
@@ -78,5 +82,28 @@ impl RowTable for TestRowTable {
 
     fn get_pk(&self) -> Vec<usize> {
         self.pks.clone()
+    }
+
+    fn insert_cell(&self, key: Row, cell_id: super::CellId, cell: super::Cell) -> Result<()> {
+        let mut inner = self.inner.write().unwrap();
+        inner.insert_cell((key.clone(), cell_id), cell.clone())?;
+        self.sender
+            .unbounded_send(TestRowTableEvent::InsertCell(key, cell_id, cell))
+            .unwrap();
+        Ok(())
+    }
+
+    fn get_cell(&self, key: Row, cell_id: super::CellId) -> Result<Option<super::Cell>> {
+        let inner = self.inner.read().unwrap();
+        inner.get_cell((key, cell_id))
+    }
+
+    fn delete_cell(&self, key: Row, cell_id: super::CellId) -> Result<()> {
+        let mut inner = self.inner.write().unwrap();
+        inner.delete_cell((key.clone(), cell_id))?;
+        self.sender
+            .unbounded_send(TestRowTableEvent::DeleteCell(key, cell_id))
+            .unwrap();
+        Ok(())
     }
 }
