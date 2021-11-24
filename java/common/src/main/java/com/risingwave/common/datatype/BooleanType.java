@@ -4,13 +4,14 @@ import com.risingwave.proto.data.DataType;
 import org.apache.calcite.rel.type.RelDataTypeComparability;
 import org.apache.calcite.sql.type.SqlTypeName;
 
+/** Type for {@link SqlTypeName#BOOLEAN}. */
 public class BooleanType extends PrimitiveTypeBase {
-  public BooleanType() {
-    this(false);
+  public BooleanType(RisingWaveDataTypeSystem typeSystem) {
+    this(false, typeSystem);
   }
 
-  public BooleanType(boolean nullable) {
-    super(nullable, SqlTypeName.BOOLEAN);
+  public BooleanType(boolean nullable, RisingWaveDataTypeSystem typeSystem) {
+    super(nullable, SqlTypeName.BOOLEAN, typeSystem);
     resetDigest();
   }
 
@@ -34,6 +35,6 @@ public class BooleanType extends PrimitiveTypeBase {
 
   @Override
   protected PrimitiveTypeBase copyWithNullability(boolean nullable) {
-    return new BooleanType(nullable);
+    return new BooleanType(nullable, typeSystem);
   }
 }

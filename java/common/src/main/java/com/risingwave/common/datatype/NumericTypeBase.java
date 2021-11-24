@@ -8,16 +8,25 @@ import com.risingwave.proto.data.DataType.TypeName;
 import org.apache.calcite.rel.type.RelDataTypeComparability;
 import org.apache.calcite.sql.type.SqlTypeName;
 
+/**
+ * Type for {@link SqlTypeName#SMALLINT}, {@link SqlTypeName#INTEGER}, {@link SqlTypeName#BIGINT},
+ * {@link SqlTypeName#REAL}, {@link SqlTypeName#DOUBLE}.
+ */
 public class NumericTypeBase extends PrimitiveTypeBase {
   // Data size in bytes
   private final int dataSize;
 
-  public NumericTypeBase(SqlTypeName sqlTypeName, int dataSize) {
-    this(false, sqlTypeName, dataSize);
+  public NumericTypeBase(
+      SqlTypeName sqlTypeName, int dataSize, RisingWaveDataTypeSystem typeSystem) {
+    this(false, sqlTypeName, dataSize, typeSystem);
   }
 
-  public NumericTypeBase(boolean nullable, SqlTypeName sqlTypeName, int dataSize) {
-    super(nullable, sqlTypeName);
+  public NumericTypeBase(
+      boolean nullable,
+      SqlTypeName sqlTypeName,
+      int dataSize,
+      RisingWaveDataTypeSystem typeSystem) {
+    super(nullable, sqlTypeName, typeSystem);
     this.dataSize = dataSize;
     resetDigest();
   }
@@ -47,7 +56,7 @@ public class NumericTypeBase extends PrimitiveTypeBase {
 
   @Override
   protected PrimitiveTypeBase copyWithNullability(boolean nullable) {
-    return new NumericTypeBase(nullable, getSqlTypeName(), this.dataSize);
+    return new NumericTypeBase(nullable, getSqlTypeName(), this.dataSize, typeSystem);
   }
 
   @Override

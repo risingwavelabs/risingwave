@@ -18,13 +18,17 @@ import org.apache.calcite.sql.type.SqlTypeExplicitPrecedenceList;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+/** Base class for primitive types. */
 public abstract class PrimitiveTypeBase extends RisingWaveTypeBase {
   protected final boolean nullable;
   protected final SqlTypeName sqlTypeName;
+  protected final RisingWaveDataTypeSystem typeSystem;
 
-  protected PrimitiveTypeBase(boolean nullable, SqlTypeName sqlTypeName) {
+  protected PrimitiveTypeBase(
+      boolean nullable, SqlTypeName sqlTypeName, RisingWaveDataTypeSystem typeSystem) {
     this.nullable = nullable;
     this.sqlTypeName = requireNonNull(sqlTypeName, "sqlTypeName");
+    this.typeSystem = typeSystem;
   }
 
   @Override
@@ -100,7 +104,7 @@ public abstract class PrimitiveTypeBase extends RisingWaveTypeBase {
 
   @Override
   public int getPrecision() {
-    return 0;
+    return typeSystem.getDefaultPrecision(sqlTypeName);
   }
 
   @Override

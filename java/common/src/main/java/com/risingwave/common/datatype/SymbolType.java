@@ -6,18 +6,18 @@ import org.apache.calcite.sql.type.SqlTypeName;
 
 /** Used by calcite to represent literals like: YEAR, DAY */
 public class SymbolType extends PrimitiveTypeBase {
-  public SymbolType() {
-    this(false);
+  public SymbolType(RisingWaveDataTypeSystem typeSystem) {
+    this(false, typeSystem);
   }
 
-  public SymbolType(boolean nullable) {
-    super(nullable, SqlTypeName.SYMBOL);
+  public SymbolType(boolean nullable, RisingWaveDataTypeSystem typeSystem) {
+    super(nullable, SqlTypeName.SYMBOL, typeSystem);
     resetDigest();
   }
 
   @Override
   protected PrimitiveTypeBase copyWithNullability(boolean nullable) {
-    return new SymbolType(nullable);
+    return new SymbolType(nullable, typeSystem);
   }
 
   @Override

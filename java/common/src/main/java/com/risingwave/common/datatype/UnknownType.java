@@ -6,10 +6,8 @@ import org.apache.calcite.sql.type.SqlTypeName;
 
 /** Required by calcite. */
 public class UnknownType extends PrimitiveTypeBase {
-  public static final UnknownType INSTANCE = new UnknownType();
-
-  private UnknownType() {
-    super(true, SqlTypeName.NULL);
+  UnknownType(RisingWaveDataTypeSystem typeSystem) {
+    super(true, SqlTypeName.NULL, typeSystem);
   }
 
   @Override

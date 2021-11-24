@@ -27,12 +27,15 @@ public class StringType extends PrimitiveTypeBase {
   private final Charset charset;
   private final SqlCollation collation;
 
-  public StringType(SqlTypeName sqlTypeName, OptionalInt maxSize) {
-    this(false, sqlTypeName, maxSize.orElse(1));
+  public StringType(
+      SqlTypeName sqlTypeName, OptionalInt maxSize, RisingWaveDataTypeSystem typeSystem) {
+    this(false, sqlTypeName, maxSize.orElse(1), typeSystem);
   }
 
-  public StringType(boolean nullable, SqlTypeName sqlTypeName, int maxSize) {
-    this(nullable, sqlTypeName, maxSize, StandardCharsets.UTF_8, SqlCollation.COERCIBLE);
+  public StringType(
+      boolean nullable, SqlTypeName sqlTypeName, int maxSize, RisingWaveDataTypeSystem typeSystem) {
+    this(
+        nullable, sqlTypeName, maxSize, StandardCharsets.UTF_8, SqlCollation.COERCIBLE, typeSystem);
   }
 
   public StringType(
@@ -40,8 +43,9 @@ public class StringType extends PrimitiveTypeBase {
       SqlTypeName sqlTypeName,
       int maxSize,
       Charset charset,
-      SqlCollation collation) {
-    super(nullable, sqlTypeName);
+      SqlCollation collation,
+      RisingWaveDataTypeSystem typeSystem) {
+    super(nullable, sqlTypeName, typeSystem);
     checkArgument(maxSize >= 0, "Max size is negative: %s", maxSize);
     checkArgument(
         checkSqlTypeName(sqlTypeName), "Invalid sql type name for string type: {}", sqlTypeName);
@@ -65,7 +69,7 @@ public class StringType extends PrimitiveTypeBase {
   }
 
   public StringType withCharsetAndCollation(Charset charset, SqlCollation collation) {
-    return new StringType(nullable, sqlTypeName, maxSize, charset, collation);
+    return new StringType(nullable, sqlTypeName, maxSize, charset, collation, typeSystem);
   }
 
   @Override
@@ -134,6 +138,7 @@ public class StringType extends PrimitiveTypeBase {
 
   @Override
   protected PrimitiveTypeBase copyWithNullability(boolean nullable) {
-    return new StringType(nullable, getSqlTypeName(), this.maxSize, this.charset, this.collation);
+    return new StringType(
+        nullable, getSqlTypeName(), this.maxSize, this.charset, this.collation, typeSystem);
   }
 }

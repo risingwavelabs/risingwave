@@ -8,6 +8,7 @@ import java.util.OptionalInt;
 import org.apache.calcite.rel.type.RelDataTypeComparability;
 import org.apache.calcite.sql.type.SqlTypeName;
 
+/** Type for {@link SqlTypeName#DECIMAL}. */
 public class DecimalType extends PrimitiveTypeBase {
   // Align with backend
   public static final int MAX_PRECISION = 28;
@@ -16,8 +17,9 @@ public class DecimalType extends PrimitiveTypeBase {
   private final int precision;
   private final int scale;
 
-  private DecimalType(boolean nullable, int precision, int scale) {
-    super(nullable, SqlTypeName.DECIMAL);
+  private DecimalType(
+      boolean nullable, int precision, int scale, RisingWaveDataTypeSystem typeSystem) {
+    super(nullable, SqlTypeName.DECIMAL, typeSystem);
     checkArgument(precision > 0, "precision must be positive: {}", precision);
     checkArgument(scale >= 0, "scale must not be negative: {}", scale);
     checkArgument(precision > scale, "Scale %s is larger than precision %s", scale, precision);
@@ -26,7 +28,8 @@ public class DecimalType extends PrimitiveTypeBase {
     resetDigest();
   }
 
-  public DecimalType(OptionalInt precision, OptionalInt scale) {
+  public DecimalType(
+      OptionalInt precision, OptionalInt scale, RisingWaveDataTypeSystem typeSystem) {
     // According to
     // https://www.postgresql.org/docs/current/datatype-numeric.html#DATATYPE-NUMERIC-DECIMAL,
     // if precision is present, scale should be zero, otherwise max scale.
@@ -40,7 +43,8 @@ public class DecimalType extends PrimitiveTypeBase {
               } else {
                 return MAX_SCALE;
               }
-            }));
+            }),
+        typeSystem);
   }
 
   @Override
@@ -98,6 +102,6 @@ public class DecimalType extends PrimitiveTypeBase {
 
   @Override
   protected PrimitiveTypeBase copyWithNullability(boolean nullable) {
-    return new DecimalType(nullable, this.precision, this.scale);
+    return new DecimalType(nullable, this.precision, this.scale, typeSystem);
   }
 }

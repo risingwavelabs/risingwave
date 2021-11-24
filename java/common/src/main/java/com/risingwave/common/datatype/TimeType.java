@@ -8,19 +8,20 @@ import java.util.OptionalInt;
 import org.apache.calcite.rel.type.RelDataTypeComparability;
 import org.apache.calcite.sql.type.SqlTypeName;
 
+/** Type for {@link SqlTypeName#TIME}. */
 public class TimeType extends PrimitiveTypeBase {
   // TODO: Add support for timezone now
   private final int precision;
 
-  public TimeType(boolean nullable, int precision) {
-    super(nullable, SqlTypeName.TIME);
+  public TimeType(boolean nullable, int precision, RisingWaveDataTypeSystem typeSystem) {
+    super(nullable, SqlTypeName.TIME, typeSystem);
     checkArgument(precision >= 0, "precision must not be negative: {}", precision);
     this.precision = precision;
     resetDigest();
   }
 
-  public TimeType(OptionalInt precision) {
-    this(false, precision.orElse(0));
+  public TimeType(OptionalInt precision, RisingWaveDataTypeSystem typeSystem) {
+    this(false, precision.orElse(0), typeSystem);
   }
 
   @Override
@@ -46,6 +47,11 @@ public class TimeType extends PrimitiveTypeBase {
   }
 
   @Override
+  public int getPrecision() {
+    return precision;
+  }
+
+  @Override
   public boolean equals(Object o) {
     if (this == o) {
       return true;
@@ -67,6 +73,6 @@ public class TimeType extends PrimitiveTypeBase {
 
   @Override
   protected PrimitiveTypeBase copyWithNullability(boolean nullable) {
-    return new TimeType(nullable, this.precision);
+    return new TimeType(nullable, this.precision, typeSystem);
   }
 }

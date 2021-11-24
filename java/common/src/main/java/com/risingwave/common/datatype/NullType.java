@@ -4,11 +4,10 @@ import com.risingwave.proto.data.DataType;
 import org.apache.calcite.rel.type.RelDataTypeComparability;
 import org.apache.calcite.sql.type.SqlTypeName;
 
+/** Type for {@link SqlTypeName#NULL}. */
 public class NullType extends PrimitiveTypeBase {
-  public static final NullType SINGLETON = new NullType();
-
-  private NullType() {
-    super(true, SqlTypeName.NULL);
+  NullType(RisingWaveDataTypeSystem typeSystem) {
+    super(true, SqlTypeName.NULL, typeSystem);
   }
 
   @Override

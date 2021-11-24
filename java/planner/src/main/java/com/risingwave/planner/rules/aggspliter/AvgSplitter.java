@@ -94,7 +94,11 @@ class AvgSplitter extends AbstractAggSplitter {
     var sumInputRef = rexBuilder.makeInputRef(input, prevStageIndexes.get(0));
     var sum2InputRef = rexBuilder.makeInputRef(input, prevStageIndexes.get(1));
 
-    return rexBuilder.makeCall(SqlStdOperatorTable.DIVIDE, sumInputRef, sum2InputRef);
+    // TODO(xiangjin): Replace this short-term mitigation of return type mismatch between calcite
+    // avg and sum/count.
+    var calc = rexBuilder.makeCall(SqlStdOperatorTable.DIVIDE, sumInputRef, sum2InputRef);
+    calc = rexBuilder.ensureType(originalAggCall.getType(), calc, false);
+    return calc;
   }
 
   @Override

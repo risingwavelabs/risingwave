@@ -9,15 +9,20 @@ import java.util.OptionalInt;
 import org.apache.calcite.rel.type.RelDataTypeComparability;
 import org.apache.calcite.sql.type.SqlTypeName;
 
+/**
+ * Type for {@link SqlTypeName#TIMESTAMP} and {@link SqlTypeName#TIMESTAMP_WITH_LOCAL_TIME_ZONE}.
+ */
 public class TimestampType extends PrimitiveTypeBase {
   private final int precision;
 
-  public TimestampType(OptionalInt precision, SqlTypeName typeName) {
-    this(false, precision.orElse(0), typeName);
+  public TimestampType(
+      OptionalInt precision, SqlTypeName typeName, RisingWaveDataTypeSystem typeSystem) {
+    this(false, precision.orElse(0), typeName, typeSystem);
   }
 
-  private TimestampType(boolean nullable, int precision, SqlTypeName typeName) {
-    super(nullable, typeName);
+  private TimestampType(
+      boolean nullable, int precision, SqlTypeName typeName, RisingWaveDataTypeSystem typeSystem) {
+    super(nullable, typeName, typeSystem);
     Verify.verify(
         typeName == SqlTypeName.TIMESTAMP || typeName == SqlTypeName.TIMESTAMP_WITH_LOCAL_TIME_ZONE,
         "{} type can not be used for timestamp type",
@@ -54,6 +59,11 @@ public class TimestampType extends PrimitiveTypeBase {
   }
 
   @Override
+  public int getPrecision() {
+    return precision;
+  }
+
+  @Override
   public boolean equals(Object o) {
     if (this == o) {
       return true;
@@ -75,6 +85,6 @@ public class TimestampType extends PrimitiveTypeBase {
 
   @Override
   protected PrimitiveTypeBase copyWithNullability(boolean nullable) {
-    return new TimestampType(nullable, this.precision, this.sqlTypeName);
+    return new TimestampType(nullable, this.precision, this.sqlTypeName, typeSystem);
   }
 }

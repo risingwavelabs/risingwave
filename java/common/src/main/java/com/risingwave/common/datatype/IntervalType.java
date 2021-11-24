@@ -38,6 +38,7 @@ import org.apache.calcite.sql.pretty.SqlPrettyWriter;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.sql.util.SqlString;
 
+/** Type for interval. */
 public class IntervalType extends PrimitiveTypeBase {
   private static final ImmutableMap<SqlTypeName, DataType.IntervalType> INTERVAL_TYPE_MAPPING =
       ImmutableMap.<SqlTypeName, DataType.IntervalType>builder()
@@ -57,12 +58,13 @@ public class IntervalType extends PrimitiveTypeBase {
 
   private final SqlIntervalQualifier intervalQualifier;
 
-  public IntervalType(SqlIntervalQualifier qualifier) {
-    this(false, qualifier);
+  public IntervalType(SqlIntervalQualifier qualifier, RisingWaveDataTypeSystem typeSystem) {
+    this(false, qualifier, typeSystem);
   }
 
-  public IntervalType(boolean nullable, SqlIntervalQualifier qualifier) {
-    super(nullable, qualifier.typeName());
+  public IntervalType(
+      boolean nullable, SqlIntervalQualifier qualifier, RisingWaveDataTypeSystem typeSystem) {
+    super(nullable, qualifier.typeName(), typeSystem);
     checkArgument(
         INTERVAL_TYPE_MAPPING.containsKey(sqlTypeName),
         "Invalid interval sql type: " + "{}",
@@ -128,6 +130,6 @@ public class IntervalType extends PrimitiveTypeBase {
 
   @Override
   protected PrimitiveTypeBase copyWithNullability(boolean nullable) {
-    return new IntervalType(nullable, intervalQualifier);
+    return new IntervalType(nullable, intervalQualifier, typeSystem);
   }
 }

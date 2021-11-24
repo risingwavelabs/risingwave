@@ -4,13 +4,14 @@ import com.risingwave.proto.data.DataType;
 import org.apache.calcite.rel.type.RelDataTypeComparability;
 import org.apache.calcite.sql.type.SqlTypeName;
 
+/** Type for {@link SqlTypeName#DATE}. */
 public class DateType extends PrimitiveTypeBase {
-  public DateType() {
-    this(false);
+  public DateType(RisingWaveDataTypeSystem typeSystem) {
+    this(false, typeSystem);
   }
 
-  public DateType(boolean nullable) {
-    super(nullable, SqlTypeName.DATE);
+  public DateType(boolean nullable, RisingWaveDataTypeSystem typeSystem) {
+    super(nullable, SqlTypeName.DATE, typeSystem);
     resetDigest();
   }
 
@@ -34,6 +35,6 @@ public class DateType extends PrimitiveTypeBase {
 
   @Override
   protected PrimitiveTypeBase copyWithNullability(boolean nullable) {
-    return new DateType(nullable);
+    return new DateType(nullable, typeSystem);
   }
 }

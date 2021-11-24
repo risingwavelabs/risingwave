@@ -122,35 +122,48 @@ public class RisingWaveTypeFactory extends JavaTypeFactoryImpl {
       SqlTypeName sqlType, OptionalInt precision, OptionalInt scale) {
     switch (sqlType) {
       case BOOLEAN:
-        return canonize(new BooleanType());
+        return canonize(new BooleanType((RisingWaveDataTypeSystem) typeSystem));
       case SMALLINT:
-        return canonize(new NumericTypeBase(SqlTypeName.SMALLINT, 2));
+        return canonize(
+            new NumericTypeBase(SqlTypeName.SMALLINT, 2, (RisingWaveDataTypeSystem) typeSystem));
       case INTEGER:
-        return canonize(new NumericTypeBase(SqlTypeName.INTEGER, 4));
+        return canonize(
+            new NumericTypeBase(SqlTypeName.INTEGER, 4, (RisingWaveDataTypeSystem) typeSystem));
       case BIGINT:
-        return canonize(new NumericTypeBase(SqlTypeName.BIGINT, 8));
+        return canonize(
+            new NumericTypeBase(SqlTypeName.BIGINT, 8, (RisingWaveDataTypeSystem) typeSystem));
       case FLOAT:
-        return canonize(new NumericTypeBase(SqlTypeName.FLOAT, 4));
+        return canonize(
+            new NumericTypeBase(SqlTypeName.FLOAT, 4, (RisingWaveDataTypeSystem) typeSystem));
       case DOUBLE:
-        return canonize(new NumericTypeBase(SqlTypeName.DOUBLE, 8));
+        return canonize(
+            new NumericTypeBase(SqlTypeName.DOUBLE, 8, (RisingWaveDataTypeSystem) typeSystem));
       case DECIMAL:
-        return canonize(new DecimalType(precision, scale));
+        return canonize(new DecimalType(precision, scale, (RisingWaveDataTypeSystem) typeSystem));
       case CHAR:
-        return canonize(new StringType(SqlTypeName.CHAR, precision));
+        return canonize(
+            new StringType(SqlTypeName.CHAR, precision, (RisingWaveDataTypeSystem) typeSystem));
       case VARCHAR:
-        return canonize(new StringType(SqlTypeName.VARCHAR, precision));
+        return canonize(
+            new StringType(SqlTypeName.VARCHAR, precision, (RisingWaveDataTypeSystem) typeSystem));
       case TIME:
-        return canonize(new TimeType(precision));
+        return canonize(new TimeType(precision, (RisingWaveDataTypeSystem) typeSystem));
       case TIMESTAMP:
-        return canonize(new TimestampType(precision, SqlTypeName.TIMESTAMP));
+        return canonize(
+            new TimestampType(
+                precision, SqlTypeName.TIMESTAMP, (RisingWaveDataTypeSystem) typeSystem));
       case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-        return canonize(new TimestampType(precision, SqlTypeName.TIMESTAMP_WITH_LOCAL_TIME_ZONE));
+        return canonize(
+            new TimestampType(
+                precision,
+                SqlTypeName.TIMESTAMP_WITH_LOCAL_TIME_ZONE,
+                (RisingWaveDataTypeSystem) typeSystem));
       case DATE:
-        return canonize(new DateType());
+        return canonize(new DateType((RisingWaveDataTypeSystem) typeSystem));
       case NULL:
-        return NullType.SINGLETON;
+        return canonize(new NullType((RisingWaveDataTypeSystem) typeSystem));
       case SYMBOL:
-        return canonize(new SymbolType());
+        return canonize(new SymbolType((RisingWaveDataTypeSystem) typeSystem));
       default:
         throw new PgException(PgErrorCode.INTERNAL_ERROR, "Unrecognized sql type: %s", sqlType);
     }
@@ -165,7 +178,7 @@ public class RisingWaveTypeFactory extends JavaTypeFactoryImpl {
 
   @Override
   public RelDataType createSqlIntervalType(SqlIntervalQualifier intervalQualifier) {
-    return new IntervalType(intervalQualifier);
+    return new IntervalType(intervalQualifier, (RisingWaveDataTypeSystem) typeSystem);
   }
 
   @Override
@@ -244,7 +257,7 @@ public class RisingWaveTypeFactory extends JavaTypeFactoryImpl {
 
   @Override
   public RelDataType createUnknownType() {
-    return UnknownType.INSTANCE;
+    return canonize(new UnknownType((RisingWaveDataTypeSystem) typeSystem));
   }
 
   @Override
