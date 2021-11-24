@@ -1,6 +1,7 @@
 package com.risingwave.catalog;
 
 import com.risingwave.common.datatype.RisingWaveDataType;
+import com.risingwave.common.datatype.RisingWaveTypeFactory;
 
 /** Column Description */
 public class ColumnDesc {
@@ -16,6 +17,13 @@ public class ColumnDesc {
     this.dataType = dataType;
     this.primary = primary;
     this.encoding = encoding;
+  }
+
+  public ColumnDesc(com.risingwave.proto.plan.ColumnDesc desc) {
+    this(
+        new RisingWaveTypeFactory().createDataType(desc.getColumnType()),
+        desc.getIsPrimary(),
+        ColumnEncoding.valueOf(desc.getEncoding().name()));
   }
 
   public RisingWaveDataType getDataType() {

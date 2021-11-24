@@ -1,18 +1,18 @@
-use crate::metadata::watermark::Watermark;
 use crate::metadata::{
-    Config, Epoch, EpochGeneratorRef, IdGeneratorRef, MetaStoreRef, SINGLE_VERSION_EPOCH,
+    Config, DatabaseMetaManager, Epoch, EpochGeneratorRef, IdGeneratorRef, MetaStoreRef,
+    SchemaMetaManager, TableMetaManager, SINGLE_VERSION_EPOCH,
 };
-use protobuf::Message;
-use risingwave_proto::metadata::EpochState;
+use prost::Message;
+use risingwave_common::error::Result;
+use risingwave_pb::metadata::{Catalog, EpochState};
+use tokio::sync::RwLock;
 
 pub struct MetaManager {
     pub meta_store_ref: MetaStoreRef,
     pub epoch_generator: EpochGeneratorRef,
     pub id_generator: IdGeneratorRef,
     pub config: Config,
-
-    // Frontend state fields.
-    pub catalog_wm: Watermark,
+    pub catalog_lock: RwLock<()>,
 
     // TODO: more data could cached for single node deployment mode.
     // Backend state fields.
@@ -33,7 +33,7 @@ impl MetaManager {
             id_generator,
             config,
 
-            catalog_wm: Watermark::new(),
+            catalog_lock: RwLock::new(()),
             current_epoch: Epoch::from(0),
             stable_epoch: Epoch::from(0),
         };
@@ -44,7 +44,7 @@ impl MetaManager {
             .await;
         match res {
             Ok(value) => {
-                let proto = EpochState::parse_from_bytes(&value).unwrap();
+                let proto = EpochState::decode(value.as_slice()).unwrap();
                 manager.current_epoch = Epoch::from(proto.get_current_epoch());
                 manager.stable_epoch = Epoch::from(proto.get_stable_epoch());
             }
@@ -56,5 +56,17 @@ impl MetaManager {
         }
 
         manager
+    }
+
+    pub async fn get_catalog(&self) -> Result<Catalog> {
+        let databases = self.list_databases().await?;
+        let schemas = self.list_schemas().await?;
+        let tables = self.list_tables().await?;
+
+        Ok(Catalog {
+            databases,
+            schemas,
+            tables,
+        })
     }
 }

@@ -1682,6 +1682,7 @@ dependencies = [
  "pb-convert",
  "pb-convert-derive",
  "prost",
+ "prost-types",
  "protobuf",
  "rand",
  "risingwave-pb",

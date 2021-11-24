@@ -1,9 +1,8 @@
 use crate::metadata::{MetaManager, SINGLE_VERSION_EPOCH};
 use async_trait::async_trait;
 use prost::Message;
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
-use risingwave_common::error::RwError;
+
 use risingwave_pb::metadata::Cluster;
 
 #[async_trait]
@@ -38,8 +37,7 @@ impl ClusterMetaManager for MetaManager {
             )
             .await?;
 
-        Cluster::decode(cluster_pb.as_slice())
-            .map_err(|e| RwError::from(InternalError(e.to_string())))
+        Ok(Cluster::decode(cluster_pb.as_slice())?)
     }
 
     async fn put_cluster(&self, cluster: Cluster) -> Result<()> {

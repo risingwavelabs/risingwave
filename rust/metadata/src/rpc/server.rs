@@ -2,9 +2,11 @@ use crate::metadata::{Config, MemEpochGenerator, MemStore, MetaManager, StoredId
 use crate::rpc::service::catalog_service::CatalogServiceImpl;
 use crate::rpc::service::epoch_service::EpochServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
+use crate::rpc::service::id_service::IdGeneratorServiceImpl;
 use risingwave_pb::metadata::catalog_service_server::CatalogServiceServer;
 use risingwave_pb::metadata::epoch_service_server::EpochServiceServer;
 use risingwave_pb::metadata::heartbeat_service_server::HeartbeatServiceServer;
+use risingwave_pb::metadata::id_generator_service_server::IdGeneratorServiceServer;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedSender;
@@ -24,7 +26,8 @@ pub async fn rpc_serve(addr: SocketAddr) -> (JoinHandle<()>, UnboundedSender<()>
 
     let epoch_srv = EpochServiceImpl::new(meta_manager.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new(meta_manager.clone());
-    let catalog_srv = CatalogServiceImpl::new(meta_manager);
+    let catalog_srv = CatalogServiceImpl::new(meta_manager.clone());
+    let id_generator_srv = IdGeneratorServiceImpl::new(meta_manager);
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {
@@ -32,6 +35,7 @@ pub async fn rpc_serve(addr: SocketAddr) -> (JoinHandle<()>, UnboundedSender<()>
             .add_service(EpochServiceServer::new(epoch_srv))
             .add_service(HeartbeatServiceServer::new(heartbeat_srv))
             .add_service(CatalogServiceServer::new(catalog_srv))
+            .add_service(IdGeneratorServiceServer::new(id_generator_srv))
             .serve_with_shutdown(addr, async move {
                 tokio::select! {
                   _ = tokio::signal::ctrl_c() => {},

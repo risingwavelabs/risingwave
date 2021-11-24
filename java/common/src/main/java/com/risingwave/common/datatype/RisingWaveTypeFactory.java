@@ -169,6 +169,55 @@ public class RisingWaveTypeFactory extends JavaTypeFactoryImpl {
     }
   }
 
+  public RisingWaveDataType createDataType(com.risingwave.proto.data.DataType dataType) {
+    switch (dataType.getTypeName()) {
+      case INT16:
+        return new NumericTypeBase(SqlTypeName.SMALLINT, 2, (RisingWaveDataTypeSystem) typeSystem);
+      case INT32:
+        return new NumericTypeBase(SqlTypeName.INTEGER, 4, (RisingWaveDataTypeSystem) typeSystem);
+      case INT64:
+        return new NumericTypeBase(SqlTypeName.BIGINT, 8, (RisingWaveDataTypeSystem) typeSystem);
+      case FLOAT:
+        return new NumericTypeBase(SqlTypeName.FLOAT, 4, (RisingWaveDataTypeSystem) typeSystem);
+      case DOUBLE:
+        return new NumericTypeBase(SqlTypeName.DOUBLE, 8, (RisingWaveDataTypeSystem) typeSystem);
+      case BOOLEAN:
+        return new BooleanType((RisingWaveDataTypeSystem) typeSystem);
+      case DATE:
+        return new DateType((RisingWaveDataTypeSystem) typeSystem);
+      case TIME:
+        return new TimeType(
+            OptionalInt.of(dataType.getPrecision()), (RisingWaveDataTypeSystem) typeSystem);
+      case TIMESTAMP:
+        return new TimestampType(
+            OptionalInt.of(dataType.getPrecision()),
+            SqlTypeName.TIMESTAMP,
+            (RisingWaveDataTypeSystem) typeSystem);
+      case TIMESTAMPZ:
+        return new TimestampType(
+            OptionalInt.of(dataType.getPrecision()),
+            SqlTypeName.TIMESTAMP_WITH_LOCAL_TIME_ZONE,
+            (RisingWaveDataTypeSystem) typeSystem);
+      case CHAR:
+        return new StringType(
+            SqlTypeName.CHAR,
+            OptionalInt.of(dataType.getPrecision()),
+            (RisingWaveDataTypeSystem) typeSystem);
+      case VARCHAR:
+        return new StringType(
+            SqlTypeName.VARCHAR,
+            OptionalInt.of(dataType.getPrecision()),
+            (RisingWaveDataTypeSystem) typeSystem);
+      case DECIMAL:
+        return new DecimalType(
+            OptionalInt.of(dataType.getPrecision()),
+            OptionalInt.of(dataType.getScale()),
+            (RisingWaveDataTypeSystem) typeSystem);
+      default:
+        throw new PgException(PgErrorCode.INTERNAL_ERROR, "Unrecognized data type: %s", dataType);
+    }
+  }
+
   @Override
   public RelDataType createTypeWithCharsetAndCollation(
       RelDataType type, Charset charset, SqlCollation collation) {

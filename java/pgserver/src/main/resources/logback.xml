@@ -18,4 +18,6 @@
         <appender-ref ref="STDOUT"/>
     </root>
 
+    <logger name="io.grpc.netty.shaded.io" level="OFF"/>
+
 </configuration>

@@ -27,6 +27,7 @@ public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCata
   private final AtomicInteger nextTableId = new AtomicInteger(0);
   private final ConcurrentMap<TableCatalog.TableId, TableCatalog> tableById;
   private final ConcurrentMap<TableCatalog.TableName, TableCatalog> tableByName;
+  private Long version;
 
   SchemaCatalog(SchemaId schemaId, SchemaName schemaName) {
     this(schemaId, schemaName, Collections.emptyList());
@@ -36,6 +37,14 @@ public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCata
     super(schemaId, schemaName);
     this.tableById = EntityBase.groupBy(tables, TableCatalog::getId);
     this.tableByName = EntityBase.groupBy(tables, TableCatalog::getEntityName);
+  }
+
+  public void setVersion(long version) {
+    this.version = version;
+  }
+
+  public Long getVersion() {
+    return this.version;
   }
 
   void createTable(CreateTableInfo createTableInfo) {
@@ -67,6 +76,38 @@ public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCata
     createTableInfo.getColumns().forEach(pair -> table.addColumn(pair.getKey(), pair.getValue()));
 
     registerTable(table);
+  }
+
+  TableCatalog createTableWithId(CreateTableInfo createTableInfo, Integer id) {
+    TableCatalog.TableName tableName =
+        new TableCatalog.TableName(createTableInfo.getName(), getEntityName());
+
+    if (tableByName.containsKey(tableName)) {
+      throw RisingWaveException.from(
+          MetaServiceError.TABLE_ALREADY_EXISTS,
+          tableName.getValue(),
+          getDatabaseName(),
+          getSchemaName());
+    }
+
+    TableCatalog.TableId tableId = new TableCatalog.TableId(id, getId());
+
+    TableCatalog table =
+        new TableCatalog(
+            tableId,
+            tableName,
+            Collections.emptyList(),
+            createTableInfo.isMv(),
+            createTableInfo.isStream(),
+            ImmutableIntList.of(),
+            DataDistributionType.ALL,
+            createTableInfo.getProperties(),
+            createTableInfo.getRowFormat());
+
+    createTableInfo.getColumns().forEach(pair -> table.addColumn(pair.getKey(), pair.getValue()));
+
+    registerTable(table);
+    return table;
   }
 
   private void registerTable(TableCatalog table) {

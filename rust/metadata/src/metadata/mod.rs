@@ -10,7 +10,6 @@ mod table;
 pub use manager::*;
 mod id;
 mod schema;
-mod watermark;
 pub use cluster::*;
 pub use config::*;
 pub use database::*;

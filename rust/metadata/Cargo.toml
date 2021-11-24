@@ -25,6 +25,7 @@ paste = "1"
 pb-convert = { path = "../utils/pb-convert" }
 pb-convert-derive = { path = "../utils/pb-convert-derive" }
 prost = "0.8"
+prost-types = "0.8"
 protobuf = "2"
 risingwave-pb = { path = "../prost" }
 risingwave-proto = { path = "../proto" }

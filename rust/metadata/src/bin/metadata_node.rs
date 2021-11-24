@@ -9,7 +9,7 @@ struct Opts {
     #[clap(long, default_value = "config/log4rs.yaml")]
     log4rs_config: String,
 
-    #[clap(long, default_value = "127.0.0.1:5688")]
+    #[clap(long, default_value = "127.0.0.1:5690")]
     host: String,
 }
 

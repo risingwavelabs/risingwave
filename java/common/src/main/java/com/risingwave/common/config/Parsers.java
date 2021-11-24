@@ -11,6 +11,8 @@ public class Parsers {
 
   public static final Parser<Integer> INT_PARSER = Integer::parseInt;
 
+  public static final Parser<String> STRING_PARSER = String::toString;
+
   // TODO: extend the boolean parser accept more input like `on`, `off`, `yes`, `no`, `1`, `0`.
   public static final Parser<Boolean> BOOLEAN_PARSER = Boolean::parseBoolean;
 

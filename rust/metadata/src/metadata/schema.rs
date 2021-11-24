@@ -1,8 +1,6 @@
 use crate::metadata::{Epoch, MetaManager};
 use async_trait::async_trait;
 use prost::Message;
-use risingwave_common::array::RwError;
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_pb::metadata::Schema;
 use risingwave_pb::plan::SchemaRefId;
@@ -30,7 +28,6 @@ impl SchemaMetaManager for MetaManager {
     }
 
     async fn create_schema(&self, mut schema: Schema) -> Result<Epoch> {
-        // TODO: add lock here, ensure sequentially creation of same schema with incremental epoch.
         let version = self.epoch_generator.generate()?;
         schema.version = version.into_inner();
         let schema_ref_id = schema.get_schema_ref_id();
@@ -56,12 +53,10 @@ impl SchemaMetaManager for MetaManager {
             )
             .await?;
 
-        Schema::decode(schema_pb.as_slice())
-            .map_err(|e| RwError::from(InternalError(e.to_string())))
+        Ok(Schema::decode(schema_pb.as_slice())?)
     }
 
     async fn drop_schema(&self, schema_id: &SchemaRefId) -> Result<Epoch> {
-        // TODO: add lock here.
         let version = self.epoch_generator.generate()?;
 
         self.meta_store_ref

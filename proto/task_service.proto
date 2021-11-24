@@ -120,5 +120,5 @@ message GetDataRequest {
 
 service ExchangeService {
   rpc GetData(GetDataRequest) returns (stream GetDataResponse);
-    rpc GetStream(GetStreamRequest) returns (stream data.StreamMessage);
+  rpc GetStream(GetStreamRequest) returns (stream data.StreamMessage);
 }

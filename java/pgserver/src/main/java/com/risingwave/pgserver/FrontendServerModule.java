@@ -6,12 +6,15 @@ import com.google.inject.AbstractModule;
 import com.google.inject.Provides;
 import com.google.inject.Singleton;
 import com.risingwave.catalog.CatalogService;
+import com.risingwave.catalog.DatabaseCatalog;
+import com.risingwave.catalog.RemoteCatalogService;
 import com.risingwave.catalog.SimpleCatalogService;
 import com.risingwave.common.config.Configuration;
 import com.risingwave.common.config.FrontendServerConfigurations;
 import com.risingwave.common.config.LeaderServerConfigurations;
 import com.risingwave.execution.handler.DefaultSqlHandlerFactory;
 import com.risingwave.execution.handler.SqlHandlerFactory;
+import com.risingwave.node.DefaultWorkerNode;
 import com.risingwave.node.DefaultWorkerNodeManager;
 import com.risingwave.node.WorkerNodeManager;
 import com.risingwave.pgserver.database.RisingWaveDatabaseManager;
@@ -19,6 +22,9 @@ import com.risingwave.pgwire.PgServer;
 import com.risingwave.pgwire.database.DatabaseManager;
 import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.ComputeClientManagerImpl;
+import com.risingwave.rpc.MetaClient;
+import com.risingwave.rpc.MetadataClientManager;
+import com.risingwave.rpc.MetadataClientManagerImpl;
 import com.risingwave.scheduler.QueryManager;
 import com.risingwave.scheduler.RemoteQueryManager;
 import com.risingwave.scheduler.streaming.StreamManager;
@@ -51,6 +57,7 @@ public class FrontendServerModule extends AbstractModule {
       bind(QueryManager.class).to(RemoteQueryManager.class).in(Singleton.class);
     }
     bind(StreamManager.class).to(StreamManagerImpl.class).in(Singleton.class);
+    bind(MetadataClientManager.class).to(MetadataClientManagerImpl.class).in(Singleton.class);
   }
 
   @Provides
@@ -74,12 +81,37 @@ public class FrontendServerModule extends AbstractModule {
 
   @Provides
   @Singleton
-  static CatalogService createCatalogService() {
+  static CatalogService createCatalogService(
+      Configuration config, MetadataClientManager metadataClientManager) {
     LOGGER.info("Creating catalog service.");
-    SimpleCatalogService catalogService = new SimpleCatalogService();
-    LOGGER.info("Creating default database: {}.", CatalogService.DEFAULT_DATABASE_NAME);
+    FrontendServerConfigurations.CatalogMode mode =
+        config.get(FrontendServerConfigurations.CATALOG_MODE);
+    CatalogService catalogService;
+    if (mode == FrontendServerConfigurations.CatalogMode.Local) {
+      catalogService = new SimpleCatalogService();
 
-    catalogService.createDatabase(CatalogService.DEFAULT_DATABASE_NAME);
+      catalogService.createDatabase(CatalogService.DEFAULT_DATABASE_NAME);
+      LOGGER.info("Creating default database: {}.", CatalogService.DEFAULT_DATABASE_NAME);
+    } else {
+      String address = config.get(FrontendServerConfigurations.METADATA_SERVICE_ADDRESS);
+      DefaultWorkerNode node = DefaultWorkerNode.from(address);
+      MetaClient client =
+          metadataClientManager.getOrCreate(
+              node.getRpcEndPoint().getHost(), node.getRpcEndPoint().getPort());
+      catalogService = new RemoteCatalogService(client);
+
+      if (catalogService.getDatabase(
+              new DatabaseCatalog.DatabaseName(CatalogService.DEFAULT_DATABASE_NAME))
+          == null) {
+
+        // For multi frontends, this may cause multi databases' creation when cluster start
+        // at the first time. That's acceptable because only at most N(number of frontends)
+        // versions of default database will be created in meta service, that doesn't cause any
+        // inconsistency problem. The newest version will be synced eventually.
+        catalogService.createDatabase(CatalogService.DEFAULT_DATABASE_NAME);
+        LOGGER.info("Creating default database: {}.", CatalogService.DEFAULT_DATABASE_NAME);
+      }
+    }
     return catalogService;
   }
 

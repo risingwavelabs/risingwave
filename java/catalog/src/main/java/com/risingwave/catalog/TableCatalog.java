@@ -53,6 +53,7 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
   private final String rowFormat;
   // TODO: Need to be used as streaming job optimizes on append-only input specially.
   private final boolean appendOnly = false;
+  private Long version;
 
   TableCatalog(
       TableId id,
@@ -86,6 +87,14 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
       this.columnById.put(rowIdColumn.getId(), rowIdColumn);
       this.columnByName.put(rowIdColumn.getEntityName(), rowIdColumn);
     }
+  }
+
+  public void setVersion(long version) {
+    this.version = version;
+  }
+
+  public Long getVersion() {
+    return this.version;
   }
 
   public boolean isMaterializedView() {

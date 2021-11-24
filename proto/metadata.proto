@@ -3,25 +3,32 @@ syntax = "proto3";
 package metadata;
 
 option java_multiple_files = true;
-option java_package = "com.risingwave.proto.metadata";
+option java_package = "com.risingwave.proto.metadatanode";
 option optimize_for = SPEED;
 
+import "common.proto";
 import "data.proto";
 import "plan.proto";
-import "google/protobuf/any.proto";
 
-message ColumnTable {
-  plan.TableRefId table_ref_id = 1;
-  uint32 column_count = 2;
-  string table_name = 3;
-  uint64 version = 4;
-}
+message Table {
+  enum DistributionType {
+    INVALID = 0;
+    ALL = 1;
+    KEY = 2;
+  }
 
-message RowTable {
   plan.TableRefId table_ref_id = 1;
-  repeated plan.ColumnDesc columns = 2;
-  repeated uint32 pk_columns = 3;
-  uint64 version = 4;
+  string table_name = 2;
+  uint32 column_count = 3;
+  repeated plan.ColumnDesc column_descs = 4;
+  bool is_materialized_view = 5;
+  bool is_stream = 6;
+  repeated uint32 pk_columns = 7;
+  DistributionType dist_type = 8;
+  map<string, string> properties = 9;
+  string row_format = 10;
+
+  uint64 version = 11;
 }
 
 message Database {
@@ -68,7 +75,8 @@ message Location {
 message GetEpochRequest {}
 
 message GetEpochResponse {
-  uint64 epoch = 1;
+  common.Status status = 1;
+  uint64 epoch = 2;
 }
 
 service EpochService {
@@ -78,52 +86,55 @@ service EpochService {
 message GetIdRequest {}
 
 message GetIdResponse {
-  int32 id = 1;
+  common.Status status = 1;
+  int32 id = 2;
 }
 
 service IdGeneratorService {
   rpc GetId(GetIdRequest) returns (GetIdResponse);
 }
 
-enum CatalogType {
-  DATABASE = 0;
-  SCHEMA = 1;
-  ROW_TABLE = 2;
-  COLUMN_TABLE = 3;
-}
-
 message CreateRequest {
   uint32 node_id = 1;
-  CatalogType catalog_type = 2;
-  // body for different catalog type:
-  // Database/Schema/RowTable/ColumnTable.
-  google.protobuf.Any body = 3;
+  oneof CatalogBody {
+    Database database = 2;
+    Schema schema = 3;
+    Table table = 4;
+  }
 }
 
 message CreateResponse {
-  uint64 version = 1;
+  common.Status status = 1;
+  uint64 version = 2;
 }
 
 message DropRequest {
   uint32 node_id = 1;
-  CatalogType catalog_type = 2;
-  // body for different catalog type:
-  // DatabaseRefId/SchemaRefId/TableRefId/TableRefId.
-  google.protobuf.Any body = 3;
+  oneof CatalogId {
+    plan.DatabaseRefId database_id = 2;
+    plan.SchemaRefId schema_id = 3;
+    plan.TableRefId table_id = 4;
+  }
+}
+
+message DropResponse {
+  common.Status status = 1;
 }
 
 message GetCatalogRequest {
   uint32 node_id = 1;
 }
-message GetCatalogResponse {
+
+message Catalog {
   repeated Database databases = 1;
   repeated Schema schemas = 2;
-  repeated ColumnTable column_tables = 3;
-  repeated RowTable row_tables = 4;
-  uint64 watermark = 5;
+  repeated Table tables = 3;
 }
 
-message DropResponse {}
+message GetCatalogResponse {
+  common.Status status = 1;
+  Catalog catalog = 2;
+}
 
 service CatalogService {
   rpc GetCatalog(GetCatalogRequest) returns (GetCatalogResponse);
@@ -141,8 +152,10 @@ message HeartbeatRequest {
 }
 
 message HeartbeatResponse {
-  //
-  google.protobuf.Any body = 1;
+  common.Status status = 1;
+  oneof Body {
+    Catalog catalog = 2;
+  }
 }
 
 service HeartbeatService {

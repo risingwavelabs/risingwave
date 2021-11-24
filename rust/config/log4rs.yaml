@@ -39,4 +39,4 @@ appenders:
 root:
   level: debug
   appenders:
-    - stdout # change to 'rolling' if want rooling files appender
+    - stdout # change to 'rolling' if want rolling files appender

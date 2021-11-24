@@ -76,6 +76,12 @@ impl From<JoinError> for RwError {
     }
 }
 
+impl From<prost::DecodeError> for RwError {
+    fn from(prost_error: prost::DecodeError) -> Self {
+        ErrorCode::ProstError(prost_error).into()
+    }
+}
+
 impl Debug for RwError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}, backtrace: {:?}", self.inner, self.backtrace)

@@ -1,8 +1,7 @@
 use crate::metadata::{Epoch, MetaManager};
 use async_trait::async_trait;
 use prost::Message;
-use risingwave_common::array::RwError;
-use risingwave_common::error::ErrorCode::InternalError;
+
 use risingwave_common::error::Result;
 use risingwave_pb::metadata::Database;
 use risingwave_pb::plan::DatabaseRefId;
@@ -30,8 +29,6 @@ impl DatabaseMetaManager for MetaManager {
     }
 
     async fn create_database(&self, mut database: Database) -> Result<Epoch> {
-        // TODO: add lock here, ensure sequentially creation of same database with incremental
-        // epoch.
         let version = self.epoch_generator.generate()?;
         database.version = version.into_inner();
         let database_ref_id = database.get_database_ref_id();
@@ -57,12 +54,10 @@ impl DatabaseMetaManager for MetaManager {
             )
             .await?;
 
-        Database::decode(database_proto.as_slice())
-            .map_err(|e| RwError::from(InternalError(e.to_string())))
+        Ok(Database::decode(database_proto.as_slice())?)
     }
 
     async fn drop_database(&self, database_id: &DatabaseRefId) -> Result<Epoch> {
-        // TODO: add lock here.
         let version = self.epoch_generator.generate()?;
 
         self.meta_store_ref

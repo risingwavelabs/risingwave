@@ -7,6 +7,7 @@ import java.util.List;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+/** ConfigTest includes some test on configuration. */
 public class ConfigTest {
 
   @Test
@@ -35,7 +36,9 @@ public class ConfigTest {
             "risingwave.pgserver.port=4567",
             "risingwave.computenode.port=5688",
             "risingwave.leader.clustermode=Distributed",
-            "risingwave.leader.computenodes=127.0.0.1:5688");
+            "risingwave.leader.computenodes=127.0.0.1:5688",
+            "risingwave.catalog.mode=Local",
+            "risingwave.metadata.node=127.0.0.1:9527");
     Configuration config =
         loadConfigFromLines(
             lines, FrontendServerConfigurations.class, LeaderServerConfigurations.class);
@@ -44,5 +47,9 @@ public class ConfigTest {
     Assertions.assertEquals(pgwirePort, 4567);
     var clusterMode = config.get(LeaderServerConfigurations.CLUSTER_MODE);
     Assertions.assertEquals(clusterMode, LeaderServerConfigurations.ClusterMode.Distributed);
+    var catalogMode = config.get(FrontendServerConfigurations.CATALOG_MODE);
+    Assertions.assertEquals(catalogMode, FrontendServerConfigurations.CatalogMode.Local);
+    var metadataAddress = config.get(FrontendServerConfigurations.METADATA_SERVICE_ADDRESS);
+    Assertions.assertEquals(metadataAddress, "127.0.0.1:9527");
   }
 }

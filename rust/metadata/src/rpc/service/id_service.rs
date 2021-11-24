@@ -24,6 +24,7 @@ impl IdGeneratorService for IdGeneratorServiceImpl {
     ) -> Result<Response<GetIdResponse>, Status> {
         let _req = request.into_inner();
         Ok(Response::new(GetIdResponse {
+            status: None,
             id: self
                 .mmc
                 .id_generator

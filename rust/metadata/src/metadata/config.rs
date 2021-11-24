@@ -1,7 +1,5 @@
-/// Column family name for column table.
-const COLUMN_TABLE_CF_NAME: &str = "cf(column)/table";
-/// Column family name for row table.
-const ROW_TABLE_CF_NAME: &str = "cf(row)/table";
+/// Column family name for table.
+const TABLE_CF_NAME: &str = "cf/table";
 /// Column family name for schema.
 const SCHEMA_CF_NAME: &str = "cf/schema";
 /// Column family name for database.
@@ -16,29 +14,19 @@ const EPOCH_STATE_KEY: &str = "epoch_state";
 pub struct Config {
     database_cf: String,
     schema_cf: String,
-
-    column_table_cf: String,
-    row_table_cf: String,
+    table_cf: String,
 
     cluster_state_cf: String,
     epoch_state_key: String,
 }
 
 impl Config {
-    pub fn set_column_table_cf(&mut self, cf: &str) {
-        self.column_table_cf = cf.to_owned();
+    pub fn set_table_cf(&mut self, cf: &str) {
+        self.table_cf = cf.to_owned();
     }
 
-    pub fn get_column_table_cf(&self) -> &str {
-        self.column_table_cf.as_str()
-    }
-
-    pub fn set_row_table_cf(&mut self, cf: &str) {
-        self.row_table_cf = cf.to_owned();
-    }
-
-    pub fn get_row_table_cf(&self) -> &str {
-        self.row_table_cf.as_str()
+    pub fn get_table_cf(&self) -> &str {
+        self.table_cf.as_str()
     }
 
     pub fn set_schema_cf(&mut self, cf: &str) {
@@ -79,8 +67,7 @@ impl Default for Config {
         Config {
             database_cf: DATABASE_CF_NAME.to_owned(),
             schema_cf: SCHEMA_CF_NAME.to_owned(),
-            column_table_cf: COLUMN_TABLE_CF_NAME.to_owned(),
-            row_table_cf: ROW_TABLE_CF_NAME.to_owned(),
+            table_cf: TABLE_CF_NAME.to_owned(),
             epoch_state_key: EPOCH_STATE_KEY.to_owned(),
             cluster_state_cf: CLUSTER_CF_NAME.to_owned(),
         }
