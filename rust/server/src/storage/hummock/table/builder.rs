@@ -4,15 +4,15 @@
 
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 
-use super::utils::{bytes_diff, crc32_checksum};
+use super::utils::bytes_diff;
 use crate::storage::hummock::bloom::Bloom;
 use crate::storage::hummock::format::user_key;
+use crate::storage::hummock::table::utils::crc32_checksum;
 use crate::storage::hummock::HummockValue;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use prost::Message;
-use risingwave_pb::hummock::{
-    checksum::Algorithm as ChecksumAlg, BlockOffset, Checksum, TableMeta,
-};
+use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
+use risingwave_pb::hummock::{BlockOffset, Checksum, TableMeta};
 
 /// Entry header stores the difference between current key and block base key. `overlap` is the
 /// common prefix of key and base key, and diff is the length of different part.
@@ -102,19 +102,10 @@ impl TableBuilder {
         bytes_diff(&self.base_key, key)
     }
 
-    /// Structure of Block:
-    /// ```plain
-    /// +-------------------+-----------------+--------------------+--------------+------------------+
-    /// | Entry1            | Entry2          | Entry3             | Entry4       | Entry5
-    /// +-------------------+-----------------+--------------------+--------------+------------------+
-    /// | Entry6            | ...             | ...                | ...          | EntryN
-    /// +-------------------+-----------------+--------------------+--------------+------------------+
-    /// | Offsets list used to perform binary | Offsets list Size  | Block        | Checksum Size
-    /// | search in the block                 | (4 Bytes)          | Checksum     | (4 Bytes)
-    /// +-------------------------------------+--------------------+--------------+------------------+
-    /// ```
     /// Append encoded block bytes to the buffer
     fn finish_block(&mut self) {
+        // ---------- encode block ----------
+
         // different behavior: BadgerDB will just return.
         assert!(!self.entry_offsets.is_empty());
 
@@ -135,13 +126,13 @@ impl TableBuilder {
         self.data_buf.put(cs_bytes);
         self.data_buf.put_u32(ck_len);
 
-        // add block to meta
-        let block = BlockOffset {
+        // ---------- add block offset to meta ----------
+        let block_offset = BlockOffset {
             key: self.base_key.to_vec(),
             offset: self.base_offset,
             len: self.data_buf.len() as u32 - self.base_offset,
         };
-        self.meta.offsets.push(block);
+        self.meta.offsets.push(block_offset);
     }
 
     fn should_finish_block(&self, key: &[u8], value: &HummockValue<Vec<u8>>) -> bool {

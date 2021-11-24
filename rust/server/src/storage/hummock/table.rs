@@ -39,6 +39,60 @@ impl Block {
         // let checksum = prost::Message::decode(self.checksum.clone())?;
         verify_checksum(&self.checksum, &self.data)
     }
+
+    /// Structure of Block:
+    /// ```plain
+    /// +-------------------+-----------------+--------------------+--------------+------------------+
+    /// | Entry1            | Entry2          | Entry3             | Entry4       | Entry5
+    /// +-------------------+-----------------+--------------------+--------------+------------------+
+    /// | Entry6            | ...             | ...                | ...          | EntryN
+    /// +-------------------+-----------------+--------------------+--------------+------------------+
+    /// | Offsets list used to perform binary | Offsets list Size  | Block        | Checksum Size
+    /// | search in the block                 | (4 Bytes)          | Checksum     | (4 Bytes)
+    /// +-------------------------------------+--------------------+--------------+------------------+
+    /// ```
+    /// Decode block from given bytes
+    fn decode(data: &Bytes, block_offset: usize) -> HummockResult<Arc<Block>> {
+        // read checksum length
+        let mut read_pos = data.len() - 4; // first read checksum length
+        let checksum_len = (&data[read_pos..read_pos + 4]).get_u32() as usize;
+
+        if checksum_len > data.len() {
+            return Err(HummockError::InvalidBlock);
+        }
+
+        // read checksum
+        read_pos -= checksum_len;
+        let checksum = Checksum::decode(&data[read_pos..read_pos + checksum_len])?;
+
+        // read entries num
+        read_pos -= 4;
+        let entries_num = (&data[read_pos..read_pos + 4]).get_u32() as usize;
+
+        // read entries position
+        let entries_index_start = read_pos - entries_num * 4;
+        let entries_index_end = entries_index_start + entries_num * 4;
+
+        // read entries
+        let mut entry_offsets_ptr = &data[entries_index_start..entries_index_end];
+        let mut entry_offsets = Vec::with_capacity(entries_num);
+        for _ in 0..entries_num {
+            entry_offsets.push(entry_offsets_ptr.get_u32_le());
+        }
+
+        verify_checksum(&checksum, &data[..])?;
+
+        let blk = Arc::new(Block {
+            offset: block_offset,
+            entries_index_start,
+            data: data.clone(),
+            entry_offsets,
+            checksum_len,
+            checksum,
+        });
+
+        Ok(blk)
+    }
 }
 
 /// [`Table`] represents a loaded SST file with the info we have about it.
