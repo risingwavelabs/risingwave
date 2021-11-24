@@ -335,7 +335,7 @@ pub(super) mod tests {
 
         let (blocks, meta) = b.finish();
         let table = Table::load(0, blocks, meta).unwrap();
-        assert_eq!(table.has_bloom_filter, with_blooms);
+        assert_eq!(table.has_bloom_filter(), with_blooms);
         for i in 0..key_count {
             let hash = farmhash::fingerprint32(user_key(format!("key_test_{}", i).as_bytes()));
             assert!(!table.surely_not_have(hash));

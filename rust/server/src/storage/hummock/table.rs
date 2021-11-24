@@ -54,7 +54,7 @@ impl Block {
     /// Decode block from given bytes
     fn decode(data: Bytes, block_offset: usize) -> HummockResult<Arc<Block>> {
         // read checksum length
-        let mut read_pos = data.len() - 4; // first read checksum length
+        let mut read_pos = data.len() - 4;
         let checksum_len = (&data[read_pos..read_pos + 4]).get_u32() as usize;
 
         if checksum_len > data.len() {
@@ -99,33 +99,19 @@ impl Block {
 /// [`Table`] represents a loaded SST file with the info we have about it.
 pub struct Table {
     /// concatenated blocks of an SST
-    blocks: Bytes,
+    pub blocks: Bytes,
 
     /// SST id
-    id: u64,
-
-    /// estimated size, only used on encryption or compression
-    estimated_size: u32,
+    pub id: u64,
 
     /// metadata of SST
-    meta: TableMeta,
-
-    /// true if there's Bloom filter in table
-    has_bloom_filter: bool,
+    pub meta: TableMeta,
 }
 
 impl Table {
     /// Open an existing SST from a pre-loaded [`Bytes`].
     pub fn load(id: u64, blocks: Bytes, meta: TableMeta) -> HummockResult<Self> {
-        let has_bloom_filter = !meta.bloom_filter.is_empty();
-        let estimated_size = meta.estimated_size;
-        Ok(Table {
-            id,
-            estimated_size,
-            meta,
-            blocks,
-            has_bloom_filter,
-        })
+        Ok(Table { id, meta, blocks })
     }
 
     /// Decode bytes to table metadata instance.
@@ -172,30 +158,9 @@ impl Table {
         Block::decode(block_data, offset)
     }
 
-    /// Get table ID
-    fn table_id(&self) -> u64 {
-        self.id
-    }
-
-    /// Get number of keys in SST
-    pub fn key_count(&self) -> u32 {
-        self.meta.key_count
-    }
-
-    /// Get size of SST
-    pub fn size(&self) -> u64 {
-        self.blocks.len() as u64
-    }
-
-    /// Get SST id
-    pub fn id(&self) -> u64 {
-        self.id
-    }
-
-    /// Get table metadata
-    fn meta(&self) -> &TableMeta {
-        &self.meta
-        // TODO: encryption
+    /// Return true if the table has a Bloom filter
+    pub fn has_bloom_filter(&self) -> bool {
+        !self.meta.bloom_filter.is_empty()
     }
 
     /// Judge whether the hash is in the table with the given false positive rate.
@@ -204,9 +169,8 @@ impl Table {
     /// - if the return value is false, then the table may or may not have the value actually,
     /// a.k.a. we don't know the answer.
     pub fn surely_not_have(&self, hash: u32) -> bool {
-        if self.has_bloom_filter {
-            let meta = self.meta();
-            let bloom = Bloom::new(&meta.bloom_filter);
+        if self.has_bloom_filter() {
+            let bloom = Bloom::new(&self.meta.bloom_filter);
             !bloom.may_contain(hash)
         } else {
             false
