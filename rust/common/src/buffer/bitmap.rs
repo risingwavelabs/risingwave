@@ -37,7 +37,7 @@ pub struct BitmapBuilder {
     data: Vec<u8>,
     num_high_bits: usize,
 
-    // `head` is 'dirty' bitmap data and will be flushed to `self.data` when `self.len%8==0`.
+    // `head` is 'dirty' bitmap data and will be flushed to `self.data` when `self.len%8==0`.
     head: u8,
 }
 

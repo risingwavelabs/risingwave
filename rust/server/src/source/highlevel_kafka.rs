@@ -353,7 +353,7 @@ impl StreamSourceReader for HighLevelKafkaSourceStreamReader {
                 let columns = Self::build_columns(&self.columns, &rows)?;
 
                 Ok(StreamChunk::new(
-                    rows.iter().map(|_| Op::Insert).collect(),
+                    vec![Op::Insert; rows.len()],
                     columns,
                     None,
                 ))

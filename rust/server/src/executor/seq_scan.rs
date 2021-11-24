@@ -94,9 +94,7 @@ impl Executor for SeqScanExecutor {
             self.column_indices = self
                 .column_ids
                 .iter()
-                .map(|c| self.table.index_of_column_id(*c))
-                .into_iter()
-                .map(|res| res.unwrap())
+                .map(|c| self.table.index_of_column_id(*c).unwrap())
                 .collect();
         }
 

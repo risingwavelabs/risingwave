@@ -313,6 +313,7 @@ impl StreamConsumer for SenderConsumer {
 mod tests {
     use super::*;
     use crate::stream_op::Op;
+    use itertools::Itertools;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder};
     use risingwave_common::types::Int32Type;
@@ -361,18 +362,16 @@ mod tests {
             }
         }
 
-        let mut start = 19260817..;
+        let mut start = 19260817i32..;
         let mut builders = (0..dimension)
             .map(|_| I32ArrayBuilder::new(cardinality).unwrap())
-            .collect::<Vec<_>>();
+            .collect_vec();
         let mut output_cols = vec![vec![vec![]; dimension]; num_outputs];
         let mut output_ops = vec![vec![]; num_outputs];
         for op in ops.iter() {
             let hash_builder = CRC32FastBuilder {};
             let mut hasher = hash_builder.build_hasher();
-            let one_row: Vec<i32> = (0..dimension)
-                .map(|_| start.next().unwrap())
-                .collect::<Vec<_>>();
+            let one_row = (0..dimension).map(|_| start.next().unwrap()).collect_vec();
             for key_idx in key_indices.iter() {
                 let val = one_row[*key_idx];
                 let bytes = val.to_le_bytes();
