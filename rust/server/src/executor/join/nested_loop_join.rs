@@ -150,7 +150,7 @@ impl NestedLoopJoinExecutor {
         let num_columns = data_types.len();
         let mut output_array_builders = data_types
             .iter()
-            .map(|data_type| DataType::create_array_builder(data_type.clone(), num_tuples))
+            .map(|data_type| DataType::create_array_builder(data_type.as_ref(), num_tuples))
             .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
         for _i in 0..num_tuples {
             for (col_idx, builder) in output_array_builders

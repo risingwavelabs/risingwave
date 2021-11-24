@@ -84,7 +84,7 @@ impl DataType for IntervalType {
         self.nullable
     }
 
-    fn create_array_builder(self: Arc<Self>, capacity: usize) -> Result<ArrayBuilderImpl> {
+    fn create_array_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl> {
         IntervalArrayBuilder::new(capacity).map(|x| x.into())
     }
 

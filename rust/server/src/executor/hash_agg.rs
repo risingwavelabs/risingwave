@@ -170,14 +170,14 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
         let mut group_builders = self
             .group_key_types
             .iter()
-            .map(|datatype| DataType::create_array_builder(datatype.clone(), cardinality))
+            .map(|datatype| DataType::create_array_builder(datatype.as_ref(), cardinality))
             .collect::<Result<Vec<_>>>()?;
 
         let mut agg_builders = self
             .agg_factories
             .iter()
             .map(|agg_factory| {
-                DataType::create_array_builder(agg_factory.get_return_type(), cardinality)
+                DataType::create_array_builder(agg_factory.get_return_type().as_ref(), cardinality)
             })
             .collect::<Result<Vec<_>>>()?;
 

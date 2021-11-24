@@ -47,7 +47,7 @@ macro_rules! make_numeric_type {
                 self.nullable
             }
 
-            fn create_array_builder(self: Arc<Self>, capacity: usize) -> Result<ArrayBuilderImpl> {
+            fn create_array_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl> {
                 Ok(PrimitiveArrayBuilder::<$native_ty>::new(capacity)?.into())
             }
 

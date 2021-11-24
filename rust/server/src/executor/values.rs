@@ -43,11 +43,13 @@ impl Executor for ValuesExecutor {
             .ok_or_else(|| RwError::from(InternalError("Can't values empty rows!".to_string())))?
             .iter() // for each column
             .map(|col| {
-                DataType::create_array_builder(col.return_type_ref(), cardinality).map_err(|_| {
-                    RwError::from(InternalError(
-                        "Creat array builder failed when values".to_string(),
-                    ))
-                })
+                DataType::create_array_builder(col.return_type_ref().as_ref(), cardinality).map_err(
+                    |_| {
+                        RwError::from(InternalError(
+                            "Creat array builder failed when values".to_string(),
+                        ))
+                    },
+                )
             })
             .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
 

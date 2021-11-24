@@ -65,7 +65,7 @@ pub enum DataSize {
 pub trait DataType: Debug + Sync + Send + 'static {
     fn data_type_kind(&self) -> DataTypeKind;
     fn is_nullable(&self) -> bool;
-    fn create_array_builder(self: Arc<Self>, capacity: usize) -> Result<ArrayBuilderImpl>;
+    fn create_array_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl>;
     fn to_protobuf(&self) -> Result<risingwave_proto::data::DataType>;
     fn to_prost(&self) -> Result<DataTypeProto>;
     fn as_any(&self) -> &dyn Any;

@@ -49,7 +49,7 @@ impl Expression for LiteralExpression {
 
     fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef> {
         let mut array_builder =
-            DataType::create_array_builder(self.return_type.clone(), input.cardinality())?;
+            DataType::create_array_builder(self.return_type.as_ref(), input.cardinality())?;
         let cardinality = input.cardinality();
         let builder = &mut array_builder;
         let literal = &self.literal;

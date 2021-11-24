@@ -98,12 +98,12 @@ impl Executor for SortAggExecutor {
         let mut group_builders = self
             .group_exprs
             .iter()
-            .map(|e| DataType::create_array_builder(e.return_type_ref(), cardinality))
+            .map(|e| DataType::create_array_builder(e.return_type(), cardinality))
             .collect::<Result<Vec<_>>>()?;
         let mut array_builders = self
             .agg_states
             .iter()
-            .map(|e| DataType::create_array_builder(e.return_type_ref(), cardinality))
+            .map(|e| DataType::create_array_builder(e.return_type_ref().as_ref(), cardinality))
             .collect::<Result<Vec<_>>>()?;
 
         while let Some(child_chunk) = self.child.next().await? {
