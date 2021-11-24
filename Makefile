@@ -40,7 +40,7 @@ rust_test:
 # See also https://github.com/xd009642/tarpaulin/issues/777
 rust_test_with_coverage:
 	cd rust && mkdir -p proto
-	cd rust && RUSTFLAGS=-Dwarnings CARGO_TARGET_DIR=target_tarpaulin cargo tarpaulin --workspace --exclude risingwave-proto --out Xml --skip-clean
+	cd rust && RUSTFLAGS=-Dwarnings CARGO_TARGET_DIR=target_tarpaulin cargo tarpaulin --workspace --exclude risingwave-proto --exclude-files tests/* --out Xml --skip-clean
 
 rust_build:
 	cd rust && cargo build
