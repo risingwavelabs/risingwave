@@ -57,6 +57,7 @@ where
         }
     }
 }
+
 /// `PrimitiveSummable` sums two primitives by `accumulate` and `retract` functions.
 /// It produces the same type of output as input `S`.
 #[derive(Debug)]
@@ -478,6 +479,7 @@ impl_fold_agg! { I64Array, Int64, I32Array }
 impl_fold_agg! { I64Array, Int64, I16Array }
 impl_fold_agg! { I64Array, Int64, BoolArray }
 impl_fold_agg! { I64Array, Int64, UTF8Array }
+impl_fold_agg! { DecimalArray, Decimal, DecimalArray }
 
 #[cfg(test)]
 mod tests {

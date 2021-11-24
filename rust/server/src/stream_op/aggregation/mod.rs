@@ -23,8 +23,8 @@ use super::{
     StreamingMaxAgg, StreamingMinAgg, StreamingSumAgg,
 };
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, F32Array, F64Array, I16Array, I32Array,
-    I64Array,
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DecimalArray, F32Array, F64Array, I16Array,
+    I32Array, I64Array,
 };
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
@@ -135,6 +135,12 @@ pub fn create_streaming_agg_state(
                 }
                 (_, AggKind::Sum, DataTypeKind::Float32, None) => {
                     Box::new(StreamingFloatSumAgg::<F32Array>::new())
+                }
+                (_, AggKind::Sum, DataTypeKind::Decimal, Some(datum)) => {
+                    Box::new(StreamingSumAgg::<DecimalArray>::try_from(datum)?)
+                }
+                (_, AggKind::Sum, DataTypeKind::Decimal, None) => {
+                    Box::new(StreamingSumAgg::<DecimalArray>::new())
                 }
                 (_, AggKind::Min, DataTypeKind::Int16, Some(datum)) => {
                     Box::new(StreamingMinAgg::<I16Array>::try_from(datum)?)
