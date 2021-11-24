@@ -325,15 +325,6 @@ public class RemoteCatalogService implements CatalogService {
     }
     schemaCatalog.setVersion(response.getVersion());
 
-    /* This operation ensures new schema info synced to other frontends.
-     * TODO: delete this when meta service implements catalog broadcasting.
-     * */
-    try {
-      Thread.sleep((long) (heartbeatInterval * 1.5));
-    } catch (Exception e) {
-      throw new PgException(PgErrorCode.INTERNAL_ERROR, "create schema failed");
-    }
-
     return schemaCatalog;
   }
 
@@ -375,15 +366,6 @@ public class RemoteCatalogService implements CatalogService {
     tableCatalog.setVersion(response.getVersion());
     creatingTable.remove(new TableCatalog.TableName(createTableInfo.getName(), schemaName));
 
-    /* This operation ensures new table info synced to other frontends.
-     * TODO: delete this when meta service implements catalog broadcasting.
-     * */
-    try {
-      Thread.sleep((long) (heartbeatInterval * 1.5));
-    } catch (Exception e) {
-      throw new PgException(PgErrorCode.INTERNAL_ERROR, "create table failed");
-    }
-
     return tableCatalog;
   }
 
@@ -424,14 +406,5 @@ public class RemoteCatalogService implements CatalogService {
     }
 
     getSchemaChecked(tableName.getParent()).dropTable(tableName.getValue());
-
-    /* This operation ensures table dropped info synced to other frontends.
-     * TODO: delete this when meta service implements catalog broadcasting.
-     * */
-    try {
-      Thread.sleep((long) (heartbeatInterval * 1.5));
-    } catch (Exception e) {
-      throw new PgException(PgErrorCode.INTERNAL_ERROR, "drop table failed");
-    }
   }
 }

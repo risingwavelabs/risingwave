@@ -117,6 +117,11 @@ jobs:
           name: compute-node
           path: ./rust/target/debug
 
+      - uses: actions/download-artifact@v2
+        with:
+          name: metadata-node
+          path: ./rust/target/debug
+
       - name: Build java frontend
         run: make java_build
 
@@ -128,12 +133,14 @@ jobs:
         run: |
           sleep 5
           chmod +x ./rust/target/debug/compute-node
+          chmod +x ./rust/target/debug/metadata-node
           ./scripts/start_cluster.sh 3
           python3 ./scripts/sqllogictest.py -p ${{ env.RW_PORT }} -db dev -f ./e2e_test/distributed/
 
       - name: Run single-node streaming end-to-end tests
         run: |
           chmod +x ./rust/target/debug/compute-node
+          chmod +x ./rust/target/debug/metadata-node
           ./scripts/start_cluster.sh 1
           python3 ./scripts/sqllogictest.py -p ${{ env.RW_PORT }} -db dev -f ./e2e_test/streaming/
           ./scripts/kill_cluster.sh
@@ -249,7 +256,7 @@ jobs:
           directory: rust
           flags: rust
 
-      - name: Build compute-node
+      - name: Build compute-node/metadata-node
         run: make rust_build
 
       - uses: actions/upload-artifact@v2
@@ -258,6 +265,13 @@ jobs:
           if-no-files-found: error # 'warn' or 'ignore' are also available, defaults to `warn`
           path: |
             rust/target/debug/compute-node
+
+      - uses: actions/upload-artifact@v2
+        with:
+          name: metadata-node
+          if-no-files-found: error # 'warn' or 'ignore' are also available, defaults to `warn`
+          path: |
+            rust/target/debug/metadata-node
 
   shell-check:
     runs-on: ubuntu-latest

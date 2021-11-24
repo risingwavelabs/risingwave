@@ -36,6 +36,13 @@ start_frontend() {
     wait_server 4567
 }
 
+start_metadata_node() {
+  log_dir="../log/metadata.out"
+  echo "Starting metadata ... logging to $log_dir"
+  nohup ./target/debug/metadata-node --log4rs-config config/log4rs.yaml > "$log_dir" &
+  wait_server 5690
+}
+
 start_n_nodes_cluster() {
     mkdir -p ./log/
 
@@ -57,21 +64,35 @@ start_n_nodes_cluster() {
     list_nodes_in_cluster
     echo ""
 
+    start_metadata_node
+    echo ""
+    echo "metadata-node:"
+    list_meta_node_in_cluster
+    echo ""
+
     FRONTEND_CFG_FILE=pgserver/src/main/resources/server.properties
     cd ../java || exit 1
     addr_str=$(IFS=, ; echo "${addresses[*]}")
     sed -i".bak" -e "s/.*computenodes.*/risingwave.leader.computenodes=$addr_str/" $FRONTEND_CFG_FILE
+    echo "risingwave.catalog.mode=Remote" >> $FRONTEND_CFG_FILE
+    echo "risingwave.metadata.node=127.0.0.1:5690" >> $FRONTEND_CFG_FILE
+
     echo "Rewritten $FRONTEND_CFG_FILE:"
     echo ""
     cat "$FRONTEND_CFG_FILE"
     echo ""
-    rm "$FRONTEND_CFG_FILE.bak"
 
     start_frontend
+
+    mv "$FRONTEND_CFG_FILE.bak" $FRONTEND_CFG_FILE
 }
 
 list_nodes_in_cluster() {
     pgrep -fl compute-node || true
+}
+
+list_meta_node_in_cluster() {
+  pgrep -fl metadata-node || true
 }
 
 if [ $# -ne 1 ]; then
