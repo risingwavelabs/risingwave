@@ -52,7 +52,7 @@ impl Block {
     /// +-------------------------------------+--------------------+--------------+------------------+
     /// ```
     /// Decode block from given bytes
-    fn decode(data: &Bytes, block_offset: usize) -> HummockResult<Arc<Block>> {
+    fn decode(data: Bytes, block_offset: usize) -> HummockResult<Arc<Block>> {
         // read checksum length
         let mut read_pos = data.len() - 4; // first read checksum length
         let checksum_len = (&data[read_pos..read_pos + 4]).get_u32() as usize;
@@ -64,6 +64,9 @@ impl Block {
         // read checksum
         read_pos -= checksum_len;
         let checksum = Checksum::decode(&data[read_pos..read_pos + checksum_len])?;
+
+        // check raw data
+        verify_checksum(&checksum, &data[..read_pos])?;
 
         // read entries num
         read_pos -= 4;
@@ -79,8 +82,6 @@ impl Block {
         for _ in 0..entries_num {
             entry_offsets.push(entry_offsets_ptr.get_u32_le());
         }
-
-        verify_checksum(&checksum, &data[..])?;
 
         let blk = Arc::new(Block {
             offset: block_offset,
@@ -164,46 +165,11 @@ impl Table {
         let block_offset = &self.meta.offsets[idx];
 
         let offset = block_offset.offset as usize;
-        let data = &self.blocks[offset..offset + block_offset.len as usize];
+        let block_data = self
+            .blocks
+            .slice(offset..offset + block_offset.len as usize);
 
-        let mut read_pos = data.len() - 4; // first read checksum length
-        let checksum_len = (&data[read_pos..read_pos + 4]).get_u32() as usize;
-
-        if checksum_len > data.len() {
-            return Err(HummockError::InvalidBlock);
-        }
-
-        // read checksum
-        read_pos -= checksum_len;
-        let checksum = Checksum::decode(&data[read_pos..read_pos + checksum_len])?;
-
-        // read num entries
-        read_pos -= 4;
-        let num_entries = (&data[read_pos..read_pos + 4]).get_u32() as usize;
-
-        let entries_index_start = read_pos - num_entries * 4;
-        let entries_index_end = entries_index_start + num_entries * 4;
-
-        let mut entry_offsets_ptr = &data[entries_index_start..entries_index_end];
-        let mut entry_offsets = Vec::with_capacity(num_entries);
-        for _ in 0..num_entries {
-            entry_offsets.push(entry_offsets_ptr.get_u32_le());
-        }
-
-        let data = self.blocks.slice(offset..offset + read_pos + 4);
-
-        let blk = Arc::new(Block {
-            offset,
-            entries_index_start,
-            data,
-            entry_offsets,
-            checksum_len,
-            checksum,
-        });
-
-        // verify_checksum(&checksum, &data[..])?;
-
-        Ok(blk)
+        Block::decode(block_data, offset)
     }
 
     /// Get table ID
