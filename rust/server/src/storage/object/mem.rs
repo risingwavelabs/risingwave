@@ -1,4 +1,4 @@
-use crate::storage::object::{BlockLocation, ObjectHandle, ObjectMetadata, ObjectStore};
+use crate::storage::object::{BlockLocation, ObjectMetadata, ObjectStore};
 use bytes::Bytes;
 use risingwave_common::array::RwError;
 use risingwave_common::error::ErrorCode::InternalError;
@@ -11,31 +11,29 @@ pub struct InMemObjectStore {
     objects: Mutex<HashMap<String, Bytes>>,
 }
 
-impl ObjectHandle for String {}
-
 #[async_trait::async_trait]
-impl ObjectStore<String> for InMemObjectStore {
-    async fn upload(&self, path: &String, obj: Bytes) -> Result<()> {
+impl ObjectStore for InMemObjectStore {
+    async fn upload(&self, path: &str, obj: Bytes) -> Result<()> {
         ensure!(!obj.is_empty());
         self.objects.lock().await.insert(path.into(), obj);
         Ok(())
     }
 
-    async fn read(&self, path: &String, block: BlockLocation) -> Result<Vec<u8>> {
+    async fn read(&self, path: &str, block: BlockLocation) -> Result<Vec<u8>> {
         self.get_object(path, |obj| find_block(obj, block)).await?
     }
 
-    async fn metadata(&self, path: &String) -> Result<ObjectMetadata> {
+    async fn metadata(&self, path: &str) -> Result<ObjectMetadata> {
         let total_size = self.get_object(path, |v| v.len()).await?;
         Ok(ObjectMetadata { total_size })
     }
 
-    async fn close(&self, _path: &String) -> Result<()> {
+    async fn close(&self, _path: &str) -> Result<()> {
         // `InMemObjectStore` is for testing purpose only. No need to do this.
         Ok(())
     }
 
-    async fn delete(&self, path: &String) -> Result<()> {
+    async fn delete(&self, path: &str) -> Result<()> {
         self.objects.lock().await.remove(path);
         Ok(())
     }
