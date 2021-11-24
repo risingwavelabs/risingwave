@@ -83,7 +83,7 @@ async fn test_stream_mv_proto() {
         node: Some(Node::MviewNode(MViewNode {
             table_ref_id: Some(make_table_ref_id(1)),
             column_descs: vec![column_desc],
-            pk_indices: vec![],
+            pk_indices: vec![0],
         })),
         input: vec![project_proto],
     };
@@ -185,7 +185,7 @@ async fn test_stream_mv_proto() {
     if let TableTypes::TestRow(test_row_table) = table_ref_mv {
         let rx = test_row_table.get_receiver();
         let event = rx.lock().await.next().await.unwrap();
-        assert!(matches!(event, TestRowTableEvent::InsertBatch(..)));
+        assert!(matches!(event, TestRowTableEvent::Ingest(..)));
         let value_row = Row(vec![Some(1.to_scalar_value())]);
         let res_row = test_row_table.get(value_row);
         if let Ok(res_row_in) = res_row {

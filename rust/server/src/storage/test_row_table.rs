@@ -79,18 +79,4 @@ impl RowTable for TestRowTable {
     fn get_pk(&self) -> Vec<usize> {
         self.pks.clone()
     }
-
-    fn insert_batch(&self, batch: Vec<(Row, bool)>) -> Result<()> {
-        let mut inner = self.inner.write().unwrap();
-        for (key, value) in batch.iter() {
-            match value {
-                true => inner.insert_one_row(key.clone())?,
-                false => inner.delete_one_row(key.clone())?,
-            }
-        }
-        self.sender
-            .unbounded_send(TestRowTableEvent::InsertBatch(batch))
-            .unwrap();
-        Ok(())
-    }
 }
