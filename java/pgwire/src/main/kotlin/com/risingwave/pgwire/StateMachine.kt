@@ -69,7 +69,7 @@ internal class StateMachine(private val out: ByteWriteChannel, private val dbMan
     Messages.writeAuthenticationOk(wBuf)
     // TODO(wutao): Implement the authentication phase.
     db = dbManager.connect(msg.user, msg.database)
-    Messages.writeParameterStatus("client_encoding", db!!.getServerEncoding(), wBuf)
+    Messages.writeParameterStatus("client_encoding", db!!.serverEncoding, wBuf)
     // In order to support simple protocol.
     Messages.writeParameterStatus("standard_conforming_strings", "on", wBuf)
     Messages.writeReadyForQuery(TransactionStatus.IDLE, wBuf)
