@@ -7,6 +7,7 @@ use crate::expr::{BoxedExpression, Expression};
 use crate::types::{option_as_scalar_ref, DataType, DataTypeRef, Scalar};
 use itertools::multizip;
 use paste::paste;
+use std::fmt;
 use std::sync::Arc;
 
 macro_rules! gen_expr_normal {
@@ -23,6 +24,18 @@ macro_rules! gen_expr_normal {
         pub(super) return_type: DataTypeRef,
         pub(super) func: F,
         pub(super) _phantom: std::marker::PhantomData<($($arg, )* OA)>,
+      }
+
+      impl<$($arg: Array, )*
+        OA: Array,
+        F: for<'a> Fn($($arg::RefItem<'a>, )*) -> Result<OA::OwnedItem> + Sized + Sync + Send,
+      > fmt::Debug for $ty_name<$($arg, )* OA, F> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+          f.debug_struct(stringify!($ty_name))
+          $(.field(stringify!([<expr_ $arg:lower>]), &self.[<expr_ $arg:lower>]))*
+          .field("return_type", &self.return_type)
+          .finish()
+        }
       }
 
       impl<$($arg: Array, )*
@@ -121,6 +134,17 @@ macro_rules! gen_expr_bytes {
 
       impl<$($arg: Array, )*
         F: for<'a> Fn($($arg::RefItem<'a>, )* BytesWriter) -> Result<BytesGuard> + Sized + Sync + Send,
+      > fmt::Debug for $ty_name<$($arg, )* F> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+          f.debug_struct(stringify!($ty_name))
+          $(.field(stringify!([<expr_ $arg:lower>]), &self.[<expr_ $arg:lower>]))*
+          .field("return_type", &self.return_type)
+          .finish()
+        }
+      }
+
+      impl<$($arg: Array, )*
+        F: for<'a> Fn($($arg::RefItem<'a>, )* BytesWriter) -> Result<BytesGuard> + Sized + Sync + Send,
       > Expression for $ty_name<$($arg, )* F>
       where
         $(for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,)*
@@ -213,7 +237,19 @@ macro_rules! gen_expr_nullable {
       impl<$($arg: Array, )*
         OA: Array,
         F: for<'a> Fn($(Option<$arg::RefItem<'a>>, )*) -> Result<Option<OA::OwnedItem>> + Sized + Sync + Send,
-      >  Expression for $ty_name<$($arg, )* OA, F>
+      > fmt::Debug for $ty_name<$($arg, )* OA, F> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+          f.debug_struct(stringify!($ty_name))
+          $(.field(stringify!([<expr_ $arg:lower>]), &self.[<expr_ $arg:lower>]))*
+          .field("return_type", &self.return_type)
+          .finish()
+        }
+      }
+
+      impl<$($arg: Array, )*
+        OA: Array,
+        F: for<'a> Fn($(Option<$arg::RefItem<'a>>, )*) -> Result<Option<OA::OwnedItem>> + Sized + Sync + Send,
+      > Expression for $ty_name<$($arg, )* OA, F>
       where
         $(for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,)*
         for<'a> &'a OA: std::convert::From<&'a ArrayImpl>,

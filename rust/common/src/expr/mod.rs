@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 pub type ExpressionRef = Arc<dyn Expression>;
 
-pub trait Expression: Sync + Send {
+pub trait Expression: std::fmt::Debug + Sync + Send {
     fn return_type(&self) -> &dyn DataType;
     fn return_type_ref(&self) -> DataTypeRef;
     fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef>;

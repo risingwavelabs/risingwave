@@ -9,6 +9,7 @@ use crate::expr::Expression;
 use crate::types::{build_from_prost as type_build_from_prost, DataType, DataTypeRef};
 
 /// `InputRefExpression` references to a column in input relation
+#[derive(Debug)]
 pub struct InputRefExpression {
     return_type: DataTypeRef,
     idx: usize,

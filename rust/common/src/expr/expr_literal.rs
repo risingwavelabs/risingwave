@@ -33,6 +33,7 @@ macro_rules! array_impl_literal_append {
   };
 }
 
+#[derive(Debug)]
 pub struct LiteralExpression {
     return_type: DataTypeRef,
     literal: Datum,

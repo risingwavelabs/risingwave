@@ -4,6 +4,7 @@ use crate::expr::{BoxedExpression, DataType, Expression};
 use crate::types::DataTypeRef;
 use itertools::Itertools;
 
+#[derive(Debug)]
 pub struct WhenClause {
     pub when: BoxedExpression,
     pub then: BoxedExpression,
@@ -15,6 +16,7 @@ impl WhenClause {
     }
 }
 
+#[derive(Debug)]
 pub struct CaseExpression {
     return_type: DataTypeRef,
     when_clauses: Vec<WhenClause>,
