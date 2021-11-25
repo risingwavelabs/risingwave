@@ -4,6 +4,9 @@ use risingwave_common::error::Result;
 pub mod mem;
 pub use mem::*;
 
+pub mod s3;
+pub use s3::*;
+
 #[derive(Debug, Copy, Clone)]
 pub struct BlockLocation {
     pub offset: usize,

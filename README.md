@@ -13,7 +13,7 @@ git clone https://github.com/singularity-data/risingwave.git
 * Go
 * CMake
 * Protocol Buffers
-* PostgreSQL
+* PostgreSQL (psql)
 
 To install compilers in macOS, run:
 ```bash
@@ -22,7 +22,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 brew install golang
 brew install cmake
 brew install protobuf
-brew install postgresql
+brew install openssl
 ```
 Note that we only tested our code against Java 11. So please use the specific version!
 

@@ -10,6 +10,7 @@ mod test_row_table;
 pub use test_row_table::*;
 
 mod object;
+pub use object::*;
 
 use crate::stream_op::StreamChunk;
 use futures::channel::mpsc;
