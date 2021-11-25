@@ -19,8 +19,12 @@ impl ObjectStore for InMemObjectStore {
         Ok(())
     }
 
-    async fn read(&self, path: &str, block: BlockLocation) -> Result<Vec<u8>> {
-        self.get_object(path, |obj| find_block(obj, block)).await?
+    async fn read(&self, path: &str, block: Option<BlockLocation>) -> Result<Vec<u8>> {
+        if let Some(loc) = block {
+            self.get_object(path, |obj| find_block(obj, loc)).await?
+        } else {
+            self.get_object(path, |obj| Ok(obj.to_vec())).await?
+        }
     }
 
     async fn metadata(&self, path: &str) -> Result<ObjectMetadata> {
@@ -79,27 +83,39 @@ mod tests {
         s3.upload(&"/abc".to_string(), block).await.unwrap();
 
         // No such object.
-        s3.read(&"/ab".to_string(), BlockLocation { offset: 0, size: 3 })
-            .await
-            .unwrap_err();
+        s3.read(
+            &"/ab".to_string(),
+            Some(BlockLocation { offset: 0, size: 3 }),
+        )
+        .await
+        .unwrap_err();
 
         let bytes = s3
-            .read(&"/abc".to_string(), BlockLocation { offset: 4, size: 2 })
+            .read(
+                &"/abc".to_string(),
+                Some(BlockLocation { offset: 4, size: 2 }),
+            )
             .await
             .unwrap();
         assert_eq!(String::from_utf8(bytes.to_vec()).unwrap(), "56".to_string());
 
         // Overflow.
-        s3.read(&"/abc".to_string(), BlockLocation { offset: 4, size: 4 })
-            .await
-            .unwrap_err();
+        s3.read(
+            &"/abc".to_string(),
+            Some(BlockLocation { offset: 4, size: 4 }),
+        )
+        .await
+        .unwrap_err();
 
         s3.delete(&"/abc".to_string()).await.unwrap();
 
         // No such object.
-        s3.read(&"/abc".to_string(), BlockLocation { offset: 0, size: 3 })
-            .await
-            .unwrap_err();
+        s3.read(
+            &"/abc".to_string(),
+            Some(BlockLocation { offset: 0, size: 3 }),
+        )
+        .await
+        .unwrap_err();
     }
 
     #[tokio::test]

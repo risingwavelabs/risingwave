@@ -43,7 +43,7 @@ impl ObjectStore for S3ObjectStore {
         Ok(())
     }
 
-    async fn read(&self, _path: &str, _block: BlockLocation) -> Result<Vec<u8>> {
+    async fn read(&self, _path: &str, _block: Option<BlockLocation>) -> Result<Vec<u8>> {
         todo!();
     }
 

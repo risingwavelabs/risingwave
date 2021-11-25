@@ -1,23 +1,9 @@
 use std::sync::Arc;
 
 use crate::storage::hummock::{HummockError, HummockResult, Table, REMOTE_DIR};
-use crate::storage::object::{BlockLocation, ObjectStore};
+use crate::storage::object::ObjectStore;
 use bytes::{Bytes, BytesMut};
 use risingwave_pb::hummock::TableMeta;
-
-pub async fn download_meta(client: &'_ dyn ObjectStore, meta_path: &str) -> HummockResult<Vec<u8>> {
-    let size = client
-        .metadata(meta_path)
-        .await
-        .map_err(|e| {
-            HummockError::ObjectIoError(format!("Read metadata for metadata failed: {}", e))
-        })?
-        .total_size;
-    client
-        .read(meta_path, BlockLocation { offset: 0, size })
-        .await
-        .map_err(|e| HummockError::ObjectIoError(format!("Read metadata failed: {}", e)))
-}
 
 /// Upload table to remote object storage and return the URL
 pub async fn gen_remote_table(
