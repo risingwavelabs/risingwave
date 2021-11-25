@@ -1,14 +1,14 @@
 use super::barrier_align::{AlignedMessage, BarrierAligner};
 use super::{Executor, Message, Op, StreamChunk};
 use async_trait::async_trait;
-use risingwave_common::array::{Row, RowRef};
+use risingwave_common::array::{ArrayBuilderImpl, Row, RowRef};
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataTypeRef, ToOwnedDatum};
 use risingwave_common::{
     array::{column::Column, DataChunk},
     error::Result,
 };
-use std::collections::HashMap;
+use std::collections::hash_map::{Entry, HashMap};
 use std::sync::Arc;
 
 // The `JoinType` and `SideType` are to mimic a enum, because currently
@@ -26,6 +26,106 @@ pub mod JoinType {
     pub const FullOuter: JoinTypePrimitive = 3;
 }
 
+/// Build a array and it's corresponding operations.
+struct StreamChunkBuilder {
+    /// operations in the data chunk to build
+    ops: Vec<Op>,
+    /// arrays in the data chunk to build
+    column_builders: Vec<ArrayBuilderImpl>,
+    /// The start position of the columns of the side
+    /// stream coming from. If the comming side is the
+    /// left, the `update_start_pos` should be 0.
+    /// If the comming side is the right, the `update_start_pos`
+    /// is the number of columns of the left side.
+    update_start_pos: usize,
+    /// The start position of the columns of the opposite side
+    /// stream coming from. If the comming side is the
+    /// left, the `matched_start_pos` should be the number of columns of the left side.
+    /// If the comming side is the right, the `matched_start_pos`
+    /// should be 0.
+    matched_start_pos: usize,
+}
+
+impl StreamChunkBuilder {
+    fn new(
+        capacity: usize,
+        data_types: &[DataTypeRef],
+        update_start_pos: usize,
+        matched_start_pos: usize,
+    ) -> Result<Self> {
+        let ops = Vec::with_capacity(capacity);
+        let column_builders = data_types
+            .iter()
+            .map(|datatype| datatype.create_array_builder(capacity))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self {
+            ops,
+            column_builders,
+            update_start_pos,
+            matched_start_pos,
+        })
+    }
+
+    /// append a row with coming update value and matched value.
+    fn append_row(&mut self, op: Op, row_update: &RowRef<'_>, row_matched: &Row) -> Result<()> {
+        self.ops.push(op);
+        for i in 0..row_update.size() {
+            self.column_builders[i + self.update_start_pos].append_datum_ref(row_update[i])?;
+        }
+        for i in 0..row_matched.size() {
+            self.column_builders[i + self.matched_start_pos].append_datum(&row_matched[i])?;
+        }
+        Ok(())
+    }
+
+    /// append a row with coming update value and fill the other side with null.
+    fn append_row_update(&mut self, op: Op, row_update: &RowRef<'_>) -> Result<()> {
+        self.ops.push(op);
+        for i in 0..row_update.size() {
+            self.column_builders[i + self.update_start_pos].append_datum_ref(row_update[i])?;
+        }
+        for i in 0..self.column_builders.len() - row_update.size() {
+            self.column_builders[i + self.matched_start_pos].append_datum(&None)?;
+        }
+        Ok(())
+    }
+
+    /// append a row with matched value and fill the comming side with null.
+    fn append_row_matched(&mut self, op: Op, row_matched: &Row) -> Result<()> {
+        self.ops.push(op);
+        for i in 0..self.column_builders.len() - row_matched.size() {
+            self.column_builders[i + self.update_start_pos].append_datum_ref(None)?;
+        }
+        for i in 0..row_matched.size() {
+            self.column_builders[i + self.matched_start_pos].append_datum(&row_matched[i])?;
+        }
+        Ok(())
+    }
+
+    // TODO: Remove this `data_types` when we replace columns with arrays
+    // https://github.com/singularity-data/risingwave/issues/1373
+    fn finish(self, data_types: &[DataTypeRef]) -> Result<StreamChunk> {
+        let new_arrays = self
+            .column_builders
+            .into_iter()
+            .map(|builder| builder.finish())
+            .collect::<Result<Vec<_>>>()?;
+
+        let new_columns = new_arrays
+            .into_iter()
+            .zip(data_types.iter())
+            .map(|(array_impl, data_type)| Column::new(Arc::new(array_impl), data_type.to_owned()))
+            .collect::<Vec<_>>();
+
+        let new_chunk = StreamChunk {
+            columns: new_columns,
+            visibility: None,
+            ops: self.ops,
+        };
+        Ok(new_chunk)
+    }
+}
+
 type SideTypePrimitive = u8;
 #[allow(non_snake_case, non_upper_case_globals)]
 mod SideType {
@@ -34,8 +134,23 @@ mod SideType {
     pub const Right: SideTypePrimitive = 1;
 }
 
+#[inline(always)]
+fn outer_side_keep(join_type: JoinTypePrimitive, side_type: SideTypePrimitive) -> bool {
+    join_type == JoinType::FullOuter
+        || (join_type == JoinType::LeftOuter && side_type == SideType::Left)
+        || (join_type == JoinType::RightOuter && side_type == SideType::Right)
+}
+
+#[inline(always)]
+fn outer_side_null(join_type: JoinTypePrimitive, side_type: SideTypePrimitive) -> bool {
+    join_type == JoinType::FullOuter
+        || (join_type == JoinType::LeftOuter && side_type == SideType::Right)
+        || (join_type == JoinType::RightOuter && side_type == SideType::Left)
+}
+
 type HashKeyType = Row;
-type HashValueType = Vec<Row>;
+type HashValueItemType = Row;
+type HashValueType = Vec<HashValueItemType>;
 
 pub struct JoinParams {
     /// Indices of the join columns
@@ -154,50 +269,29 @@ impl<const T: JoinTypePrimitive> HashJoinExecutor<T> {
         }
     }
 
-    /// update the hash table
-    fn update_ht(
-        rows: &DataChunk,
-        ops: &[Op],
-        key_indices: &[usize],
-        ht: &mut HashMap<HashKeyType, HashValueType>,
-    ) {
-        for (row, op) in rows.iter().zip(ops.iter()) {
-            let mut key = Vec::with_capacity(key_indices.len());
-            let mut value = Vec::with_capacity(row.size());
-            for i in 0..row.size() {
-                if key_indices.contains(&i) {
-                    key.push(row[i].to_owned_datum());
-                }
-                value.push(row[i].to_owned_datum());
-            }
-            let key = Row(key);
-            let value = Row(value);
-            match *op {
-                Op::Insert | Op::UpdateInsert => ht.entry(key).or_default().push(value),
-                Op::Delete | Op::UpdateDelete => {
-                    if let Some(v) = ht.get_mut(&key) {
-                        if let Some(pos) = v.iter().position(|row| *row == value) {
-                            v.remove(pos);
-                        }
-                    }
-                }
-            };
-        }
+    /// the data the hash table and match the coming
+    /// data chunk with the executor state
+    fn hash_eq_match<'a>(
+        key: &Row,
+        ht: &'a HashMap<HashKeyType, HashValueType>,
+    ) -> Option<&'a HashValueType> {
+        ht.get(key)
     }
 
-    /// match the coming data chunk with the executor state
-    fn hash_join_eq_match<'a>(
-        row: &'a RowRef<'a>,
-        ht: &'a HashMap<HashKeyType, HashValueType>,
-        key_indices: &'a [usize],
-    ) -> Option<&'a HashValueType> {
+    fn hash_key_from_row_ref(row: &RowRef, key_indices: &[usize]) -> HashKeyType {
         let mut key = Vec::with_capacity(key_indices.len());
-        for i in 0..row.size() {
-            if key_indices.contains(&i) {
-                key.push(row[i].to_owned_datum());
-            }
+        for i in key_indices {
+            key.push(row[*i].to_owned_datum());
         }
-        ht.get(&Row(key))
+        Row(key)
+    }
+
+    fn hash_value_item_from_row_ref(row: &RowRef) -> HashValueItemType {
+        let mut value = Vec::with_capacity(row.size());
+        for i in 0..row.size() {
+            value.push(row[i].to_owned_datum());
+        }
+        Row(value)
     }
 
     fn consume_chunk_left(&mut self, chunk: StreamChunk) -> Result<Message> {
@@ -234,62 +328,101 @@ impl<const T: JoinTypePrimitive> HashJoinExecutor<T> {
             (&mut self.side_r, &mut self.side_l)
         };
 
-        Self::update_ht(
-            &data_chunk,
-            &ops,
-            &side_update.key_indices,
-            &mut side_update.ht,
-        );
-
         // TODO: find a better capacity number, the actual array length
         // is likely to be larger than the current capacity
         let capacity = data_chunk.capacity();
-        let mut new_ops = Vec::with_capacity(capacity);
 
-        let new_column_builders = self
-            .new_column_datatypes
-            .iter()
-            .map(|datatype| datatype.create_array_builder(capacity));
-
-        let mut new_column_builders = new_column_builders
-            .into_iter()
-            .collect::<Result<Vec<_>>>()?;
+        let mut stream_chunk_builder = StreamChunkBuilder::new(
+            capacity,
+            &self.new_column_datatypes,
+            side_update.start_pos,
+            side_match.start_pos,
+        )?;
 
         for (row, op) in data_chunk.iter().zip(ops.iter()) {
-            assert_eq!(row.size(), side_update.col_types.len());
-            let matched_rows =
-                Self::hash_join_eq_match(&row, &side_match.ht, &side_match.key_indices);
+            let key = Self::hash_key_from_row_ref(&row, &side_update.key_indices);
+            let value = Self::hash_value_item_from_row_ref(&row);
+            let matched_rows = Self::hash_eq_match(&key, &side_match.ht);
+            let mut null_row_updated = false;
             if let Some(matched_rows) = matched_rows {
-                for matched_row in matched_rows.iter() {
-                    new_ops.push(*op);
-                    assert_eq!(matched_row.size(), side_match.col_types.len());
-                    for i in 0..side_update.col_types.len() {
-                        new_column_builders[i + side_update.start_pos].append_datum_ref(row[i])?;
+                match *op {
+                    Op::Insert | Op::UpdateInsert => {
+                        let entry = side_update.ht.entry(key);
+                        let entry = match entry {
+                            Entry::Occupied(entry) => entry.into_mut(),
+                            // if outer join and not its the fisrt to insert, meaning there must be
+                            // corresponding nulls.
+                            Entry::Vacant(entry) => {
+                                if outer_side_null(T, S) {
+                                    for matched_row in matched_rows.iter() {
+                                        stream_chunk_builder
+                                            .append_row_matched(Op::UpdateDelete, matched_row)?;
+                                        stream_chunk_builder.append_row(
+                                            Op::UpdateInsert,
+                                            &row,
+                                            matched_row,
+                                        )?;
+                                    }
+                                    null_row_updated = true;
+                                };
+                                entry.insert(Default::default())
+                            }
+                        };
+                        entry.push(value);
                     }
-                    for i in 0..side_match.col_types.len() {
-                        new_column_builders[i + side_match.start_pos]
-                            .append_datum(&matched_row[i])?;
+                    Op::Delete | Op::UpdateDelete => {
+                        let mut deleted = false;
+                        if let Some(v) = side_update.ht.get_mut(&key) {
+                            if let Some(pos) = v.iter().position(|row| *row == value) {
+                                v.remove(pos);
+                                if outer_side_null(T, S) && v.is_empty() {
+                                    for matched_row in matched_rows.iter() {
+                                        stream_chunk_builder.append_row(
+                                            Op::UpdateDelete,
+                                            &row,
+                                            matched_row,
+                                        )?;
+                                        stream_chunk_builder
+                                            .append_row_matched(Op::UpdateInsert, matched_row)?;
+                                    }
+                                    null_row_updated = true;
+                                }
+                                deleted = true;
+                            }
+                        }
+                        if !deleted {
+                            unreachable!("Deleted value does not exist: {:?}", row);
+                        }
                     }
+                };
+                if !outer_side_null(T, S) || !null_row_updated {
+                    for matched_row in matched_rows.iter() {
+                        assert_eq!(matched_row.size(), side_match.col_types.len());
+                        stream_chunk_builder.append_row(*op, &row, matched_row)?;
+                    }
+                }
+            } else {
+                // if there are no matched rows, just update the hash table
+                match *op {
+                    Op::Insert | Op::UpdateInsert => {
+                        side_update.ht.entry(key).or_default().push(value);
+                    }
+                    Op::Delete | Op::UpdateDelete => {
+                        if let Some(v) = side_update.ht.get_mut(&key) {
+                            if let Some(pos) = v.iter().position(|row| *row == value) {
+                                v.remove(pos);
+                            }
+                        }
+                    }
+                };
+                // if it's outer join and the side needs maintained.
+                if outer_side_keep(T, S) {
+                    stream_chunk_builder.append_row_update(*op, &row)?;
                 }
             }
         }
 
-        let new_arrays = new_column_builders
-            .into_iter()
-            .map(|builder| builder.finish())
-            .collect::<Result<Vec<_>>>()?;
-
-        let new_columns = new_arrays
-            .into_iter()
-            .zip(self.new_column_datatypes.iter())
-            .map(|(array_impl, data_type)| Column::new(Arc::new(array_impl), data_type.to_owned()))
-            .collect::<Vec<_>>();
-
-        let new_chunk = StreamChunk {
-            columns: new_columns,
-            visibility: None,
-            ops: new_ops,
-        };
+        let new_chunk = stream_chunk_builder.finish(&self.new_column_datatypes)?;
 
         Ok(Message::Chunk(new_chunk))
     }
@@ -311,7 +444,7 @@ mod tests {
     use tokio::sync::mpsc::unbounded_channel;
 
     #[tokio::test]
-    async fn test_hash_join() {
+    async fn test_streaming_hash_inner_join() {
         let chunk_l1 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert, Op::Insert],
             columns: vec![
@@ -321,7 +454,7 @@ mod tests {
             visibility: None,
         };
         let chunk_l2 = StreamChunk {
-            ops: vec![Op::UpdateInsert, Op::UpdateDelete],
+            ops: vec![Op::Insert, Op::Delete],
             columns: vec![
                 column_nonnull! { I64Array, Int64Type, [3, 3] },
                 column_nonnull! { I64Array, Int64Type, [8, 8] },
@@ -337,7 +470,7 @@ mod tests {
             visibility: None,
         };
         let chunk_r2 = StreamChunk {
-            ops: vec![Op::Delete, Op::Delete],
+            ops: vec![Op::Insert, Op::Insert],
             columns: vec![
                 column_nonnull! { I64Array, Int64Type, [3, 6] },
                 column_nonnull! { I64Array, Int64Type, [10, 11] },
@@ -429,7 +562,7 @@ mod tests {
         // push the 2nd right chunk
         MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r2]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
-            assert_eq!(chunk.ops, vec![Op::Delete]);
+            assert_eq!(chunk.ops, vec![Op::Insert]);
             assert_eq!(chunk.columns.len(), 4);
             assert_eq!(
                 chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
@@ -453,7 +586,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_hash_join_with_barrier() {
+    async fn test_streaming_hash_inner_join_with_barrier() {
         let chunk_l1 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert, Op::Insert],
             columns: vec![
@@ -615,6 +748,475 @@ mod tests {
             assert_eq!(
                 chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
                 vec![Some(10), Some(10), Some(11)]
+            );
+        } else {
+            unreachable!();
+        }
+    }
+
+    #[tokio::test]
+    async fn test_streaming_hash_left_join() {
+        let chunk_l1 = StreamChunk {
+            ops: vec![Op::Insert, Op::Insert, Op::Insert],
+            columns: vec![
+                column_nonnull! { I64Array, Int64Type, [1, 2, 3] },
+                column_nonnull! { I64Array, Int64Type, [4, 5, 6] },
+            ],
+            visibility: None,
+        };
+        let chunk_l2 = StreamChunk {
+            ops: vec![Op::Insert, Op::Delete],
+            columns: vec![
+                column_nonnull! { I64Array, Int64Type, [3, 3] },
+                column_nonnull! { I64Array, Int64Type, [8, 8] },
+            ],
+            visibility: Some((vec![true, true]).try_into().unwrap()),
+        };
+        let chunk_r1 = StreamChunk {
+            ops: vec![Op::Insert, Op::Insert, Op::Insert],
+            columns: vec![
+                column_nonnull! { I64Array, Int64Type, [2, 4, 6] },
+                column_nonnull! { I64Array, Int64Type, [7, 8, 9] },
+            ],
+            visibility: None,
+        };
+        let chunk_r2 = StreamChunk {
+            ops: vec![Op::Insert, Op::Insert],
+            columns: vec![
+                column_nonnull! { I64Array, Int64Type, [3, 6] },
+                column_nonnull! { I64Array, Int64Type, [10, 11] },
+            ],
+            visibility: Some((vec![true, true]).try_into().unwrap()),
+        };
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    data_type: Int64Type::create(false),
+                },
+                Field {
+                    data_type: Int64Type::create(false),
+                },
+            ],
+        };
+
+        let (mut tx_l, rx_l) = unbounded_channel();
+        let (mut tx_r, rx_r) = unbounded_channel();
+
+        let source_l = MockAsyncSource::new(schema.clone(), rx_l);
+        let source_r = MockAsyncSource::new(schema.clone(), rx_r);
+
+        let params_l = JoinParams::new(vec![0]);
+        let params_r = JoinParams::new(vec![0]);
+
+        let mut hash_join = HashJoinExecutor::<{ JoinType::LeftOuter }>::new(
+            Box::new(source_l),
+            Box::new(source_r),
+            params_l,
+            params_r,
+        );
+
+        // push the 1st left chunk
+        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(chunk.ops, vec![Op::Insert, Op::Insert, Op::Insert]);
+            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(
+                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(1), Some(2), Some(3)]
+            );
+            assert_eq!(
+                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(4), Some(5), Some(6)]
+            );
+            assert_eq!(
+                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                vec![None, None, None]
+            );
+            assert_eq!(
+                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                vec![None, None, None]
+            );
+        } else {
+            unreachable!();
+        }
+
+        // push the 2nd left chunk
+        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(chunk.ops, vec![Op::Insert, Op::Delete]);
+            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(
+                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(3), Some(3)]
+            );
+            assert_eq!(
+                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(8), Some(8)]
+            );
+            assert_eq!(
+                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                vec![None, None]
+            );
+            assert_eq!(
+                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                vec![None, None]
+            );
+        } else {
+            unreachable!();
+        }
+
+        // push the 1st right chunk
+        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(chunk.ops, vec![Op::UpdateDelete, Op::UpdateInsert]);
+            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(
+                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(2), Some(2)]
+            );
+            assert_eq!(
+                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(5), Some(5)]
+            );
+            assert_eq!(
+                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                vec![None, Some(2)]
+            );
+            assert_eq!(
+                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                vec![None, Some(7)]
+            );
+        } else {
+            unreachable!();
+        }
+
+        // push the 2nd right chunk
+        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r2]);
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(chunk.ops, vec![Op::UpdateDelete, Op::UpdateInsert]);
+            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(
+                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(3), Some(3)]
+            );
+            assert_eq!(
+                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(6), Some(6)]
+            );
+            assert_eq!(
+                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                vec![None, Some(3)]
+            );
+            assert_eq!(
+                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                vec![None, Some(10)]
+            );
+        } else {
+            unreachable!();
+        }
+    }
+
+    #[tokio::test]
+    async fn test_streaming_hash_right_join() {
+        let chunk_l1 = StreamChunk {
+            ops: vec![Op::Insert, Op::Insert, Op::Insert],
+            columns: vec![
+                column_nonnull! { I64Array, Int64Type, [1, 2, 3] },
+                column_nonnull! { I64Array, Int64Type, [4, 5, 6] },
+            ],
+            visibility: None,
+        };
+        let chunk_l2 = StreamChunk {
+            ops: vec![Op::Insert, Op::Delete],
+            columns: vec![
+                column_nonnull! { I64Array, Int64Type, [3, 3] },
+                column_nonnull! { I64Array, Int64Type, [8, 8] },
+            ],
+            visibility: Some((vec![true, true]).try_into().unwrap()),
+        };
+        let chunk_r1 = StreamChunk {
+            ops: vec![Op::Insert, Op::Insert, Op::Insert],
+            columns: vec![
+                column_nonnull! { I64Array, Int64Type, [2, 4, 6] },
+                column_nonnull! { I64Array, Int64Type, [7, 8, 9] },
+            ],
+            visibility: None,
+        };
+        let chunk_r2 = StreamChunk {
+            ops: vec![Op::Insert, Op::Delete],
+            columns: vec![
+                column_nonnull! { I64Array, Int64Type, [5, 5] },
+                column_nonnull! { I64Array, Int64Type, [10, 10] },
+            ],
+            visibility: Some((vec![true, true]).try_into().unwrap()),
+        };
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    data_type: Int64Type::create(false),
+                },
+                Field {
+                    data_type: Int64Type::create(false),
+                },
+            ],
+        };
+
+        let (mut tx_l, rx_l) = unbounded_channel();
+        let (mut tx_r, rx_r) = unbounded_channel();
+
+        let source_l = MockAsyncSource::new(schema.clone(), rx_l);
+        let source_r = MockAsyncSource::new(schema.clone(), rx_r);
+
+        let params_l = JoinParams::new(vec![0]);
+        let params_r = JoinParams::new(vec![0]);
+
+        let mut hash_join = HashJoinExecutor::<{ JoinType::RightOuter }>::new(
+            Box::new(source_l),
+            Box::new(source_r),
+            params_l,
+            params_r,
+        );
+
+        // push the 1st left chunk
+        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(chunk.ops.len(), 0);
+            assert_eq!(chunk.columns.len(), 4);
+            for i in 0..4 {
+                assert_eq!(
+                    chunk.columns[i].array_ref().as_int64().iter().collect_vec(),
+                    vec![]
+                );
+            }
+        } else {
+            unreachable!();
+        }
+
+        // push the 2nd left chunk
+        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(chunk.ops.len(), 0);
+            assert_eq!(chunk.columns.len(), 4);
+            for i in 0..4 {
+                assert_eq!(
+                    chunk.columns[i].array_ref().as_int64().iter().collect_vec(),
+                    vec![]
+                );
+            }
+        } else {
+            unreachable!();
+        }
+
+        // push the 1st right chunk
+        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(chunk.ops, vec![Op::Insert, Op::Insert, Op::Insert]);
+            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(
+                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(2), None, None]
+            );
+            assert_eq!(
+                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(5), None, None]
+            );
+            assert_eq!(
+                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(2), Some(4), Some(6)]
+            );
+            assert_eq!(
+                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(7), Some(8), Some(9)]
+            );
+        } else {
+            unreachable!();
+        }
+
+        // push the 2nd right chunk
+        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r2]);
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(chunk.ops, vec![Op::Insert, Op::Delete]);
+            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(
+                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                vec![None, None]
+            );
+            assert_eq!(
+                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                vec![None, None]
+            );
+            assert_eq!(
+                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(5), Some(5)]
+            );
+            assert_eq!(
+                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(10), Some(10)]
+            );
+        } else {
+            unreachable!();
+        }
+    }
+
+    #[tokio::test]
+    async fn test_streaming_hash_full_outer_join() {
+        let chunk_l1 = StreamChunk {
+            ops: vec![Op::Insert, Op::Insert, Op::Insert],
+            columns: vec![
+                column_nonnull! { I64Array, Int64Type, [1, 2, 3] },
+                column_nonnull! { I64Array, Int64Type, [4, 5, 6] },
+            ],
+            visibility: None,
+        };
+        let chunk_l2 = StreamChunk {
+            ops: vec![Op::Insert, Op::Delete],
+            columns: vec![
+                column_nonnull! { I64Array, Int64Type, [3, 3] },
+                column_nonnull! { I64Array, Int64Type, [8, 8] },
+            ],
+            visibility: Some((vec![true, true]).try_into().unwrap()),
+        };
+        let chunk_r1 = StreamChunk {
+            ops: vec![Op::Insert, Op::Insert, Op::Insert],
+            columns: vec![
+                column_nonnull! { I64Array, Int64Type, [2, 4, 6] },
+                column_nonnull! { I64Array, Int64Type, [7, 8, 9] },
+            ],
+            visibility: None,
+        };
+        let chunk_r2 = StreamChunk {
+            ops: vec![Op::Insert, Op::Delete],
+            columns: vec![
+                column_nonnull! { I64Array, Int64Type, [5, 5] },
+                column_nonnull! { I64Array, Int64Type, [10, 10] },
+            ],
+            visibility: Some((vec![true, true]).try_into().unwrap()),
+        };
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    data_type: Int64Type::create(false),
+                },
+                Field {
+                    data_type: Int64Type::create(false),
+                },
+            ],
+        };
+
+        let (mut tx_l, rx_l) = unbounded_channel();
+        let (mut tx_r, rx_r) = unbounded_channel();
+
+        let source_l = MockAsyncSource::new(schema.clone(), rx_l);
+        let source_r = MockAsyncSource::new(schema.clone(), rx_r);
+
+        let params_l = JoinParams::new(vec![0]);
+        let params_r = JoinParams::new(vec![0]);
+
+        let mut hash_join = HashJoinExecutor::<{ JoinType::FullOuter }>::new(
+            Box::new(source_l),
+            Box::new(source_r),
+            params_l,
+            params_r,
+        );
+
+        // push the 1st left chunk
+        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(chunk.ops, vec![Op::Insert, Op::Insert, Op::Insert]);
+            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(
+                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(1), Some(2), Some(3)]
+            );
+            assert_eq!(
+                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(4), Some(5), Some(6)]
+            );
+            assert_eq!(
+                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                vec![None, None, None]
+            );
+            assert_eq!(
+                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                vec![None, None, None]
+            );
+        } else {
+            unreachable!();
+        }
+
+        // push the 2nd left chunk
+        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(chunk.ops, vec![Op::Insert, Op::Delete]);
+            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(
+                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(3), Some(3)]
+            );
+            assert_eq!(
+                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(8), Some(8)]
+            );
+            assert_eq!(
+                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                vec![None, None]
+            );
+            assert_eq!(
+                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                vec![None, None]
+            );
+        } else {
+            unreachable!();
+        }
+
+        // push the 1st right chunk
+        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(
+                chunk.ops,
+                vec![Op::UpdateDelete, Op::UpdateInsert, Op::Insert, Op::Insert]
+            );
+            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(
+                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(2), Some(2), None, None]
+            );
+            assert_eq!(
+                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(5), Some(5), None, None]
+            );
+            assert_eq!(
+                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                vec![None, Some(2), Some(4), Some(6)]
+            );
+            assert_eq!(
+                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                vec![None, Some(7), Some(8), Some(9)]
+            );
+        } else {
+            unreachable!();
+        }
+
+        // push the 2nd right chunk
+        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r2]);
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(chunk.ops, vec![Op::Insert, Op::Delete]);
+            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(
+                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                vec![None, None]
+            );
+            assert_eq!(
+                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                vec![None, None]
+            );
+            assert_eq!(
+                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(5), Some(5)]
+            );
+            assert_eq!(
+                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                vec![Some(10), Some(10)]
             );
         } else {
             unreachable!();
