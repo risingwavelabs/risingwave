@@ -40,6 +40,6 @@ class CountSplitter extends AbstractAggSplitter {
             groupCount,
             args.getInput(),
             null,
-            null));
+            call.getName()));
   }
 }
