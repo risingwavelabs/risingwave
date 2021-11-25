@@ -78,9 +78,12 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
 
     use crate::storage::hummock::HummockOptions;
+    use crate::storage::InMemObjectStore;
     use crate::stream_op::RowSerializer;
     use risingwave_common::catalog::Schema;
     use risingwave_common::types::ScalarImpl::Int64;
@@ -90,7 +93,7 @@ mod tests {
         HummockKeyedState::new(
             schema_new(),
             schema_new(),
-            HummockStorage::new(HummockOptions::default()),
+            HummockStorage::new(Arc::new(InMemObjectStore::new()), HummockOptions::default()),
         )
     }
 

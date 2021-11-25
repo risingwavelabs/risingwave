@@ -214,7 +214,10 @@ impl StreamManagerCore {
             sender_placeholder: vec![],
             mock_source: (Some(tx), Some(rx)),
             addr,
-            state_store: HummockStorage::new(HummockOptions::default()),
+            state_store: HummockStorage::new(
+                Arc::new(InMemObjectStore::new()),
+                HummockOptions::default(),
+            ),
         }
     }
 

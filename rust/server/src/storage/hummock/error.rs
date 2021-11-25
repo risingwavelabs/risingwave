@@ -13,6 +13,8 @@ pub enum HummockError {
     DecodeError(String),
     #[error("Mock Error {0}")]
     MockError(String),
+    #[error("Object Store IO Error {0}")]
+    ObjectIoError(String),
 }
 
 impl From<prost::DecodeError> for HummockError {

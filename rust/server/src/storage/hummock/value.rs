@@ -96,7 +96,6 @@ impl<'a> HummockValue<&'a [u8]> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_vec_decode_encode() {
         let mut result = vec![];

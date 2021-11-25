@@ -166,12 +166,14 @@ impl BlockIterator {
 
 #[cfg(test)]
 mod tests {
+    use crate::storage::hummock::cloud::gen_remote_table;
     use bytes::{Bytes, BytesMut};
     use itertools::Itertools;
 
     use crate::storage::hummock::HummockValue;
+    use crate::storage::object::{InMemObjectStore, ObjectStore};
 
-    use super::super::{Table, TableBuilder, TableBuilderOptions};
+    use super::super::{TableBuilder, TableBuilderOptions};
 
     use super::*;
 
@@ -198,7 +200,12 @@ mod tests {
             );
         }
         let (blocks, meta) = b.finish();
-        let table = Table::load(0, blocks, meta).unwrap();
+
+        let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
+        let table = gen_remote_table(obj_client, 0, blocks, meta, None)
+            .await
+            .unwrap();
+
         let block = table.block(0).await.unwrap();
 
         let mut blk_iter = BlockIterator::new(block);

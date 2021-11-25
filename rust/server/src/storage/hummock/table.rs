@@ -11,12 +11,14 @@ pub use table_iterator::*;
 mod utils;
 use utils::verify_checksum;
 
-use std::sync::Arc;
-
 use super::{Bloom, HummockError, HummockResult};
-use bytes::{Buf, Bytes};
+use crate::storage::hummock::table::utils::crc32_checksum;
+use crate::storage::object::{BlockLocation, ObjectStore};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use prost::Message;
+use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_pb::hummock::{Checksum, TableMeta};
+use std::sync::Arc;
 
 /// Block contains several entries. It can be obtained from an SST.
 #[derive(Default)]
@@ -100,20 +102,32 @@ impl Block {
 
 /// [`Table`] represents a loaded SST file with the info we have about it.
 pub struct Table {
-    /// concatenated blocks of an SST
-    pub blocks: Bytes,
-
     /// SST id
     pub id: u64,
 
     /// metadata of SST
     pub meta: TableMeta,
+
+    pub obj_client: Arc<dyn ObjectStore>,
+
+    // Data path for the data object
+    pub data_path: String,
 }
 
 impl Table {
     /// Open an existing SST from a pre-loaded [`Bytes`].
-    pub fn load(id: u64, blocks: Bytes, meta: TableMeta) -> HummockResult<Self> {
-        Ok(Table { id, meta, blocks })
+    pub async fn load(
+        id: u64,
+        obj_client: Arc<dyn ObjectStore>,
+        data_path: String,
+        meta: TableMeta,
+    ) -> HummockResult<Self> {
+        Ok(Table {
+            id,
+            obj_client,
+            data_path,
+            meta,
+        })
     }
 
     /// Decode bytes to table metadata instance.
@@ -123,7 +137,7 @@ impl Table {
     /// |       variable      | variable |       4B        |
     /// |  Prost-encoded Meta | Checksum | Checksum Length |
     /// ```
-    fn decode_meta(content: &[u8]) -> HummockResult<TableMeta> {
+    pub fn decode_meta(content: &[u8]) -> HummockResult<TableMeta> {
         let mut read_pos = content.len();
 
         // read checksum length from last 4 bytes
@@ -143,19 +157,44 @@ impl Table {
         Ok(TableMeta::decode(data)?)
     }
 
+    pub fn encode_meta(meta: &TableMeta, buf: &mut BytesMut) {
+        // encode index
+        let mut raw_meta = BytesMut::new();
+        meta.encode(&mut raw_meta).unwrap();
+        assert!(raw_meta.len() < u32::MAX as usize);
+
+        // encode checksum and its length
+        let checksum = Checksum {
+            sum: crc32_checksum(&raw_meta),
+            algo: ChecksumAlg::Crc32c as i32,
+        };
+        let mut cs_bytes = BytesMut::new();
+        checksum.encode(&mut cs_bytes).unwrap();
+        let cs_len = cs_bytes.len() as u32;
+
+        buf.put(raw_meta);
+        buf.put(cs_bytes);
+        buf.put_u32(cs_len);
+    }
+
     /// Get the required block.
     /// After reading the metadata, we could know where each block is located, the Bloom filter for
     /// the table, and the first key of each block.
     /// Inside each block, we apply prefix-compression and store key-value pairs.
     /// The block header records the base key of the block. And then, each entry
     /// records the difference to the last key, and the value.
-    async fn block(&self, idx: usize) -> HummockResult<Arc<Block>> {
+    pub async fn block(&self, idx: usize) -> HummockResult<Arc<Block>> {
         let block_offset = &self.meta.offsets[idx];
-
         let offset = block_offset.offset as usize;
+        let size = block_offset.len as usize;
+        let block_loc = BlockLocation { offset, size };
+
         let block_data = self
-            .blocks
-            .slice(offset..offset + block_offset.len as usize);
+            .obj_client
+            .read(self.data_path.as_str(), block_loc)
+            .await
+            .map_err(|e| HummockError::ObjectIoError(e.to_string()))?;
+        let block_data = Bytes::from(block_data);
 
         Block::decode(block_data, offset)
     }
@@ -188,12 +227,12 @@ impl Table {
 #[cfg(test)]
 mod tests {
     use super::builder::tests::*;
-    use super::*;
 
     #[tokio::test]
     async fn test_table_load() {
-        let (blocks, meta) = generate_table(default_builder_opt_for_test());
-        let table = Table::load(0, blocks, meta).unwrap();
+        // build remote table
+        let table = gen_test_table(default_builder_opt_for_test()).await;
+
         for i in 0..10 {
             table.block(i).await.unwrap();
         }

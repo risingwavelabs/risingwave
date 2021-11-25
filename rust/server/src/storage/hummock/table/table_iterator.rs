@@ -86,18 +86,19 @@ impl HummockIterator for TableIterator {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::hummock::table::builder::tests::generate_table;
+    use crate::storage::hummock::table::builder::tests::gen_test_table;
 
     use super::super::builder::tests::*;
     use super::*;
 
     #[tokio::test]
     async fn test_table_iterator() {
-        let (blocks, meta) = generate_table(default_builder_opt_for_test());
+        // build remote table
+        let table = gen_test_table(default_builder_opt_for_test()).await;
         // We should have at least 10 blocks, so that table iterator test could cover more code
         // path.
-        assert!(meta.offsets.len() > 10);
-        let table = Table::load(0, blocks, meta).unwrap();
+        assert!(table.meta.offsets.len() > 10);
+
         let mut table_iter = TableIterator::new(Arc::new(table));
         let mut cnt = 0;
         while let Some((key, value)) = table_iter.next().await.unwrap() {
