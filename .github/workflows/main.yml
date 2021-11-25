@@ -35,9 +35,6 @@ jobs:
           java-version: '11'
           distribution: 'adopt'
 
-      - name: Validate gradle wrapper
-        uses: gradle/wrapper-validation-action@v1
-
       - name: Cache Gradle packages
         uses: actions/cache@v2
         with:
