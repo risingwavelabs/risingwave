@@ -65,10 +65,10 @@ public final class StreamingAggRuleUtility {
    *     added by ourselves
    * @param newAggCalls new aggregation calls as the return value should be used for creating new
    *     aggregation operator
-   * @param originalIndices original indices that contain the COUNT(*) or SUM we are looking for
-   * @param aggCallMayAdd if original aggregation calls do NOT contain the COUNT(*) or SUM we are
+   * @param originalIndices original indices that contain the COUNT(*) or SUM0 we are looking for
+   * @param aggCallMayAdd if original aggregation calls do NOT contain the COUNT(*) or SUM0 we are
    *     looking for, we add it by ourselves
-   * @return the COUNT(*) or SUM index we will refer to in STREAM_NULL_BY_ROW_COUNT or Filter
+   * @return the COUNT(*) or SUM0 index we will refer to in STREAM_NULL_BY_ROW_COUNT or Filter
    */
   public static int addCountOrSumIfNotExist(
       final List<AggregateCall> originalAggCalls,
@@ -79,18 +79,17 @@ public final class StreamingAggRuleUtility {
     newAggCalls.addAll(originalAggCalls);
     for (int idx = 0; idx < newAggCalls.size(); idx++) {
       var aggCall = newAggCalls.get(idx);
-      // we find a COUNT(*) which can serve as ROW COUNT;
-      // TODO: here we assume that calcite would optimize all count(constant) to count(*)
-      if (aggCall.getAggregation().getKind() == aggCallMayAdd.getAggregation().getKind()
-          && !aggCall.isDistinct()
-          && aggCall.getArgList().size() == 0) {
+      // we find a COUNT(*) which can serve as ROW COUNT or a SUM0(index of count(*)) which can
+      // serve
+      // as ROW SUM0.
+      if (aggCall.equals(aggCallMayAdd)) {
         originalIndices.add(idx);
       }
     }
 
-    // we need a COUNT(*)/SUM(*) as reference in each STREAM_NULL_BY_ROW_COUNT function
+    // we need a COUNT(*)/SUM0(*) as reference in each STREAM_NULL_BY_ROW_COUNT function
     var refIdx = -1;
-    // if we don't have a COUNT(*)/SUM(*), then we must add one for stream_null_by_row_count to use
+    // if we don't have a COUNT(*)/SUM0(*), then we must add one for stream_null_by_row_count to use
     if (originalIndices.isEmpty()) {
       // the newly added count(*) is at the last position
       refIdx = newAggCalls.size();
@@ -142,7 +141,7 @@ public final class StreamingAggRuleUtility {
   /**
    * @param logicalAgg the original logical aggregation
    * @param streamAgg the input for the new Filter operator
-   * @param newlyAddedIndex the index of the COUNT(*) or SUM we added for the aggregation
+   * @param newlyAddedIndex the index of the COUNT(*) or SUM0 we added for the aggregation
    * @return the new Filter operator
    */
   public static RwStreamFilter createFilterAfterAggregate(
@@ -165,8 +164,8 @@ public final class StreamingAggRuleUtility {
    * @param logicalAgg the original logical aggregation
    * @param streamAgg the input for the new Project operator
    * @param newAggCalls the new aggregation calls we used for streamAgg
-   * @param originalIndices original indices that contain the COUNT(*) or SUM we are looking for
-   * @param newlyAddedIndex the index of the COUNT(*) or SUM we added for the aggregation
+   * @param originalIndices original indices that contain the COUNT(*) or SUM0 we are looking for
+   * @param newlyAddedIndex the index of the COUNT(*) or SUM0 we added for the aggregation
    * @param isAfterLocalAgg if it is after local agg, it needs to keep the newly add COUNT.
    *     Otherwise, remove it.
    * @return the new Project operator
@@ -178,9 +177,9 @@ public final class StreamingAggRuleUtility {
       final Set<Integer> originalIndices,
       final int newlyAddedIndex,
       final boolean isAfterLocalAgg) {
-    // we abuse the name of newlyAddedIndex here
+    // We abuse the name of newlyAddedIndex here
     // as it may be
-    // 1. an index of the original count(*)/sum(*) contained in originalIndices or
+    // 1. an index of the original count(*)/sum0 contained in originalIndices or
     // 2. an index of a newly added one
     // But this produces the behavior we expect in the following loop as case 1 would be shadowed in
     // originalIndices.
@@ -195,11 +194,11 @@ public final class StreamingAggRuleUtility {
     var groupCount = logicalAgg.getGroupCount();
 
     // For aggregate columns, we have three cases:
-    // 1. for those non-count(*)/sum(*), we just wrap them within the STREAM_NULL_BY_ROW_COUNT
+    // 1. for those non-count(*)/sum0, we just wrap them within the STREAM_NULL_BY_ROW_COUNT
     // function and output
-    // 2. for those count(*)/sum(*) that are in the original aggregate, we keep them and do nothing
+    // 2. for those count(*)/sum0 that are in the original aggregate, we keep them and do nothing
     // and output
-    // 3. for the optional count(*)/sum(*) that we may add additionally:
+    // 3. for the optional count(*)/sum0 that we may add additionally:
     //    a. if it is after the local aggregation, we DO output
     //    b. if it is after the global/single aggregation, we do NOT output.
     // Another assumption here is that all the group by keys are always before agg calls.
@@ -222,7 +221,8 @@ public final class StreamingAggRuleUtility {
       }
     }
 
-    // get the original output type
+    // Get the output type after agg call is split, if we are adding project after a local
+    // aggregator for 2-phase aggregation.
     var rowType = logicalAgg.getRowType();
     assert rowType.isStruct();
     // if it is
@@ -243,10 +243,7 @@ public final class StreamingAggRuleUtility {
           .forEachOrdered(newFieldList::add);
       newFieldList.add("Row Count");
       newRowType =
-          logicalAgg
-              .getCluster()
-              .getTypeFactory()
-              .createStructType(kind, newTypeList, newFieldList);
+          streamAgg.getCluster().getTypeFactory().createStructType(kind, newTypeList, newFieldList);
     }
     assert newRowType.isStruct();
     assert (newRowType.getFieldList().size() == expressions.size())

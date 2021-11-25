@@ -67,10 +67,24 @@ public class StreamingTwoPhaseAggRule extends RelRule<StreamingTwoPhaseAggRule.C
     final var groupCount = logicalAgg.getGroupCount();
     var splitters = getAggSplitters(logicalAgg);
 
+    // Since we are creating 2-phase aggregation here, agg calls such as AVG(...) will be
+    // split into COUNT(...) and SUM(...), so that the global aggregation phase can gather
+    // results from local aggregation and calculate the final result.
     var localAggCalls =
         getLocalAggCalls(logicalAgg, splitters).stream()
             .flatMap(List::stream)
             .collect(Collectors.toList());
+
+    // We just need to use it to get the correct group by key and output row type after agg call is
+    // split.
+    var newLogicalAgg =
+        (RwLogicalAggregate)
+            logicalAgg.copy(
+                logicalAgg.getTraitSet(),
+                logicalAgg.getInput(),
+                logicalAgg.getGroupSet(),
+                logicalAgg.getGroupSets(),
+                localAggCalls);
 
     var localAggTraits = logicalAgg.getTraitSet().plus(STREAMING);
     var localAggInputRequiredTraits = logicalAgg.getInput().getTraitSet().plus(STREAMING);
@@ -98,7 +112,7 @@ public class StreamingTwoPhaseAggRule extends RelRule<StreamingTwoPhaseAggRule.C
 
     var localStreamProject =
         createProjectAfterAggregate(
-            logicalAgg,
+            newLogicalAgg,
             localStreamAgg,
             newLocalAggCalls,
             originalCountStarIndices,
@@ -182,7 +196,7 @@ public class StreamingTwoPhaseAggRule extends RelRule<StreamingTwoPhaseAggRule.C
 
       if (needToDelete) {
         var projects = new ArrayList<RexNode>();
-        for (int idx = 0; idx < logicalAgg.getRowType().getFieldCount(); idx++) {
+        for (int idx = 0; idx < newLogicalAgg.getRowType().getFieldCount(); idx++) {
           projects.add(rexBuilder.makeInputRef(filter, idx));
         }
         var project =
@@ -192,7 +206,7 @@ public class StreamingTwoPhaseAggRule extends RelRule<StreamingTwoPhaseAggRule.C
                 logicalAgg.getHints(),
                 filter,
                 projects,
-                originalRowType);
+                newLogicalAgg.getRowType());
 
         if (allLastCalcAreTrivial) {
           call.transformTo(project);

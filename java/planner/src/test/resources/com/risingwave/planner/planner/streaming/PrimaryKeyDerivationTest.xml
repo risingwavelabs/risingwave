@@ -219,11 +219,10 @@ RwStreamMaterializedView(name=[t_two_condition_inner_join])
 ]]>
         </Resource>
     </TestCase>
-
     <TestCase name="query 10">
         <Resource name="sql">
             <![CDATA[
-create materialized view T_wrong_case as
+create materialized view T_wrong_case_shuffle_agg as
 select t1.v1 from
 (select v1, v2, sum(v3) from t group by v1, v2) as t1
 join
@@ -233,7 +232,7 @@ on t1.v1 = t2.v1;
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[t_wrong_case])
+RwStreamMaterializedView(name=[t_wrong_case_shuffle_agg])
   RwStreamProject(v1=[$0], v2=[$1], v10=[$3], v20=[$4])
     RwStreamHashJoin(condition=[=($0, $3)], joinType=[inner])
       RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
@@ -255,6 +254,48 @@ RwStreamMaterializedView(name=[t_wrong_case])
         <Resource name="primaryKey">
             <![CDATA[
 [0, 1, 2, 3]
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="query 11">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T_wrong_case_two_phase_agg as
+select t1.v1 from
+(select v1, sum(v3) from t group by v1) as t1
+join
+(select v1, avg(v3) from t group by v1) as t2
+on t1.v1 = t2.v1;
+]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[t_wrong_case_two_phase_agg])
+  RwStreamProject(v1=[$0], v10=[$2])
+    RwStreamHashJoin(condition=[=($0, $2)], joinType=[inner])
+      RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+        RwStreamProject(v1=[$0], EXPR$1=[$1])
+          RwStreamFilter(condition=[<>($2, 0)])
+            RwStreamAgg(group=[{0}], EXPR$1=[SUM($1)], Row Sum0=[$SUM0($2)])
+              RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                RwStreamProject(v1=[$0], EXPR$1=[$STREAM_NULL_BY_ROW_COUNT($2, $1)], Row Count=[$2])
+                  RwStreamAgg(group=[{0}], EXPR$1=[SUM($1)], Row Count=[COUNT()])
+                    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v3])
+      RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+        RwStreamProject(v1=[$0], EXPR$1=[/($1, $2)])
+          RwStreamFilter(condition=[<>($3, 0)])
+            RwStreamAgg(group=[{0}], agg#0=[SUM($1)], agg#1=[SUM($2)], Row Sum0=[$SUM0($3)])
+              RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                RwStreamProject(v1=[$0], $f1=[$STREAM_NULL_BY_ROW_COUNT($3, $1)], $f2=[$STREAM_NULL_BY_ROW_COUNT($3, $2)], Row Count=[$3])
+                  RwStreamAgg(group=[{0}], agg#0=[SUM($1)], agg#1=[COUNT($1)], Row Count=[COUNT()])
+                    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v3])
+]]>
+        </Resource>
+        <Resource name="primaryKey">
+            <![CDATA[
+[0, 1]
 ]]>
         </Resource>
     </TestCase>
