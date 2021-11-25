@@ -64,6 +64,7 @@ public class CreateMaterializedViewHandlerTest {
     var handler = ((CreateMaterializedViewHandler) sqlHandlerFactory.create(ast, executionContext));
 
     SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
+
     String tableName = createMaterializedView.name.getSimple();
     StreamPlanner planner = new StreamPlanner();
     StreamingPlan plan = planner.plan(ast, executionContext);
@@ -114,5 +115,44 @@ public class CreateMaterializedViewHandlerTest {
     Assertions.assertEquals(column1.getDesc().getDataType() instanceof NumericTypeBase, true);
     Assertions.assertEquals(
         SqlTypeName.BIGINT, ((NumericTypeBase) column1.getDesc().getDataType()).getSqlTypeName());
+  }
+
+  @Test
+  void testAliasedChecking1() {
+    String sql = "create materialized view mv3 as select v1, v2, sum(v3) from t group by v1, v2";
+    SqlNode ast = SqlParser.createCalciteStatement(sql);
+    var handler = ((CreateMaterializedViewHandler) sqlHandlerFactory.create(ast, executionContext));
+
+    StreamPlanner planner = new StreamPlanner();
+    StreamingPlan plan = planner.plan(ast, executionContext);
+
+    boolean isAliased = handler.isAllAliased(plan.getStreamingPlan());
+    Assertions.assertEquals(false, isAliased);
+  }
+
+  @Test
+  void testAliasedChecking2() {
+    String sql = "create materialized view mv4 as select v1, v2 from t";
+    SqlNode ast = SqlParser.createCalciteStatement(sql);
+    var handler = ((CreateMaterializedViewHandler) sqlHandlerFactory.create(ast, executionContext));
+
+    StreamPlanner planner = new StreamPlanner();
+    StreamingPlan plan = planner.plan(ast, executionContext);
+
+    boolean isAliased = handler.isAllAliased(plan.getStreamingPlan());
+    Assertions.assertEquals(true, isAliased);
+  }
+
+  @Test
+  void testAliasedChecking3() {
+    String sql = "create materialized view mv5 as select sum(v1) as v1_sum from t";
+    SqlNode ast = SqlParser.createCalciteStatement(sql);
+    var handler = ((CreateMaterializedViewHandler) sqlHandlerFactory.create(ast, executionContext));
+
+    StreamPlanner planner = new StreamPlanner();
+    StreamingPlan plan = planner.plan(ast, executionContext);
+
+    boolean isAliased = handler.isAllAliased(plan.getStreamingPlan());
+    Assertions.assertEquals(true, isAliased);
   }
 }

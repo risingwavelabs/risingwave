@@ -4,6 +4,8 @@ import com.google.common.annotations.VisibleForTesting;
 import com.risingwave.catalog.CreateTableInfo;
 import com.risingwave.catalog.SchemaCatalog;
 import com.risingwave.catalog.TableCatalog;
+import com.risingwave.common.exception.PgErrorCode;
+import com.risingwave.common.exception.PgException;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.execution.result.DdlResult;
 import com.risingwave.node.WorkerNodeManager;
@@ -46,6 +48,14 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     // configuration.
     StreamPlanner planner = new StreamPlanner();
     StreamingPlan plan = planner.plan(ast, context);
+
+    // Check whether the naming for columns in MV is valid.
+    boolean isAllAliased = isAllAliased(plan.getStreamingPlan());
+    if (!isAllAliased) {
+      throw new PgException(
+          PgErrorCode.INVALID_COLUMN_DEFINITION,
+          "An alias name must be specified for an aggregation function");
+    }
 
     // Bind stream plan with materialized view catalog.
     TableCatalog catalog = convertPlanToCatalog(tableName, plan, context);
@@ -99,5 +109,18 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     TableCatalog tableCatalog = context.getCatalogService().createTable(schemaName, tableInfo);
     rootNode.setTableId(tableCatalog.getId());
     return tableCatalog;
+  }
+
+  @VisibleForTesting
+  public boolean isAllAliased(RwStreamMaterializedView root) {
+    // Trick for checking whether is there any un-aliased aggregations: check the name pattern of
+    // columns. Un-aliased column is named as EXPR$1 etc.
+    var columns = root.getColumns();
+    for (var pair : columns) {
+      if (pair.left.startsWith("EXPR$")) {
+        return false;
+      }
+    }
+    return true;
   }
 }
