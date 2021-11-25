@@ -72,7 +72,10 @@ public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCata
             DataDistributionType.ALL,
             createTableInfo.getProperties(),
             createTableInfo.getRowFormat(),
-            createTableInfo.getRowSchemaLocation());
+            createTableInfo.getRowSchemaLocation(),
+            createTableInfo.getCollation(),
+            createTableInfo.getOffset(),
+            createTableInfo.getLimit());
 
     createTableInfo.getColumns().forEach(pair -> table.addColumn(pair.getKey(), pair.getValue()));
 
@@ -104,7 +107,10 @@ public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCata
             DataDistributionType.ALL,
             createTableInfo.getProperties(),
             createTableInfo.getRowFormat(),
-            createTableInfo.getRowSchemaLocation());
+            createTableInfo.getRowSchemaLocation(),
+            createTableInfo.getCollation(),
+            createTableInfo.getOffset(),
+            createTableInfo.getLimit());
 
     createTableInfo.getColumns().forEach(pair -> table.addColumn(pair.getKey(), pair.getValue()));
 

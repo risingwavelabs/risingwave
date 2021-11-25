@@ -6,6 +6,8 @@ import javax.annotation.Nonnull;
 /** Visitor for nodes in streaming convention */
 public interface RwStreamingRelVisitor<T> {
 
+  Result<T> visit(RwStreamSort sort);
+
   Result<T> visit(RwStreamHashJoin hashJoin);
 
   Result<T> visit(RwStreamAgg aggregate);

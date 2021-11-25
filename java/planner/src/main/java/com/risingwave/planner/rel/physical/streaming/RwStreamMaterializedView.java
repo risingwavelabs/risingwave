@@ -5,18 +5,28 @@ import com.risingwave.catalog.ColumnDesc;
 import com.risingwave.catalog.ColumnEncoding;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.common.datatype.RisingWaveDataType;
+import com.risingwave.proto.data.DataType;
+import com.risingwave.proto.expr.InputRefExpr;
+import com.risingwave.proto.plan.ColumnOrder;
+import com.risingwave.proto.plan.OrderType;
 import com.risingwave.proto.streaming.plan.MViewNode;
 import com.risingwave.proto.streaming.plan.StreamNode;
 import com.risingwave.rpc.Messages;
 import java.util.ArrayList;
 import java.util.List;
+import javax.annotation.Nullable;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelTraitSet;
+import org.apache.calcite.rel.RelCollation;
+import org.apache.calcite.rel.RelFieldCollation;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.SingleRel;
+import org.apache.calcite.rex.RexInputRef;
+import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.util.Pair;
+import org.apache.commons.lang3.SerializationException;
 
 /**
  * We need to explicitly specify a materialized view node in a streaming plan.
@@ -31,23 +41,51 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
 
   private final ImmutableList<Integer> primaryKeyIndices;
 
+  private final RelCollation collation;
+
+  private final RexNode offset;
+
+  private final RexNode fetch;
+
   public RwStreamMaterializedView(
       RelOptCluster cluster,
       RelTraitSet traits,
       RelNode input,
       SqlIdentifier name,
       ImmutableList<Integer> primaryKeyIndices) {
+    this(cluster, traits, input, name, primaryKeyIndices, null, null, null);
+  }
+
+  public RwStreamMaterializedView(
+      RelOptCluster cluster,
+      RelTraitSet traits,
+      RelNode input,
+      SqlIdentifier name,
+      ImmutableList<Integer> primaryKeyIndices,
+      @Nullable RelCollation relCollation,
+      @Nullable RexNode offset,
+      @Nullable RexNode fetch) {
     super(cluster, traits, input);
     checkConvention();
     this.name = name;
     this.primaryKeyIndices = primaryKeyIndices;
+    this.collation = relCollation;
+    this.offset = offset;
+    this.fetch = fetch;
   }
 
   public List<Integer> getPrimaryKeyIndices() {
     return this.primaryKeyIndices;
   }
 
-  /** Serialize to protobuf */
+  /**
+   * Serialize to protobuf
+   *
+   * <p>We remark that we DO need to tell the backend about the sort keys, but we do NOT need to
+   * tell the backend about the offset and fetch. These two properties should only be documented by
+   * the frontend so that when the OLAP system query the MV, it can properly insert proper
+   * executors/operators to enforce fetch/offset.
+   */
   @Override
   public StreamNode serialize() {
     MViewNode.Builder materializedViewNodeBuilder = MViewNode.newBuilder();
@@ -65,6 +103,37 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
     materializedViewNodeBuilder.addAllPkIndices(this.getPrimaryKeyIndices());
     // Set table ref id.
     materializedViewNodeBuilder.setTableRefId(Messages.getTableRefId(tableId));
+    // Set column orders.
+    // Sort key serialization starts
+    if (collation != null) {
+      List<ColumnOrder> columnOrders = new ArrayList<ColumnOrder>();
+      List<RelFieldCollation> rfc = collation.getFieldCollations();
+      for (RelFieldCollation relFieldCollation : rfc) {
+        RexInputRef inputRef =
+            getCluster().getRexBuilder().makeInputRef(input, relFieldCollation.getFieldIndex());
+        DataType returnType = ((RisingWaveDataType) inputRef.getType()).getProtobufType();
+        InputRefExpr inputRefExpr =
+            InputRefExpr.newBuilder().setColumnIdx(inputRef.getIndex()).build();
+        RelFieldCollation.Direction dir = relFieldCollation.getDirection();
+        OrderType orderType;
+        if (dir == RelFieldCollation.Direction.ASCENDING) {
+          orderType = OrderType.ASCENDING;
+        } else if (dir == RelFieldCollation.Direction.DESCENDING) {
+          orderType = OrderType.DESCENDING;
+        } else {
+          throw new SerializationException(String.format("%s direction not supported", dir));
+        }
+        ColumnOrder columnOrder =
+            ColumnOrder.newBuilder()
+                .setOrderType(orderType)
+                .setInputRef(inputRefExpr)
+                .setReturnType(returnType)
+                .build();
+        columnOrders.add(columnOrder);
+      }
+      materializedViewNodeBuilder.addAllColumnOrders(columnOrders);
+    }
+    // Sort key serialization ends
     // Build and return.
     MViewNode materializedViewNode = materializedViewNodeBuilder.build();
     return StreamNode.newBuilder().setMviewNode(materializedViewNode).build();
@@ -78,7 +147,17 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
   /** Explain */
   @Override
   public RelWriter explainTerms(RelWriter pw) {
-    return super.explainTerms(pw).item("name", name);
+    var writer = super.explainTerms(pw).item("name", name);
+    if (collation != null) {
+      writer = writer.item("collation", collation);
+    }
+    if (offset != null) {
+      writer = writer.item("offset", offset);
+    }
+    if (fetch != null) {
+      writer = writer.item("limit", fetch);
+    }
+    return writer;
   }
 
   /**

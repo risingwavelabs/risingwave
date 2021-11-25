@@ -23,6 +23,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javax.annotation.Nullable;
 import org.apache.calcite.config.CalciteConnectionConfig;
+import org.apache.calcite.rel.RelCollation;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rel.type.StructKind;
@@ -55,6 +56,9 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
   private final boolean appendOnly = false;
   private Long version;
   private final String rowSchemaLocation;
+  private final RelCollation collation;
+  private final Integer offset;
+  private final Integer limit;
 
   TableCatalog(
       TableId id,
@@ -66,7 +70,10 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
       DataDistributionType distributionType,
       ImmutableMap<String, String> properties,
       String rowFormat,
-      String rowSchemaLocation) {
+      String rowSchemaLocation,
+      RelCollation collation,
+      Integer offset,
+      Integer limit) {
     super(id, name);
     // We remark that we should only insert implicit row id for OLAP table, not MV, not Stream.
     // If an MV happen to have some implicit row id as its pk, it will be added in an explicit
@@ -85,6 +92,9 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
     this.rowFormat = rowFormat;
     this.rowIdColumn = buildRowIdColumn();
     this.rowSchemaLocation = rowSchemaLocation;
+    this.collation = collation;
+    this.offset = offset;
+    this.limit = limit;
     if (!stream && !materializedView) {
       // Put row-id column in map but do not put it in list of columns.
       this.columnById.put(rowIdColumn.getId(), rowIdColumn);

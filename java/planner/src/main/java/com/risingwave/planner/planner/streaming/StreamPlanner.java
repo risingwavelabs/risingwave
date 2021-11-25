@@ -21,6 +21,7 @@ import com.risingwave.planner.program.VolcanoOptimizerProgram;
 import com.risingwave.planner.rel.physical.streaming.PrimaryKeyDerivationVisitor;
 import com.risingwave.planner.rel.physical.streaming.RisingWaveStreamingRel;
 import com.risingwave.planner.rel.physical.streaming.RwStreamMaterializedView;
+import com.risingwave.planner.rel.physical.streaming.RwStreamSort;
 import com.risingwave.planner.rel.physical.streaming.StreamingPlan;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
 import com.risingwave.planner.rules.BatchRuleSets;
@@ -75,6 +76,7 @@ public class StreamPlanner implements Planner<StreamingPlan> {
     OptimizerProgram program = buildStreamingOptimizerProgram();
     RisingWaveStreamingRel rawPlan =
         (RisingWaveStreamingRel) program.optimize(logicalPlan, context);
+    log.debug("Before adding Materialized View, the plan:\n" + ExplainWriter.explainPlan(rawPlan));
     RwStreamMaterializedView materializedViewPlan = addMaterializedViewNode(rawPlan, name);
     log.debug("Create streaming plan:\n" + ExplainWriter.explainPlan(materializedViewPlan));
     return materializedViewPlan;
@@ -84,8 +86,24 @@ public class StreamPlanner implements Planner<StreamingPlan> {
       RisingWaveStreamingRel root, SqlIdentifier name) {
     var visitor = new PrimaryKeyDerivationVisitor();
     var p = root.accept(visitor);
-    return new RwStreamMaterializedView(
-        p.node.getCluster(), p.node.getTraitSet(), p.node, name, p.info.getPrimaryKeyIndices());
+    // There are two cases:
+    // 1. Sort/Limit/TopN is the root. We merge them into the new RwStreamMaterializedView
+    // 2. Otherwise, we just add a RwStreamMaterializedView.
+    if (p.node instanceof RwStreamSort) {
+      RwStreamSort sort = (RwStreamSort) p.node;
+      return new RwStreamMaterializedView(
+          sort.getCluster(),
+          sort.getTraitSet(),
+          sort.getInput(),
+          name,
+          p.info.getPrimaryKeyIndices(),
+          sort.getCollation(),
+          sort.offset,
+          sort.fetch);
+    } else {
+      return new RwStreamMaterializedView(
+          p.node.getCluster(), p.node.getTraitSet(), p.node, name, p.info.getPrimaryKeyIndices());
+    }
   }
 
   private OptimizerProgram buildLogicalOptimizerProgram() {

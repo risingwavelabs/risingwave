@@ -8,6 +8,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import javax.annotation.Nullable;
+import org.apache.calcite.rel.RelCollation;
 import org.apache.calcite.util.Pair;
 
 /** CreateTableInfo is a class that contains information about the table to be */
@@ -20,6 +22,9 @@ public class CreateTableInfo {
   private final boolean stream;
   private final String rowFormat;
   private final String rowSchemaLocation;
+  private final RelCollation collation;
+  private final Integer offset;
+  private final Integer limit;
 
   private CreateTableInfo(
       String tableName,
@@ -29,7 +34,10 @@ public class CreateTableInfo {
       boolean mv,
       boolean stream,
       String rowFormat,
-      String rowSchemaLocation) {
+      String rowSchemaLocation,
+      @Nullable RelCollation collation,
+      @Nullable Integer offset,
+      @Nullable Integer limit) {
     this.name = tableName;
     this.columns = columns;
     this.properties = properties;
@@ -38,6 +46,9 @@ public class CreateTableInfo {
     this.stream = stream;
     this.rowFormat = rowFormat;
     this.rowSchemaLocation = rowSchemaLocation;
+    this.collation = collation;
+    this.offset = offset;
+    this.limit = limit;
   }
 
   public String getName() {
@@ -76,6 +87,18 @@ public class CreateTableInfo {
     return rowSchemaLocation;
   }
 
+  public RelCollation getCollation() {
+    return collation;
+  }
+
+  public Integer getOffset() {
+    return offset;
+  }
+
+  public Integer getLimit() {
+    return limit;
+  }
+
   /** Builder class for CreateTableInfo. */
   public static class Builder {
     private final String tableName;
@@ -86,6 +109,9 @@ public class CreateTableInfo {
     private boolean stream = false;
     private String rowFormat = "";
     private String rowSchemaLocation = "";
+    private RelCollation collation = null;
+    private Integer offset = null;
+    private Integer limit = null;
 
     private Builder(String tableName) {
       this.tableName = requireNonNull(tableName, "table name can't be null!");
@@ -94,6 +120,18 @@ public class CreateTableInfo {
     public Builder addColumn(String name, ColumnDesc columnDesc) {
       columns.add(Pair.of(name, columnDesc));
       return this;
+    }
+
+    public void setCollation(RelCollation collation) {
+      this.collation = collation;
+    }
+
+    public void setOffset(Integer offset) {
+      this.offset = offset;
+    }
+
+    public void setLimit(Integer limit) {
+      this.limit = limit;
     }
 
     public Builder setAppendOnly(boolean appendOnly) {
@@ -132,7 +170,10 @@ public class CreateTableInfo {
           mv,
           stream,
           rowFormat,
-          rowSchemaLocation);
+          rowSchemaLocation,
+          collation,
+          offset,
+          limit);
     }
   }
 }

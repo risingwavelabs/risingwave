@@ -86,6 +86,7 @@ async fn test_stream_mv_proto() {
             table_ref_id: Some(make_table_ref_id(1)),
             column_descs: vec![column_desc],
             pk_indices: vec![0],
+            column_orders: vec![],
         })),
         input: vec![project_proto],
     };

@@ -10,6 +10,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import org.apache.calcite.rel.RelCollations;
+import org.apache.calcite.rel.RelFieldCollation;
 import org.apache.calcite.rex.RexInputRef;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexShuttle;
@@ -229,6 +231,55 @@ public class PrimaryKeyDerivationVisitor
   }
 
   /**
+   * Sort concatenates its sort keys and input primary key as its output primary key. If they
+   * overlap, the overlap part will be kept only once.
+   *
+   * @param sort Original sort
+   * @return Sort and its output primary key
+   */
+  @Override
+  public Result<PrimaryKeyIndicesAndPositionMap> visit(RwStreamSort sort) {
+    LOGGER.debug("visit RwStreamSort");
+    var input = (RisingWaveStreamingRel) sort.getInput(0);
+    var p = input.accept(this);
+    var positionMap = p.info.getPositionMap();
+    var oldPrimaryKeyIndices = p.info.getPrimaryKeyIndices();
+    var newPrimaryKeyIndices = new ArrayList<Integer>();
+
+    var newFieldCollations = new ArrayList<RelFieldCollation>();
+    for (var collation : sort.collation.getFieldCollations()) {
+      var index = collation.getFieldIndex();
+      var newIndex = positionMap.getOrDefault(index, index);
+      newPrimaryKeyIndices.add(newIndex);
+      var newCollation = collation.withFieldIndex(index);
+      newFieldCollations.add(newCollation);
+    }
+    for (var oldPrimaryKeyIndex : oldPrimaryKeyIndices) {
+      boolean exist = false;
+      for (var existPrimaryKeyIndex : newPrimaryKeyIndices) {
+        if (oldPrimaryKeyIndex.equals(existPrimaryKeyIndex)) {
+          exist = true;
+          break;
+        }
+      }
+      if (!exist) {
+        newPrimaryKeyIndices.add(oldPrimaryKeyIndex);
+      }
+    }
+    var newCollation = RelCollations.of(sort.collation.getFieldCollations());
+    LOGGER.debug("old collation:" + sort.collation);
+    LOGGER.debug("new collation:" + newCollation);
+    LOGGER.debug("old primaryKeyIndices:" + oldPrimaryKeyIndices);
+    LOGGER.debug("new primaryKeyIndices:" + newPrimaryKeyIndices);
+    var newSort =
+        (RwStreamSort) sort.copy(sort.getTraitSet(), p.node, newCollation, sort.offset, sort.fetch);
+    return new Result<>(
+        newSort,
+        new PrimaryKeyIndicesAndPositionMap(
+            ImmutableList.copyOf(newPrimaryKeyIndices), positionMap));
+  }
+
+  /**
    * @param aggregate Aggregate's group by key is its output key.
    * @return Original aggregate
    */
@@ -350,7 +401,6 @@ public class PrimaryKeyDerivationVisitor
     for (var oldProjectExpression : project.getProjects()) {
       oldProjectExpressions.add(oldProjectExpression.accept(inputRefReplaceShuttle));
     }
-    LOGGER.debug("oldProjectExpressions:" + oldProjectExpressions);
     var newProjects = new ArrayList<>(oldProjectExpressions);
     var newFields = new ArrayList<>(project.getRowType().getFieldList());
 
@@ -392,6 +442,9 @@ public class PrimaryKeyDerivationVisitor
     LOGGER.debug("newOutputPrimaryKeyIndices:" + newOutputPrimaryKeyIndices);
     LOGGER.debug("newProject's child:" + p.node);
     LOGGER.debug("newProject:" + newProject);
+    LOGGER.debug("oldProjectExpressions:" + oldProjectExpressions);
+    LOGGER.debug("newProjectExpressions:" + newProject.getProjects());
+    LOGGER.debug("newFields:" + newFields);
     var info =
         new PrimaryKeyIndicesAndPositionMap(
             ImmutableList.copyOf(newOutputPrimaryKeyIndices), ImmutableMap.of());
@@ -419,6 +472,7 @@ public class PrimaryKeyDerivationVisitor
       if (columnId.equals(rowIdColumn)) {
         LOGGER.debug("Already has row id column, no need to read again");
         var info = new PrimaryKeyIndicesAndPositionMap(ImmutableList.of(idx), ImmutableMap.of());
+        LOGGER.debug("leave RwStreamTableSource");
         return new Result<>(tableSource, info);
       }
     }
@@ -440,6 +494,7 @@ public class PrimaryKeyDerivationVisitor
     var info =
         new PrimaryKeyIndicesAndPositionMap(
             ImmutableList.of(columns.size() - 1), ImmutableMap.of());
+    LOGGER.debug("leave RwStreamTableSource");
     return new Result<>(newTableSource, info);
   }
 }
