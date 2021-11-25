@@ -577,7 +577,7 @@ mod tests {
     }
 
     #[test]
-    /// Even if there is no element after some insertions and equal number of deletion opertaions,
+    /// Even if there is no element after some insertions and equal number of deletion operations,
     /// `PrimitiveSummable` should output `0` instead of `None`.
     fn test_primitive_sum_no_none() {
         let mut agg = TestStreamingSumAgg::<I64Array>::new();

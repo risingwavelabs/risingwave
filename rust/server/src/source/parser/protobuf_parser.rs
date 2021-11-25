@@ -291,12 +291,12 @@ mod tests {
 
         let result = parser.parse(PRE_GEN_PROTO_DATA, &descs);
         assert!(result.is_ok());
-        let datums = result.unwrap();
-        assert_eq!(datums.len(), descs.len());
-        assert!(datums[0].eq(&Some(ScalarImpl::Int32(123))));
-        assert!(datums[1].eq(&Some(ScalarImpl::UTF8("test address".to_string()))));
-        assert!(datums[2].eq(&Some(ScalarImpl::UTF8("test city".to_string()))));
-        assert!(datums[3].eq(&Some(ScalarImpl::Int64(456))));
-        assert!(datums[4].eq(&Some(ScalarImpl::Float32(1.2345))));
+        let data = result.unwrap();
+        assert_eq!(data.len(), descs.len());
+        assert!(data[0].eq(&Some(ScalarImpl::Int32(123))));
+        assert!(data[1].eq(&Some(ScalarImpl::UTF8("test address".to_string()))));
+        assert!(data[2].eq(&Some(ScalarImpl::UTF8("test city".to_string()))));
+        assert!(data[3].eq(&Some(ScalarImpl::Int64(456))));
+        assert!(data[4].eq(&Some(ScalarImpl::Float32(1.2345))));
     }
 }

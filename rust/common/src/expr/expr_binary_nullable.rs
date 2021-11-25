@@ -22,7 +22,7 @@ macro_rules! gen_stream_null_by_row_count_expr {
     };
 }
 
-//  stream_null_by_row_count is mainly used for a spcial case of the conditional aggregation.
+//  stream_null_by_row_count is mainly used for a special case of the conditional aggregation.
 //  For example, SELECT stream_null_by_row_count(row_count, x) FROM (SELECT count(*) AS row_count,
 // avg(x) AS x FROM t1)  is equivalent to the SELECT avg(case when row_count > 0 then x else NULL)
 // FROM t1;

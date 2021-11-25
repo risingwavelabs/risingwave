@@ -163,8 +163,8 @@ mod tests {
         );
         let data_chunk = DataChunk::builder().columns(vec![col1]).build();
         let expr = make_expression(kind, &[TypeName::Boolean], &[0]);
-        let mut vec_excutor = build_from_prost(&expr).unwrap();
-        let res = vec_excutor.eval(&data_chunk).unwrap();
+        let mut vec_executor = build_from_prost(&expr).unwrap();
+        let res = vec_executor.eval(&data_chunk).unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
@@ -199,8 +199,8 @@ mod tests {
         );
         let data_chunk = DataChunk::builder().columns(vec![col1]).build();
         let expr = make_expression(kind, &[TypeName::Date], &[0]);
-        let mut vec_excutor = build_from_prost(&expr).unwrap();
-        let res = vec_excutor.eval(&data_chunk).unwrap();
+        let mut vec_executor = build_from_prost(&expr).unwrap();
+        let res = vec_executor.eval(&data_chunk).unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());

@@ -572,7 +572,7 @@ impl EqGroups {
     /// This is required so that we know `group by c1, c2` with `c1 = [a, a, c, c, d, d]`
     /// and `c2 = [g, h, h, h, h, h]` actually forms 4 groups: `[(a, g), (a, h), (c, h), (d, h)]`.
     ///
-    /// Since the internal encoding is a sequence of sorted indices, this is effectly
+    /// Since the internal encoding is a sequence of sorted indices, this is effectively
     /// merging all sequences into a single one with deduplication. In the example above,
     /// the `EqGroups` of `c1` is `[2, 4]` and that of `c2` is `[1]`, so the output of
     /// `intersect` would be `[1, 2, 4]` identifying the new groups starting at these indices.

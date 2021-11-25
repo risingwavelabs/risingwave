@@ -108,7 +108,7 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
 }
 /// `HashAggExecutor` implements the hash aggregate algorithm.
 pub(super) struct HashAggExecutor<K> {
-    /// factories to construct aggrator for each groups
+    /// factories to construct aggregator for each groups
     agg_factories: Vec<AggStateFactory>,
     /// Column indexes of keys that specify a group
     group_key_columns: Vec<usize>,

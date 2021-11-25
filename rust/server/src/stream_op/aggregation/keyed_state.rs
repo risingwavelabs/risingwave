@@ -30,7 +30,7 @@ where
 
     /// Get a corresponding row from the keyed states.
     ///
-    /// TODO: optimize this function later. If a value is bufferred in memory, we do not need
+    /// TODO: optimize this function later. If a value is buffered in memory, we do not need
     /// to call an async function to get it. We could directly fetch it without an async function.
     /// There are two ways to do this: use `async_trait_static` that avoids the `Box<dyn Future>`
     /// overhead, or add a new function called `try_get_in_memory`.

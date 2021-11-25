@@ -19,7 +19,7 @@ pub(crate) struct Opts {
     /// Postgresql server port to test against.
     #[clap(name = "PG_SERVER_PORT", short = 'p', long = "port")]
     pg_server_port: u16,
-    /// Input directory containing sqls, exepected outputs.
+    /// Input directory containing sqls, expected outputs.
     #[clap(name = "INPUT_DIR", short = 'i', long = "input", parse(from_os_str), value_hint = ValueHint::DirPath)]
     input_dir: PathBuf,
     /// Output directory containing output files, diff reuslts.

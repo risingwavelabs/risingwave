@@ -26,7 +26,7 @@ pub struct MemRowGroup {
     /// `data_chunks` stores the payload of the `RowGroup`.
     data_chunks: Vec<DataChunkRef>,
 
-    /// `dbmp` is the delete map of deletions with the same range of transactions happend.
+    /// `dbmp` is the delete map of deletions with the same range of transactions happened.
     dbmp: Option<Bitmap>,
     rwlock: Arc<RwLock<i32>>,
     // TODO: [xiangyhu] footers

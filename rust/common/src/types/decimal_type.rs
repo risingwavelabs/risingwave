@@ -113,7 +113,7 @@ mod tests {
     }
 
     #[test]
-    fn test_create_decimal_with_wrong_precison_and_scale() {
+    fn test_create_decimal_with_wrong_precision_and_scale() {
         let larger_scale = DecimalType::create(true, 5, 6);
         assert!(larger_scale.is_err());
         let larger_precision = DecimalType::create(true, 40, 20);

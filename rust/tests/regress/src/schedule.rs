@@ -118,11 +118,11 @@ impl Schedule {
 
         if !different_tests.is_empty() {
             info!(
-        "Risingwave regress tests failed, these tests are differenct from expected output: {:?}",
+        "Risingwave regress tests failed, these tests are different from expected output: {:?}",
         different_tests
       );
             bail!(
-        "Risingwave regress tests failed, these tests are differenct from expected output: {:?}",
+        "Risingwave regress tests failed, these tests are different from expected output: {:?}",
         different_tests
       )
         } else {
@@ -148,7 +148,7 @@ impl Schedule {
         for (test_name, join_handle) in join_handles.into_iter() {
             let ret = join_handle
                 .await
-                .with_context(|| format!("Running test case {} paniced!", test_name))??;
+                .with_context(|| format!("Running test case {} panicked!", test_name))??;
 
             result.insert(test_name.to_string(), ret);
         }

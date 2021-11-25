@@ -15,7 +15,7 @@ use async_trait::async_trait;
 #[async_trait]
 pub trait HummockIterator {
     /// Get the next key/value pair in the table. If `None` is returned, the iterator must be
-    /// rewinded to retrive new values.
+    /// rewinded to retrieve new values.
     async fn next(&mut self) -> HummockResult<Option<(&[u8], HummockValue<&[u8]>)>>;
 
     /// Reset the position of the iterator

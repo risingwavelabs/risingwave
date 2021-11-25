@@ -363,7 +363,7 @@ mod tests {
             3,
         );
 
-        // It should return `None` when buider is empty
+        // It should return `None` when builder is empty
         assert!(builder.consume_all().unwrap().is_none());
 
         // Append a chunk with 2 rows

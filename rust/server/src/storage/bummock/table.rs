@@ -73,7 +73,7 @@ impl Table for BummockTable {
 
             futures::executor::block_on(async move { sender.send(chunk).await })
                 .or_else(|x| {
-                    // Disconnection means the receiver is dropped. So the sender shouble be dropped
+                    // Disconnection means the receiver is dropped. So the sender should be dropped
                     // here too.
                     if x.is_disconnected() {
                         is_send_messages_success = false;
@@ -250,7 +250,7 @@ impl BummockTable {
     }
 
     /// An `update` marks the deletion of a key and appends a new one.
-    /// DN: Alternatively, deletion of a key can be ommitted and just appending
+    /// DN: Alternatively, deletion of a key can be omitted and just appending
     /// a new row. But that would require more efforts scanning and merging the results
     async fn update(
         &self,
@@ -261,7 +261,7 @@ impl BummockTable {
 
         // append new data chunks
 
-        // stamp the row group if transaction boundry is hit
+        // stamp the row group if transaction boundary is hit
 
         todo!();
     }

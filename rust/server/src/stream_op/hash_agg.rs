@@ -152,7 +152,7 @@ impl<StateBackend> HashAggExecutor<StateBackend>
 where
     StateBackend: KeyedState<RowSerializer, AggStateSerializer>,
 {
-    /// Flush the bufferred chunk to the storage backend, and get the edits of the states.
+    /// Flush the buffered chunk to the storage backend, and get the edits of the states.
     async fn flush_data(&mut self) -> Result<StreamChunk> {
         let dirty_cnt = self.modified_states.len();
         let key_len = self.key_indices.len();
@@ -172,7 +172,7 @@ where
             .map(|ty| ty.create_array_builder(dirty_cnt * 2).unwrap())
             .collect_vec();
 
-        // --- Retrive modified states and put the changes into the builders ---
+        // --- Retrieve modified states and put the changes into the builders ---
 
         let mut new_ops = Vec::with_capacity(dirty_cnt);
 
@@ -286,7 +286,7 @@ where
         // --- Retrieve grouped keys into Row format ---
         let mut keys = vec![Row(vec![]); total_num_rows];
 
-        // we retrive the key column-by-column
+        // we retrieve the key column-by-column
         for key_idx in &self.key_indices {
             let col = &columns[*key_idx];
 
@@ -315,7 +315,7 @@ where
             .collect::<Vec<_>>();
 
         for (key, vis_map) in unique_keys {
-            // Retrive preivous state from the KeyedState.
+            // Retrieve previous state from the KeyedState.
             let prev_state = self.state_entries.get(key).await?;
 
             // Mark the key as dirty, and store state, so that we can know what change to output
