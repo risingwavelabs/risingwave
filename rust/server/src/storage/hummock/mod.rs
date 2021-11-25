@@ -11,7 +11,6 @@ mod bloom;
 use bloom::*;
 mod cloud;
 mod error;
-mod format;
 mod iterator;
 mod keyed_state;
 mod value;
@@ -86,4 +85,16 @@ impl HummockStorage {
         self.tables.insert(table_id, table);
         Ok(())
     }
+}
+
+/// `assert_eq` two `Vec<u8>` with human-readable format.
+#[macro_export]
+macro_rules! assert_bytes_eq {
+    ($left:expr, $right:expr) => {{
+        use bytes::Bytes;
+        assert_eq!(
+            Bytes::copy_from_slice(&$left),
+            Bytes::copy_from_slice(&$right)
+        )
+    }};
 }

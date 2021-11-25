@@ -6,7 +6,6 @@
 
 use super::utils::bytes_diff;
 use crate::storage::hummock::bloom::Bloom;
-use crate::storage::hummock::format::user_key;
 use crate::storage::hummock::table::utils::crc32_checksum;
 use crate::storage::hummock::HummockValue;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -81,7 +80,6 @@ impl TableBuilder {
     /// Create new builder from options
     pub fn new(options: TableBuilderOptions) -> Self {
         Self {
-            // approximately 16MB index + table size
             data_buf: BytesMut::with_capacity(options.table_capacity as usize),
             meta: TableMeta::default(),
             base_key: Bytes::new(),
@@ -174,7 +172,7 @@ impl TableBuilder {
             self.entry_offsets.clear();
         }
 
-        self.key_hashes.push(farmhash::fingerprint32(user_key(key)));
+        self.key_hashes.push(farmhash::fingerprint32(key));
 
         // diff_key stores the difference of key with baseKey.
         let diff_key = if self.base_key.is_empty() {
@@ -283,7 +281,7 @@ pub(super) mod tests {
 
     /// The key of an index in the test table
     pub fn test_key_of(idx: usize) -> Vec<u8> {
-        format!("key_test_{}", idx).as_bytes().to_vec()
+        format!("key_test_{:05}", idx * 2).as_bytes().to_vec()
     }
 
     /// The value of an index in the test table
@@ -341,7 +339,7 @@ pub(super) mod tests {
 
         assert_eq!(table.has_bloom_filter(), with_blooms);
         for i in 0..key_count {
-            let hash = farmhash::fingerprint32(user_key(format!("key_test_{}", i).as_bytes()));
+            let hash = farmhash::fingerprint32(test_key_of(i).as_slice());
             assert!(!table.surely_not_have(hash));
         }
     }

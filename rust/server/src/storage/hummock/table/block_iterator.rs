@@ -111,12 +111,13 @@ impl BlockIterator {
     }
 
     /// Seek to the first entry that is equal or greater than key.
-    pub fn seek(&mut self, key: &Bytes, whence: SeekPos) {
+    pub fn seek(&mut self, key: &[u8], whence: SeekPos) {
         let start_index = match whence {
             SeekPos::Origin => 0,
             SeekPos::Current => self.idx as usize,
         };
         let found_entry_idx = (start_index..self.entry_offsets().len())
+            // TODO: remove this collect_vec
             .collect_vec()
             .partition_point(|idx| {
                 self.set_idx(*idx as isize);
