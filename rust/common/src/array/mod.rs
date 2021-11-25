@@ -261,14 +261,14 @@ macro_rules! impl_convert {
           pub fn [<as_ $suffix_name>](&self) -> &$array {
             match self {
               Self::$variant_name(ref array) => array,
-              other_array => panic!("cannot covert ArrayImpl::{} to concrete type", other_array.get_ident())
+              other_array => panic!("cannot covert ArrayImpl::{} to concrete type {}", other_array.get_ident(), stringify!($variant_name))
             }
           }
 
           pub fn [<into_ $suffix_name>](self) -> $array {
             match self {
               Self::$variant_name(array) => array,
-              other_array =>  panic!("cannot covert ArrayImpl::{} to concrete type", other_array.get_ident())
+              other_array =>  panic!("cannot covert ArrayImpl::{} to concrete type {}", other_array.get_ident(), stringify!($variant_name))
             }
           }
         }
@@ -277,7 +277,7 @@ macro_rules! impl_convert {
           fn from(array: &'a ArrayImpl) -> Self {
             match array {
               ArrayImpl::$variant_name(inner) => inner,
-              other_array => panic!("cannot covert ArrayImpl::{} to concrete type", other_array.get_ident())
+              other_array => panic!("cannot covert ArrayImpl::{} to concrete type {}", other_array.get_ident(), stringify!($variant_name))
             }
           }
         }
