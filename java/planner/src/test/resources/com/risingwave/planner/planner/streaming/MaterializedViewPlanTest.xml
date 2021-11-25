@@ -70,7 +70,7 @@ RwStreamMaterializedView(name=[t1])
             }
           }],
           "returnType": {
-            "typeName": "INT32"
+            "typeName": "INT64"
           }
         }, {
           "type": "COUNT",
@@ -84,7 +84,7 @@ RwStreamMaterializedView(name=[t1])
       "selectList": [{
         "exprType": "STREAM_NULL_BY_ROW_COUNT",
         "returnType": {
-          "typeName": "INT32"
+          "typeName": "INT64"
         },
         "funcCall": {
           "children": [{
@@ -98,7 +98,7 @@ RwStreamMaterializedView(name=[t1])
           }, {
             "exprType": "INPUT_REF",
             "returnType": {
-              "typeName": "INT32"
+              "typeName": "INT64"
             },
             "inputRef": {
             }
@@ -117,7 +117,7 @@ RwStreamMaterializedView(name=[t1])
     },
     "columnDescs": [{
       "columnType": {
-        "typeName": "INT32"
+        "typeName": "INT64"
       },
       "encoding": "RAW"
     }]
@@ -269,7 +269,7 @@ RwStreamMaterializedView(name=[t3])
               }
             }],
             "returnType": {
-              "typeName": "INT32"
+              "typeName": "INT64"
             }
           }, {
             "type": "COUNT",
@@ -318,7 +318,7 @@ RwStreamMaterializedView(name=[t3])
       }, {
         "exprType": "INPUT_REF",
         "returnType": {
-          "typeName": "INT32"
+          "typeName": "INT64"
         },
         "inputRef": {
           "columnIdx": 1
@@ -341,7 +341,7 @@ RwStreamMaterializedView(name=[t3])
       "encoding": "RAW"
     }, {
       "columnType": {
-        "typeName": "INT32"
+        "typeName": "INT64"
       },
       "encoding": "RAW"
     }],
@@ -393,7 +393,7 @@ RwStreamMaterializedView(name=[t4])
             }
           }],
           "returnType": {
-            "typeName": "INT32"
+            "typeName": "INT64"
           }
         }, {
           "type": "SUM",
@@ -406,7 +406,7 @@ RwStreamMaterializedView(name=[t4])
             }
           }],
           "returnType": {
-            "typeName": "INT32"
+            "typeName": "INT64"
           }
         }, {
           "type": "COUNT",
@@ -420,13 +420,13 @@ RwStreamMaterializedView(name=[t4])
       "selectList": [{
         "exprType": "ADD",
         "returnType": {
-          "typeName": "INT32"
+          "typeName": "INT64"
         },
         "funcCall": {
           "children": [{
             "exprType": "STREAM_NULL_BY_ROW_COUNT",
             "returnType": {
-              "typeName": "INT32"
+              "typeName": "INT64"
             },
             "funcCall": {
               "children": [{
@@ -440,7 +440,7 @@ RwStreamMaterializedView(name=[t4])
               }, {
                 "exprType": "INPUT_REF",
                 "returnType": {
-                  "typeName": "INT32"
+                  "typeName": "INT64"
                 },
                 "inputRef": {
                 }
@@ -449,7 +449,7 @@ RwStreamMaterializedView(name=[t4])
           }, {
             "exprType": "STREAM_NULL_BY_ROW_COUNT",
             "returnType": {
-              "typeName": "INT32"
+              "typeName": "INT64"
             },
             "funcCall": {
               "children": [{
@@ -463,7 +463,7 @@ RwStreamMaterializedView(name=[t4])
               }, {
                 "exprType": "INPUT_REF",
                 "returnType": {
-                  "typeName": "INT32"
+                  "typeName": "INT64"
                 },
                 "inputRef": {
                   "columnIdx": 1
@@ -485,7 +485,7 @@ RwStreamMaterializedView(name=[t4])
     },
     "columnDescs": [{
       "columnType": {
-        "typeName": "INT32"
+        "typeName": "INT64"
       },
       "encoding": "RAW"
     }]
@@ -565,7 +565,7 @@ RwStreamMaterializedView(name=[t5])
             }
           }],
           "returnType": {
-            "typeName": "INT32"
+            "typeName": "INT64"
           }
         }, {
           "type": "COUNT",
@@ -579,7 +579,7 @@ RwStreamMaterializedView(name=[t5])
       "selectList": [{
         "exprType": "STREAM_NULL_BY_ROW_COUNT",
         "returnType": {
-          "typeName": "INT32"
+          "typeName": "INT64"
         },
         "funcCall": {
           "children": [{
@@ -593,7 +593,7 @@ RwStreamMaterializedView(name=[t5])
           }, {
             "exprType": "INPUT_REF",
             "returnType": {
-              "typeName": "INT32"
+              "typeName": "INT64"
             },
             "inputRef": {
             }
@@ -612,7 +612,7 @@ RwStreamMaterializedView(name=[t5])
     },
     "columnDescs": [{
       "columnType": {
-        "typeName": "INT32"
+        "typeName": "INT64"
       },
       "encoding": "RAW"
     }]
@@ -673,7 +673,7 @@ RwStreamMaterializedView(name=[t6])
               }
             }],
             "returnType": {
-              "typeName": "INT32"
+              "typeName": "INT64"
             }
           }, {
             "type": "COUNT",
@@ -715,7 +715,7 @@ RwStreamMaterializedView(name=[t6])
       "selectList": [{
         "exprType": "INPUT_REF",
         "returnType": {
-          "typeName": "INT32"
+          "typeName": "INT64"
         },
         "inputRef": {
           "columnIdx": 1
@@ -740,7 +740,7 @@ RwStreamMaterializedView(name=[t6])
     },
     "columnDescs": [{
       "columnType": {
-        "typeName": "INT32"
+        "typeName": "INT64"
       },
       "encoding": "RAW"
     }, {
@@ -807,7 +807,7 @@ RwStreamMaterializedView(name=[t7])
               }
             }],
             "returnType": {
-              "typeName": "INT32"
+              "typeName": "INT64"
             }
           }, {
             "type": "COUNT",
@@ -849,13 +849,13 @@ RwStreamMaterializedView(name=[t7])
       "selectList": [{
         "exprType": "ADD",
         "returnType": {
-          "typeName": "INT32"
+          "typeName": "INT64"
         },
         "funcCall": {
           "children": [{
             "exprType": "INPUT_REF",
             "returnType": {
-              "typeName": "INT32"
+              "typeName": "INT64"
             },
             "inputRef": {
               "columnIdx": 1
@@ -890,7 +890,7 @@ RwStreamMaterializedView(name=[t7])
     },
     "columnDescs": [{
       "columnType": {
-        "typeName": "INT32"
+        "typeName": "INT64"
       },
       "encoding": "RAW"
     }, {
@@ -975,7 +975,7 @@ RwStreamMaterializedView(name=[t8])
             }
           }],
           "returnType": {
-            "typeName": "INT32"
+            "typeName": "INT64"
           }
         }, {
           "type": "COUNT",
@@ -989,13 +989,13 @@ RwStreamMaterializedView(name=[t8])
       "selectList": [{
         "exprType": "ADD",
         "returnType": {
-          "typeName": "INT32"
+          "typeName": "INT64"
         },
         "funcCall": {
           "children": [{
             "exprType": "STREAM_NULL_BY_ROW_COUNT",
             "returnType": {
-              "typeName": "INT32"
+              "typeName": "INT64"
             },
             "funcCall": {
               "children": [{
@@ -1009,7 +1009,7 @@ RwStreamMaterializedView(name=[t8])
               }, {
                 "exprType": "INPUT_REF",
                 "returnType": {
-                  "typeName": "INT32"
+                  "typeName": "INT64"
                 },
                 "inputRef": {
                 }
@@ -1038,7 +1038,7 @@ RwStreamMaterializedView(name=[t8])
     },
     "columnDescs": [{
       "columnType": {
-        "typeName": "INT32"
+        "typeName": "INT64"
       },
       "encoding": "RAW"
     }]

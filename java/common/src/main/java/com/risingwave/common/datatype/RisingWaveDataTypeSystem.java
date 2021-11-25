@@ -18,6 +18,26 @@ public class RisingWaveDataTypeSystem extends RelDataTypeSystemImpl {
     }
   }
 
+  /**
+   * Derive the return type for sum aggregate function. It does not override {@link
+   * RelDataTypeSystemImpl#deriveSumType} because the default rule is still used by the global
+   * phase.
+   */
+  public RelDataType deriveSumTypeLocal(RelDataTypeFactory typeFactory, RelDataType argumentType) {
+    switch (argumentType.getSqlTypeName()) {
+      case SMALLINT:
+      case INTEGER:
+        return typeFactory.createTypeWithNullability(
+            typeFactory.createSqlType(SqlTypeName.BIGINT), argumentType.isNullable());
+      case BIGINT:
+        return typeFactory.createTypeWithNullability(
+            typeFactory.createSqlType(SqlTypeName.DECIMAL, getMaxNumericPrecision(), 0),
+            argumentType.isNullable());
+      default:
+        return super.deriveSumType(typeFactory, argumentType);
+    }
+  }
+
   @Override
   public int getMaxNumericScale() {
     return DecimalType.MAX_SCALE;

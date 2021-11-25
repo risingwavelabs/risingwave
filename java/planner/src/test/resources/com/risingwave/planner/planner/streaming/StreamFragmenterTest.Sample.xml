@@ -13,11 +13,11 @@
               "input": {
               },
               "type": {
-                "typeName": "INT32"
+                "typeName": "INT64"
               }
             }],
             "returnType": {
-              "typeName": "INT32"
+              "typeName": "INT64"
             }
           }, {
             "type": "SUM",
@@ -39,13 +39,13 @@
         "selectList": [{
           "exprType": "ADD",
           "returnType": {
-            "typeName": "INT32"
+            "typeName": "INT64"
           },
           "funcCall": {
             "children": [{
               "exprType": "STREAM_NULL_BY_ROW_COUNT",
               "returnType": {
-                "typeName": "INT32"
+                "typeName": "INT64"
               },
               "funcCall": {
                 "children": [{
@@ -59,7 +59,7 @@
                 }, {
                   "exprType": "INPUT_REF",
                   "returnType": {
-                    "typeName": "INT32"
+                    "typeName": "INT64"
                   },
                   "inputRef": {
                   }
@@ -88,7 +88,7 @@
       },
       "columnDescs": [{
         "columnType": {
-          "typeName": "INT32"
+          "typeName": "INT64"
         },
         "encoding": "RAW"
       }]
@@ -102,7 +102,7 @@
   },
   "inputColumnDescs": [{
     "columnType": {
-      "typeName": "INT32"
+      "typeName": "INT64"
     },
     "encoding": "RAW"
   }, {
@@ -159,7 +159,7 @@
             }
           }],
           "returnType": {
-            "typeName": "INT32"
+            "typeName": "INT64"
           }
         }, {
           "type": "COUNT",
@@ -173,7 +173,7 @@
       "selectList": [{
         "exprType": "STREAM_NULL_BY_ROW_COUNT",
         "returnType": {
-          "typeName": "INT32"
+          "typeName": "INT64"
         },
         "funcCall": {
           "children": [{
@@ -187,7 +187,7 @@
           }, {
             "exprType": "INPUT_REF",
             "returnType": {
-              "typeName": "INT32"
+              "typeName": "INT64"
             },
             "inputRef": {
             }
@@ -269,7 +269,7 @@
             }
           }],
           "returnType": {
-            "typeName": "INT32"
+            "typeName": "INT64"
           }
         }, {
           "type": "COUNT",
@@ -283,7 +283,7 @@
       "selectList": [{
         "exprType": "STREAM_NULL_BY_ROW_COUNT",
         "returnType": {
-          "typeName": "INT32"
+          "typeName": "INT64"
         },
         "funcCall": {
           "children": [{
@@ -297,7 +297,7 @@
           }, {
             "exprType": "INPUT_REF",
             "returnType": {
-              "typeName": "INT32"
+              "typeName": "INT64"
             },
             "inputRef": {
             }
@@ -379,7 +379,7 @@
             }
           }],
           "returnType": {
-            "typeName": "INT32"
+            "typeName": "INT64"
           }
         }, {
           "type": "COUNT",
@@ -393,7 +393,7 @@
       "selectList": [{
         "exprType": "STREAM_NULL_BY_ROW_COUNT",
         "returnType": {
-          "typeName": "INT32"
+          "typeName": "INT64"
         },
         "funcCall": {
           "children": [{
@@ -407,7 +407,7 @@
           }, {
             "exprType": "INPUT_REF",
             "returnType": {
-              "typeName": "INT32"
+              "typeName": "INT64"
             },
             "inputRef": {
             }
@@ -489,7 +489,7 @@
             }
           }],
           "returnType": {
-            "typeName": "INT32"
+            "typeName": "INT64"
           }
         }, {
           "type": "COUNT",
@@ -503,7 +503,7 @@
       "selectList": [{
         "exprType": "STREAM_NULL_BY_ROW_COUNT",
         "returnType": {
-          "typeName": "INT32"
+          "typeName": "INT64"
         },
         "funcCall": {
           "children": [{
@@ -517,7 +517,7 @@
           }, {
             "exprType": "INPUT_REF",
             "returnType": {
-              "typeName": "INT32"
+              "typeName": "INT64"
             },
             "inputRef": {
             }

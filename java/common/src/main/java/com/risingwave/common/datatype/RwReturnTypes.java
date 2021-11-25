@@ -19,4 +19,17 @@ public abstract class RwReturnTypes {
   public static final SqlReturnTypeInference NULLABLE_SUM =
       ReturnTypes.chain(
           DATE_PLUS_INTERVAL, ReturnTypes.DECIMAL_SUM_NULLABLE, ReturnTypes.LEAST_RESTRICTIVE);
+
+  public static final SqlReturnTypeInference AGG_SUM =
+      opBinding -> {
+        final RelDataTypeFactory typeFactory = opBinding.getTypeFactory();
+        final RelDataType type =
+            ((RisingWaveDataTypeSystem) typeFactory.getTypeSystem())
+                .deriveSumTypeLocal(typeFactory, opBinding.getOperandType(0));
+        if (opBinding.getGroupCount() == 0 || opBinding.hasFilter()) {
+          return typeFactory.createTypeWithNullability(type, true);
+        } else {
+          return type;
+        }
+      };
 }

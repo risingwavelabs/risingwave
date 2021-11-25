@@ -1,12 +1,15 @@
 package com.risingwave.planner.sql;
 
 import com.risingwave.common.datatype.RwReturnTypes;
+import org.apache.calcite.sql.SqlAggFunction;
 import org.apache.calcite.sql.SqlBinaryOperator;
+import org.apache.calcite.sql.SqlFunctionCategory;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.fun.SqlMonotonicBinaryOperator;
 import org.apache.calcite.sql.type.InferTypes;
 import org.apache.calcite.sql.type.OperandTypes;
 import org.apache.calcite.sql.util.ReflectiveSqlOperatorTable;
+import org.apache.calcite.util.Optionality;
 import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
 
 /**
@@ -49,4 +52,18 @@ public class RisingWaveOverrideOperatorTable extends ReflectiveSqlOperatorTable 
           RwReturnTypes.NULLABLE_SUM,
           InferTypes.FIRST_KNOWN,
           OperandTypes.MINUS_OPERATOR);
+
+  /** <code>SUM</code> aggregate function. */
+  public static final SqlAggFunction SUM =
+      new SqlAggFunction(
+          "SUM",
+          null,
+          SqlKind.SUM,
+          RwReturnTypes.AGG_SUM,
+          null,
+          OperandTypes.NUMERIC,
+          SqlFunctionCategory.NUMERIC,
+          false,
+          false,
+          Optionality.FORBIDDEN) {};
 }
