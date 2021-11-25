@@ -74,8 +74,6 @@ start_n_nodes_cluster() {
     cd ../java || exit 1
     addr_str=$(IFS=, ; echo "${addresses[*]}")
     sed -i".bak" -e "s/.*computenodes.*/risingwave.leader.computenodes=$addr_str/" $FRONTEND_CFG_FILE
-    echo "risingwave.catalog.mode=Remote" >> $FRONTEND_CFG_FILE
-    echo "risingwave.metadata.node=127.0.0.1:5690" >> $FRONTEND_CFG_FILE
 
     echo "Rewritten $FRONTEND_CFG_FILE:"
     echo ""
