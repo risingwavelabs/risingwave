@@ -16,9 +16,6 @@ mod keyed_state;
 mod value;
 use value::*;
 
-#[cfg(test)]
-mod mock_fs;
-
 use crate::storage::hummock::cloud::gen_remote_table;
 use crate::storage::object::ObjectStore;
 pub use error::*;
