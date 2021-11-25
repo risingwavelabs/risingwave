@@ -29,8 +29,6 @@ pub(super) struct RowSeqScanExecutor {
     iter: MemTableRowIter,
     data_types: Vec<DataTypeRef>,
     column_ids: Vec<usize>,
-    /// If empty, then the row will be iterated in a different manner.
-    has_pk: bool,
     schema: Schema,
 }
 
@@ -59,7 +57,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
                 .iter()
                 .map(|f| f.data_type.clone())
                 .collect::<Vec<_>>();
-            let pks = table_ref.get_pk();
             let schema = schema.clone();
 
             Ok(Box::new(Self {
@@ -70,7 +67,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
                     .map(|i| *i as usize)
                     .collect::<Vec<_>>(),
                 iter: make_row_iter(table_ref)?,
-                has_pk: !pks.is_empty(),
                 schema,
             }))
         } else {
@@ -223,7 +219,6 @@ mod tests {
             data_types,
             column_ids: vec![0, 1],
             iter: mem_table.iter()?,
-            has_pk: true,
             schema,
         };
 
