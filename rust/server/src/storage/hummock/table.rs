@@ -105,9 +105,10 @@ pub struct Table {
     /// SST id
     pub id: u64,
 
-    /// metadata of SST
+    /// Prost-encoded Metadata of SST
     pub meta: TableMeta,
 
+    /// Client of object store
     pub obj_client: Arc<dyn ObjectStore>,
 
     // Data path for the data object
@@ -178,11 +179,6 @@ impl Table {
     }
 
     /// Get the required block.
-    /// After reading the metadata, we could know where each block is located, the Bloom filter for
-    /// the table, and the first key of each block.
-    /// Inside each block, we apply prefix-compression and store key-value pairs.
-    /// The block header records the base key of the block. And then, each entry
-    /// records the difference to the last key, and the value.
     pub async fn block(&self, idx: usize) -> HummockResult<Arc<Block>> {
         let block_offset = &self.meta.offsets[idx];
         let offset = block_offset.offset as usize;
