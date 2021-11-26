@@ -38,7 +38,7 @@ class GrpcMetaClient(private val channel: Channel) : MetaClient {
       return stub.getCatalog(request)
     } catch (e: StatusRuntimeException) {
       LOGGER.warn("RPC failed: {}", e.status)
-      throw rpcException("listCatalogs", e)
+      throw rpcException("getCatalog", e)
     }
   }
 

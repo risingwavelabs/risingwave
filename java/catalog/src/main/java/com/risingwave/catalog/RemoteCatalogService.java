@@ -48,6 +48,7 @@ public class RemoteCatalogService implements CatalogService {
   // Get identifier of database/schema/table from metadata service.
   private static final Logger LOGGER = LoggerFactory.getLogger(RemoteCatalogService.class);
   private final MetaClient metadataClient;
+  private static final long startWaitInterval = 1000;
   private static final long heartbeatInterval = 2000;
 
   private final ConcurrentMap<DatabaseCatalog.DatabaseId, DatabaseCatalog> databaseById;
@@ -197,9 +198,18 @@ public class RemoteCatalogService implements CatalogService {
 
   private void initCatalog() {
     GetCatalogRequest request = GetCatalogRequest.newBuilder().build();
-    GetCatalogResponse response = this.metadataClient.getCatalog(request);
-    if (response.getStatus().getCode() != Status.Code.OK) {
-      throw new PgException(PgErrorCode.INTERNAL_ERROR, "Init Catalog failed");
+    GetCatalogResponse response;
+    while (true) {
+      try {
+        TimeUnit.MILLISECONDS.sleep(startWaitInterval);
+        response = this.metadataClient.getCatalog(request);
+        if (response.getStatus().getCode() == Status.Code.OK) {
+          break;
+        }
+      } catch (Exception e) {
+        LOGGER.warn("meta service unreachable, wait for start.");
+        // ignore and retry.
+      }
     }
     Catalog catalog = response.getCatalog();
     LOGGER.debug("Init catalog from metadata service: {} ", catalog);

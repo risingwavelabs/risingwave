@@ -43,6 +43,13 @@ and then passes the physical plan to the corresponding to compute server(s).
 - The compute server performs computation and then returns results to the frontend server.
 - The metadata server performs epoch, id generation and metadata management.
 
+To start the metadata server, create one terminal and then type:
+```bash
+make rust_build ## Not necessary if previously built
+cd rust
+./target/debug/metadata-node --log4rs-config config/log4rs.yaml
+```
+
 To start the frontend server, create one terminal and then type:
 ```bash
 cd java
@@ -54,13 +61,6 @@ To start the compute server, create one terminal and then type:
 make rust_build
 cd rust
 ./target/debug/compute-node --log4rs-config config/log4rs.yaml
-```
-
-To start the metadata server, create one terminal and then type:
-```bash
-make rust_build ## Not necessary if previously built
-cd rust
-./target/debug/metadata-node --log4rs-config config/log4rs.yaml
 ```
 
 To start the Postgres shell, create one terminal and then type:
