@@ -4,31 +4,87 @@ use risingwave_common::{
     array::RwError,
     error::{ErrorCode::InternalError, Result},
 };
-use rusoto_core::ByteStream;
-use rusoto_s3::{PutObjectRequest, S3Client, S3};
-use std::collections::HashMap;
+use rusoto_core::{
+    credential::{AwsCredentials, StaticProvider},
+    ByteStream, HttpClient, Region, RusotoError,
+};
+use rusoto_s3::{GetObjectError, GetObjectRequest, PutObjectRequest, S3Client, S3};
+use std::{collections::HashMap, str::FromStr};
+use tokio::io::AsyncReadExt;
 use tokio::sync::Mutex;
 
 use super::{BlockLocation, ObjectMetadata};
 
 /// Implement object store on S3.
 pub struct S3ObjectStore {
+    connection_info: Option<ConnectionInfo>,
     client: Option<S3Client>,
     bucket: String,
     object: Mutex<HashMap<String, Bytes>>,
+}
+
+#[derive(Clone)]
+pub struct ConnectionInfo {
+    region: String,
+    access_key: String,
+    secret_key: String,
+    token: Option<String>,
+}
+
+impl From<ConnectionInfo> for AwsCredentials {
+    fn from(connection_info: ConnectionInfo) -> AwsCredentials {
+        AwsCredentials::new(
+            connection_info.access_key,
+            connection_info.secret_key,
+            connection_info.token,
+            None,
+        )
+    }
+}
+
+impl ConnectionInfo {
+    #[cfg(test)]
+    pub fn new_for_test_account() -> Self {
+        Self {
+            region: std::env::var("S3_TEST_REGION")
+                .map_err(|err| format!("no s3 access key found: {}", err))
+                .unwrap(),
+            access_key: std::env::var("S3_TEST_ACCESS_KEY")
+                .map_err(|err| format!("no s3 access key found: {}", err))
+                .unwrap(),
+            secret_key: std::env::var("S3_TEST_SECRET_KEY")
+                .map_err(|err| format!("no s3 access key found: {}", err))
+                .unwrap(),
+            token: None,
+        }
+    }
+
+    pub fn new(
+        region: String,
+        access_key: String,
+        secret_key: String,
+        token: Option<String>,
+    ) -> Self {
+        Self {
+            region,
+            access_key,
+            secret_key,
+            token,
+        }
+    }
 }
 
 #[async_trait::async_trait]
 impl ObjectStore for S3ObjectStore {
     async fn upload(&self, path: &str, obj: Bytes) -> Result<()> {
         ensure!(!obj.is_empty());
-        let client = self
-            .ensure_connection()
-            .ok_or_else(|| RwError::from(InternalError("S3 connection failure".to_string())))?;
+        ensure!(!self.client.is_none());
 
         // TODO(xiangyhu): what if the blob existed?
         let data = ByteStream::from(obj.as_ref().to_vec());
-        client
+        self.client
+            .as_ref()
+            .unwrap()
             .put_object(PutObjectRequest {
                 bucket: self.bucket.clone(),
                 key: path.to_string(),
@@ -43,8 +99,56 @@ impl ObjectStore for S3ObjectStore {
         Ok(())
     }
 
-    async fn read(&self, _path: &str, _block: Option<BlockLocation>) -> Result<Vec<u8>> {
-        todo!();
+    /// Amazon S3 doesn't support retrieving multiple ranges of data per GET request.
+    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> Result<Vec<u8>> {
+        ensure!(!self.client.is_none());
+
+        let response = self
+            .client
+            .as_ref()
+            .unwrap()
+            .get_object(GetObjectRequest {
+                bucket: self.bucket.clone(),
+                key: path.to_string(),
+                range: block_loc.unwrap().byte_range_specifier(),
+                ..Default::default()
+            })
+            .await;
+
+        match response {
+            Ok(data) => {
+                let mut val = Vec::new();
+                data.body
+                    .ok_or_else(|| {
+                        RwError::from(InternalError(format!(
+                            "request object {} but body is missing",
+                            path
+                        )))
+                    })?
+                    .into_async_read()
+                    .read_to_end(&mut val)
+                    .await
+                    .map_err(|err| {
+                        RwError::from(InternalError(format!(
+                            "reading object {} failed with error {}",
+                            path, err
+                        )))
+                    })?;
+                Ok(val)
+            }
+            Err(RusotoError::Service(GetObjectError::NoSuchKey(_))) => {
+                return Err(RwError::from(InternalError(format!(
+                    "No object named {} was found",
+                    path
+                ))))
+            }
+            Err(err) => {
+                return Err(RwError::from(InternalError(format!(
+                    "S3 put failure with error: {}",
+                    err
+                ))))
+            }
+        }
     }
 
     async fn metadata(&self, _path: &str) -> Result<ObjectMetadata> {
@@ -61,8 +165,57 @@ impl ObjectStore for S3ObjectStore {
 }
 
 impl S3ObjectStore {
-    fn ensure_connection(&self) -> Option<&S3Client> {
-        // TODO(xiangyhu): Make sure s3 client is valid and connectable with retry.
-        self.client.as_ref()
+    pub fn new(conn_info: ConnectionInfo, bucket: String) -> Self {
+        Self {
+            connection_info: Some(conn_info.clone()),
+            client: Some(S3Client::new_with(
+                HttpClient::new().expect("Failed to create HTTP client"),
+                StaticProvider::from(AwsCredentials::from(conn_info.clone())),
+                Region::from_str(conn_info.region.as_ref()).unwrap(),
+            )),
+            bucket,
+            object: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+/// We cannot leave credentials in our code history.
+/// To run this test, please read this page for references.
+/// [Run S3 tests](https://singularity-data.larksuite.com/docs/docuszYRfc00x6Q0QhqidP2AxEg)
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::Bytes;
+    use uuid::Uuid;
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_upload() {
+        let block = Bytes::from("123456");
+        let conn_info = ConnectionInfo::new_for_test_account();
+        let bucket = "s3-ut";
+        let path = Uuid::new_v4().to_string();
+
+        let s3 = S3ObjectStore::new(conn_info, bucket.to_string());
+        s3.upload(&path, block).await.unwrap();
+
+        // No such object.
+        s3.read(
+            &"/ab".to_string(),
+            Some(BlockLocation { offset: 0, size: 3 }),
+        )
+        .await
+        .unwrap_err();
+
+        let bytes = s3
+            .read(&path, Some(BlockLocation { offset: 4, size: 2 }))
+            .await
+            .unwrap();
+        assert_eq!(String::from_utf8(bytes.to_vec()).unwrap(), "56".to_string());
+
+        // Overflow.
+        s3.read(&path, Some(BlockLocation { offset: 7, size: 7 }))
+            .await
+            .unwrap_err();
     }
 }

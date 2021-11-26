@@ -17,6 +17,13 @@ pub struct ObjectMetadata {
     pub total_size: usize,
 }
 
+impl BlockLocation {
+    /// Generate the http bytes range specifer.
+    pub fn byte_range_specifier(&self) -> Option<String> {
+        Some(format!("bytes={}-{}", self.offset, self.offset + self.size))
+    }
+}
+
 /// The implementation must be thread-safe.
 #[async_trait::async_trait]
 pub trait ObjectStore: Send + Sync {

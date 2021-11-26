@@ -53,6 +53,7 @@ tokio-test = "0.4.2"
 tonic = "0.5"
 typed-builder = "0.9"
 url = "2.2.2"
+uuid = { version = "0.8", features = ["v4"] }
 
 [dev-dependencies]
 approx = "0.5"
