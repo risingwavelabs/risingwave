@@ -464,7 +464,7 @@ mod tests {
     fn test_bitmap_eq() {
         let b1: Bitmap = (vec![false; 3]).try_into().unwrap();
         let b2: Bitmap = (vec![false; 5]).try_into().unwrap();
-        assert!(b1 != b2);
+        assert_ne!(b1, b2);
 
         let b1: Bitmap = [true, false]
             .iter()
@@ -482,7 +482,7 @@ mod tests {
             .collect_vec()
             .try_into()
             .unwrap();
-        assert!(b1 == b2);
+        assert_eq!(b1, b2);
     }
 
     #[test]

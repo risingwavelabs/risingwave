@@ -125,10 +125,10 @@ impl Executor for NestedLoopJoinExecutor {
                 }
 
                 NestedLoopJoinState::Done => {
-                    if let Some(data_chunk) = self.chunk_builder.consume_all()? {
-                        return Ok(Some(data_chunk));
+                    return if let Some(data_chunk) = self.chunk_builder.consume_all()? {
+                        Ok(Some(data_chunk))
                     } else {
-                        return Ok(None);
+                        Ok(None)
                     }
                 }
             }

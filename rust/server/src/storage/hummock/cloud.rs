@@ -18,6 +18,7 @@ pub async fn gen_remote_table(
     Table::encode_meta(&meta, &mut buf);
     let meta_bytes = buf.freeze();
 
+    // get remote dir
     let remote_dir = remote_dir.unwrap_or(REMOTE_DIR);
 
     // upload table metadata
