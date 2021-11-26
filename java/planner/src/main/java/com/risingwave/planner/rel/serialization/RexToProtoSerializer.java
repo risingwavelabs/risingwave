@@ -34,6 +34,8 @@ import org.apache.calcite.util.TimestampWithTimeZoneString;
 
 /** Serialize Rex to protoExprNode */
 public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
+  private static final String ROUND_FUNC_NAME = "ROUND";
+
   private static final ImmutableMap<SqlKind, ExprNode.Type> SQL_TO_FUNC_MAPPING =
       ImmutableMap.<SqlKind, ExprNode.Type>builder()
           .put(SqlKind.CAST, ExprNode.Type.CAST)
@@ -261,23 +263,36 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
         call.getOperands().stream()
             .map(rexNode -> rexNode.accept(this))
             .collect(Collectors.toList());
-    return makeFunctionCallExpr(
-        children, protoDataType, funcCallOf(call.getKind(), call.getOperator().getName()));
+    return makeFunctionCallExpr(children, protoDataType, funcCallOf(call));
   }
 
   private static ExprNode.Type funcCallOf(SqlKind kind, String name) {
     if (kind == SqlKind.OTHER_FUNCTION) {
-      return Optional.of(STRING_TO_FUNC_MAPPING.get(name))
+      return Optional.ofNullable(STRING_TO_FUNC_MAPPING.get(name))
           .orElseThrow(
               () ->
                   new PgException(
                       PgErrorCode.INTERNAL_ERROR, "Unmappable function call:" + " %s", name));
     }
-    return Optional.of(SQL_TO_FUNC_MAPPING.get(kind))
+    return Optional.ofNullable(SQL_TO_FUNC_MAPPING.get(kind))
         .orElseThrow(
             () ->
                 new PgException(
                     PgErrorCode.INTERNAL_ERROR, "Unmappable function call:" + " %s", kind));
+  }
+
+  private static ExprNode.Type funcCallOf(RexCall call) {
+    var operator = call.getOperator();
+
+    if (operator.getName().equalsIgnoreCase(ROUND_FUNC_NAME)) {
+      if (call.getOperands().size() > 1) {
+        return ExprNode.Type.ROUND_DIGIT;
+      } else {
+        return ExprNode.Type.ROUND;
+      }
+    }
+
+    return funcCallOf(operator.getKind(), operator.getName());
   }
 
   /**

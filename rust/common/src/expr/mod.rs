@@ -40,7 +40,7 @@ pub fn build_from_prost(prost: &ProstExprNode) -> Result<BoxedExpression> {
             build_binary_expr_prost(prost)
         }
         Add | Subtract | Multiply | Divide | Modulus | And | Or => build_binary_expr_prost(prost),
-        Extract => build_binary_expr_prost(prost),
+        Extract | RoundDigit => build_binary_expr_prost(prost),
         StreamNullByRowCount => build_nullable_binary_expr_prost(prost),
         Substr => build_substr_expr(prost),
         Length => build_length_expr(prost),

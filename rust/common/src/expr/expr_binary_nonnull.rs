@@ -1,5 +1,5 @@
 /// For expression that only accept two non null arguments as input.
-use crate::array::{Array, BoolArray, DataTypeTrait, I32Array, I64Array, UTF8Array};
+use crate::array::{Array, BoolArray, DataTypeTrait, DecimalArray, I32Array, I64Array, UTF8Array};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 use crate::expr::template::BinaryExpression;
@@ -12,6 +12,7 @@ use crate::vector_op::conjunction::{and, or};
 use crate::vector_op::extract::{extract_from_date, extract_from_timestamp};
 use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
+use crate::vector_op::round::round_digits;
 use risingwave_pb::expr::expr_node::Type as ProstExprType;
 use std::marker::PhantomData;
 
@@ -229,6 +230,17 @@ pub fn new_binary_expr(
             _phantom: PhantomData,
         }),
         ProstExprType::Extract => build_extract_expr(ret, l, r),
+        ProstExprType::RoundDigit => {
+            Box::new(
+                BinaryExpression::<DecimalArray, I32Array, DecimalArray, _> {
+                    expr_ia1: l,
+                    expr_ia2: r,
+                    return_type: ret,
+                    func: round_digits,
+                    _phantom: PhantomData,
+                },
+            )
+        }
         tp => {
             unimplemented!(
                 "The expression {:?} using vectorized expression framework is not supported yet!",

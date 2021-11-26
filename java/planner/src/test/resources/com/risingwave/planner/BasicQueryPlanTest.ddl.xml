@@ -22,5 +22,9 @@ create table t3(v1 int not null)
 create table t4(v1 int)
         ]]>
     </Resource>
-
+    <Resource>
+        <![CDATA[
+create table t5(v1 numeric)
+        ]]>
+    </Resource>
 </Root>

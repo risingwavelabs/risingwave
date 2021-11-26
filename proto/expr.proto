@@ -44,6 +44,14 @@ message ExprNode {
     LTRIM = 210;
     RTRIM = 211;
     CASE = 212;
+    // Function `round(numeric, integer) -> numeric` in pg
+    ROUND_DIGIT = 213;
+    // Functions
+    // ```
+    // round(numeric) -> numeric
+    // round(double precision) -> double precision
+    // ``` in pg
+    ROUND = 214;
     STREAM_NULL_BY_ROW_COUNT = 1000;
   }
   Type expr_type = 1;

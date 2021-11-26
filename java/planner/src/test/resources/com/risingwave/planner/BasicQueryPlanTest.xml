@@ -337,4 +337,19 @@ RwBatchProject(EXPR$0=[EXTRACT(FLAG(DAY), 1999-01-02)])
         <Resource name="json" path="batch/basic/extract">
         </Resource>
     </TestCase>
+    <TestCase name="round function">
+        <Resource name="sql">
+            <![CDATA[
+            select round(v1, 4) from t5;
+]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchProject(EXPR$0=[ROUND($0, 4)])
+  RwBatchTableScan(table=[[test_schema, t5]], columns=[v1])
+]]>
+        </Resource>
+        <Resource name="json" path="batch/basic/round_digit">
+        </Resource>
+    </TestCase>
 </Root>

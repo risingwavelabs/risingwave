@@ -1,0 +1,56 @@
+{
+  "nodeType": "PROJECT",
+  "body": {
+    "@type": "type.googleapis.com/plan.ProjectNode",
+    "selectList": [{
+      "exprType": "ROUND_DIGIT",
+      "returnType": {
+        "typeName": "DECIMAL",
+        "precision": 28,
+        "scale": 10,
+        "isNullable": true
+      },
+      "funcCall": {
+        "children": [{
+          "exprType": "INPUT_REF",
+          "returnType": {
+            "typeName": "DECIMAL",
+            "precision": 28,
+            "scale": 10,
+            "isNullable": true
+          },
+          "inputRef": {
+          }
+        }, {
+          "exprType": "CONSTANT_VALUE",
+          "returnType": {
+            "typeName": "INT32"
+          },
+          "constant": {
+            "body": "AAAABA=="
+          }
+        }]
+      }
+    }]
+  },
+  "children": [{
+    "nodeType": "SEQ_SCAN",
+    "body": {
+      "@type": "type.googleapis.com/plan.SeqScanNode",
+      "tableRefId": {
+        "schemaRefId": {
+          "databaseRefId": {
+          }
+        },
+        "tableId": 4
+      },
+      "columnIds": [1],
+      "columnType": [{
+        "typeName": "DECIMAL",
+        "precision": 28,
+        "scale": 10,
+        "isNullable": true
+      }]
+    }
+  }]
+}
