@@ -154,7 +154,7 @@ mod tests {
         };
         let column_ids = vec![0, 1];
 
-        let stream_recv = table.create_stream()?;
+        let (_stream_sender, stream_recv) = table.create_stream()?;
         let (barrier_sender, barrier_receiver) = unbounded();
 
         let mut source =
@@ -256,7 +256,7 @@ mod tests {
         };
         let column_ids = vec![0, 1];
 
-        let stream_recv = table.create_stream()?;
+        let (_stream_sender, stream_recv) = table.create_stream()?;
         let (barrier_sender, barrier_receiver) = unbounded();
 
         let mut source =

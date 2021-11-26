@@ -128,12 +128,17 @@ impl Table for BummockTable {
         Ok(ret_cardinality)
     }
 
-    fn create_stream(&self) -> Result<mpsc::UnboundedReceiver<StreamChunk>> {
+    fn create_stream(
+        &self,
+    ) -> Result<(
+        mpsc::UnboundedSender<StreamChunk>,
+        mpsc::UnboundedReceiver<StreamChunk>,
+    )> {
         let _write_guard = self.rwlock.write().unwrap();
         let (tx, rx) = mpsc::unbounded();
         let mut s = self.stream_sender.write().unwrap();
-        s.push(Some(tx));
-        Ok(rx)
+        s.push(Some(tx.clone()));
+        Ok((tx, rx))
     }
 
     async fn get_data(&self) -> Result<BummockResult> {

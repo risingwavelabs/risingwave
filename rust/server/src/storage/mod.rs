@@ -45,7 +45,12 @@ pub trait Table: Sync + Send {
     /// Note that only one stream is allowed for a table.
     /// Existing stream should be reused if the user create
     /// more than one materialized view from a table.
-    fn create_stream(&self) -> Result<mpsc::UnboundedReceiver<StreamChunk>>;
+    fn create_stream(
+        &self,
+    ) -> Result<(
+        mpsc::UnboundedSender<StreamChunk>,
+        mpsc::UnboundedReceiver<StreamChunk>,
+    )>;
 
     /// Get the column ids of the table.
     fn get_column_ids(&self) -> Vec<i32>;

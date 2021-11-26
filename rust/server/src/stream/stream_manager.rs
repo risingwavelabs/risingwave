@@ -374,14 +374,35 @@ impl StreamManagerCore {
                     .map(|column_id| *column_id as usize)
                     .collect::<Vec<_>>();
                 if let TableTypes::BummockTable(table) = table_ref {
-                    let stream_receiver = table.create_stream()?;
+                    let (stream_sender, stream_receiver) = table.create_stream()?;
+                    let schema = table.schema();
+                    // Add existing data in the table into stream channel for initializing states.
+                    tokio::spawn(async move {
+                        let bummock_result = table.get_data().await;
+                        match bummock_result {
+                            Ok(BummockResult::Data(table_data)) => {
+                                table_data.iter().for_each(|data_chunk| {
+                                    let stream_chunk = StreamChunk::new(
+                                        vec![Op::Insert; data_chunk.cardinality()],
+                                        Vec::from(data_chunk.columns()),
+                                        data_chunk.visibility().clone(),
+                                    );
+                                    stream_sender.unbounded_send(stream_chunk).unwrap();
+                                });
+                            }
+                            _ => {
+                                info!("all data init");
+                            }
+                        }
+                    });
+
                     // TODO: The channel pair should be created by the Checkpoint manger. So this
                     // line may be removed later.
                     let (sender, barrier_receiver) = unbounded();
                     self.sender_placeholder.push(sender);
                     Ok(Box::new(TableSourceExecutor::new(
                         table_id,
-                        table.schema(),
+                        schema,
                         column_ids,
                         stream_receiver,
                         barrier_receiver,
