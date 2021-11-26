@@ -37,23 +37,26 @@ sleep 10
 echo "Create topics"
 for filename in "$SCRIPT_PATH"/test_data/* ; do
     [ -e "$filename" ] || continue
-    topic=$(basename "$filename")
+    base=$(basename "$filename")
+    topic="${base%%.*}"
+    partition="${base##*.}"
 
     # always ok
     echo "Drop topic $topic"
     docker exec -i broker /usr/bin/kafka-topics --bootstrap-server broker:9092 --topic "$topic" --delete || true
 
-    echo "Recreate topic $topic"
-    docker exec -i broker /usr/bin/kafka-topics --bootstrap-server broker:9092 --topic "$topic" --create
+    echo "Recreate topic $topic with partition $partition"
+    docker exec -i broker /usr/bin/kafka-topics --bootstrap-server broker:9092 --topic "$topic" --create --partitions "$partition"
 done
 
 
 echo "Fulfill kafka topics"
 for filename in "$SCRIPT_PATH"/test_data/* ; do
     [ -e "$filename" ] || continue
-    topic=$(basename "$filename")
+    base=$(basename "$filename")
+    topic="${base%%.*}"
 
-    echo "Fulfill kafka topic $topic"
+    echo "Fulfill kafka topic $topic with data from $base"
     # Note the -l parameter here, without which -l will treat the entire file as a single message
-    docker exec -i kafkacat kafkacat -b broker:9092 -t "$topic" -l -P /streaming/test_data/"$topic"
+    docker exec -i kafkacat kafkacat -b broker:9092 -t "$topic" -l -P /streaming/test_data/"$base"
 done
