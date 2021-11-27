@@ -8,6 +8,7 @@ import java.util.Set;
 import org.apache.calcite.plan.DeriveMode;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelTraitSet;
+import org.apache.calcite.rel.PhysicalNode;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.CorrelationId;
 import org.apache.calcite.rel.core.Join;
@@ -20,7 +21,7 @@ import org.apache.calcite.util.mapping.Mappings;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 /** Base class for join with build and probe side. */
-public abstract class RwBufferJoinBase extends Join implements RisingWaveBatchPhyRel {
+public abstract class RwBufferJoinBase extends Join implements RisingWaveBatchPhyRel, PhysicalNode {
 
   public RwBufferJoinBase(
       RelOptCluster cluster,
@@ -36,8 +37,20 @@ public abstract class RwBufferJoinBase extends Join implements RisingWaveBatchPh
   }
 
   @Override
+  public @Nullable Pair<RelTraitSet, List<RelTraitSet>> passThroughTraits(RelTraitSet required) {
+    return null;
+  }
+
+  @Override
   public @Nullable Pair<RelTraitSet, List<RelTraitSet>> deriveTraits(
       RelTraitSet childTraits, int childId) {
+    if (childTraits.getConvention() != traitSet.getConvention()) {
+      return null;
+    }
+    if (childTraits.getConvention() != BATCH_DISTRIBUTED) {
+      return null;
+    }
+
     var newTraits = traitSet;
     var dist = childTraits.getTrait(RwDistributionTraitDef.getInstance());
     if (dist != null) {

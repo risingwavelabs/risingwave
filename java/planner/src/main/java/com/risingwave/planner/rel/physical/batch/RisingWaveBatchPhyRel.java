@@ -6,18 +6,15 @@ import com.risingwave.planner.rel.common.dist.RwDistributionTrait;
 import com.risingwave.planner.rel.common.dist.RwDistributionTraitDef;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.physical.RisingWavePhysicalRel;
-import java.util.List;
 import org.apache.calcite.plan.Convention;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelTraitSet;
-import org.apache.calcite.rel.PhysicalNode;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.convert.ConverterRule;
-import org.apache.calcite.util.Pair;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 /** BatchPhyRel used in physical and distributed optimization phase */
-public interface RisingWaveBatchPhyRel extends RisingWavePhysicalRel, PhysicalNode {
+public interface RisingWaveBatchPhyRel extends RisingWavePhysicalRel {
   Convention BATCH_PHYSICAL =
       new Convention.Impl("RisingWave Batch Physical", RisingWaveBatchPhyRel.class) {
         @Override
@@ -98,17 +95,6 @@ public interface RisingWaveBatchPhyRel extends RisingWavePhysicalRel, PhysicalNo
   }
 
   default @Nullable RelNode convertToDistributed() {
-    return null;
-  }
-
-  @Override
-  default @Nullable Pair<RelTraitSet, List<RelTraitSet>> passThroughTraits(RelTraitSet required) {
-    return null;
-  }
-
-  @Override
-  default @Nullable Pair<RelTraitSet, List<RelTraitSet>> deriveTraits(
-      RelTraitSet childTraits, int childId) {
     return null;
   }
 

@@ -4,7 +4,6 @@ import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
 import com.google.common.collect.ImmutableList;
 import com.google.protobuf.Any;
-import com.risingwave.planner.rel.common.dist.RwDistributionTraitDef;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.logical.RwLogicalValues;
 import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
@@ -19,7 +18,6 @@ import org.apache.calcite.rel.core.Values;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
-import org.apache.calcite.util.Pair;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 /**
@@ -71,17 +69,7 @@ public class RwBatchValues extends Values implements RisingWaveBatchPhyRel {
 
   @Override
   public RelNode convertToDistributed() {
-    return copy(getTraitSet().plus(BATCH_DISTRIBUTED).plus(RwDistributions.ANY));
-  }
-
-  @Override
-  public Pair<RelTraitSet, List<RelTraitSet>> passThroughTraits(RelTraitSet required) {
-    var newTraits = traitSet;
-    var dist = required.getTrait(RwDistributionTraitDef.getInstance());
-    if (dist != null) {
-      newTraits = newTraits.plus(dist);
-    }
-    return Pair.of(newTraits, ImmutableList.of());
+    return copy(getTraitSet().plus(BATCH_DISTRIBUTED).plus(RwDistributions.SINGLETON));
   }
 
   /** Values converter rule between logical and physical. */

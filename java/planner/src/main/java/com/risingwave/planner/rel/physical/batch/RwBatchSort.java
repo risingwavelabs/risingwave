@@ -20,6 +20,7 @@ import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelTraitSet;
+import org.apache.calcite.rel.PhysicalNode;
 import org.apache.calcite.rel.RelCollation;
 import org.apache.calcite.rel.RelFieldCollation;
 import org.apache.calcite.rel.RelNode;
@@ -34,7 +35,7 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 
 /** Sort in Batch convention */
 // TODO: convert to distributed plan when offset != NULL
-public class RwBatchSort extends Sort implements RisingWaveBatchPhyRel {
+public class RwBatchSort extends Sort implements RisingWaveBatchPhyRel, PhysicalNode {
   public RwBatchSort(
       RelOptCluster cluster, RelTraitSet traits, RelNode child, RelCollation collation) {
     this(cluster, traits, child, collation, null, null);
@@ -148,8 +149,20 @@ public class RwBatchSort extends Sort implements RisingWaveBatchPhyRel {
   }
 
   @Override
+  public @Nullable Pair<RelTraitSet, List<RelTraitSet>> passThroughTraits(RelTraitSet required) {
+    return null;
+  }
+
+  @Override
   public Pair<RelTraitSet, List<RelTraitSet>> deriveTraits(
       final RelTraitSet childTraits, final int childId) {
+    if (childTraits.getConvention() != traitSet.getConvention()) {
+      return null;
+    }
+    if (childTraits.getConvention() != BATCH_DISTRIBUTED) {
+      return null;
+    }
+
     if (fetch != null) {
       return null;
     }

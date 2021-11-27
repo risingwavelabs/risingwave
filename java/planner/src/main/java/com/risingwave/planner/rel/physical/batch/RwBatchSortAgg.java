@@ -17,6 +17,7 @@ import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.plan.RelTraitSet;
+import org.apache.calcite.rel.PhysicalNode;
 import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.convert.ConverterRule;
@@ -29,7 +30,7 @@ import org.apache.calcite.util.Pair;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 /** Sort agg assumes that its input are sorted according to it group key. */
-public class RwBatchSortAgg extends RwAggregate implements RisingWaveBatchPhyRel {
+public class RwBatchSortAgg extends RwAggregate implements RisingWaveBatchPhyRel, PhysicalNode {
   public RwBatchSortAgg(
       RelOptCluster cluster,
       RelTraitSet traitSet,
@@ -64,8 +65,20 @@ public class RwBatchSortAgg extends RwAggregate implements RisingWaveBatchPhyRel
   }
 
   @Override
+  public @Nullable Pair<RelTraitSet, List<RelTraitSet>> passThroughTraits(RelTraitSet required) {
+    return null;
+  }
+
+  @Override
   public Pair<RelTraitSet, List<RelTraitSet>> deriveTraits(
       final RelTraitSet childTraits, final int childId) {
+    if (childTraits.getConvention() != traitSet.getConvention()) {
+      return null;
+    }
+    if (childTraits.getConvention() != BATCH_DISTRIBUTED) {
+      return null;
+    }
+
     var newTraits = traitSet;
     var dist = childTraits.getTrait(RwDistributionTraitDef.getInstance());
     if (dist != null) {
