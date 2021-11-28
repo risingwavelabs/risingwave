@@ -4,6 +4,8 @@ use crate::storage::RowTableRef;
 use async_trait::async_trait;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::Schema;
+use risingwave_common::util::sort_util::OrderPair;
+use std::sync::Arc;
 
 /// `MViewSinkExecutor` writes data to a row-based memtable, so that data could
 /// be queried by the AP engine.
@@ -11,15 +13,22 @@ pub struct MViewSinkExecutor {
     input: Box<dyn Executor>,
     table: RowTableRef,
     pk_col: Vec<usize>,
+    order_pairs: Arc<Vec<OrderPair>>,
     ingest_op: Vec<(Row, Option<Row>)>,
 }
 
 impl MViewSinkExecutor {
-    pub fn new(input: Box<dyn Executor>, table: RowTableRef, pk_col: Vec<usize>) -> Self {
+    pub fn new(
+        input: Box<dyn Executor>,
+        table: RowTableRef,
+        pk_col: Vec<usize>,
+        order_pairs: Arc<Vec<OrderPair>>,
+    ) -> Self {
         Self {
             input,
             table,
             pk_col,
+            order_pairs,
             ingest_op: vec![],
         }
     }
@@ -184,8 +193,12 @@ mod tests {
                     Message::Barrier(Barrier::default()),
                 ],
             );
-            let mut sink_executor =
-                Box::new(MViewSinkExecutor::new(Box::new(source), table.clone(), pks));
+            let mut sink_executor = Box::new(MViewSinkExecutor::new(
+                Box::new(source),
+                table.clone(),
+                pks,
+                Arc::new(vec![]),
+            ));
 
             sink_executor.next().await.unwrap();
             // First stream chunk. We check the existence of (3) -> (3,6)

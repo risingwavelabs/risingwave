@@ -47,9 +47,11 @@ public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCata
     return this.version;
   }
 
-  void createTable(CreateTableInfo createTableInfo) {
+  MaterializedViewCatalog createMaterializedView(
+      CreateMaterializedViewInfo createMaterializedViewInfo) {
+    var id = nextTableId.getAndIncrement();
     TableCatalog.TableName tableName =
-        new TableCatalog.TableName(createTableInfo.getName(), getEntityName());
+        new TableCatalog.TableName(createMaterializedViewInfo.getName(), getEntityName());
 
     if (tableByName.containsKey(tableName)) {
       throw RisingWaveException.from(
@@ -59,27 +61,34 @@ public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCata
           getSchemaName());
     }
 
-    TableCatalog.TableId tableId = new TableCatalog.TableId(nextTableId.getAndIncrement(), getId());
+    TableCatalog.TableId viewId = new TableCatalog.TableId(id, getId());
 
-    TableCatalog table =
-        new TableCatalog(
-            tableId,
+    MaterializedViewCatalog view =
+        new MaterializedViewCatalog(
+            viewId,
             tableName,
             Collections.emptyList(),
-            createTableInfo.isMv(),
-            createTableInfo.isStream(),
+            createMaterializedViewInfo.isStream(),
             ImmutableIntList.of(),
             DataDistributionType.ALL,
-            createTableInfo.getProperties(),
-            createTableInfo.getRowFormat(),
-            createTableInfo.getRowSchemaLocation(),
-            createTableInfo.getCollation(),
-            createTableInfo.getOffset(),
-            createTableInfo.getLimit());
+            createMaterializedViewInfo.getProperties(),
+            createMaterializedViewInfo.getRowFormat(),
+            createMaterializedViewInfo.getRowSchemaLocation(),
+            createMaterializedViewInfo.getCollation(),
+            createMaterializedViewInfo.getOffset(),
+            createMaterializedViewInfo.getLimit());
 
-    createTableInfo.getColumns().forEach(pair -> table.addColumn(pair.getKey(), pair.getValue()));
+    createMaterializedViewInfo
+        .getColumns()
+        .forEach(pair -> view.addColumn(pair.getKey(), pair.getValue()));
 
-    registerTable(table);
+    registerTable(view);
+    return view;
+  }
+
+  void createTable(CreateTableInfo createTableInfo) {
+    var id = nextTableId.getAndIncrement();
+    createTableWithId(createTableInfo, id);
   }
 
   TableCatalog createTableWithId(CreateTableInfo createTableInfo, Integer id) {
@@ -101,16 +110,12 @@ public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCata
             tableId,
             tableName,
             Collections.emptyList(),
-            createTableInfo.isMv(),
             createTableInfo.isStream(),
             ImmutableIntList.of(),
             DataDistributionType.ALL,
             createTableInfo.getProperties(),
             createTableInfo.getRowFormat(),
-            createTableInfo.getRowSchemaLocation(),
-            createTableInfo.getCollation(),
-            createTableInfo.getOffset(),
-            createTableInfo.getLimit());
+            createTableInfo.getRowSchemaLocation());
 
     createTableInfo.getColumns().forEach(pair -> table.addColumn(pair.getKey(), pair.getValue()));
 

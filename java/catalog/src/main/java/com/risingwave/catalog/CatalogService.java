@@ -71,6 +71,15 @@ public interface CatalogService {
     return createTable(SchemaCatalog.SchemaName.of(database, schema), createTableInfo);
   }
 
+  MaterializedViewCatalog createMaterializedView(
+      SchemaCatalog.SchemaName schemaName, CreateMaterializedViewInfo createMaterializedViewInfo);
+
+  default TableCatalog createMaterializedView(
+      String database, String schema, CreateMaterializedViewInfo createMaterializedViewInfo) {
+    return createMaterializedView(
+        SchemaCatalog.SchemaName.of(database, schema), createMaterializedViewInfo);
+  }
+
   TableCatalog getTable(TableCatalog.TableName tableName);
 
   @Nullable

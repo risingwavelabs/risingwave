@@ -78,6 +78,18 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
     return this.primaryKeyIndices;
   }
 
+  public RelCollation getCollation() {
+    return collation;
+  }
+
+  public RexNode getOffset() {
+    return offset;
+  }
+
+  public RexNode getFetch() {
+    return fetch;
+  }
+
   /**
    * Serialize to protobuf
    *

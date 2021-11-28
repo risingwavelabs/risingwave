@@ -1,7 +1,8 @@
 package com.risingwave.execution.handler;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.risingwave.catalog.CreateTableInfo;
+import com.risingwave.catalog.CreateMaterializedViewInfo;
+import com.risingwave.catalog.MaterializedViewCatalog;
 import com.risingwave.catalog.SchemaCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.common.exception.PgErrorCode;
@@ -20,6 +21,7 @@ import com.risingwave.rpc.Messages;
 import com.risingwave.scheduler.streaming.StreamFragmenter;
 import com.risingwave.scheduler.streaming.StreamManager;
 import com.risingwave.scheduler.streaming.graph.StreamGraph;
+import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlCreateMaterializedView;
@@ -94,21 +96,27 @@ public class CreateMaterializedViewHandler implements SqlHandler {
   }
 
   @VisibleForTesting
-  public TableCatalog convertPlanToCatalog(
+  public MaterializedViewCatalog convertPlanToCatalog(
       String tableName, StreamingPlan plan, ExecutionContext context) {
     SchemaCatalog.SchemaName schemaName = context.getCurrentSchema();
 
-    CreateTableInfo.Builder createTableInfoBuilder = CreateTableInfo.builder(tableName);
+    CreateMaterializedViewInfo.Builder builder = CreateMaterializedViewInfo.builder(tableName);
     RwStreamMaterializedView rootNode = plan.getStreamingPlan();
     var columns = rootNode.getColumns();
     for (var column : columns) {
-      createTableInfoBuilder.addColumn(column.getKey(), column.getValue());
+      builder.addColumn(column.getKey(), column.getValue());
     }
-    createTableInfoBuilder.setMv(true);
-    CreateTableInfo tableInfo = createTableInfoBuilder.build();
-    TableCatalog tableCatalog = context.getCatalogService().createTable(schemaName, tableInfo);
-    rootNode.setTableId(tableCatalog.getId());
-    return tableCatalog;
+    builder.setCollation(rootNode.getCollation());
+    RexNode fetch = rootNode.getFetch();
+    RexNode offset = rootNode.getOffset();
+    builder.setLimit(fetch);
+    builder.setOffset(offset);
+    builder.setMv(true);
+    CreateMaterializedViewInfo mvInfo = builder.build();
+    MaterializedViewCatalog viewCatalog =
+        context.getCatalogService().createMaterializedView(schemaName, mvInfo);
+    rootNode.setTableId(viewCatalog.getId());
+    return viewCatalog;
   }
 
   @VisibleForTesting

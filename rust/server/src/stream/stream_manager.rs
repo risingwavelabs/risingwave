@@ -523,29 +523,24 @@ impl StreamManagerCore {
                     .iter()
                     .map(|key| *key as usize)
                     .collect::<Vec<_>>();
+                let column_orders = materialized_view_node.get_column_orders();
+                let order_pairs = fetch_orders(column_orders).unwrap();
                 table_manager.create_materialized_view(&table_id, columns, pks.clone())?;
                 let table_ref = table_manager.get_table(&table_id).unwrap();
-                match table_ref {
-                    TableTypes::Row(table) => {
-                        let executor = Box::new(MViewSinkExecutor::new(
-                            input.remove(0),
-                            table as Arc<dyn RowTable>,
-                            pks,
-                        ));
-                        Ok(executor)
-                    }
-                    TableTypes::TestRow(table) => {
-                        let executor = Box::new(MViewSinkExecutor::new(
-                            input.remove(0),
-                            table as Arc<dyn RowTable>,
-                            pks,
-                        ));
-                        Ok(executor)
-                    }
+                let table = match table_ref {
+                    TableTypes::Row(table) => Ok(table as Arc<dyn RowTable>),
+                    TableTypes::TestRow(table) => Ok(table as Arc<dyn RowTable>),
                     _ => Err(RwError::from(InternalError(
                         "Materialized view creation internal error".to_string(),
                     ))),
-                }
+                }?;
+                let executor = Box::new(MViewSinkExecutor::new(
+                    input.remove(0),
+                    table as Arc<dyn RowTable>,
+                    pks,
+                    Arc::new(order_pairs),
+                ));
+                Ok(executor)
             }
         };
 

@@ -91,7 +91,6 @@ public class RwBatchInsert extends TableModify implements RisingWaveBatchPhyRel 
         InsertNode.newBuilder().setTableRefId(Messages.getTableRefId(tableCatalog.getId()));
 
     insertNodeBuilder.addAllColumnIds(columnIds);
-
     return PlanNode.newBuilder()
         .setNodeType(PlanNode.PlanNodeType.INSERT)
         .setBody(Any.pack(insertNodeBuilder.build()))

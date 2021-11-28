@@ -380,6 +380,14 @@ public class RemoteCatalogService implements CatalogService {
   }
 
   @Override
+  public MaterializedViewCatalog createMaterializedView(
+      SchemaCatalog.SchemaName schemaName, CreateMaterializedViewInfo createMaterializedViewInfo) {
+    LOGGER.debug(
+        "create materialized view: {}:{}", createMaterializedViewInfo.getName(), schemaName);
+    throw new RuntimeException("createMaterializedView unimplemented");
+  }
+
+  @Override
   public TableCatalog getTable(TableCatalog.TableName tableName) {
     return getSchemaChecked(tableName.getParent()).getTableCatalog(tableName);
   }

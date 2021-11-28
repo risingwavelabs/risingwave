@@ -23,7 +23,6 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javax.annotation.Nullable;
 import org.apache.calcite.config.CalciteConnectionConfig;
-import org.apache.calcite.rel.RelCollation;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rel.type.StructKind;
@@ -46,7 +45,6 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
   private final ColumnCatalog rowIdColumn;
   private final ConcurrentMap<ColumnCatalog.ColumnId, ColumnCatalog> columnById;
   private final ConcurrentMap<ColumnCatalog.ColumnName, ColumnCatalog> columnByName;
-  private final boolean materializedView;
   private final boolean stream;
   private final ImmutableIntList primaryKeyColumnIds;
   private final DataDistributionType distributionType;
@@ -56,35 +54,27 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
   private final boolean appendOnly = false;
   private Long version;
   private final String rowSchemaLocation;
-  private final RelCollation collation;
-  private final Integer offset;
-  private final Integer limit;
 
   TableCatalog(
       TableId id,
       TableName name,
       Collection<ColumnCatalog> columns,
-      boolean materializedView,
       boolean stream,
       ImmutableIntList primaryKeyColumnIds,
       DataDistributionType distributionType,
       ImmutableMap<String, String> properties,
       String rowFormat,
-      String rowSchemaLocation,
-      RelCollation collation,
-      Integer offset,
-      Integer limit) {
+      String rowSchemaLocation) {
     super(id, name);
     // We remark that we should only insert implicit row id for OLAP table, not MV, not Stream.
     // If an MV happen to have some implicit row id as its pk, it will be added in an explicit
     // manner.
-    if (!stream && !materializedView) {
+    if (!stream && !isMaterializedView()) {
       this.nextColumnId.getAndIncrement();
     }
     this.columns = new ArrayList<>(columns);
     this.columnById = EntityBase.groupBy(columns, ColumnCatalog::getId);
     this.columnByName = EntityBase.groupBy(columns, ColumnCatalog::getEntityName);
-    this.materializedView = materializedView;
     this.stream = stream;
     this.primaryKeyColumnIds = primaryKeyColumnIds;
     this.distributionType = distributionType;
@@ -92,10 +82,7 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
     this.rowFormat = rowFormat;
     this.rowIdColumn = buildRowIdColumn();
     this.rowSchemaLocation = rowSchemaLocation;
-    this.collation = collation;
-    this.offset = offset;
-    this.limit = limit;
-    if (!stream && !materializedView) {
+    if (!stream && !isMaterializedView()) {
       // Put row-id column in map but do not put it in list of columns.
       this.columnById.put(rowIdColumn.getId(), rowIdColumn);
       this.columnByName.put(rowIdColumn.getEntityName(), rowIdColumn);
@@ -111,7 +98,7 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
   }
 
   public boolean isMaterializedView() {
-    return materializedView;
+    return false;
   }
 
   public ImmutableIntList getPrimaryKeyColumnIds() {
@@ -219,7 +206,7 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
 
   @Override
   public Schema.TableType getJdbcTableType() {
-    return materializedView ? Schema.TableType.MATERIALIZED_VIEW : Schema.TableType.TABLE;
+    return Schema.TableType.TABLE;
   }
 
   @Override

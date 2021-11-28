@@ -70,6 +70,16 @@ public class SimpleCatalogService implements CatalogService {
   }
 
   @Override
+  public MaterializedViewCatalog createMaterializedView(
+      SchemaCatalog.SchemaName schemaName, CreateMaterializedViewInfo createMaterializedViewInfo) {
+    SchemaCatalog schema = getSchemaChecked(schemaName);
+    schema.createMaterializedView(createMaterializedViewInfo);
+    return (MaterializedViewCatalog)
+        schema.getTableCatalog(
+            new TableCatalog.TableName(createMaterializedViewInfo.getName(), schemaName));
+  }
+
+  @Override
   public TableCatalog getTable(TableCatalog.TableName tableName) {
     return getSchemaChecked(tableName.getParent()).getTableCatalog(tableName);
   }

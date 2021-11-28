@@ -21,7 +21,9 @@ import com.risingwave.planner.rel.physical.batch.RwBatchTableScan;
 import com.risingwave.planner.rel.physical.batch.RwBatchValues;
 import com.risingwave.planner.rel.physical.batch.join.RwBatchHashJoin;
 import com.risingwave.planner.rel.physical.batch.join.RwBatchNestLoopJoin;
+import com.risingwave.planner.rules.distributed.agg.SingleLimitRule;
 import com.risingwave.planner.rules.distributed.agg.TwoPhaseAggRule;
+import com.risingwave.planner.rules.distributed.agg.TwoPhaseLimitRule;
 import com.risingwave.planner.rules.distributed.join.BroadcastJoinRule;
 import com.risingwave.planner.rules.distributed.join.ShuffleJoinRule;
 import com.risingwave.planner.rules.logical.ProjectToTableScanRule;
@@ -124,7 +126,8 @@ public class BatchRuleSets {
           RwBatchHashJoin.BatchHashJoinConverterRule.INSTANCE,
           RwBatchNestLoopJoin.BatchNestLoopJoinConverterRule.INSTANCE,
           RwBatchHashAgg.BatchHashAggConverterRule.INSTANCE,
-          RwBatchSortAgg.BatchSortAggConverterRule.INSTANCE);
+          RwBatchSortAgg.BatchSortAggConverterRule.INSTANCE,
+          CoreRules.SORT_REMOVE);
 
   public static final RuleSet DISTRIBUTED_CONVERTER_RULES =
       RuleSets.ofList(
@@ -144,5 +147,7 @@ public class BatchRuleSets {
           // FIXME: currently cardinality estimation is inaccurate without enough statistics to
           // determine shuffleAgg or 2phaseAgg
           //          ShuffleAggRule.INSTANCE,
-          TwoPhaseAggRule.INSTANCE);
+          TwoPhaseAggRule.INSTANCE,
+          TwoPhaseLimitRule.INSTANCE,
+          SingleLimitRule.INSTANCE);
 }

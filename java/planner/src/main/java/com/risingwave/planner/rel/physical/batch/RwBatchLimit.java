@@ -6,15 +6,17 @@ import com.risingwave.proto.plan.PlanNode;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelTraitSet;
+import org.apache.calcite.rel.PhysicalNode;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.SingleRel;
 import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.util.Pair;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 /** Limit in Batch convention */
-public class RwBatchLimit extends SingleRel implements RisingWaveBatchPhyRel {
+public class RwBatchLimit extends SingleRel implements RisingWaveBatchPhyRel, PhysicalNode {
 
   public final @Nullable RexNode offset;
   public final @Nullable RexNode fetch;
@@ -28,6 +30,25 @@ public class RwBatchLimit extends SingleRel implements RisingWaveBatchPhyRel {
     super(cluster, traitSet, input);
     this.offset = offset;
     this.fetch = fetch;
+  }
+
+  public RexNode getOffset() {
+    return offset;
+  }
+
+  public RexNode getFetch() {
+    return fetch;
+  }
+
+  @Override
+  public @Nullable Pair<RelTraitSet, List<RelTraitSet>> passThroughTraits(RelTraitSet required) {
+    return null;
+  }
+
+  @Override
+  public Pair<RelTraitSet, List<RelTraitSet>> deriveTraits(
+      final RelTraitSet childTraits, final int childId) {
+    return null;
   }
 
   @Override

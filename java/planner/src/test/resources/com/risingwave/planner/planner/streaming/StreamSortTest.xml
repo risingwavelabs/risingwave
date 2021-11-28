@@ -80,4 +80,24 @@ RwStreamMaterializedView(name=[t_order_after_aggregation], collation=[[1 DESC]])
 ]]>
         </Resource>
     </TestCase>
+    <TestCase name="query 5">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T_order_limit as
+select * from t order by v1 limit 100 offset 10;
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[t_order_limit], collation=[[0]], offset=[10], limit=[100])
+  RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+    RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
+]]>
+        </Resource>
+        <Resource name="primaryKey">
+            <![CDATA[
+[0, 3]
+]]>
+        </Resource>
+    </TestCase>
 </Root>

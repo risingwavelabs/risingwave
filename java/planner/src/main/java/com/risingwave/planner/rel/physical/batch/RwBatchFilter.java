@@ -74,6 +74,7 @@ public class RwBatchFilter extends Filter implements RisingWaveBatchPhyRel, Phys
     if (childTraits.getConvention() != BATCH_DISTRIBUTED) {
       return null;
     }
+
     var newTraits = traitSet;
     var dist = childTraits.getTrait(RwDistributionTraitDef.getInstance());
     if (dist != null) {

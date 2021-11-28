@@ -80,9 +80,11 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
 
     BatchPlanner batchPlanner = new BatchPlanner();
     BatchPlan plan = batchPlanner.plan(parseSql(sql), executionContext);
-    String explain = ExplainWriter.explainPlan(plan.getRoot());
-
-    Assertions.assertTrue(explain.contains("RwBatchMaterializedViewScan"));
+    String resultPlan = ExplainWriter.explainPlan(plan.getRoot());
+    String expectedPlan =
+        "RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])\n"
+            + "  RwBatchMaterializedViewScan(table=[[test_schema, t_test]], columns=[v])";
+    Assertions.assertEquals(expectedPlan, resultPlan);
   }
 
   @Test
@@ -128,7 +130,6 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
         .set(
             LeaderServerConfigurations.CLUSTER_MODE,
             LeaderServerConfigurations.ClusterMode.Distributed);
-    // A sample code for distributed streaming aggregation plan.
     String sql = "create materialized view T_agg as select v1, sum(v2) as V from t group by v1";
 
     SqlNode ast = parseSql(sql);
@@ -152,5 +153,110 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
             + "                RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])";
     System.out.println(explainExchangePlan);
     Assertions.assertEquals(expectedPlan, explainExchangePlan);
+  }
+
+  @Test
+  @Order(5)
+  void testCreateMaterializedViewWithOrderAndLimit() {
+    String sql =
+        "create materialized view T_test_order_limit as select * from t order by v1, v2 LIMIT 100 OFFSET 10";
+    SqlNode ast = parseSql(sql);
+    StreamingPlan plan = streamPlanner.plan(ast, executionContext);
+    String resultPlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
+    String expectedPlan =
+        "RwStreamMaterializedView(name=[t_test_order_limit], collation=[[0, 1]], offset=[10], limit=[100])\n"
+            + "  RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
+            + "    RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])";
+    Assertions.assertEquals(expectedPlan, resultPlan);
+
+    CreateMaterializedViewHandler handler = new CreateMaterializedViewHandler();
+    SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
+    String tableName = createMaterializedView.name.getSimple();
+    handler.convertPlanToCatalog(tableName, plan, executionContext);
+  }
+
+  @Test
+  @Order(6)
+  void testSelectMaterializedViewWithOrderAndLimit() {
+    String sql = "select * from T_test_order_limit"; // T_test was created in previous case
+
+    BatchPlanner batchPlanner = new BatchPlanner();
+    BatchPlan plan = batchPlanner.plan(parseSql(sql), executionContext);
+    String resultPlan = ExplainWriter.explainPlan(plan.getRoot());
+    String expectedPlan =
+        "RwBatchLimit(offset=[10], fetch=[100])\n"
+            + "  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0, 1]])\n"
+            + "    RwBatchLimit(offset=[0], fetch=[110])\n"
+            + "      RwBatchMaterializedViewScan(table=[[test_schema, t_test_order_limit]], columns=[v1,v2,v3,_row_id])";
+    Assertions.assertEquals(expectedPlan, resultPlan);
+  }
+
+  @Test
+  @Order(7)
+  void testSelectMaterializedViewWithOrderAndLimitBySameOrder() {
+    String sql =
+        "select * from T_test_order_limit order by v1, v2"; // T_test was created in previous case
+
+    BatchPlanner batchPlanner = new BatchPlanner();
+    BatchPlan plan = batchPlanner.plan(parseSql(sql), executionContext);
+    String resultPlan = ExplainWriter.explainPlan(plan.getRoot());
+    String expectedPlan =
+        "RwBatchLimit(offset=[10], fetch=[100])\n"
+            + "  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0, 1]])\n"
+            + "    RwBatchLimit(offset=[0], fetch=[110])\n"
+            + "      RwBatchMaterializedViewScan(table=[[test_schema, t_test_order_limit]], columns=[v1,v2,v3,_row_id])";
+    Assertions.assertEquals(expectedPlan, resultPlan);
+  }
+
+  @Test
+  @Order(7)
+  void testSelectMaterializedViewWithOrderAndLimitByDifferentOrder() {
+    String sql = "select * from T_test_order_limit order by v3, v2, v1";
+
+    BatchPlanner batchPlanner = new BatchPlanner();
+    BatchPlan plan = batchPlanner.plan(parseSql(sql), executionContext);
+    String resultPlan = ExplainWriter.explainPlan(plan.getRoot());
+    String expectedPlan =
+        "RwBatchSort(sort0=[$2], sort1=[$1], sort2=[$0], dir0=[ASC], dir1=[ASC], dir2=[ASC])\n"
+            + "  RwBatchLimit(offset=[10], fetch=[100])\n"
+            + "    RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0, 1]])\n"
+            + "      RwBatchLimit(offset=[0], fetch=[110])\n"
+            + "        RwBatchMaterializedViewScan(table=[[test_schema, t_test_order_limit]], columns=[v1,v2,v3,_row_id])";
+    Assertions.assertEquals(expectedPlan, resultPlan);
+  }
+
+  @Test
+  @Order(8)
+  void testCreateMaterializedViewWithOrderAndZeroLimit() {
+    String sql =
+        "create materialized view T_test_order_zero_limit as select * from t order by v1, v2 OFFSET 10";
+    SqlNode ast = parseSql(sql);
+    StreamingPlan plan = streamPlanner.plan(ast, executionContext);
+    String resultPlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
+    String expectedPlan =
+        "RwStreamMaterializedView(name=[t_test_order_zero_limit], collation=[[0, 1]], offset=[10])\n"
+            + "  RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
+            + "    RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])";
+    Assertions.assertEquals(expectedPlan, resultPlan);
+
+    CreateMaterializedViewHandler handler = new CreateMaterializedViewHandler();
+    SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
+    String tableName = createMaterializedView.name.getSimple();
+    handler.convertPlanToCatalog(tableName, plan, executionContext);
+  }
+
+  @Test
+  @Order(9)
+  void testSelectMaterializedViewWithOrderAndZeroLimit() {
+    String sql = "select * from T_test_order_zero_limit"; // T_test was created in previous case
+
+    BatchPlanner batchPlanner = new BatchPlanner();
+    BatchPlan plan = batchPlanner.plan(parseSql(sql), executionContext);
+    String resultPlan = ExplainWriter.explainPlan(plan.getRoot());
+    String expectedPlan =
+        "RwBatchLimit(offset=[10])\n"
+            + "  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0, 1]])\n"
+            + "    RwBatchMaterializedViewScan(table=[[test_schema, t_test_order_zero_limit]], columns=[v1,v2,v3,_row_id])";
+    Assertions.assertEquals(expectedPlan, resultPlan);
   }
 }
