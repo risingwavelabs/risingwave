@@ -1,5 +1,5 @@
 /// For expression that only accept two non null arguments as input.
-use crate::array::{Array, BoolArray, DataTypeTrait, DecimalArray, I32Array, I64Array, UTF8Array};
+use crate::array::{Array, BoolArray, DataTypeTrait, DecimalArray, I32Array, I64Array, Utf8Array};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 use crate::expr::template::BinaryExpression;
@@ -152,14 +152,14 @@ macro_rules! gen_binary_expr {
 
 fn build_extract_expr(ret: DataTypeRef, l: BoxedExpression, r: BoxedExpression) -> BoxedExpression {
     match r.return_type().data_type_kind() {
-        DataTypeKind::Date => Box::new(BinaryExpression::<UTF8Array, I32Array, I64Array, _> {
+        DataTypeKind::Date => Box::new(BinaryExpression::<Utf8Array, I32Array, I64Array, _> {
             expr_ia1: l,
             expr_ia2: r,
             return_type: ret,
             func: extract_from_date,
             _phantom: PhantomData,
         }),
-        DataTypeKind::Timestamp => Box::new(BinaryExpression::<UTF8Array, I64Array, I64Array, _> {
+        DataTypeKind::Timestamp => Box::new(BinaryExpression::<Utf8Array, I64Array, I64Array, _> {
             expr_ia1: l,
             expr_ia2: r,
             return_type: ret,
@@ -255,7 +255,7 @@ pub fn new_like_default(
     expr_ia2: BoxedExpression,
     return_type: DataTypeRef,
 ) -> BoxedExpression {
-    Box::new(BinaryExpression::<UTF8Array, UTF8Array, BoolArray, _> {
+    Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _> {
         expr_ia1,
         expr_ia2,
         return_type,
@@ -269,7 +269,7 @@ pub fn new_position_expr(
     expr_ia2: BoxedExpression,
     return_type: DataTypeRef,
 ) -> BoxedExpression {
-    Box::new(BinaryExpression::<UTF8Array, UTF8Array, I32Array, _> {
+    Box::new(BinaryExpression::<Utf8Array, Utf8Array, I32Array, _> {
         expr_ia1,
         expr_ia2,
         return_type,

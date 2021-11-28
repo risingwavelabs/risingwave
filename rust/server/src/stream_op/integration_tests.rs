@@ -198,11 +198,11 @@ fn make_tpchq6_expr() -> (
 ) {
     let const_1994_01_01 = LiteralExpression::new(
         StringType::create(true, 20, DataTypeKind::Char),
-        Some(ScalarImpl::UTF8("1994-01-01 00:00:00".to_string())),
+        Some(ScalarImpl::Utf8("1994-01-01 00:00:00".to_string())),
     );
     let const_1995_01_01 = LiteralExpression::new(
         StringType::create(true, 20, DataTypeKind::Char),
-        Some(ScalarImpl::UTF8("1995-01-01 00:00:00".to_string())),
+        Some(ScalarImpl::Utf8("1995-01-01 00:00:00".to_string())),
     );
     let const_0_05 =
         LiteralExpression::new(Float64Type::create(false), Some(ScalarImpl::Float64(0.05)));

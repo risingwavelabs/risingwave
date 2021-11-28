@@ -97,7 +97,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{ArrayImpl, DataChunk};
-    use risingwave_common::array::{I32Array, UTF8Array};
+    use risingwave_common::array::{I32Array, Utf8Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::test_utils::mock_table_id;
     use risingwave_common::catalog::{Field, Schema};
@@ -125,10 +125,10 @@ mod tests {
         // Prepare test data chunks
         let col1_arr1: Arc<ArrayImpl> = Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into());
         let col2_arr1: Arc<ArrayImpl> =
-            Arc::new(array_nonnull! { UTF8Array, ["foo", "bar", "baz"] }.into());
+            Arc::new(array_nonnull! { Utf8Array, ["foo", "bar", "baz"] }.into());
         let col1_arr2: Arc<ArrayImpl> = Arc::new(array_nonnull! { I32Array, [4, 5, 6] }.into());
         let col2_arr2: Arc<ArrayImpl> =
-            Arc::new(UTF8Array::from_slice(&[Some("hello"), None, Some("world")])?.into());
+            Arc::new(Utf8Array::from_slice(&[Some("hello"), None, Some("world")])?.into());
 
         let chunk1 = {
             let col1 = Column::new(col1_arr1.clone(), col1_type.clone());
@@ -236,7 +236,7 @@ mod tests {
         // Prepare test data chunks
         let col1_arr1: Arc<ArrayImpl> = Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into());
         let col2_arr1: Arc<ArrayImpl> =
-            Arc::new(array_nonnull! { UTF8Array, ["foo", "bar", "baz"] }.into());
+            Arc::new(array_nonnull! { Utf8Array, ["foo", "bar", "baz"] }.into());
 
         let chunk1 = {
             let col1 = Column::new(col1_arr1.clone(), col1_type.clone());

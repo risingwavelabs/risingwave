@@ -1,6 +1,6 @@
 /// Template macro to generate code for unary/binary/ternary expression.
 use crate::array::{
-    Array, ArrayBuilder, ArrayImpl, ArrayRef, BytesGuard, BytesWriter, DataChunk, UTF8ArrayBuilder,
+    Array, ArrayBuilder, ArrayImpl, ArrayRef, BytesGuard, BytesWriter, DataChunk, Utf8ArrayBuilder,
 };
 use crate::error::Result;
 use crate::expr::{BoxedExpression, Expression};
@@ -164,7 +164,7 @@ macro_rules! gen_expr_bytes {
           )*
 
           let bitmap = data_chunk.get_visibility_ref();
-          let mut output_array = UTF8ArrayBuilder::new(data_chunk.capacity())?;
+          let mut output_array = Utf8ArrayBuilder::new(data_chunk.capacity())?;
           Ok(Arc::new(match bitmap {
             Some(bitmap) => {
               for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<arr_ $arg:lower>].iter(), )*)).zip(bitmap.iter()) {

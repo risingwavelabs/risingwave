@@ -1,4 +1,4 @@
-use crate::array::{ArrayBuilder, ArrayBuilderImpl, UTF8ArrayBuilder};
+use crate::array::{ArrayBuilder, ArrayBuilderImpl, Utf8ArrayBuilder};
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 use crate::types::{DataSize, DataType, DataTypeKind, DataTypeRef};
@@ -26,7 +26,7 @@ impl DataType for StringType {
     }
 
     fn create_array_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl> {
-        Ok(UTF8ArrayBuilder::new(capacity)?.into())
+        Ok(Utf8ArrayBuilder::new(capacity)?.into())
     }
 
     fn to_protobuf(&self) -> Result<risingwave_proto::data::DataType> {

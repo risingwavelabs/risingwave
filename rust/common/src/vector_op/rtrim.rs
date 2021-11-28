@@ -12,7 +12,7 @@ pub fn rtrim(s: &str, writer: BytesWriter) -> Result<BytesGuard> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array::{Array, ArrayBuilder, UTF8ArrayBuilder};
+    use crate::array::{Array, ArrayBuilder, Utf8ArrayBuilder};
 
     #[test]
     fn test_rtrim() -> Result<()> {
@@ -22,7 +22,7 @@ mod tests {
         ];
 
         for (s, expected) in cases {
-            let builder = UTF8ArrayBuilder::new(1)?;
+            let builder = Utf8ArrayBuilder::new(1)?;
             let writer = builder.writer();
             let guard = rtrim(s, writer)?;
             let array = guard.into_inner().finish()?;

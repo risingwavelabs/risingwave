@@ -49,7 +49,7 @@ impl Scalar for String {
     }
 
     fn to_scalar_value(self) -> ScalarImpl {
-        ScalarImpl::UTF8(self)
+        ScalarImpl::Utf8(self)
     }
 }
 

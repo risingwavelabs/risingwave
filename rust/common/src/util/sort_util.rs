@@ -132,7 +132,7 @@ pub fn compare_two_row(
         let res = gen_match!(
             lhs_array,
             rhs_array,
-            [Int16, Int32, Int64, Float32, Float64, UTF8, Bool]
+            [Int16, Int32, Int64, Float32, Float64, Utf8, Bool]
         );
         if res != Ordering::Equal {
             return Ok(res);

@@ -8,7 +8,7 @@ pub fn upper(s: &str, writer: BytesWriter) -> Result<BytesGuard> {
 
 #[cfg(test)]
 mod tests {
-    use crate::array::{Array, ArrayBuilder, UTF8ArrayBuilder};
+    use crate::array::{Array, ArrayBuilder, Utf8ArrayBuilder};
 
     use super::*;
 
@@ -21,7 +21,7 @@ mod tests {
         ];
 
         for (s, expected) in cases {
-            let builder = UTF8ArrayBuilder::new(1)?;
+            let builder = Utf8ArrayBuilder::new(1)?;
             let writer = builder.writer();
             let guard = upper(s, writer)?;
             let array = guard.into_inner().finish()?;

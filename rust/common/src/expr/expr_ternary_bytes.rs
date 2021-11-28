@@ -1,5 +1,5 @@
 /// For expression that accept 3 arguments + 1 bytes writer as input.
-use crate::array::{I32Array, UTF8Array};
+use crate::array::{I32Array, Utf8Array};
 use crate::expr::template::TernaryBytesExpression;
 use crate::expr::BoxedExpression;
 use crate::types::DataTypeRef;
@@ -13,7 +13,7 @@ pub fn new_substr_start_end(
     len: BoxedExpression,
     return_type: DataTypeRef,
 ) -> BoxedExpression {
-    Box::new(TernaryBytesExpression::<UTF8Array, I32Array, I32Array, _> {
+    Box::new(TernaryBytesExpression::<Utf8Array, I32Array, I32Array, _> {
         expr_ia1: items,
         expr_ia2: off,
         expr_ia3: len,
@@ -30,7 +30,7 @@ pub fn new_replace_expr(
     return_type: DataTypeRef,
 ) -> BoxedExpression {
     Box::new(
-        TernaryBytesExpression::<UTF8Array, UTF8Array, UTF8Array, _> {
+        TernaryBytesExpression::<Utf8Array, Utf8Array, Utf8Array, _> {
             expr_ia1: s,
             expr_ia2: from_str,
             expr_ia3: to_str,

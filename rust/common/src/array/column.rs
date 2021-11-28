@@ -5,7 +5,7 @@ use crate::array::value_reader::{
     DecimalValueReader, F32ValueReader, F64ValueReader, I16ValueReader, I32ValueReader,
     I64ValueReader, Utf8ValueReader,
 };
-use crate::array::{ArrayImpl, ArrayRef, DecimalArrayBuilder, UTF8ArrayBuilder};
+use crate::array::{ArrayImpl, ArrayRef, DecimalArrayBuilder, Utf8ArrayBuilder};
 use crate::error::ErrorCode::{InternalError, ProtobufError};
 use crate::error::{Result, RwError};
 use crate::types::{build_from_proto, DataType, DataTypeRef};
@@ -61,7 +61,7 @@ impl Column {
             }
             DataType_TypeName::BOOLEAN => read_bool_column(&col, cardinality)?,
             DataType_TypeName::VARCHAR | DataType_TypeName::CHAR => {
-                read_string_column::<UTF8ArrayBuilder, Utf8ValueReader>(&col, cardinality)?
+                read_string_column::<Utf8ArrayBuilder, Utf8ValueReader>(&col, cardinality)?
             }
             DataType_TypeName::DECIMAL => {
                 read_string_column::<DecimalArrayBuilder, DecimalValueReader>(&col, cardinality)?
@@ -98,7 +98,7 @@ impl Column {
 mod tests {
     use super::*;
     use crate::array::{
-        Array, ArrayBuilder, BoolArray, BoolArrayBuilder, I32Array, I32ArrayBuilder, UTF8Array,
+        Array, ArrayBuilder, BoolArray, BoolArrayBuilder, I32Array, I32ArrayBuilder, Utf8Array,
     };
     use crate::error::{ErrorCode, Result};
     use crate::types::{BoolType, DataTypeKind, Int32Type, StringType};
@@ -184,7 +184,7 @@ mod tests {
     #[test]
     fn test_utf8_column_conversion() -> Result<()> {
         let cardinality = 2048;
-        let mut builder = UTF8ArrayBuilder::new(cardinality).unwrap();
+        let mut builder = Utf8ArrayBuilder::new(cardinality).unwrap();
         for i in 0..cardinality {
             if i % 2 == 0 {
                 builder.append(Some("abc")).unwrap();
@@ -198,7 +198,7 @@ mod tests {
         );
         let col_proto = unpack_from_any!(col.to_protobuf().unwrap(), ColumnProto);
         let new_col = Column::from_protobuf(col_proto, cardinality).unwrap();
-        let arr: &UTF8Array = new_col.array_ref().as_utf8();
+        let arr: &Utf8Array = new_col.array_ref().as_utf8();
         arr.iter().enumerate().for_each(|(i, x)| {
             if i % 2 == 0 {
                 assert_eq!("abc", x.unwrap());

@@ -1,6 +1,6 @@
 use crate::array::{
     Array, ArrayImpl, BoolArray, DataChunk, F32Array, F64Array, I16Array, I32Array, I64Array,
-    UTF8Array,
+    Utf8Array,
 };
 use crate::error::{ErrorCode, Result};
 use crate::types::{DataTypeKind, DataTypeRef};
@@ -20,7 +20,7 @@ enum EncodableArray<'a> {
     Int64(&'a I64Array),
     Float32(&'a F32Array),
     Float64(&'a F64Array),
-    UTF8(&'a UTF8Array),
+    Utf8(&'a Utf8Array),
 }
 
 impl EncodableArray<'_> {
@@ -32,7 +32,7 @@ impl EncodableArray<'_> {
             Self::Int64(_) => 8usize,
             Self::Float32(_) => 4usize,
             Self::Float64(_) => 8usize,
-            Self::UTF8(array) => {
+            Self::Utf8(array) => {
                 // Find the max length of utf string
                 array.iter().fold(0, |m, s| {
                     m.max(match s {
@@ -128,7 +128,7 @@ impl EncodableArray<'_> {
                     vec![0u8; 8]
                 }
             }
-            Self::UTF8(utf8_array) => {
+            Self::Utf8(utf8_array) => {
                 if let Some(value) = utf8_array.value_at(idx) {
                     let mut buf = value.as_bytes().to_vec();
                     // padding
@@ -151,7 +151,7 @@ impl EncodableArray<'_> {
             Self::Int64(int_array) => int_array.len(),
             Self::Float32(float_array) => float_array.len(),
             Self::Float64(float_array) => float_array.len(),
-            Self::UTF8(utf8_array) => utf8_array.len(),
+            Self::Utf8(utf8_array) => utf8_array.len(),
         }
     }
     pub fn is_empty(&self) -> bool {
@@ -197,7 +197,7 @@ fn encode_array(array: &ArrayImpl, order: &OrderType) -> Result<EncodedColumn> {
         ArrayImpl::Int64(array) => Ok(EncodableArray::Int64(array).encode_array(order)),
         ArrayImpl::Float32(array) => Ok(EncodableArray::Float32(array).encode_array(order)),
         ArrayImpl::Float64(array) => Ok(EncodableArray::Float64(array).encode_array(order)),
-        ArrayImpl::UTF8(array) => Ok(EncodableArray::UTF8(array).encode_array(order)),
+        ArrayImpl::Utf8(array) => Ok(EncodableArray::Utf8(array).encode_array(order)),
         _ => Err(ErrorCode::NotImplementedError(
             "Binary Compression is not implemented for this type".to_string(),
         )
@@ -207,7 +207,7 @@ fn encode_array(array: &ArrayImpl, order: &OrderType) -> Result<EncodedColumn> {
 
 /// This function is used to accelerate the comparison of tuples. It takes datachunk and
 /// user-defined order as input, yield encoded binary string with order preserved for each tuple in
-/// the datachunk. We only support encoding for Bool, Int16, Int32, Int64, Float32, Float64, UTF8 by
+/// the datachunk. We only support encoding for Bool, Int16, Int32, Int64, Float32, Float64, Utf8 by
 /// now.
 pub fn encode_chunk(chunk: &DataChunk, order_pairs: Arc<Vec<OrderPair>>) -> Arc<Vec<Vec<u8>>> {
     let encoded_columns = order_pairs

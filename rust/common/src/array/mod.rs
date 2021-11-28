@@ -57,7 +57,7 @@ static NULL_VAL_FOR_HASH: u32 = 0xfffffff0;
 /// `ArrayBuilder` is a trait over all builders. You could build an array with
 /// `append` with the help of `ArrayBuilder` trait. The `append` function always
 /// accepts reference to an element if it is not primitive. e.g. for `PrimitiveArray`,
-/// you could do `builder.append(Some(1))`. For `UTF8Array`, you must do
+/// you could do `builder.append(Some(1))`. For `Utf8Array`, you must do
 /// `builder.append(Some("xxx"))`. Note that you don't need to construct a `String`.
 ///
 /// The associated type `ArrayType` is the type of the corresponding array. It is the
@@ -100,7 +100,7 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
 /// type is the iterator of this array. And the `RefItem` is the item you could
 /// retrieve from this array.
 ///
-/// For example, `PrimitiveArray` could return an `Option<u32>`, and `UTF8Array` will
+/// For example, `PrimitiveArray` could return an `Option<u32>`, and `Utf8Array` will
 /// return an `Option<&str>`.
 ///
 /// In some cases, we will need to store owned data. For example, when aggregating min
@@ -196,7 +196,7 @@ macro_rules! for_all_variants {
       { Int64, int64, I64Array, I64ArrayBuilder },
       { Float32, float32, F32Array, F32ArrayBuilder },
       { Float64, float64, F64Array, F64ArrayBuilder },
-      { UTF8, utf8, UTF8Array, UTF8ArrayBuilder },
+      { Utf8, utf8, Utf8Array, Utf8ArrayBuilder },
       { Bool, bool, BoolArray, BoolArrayBuilder },
       { Decimal, decimal, DecimalArray, DecimalArrayBuilder },
       { Interval, interval, IntervalArray, IntervalArrayBuilder }
@@ -233,9 +233,9 @@ impl From<DecimalArray> for ArrayImpl {
     }
 }
 
-impl From<UTF8Array> for ArrayImpl {
-    fn from(arr: UTF8Array) -> Self {
-        Self::UTF8(arr)
+impl From<Utf8Array> for ArrayImpl {
+    fn from(arr: Utf8Array) -> Self {
+        Self::Utf8(arr)
     }
 }
 

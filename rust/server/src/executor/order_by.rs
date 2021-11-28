@@ -179,7 +179,7 @@ impl Executor for OrderByExecutor {
                 let _ = gen_match!(
                     builder,
                     chunk_arr,
-                    [Int16, Int32, Int64, Float32, Float64, UTF8, Bool, Decimal]
+                    [Int16, Int32, Int64, Float32, Float64, Utf8, Bool, Decimal]
                 );
             }
             chunk_size += 1;
@@ -217,7 +217,7 @@ mod tests {
         Rng,
     };
     use risingwave_common::array::{
-        column::Column, BoolArray, DataChunk, PrimitiveArray, UTF8Array,
+        column::Column, BoolArray, DataChunk, PrimitiveArray, Utf8Array,
     };
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::expr::InputRefExpression;
@@ -264,7 +264,7 @@ mod tests {
             .iter()
             .map(|s| s.as_ref().map(|s| s.as_str()))
             .collect_vec();
-        let array = UTF8Array::from_slice(&str_vec).map(|x| Arc::new(x.into()))?;
+        let array = Utf8Array::from_slice(&str_vec).map(|x| Arc::new(x.into()))?;
         let data_type = StringType::create(false, 0, DataTypeKind::Varchar);
         Ok(Column::new(array, data_type))
     }

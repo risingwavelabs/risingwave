@@ -1,5 +1,5 @@
 use crate::array::{
-    Array, ArrayBuilder, DecimalArrayBuilder, PrimitiveArrayItemType, UTF8ArrayBuilder,
+    Array, ArrayBuilder, DecimalArrayBuilder, PrimitiveArrayItemType, Utf8ArrayBuilder,
 };
 use crate::error::ErrorCode::InternalError;
 use crate::error::{ErrorCode, Result, RwError};
@@ -47,7 +47,7 @@ pub trait VarSizedValueReader<AB: ArrayBuilder> {
 
 pub struct Utf8ValueReader {}
 
-impl VarSizedValueReader<UTF8ArrayBuilder> for Utf8ValueReader {
+impl VarSizedValueReader<Utf8ArrayBuilder> for Utf8ValueReader {
     fn read(buf: &[u8]) -> Result<&str> {
         from_utf8(buf).map_err(|e| {
             RwError::from(InternalError(format!(

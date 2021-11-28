@@ -123,7 +123,7 @@ impl SourceParser for ProtobufParser {
           protobuf_match_type!(value, ScalarImpl::Decimal, { I8, I16, I32, I64, U8, U16, U32, U64}, Decimal)
         }
         DataTypeKind::Char | DataTypeKind::Varchar => {
-          protobuf_match_type!(value, ScalarImpl::UTF8, { String }, String)
+          protobuf_match_type!(value, ScalarImpl::Utf8, { String }, String)
         }
         _ => unimplemented!(),
       }
@@ -294,8 +294,8 @@ mod tests {
         let data = result.unwrap();
         assert_eq!(data.len(), descs.len());
         assert!(data[0].eq(&Some(ScalarImpl::Int32(123))));
-        assert!(data[1].eq(&Some(ScalarImpl::UTF8("test address".to_string()))));
-        assert!(data[2].eq(&Some(ScalarImpl::UTF8("test city".to_string()))));
+        assert!(data[1].eq(&Some(ScalarImpl::Utf8("test address".to_string()))));
+        assert!(data[2].eq(&Some(ScalarImpl::Utf8("test city".to_string()))));
         assert!(data[3].eq(&Some(ScalarImpl::Int64(456))));
         assert!(data[4].eq(&Some(ScalarImpl::Float32(1.2345))));
     }

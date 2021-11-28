@@ -1,5 +1,5 @@
 /// For expression that only accept two arguments + 1 bytes writer as input.
-use crate::array::{I32Array, UTF8Array};
+use crate::array::{I32Array, Utf8Array};
 use crate::expr::template::BinaryBytesExpression;
 use crate::expr::BoxedExpression;
 use crate::types::DataTypeRef;
@@ -11,7 +11,7 @@ pub fn new_substr_start(
     expr_ia2: BoxedExpression,
     return_type: DataTypeRef,
 ) -> BoxedExpression {
-    Box::new(BinaryBytesExpression::<UTF8Array, I32Array, _> {
+    Box::new(BinaryBytesExpression::<Utf8Array, I32Array, _> {
         expr_ia1,
         expr_ia2,
         return_type,
@@ -25,7 +25,7 @@ pub fn new_substr_for(
     expr_ia2: BoxedExpression,
     return_type: DataTypeRef,
 ) -> BoxedExpression {
-    Box::new(BinaryBytesExpression::<UTF8Array, I32Array, _> {
+    Box::new(BinaryBytesExpression::<Utf8Array, I32Array, _> {
         expr_ia1,
         expr_ia2,
         return_type,

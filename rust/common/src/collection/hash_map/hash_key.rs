@@ -510,7 +510,7 @@ mod tests {
     use crate::array::column::Column;
     use crate::array::{
         ArrayRef, BoolArray, DataChunk, DecimalArray, F32Array, F64Array, I16Array, I32Array,
-        I64Array, UTF8Array,
+        I64Array, Utf8Array,
     };
     use crate::collection::hash_map::{
         HashKey, Key128, Key16, Key256, Key32, Key64, KeySerialized, PrecomputedBuildHasher,
@@ -561,7 +561,7 @@ mod tests {
                 Arc::new(DecimalType::new(true, 20, 10).expect("Failed to create decimal type")),
             ),
             Column::new(
-                seed_rand_array_ref::<UTF8Array>(capacity, seed),
+                seed_rand_array_ref::<Utf8Array>(capacity, seed),
                 StringType::create(true, 20, DataTypeKind::Varchar),
             ),
         ];

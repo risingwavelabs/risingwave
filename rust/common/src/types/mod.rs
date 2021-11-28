@@ -189,7 +189,7 @@ macro_rules! for_all_scalar_variants {
       { Int64, int64, i64, i64 },
       { Float32, float32, f32, f32 },
       { Float64, float64, f64, f64 },
-      { UTF8, utf8, String, &'scalar str },
+      { Utf8, utf8, String, &'scalar str },
       { Bool, bool, bool, bool },
       { Decimal, decimal, Decimal, Decimal  },
       { Interval, interval, IntervalUnit, IntervalUnit }
@@ -369,7 +369,7 @@ impl std::hash::Hash for ScalarImpl {
             inner.hash_wrapper(state);
           }, )*
           Self::Bool(b) => b.hash(state),
-          Self::UTF8(s) => s.hash(state),
+          Self::Utf8(s) => s.hash(state),
           Self::Decimal(decimal) => decimal.hash(state),
           Self::Interval(interval) => interval.hash(state),
         }
@@ -388,7 +388,7 @@ impl ScalarImpl {
             &Self::Int64(v) => v.serialize(ser)?,
             &Self::Float32(v) => v.serialize(ser)?,
             &Self::Float64(v) => v.serialize(ser)?,
-            Self::UTF8(v) => v.serialize(ser)?,
+            Self::Utf8(v) => v.serialize(ser)?,
             &Self::Bool(v) => v.serialize(ser)?,
             &Self::Decimal(v) => ser.serialize_decimal(v.mantissa(), v.scale() as u8)?,
             Self::Interval(v) => v.serialize(ser)?,
@@ -408,7 +408,7 @@ impl ScalarImpl {
             Ty::Int64 => Self::Int64(i64::deserialize(de)?),
             Ty::Float32 => Self::Float32(f32::deserialize(de)?),
             Ty::Float64 => Self::Float64(f64::deserialize(de)?),
-            Ty::Char | Ty::Varchar => Self::UTF8(String::deserialize(de)?),
+            Ty::Char | Ty::Varchar => Self::Utf8(String::deserialize(de)?),
             Ty::Boolean => Self::Bool(bool::deserialize(de)?),
             Ty::Decimal => Self::Decimal({
                 let (mantissa, scale) = de.deserialize_decimal()?;

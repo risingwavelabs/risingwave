@@ -8,18 +8,18 @@ use risingwave_proto::data::Buffer_CompressionType;
 use std::hash::{Hash, Hasher};
 use std::mem::size_of;
 
-/// `UTF8Array` is a collection of Rust UTF8 `String`s.
+/// `Utf8Array` is a collection of Rust Utf8 `String`s.
 #[derive(Debug)]
-pub struct UTF8Array {
+pub struct Utf8Array {
     offset: Vec<usize>,
     bitmap: Bitmap,
     data: Vec<u8>,
 }
 
-impl Array for UTF8Array {
+impl Array for Utf8Array {
     type RefItem<'a> = &'a str;
     type OwnedItem = String;
-    type Builder = UTF8ArrayBuilder;
+    type Builder = Utf8ArrayBuilder;
     type Iter<'a> = ArrayIterator<'a, Self>;
 
     fn value_at(&self, idx: usize) -> Option<&str> {
@@ -78,7 +78,7 @@ impl Array for UTF8Array {
     }
 }
 
-impl UTF8Array {
+impl Utf8Array {
     pub fn from_slice(data: &[Option<&str>]) -> Result<Self> {
         let mut builder = <Self as Array>::Builder::new(data.len())?;
         for i in data {
@@ -88,16 +88,16 @@ impl UTF8Array {
     }
 }
 
-/// `UTF8ArrayBuilder` use `&str` to build an `UTF8Array`.
+/// `Utf8ArrayBuilder` use `&str` to build an `Utf8Array`.
 #[derive(Debug)]
-pub struct UTF8ArrayBuilder {
+pub struct Utf8ArrayBuilder {
     offset: Vec<usize>,
     bitmap: BitmapBuilder,
     data: Vec<u8>,
 }
 
-impl ArrayBuilder for UTF8ArrayBuilder {
-    type ArrayType = UTF8Array;
+impl ArrayBuilder for Utf8ArrayBuilder {
+    type ArrayType = Utf8Array;
 
     fn new(capacity: usize) -> Result<Self> {
         let mut offset = Vec::with_capacity(capacity + 1);
@@ -124,7 +124,7 @@ impl ArrayBuilder for UTF8ArrayBuilder {
         Ok(())
     }
 
-    fn append_array(&mut self, other: &UTF8Array) -> Result<()> {
+    fn append_array(&mut self, other: &Utf8Array) -> Result<()> {
         for bit in other.bitmap.iter() {
             self.bitmap.append(bit);
         }
@@ -136,8 +136,8 @@ impl ArrayBuilder for UTF8ArrayBuilder {
         Ok(())
     }
 
-    fn finish(mut self) -> Result<UTF8Array> {
-        Ok(UTF8Array {
+    fn finish(mut self) -> Result<Utf8Array> {
+        Ok(Utf8Array {
             bitmap: (self.bitmap).finish(),
             data: self.data,
             offset: self.offset,
@@ -145,7 +145,7 @@ impl ArrayBuilder for UTF8ArrayBuilder {
     }
 }
 
-impl UTF8ArrayBuilder {
+impl Utf8ArrayBuilder {
     pub fn writer(self) -> BytesWriter {
         BytesWriter { builder: self }
     }
@@ -169,7 +169,7 @@ impl UTF8ArrayBuilder {
 
 /// `BytesWriter` has the ownership of the right to append only one record.
 pub struct BytesWriter {
-    builder: UTF8ArrayBuilder,
+    builder: Utf8ArrayBuilder,
 }
 
 impl BytesWriter {
@@ -192,7 +192,7 @@ impl BytesWriter {
 }
 
 pub struct PartialBytesWriter {
-    builder: UTF8ArrayBuilder,
+    builder: Utf8ArrayBuilder,
 }
 
 impl PartialBytesWriter {
@@ -219,11 +219,11 @@ impl PartialBytesWriter {
 /// `BytesGuard` guarded that exactly one record was appendded.
 /// `BytesGuard` will be produced iff the `BytesWriter` was consumed.
 pub struct BytesGuard {
-    builder: UTF8ArrayBuilder,
+    builder: Utf8ArrayBuilder,
 }
 
 impl BytesGuard {
-    pub fn into_inner(self) -> UTF8ArrayBuilder {
+    pub fn into_inner(self) -> Utf8ArrayBuilder {
         self.builder
     }
 }
@@ -237,7 +237,7 @@ mod tests {
 
     #[test]
     fn test_utf8_builder() {
-        let mut builder = UTF8ArrayBuilder::new(0).unwrap();
+        let mut builder = Utf8ArrayBuilder::new(0).unwrap();
         for i in 0..100 {
             if i % 2 == 0 {
                 builder.append(Some(&format!("{}", i))).unwrap();
@@ -250,7 +250,7 @@ mod tests {
 
     #[test]
     fn test_utf8_partial_writer() -> Result<()> {
-        let builder = UTF8ArrayBuilder::new(0)?;
+        let builder = Utf8ArrayBuilder::new(0)?;
         let writer = builder.writer();
         let mut partial_writer = writer.begin();
         for _ in 0..2 {
@@ -276,7 +276,7 @@ mod tests {
             Some("666666"),
         ];
 
-        let result_array = UTF8Array::from_slice(&input);
+        let result_array = Utf8Array::from_slice(&input);
 
         assert!(result_array.is_ok());
         let array = result_array.unwrap();
@@ -302,7 +302,7 @@ mod tests {
             Some("666666"),
         ];
 
-        let result_array = UTF8Array::from_slice(&input);
+        let result_array = Utf8Array::from_slice(&input);
 
         assert!(result_array.is_ok());
         let array = result_array.unwrap();
@@ -350,7 +350,7 @@ mod tests {
 
         let arrs = vecs
             .iter()
-            .map(|v| UTF8Array::from_slice(v).unwrap())
+            .map(|v| Utf8Array::from_slice(v).unwrap())
             .collect_vec();
 
         let hasher_builder = RandomXxHashBuilder64::default();

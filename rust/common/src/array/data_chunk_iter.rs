@@ -189,7 +189,7 @@ mod tests {
     #[test]
     fn row_memcomparable_encode_decode_not_null() {
         let row = Row(vec![
-            Some(ScalarImpl::UTF8("string".into())),
+            Some(ScalarImpl::Utf8("string".into())),
             Some(ScalarImpl::Bool(true)),
             Some(ScalarImpl::Int16(1)),
             Some(ScalarImpl::Int32(2)),
@@ -220,7 +220,7 @@ mod tests {
     #[test]
     fn row_memcomparable_encode_decode() {
         let row = Row(vec![
-            Some(ScalarImpl::UTF8("string".into())),
+            Some(ScalarImpl::Utf8("string".into())),
             Some(ScalarImpl::Bool(true)),
             Some(ScalarImpl::Int16(1)),
             Some(ScalarImpl::Int32(2)),

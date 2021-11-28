@@ -21,7 +21,7 @@ pub fn replace(s: &str, from_str: &str, to_str: &str, writer: BytesWriter) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array::{Array, ArrayBuilder, UTF8ArrayBuilder};
+    use crate::array::{Array, ArrayBuilder, Utf8ArrayBuilder};
 
     #[test]
     fn test_replace() {
@@ -35,7 +35,7 @@ mod tests {
         ];
 
         for (s, from_str, to_str, expected) in cases {
-            let builder = UTF8ArrayBuilder::new(1).unwrap();
+            let builder = Utf8ArrayBuilder::new(1).unwrap();
             let writer = builder.writer();
             let guard = replace(s, from_str, to_str, writer).unwrap();
             let array = guard.into_inner().finish().unwrap();

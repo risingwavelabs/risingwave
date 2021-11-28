@@ -1,6 +1,6 @@
 /// For expression that only accept one value as input (e.g. CAST)
 use super::template::{UnaryBytesExpression, UnaryExpression};
-use crate::array::{BoolArray, I32Array, I64Array, UTF8Array};
+use crate::array::{BoolArray, I32Array, I64Array, Utf8Array};
 use crate::expr::BoxedExpression;
 use crate::types::{DataTypeKind, DataTypeRef};
 use crate::vector_op::length::length_default;
@@ -23,7 +23,7 @@ pub fn new_unary_expr(
         child_expr.return_type().data_type_kind(),
     ) {
         (ProstType::Cast, DataTypeKind::Date, DataTypeKind::Char) => {
-            Box::new(UnaryExpression::<UTF8Array, I32Array, _> {
+            Box::new(UnaryExpression::<Utf8Array, I32Array, _> {
                 expr_ia1: child_expr,
                 return_type,
                 func: cast::str_to_date,
@@ -31,7 +31,7 @@ pub fn new_unary_expr(
             })
         }
         (ProstType::Cast, DataTypeKind::Time, DataTypeKind::Char) => {
-            Box::new(UnaryExpression::<UTF8Array, I64Array, _> {
+            Box::new(UnaryExpression::<Utf8Array, I64Array, _> {
                 expr_ia1: child_expr,
                 return_type,
                 func: cast::str_to_time,
@@ -39,7 +39,7 @@ pub fn new_unary_expr(
             })
         }
         (ProstType::Cast, DataTypeKind::Timestamp, DataTypeKind::Char) => {
-            Box::new(UnaryExpression::<UTF8Array, I64Array, _> {
+            Box::new(UnaryExpression::<Utf8Array, I64Array, _> {
                 expr_ia1: child_expr,
                 return_type,
                 func: cast::str_to_timestamp,
@@ -47,7 +47,7 @@ pub fn new_unary_expr(
             })
         }
         (ProstType::Cast, DataTypeKind::Timestampz, DataTypeKind::Char) => {
-            Box::new(UnaryExpression::<UTF8Array, I64Array, _> {
+            Box::new(UnaryExpression::<Utf8Array, I64Array, _> {
                 expr_ia1: child_expr,
                 return_type,
                 func: cast::str_to_timestampz,
@@ -68,7 +68,7 @@ pub fn new_unary_expr(
             func: conjunction::not,
             _phantom: PhantomData,
         }),
-        (ProstType::Upper, _, _) => Box::new(UnaryBytesExpression::<UTF8Array, _> {
+        (ProstType::Upper, _, _) => Box::new(UnaryBytesExpression::<Utf8Array, _> {
             expr_ia1: child_expr,
             return_type,
             func: upper,
@@ -81,7 +81,7 @@ pub fn new_unary_expr(
 }
 
 pub fn new_length_default(expr_ia1: BoxedExpression, return_type: DataTypeRef) -> BoxedExpression {
-    Box::new(UnaryExpression::<UTF8Array, I64Array, _> {
+    Box::new(UnaryExpression::<Utf8Array, I64Array, _> {
         expr_ia1,
         return_type,
         func: length_default,
@@ -90,7 +90,7 @@ pub fn new_length_default(expr_ia1: BoxedExpression, return_type: DataTypeRef) -
 }
 
 pub fn new_trim_expr(expr_ia1: BoxedExpression, return_type: DataTypeRef) -> BoxedExpression {
-    Box::new(UnaryBytesExpression::<UTF8Array, _> {
+    Box::new(UnaryBytesExpression::<Utf8Array, _> {
         expr_ia1,
         return_type,
         func: trim,
@@ -99,7 +99,7 @@ pub fn new_trim_expr(expr_ia1: BoxedExpression, return_type: DataTypeRef) -> Box
 }
 
 pub fn new_ltrim_expr(expr_ia1: BoxedExpression, return_type: DataTypeRef) -> BoxedExpression {
-    Box::new(UnaryBytesExpression::<UTF8Array, _> {
+    Box::new(UnaryBytesExpression::<Utf8Array, _> {
         expr_ia1,
         return_type,
         func: ltrim,
@@ -108,7 +108,7 @@ pub fn new_ltrim_expr(expr_ia1: BoxedExpression, return_type: DataTypeRef) -> Bo
 }
 
 pub fn new_rtrim_expr(expr_ia1: BoxedExpression, return_type: DataTypeRef) -> BoxedExpression {
-    Box::new(UnaryBytesExpression::<UTF8Array, _> {
+    Box::new(UnaryBytesExpression::<Utf8Array, _> {
         expr_ia1,
         return_type,
         func: rtrim,

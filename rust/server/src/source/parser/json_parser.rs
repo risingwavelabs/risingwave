@@ -48,7 +48,7 @@ impl SourceParser for JSONParser {
                         .map(|v| ScalarImpl::Decimal(Decimal::from(v))),
                     DataTypeKind::Char | DataTypeKind::Varchar => value
                         .and_then(|v| v.as_str())
-                        .map(|v| ScalarImpl::UTF8(v.to_owned_scalar())),
+                        .map(|v| ScalarImpl::Utf8(v.to_owned_scalar())),
                     _ => unimplemented!(),
                 }
             })
@@ -120,13 +120,13 @@ mod tests {
         let datums = result.unwrap();
         assert_eq!(datums.len(), descs.len());
         assert!(datums[0].eq(&Some(ScalarImpl::Int32(1))));
-        assert!(datums[1].eq(&Some(ScalarImpl::UTF8("char".to_string()))));
+        assert!(datums[1].eq(&Some(ScalarImpl::Utf8("char".to_string()))));
         assert!(datums[2].eq(&Some(ScalarImpl::Bool(true))));
         assert!(datums[3].eq(&Some(ScalarImpl::Int16(1))));
         assert!(datums[4].eq(&Some(ScalarImpl::Int64(12345678))));
         assert!(datums[5].eq(&Some(ScalarImpl::Float32(1.23))));
         assert!(datums[6].eq(&Some(ScalarImpl::Float64(1.2345))));
-        assert!(datums[7].eq(&Some(ScalarImpl::UTF8("varchar".to_string()))));
+        assert!(datums[7].eq(&Some(ScalarImpl::Utf8("varchar".to_string()))));
 
         let payload = r#"{"i32":1}"#.as_bytes();
         let result = parser.parse(payload, &descs);

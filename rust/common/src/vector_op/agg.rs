@@ -155,7 +155,7 @@ fn create_agg_state_unary(
             ))
         }
         (DataTypeKind::Char, AggKind::Count, DataTypeKind::Int64) => {
-            Box::new(GeneralAgg::<UTF8Array, _, _>::new(
+            Box::new(GeneralAgg::<Utf8Array, _, _>::new(
                 return_type,
                 input_col_idx,
                 count_str,
@@ -253,7 +253,7 @@ fn create_agg_state_unary(
             ))
         }
         (DataTypeKind::Char, AggKind::Min, DataTypeKind::Char) => {
-            Box::new(GeneralAgg::<UTF8Array, _, UTF8Array>::new(
+            Box::new(GeneralAgg::<Utf8Array, _, Utf8Array>::new(
                 return_type,
                 input_col_idx,
                 min_str,
@@ -502,13 +502,13 @@ impl_aggregator! { I64Array, Int64, I64Array, Int64 }
 impl_aggregator! { F32Array, Float32, F32Array, Float32 }
 impl_aggregator! { F64Array, Float64, F64Array, Float64 }
 impl_aggregator! { DecimalArray, Decimal, DecimalArray, Decimal }
-impl_aggregator! { UTF8Array, UTF8, UTF8Array, UTF8 }
+impl_aggregator! { Utf8Array, Utf8, Utf8Array, Utf8 }
 impl_aggregator! { I16Array, Int16, I64Array, Int64 }
 impl_aggregator! { I32Array, Int32, I64Array, Int64 }
 impl_aggregator! { F32Array, Float32, I64Array, Int64 }
 impl_aggregator! { F64Array, Float64, I64Array, Int64 }
 impl_aggregator! { DecimalArray, Decimal, I64Array, Int64 }
-impl_aggregator! { UTF8Array, UTF8, I64Array, Int64 }
+impl_aggregator! { Utf8Array, Utf8, I64Array, Int64 }
 impl_aggregator! { BoolArray, Bool, I64Array, Int64 }
 impl_aggregator! { I64Array, Int64, DecimalArray, Decimal }
 
@@ -876,7 +876,7 @@ mod tests {
 
     #[test]
     fn vec_min_char() -> Result<()> {
-        let input = UTF8Array::from_slice(&[Some("b"), Some("aa")])?;
+        let input = Utf8Array::from_slice(&[Some("b"), Some("aa")])?;
         let agg_type = AggKind::Min;
         let input_type = StringType::create(true, 5, DataTypeKind::Char);
         let return_type = StringType::create(true, 5, DataTypeKind::Char);
@@ -885,7 +885,7 @@ mod tests {
             Arc::new(input.into()),
             &agg_type,
             return_type,
-            ArrayBuilderImpl::UTF8(UTF8ArrayBuilder::new(0)?),
+            ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0)?),
         )?;
         let actual = actual.as_utf8();
         let actual = actual.iter().collect::<Vec<_>>();

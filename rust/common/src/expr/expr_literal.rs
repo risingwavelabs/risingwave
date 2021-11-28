@@ -85,8 +85,8 @@ fn literal_type_match(return_type: DataTypeKind, literal: Option<&ScalarImpl>) -
                     | (DataTypeKind::Float32, ScalarImpl::Float32(_))
                     | (DataTypeKind::Float64, ScalarImpl::Float64(_))
                     | (DataTypeKind::Date, ScalarImpl::Int32(_))
-                    | (DataTypeKind::Char, ScalarImpl::UTF8(_))
-                    | (DataTypeKind::Varchar, ScalarImpl::UTF8(_))
+                    | (DataTypeKind::Char, ScalarImpl::Utf8(_))
+                    | (DataTypeKind::Varchar, ScalarImpl::Utf8(_))
             )
         }
 
@@ -182,14 +182,14 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
                         InternalError(format!("Failed to deserialize f64, reason: {:?}", e))
                     })?,
                 )),
-                TypeName::Char | TypeName::Symbol => ScalarImpl::UTF8(
+                TypeName::Char | TypeName::Symbol => ScalarImpl::Utf8(
                     std::str::from_utf8(prost_value.get_body())
                         .map_err(|e| {
                             InternalError(format!("Failed to deserialize char, reason: {:?}", e))
                         })?
                         .to_string(),
                 ),
-                TypeName::Varchar => ScalarImpl::UTF8(
+                TypeName::Varchar => ScalarImpl::Utf8(
                     std::str::from_utf8(prost_value.get_body())
                         .map_err(|e| {
                             InternalError(format!("Failed to deserialize varchar, reason: {:?}", e))
