@@ -2,6 +2,7 @@
 
 use std::{
     cmp::{self},
+    hash::Hasher,
     ptr,
 };
 
@@ -42,14 +43,21 @@ pub fn bytes_diff<'a, 'b>(base: &'a [u8], target: &'b [u8]) -> &'b [u8] {
     }
 }
 
-/// Calculate the CRC32 of the given data
+/// Calculate the CRC32 of the given data.
 pub fn crc32_checksum(data: &[u8]) -> u64 {
     let mut hasher = crc32fast::Hasher::new();
     hasher.update(data);
     hasher.finalize() as u64
 }
 
-/// Verify the checksum of the data equals the given checksum
+/// Calculate the ``XxHash`` of the given data.
+pub fn xxhash64_checksum(data: &[u8]) -> u64 {
+    let mut hasher = twox_hash::XxHash64::with_seed(0);
+    hasher.write(data);
+    hasher.finish() as u64
+}
+
+/// Verify the checksum of the data equals the given checksum.
 pub fn verify_checksum(chksum: &Checksum, data: &[u8]) -> HummockResult<()> {
     match chksum.algo() {
         ChecksumAlg::Crc32c => {
@@ -57,7 +65,11 @@ pub fn verify_checksum(chksum: &Checksum, data: &[u8]) -> HummockResult<()> {
                 return Err(HummockError::ChecksumMismatch);
             }
         }
-        _ => todo!(),
+        ChecksumAlg::XxHash64 => {
+            if xxhash64_checksum(data) != chksum.get_sum() {
+                return Err(HummockError::ChecksumMismatch);
+            }
+        }
     }
     Ok(())
 }
