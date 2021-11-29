@@ -348,7 +348,7 @@ impl<'a> SelectBuilder<'a> {
             let column_ids = column_table_ref.get_column_ids();
             let scan = SeqScanNode {
                 table_ref_id: None,
-                column_ids: column_ids.iter().copied().collect_vec(),
+                column_ids,
                 column_type: vec![],
             };
 

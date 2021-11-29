@@ -10,8 +10,10 @@ use risingwave_pb::stream_service::*;
 use risingwave_pb::task_service::HostAddress;
 use std::sync::Arc;
 
+use crate::source::MemSourceManager;
 use crate::storage::SimpleTableManager;
 use crate::stream_op::Message;
+use crate::task::{GlobalTaskEnv, TaskManager};
 use risingwave_common::util::addr::get_host_port;
 
 use super::*;
@@ -174,9 +176,14 @@ async fn test_stream_proto() {
         ])
         .unwrap();
 
-    let table_manager = Arc::new(SimpleTableManager::new());
+    let env = GlobalTaskEnv::new(
+        Arc::new(SimpleTableManager::new()),
+        Arc::new(MemSourceManager::new()),
+        Arc::new(TaskManager::new()),
+        std::net::SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
+    );
     stream_manager
-        .build_fragment(&[1, 3, 7, 11, 13], table_manager)
+        .build_fragment(&[1, 3, 7, 11, 13], env)
         .unwrap();
 
     let mut source = stream_manager.take_source();

@@ -8,7 +8,8 @@ use risingwave_pb::plan::InsertNode;
 use risingwave_pb::ToProto;
 
 use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
-use crate::storage::*;
+use crate::source::{Source, SourceImpl, SourceManagerRef, SourceWriter};
+use crate::stream_op::{Op, StreamChunk};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
     ArrayBuilder, ArrayImpl, DataChunk, I64ArrayBuilder, PrimitiveArrayBuilder,
@@ -25,29 +26,11 @@ use super::BoxedExecutor;
 pub(super) struct InsertExecutor {
     /// target table id
     table_id: TableId,
-    table_manager: TableManagerRef,
+    source_manager: SourceManagerRef,
 
     child: BoxedExecutor,
     executed: bool,
     schema: Schema,
-}
-
-impl InsertExecutor {
-    /// Generate next row-id
-    fn next_row_id(&self) -> Result<usize> {
-        let table_ref = (if let TableTypes::BummockTable(table_ref) =
-            self.table_manager.get_table(&self.table_id)?
-        {
-            Ok(table_ref)
-        } else {
-            Err(RwError::from(InternalError(
-                "Only columnar table support insert".to_string(),
-            )))
-        })?;
-
-        // TODO: include node_id in the row id to ensure unique in cluster
-        Ok(table_ref.next_row_id())
-    }
 }
 
 #[async_trait::async_trait]
@@ -63,15 +46,14 @@ impl Executor for InsertExecutor {
             return Ok(None);
         }
 
-        let table_ref = (if let TableTypes::BummockTable(table_ref) =
-            self.table_manager.get_table(&self.table_id)?
-        {
-            Ok(table_ref)
+        let source = self.source_manager.get_source(&self.table_id)?;
+        let table_source = if let Source::Table(ref t) = *source.source {
+            t
         } else {
-            Err(RwError::from(InternalError(
-                "Only columnar table support insert".to_string(),
-            )))
-        })?;
+            panic!("InsertExecutor: table source expected");
+        };
+        let mut writer = table_source.create_writer()?;
+
         let mut rows_inserted = 0;
         while let Some(child_chunk) = self.child.next().await? {
             let len = child_chunk.capacity();
@@ -82,7 +64,9 @@ impl Executor for InsertExecutor {
             // add row-id column as first column
             let mut builder = I64ArrayBuilder::new(len).unwrap();
             for _ in 0..len {
-                builder.append(Some(self.next_row_id()? as i64)).unwrap();
+                builder
+                    .append(Some(table_source.next_row_id() as i64))
+                    .unwrap();
             }
             let rowid_column = Column::new(
                 Arc::new(ArrayImpl::from(builder.finish().unwrap())),
@@ -94,9 +78,14 @@ impl Executor for InsertExecutor {
                 columns.push(col.clone());
             }
 
-            let chunk = DataChunk::new(columns, None);
-            rows_inserted += table_ref.append(chunk).await?;
+            let chunk = StreamChunk::new(vec![Op::Insert; len], columns, None);
+            writer.write(chunk).await?;
+
+            rows_inserted += len;
         }
+
+        // FIXME: should do flush on checkpoint in the future
+        writer.flush().await?;
 
         // create ret value
         {
@@ -140,8 +129,6 @@ impl BoxedExecutorBuilder for InsertExecutor {
         )
         .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
-        let table_manager = source.global_task_env().table_manager_ref();
-
         let proto_child = source.plan_node.get_children().get(0).ok_or_else(|| {
             RwError::from(ErrorCode::InternalError(String::from(
                 "Child interpreting error",
@@ -151,7 +138,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
 
         Ok(Box::new(Self {
             table_id,
-            table_manager,
+            source_manager: source.global_task_env().source_manager_ref(),
             child,
             executed: false,
             schema: Schema {
@@ -168,6 +155,8 @@ mod tests {
     use std::sync::Arc;
 
     use crate::executor::test_utils::MockExecutor;
+    use crate::source::{MemSourceManager, SourceManager};
+    use crate::storage::*;
     use crate::storage::{SimpleTableManager, TableManager};
     use crate::*;
     use risingwave_common::array::{Array, I64Array};
@@ -180,6 +169,8 @@ mod tests {
     #[tokio::test]
     async fn test_insert_executor() -> Result<()> {
         let table_manager = Arc::new(SimpleTableManager::new());
+        let source_manager = Arc::new(MemSourceManager::new());
+
         // Schema for mock executor.
         let schema = Schema {
             fields: vec![
@@ -225,13 +216,14 @@ mod tests {
 
         // Create the first table.
         let table_id = TableId::new(SchemaId::default(), 0);
-        table_manager
+        let table = table_manager
             .create_table(&table_id, table_columns.to_vec())
             .await?;
+        source_manager.create_table_source(&table_id, table)?;
 
         let mut insert_executor = InsertExecutor {
             table_id: table_id.clone(),
-            table_manager: table_manager.clone(),
+            source_manager: source_manager.clone(),
             child: Box::new(mock_executor),
             executed: false,
             schema: Schema {
@@ -254,9 +246,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![Some(5)]
         );
-        let table_ref = insert_executor
-            .table_manager
-            .get_table(&insert_executor.table_id)?;
+        let table_ref = table_manager.get_table(&insert_executor.table_id)?;
         if let TableTypes::BummockTable(table_ref) = table_ref {
             match table_ref.get_data().await? {
                 BummockResult::Data(data_ref) => {
@@ -304,7 +294,7 @@ mod tests {
         mock_executor.add(data_chunk.clone());
         let mut insert_executor = InsertExecutor {
             table_id: table_id.clone(),
-            table_manager: table_manager.clone(),
+            source_manager: source_manager.clone(),
             child: Box::new(mock_executor),
             executed: false,
             schema: Schema {
@@ -327,9 +317,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![Some(5)]
         );
-        let table_ref = insert_executor
-            .table_manager
-            .get_table(&insert_executor.table_id)?;
+        let table_ref = table_manager.get_table(&insert_executor.table_id)?;
         if let TableTypes::BummockTable(table_ref) = table_ref {
             match table_ref.get_data().await? {
                 BummockResult::Data(data_ref) => {
@@ -358,7 +346,7 @@ mod tests {
         mock_executor.add(data_chunk);
         let mut insert_executor = InsertExecutor {
             table_id: table_id2.clone(),
-            table_manager: table_manager.clone(),
+            source_manager: source_manager.clone(),
             child: Box::new(mock_executor),
             executed: false,
             schema: Schema {
@@ -367,9 +355,11 @@ mod tests {
                 }],
             },
         };
-        table_manager
+        let table2 = table_manager
             .create_table(&table_id2, table_columns)
             .await?;
+        source_manager.create_table_source(&table_id2, table2)?;
+
         insert_executor.open().await.unwrap();
         let fields = &insert_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
@@ -384,9 +374,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![Some(5)]
         );
-        let table_ref = insert_executor
-            .table_manager
-            .get_table(&insert_executor.table_id)?;
+        let table_ref = table_manager.get_table(&insert_executor.table_id)?;
         if let TableTypes::BummockTable(table_ref) = table_ref {
             match table_ref.get_data().await? {
                 BummockResult::Data(data_ref) => {

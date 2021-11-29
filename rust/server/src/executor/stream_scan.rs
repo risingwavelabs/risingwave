@@ -90,6 +90,7 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
                     bound_timestamp_ms: Some(stream_scan_node.timestamp_ms),
                 })?)
             }
+            Source::Table(_) => panic!("use table_scan to scan a table"),
         };
 
         Ok(Box::new(Self {

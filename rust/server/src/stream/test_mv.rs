@@ -1,8 +1,10 @@
+use crate::source::{MemSourceManager, SourceManager};
 use crate::storage::{
     RowTable, SimpleTableManager, Table, TableColumnDesc, TableManager, TableTypes,
     TestRowTableEvent,
 };
 use crate::stream::StreamManager;
+use crate::task::{GlobalTaskEnv, TaskManager};
 use futures::StreamExt;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::Row;
@@ -112,6 +114,7 @@ async fn test_stream_mv_proto() {
 
     // Initialize storage.
     let table_manager = Arc::new(SimpleTableManager::new());
+    let source_manager = Arc::new(MemSourceManager::new());
     let table_id = TableId::default();
     let table_columns = vec![
         TableColumnDesc {
@@ -123,7 +126,14 @@ async fn test_stream_mv_proto() {
             data_type: Arc::new(DecimalType::new(false, 10, 5).unwrap()),
         },
     ];
-    let _res = table_manager.create_table(&table_id, table_columns).await;
+    let table = table_manager
+        .create_table(&table_id, table_columns)
+        .await
+        .unwrap();
+    source_manager
+        .create_table_source(&table_id, table)
+        .unwrap();
+
     let table_ref =
         (if let TableTypes::BummockTable(table_ref) = table_manager.get_table(&table_id).unwrap() {
             Ok(table_ref)
@@ -149,6 +159,12 @@ async fn test_stream_mv_proto() {
     // Build stream actor.
     let socket_addr = get_host_port(&format!("127.0.0.1:{}", port)).unwrap();
     let stream_manager = StreamManager::new(socket_addr);
+    let env = GlobalTaskEnv::new(
+        table_manager.clone(),
+        source_manager,
+        Arc::new(TaskManager::new()),
+        socket_addr,
+    );
 
     let actor_info_proto = ActorInfo {
         fragment_id: 1,
@@ -169,9 +185,7 @@ async fn test_stream_mv_proto() {
     };
     stream_manager.update_actor_info(actor_info_table).unwrap();
     stream_manager.update_fragment(&[fragment_proto]).unwrap();
-    stream_manager
-        .build_fragment(&[1], table_manager.clone())
-        .unwrap();
+    stream_manager.build_fragment(&[1], env).unwrap();
 
     // Insert data and check if the materialized view has been updated.
     let _res_app = table_ref.append(append_chunk).await;

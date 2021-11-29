@@ -7,7 +7,10 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataTypeRef;
 
-use crate::source::{HighLevelKafkaSource, Source, SourceConfig, SourceFormat, SourceParser};
+use crate::source::{
+    HighLevelKafkaSource, Source, SourceConfig, SourceFormat, SourceParser, TableSource,
+};
+use crate::storage::BummockTable;
 
 pub type SourceRef = Arc<Source>;
 
@@ -20,6 +23,7 @@ pub trait SourceManager: Sync + Send {
         config: &SourceConfig,
         columns: Vec<SourceColumnDesc>,
     ) -> Result<()>;
+    fn create_table_source(&self, table_id: &TableId, table: Arc<BummockTable>) -> Result<()>;
     fn get_source(&self, source_id: &TableId) -> Result<SourceDesc>;
     fn drop_source(&self, source_id: &TableId) -> Result<()>;
 }
@@ -80,6 +84,38 @@ impl SourceManager for MemSourceManager {
 
         tables.insert(table_id.clone(), desc);
 
+        Ok(())
+    }
+
+    fn create_table_source(&self, table_id: &TableId, table: Arc<BummockTable>) -> Result<()> {
+        let mut tables = self.get_tables()?;
+
+        ensure!(
+            !tables.contains_key(table_id),
+            "Source id already exists: {:?}",
+            table_id
+        );
+
+        let columns = table
+            .columns()
+            .iter()
+            .map(|c| SourceColumnDesc {
+                name: "".to_string(),
+                data_type: c.data_type.clone(),
+                column_id: c.column_id,
+            })
+            .collect();
+
+        let source = Source::Table(TableSource::new(table));
+
+        // Table sources do not need columns and format
+        let desc = SourceDesc {
+            source: Arc::new(source),
+            columns,
+            format: SourceFormat::Invalid,
+        };
+
+        tables.insert(table_id.clone(), desc);
         Ok(())
     }
 

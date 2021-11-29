@@ -210,15 +210,16 @@ impl HighLevelKafkaSource {
 
 #[async_trait]
 impl SourceWriter for HighLevelKafkaSourceWriter {
-    async fn write(&mut self, _chunk: &StreamChunk) -> Result<()> {
+    async fn write(&mut self, _chunk: StreamChunk) -> Result<()> {
         todo!()
     }
 
-    async fn flush(&mut self, _chunk: &StreamChunk) -> Result<()> {
+    async fn flush(&mut self) -> Result<()> {
         todo!()
     }
 }
 
+#[async_trait]
 impl SourceImpl for HighLevelKafkaSource {
     type ReaderContext = HighLevelKafkaSourceReaderContext;
     type BatchReader = HighLevelKafkaSourceBatchReader;
@@ -264,6 +265,7 @@ impl SourceImpl for HighLevelKafkaSource {
     fn stream_reader(
         &self,
         context: HighLevelKafkaSourceReaderContext,
+        _column_ids: Vec<i32>, // FIXME: use column_ids
     ) -> Result<Self::StreamReader> {
         let consumer = self.create_consumer(&context)?;
 

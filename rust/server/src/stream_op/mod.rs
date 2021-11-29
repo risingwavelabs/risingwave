@@ -118,6 +118,9 @@ pub struct StreamChunk {
 
 impl StreamChunk {
     pub fn new(ops: Vec<Op>, columns: Vec<Column>, visibility: Option<Bitmap>) -> Self {
+        for col in columns.iter() {
+            assert_eq!(col.array_ref().len(), ops.len());
+        }
         StreamChunk {
             ops,
             columns,
@@ -221,6 +224,14 @@ impl StreamChunk {
         }
 
         Ok(stream_chunk)
+    }
+
+    pub fn ops(&self) -> &[Op] {
+        &self.ops
+    }
+
+    pub fn visibility(&self) -> &Option<Bitmap> {
+        &self.visibility
     }
 }
 

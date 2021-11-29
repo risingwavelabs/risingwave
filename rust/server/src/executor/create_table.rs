@@ -8,6 +8,7 @@ use risingwave_pb::plan::CreateTableNode;
 use risingwave_pb::ToProto;
 
 use crate::executor::{Executor, ExecutorBuilder};
+use crate::source::SourceManagerRef;
 use crate::storage::{TableColumnDesc, TableManagerRef};
 use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
@@ -19,6 +20,7 @@ use super::{BoxedExecutor, BoxedExecutorBuilder};
 pub(super) struct CreateTableExecutor {
     table_id: TableId,
     table_manager: TableManagerRef,
+    source_manager: SourceManagerRef,
     table_columns: Vec<TableColumnDesc>,
 }
 
@@ -49,6 +51,7 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
         Ok(Box::new(Self {
             table_id,
             table_manager: source.global_task_env().table_manager_ref(),
+            source_manager: source.global_task_env().source_manager_ref(),
             table_columns,
         }))
     }
@@ -59,9 +62,12 @@ impl Executor for CreateTableExecutor {
     async fn open(&mut self) -> Result<()> {
         info!("create table executor initing!");
         let table_columns = std::mem::take(&mut self.table_columns);
-        self.table_manager
+        let table = self
+            .table_manager
             .create_table(&self.table_id, table_columns)
             .await?;
+        self.source_manager
+            .create_table_source(&self.table_id, table)?;
         Ok(())
     }
 

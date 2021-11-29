@@ -1,23 +1,19 @@
-use crate::storage::TableManagerRef;
 use crate::stream::StreamManager;
+use crate::task::GlobalTaskEnv;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
-use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BroadcastActorInfoTableResponse, BuildFragmentRequest,
-    BuildFragmentResponse, DropFragmentsRequest, DropFragmentsResponse, UpdateFragmentRequest,
-    UpdateFragmentResponse,
-};
+use risingwave_pb::stream_service::*;
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
 #[derive(Clone)]
 pub struct StreamServiceImpl {
     mgr: Arc<StreamManager>,
-    table_manager: TableManagerRef,
+    env: GlobalTaskEnv,
 }
 
 impl StreamServiceImpl {
-    pub fn new(mgr: Arc<StreamManager>, table_manager: TableManagerRef) -> Self {
-        StreamServiceImpl { mgr, table_manager }
+    pub fn new(mgr: Arc<StreamManager>, env: GlobalTaskEnv) -> Self {
+        StreamServiceImpl { mgr, env }
     }
 }
 
@@ -61,7 +57,7 @@ impl StreamService for StreamServiceImpl {
         let fragment_id = req.fragment_id;
         let res = self
             .mgr
-            .build_fragment(fragment_id.as_slice(), self.table_manager.clone());
+            .build_fragment(fragment_id.as_slice(), self.env.clone());
         match res {
             Err(e) => {
                 error!("failed to build fragments {}", e);

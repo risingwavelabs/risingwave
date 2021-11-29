@@ -1,15 +1,16 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use crate::source::*;
 use crate::storage::hummock::{HummockOptions, HummockStorage};
 use crate::storage::*;
 use crate::stream_op::*;
+use crate::task::GlobalTaskEnv;
 use async_std::net::SocketAddr;
 use futures::channel::mpsc::{channel, unbounded, Receiver, Sender, UnboundedSender};
 use itertools::Itertools;
 use pb_convert::FromProtobuf;
-use risingwave_common::catalog::Schema;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::{build_from_prost as build_expr_from_prost, AggKind};
@@ -161,9 +162,9 @@ impl StreamManager {
     }
 
     /// This function could only be called once during the lifecycle of `StreamManager` for now.
-    pub fn build_fragment(&self, fragments: &[u32], table_manager: TableManagerRef) -> Result<()> {
+    pub fn build_fragment(&self, fragments: &[u32], env: GlobalTaskEnv) -> Result<()> {
         let mut core = self.core.lock().unwrap();
-        core.build_fragment(fragments, table_manager)
+        core.build_fragment(fragments, env)
     }
 
     #[cfg(test)]
@@ -337,7 +338,7 @@ impl StreamManagerCore {
         &mut self,
         node: &stream_plan::StreamNode,
         mergers: Vec<Box<dyn Executor>>,
-        table_manager: TableManagerRef,
+        env: GlobalTaskEnv,
     ) -> Result<Box<dyn Executor>> {
         use stream_plan::stream_node::Node::*;
 
@@ -349,14 +350,15 @@ impl StreamManagerCore {
                 node.input
                     .iter()
                     .zip(mergers.into_iter())
-                    .map(|(input, merger)| {
-                        self.create_nodes(input, vec![merger], table_manager.clone())
-                    })
+                    .map(|(input, merger)| self.create_nodes(input, vec![merger], env.clone()))
                     .collect::<Result<Vec<_>>>()?
             } else {
                 mergers
             }
         };
+
+        let table_manager = env.table_manager();
+        let source_manager = env.source_manager();
 
         let executor: Result<Box<dyn Executor>> = match node.get_node() {
             TableSourceNode(table_source_node) => {
@@ -367,35 +369,24 @@ impl StreamManagerCore {
                 )
                 .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
-                let table_ref = table_manager.clone().get_table(&table_id).unwrap();
-                let column_ids = table_source_node
-                    .get_column_ids()
-                    .iter()
-                    .map(|column_id| *column_id as usize)
-                    .collect::<Vec<_>>();
-                if let TableTypes::BummockTable(table) = table_ref {
-                    let (stream_sender, stream_receiver) = table.create_stream()?;
-                    let schema = table.schema();
-                    // Add existing data in the table into stream channel for initializing states.
-                    tokio::spawn(async move {
-                        let bummock_result = table.get_data().await;
-                        match bummock_result {
-                            Ok(BummockResult::Data(table_data)) => {
-                                table_data.iter().for_each(|data_chunk| {
-                                    let stream_chunk = StreamChunk::new(
-                                        vec![Op::Insert; data_chunk.cardinality()],
-                                        Vec::from(data_chunk.columns()),
-                                        data_chunk.visibility().clone(),
-                                    );
-                                    stream_sender.unbounded_send(stream_chunk).unwrap();
-                                });
-                            }
-                            _ => {
-                                info!("all data init");
-                            }
-                        }
-                    });
+                let source_desc = source_manager.get_source(&table_id)?;
+                let source = source_desc.source;
 
+                let column_ids = table_source_node.get_column_ids().to_vec();
+
+                let mut fields = Vec::with_capacity(column_ids.len());
+                for &column_id in column_ids.iter() {
+                    let column_desc = source_desc
+                        .columns
+                        .iter()
+                        .find(|c| c.column_id == column_id)
+                        .unwrap();
+                    fields.push(Field::new(column_desc.data_type.clone()));
+                }
+                let schema = Schema::new(fields);
+
+                if let Source::Table(ref table) = *source {
+                    let stream_reader = table.stream_reader(TableReaderContext {}, column_ids)?;
                     // TODO: The channel pair should be created by the Checkpoint manger. So this
                     // line may be removed later.
                     let (sender, barrier_receiver) = unbounded();
@@ -403,13 +394,12 @@ impl StreamManagerCore {
                     Ok(Box::new(TableSourceExecutor::new(
                         table_id,
                         schema,
-                        column_ids,
-                        stream_receiver,
+                        stream_reader,
                         barrier_receiver,
                     )))
                 } else {
                     Err(RwError::from(InternalError(
-                        "Streaming source only supports columnar table".to_string(),
+                        "Streaming source only supports table source".to_string(),
                     )))
                 }
             }
@@ -523,6 +513,7 @@ impl StreamManagerCore {
                     .iter()
                     .map(|key| *key as usize)
                     .collect::<Vec<_>>();
+
                 let column_orders = materialized_view_node.get_column_orders();
                 let order_pairs = fetch_orders(column_orders).unwrap();
                 table_manager.create_materialized_view(&table_id, columns, pks.clone())?;
@@ -649,7 +640,7 @@ impl StreamManagerCore {
         }
     }
 
-    fn build_fragment(&mut self, fragments: &[u32], table_manager: TableManagerRef) -> Result<()> {
+    fn build_fragment(&mut self, fragments: &[u32], env: GlobalTaskEnv) -> Result<()> {
         for fragment_id in fragments {
             let fragment = self.fragments.remove(fragment_id).unwrap();
 
@@ -668,8 +659,7 @@ impl StreamManagerCore {
                 })
                 .collect::<Result<Vec<_>>>()?;
 
-            let executor =
-                self.create_nodes(fragment.get_nodes(), mergers, table_manager.clone())?;
+            let executor = self.create_nodes(fragment.get_nodes(), mergers, env.clone())?;
 
             let dispatcher = self.create_dispatcher(
                 executor,

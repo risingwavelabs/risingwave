@@ -7,6 +7,7 @@ pub use manager::*;
 pub use parser::*;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::Result;
+pub use table::*;
 
 use crate::stream_op::StreamChunk;
 
@@ -30,15 +31,19 @@ pub struct SourceReaderContext {
 
 #[derive(Clone, Debug)]
 pub enum SourceFormat {
+    Invalid,
     Json,
     Protobuf,
     Avro,
 }
 
+#[derive(Debug)]
 pub enum Source {
     HighLevelKafka(HighLevelKafkaSource),
+    Table(TableSource),
 }
 
+#[async_trait]
 pub trait SourceImpl: Send + Sync + 'static {
     type ReaderContext;
     type BatchReader: BatchSourceReader;
@@ -49,7 +54,11 @@ pub trait SourceImpl: Send + Sync + 'static {
     fn batch_reader(&self, context: Self::ReaderContext) -> Result<Self::BatchReader>;
 
     /// Create a stream reader
-    fn stream_reader(&self, context: Self::ReaderContext) -> Result<Self::StreamReader>;
+    fn stream_reader(
+        &self,
+        context: Self::ReaderContext,
+        column_ids: Vec<i32>,
+    ) -> Result<Self::StreamReader>;
 
     /// Create a writer
     fn create_writer(&self) -> Result<Self::Writer>;
@@ -58,10 +67,10 @@ pub trait SourceImpl: Send + Sync + 'static {
 #[async_trait]
 pub trait SourceWriter: Send + Sync + 'static {
     /// `write` a stream chunk into table
-    async fn write(&mut self, chunk: &StreamChunk) -> Result<()>;
+    async fn write(&mut self, chunk: StreamChunk) -> Result<()>;
 
     /// `flush` ensures data flushed and make sure writer can be closed safely
-    async fn flush(&mut self, chunk: &StreamChunk) -> Result<()>;
+    async fn flush(&mut self) -> Result<()>;
 }
 
 #[async_trait]

@@ -13,7 +13,6 @@ mod object;
 pub use object::*;
 
 use crate::stream_op::StreamChunk;
-use futures::channel::mpsc;
 use risingwave_common::array::DataChunk;
 use risingwave_common::array::InternalError;
 use risingwave_common::catalog::Schema;
@@ -40,26 +39,11 @@ pub trait Table: Sync + Send {
     /// An assertion is put to assert only insertion operations are allowed.
     fn write(&self, chunk: &StreamChunk) -> Result<usize>;
 
-    /// Create a stream from the table.
-    /// The stream includes all existing rows in tables and changed rows in future.
-    /// Note that only one stream is allowed for a table.
-    /// Existing stream should be reused if the user create
-    /// more than one materialized view from a table.
-    fn create_stream(
-        &self,
-    ) -> Result<(
-        mpsc::UnboundedSender<StreamChunk>,
-        mpsc::UnboundedReceiver<StreamChunk>,
-    )>;
-
     /// Get the column ids of the table.
     fn get_column_ids(&self) -> Vec<i32>;
 
     /// Get the indices of the specific column.
     fn index_of_column_id(&self, column_id: i32) -> Result<usize>;
-
-    /// Get the status of stream connection of this table.
-    fn is_stream_connected(&self) -> bool;
 }
 
 #[async_trait::async_trait]
@@ -72,7 +56,7 @@ pub trait TableManager: Sync + Send {
         &self,
         table_id: &TableId,
         table_columns: Vec<TableColumnDesc>,
-    ) -> Result<()>;
+    ) -> Result<Arc<BummockTable>>;
 
     /// Get a specific table.
     fn get_table(&self, table_id: &TableId) -> Result<TableTypes>;
@@ -116,7 +100,7 @@ impl TableManager for SimpleTableManager {
         &self,
         table_id: &TableId,
         table_columns: Vec<TableColumnDesc>,
-    ) -> Result<()> {
+    ) -> Result<Arc<BummockTable>> {
         let mut tables = self.get_tables()?;
 
         ensure!(
@@ -131,11 +115,9 @@ impl TableManager for SimpleTableManager {
             "column count must be positive: {}",
             column_count
         );
-        tables.insert(
-            table_id.clone(),
-            TableTypes::BummockTable(Arc::new(BummockTable::new(table_id, table_columns))),
-        );
-        Ok(())
+        let table = Arc::new(BummockTable::new(table_id, table_columns));
+        tables.insert(table_id.clone(), TableTypes::BummockTable(table.clone()));
+        Ok(table)
     }
 
     fn get_table(&self, table_id: &TableId) -> Result<TableTypes> {

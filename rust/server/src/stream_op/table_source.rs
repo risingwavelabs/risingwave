@@ -1,4 +1,5 @@
-use crate::stream_op::{Barrier, Executor, Message, StreamChunk};
+use crate::source::{StreamSourceReader, TableStreamReader};
+use crate::stream_op::{Barrier, Executor, Message};
 use async_trait::async_trait;
 use futures::channel::mpsc::UnboundedReceiver;
 use futures::StreamExt;
@@ -10,25 +11,24 @@ use std::fmt::{Debug, Formatter};
 pub struct TableSourceExecutor {
     table_id: TableId,
     schema: Schema,
-    column_ids: Vec<usize>,
-    data_receiver: Option<UnboundedReceiver<StreamChunk>>,
+    stream_reader: Option<TableStreamReader>,
     barrier_receiver: UnboundedReceiver<Message>,
+    first_execution: bool,
 }
 
 impl TableSourceExecutor {
     pub fn new(
         table_id: TableId,
         schema: Schema,
-        column_ids: Vec<usize>,
-        data_receiver: UnboundedReceiver<StreamChunk>,
+        stream_reader: TableStreamReader,
         barrier_receiver: UnboundedReceiver<Message>,
     ) -> Self {
         TableSourceExecutor {
             table_id,
             schema,
-            column_ids,
-            data_receiver: Some(data_receiver),
+            stream_reader: Some(stream_reader),
             barrier_receiver,
+            first_execution: true,
         }
     }
 }
@@ -36,32 +36,31 @@ impl TableSourceExecutor {
 #[async_trait]
 impl Executor for TableSourceExecutor {
     async fn next(&mut self) -> Result<Message> {
-        if let Some(data_receiver) = &mut self.data_receiver {
+        if let Some(stream_reader) = &mut self.stream_reader {
+            if self.first_execution {
+                stream_reader.open().await?;
+                self.first_execution = false;
+            }
+
+            // FIXME: incorrect usage of `select!`
             let msg = tokio::select! {
-              chunk = data_receiver.next() => {
-                chunk.map(Message::Chunk)
+              result = stream_reader.next() => {
+                Message::Chunk(result?)
               }
               message = self.barrier_receiver.next() => {
-                message
+                message.expect("barrier channel closed unexpectedly")
               }
             };
-            let msg = msg.expect("table stream closed unexpectedly");
             Ok(match msg {
                 Message::Chunk(chunk) => {
-                    let new_columns = self
-                        .column_ids
-                        .iter()
-                        .map(|column_id| chunk.columns[*column_id].clone())
-                        .collect::<Vec<_>>();
-                    let new_chunk =
-                        StreamChunk::new(chunk.ops.clone(), new_columns, chunk.visibility);
-                    Message::Chunk(new_chunk)
+                    // FIXME: extract the columns with given column ids
+                    Message::Chunk(chunk)
                 }
                 Message::Barrier(barrier) => {
                     if barrier.stop {
                         // Drop the receiver here, the source will encounter an error at the next
                         // send.
-                        self.data_receiver = None;
+                        self.stream_reader = None;
                     }
 
                     Message::Barrier(barrier)
@@ -91,12 +90,13 @@ impl Debug for TableSourceExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::{BummockTable, Table, TableColumnDesc};
-    use crate::stream_op::Op;
+    use crate::source::*;
+    use crate::storage::{BummockTable, TableColumnDesc};
+    use crate::stream_op::{Op, StreamChunk};
     use futures::channel::mpsc::unbounded;
     use itertools::Itertools;
     use risingwave_common::array::column::Column;
-    use risingwave_common::array::{ArrayImpl, DataChunk};
+    use risingwave_common::array::ArrayImpl;
     use risingwave_common::array::{I32Array, Utf8Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::test_utils::mock_table_id;
@@ -104,9 +104,18 @@ mod tests {
     use risingwave_common::types::{DataTypeKind, DataTypeRef, DecimalType, Int32Type, StringType};
     use std::sync::Arc;
 
+    impl Source {
+        fn as_table(&self) -> &TableSource {
+            match self {
+                Source::Table(table) => table,
+                _ => panic!("not a table source"),
+            }
+        }
+    }
+
     #[tokio::test]
     async fn test_table_source() -> Result<()> {
-        let table_id = mock_table_id();
+        let table_id = TableId::default();
         let table_columns = vec![
             TableColumnDesc {
                 column_id: 0,
@@ -117,7 +126,12 @@ mod tests {
                 data_type: Arc::new(DecimalType::new(false, 10, 5)?),
             },
         ];
-        let table = BummockTable::new(&table_id, table_columns);
+        let table = Arc::new(BummockTable::new(&table_id, table_columns));
+
+        let source_manager = MemSourceManager::new();
+        source_manager.create_table_source(&table_id, table.clone())?;
+        let source = source_manager.get_source(&table_id)?.source;
+        let table_source = source.as_table();
 
         let col1_type = Int32Type::create(false) as DataTypeRef;
         let col2_type = StringType::create(true, 10, DataTypeKind::Varchar);
@@ -133,13 +147,15 @@ mod tests {
         let chunk1 = {
             let col1 = Column::new(col1_arr1.clone(), col1_type.clone());
             let col2 = Column::new(col2_arr1.clone(), col2_type.clone());
-            DataChunk::new(vec![col1, col2], None)
+            let vis = vec![Op::Insert, Op::Insert, Op::Insert];
+            StreamChunk::new(vis, vec![col1, col2], None)
         };
 
         let chunk2 = {
             let col1 = Column::new(col1_arr2.clone(), col1_type.clone());
             let col2 = Column::new(col2_arr2.clone(), col2_type.clone());
-            DataChunk::new(vec![col1, col2], None)
+            let vis = vec![Op::Insert, Op::Insert, Op::Insert];
+            StreamChunk::new(vis, vec![col1, col2], None)
         };
 
         let schema = Schema {
@@ -152,13 +168,13 @@ mod tests {
                 },
             ],
         };
-        let column_ids = vec![0, 1];
 
-        let (_stream_sender, stream_recv) = table.create_stream()?;
+        let column_ids = vec![0, 1];
+        let stream_reader = table_source.stream_reader(TableReaderContext {}, column_ids)?;
         let (barrier_sender, barrier_receiver) = unbounded();
 
         let mut source =
-            TableSourceExecutor::new(table_id, schema, column_ids, stream_recv, barrier_receiver);
+            TableSourceExecutor::new(table_id, schema, stream_reader, barrier_receiver);
 
         barrier_sender
             .unbounded_send(Message::Barrier(Barrier {
@@ -166,11 +182,10 @@ mod tests {
                 stop: false,
             }))
             .unwrap();
-        // Write 1st chunk
-        let card = table.append(chunk1).await?;
-        // barrier_sender.start_send(Message::Barrier(0))
 
-        assert_eq!(3, card);
+        let mut writer = table_source.create_writer()?;
+        // Write 1st chunk
+        writer.write(chunk1).await?;
 
         for _ in 0..2 {
             match source.next().await.unwrap() {
@@ -193,8 +208,7 @@ mod tests {
         }
 
         // Write 2nd chunk
-        let card = table.append(chunk2).await?;
-        assert_eq!(3, card);
+        writer.write(chunk2).await?;
 
         if let Message::Chunk(chunk) = source.next().await.unwrap() {
             assert_eq!(2, chunk.columns.len());
@@ -228,7 +242,12 @@ mod tests {
                 data_type: Arc::new(DecimalType::new(false, 10, 5)?),
             },
         ];
-        let table = BummockTable::new(&table_id, table_columns);
+        let table = Arc::new(BummockTable::new(&table_id, table_columns));
+
+        let source_manager = MemSourceManager::new();
+        source_manager.create_table_source(&table_id, table.clone())?;
+        let source = source_manager.get_source(&table_id)?.source;
+        let table_source = source.as_table();
 
         let col1_type = Int32Type::create(false) as DataTypeRef;
         let col2_type = StringType::create(true, 10, DataTypeKind::Varchar);
@@ -241,7 +260,8 @@ mod tests {
         let chunk1 = {
             let col1 = Column::new(col1_arr1.clone(), col1_type.clone());
             let col2 = Column::new(col2_arr1.clone(), col2_type.clone());
-            DataChunk::new(vec![col1, col2], None)
+            let vis = vec![Op::Insert, Op::Insert, Op::Insert];
+            StreamChunk::new(vis, vec![col1, col2], None)
         };
 
         let schema = Schema {
@@ -254,15 +274,16 @@ mod tests {
                 },
             ],
         };
-        let column_ids = vec![0, 1];
 
-        let (_stream_sender, stream_recv) = table.create_stream()?;
+        let column_ids = vec![0, 1];
+        let stream_reader = table_source.stream_reader(TableReaderContext {}, column_ids)?;
         let (barrier_sender, barrier_receiver) = unbounded();
 
         let mut source =
-            TableSourceExecutor::new(table_id, schema, column_ids, stream_recv, barrier_receiver);
+            TableSourceExecutor::new(table_id, schema, stream_reader, barrier_receiver);
 
-        table.append(chunk1.clone()).await?;
+        let mut writer = table_source.create_writer()?;
+        writer.write(chunk1.clone()).await?;
 
         barrier_sender
             .unbounded_send(Message::Barrier(Barrier {
@@ -273,9 +294,7 @@ mod tests {
 
         source.next().await.unwrap();
         source.next().await.unwrap();
-        table.append(chunk1).await?;
-
-        assert!(!table.is_stream_connected());
+        writer.write(chunk1).await?;
 
         Ok(())
     }

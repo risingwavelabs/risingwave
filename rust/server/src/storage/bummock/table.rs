@@ -3,14 +3,12 @@ use crate::storage::Table;
 use crate::storage::{MemRowGroup, MemRowGroupRef};
 use crate::storage::{PartitionedRowGroupRef, TableColumnDesc};
 use crate::stream_op::{Op, StreamChunk};
-use futures::channel::mpsc;
-use futures::SinkExt;
 use risingwave_common::array::InternalError;
 use risingwave_common::array::{DataChunk, DataChunkRef};
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
-use std::sync::atomic::{AtomicU64, AtomicUsize};
 use std::sync::Arc;
 use std::sync::RwLock;
 
@@ -26,9 +24,6 @@ pub struct BummockTable {
 
     /// Current tuple id.
     current_tuple_id: AtomicU64,
-
-    /// Stream sender.
-    stream_sender: RwLock<Vec<Option<mpsc::UnboundedSender<StreamChunk>>>>,
 
     /// Represents the cached in-memory parts of the table.
     /// Note: Remotely partitioned (merged) segments will be segmented here.
@@ -49,50 +44,18 @@ pub struct BummockTable {
 
     /// synchronization protection
     rwlock: Arc<RwLock<i32>>,
-
-    /// current implicit row id
-    next_row_id: AtomicUsize,
 }
 
 #[async_trait::async_trait]
 impl Table for BummockTable {
     async fn append(&self, data: DataChunk) -> Result<usize> {
         let _write_guard = self.rwlock.write().unwrap();
-        let mut is_send_messages_success = true;
-
-        // TODO, this looks like not necessary when we have table source stream.
-        self.stream_sender.write().unwrap().iter().for_each(|ch| {
-            let sender = &mut ch.as_ref().unwrap();
-
-            use crate::stream_op::Op;
-            let chunk = StreamChunk::new(
-                vec![Op::Insert; data.cardinality()],
-                Vec::from(data.columns()),
-                data.visibility().clone(),
-            );
-
-            futures::executor::block_on(async move { sender.send(chunk).await })
-                .or_else(|x| {
-                    // Disconnection means the receiver is dropped. So the sender should be dropped
-                    // here too.
-                    if x.is_disconnected() {
-                        is_send_messages_success = false;
-                        return Ok(());
-                    }
-                    Err(x)
-                })
-                .expect("send changes failed");
-        });
-
-        if !is_send_messages_success {
-            self.stream_sender.write().unwrap().clear();
-        }
 
         let mut appender = self.mem_dirty_segs.write().unwrap();
 
         // only one row group before having disk swapping
         if appender.is_empty() {
-            appender.push(MemRowGroup::new(self.get_column_ids().len()));
+            appender.push(MemRowGroup::new(self.columns().len()));
         }
 
         let (ret_tuple_id, ret_cardinality) = (*appender)
@@ -116,7 +79,7 @@ impl Table for BummockTable {
         let mut appender = self.mem_dirty_segs.write().unwrap();
         // only one row group before having disk swapping
         if (appender).is_empty() {
-            appender.push(MemRowGroup::new(self.get_column_ids().len()));
+            appender.push(MemRowGroup::new(self.columns().len()));
         }
 
         let (ret_tuple_id, ret_cardinality) = (*appender)
@@ -126,19 +89,6 @@ impl Table for BummockTable {
             .unwrap();
         self.current_tuple_id.store(ret_tuple_id, Ordering::SeqCst);
         Ok(ret_cardinality)
-    }
-
-    fn create_stream(
-        &self,
-    ) -> Result<(
-        mpsc::UnboundedSender<StreamChunk>,
-        mpsc::UnboundedReceiver<StreamChunk>,
-    )> {
-        let _write_guard = self.rwlock.write().unwrap();
-        let (tx, rx) = mpsc::unbounded();
-        let mut s = self.stream_sender.write().unwrap();
-        s.push(Some(tx.clone()));
-        Ok((tx, rx))
     }
 
     async fn get_data(&self) -> Result<BummockResult> {
@@ -167,10 +117,6 @@ impl Table for BummockTable {
             ))))
         }
     }
-
-    fn is_stream_connected(&self) -> bool {
-        self.stream_sender.read().unwrap().len() > 0
-    }
 }
 
 impl BummockTable {
@@ -178,7 +124,6 @@ impl BummockTable {
         Self {
             table_id: table_id.clone(),
             table_columns,
-            stream_sender: RwLock::new(vec![]),
             mem_clean_segs: Vec::new(),
             mem_free_segs: Vec::with_capacity(0), // empty before we have memory pool
             mem_dirty_segs: RwLock::new(Vec::new()),
@@ -187,12 +132,11 @@ impl BummockTable {
                                                       * time */
             current_tuple_id: AtomicU64::new(0),
             rwlock: Arc::new(RwLock::new(1)),
-            next_row_id: AtomicUsize::new(0),
         }
     }
 
-    pub fn next_row_id(&self) -> usize {
-        self.next_row_id.fetch_add(1, Ordering::Relaxed)
+    pub fn columns(&self) -> &[TableColumnDesc] {
+        &self.table_columns
     }
 
     pub fn schema(&self) -> Schema {

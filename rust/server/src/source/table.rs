@@ -1,13 +1,15 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
-use tokio::sync::broadcast;
+use std::collections::VecDeque;
+use std::ops::Deref;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use tokio::sync::broadcast::error::RecvError;
+use tokio::sync::{broadcast, RwLock};
 
 use risingwave_common::array::{DataChunk, DataChunkRef};
 use risingwave_common::error::Result;
 
-use crate::source::{BatchSourceReader, SourceImpl, SourceWriter, StreamSourceReader};
+use crate::source::*;
 
 use crate::storage::{BummockResult, BummockTable, Table};
 use crate::stream_op::{Op, StreamChunk};
@@ -19,53 +21,176 @@ use crate::stream_op::{Op, StreamChunk};
 /// view to construct the table and zero or more downstreams
 #[derive(Debug)]
 pub struct TableSource {
-    table: Arc<BummockTable>,
+    core: Arc<RwLock<TableSourceCore>>,
 
-    // Use broadcast channel here to support multiple receivers
-    write_channel: broadcast::Sender<StreamChunk>,
+    /// All columns in this table
+    columns: Vec<SourceColumnDesc>,
+
+    /// current allocated row id
+    next_row_id: AtomicUsize,
 }
 
 #[derive(Debug)]
-pub struct TableBatchReader {}
+struct TableSourceCore {
+    /// The table to be updated
+    table: Arc<BummockTable>,
 
-#[async_trait]
-impl BatchSourceReader for TableBatchReader {
-    async fn open(&mut self) -> Result<()> {
-        todo!()
+    /// Unflushed rows
+    buffer: Vec<StreamChunk>,
+
+    /// Channel used to broadcast changes into downstream streaming operators
+    write_channel: broadcast::Sender<StreamChunk>,
+}
+
+impl TableSource {
+    /// Capacity of broadcast channel.
+    const CHANNEL_CAPACITY: usize = 1000;
+
+    pub fn new(table: Arc<BummockTable>) -> Self {
+        let source_columns = table
+            .columns()
+            .iter()
+            .map(|c| SourceColumnDesc {
+                name: "".to_string(),
+                data_type: c.data_type.clone(),
+                column_id: c.column_id,
+            })
+            .collect();
+
+        let (tx, _rx) = broadcast::channel(TableSource::CHANNEL_CAPACITY);
+        let core = TableSourceCore {
+            table,
+            buffer: vec![],
+            write_channel: tx,
+        };
+        TableSource {
+            core: Arc::new(RwLock::new(core)),
+            columns: source_columns,
+            next_row_id: AtomicUsize::new(0),
+        }
     }
 
-    async fn next(&mut self) -> Result<Option<DataChunk>> {
-        todo!()
-    }
-
-    async fn close(&mut self) -> Result<()> {
-        todo!()
+    pub fn next_row_id(&self) -> usize {
+        self.next_row_id.fetch_add(1, Ordering::Relaxed)
     }
 }
 
 #[derive(Debug)]
 pub struct TableReaderContext {}
 
-/// `TableSourceReader` reads changes from a certain table. Note that this is
-/// not for OLAP scanning, but for the materialized views and other downstream
-/// operators.
+/// `TableBatchReader` reads a latest snapshot from `BummockTable`
 #[derive(Debug)]
-pub struct TableStreamReader {
-    table: Arc<BummockTable>,
-    snapshot: Vec<DataChunkRef>,
-    rx: broadcast::Receiver<StreamChunk>,
+pub struct TableBatchReader {
+    core: Arc<RwLock<TableSourceCore>>,
+    snapshot: VecDeque<DataChunkRef>,
 }
 
-impl TableSource {
-    pub fn new(table: Arc<BummockTable>) -> Self {
-        let (tx, _rx) = broadcast::channel(100);
-        TableSource {
-            table,
-            write_channel: tx,
+#[async_trait]
+impl BatchSourceReader for TableBatchReader {
+    async fn open(&mut self) -> Result<()> {
+        let core = self.core.read().await;
+        match core.table.get_data().await? {
+            BummockResult::Data(snapshot) => {
+                self.snapshot = VecDeque::from(snapshot);
+                Ok(())
+            }
+            BummockResult::DataEof => {
+                // Table is empty
+                Ok(())
+            }
         }
+    }
+
+    async fn next(&mut self) -> Result<Option<DataChunk>> {
+        if let Some(chunk) = self.snapshot.pop_front() {
+            Ok(Some(chunk.deref().clone()))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn close(&mut self) -> Result<()> {
+        self.snapshot.clear();
+        Ok(())
     }
 }
 
+/// `TableSourceReader` reads changes from a certain table continuously
+#[derive(Debug)]
+pub struct TableStreamReader {
+    core: Arc<RwLock<TableSourceCore>>,
+
+    /// Columns to be read
+    columns: Vec<SourceColumnDesc>,
+
+    /// Mappings from the source column to the column to be read
+    column_indexes: Vec<usize>,
+
+    /// `existing_data` contains data from the last snapshot and unflushed data
+    /// at the time the snapshot created
+    existing_data: VecDeque<StreamChunk>,
+
+    read_channel: Option<broadcast::Receiver<StreamChunk>>,
+}
+
+#[async_trait]
+impl StreamSourceReader for TableStreamReader {
+    async fn open(&mut self) -> Result<()> {
+        let core = self.core.read().await;
+        let snapshot = match core.table.get_data().await? {
+            BummockResult::Data(snapshot) => snapshot,
+            BummockResult::DataEof => vec![],
+        };
+
+        for chunk in snapshot.into_iter() {
+            let stream_chunk = StreamChunk::new(
+                vec![Op::Insert; chunk.capacity()],
+                chunk.columns().to_vec(),
+                chunk.visibility().clone(),
+            );
+            self.existing_data.push_back(stream_chunk);
+        }
+
+        for stream_chunk in core.buffer.iter() {
+            self.existing_data.push_back(stream_chunk.clone())
+        }
+
+        self.read_channel = Some(core.write_channel.subscribe());
+        Ok(())
+    }
+
+    async fn next(&mut self) -> Result<StreamChunk> {
+        // Pop data from snapshot if exists
+        let chunk = if let Some(chunk) = self.existing_data.pop_front() {
+            chunk
+        } else {
+            // Otherwise, read from the writing channel
+            match self.read_channel.as_mut().unwrap().recv().await {
+                Ok(chunk) => chunk,
+                Err(err) => {
+                    if let RecvError::Closed = err {
+                        panic!("TableSource dropped before streaming task terminated")
+                    } else {
+                        unreachable!();
+                    }
+                }
+            }
+        };
+
+        let selected_columns = self
+            .column_indexes
+            .iter()
+            .map(|i| chunk.columns()[*i].clone())
+            .collect();
+        Ok(StreamChunk::new(
+            chunk.ops().to_vec(),
+            selected_columns,
+            chunk.visibility().clone(),
+        ))
+    }
+}
+
+#[async_trait]
 impl SourceImpl for TableSource {
     type ReaderContext = TableReaderContext;
     type BatchReader = TableBatchReader;
@@ -73,86 +198,67 @@ impl SourceImpl for TableSource {
     type Writer = TableWriter;
 
     fn batch_reader(&self, _context: Self::ReaderContext) -> Result<Self::BatchReader> {
-        todo!()
+        Ok(TableBatchReader {
+            core: self.core.clone(),
+            snapshot: VecDeque::new(),
+        })
     }
 
-    fn stream_reader(&self, _context: Self::ReaderContext) -> Result<Self::StreamReader> {
-        let rx = self.write_channel.subscribe();
+    fn stream_reader(
+        &self,
+        _context: Self::ReaderContext,
+        column_ids: Vec<i32>,
+    ) -> Result<Self::StreamReader> {
+        let mut columns = vec![];
+        let mut column_indexes = vec![];
+        for column_id in column_ids {
+            let idx = self
+                .columns
+                .iter()
+                .position(|c| c.column_id == column_id)
+                .expect("column id not exists");
+            columns.push(self.columns[idx].clone());
+            column_indexes.push(idx);
+        }
+
         Ok(TableStreamReader {
-            table: self.table.clone(),
-            snapshot: vec![],
-            rx,
+            core: self.core.clone(),
+            existing_data: VecDeque::new(),
+            read_channel: None,
+            columns,
+            column_indexes,
         })
     }
 
     fn create_writer(&self) -> Result<Self::Writer> {
-        let tx = self.write_channel.clone();
         Ok(TableWriter {
-            table: self.table.clone(),
-            tx,
+            core: self.core.clone(),
         })
     }
 }
 
 /// `TableWriter` is for writing data into table.
 pub struct TableWriter {
-    table: Arc<BummockTable>,
-    tx: broadcast::Sender<StreamChunk>,
+    core: Arc<RwLock<TableSourceCore>>,
 }
 
 #[async_trait]
 impl SourceWriter for TableWriter {
-    async fn write(&mut self, chunk: &StreamChunk) -> Result<()> {
-        self.table.write(chunk)?;
-
+    async fn write(&mut self, chunk: StreamChunk) -> Result<()> {
+        let mut core = self.core.write().await;
+        core.buffer.push(chunk.clone());
         // Ignore SendError caused by no receivers
-        self.tx.send(chunk.clone()).ok();
-
+        core.write_channel.send(chunk).ok();
         Ok(())
     }
 
-    async fn flush(&mut self, _chunk: &StreamChunk) -> Result<()> {
-        todo!()
-    }
-}
-
-#[async_trait]
-impl StreamSourceReader for TableStreamReader {
-    async fn open(&mut self) -> Result<()> {
-        // In the completed design, should wait until first barrier to get the snapshot
-        match self.table.get_data().await? {
-            BummockResult::Data(mut snapshot) => {
-                snapshot.reverse(); // first element should be popped first
-                self.snapshot = snapshot;
-                Ok(())
-            }
-            BummockResult::DataEof => {
-                // TODO, handle eof here
-                Ok(())
-            }
+    async fn flush(&mut self) -> Result<()> {
+        let mut core = self.core.write().await;
+        let write_batch = std::mem::take(&mut core.buffer);
+        for stream_chunk in write_batch {
+            core.table.write(&stream_chunk)?;
         }
-    }
-
-    async fn next(&mut self) -> Result<StreamChunk> {
-        if let Some(chunk) = self.snapshot.pop() {
-            let stream_chunk = StreamChunk::new(
-                vec![Op::Insert; chunk.capacity()],
-                chunk.columns().to_vec(),
-                chunk.visibility().clone(),
-            );
-            return Ok(stream_chunk);
-        }
-
-        match self.rx.recv().await {
-            Ok(chunk) => Ok(chunk),
-            Err(err) => {
-                if let RecvError::Closed = err {
-                    panic!("TableSource dropped before streaming task terminated")
-                } else {
-                    unreachable!();
-                }
-            }
-        }
+        Ok(())
     }
 }
 
@@ -166,14 +272,20 @@ mod test {
     use risingwave_common::column_nonnull;
     use risingwave_common::types::Int64Type;
 
-    use crate::storage::Table;
+    use crate::storage::{Table, TableColumnDesc};
     use crate::stream_op::Op;
 
     use super::*;
 
     #[tokio::test]
     async fn test_table_source() {
-        let table = Arc::new(BummockTable::new(&mock_table_id(), vec![]));
+        let table = Arc::new(BummockTable::new(
+            &mock_table_id(),
+            vec![TableColumnDesc {
+                data_type: Arc::new(Int64Type::new(false)),
+                column_id: 0,
+            }],
+        ));
 
         // Some existing data
         let chunk0 = StreamChunk::new(
@@ -185,7 +297,9 @@ mod test {
 
         let source = TableSource::new(table.clone());
 
-        let mut reader1 = source.stream_reader(TableReaderContext {}).unwrap();
+        let mut reader1 = source
+            .stream_reader(TableReaderContext {}, vec![0])
+            .unwrap();
         reader1.open().await.unwrap();
 
         // insert chunk 1
@@ -195,12 +309,8 @@ mod test {
             None,
         );
 
-        source
-            .create_writer()
-            .unwrap()
-            .write(&chunk1)
-            .await
-            .unwrap();
+        let mut writer = source.create_writer().unwrap();
+        writer.write(chunk1).await.unwrap();
 
         // reader 1 sees chunk 0,1
         assert_matches!(reader1.next().await.unwrap(), chunk => {
@@ -211,7 +321,9 @@ mod test {
           assert_eq!(chunk.columns()[0].array_ref().as_int64().iter().collect_vec(), vec![Some(1)]);
         });
 
-        let mut reader2 = source.stream_reader(TableReaderContext {}).unwrap();
+        let mut reader2 = source
+            .stream_reader(TableReaderContext {}, vec![0])
+            .unwrap();
         reader2.open().await.unwrap();
 
         // insert chunk 2
@@ -220,12 +332,9 @@ mod test {
             vec![column_nonnull!(I64Array, Int64Type, [2])],
             None,
         );
-        source
-            .create_writer()
-            .unwrap()
-            .write(&chunk2)
-            .await
-            .unwrap();
+
+        let mut writer = source.create_writer().unwrap();
+        writer.write(chunk2).await.unwrap();
 
         // reader 1 sees chunk 2
         assert_matches!(reader1.next().await.unwrap(), chunk => {
