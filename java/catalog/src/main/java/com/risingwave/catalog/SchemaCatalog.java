@@ -50,6 +50,11 @@ public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCata
   MaterializedViewCatalog createMaterializedView(
       CreateMaterializedViewInfo createMaterializedViewInfo) {
     var id = nextTableId.getAndIncrement();
+    return createMaterializedViewWithId(createMaterializedViewInfo, id);
+  }
+
+  MaterializedViewCatalog createMaterializedViewWithId(
+      CreateMaterializedViewInfo createMaterializedViewInfo, Integer id) {
     TableCatalog.TableName tableName =
         new TableCatalog.TableName(createMaterializedViewInfo.getName(), getEntityName());
 

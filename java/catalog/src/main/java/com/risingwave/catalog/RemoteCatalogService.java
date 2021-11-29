@@ -366,7 +366,9 @@ public class RemoteCatalogService implements CatalogService {
       SchemaCatalog.SchemaName schemaName, CreateTableInfo createTableInfo) {
     LOGGER.debug("create table: {}:{}", createTableInfo.getName(), schemaName);
     SchemaCatalog schema = getSchemaChecked(schemaName);
-    creatingTable.put(new TableCatalog.TableName(createTableInfo.getName(), schemaName), true);
+    TableCatalog.TableName tableName =
+        new TableCatalog.TableName(createTableInfo.getName(), schemaName);
+    creatingTable.put(tableName, true);
     TableCatalog tableCatalog = schema.createTableWithId(createTableInfo, getId());
     CreateRequest request = MetaMessages.buildCreateTableRequest(buildTable(tableCatalog));
     CreateResponse response = this.metadataClient.create(request);
@@ -374,7 +376,7 @@ public class RemoteCatalogService implements CatalogService {
       throw new PgException(PgErrorCode.INTERNAL_ERROR, "create table failed");
     }
     tableCatalog.setVersion(response.getVersion());
-    creatingTable.remove(new TableCatalog.TableName(createTableInfo.getName(), schemaName));
+    creatingTable.remove(tableName);
 
     return tableCatalog;
   }
@@ -384,7 +386,20 @@ public class RemoteCatalogService implements CatalogService {
       SchemaCatalog.SchemaName schemaName, CreateMaterializedViewInfo createMaterializedViewInfo) {
     LOGGER.debug(
         "create materialized view: {}:{}", createMaterializedViewInfo.getName(), schemaName);
-    throw new RuntimeException("createMaterializedView unimplemented");
+    SchemaCatalog schema = getSchemaChecked(schemaName);
+    TableCatalog.TableName viewName =
+        new TableCatalog.TableName(createMaterializedViewInfo.getName(), schemaName);
+    creatingTable.put(viewName, true);
+    MaterializedViewCatalog viewCatalog =
+        schema.createMaterializedViewWithId(createMaterializedViewInfo, getId());
+    CreateRequest request = MetaMessages.buildCreateTableRequest(buildTable(viewCatalog));
+    CreateResponse response = this.metadataClient.create(request);
+    if (response.getStatus().getCode() != Status.Code.OK) {
+      throw new PgException(PgErrorCode.INTERNAL_ERROR, "create materialized view failed");
+    }
+    viewCatalog.setVersion(response.getVersion());
+    creatingTable.remove(viewName);
+    return viewCatalog;
   }
 
   @Override
