@@ -99,7 +99,6 @@ mod tests {
     use risingwave_common::array::ArrayImpl;
     use risingwave_common::array::{I32Array, Utf8Array};
     use risingwave_common::array_nonnull;
-    use risingwave_common::catalog::test_utils::mock_table_id;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataTypeKind, DataTypeRef, DecimalType, Int32Type, StringType};
     use std::sync::Arc;
@@ -230,7 +229,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_table_dropped() -> Result<()> {
-        let table_id = mock_table_id();
+        let table_id = TableId::default();
 
         let table_columns = vec![
             TableColumnDesc {

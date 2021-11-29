@@ -153,7 +153,6 @@ impl SeqScanExecutor {
 mod tests {
     use crate::*;
     use risingwave_common::array::{Array, I64Array};
-    use risingwave_common::catalog::test_utils::mock_table_id;
     use risingwave_common::catalog::Field;
     use risingwave_common::types::{DataTypeKind, DecimalType, Int64Type};
 
@@ -161,7 +160,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_seq_scan_executor() -> Result<()> {
-        let table_id = mock_table_id();
+        let table_id = TableId::default();
         let schema = Schema {
             fields: vec![Field {
                 data_type: Arc::new(DecimalType::new(false, 10, 5)?),
