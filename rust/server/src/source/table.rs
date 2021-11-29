@@ -191,7 +191,7 @@ impl StreamSourceReader for TableStreamReader {
 }
 
 #[async_trait]
-impl SourceImpl for TableSource {
+impl Source for TableSource {
     type ReaderContext = TableReaderContext;
     type BatchReader = TableBatchReader;
     type StreamReader = TableStreamReader;

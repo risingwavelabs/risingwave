@@ -47,7 +47,7 @@ impl BoxedExecutorBuilder for SeqScanExecutor {
             .table_manager()
             .get_table(&table_id)?;
 
-        if let TableTypes::BummockTable(table_ref) = table_ref {
+        if let TableImpl::Bummock(table_ref) = table_ref {
             let column_ids = seq_scan_node.get_column_ids();
 
             let schema = Schema::new(

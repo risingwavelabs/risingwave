@@ -385,7 +385,7 @@ impl StreamManagerCore {
                 }
                 let schema = Schema::new(fields);
 
-                if let Source::Table(ref table) = *source {
+                if let SourceImpl::Table(ref table) = *source {
                     let stream_reader = table.stream_reader(TableReaderContext {}, column_ids)?;
                     // TODO: The channel pair should be created by the Checkpoint manger. So this
                     // line may be removed later.
@@ -519,8 +519,8 @@ impl StreamManagerCore {
                 table_manager.create_materialized_view(&table_id, columns, pks.clone())?;
                 let table_ref = table_manager.get_table(&table_id).unwrap();
                 let table = match table_ref {
-                    TableTypes::Row(table) => Ok(table as Arc<dyn RowTable>),
-                    TableTypes::TestRow(table) => Ok(table as Arc<dyn RowTable>),
+                    TableImpl::Row(table) => Ok(table as Arc<dyn RowTable>),
+                    TableImpl::TestRow(table) => Ok(table as Arc<dyn RowTable>),
                     _ => Err(RwError::from(InternalError(
                         "Materialized view creation internal error".to_string(),
                     ))),

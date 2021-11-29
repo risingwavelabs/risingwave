@@ -113,7 +113,7 @@ impl SimpleExecutor for MViewSinkExecutor {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::{RowTable, SimpleTableManager, TableManager, TableTypes};
+    use crate::storage::{RowTable, SimpleTableManager, TableImpl, TableManager};
     use crate::stream_op::test_utils::*;
     use crate::stream_op::*;
     use crate::*;
@@ -172,7 +172,7 @@ mod tests {
         };
 
         let table_ref = store_mgr.get_table(&table_id).unwrap();
-        if let TableTypes::TestRow(table) = table_ref {
+        if let TableImpl::TestRow(table) = table_ref {
             // Prepare stream executors.
             let schema = Schema {
                 fields: vec![

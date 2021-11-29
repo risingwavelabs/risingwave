@@ -18,7 +18,7 @@ use risingwave_common::types::Datum;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 
 use crate::source::{
-    BatchSourceReader, SourceColumnDesc, SourceImpl, SourceParser, SourceWriter, StreamSourceReader,
+    BatchSourceReader, Source, SourceColumnDesc, SourceParser, SourceWriter, StreamSourceReader,
 };
 use crate::stream_op::{Op, StreamChunk};
 
@@ -220,7 +220,7 @@ impl SourceWriter for HighLevelKafkaSourceWriter {
 }
 
 #[async_trait]
-impl SourceImpl for HighLevelKafkaSource {
+impl Source for HighLevelKafkaSource {
     type ReaderContext = HighLevelKafkaSourceReaderContext;
     type BatchReader = HighLevelKafkaSourceBatchReader;
     type StreamReader = HighLevelKafkaSourceStreamReader;

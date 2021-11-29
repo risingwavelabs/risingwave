@@ -47,7 +47,7 @@ impl Executor for InsertExecutor {
         }
 
         let source = self.source_manager.get_source(&self.table_id)?;
-        let table_source = if let Source::Table(ref t) = *source.source {
+        let table_source = if let SourceImpl::Table(ref t) = *source.source {
             t
         } else {
             panic!("InsertExecutor: table source expected");
@@ -247,7 +247,7 @@ mod tests {
             vec![Some(5)]
         );
         let table_ref = table_manager.get_table(&insert_executor.table_id)?;
-        if let TableTypes::BummockTable(table_ref) = table_ref {
+        if let TableImpl::Bummock(table_ref) = table_ref {
             match table_ref.get_data().await? {
                 BummockResult::Data(data_ref) => {
                     assert_eq!(
@@ -318,7 +318,7 @@ mod tests {
             vec![Some(5)]
         );
         let table_ref = table_manager.get_table(&insert_executor.table_id)?;
-        if let TableTypes::BummockTable(table_ref) = table_ref {
+        if let TableImpl::Bummock(table_ref) = table_ref {
             match table_ref.get_data().await? {
                 BummockResult::Data(data_ref) => {
                     assert_eq!(
@@ -375,7 +375,7 @@ mod tests {
             vec![Some(5)]
         );
         let table_ref = table_manager.get_table(&insert_executor.table_id)?;
-        if let TableTypes::BummockTable(table_ref) = table_ref {
+        if let TableImpl::Bummock(table_ref) = table_ref {
             match table_ref.get_data().await? {
                 BummockResult::Data(data_ref) => {
                     assert_eq!(

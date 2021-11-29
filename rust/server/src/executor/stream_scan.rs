@@ -84,13 +84,13 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
             .collect::<Vec<Field>>();
 
         let reader: Box<dyn BatchSourceReader> = match source_desc.source.as_ref() {
-            Source::HighLevelKafka(k) => {
+            SourceImpl::HighLevelKafka(k) => {
                 Box::new(k.batch_reader(HighLevelKafkaSourceReaderContext {
                     query_id: Some(source.task_id.clone().query_id),
                     bound_timestamp_ms: Some(stream_scan_node.timestamp_ms),
                 })?)
             }
-            Source::Table(_) => panic!("use table_scan to scan a table"),
+            SourceImpl::Table(_) => panic!("use table_scan to scan a table"),
         };
 
         Ok(Box::new(Self {

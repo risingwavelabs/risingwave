@@ -1,6 +1,6 @@
 use super::*;
 use crate::rpc::service::exchange_service::ExchangeWriter;
-use crate::storage::{Table, TableTypes};
+use crate::storage::{Table, TableImpl};
 use core::default::Default as CoreDefault;
 use itertools::Itertools;
 use prost::Message;
@@ -344,7 +344,7 @@ impl<'a> SelectBuilder<'a> {
             .table_manager_ref()
             .get_table(&TableId::default())
             .unwrap();
-        if let TableTypes::BummockTable(column_table_ref) = table_ref {
+        if let TableImpl::Bummock(column_table_ref) = table_ref {
             let column_ids = column_table_ref.get_column_ids();
             let scan = SeqScanNode {
                 table_ref_id: None,

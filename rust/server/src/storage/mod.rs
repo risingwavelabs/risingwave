@@ -59,7 +59,7 @@ pub trait TableManager: Sync + Send {
     ) -> Result<Arc<BummockTable>>;
 
     /// Get a specific table.
-    fn get_table(&self, table_id: &TableId) -> Result<TableTypes>;
+    fn get_table(&self, table_id: &TableId) -> Result<TableImpl>;
 
     /// Drop a specific table.
     async fn drop_table(&self, table_id: &TableId) -> Result<()>;
@@ -75,9 +75,9 @@ pub trait TableManager: Sync + Send {
 
 /// The enumeration of supported simple tables in `SimpleTableManager`.
 #[derive(Clone)]
-pub enum TableTypes {
+pub enum TableImpl {
     Row(Arc<MemRowTable>),
-    BummockTable(Arc<BummockTable>),
+    Bummock(Arc<BummockTable>),
     TestRow(Arc<TestRowTable>),
 }
 
@@ -91,7 +91,7 @@ pub struct TableColumnDesc {
 /// It will be replaced in near future when replaced by locally
 /// on-disk files.
 pub struct SimpleTableManager {
-    tables: Mutex<HashMap<TableId, TableTypes>>,
+    tables: Mutex<HashMap<TableId, TableImpl>>,
 }
 
 #[async_trait::async_trait]
@@ -116,11 +116,11 @@ impl TableManager for SimpleTableManager {
             column_count
         );
         let table = Arc::new(BummockTable::new(table_id, table_columns));
-        tables.insert(table_id.clone(), TableTypes::BummockTable(table.clone()));
+        tables.insert(table_id.clone(), TableImpl::Bummock(table.clone()));
         Ok(table)
     }
 
-    fn get_table(&self, table_id: &TableId) -> Result<TableTypes> {
+    fn get_table(&self, table_id: &TableId) -> Result<TableImpl> {
         let tables = self.get_tables()?;
         tables
             .get(table_id)
@@ -164,7 +164,7 @@ impl TableManager for SimpleTableManager {
         )?;
         tables.insert(
             table_id.clone(),
-            TableTypes::TestRow(Arc::new(TestRowTable::new(schema, pk_columns))),
+            TableImpl::TestRow(Arc::new(TestRowTable::new(schema, pk_columns))),
         );
 
         Ok(())
@@ -195,7 +195,7 @@ impl TableManager for SimpleTableManager {
         )?;
         tables.insert(
             table_id.clone(),
-            TableTypes::Row(Arc::new(MemRowTable::new(schema, pk_columns))),
+            TableImpl::Row(Arc::new(MemRowTable::new(schema, pk_columns))),
         );
 
         Ok(())
@@ -209,7 +209,7 @@ impl SimpleTableManager {
         }
     }
 
-    fn get_tables(&self) -> Result<MutexGuard<HashMap<TableId, TableTypes>>> {
+    fn get_tables(&self) -> Result<MutexGuard<HashMap<TableId, TableImpl>>> {
         Ok(self.tables.lock().unwrap())
     }
 }

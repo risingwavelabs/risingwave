@@ -103,10 +103,10 @@ mod tests {
     use risingwave_common::types::{DataTypeKind, DataTypeRef, DecimalType, Int32Type, StringType};
     use std::sync::Arc;
 
-    impl Source {
+    impl SourceImpl {
         fn as_table(&self) -> &TableSource {
             match self {
-                Source::Table(table) => table,
+                SourceImpl::Table(table) => table,
                 _ => panic!("not a table source"),
             }
         }

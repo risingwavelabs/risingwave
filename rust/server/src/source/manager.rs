@@ -8,11 +8,11 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataTypeRef;
 
 use crate::source::{
-    HighLevelKafkaSource, Source, SourceConfig, SourceFormat, SourceParser, TableSource,
+    HighLevelKafkaSource, SourceConfig, SourceFormat, SourceImpl, SourceParser, TableSource,
 };
 use crate::storage::BummockTable;
 
-pub type SourceRef = Arc<Source>;
+pub type SourceRef = Arc<SourceImpl>;
 
 pub trait SourceManager: Sync + Send {
     fn create_source(
@@ -69,7 +69,7 @@ impl SourceManager for MemSourceManager {
         );
 
         let source = match config {
-            SourceConfig::Kafka(config) => Source::HighLevelKafka(HighLevelKafkaSource::new(
+            SourceConfig::Kafka(config) => SourceImpl::HighLevelKafka(HighLevelKafkaSource::new(
                 config.clone(),
                 Arc::new(columns.clone()),
                 parser.clone(),
@@ -106,7 +106,7 @@ impl SourceManager for MemSourceManager {
             })
             .collect();
 
-        let source = Source::Table(TableSource::new(table));
+        let source = SourceImpl::Table(TableSource::new(table));
 
         // Table sources do not need columns and format
         let desc = SourceDesc {

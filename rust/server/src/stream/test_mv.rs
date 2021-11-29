@@ -1,6 +1,6 @@
 use crate::source::{MemSourceManager, SourceManager};
 use crate::storage::{
-    RowTable, SimpleTableManager, Table, TableColumnDesc, TableManager, TableTypes,
+    RowTable, SimpleTableManager, Table, TableColumnDesc, TableImpl, TableManager,
     TestRowTableEvent,
 };
 use crate::stream::StreamManager;
@@ -135,7 +135,7 @@ async fn test_stream_mv_proto() {
         .unwrap();
 
     let table_ref =
-        (if let TableTypes::BummockTable(table_ref) = table_manager.get_table(&table_id).unwrap() {
+        (if let TableImpl::Bummock(table_ref) = table_manager.get_table(&table_id).unwrap() {
             Ok(table_ref)
         } else {
             Err(RwError::from(InternalError(
@@ -199,7 +199,7 @@ async fn test_stream_mv_proto() {
     // then we can send the stop barrier.
     tokio::time::sleep(Duration::from_millis(500)).await;
     stream_manager.send_stop_barrier();
-    if let TableTypes::TestRow(test_row_table) = table_ref_mv {
+    if let TableImpl::TestRow(test_row_table) = table_ref_mv {
         let rx = test_row_table.get_receiver();
         let event = rx.lock().await.next().await.unwrap();
         assert!(matches!(event, TestRowTableEvent::Ingest(..)));

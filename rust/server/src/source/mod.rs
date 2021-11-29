@@ -38,13 +38,13 @@ pub enum SourceFormat {
 }
 
 #[derive(Debug)]
-pub enum Source {
+pub enum SourceImpl {
     HighLevelKafka(HighLevelKafkaSource),
     Table(TableSource),
 }
 
 #[async_trait]
-pub trait SourceImpl: Send + Sync + 'static {
+pub trait Source: Send + Sync + 'static {
     type ReaderContext;
     type BatchReader: BatchSourceReader;
     type StreamReader: StreamSourceReader;
