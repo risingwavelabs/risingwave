@@ -5,4 +5,9 @@ create table t(v1 date not null, v2 time not null, v3 timestamp not null, v4 tim
         ]]>
     </Resource>
 
+    <Resource>
+        <![CDATA[
+create table f(v1 real)
+        ]]>
+    </Resource>
 </Root>

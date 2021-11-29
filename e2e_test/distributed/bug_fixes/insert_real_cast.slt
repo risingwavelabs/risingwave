@@ -1,0 +1,32 @@
+statement ok
+create table f (v1 real)
+
+statement ok
+insert into f values (1)
+
+statement ok
+insert into f values (null)
+
+statement ok
+insert into f values (1.2)
+
+statement ok
+insert into f values (1), (null)
+
+statement ok
+insert into f values (1), (1.2)
+
+statement ok
+insert into f values (null), (1)
+
+statement ok
+insert into f values (null), (1.2)
+
+statement ok
+insert into f values (1.2), (1)
+
+statement ok
+insert into f values (1.2), (null)
+
+statement ok
+drop table f

@@ -61,7 +61,7 @@ public abstract class BatchPlanTestBase extends SqlTestBase {
     if (testCase.getJson().isPresent()) {
       // We still assume that the parsed json test case contains json value only.
       String serializedJsonPlan = Messages.jsonFormat(phyPlan.getRoot().serialize());
-      String ans = testCase.getJson().get();
+      String ans = testCase.getJson().get().stripTrailing();
       assertEquals(ans, serializedJsonPlan, "Json not match!");
     }
   }

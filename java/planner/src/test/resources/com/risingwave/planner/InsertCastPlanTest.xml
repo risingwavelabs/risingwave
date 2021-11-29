@@ -15,4 +15,20 @@ RwBatchInsert(table=[[test_schema, t]], operation=[INSERT], flattened=[false])
         <Resource name="json" path="batch/basic/insert_cast_time">
         </Resource>
     </TestCase>
+
+    <TestCase name="insert cast (real)">
+        <Resource name="sql">
+            <![CDATA[
+insert into f values (1), (null)
+            ]]>
+        </Resource>
+        <Resource name="physical">
+            <![CDATA[
+RwBatchInsert(table=[[test_schema, f]], operation=[INSERT], flattened=[false])
+  RwBatchValues(tuples=[[{ 1 }, { null }]])
+            ]]>
+        </Resource>
+        <Resource name="json" path="batch/basic/insert_cast_real">
+        </Resource>
+    </TestCase>
 </Root>
