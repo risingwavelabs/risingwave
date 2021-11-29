@@ -21,7 +21,7 @@ public class BasicQueryPlanTest extends BatchPlanTestBase {
   @ParameterizedTest(name = "{index} => {0}")
   @DisplayName("Filter scan plan tests")
   @ArgumentsSource(PlanTestCaseLoader.class)
-  public void testFilterScanPlan(@ToPlannerTestCase PlannerTestCase testCase) {
+  public void testBasicQueryPlan(@ToPlannerTestCase PlannerTestCase testCase) {
     runTestCase(testCase);
   }
 }

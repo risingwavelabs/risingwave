@@ -9,7 +9,7 @@ import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ArgumentsSource;
 
-/** Contains query plan for basic query statements, e.g. aggregation, filter scan. */
+/** Contains query plan for join plan contains hash shuffle, e.g. sort merge join, hash join. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class ShuffleJoinPlannerTest extends BatchPlanTestBase {
 
@@ -21,7 +21,7 @@ public class ShuffleJoinPlannerTest extends BatchPlanTestBase {
   @ParameterizedTest(name = "{index} => {0}")
   @DisplayName("Shuffle join plan tests")
   @ArgumentsSource(PlanTestCaseLoader.class)
-  public void testFilterScanPlan(@ToPlannerTestCase PlannerTestCase testCase) {
+  public void testShuffleJoinPlan(@ToPlannerTestCase PlannerTestCase testCase) {
     runTestCase(testCase);
   }
 }
