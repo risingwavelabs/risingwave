@@ -22,9 +22,9 @@ import org.apache.calcite.rel.hint.RelHint;
 import org.apache.calcite.rex.RexNode;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-/** Batch physical plan node nest loop join. */
-public class RwBatchNestLoopJoin extends RwBufferJoinBase implements RisingWaveBatchPhyRel {
-  public RwBatchNestLoopJoin(
+/** Batch physical plan node for nested loop join. */
+public class RwBatchNestedLoopJoin extends RwBufferJoinBase implements RisingWaveBatchPhyRel {
+  public RwBatchNestedLoopJoin(
       RelOptCluster cluster,
       RelTraitSet traitSet,
       List<RelHint> hints,
@@ -60,23 +60,23 @@ public class RwBatchNestLoopJoin extends RwBufferJoinBase implements RisingWaveB
       RelNode right,
       JoinRelType joinType,
       boolean semiJoinDone) {
-    return new RwBatchNestLoopJoin(
+    return new RwBatchNestedLoopJoin(
         getCluster(), traitSet, getHints(), left, right, conditionExpr, joinType);
   }
 
   /** Nested loop join converter rule between logical and physical. */
-  public static class BatchNestLoopJoinConverterRule extends ConverterRule {
-    public static final RwBatchNestLoopJoin.BatchNestLoopJoinConverterRule INSTANCE =
+  public static class BatchNestedLoopJoinConverterRule extends ConverterRule {
+    public static final RwBatchNestedLoopJoin.BatchNestedLoopJoinConverterRule INSTANCE =
         Config.INSTANCE
             .withInTrait(LOGICAL)
             .withOutTrait(BATCH_PHYSICAL)
-            .withRuleFactory(RwBatchNestLoopJoin.BatchNestLoopJoinConverterRule::new)
+            .withRuleFactory(RwBatchNestedLoopJoin.BatchNestedLoopJoinConverterRule::new)
             .withOperandSupplier(t -> t.operand(RwLogicalJoin.class).anyInputs())
-            .withDescription("Converting logical join to batch nestloop join.")
+            .withDescription("Converting logical join to batch nested loop join.")
             .as(Config.class)
-            .toRule(RwBatchNestLoopJoin.BatchNestLoopJoinConverterRule.class);
+            .toRule(RwBatchNestedLoopJoin.BatchNestedLoopJoinConverterRule.class);
 
-    protected BatchNestLoopJoinConverterRule(Config config) {
+    protected BatchNestedLoopJoinConverterRule(Config config) {
       super(config);
     }
 
@@ -106,7 +106,7 @@ public class RwBatchNestLoopJoin extends RwBufferJoinBase implements RisingWaveB
 
       var newJoinTraits = newLeft.getTraitSet();
 
-      return new RwBatchNestLoopJoin(
+      return new RwBatchNestedLoopJoin(
           join.getCluster(),
           newJoinTraits,
           join.getHints(),

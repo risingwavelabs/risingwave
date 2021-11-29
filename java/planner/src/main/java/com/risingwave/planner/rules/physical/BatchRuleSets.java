@@ -20,7 +20,7 @@ import com.risingwave.planner.rel.physical.RwBatchStreamScan;
 import com.risingwave.planner.rel.physical.RwBatchTableScan;
 import com.risingwave.planner.rel.physical.RwBatchValues;
 import com.risingwave.planner.rel.physical.join.RwBatchHashJoin;
-import com.risingwave.planner.rel.physical.join.RwBatchNestLoopJoin;
+import com.risingwave.planner.rel.physical.join.RwBatchNestedLoopJoin;
 import com.risingwave.planner.rules.distributed.agg.SingleLimitRule;
 import com.risingwave.planner.rules.distributed.agg.TwoPhaseAggRule;
 import com.risingwave.planner.rules.distributed.agg.TwoPhaseLimitRule;
@@ -123,7 +123,7 @@ public class BatchRuleSets {
           RwBatchInsert.BatchInsertConverterRule.INSTANCE,
           RwBatchValues.BatchValuesConverterRule.INSTANCE,
           RwBatchHashJoin.BatchHashJoinConverterRule.INSTANCE,
-          RwBatchNestLoopJoin.BatchNestLoopJoinConverterRule.INSTANCE,
+          RwBatchNestedLoopJoin.BatchNestedLoopJoinConverterRule.INSTANCE,
           RwBatchHashAgg.BatchHashAggConverterRule.INSTANCE,
           RwBatchSortAgg.BatchSortAggConverterRule.INSTANCE,
           CoreRules.SORT_REMOVE);

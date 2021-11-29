@@ -269,7 +269,7 @@ RwBatchFilter(condition=[>=($0, 1970-01-01)])
         </Resource>
         <Resource name="physical">
             <![CDATA[
-RwBatchNestLoopJoin(condition=[>($0, $3)], joinType=[inner])
+RwBatchNestedLoopJoin(condition=[>($0, $3)], joinType=[inner])
   RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
   RwBatchTableScan(table=[[test_schema, t3]], columns=[v1])
 ]]>
