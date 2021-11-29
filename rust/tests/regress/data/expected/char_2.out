@@ -1,0 +1,122 @@
+--
+-- CHAR
+--
+-- fixed-length by value
+-- internally passed by value if <= 4 bytes in storage
+SELECT char 'c' = char 'c' AS true;
+ true 
+------
+ t
+(1 row)
+
+--
+-- Build a table for testing
+--
+CREATE TABLE CHAR_TBL(f1 char);
+INSERT INTO CHAR_TBL (f1) VALUES ('a');
+INSERT INTO CHAR_TBL (f1) VALUES ('A');
+-- any of the following three input formats are acceptable
+INSERT INTO CHAR_TBL (f1) VALUES ('1');
+INSERT INTO CHAR_TBL (f1) VALUES (2);
+INSERT INTO CHAR_TBL (f1) VALUES ('3');
+-- zero-length char
+INSERT INTO CHAR_TBL (f1) VALUES ('');
+-- try char's of greater than 1 length
+INSERT INTO CHAR_TBL (f1) VALUES ('cd');
+ERROR:  value too long for type character(1)
+INSERT INTO CHAR_TBL (f1) VALUES ('c     ');
+SELECT * FROM CHAR_TBL;
+ f1 
+----
+ a
+ A
+ 1
+ 2
+ 3
+  
+ c
+(7 rows)
+
+SELECT c.*
+   FROM CHAR_TBL c
+   WHERE c.f1 <> 'a';
+ f1 
+----
+ A
+ 1
+ 2
+ 3
+  
+ c
+(6 rows)
+
+SELECT c.*
+   FROM CHAR_TBL c
+   WHERE c.f1 = 'a';
+ f1 
+----
+ a
+(1 row)
+
+SELECT c.*
+   FROM CHAR_TBL c
+   WHERE c.f1 < 'a';
+ f1 
+----
+  
+(1 row)
+
+SELECT c.*
+   FROM CHAR_TBL c
+   WHERE c.f1 <= 'a';
+ f1 
+----
+ a
+  
+(2 rows)
+
+SELECT c.*
+   FROM CHAR_TBL c
+   WHERE c.f1 > 'a';
+ f1 
+----
+ A
+ 1
+ 2
+ 3
+ c
+(5 rows)
+
+SELECT c.*
+   FROM CHAR_TBL c
+   WHERE c.f1 >= 'a';
+ f1 
+----
+ a
+ A
+ 1
+ 2
+ 3
+ c
+(6 rows)
+
+DROP TABLE CHAR_TBL;
+--
+-- Now test longer arrays of char
+--
+CREATE TABLE CHAR_TBL(f1 char(4));
+INSERT INTO CHAR_TBL (f1) VALUES ('a');
+INSERT INTO CHAR_TBL (f1) VALUES ('ab');
+INSERT INTO CHAR_TBL (f1) VALUES ('abcd');
+INSERT INTO CHAR_TBL (f1) VALUES ('abcde');
+ERROR:  value too long for type character(4)
+INSERT INTO CHAR_TBL (f1) VALUES ('abcd    ');
+SELECT * FROM CHAR_TBL;
+  f1  
+------
+ a   
+ ab  
+ abcd
+ abcd
+(4 rows)
+
