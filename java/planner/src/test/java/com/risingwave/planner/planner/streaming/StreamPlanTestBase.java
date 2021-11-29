@@ -38,7 +38,7 @@ public abstract class StreamPlanTestBase extends SqlTestBase {
     List<String> ddls = PlannerTestDdlLoader.load(getClass());
 
     for (String ddl : ddls) {
-      System.out.println("create table ddl: " + ddl);
+      baseLogger.debug("create table sql: " + ddl);
       SqlNode ddlSql = parseDdl(ddl);
       executionContext
           .getSqlHandlerFactory()

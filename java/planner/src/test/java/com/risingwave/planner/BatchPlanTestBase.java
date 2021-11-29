@@ -26,7 +26,7 @@ public abstract class BatchPlanTestBase extends SqlTestBase {
     List<String> ddls = PlannerTestDdlLoader.load(getClass());
 
     for (String ddl : ddls) {
-      System.out.println("sql: " + ddl);
+      baseLogger.debug("create table sql: " + ddl);
       SqlNode ddlSql = parseDdl(ddl);
       executionContext
           .getSqlHandlerFactory()

@@ -23,11 +23,15 @@ import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ArgumentsSource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Tests for streaming job */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 public class MaterializedViewPlanTest extends StreamPlanTestBase {
+  private final Logger testLogger = LoggerFactory.getLogger(MaterializedViewPlanTest.class);
+
   @BeforeAll
   public void initAll() {
     super.init();
@@ -70,7 +74,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
 
     StreamNode serializedProto = plan.getStreamingPlan().serialize();
     String serializedJsonPlan = Messages.jsonFormat(serializedProto);
-    // System.out.println(serializedJsonPlan);
+    testLogger.debug("serialized json plan:\n" + serializedJsonPlan);
   }
 
   @Test
@@ -84,6 +88,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     String expectedPlan =
         "RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])\n"
             + "  RwBatchMaterializedViewScan(table=[[test_schema, t_test]], columns=[v])";
+    testLogger.debug("result plan:\n" + resultPlan);
     Assertions.assertEquals(expectedPlan, resultPlan);
   }
 
@@ -118,7 +123,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
             + "            RwStreamFilter(condition=[>($0, $1)])\n"
             + "              RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
             + "                RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])";
-    System.out.println(explainExchangePlan);
+    testLogger.debug("explain the exchange plan:\n" + explainExchangePlan);
     Assertions.assertEquals(expectedPlan, explainExchangePlan);
   }
 
@@ -151,7 +156,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
             + "            RwStreamAgg(group=[{0}], v=[SUM($1)], Row Count=[COUNT()])\n"
             + "              RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
             + "                RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])";
-    System.out.println(explainExchangePlan);
+    testLogger.debug("explain the exchange plan:\n" + explainExchangePlan);
     Assertions.assertEquals(expectedPlan, explainExchangePlan);
   }
 
@@ -167,6 +172,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
         "RwStreamMaterializedView(name=[t_test_order_limit], collation=[[0, 1]], offset=[10], limit=[100])\n"
             + "  RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
             + "    RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])";
+    testLogger.debug("result plan:\n" + resultPlan);
     Assertions.assertEquals(expectedPlan, resultPlan);
 
     CreateMaterializedViewHandler handler = new CreateMaterializedViewHandler();
@@ -188,6 +194,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
             + "  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0, 1]])\n"
             + "    RwBatchLimit(offset=[0], fetch=[110])\n"
             + "      RwBatchMaterializedViewScan(table=[[test_schema, t_test_order_limit]], columns=[v1,v2,v3,_row_id])";
+    testLogger.debug("result plan:\n" + resultPlan);
     Assertions.assertEquals(expectedPlan, resultPlan);
   }
 
@@ -205,6 +212,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
             + "  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0, 1]])\n"
             + "    RwBatchLimit(offset=[0], fetch=[110])\n"
             + "      RwBatchMaterializedViewScan(table=[[test_schema, t_test_order_limit]], columns=[v1,v2,v3,_row_id])";
+    testLogger.debug("result plan:\n" + resultPlan);
     Assertions.assertEquals(expectedPlan, resultPlan);
   }
 
@@ -222,6 +230,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
             + "    RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0, 1]])\n"
             + "      RwBatchLimit(offset=[0], fetch=[110])\n"
             + "        RwBatchMaterializedViewScan(table=[[test_schema, t_test_order_limit]], columns=[v1,v2,v3,_row_id])";
+    testLogger.debug("result plan:\n" + resultPlan);
     Assertions.assertEquals(expectedPlan, resultPlan);
   }
 
@@ -237,6 +246,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
         "RwStreamMaterializedView(name=[t_test_order_zero_limit], collation=[[0, 1]], offset=[10])\n"
             + "  RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
             + "    RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])";
+    testLogger.debug("result plan:\n" + resultPlan);
     Assertions.assertEquals(expectedPlan, resultPlan);
 
     CreateMaterializedViewHandler handler = new CreateMaterializedViewHandler();
@@ -257,6 +267,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
         "RwBatchLimit(offset=[10])\n"
             + "  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0, 1]])\n"
             + "    RwBatchMaterializedViewScan(table=[[test_schema, t_test_order_zero_limit]], columns=[v1,v2,v3,_row_id])";
+    testLogger.debug("result plan:\n" + resultPlan);
     Assertions.assertEquals(expectedPlan, resultPlan);
   }
 }

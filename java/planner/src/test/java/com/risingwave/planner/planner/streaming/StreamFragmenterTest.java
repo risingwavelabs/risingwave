@@ -16,11 +16,15 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestMethodOrder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Tests for stream fragmenter. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 public class StreamFragmenterTest extends StreamPlanTestBase {
+  private final Logger testLogger = LoggerFactory.getLogger(StreamFragmenterTest.class);
+
   @BeforeAll
   public void initAll() {
     super.init();
@@ -83,9 +87,9 @@ public class StreamFragmenterTest extends StreamPlanTestBase {
     var rootStage = streamFragmenter.generateStageGraph(plan, executionContext);
     var stages = rootStage.getStages();
     for (var stage : stages) {
-      System.out.println("id:" + stage.getStageId());
+      testLogger.debug("id:" + stage.getStageId());
       String actualStage = StreamingStageSerializer.explainStage(stage.getRoot(), 0);
-      System.out.println("explain:\n" + actualStage);
+      testLogger.debug("explain:\n" + actualStage);
       Assertions.assertEquals(expectedStages[stage.getStageId()], actualStage);
     }
 
@@ -98,7 +102,7 @@ public class StreamFragmenterTest extends StreamPlanTestBase {
       var fragment = fragments.get(i);
       String serializedFragment = Messages.jsonFormat(fragment.serialize());
       String expectedFragment = expectedFragments.get(i).trim();
-      System.out.println(serializedFragment);
+      testLogger.debug("serialized fragment:\n" + serializedFragment);
       Assertions.assertEquals(expectedFragment, serializedFragment);
     }
   }
