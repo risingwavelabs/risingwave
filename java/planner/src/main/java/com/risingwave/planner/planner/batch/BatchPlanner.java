@@ -8,12 +8,12 @@ import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPh
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.PHYSICAL;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.SUBQUERY_REWRITE;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
-import static com.risingwave.planner.rules.BatchRuleSets.DISTRIBUTED_CONVERTER_RULES;
-import static com.risingwave.planner.rules.BatchRuleSets.DISTRIBUTION_RULES;
-import static com.risingwave.planner.rules.BatchRuleSets.LOGICAL_CONVERTER_RULES;
-import static com.risingwave.planner.rules.BatchRuleSets.LOGICAL_OPTIMIZATION_RULES;
-import static com.risingwave.planner.rules.BatchRuleSets.LOGICAL_REWRITE_RULES;
-import static com.risingwave.planner.rules.BatchRuleSets.PHYSICAL_CONVERTER_RULES;
+import static com.risingwave.planner.rules.physical.BatchRuleSets.DISTRIBUTED_CONVERTER_RULES;
+import static com.risingwave.planner.rules.physical.BatchRuleSets.DISTRIBUTION_RULES;
+import static com.risingwave.planner.rules.physical.BatchRuleSets.LOGICAL_CONVERTER_RULES;
+import static com.risingwave.planner.rules.physical.BatchRuleSets.LOGICAL_OPTIMIZATION_RULES;
+import static com.risingwave.planner.rules.physical.BatchRuleSets.LOGICAL_REWRITE_RULES;
+import static com.risingwave.planner.rules.physical.BatchRuleSets.PHYSICAL_CONVERTER_RULES;
 
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.planner.planner.Planner;
@@ -27,7 +27,7 @@ import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.physical.BatchPlan;
 import com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
-import com.risingwave.planner.rules.BatchRuleSets;
+import com.risingwave.planner.rules.physical.BatchRuleSets;
 import com.risingwave.planner.sql.SqlConverter;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.sql.SqlNode;

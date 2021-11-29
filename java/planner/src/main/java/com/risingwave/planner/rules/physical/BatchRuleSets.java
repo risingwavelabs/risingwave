@@ -1,4 +1,4 @@
-package com.risingwave.planner.rules;
+package com.risingwave.planner.rules.physical;
 
 import com.risingwave.planner.rel.logical.RwLogicalAggregate;
 import com.risingwave.planner.rel.logical.RwLogicalFilter;
@@ -27,7 +27,6 @@ import com.risingwave.planner.rules.distributed.agg.TwoPhaseLimitRule;
 import com.risingwave.planner.rules.distributed.join.BroadcastJoinRule;
 import com.risingwave.planner.rules.distributed.join.ShuffleJoinRule;
 import com.risingwave.planner.rules.logical.ProjectToTableScanRule;
-import com.risingwave.planner.rules.physical.BatchScanConverterRule;
 import org.apache.calcite.rel.rules.CoreRules;
 import org.apache.calcite.rel.rules.PruneEmptyRules;
 import org.apache.calcite.tools.RuleSet;

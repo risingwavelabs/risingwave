@@ -6,9 +6,9 @@ import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPh
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.STREAMING;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.SUBQUERY_REWRITE;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
-import static com.risingwave.planner.rules.BatchRuleSets.LOGICAL_CONVERTER_RULES;
-import static com.risingwave.planner.rules.BatchRuleSets.LOGICAL_OPTIMIZATION_RULES;
-import static com.risingwave.planner.rules.BatchRuleSets.LOGICAL_REWRITE_RULES;
+import static com.risingwave.planner.rules.physical.BatchRuleSets.LOGICAL_CONVERTER_RULES;
+import static com.risingwave.planner.rules.physical.BatchRuleSets.LOGICAL_OPTIMIZATION_RULES;
+import static com.risingwave.planner.rules.physical.BatchRuleSets.LOGICAL_REWRITE_RULES;
 
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.planner.planner.Planner;
@@ -24,7 +24,7 @@ import com.risingwave.planner.rel.streaming.RisingWaveStreamingRel;
 import com.risingwave.planner.rel.streaming.RwStreamMaterializedView;
 import com.risingwave.planner.rel.streaming.RwStreamSort;
 import com.risingwave.planner.rel.streaming.StreamingPlan;
-import com.risingwave.planner.rules.BatchRuleSets;
+import com.risingwave.planner.rules.physical.BatchRuleSets;
 import com.risingwave.planner.rules.streaming.StreamingConvertRules;
 import com.risingwave.planner.sql.SqlConverter;
 import org.apache.calcite.rel.RelNode;

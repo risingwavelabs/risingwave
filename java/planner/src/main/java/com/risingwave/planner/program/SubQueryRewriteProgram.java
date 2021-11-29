@@ -2,7 +2,7 @@ package com.risingwave.planner.program;
 
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
-import com.risingwave.planner.rules.BatchRuleSets;
+import com.risingwave.planner.rules.physical.BatchRuleSets;
 import org.apache.calcite.plan.hep.HepMatchOrder;
 import org.apache.calcite.plan.hep.HepPlanner;
 import org.apache.calcite.plan.hep.HepProgram;
@@ -12,6 +12,7 @@ import org.apache.calcite.sql2rel.RelDecorrelator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/** The optimizer program for rewriting subqueries. */
 public class SubQueryRewriteProgram implements OptimizerProgram {
   private static final Logger LOG = LoggerFactory.getLogger(SubQueryRewriteProgram.class);
   public static final SubQueryRewriteProgram INSTANCE = new SubQueryRewriteProgram();
