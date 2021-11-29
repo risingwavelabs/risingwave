@@ -8,7 +8,9 @@ use rusoto_core::{
     credential::{AwsCredentials, StaticProvider},
     ByteStream, HttpClient, Region, RusotoError,
 };
-use rusoto_s3::{GetObjectError, GetObjectRequest, PutObjectRequest, S3Client, S3};
+use rusoto_s3::{
+    DeleteObjectRequest, GetObjectError, GetObjectRequest, PutObjectRequest, S3Client, S3,
+};
 use std::{collections::HashMap, str::FromStr};
 use tokio::io::AsyncReadExt;
 use tokio::sync::Mutex;
@@ -18,6 +20,7 @@ use super::{BlockLocation, ObjectMetadata};
 /// Implement object store on S3.
 pub struct S3ObjectStore {
     connection_info: Option<ConnectionInfo>,
+    // None is reserved for to-be-apperaed connection pool
     client: Option<S3Client>,
     bucket: String,
     object: Mutex<HashMap<String, Bytes>>,
@@ -152,15 +155,35 @@ impl ObjectStore for S3ObjectStore {
     }
 
     async fn metadata(&self, _path: &str) -> Result<ObjectMetadata> {
-        todo!();
+        todo!()
     }
 
     async fn close(&self, _path: &str) -> Result<()> {
-        todo!();
+        todo!()
     }
 
-    async fn delete(&self, _path: &str) -> Result<()> {
-        todo!();
+    /// Permanently delete the whole object.
+    /// Accoding to Amazon S3, this will simply return Ok if the object does not exist.
+    async fn delete(&self, path: &str) -> Result<()> {
+        ensure!(!self.client.is_none());
+
+        self.client
+            .as_ref()
+            .unwrap()
+            .delete_object(DeleteObjectRequest {
+                bucket: self.bucket.clone(),
+                key: path.to_string(),
+                ..Default::default()
+            })
+            .await
+            .map_err(|err| {
+                RwError::from(InternalError(format!(
+                    "S3 delete failure with error: {}",
+                    err
+                )))
+            })?;
+
+        Ok(())
     }
 }
 
@@ -217,5 +240,39 @@ mod tests {
         s3.read(&path, Some(BlockLocation { offset: 7, size: 7 }))
             .await
             .unwrap_err();
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_delete() {
+        let block = Bytes::from("123456");
+        let conn_info = ConnectionInfo::new_for_test_account();
+        let bucket = "s3-ut";
+        let path = Uuid::new_v4().to_string();
+
+        let s3 = S3ObjectStore::new(conn_info, bucket.to_string());
+
+        // delete an inexistent object should be OK
+        s3.delete(&path).await.unwrap();
+
+        s3.upload(&path, block).await.unwrap();
+
+        // read partial object
+        let bytes = s3
+            .read(&path, Some(BlockLocation { offset: 4, size: 2 }))
+            .await
+            .unwrap();
+        assert_eq!(String::from_utf8(bytes.to_vec()).unwrap(), "56".to_string());
+
+        // delete object
+        s3.delete(&path).await.unwrap();
+
+        // should fail to read partial objects again
+        let read_res = s3
+            .read(&path, Some(BlockLocation { offset: 4, size: 2 }))
+            .await
+            .map_err(|e| e.to_string());
+
+        assert!(matches!(read_res, Err(_)));
     }
 }
