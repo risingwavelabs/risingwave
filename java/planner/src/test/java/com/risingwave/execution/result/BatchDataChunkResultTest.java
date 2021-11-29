@@ -101,19 +101,19 @@ class BatchDataChunkResultTest {
     Assertions.assertTrue(iter.next());
     List<PgValue> row = iter.getRow();
     Assertions.assertEquals("0", row.get(0).encodeInText());
-    Assertions.assertEquals("false", row.get(1).encodeInText());
+    Assertions.assertEquals("f", row.get(1).encodeInText());
     Assertions.assertTrue(iter.next());
     row = iter.getRow();
     Assertions.assertEquals("1", row.get(0).encodeInText());
-    Assertions.assertEquals("true", row.get(1).encodeInText());
+    Assertions.assertEquals("t", row.get(1).encodeInText());
     Assertions.assertTrue(iter.next());
     row = iter.getRow();
     Assertions.assertEquals("2", row.get(0).encodeInText());
-    Assertions.assertEquals("false", row.get(1).encodeInText());
+    Assertions.assertEquals("f", row.get(1).encodeInText());
     Assertions.assertTrue(iter.next());
     row = iter.getRow();
     Assertions.assertEquals("3", row.get(0).encodeInText());
-    Assertions.assertEquals("true", row.get(1).encodeInText());
+    Assertions.assertEquals("t", row.get(1).encodeInText());
     Assertions.assertFalse(iter.next());
   }
 }

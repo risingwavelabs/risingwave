@@ -6,6 +6,7 @@ import static org.hamcrest.core.Is.is;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
+/** Identifier test. */
 public class IdentifiersTest {
 
   @Test
@@ -16,7 +17,7 @@ public class IdentifiersTest {
     // adapt this test.
     assertThat(
         (int) Identifiers.KEYWORDS.stream().filter(Identifiers.Keyword::isReserved).count(),
-        is(95));
+        is(96));
   }
 
   @Test

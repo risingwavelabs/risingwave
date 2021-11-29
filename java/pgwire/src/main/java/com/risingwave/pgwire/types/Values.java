@@ -10,6 +10,7 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 
+/** Postgresql values implementation. */
 public class Values {
   public static PgValue createBoolean(boolean v) {
     return new PgValue() {
@@ -21,7 +22,7 @@ public class Values {
 
       @Override
       public String encodeInText() {
-        return String.valueOf(v);
+        return v ? "t" : "f";
       }
     };
   }

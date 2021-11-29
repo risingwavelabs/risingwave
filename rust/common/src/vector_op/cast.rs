@@ -1,5 +1,6 @@
 // TODO: delete vector_op. use new vectorized
 use crate::array::{Array, ArrayBuilder, ArrayImpl, ArrayRef, I32Array, I64Array};
+use crate::error::ErrorCode::InvalidInputSyntax;
 use crate::error::{ErrorCode::ParseError, Result, RwError};
 use crate::types::{DataTypeKind, DataTypeRef, Scalar};
 use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
@@ -37,6 +38,14 @@ pub fn vec_cast(
 // Minus this magic number to store the number of days since 1970-01-01.
 pub const UNIX_EPOCH_DAYS: i32 = 719_163;
 
+/// String literals for bool type.
+///
+/// See [`https://www.postgresql.org/docs/9.5/datatype-boolean.html`]
+const TRUE_BOOL_LITERALS: [&str; 9] = ["true", "tru", "tr", "t", "on", "1", "yes", "ye", "y"];
+const FALSE_BOOL_LITERALS: [&str; 10] = [
+    "false", "fals", "fal", "fa", "f", "off", "of", "0", "no", "n",
+];
+
 #[inline(always)]
 pub fn str_to_date(elem: &str) -> Result<i32> {
     NaiveDate::parse_from_str(elem, "%Y-%m-%d")
@@ -69,6 +78,24 @@ pub fn str_to_timestampz(elem: &str) -> Result<i64> {
 #[inline(always)]
 pub fn date_to_timestamp(elem: i32) -> Result<i64> {
     Ok((elem as i64) * 24 * 60 * 60 * 1000 * 1000)
+}
+
+#[inline(always)]
+pub fn str_to_bool(input: &str) -> Result<bool> {
+    let trimmed_input = input.trim();
+    if TRUE_BOOL_LITERALS
+        .iter()
+        .any(|s| s.eq_ignore_ascii_case(trimmed_input))
+    {
+        Ok(true)
+    } else if FALSE_BOOL_LITERALS
+        .iter()
+        .any(|s| trimmed_input.eq_ignore_ascii_case(*s))
+    {
+        Ok(false)
+    } else {
+        Err(InvalidInputSyntax("boolean".to_string(), input.to_string()).into())
+    }
 }
 
 fn vector_cast_op<'a, A1, A2, F>(a: &'a A1, f: F) -> Result<A2>

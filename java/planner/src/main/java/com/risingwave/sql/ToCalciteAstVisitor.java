@@ -789,6 +789,7 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
     String typeName = columnType.name().toUpperCase();
     switch (typeName) {
       case "BOOLEAN":
+      case "BOOL":
         return new SqlBasicTypeNameSpec(SqlTypeName.BOOLEAN, SqlParserPos.ZERO);
       case "SMALLINT":
         return new SqlBasicTypeNameSpec(SqlTypeName.SMALLINT, SqlParserPos.ZERO);

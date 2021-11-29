@@ -37,6 +37,8 @@ pub enum ErrorCode {
     TaskNotFound,
     #[error("Item not found: {0}")]
     ItemNotFound(String),
+    #[error(r#"invalid input syntax for {0} type: "{1}""#)]
+    InvalidInputSyntax(String, String),
 }
 
 #[derive(Clone)]
@@ -121,6 +123,7 @@ impl ErrorCode {
             ErrorCode::TaskNotFound => 10,
             ErrorCode::ProstError(_) => 11,
             ErrorCode::ItemNotFound(_) => 13,
+            ErrorCode::InvalidInputSyntax(_, _) => 14,
         }
     }
 }

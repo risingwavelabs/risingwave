@@ -1,0 +1,14 @@
+query B
+SELECT true AS true;
+----
+true
+
+query B
+SELECT bool 't' AS true;
+----
+true
+
+query B
+SELECT bool '   f           ' AS false;
+----
+false
