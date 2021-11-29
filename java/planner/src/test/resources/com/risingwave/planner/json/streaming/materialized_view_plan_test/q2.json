@@ -1,0 +1,70 @@
+{
+  "input": [{
+    "input": [{
+      "tableSourceNode": {
+        "tableRefId": {
+          "schemaRefId": {
+            "databaseRefId": {
+            }
+          }
+        },
+        "columnIds": [1, 2, 0]
+      }
+    }],
+    "projectNode": {
+      "selectList": [{
+        "exprType": "ADD",
+        "returnType": {
+          "typeName": "INT32"
+        },
+        "funcCall": {
+          "children": [{
+            "exprType": "INPUT_REF",
+            "returnType": {
+              "typeName": "INT32"
+            },
+            "inputRef": {
+            }
+          }, {
+            "exprType": "INPUT_REF",
+            "returnType": {
+              "typeName": "INT32"
+            },
+            "inputRef": {
+              "columnIdx": 1
+            }
+          }]
+        }
+      }, {
+        "exprType": "INPUT_REF",
+        "returnType": {
+          "typeName": "INT64"
+        },
+        "inputRef": {
+          "columnIdx": 2
+        }
+      }]
+    }
+  }],
+  "mviewNode": {
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      },
+      "tableId": 2
+    },
+    "columnDescs": [{
+      "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW"
+    }, {
+      "columnType": {
+        "typeName": "INT64"
+      },
+      "encoding": "RAW"
+    }],
+    "pkIndices": [1]
+  }
+}

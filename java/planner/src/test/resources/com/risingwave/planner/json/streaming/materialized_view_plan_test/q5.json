@@ -1,0 +1,106 @@
+{
+  "input": [{
+    "input": [{
+      "input": [{
+        "input": [{
+          "tableSourceNode": {
+            "tableRefId": {
+              "schemaRefId": {
+                "databaseRefId": {
+                }
+              }
+            },
+            "columnIds": [1, 2]
+          }
+        }],
+        "projectNode": {
+          "selectList": [{
+            "exprType": "ADD",
+            "returnType": {
+              "typeName": "INT32"
+            },
+            "funcCall": {
+              "children": [{
+                "exprType": "INPUT_REF",
+                "returnType": {
+                  "typeName": "INT32"
+                },
+                "inputRef": {
+                }
+              }, {
+                "exprType": "INPUT_REF",
+                "returnType": {
+                  "typeName": "INT32"
+                },
+                "inputRef": {
+                  "columnIdx": 1
+                }
+              }]
+            }
+          }]
+        }
+      }],
+      "simpleAggNode": {
+        "aggCalls": [{
+          "type": "SUM",
+          "args": [{
+            "input": {
+            },
+            "type": {
+              "typeName": "INT32"
+            }
+          }],
+          "returnType": {
+            "typeName": "INT64"
+          }
+        }, {
+          "type": "COUNT",
+          "returnType": {
+            "typeName": "INT64"
+          }
+        }]
+      }
+    }],
+    "projectNode": {
+      "selectList": [{
+        "exprType": "STREAM_NULL_BY_ROW_COUNT",
+        "returnType": {
+          "typeName": "INT64"
+        },
+        "funcCall": {
+          "children": [{
+            "exprType": "INPUT_REF",
+            "returnType": {
+              "typeName": "INT64"
+            },
+            "inputRef": {
+              "columnIdx": 1
+            }
+          }, {
+            "exprType": "INPUT_REF",
+            "returnType": {
+              "typeName": "INT64"
+            },
+            "inputRef": {
+            }
+          }]
+        }
+      }]
+    }
+  }],
+  "mviewNode": {
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      },
+      "tableId": 5
+    },
+    "columnDescs": [{
+      "columnType": {
+        "typeName": "INT64"
+      },
+      "encoding": "RAW"
+    }]
+  }
+}

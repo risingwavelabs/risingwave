@@ -1,0 +1,106 @@
+{
+  "fragmentId": 4,
+  "nodes": {
+    "input": [{
+      "input": [{
+        "filterNode": {
+          "searchCondition": {
+            "exprType": "GREATER_THAN",
+            "returnType": {
+              "typeName": "BOOLEAN"
+            },
+            "funcCall": {
+              "children": [{
+                "exprType": "INPUT_REF",
+                "returnType": {
+                  "typeName": "INT32"
+                },
+                "inputRef": {
+                }
+              }, {
+                "exprType": "INPUT_REF",
+                "returnType": {
+                  "typeName": "INT32"
+                },
+                "inputRef": {
+                  "columnIdx": 1
+                }
+              }]
+            }
+          }
+        }
+      }],
+      "simpleAggNode": {
+        "aggCalls": [{
+          "type": "SUM",
+          "args": [{
+            "input": {
+            },
+            "type": {
+              "typeName": "INT32"
+            }
+          }],
+          "returnType": {
+            "typeName": "INT64"
+          }
+        }, {
+          "type": "COUNT",
+          "returnType": {
+            "typeName": "INT64"
+          }
+        }]
+      }
+    }],
+    "projectNode": {
+      "selectList": [{
+        "exprType": "STREAM_NULL_BY_ROW_COUNT",
+        "returnType": {
+          "typeName": "INT64"
+        },
+        "funcCall": {
+          "children": [{
+            "exprType": "INPUT_REF",
+            "returnType": {
+              "typeName": "INT64"
+            },
+            "inputRef": {
+              "columnIdx": 1
+            }
+          }, {
+            "exprType": "INPUT_REF",
+            "returnType": {
+              "typeName": "INT64"
+            },
+            "inputRef": {
+            }
+          }]
+        }
+      }, {
+        "exprType": "INPUT_REF",
+        "returnType": {
+          "typeName": "INT64"
+        },
+        "inputRef": {
+          "columnIdx": 1
+        }
+      }]
+    }
+  },
+  "mergers": [{
+    "upstreamFragmentId": [6]
+  }],
+  "dispatcher": {
+  },
+  "downstreamFragmentId": [1],
+  "inputColumnDescs": [{
+    "columnType": {
+      "typeName": "INT32"
+    },
+    "encoding": "RAW"
+  }, {
+    "columnType": {
+      "typeName": "INT32"
+    },
+    "encoding": "RAW"
+  }]
+}

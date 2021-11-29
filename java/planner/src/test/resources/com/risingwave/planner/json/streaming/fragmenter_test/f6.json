@@ -1,0 +1,18 @@
+{
+  "fragmentId": 6,
+  "nodes": {
+    "tableSourceNode": {
+      "tableRefId": {
+        "schemaRefId": {
+          "databaseRefId": {
+          }
+        }
+      },
+      "columnIds": [1, 2]
+    }
+  },
+  "dispatcher": {
+    "type": "HASH"
+  },
+  "downstreamFragmentId": [2, 3, 4, 5]
+}

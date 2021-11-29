@@ -2,6 +2,9 @@ package com.risingwave.planner.util;
 
 import java.io.File;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import org.w3c.dom.CDATASection;
@@ -29,6 +32,25 @@ public class ResourceUtil {
     // The reference file for class "com.foo.Bar" is "com/foo/Bar.xml"
     String rest = "/" + clazz.getName().replace('.', File.separatorChar) + suffix;
     return clazz.getResource(rest);
+  }
+
+  private URL findJsonFileFromPathCore(String path) {
+    String res = "com/risingwave/planner/json/" + path + ".json";
+    URL ret = getClass().getClassLoader().getResource(res);
+    return ret;
+  }
+
+  public static URL findJsonFileFromPath(String path) {
+    ResourceUtil util = new ResourceUtil();
+    return util.findJsonFileFromPathCore(path);
+  }
+
+  public static String readJsonStringFromUrl(URL url) {
+    try {
+      return Files.readString(Path.of(url.toURI()), StandardCharsets.UTF_8);
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
   }
 
   public static Document loadXml(URL refFile) {

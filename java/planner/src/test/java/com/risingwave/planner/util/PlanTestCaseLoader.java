@@ -74,9 +74,12 @@ public class PlanTestCaseLoader implements ArgumentsProvider {
       } else if (ResourceUtil.PRIMARY_KEY_TAG.equals(name)) {
         primaryKey = ResourceUtil.getText(res).trim();
       } else if (ResourceUtil.JSON_TAG.equals(name)) {
+        // Two modes: if the res has path attribute, then read json value form the path. Otherwise,
+        // read the json value from the resource itself.
         if (res.hasAttribute(ResourceUtil.PATH_TAG)) {
-          String path = res.getAttribute(ResourceUtil.PATH_TAG);
-          json = res.getAttribute(ResourceUtil.PATH_TAG);
+          String jsonPath = res.getAttribute(ResourceUtil.PATH_TAG);
+          URL jsonFile = ResourceUtil.findJsonFileFromPath(jsonPath);
+          json = ResourceUtil.readJsonStringFromUrl(jsonFile);
         } else {
           // TODO: remove directly read json source. It should be a path to json file.
           json = ResourceUtil.getText(res).trim();
