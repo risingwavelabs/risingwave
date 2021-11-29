@@ -26,4 +26,22 @@ public class BatchPlannerConfigurations {
           .withDefaultValue(true)
           .withDoc("Enable sort agg for batch execution.")
           .build();
+
+  @Config
+  public static final ConfigEntry<Boolean> ENABLE_HASH_JOIN =
+      ConfigEntry.<Boolean>builder("enable_hashjoin")
+          .setOptional(true)
+          .withConverter(Parsers.BOOLEAN_PARSER)
+          .withDefaultValue(true)
+          .withDoc("Enable hash join for batch execution.")
+          .build();
+
+  @Config
+  public static final ConfigEntry<Boolean> ENABLE_SORT_MERGE_JOIN =
+      ConfigEntry.<Boolean>builder("enable_mergejoin")
+          .setOptional(true)
+          .withConverter(Parsers.BOOLEAN_PARSER)
+          .withDefaultValue(true)
+          .withDoc("Enable sort agg for batch execution.")
+          .build();
 }

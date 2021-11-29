@@ -67,4 +67,25 @@ RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], col
         </Resource>
     </TestCase>
 
+    <TestCase name="sort merge join">
+        <Resource name="sql">
+            <![CDATA[
+SELECT * FROM t1 JOIN t2 ON t1.v1 = t2.v1 ORDER BY t1.v1
+            ]]>
+        </Resource>
+
+        <Resource name="distributed">
+            <![CDATA[
+RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0]])
+  RwBatchSortMergeJoin(condition=[=($0, $3)], joinType=[inner])
+    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[0]])
+      RwBatchSort(sort0=[$0], dir0=[ASC])
+        RwBatchTableScan(table=[[test_schema, t1]], columns=[v1,v2,v3])
+    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[0]])
+      RwBatchSort(sort0=[$0], dir0=[ASC])
+        RwBatchTableScan(table=[[test_schema, t2]], columns=[v1,v2])
+            ]]>
+        </Resource>
+    </TestCase>
+
 </Root>

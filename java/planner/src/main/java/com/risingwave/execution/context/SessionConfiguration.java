@@ -50,4 +50,8 @@ public class SessionConfiguration {
       return (T) rawValue;
     }
   }
+
+  public <T> T get(ConfigEntry<T> key) {
+    return (T) getByString(key.getKey());
+  }
 }

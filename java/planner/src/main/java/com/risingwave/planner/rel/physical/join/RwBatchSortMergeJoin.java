@@ -1,22 +1,22 @@
 package com.risingwave.planner.rel.physical.join;
 
 import static com.google.common.base.Verify.verify;
-import static com.risingwave.common.config.BatchPlannerConfigurations.ENABLE_HASH_JOIN;
+import static com.risingwave.common.config.BatchPlannerConfigurations.ENABLE_SORT_MERGE_JOIN;
 import static com.risingwave.execution.context.ExecutionContext.contextOf;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 import static com.risingwave.planner.rel.physical.join.BatchJoinUtils.isEquiJoin;
 
-import com.google.protobuf.Any;
+import com.risingwave.common.exception.PgErrorCode;
+import com.risingwave.common.exception.PgException;
 import com.risingwave.planner.rel.logical.RwLogicalJoin;
 import com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel;
-import com.risingwave.proto.plan.HashJoinNode;
 import com.risingwave.proto.plan.PlanNode;
 import java.util.Collections;
 import java.util.List;
-import java.util.stream.IntStream;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.plan.RelTraitSet;
+import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.convert.ConverterRule;
@@ -24,11 +24,12 @@ import org.apache.calcite.rel.core.Join;
 import org.apache.calcite.rel.core.JoinRelType;
 import org.apache.calcite.rel.hint.RelHint;
 import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.util.ImmutableIntList;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-/** Batch hash join plan node. */
-public class RwBatchHashJoin extends RwBufferJoinBase implements RisingWaveBatchPhyRel {
-  public RwBatchHashJoin(
+/** Batch sort merge join plan node. */
+public class RwBatchSortMergeJoin extends RwBufferJoinBase implements RisingWaveBatchPhyRel {
+  public RwBatchSortMergeJoin(
       RelOptCluster cluster,
       RelTraitSet traitSet,
       List<RelHint> hints,
@@ -38,35 +39,14 @@ public class RwBatchHashJoin extends RwBufferJoinBase implements RisingWaveBatch
       JoinRelType joinType) {
     super(cluster, traitSet, hints, left, right, condition, Collections.emptySet(), joinType);
     checkConvention();
-    verify(BatchJoinUtils.isEquiJoin(analyzeCondition()), "Hash join only support equi join!");
+    verify(isEquiJoin(analyzeCondition()), "Sort merge join only support equi join!");
   }
 
   @Override
   public PlanNode serialize() {
-    var builder = HashJoinNode.newBuilder();
-
-    builder.setJoinType(BatchJoinUtils.getJoinTypeProto(getJoinType()));
-
-    var joinInfo = analyzeCondition();
-    joinInfo.leftKeys.forEach(builder::addLeftKey);
-    IntStream.range(0, left.getRowType().getFieldCount()).forEachOrdered(builder::addLeftOutput);
-
-    joinInfo.rightKeys.forEach(builder::addRightKey);
-    IntStream.range(0, right.getRowType().getFieldCount()).forEachOrdered(builder::addRightOutput);
-
-    var hashJoinNode = builder.build();
-
-    // TODO: Push project into join
-
-    var leftChild = ((RisingWaveBatchPhyRel) left).serialize();
-    var rightChild = ((RisingWaveBatchPhyRel) right).serialize();
-
-    return PlanNode.newBuilder()
-        .setNodeType(PlanNode.PlanNodeType.HASH_JOIN)
-        .addChildren(leftChild)
-        .addChildren(rightChild)
-        .setBody(Any.pack(hashJoinNode))
-        .build();
+    throw new PgException(
+        PgErrorCode.FEATURE_NOT_SUPPORTED,
+        "Sort merge join executor do not support serialize to json now!");
   }
 
   @Override
@@ -82,23 +62,23 @@ public class RwBatchHashJoin extends RwBufferJoinBase implements RisingWaveBatch
       RelNode right,
       JoinRelType joinType,
       boolean semiJoinDone) {
-    return new RwBatchHashJoin(
+    return new RwBatchSortMergeJoin(
         getCluster(), traitSet, getHints(), left, right, conditionExpr, joinType);
   }
 
-  /** Hash join converter rule between logical and physical. */
-  public static class BatchHashJoinConverterRule extends ConverterRule {
-    public static final RwBatchHashJoin.BatchHashJoinConverterRule INSTANCE =
+  /** Sort merge join converter rule between logical and physical. */
+  public static class BatchSortMergeJoinConverterRule extends ConverterRule {
+    public static final RwBatchSortMergeJoin.BatchSortMergeJoinConverterRule INSTANCE =
         Config.INSTANCE
             .withInTrait(LOGICAL)
             .withOutTrait(BATCH_PHYSICAL)
-            .withRuleFactory(RwBatchHashJoin.BatchHashJoinConverterRule::new)
+            .withRuleFactory(RwBatchSortMergeJoin.BatchSortMergeJoinConverterRule::new)
             .withOperandSupplier(t -> t.operand(RwLogicalJoin.class).anyInputs())
-            .withDescription("Converting logical join to batch hash join.")
+            .withDescription("Converting logical join to batch sort merge join.")
             .as(Config.class)
-            .toRule(RwBatchHashJoin.BatchHashJoinConverterRule.class);
+            .toRule(RwBatchSortMergeJoin.BatchSortMergeJoinConverterRule.class);
 
-    protected BatchHashJoinConverterRule(Config config) {
+    protected BatchSortMergeJoinConverterRule(Config config) {
       super(config);
     }
 
@@ -107,28 +87,36 @@ public class RwBatchHashJoin extends RwBufferJoinBase implements RisingWaveBatch
       var join = (RwLogicalJoin) call.rel(0);
       var joinInfo = join.analyzeCondition();
       return isEquiJoin(joinInfo)
-          && contextOf(call).getSessionConfiguration().get(ENABLE_HASH_JOIN);
+          && contextOf(call).getSessionConfiguration().get(ENABLE_SORT_MERGE_JOIN);
     }
 
     @Override
     public @Nullable RelNode convert(RelNode rel) {
       var join = (RwLogicalJoin) rel;
-
+      var joinInfo = join.analyzeCondition();
+      // Add collation to both left input and right input.
       var left = join.getLeft();
       var leftTraits = left.getTraitSet().plus(BATCH_PHYSICAL);
+      var leftCollation = RelCollations.of(ImmutableIntList.copyOf(joinInfo.leftKeys));
+      // Only add collation if the traits do not have it.
+      if (!leftTraits.contains(leftCollation)) {
+        leftTraits = leftTraits.plus(leftCollation);
+      }
       leftTraits = leftTraits.simplify();
-
       var newLeft = convert(left, leftTraits);
 
       var right = join.getRight();
       var rightTraits = right.getTraitSet().plus(BATCH_PHYSICAL);
+      var rightCollation = RelCollations.of(ImmutableIntList.copyOf(joinInfo.rightKeys));
+      if (!rightTraits.contains(rightCollation)) {
+        rightTraits = rightTraits.plus(rightCollation);
+      }
       rightTraits = rightTraits.simplify();
-
       var newRight = convert(right, rightTraits);
 
       var newJoinTraits = newLeft.getTraitSet();
 
-      return new RwBatchHashJoin(
+      return new RwBatchSortMergeJoin(
           join.getCluster(),
           newJoinTraits,
           join.getHints(),
