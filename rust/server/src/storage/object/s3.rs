@@ -9,7 +9,8 @@ use rusoto_core::{
     ByteStream, HttpClient, Region, RusotoError,
 };
 use rusoto_s3::{
-    DeleteObjectRequest, GetObjectError, GetObjectRequest, PutObjectRequest, S3Client, S3,
+    DeleteObjectRequest, GetObjectError, GetObjectRequest, HeadObjectRequest, PutObjectRequest,
+    S3Client, S3,
 };
 use std::{collections::HashMap, str::FromStr};
 use tokio::io::AsyncReadExt;
@@ -154,8 +155,34 @@ impl ObjectStore for S3ObjectStore {
         }
     }
 
-    async fn metadata(&self, _path: &str) -> Result<ObjectMetadata> {
-        todo!()
+    async fn metadata(&self, path: &str) -> Result<ObjectMetadata> {
+        ensure!(!self.client.is_none());
+
+        let response = self
+            .client
+            .as_ref()
+            .unwrap()
+            .head_object(HeadObjectRequest {
+                bucket: self.bucket.clone(),
+                key: path.to_string(),
+                ..Default::default()
+            })
+            .await
+            .map_err(|err| {
+                RwError::from(InternalError(format!(
+                    "S3 fetch metadata failure with error: {}",
+                    err
+                )))
+            })?;
+
+        match response.content_length {
+            Some(len) => Ok(ObjectMetadata {
+                total_size: len as usize,
+            }),
+            None => Err(RwError::from(InternalError(
+                "No matched fields".to_string(),
+            ))),
+        }
     }
 
     async fn close(&self, _path: &str) -> Result<()> {
@@ -274,5 +301,28 @@ mod tests {
             .map_err(|e| e.to_string());
 
         assert!(matches!(read_res, Err(_)));
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_metadata() {
+        // get S3 client
+        let block = Bytes::from("123456");
+        let conn_info = ConnectionInfo::new_for_test_account();
+        let bucket = "s3-ut";
+        let path = Uuid::new_v4().to_string();
+        let s3 = S3ObjectStore::new(conn_info, bucket.to_string());
+
+        // upload data
+        s3.upload(&path, block).await.unwrap();
+
+        // read metadata
+        let data_size = s3.metadata(&path).await.unwrap().total_size;
+        assert_eq!(data_size, 6);
+
+        // should not read after delete
+        s3.delete(&path).await.unwrap();
+        let res = s3.metadata(&path).await.map_err(|e| e.to_string());
+        assert!(matches!(res, Err(_)));
     }
 }
