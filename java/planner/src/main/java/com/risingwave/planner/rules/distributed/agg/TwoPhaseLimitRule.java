@@ -3,6 +3,7 @@ package com.risingwave.planner.rules.distributed.agg;
 import static com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel.BATCH_DISTRIBUTED;
 import static com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel.BATCH_PHYSICAL;
 
+import com.risingwave.common.datatype.RisingWaveTypeFactory;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.physical.RwBatchLimit;
 import org.apache.calcite.plan.RelOptRule;
@@ -12,6 +13,7 @@ import org.apache.calcite.rel.convert.ConverterRule;
 import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.sql.type.SqlTypeName;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 /** Rule converting a RwBatchLimit to 2-phase limit */
@@ -53,7 +55,8 @@ public class TwoPhaseLimitRule extends ConverterRule {
     var newInput = RelOptRule.convert(limit.getInput(), requiredInputTraits);
 
     // For the local limit, we need to keep `offset + limit` number of rows
-    RexNode zeroOffset = rexBuilder.makeZeroLiteral(globalOffset.getType());
+    RisingWaveTypeFactory typeFactory = new RisingWaveTypeFactory();
+    RexNode zeroOffset = rexBuilder.makeZeroLiteral(typeFactory.createSqlType(SqlTypeName.INTEGER));
     RexNode localFetch = rexBuilder.makeLiteral(fetchValue + offsetValue, globalFetch.getType());
     var localLimit =
         new RwBatchLimit(

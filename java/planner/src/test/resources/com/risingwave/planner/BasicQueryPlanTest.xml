@@ -352,4 +352,19 @@ RwBatchProject(EXPR$0=[ROUND($0, 4)])
         <Resource name="json" path="batch/basic/round_digit">
         </Resource>
     </TestCase>
+    <TestCase name="limit">
+        <Resource name="sql">
+            <![CDATA[
+            select * from t5 limit 1 offset 1;
+]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchLimit(offset=[1], fetch=[1])
+  RwBatchTableScan(table=[[test_schema, t5]], columns=[v1])
+]]>
+        </Resource>
+        <Resource name="json" path="batch/basic/limit">
+        </Resource>
+    </TestCase>
 </Root>

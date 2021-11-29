@@ -251,7 +251,8 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
     }
 
     var having = node.getHaving().map(exp -> exp.accept(this, context)).orElse(null);
-
+    var offset = node.getOffset().map(off -> off.accept(this, context)).orElse(null);
+    var limit = node.getLimit().map(lim -> lim.accept(this, context)).orElse(null);
     var selectNode =
         new SqlSelect(
             SqlParserPos.ZERO,
@@ -263,24 +264,22 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
             having,
             null,
             null,
-            null,
-            null,
+            offset,
+            limit,
             null);
 
     SqlNode ret = selectNode;
-
     if (!node.getOrderBy().isEmpty()) {
+      // When it's SqlOrderBy node, we should select all tuples and sort.
+      selectNode.setFetch(null);
+      selectNode.setOffset(null);
       var orderList =
           sqlNodeListOf(
               node.getOrderBy().stream()
                   .map(orderByItem -> orderByItem.accept(this, context))
                   .collect(Collectors.toList()));
-      var offset = node.getOffset().map(off -> off.accept(this, context)).orElse(null);
-      var limit = node.getLimit().map(lim -> lim.accept(this, context)).orElse(null);
-
       ret = new SqlOrderBy(SqlParserPos.ZERO, selectNode, orderList, offset, limit);
     }
-
     return ret;
   }
 

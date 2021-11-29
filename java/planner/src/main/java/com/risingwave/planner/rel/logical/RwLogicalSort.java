@@ -13,6 +13,7 @@ import org.apache.calcite.rel.logical.LogicalSort;
 import org.apache.calcite.rex.RexNode;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+/** Logical sort operator in RisingWave */
 public class RwLogicalSort extends Sort implements RisingWaveLogicalRel {
   public RwLogicalSort(
       RelOptCluster cluster,
@@ -35,6 +36,7 @@ public class RwLogicalSort extends Sort implements RisingWaveLogicalRel {
     return new RwLogicalSort(getCluster(), traitSet, newInput, newCollation, offset, fetch);
   }
 
+  /** Rule for converting Sort in logical convention to batch convention */
   public static class RwLogicalSortConverterRule extends ConverterRule {
     public static final RwLogicalSortConverterRule INSTANCE =
         Config.INSTANCE
@@ -57,7 +59,11 @@ public class RwLogicalSort extends Sort implements RisingWaveLogicalRel {
       var newInput = RelOptRule.convert(input, input.getTraitSet().plus(LOGICAL));
       var collationTraits = RelCollationTraitDef.INSTANCE.canonize(logicalSort.getCollation());
       var newTraits = logicalSort.getTraitSet().plus(LOGICAL).plus(collationTraits);
-
+      // If there is nothing should be sorted, then transfer it to RwLogicalLimit
+      if (collationTraits.getFieldCollations().isEmpty()) {
+        return new RwLogicalLimit(
+            rel.getCluster(), newTraits, newInput, logicalSort.offset, logicalSort.fetch);
+      }
       return new RwLogicalSort(
           rel.getCluster(),
           newTraits,

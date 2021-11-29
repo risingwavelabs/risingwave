@@ -12,6 +12,7 @@ import com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel;
 import com.risingwave.planner.rel.physical.RwBatchFilter;
 import com.risingwave.planner.rel.physical.RwBatchHashAgg;
 import com.risingwave.planner.rel.physical.RwBatchInsert;
+import com.risingwave.planner.rel.physical.RwBatchLimit;
 import com.risingwave.planner.rel.physical.RwBatchMaterializedViewScan;
 import com.risingwave.planner.rel.physical.RwBatchProject;
 import com.risingwave.planner.rel.physical.RwBatchSort;
@@ -126,6 +127,7 @@ public class BatchRuleSets {
           RwBatchNestedLoopJoin.BatchNestedLoopJoinConverterRule.INSTANCE,
           RwBatchHashAgg.BatchHashAggConverterRule.INSTANCE,
           RwBatchSortAgg.BatchSortAggConverterRule.INSTANCE,
+          RwBatchLimit.BatchLimitConverterRule.INSTANCE,
           CoreRules.SORT_REMOVE);
 
   public static final RuleSet DISTRIBUTED_CONVERTER_RULES =
