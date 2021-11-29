@@ -1,6 +1,6 @@
 package com.risingwave.planner.rules.streaming;
 
-import com.risingwave.planner.rel.physical.streaming.RwStreamProject;
+import com.risingwave.planner.rel.streaming.RwStreamProject;
 import java.util.List;
 import java.util.stream.Collectors;
 import org.apache.calcite.plan.RelOptRule;

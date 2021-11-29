@@ -6,7 +6,7 @@ import com.risingwave.catalog.ColumnEncoding;
 import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
-import com.risingwave.planner.rel.physical.streaming.RisingWaveStreamingRel;
+import com.risingwave.planner.rel.streaming.RisingWaveStreamingRel;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;

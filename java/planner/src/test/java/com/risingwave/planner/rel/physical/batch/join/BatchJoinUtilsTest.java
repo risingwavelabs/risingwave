@@ -1,6 +1,6 @@
 package com.risingwave.planner.rel.physical.batch.join;
 
-import static com.risingwave.planner.rel.physical.batch.join.BatchJoinUtils.getJoinTypeProto;
+import static com.risingwave.planner.rel.physical.join.BatchJoinUtils.getJoinTypeProto;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.risingwave.proto.plan.JoinType;

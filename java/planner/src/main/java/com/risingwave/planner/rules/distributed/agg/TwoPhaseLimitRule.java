@@ -1,10 +1,10 @@
 package com.risingwave.planner.rules.distributed.agg;
 
-import static com.risingwave.planner.rel.physical.batch.RisingWaveBatchPhyRel.BATCH_DISTRIBUTED;
-import static com.risingwave.planner.rel.physical.batch.RisingWaveBatchPhyRel.BATCH_PHYSICAL;
+import static com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel.BATCH_DISTRIBUTED;
+import static com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel.BATCH_PHYSICAL;
 
 import com.risingwave.planner.rel.common.dist.RwDistributions;
-import com.risingwave.planner.rel.physical.batch.RwBatchLimit;
+import com.risingwave.planner.rel.physical.RwBatchLimit;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.rel.RelNode;

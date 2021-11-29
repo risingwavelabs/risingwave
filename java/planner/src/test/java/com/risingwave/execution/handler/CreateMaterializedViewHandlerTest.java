@@ -15,7 +15,7 @@ import com.risingwave.execution.context.FrontendEnv;
 import com.risingwave.execution.context.SessionConfiguration;
 import com.risingwave.planner.TestPlannerModule;
 import com.risingwave.planner.planner.streaming.StreamPlanner;
-import com.risingwave.planner.rel.physical.streaming.StreamingPlan;
+import com.risingwave.planner.rel.streaming.StreamingPlan;
 import com.risingwave.sql.parser.SqlParser;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlCreateMaterializedView;

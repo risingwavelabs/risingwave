@@ -6,7 +6,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.risingwave.node.WorkerNode;
 import com.risingwave.node.WorkerNodeManager;
-import com.risingwave.planner.rel.physical.batch.RisingWaveBatchPhyRel;
+import com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel;
 import com.risingwave.scheduler.exchange.SingleDistribution;
 import com.risingwave.scheduler.query.Query;
 import com.risingwave.scheduler.stage.QueryStage;

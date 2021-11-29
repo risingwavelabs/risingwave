@@ -2,11 +2,11 @@ package com.risingwave.planner.rules.streaming;
 
 import static org.apache.calcite.rel.rules.CoreRules.AGGREGATE_PROJECT_MERGE;
 
-import com.risingwave.planner.rel.physical.streaming.RwStreamFilter;
-import com.risingwave.planner.rel.physical.streaming.RwStreamProject;
-import com.risingwave.planner.rel.physical.streaming.RwStreamSort;
-import com.risingwave.planner.rel.physical.streaming.RwStreamTableSource;
-import com.risingwave.planner.rel.physical.streaming.join.RwStreamHashJoin;
+import com.risingwave.planner.rel.streaming.RwStreamFilter;
+import com.risingwave.planner.rel.streaming.RwStreamProject;
+import com.risingwave.planner.rel.streaming.RwStreamSort;
+import com.risingwave.planner.rel.streaming.RwStreamTableSource;
+import com.risingwave.planner.rel.streaming.join.RwStreamHashJoin;
 import com.risingwave.planner.rules.streaming.aggregate.StreamingShuffleAggRule;
 import com.risingwave.planner.rules.streaming.aggregate.StreamingSingleModeAggRule;
 import com.risingwave.planner.rules.streaming.aggregate.StreamingTwoPhaseAggRule;

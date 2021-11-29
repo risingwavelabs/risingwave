@@ -1,7 +1,7 @@
 package com.risingwave.planner.rules.distributed.agg;
 
-import static com.risingwave.planner.rel.physical.batch.RisingWaveBatchPhyRel.BATCH_DISTRIBUTED;
-import static com.risingwave.planner.rel.physical.batch.RisingWaveBatchPhyRel.BATCH_PHYSICAL;
+import static com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel.BATCH_DISTRIBUTED;
+import static com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel.BATCH_PHYSICAL;
 import static com.risingwave.planner.rules.distributed.agg.SplitUtils.getAggSplitters;
 import static com.risingwave.planner.rules.distributed.agg.SplitUtils.getGlobalAggCalls;
 import static com.risingwave.planner.rules.distributed.agg.SplitUtils.getLocalAggCalls;
@@ -10,7 +10,7 @@ import static java.util.Collections.emptyList;
 import com.risingwave.planner.rel.common.dist.RwDistributionTrait;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.physical.RwAggregate;
-import com.risingwave.planner.rel.physical.batch.RwBatchProject;
+import com.risingwave.planner.rel.physical.RwBatchProject;
 import com.risingwave.planner.rules.aggspliter.AggSplitter;
 import java.util.ArrayList;
 import java.util.List;

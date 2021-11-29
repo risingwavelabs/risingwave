@@ -2,9 +2,9 @@ package com.risingwave.planner.planner.streaming;
 
 import com.risingwave.common.config.LeaderServerConfigurations;
 import com.risingwave.execution.handler.CreateMaterializedViewHandler;
-import com.risingwave.planner.rel.physical.streaming.StreamingPlan;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
 import com.risingwave.planner.rel.serialization.StreamingStageSerializer;
+import com.risingwave.planner.rel.streaming.StreamingPlan;
 import com.risingwave.rpc.Messages;
 import java.util.List;
 import org.apache.calcite.sql.SqlNode;

@@ -2,15 +2,15 @@ package com.risingwave.planner.rules.streaming.aggregate;
 
 import static com.risingwave.execution.context.ExecutionContext.contextOf;
 import static com.risingwave.planner.planner.PlannerUtils.isSingleMode;
-import static com.risingwave.planner.rel.physical.streaming.RisingWaveStreamingRel.STREAMING;
+import static com.risingwave.planner.rel.streaming.RisingWaveStreamingRel.STREAMING;
 import static com.risingwave.planner.rules.streaming.aggregate.StreamingAggRuleUtility.addCountOrSumIfNotExist;
 import static com.risingwave.planner.rules.streaming.aggregate.StreamingAggRuleUtility.createCountStarAggCall;
 import static com.risingwave.planner.rules.streaming.aggregate.StreamingAggRuleUtility.createFilterAfterAggregate;
 import static com.risingwave.planner.rules.streaming.aggregate.StreamingAggRuleUtility.createProjectAfterAggregate;
 
 import com.risingwave.planner.rel.logical.RwLogicalAggregate;
-import com.risingwave.planner.rel.physical.streaming.RwStreamAgg;
-import com.risingwave.planner.rel.physical.streaming.RwStreamProject;
+import com.risingwave.planner.rel.streaming.RwStreamAgg;
+import com.risingwave.planner.rel.streaming.RwStreamProject;
 import java.util.ArrayList;
 import java.util.HashSet;
 import org.apache.calcite.plan.RelOptRule;

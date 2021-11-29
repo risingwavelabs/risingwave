@@ -1,7 +1,7 @@
 package com.risingwave.planner.rel.serialization;
 
-import com.risingwave.planner.rel.physical.streaming.RisingWaveStreamingRel;
-import com.risingwave.planner.rel.physical.streaming.RwStreamExchange;
+import com.risingwave.planner.rel.streaming.RisingWaveStreamingRel;
+import com.risingwave.planner.rel.streaming.RwStreamExchange;
 import com.risingwave.proto.streaming.plan.StreamNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

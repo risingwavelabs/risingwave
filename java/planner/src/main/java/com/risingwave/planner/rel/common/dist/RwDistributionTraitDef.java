@@ -1,9 +1,9 @@
 package com.risingwave.planner.rel.common.dist;
 
 import static com.google.common.base.Preconditions.checkArgument;
-import static com.risingwave.planner.rel.physical.batch.RisingWaveBatchPhyRel.BATCH_PHYSICAL;
+import static com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel.BATCH_PHYSICAL;
 
-import com.risingwave.planner.rel.physical.batch.RwBatchExchange;
+import com.risingwave.planner.rel.physical.RwBatchExchange;
 import org.apache.calcite.plan.RelOptPlanner;
 import org.apache.calcite.plan.RelTraitDef;
 import org.apache.calcite.plan.RelTraitSet;
@@ -11,6 +11,7 @@ import org.apache.calcite.rel.RelDistribution;
 import org.apache.calcite.rel.RelNode;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+/** The trait definition class for a RisingWave distribution trait. */
 public class RwDistributionTraitDef extends RelTraitDef<RwDistributionTrait> {
   private static final RwDistributionTraitDef SINGLETON = new RwDistributionTraitDef();
 

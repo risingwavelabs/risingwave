@@ -2,11 +2,11 @@ package com.risingwave.planner.rules.streaming;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Verify.verify;
-import static com.risingwave.planner.rel.physical.streaming.RisingWaveStreamingRel.STREAMING;
+import static com.risingwave.planner.rel.streaming.RisingWaveStreamingRel.STREAMING;
 
 import com.risingwave.planner.rel.common.dist.RwDistributionTrait;
 import com.risingwave.planner.rel.common.dist.RwDistributionTraitDef;
-import com.risingwave.planner.rel.physical.streaming.RwStreamExchange;
+import com.risingwave.planner.rel.streaming.RwStreamExchange;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.plan.RelRule;

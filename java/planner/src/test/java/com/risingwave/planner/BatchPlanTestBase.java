@@ -3,7 +3,7 @@ package com.risingwave.planner;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.risingwave.planner.planner.batch.BatchPlanner;
-import com.risingwave.planner.rel.physical.batch.BatchPlan;
+import com.risingwave.planner.rel.physical.BatchPlan;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
 import com.risingwave.planner.util.PlannerTestCase;
 import com.risingwave.planner.util.PlannerTestDdlLoader;

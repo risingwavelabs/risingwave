@@ -7,8 +7,8 @@ import static org.mockito.Mockito.when;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
 import com.risingwave.node.DefaultWorkerNode;
-import com.risingwave.planner.rel.physical.batch.BatchPlan;
-import com.risingwave.planner.rel.physical.batch.RisingWaveBatchPhyRel;
+import com.risingwave.planner.rel.physical.BatchPlan;
+import com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.scheduler.query.PlanFragmenter;
 import com.risingwave.scheduler.query.Query;
@@ -22,6 +22,7 @@ import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+/** The test for query manager. */
 public class QueryManagerTest {
 
   @Test

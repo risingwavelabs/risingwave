@@ -1,6 +1,6 @@
 package com.risingwave.scheduler.streaming.graph;
 
-import com.risingwave.planner.rel.physical.streaming.RisingWaveStreamingRel;
+import com.risingwave.planner.rel.streaming.RisingWaveStreamingRel;
 
 /**
  * A stream stage is a part of streaming plan, such that each stage can be parallelized by multiple

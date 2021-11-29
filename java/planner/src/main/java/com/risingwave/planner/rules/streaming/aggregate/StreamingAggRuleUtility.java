@@ -3,9 +3,9 @@ package com.risingwave.planner.rules.streaming.aggregate;
 import static java.util.Collections.emptyList;
 
 import com.risingwave.planner.rel.logical.RwLogicalAggregate;
-import com.risingwave.planner.rel.physical.streaming.RwStreamAgg;
-import com.risingwave.planner.rel.physical.streaming.RwStreamFilter;
-import com.risingwave.planner.rel.physical.streaming.RwStreamProject;
+import com.risingwave.planner.rel.streaming.RwStreamAgg;
+import com.risingwave.planner.rel.streaming.RwStreamFilter;
+import com.risingwave.planner.rel.streaming.RwStreamProject;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;

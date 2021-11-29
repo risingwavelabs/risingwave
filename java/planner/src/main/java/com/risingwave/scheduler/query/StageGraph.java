@@ -6,7 +6,7 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
-import com.risingwave.planner.rel.physical.batch.RwBatchExchange;
+import com.risingwave.planner.rel.physical.RwBatchExchange;
 import com.risingwave.scheduler.stage.QueryStage;
 import com.risingwave.scheduler.stage.StageId;
 import java.util.HashMap;

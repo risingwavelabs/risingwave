@@ -2,10 +2,11 @@ package com.risingwave.scheduler.query;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
-import com.risingwave.planner.rel.physical.batch.RwBatchExchange;
+import com.risingwave.planner.rel.physical.RwBatchExchange;
 import com.risingwave.scheduler.stage.QueryStage;
 import com.risingwave.scheduler.stage.StageId;
 
+/** A query to be executed by the scheduler. */
 public class Query {
   private final QueryId queryId;
   private final StageGraph graph;

@@ -2,7 +2,7 @@ package com.risingwave.planner.rules.streaming.aggregate;
 
 import static com.risingwave.execution.context.ExecutionContext.contextOf;
 import static com.risingwave.planner.planner.PlannerUtils.isDistributedMode;
-import static com.risingwave.planner.rel.physical.streaming.RisingWaveStreamingRel.STREAMING;
+import static com.risingwave.planner.rel.streaming.RisingWaveStreamingRel.STREAMING;
 import static com.risingwave.planner.rules.aggspliter.LogicalAggSplitUtils.getAggSplitters;
 import static com.risingwave.planner.rules.aggspliter.LogicalAggSplitUtils.getGlobalAggCalls;
 import static com.risingwave.planner.rules.aggspliter.LogicalAggSplitUtils.getLocalAggCalls;
@@ -15,8 +15,8 @@ import static com.risingwave.planner.rules.streaming.aggregate.StreamingAggRuleU
 
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.logical.RwLogicalAggregate;
-import com.risingwave.planner.rel.physical.streaming.RwStreamAgg;
-import com.risingwave.planner.rel.physical.streaming.RwStreamProject;
+import com.risingwave.planner.rel.streaming.RwStreamAgg;
+import com.risingwave.planner.rel.streaming.RwStreamProject;
 import com.risingwave.planner.rules.aggspliter.AggSplitter;
 import com.risingwave.planner.rules.aggspliter.LogicalAggSplitUtils;
 import java.util.ArrayList;

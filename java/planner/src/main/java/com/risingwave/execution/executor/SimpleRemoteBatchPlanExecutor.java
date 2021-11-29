@@ -2,7 +2,7 @@ package com.risingwave.execution.executor;
 
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.pgwire.database.PgResult;
-import com.risingwave.planner.rel.physical.batch.BatchPlan;
+import com.risingwave.planner.rel.physical.BatchPlan;
 
 /** Used to execute against single compute node. */
 public class SimpleRemoteBatchPlanExecutor implements BatchPlanExecutor {

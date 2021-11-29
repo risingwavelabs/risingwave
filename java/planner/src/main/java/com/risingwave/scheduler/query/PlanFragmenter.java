@@ -2,9 +2,9 @@ package com.risingwave.scheduler.query;
 
 import static java.util.Objects.requireNonNull;
 
-import com.risingwave.planner.rel.physical.batch.BatchPlan;
-import com.risingwave.planner.rel.physical.batch.RisingWaveBatchPhyRel;
-import com.risingwave.planner.rel.physical.batch.RwBatchExchange;
+import com.risingwave.planner.rel.physical.BatchPlan;
+import com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel;
+import com.risingwave.planner.rel.physical.RwBatchExchange;
 import com.risingwave.scheduler.exchange.Distribution;
 import com.risingwave.scheduler.exchange.SingleDistribution;
 import com.risingwave.scheduler.stage.QueryStage;

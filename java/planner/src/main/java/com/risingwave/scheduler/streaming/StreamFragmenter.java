@@ -3,9 +3,9 @@ package com.risingwave.scheduler.streaming;
 import static java.util.Objects.requireNonNull;
 
 import com.risingwave.execution.context.ExecutionContext;
-import com.risingwave.planner.rel.physical.streaming.RisingWaveStreamingRel;
-import com.risingwave.planner.rel.physical.streaming.RwStreamExchange;
-import com.risingwave.planner.rel.physical.streaming.StreamingPlan;
+import com.risingwave.planner.rel.streaming.RisingWaveStreamingRel;
+import com.risingwave.planner.rel.streaming.RwStreamExchange;
+import com.risingwave.planner.rel.streaming.StreamingPlan;
 import com.risingwave.scheduler.streaming.graph.StreamFragment;
 import com.risingwave.scheduler.streaming.graph.StreamGraph;
 import com.risingwave.scheduler.streaming.graph.StreamStage;

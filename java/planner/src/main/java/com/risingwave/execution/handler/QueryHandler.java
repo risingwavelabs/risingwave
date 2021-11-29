@@ -4,7 +4,7 @@ import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.execution.result.BatchDataChunkResult;
 import com.risingwave.pgwire.database.PgResult;
 import com.risingwave.planner.planner.batch.BatchPlanner;
-import com.risingwave.planner.rel.physical.batch.BatchPlan;
+import com.risingwave.planner.rel.physical.BatchPlan;
 import com.risingwave.proto.computenode.GetDataRequest;
 import com.risingwave.proto.computenode.GetDataResponse;
 import com.risingwave.proto.computenode.TaskSinkId;

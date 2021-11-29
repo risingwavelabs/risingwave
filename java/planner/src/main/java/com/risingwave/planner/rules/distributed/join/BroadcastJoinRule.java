@@ -1,11 +1,11 @@
 package com.risingwave.planner.rules.distributed.join;
 
-import static com.risingwave.planner.rel.physical.batch.RisingWaveBatchPhyRel.BATCH_DISTRIBUTED;
-import static com.risingwave.planner.rel.physical.batch.RisingWaveBatchPhyRel.BATCH_PHYSICAL;
-import static com.risingwave.planner.rel.physical.batch.join.BatchJoinUtils.isEquiJoin;
+import static com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel.BATCH_DISTRIBUTED;
+import static com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel.BATCH_PHYSICAL;
+import static com.risingwave.planner.rel.physical.join.BatchJoinUtils.isEquiJoin;
 
 import com.risingwave.planner.rel.common.dist.RwDistributions;
-import com.risingwave.planner.rel.physical.batch.join.RwBufferJoinBase;
+import com.risingwave.planner.rel.physical.join.RwBufferJoinBase;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.convert.ConverterRule;

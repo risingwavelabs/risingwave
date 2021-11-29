@@ -2,7 +2,7 @@ package com.risingwave.scheduler;
 
 import static java.util.Objects.requireNonNull;
 
-import com.risingwave.planner.rel.physical.batch.BatchPlan;
+import com.risingwave.planner.rel.physical.BatchPlan;
 import com.risingwave.scheduler.query.PlanFragmenter;
 import com.risingwave.scheduler.query.Query;
 import com.risingwave.scheduler.query.QueryId;
