@@ -25,10 +25,11 @@ pub trait HummockIterator {
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()>;
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum HummockIteratorImpl {
     // Will support later
     // Table(TableIterator),
-    Concat(ConcatIterator),
+    Concat(Box<ConcatIterator>),
     Merge(MergeIterator),
     #[cfg(test)]
     Test(tests::TestIterator),

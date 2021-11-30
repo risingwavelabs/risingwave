@@ -38,7 +38,19 @@ impl TableIterator {
         self.block_iter = Some(block_iter);
         Ok(self.block_iter.as_ref().unwrap().data().unwrap())
     }
+    pub fn is_valid(&self) -> bool {
+        if self.next_blk == 0 && self.block_iter.is_none() {
+            return true;
+        }
 
+        if let Some(cur) = &self.block_iter {
+            if !self.first_op_after_seek && cur.is_last() {
+                return false;
+            }
+            return cur.is_valid();
+        }
+        false
+    }
     async fn next_inner(&mut self) -> HummockResult<Option<(&[u8], HummockValue<&[u8]>)>> {
         let data_available = match &mut self.block_iter {
             Some(block_iter) => {

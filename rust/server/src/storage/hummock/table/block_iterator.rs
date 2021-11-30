@@ -149,6 +149,10 @@ impl BlockIterator {
         }
     }
 
+    /// Check whether the iterator is at the last position
+    pub fn is_last(&self) -> bool {
+        self.idx >= 0 && self.idx == (self.entry_offsets().len() - 1) as isize
+    }
     /// Check whether the iterator is at a valid position
     pub fn is_valid(&self) -> bool {
         self.idx >= 0 && self.idx < self.entry_offsets().len() as isize
