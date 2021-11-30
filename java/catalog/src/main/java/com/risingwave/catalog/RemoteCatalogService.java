@@ -34,7 +34,6 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -61,7 +60,13 @@ public class RemoteCatalogService implements CatalogService {
     this.databaseByName = new ConcurrentHashMap<>();
     this.creatingTable = new ConcurrentHashMap<>();
     initCatalog();
-    startHeartbeatSchedule(Executors.newSingleThreadScheduledExecutor());
+    /*
+    FIXME: simply stop heartbeat here. There still got an asynchrony inconsistency between create table and
+       table dropped detection in heartbeat. ReadWrite lock should be introduced here to ensure consistency
+       which will brings some overhead here. Since heartbeat is only a temporary solution for multi-frontends
+       deployment, we will fix this when broadcast catalog solution finished development in meta service.
+    */
+    // startHeartbeatSchedule(Executors.newSingleThreadScheduledExecutor());
   }
 
   private void startHeartbeatSchedule(ScheduledExecutorService service) {
