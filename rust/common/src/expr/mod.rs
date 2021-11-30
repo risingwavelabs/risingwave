@@ -8,7 +8,9 @@ mod expr_input_ref;
 mod expr_literal;
 mod expr_ternary_bytes;
 pub mod expr_unary_nonnull;
+mod pg_sleep;
 mod template;
+
 use crate::array::{ArrayRef, DataChunk};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
@@ -23,9 +25,16 @@ use std::sync::Arc;
 
 pub type ExpressionRef = Arc<dyn Expression>;
 
+/// Instance of an expression
 pub trait Expression: std::fmt::Debug + Sync + Send {
     fn return_type(&self) -> &dyn DataType;
     fn return_type_ref(&self) -> DataTypeRef;
+
+    /// Evaluate the expression
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - input data of the Project Executor
     fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef>;
 }
 
@@ -35,7 +44,7 @@ pub fn build_from_prost(prost: &ProstExprNode) -> Result<BoxedExpression> {
     use risingwave_pb::expr::expr_node::Type::*;
 
     match prost.get_expr_type() {
-        Cast | Upper | Not => build_unary_expr_prost(prost),
+        Cast | Upper | Not | PgSleep => build_unary_expr_prost(prost),
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual => {
             build_binary_expr_prost(prost)
         }

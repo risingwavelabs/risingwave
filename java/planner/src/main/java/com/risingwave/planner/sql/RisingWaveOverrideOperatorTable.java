@@ -3,11 +3,14 @@ package com.risingwave.planner.sql;
 import com.risingwave.common.datatype.RwReturnTypes;
 import org.apache.calcite.sql.SqlAggFunction;
 import org.apache.calcite.sql.SqlBinaryOperator;
+import org.apache.calcite.sql.SqlFunction;
 import org.apache.calcite.sql.SqlFunctionCategory;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.fun.SqlMonotonicBinaryOperator;
 import org.apache.calcite.sql.type.InferTypes;
 import org.apache.calcite.sql.type.OperandTypes;
+import org.apache.calcite.sql.type.ReturnTypes;
+import org.apache.calcite.sql.type.SqlTypeFamily;
 import org.apache.calcite.sql.util.ReflectiveSqlOperatorTable;
 import org.apache.calcite.util.Optionality;
 import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
@@ -66,4 +69,13 @@ public class RisingWaveOverrideOperatorTable extends ReflectiveSqlOperatorTable 
           false,
           false,
           Optionality.FORBIDDEN) {};
+
+  public static final SqlFunction PG_SLEEP =
+      new SqlFunction(
+          "PG_SLEEP",
+          SqlKind.OTHER_FUNCTION,
+          ReturnTypes.INTEGER_NULLABLE,
+          null,
+          OperandTypes.family(SqlTypeFamily.DECIMAL),
+          SqlFunctionCategory.TIMEDATE);
 }

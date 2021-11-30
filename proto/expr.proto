@@ -32,6 +32,7 @@ message ExprNode {
     NOT = 23;
     // date functions
     EXTRACT = 101;
+    PG_SLEEP = 102;
     // other functions
     CAST = 201;
     SUBSTR = 202;

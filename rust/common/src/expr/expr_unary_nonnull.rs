@@ -1,6 +1,7 @@
 /// For expression that only accept one value as input (e.g. CAST)
 use super::template::{UnaryBytesExpression, UnaryExpression};
 use crate::array::{BoolArray, I32Array, I64Array, Utf8Array};
+use crate::expr::pg_sleep::PgSleepExpression;
 use crate::expr::BoxedExpression;
 use crate::types::{DataTypeKind, DataTypeRef};
 use crate::vector_op::length::length_default;
@@ -82,6 +83,9 @@ pub fn new_unary_expr(
             func: upper,
             _phantom: PhantomData,
         }),
+        (ProstType::PgSleep, _, DataTypeKind::Decimal) => {
+            Box::new(PgSleepExpression::new(child_expr))
+        }
         (expr, ret, child) => {
             unimplemented!("The expression {:?}({:?}) ->{:?} using vectorized expression framework is not supported yet!", expr, child, ret)
         }

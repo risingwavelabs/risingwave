@@ -45,7 +45,7 @@ class StageExecution(
           val node = taskManager.schedule(task)
           scheduleTasks[task.taskId] = node
         } catch (e: Exception) {
-          log.info("doExecute error:$e")
+          log.info("Failed to execute stage", e)
           throw PgException(PgErrorCode.INTERNAL_ERROR, "task ${task.taskId} failed to schedule")
         }
       }
