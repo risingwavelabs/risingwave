@@ -1,11 +1,8 @@
-use crate::source::{MemSourceManager, SourceManager};
-use crate::storage::{
-    RowTable, SimpleTableManager, Table, TableColumnDesc, TableImpl, TableManager,
-    TestRowTableEvent,
-};
-use crate::stream::StreamManager;
-use crate::task::{GlobalTaskEnv, TaskManager};
+use std::sync::Arc;
+use std::time::Duration;
+
 use futures::StreamExt;
+
 use risingwave_common::array::column::Column;
 use risingwave_common::array::Row;
 use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder};
@@ -22,14 +19,21 @@ use risingwave_pb::expr::{ExprNode, InputRefExpr};
 use risingwave_pb::plan::column_desc::ColumnEncodingType;
 use risingwave_pb::plan::{ColumnDesc, DatabaseRefId, SchemaRefId, TableRefId};
 use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::table_source_node::SourceType;
 use risingwave_pb::stream_plan::{
     dispatcher::DispatcherType, Dispatcher, MViewNode, Merger, ProjectNode, StreamFragment,
     StreamNode, TableSourceNode,
 };
 use risingwave_pb::stream_service::{ActorInfo, BroadcastActorInfoTableRequest};
 use risingwave_pb::task_service::HostAddress;
-use std::sync::Arc;
-use std::time::Duration;
+
+use crate::source::{MemSourceManager, SourceManager};
+use crate::storage::{
+    RowTable, SimpleTableManager, Table, TableColumnDesc, TableImpl, TableManager,
+    TestRowTableEvent,
+};
+use crate::stream::StreamManager;
+use crate::task::{GlobalTaskEnv, TaskManager};
 
 fn make_int32_type_pb() -> DataType {
     DataType {
@@ -58,6 +62,7 @@ async fn test_stream_mv_proto() {
         node: Some(Node::TableSourceNode(TableSourceNode {
             table_ref_id: Some(make_table_ref_id(0)),
             column_ids: vec![0, 1],
+            source_type: SourceType::Table as i32,
         })),
         input: vec![],
     };

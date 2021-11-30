@@ -490,7 +490,8 @@ public class PrimaryKeyDerivationVisitor
             tableSource.getHints(),
             tableSource.getTable(),
             tableSource.getTableId(),
-            columns);
+            columns,
+            tableCatalog.isStream());
     var info =
         new PrimaryKeyIndicesAndPositionMap(
             ImmutableList.of(columns.size() - 1), ImmutableMap.of());

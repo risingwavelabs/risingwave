@@ -1,3 +1,13 @@
+use std::net::SocketAddr;
+use std::sync::Arc;
+
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::task::JoinHandle;
+
+use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
+use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
+use risingwave_pb::task_service::task_service_server::TaskServiceServer;
+
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::task_service::TaskServiceImpl;
@@ -5,13 +15,6 @@ use crate::source::MemSourceManager;
 use crate::storage::SimpleTableManager;
 use crate::stream::StreamManager;
 use crate::task::{GlobalTaskEnv, TaskManager};
-use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
-use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
-use risingwave_pb::task_service::task_service_server::TaskServiceServer;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use tokio::sync::mpsc::UnboundedSender;
-use tokio::task::JoinHandle;
 
 pub fn rpc_serve(addr: SocketAddr) -> (JoinHandle<()>, UnboundedSender<()>) {
     let table_mgr = Arc::new(SimpleTableManager::new());
@@ -57,8 +60,9 @@ pub fn rpc_serve(addr: SocketAddr) -> (JoinHandle<()>, UnboundedSender<()>) {
 
 #[cfg(test)]
 mod tests {
-    use crate::rpc::server::rpc_serve;
     use risingwave_common::util::addr::get_host_port;
+
+    use crate::rpc::server::rpc_serve;
 
     #[tokio::test]
     async fn test_server_shutdown() {

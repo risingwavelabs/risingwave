@@ -1,9 +1,16 @@
+use std::sync::Arc;
+
+use tonic::{Request, Response, Status};
+
+use risingwave_pb::stream_service::stream_service_server::StreamService;
+use risingwave_pb::stream_service::{
+    BroadcastActorInfoTableRequest, BroadcastActorInfoTableResponse, BuildFragmentRequest,
+    BuildFragmentResponse, DropFragmentsRequest, DropFragmentsResponse, UpdateFragmentRequest,
+    UpdateFragmentResponse,
+};
+
 use crate::stream::StreamManager;
 use crate::task::GlobalTaskEnv;
-use risingwave_pb::stream_service::stream_service_server::StreamService;
-use risingwave_pb::stream_service::*;
-use std::sync::Arc;
-use tonic::{Request, Response, Status};
 
 #[derive(Clone)]
 pub struct StreamServiceImpl {
@@ -19,18 +26,6 @@ impl StreamServiceImpl {
 
 #[async_trait::async_trait]
 impl StreamService for StreamServiceImpl {
-    #[cfg(not(tarpaulin_include))]
-    async fn drop_fragment(
-        &self,
-        request: Request<DropFragmentsRequest>,
-    ) -> std::result::Result<Response<DropFragmentsResponse>, Status> {
-        let fragments = request.into_inner().fragment_ids;
-        self.mgr
-            .drop_fragment(fragments.as_slice())
-            .map_err(|e| e.to_grpc_status())?;
-        Ok(Response::new(DropFragmentsResponse::default()))
-    }
-
     #[cfg(not(tarpaulin_include))]
     async fn update_fragment(
         &self,
@@ -87,5 +82,17 @@ impl StreamService for StreamServiceImpl {
                 status: None,
             })),
         }
+    }
+
+    #[cfg(not(tarpaulin_include))]
+    async fn drop_fragment(
+        &self,
+        request: Request<DropFragmentsRequest>,
+    ) -> std::result::Result<Response<DropFragmentsResponse>, Status> {
+        let fragments = request.into_inner().fragment_ids;
+        self.mgr
+            .drop_fragment(fragments.as_slice())
+            .map_err(|e| e.to_grpc_status())?;
+        Ok(Response::new(DropFragmentsResponse::default()))
     }
 }

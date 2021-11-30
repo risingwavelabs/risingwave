@@ -1,8 +1,9 @@
-use super::ReceiverExecutor;
-use super::*;
+use std::sync::{Arc, Mutex};
+
 use approx::assert_relative_eq;
 use futures::channel::mpsc::channel;
 use futures::SinkExt;
+
 use risingwave_common::array::*;
 use risingwave_common::catalog::Field;
 use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
@@ -10,7 +11,9 @@ use risingwave_common::expr::expr_unary_nonnull::new_unary_expr;
 use risingwave_common::expr::*;
 use risingwave_common::types::*;
 use risingwave_pb::expr::expr_node::Type as ProstExprType;
-use std::sync::{Arc, Mutex};
+
+use super::ReceiverExecutor;
+use super::*;
 
 pub struct MockConsumer {
     input: Box<dyn Executor>,

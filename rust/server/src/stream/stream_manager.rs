@@ -1,14 +1,12 @@
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::sync::{Arc, Mutex};
 
-use crate::source::*;
-use crate::storage::hummock::{HummockOptions, HummockStorage};
-use crate::storage::*;
-use crate::stream_op::*;
-use crate::task::GlobalTaskEnv;
 use async_std::net::SocketAddr;
 use futures::channel::mpsc::{channel, unbounded, Receiver, Sender, UnboundedSender};
 use itertools::Itertools;
+use tokio::task::JoinHandle;
+
 use pb_convert::FromProtobuf;
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
@@ -19,10 +17,16 @@ use risingwave_common::util::addr::{get_host_port, is_local_address};
 use risingwave_common::util::sort_util::fetch_orders;
 use risingwave_pb::expr;
 use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::table_source_node::SourceType;
 use risingwave_pb::stream_service;
 use risingwave_pb::ToProto;
-use std::convert::TryFrom;
-use tokio::task::JoinHandle;
+
+use crate::source::Source;
+use crate::source::*;
+use crate::storage::hummock::{HummockOptions, HummockStorage};
+use crate::storage::*;
+use crate::stream_op::*;
+use crate::task::GlobalTaskEnv;
 
 /// Default capacity of channel if two fragments are on the same node
 pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
@@ -370,37 +374,48 @@ impl StreamManagerCore {
                 .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
                 let source_desc = source_manager.get_source(&table_id)?;
-                let source = source_desc.source;
 
-                let column_ids = table_source_node.get_column_ids().to_vec();
+                // TODO: The channel pair should be created by the Checkpoint manger. So this line
+                // may be removed later.
+                let (sender, barrier_receiver) = unbounded();
+                self.sender_placeholder.push(sender);
 
-                let mut fields = Vec::with_capacity(column_ids.len());
-                for &column_id in column_ids.iter() {
-                    let column_desc = source_desc
-                        .columns
-                        .iter()
-                        .find(|c| c.column_id == column_id)
-                        .unwrap();
-                    fields.push(Field::new(column_desc.data_type.clone()));
-                }
-                let schema = Schema::new(fields);
+                match table_source_node.get_source_type() {
+                    SourceType::Table => {
+                        let column_ids = table_source_node.get_column_ids().to_vec();
+                        let source = source_desc.source;
 
-                if let SourceImpl::Table(ref table) = *source {
-                    let stream_reader = table.stream_reader(TableReaderContext {}, column_ids)?;
-                    // TODO: The channel pair should be created by the Checkpoint manger. So this
-                    // line may be removed later.
-                    let (sender, barrier_receiver) = unbounded();
-                    self.sender_placeholder.push(sender);
-                    Ok(Box::new(TableSourceExecutor::new(
-                        table_id,
-                        schema,
-                        stream_reader,
+                        let mut fields = Vec::with_capacity(column_ids.len());
+                        for &column_id in column_ids.iter() {
+                            let column_desc = source_desc
+                                .columns
+                                .iter()
+                                .find(|c| c.column_id == column_id)
+                                .unwrap();
+                            fields.push(Field::new(column_desc.data_type.clone()));
+                        }
+                        let schema = Schema::new(fields);
+
+                        if let SourceImpl::Table(ref table) = *source {
+                            let stream_reader =
+                                table.stream_reader(TableReaderContext {}, column_ids)?;
+
+                            Ok(Box::new(TableSourceExecutor::new(
+                                table_id,
+                                schema,
+                                stream_reader,
+                                barrier_receiver,
+                            )))
+                        } else {
+                            Err(RwError::from(InternalError(
+                                "Streaming source only supports table source".to_string(),
+                            )))
+                        }
+                    }
+                    SourceType::Stream => Ok(Box::new(StreamSourceExecutor::new(
+                        source_desc,
                         barrier_receiver,
-                    )))
-                } else {
-                    Err(RwError::from(InternalError(
-                        "Streaming source only supports table source".to_string(),
-                    )))
+                    )?)),
                 }
             }
             ProjectNode(project_node) => {
@@ -660,7 +675,6 @@ impl StreamManagerCore {
                 .collect::<Result<Vec<_>>>()?;
 
             let executor = self.create_nodes(fragment.get_nodes(), mergers, env.clone())?;
-
             let dispatcher = self.create_dispatcher(
                 executor,
                 fragment.get_dispatcher(),

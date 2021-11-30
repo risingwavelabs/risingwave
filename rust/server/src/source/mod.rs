@@ -2,18 +2,20 @@ use std::fmt::Debug;
 
 use async_trait::async_trait;
 
-pub use highlevel_kafka::*;
+pub use high_level_kafka::*;
 pub use manager::*;
 pub use parser::*;
 use risingwave_common::array::DataChunk;
+use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::Result;
+use risingwave_common::error::RwError;
 pub use table::*;
 
 use crate::stream_op::StreamChunk;
 
 pub mod parser;
 
-mod highlevel_kafka;
+mod high_level_kafka;
 mod manager;
 
 mod table;
@@ -21,12 +23,6 @@ mod table;
 #[derive(Clone, Debug)]
 pub enum SourceConfig {
     Kafka(HighLevelKafkaSourceConfig),
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct SourceReaderContext {
-    pub(crate) query_id: Option<String>,
-    pub(crate) bound_timestamp_ms: Option<i64>,
 }
 
 #[derive(Clone, Debug)]
@@ -41,6 +37,47 @@ pub enum SourceFormat {
 pub enum SourceImpl {
     HighLevelKafka(HighLevelKafkaSource),
     Table(TableSource),
+}
+
+pub enum SourceReaderContext {
+    HighLevelKafka(HighLevelKafkaSourceReaderContext),
+    Table(TableReaderContext),
+}
+
+impl SourceImpl {
+    /// Create a stream reader
+    pub fn stream_reader(
+        &self,
+        ctx: SourceReaderContext,
+        column_ids: Vec<i32>,
+    ) -> Result<Box<dyn StreamSourceReader>> {
+        match (self, ctx) {
+            (SourceImpl::HighLevelKafka(source), SourceReaderContext::HighLevelKafka(ctx)) => {
+                Ok(Box::new(source.stream_reader(ctx, column_ids)?))
+            }
+            (SourceImpl::Table(source), SourceReaderContext::Table(ctx)) => {
+                Ok(Box::new(source.stream_reader(ctx, column_ids)?))
+            }
+            _ => Err(RwError::from(ProtocolError(
+                "context type illegal".to_string(),
+            ))),
+        }
+    }
+
+    /// Create a batch reader
+    pub fn batch_reader(&self, ctx: SourceReaderContext) -> Result<Box<dyn BatchSourceReader>> {
+        match (self, ctx) {
+            (SourceImpl::HighLevelKafka(source), SourceReaderContext::HighLevelKafka(ctx)) => {
+                Ok(Box::new(source.batch_reader(ctx)?))
+            }
+            (SourceImpl::Table(source), SourceReaderContext::Table(ctx)) => {
+                Ok(Box::new(source.batch_reader(ctx)?))
+            }
+            _ => Err(RwError::from(ProtocolError(
+                "context type illegal".to_string(),
+            ))),
+        }
+    }
 }
 
 #[async_trait]

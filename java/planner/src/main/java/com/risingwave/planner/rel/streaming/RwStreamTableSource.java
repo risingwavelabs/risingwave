@@ -33,6 +33,7 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 public class RwStreamTableSource extends TableScan implements RisingWaveStreamingRel {
   protected final TableCatalog.TableId tableId;
   protected final ImmutableList<ColumnCatalog.ColumnId> columnIds;
+  private final boolean isStream;
 
   public RwStreamTableSource(
       RelOptCluster cluster,
@@ -40,10 +41,12 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
       List<RelHint> hints,
       RelOptTable table,
       TableCatalog.TableId tableId,
-      ImmutableList<ColumnCatalog.ColumnId> columnIds) {
+      ImmutableList<ColumnCatalog.ColumnId> columnIds,
+      boolean isStream) {
     super(cluster, traitSet, hints, table);
     this.tableId = tableId;
     this.columnIds = columnIds;
+    this.isStream = isStream;
   }
 
   public TableCatalog.TableId getTableId() {
@@ -60,7 +63,13 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
     TableRefId tableRefId = Messages.getTableRefId(tableId);
 
     TableSourceNode.Builder tableSourceNodeBuilder =
-        TableSourceNode.newBuilder().setTableRefId(tableRefId);
+        TableSourceNode.newBuilder()
+            .setTableRefId(tableRefId)
+            .setSourceType(
+                this.isStream
+                    ? TableSourceNode.SourceType.STREAM
+                    : TableSourceNode.SourceType.TABLE);
+
     columnIds.forEach(c -> tableSourceNodeBuilder.addColumnIds(c.getValue()));
     return StreamNode.newBuilder().setTableSourceNode(tableSourceNodeBuilder.build()).build();
   }
@@ -138,7 +147,8 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
               Collections.emptyList(),
               source.getTable(),
               tableCatalog.getId(),
-              source.getColumnIds());
+              source.getColumnIds(),
+              tableCatalog.isStream());
 
       // TODO: will be removed once single mode removed
       boolean isSingle = isSingleMode(contextOf(source.getCluster()));
