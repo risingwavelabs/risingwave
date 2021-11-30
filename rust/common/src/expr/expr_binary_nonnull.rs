@@ -103,7 +103,8 @@ macro_rules! comparison_impl {
 /// * `deci_f_f`: the scalar function for decimal with float. In this scalar function, all inputs
 ///   will be cast to float
 macro_rules! gen_binary_expr {
-  ($macro:tt, $int_f:ident, $float_f:ident, $deci_f_f:ident, $deci_f:ident, $interval_date_f:ident, $date_interval_f:ident $(, $x:tt)* ) => {
+  ($macro:tt, $int_f:ident, $float_f:ident, $deci_f_f:ident, $deci_f:ident,
+  $interval_date_f:ident, $date_interval_f:ident, $bool_f: ident $(, $x:tt)* ) => {
     $macro! {
       [$($x),*],
       { Int16Type, Int16Type, Int16Type, $int_f },
@@ -145,7 +146,8 @@ macro_rules! gen_binary_expr {
       { TimestampType, TimestampType, TimestampType, $int_f },
       { DateType, DateType, Int32Type, $int_f },
       { DateType, IntervalType, TimestampType, $date_interval_f },
-      { IntervalType, DateType, TimestampType, $interval_date_f }
+      { IntervalType, DateType, TimestampType, $interval_date_f },
+      { BoolType, BoolType, BoolType, $bool_f }
     }
   };
 }
@@ -183,37 +185,48 @@ pub fn new_binary_expr(
 ) -> BoxedExpression {
     match expr_type {
         ProstExprType::Equal => {
-            gen_binary_expr! {comparison_impl, prim_eq, prim_eq, deci_f_eq, deci_eq, cmp_placeholder, cmp_placeholder, l, r, ret}
+            gen_binary_expr! {comparison_impl, prim_eq, prim_eq, deci_f_eq, deci_eq, cmp_placeholder,
+            cmp_placeholder, total_order_eq, l, r, ret}
         }
         ProstExprType::NotEqual => {
-            gen_binary_expr! {comparison_impl, prim_neq, prim_neq, deci_f_neq, deci_neq, cmp_placeholder, cmp_placeholder, l, r, ret}
+            gen_binary_expr! {comparison_impl, prim_neq, prim_neq, deci_f_neq, deci_neq,
+            cmp_placeholder, cmp_placeholder, total_order_ne, l, r, ret}
         }
         ProstExprType::LessThan => {
-            gen_binary_expr! {comparison_impl, prim_lt, prim_lt, deci_f_lt, deci_lt, cmp_placeholder, cmp_placeholder, l, r, ret}
+            gen_binary_expr! {comparison_impl, prim_lt, prim_lt, deci_f_lt, deci_lt, cmp_placeholder,
+            cmp_placeholder, total_order_lt, l, r, ret}
         }
         ProstExprType::GreaterThan => {
-            gen_binary_expr! {comparison_impl, prim_gt, prim_gt, deci_f_gt, deci_gt, cmp_placeholder, cmp_placeholder, l, r, ret}
+            gen_binary_expr! {comparison_impl, prim_gt, prim_gt, deci_f_gt, deci_gt, cmp_placeholder,
+            cmp_placeholder, total_order_gt, l, r, ret}
         }
         ProstExprType::GreaterThanOrEqual => {
-            gen_binary_expr! {comparison_impl, prim_geq, prim_geq, deci_f_geq, deci_geq, cmp_placeholder, cmp_placeholder, l, r, ret}
+            gen_binary_expr! {comparison_impl, prim_geq, prim_geq, deci_f_geq, deci_geq,
+            cmp_placeholder, cmp_placeholder, total_order_ge, l, r, ret}
         }
         ProstExprType::LessThanOrEqual => {
-            gen_binary_expr! {comparison_impl, prim_leq, prim_leq, deci_f_leq, deci_leq, cmp_placeholder, cmp_placeholder, l, r, ret}
+            gen_binary_expr! {comparison_impl, prim_leq, prim_leq, deci_f_leq, deci_leq,
+            cmp_placeholder, cmp_placeholder, total_order_le, l, r, ret}
         }
         ProstExprType::Add => {
-            gen_binary_expr! {arithmetic_impl, int_add, float_add, deci_f_add, deci_add, interval_date_add, date_interval_add, l, r, ret}
+            gen_binary_expr! {arithmetic_impl, int_add, float_add, deci_f_add, deci_add,
+            interval_date_add, date_interval_add, atm_placeholder, l, r, ret}
         }
         ProstExprType::Subtract => {
-            gen_binary_expr! {arithmetic_impl, int_sub, float_sub, deci_f_sub, deci_sub, atm_placeholder, date_interval_sub, l, r, ret}
+            gen_binary_expr! {arithmetic_impl, int_sub, float_sub, deci_f_sub, deci_sub,
+            atm_placeholder, date_interval_sub, atm_placeholder, l, r, ret}
         }
         ProstExprType::Multiply => {
-            gen_binary_expr! {arithmetic_impl, int_mul, float_mul, deci_f_mul, deci_mul, atm_placeholder, atm_placeholder, l, r, ret}
+            gen_binary_expr! {arithmetic_impl, int_mul, float_mul, deci_f_mul, deci_mul,
+            atm_placeholder, atm_placeholder, atm_placeholder, l, r, ret}
         }
         ProstExprType::Divide => {
-            gen_binary_expr! {arithmetic_impl, int_div, float_div, deci_f_div, deci_div, atm_placeholder, atm_placeholder, l, r, ret}
+            gen_binary_expr! {arithmetic_impl, int_div, float_div, deci_f_div, deci_div,
+            atm_placeholder, atm_placeholder, atm_placeholder, l, r, ret}
         }
         ProstExprType::Modulus => {
-            gen_binary_expr! {arithmetic_impl, prim_mod, prim_mod, deci_f_mod, deci_mod, atm_placeholder, atm_placeholder, l, r, ret}
+            gen_binary_expr! {arithmetic_impl, prim_mod, prim_mod, deci_f_mod, deci_mod,
+            atm_placeholder, atm_placeholder, atm_placeholder, l, r, ret}
         }
         ProstExprType::And => Box::new(BinaryExpression::<BoolArray, BoolArray, BoolArray, _> {
             expr_ia1: l,

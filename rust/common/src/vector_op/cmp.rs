@@ -3,6 +3,8 @@ use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 use core::convert::From;
 use num_traits::AsPrimitive;
+use std::any::type_name;
+use std::fmt::Debug;
 
 #[inline(always)]
 pub fn prim_eq<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
@@ -231,13 +233,99 @@ where
         .map_err(|_| RwError::from(InternalError("Can't covert right to float".to_string())))?;
     Ok(l != r)
 }
+
+fn total_order_cmp<T1, T2, T3, F>(l: T1, r: T2, cmp: F) -> Result<bool>
+where
+    T1: TryInto<T3> + Debug,
+    T2: TryInto<T3> + Debug,
+    T3: Ord,
+    F: FnOnce(T3, T3) -> bool,
+{
+    // TODO: We need to improve the error message
+    let l: T3 = l.try_into().map_err(|_| {
+        RwError::from(InternalError(format!(
+            "Can't covert {} to {}",
+            type_name::<T1>(),
+            type_name::<T3>()
+        )))
+    })?;
+    let r: T3 = r.try_into().map_err(|_| {
+        RwError::from(InternalError(format!(
+            "Can't covert {} to {}",
+            type_name::<T2>(),
+            type_name::<T3>()
+        )))
+    })?;
+    Ok(cmp(l, r))
+}
+
+#[inline(always)]
+pub fn total_order_eq<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+where
+    T1: TryInto<T3> + Debug,
+    T2: TryInto<T3> + Debug,
+    T3: Ord,
+{
+    total_order_cmp(l, r, |a, b| a == b)
+}
+
+#[inline(always)]
+pub fn total_order_ne<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+where
+    T1: TryInto<T3> + Debug,
+    T2: TryInto<T3> + Debug,
+    T3: Ord,
+{
+    total_order_cmp(l, r, |a, b| a != b)
+}
+
+#[inline(always)]
+pub fn total_order_ge<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+where
+    T1: TryInto<T3> + Debug,
+    T2: TryInto<T3> + Debug,
+    T3: Ord,
+{
+    total_order_cmp(l, r, |a, b| a >= b)
+}
+
+#[inline(always)]
+pub fn total_order_gt<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+where
+    T1: TryInto<T3> + Debug,
+    T2: TryInto<T3> + Debug,
+    T3: Ord,
+{
+    total_order_cmp(l, r, |a, b| a > b)
+}
+
+#[inline(always)]
+pub fn total_order_le<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+where
+    T1: TryInto<T3> + Debug,
+    T2: TryInto<T3> + Debug,
+    T3: Ord,
+{
+    total_order_cmp(l, r, |a, b| a <= b)
+}
+
+#[inline(always)]
+pub fn total_order_lt<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+where
+    T1: TryInto<T3> + Debug,
+    T2: TryInto<T3> + Debug,
+    T3: Ord,
+{
+    total_order_cmp(l, r, |a, b| a < b)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use rust_decimal::Decimal;
     use std::str::FromStr;
-    #[test]
 
+    #[test]
     fn test_deci_f() {
         assert!(deci_f_eq::<_, _, f32>(Decimal::from_str("1.1").unwrap(), 1.1f32).unwrap())
     }

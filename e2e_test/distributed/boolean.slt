@@ -12,3 +12,38 @@ query B
 SELECT bool '   f           ' AS false;
 ----
 false
+
+query B
+SELECT not bool 'f' AS true;
+----
+true
+
+query B
+SELECT bool 't' = bool 'f' AS false;
+----
+false
+
+query B
+SELECT bool 't' <> bool 'f' AS true;
+----
+true
+
+query B
+SELECT bool 't' > bool 'f' AS true;
+----
+true
+
+query B
+SELECT bool 't' >= bool 'f' AS true;
+----
+true
+
+query B
+SELECT bool 'f' < bool 't' AS true;
+----
+true
+
+query B
+SELECT bool 'f' <= bool 't' AS true;
+----
+true

@@ -781,8 +781,11 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
       var notOperator = lookupOperator("NOT", SqlSyntax.PREFIX);
       var existsOperator = visitExists((ExistsPredicate) inner, context);
       return new SqlBasicCall(notOperator, new SqlNode[] {existsOperator}, SqlParserPos.ZERO);
+    } else {
+      var notOperator = lookupOperator("NOT", SqlSyntax.PREFIX);
+      var childExpression = inner.accept(this, context);
+      return new SqlBasicCall(notOperator, new SqlNode[] {childExpression}, SqlParserPos.ZERO);
     }
-    return super.visitNotExpression(node, context);
   }
 
   private static SqlBasicTypeNameSpec toBasicTypeNameSpec(ColumnType<?> columnType) {
