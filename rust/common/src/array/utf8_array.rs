@@ -6,6 +6,7 @@ use crate::error::Result;
 use risingwave_proto::data::Buffer;
 use risingwave_proto::data::Buffer_CompressionType;
 use std::hash::{Hash, Hasher};
+use std::iter;
 use std::mem::size_of;
 
 /// `Utf8Array` is a collection of Rust Utf8 `String`s.
@@ -40,15 +41,26 @@ impl Array for Utf8Array {
     }
 
     fn to_protobuf(&self) -> Result<Vec<Buffer>> {
-        let offset_buffer = self.offset.iter().fold(
-            Vec::<u8>::with_capacity(self.offset.len() * size_of::<usize>()),
-            |mut buffer, offset| {
-                // TODO: force convert usize to u64, frontend will treat this offset buffer as u64
-                let offset = *offset as u64;
-                buffer.extend_from_slice(&offset.to_be_bytes());
-                buffer
-            },
-        );
+        let offset_buffer = self
+            .offset
+            .iter()
+            // length of offset is n + 1 while the length
+            // of null_bitmap is n, chain iterator of null_bitmap
+            // with one single true here to push the end of offset
+            // to offset_buffer
+            .zip(self.null_bitmap().iter().chain(iter::once(true)))
+            .fold(
+                Vec::<u8>::with_capacity(self.offset.len() * size_of::<usize>()),
+                |mut buffer, (offset, not_null)| {
+                    // TODO: force convert usize to u64, frontend will treat this offset buffer as
+                    // u64
+                    if not_null {
+                        let offset = *offset as u64;
+                        buffer.extend_from_slice(&offset.to_be_bytes());
+                    }
+                    buffer
+                },
+            );
 
         let data_buffer = self.data.clone();
 

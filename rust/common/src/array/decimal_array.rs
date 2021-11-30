@@ -52,12 +52,14 @@ impl Array for DecimalArray {
         let mut offset_buffer = Vec::<u8>::with_capacity(self.data.len() * size_of::<usize>());
         let mut data_buffer = Vec::<u8>::new();
         let mut offset = 0usize;
-        for d in self.data.iter() {
+        for (d, not_null) in self.data.iter().zip(self.null_bitmap().iter()) {
             let s = d.to_string();
             let b = s.as_bytes();
-            offset_buffer.extend_from_slice(&offset.to_be_bytes());
-            data_buffer.extend_from_slice(b);
-            offset += b.len();
+            if not_null {
+                offset_buffer.extend_from_slice(&offset.to_be_bytes());
+                data_buffer.extend_from_slice(b);
+                offset += b.len();
+            }
         }
         offset_buffer.extend_from_slice(&offset.to_be_bytes());
         Ok(vec![offset_buffer, data_buffer]
@@ -173,10 +175,7 @@ mod tests {
                         v.extend_from_slice(&o.to_be_bytes());
                         (o + d.to_string().as_bytes().len(), v)
                     }
-                    None => {
-                        v.extend_from_slice(&o.to_be_bytes());
-                        (o + Decimal::default().to_string().as_bytes().len(), v)
-                    }
+                    None => (o, v),
                 });
         offset_buffer.extend_from_slice(&offset.to_be_bytes());
 
@@ -185,10 +184,7 @@ mod tests {
                 v.extend_from_slice(d.to_string().as_bytes());
                 v
             }
-            None => {
-                v.extend_from_slice(Decimal::default().to_string().as_bytes());
-                v
-            }
+            None => v,
         });
 
         assert_eq!(buffers[0].get_body(), offset_buffer);

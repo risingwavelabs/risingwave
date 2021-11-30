@@ -95,14 +95,13 @@ pub fn read_string_column<B: ArrayBuilder, R: VarSizedValueReader<B>>(
 
     let mut buf = Vec::new();
     for not_null in bitmap.iter() {
-        if prev_offset < 0 {
-            prev_offset = read_offset(&mut offset_cursor)?;
-        }
-        let offset = read_offset(&mut offset_cursor)?;
-        let length = (offset - prev_offset) as usize;
-        prev_offset = offset;
-
         if not_null {
+            if prev_offset < 0 {
+                prev_offset = read_offset(&mut offset_cursor)?;
+            }
+            let offset = read_offset(&mut offset_cursor)?;
+            let length = (offset - prev_offset) as usize;
+            prev_offset = offset;
             buf.resize(length, Default::default());
             data_cursor.read_exact(buf.as_mut_slice()).map_err(|e| {
                 InternalError(format!(
