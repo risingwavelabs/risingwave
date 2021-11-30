@@ -1,12 +1,16 @@
 use itertools::Itertools;
 
 use risingwave_common::array::data_chunk_iter::RowDeserializer;
-use risingwave_common::array::{ArrayImpl, Row};
+use risingwave_common::array::{ArrayImpl, Row, RwError};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::DataTypeKind;
 
-use super::{get_one_output_from_state_impl, AggCall, SchemaedSerializable, StreamingAggStateImpl};
+use super::{
+    get_one_output_from_state_impl, AggCall, CellBasedSchemaedSerializable, SchemaedSerializable,
+    StreamingAggStateImpl,
+};
 use crate::stream_op::{create_streaming_agg_state, Op};
 
 /// A key stored in `KeyedState`.
@@ -17,6 +21,13 @@ pub type HashKey = Row;
 pub struct HashValue {
     /// one or more aggregation states, all corresponding to the same key
     pub agg_states: Vec<Box<dyn StreamingAggStateImpl>>,
+}
+
+impl std::ops::Index<usize> for HashValue {
+    type Output = <Vec<Box<dyn StreamingAggStateImpl>> as std::ops::Index<usize>>::Output;
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.agg_states[index]
+    }
 }
 
 impl HashValue {
@@ -40,6 +51,26 @@ impl HashValue {
                     agg_state.apply_batch(ops, visibility, &[input_arrays[0]])
                 }
             })
+    }
+
+    pub fn serialize(&self) -> Result<Vec<u8>> {
+        let row = self
+            .agg_states
+            .iter()
+            .map(|state| get_one_output_from_state_impl(&**state).unwrap().to_datum())
+            .collect_vec();
+        Row(row)
+            .serialize()
+            .map_err(|e| ErrorCode::MemComparableError(e).into())
+    }
+
+    pub fn serialize_cell(&self, cell_idx: usize) -> Result<Vec<u8>> {
+        let datum = get_one_output_from_state_impl(&*self.agg_states[cell_idx])
+            .unwrap()
+            .to_datum();
+        Row(vec![datum])
+            .serialize()
+            .map_err(|e| ErrorCode::MemComparableError(e).into())
     }
 }
 
@@ -81,44 +112,55 @@ impl SchemaedSerializable for RowSerializer {
     }
 }
 
-/// Serialize and deserialize a aggregation state into bytes.
-pub struct AggStateSerializer {
-    /// The aggregation call description of the current schema.
-    agg_calls: Vec<AggCall>,
+impl CellBasedSchemaedSerializable for RowSerializer {
+    type Output = Row;
 
-    /// The internal representation of data is Row, so we need a Row deserializer.
-    deserializer: RowDeserializer,
+    fn cells(&self) -> usize {
+        self.schema.fields().len()
+    }
+
+    fn cell_based_schemaed_serialize(&self, data: &Self::Output, cell_idx: usize) -> Vec<u8> {
+        data.serialize_datum(cell_idx).unwrap()
+    }
+
+    fn cell_based_schemaed_deserialize(
+        &self,
+        data: &[u8],
+        cell_idx: usize,
+    ) -> <Self::Output as std::ops::Index<usize>>::Output {
+        self.deserializer.deserialize_datum(data, cell_idx).unwrap()
+    }
+
+    fn schemaed_serialize(&self, data: &Self::Output) -> Vec<u8> {
+        data.serialize().unwrap()
+    }
+
+    fn schemaed_deserialize(&self, data: &[u8]) -> Self::Output {
+        self.deserializer.deserialize(data).unwrap()
+    }
 }
 
-impl AggStateSerializer {
-    pub fn new(agg_calls: Vec<AggCall>) -> Self {
+struct AggStateDeserializer {
+    /// The internal representation of data is Row, so we need a Row deserializer.
+    inner: RowDeserializer,
+    /// The aggregation call description of the current schema.
+    agg_calls: Vec<AggCall>,
+}
+
+impl AggStateDeserializer {
+    pub fn new(schema: Vec<DataTypeKind>, agg_calls: Vec<AggCall>) -> Self {
         Self {
-            deserializer: RowDeserializer::new(
-                agg_calls
-                    .iter()
-                    .map(|x| x.return_type.data_type_kind())
-                    .collect_vec(),
-            ),
+            inner: RowDeserializer::new(schema),
             agg_calls,
         }
     }
-}
 
-impl SchemaedSerializable for AggStateSerializer {
-    type Output = HashValue;
-
-    fn schemaed_serialize(&self, data: &HashValue) -> Vec<u8> {
-        let row = data
-            .agg_states
-            .iter()
-            .map(|state| get_one_output_from_state_impl(&**state).unwrap().to_datum())
-            .collect_vec();
-        Row(row).serialize().unwrap()
-    }
-
-    fn schemaed_deserialize(&self, data: &[u8]) -> HashValue {
-        let row = self.deserializer.deserialize(data).unwrap();
-        HashValue::new(
+    pub fn deserialize(&self, data: &[u8]) -> Result<HashValue> {
+        let row = self
+            .inner
+            .deserialize(data)
+            .map_err(|e| RwError::from(ErrorCode::MemComparableError(e)))?;
+        Ok(HashValue::new(
             row.0
                 .into_iter()
                 .zip(self.agg_calls.iter())
@@ -132,6 +174,85 @@ impl SchemaedSerializable for AggStateSerializer {
                     .unwrap()
                 })
                 .collect_vec(),
+        ))
+    }
+
+    pub fn deserialize_cell(
+        &self,
+        data: &[u8],
+        cell_idx: usize,
+    ) -> Result<Box<dyn StreamingAggStateImpl>> {
+        let datum = self
+            .inner
+            .deserialize_datum(data, cell_idx)
+            .map_err(|e| RwError::from(ErrorCode::MemComparableError(e)))?;
+        let agg_call = &self.agg_calls[cell_idx];
+        Ok(create_streaming_agg_state(
+            agg_call.args.arg_types(),
+            &agg_call.kind,
+            &agg_call.return_type,
+            Some(datum),
         )
+        .unwrap())
+    }
+}
+
+/// Serialize and deserialize a aggregation state into bytes.
+pub struct AggStateSerializer {
+    /// The internal representation of data is Row, so we need a Row deserializer.
+    deserializer: AggStateDeserializer,
+}
+
+impl AggStateSerializer {
+    pub fn new(agg_calls: Vec<AggCall>) -> Self {
+        Self {
+            deserializer: AggStateDeserializer::new(
+                agg_calls
+                    .iter()
+                    .map(|x| x.return_type.data_type_kind())
+                    .collect_vec(),
+                agg_calls,
+            ),
+        }
+    }
+}
+
+impl SchemaedSerializable for AggStateSerializer {
+    type Output = HashValue;
+
+    fn schemaed_serialize(&self, data: &HashValue) -> Vec<u8> {
+        data.serialize().unwrap()
+    }
+
+    fn schemaed_deserialize(&self, data: &[u8]) -> HashValue {
+        self.deserializer.deserialize(data).unwrap()
+    }
+}
+
+impl CellBasedSchemaedSerializable for AggStateSerializer {
+    type Output = HashValue;
+
+    fn cells(&self) -> usize {
+        self.deserializer.agg_calls.len()
+    }
+
+    fn cell_based_schemaed_serialize(&self, data: &Self::Output, cell_idx: usize) -> Vec<u8> {
+        data.serialize_cell(cell_idx).unwrap()
+    }
+
+    fn cell_based_schemaed_deserialize(
+        &self,
+        data: &[u8],
+        cell_idx: usize,
+    ) -> <Self::Output as std::ops::Index<usize>>::Output {
+        self.deserializer.deserialize_cell(data, cell_idx).unwrap()
+    }
+
+    fn schemaed_serialize(&self, data: &Self::Output) -> Vec<u8> {
+        data.serialize().unwrap()
+    }
+
+    fn schemaed_deserialize(&self, data: &[u8]) -> Self::Output {
+        self.deserializer.deserialize(data).unwrap()
     }
 }

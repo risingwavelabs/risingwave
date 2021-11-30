@@ -5,13 +5,13 @@ use risingwave_common::array::Row;
 use risingwave_common::error::{ErrorCode, Result};
 
 use super::{HummockStorage, HummockValue};
-use crate::stream_op::{KeyedState, SchemaedSerializable};
+use crate::stream_op::{CellBasedSchemaedSerializable, KeyedState, SchemaedSerializable};
 
 /// [`KeyedState`] for `Hummock` storage engine.
 pub struct HummockKeyedState<K, V>
 where
     K: SchemaedSerializable<Output = Row>,
-    V: SchemaedSerializable,
+    V: CellBasedSchemaedSerializable,
 {
     key_schema: K,
     value_schema: V,
@@ -22,7 +22,7 @@ where
 impl<K, V> HummockKeyedState<K, V>
 where
     K: SchemaedSerializable<Output = Row>,
-    V: SchemaedSerializable,
+    V: CellBasedSchemaedSerializable,
 {
     pub fn new(key_schema: K, value_schema: V, storage: HummockStorage) -> HummockKeyedState<K, V> {
         Self {
@@ -38,7 +38,7 @@ where
 impl<K, V> KeyedState<K, V> for HummockKeyedState<K, V>
 where
     K: SchemaedSerializable<Output = Row>,
-    V: SchemaedSerializable,
+    V: CellBasedSchemaedSerializable,
 {
     async fn get(&self, key: &Row) -> Result<Option<V::Output>> {
         match self.mem_table.get(key) {
@@ -57,6 +57,8 @@ where
         self.mem_table.insert(key.clone(), HummockValue::Delete);
     }
 
+    // TODO(MrCroxx): value now support cell-based serialize/deserialize.
+    // Only dirty cell-based state needs to be flushed.
     async fn flush(&mut self) -> Result<()> {
         self.storage
             .write_batch(self.mem_table.drain().map(|(key, value)| {

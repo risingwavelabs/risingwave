@@ -1,9 +1,11 @@
-use serde::{Deserialize, Serialize};
 use std::hash::Hash;
 use std::ops;
 
 use crate::array::DataChunk;
-use crate::types::{DataTypeKind, Datum, DatumRef, ScalarImpl, ToOwnedDatum};
+use crate::types::{
+    deserialize_datum_from, deserialize_datum_not_null_from, serialize_datum_into,
+    serialize_datum_not_null_into, DataTypeKind, Datum, DatumRef, ToOwnedDatum,
+};
 
 impl DataChunk {
     pub fn rows(&self) -> DataChunkRefIter<'_> {
@@ -117,12 +119,7 @@ impl Row {
     pub fn serialize(&self) -> Result<Vec<u8>, memcomparable::Error> {
         let mut serializer = memcomparable::Serializer::default();
         for v in self.0.iter() {
-            if let Some(v) = v {
-                1u8.serialize(&mut serializer)?;
-                v.serialize(&mut serializer)?;
-            } else {
-                0u8.serialize(&mut serializer)?;
-            }
+            serialize_datum_into(v, &mut serializer)?;
         }
         Ok(serializer.into_inner())
     }
@@ -131,10 +128,19 @@ impl Row {
     pub fn serialize_not_null(&self) -> Result<Vec<u8>, memcomparable::Error> {
         let mut serializer = memcomparable::Serializer::default();
         for v in self.0.iter() {
-            v.as_ref()
-                .expect("value can not be null")
-                .serialize(&mut serializer)?;
+            serialize_datum_not_null_into(v, &mut serializer)?;
         }
+        Ok(serializer.into_inner())
+    }
+
+    /// Deserialize a datum in the row to a memcomparable bytes. The datum must not be null.
+    ///
+    /// !Panics
+    ///
+    /// * Panics when `datum_idx` is out of range.
+    pub fn serialize_datum(&self, datum_idx: usize) -> Result<Vec<u8>, memcomparable::Error> {
+        let mut serializer = memcomparable::Serializer::default();
+        serialize_datum_into(&self.0[datum_idx], &mut serializer)?;
         Ok(serializer.into_inner())
     }
 }
@@ -156,14 +162,7 @@ impl RowDeserializer {
         values.reserve(self.schema.len());
         let mut deserializer = memcomparable::Deserializer::from_slice(data);
         for &ty in self.schema.iter() {
-            match u8::deserialize(&mut deserializer)? {
-                0 => values.push(None),
-                1 => {
-                    let scalar = ScalarImpl::deserialize(ty, &mut deserializer)?;
-                    values.push(Some(scalar));
-                }
-                t => return Err(memcomparable::Error::InvalidTagEncoding(t as _)),
-            }
+            values.push(deserialize_datum_from(&ty, &mut deserializer)?);
         }
         Ok(Row(values))
     }
@@ -174,17 +173,31 @@ impl RowDeserializer {
         values.reserve(self.schema.len());
         let mut deserializer = memcomparable::Deserializer::from_slice(data);
         for &ty in self.schema.iter() {
-            let scalar = ScalarImpl::deserialize(ty, &mut deserializer)?;
-            values.push(Some(scalar));
+            values.push(deserialize_datum_not_null_from(&ty, &mut deserializer)?);
         }
         Ok(Row(values))
+    }
+
+    /// Deserialize a datum in the row to a memcomparable bytes. The datum must not be null.
+    ///
+    /// !Panics
+    ///
+    /// * Panics when `datum_idx` is out of range.
+    pub fn deserialize_datum(
+        &self,
+        data: &[u8],
+        datum_idx: usize,
+    ) -> Result<Datum, memcomparable::Error> {
+        let mut deserializer = memcomparable::Deserializer::from_slice(data);
+        let datum = deserialize_datum_from(&self.schema[datum_idx], &mut deserializer)?;
+        Ok(datum)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{DataTypeKind as Ty, IntervalUnit};
+    use crate::types::{DataTypeKind as Ty, IntervalUnit, ScalarImpl};
 
     #[test]
     fn row_memcomparable_encode_decode_not_null() {

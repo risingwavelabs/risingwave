@@ -220,6 +220,51 @@ for_all_scalar_variants! { scalar_impl_enum }
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
 
+// TODO(MrCroxx): trun Datum into a struct, and impl ser/de as its member functions.
+pub fn serialize_datum_into(
+    datum: &Datum,
+    serializer: &mut memcomparable::Serializer,
+) -> memcomparable::Result<()> {
+    if let Some(datum) = datum {
+        1u8.serialize(&mut *serializer)?;
+        datum.serialize(serializer)?;
+    } else {
+        0u8.serialize(serializer)?;
+    }
+    Ok(())
+}
+
+// TODO(MrCroxx): trun Datum into a struct, and impl ser/de as its member functions.
+pub fn serialize_datum_not_null_into(
+    datum: &Datum,
+    serializer: &mut memcomparable::Serializer,
+) -> memcomparable::Result<()> {
+    datum
+        .as_ref()
+        .expect("datum cannot be null")
+        .serialize(serializer)
+}
+
+// TODO(MrCroxx): trun Datum into a struct, and impl ser/de as its member functions.
+pub fn deserialize_datum_from(
+    ty: &DataTypeKind,
+    deserializer: &mut memcomparable::Deserializer,
+) -> memcomparable::Result<Datum> {
+    match u8::deserialize(&mut *deserializer)? {
+        0 => Ok(None),
+        1 => Ok(Some(ScalarImpl::deserialize(*ty, deserializer)?)),
+        _ => Err(memcomparable::Error::InvalidTagEncoding(*ty as _)),
+    }
+}
+
+// TODO(MrCroxx): trun Datum into a struct, and impl ser/de as its member functions.
+pub fn deserialize_datum_not_null_from(
+    ty: &DataTypeKind,
+    deserializer: &mut memcomparable::Deserializer,
+) -> memcomparable::Result<Datum> {
+    Ok(Some(ScalarImpl::deserialize(*ty, deserializer)?))
+}
+
 /// This trait is to implement `to_owned_datum` for `Option<ScalarImpl>`
 pub trait ToOwnedDatum {
     /// implement `to_owned_datum` for `DatumRef` to covert to `Datum`

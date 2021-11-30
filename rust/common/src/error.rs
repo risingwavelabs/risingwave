@@ -11,6 +11,8 @@ use std::io::Error as IoError;
 use thiserror::Error;
 use tokio::task::JoinError;
 
+use memcomparable::Error as MemComparableError;
+
 #[derive(Error, Debug)]
 pub enum ErrorCode {
     #[error("ok")]
@@ -37,8 +39,11 @@ pub enum ErrorCode {
     TaskNotFound,
     #[error("Item not found: {0}")]
     ItemNotFound(String),
+
     #[error(r#"invalid input syntax for {0} type: "{1}""#)]
     InvalidInputSyntax(String, String),
+    #[error("Can not compare in memory: {0}")]
+    MemComparableError(MemComparableError),
 }
 
 #[derive(Clone)]
@@ -124,6 +129,7 @@ impl ErrorCode {
             ErrorCode::ProstError(_) => 11,
             ErrorCode::ItemNotFound(_) => 13,
             ErrorCode::InvalidInputSyntax(_, _) => 14,
+            ErrorCode::MemComparableError(_) => 15,
         }
     }
 }

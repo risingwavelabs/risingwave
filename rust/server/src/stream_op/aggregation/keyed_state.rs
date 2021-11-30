@@ -14,12 +14,37 @@ pub trait SchemaedSerializable: Send + Sync + 'static {
     fn schemaed_deserialize(&self, data: &[u8]) -> Self::Output;
 }
 
+/// Transform a cell-based value to and from a `Vec<u8>`
+/// based on the schema of each cell.
+pub trait CellBasedSchemaedSerializable: Send + Sync + 'static {
+    type Output: Clone + Send + Sync + std::ops::Index<usize> + 'static;
+
+    /// Count of cells.
+    fn cells(&self) -> usize;
+
+    /// Serialize a cell of value to `Vec<u8>`.
+    fn cell_based_schemaed_serialize(&self, data: &Self::Output, cell_idx: usize) -> Vec<u8>;
+
+    /// Deserialize a cell of value from `Vec<u8>`.
+    fn cell_based_schemaed_deserialize(
+        &self,
+        data: &[u8],
+        cell_idx: usize,
+    ) -> <Self::Output as std::ops::Index<usize>>::Output;
+
+    /// Serialize the full value to `Vec<u8>`.
+    fn schemaed_serialize(&self, data: &Self::Output) -> Vec<u8>;
+
+    /// Deserialize the full value from `&[u8]`.
+    fn schemaed_deserialize(&self, data: &[u8]) -> Self::Output;
+}
+
 /// A trait for keyed state store
 #[async_trait]
 pub trait KeyedState<K, V>: Send + Sync + 'static
 where
     K: SchemaedSerializable<Output = Row>,
-    V: SchemaedSerializable,
+    V: CellBasedSchemaedSerializable,
 {
     /// Put a key-value pair to the keyed states. This operation is in-memory and should always
     /// succeed.
@@ -44,7 +69,7 @@ where
 pub struct InMemoryKeyedState<K, V>
 where
     K: SchemaedSerializable<Output = Row>,
-    V: SchemaedSerializable,
+    V: CellBasedSchemaedSerializable,
 {
     _key_schema: K,
     _value_schema: V,
@@ -54,7 +79,7 @@ where
 impl<K, V> InMemoryKeyedState<K, V>
 where
     K: SchemaedSerializable<Output = Row>,
-    V: SchemaedSerializable,
+    V: CellBasedSchemaedSerializable,
 {
     pub fn new(key_schema: K, value_schema: V) -> InMemoryKeyedState<K, V> {
         Self {
@@ -71,7 +96,7 @@ where
 impl<K, V> KeyedState<K, V> for InMemoryKeyedState<K, V>
 where
     K: SchemaedSerializable<Output = Row>,
-    V: SchemaedSerializable,
+    V: CellBasedSchemaedSerializable,
 {
     async fn get(&self, key: &Row) -> Result<Option<V::Output>> {
         Ok(self.state_entries.get(key).cloned())
@@ -94,7 +119,7 @@ where
 pub struct SerializedKeyedState<K, V>
 where
     K: SchemaedSerializable<Output = Row>,
-    V: SchemaedSerializable,
+    V: CellBasedSchemaedSerializable,
 {
     key_schema: K,
     value_schema: V,
@@ -104,7 +129,7 @@ where
 impl<K, V> SerializedKeyedState<K, V>
 where
     K: SchemaedSerializable<Output = Row>,
-    V: SchemaedSerializable,
+    V: CellBasedSchemaedSerializable,
 {
     pub fn new(key_schema: K, value_schema: V) -> SerializedKeyedState<K, V> {
         Self {
@@ -119,7 +144,7 @@ where
 impl<K, V> KeyedState<K, V> for SerializedKeyedState<K, V>
 where
     K: SchemaedSerializable<Output = Row>,
-    V: SchemaedSerializable,
+    V: CellBasedSchemaedSerializable,
 {
     async fn get(&self, key: &Row) -> Result<Option<V::Output>> {
         Ok(self
