@@ -14,8 +14,8 @@ import org.apache.calcite.tools.RuleSet;
 import org.apache.calcite.tools.RuleSets;
 
 /** Rules for converting logical RelNode to stream RelNode */
-public class StreamingConvertRules {
-  public StreamingConvertRules() {}
+public class StreamingRuleSets {
+  public StreamingRuleSets() {}
 
   public static final RuleSet STREAMING_CONVERTER_RULES =
       RuleSets.ofList(

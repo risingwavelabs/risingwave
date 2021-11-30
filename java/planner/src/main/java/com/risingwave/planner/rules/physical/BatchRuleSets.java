@@ -29,7 +29,9 @@ import com.risingwave.planner.rules.distributed.agg.TwoPhaseLimitRule;
 import com.risingwave.planner.rules.distributed.join.BroadcastJoinRule;
 import com.risingwave.planner.rules.distributed.join.ShuffleJoinRule;
 import com.risingwave.planner.rules.logical.ProjectToTableScanRule;
+import org.apache.calcite.rel.rules.AggregateExtractProjectRule;
 import org.apache.calcite.rel.rules.CoreRules;
+import org.apache.calcite.rel.rules.ProjectJoinTransposeRule;
 import org.apache.calcite.rel.rules.PruneEmptyRules;
 import org.apache.calcite.tools.RuleSet;
 import org.apache.calcite.tools.RuleSets;
@@ -46,6 +48,7 @@ public class BatchRuleSets {
 
   public static final RuleSet LOGICAL_REWRITE_RULES =
       RuleSets.ofList(
+          AggregateExtractProjectRule.SCAN,
           CoreRules.UNION_TO_DISTINCT,
           CoreRules.FILTER_INTO_JOIN,
           CoreRules.JOIN_CONDITION_PUSH,
@@ -63,6 +66,7 @@ public class BatchRuleSets {
           CoreRules.AGGREGATE_PROJECT_PULL_UP_CONSTANTS,
           CoreRules.SORT_REMOVE,
           CoreRules.FILTER_EXPAND_IS_NOT_DISTINCT_FROM,
+          ProjectJoinTransposeRule.Config.DEFAULT.toRule(),
           PruneEmptyRules.UNION_INSTANCE,
           PruneEmptyRules.INTERSECT_INSTANCE,
           PruneEmptyRules.MINUS_INSTANCE,

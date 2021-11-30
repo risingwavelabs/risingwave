@@ -25,7 +25,7 @@ import com.risingwave.planner.rel.streaming.RwStreamMaterializedView;
 import com.risingwave.planner.rel.streaming.RwStreamSort;
 import com.risingwave.planner.rel.streaming.StreamingPlan;
 import com.risingwave.planner.rules.physical.BatchRuleSets;
-import com.risingwave.planner.rules.streaming.StreamingConvertRules;
+import com.risingwave.planner.rules.streaming.StreamingRuleSets;
 import com.risingwave.planner.sql.SqlConverter;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.sql.SqlIdentifier;
@@ -132,9 +132,9 @@ public class StreamPlanner implements Planner<StreamingPlan> {
 
   private static OptimizerProgram buildStreamingOptimizerProgram() {
     return VolcanoOptimizerProgram.builder()
-        .addRules(StreamingConvertRules.STREAMING_CONVERTER_RULES)
-        .addRules(StreamingConvertRules.STREAMING_AGG_RULES)
-        .addRules(StreamingConvertRules.STREAMING_REMOVE_RULES)
+        .addRules(StreamingRuleSets.STREAMING_CONVERTER_RULES)
+        .addRules(StreamingRuleSets.STREAMING_AGG_RULES)
+        .addRules(StreamingRuleSets.STREAMING_REMOVE_RULES)
         .addRequiredOutputTraits(RisingWaveStreamingRel.STREAMING)
         .build();
   }
