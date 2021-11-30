@@ -5,13 +5,11 @@ use async_trait::async_trait;
 pub use high_level_kafka::*;
 pub use manager::*;
 pub use parser::*;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::Result;
 use risingwave_common::error::RwError;
 pub use table::*;
-
-use crate::stream_op::StreamChunk;
 
 pub mod parser;
 

@@ -7,8 +7,8 @@ use std::ops::Neg;
 
 use crate::stream_op::*;
 use num_traits::{CheckedAdd, CheckedSub};
-use risingwave_common::array::Array;
 use risingwave_common::array::*;
+use risingwave_common::array::{stream_chunk::Ops, Array};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::option_as_scalar_ref;
 
@@ -126,12 +126,9 @@ impl_cast_div!(i64, i64, i64);
 
 #[cfg(test)]
 mod tests {
-    use crate::stream_op::{
-        aggregation::{tests::get_output_from_state, StreamingAggState},
-        Op,
-    };
-    use risingwave_common::array::ArrayBuilder;
+    use crate::stream_op::aggregation::{tests::get_output_from_state, StreamingAggState};
     use risingwave_common::array::{Array, F64Array, I64Array};
+    use risingwave_common::array::{ArrayBuilder, Op};
     use risingwave_common::{array, array_nonnull};
 
     use super::StreamingAvgAgg;

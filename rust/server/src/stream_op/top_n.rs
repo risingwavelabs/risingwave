@@ -8,8 +8,8 @@ use risingwave_common::util::sort_util::{HeapElem, OrderPair};
 
 use std::sync::Arc;
 
-use crate::stream_op::{Executor, Message, Op, SimpleExecutor, StreamChunk};
-use risingwave_common::array::DataChunk;
+use crate::stream_op::{Executor, Message, SimpleExecutor, StreamChunk};
+use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use std::collections::BinaryHeap;
@@ -159,8 +159,8 @@ impl SimpleExecutor for AppendOnlyTopNExecutor {
 mod tests {
     use crate::stream_op::test_utils::MockSource;
     use crate::stream_op::top_n::AppendOnlyTopNExecutor;
-    use crate::stream_op::{Executor, Message, Op, StreamChunk};
-    use risingwave_common::array::{Array, I64Array};
+    use crate::stream_op::{Executor, Message, StreamChunk};
+    use risingwave_common::array::{Array, I64Array, Op};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::expr::InputRefExpression;
     use risingwave_common::types::Int64Type;

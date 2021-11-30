@@ -4,7 +4,10 @@ use approx::assert_relative_eq;
 use futures::channel::mpsc::channel;
 use futures::SinkExt;
 
+use risingwave_common::array::column::Column;
+use risingwave_common::array::Op::*;
 use risingwave_common::array::*;
+use risingwave_common::array::{I64Array, Op};
 use risingwave_common::catalog::Field;
 use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_common::expr::expr_unary_nonnull::new_unary_expr;
@@ -469,8 +472,6 @@ async fn test_tpch_q6() {
         .map(Some)
         .collect::<Vec<_>>();
     let d_extended_price = vec![10f64; 10].into_iter().map(Some).collect::<Vec<_>>();
-
-    use super::Op::*;
 
     let make_chunk = |op: Op| StreamChunk {
         ops: vec![op; 10],

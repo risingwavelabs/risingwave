@@ -95,7 +95,7 @@ impl SimpleExecutor for MViewSinkExecutor {
             }
             let row = Row(row);
 
-            use super::Op::*;
+            use risingwave_common::array::Op::*;
 
             match op {
                 Insert | UpdateInsert => {
@@ -117,12 +117,14 @@ mod tests {
     use crate::stream_op::test_utils::*;
     use crate::stream_op::*;
     use crate::*;
+    use risingwave_pb::ToProto;
 
-    use risingwave_common::array::{I32Array, Row};
+    use risingwave_common::array::{I32Array, Op, Row};
     use risingwave_common::catalog::{Field, SchemaId, TableId};
     use risingwave_common::types::{Int32Type, Scalar};
     use risingwave_pb::data::{data_type::TypeName, DataType};
     use risingwave_pb::plan::{column_desc::ColumnEncodingType, ColumnDesc};
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_sink() {

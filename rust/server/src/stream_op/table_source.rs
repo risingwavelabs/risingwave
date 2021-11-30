@@ -92,12 +92,12 @@ mod tests {
     use super::*;
     use crate::source::*;
     use crate::storage::{BummockTable, TableColumnDesc};
-    use crate::stream_op::{Op, StreamChunk};
     use futures::channel::mpsc::unbounded;
     use itertools::Itertools;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::ArrayImpl;
     use risingwave_common::array::{I32Array, Utf8Array};
+    use risingwave_common::array::{Op, StreamChunk};
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataTypeKind, DataTypeRef, DecimalType, Int32Type, StringType};

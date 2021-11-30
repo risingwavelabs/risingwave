@@ -2,6 +2,7 @@
 
 use std::marker::PhantomData;
 
+use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::{
@@ -9,7 +10,7 @@ use risingwave_common::error::{
 };
 use risingwave_common::types::{option_as_scalar_ref, Datum, Scalar, ScalarRef};
 
-use super::{Op, Ops, StreamingAggFunction, StreamingAggState, StreamingAggStateImpl};
+use super::{StreamingAggFunction, StreamingAggState, StreamingAggStateImpl};
 
 /// A trait over all fold functions.
 ///

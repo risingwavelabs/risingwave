@@ -10,6 +10,7 @@ pub mod interval_array;
 mod iterator;
 mod macros;
 mod primitive_array;
+pub mod stream_chunk;
 mod utf8_array;
 mod value_reader;
 use crate::array::iterator::ArrayImplIterator;
@@ -35,6 +36,7 @@ use risingwave_proto::data::Buffer;
 use std::convert::From;
 use std::hash::Hasher;
 use std::sync::Arc;
+pub use stream_chunk::{Op, StreamChunk};
 pub use utf8_array::*;
 
 pub type I64Array = PrimitiveArray<i64>;

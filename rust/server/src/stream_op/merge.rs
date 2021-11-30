@@ -217,11 +217,11 @@ impl Executor for MergeExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stream_op::{Op, StreamChunk};
     use assert_matches::assert_matches;
     use futures::channel::mpsc::channel;
     use futures::SinkExt;
     use itertools::Itertools;
+    use risingwave_common::array::{Op, StreamChunk};
     use risingwave_common::util::addr::get_host_port;
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,

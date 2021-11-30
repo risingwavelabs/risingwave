@@ -1,7 +1,7 @@
 use super::barrier_align::{AlignedMessage, BarrierAligner};
-use super::{Executor, Message, Op, StreamChunk};
+use super::{Executor, Message};
 use async_trait::async_trait;
-use risingwave_common::array::{ArrayBuilderImpl, Row, RowRef};
+use risingwave_common::array::{ArrayBuilderImpl, Op, Row, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataTypeRef, ToOwnedDatum};
 use risingwave_common::{
@@ -437,7 +437,7 @@ mod tests {
 
     use super::{HashJoinExecutor, JoinParams, JoinType};
     use crate::stream_op::test_utils::MockAsyncSource;
-    use crate::stream_op::{Barrier, Executor, Message, Op, StreamChunk};
+    use crate::stream_op::{Barrier, Executor, Message};
     use crate::*;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::Int64Type;

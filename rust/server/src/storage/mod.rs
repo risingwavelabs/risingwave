@@ -12,9 +12,8 @@ pub use test_row_table::*;
 mod object;
 pub use object::*;
 
-use crate::stream_op::StreamChunk;
-use risingwave_common::array::DataChunk;
 use risingwave_common::array::InternalError;
+use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;

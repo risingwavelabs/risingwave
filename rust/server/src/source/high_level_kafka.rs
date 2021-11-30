@@ -20,7 +20,7 @@ use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use crate::source::{
     BatchSourceReader, Source, SourceColumnDesc, SourceParser, SourceWriter, StreamSourceReader,
 };
-use crate::stream_op::{Op, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
 
 /// `KAFKA_SYNC_CALL_TIMEOUT` provides a timeout parameter for `rdkafka` calls, note that currently
 /// we only use `committed_offsets` and `fetch_metadata` for synchronization calls, these two calls

@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use super::aggregation::*;
-use super::{Executor, Message, Op, SimpleExecutor, StreamChunk};
+use super::{Executor, Message, SimpleExecutor};
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::*;

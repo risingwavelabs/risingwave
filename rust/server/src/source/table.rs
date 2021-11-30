@@ -12,7 +12,7 @@ use risingwave_common::error::Result;
 use crate::source::*;
 
 use crate::storage::{BummockResult, BummockTable, Table};
-use crate::stream_op::{Op, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
 
 /// `TableSource` is a special internal source to handle table updates from user,
 /// including insert/delete/update statements via SQL interface.
@@ -267,13 +267,12 @@ mod test {
     use assert_matches::assert_matches;
     use itertools::Itertools;
 
-    use risingwave_common::array::{Array, I64Array};
+    use risingwave_common::array::{Array, I64Array, Op};
     use risingwave_common::catalog::TableId;
     use risingwave_common::column_nonnull;
     use risingwave_common::types::Int64Type;
 
     use crate::storage::{Table, TableColumnDesc};
-    use crate::stream_op::Op;
 
     use super::*;
 

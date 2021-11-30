@@ -1,9 +1,10 @@
 use super::{Message, Result, StreamChunk};
-use crate::stream_op::{Executor, Op, StreamConsumer};
+use crate::stream_op::{Executor, StreamConsumer};
 use async_trait::async_trait;
 use futures::channel::mpsc::Sender;
 use futures::SinkExt;
 use risingwave_common::array::DataChunk;
+use risingwave_common::array::Op;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 
 /// `Output` provides an interface for `Dispatcher` to send data into downstream fragments.
@@ -163,16 +164,13 @@ impl DataDispatcher for HashDataDispatcher {
         // In these output chunks, the only difference are visibility map, which is calculated
         // by the hash value of each line in the input chunk.
         let num_outputs = self.outputs.len();
-        let StreamChunk {
-            ops,
-            columns: arrays,
-            visibility,
-        } = chunk;
+
+        let (ops, columns, visibility) = chunk.into_inner();
 
         // Due to some functions only exist in data chunk but not in stream chunk,
         // a new data chunk is temporally built.
         let data_chunk = {
-            let data_chunk_builder = DataChunk::builder().columns(arrays.clone());
+            let data_chunk_builder = DataChunk::builder().columns(columns.clone());
             // if visibility is set, build the chunk by the visibility, else build chunk directly
             if let Some(visibility) = visibility {
                 data_chunk_builder.visibility(visibility).build()
@@ -230,7 +228,7 @@ impl DataDispatcher for HashDataDispatcher {
             let new_stream_chunk = StreamChunk {
                 // columns is not changed in this function
                 ops: ops.clone(),
-                columns: arrays.clone(),
+                columns: columns.clone(),
                 visibility: Some(vis_map),
             };
             output.send(Message::Chunk(new_stream_chunk)).await?;
@@ -312,10 +310,9 @@ impl StreamConsumer for SenderConsumer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stream_op::Op;
     use itertools::Itertools;
     use risingwave_common::array::column::Column;
-    use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder};
+    use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
     use risingwave_common::types::Int32Type;
     use std::hash::{BuildHasher, Hasher};
     use std::sync::{Arc, Mutex};

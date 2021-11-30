@@ -1,10 +1,10 @@
 use async_trait::async_trait;
 
-use risingwave_common::array::{Array, ArrayImpl, DataChunk};
+use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op};
 use risingwave_common::error::Result;
 use risingwave_common::{catalog::Schema, expr::BoxedExpression};
 
-use super::{Executor, Message, Op, SimpleExecutor, StreamChunk};
+use super::{Executor, Message, SimpleExecutor, StreamChunk};
 
 /// `FilterExecutor` filters data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a boolean array on whether each item should be retained. And then,
@@ -138,12 +138,12 @@ impl SimpleExecutor for FilterExecutor {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use risingwave_common::array::I64Array;
+    use risingwave_common::array::{I64Array, Op, StreamChunk};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_pb::expr::expr_node::Type as ProstExprType;
 
     use crate::stream_op::test_utils::MockSource;
-    use crate::stream_op::{Executor, FilterExecutor, Message, Op, StreamChunk};
+    use crate::stream_op::{Executor, FilterExecutor, Message};
     use crate::*;
     use risingwave_common::column_nonnull;
     use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;

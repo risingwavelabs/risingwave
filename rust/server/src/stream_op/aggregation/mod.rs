@@ -7,6 +7,7 @@ mod foldable;
 pub use foldable::*;
 
 mod row_count;
+use risingwave_common::array::stream_chunk::Ops;
 pub use row_count::*;
 
 mod avg;
@@ -19,7 +20,7 @@ mod hash_kv;
 pub use hash_kv::*;
 
 use super::{
-    Op, Ops, StreamingCountAgg, StreamingFloatMaxAgg, StreamingFloatMinAgg, StreamingFloatSumAgg,
+    StreamingCountAgg, StreamingFloatMaxAgg, StreamingFloatMinAgg, StreamingFloatSumAgg,
     StreamingMaxAgg, StreamingMinAgg, StreamingSumAgg,
 };
 use risingwave_common::array::{

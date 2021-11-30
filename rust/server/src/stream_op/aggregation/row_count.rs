@@ -1,6 +1,6 @@
 //! This module implements `StreamingRowCountAgg`.
 
-use crate::stream_op::{Op, Ops};
+use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;

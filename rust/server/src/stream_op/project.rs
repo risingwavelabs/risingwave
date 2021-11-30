@@ -96,7 +96,7 @@ impl SimpleExecutor for ProjectExecutor {
 #[cfg(test)]
 mod tests {
     use crate::stream_op::test_utils::MockSource;
-    use crate::stream_op::{Executor, Message, Op, ProjectExecutor, StreamChunk};
+    use crate::stream_op::{Executor, Message, ProjectExecutor};
     use crate::*;
     use itertools::Itertools;
     use risingwave_common::array::I64Array;

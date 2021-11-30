@@ -9,11 +9,11 @@ use risingwave_pb::ToProto;
 
 use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
 use crate::source::{Source, SourceImpl, SourceManagerRef, SourceWriter};
-use crate::stream_op::{Op, StreamChunk};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
     ArrayBuilder, ArrayImpl, DataChunk, I64ArrayBuilder, PrimitiveArrayBuilder,
 };
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::TableId;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::{InternalError, ProstError};

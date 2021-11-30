@@ -1,7 +1,7 @@
 use itertools::Itertools;
 
 use risingwave_common::array::data_chunk_iter::RowDeserializer;
-use risingwave_common::array::{ArrayImpl, Row, RwError};
+use risingwave_common::array::{ArrayImpl, Op, Row, RwError};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
@@ -11,7 +11,7 @@ use super::{
     get_one_output_from_state_impl, AggCall, CellBasedSchemaedSerializable, SchemaedSerializable,
     StreamingAggStateImpl,
 };
-use crate::stream_op::{create_streaming_agg_state, Op};
+use crate::stream_op::create_streaming_agg_state;
 
 /// A key stored in `KeyedState`.
 pub type HashKey = Row;

@@ -1,11 +1,12 @@
 //! Global Streaming Hash Aggregators
 
 use super::aggregation::*;
-use super::{AggCall, Barrier, Executor, Message, Op, StreamChunk};
+use super::{AggCall, Barrier, Executor, Message};
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{Array, Row};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
@@ -417,7 +418,7 @@ mod tests {
     use assert_matches::assert_matches;
     use itertools::Itertools;
     use risingwave_common::array::data_chunk_iter::Row;
-    use risingwave_common::array::I64Array;
+    use risingwave_common::array::{I64Array, Op};
     use risingwave_common::catalog::Field;
     use risingwave_common::expr::*;
     use risingwave_common::types::{Int64Type, Scalar};
