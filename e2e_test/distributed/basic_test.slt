@@ -117,6 +117,22 @@ foo
 bar
 foo
 
+query T
+select case when v2 <= 3 then 'foo' end from t
+----
+NULL
+foo
+NULL
+foo
+
+query T
+select case when v3 = 2 then '2' when v3 = 3 then '3' when v3 = 4 then '4' when v3 = 5 then '5' end from t;
+----
+2
+3
+4
+5
+
 statement ok
 drop table t
 

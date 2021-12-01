@@ -63,19 +63,22 @@ impl Expression for CaseExpression {
             .return_type_ref()
             .create_array_builder(input.capacity())?;
         for idx in 0..input.capacity() {
-            let t = if let Some((_, t)) = when_thens
+            if let Some((_, t)) = when_thens
                 .iter()
                 .map(|(w, t)| (w.value_at(idx), t.value_at(idx)))
                 .find(|(w, _)| *w.unwrap().into_scalar_impl().as_bool())
             {
-                Some(t.unwrap().into_scalar_impl())
+                let t = Some(t.unwrap().into_scalar_impl());
+                output_array.append_datum(&t)?;
+            } else if let Some(els) = els.as_mut() {
+                let t = els.datum_at(idx);
+                output_array.append_datum(&t)?;
             } else {
-                els.as_mut()
-                    .map(|e| e.value_at(idx).unwrap().into_scalar_impl())
+                output_array.append_null()?;
             };
-            output_array.append_datum(&t)?;
         }
-        Ok(output_array.finish()?.into())
+        let output_array = output_array.finish()?.into();
+        Ok(output_array)
     }
 }
 
@@ -129,5 +132,34 @@ mod tests {
         assert_eq!(output.datum_at(2), Some(4.1f32.to_scalar_value()));
         assert_eq!(output.datum_at(3), Some(4.1f32.to_scalar_value()));
         assert_eq!(output.datum_at(4), Some(4.1f32.to_scalar_value()));
+    }
+
+    #[test]
+    fn test_without_else() {
+        let ret_type = Float32Type::create(true);
+        // when x <= 3 then 3.1
+        let when_clauses = vec![WhenClause::new(
+            new_binary_expr(
+                ProstExprType::LessThanOrEqual,
+                BoolType::create(false),
+                Box::new(InputRefExpression::new(Int32Type::create(false), 0)),
+                Box::new(LiteralExpression::new(
+                    Float32Type::create(false),
+                    Some(3f32.to_scalar_value()),
+                )),
+            ),
+            Box::new(LiteralExpression::new(
+                Float32Type::create(true),
+                Some(3.1f32.to_scalar_value()),
+            )),
+        )];
+        let mut searched_case_expr = CaseExpression::new(ret_type, when_clauses, None);
+        let col = create_column_i32(&[Some(3), Some(4), Some(3), Some(4)]).unwrap();
+        let input = DataChunk::builder().columns([col].to_vec()).build();
+        let output = searched_case_expr.eval(&input).unwrap();
+        assert_eq!(output.datum_at(0), Some(3.1f32.to_scalar_value()));
+        assert_eq!(output.datum_at(1), None);
+        assert_eq!(output.datum_at(2), Some(3.1f32.to_scalar_value()));
+        assert_eq!(output.datum_at(3), None);
     }
 }

@@ -715,7 +715,12 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
             .map(exp -> exp.accept(this, context))
             .collect(Collectors.toList());
 
-    var elseValue = node.getDefaultValue().accept(this, context);
+    var sqlNodeDefaultValue = node.getDefaultValue();
+    SqlNode elseValue = null;
+    if (sqlNodeDefaultValue != null) {
+      elseValue = sqlNodeDefaultValue.accept(this, context);
+    }
+
     return SqlCase.createSwitched(
         SqlParserPos.ZERO,
         null,
