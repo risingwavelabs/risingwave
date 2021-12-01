@@ -3,15 +3,15 @@
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 
 mod block_iterator;
+mod bloom;
+use bloom::Bloom;
 pub mod builder;
 pub use block_iterator::*;
 pub use builder::*;
 mod table_iterator;
 pub use table_iterator::*;
 mod utils;
-use utils::verify_checksum;
-
-use super::{Bloom, HummockError, HummockResult};
+use super::{HummockError, HummockResult};
 use crate::storage::hummock::table::utils::crc32_checksum;
 use crate::storage::object::{BlockLocation, ObjectStore};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -19,6 +19,7 @@ use prost::Message;
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_pb::hummock::{Checksum, TableMeta};
 use std::sync::Arc;
+use utils::verify_checksum;
 
 /// Block contains several entries. It can be obtained from an SST.
 #[derive(Default)]
@@ -180,9 +181,9 @@ impl Table {
 
     /// Get the required block.
     pub async fn block(&self, idx: usize) -> HummockResult<Arc<Block>> {
-        let block_offset = &self.meta.offsets[idx];
-        let offset = block_offset.offset as usize;
-        let size = block_offset.len as usize;
+        let block_meta = &self.meta.block_metas[idx];
+        let offset = block_meta.offset as usize;
+        let size = block_meta.len as usize;
         let block_loc = BlockLocation { offset, size };
 
         let block_data = self
@@ -216,7 +217,7 @@ impl Table {
 
     /// Number of blocks in the current table
     pub fn block_count(&self) -> usize {
-        self.meta.offsets.len()
+        self.meta.block_metas.len()
     }
 }
 

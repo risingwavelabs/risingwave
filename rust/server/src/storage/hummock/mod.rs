@@ -4,11 +4,8 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use iterator::*;
 mod table;
 use table::*;
-mod bloom;
-use bloom::*;
 mod cloud;
 mod error;
 mod iterator;

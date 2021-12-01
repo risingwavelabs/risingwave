@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::super::{HummockIterator, HummockResult, HummockValue};
+use super::super::{iterator::HummockIterator, HummockResult, HummockValue};
 use super::{BlockIterator, SeekPos, Table};
 use async_trait::async_trait;
 
@@ -91,11 +91,11 @@ impl TableIterator {
     }
 
     async fn seek_inner(&mut self, key: &[u8]) -> HummockResult<()> {
-        let block_idx = self.table.meta.offsets.partition_point(|offset| {
+        let block_idx = self.table.meta.block_metas.partition_point(|offset| {
             use std::cmp::Ordering::Less;
             // Find the first block that seek key >= its first key, so that the seek key is within
             // the range of the previous block.
-            offset.key.as_slice().partial_cmp(key) == Some(Less)
+            offset.smallest_key.as_slice().partial_cmp(key) == Some(Less)
         });
         let block_idx = if block_idx > 0 { block_idx - 1 } else { 0 };
 
@@ -140,7 +140,7 @@ mod tests {
         let table = gen_test_table(default_builder_opt_for_test()).await;
         // We should have at least 10 blocks, so that table iterator test could cover more code
         // path.
-        assert!(table.meta.offsets.len() > 10);
+        assert!(table.meta.block_metas.len() > 10);
 
         let mut table_iter = TableIterator::new(Arc::new(table));
         let mut cnt = 0;
@@ -157,7 +157,7 @@ mod tests {
         let table = gen_test_table(default_builder_opt_for_test()).await;
         // We should have at least 10 blocks, so that table iterator test could cover more code
         // path.
-        assert!(table.meta.offsets.len() > 10);
+        assert!(table.meta.block_metas.len() > 10);
         let table = Arc::new(table);
         let mut table_iter = TableIterator::new(table.clone());
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();

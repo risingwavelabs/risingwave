@@ -4,14 +4,14 @@
 
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 
+use super::bloom::Bloom;
 use super::utils::bytes_diff;
-use crate::storage::hummock::bloom::Bloom;
 use crate::storage::hummock::table::utils::crc32_checksum;
 use crate::storage::hummock::HummockValue;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use prost::Message;
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
-use risingwave_pb::hummock::{BlockOffset, Checksum, TableMeta};
+use risingwave_pb::hummock::{BlockMeta, Checksum, TableMeta};
 
 /// Entry header stores the difference between current key and block base key. `overlap` is the
 /// common prefix of key and base key, and diff is the length of different part.
@@ -103,7 +103,6 @@ impl TableBuilder {
     /// Append encoded block bytes to the buffer
     fn finish_block(&mut self) {
         // ---------- encode block ----------
-
         // different behavior: BadgerDB will just return.
         assert!(!self.entry_offsets.is_empty());
 
@@ -125,12 +124,12 @@ impl TableBuilder {
         self.data_buf.put_u32(ck_len);
 
         // ---------- add block offset to meta ----------
-        let block_offset = BlockOffset {
-            key: self.base_key.to_vec(),
+        let block_meta = BlockMeta {
+            smallest_key: self.base_key.to_vec(),
             offset: self.base_offset,
             len: self.data_buf.len() as u32 - self.base_offset,
         };
-        self.meta.offsets.push(block_offset);
+        self.meta.block_metas.push(block_meta);
     }
 
     fn should_finish_block(&self, key: &[u8], value: &HummockValue<Vec<u8>>) -> bool {
@@ -144,7 +143,8 @@ impl TableBuilder {
         4 + // size of list
         8 + // sum64 in checksum proto
         4) as u32; // checksum length
-                   // Integer overflow check for statements above.
+
+        // Integer overflow check for statements above.
         assert!(entries_offsets_size < u32::MAX);
         let estimated_size = (self.data_buf.len() as u32)
             - self.base_offset + 6 // header size for entry
@@ -163,6 +163,8 @@ impl TableBuilder {
     /// | Block | Block | Block | Block | Block |
     /// ```
     /// Add adds a key-value pair to the block.
+    /// Note: the passed key-value pairs should be ordered,
+    /// though we do not check that yet.
     pub fn add(&mut self, key: &[u8], value: HummockValue<Vec<u8>>) {
         if self.should_finish_block(key, &value) {
             self.finish_block();
@@ -215,7 +217,7 @@ impl TableBuilder {
 
         let estimated_size = block_size +
                                   4 + // index length
-                                  5 * self.meta.offsets.len() as u32; // TODO: why 5?
+                                  5 * self.meta.block_metas.len() as u32; // TODO: why 5?
         estimated_size as u32 > self.options.table_capacity
     }
 

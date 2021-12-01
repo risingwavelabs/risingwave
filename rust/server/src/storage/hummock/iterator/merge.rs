@@ -135,8 +135,8 @@ mod test {
             default_builder_opt_for_test, gen_test_table_base, test_key_of, test_value_of,
             TEST_KEYS_COUNT,
         },
+        iterator::HummockIterator,
         table::TableIterator,
-        HummockIterator,
     };
 
     use super::MergeIterator;
