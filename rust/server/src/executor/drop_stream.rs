@@ -61,27 +61,3 @@ impl BoxedExecutorBuilder for DropStreamExecutor {
         }))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use risingwave_pb::plan::{plan_node::PlanNodeType, PlanNode};
-
-    use crate::executor::drop_stream::DropStreamExecutor;
-    use crate::executor::{BoxedExecutorBuilder, ExecutorBuilder};
-    use crate::task::{GlobalTaskEnv, TaskId};
-
-    #[test]
-    fn test_drop_stream() {
-        let mut plan_node = PlanNode {
-            ..Default::default()
-        };
-        plan_node.set_node_type(PlanNodeType::Filter);
-        let task_id = &TaskId {
-            task_id: 0,
-            stage_id: 0,
-            query_id: "".to_string(),
-        };
-        let builder = ExecutorBuilder::new(&plan_node, task_id, GlobalTaskEnv::for_test());
-        assert!(DropStreamExecutor::new_boxed_executor(&builder).is_err())
-    }
-}

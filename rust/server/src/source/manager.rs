@@ -54,18 +54,18 @@ pub struct MemSourceManager {
 impl SourceManager for MemSourceManager {
     fn create_source(
         &self,
-        table_id: &TableId,
+        source_id: &TableId,
         format: SourceFormat,
         parser: Arc<dyn SourceParser>,
         config: &SourceConfig,
         columns: Vec<SourceColumnDesc>,
     ) -> Result<()> {
-        let mut tables = self.get_tables()?;
+        let mut tables = self.get_sources()?;
 
         ensure!(
-            !tables.contains_key(table_id),
+            !tables.contains_key(source_id),
             "Source id already exists: {:?}",
-            table_id
+            source_id
         );
 
         let source = match config {
@@ -82,16 +82,16 @@ impl SourceManager for MemSourceManager {
             columns,
         };
 
-        tables.insert(table_id.clone(), desc);
+        tables.insert(source_id.clone(), desc);
 
         Ok(())
     }
 
     fn create_table_source(&self, table_id: &TableId, table: Arc<BummockTable>) -> Result<()> {
-        let mut tables = self.get_tables()?;
+        let mut sources = self.get_sources()?;
 
         ensure!(
-            !tables.contains_key(table_id),
+            !sources.contains_key(table_id),
             "Source id already exists: {:?}",
             table_id
         );
@@ -115,26 +115,26 @@ impl SourceManager for MemSourceManager {
             format: SourceFormat::Invalid,
         };
 
-        tables.insert(table_id.clone(), desc);
+        sources.insert(table_id.clone(), desc);
         Ok(())
     }
 
     fn get_source(&self, table_id: &TableId) -> Result<SourceDesc> {
-        let tables = self.get_tables()?;
-        tables
+        let sources = self.get_sources()?;
+        sources
             .get(table_id)
             .cloned()
             .ok_or_else(|| InternalError(format!("Table id not exists: {:?}", table_id)).into())
     }
 
     fn drop_source(&self, table_id: &TableId) -> Result<()> {
-        let mut tables = self.get_tables()?;
+        let mut sources = self.get_sources()?;
         ensure!(
-            tables.contains_key(table_id),
-            "Table does not exist: {:?}",
+            sources.contains_key(table_id),
+            "Source does not exist: {:?}",
             table_id
         );
-        tables.remove(table_id);
+        sources.remove(table_id);
         Ok(())
     }
 }
@@ -146,7 +146,7 @@ impl MemSourceManager {
         }
     }
 
-    fn get_tables(&self) -> Result<MutexGuard<HashMap<TableId, SourceDesc>>> {
+    fn get_sources(&self) -> Result<MutexGuard<HashMap<TableId, SourceDesc>>> {
         self.sources.lock().map_err(|e| {
             RwError::from(ErrorCode::InternalError(format!(
                 "failed to acquire storage manager lock: {}",

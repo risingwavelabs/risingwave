@@ -1,5 +1,5 @@
 statement ok
-create stream s (v1 int not null, v2 char(8) not null) with ( upstream_source = 'kafka', kafka_topic = 'test_topic_1', kafka_bootstrap_servers = 'localhost:29092' ) row format json
+create stream s (v1 int not null, v2 char(8) not null) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'kafka_1_partition_topic', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
 
 query IT rowsort
 select * from s
@@ -13,7 +13,7 @@ statement ok
 drop stream s
 
 statement ok
-create stream s (v1 int not null, v2 char(8) not null) with ( upstream_source = 'kafka', kafka_topic = 'test_topic_2', kafka_bootstrap_servers = 'localhost:29092' ) row format json
+create stream s (v1 int not null, v2 char(8) not null) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'kafka_2_partition_topic', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
 
 query IT rowsort
 select * from s
@@ -27,7 +27,7 @@ statement ok
 drop stream s
 
 statement ok
-create stream s (v1 int not null, v2 char(8) not null) with ( upstream_source = 'kafka', kafka_topic = 'test_topic_3', kafka_bootstrap_servers = 'localhost:29092' ) row format json
+create stream s (v1 int not null, v2 char(8) not null) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'kafka_3_partition_topic', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
 
 query IT rowsort
 select * from s
@@ -41,7 +41,7 @@ statement ok
 drop stream s
 
 statement ok
-create stream s (v1 int not null, v2 char(8) not null) with ( upstream_source = 'kafka', kafka_topic = 'test_topic_4', kafka_bootstrap_servers = 'localhost:29092' ) row format json
+create stream s (v1 int not null, v2 char(8) not null) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'kafka_4_partition_topic', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
 
 query IT rowsort
 select * from s
@@ -55,7 +55,7 @@ statement ok
 drop stream s
 
 statement ok
-create stream s (v1 int not null, v2 char(8) not null) with ( upstream_source = 'kafka', kafka_topic = 'test_topic_100', kafka_bootstrap_servers = 'localhost:29092' ) row format json
+create stream s (v1 int not null, v2 char(8) not null) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'kafka_4_partition_topic_with_100_message', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
 
 query I
 select count(*) from s

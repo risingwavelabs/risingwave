@@ -207,6 +207,7 @@ import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.Token;
+import org.antlr.v4.runtime.tree.ParseTree;
 import org.antlr.v4.runtime.tree.TerminalNode;
 
 class AstBuilder extends SqlBaseBaseVisitor<Node> {
@@ -355,14 +356,14 @@ class AstBuilder extends SqlBaseBaseVisitor<Node> {
     String rowSchemaLocation = "";
 
     if (context.rowSchemaLocation != null) {
-      rowSchemaLocation = context.rowSchemaLocation.getText();
+      rowSchemaLocation = getText(context.rowSchemaLocation);
     }
 
     return new CreateStream(
         context.name.getText(),
         tableElements,
         extractGenericProperties(context.withProperties()),
-        context.rowFormat.getText(),
+        getText(context.rowFormat),
         rowSchemaLocation);
   }
 
@@ -973,7 +974,6 @@ class AstBuilder extends SqlBaseBaseVisitor<Node> {
   }
 
   // Properties
-
   private GenericProperties<Expression> extractGenericProperties(ParserRuleContext context) {
     return visitIfPresent(context, GenericProperties.class).orElse(GenericProperties.empty());
   }
@@ -993,7 +993,8 @@ class AstBuilder extends SqlBaseBaseVisitor<Node> {
   @Override
   public GenericProperty<Expression> visitGenericProperty(
       SqlBaseParser.GenericPropertyContext context) {
-    return new GenericProperty<>(getIdentText(context.ident()), (Expression) visit(context.expr()));
+    return new GenericProperty<>(
+        getText(context.stringLiteralOrIdentifierOrQname()), (Expression) visit(context.expr()));
   }
 
   // Amending tables
@@ -1229,6 +1230,15 @@ class AstBuilder extends SqlBaseBaseVisitor<Node> {
 
   @Nullable
   private String getIdentText(@Nullable SqlBaseParser.IdentContext ident) {
+    if (ident != null) {
+      StringLiteral literal = (StringLiteral) visit(ident);
+      return literal.getValue();
+    }
+    return null;
+  }
+
+  @Nullable
+  private String getText(@Nullable ParseTree ident) {
     if (ident != null) {
       StringLiteral literal = (StringLiteral) visit(ident);
       return literal.getValue();

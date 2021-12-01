@@ -12,6 +12,7 @@ use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::Datum;
@@ -20,7 +21,6 @@ use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use crate::source::{
     BatchSourceReader, Source, SourceColumnDesc, SourceParser, SourceWriter, StreamSourceReader,
 };
-use risingwave_common::array::{Op, StreamChunk};
 
 /// `KAFKA_SYNC_CALL_TIMEOUT` provides a timeout parameter for `rdkafka` calls, note that currently
 /// we only use `committed_offsets` and `fetch_metadata` for synchronization calls, these two calls
@@ -177,6 +177,10 @@ impl HighLevelKafkaSource {
     ) -> Result<StreamConsumer> {
         let mut config = ClientConfig::new();
 
+        config.set("topic.metadata.refresh.interval.ms", "30000");
+        config.set("fetch.message.max.bytes", "134217728");
+        config.set("auto.offset.reset", "earliest");
+
         config.set(
             "group.id",
             match context.query_id.as_ref() {
@@ -191,15 +195,14 @@ impl HighLevelKafkaSource {
             },
         );
 
-        config.set("bootstrap.servers", self.config.bootstrap_servers.join(","));
-
-        config.set("topic.metadata.refresh.interval.ms", "30000");
-        config.set("fetch.message.max.bytes", "134217728");
+        for (k, v) in self.config.properties.iter() {
+            config.set(k, v);
+        }
 
         // disable partition eof
         config.set("enable.partition.eof", "false");
-        config.set("auto.offset.reset", "earliest");
         config.set("enable.auto.commit", "false");
+        config.set("bootstrap.servers", self.config.bootstrap_servers.join(","));
 
         config
             .set_log_level(RDKafkaLogLevel::Debug)

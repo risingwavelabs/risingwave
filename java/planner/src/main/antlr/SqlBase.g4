@@ -499,8 +499,8 @@ createStmt
     | CREATE ( OR REPLACE )? STREAM (IF NOT EXISTS)? name=ident
         '(' tableElement (',' tableElement)* ')'
         withProperties?
-        ROW FORMAT rowFormat=ident
-        (ROW SCHEMA LOCATION rowSchemaLocation=ident)?                               #createStream
+        ROW FORMAT rowFormat=stringLiteralOrIdentifier
+        (ROW SCHEMA LOCATION rowSchemaLocation=stringLiteral)?                       #createStream
     ;
 
 functionArgument
@@ -597,7 +597,7 @@ genericProperties
     ;
 
 genericProperty
-    : ident EQ expr
+    : stringLiteralOrIdentifierOrQname EQ expr
     ;
 
 matchPredicateIdents

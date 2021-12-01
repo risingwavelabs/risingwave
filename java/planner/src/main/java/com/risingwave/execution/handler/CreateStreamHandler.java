@@ -135,7 +135,7 @@ public class CreateStreamHandler implements SqlHandler {
             .map(n -> (SqlTableOption) n)
             .collect(
                 Collectors.toMap(
-                    n -> ((SqlCharStringLiteral) n.getKey()).getValueAs(String.class),
+                    n -> ((SqlCharStringLiteral) n.getKey()).getValueAs(String.class).toLowerCase(),
                     n -> ((SqlCharStringLiteral) n.getValue()).getValueAs(String.class)));
 
     createStreamInfoBuilder.setProperties(properties);

@@ -30,8 +30,15 @@ use crate::source::{
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 
-static PROTO_MESSAGE_KEY: &str = "proto.message";
-static TEMP_PROTOBUF_FILENAME: &str = "rw.proto";
+const UPSTREAM_SOURCE_KEY: &str = "upstream.source";
+const KAFKA_SOURCE: &str = "kafka";
+
+const KAFKA_TOPIC_KEY: &str = "kafka.topic";
+const KAFKA_BOOTSTRAP_SERVERS_KEY: &str = "kafka.bootstrap.servers";
+
+const PROTOBUF_MESSAGE_KEY: &str = "proto.message";
+const PROTOBUF_TEMP_LOCAL_FILENAME: &str = "rw.proto";
+const PROTOBUF_FILE_URL_SCHEME: &str = "file";
 
 pub(super) struct CreateStreamExecutor {
     table_id: TableId,
@@ -56,11 +63,11 @@ macro_rules! get_from_properties {
 impl CreateStreamExecutor {
     fn extract_kafka_config(properties: &HashMap<String, String>) -> Result<SourceConfig> {
         Ok(SourceConfig::Kafka(HighLevelKafkaSourceConfig {
-            bootstrap_servers: get_from_properties!(properties, "kafka_bootstrap_servers")
+            bootstrap_servers: get_from_properties!(properties, KAFKA_BOOTSTRAP_SERVERS_KEY)
                 .split(',')
                 .map(|s| s.to_string())
                 .collect::<Vec<String>>(),
-            topic: get_from_properties!(properties, "kafka_topic").clone(),
+            topic: get_from_properties!(properties, KAFKA_TOPIC_KEY).clone(),
             properties: Default::default(),
         }))
     }
@@ -111,8 +118,8 @@ impl BoxedExecutorBuilder for CreateStreamExecutor {
             }
         }
 
-        let config = match get_from_properties!(properties, "upstream_source").as_str() {
-            "kafka" => CreateStreamExecutor::extract_kafka_config(properties),
+        let config = match get_from_properties!(properties, UPSTREAM_SOURCE_KEY).as_str() {
+            KAFKA_SOURCE => CreateStreamExecutor::extract_kafka_config(properties),
             other => Err(RwError::from(ProtocolError(format!(
                 "source type {} not supported",
                 other
@@ -140,8 +147,9 @@ impl CreateStreamExecutor {
     ) -> Result<ProtobufParser> {
         let location = schema_location;
         let url = Url::parse(location).map_err(|e| RwError::from(InternalError(e.to_string())))?;
+
         match url.scheme() {
-            "file" => {
+            PROTOBUF_FILE_URL_SCHEME => {
                 let path = url.to_file_path().map_err(|_| {
                     RwError::from(InternalError(format!("path {} illegal", location)))
                 })?;
@@ -157,7 +165,7 @@ impl CreateStreamExecutor {
                     .tempdir()
                     .map_err(|e| RwError::from(InternalError(e.to_string())))?;
 
-                let target = temp_dir.path().join(TEMP_PROTOBUF_FILENAME);
+                let target = temp_dir.path().join(PROTOBUF_TEMP_LOCAL_FILENAME);
 
                 fs::copy(path, target.as_path())
                     .await
@@ -198,10 +206,10 @@ impl Executor for CreateStreamExecutor {
                 Ok(parser)
             }
             SourceFormat::Protobuf => {
-                let message_name = self.properties.get(PROTO_MESSAGE_KEY).ok_or_else(|| {
+                let message_name = self.properties.get(PROTOBUF_MESSAGE_KEY).ok_or_else(|| {
                     RwError::from(ProtocolError(format!(
                         "{} not found in properties",
-                        PROTO_MESSAGE_KEY
+                        PROTOBUF_MESSAGE_KEY
                     )))
                 })?;
 
