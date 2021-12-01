@@ -1,5 +1,7 @@
 package com.risingwave.pgwire.msg;
 
+import java.util.EnumSet;
+
 /** StatementType is the type of the statement */
 public enum StatementType {
   INSERT,
@@ -20,5 +22,12 @@ public enum StatementType {
   ORDER_BY,
   SET_OPTION,
   SHOW_PARAMETERS,
-  OTHER
+  OTHER;
+
+  private static final EnumSet<StatementType> COMMANDS =
+      EnumSet.of(INSERT, DELETE, UPDATE, MOVE, COPY);
+
+  public boolean isCommand() {
+    return COMMANDS.contains(this);
+  }
 }

@@ -2,6 +2,7 @@ package com.risingwave.execution.handler;
 
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.execution.result.BatchDataChunkResult;
+import com.risingwave.execution.result.CommandResult;
 import com.risingwave.pgwire.database.PgResult;
 import com.risingwave.planner.planner.batch.BatchPlanner;
 import com.risingwave.planner.rel.physical.BatchPlan;
@@ -41,11 +42,22 @@ public class QueryHandler implements SqlHandler {
 
     // Convert task data to list to iterate it multiple times.
     // FIXME: use Iterator<TaskData>
-    ArrayList<GetDataResponse> responses = new ArrayList();
+    ArrayList<GetDataResponse> responses = new ArrayList<>();
     while (iter.hasNext()) {
       responses.add(iter.next());
     }
-    return new BatchDataChunkResult(
-        SqlHandler.getStatementType(ast), responses, plan.getRoot().getRowType());
+
+    var result =
+        new BatchDataChunkResult(
+            SqlHandler.getStatementType(ast), responses, plan.getRoot().getRowType());
+
+    // TODO: We need a better solution for this.
+    if (result.getStatementType().isCommand()) {
+      var effectedRowCount =
+          Integer.parseInt(result.createIterator().getRow().get(0).encodeInText());
+      return new CommandResult(result.getStatementType(), effectedRowCount);
+    } else {
+      return result;
+    }
   }
 }
