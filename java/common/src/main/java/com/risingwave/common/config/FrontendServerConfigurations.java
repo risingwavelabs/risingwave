@@ -23,9 +23,18 @@ public class FrontendServerConfigurations {
       ConfigEntry.<Integer>builder("risingwave.pgserver.port")
           .setOptional(true)
           .withDefaultValue(5432)
-          .withDoc("Postgre sql server port")
+          .withDoc("PostgreSQL server port")
           .withConverter(INT_PARSER)
           .withValidator(intRangeValidator(2000, 9000))
+          .build();
+
+  @Config
+  public static final ConfigEntry<String> PG_WIRE_IP =
+      ConfigEntry.<String>builder("risingwave.metadata.ip")
+          .setOptional(true)
+          .withDefaultValue("0.0.0.0")
+          .withDoc("PostgreSQL server IP address")
+          .withConverter(STRING_PARSER)
           .build();
 
   @Config

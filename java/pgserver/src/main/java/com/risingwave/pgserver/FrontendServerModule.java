@@ -75,8 +75,9 @@ public class FrontendServerModule extends AbstractModule {
   @Singleton
   static PgServer createPgServer(Configuration config, DatabaseManager dbManager) {
     LOGGER.info("Creating pg server.");
+    String ip = config.get(FrontendServerConfigurations.PG_WIRE_IP);
     int port = config.get(FrontendServerConfigurations.PG_WIRE_PORT);
-    return new PgServer(port, dbManager);
+    return new PgServer(ip, port, dbManager);
   }
 
   @Provides

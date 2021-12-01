@@ -45,6 +45,8 @@ public class ConfigTest {
 
     var pgwirePort = config.get(FrontendServerConfigurations.PG_WIRE_PORT);
     Assertions.assertEquals(pgwirePort, 4567);
+    var pgwireIp = config.get(FrontendServerConfigurations.PG_WIRE_IP);
+    Assertions.assertEquals(pgwireIp, "0.0.0.0");
     var clusterMode = config.get(LeaderServerConfigurations.CLUSTER_MODE);
     Assertions.assertEquals(clusterMode, LeaderServerConfigurations.ClusterMode.Distributed);
     var catalogMode = config.get(FrontendServerConfigurations.CATALOG_MODE);

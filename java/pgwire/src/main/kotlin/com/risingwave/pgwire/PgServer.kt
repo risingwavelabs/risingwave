@@ -12,7 +12,7 @@ import kotlinx.coroutines.runBlocking
 import org.slf4j.LoggerFactory
 import java.net.InetSocketAddress
 
-class PgServer(private val port: Int, private val dbManager: DatabaseManager) {
+class PgServer(private val ip: String, private val port: Int, private val dbManager: DatabaseManager) {
   companion object {
     private val log = LoggerFactory.getLogger(PgServer::class.java)
   }
@@ -21,7 +21,7 @@ class PgServer(private val port: Int, private val dbManager: DatabaseManager) {
 
   fun serve() {
     runBlocking { // The coroutine scope.
-      val addr = InetSocketAddress("127.0.0.1", port)
+      val addr = InetSocketAddress(ip, port)
       acceptor = aSocket(ActorSelectorManager(Dispatchers.Default)).tcp().bind(addr)
       log.info("Started server at ${acceptor.localAddress}")
 
