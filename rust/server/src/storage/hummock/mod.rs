@@ -14,6 +14,7 @@ mod error;
 mod iterator;
 mod keyed_state;
 mod value;
+use tokio::sync::Mutex;
 use value::*;
 
 use crate::storage::hummock::cloud::gen_remote_table;
@@ -35,10 +36,11 @@ pub struct HummockOptions {
 }
 
 /// Hummock is the state store backend.
+#[derive(Clone)]
 pub struct HummockStorage {
     options: Arc<HummockOptions>,
-    unique_id: AtomicU64,
-    tables: HashMap<u64, Table>,
+    unique_id: Arc<AtomicU64>,
+    tables: Arc<Mutex<HashMap<u64, Table>>>,
     obj_client: Arc<dyn ObjectStore>,
 }
 
@@ -46,15 +48,19 @@ impl HummockStorage {
     pub fn new(obj_client: Arc<dyn ObjectStore>, options: HummockOptions) -> Self {
         Self {
             options: Arc::new(options),
-            unique_id: AtomicU64::new(0),
-            tables: HashMap::new(),
+            unique_id: Arc::new(AtomicU64::new(0)),
+            tables: Arc::new(Mutex::new(HashMap::new())),
             obj_client,
         }
     }
 
+    pub async fn get(&self, _key: &[u8]) -> HummockResult<Option<Vec<u8>>> {
+        todo!()
+    }
+
     /// Write batch to storage.
     pub async fn write_batch(
-        &mut self,
+        &self,
         kv_pairs: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
     ) -> HummockResult<()> {
         let get_builder = |options: &HummockOptions| {
@@ -79,7 +85,7 @@ impl HummockStorage {
         let table =
             gen_remote_table(self.obj_client.clone(), table_id, blocks, meta, remote_dir).await?;
 
-        self.tables.insert(table_id, table);
+        self.tables.lock().await.insert(table_id, table);
         Ok(())
     }
 }
