@@ -1,0 +1,27 @@
+statement ok
+create table t1 (v1 int not null, v2 int not null, v3 int not null)
+
+statement ok
+insert into t1 values (1,4,2), (2,3,3);
+
+statement ok
+create materialized view mv1 as select * from t1;
+
+query III
+select v1, v2, v3 from mv1;
+----
+1 4 2
+2 3 3
+
+statement ok
+insert into t1 values (3,4,4), (4,3,5);
+
+sleep 1s
+
+query III
+select v1, v2, v3 from mv1
+----
+1 4 2
+2 3 3
+3 4 4
+4 3 5
