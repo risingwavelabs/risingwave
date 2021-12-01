@@ -45,7 +45,7 @@ tasks.register<JacocoReport>("jacocoRootReport") {
                 !listOf(
                     "catalog:test",
                     "risingwave:test",
-                    "metadata:test",
+                    "meta:test",
                     "proto:test",
                     "pgserver:test",
                     "pgserver:run",
@@ -70,7 +70,7 @@ tasks.register<JacocoReport>("jacocoE2eReport") {
                 !listOf(
                     "catalog:test",
                     "risingwave:test",
-                    "metadata:test",
+                    "meta:test",
                     "proto:test",
                     "pgserver:test"
                 ).contains("${it.project.name}:${it.name}")

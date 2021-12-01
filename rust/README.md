@@ -9,3 +9,4 @@ the workspace are organized as following:
 [crates.io](crates.io) in future when they are more mature.
 4. `server`: The crate contains our query engine server and streaming server. We may split them into smaller crates 
    in future.
+5. `meta`: The crate contains our meta server.

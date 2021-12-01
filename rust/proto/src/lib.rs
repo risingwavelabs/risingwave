@@ -5,7 +5,7 @@ pub mod data;
 #[rustfmt::skip]
 pub mod expr;
 #[rustfmt::skip]
-pub mod metadata;
+pub mod meta;
 #[rustfmt::skip]
 pub mod plan;
 #[rustfmt::skip]

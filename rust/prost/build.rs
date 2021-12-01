@@ -7,7 +7,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "common",
         "data",
         "expr",
-        "metadata",
+        "meta",
         "plan",
         "task_service",
         "stream_plan",

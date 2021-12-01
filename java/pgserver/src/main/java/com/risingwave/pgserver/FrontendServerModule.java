@@ -23,8 +23,8 @@ import com.risingwave.pgwire.database.DatabaseManager;
 import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.ComputeClientManagerImpl;
 import com.risingwave.rpc.MetaClient;
-import com.risingwave.rpc.MetadataClientManager;
-import com.risingwave.rpc.MetadataClientManagerImpl;
+import com.risingwave.rpc.MetaClientManager;
+import com.risingwave.rpc.MetaClientManagerImpl;
 import com.risingwave.scheduler.QueryManager;
 import com.risingwave.scheduler.RemoteQueryManager;
 import com.risingwave.scheduler.streaming.StreamManager;
@@ -57,7 +57,7 @@ public class FrontendServerModule extends AbstractModule {
       bind(QueryManager.class).to(RemoteQueryManager.class).in(Singleton.class);
     }
     bind(StreamManager.class).to(StreamManagerImpl.class).in(Singleton.class);
-    bind(MetadataClientManager.class).to(MetadataClientManagerImpl.class).in(Singleton.class);
+    bind(MetaClientManager.class).to(MetaClientManagerImpl.class).in(Singleton.class);
   }
 
   @Provides
@@ -83,7 +83,7 @@ public class FrontendServerModule extends AbstractModule {
   @Provides
   @Singleton
   static CatalogService createCatalogService(
-      Configuration config, MetadataClientManager metadataClientManager) {
+      Configuration config, MetaClientManager metaClientManager) {
     LOGGER.info("Creating catalog service.");
     FrontendServerConfigurations.CatalogMode mode =
         config.get(FrontendServerConfigurations.CATALOG_MODE);
@@ -94,10 +94,10 @@ public class FrontendServerModule extends AbstractModule {
       catalogService.createDatabase(CatalogService.DEFAULT_DATABASE_NAME);
       LOGGER.info("Creating default database: {}.", CatalogService.DEFAULT_DATABASE_NAME);
     } else {
-      String address = config.get(FrontendServerConfigurations.METADATA_SERVICE_ADDRESS);
+      String address = config.get(FrontendServerConfigurations.META_SERVICE_ADDRESS);
       DefaultWorkerNode node = DefaultWorkerNode.from(address);
       MetaClient client =
-          metadataClientManager.getOrCreate(
+          metaClientManager.getOrCreate(
               node.getRpcEndPoint().getHost(), node.getRpcEndPoint().getPort());
       catalogService = new RemoteCatalogService(client);
 

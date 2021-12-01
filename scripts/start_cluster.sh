@@ -36,10 +36,10 @@ start_frontend() {
     wait_server 4567
 }
 
-start_metadata_node() {
-  log_dir="../log/metadata.out"
-  echo "Starting metadata ... logging to $log_dir"
-  nohup ./target/debug/metadata-node --log4rs-config config/log4rs.yaml > "$log_dir" &
+start_meta_node() {
+  log_dir="../log/meta.out"
+  echo "Starting meta service ... logging to $log_dir"
+  nohup ./target/debug/meta-node --log4rs-config config/log4rs.yaml > "$log_dir" &
   wait_server 5690
 }
 
@@ -64,9 +64,9 @@ start_n_nodes_cluster() {
     list_nodes_in_cluster
     echo ""
 
-    start_metadata_node
+    start_meta_node
     echo ""
-    echo "metadata-node:"
+    echo "meta-node:"
     list_meta_node_in_cluster
     echo ""
 
@@ -90,7 +90,7 @@ list_nodes_in_cluster() {
 }
 
 list_meta_node_in_cluster() {
-  pgrep -fl metadata-node || true
+  pgrep -fl meta-node || true
 }
 
 if [ $# -ne 1 ]; then

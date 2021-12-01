@@ -38,7 +38,7 @@ public class ConfigTest {
             "risingwave.leader.clustermode=Distributed",
             "risingwave.leader.computenodes=127.0.0.1:5688",
             "risingwave.catalog.mode=Local",
-            "risingwave.metadata.node=127.0.0.1:9527");
+            "risingwave.meta.node=127.0.0.1:9527");
     Configuration config =
         loadConfigFromLines(
             lines, FrontendServerConfigurations.class, LeaderServerConfigurations.class);
@@ -51,7 +51,7 @@ public class ConfigTest {
     Assertions.assertEquals(clusterMode, LeaderServerConfigurations.ClusterMode.Distributed);
     var catalogMode = config.get(FrontendServerConfigurations.CATALOG_MODE);
     Assertions.assertEquals(catalogMode, FrontendServerConfigurations.CatalogMode.Local);
-    var metadataAddress = config.get(FrontendServerConfigurations.METADATA_SERVICE_ADDRESS);
-    Assertions.assertEquals(metadataAddress, "127.0.0.1:9527");
+    var metaAddress = config.get(FrontendServerConfigurations.META_SERVICE_ADDRESS);
+    Assertions.assertEquals(metaAddress, "127.0.0.1:9527");
   }
 }

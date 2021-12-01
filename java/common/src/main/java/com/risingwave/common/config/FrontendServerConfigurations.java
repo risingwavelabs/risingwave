@@ -47,11 +47,11 @@ public class FrontendServerConfigurations {
           .build();
 
   @Config
-  public static final ConfigEntry<String> METADATA_SERVICE_ADDRESS =
-      ConfigEntry.<String>builder("risingwave.metadata.node")
+  public static final ConfigEntry<String> META_SERVICE_ADDRESS =
+      ConfigEntry.<String>builder("risingwave.meta.node")
           .setOptional(true)
           .withDefaultValue("127.0.0.1:5689")
-          .withDoc("Metadata service node address")
+          .withDoc("Meta service node address")
           .withConverter(STRING_PARSER)
           .build();
 }
