@@ -32,6 +32,7 @@ mod merge;
 mod mview_sink;
 mod project;
 mod simple_agg;
+mod state_aggregation;
 mod stream_source;
 mod table_source;
 mod top_n;

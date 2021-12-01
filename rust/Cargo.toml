@@ -8,9 +8,9 @@ members = [
   "proto",
   "server",
   "stream",
-  "tests/regress"
-,
+  "tests/regress",
   "utils/memcomparable",
   "utils/pb-construct",
   "utils/pb-convert",
-  "utils/pb-convert-derive"]
+  "utils/pb-convert-derive",
+]

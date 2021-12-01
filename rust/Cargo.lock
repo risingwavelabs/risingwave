@@ -1791,6 +1791,7 @@ dependencies = [
  "log",
  "log4rs",
  "mem_cmp",
+ "memcomparable",
  "num-traits",
  "paste",
  "pb-construct",
