@@ -267,7 +267,7 @@ pub fn deserialize_datum_not_null_from(
 
 /// This trait is to implement `to_owned_datum` for `Option<ScalarImpl>`
 pub trait ToOwnedDatum {
-    /// implement `to_owned_datum` for `DatumRef` to covert to `Datum`
+    /// implement `to_owned_datum` for `DatumRef` to convert to `Datum`
     fn to_owned_datum(self) -> Datum;
 }
 
@@ -317,7 +317,7 @@ macro_rules! impl_convert {
             match val {
               ScalarImpl::$variant_name(scalar) => Ok(scalar),
               other_scalar => Err(ErrorCode::InternalError(
-                format!("cannot covert ScalarImpl::{} to concrete type", other_scalar.get_ident())
+                format!("cannot convert ScalarImpl::{} to concrete type", other_scalar.get_ident())
               ).into())
             }
           }
@@ -336,7 +336,7 @@ macro_rules! impl_convert {
             match val {
               ScalarRefImpl::$variant_name(scalar_ref) => Ok(scalar_ref),
               other_scalar => Err(ErrorCode::InternalError(
-                format!("cannot covert ScalarRefImpl::{} to concrete type", other_scalar.get_ident())
+                format!("cannot convert ScalarRefImpl::{} to concrete type", other_scalar.get_ident())
               ).into())
             }
           }
@@ -346,14 +346,14 @@ macro_rules! impl_convert {
           pub fn [<as_ $suffix_name>](&self) -> &$scalar {
             match self {
               Self::$variant_name(ref scalar) => scalar,
-              other_scalar => panic!("cannot covert ScalarImpl::{} to concrete type", other_scalar.get_ident())
+              other_scalar => panic!("cannot convert ScalarImpl::{} to concrete type", other_scalar.get_ident())
             }
           }
 
           pub fn [<into_ $suffix_name>](self) -> $scalar {
             match self {
               Self::$variant_name(scalar) => scalar,
-              other_scalar =>  panic!("cannot covert ScalarImpl::{} to concrete type", other_scalar.get_ident())
+              other_scalar =>  panic!("cannot convert ScalarImpl::{} to concrete type", other_scalar.get_ident())
             }
           }
         }
@@ -363,7 +363,7 @@ macro_rules! impl_convert {
           pub fn [<into_ $suffix_name>](self) -> $scalar_ref {
             match self {
               Self::$variant_name(inner) => inner,
-              other_scalar => panic!("cannot covert ScalarRefImpl::{} to concrete type", other_scalar.get_ident())
+              other_scalar => panic!("cannot convert ScalarRefImpl::{} to concrete type", other_scalar.get_ident())
             }
           }
         }

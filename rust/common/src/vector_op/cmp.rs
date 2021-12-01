@@ -87,10 +87,10 @@ where
 {
     let l: T3 = l
         .try_into()
-        .map_err(|_| RwError::from(InternalError("Can't covert left to float".to_string())))?;
+        .map_err(|_| RwError::from(InternalError("Can't convert left to float".to_string())))?;
     let r: T3 = r
         .try_into()
-        .map_err(|_| RwError::from(InternalError("Can't covert right to float".to_string())))?;
+        .map_err(|_| RwError::from(InternalError("Can't convert right to float".to_string())))?;
     Ok(l > r)
 }
 
@@ -115,10 +115,10 @@ where
 {
     let l: T3 = l
         .try_into()
-        .map_err(|_| RwError::from(InternalError("Can't covert left to float".to_string())))?;
+        .map_err(|_| RwError::from(InternalError("Can't convert left to float".to_string())))?;
     let r: T3 = r
         .try_into()
-        .map_err(|_| RwError::from(InternalError("Can't covert right to float".to_string())))?;
+        .map_err(|_| RwError::from(InternalError("Can't convert right to float".to_string())))?;
     Ok(l >= r)
 }
 
@@ -143,10 +143,10 @@ where
 {
     let l: T3 = l
         .try_into()
-        .map_err(|_| RwError::from(InternalError("Can't covert left to float".to_string())))?;
+        .map_err(|_| RwError::from(InternalError("Can't convert left to float".to_string())))?;
     let r: T3 = r
         .try_into()
-        .map_err(|_| RwError::from(InternalError("Can't covert right to float".to_string())))?;
+        .map_err(|_| RwError::from(InternalError("Can't convert right to float".to_string())))?;
     Ok(l < r)
 }
 
@@ -171,10 +171,10 @@ where
 {
     let l: T3 = l
         .try_into()
-        .map_err(|_| RwError::from(InternalError("Can't covert left to float".to_string())))?;
+        .map_err(|_| RwError::from(InternalError("Can't convert left to float".to_string())))?;
     let r: T3 = r
         .try_into()
-        .map_err(|_| RwError::from(InternalError("Can't covert right to float".to_string())))?;
+        .map_err(|_| RwError::from(InternalError("Can't convert right to float".to_string())))?;
     Ok(l <= r)
 }
 
@@ -199,10 +199,10 @@ where
 {
     let l: T3 = l
         .try_into()
-        .map_err(|_| RwError::from(InternalError("Can't covert left to float".to_string())))?;
+        .map_err(|_| RwError::from(InternalError("Can't convert left to float".to_string())))?;
     let r: T3 = r
         .try_into()
-        .map_err(|_| RwError::from(InternalError("Can't covert right to float".to_string())))?;
+        .map_err(|_| RwError::from(InternalError("Can't convert right to float".to_string())))?;
     Ok(l == r)
 }
 
@@ -227,10 +227,10 @@ where
 {
     let l: T3 = l
         .try_into()
-        .map_err(|_| RwError::from(InternalError("Can't covert left to float".to_string())))?;
+        .map_err(|_| RwError::from(InternalError("Can't convert left to float".to_string())))?;
     let r: T3 = r
         .try_into()
-        .map_err(|_| RwError::from(InternalError("Can't covert right to float".to_string())))?;
+        .map_err(|_| RwError::from(InternalError("Can't convert right to float".to_string())))?;
     Ok(l != r)
 }
 
@@ -244,14 +244,14 @@ where
     // TODO: We need to improve the error message
     let l: T3 = l.try_into().map_err(|_| {
         RwError::from(InternalError(format!(
-            "Can't covert {} to {}",
+            "Can't convert {} to {}",
             type_name::<T1>(),
             type_name::<T3>()
         )))
     })?;
     let r: T3 = r.try_into().map_err(|_| {
         RwError::from(InternalError(format!(
-            "Can't covert {} to {}",
+            "Can't convert {} to {}",
             type_name::<T2>(),
             type_name::<T3>()
         )))
