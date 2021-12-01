@@ -48,7 +48,7 @@ message HashAggNode {
   repeated expr.AggCall agg_calls = 2;
 }
 
-message AppendOnlyTopNNode {
+message TopNNode {
   repeated plan.ColumnOrder column_orders = 1;
   // 0 means no limit as limit of 0 means this node should be optimized away
   uint64 limit = 2;
@@ -71,8 +71,9 @@ message StreamNode {
     MViewNode mview_node = 7;
     SimpleAggNode simple_agg_node = 8;
     HashAggNode hash_agg_node = 9;
-    AppendOnlyTopNNode append_only_top_n_node = 10;
+    TopNNode append_only_top_n_node = 10;
     HashJoinNode hash_join_node = 11;
+    TopNNode top_n_node = 12;
   }
   // Child node in plan aka. upstream nodes in the streaming DAG
   repeated StreamNode input = 3;

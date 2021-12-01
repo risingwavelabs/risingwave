@@ -488,6 +488,21 @@ impl StreamManagerCore {
                     top_n_node.offset as usize,
                 )))
             }
+            TopNNode(top_n_node) => {
+                let column_orders = &top_n_node.column_orders;
+                let order_paris = fetch_orders(column_orders)?;
+                let limit = if top_n_node.limit == 0 {
+                    None
+                } else {
+                    Some(top_n_node.limit as usize)
+                };
+                Ok(Box::new(TopNExecutor::new(
+                    input.remove(0),
+                    Arc::new(order_paris),
+                    limit,
+                    top_n_node.offset as usize,
+                )))
+            }
             HashJoinNode(hash_join_node) => {
                 let source_r = input.remove(1);
                 let source_l = input.remove(0);

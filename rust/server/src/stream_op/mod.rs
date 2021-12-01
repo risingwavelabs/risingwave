@@ -19,6 +19,7 @@ pub use simple_agg::*;
 pub use stream_source::*;
 pub use table_source::*;
 pub use top_n::*;
+pub use top_n_appendonly::*;
 
 mod actor;
 mod aggregation;
@@ -34,6 +35,7 @@ mod simple_agg;
 mod stream_source;
 mod table_source;
 mod top_n;
+mod top_n_appendonly;
 
 #[cfg(test)]
 mod integration_tests;

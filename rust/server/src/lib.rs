@@ -5,6 +5,7 @@
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(test)]
+#![feature(map_first_last)]
 
 #[macro_use]
 extern crate log;
