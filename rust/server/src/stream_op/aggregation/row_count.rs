@@ -4,7 +4,7 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
-use risingwave_common::types::{DataTypeRef, Datum, Int64Type, Scalar, ScalarImpl};
+use risingwave_common::types::{DataTypeRef, Datum, Int64Type, ScalarImpl};
 
 use super::StreamingAggStateImpl;
 
@@ -77,18 +77,8 @@ impl StreamingAggStateImpl for StreamingRowCountAgg {
         Ok(())
     }
 
-    fn get_output(&self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-        match builder {
-            ArrayBuilderImpl::Int64(builder) => builder.append(Some(self.row_cnt)),
-            other_variant => panic!(
-        "type mismatch in streaming aggregator StreamingFoldAgg output: expected i64, get {}",
-        other_variant.get_ident()
-      ),
-        }
-    }
-
-    fn to_datum(&self) -> Datum {
-        Some(self.row_cnt.to_scalar_value())
+    fn get_output(&self) -> Result<Datum> {
+        Ok(Some(self.row_cnt.into()))
     }
 
     fn new_builder(&self) -> ArrayBuilderImpl {
@@ -98,57 +88,32 @@ impl StreamingAggStateImpl for StreamingRowCountAgg {
 
 #[cfg(test)]
 mod tests {
-    use super::super::tests::get_output_from_impl_state;
     use super::*;
 
     #[test]
     fn test_countable_agg() {
         let mut state = StreamingRowCountAgg::new();
 
-        // when there is no element, output should be `None`.
-        assert_eq!(
-            get_output_from_impl_state(&mut state)
-                .as_int64()
-                .iter()
-                .collect::<Vec<_>>(),
-            [Some(0)]
-        );
+        // when there is no element, output should be `0`.
+        assert_eq!(state.get_output().unwrap().unwrap().as_int64(), &0);
 
         // insert one element to state
         state.apply_batch(&[Op::Insert], None, &[]).unwrap();
 
         // should be one row
-        assert_eq!(
-            get_output_from_impl_state(&mut state)
-                .as_int64()
-                .iter()
-                .collect::<Vec<_>>(),
-            [Some(1)]
-        );
+        assert_eq!(state.get_output().unwrap().unwrap().as_int64(), &1);
 
         // delete one element from state
         state.apply_batch(&[Op::Delete], None, &[]).unwrap();
 
         // should be 0 rows.
-        assert_eq!(
-            get_output_from_impl_state(&mut state)
-                .as_int64()
-                .iter()
-                .collect::<Vec<_>>(),
-            [Some(0)]
-        );
+        assert_eq!(state.get_output().unwrap().unwrap().as_int64(), &0);
 
         // one more deletion, so we are having `-1` elements inside.
         state.apply_batch(&[Op::Delete], None, &[]).unwrap();
 
         // should be the same as `TestState`'s output
-        assert_eq!(
-            get_output_from_impl_state(&mut state)
-                .as_int64()
-                .iter()
-                .collect::<Vec<_>>(),
-            [Some(-1)]
-        );
+        assert_eq!(state.get_output().unwrap().unwrap().as_int64(), &-1);
 
         // one more insert, so we are having `0` elements inside.
         state
@@ -160,13 +125,7 @@ mod tests {
             .unwrap();
 
         // should be `0`
-        assert_eq!(
-            get_output_from_impl_state(&mut state)
-                .as_int64()
-                .iter()
-                .collect::<Vec<_>>(),
-            [Some(0)]
-        );
+        assert_eq!(state.get_output().unwrap().unwrap().as_int64(), &0);
 
         // one more deletion, so we are having `-1` elements inside.
         state
@@ -178,12 +137,6 @@ mod tests {
             .unwrap();
 
         // should be `-1`
-        assert_eq!(
-            get_output_from_impl_state(&mut state)
-                .as_int64()
-                .iter()
-                .collect::<Vec<_>>(),
-            [Some(-1)]
-        );
+        assert_eq!(state.get_output().unwrap().unwrap().as_int64(), &-1);
     }
 }

@@ -5,7 +5,7 @@ use super::{AggCall, Barrier, Executor, Message};
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{Array, Row};
+use risingwave_common::array::Row;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
@@ -192,10 +192,11 @@ where
 
             // We assume the first state of aggregation is always `StreamingRowCountAgg`.
             let row_cnt = {
-                get_one_output_from_state_impl(&*cur_states.agg_states[0])?
-                    .as_int64()
-                    .value_at(0)
+                cur_states.agg_states[0]
+                    .get_output()
                     .unwrap()
+                    .map(|x| *x.as_int64())
+                    .unwrap_or(0)
             };
 
             if row_cnt == 0 {
@@ -217,7 +218,7 @@ where
                         .iter_mut()
                         .zip(cur_states.agg_states.iter())
                     {
-                        state.get_output(builder)?;
+                        builder.append_datum(&state.get_output()?)?;
                     }
                 }
                 Some(prev_states) if row_cnt == 0 => {
@@ -231,7 +232,7 @@ where
                         .iter_mut()
                         .zip(prev_states.agg_states.iter())
                     {
-                        state.get_output(builder)?;
+                        builder.append_datum(&state.get_output()?)?;
                     }
                 }
                 Some(prev_states) => {
@@ -248,8 +249,8 @@ where
                         prev_states.agg_states.iter(),
                         cur_states.agg_states.iter(),
                     )) {
-                        prev_state.get_output(builder)?;
-                        cur_state.get_output(builder)?;
+                        builder.append_datum(&prev_state.get_output()?)?;
+                        builder.append_datum(&cur_state.get_output()?)?;
                     }
                 }
             }

@@ -7,10 +7,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataTypeKind;
 
-use super::{
-    get_one_output_from_state_impl, AggCall, CellBasedSchemaedSerializable, SchemaedSerializable,
-    StreamingAggStateImpl,
-};
+use super::{AggCall, CellBasedSchemaedSerializable, SchemaedSerializable, StreamingAggStateImpl};
 use crate::stream_op::create_streaming_agg_state;
 
 /// A key stored in `KeyedState`.
@@ -57,7 +54,7 @@ impl HashValue {
         let row = self
             .agg_states
             .iter()
-            .map(|state| get_one_output_from_state_impl(&**state).unwrap().to_datum())
+            .map(|state| state.get_output().unwrap())
             .collect_vec();
         Row(row)
             .serialize()
@@ -65,9 +62,7 @@ impl HashValue {
     }
 
     pub fn serialize_cell(&self, cell_idx: usize) -> Result<Vec<u8>> {
-        let datum = get_one_output_from_state_impl(&*self.agg_states[cell_idx])
-            .unwrap()
-            .to_datum();
+        let datum = self.agg_states[cell_idx].get_output().unwrap();
         Row(vec![datum])
             .serialize()
             .map_err(|e| ErrorCode::MemComparableError(e).into())

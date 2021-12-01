@@ -47,13 +47,14 @@ pub trait StreamingAggState<A: Array>: Send + Sync + 'static {
 
 /// `StreamingAggFunction` allows us to get output from a streaming state.
 pub trait StreamingAggFunction<B: ArrayBuilder>: Send + Sync + 'static {
-    fn get_output_concrete(&self, builder: &mut B) -> Result<()>;
+    fn get_output_concrete(&self) -> Result<Option<<B::ArrayType as Array>::OwnedItem>>;
 }
 
 /// `StreamingAggStateImpl` erases the associated type information of
 /// `StreamingAggState` and `StreamingAggFunction`. You should manually
 /// implement this trait for necessary types.
 pub trait StreamingAggStateImpl: Any + std::fmt::Debug + DynClone + Send + Sync + 'static {
+    /// Apply a batch to the state
     fn apply_batch(
         &mut self,
         ops: Ops<'_>,
@@ -61,20 +62,14 @@ pub trait StreamingAggStateImpl: Any + std::fmt::Debug + DynClone + Send + Sync 
         data: &[&ArrayImpl],
     ) -> Result<()>;
 
-    fn get_output(&self, builder: &mut ArrayBuilderImpl) -> Result<()>;
+    /// Get the output value
+    fn get_output(&self) -> Result<Datum>;
 
-    fn to_datum(&self) -> Datum;
-
+    /// Get the builder of the state output
     fn new_builder(&self) -> ArrayBuilderImpl;
 }
 
 dyn_clone::clone_trait_object!(StreamingAggStateImpl);
-
-pub fn get_one_output_from_state_impl(state: &dyn StreamingAggStateImpl) -> Result<ArrayImpl> {
-    let mut builder: ArrayBuilderImpl = state.new_builder();
-    state.get_output(&mut builder)?;
-    Ok(builder.finish().unwrap())
-}
 
 /// [postgresql specification of aggregate functions](https://www.postgresql.org/docs/13/functions-aggregate.html)
 /// Most of the general-purpose aggregate functions have one input except for:
@@ -233,25 +228,4 @@ pub fn create_streaming_agg_state(
         _ => todo!(),
     };
     Ok(state)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    use risingwave_common::array::from_builder;
-
-    pub fn get_output_from_state<O, S>(state: &mut S) -> O::ArrayType
-    where
-        O: ArrayBuilder,
-        S: StreamingAggFunction<O>,
-    {
-        from_builder(|builder| state.get_output_concrete(builder)).unwrap()
-    }
-
-    pub fn get_output_from_impl_state(state: &mut impl StreamingAggStateImpl) -> ArrayImpl {
-        let mut builder = state.new_builder();
-        state.get_output(&mut builder).unwrap();
-        builder.finish().unwrap()
-    }
 }

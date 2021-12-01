@@ -8,7 +8,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::{
     ErrorCode::NotImplementedError, ErrorCode::NumericValueOutOfRange, Result, RwError,
 };
-use risingwave_common::types::{option_as_scalar_ref, Datum, Scalar, ScalarRef};
+use risingwave_common::types::{Datum, Scalar, ScalarRef};
 
 use super::{StreamingAggFunction, StreamingAggState, StreamingAggStateImpl};
 
@@ -386,8 +386,8 @@ where
     I: Array,
     S: StreamingFoldable<R::OwnedItem, I::OwnedItem>,
 {
-    fn get_output_concrete(&self, builder: &mut R::Builder) -> Result<()> {
-        builder.append(option_as_scalar_ref(&self.result))
+    fn get_output_concrete(&self) -> Result<Option<R::OwnedItem>> {
+        Ok(self.result.clone())
     }
 }
 
@@ -432,40 +432,29 @@ where
 }
 
 macro_rules! impl_fold_agg {
-  ($result:tt, $result_variant:tt, $input:tt) => {
-    impl<S> StreamingAggStateImpl for StreamingFoldAgg<$result, $input, S>
-    where
-      S: StreamingFoldable<<$result as Array>::OwnedItem, <$input as Array>::OwnedItem>,
-    {
-      fn apply_batch(
-        &mut self,
-        ops: Ops<'_>,
-        visibility: Option<&Bitmap>,
-        data: &[&ArrayImpl],
-      ) -> Result<()> {
-        self.apply_batch_concrete(ops, visibility, data[0].into())
-      }
+    ($result:tt, $result_variant:tt, $input:tt) => {
+        impl<S> StreamingAggStateImpl for StreamingFoldAgg<$result, $input, S>
+        where
+            S: StreamingFoldable<<$result as Array>::OwnedItem, <$input as Array>::OwnedItem>,
+        {
+            fn apply_batch(
+                &mut self,
+                ops: Ops<'_>,
+                visibility: Option<&Bitmap>,
+                data: &[&ArrayImpl],
+            ) -> Result<()> {
+                self.apply_batch_concrete(ops, visibility, data[0].into())
+            }
 
-      fn get_output(&self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-        match builder {
-          ArrayBuilderImpl::$result_variant(builder) => self.get_output_concrete(builder),
-          other_variant => panic!(
-            "type mismatch in streaming aggregator StreamingFoldAgg output: expected {}, get {}",
-            stringify!($result),
-            other_variant.get_ident()
-          ),
+            fn get_output(&self) -> Result<Datum> {
+                Ok(self.result.map(Scalar::to_scalar_value))
+            }
+
+            fn new_builder(&self) -> ArrayBuilderImpl {
+                ArrayBuilderImpl::$result_variant(<$result as Array>::Builder::new(0).unwrap())
+            }
         }
-      }
-
-      fn to_datum(&self) -> Datum {
-        self.result.map(Scalar::to_scalar_value)
-      }
-
-      fn new_builder(&self) -> ArrayBuilderImpl {
-        ArrayBuilderImpl::$result_variant(<$result as Array>::Builder::new(0).unwrap())
-      }
-    }
-  };
+    };
 }
 
 // Implement all supported combination of input and output for `StreamingFoldAgg`.
@@ -484,7 +473,6 @@ impl_fold_agg! { DecimalArray, Decimal, DecimalArray }
 
 #[cfg(test)]
 mod tests {
-    use super::super::tests::get_output_from_state;
     use super::*;
     use risingwave_common::array::I64Array;
     use risingwave_common::{array, array_nonnull};
@@ -512,10 +500,7 @@ mod tests {
             &[&array_nonnull!(I64Array, [1, 2, 3, 3]).into()],
         )
         .unwrap();
-        let mut builder = agg.new_builder();
-        agg.get_output(&mut builder).unwrap();
-        let array = builder.finish().unwrap();
-        assert_eq!(array.as_int64().value_at(0), Some(3));
+        assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &3);
 
         agg.apply_batch(
             &[Op::Insert, Op::Delete, Op::Delete, Op::Insert],
@@ -523,10 +508,7 @@ mod tests {
             &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
         )
         .unwrap();
-        let mut builder = agg.new_builder();
-        agg.get_output(&mut builder).unwrap();
-        let array = builder.finish().unwrap();
-        assert_eq!(array.as_int64().value_at(0), Some(5));
+        assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &5);
     }
 
     #[test]
@@ -538,8 +520,7 @@ mod tests {
             &[&array_nonnull!(I64Array, [1, 2, 3, 3]).into()],
         )
         .unwrap();
-        let array = get_output_from_state(&mut agg);
-        assert_eq!(array.value_at(0), Some(3));
+        assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &3);
 
         agg.apply_batch(
             &[Op::Insert, Op::Delete, Op::Delete, Op::Insert],
@@ -547,10 +528,7 @@ mod tests {
             &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
         )
         .unwrap();
-        let mut builder = agg.new_builder();
-        agg.get_output(&mut builder).unwrap();
-        let array = builder.finish().unwrap();
-        assert_eq!(array.as_int64().value_at(0), Some(5));
+        assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &5);
     }
 
     #[test]
@@ -562,8 +540,7 @@ mod tests {
             &[&array_nonnull!(I64Array, [10, 1, 2, 3, 3]).into()],
         )
         .unwrap();
-        let array = get_output_from_state(&mut agg);
-        assert_eq!(array.value_at(0), Some(-7));
+        assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &-7);
 
         agg.apply_batch(
             &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
@@ -571,10 +548,7 @@ mod tests {
             &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
         )
         .unwrap();
-        let mut builder = agg.new_builder();
-        agg.get_output(&mut builder).unwrap();
-        let array = builder.finish().unwrap();
-        assert_eq!(array.as_int64().value_at(0), Some(-8));
+        assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &-8);
     }
 
     #[test]
@@ -583,9 +557,7 @@ mod tests {
     fn test_primitive_sum_no_none() {
         let mut agg = TestStreamingSumAgg::<I64Array>::new();
 
-        // When no operation has been applied, output should be `None`.
-        let array = get_output_from_state(&mut agg);
-        assert_eq!(array.value_at(0), None);
+        assert_eq!(agg.get_output().unwrap(), None);
 
         agg.apply_batch(
             &[Op::Delete, Op::Insert, Op::Insert, Op::Delete],
@@ -593,8 +565,7 @@ mod tests {
             &[&array_nonnull!(I64Array, [1, 2, 1, 2]).into()],
         )
         .unwrap();
-        let array = get_output_from_state(&mut agg);
-        assert_eq!(array.value_at(0), Some(0));
+        assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
 
         agg.apply_batch(
             &[Op::Delete, Op::Delete, Op::Delete, Op::Insert],
@@ -602,10 +573,7 @@ mod tests {
             &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
         )
         .unwrap();
-        let mut builder = agg.new_builder();
-        agg.get_output(&mut builder).unwrap();
-        let array = builder.finish().unwrap();
-        assert_eq!(array.as_int64().value_at(0), Some(0));
+        assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
     }
 
     #[test]
@@ -618,8 +586,7 @@ mod tests {
         )
         .unwrap();
 
-        let array = get_output_from_state(&mut agg);
-        assert_eq!(array.value_at(0), Some(1));
+        assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &1);
 
         agg.apply_batch(
             &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
@@ -627,10 +594,7 @@ mod tests {
             &[&array!(I64Array, [Some(1), None, Some(3), Some(1)]).into()],
         )
         .unwrap();
-        let mut builder = agg.new_builder();
-        agg.get_output(&mut builder).unwrap();
-        let array = builder.finish().unwrap();
-        assert_eq!(array.as_int64().value_at(0), Some(1));
+        assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &1);
     }
 
     #[test]
@@ -643,8 +607,7 @@ mod tests {
         )
         .unwrap();
 
-        let array = get_output_from_state(&mut agg);
-        assert_eq!(array.value_at(0), Some(1));
+        assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &1);
 
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
@@ -652,10 +615,7 @@ mod tests {
             &[&array!(I64Array, [Some(1), Some(10), Some(-1), Some(5)]).into()],
         )
         .unwrap();
-        let mut builder = agg.new_builder();
-        agg.get_output(&mut builder).unwrap();
-        let array = builder.finish().unwrap();
-        assert_eq!(array.as_int64().value_at(0), Some(-1));
+        assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &-1);
     }
 
     #[test]
@@ -668,8 +628,7 @@ mod tests {
         )
         .unwrap();
 
-        let array = get_output_from_state(&mut agg);
-        assert_eq!(array.value_at(0), Some(1.0));
+        assert_eq!(agg.get_output().unwrap().unwrap().as_float64(), &1.0);
 
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
@@ -677,10 +636,7 @@ mod tests {
             &[&array!(F64Array, [Some(1.0), Some(10.0), Some(-1.0), Some(5.0)]).into()],
         )
         .unwrap();
-        let mut builder = agg.new_builder();
-        agg.get_output(&mut builder).unwrap();
-        let array = builder.finish().unwrap();
-        assert_eq!(array.as_float64().value_at(0), Some(-1.0));
+        assert_eq!(agg.get_output().unwrap().unwrap().as_float64(), &-1.0);
     }
 
     #[test]
@@ -693,8 +649,7 @@ mod tests {
         )
         .unwrap();
 
-        let array = get_output_from_state(&mut agg);
-        assert_eq!(array.value_at(0), Some(10));
+        assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &10);
 
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
@@ -702,9 +657,6 @@ mod tests {
             &[&array!(I64Array, [Some(1), Some(10), Some(100), Some(5)]).into()],
         )
         .unwrap();
-        let mut builder = agg.new_builder();
-        agg.get_output(&mut builder).unwrap();
-        let array = builder.finish().unwrap();
-        assert_eq!(array.as_int64().value_at(0), Some(100));
+        assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &100);
     }
 }

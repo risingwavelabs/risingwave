@@ -98,7 +98,7 @@ impl SimpleAggExecutor {
     /// Record current states into a group of builders
     fn record_states(&mut self, builders: &mut [ArrayBuilderImpl]) -> Result<()> {
         for (state, builder) in self.states.iter().zip(builders.iter_mut()) {
-            state.get_output(builder)?;
+            builder.append_datum(&state.get_output()?)?;
         }
         Ok(())
     }
