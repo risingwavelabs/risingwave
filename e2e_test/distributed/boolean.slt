@@ -58,3 +58,11 @@ SELECT '    true   '::text::boolean AS true,
        '     FALSE'::text::boolean AS false;
 ----
 true false
+
+statement ok
+CREATE TABLE TB1(v1 bool);
+
+query B
+SELECT TB1.* FROM TB1;
+----
+

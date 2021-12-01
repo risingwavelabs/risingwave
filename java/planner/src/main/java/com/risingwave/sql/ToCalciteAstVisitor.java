@@ -218,6 +218,7 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
   public SqlNode visitAllColumns(AllColumns node, Void context) {
     if (node.getPrefix().isPresent()) {
       List<String> prefixes = node.getPrefix().get().getParts();
+      prefixes.add("*");
       List<SqlParserPos> poses =
           prefixes.stream().map(x -> SqlParserPos.ZERO).collect(Collectors.toList());
       return SqlIdentifier.star(prefixes, SqlParserPos.ZERO, poses);
