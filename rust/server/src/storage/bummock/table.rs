@@ -3,7 +3,7 @@ use crate::storage::Table;
 use crate::storage::{MemRowGroup, MemRowGroupRef};
 use crate::storage::{PartitionedRowGroupRef, TableColumnDesc};
 use risingwave_common::array::InternalError;
-use risingwave_common::array::{DataChunk, DataChunkRef};
+use risingwave_common::array::{make_dummy_data_chunk, DataChunk, DataChunkRef};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
@@ -218,6 +218,29 @@ impl BummockTable {
     // TODO: [xiangyhu] flush using persist::fs module
     async fn flush(&self) -> Result<()> {
         todo!();
+    }
+
+    /// TODO: Since we only need to know how many rows are visible,
+    /// the storage can read much much less and only return dummy `DataChunk`s
+    /// whose cardinality is the number of visible rows, instead of
+    /// actually reading one or more columns.
+    /// Whether this needs to be an independent function or merged with other function
+    /// is undecided. The `seq_scan` uses `get_data` together with `column_at`
+    /// to get around with unimplemented `get_data_by_columns`. So it seems this would be
+    /// a temporary workaround anyway?
+    pub async fn get_dummy_data(&self) -> Result<BummockResult> {
+        let segs = self.mem_dirty_segs.read().unwrap();
+        match segs.is_empty() {
+            true => Ok(BummockResult::DataEof),
+            false => {
+                let data_vec = segs.last().unwrap().get_data().unwrap();
+                let dummy_data_vec = data_vec
+                    .iter()
+                    .map(|chunk| Arc::new(make_dummy_data_chunk(chunk.cardinality())))
+                    .collect::<Vec<_>>();
+                Ok(BummockResult::Data(dummy_data_vec))
+            }
+        }
     }
 }
 

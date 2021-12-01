@@ -129,8 +129,7 @@ RwStreamMaterializedView(name=[t_one_count_star])
       RwStreamExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
         RwStreamProject(EXPR$0=[$0])
           RwStreamAgg(group=[{}], EXPR$0=[COUNT()])
-            RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-              RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3])
+            RwStreamTableSource(table=[[test_schema, t]])
             ]]>
         </Resource>
     </TestCase>

@@ -14,6 +14,12 @@ use std::hash::BuildHasher;
 use std::sync::Arc;
 use typed_builder::TypedBuilder;
 
+pub fn make_dummy_data_chunk(cardinality: usize) -> DataChunk {
+    let mut chunk = DataChunk::new(vec![], None);
+    chunk.set_dummy_cardinality(cardinality);
+    chunk
+}
+
 /// `DataChunk` is a collection of arrays with visibility mask.
 #[derive(Clone, Default, Debug, TypedBuilder)]
 pub struct DataChunk {
@@ -21,6 +27,8 @@ pub struct DataChunk {
     columns: Vec<Column>,
     #[builder(default, setter(strip_option))]
     visibility: Option<Bitmap>,
+    #[builder(default, setter(strip_option))]
+    dummy_cardinality: Option<usize>,
 }
 
 impl DataChunk {
@@ -28,7 +36,12 @@ impl DataChunk {
         DataChunk {
             columns,
             visibility,
+            dummy_cardinality: None,
         }
+    }
+
+    fn set_dummy_cardinality(&mut self, cardinality: usize) -> Option<usize> {
+        self.dummy_cardinality.replace(cardinality)
     }
 
     pub fn into_parts(self) -> (Vec<Column>, Option<Bitmap>) {
@@ -41,6 +54,9 @@ impl DataChunk {
 
     /// return the number of visible tuples
     pub fn cardinality(&self) -> usize {
+        if let Some(card) = self.dummy_cardinality {
+            return card;
+        }
         if let Some(bitmap) = &self.visibility {
             bitmap.iter().map(|visible| visible as usize).sum()
         } else {
@@ -64,6 +80,7 @@ impl DataChunk {
         DataChunk {
             columns: self.columns.clone(),
             visibility: Some(visibility),
+            dummy_cardinality: None,
         }
     }
 
@@ -130,6 +147,7 @@ impl DataChunk {
         let mut chunk = DataChunk {
             columns: vec![],
             visibility: None,
+            dummy_cardinality: None,
         };
 
         for any_col in proto.get_columns() {
@@ -288,6 +306,7 @@ impl TryFrom<Vec<Column>> for DataChunk {
         Ok(Self {
             columns,
             visibility: None,
+            dummy_cardinality: None,
         })
     }
 }

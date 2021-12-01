@@ -10,7 +10,7 @@ use risingwave_pb::ToProto;
 use crate::executor::{Executor, ExecutorBuilder};
 use crate::storage::*;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{DataChunk, DataChunkRef};
+use risingwave_common::array::{make_dummy_data_chunk, DataChunk, DataChunkRef};
 use risingwave_common::catalog::TableId;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::{InternalError, ProstError};
@@ -85,7 +85,14 @@ impl Executor for SeqScanExecutor {
     async fn next(&mut self) -> Result<Option<DataChunk>> {
         if self.first_execution {
             self.first_execution = false;
-            if let BummockResult::Data(data) = self.table.get_data().await? {
+
+            let res = if self.column_ids.is_empty() {
+                self.table.get_dummy_data().await?
+            } else {
+                self.table.get_data().await?
+            };
+
+            if let BummockResult::Data(data) = res {
                 self.data = data;
             } else {
                 return Ok(None);
@@ -104,14 +111,19 @@ impl Executor for SeqScanExecutor {
 
         let cur_chunk = &self.data[self.chunk_idx];
 
-        let columns = self
-            .column_indices
-            .iter()
-            .map(|idx| cur_chunk.column_at(*idx))
-            .collect::<Result<Vec<Column>>>()?;
+        let ret = if self.column_indices.is_empty() {
+            make_dummy_data_chunk(cur_chunk.cardinality())
+        } else {
+            let columns = self
+                .column_indices
+                .iter()
+                .map(|idx| cur_chunk.column_at(*idx))
+                .collect::<Result<Vec<Column>>>()?;
 
-        // TODO: visibility map here
-        let ret = DataChunk::builder().columns(columns).build();
+            // TODO: visibility map here
+            let ret: DataChunk = DataChunk::builder().columns(columns).build();
+            ret
+        };
 
         self.chunk_idx += 1;
         Ok(Some(ret))

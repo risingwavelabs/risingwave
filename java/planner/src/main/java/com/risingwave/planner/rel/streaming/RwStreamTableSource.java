@@ -164,9 +164,13 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
       //
       // Distribution by first field may not always be a good solution, but for now, just
       // simply do it.
-      int[] distFields = {0};
-      RwDistributionTrait exchangeDistributionTrait = RwDistributions.hash(distFields);
-      return RwStreamExchange.create(streamTableSource, exchangeDistributionTrait);
+      if (!streamTableSource.getColumnIds().isEmpty()) {
+        int[] distFields = {0};
+        RwDistributionTrait exchangeDistributionTrait = RwDistributions.hash(distFields);
+        return RwStreamExchange.create(streamTableSource, exchangeDistributionTrait);
+      } else {
+        return streamTableSource;
+      }
     }
   }
 }

@@ -29,6 +29,7 @@ import com.risingwave.planner.rules.distributed.agg.TwoPhaseLimitRule;
 import com.risingwave.planner.rules.distributed.join.BroadcastJoinRule;
 import com.risingwave.planner.rules.distributed.join.ShuffleJoinRule;
 import com.risingwave.planner.rules.logical.ProjectToTableScanRule;
+import com.risingwave.planner.rules.logical.SimpleCountStarColumnPruningRule;
 import org.apache.calcite.rel.rules.AggregateExtractProjectRule;
 import org.apache.calcite.rel.rules.CoreRules;
 import org.apache.calcite.rel.rules.ProjectJoinTransposeRule;
@@ -118,7 +119,9 @@ public class BatchRuleSets {
           RwLogicalJoin.RwLogicalJoinConverterRule.INSTANCE);
 
   public static final RuleSet LOGICAL_OPTIMIZATION_RULES =
-      RuleSets.ofList(ProjectToTableScanRule.Config.INSTANCE.toRule());
+      RuleSets.ofList(
+          ProjectToTableScanRule.Config.INSTANCE.toRule(),
+          SimpleCountStarColumnPruningRule.Config.INSTANCE.toRule());
 
   public static final RuleSet PHYSICAL_CONVERTER_RULES =
       RuleSets.ofList(

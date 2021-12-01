@@ -64,4 +64,33 @@ RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
 ]]>
         </Resource>
     </TestCase>
+
+    <TestCase name="simple count(*)">
+        <Resource name="sql">
+            <![CDATA[
+select count(*) from supplier
+            ]]>
+        </Resource>
+        <Resource name="physical">
+            <![CDATA[
+RwBatchSortAgg(group=[{}], EXPR$0=[COUNT()])
+  RwBatchTableScan(table=[[test_schema, supplier]])
+]]>
+        </Resource>
+    </TestCase>
+
+    <TestCase name="group by count(*)">
+        <Resource name="sql">
+            <![CDATA[
+select s_suppkey, s_nationkey, count(*) from supplier group by s_suppkey, s_nationkey
+            ]]>
+        </Resource>
+        <Resource name="physical">
+            <![CDATA[
+RwBatchSortAgg(group=[{0, 1}], EXPR$2=[COUNT()])
+  RwBatchSort(sort0=[$0], sort1=[$1], dir0=[ASC], dir1=[ASC])
+    RwBatchTableScan(table=[[test_schema, supplier]], columns=[s_suppkey,s_nationkey])
+]]>
+        </Resource>
+    </TestCase>
 </Root>
