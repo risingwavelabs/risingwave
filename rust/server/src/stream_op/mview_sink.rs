@@ -1,6 +1,5 @@
-use super::Barrier;
+use super::{Barrier, KeyedState, RowSerializer};
 use super::{Executor, Message, Result, SimpleExecutor, StreamChunk};
-use crate::storage::RowTableRef;
 use async_trait::async_trait;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::Schema;
@@ -9,54 +8,67 @@ use std::sync::Arc;
 
 /// `MViewSinkExecutor` writes data to a row-based memtable, so that data could
 /// be queried by the AP engine.
-pub struct MViewSinkExecutor {
+pub struct MViewSinkExecutor<StateBackend>
+where
+    StateBackend: KeyedState<RowSerializer, RowSerializer>,
+{
     input: Box<dyn Executor>,
-    table: RowTableRef,
+    schema: Schema,
+    state: StateBackend,
     pk_col: Vec<usize>,
     order_pairs: Arc<Vec<OrderPair>>,
-    ingest_op: Vec<(Row, Option<Row>)>,
 }
 
-impl MViewSinkExecutor {
+impl<StateBackend> MViewSinkExecutor<StateBackend>
+where
+    StateBackend: KeyedState<RowSerializer, RowSerializer>,
+{
     pub fn new(
         input: Box<dyn Executor>,
-        table: RowTableRef,
+        schema: Schema,
+        state: StateBackend,
         pk_col: Vec<usize>,
         order_pairs: Arc<Vec<OrderPair>>,
     ) -> Self {
         Self {
             input,
-            table,
+            schema,
+            state,
             pk_col,
             order_pairs,
-            ingest_op: vec![],
         }
     }
 
-    fn flush(&mut self, barrier: Barrier) -> Result<Message> {
-        self.table.ingest(std::mem::take(&mut self.ingest_op))?;
+    async fn flush(&mut self, barrier: Barrier) -> Result<Message> {
+        self.state.flush().await?;
         Ok(Message::Barrier(barrier))
     }
 }
 
 #[async_trait]
-impl Executor for MViewSinkExecutor {
+impl<StateBackend> Executor for MViewSinkExecutor<StateBackend>
+where
+    StateBackend: KeyedState<RowSerializer, RowSerializer>,
+{
     async fn next(&mut self) -> Result<Message> {
         match self.input().next().await {
             Ok(message) => match message {
                 Message::Chunk(chunk) => self.consume_chunk(chunk),
-                Message::Barrier(b) => self.flush(b),
+                Message::Barrier(b) => self.flush(b).await,
             },
             Err(e) => Err(e),
         }
     }
 
     fn schema(&self) -> &Schema {
-        self.table.schema()
+        &self.schema
     }
 }
 
-impl SimpleExecutor for MViewSinkExecutor {
+impl<StateBackend> SimpleExecutor for MViewSinkExecutor<StateBackend>
+where
+    StateBackend: KeyedState<RowSerializer, RowSerializer>,
+{
     fn input(&mut self) -> &mut dyn Executor {
         &mut *self.input
     }
@@ -99,10 +111,11 @@ impl SimpleExecutor for MViewSinkExecutor {
 
             match op {
                 Insert | UpdateInsert => {
-                    self.ingest_op.push((pk_row, Some(row)));
+                    self.state.put(pk_row, row);
                 }
                 Delete | UpdateDelete => {
-                    self.ingest_op.push((pk_row, None));
+                    // TODO(MrCroxx): make sure the delete implementation writes tombstones.
+                    self.state.delete(&pk_row);
                 }
             }
         }
@@ -113,24 +126,21 @@ impl SimpleExecutor for MViewSinkExecutor {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::{RowTable, SimpleTableManager, TableImpl, TableManager};
+
     use crate::stream_op::test_utils::*;
     use crate::stream_op::*;
     use crate::*;
-    use risingwave_pb::ToProto;
-
     use risingwave_common::array::{I32Array, Op, Row};
-    use risingwave_common::catalog::{Field, SchemaId, TableId};
+    use risingwave_common::catalog::Field;
     use risingwave_common::types::{Int32Type, Scalar};
     use risingwave_pb::data::{data_type::TypeName, DataType};
     use risingwave_pb::plan::{column_desc::ColumnEncodingType, ColumnDesc};
+
     use std::sync::Arc;
 
     #[tokio::test]
     async fn test_sink() {
-        // Prepare storage and memtable.
-        let store_mgr = Arc::new(SimpleTableManager::new());
-        let table_id = TableId::new(SchemaId::default(), 1);
+        // TODO(MrCroxx): use `Field` directly.
         // Two columns of int32 type, the first column is PK.
         let column_desc1 = ColumnDesc {
             column_type: Some(DataType {
@@ -152,9 +162,18 @@ mod tests {
             is_primary: false,
             column_id: 1,
         };
-        let column_descs = vec![column_desc1.to_proto(), column_desc2.to_proto()];
+        let columns: Vec<ColumnDesc> = vec![column_desc1, column_desc2];
         let pks = vec![0_usize];
-        let _res = store_mgr.create_materialized_view(&table_id, column_descs, pks.clone());
+
+        // TODO: Remove to_prost later.
+        let key_schema = Schema::try_from(
+            &pks.iter()
+                .map(|col_idx| columns[*col_idx].clone())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let value_schema = Schema::try_from(&columns).unwrap();
+
         // Prepare source chunks.
         let chunk1 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert, Op::Insert],
@@ -173,65 +192,65 @@ mod tests {
             visibility: None,
         };
 
-        let table_ref = store_mgr.get_table(&table_id).unwrap();
-        if let TableImpl::TestRow(table) = table_ref {
-            // Prepare stream executors.
-            let schema = Schema {
-                fields: vec![
-                    Field {
-                        data_type: Int32Type::create(false),
-                    },
-                    Field {
-                        data_type: Int32Type::create(false),
-                    },
-                ],
-            };
-            let source = MockSource::with_messages(
-                schema,
-                vec![
-                    Message::Chunk(chunk1),
-                    Message::Barrier(Barrier::default()),
-                    Message::Chunk(chunk2),
-                    Message::Barrier(Barrier::default()),
-                ],
-            );
-            let mut sink_executor = Box::new(MViewSinkExecutor::new(
-                Box::new(source),
-                table.clone(),
-                pks,
-                Arc::new(vec![]),
-            ));
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    data_type: Int32Type::create(false),
+                },
+                Field {
+                    data_type: Int32Type::create(false),
+                },
+            ],
+        };
 
-            sink_executor.next().await.unwrap();
-            // First stream chunk. We check the existence of (3) -> (3,6)
-            if let Message::Barrier(_) = sink_executor.next().await.unwrap() {
-                let value_row = Row(vec![Some(3.to_scalar_value())]);
-                let res_row = table.get(value_row);
-                if let Ok(res_row_in) = res_row {
-                    let datum = res_row_in.unwrap().0.get(1).unwrap().clone();
-                    // Dirty trick to assert_eq between (&int32 and integer).
-                    let d_value = datum.unwrap().as_int32() + 1;
-                    assert_eq!(d_value, 7);
-                } else {
-                    unreachable!();
-                }
+        let source = MockSource::with_messages(
+            schema.clone(),
+            vec![
+                Message::Chunk(chunk1),
+                Message::Barrier(Barrier::default()),
+                Message::Chunk(chunk2),
+                Message::Barrier(Barrier::default()),
+            ],
+        );
+
+        let mut sink_executor = Box::new(MViewSinkExecutor::new(
+            Box::new(source),
+            schema,
+            InMemoryKeyedState::new(
+                RowSerializer::new(key_schema),
+                RowSerializer::new(value_schema),
+            ),
+            pks,
+            Arc::new(vec![]),
+        ));
+
+        sink_executor.next().await.unwrap();
+        // First stream chunk. We check the existence of (3) -> (3,6)
+        if let Message::Barrier(_) = sink_executor.next().await.unwrap() {
+            let value_row = Row(vec![Some(3_i32.to_scalar_value())]);
+            let res_row = sink_executor.state.get(&value_row).await;
+            if let Ok(res_row_in) = res_row {
+                let datum = res_row_in.unwrap().0.get(1).unwrap().clone();
+                // Dirty trick to assert_eq between (&int32 and integer).
+                let d_value = datum.unwrap().as_int32() + 1;
+                assert_eq!(d_value, 7);
             } else {
                 unreachable!();
             }
+        } else {
+            unreachable!();
+        }
 
-            sink_executor.next().await.unwrap();
-            // Second stream chunk. We check the existence of (7) -> (7,8)
-            if let Message::Barrier(_) = sink_executor.next().await.unwrap() {
-                // From (7) -> (7,8)
-                let value_row = Row(vec![Some(7.to_scalar_value())]);
-                let res_row = table.get(value_row);
-                if let Ok(res_row_in) = res_row {
-                    let datum = res_row_in.unwrap().0.get(1).unwrap().clone();
-                    let d_value = datum.unwrap().as_int32() + 1;
-                    assert_eq!(d_value, 9);
-                } else {
-                    unreachable!();
-                }
+        sink_executor.next().await.unwrap();
+        // Second stream chunk. We check the existence of (7) -> (7,8)
+        if let Message::Barrier(_) = sink_executor.next().await.unwrap() {
+            // From (7) -> (7,8)
+            let value_row = Row(vec![Some(7_i32.to_scalar_value())]);
+            let res_row = sink_executor.state.get(&value_row).await;
+            if let Ok(res_row_in) = res_row {
+                let datum = res_row_in.unwrap().0.get(1).unwrap().clone();
+                let d_value = datum.unwrap().as_int32() + 1;
+                assert_eq!(d_value, 9);
             } else {
                 unreachable!();
             }

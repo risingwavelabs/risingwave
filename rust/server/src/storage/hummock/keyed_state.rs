@@ -2,10 +2,14 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use risingwave_common::array::Row;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::{Int32Type, Scalar};
 
 use super::{HummockStorage, HummockValue};
-use crate::stream_op::{CellBasedSchemaedSerializable, KeyedState, SchemaedSerializable};
+use crate::stream_op::{
+    CellBasedSchemaedSerializable, KeyedState, RowSerializer, SchemaedSerializable,
+};
 
 /// [`KeyedState`] for `Hummock` storage engine.
 pub struct HummockKeyedState<K, V>
@@ -59,19 +63,34 @@ where
 
     // TODO(MrCroxx): value now support cell-based serialize/deserialize.
     // Only dirty cell-based state needs to be flushed.
+    // Temporarily we flush all cells in cell-based format.
     async fn flush(&mut self) -> Result<()> {
-        self.storage
-            .write_batch(self.mem_table.drain().map(|(key, value)| {
-                (
-                    self.key_schema.schemaed_serialize(&key),
-                    match value {
-                        HummockValue::Put(value) => {
-                            HummockValue::Put(self.value_schema.schemaed_serialize(&value))
-                        }
+        let mut batch = Vec::with_capacity(self.mem_table.len());
+        // TODO(MrCroxx): Temporarily we serialize cell_idx seperately.
+        // Consider combine it in serializar trait?
+        let cell_idx_serializer =
+            RowSerializer::new(Schema::new(vec![Field::new(Int32Type::create(false))]));
+        for (key, value) in self.mem_table.drain() {
+            for cell_idx in 0..self.value_schema.len() as i32 {
+                let mut k = self.key_schema.schemaed_serialize(&key);
+                k.extend(SchemaedSerializable::schemaed_serialize(
+                    &cell_idx_serializer,
+                    &Row(vec![Some(cell_idx.to_scalar_value())]),
+                ));
+                batch.push((
+                    k,
+                    match &value {
+                        HummockValue::Put(v) => HummockValue::Put(
+                            self.value_schema
+                                .cell_based_schemaed_serialize(v, cell_idx as usize),
+                        ),
                         HummockValue::Delete => HummockValue::Delete,
                     },
-                )
-            }))
+                ));
+            }
+        }
+        self.storage
+            .write_batch(batch.into_iter())
             .await
             .map_err(|err| ErrorCode::InternalError(err.to_string()))?;
         Ok(())

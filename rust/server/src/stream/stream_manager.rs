@@ -361,7 +361,6 @@ impl StreamManagerCore {
             }
         };
 
-        let table_manager = env.table_manager();
         let source_manager = env.source_manager();
 
         let executor: Result<Box<dyn Executor>> = match node.get_node() {
@@ -526,18 +525,7 @@ impl StreamManagerCore {
                 )))
             }
             MviewNode(materialized_view_node) => {
-                let table_id = TableId::from_protobuf(
-                    &materialized_view_node
-                        .get_table_ref_id()
-                        .to_proto::<risingwave_proto::plan::TableRefId>(),
-                )
-                .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
-
-                let columns = materialized_view_node
-                    .get_column_descs()
-                    .iter()
-                    .map(|column_desc| column_desc.to_proto::<risingwave_proto::plan::ColumnDesc>())
-                    .collect();
+                let columns = materialized_view_node.get_column_descs();
                 let pks = materialized_view_node
                     .pk_indices
                     .iter()
@@ -546,18 +534,20 @@ impl StreamManagerCore {
 
                 let column_orders = materialized_view_node.get_column_orders();
                 let order_pairs = fetch_orders(column_orders).unwrap();
-                table_manager.create_materialized_view(&table_id, columns, pks.clone())?;
-                let table_ref = table_manager.get_table(&table_id).unwrap();
-                let table = match table_ref {
-                    TableImpl::Row(table) => Ok(table as Arc<dyn RowTable>),
-                    TableImpl::TestRow(table) => Ok(table as Arc<dyn RowTable>),
-                    _ => Err(RwError::from(InternalError(
-                        "Materialized view creation internal error".to_string(),
-                    ))),
-                }?;
+                let pk_schema = Schema::try_from(
+                    &pks.iter()
+                        .map(|col_idx| columns[*col_idx].clone())
+                        .collect::<Vec<_>>(),
+                )?;
+                let schema = Schema::try_from(columns)?;
+
                 let executor = Box::new(MViewSinkExecutor::new(
                     input.remove(0),
-                    table as Arc<dyn RowTable>,
+                    schema.clone(),
+                    InMemoryKeyedState::new(
+                        RowSerializer::new(pk_schema),
+                        RowSerializer::new(schema),
+                    ),
                     pks,
                     Arc::new(order_pairs),
                 ));
