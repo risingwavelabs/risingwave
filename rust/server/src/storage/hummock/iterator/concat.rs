@@ -124,8 +124,6 @@ mod tests {
         let (k, v) = iter.next().await.unwrap().unwrap();
         assert_eq!(k, test_key_of(0, 0).as_slice());
         assert_eq!(v.into_put_value().unwrap(), test_value_of(0, 0).as_slice());
-
-        // Test cases for seek
     }
 
     #[tokio::test]
