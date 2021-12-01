@@ -47,3 +47,14 @@ query B
 SELECT bool 'f' <= bool 't' AS true;
 ----
 true
+
+query BB
+SELECT 'TrUe'::text::boolean AS true, 'fAlse'::text::boolean AS false;
+----
+true false
+
+query BB
+SELECT '    true   '::text::boolean AS true,
+       '     FALSE'::text::boolean AS false;
+----
+true false

@@ -63,6 +63,14 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
+        (ProstType::Cast, DataTypeKind::Boolean, DataTypeKind::Varchar) => {
+            Box::new(UnaryExpression::<Utf8Array, BoolArray, _> {
+                expr_ia1: child_expr,
+                return_type,
+                func: cast::str_to_bool,
+                _phantom: PhantomData,
+            })
+        }
         (ProstType::Cast, DataTypeKind::Timestamp, DataTypeKind::Date) => {
             Box::new(UnaryExpression::<I32Array, I64Array, _> {
                 expr_ia1: child_expr,

@@ -19,6 +19,7 @@ import org.checkerframework.checker.nullness.qual.Nullable;
  * <p>Currently the only supported encoding is utf-8.
  */
 public class StringType extends PrimitiveTypeBase {
+  public static final int MAX_SIZE = Integer.MAX_VALUE;
   /** Fixed size for char, max size for varchar. */
   private final int maxSize;
   /** Fixed size char or not. */

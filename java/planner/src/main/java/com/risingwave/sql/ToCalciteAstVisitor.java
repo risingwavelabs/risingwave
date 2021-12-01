@@ -11,6 +11,7 @@ import static java.util.Objects.requireNonNull;
 import com.google.common.base.Verify;
 import com.google.common.collect.Iterators;
 import com.risingwave.common.collections.Lists2;
+import com.risingwave.common.datatype.StringType;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.planner.sql.RisingWaveOperatorTable;
@@ -830,12 +831,18 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
           Verify.verify(parameters.size() <= 1, "The parameter list of VARCHAR is too long");
           if (parameters.size() == 0) {
             // If user do not specify length, there is no limit. Use -1 here.
-            return new SqlBasicTypeNameSpec(SqlTypeName.VARCHAR, -1, SqlParserPos.ZERO);
+            return new SqlBasicTypeNameSpec(SqlTypeName.VARCHAR, 1, SqlParserPos.ZERO);
           } else {
             return new SqlBasicTypeNameSpec(
                 SqlTypeName.VARCHAR, parameters.get(0), SqlParserPos.ZERO);
           }
         }
+      case "TEXT":
+        // According to https://www.postgresql.org/docs/9.5/datatype-character.html
+        // TEXT should be varchar without size limit, and by default varchar without size should be
+        // size 1
+        return new SqlBasicTypeNameSpec(
+            SqlTypeName.VARCHAR, StringType.MAX_SIZE, SqlParserPos.ZERO);
       case "NUMERIC":
         {
           var parameters = columnType.parameters();
