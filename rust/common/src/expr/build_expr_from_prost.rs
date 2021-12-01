@@ -203,7 +203,7 @@ mod tests {
                         is_nullable: false,
                         interval_type: IntervalType::Invalid as i32,
                     }),
-                    rex_node: Some(RexNode::Constant(ConstantValue { body: vec![] })),
+                    rex_node: None,
                 },
                 ExprNode {
                     expr_type: Type::ConstantValue as i32,
@@ -214,7 +214,7 @@ mod tests {
                         is_nullable: false,
                         interval_type: IntervalType::Invalid as i32,
                     }),
-                    rex_node: Some(RexNode::Constant(ConstantValue { body: vec![] })),
+                    rex_node: None,
                 },
             ],
         };
@@ -256,7 +256,7 @@ mod tests {
                 is_nullable: false,
                 interval_type: IntervalType::Invalid as i32,
             }),
-            rex_node: Some(RexNode::Constant(ConstantValue { body: vec![] })),
+            rex_node: None,
         };
         let right_time = ExprNode {
             expr_type: Type::ConstantValue as i32,
@@ -267,7 +267,7 @@ mod tests {
                 is_nullable: false,
                 interval_type: IntervalType::Invalid as i32,
             }),
-            rex_node: Some(RexNode::Constant(ConstantValue { body: vec![] })),
+            rex_node: None,
         };
 
         let expr = ExprNode {

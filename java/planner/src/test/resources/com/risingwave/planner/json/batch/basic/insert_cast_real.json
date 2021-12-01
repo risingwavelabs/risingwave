@@ -30,8 +30,6 @@
           "exprType": "CONSTANT_VALUE",
           "returnType": {
             "typeName": "FLOAT"
-          },
-          "constant": {
           }
         }]
       }]

@@ -20,8 +20,6 @@
           "exprType": "CONSTANT_VALUE",
           "returnType": {
             "typeName": "INT32"
-          },
-          "constant": {
           }
         }]
       }]

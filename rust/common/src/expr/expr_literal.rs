@@ -140,16 +140,14 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
         ensure!(prost.expr_type == Type::ConstantValue as i32);
         let ret_type = type_build_from_prost(prost.get_return_type())?;
+        if prost.rex_node.is_none() {
+            return Ok(Self {
+                return_type: ret_type,
+                literal: None,
+            });
+        }
 
         if let RexNode::Constant(prost_value) = prost.get_rex_node() {
-            // when the body length is zero, the value is None
-            if prost_value.get_body().is_empty() {
-                return Ok(Self {
-                    return_type: ret_type,
-                    literal: None,
-                });
-            }
-
             // TODO: We need to unify these
             let value = match prost.get_return_type().get_type_name() {
                 TypeName::Boolean => ScalarImpl::Bool(
@@ -248,44 +246,43 @@ mod tests {
         let v = 1i32;
         let t = TypeName::Int32;
         let bytes = v.to_be_bytes().to_vec();
-        let expr = LiteralExpression::try_from(&make_expression(bytes, t)).unwrap();
+        let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();
         assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
 
         let v = 1i64;
         let t = TypeName::Int64;
         let bytes = v.to_be_bytes().to_vec();
-        let expr = LiteralExpression::try_from(&make_expression(bytes, t)).unwrap();
+        let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();
         assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
 
         let v = 1f32;
         let t = TypeName::Float;
         let bytes = v.to_be_bytes().to_vec();
-        let expr = LiteralExpression::try_from(&make_expression(bytes, t)).unwrap();
+        let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();
         assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
 
         let v = 1f64;
         let t = TypeName::Double;
         let bytes = v.to_be_bytes().to_vec();
-        let expr = LiteralExpression::try_from(&make_expression(bytes, t)).unwrap();
+        let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();
         assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
 
         let v = None;
         let t = TypeName::Float;
-        let bytes = Vec::new();
-        let expr = LiteralExpression::try_from(&make_expression(bytes, t)).unwrap();
+        let expr = LiteralExpression::try_from(&make_expression(None, t)).unwrap();
         assert_eq!(v, expr.literal());
 
         let v = 32i32;
         let t = TypeName::Interval;
         let bytes = v.to_be_bytes().to_vec();
-        let expr = LiteralExpression::try_from(&make_expression(bytes, t)).unwrap();
+        let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();
         assert_eq!(
             IntervalUnit::from_month(v).to_scalar_value(),
             expr.literal().unwrap()
         );
     }
 
-    fn make_expression(bytes: Vec<u8>, data_type: TypeName) -> ExprNode {
+    fn make_expression(bytes: Option<Vec<u8>>, data_type: TypeName) -> ExprNode {
         ExprNode {
             expr_type: Type::ConstantValue as i32,
             return_type: Some(DataType {
@@ -293,7 +290,7 @@ mod tests {
                 interval_type: IntervalType::Month as i32,
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::Constant(ConstantValue { body: bytes })),
+            rex_node: bytes.map(|bs| RexNode::Constant(ConstantValue { body: bs })),
         }
     }
 

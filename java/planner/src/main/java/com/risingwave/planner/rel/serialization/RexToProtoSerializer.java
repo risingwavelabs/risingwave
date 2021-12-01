@@ -76,9 +76,6 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
   }
 
   private static byte[] getBytesRepresentation(RexLiteral val, DataType dataType) {
-    if (val.isNull()) {
-      return ByteBuffer.allocate(0).array();
-    }
     requireNonNull(val.getValue(), "val.value");
     ByteBuffer bb;
     switch (dataType.getTypeName()) {
@@ -303,17 +300,23 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
    */
   private static ExprNode makeConstantExpr(
       RexLiteral literal, DataType returnProtoDataType, DataType protoDataType) {
-    var constantValue =
-        ConstantValue.newBuilder()
-            .setBody(
-                ByteString.copyFrom(
-                    RexToProtoSerializer.getBytesRepresentation(literal, protoDataType)))
-            .build();
-    return ExprNode.newBuilder()
-        .setExprType(ExprNode.Type.CONSTANT_VALUE)
-        .setReturnType(returnProtoDataType)
-        .setConstant(constantValue)
-        .build();
+    var nodeBuilder =
+        ExprNode.newBuilder()
+            .setExprType(ExprNode.Type.CONSTANT_VALUE)
+            .setReturnType(returnProtoDataType);
+
+    if (!literal.isNull()) {
+      var constValue =
+          ConstantValue.newBuilder()
+              .setBody(
+                  ByteString.copyFrom(
+                      RexToProtoSerializer.getBytesRepresentation(literal, protoDataType)))
+              .build();
+
+      nodeBuilder.setConstant(constValue);
+    }
+
+    return nodeBuilder.build();
   }
 
   private static ExprNode makeBiFunctionCallExprNode(
