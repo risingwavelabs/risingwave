@@ -138,7 +138,7 @@ jobs:
         run: |
           sleep 5
           chmod +x ./rust/target/debug/compute-node
-          chmod +x ./rust/target/debug/metadata-node
+          chmod +x ./rust/target/debug/meta-node
           ./scripts/start_cluster.sh 1
           python3 ./scripts/sqllogictest.py -p ${{ env.RW_PORT }} -db dev -f ./e2e_test/streaming/
 
@@ -146,7 +146,7 @@ jobs:
       #   run: |
       #     sleep 5
       #     chmod +x ./rust/target/debug/compute-node
-      #     chmod +x ./rust/target/debug/metadata-node
+      #     chmod +x ./rust/target/debug/meta-node
       #     ./scripts/start_cluster.sh 3
       #     python3 ./scripts/sqllogictest.py -p ${{ env.RW_PORT }} -db dev -f ./e2e_test/streaming/
 
