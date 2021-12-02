@@ -10,9 +10,12 @@ mod table;
 pub use manager::*;
 mod id;
 mod schema;
+mod stream;
+
 pub use cluster::*;
 pub use config::*;
 pub use database::*;
 pub use id::*;
 pub use schema::*;
+pub use stream::*;
 pub use table::*;
