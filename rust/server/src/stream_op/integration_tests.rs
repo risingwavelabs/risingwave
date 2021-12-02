@@ -10,7 +10,8 @@ use risingwave_common::array::*;
 use risingwave_common::array::{I64Array, Op};
 use risingwave_common::catalog::Field;
 use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
-use risingwave_common::expr::expr_unary_nonnull::new_unary_expr;
+use risingwave_common::expr::expr_binary_nullable::new_nullable_binary_expr;
+use risingwave_common::expr::expr_unary::new_unary_expr;
 use risingwave_common::expr::*;
 use risingwave_common::types::*;
 use risingwave_pb::expr::expr_node::Type as ProstExprType;
@@ -274,28 +275,28 @@ fn make_tpchq6_expr() -> (
         Box::new(const_24),
     );
 
-    let and = new_binary_expr(
+    let and = new_nullable_binary_expr(
         ProstExprType::And,
         BoolType::create(false),
         l_shipdate_geq,
         l_shipdate_le,
     );
 
-    let and = new_binary_expr(
+    let and = new_nullable_binary_expr(
         ProstExprType::And,
         BoolType::create(false),
         and,
         l_discount_geq,
     );
 
-    let and = new_binary_expr(
+    let and = new_nullable_binary_expr(
         ProstExprType::And,
         BoolType::create(false),
         and,
         l_discount_leq,
     );
 
-    let and = new_binary_expr(
+    let and = new_nullable_binary_expr(
         ProstExprType::And,
         BoolType::create(false),
         and,

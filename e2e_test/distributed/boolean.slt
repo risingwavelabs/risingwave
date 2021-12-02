@@ -66,3 +66,25 @@ query B
 SELECT TB1.* FROM TB1;
 ----
 
+statement ok
+DROP TABLE TB1;
+
+query BB
+select true AND NULL, false OR NULL;
+----
+NULL NULL
+
+query BB
+select false AND NULL, true OR NULL;
+----
+false true
+
+query BB
+select NULL AND NULL, NULL OR NULL;
+----
+NULL NULL
+
+query BB
+select not TRUE, not NULL;
+----
+false NULL

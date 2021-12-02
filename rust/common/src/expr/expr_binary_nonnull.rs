@@ -8,7 +8,6 @@ use crate::types::DataTypeRef;
 use crate::types::*;
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::cmp::*;
-use crate::vector_op::conjunction::{and, or};
 use crate::vector_op::extract::{extract_from_date, extract_from_timestamp};
 use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
@@ -228,20 +227,6 @@ pub fn new_binary_expr(
             gen_binary_expr! {arithmetic_impl, prim_mod, prim_mod, deci_f_mod, deci_mod,
             atm_placeholder, atm_placeholder, atm_placeholder, l, r, ret}
         }
-        ProstExprType::And => Box::new(BinaryExpression::<BoolArray, BoolArray, BoolArray, _> {
-            expr_ia1: l,
-            expr_ia2: r,
-            return_type: ret,
-            func: and,
-            _phantom: PhantomData,
-        }),
-        ProstExprType::Or => Box::new(BinaryExpression::<BoolArray, BoolArray, BoolArray, _> {
-            expr_ia1: l,
-            expr_ia2: r,
-            return_type: ret,
-            func: or,
-            _phantom: PhantomData,
-        }),
         ProstExprType::Extract => build_extract_expr(ret, l, r),
         ProstExprType::RoundDigit => {
             Box::new(
@@ -298,9 +283,7 @@ mod tests {
     use crate::array::interval_array::IntervalArray;
     use crate::array::*;
     use crate::expr::test_utils::make_expression;
-    use crate::types::{
-        BoolType, DateType, DecimalType, Int32Type, IntervalType, IntervalUnit, Scalar,
-    };
+    use crate::types::{DateType, DecimalType, Int32Type, IntervalType, IntervalUnit, Scalar};
     use crate::vector_op::arithmetic_op::{date_interval_add, date_interval_sub};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::expr::expr_node::Type as ProstExprType;
@@ -328,8 +311,6 @@ mod tests {
         test_binary_decimal::<BoolArray, _>(|x, y| x >= y, ProstExprType::GreaterThanOrEqual);
         test_binary_decimal::<BoolArray, _>(|x, y| x < y, ProstExprType::LessThan);
         test_binary_decimal::<BoolArray, _>(|x, y| x <= y, ProstExprType::LessThanOrEqual);
-        test_binary_bool::<BoolArray, _>(|x, y| x && y, ProstExprType::And);
-        test_binary_bool::<BoolArray, _>(|x, y| x || y, ProstExprType::Or);
         test_binary_interval::<I64Array, _>(
             |x, y| date_interval_add::<i32, i32, i64>(x, y).unwrap(),
             ProstExprType::Add,
@@ -479,59 +460,6 @@ mod tests {
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
             DecimalType::create(true, 10, 5).unwrap(),
-        );
-        let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
-        let expr = make_expression(kind, &[TypeName::Decimal, TypeName::Decimal], &[0, 1]);
-        let mut vec_executor = build_from_prost(&expr).unwrap();
-        let res = vec_executor.eval(&data_chunk).unwrap();
-        let arr: &A = res.as_ref().into();
-        for (idx, item) in arr.iter().enumerate() {
-            let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
-            assert_eq!(x, item);
-        }
-    }
-
-    fn test_binary_bool<A, F>(f: F, kind: ProstExprType)
-    where
-        A: Array,
-        for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
-        for<'a> <A as Array>::RefItem<'a>: PartialEq,
-        F: Fn(bool, bool) -> <A as Array>::OwnedItem,
-    {
-        let mut lhs = Vec::<Option<bool>>::new();
-        let mut rhs = Vec::<Option<bool>>::new();
-        let mut target = Vec::<Option<<A as Array>::OwnedItem>>::new();
-        for i in 0..100 {
-            if i % 2 == 0 {
-                lhs.push(Some(true));
-                rhs.push(None);
-                target.push(None);
-            } else if i % 3 == 0 {
-                lhs.push(Some(true));
-                rhs.push(Some(false));
-                target.push(Some(f(true, false)));
-            } else if i % 5 == 0 {
-                lhs.push(Some(false));
-                rhs.push(Some(false));
-                target.push(Some(f(false, false)));
-            } else {
-                lhs.push(Some(true));
-                rhs.push(Some(true));
-                target.push(Some(f(true, true)));
-            }
-        }
-
-        let col1 = Column::new(
-            BoolArray::from_slice(&lhs)
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-            BoolType::create(true),
-        );
-        let col2 = Column::new(
-            BoolArray::from_slice(&rhs)
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-            BoolType::create(true),
         );
         let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
         let expr = make_expression(kind, &[TypeName::Decimal, TypeName::Decimal], &[0, 1]);

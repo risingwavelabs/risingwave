@@ -2,12 +2,12 @@ mod agg;
 pub mod build_expr_from_prost;
 mod expr_binary_bytes;
 pub mod expr_binary_nonnull;
-mod expr_binary_nullable;
+pub mod expr_binary_nullable;
 mod expr_case;
 mod expr_input_ref;
 mod expr_literal;
 mod expr_ternary_bytes;
-pub mod expr_unary_nonnull;
+pub mod expr_unary;
 mod pg_sleep;
 mod template;
 
@@ -48,9 +48,9 @@ pub fn build_from_prost(prost: &ProstExprNode) -> Result<BoxedExpression> {
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual => {
             build_binary_expr_prost(prost)
         }
-        Add | Subtract | Multiply | Divide | Modulus | And | Or => build_binary_expr_prost(prost),
+        Add | Subtract | Multiply | Divide | Modulus => build_binary_expr_prost(prost),
         Extract | RoundDigit => build_binary_expr_prost(prost),
-        StreamNullByRowCount => build_nullable_binary_expr_prost(prost),
+        StreamNullByRowCount | And | Or => build_nullable_binary_expr_prost(prost),
         Substr => build_substr_expr(prost),
         Length => build_length_expr(prost),
         Replace => build_replace_expr(prost),

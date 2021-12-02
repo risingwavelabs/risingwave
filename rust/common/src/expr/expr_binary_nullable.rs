@@ -7,6 +7,7 @@ use crate::error::Result;
 use crate::expr::template::BinaryNullableExpression;
 use crate::types::DataTypeKind;
 use crate::types::DataTypeRef;
+use crate::vector_op::conjunction::{and, or};
 use risingwave_pb::expr::expr_node::Type;
 
 // TODO: consider implement it using generic function.
@@ -62,6 +63,24 @@ pub fn new_nullable_binary_expr(
                 )
             }
         },
+        Type::And => Box::new(
+            BinaryNullableExpression::<BoolArray, BoolArray, BoolArray, _> {
+                expr_ia1: l,
+                expr_ia2: r,
+                return_type: ret,
+                func: and,
+                _phantom: PhantomData,
+            },
+        ),
+        Type::Or => Box::new(
+            BinaryNullableExpression::<BoolArray, BoolArray, BoolArray, _> {
+                expr_ia1: l,
+                expr_ia2: r,
+                return_type: ret,
+                func: or,
+                _phantom: PhantomData,
+            },
+        ),
         tp => {
             unimplemented!(
                 "The expression {:?} using vectorized expression framework is not supported yet!",

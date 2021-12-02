@@ -2,6 +2,7 @@
 use super::template::{UnaryBytesExpression, UnaryExpression};
 use crate::array::{BoolArray, I32Array, I64Array, Utf8Array};
 use crate::expr::pg_sleep::PgSleepExpression;
+use crate::expr::template::UnaryNullableExpression;
 use crate::expr::BoxedExpression;
 use crate::types::{DataTypeKind, DataTypeRef};
 use crate::vector_op::length::length_default;
@@ -79,7 +80,7 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
-        (ProstType::Not, _, _) => Box::new(UnaryExpression::<BoolArray, BoolArray, _> {
+        (ProstType::Not, _, _) => Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _> {
             expr_ia1: child_expr,
             return_type,
             func: conjunction::not,
