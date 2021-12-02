@@ -14,3 +14,9 @@ members = [
   "utils/pb-convert",
   "utils/pb-convert-derive",
 ]
+
+[profile.dev]
+panic = 'abort'
+
+[profile.release]
+panic = 'abort'
