@@ -1,0 +1,55 @@
+statement ok
+create table T (v1 float, v2 float, v3 float);
+
+statement ok
+insert into T values (1,1,1);
+
+statement ok
+insert into T values (2,2,2);
+
+statement ok
+insert into T values (2,3,4);
+
+statement ok
+insert into T values (3,6,1);
+
+query RRRRRR rowsort
+select * from T as T1, T as T2 where T1.v2>=T2.v3;
+----
+1 1 1 1 1 1
+1 1 1 3 6 1
+2 2 2 1 1 1
+2 2 2 2 2 2
+2 2 2 3 6 1
+2 3 4 1 1 1
+2 3 4 2 2 2
+2 3 4 3 6 1
+3 6 1 1 1 1
+3 6 1 2 2 2
+3 6 1 2 3 4
+3 6 1 3 6 1
+
+statement ok
+drop table T
+
+statement ok
+create table T (v1 date, v2 float, v3 integer, v4 float)
+
+statement ok
+insert into T values ('2021-12-01',1,1,1)
+
+statement ok
+insert into T values ('2021-12-01',1,2,2)
+
+statement ok
+insert into T values ('2021-12-01',1,3,3)
+
+statement ok
+insert into T values ('2021-12-01',1,4,4)
+
+query RR
+select T1.v1 as v11, T2.v1 as v21 from T as T1, T as T2 where T1.v3=T2.v3 and T1.v2 > T2.v2
+----
+
+statement ok
+drop table T

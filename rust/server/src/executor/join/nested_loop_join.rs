@@ -488,6 +488,7 @@ impl ProbeSideSource {
             Some(chunk) => {
                 if self.idx >= chunk.capacity() {
                     self.cur_chunk = self.outer.next().await?;
+                    self.idx = 0;
                 }
             }
             None => {
