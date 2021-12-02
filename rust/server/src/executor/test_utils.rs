@@ -127,7 +127,7 @@ pub async fn diff_executor_output(mut actual: BoxedExecutor, mut expect: BoxedEx
         .cloned()
         .collect_vec();
 
-    let chunk = DataChunk::new(columns, None);
+    let chunk = DataChunk::builder().columns(columns).build();
     for idx in 0..col_num {
         let idy = idx + col_num;
         let data_type = chunk.columns()[idx].data_type();

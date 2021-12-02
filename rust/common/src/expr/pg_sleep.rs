@@ -82,13 +82,12 @@ mod tests {
             builder.finish()?
         };
 
-        let input_chunk = DataChunk::new(
-            vec![Column::new(
+        let input_chunk = DataChunk::builder()
+            .columns(vec![Column::new(
                 Arc::new(ArrayImpl::Decimal(input_array)),
                 decimal_type,
-            )],
-            None,
-        );
+            )])
+            .build();
         let result_array = expr.eval(&input_chunk).unwrap();
         assert_eq!(3, result_array.len());
         for i in 0..3 {

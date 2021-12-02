@@ -10,7 +10,7 @@ use risingwave_pb::ToProto;
 use crate::executor::{Executor, ExecutorBuilder};
 use crate::storage::*;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{make_dummy_data_chunk, DataChunk, DataChunkRef};
+use risingwave_common::array::{DataChunk, DataChunkRef};
 use risingwave_common::catalog::TableId;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::{InternalError, ProstError};
@@ -112,7 +112,7 @@ impl Executor for SeqScanExecutor {
         let cur_chunk = &self.data[self.chunk_idx];
 
         let ret = if self.column_indices.is_empty() {
-            make_dummy_data_chunk(cur_chunk.cardinality())
+            DataChunk::new_dummy(cur_chunk.cardinality())
         } else {
             let columns = self
                 .column_indices

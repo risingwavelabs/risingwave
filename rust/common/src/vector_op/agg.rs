@@ -775,7 +775,9 @@ mod tests {
         return_type: DataTypeRef,
         mut builder: ArrayBuilderImpl,
     ) -> Result<ArrayImpl> {
-        let input_chunk = DataChunk::new(vec![Column::new(input, input_type.clone())], None);
+        let input_chunk = DataChunk::builder()
+            .columns(vec![Column::new(input, input_type.clone())])
+            .build();
         let mut agg_state = create_agg_state_unary(input_type, 0, agg_type, return_type.clone())?;
         agg_state.update(&input_chunk)?;
         agg_state.output(&mut builder)?;
@@ -1025,7 +1027,9 @@ mod tests {
         g0.update_and_output_with_sorted_groups_concrete(&input, &mut g0_builder, &eq)
             .unwrap();
         a.update_and_output_with_sorted_groups(
-            &DataChunk::new(vec![Column::new(Arc::new(input.into()), t32.clone())], None),
+            &DataChunk::builder()
+                .columns(vec![Column::new(Arc::new(input.into()), t32.clone())])
+                .build(),
             &mut a_builder,
             &eq,
         )
@@ -1036,7 +1040,9 @@ mod tests {
         g0.update_and_output_with_sorted_groups_concrete(&input, &mut g0_builder, &eq)
             .unwrap();
         a.update_and_output_with_sorted_groups(
-            &DataChunk::new(vec![Column::new(Arc::new(input.into()), t32.clone())], None),
+            &DataChunk::builder()
+                .columns(vec![Column::new(Arc::new(input.into()), t32.clone())])
+                .build(),
             &mut a_builder,
             &eq,
         )
@@ -1047,7 +1053,9 @@ mod tests {
         g0.update_and_output_with_sorted_groups_concrete(&input, &mut g0_builder, &eq)
             .unwrap();
         a.update_and_output_with_sorted_groups(
-            &DataChunk::new(vec![Column::new(Arc::new(input.into()), t32)], None),
+            &DataChunk::builder()
+                .columns(vec![Column::new(Arc::new(input.into()), t32)])
+                .build(),
             &mut a_builder,
             &eq,
         )

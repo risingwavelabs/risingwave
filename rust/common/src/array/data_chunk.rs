@@ -12,36 +12,75 @@ use risingwave_proto::data::{Column as ColumnProto, DataChunk as DataChunkProto}
 use std::convert::TryFrom;
 use std::hash::BuildHasher;
 use std::sync::Arc;
-use typed_builder::TypedBuilder;
 
-pub fn make_dummy_data_chunk(cardinality: usize) -> DataChunk {
-    let mut chunk = DataChunk::new(vec![], None);
-    chunk.set_dummy_cardinality(cardinality);
-    chunk
-}
-
-/// `DataChunk` is a collection of arrays with visibility mask.
-#[derive(Clone, Default, Debug, TypedBuilder)]
-pub struct DataChunk {
-    #[builder(default)]
+pub struct DataChunkBuilder {
     columns: Vec<Column>,
-    #[builder(default, setter(strip_option))]
     visibility: Option<Bitmap>,
-    #[builder(default, setter(strip_option))]
-    dummy_cardinality: Option<usize>,
 }
 
-impl DataChunk {
-    pub fn new(columns: Vec<Column>, visibility: Option<Bitmap>) -> Self {
-        DataChunk {
-            columns,
-            visibility,
-            dummy_cardinality: None,
+impl DataChunkBuilder {
+    fn new() -> Self {
+        DataChunkBuilder {
+            columns: vec![],
+            visibility: None,
         }
     }
 
-    fn set_dummy_cardinality(&mut self, cardinality: usize) -> Option<usize> {
-        self.dummy_cardinality.replace(cardinality)
+    pub fn columns(self, columns: Vec<Column>) -> DataChunkBuilder {
+        DataChunkBuilder {
+            columns,
+            visibility: self.visibility,
+        }
+    }
+
+    pub fn visibility(self, visibility: Bitmap) -> DataChunkBuilder {
+        DataChunkBuilder {
+            columns: self.columns,
+            visibility: Some(visibility),
+        }
+    }
+
+    pub fn build(self) -> DataChunk {
+        DataChunk::new(self.columns, self.visibility)
+    }
+}
+
+/// `DataChunk` is a collection of arrays with visibility mask.
+#[derive(Clone, Default, Debug)]
+pub struct DataChunk {
+    columns: Vec<Column>,
+    visibility: Option<Bitmap>,
+    cardinality: usize,
+}
+
+impl DataChunk {
+    fn new(columns: Vec<Column>, visibility: Option<Bitmap>) -> Self {
+        let cardinality = if let Some(bitmap) = &visibility {
+            bitmap.iter().map(|visible| visible as usize).sum()
+        } else if columns.is_empty() {
+            0
+        } else {
+            columns.first().unwrap().array_ref().len()
+        };
+
+        DataChunk {
+            columns,
+            visibility,
+            cardinality,
+        }
+    }
+
+    /// `new_dummy` creates a data chunk without columns but only a cardinality
+    pub fn new_dummy(cardinality: usize) -> Self {
+        DataChunk {
+            columns: vec![],
+            visibility: None,
+            cardinality,
+        }
+    }
+
+    pub fn builder() -> DataChunkBuilder {
+        DataChunkBuilder::new()
     }
 
     pub fn into_parts(self) -> (Vec<Column>, Option<Bitmap>) {
@@ -54,14 +93,7 @@ impl DataChunk {
 
     /// return the number of visible tuples
     pub fn cardinality(&self) -> usize {
-        if let Some(card) = self.dummy_cardinality {
-            return card;
-        }
-        if let Some(bitmap) = &self.visibility {
-            bitmap.iter().map(|visible| visible as usize).sum()
-        } else {
-            self.capacity()
-        }
+        self.cardinality
     }
 
     /// return physical length of any chunk column
@@ -77,11 +109,7 @@ impl DataChunk {
     }
 
     pub fn with_visibility(&self, visibility: Bitmap) -> Self {
-        DataChunk {
-            columns: self.columns.clone(),
-            visibility: Some(visibility),
-            dummy_cardinality: None,
-        }
+        DataChunk::new(self.columns.clone(), Some(visibility))
     }
 
     pub fn get_visibility_ref(&self) -> Option<&Bitmap> {
@@ -144,17 +172,15 @@ impl DataChunk {
     }
 
     pub fn from_protobuf(proto: &DataChunkProto) -> Result<Self> {
-        let mut chunk = DataChunk {
-            columns: vec![],
-            visibility: None,
-            dummy_cardinality: None,
-        };
+        let mut columns = vec![];
 
         for any_col in proto.get_columns() {
             let col = unpack_from_any!(any_col, ColumnProto);
             let cardinality = proto.get_cardinality() as usize;
-            chunk.columns.push(Column::from_protobuf(col, cardinality)?);
+            columns.push(Column::from_protobuf(col, cardinality)?);
         }
+
+        let chunk = DataChunk::new(columns, None);
         Ok(chunk)
     }
 
@@ -303,11 +329,7 @@ impl TryFrom<Vec<Column>> for DataChunk {
             "Not all columns length same!"
         );
 
-        Ok(Self {
-            columns,
-            visibility: None,
-            dummy_cardinality: None,
-        })
+        Ok(DataChunk::new(columns, None))
     }
 }
 

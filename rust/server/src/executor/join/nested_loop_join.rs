@@ -173,7 +173,7 @@ impl NestedLoopJoinExecutor {
             })
             .collect::<Result<Vec<Column>>>()?;
 
-        Ok(DataChunk::new(result_columns, None))
+        Ok(DataChunk::builder().columns(result_columns).build())
     }
 }
 
@@ -433,7 +433,13 @@ impl NestedLoopJoinExecutor {
                 )
             }
         };
-        Ok(DataChunk::new(concated_columns, vis))
+        let builder = DataChunk::builder().columns(concated_columns);
+        let data_chunk = if let Some(vis) = vis {
+            builder.visibility(vis).build()
+        } else {
+            builder.build()
+        };
+        Ok(data_chunk)
     }
 }
 

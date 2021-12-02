@@ -476,7 +476,7 @@ impl BatchSourceReader for HighLevelKafkaSourceBatchReader {
 
                     let columns = Self::build_columns(&self.columns, &rows)?;
 
-                    return Ok(Some(DataChunk::new(columns, None)));
+                    return Ok(Some(DataChunk::builder().columns(columns).build()));
                 }
                 _ => {
                     if Self::check_bounds(

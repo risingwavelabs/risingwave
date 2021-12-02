@@ -3,7 +3,7 @@ use crate::storage::Table;
 use crate::storage::{MemRowGroup, MemRowGroupRef};
 use crate::storage::{PartitionedRowGroupRef, TableColumnDesc};
 use risingwave_common::array::InternalError;
-use risingwave_common::array::{make_dummy_data_chunk, DataChunk, DataChunkRef};
+use risingwave_common::array::{DataChunk, DataChunkRef};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
@@ -236,7 +236,7 @@ impl BummockTable {
                 let data_vec = segs.last().unwrap().get_data().unwrap();
                 let dummy_data_vec = data_vec
                     .iter()
-                    .map(|chunk| Arc::new(make_dummy_data_chunk(chunk.cardinality())))
+                    .map(|chunk| Arc::new(DataChunk::new_dummy(chunk.cardinality())))
                     .collect::<Vec<_>>();
                 Ok(BummockResult::Data(dummy_data_vec))
             }

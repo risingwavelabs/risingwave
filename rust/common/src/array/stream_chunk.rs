@@ -130,7 +130,12 @@ impl StreamChunk {
             columns,
             visibility,
         } = self;
-        let data_chunk = DataChunk::new(columns, visibility);
+        let builder = DataChunk::builder().columns(columns);
+        let data_chunk = if let Some(vis) = visibility {
+            builder.visibility(vis).build()
+        } else {
+            builder.build()
+        };
         (data_chunk, ops)
     }
 
