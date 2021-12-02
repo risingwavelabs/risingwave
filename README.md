@@ -32,7 +32,7 @@ You should have already seen multiple folders in our repo:
 - The `java` folder contains the system's frontend code. The frontend includes parser, binder, planner,
 optimizer, and other components. We use Calcite to serve as our query optimizer.
 - The `rust` folder contains the system's backend code. The backend includes the streaming engine, OLAP
-engine, storage engine and metadata service.
+engine, storage engine and meta service.
 - The `e2e_test` folder contains the latest end-to-end test cases.
 
 ## Deployment
@@ -42,13 +42,13 @@ results returned by the database.
 - The frontend server receives the user command, performs parsing, binding, planning, optimization,
 and then passes the physical plan to the corresponding to compute server(s).
 - The compute server performs computation and then returns results to the frontend server.
-- The metadata server performs epoch, id generation and metadata management.
+- The meta server performs epoch, id generation and metadata management.
 
-To start the metadata server, create one terminal and then type:
+To start the meta server, create one terminal and then type:
 ```bash
 make rust_build ## Not necessary if previously built
 cd rust
-./target/debug/metadata-node --log4rs-config config/log4rs.yaml
+./target/debug/meta-node --log4rs-config config/log4rs.yaml
 ```
 
 To start the frontend server, create one terminal and then type:
