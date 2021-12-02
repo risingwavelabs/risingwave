@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -9,12 +9,18 @@ use tokio::sync::Mutex;
 use super::StateStore;
 
 /// An in-memory state store
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct MemoryStateStore {
-    inner: Arc<Mutex<HashMap<Bytes, Bytes>>>,
+    inner: Arc<Mutex<BTreeMap<Bytes, Bytes>>>,
 }
 
 impl MemoryStateStore {
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(BTreeMap::new())),
+        }
+    }
+
     /// Verify if the ingested batch does not have duplicated key.
     fn verify_ingest_batch(&self, kv_pairs: &mut Vec<(Bytes, Option<Bytes>)>) -> bool {
         let original_length = kv_pairs.len();
@@ -30,11 +36,9 @@ impl MemoryStateStore {
         debug_assert!(result);
         for (key, value) in kv_pairs {
             if let Some(value) = value {
-                let ret = inner.insert(key, value);
-                debug_assert!(ret.is_none());
+                inner.insert(key, value);
             } else {
-                let ret = inner.remove(&key);
-                debug_assert!(ret.is_some());
+                inner.remove(&key);
             }
         }
         Ok(())

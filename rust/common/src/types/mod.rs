@@ -465,3 +465,24 @@ impl ScalarImpl {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn serialize_datum_not_null_into_vec(data: i64) -> Vec<u8> {
+        let mut serializer = memcomparable::Serializer::default();
+        serialize_datum_not_null_into(&Some(ScalarImpl::Int64(data)), &mut serializer).unwrap();
+        serializer.into_inner()
+    }
+
+    #[test]
+    fn test_memcomparable() {
+        let memcmp_3874 = serialize_datum_not_null_into_vec(3874);
+        let memcmp_45745 = serialize_datum_not_null_into_vec(45745);
+        let memcmp_21234 = serialize_datum_not_null_into_vec(21234);
+        assert!(memcmp_3874 < memcmp_45745);
+        assert!(memcmp_3874 < memcmp_21234);
+        assert!(memcmp_21234 < memcmp_45745);
+    }
+}

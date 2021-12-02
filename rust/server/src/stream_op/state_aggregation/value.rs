@@ -71,6 +71,7 @@ impl<S: StateStore> ManagedValueState<S> {
     /// output is the same as the aggregation state. In other aggregators, like min and max,
     /// `get_output` might involve a scan from the state store.
     pub async fn get_output(&mut self) -> Result<Datum> {
+        debug_assert!(!self.is_dirty());
         self.state.get_output()
     }
 
@@ -83,7 +84,7 @@ impl<S: StateStore> ManagedValueState<S> {
     pub fn flush(&mut self, write_batch: &mut Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
         // If the managed state is not dirty, the caller should not flush. But forcing a flush won't
         // cause incorrect result: it will only produce more I/O.
-        debug_assert!(self.is_dirty);
+        debug_assert!(self.is_dirty());
 
         let v = self.state.get_output()?;
         let mut serializer = memcomparable::Serializer::default();
@@ -116,7 +117,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_managed_value_state() {
-        let store = MemoryStateStore::default();
+        let store = MemoryStateStore::new();
         let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
         let mut managed_state = ManagedValueState::new(create_test_count_state(), keyspace)
             .await
@@ -135,15 +136,17 @@ mod tests {
             .await
             .unwrap();
         assert!(managed_state.is_dirty());
-        assert_eq!(
-            managed_state.get_output().await.unwrap(),
-            Some(ScalarImpl::Int64(3))
-        );
 
         // flush to write batch and write to state store
         let mut write_batch = vec![];
         managed_state.flush(&mut write_batch).unwrap();
         store.ingest_batch(write_batch).await.unwrap();
+
+        // get output
+        assert_eq!(
+            managed_state.get_output().await.unwrap(),
+            Some(ScalarImpl::Int64(3))
+        );
 
         // reload the state and check the output
         let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
