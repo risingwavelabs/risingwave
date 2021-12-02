@@ -4,9 +4,11 @@ import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
 import com.google.common.collect.ImmutableList;
 import com.google.protobuf.Any;
+import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.logical.RwLogicalValues;
 import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
+import com.risingwave.proto.data.DataType;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.proto.plan.ValuesNode;
 import java.util.List;
@@ -50,6 +52,11 @@ public class RwBatchValues extends Values implements RisingWaveBatchPhyRel {
         exprTupleBuilder.addCells(value.accept(rexToProtoSerializer));
       }
       valuesNodeBuilder.addTuples(exprTupleBuilder.build());
+    }
+
+    for (var fieldType : rowType.getFieldList()) {
+      DataType dataType = ((RisingWaveDataType) fieldType.getType()).getProtobufType();
+      valuesNodeBuilder.addColumnTypes(dataType);
     }
 
     return PlanNode.newBuilder()

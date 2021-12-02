@@ -118,6 +118,13 @@
             "body": "QKAAAA=="
           }
         }]
+      }],
+      "columnTypes": [{
+        "typeName": "INT32"
+      }, {
+        "typeName": "INT32"
+      }, {
+        "typeName": "FLOAT"
       }]
     }
   }]

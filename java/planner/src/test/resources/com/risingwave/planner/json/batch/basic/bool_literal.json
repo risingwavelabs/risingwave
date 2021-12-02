@@ -20,6 +20,11 @@
           "body": "AQ=="
         }
       }]
+    }],
+    "columnTypes": [{
+      "typeName": "BOOLEAN"
+    }, {
+      "typeName": "BOOLEAN"
     }]
   }
 }

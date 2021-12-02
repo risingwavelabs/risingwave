@@ -13,7 +13,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::expr::{build_from_prost, BoxedExpression};
-use risingwave_common::types::Int32Type;
+use risingwave_common::types::{build_from_prost as type_build_from_prost, DataTypeRef, Int32Type};
 
 /// `ValuesExecutor` implements Values executor.
 pub(super) struct ValuesExecutor {
@@ -30,7 +30,7 @@ impl Executor for ValuesExecutor {
     }
 
     async fn next(&mut self) -> Result<Option<DataChunk>> {
-        if self.executed {
+        if self.executed || self.rows.is_empty() {
             return Ok(None);
         }
 
@@ -102,7 +102,7 @@ impl Executor for ValuesExecutor {
 impl BoxedExecutorBuilder for ValuesExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_node_type() == PlanNodeType::Value);
-        let value_node =
+        let value_node: ValuesNode =
             ValuesNode::decode(&(source.plan_node()).get_body().value[..]).map_err(ProstError)?;
 
         let mut rows: Vec<Vec<BoxedExpression>> = Vec::with_capacity(value_node.get_tuples().len());
@@ -115,12 +115,15 @@ impl BoxedExecutorBuilder for ValuesExecutor {
             rows.push(expr_row);
         }
 
-        let fields = rows
-            .first()
-            .ok_or_else(|| RwError::from(InternalError("Can't values empty rows!".to_string())))?
-            .iter() // for each column
-            .map(|col| Field {
-                data_type: col.return_type_ref(),
+        let data_types = value_node
+            .get_column_types()
+            .iter()
+            .map(type_build_from_prost)
+            .collect::<Result<Vec<DataTypeRef>>>()?;
+        let fields = data_types
+            .iter()
+            .map(|data_type| Field {
+                data_type: data_type.clone(),
             })
             .collect::<Vec<Field>>();
 

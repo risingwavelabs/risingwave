@@ -22,6 +22,9 @@
             "typeName": "INT32"
           }
         }]
+      }],
+      "columnTypes": [{
+        "typeName": "INT32"
       }]
     }
   }]

@@ -84,6 +84,7 @@ message ValuesNode {
     repeated expr.ExprNode cells = 1;
   }
   repeated ExprTuple tuples = 1;
+  repeated data.DataType column_types = 2;
 }
 
 message CreateTableNode {

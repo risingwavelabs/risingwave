@@ -52,6 +52,9 @@
             "body": "AAAAAA=="
           }
         }]
+      }],
+      "columnTypes": [{
+        "typeName": "INT32"
       }]
     }
   }]

@@ -228,6 +228,18 @@ impl<'a> TableBuilder<'a> {
             column_ids: vec![0; self.col_types.len()],
         };
 
+        let tuples = self
+            .tuples
+            .iter()
+            .map(|tuple| TableBuilder::build_values(tuple.clone()))
+            .collect_vec();
+        let column_types = tuples
+            .first()
+            .unwrap()
+            .cells
+            .iter()
+            .map(|cell| cell.get_return_type().clone())
+            .collect::<Vec<_>>();
         PlanFragment {
             root: Some(PlanNode {
                 node_type: PlanNodeType::Insert as i32,
@@ -240,11 +252,8 @@ impl<'a> TableBuilder<'a> {
                     body: Some(Any {
                         type_url: "/".to_string(),
                         value: ValuesNode {
-                            tuples: self
-                                .tuples
-                                .iter()
-                                .map(|tuple| TableBuilder::build_values(tuple.clone()))
-                                .collect_vec(),
+                            tuples,
+                            column_types,
                         }
                         .encode_to_vec(),
                     }),

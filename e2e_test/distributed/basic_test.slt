@@ -69,6 +69,11 @@ select * from t order by v1 desc
 1 4 2
 
 query III
+select * from t limit 0
+----
+
+
+query III
 select * from t order by v1 desc limit 1
 ----
 4 3 5
