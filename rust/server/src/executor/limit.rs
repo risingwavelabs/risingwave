@@ -133,7 +133,7 @@ mod tests {
         Ok(Column::new(array, data_type))
     }
 
-    async fn test_limit_all_visable(
+    async fn test_limit_all_visible(
         row_num: usize,
         chunk_size: usize,
         limit: usize,
@@ -191,33 +191,33 @@ mod tests {
         tot_row: usize,
         limit: usize,
         offset: usize,
-        visable: Vec<bool>,
+        visible: Vec<bool>,
         returned: usize,
         skipped: usize,
         cur_row: usize,
     }
 
     impl MockLimitIter {
-        fn new(tot_row: usize, limit: usize, offset: usize, visable: Vec<bool>) -> Self {
-            assert_eq!(tot_row, visable.len());
+        fn new(tot_row: usize, limit: usize, offset: usize, visible: Vec<bool>) -> Self {
+            assert_eq!(tot_row, visible.len());
             let mut cur_row = 0;
-            while cur_row != tot_row && !visable[cur_row] {
+            while cur_row != tot_row && !visible[cur_row] {
                 cur_row += 1;
             }
             Self {
                 tot_row,
                 limit,
                 offset,
-                visable,
+                visible,
                 returned: 0,
                 skipped: 0,
                 cur_row,
             }
         }
 
-        fn next_visable(&mut self) {
+        fn next_visible(&mut self) {
             self.cur_row += 1;
-            while self.cur_row != self.tot_row && !self.visable[self.cur_row] {
+            while self.cur_row != self.tot_row && !self.visible[self.cur_row] {
                 self.cur_row += 1;
             }
         }
@@ -234,14 +234,14 @@ mod tests {
                 return None;
             }
             while self.skipped < self.offset {
-                self.next_visable();
+                self.next_visible();
                 if self.cur_row == self.tot_row {
                     return None;
                 }
                 self.skipped += 1;
             }
             let ret = self.cur_row;
-            self.next_visable();
+            self.next_visible();
             self.returned += 1;
             Some(ret)
         }
@@ -252,9 +252,9 @@ mod tests {
         chunk_size: usize,
         limit: usize,
         offset: usize,
-        visable: Vec<bool>,
+        visible: Vec<bool>,
     ) {
-        assert_eq!(visable.len(), row_num);
+        assert_eq!(visible.len(), row_num);
         let col0 = create_column(
             (0..row_num)
                 .into_iter()
@@ -264,8 +264,8 @@ mod tests {
         )
         .unwrap();
 
-        let visable_array = BoolArray::from_slice(
-            visable
+        let visible_array = BoolArray::from_slice(
+            visible
                 .clone()
                 .into_iter()
                 .map(Some)
@@ -275,7 +275,7 @@ mod tests {
         .unwrap();
 
         let col1 = Column::new(
-            Arc::new(visable_array.into()),
+            Arc::new(visible_array.into()),
             Arc::new(BoolType::new(false)),
         );
         let schema = Schema {
@@ -320,11 +320,11 @@ mod tests {
         }
         let chunks =
             DataChunk::rechunk(results.into_iter().collect_vec().as_slice(), row_num).unwrap();
-        // let _for_debug = MockLimitIter::new(row_num, limit, offset, visable).collect_vec();
+        // let _for_debug = MockLimitIter::new(row_num, limit, offset, visible).collect_vec();
 
         if chunks.is_empty() {
             assert_eq!(
-                MockLimitIter::new(row_num, limit, offset, visable).count(),
+                MockLimitIter::new(row_num, limit, offset, visible).count(),
                 0
             );
             return;
@@ -334,10 +334,10 @@ mod tests {
         let col0 = result.column_at(0).unwrap();
         let col1 = result.column_at(1).unwrap();
         assert_eq!(
-            MockLimitIter::new(row_num, limit, offset, visable.clone()).count(),
+            MockLimitIter::new(row_num, limit, offset, visible.clone()).count(),
             result.cardinality()
         );
-        MockLimitIter::new(row_num, limit, offset, visable)
+        MockLimitIter::new(row_num, limit, offset, visible)
             .zip_eq(0..result.cardinality())
             .for_each(|(expect, chunk_idx)| {
                 assert_eq!(col1.array().as_bool().value_at(chunk_idx), Some(true));
@@ -352,24 +352,24 @@ mod tests {
 
     #[tokio::test]
     async fn test_limit_executor() {
-        test_limit_all_visable(18, 18, 11, 0).await;
-        test_limit_all_visable(18, 3, 9, 0).await;
-        test_limit_all_visable(18, 3, 10, 0).await;
-        test_limit_all_visable(18, 3, 11, 0).await;
+        test_limit_all_visible(18, 18, 11, 0).await;
+        test_limit_all_visible(18, 3, 9, 0).await;
+        test_limit_all_visible(18, 3, 10, 0).await;
+        test_limit_all_visible(18, 3, 11, 0).await;
     }
 
     #[tokio::test]
     async fn test_limit_executor_large() {
-        test_limit_all_visable(1024, 1024, 512, 0).await;
-        test_limit_all_visable(1024, 33, 512, 0).await;
-        test_limit_all_visable(1024, 33, 515, 0).await;
+        test_limit_all_visible(1024, 1024, 512, 0).await;
+        test_limit_all_visible(1024, 33, 512, 0).await;
+        test_limit_all_visible(1024, 33, 515, 0).await;
     }
 
     #[tokio::test]
     async fn test_limit_executor_with_offset() {
         for limit in 9..12 {
             for offset in 3..6 {
-                test_limit_all_visable(18, 3, limit, offset).await;
+                test_limit_all_visible(18, 3, limit, offset).await;
             }
         }
     }
