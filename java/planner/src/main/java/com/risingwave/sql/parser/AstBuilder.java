@@ -404,7 +404,8 @@ class AstBuilder extends SqlBaseBaseVisitor<Node> {
 
   @Override
   public Node visitDropView(SqlBaseParser.DropViewContext ctx) {
-    return new DropView(getQualifiedNames(ctx.qnames()), ctx.EXISTS() != null);
+    return new DropView(
+        getQualifiedName(ctx.qname()), ctx.EXISTS() != null, ctx.MATERIALIZED() != null);
   }
 
   @Override

@@ -111,6 +111,7 @@ import java.util.stream.Collector;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
+/** Create a standard formatted SQL statement for a SqlNode. */
 public final class SqlFormatter {
 
   private static final String INDENT = "   ";
@@ -961,9 +962,7 @@ public final class SqlFormatter {
       if (node.ifExists()) {
         builder.append("IF EXISTS ");
       }
-      builder.append(node.names().stream()
-          .map(Formatter::formatQualifiedName)
-          .collect(COMMA_JOINER));
+      builder.append(node.name());
       return null;
     }
 

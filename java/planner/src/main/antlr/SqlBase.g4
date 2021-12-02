@@ -92,7 +92,7 @@ statement
     | DROP FUNCTION (IF EXISTS)? name=qname
         '(' (functionArgument (',' functionArgument)*)? ')'                          #dropFunction
     | DROP USER (IF EXISTS)? name=ident                                              #dropUser
-    | DROP VIEW (IF EXISTS)? names=qnames                                            #dropView
+    | DROP (MATERIALIZED)? VIEW (IF EXISTS)? name=qname                                            #dropView
     | DROP ANALYZER name=ident                                                       #dropAnalyzer
     | GRANT (priviliges=idents | ALL PRIVILEGES?)
         (ON clazz qnames)? TO users=idents                                           #grantPrivilege

@@ -21,24 +21,32 @@
 
 package com.risingwave.sql.tree;
 
-import java.util.List;
-
+/**
+ * The drop view statement extended from CrateDB. Note that we modify the grammar from CrateDB, such
+ * that we allow drop only one table once.
+ */
 public final class DropView extends Statement {
 
-  private final List<QualifiedName> names;
+  private final QualifiedName name;
   private final boolean ifExists;
+  private final boolean materialized;
 
-  public DropView(List<QualifiedName> names, boolean ifExists) {
-    this.names = names;
+  public DropView(QualifiedName name, boolean ifExists, boolean materialized) {
+    this.name = name;
     this.ifExists = ifExists;
+    this.materialized = materialized;
   }
 
-  public List<QualifiedName> names() {
-    return names;
+  public QualifiedName name() {
+    return name;
   }
 
   public boolean ifExists() {
     return ifExists;
+  }
+
+  public boolean isMaterialized() {
+    return materialized;
   }
 
   @Override
@@ -55,19 +63,19 @@ public final class DropView extends Statement {
     if (ifExists != dropView.ifExists) {
       return false;
     }
-    return names.equals(dropView.names);
+    return name.equals(dropView.name);
   }
 
   @Override
   public int hashCode() {
-    int result = names.hashCode();
+    int result = name.hashCode();
     result = 31 * result + (ifExists ? 1 : 0);
     return result;
   }
 
   @Override
   public String toString() {
-    return "DropView{" + "names=" + names + ", ifExists=" + ifExists + '}';
+    return "DropView{" + "name=" + name + ", ifExists=" + ifExists + '}';
   }
 
   @Override

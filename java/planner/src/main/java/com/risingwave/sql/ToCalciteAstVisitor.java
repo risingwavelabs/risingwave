@@ -33,6 +33,7 @@ import com.risingwave.sql.tree.CreateTable;
 import com.risingwave.sql.tree.CreateView;
 import com.risingwave.sql.tree.DoubleLiteral;
 import com.risingwave.sql.tree.DropTable;
+import com.risingwave.sql.tree.DropView;
 import com.risingwave.sql.tree.ExistsPredicate;
 import com.risingwave.sql.tree.Explain;
 import com.risingwave.sql.tree.Expression;
@@ -165,6 +166,17 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
     SqlCharStringLiteral rowSchemaLocation =
         SqlLiteral.createCharString(node.getRowSchemaLocation(), pos);
     return new SqlCreateStream(pos, name, columnList, properties, rowFormat, rowSchemaLocation);
+  }
+
+  @Override
+  public SqlNode visitDropView(DropView dropView, Void context) {
+    SqlIdentifier name = new SqlIdentifier(dropView.name().getParts(), SqlParserPos.ZERO);
+
+    if (dropView.isMaterialized()) {
+      return SqlDdlNodes.dropMaterializedView(SqlParserPos.ZERO, dropView.ifExists(), name);
+    } else {
+      return SqlDdlNodes.dropView(SqlParserPos.ZERO, dropView.ifExists(), name);
+    }
   }
 
   @Override

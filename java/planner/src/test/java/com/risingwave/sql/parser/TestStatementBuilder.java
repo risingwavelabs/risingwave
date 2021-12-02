@@ -84,6 +84,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.hamcrest.CoreMatchers;
 import org.junit.jupiter.api.Test;
 
+/**
+ * The test class for testing parsing statements from strings. Note that the statements here will
+ * later be translated to Calcite statements.
+ */
 public class TestStatementBuilder {
 
   private static void printStatement(String sql) {
@@ -1788,9 +1792,7 @@ public class TestStatementBuilder {
   @Test
   public void testDropViewParsing() {
     printStatement("DROP VIEW myView");
-    printStatement("DROP VIEW v1, v2, x.v3");
     printStatement("DROP VIEW IF EXISTS myView");
-    printStatement("DROP VIEW IF EXISTS v1, x.v2, y.v3");
   }
 
   @Test
