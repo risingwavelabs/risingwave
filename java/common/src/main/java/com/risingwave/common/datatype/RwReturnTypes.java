@@ -1,9 +1,13 @@
 package com.risingwave.common.datatype;
 
+import static org.apache.calcite.sql.type.ReturnTypes.BOOLEAN_NULLABLE_OPTIMIZED;
+
+import java.util.stream.IntStream;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.sql.type.ReturnTypes;
 import org.apache.calcite.sql.type.SqlReturnTypeInference;
+import org.apache.calcite.sql.type.SqlTypeName;
 
 /** A collection of return-type inference strategies as supplements to {@link ReturnTypes}. */
 public abstract class RwReturnTypes {
@@ -31,5 +35,53 @@ public abstract class RwReturnTypes {
         } else {
           return type;
         }
+      };
+
+  public static final SqlReturnTypeInference RW_AND_BOOLEAN_NULLABLE =
+      opBinding -> {
+        // Make it simple first, don't take cast into account.
+        var allLiterals =
+            IntStream.range(0, opBinding.getOperandCount())
+                .allMatch(idx -> opBinding.isOperandLiteral(idx, false));
+
+        if (allLiterals) {
+          var hasFalse =
+              IntStream.range(0, opBinding.getOperandCount())
+                  .anyMatch(
+                      idx ->
+                          Boolean.FALSE.equals(
+                              opBinding.getOperandLiteralValue(idx, Boolean.class)));
+          if (hasFalse) {
+            return ((RisingWaveDataType)
+                    opBinding.getTypeFactory().createSqlType(SqlTypeName.BOOLEAN))
+                .withNullability(false);
+          }
+        }
+
+        return BOOLEAN_NULLABLE_OPTIMIZED.inferReturnType(opBinding);
+      };
+
+  public static final SqlReturnTypeInference RW_OR_BOOLEAN_NULLABLE =
+      opBinding -> {
+        // Make it simple first, don't take cast into account.
+        var allLiterals =
+            IntStream.range(0, opBinding.getOperandCount())
+                .allMatch(idx -> opBinding.isOperandLiteral(idx, false));
+
+        if (allLiterals) {
+          var hasTrue =
+              IntStream.range(0, opBinding.getOperandCount())
+                  .anyMatch(
+                      idx ->
+                          Boolean.TRUE.equals(
+                              opBinding.getOperandLiteralValue(idx, Boolean.class)));
+          if (hasTrue) {
+            return ((RisingWaveDataType)
+                    opBinding.getTypeFactory().createSqlType(SqlTypeName.BOOLEAN))
+                .withNullability(false);
+          }
+        }
+
+        return BOOLEAN_NULLABLE_OPTIMIZED.inferReturnType(opBinding);
       };
 }

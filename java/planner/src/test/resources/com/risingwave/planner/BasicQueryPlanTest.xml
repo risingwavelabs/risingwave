@@ -367,4 +367,18 @@ RwBatchLimit(offset=[1], fetch=[1])
         <Resource name="json" path="batch/basic/limit">
         </Resource>
     </TestCase>
+    <TestCase name="bool literal">
+        <Resource name="sql">
+            <![CDATA[
+select false AND NULL, true or NULL;
+]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchValues(tuples=[[{ false, true }]])
+]]>
+        </Resource>
+        <Resource name="json" path="batch/basic/bool_literal">
+        </Resource>
+    </TestCase>
 </Root>

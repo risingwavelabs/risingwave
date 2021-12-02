@@ -1,0 +1,25 @@
+{
+  "nodeType": "VALUE",
+  "body": {
+    "@type": "type.googleapis.com/plan.ValuesNode",
+    "tuples": [{
+      "cells": [{
+        "exprType": "CONSTANT_VALUE",
+        "returnType": {
+          "typeName": "BOOLEAN"
+        },
+        "constant": {
+          "body": "AA=="
+        }
+      }, {
+        "exprType": "CONSTANT_VALUE",
+        "returnType": {
+          "typeName": "BOOLEAN"
+        },
+        "constant": {
+          "body": "AQ=="
+        }
+      }]
+    }]
+  }
+}

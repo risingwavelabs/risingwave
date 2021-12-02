@@ -78,4 +78,26 @@ public class RisingWaveOverrideOperatorTable extends ReflectiveSqlOperatorTable 
           null,
           OperandTypes.family(SqlTypeFamily.DECIMAL),
           SqlFunctionCategory.TIMEDATE);
+
+  /** Logical <code>AND</code> operator. */
+  public static final SqlBinaryOperator AND =
+      new RwSqlBinaryOperator(
+          "AND",
+          SqlKind.AND,
+          24,
+          true,
+          RwReturnTypes.RW_AND_BOOLEAN_NULLABLE,
+          InferTypes.BOOLEAN,
+          OperandTypes.BOOLEAN_BOOLEAN);
+
+  /** Logical <code>OR</code> operator. */
+  public static final SqlBinaryOperator OR =
+      new RwSqlBinaryOperator(
+          "OR",
+          SqlKind.OR,
+          24,
+          true,
+          RwReturnTypes.RW_OR_BOOLEAN_NULLABLE,
+          InferTypes.BOOLEAN,
+          OperandTypes.BOOLEAN_BOOLEAN);
 }
