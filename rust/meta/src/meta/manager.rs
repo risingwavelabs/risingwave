@@ -1,5 +1,5 @@
 use crate::meta::{
-    Config, DatabaseMetaManager, Epoch, EpochGeneratorRef, IdGeneratorRef, MetaStoreRef,
+    Config, DatabaseMetaManager, Epoch, EpochGeneratorRef, IdGeneratorManager, MetaStoreRef,
     SchemaMetaManager, TableMetaManager, SINGLE_VERSION_EPOCH,
 };
 use prost::Message;
@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 pub struct MetaManager {
     pub meta_store_ref: MetaStoreRef,
     pub epoch_generator: EpochGeneratorRef,
-    pub id_generator: IdGeneratorRef,
+    pub id_gen_manager: IdGeneratorManager,
     pub config: Config,
     pub catalog_lock: RwLock<()>,
 
@@ -24,13 +24,13 @@ impl MetaManager {
     pub async fn new(
         meta_store_ref: MetaStoreRef,
         epoch_generator: EpochGeneratorRef,
-        id_generator: IdGeneratorRef,
+        id_gen_manager: IdGeneratorManager,
         config: Config,
     ) -> Self {
         let mut manager = MetaManager {
             meta_store_ref,
             epoch_generator,
-            id_generator,
+            id_gen_manager,
             config,
 
             catalog_lock: RwLock::new(()),

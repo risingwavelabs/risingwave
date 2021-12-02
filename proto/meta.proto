@@ -89,7 +89,16 @@ service EpochService {
 
 // Below for id generator service.
 
-message GetIdRequest {}
+message GetIdRequest {
+  enum IdCategory {
+    Default = 0;
+    Database = 1;
+    Schema = 2;
+    Table = 3;
+    Fragment = 4;
+  }
+  IdCategory category = 1;
+}
 
 message GetIdResponse {
   common.Status status = 1;

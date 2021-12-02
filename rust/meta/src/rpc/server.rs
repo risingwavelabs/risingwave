@@ -1,4 +1,4 @@
-use crate::meta::{Config, MemEpochGenerator, MemStore, MetaManager, StoredIdGenerator};
+use crate::meta::{Config, IdGeneratorManager, MemEpochGenerator, MemStore, MetaManager};
 use crate::rpc::service::catalog_service::CatalogServiceImpl;
 use crate::rpc::service::epoch_service::EpochServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
@@ -18,7 +18,7 @@ pub async fn rpc_serve(addr: SocketAddr) -> (JoinHandle<()>, UnboundedSender<()>
         MetaManager::new(
             meta_store_ref.clone(),
             Box::new(MemEpochGenerator::new()),
-            Box::new(StoredIdGenerator::new(meta_store_ref).await),
+            IdGeneratorManager::new(meta_store_ref).await,
             Config::default(),
         )
         .await,

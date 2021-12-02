@@ -22,13 +22,14 @@ impl IdGeneratorService for IdGeneratorServiceImpl {
         &self,
         request: Request<GetIdRequest>,
     ) -> Result<Response<GetIdResponse>, Status> {
-        let _req = request.into_inner();
+        let req = request.into_inner();
+        let category = req.get_category();
         Ok(Response::new(GetIdResponse {
             status: None,
             id: self
                 .mmc
-                .id_generator
-                .generate()
+                .id_gen_manager
+                .generate(category)
                 .await
                 .map_err(|e| e.to_grpc_status())?,
         }))

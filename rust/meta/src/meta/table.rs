@@ -71,7 +71,7 @@ impl TableMetaManager for MetaManager {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::meta::{Config, MemEpochGenerator, MemStore, StoredIdGenerator};
+    use crate::meta::{Config, IdGeneratorManager, MemEpochGenerator, MemStore};
     use futures::future;
     use std::sync::Arc;
 
@@ -81,7 +81,7 @@ mod test {
         let meta_manager = MetaManager::new(
             meta_store_ref.clone(),
             Box::new(MemEpochGenerator::new()),
-            Box::new(StoredIdGenerator::new(meta_store_ref).await),
+            IdGeneratorManager::new(meta_store_ref).await,
             Config::default(),
         )
         .await;
