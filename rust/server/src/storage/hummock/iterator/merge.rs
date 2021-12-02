@@ -26,7 +26,7 @@ pub struct MergeIterator {
     iterators: Vec<Box<dyn HummockIterator + Send>>,
     heap: BinaryHeap<HeapNode>,
     cur_node: Option<HeapNode>,
-    heap_builded: bool,
+    heap_built: bool,
 }
 
 impl HeapNode {
@@ -68,11 +68,11 @@ impl MergeIterator {
             iterators,
             heap: BinaryHeap::new(),
             cur_node: None,
-            heap_builded: false,
+            heap_built: false,
         }
     }
     async fn next_inner(&mut self) -> HummockResult<Option<(&[u8], HummockValue<&[u8]>)>> {
-        if !self.heap_builded {
+        if !self.heap_built {
             self.build_heap().await?;
         }
         if self.heap.is_empty() {
@@ -101,7 +101,7 @@ impl MergeIterator {
     }
 
     async fn build_heap(&mut self) -> HummockResult<()> {
-        self.heap_builded = true;
+        self.heap_built = true;
         for (iterator_idx, iter) in &mut self.iterators.iter_mut().enumerate() {
             if let Some((key, val)) = iter.next().await? {
                 self.heap.push(HeapNode::new(iterator_idx, key, val));

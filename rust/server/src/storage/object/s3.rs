@@ -190,7 +190,7 @@ impl ObjectStore for S3ObjectStore {
     }
 
     /// Permanently delete the whole object.
-    /// Accoding to Amazon S3, this will simply return Ok if the object does not exist.
+    /// According to Amazon S3, this will simply return Ok if the object does not exist.
     async fn delete(&self, path: &str) -> Result<()> {
         ensure!(!self.client.is_none());
 

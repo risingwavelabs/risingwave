@@ -44,6 +44,6 @@ pub trait ObjectStore: Send + Sync {
     /// conditional vacuuming.
     async fn close(&self, path: &str) -> Result<()>;
 
-    /// Delete blob permanantly.
+    /// Delete blob permanently.
     async fn delete(&self, path: &str) -> Result<()>;
 }

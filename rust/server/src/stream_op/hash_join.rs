@@ -33,15 +33,15 @@ struct StreamChunkBuilder {
     /// arrays in the data chunk to build
     column_builders: Vec<ArrayBuilderImpl>,
     /// The start position of the columns of the side
-    /// stream coming from. If the comming side is the
+    /// stream coming from. If the coming side is the
     /// left, the `update_start_pos` should be 0.
-    /// If the comming side is the right, the `update_start_pos`
+    /// If the coming side is the right, the `update_start_pos`
     /// is the number of columns of the left side.
     update_start_pos: usize,
     /// The start position of the columns of the opposite side
-    /// stream coming from. If the comming side is the
+    /// stream coming from. If the coming side is the
     /// left, the `matched_start_pos` should be the number of columns of the left side.
-    /// If the comming side is the right, the `matched_start_pos`
+    /// If the coming side is the right, the `matched_start_pos`
     /// should be 0.
     matched_start_pos: usize,
 }
@@ -90,7 +90,7 @@ impl StreamChunkBuilder {
         Ok(())
     }
 
-    /// append a row with matched value and fill the comming side with null.
+    /// append a row with matched value and fill the coming side with null.
     fn append_row_matched(&mut self, op: Op, row_matched: &Row) -> Result<()> {
         self.ops.push(op);
         for i in 0..self.column_builders.len() - row_matched.size() {
@@ -168,7 +168,7 @@ struct JoinSide {
     ht: HashMap<HashKeyType, HashValueType>,
     /// Indices of the join columns
     key_indices: Vec<usize>,
-    /// The date type of each colums to join on
+    /// The date type of each columns to join on
     col_types: Vec<DataTypeRef>,
     /// The start position for the side in output new columns
     start_pos: usize,
@@ -180,7 +180,7 @@ pub struct HashJoinExecutor<const T: JoinTypePrimitive> {
     /// Barrier aligner that combines two input streams and aligns their barriers
     aligner: BarrierAligner,
     // TODO: maybe remove `new_column_datatypes` and use schema
-    /// the data types of the formed new colums
+    /// the data types of the formed new columns
     new_column_datatypes: Vec<DataTypeRef>,
     /// The schema of the hash join executor
     schema: Schema,
@@ -350,7 +350,7 @@ impl<const T: JoinTypePrimitive> HashJoinExecutor<T> {
                         let entry = side_update.ht.entry(key);
                         let entry = match entry {
                             Entry::Occupied(entry) => entry.into_mut(),
-                            // if outer join and not its the fisrt to insert, meaning there must be
+                            // if outer join and not its the first to insert, meaning there must be
                             // corresponding nulls.
                             Entry::Vacant(entry) => {
                                 if outer_side_null(T, S) {

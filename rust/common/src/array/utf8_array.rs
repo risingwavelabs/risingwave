@@ -213,7 +213,7 @@ impl PartialBytesWriter {
     /// in that it allows us to call it multiple times.
     pub fn write_ref(&mut self, value: &str) -> Result<()> {
         // SAFETY: The dirty `builder` is owned by `PartialBytesWriter`.
-        // We can't access it until `finish` was callled.
+        // We can't access it until `finish` was called.
         unsafe { self.builder.append_partial(value) }
     }
 

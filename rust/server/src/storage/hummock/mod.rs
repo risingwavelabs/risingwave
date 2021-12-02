@@ -28,7 +28,7 @@ pub struct HummockOptions {
     pub block_size: u32,
     /// false positive probability of Bloom filter
     pub bloom_false_positive: f64,
-    /// remote direcotry for storing data and metadata objects
+    /// remote directory for storing data and metadata objects
     pub remote_dir: String,
 }
 

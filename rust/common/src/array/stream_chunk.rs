@@ -90,7 +90,7 @@ impl StreamChunk {
         &self.columns
     }
 
-    /// compact the `StreamChunck` with its visibility map
+    /// compact the `StreamChunk` with its visibility map
     pub fn compact(self) -> Result<Self> {
         match &self.visibility {
             None => Ok(self),

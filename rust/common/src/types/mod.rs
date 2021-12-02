@@ -220,7 +220,7 @@ for_all_scalar_variants! { scalar_impl_enum }
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
 
-// TODO(MrCroxx): trun Datum into a struct, and impl ser/de as its member functions.
+// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
 pub fn serialize_datum_into(
     datum: &Datum,
     serializer: &mut memcomparable::Serializer,
@@ -234,7 +234,7 @@ pub fn serialize_datum_into(
     Ok(())
 }
 
-// TODO(MrCroxx): trun Datum into a struct, and impl ser/de as its member functions.
+// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
 pub fn serialize_datum_not_null_into(
     datum: &Datum,
     serializer: &mut memcomparable::Serializer,
@@ -245,7 +245,7 @@ pub fn serialize_datum_not_null_into(
         .serialize(serializer)
 }
 
-// TODO(MrCroxx): trun Datum into a struct, and impl ser/de as its member functions.
+// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
 pub fn deserialize_datum_from(
     ty: &DataTypeKind,
     deserializer: &mut memcomparable::Deserializer,
@@ -257,7 +257,7 @@ pub fn deserialize_datum_from(
     }
 }
 
-// TODO(MrCroxx): trun Datum into a struct, and impl ser/de as its member functions.
+// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
 pub fn deserialize_datum_not_null_from(
     ty: &DataTypeKind,
     deserializer: &mut memcomparable::Deserializer,

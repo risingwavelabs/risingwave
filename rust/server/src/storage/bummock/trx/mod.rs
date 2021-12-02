@@ -4,12 +4,12 @@ pub struct Transaction {
 
 /// Like the snapshot in PostgreSQL, this struct serves to use `Snapshot Isolation`
 /// concurrency control to set up the read view of the data achieving `Serializble`.
-/// Design Note: It is not truely `Serializable` as `Write Skew` could happen when two transactions 
+/// Design Note: It is not truly `Serializable` as `Write Skew` could happen when two transactions 
 /// reads and writes in a crossed manner. For example, `T1` reads from `a` and writes to `b` 
 /// and `T2` reads from `b` and writes to `a`. This could happen in our system when two source 
 /// executors read and write values from different keyed CDC streams. The expected serializable 
 /// result of `T1` and `T2`would either be both `a`s or `b`s. However both transactions will get 
-/// a `SnapshotData` to fetch `a` and `b` independently, and the finaly result of two transactions 
+/// a `SnapshotData` to fetch `a` and `b` independently, and the final result of two transactions 
 /// will be either `(a, b)` or `(b, a)`.
 pub struct SnapshotData {
     /// `xmin`: all transactions smaller than `xmin` are done and visible.
