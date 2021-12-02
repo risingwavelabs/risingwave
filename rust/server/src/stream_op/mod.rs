@@ -28,6 +28,7 @@ mod dispatch;
 mod filter;
 mod hash_agg;
 mod hash_join;
+mod keyspace;
 mod merge;
 mod mview_sink;
 mod project;

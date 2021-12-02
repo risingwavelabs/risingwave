@@ -93,6 +93,24 @@ impl<'a> HummockValue<&'a [u8]> {
     }
 }
 
+impl From<Option<Vec<u8>>> for HummockValue<Vec<u8>> {
+    fn from(data: Option<Vec<u8>>) -> Self {
+        match data {
+            Some(data) => Self::Put(data),
+            None => Self::Delete,
+        }
+    }
+}
+
+impl<'a> From<Option<&'a [u8]>> for HummockValue<&'a [u8]> {
+    fn from(data: Option<&'a [u8]>) -> Self {
+        match data {
+            Some(data) => Self::Put(data),
+            None => Self::Delete,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
