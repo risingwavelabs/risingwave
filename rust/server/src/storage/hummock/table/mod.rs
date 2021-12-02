@@ -6,11 +6,14 @@ mod block_iterator;
 mod bloom;
 use bloom::Bloom;
 pub mod builder;
+pub mod format;
 pub use block_iterator::*;
 pub use builder::*;
 mod table_iterator;
 pub use table_iterator::*;
 mod utils;
+use self::format::user_key;
+
 use super::{HummockError, HummockResult};
 use crate::storage::hummock::table::utils::crc32_checksum;
 use crate::storage::object::{BlockLocation, ObjectStore};
@@ -201,13 +204,17 @@ impl Table {
         !self.meta.bloom_filter.is_empty()
     }
 
-    /// Judge whether the hash is in the table with the given false positive rate.
+    /// Judge whether the key is in the table with the given false positive rate.
     /// Note: it means that :
     /// - if the return value is true, then the table surely does not have the value;
     /// - if the return value is false, then the table may or may not have the value actually,
     /// a.k.a. we don't know the answer.
-    pub fn surely_not_have(&self, hash: u32) -> bool {
+    pub fn surely_not_have(&self, key: &[u8]) -> bool {
         if self.has_bloom_filter() {
+            // remove timestamp
+            let key = user_key(key);
+
+            let hash = farmhash::fingerprint32(key);
             let bloom = Bloom::new(&self.meta.bloom_filter);
             !bloom.may_contain(hash)
         } else {

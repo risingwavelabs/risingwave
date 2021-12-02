@@ -11,12 +11,12 @@ mod error;
 mod iterator;
 mod keyed_state;
 mod value;
+use self::table::format::key_with_ts;
+use crate::storage::object::ObjectStore;
+use cloud::gen_remote_table;
+pub use error::*;
 use tokio::sync::Mutex;
 use value::*;
-
-use crate::storage::hummock::cloud::gen_remote_table;
-use crate::storage::object::ObjectStore;
-pub use error::*;
 
 pub static REMOTE_DIR: &str = "/test/";
 
@@ -70,6 +70,7 @@ impl HummockStorage {
 
         let mut table_builder = get_builder(&self.options);
         for (k, v) in kv_pairs {
+            let k = key_with_ts(k, 0);
             table_builder.add(k.as_slice(), v);
         }
 

@@ -6,6 +6,7 @@
 
 use super::bloom::Bloom;
 use super::utils::bytes_diff;
+use crate::storage::hummock::table::format::user_key;
 use crate::storage::hummock::table::utils::crc32_checksum;
 use crate::storage::hummock::HummockValue;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -183,7 +184,9 @@ impl TableBuilder {
         self.meta.largest_key.clear();
         self.meta.largest_key.extend_from_slice(key);
 
-        self.key_hashes.push(farmhash::fingerprint32(key));
+        // remove timestamp before calculate hash
+        let user_key = user_key(key);
+        self.key_hashes.push(farmhash::fingerprint32(user_key));
 
         // diff_key stores the difference of key with baseKey.
         let diff_key = if self.base_key.is_empty() {
@@ -255,6 +258,7 @@ pub(super) mod tests {
 
     use super::*;
     use crate::storage::hummock::cloud::gen_remote_table;
+    use crate::storage::hummock::table::format::key_with_ts;
     use crate::storage::hummock::table::Table;
     use crate::storage::object::{InMemObjectStore, ObjectStore};
     use itertools::Itertools;
@@ -303,9 +307,10 @@ pub(super) mod tests {
         assert_eq!(header.diff, 23334);
     }
 
-    /// The key of an index in the test table
+    /// The key (with timestamp 0) of an index in the test table
     pub fn test_key_of(idx: usize) -> Vec<u8> {
-        format!("key_test_{:05}", idx * 2).as_bytes().to_vec()
+        let user_key = format!("key_test_{:05}", idx * 2).as_bytes().to_vec();
+        key_with_ts(user_key, 0)
     }
 
     /// The value of an index in the test table
@@ -363,8 +368,8 @@ pub(super) mod tests {
 
         assert_eq!(table.has_bloom_filter(), with_blooms);
         for i in 0..key_count {
-            let hash = farmhash::fingerprint32(test_key_of(i).as_slice());
-            assert!(!table.surely_not_have(hash));
+            let key = test_key_of(i);
+            assert!(!table.surely_not_have(key.as_slice()));
         }
     }
 
