@@ -8,3 +8,6 @@ query I
 select count(*) from t
 ----
 4
+
+statement ok
+drop table t
