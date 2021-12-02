@@ -9,6 +9,8 @@ option optimize_for = SPEED;
 import "common.proto";
 import "data.proto";
 import "plan.proto";
+import "stream_service.proto";
+import "stream_plan.proto";
 
 message Table {
   enum DistributionType {
@@ -72,6 +74,8 @@ message Location {
   uint64 version = 3;
 }
 
+// Below for epoch service.
+
 message GetEpochRequest {}
 
 message GetEpochResponse {
@@ -83,6 +87,8 @@ service EpochService {
   rpc GetEpoch(GetEpochRequest) returns (GetEpochResponse);
 }
 
+// Below for id generator service.
+
 message GetIdRequest {}
 
 message GetIdResponse {
@@ -93,6 +99,8 @@ message GetIdResponse {
 service IdGeneratorService {
   rpc GetId(GetIdRequest) returns (GetIdResponse);
 }
+
+// Below for catalog service.
 
 message CreateRequest {
   uint32 node_id = 1;
@@ -142,6 +150,8 @@ service CatalogService {
   rpc Drop(DropRequest) returns (DropResponse);
 }
 
+// Below for heartbeat.
+
 message HeartbeatRequest {
   enum NodeType {
     FRONTEND = 0;
@@ -160,4 +170,37 @@ message HeartbeatResponse {
 
 service HeartbeatService {
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+}
+
+// Below for stream manager.
+
+message AllocateFragmentIdRequest {
+  int32 interval = 1;
+}
+
+message AllocateFragmentIdResponse {
+  common.Status status = 1;
+  int32 start_id = 2;
+}
+
+message FetchActorInfoTableRequest {}
+
+message FetchActorInfoTableResponse {
+  common.Status status = 1;
+  repeated stream_service.ActorInfo info = 2;
+}
+
+message AddFragmentToWorkerRequest {
+  stream_plan.StreamFragment fragment = 1;
+  Cluster.Node node = 2;
+}
+
+message AddFragmentToWorkerResponse {
+  common.Status status = 1;
+}
+
+service StreamManagerService {
+  rpc AllocateFragmentId(AllocateFragmentIdRequest) returns (AllocateFragmentIdResponse);
+  rpc FetchActorInfoTable(FetchActorInfoTableRequest) returns (FetchActorInfoTableResponse);
+  rpc AddFragmentToWorker(AddFragmentToWorkerRequest) returns (AddFragmentToWorkerResponse);
 }
