@@ -25,17 +25,6 @@ pub struct ManagedValueState<S: StateStore> {
     is_dirty: bool,
 }
 
-/// Verify if the data going through the state is valid by checking if `ops.len() ==
-/// visibility.len() == data[x].len()`.
-pub fn verify_batch(ops: Ops<'_>, visibility: Option<&Bitmap>, data: &[&ArrayImpl]) -> bool {
-    let mut all_lengths = vec![ops.len()];
-    if let Some(visibility) = visibility {
-        all_lengths.push(visibility.len());
-    }
-    all_lengths.extend(data.iter().map(|x| x.len()));
-    all_lengths.iter().min() == all_lengths.iter().max()
-}
-
 impl<S: StateStore> ManagedValueState<S> {
     /// Create a single-value managed state based on `AggCall` and `Keyspace`.
     pub async fn new(agg_call: AggCall, keyspace: Keyspace<S>) -> Result<Self> {
@@ -73,7 +62,7 @@ impl<S: StateStore> ManagedValueState<S> {
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
     ) -> Result<()> {
-        debug_assert!(verify_batch(ops, visibility, data));
+        debug_assert!(super::verify_batch(ops, visibility, data));
         self.is_dirty = true;
         self.state.apply_batch(ops, visibility, data)
     }
@@ -81,17 +70,17 @@ impl<S: StateStore> ManagedValueState<S> {
     /// Get the output of the state. Note that in our case, getting the output is very easy, as the
     /// output is the same as the aggregation state. In other aggregators, like min and max,
     /// `get_output` might involve a scan from the state store.
-    async fn get_output(&self) -> Result<Datum> {
+    pub async fn get_output(&mut self) -> Result<Datum> {
         self.state.get_output()
     }
 
     /// Check if this state needs a flush.
-    fn is_dirty(&self) -> bool {
+    pub fn is_dirty(&self) -> bool {
         self.is_dirty
     }
 
     /// Flush the internal state to a write batch. TODO: add `WriteBatch` to Hummock.
-    fn flush(&mut self, write_batch: &mut Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
+    pub fn flush(&mut self, write_batch: &mut Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
         // If the managed state is not dirty, the caller should not flush. But forcing a flush won't
         // cause incorrect result: it will only produce more I/O.
         debug_assert!(self.is_dirty);
@@ -158,7 +147,7 @@ mod tests {
 
         // reload the state and check the output
         let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
-        let managed_state = ManagedValueState::new(create_test_count_state(), keyspace)
+        let mut managed_state = ManagedValueState::new(create_test_count_state(), keyspace)
             .await
             .unwrap();
         assert_eq!(

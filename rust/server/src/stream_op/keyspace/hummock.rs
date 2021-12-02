@@ -22,8 +22,13 @@ impl StateStore for HummockStateStore {
             .get(key)
             .await
             .map(|x| x.map(Bytes::from))
+            // TODO: make the HummockError into an I/O Error.
             .map_err(anyhow::Error::new)
             .to_rw_result()
+    }
+
+    async fn scan(&self, _prefix: &[u8], _limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
+        todo!()
     }
 
     async fn ingest_batch(&self, mut kv_pairs: Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
