@@ -1,12 +1,15 @@
 use std::sync::Arc;
+use std::time::Duration;
+
+use futures::StreamExt;
 
 use risingwave_common::array::column::Column;
-
+use risingwave_common::array::Row;
 use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder};
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{SchemaId, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::RwError;
-use risingwave_common::types::{DecimalType, Int32Type};
+use risingwave_common::types::{DecimalType, Int32Type, Scalar};
 use risingwave_common::util::addr::get_host_port;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
@@ -25,7 +28,10 @@ use risingwave_pb::stream_service::{ActorInfo, BroadcastActorInfoTableRequest};
 use risingwave_pb::task_service::HostAddress;
 
 use crate::source::{MemSourceManager, SourceManager};
-use crate::storage::{SimpleTableManager, Table, TableColumnDesc, TableImpl, TableManager};
+use crate::storage::{
+    RowTable, SimpleTableManager, Table, TableColumnDesc, TableImpl, TableManager,
+    TestRowTableEvent,
+};
 use crate::stream::StreamManager;
 use crate::task::{GlobalTaskEnv, TaskManager};
 
@@ -188,35 +194,30 @@ async fn test_stream_mv_proto() {
 
     // Insert data and check if the materialized view has been updated.
     let _res_app = table_ref.append(append_chunk).await;
+    let table_id_mv = TableId::new(SchemaId::default(), 1);
+    let table_ref_mv = table_manager.get_table(&table_id_mv).unwrap();
 
-    // TODO(MrCroxx): Currently, we cannot check if mem state has been correctly flushed in
-    // `KeyedState`. Considering `KeyedState` will be blown up soon, we temporarily comment this
-    // part and restore it after `KetedState` is modified.
-
-    // let table_id_mv = TableId::new(SchemaId::default(), 1);
-    // let table_ref_mv = table_manager.get_table(&table_id_mv).unwrap();
-
-    // // We remark that normal barrier generation initiates in `rpc_serve`. In tests,
-    // // we don't have a `server`. Without explicit sending a stop barrier, `MViewSinkExecutor`
-    // // won't flush. Thus we can get NO event from `TestRowTable` and get stuck.
-    // // FIXME: We have to make sure that `append_chunk` has been processed by the actor first,
-    // // then we can send the stop barrier.
-    // tokio::time::sleep(Duration::from_millis(500)).await;
-    // stream_manager.send_stop_barrier();
-    // if let TableImpl::TestRow(test_row_table) = table_ref_mv {
-    //   let rx = test_row_table.get_receiver();
-    //   let event = rx.lock().await.next().await.unwrap();
-    //   assert!(matches!(event, TestRowTableEvent::Ingest(..)));
-    //   let value_row = Row(vec![Some(1.to_scalar_value())]);
-    //   let res_row = test_row_table.get(value_row);
-    //   if let Ok(res_row_in) = res_row {
-    //     let datum = res_row_in.unwrap().0.get(0).unwrap().clone();
-    //     let d_value = datum.unwrap().into_int32();
-    //     assert_eq!(d_value, 1);
-    //   } else {
-    //     unreachable!();
-    //   }
-    // } else {
-    //   unreachable!();
-    // }
+    // We remark that normal barrier generation initiates in `rpc_serve`. In tests,
+    // we don't have a `server`. Without explicit sending a stop barrier, `MViewSinkExecutor`
+    // won't flush. Thus we can get NO event from `TestRowTable` and get stuck.
+    // FIXME: We have to make sure that `append_chunk` has been processed by the actor first,
+    // then we can send the stop barrier.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    stream_manager.send_stop_barrier();
+    if let TableImpl::TestRow(test_row_table) = table_ref_mv {
+        let rx = test_row_table.get_receiver();
+        let event = rx.lock().await.next().await.unwrap();
+        assert!(matches!(event, TestRowTableEvent::Ingest(..)));
+        let value_row = Row(vec![Some(1.to_scalar_value())]);
+        let res_row = test_row_table.get(value_row);
+        if let Ok(res_row_in) = res_row {
+            let datum = res_row_in.unwrap().0.get(0).unwrap().clone();
+            let d_value = datum.unwrap().into_int32();
+            assert_eq!(d_value, 1);
+        } else {
+            unreachable!();
+        }
+    } else {
+        unreachable!();
+    }
 }

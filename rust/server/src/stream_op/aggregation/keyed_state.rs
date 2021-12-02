@@ -7,9 +7,6 @@ use std::collections::HashMap;
 pub trait SchemaedSerializable: Send + Sync + 'static {
     type Output: Clone + Send + Sync + 'static;
 
-    /// Inner items count of the value.
-    fn len(&self) -> usize;
-
     /// Serialize a value to `Vec<u8>`.
     fn schemaed_serialize(&self, data: &Self::Output) -> Vec<u8>;
 
@@ -22,8 +19,8 @@ pub trait SchemaedSerializable: Send + Sync + 'static {
 pub trait CellBasedSchemaedSerializable: Send + Sync + 'static {
     type Output: Clone + Send + Sync + std::ops::Index<usize> + 'static;
 
-    /// Inner items count of the value.
-    fn len(&self) -> usize;
+    /// Count of cells.
+    fn cells(&self) -> usize;
 
     /// Serialize a cell of value to `Vec<u8>`.
     fn cell_based_schemaed_serialize(&self, data: &Self::Output, cell_idx: usize) -> Vec<u8>;

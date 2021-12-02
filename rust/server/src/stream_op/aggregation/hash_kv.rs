@@ -98,10 +98,6 @@ impl RowSerializer {
 impl SchemaedSerializable for RowSerializer {
     type Output = Row;
 
-    fn len(&self) -> usize {
-        self.schema.len()
-    }
-
     fn schemaed_serialize(&self, data: &Row) -> Vec<u8> {
         data.serialize().unwrap()
     }
@@ -114,7 +110,7 @@ impl SchemaedSerializable for RowSerializer {
 impl CellBasedSchemaedSerializable for RowSerializer {
     type Output = Row;
 
-    fn len(&self) -> usize {
+    fn cells(&self) -> usize {
         self.schema.fields().len()
     }
 
@@ -219,10 +215,6 @@ impl AggStateSerializer {
 impl SchemaedSerializable for AggStateSerializer {
     type Output = HashValue;
 
-    fn len(&self) -> usize {
-        self.deserializer.agg_calls.len()
-    }
-
     fn schemaed_serialize(&self, data: &HashValue) -> Vec<u8> {
         data.serialize().unwrap()
     }
@@ -235,7 +227,7 @@ impl SchemaedSerializable for AggStateSerializer {
 impl CellBasedSchemaedSerializable for AggStateSerializer {
     type Output = HashValue;
 
-    fn len(&self) -> usize {
+    fn cells(&self) -> usize {
         self.deserializer.agg_calls.len()
     }
 
