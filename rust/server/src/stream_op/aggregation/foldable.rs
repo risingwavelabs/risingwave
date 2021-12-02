@@ -62,43 +62,39 @@ where
 /// `PrimitiveSummable` sums two primitives by `accumulate` and `retract` functions.
 /// It produces the same type of output as input `S`.
 #[derive(Debug)]
-pub struct PrimitiveSummable<S>
+pub struct PrimitiveSummable<S, I>
 where
-    S: Scalar
-        + num_traits::CheckedAdd<Output = S>
-        + num_traits::CheckedSub<Output = S>
-        + std::ops::Neg<Output = S>,
+    I: Scalar + Into<S> + std::ops::Neg<Output = I>,
+    S: Scalar + num_traits::CheckedAdd<Output = S> + num_traits::CheckedSub<Output = S>,
 {
-    _phantom: PhantomData<S>,
+    _phantom: PhantomData<(S, I)>,
 }
 
-impl<S> StreamingFoldable<S, S> for PrimitiveSummable<S>
+impl<S, I> StreamingFoldable<S, I> for PrimitiveSummable<S, I>
 where
-    S: Scalar
-        + num_traits::CheckedAdd<Output = S>
-        + num_traits::CheckedSub<Output = S>
-        + std::ops::Neg<Output = S>,
+    I: Scalar + Into<S> + std::ops::Neg<Output = I>,
+    S: Scalar + num_traits::CheckedAdd<Output = S> + num_traits::CheckedSub<Output = S>,
 {
-    fn accumulate(result: Option<&S>, input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
+    fn accumulate(result: Option<&S>, input: Option<I::ScalarRefType<'_>>) -> Result<Option<S>> {
         Ok(match (result, input) {
             (Some(x), Some(y)) => Some(
-                x.checked_add(&y.to_owned_scalar())
+                x.checked_add(&(y.to_owned_scalar()).into())
                     .ok_or_else(|| RwError::from(NumericValueOutOfRange))?,
             ),
             (Some(x), None) => Some(x.clone()),
-            (None, Some(y)) => Some(y.to_owned_scalar()),
+            (None, Some(y)) => Some((y.to_owned_scalar()).into()),
             (None, None) => None,
         })
     }
 
-    fn retract(result: Option<&S>, input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
+    fn retract(result: Option<&S>, input: Option<I::ScalarRefType<'_>>) -> Result<Option<S>> {
         Ok(match (result, input) {
             (Some(x), Some(y)) => Some(
-                x.checked_sub(&y.to_owned_scalar())
+                x.checked_sub(&(y.to_owned_scalar()).into())
                     .ok_or_else(|| RwError::from(NumericValueOutOfRange))?,
             ),
             (Some(x), None) => Some(x.clone()),
-            (None, Some(y)) => Some(-y.to_owned_scalar()),
+            (None, Some(y)) => Some((-y.to_owned_scalar()).into()),
             (None, None) => None,
         })
     }
@@ -469,6 +465,7 @@ impl_fold_agg! { I64Array, Int64, I32Array }
 impl_fold_agg! { I64Array, Int64, I16Array }
 impl_fold_agg! { I64Array, Int64, BoolArray }
 impl_fold_agg! { I64Array, Int64, Utf8Array }
+impl_fold_agg! { DecimalArray, Decimal, I64Array }
 impl_fold_agg! { DecimalArray, Decimal, DecimalArray }
 
 #[cfg(test)]
@@ -478,7 +475,7 @@ mod tests {
     use risingwave_common::{array, array_nonnull};
 
     type TestStreamingSumAgg<R> =
-        StreamingFoldAgg<R, R, PrimitiveSummable<<R as Array>::OwnedItem>>;
+        StreamingFoldAgg<R, R, PrimitiveSummable<<R as Array>::OwnedItem, <R as Array>::OwnedItem>>;
 
     type TestStreamingCountAgg<R> = StreamingFoldAgg<R, R, Countable<<R as Array>::OwnedItem>>;
 

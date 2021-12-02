@@ -99,24 +99,31 @@ pub fn create_streaming_agg_state(
                 (_, AggKind::Count, DataTypeKind::Int64, None) => {
                     Box::new(StreamingCountAgg::<I64Array>::new())
                 }
-                (_, AggKind::Sum, DataTypeKind::Int64, Some(datum)) => {
-                    Box::new(StreamingSumAgg::<I64Array>::try_from(datum)?)
+                (DataTypeKind::Int64, AggKind::Sum, DataTypeKind::Int64, Some(datum)) => {
+                    Box::new(StreamingSumAgg::<I64Array, I64Array>::try_from(datum)?)
                 }
-                (_, AggKind::Sum, DataTypeKind::Int64, None) => {
-                    Box::new(StreamingSumAgg::<I64Array>::new())
+                (DataTypeKind::Int64, AggKind::Sum, DataTypeKind::Int64, None) => {
+                    Box::new(StreamingSumAgg::<I64Array, I64Array>::new())
                 }
-                (_, AggKind::Sum, DataTypeKind::Int32, Some(datum)) => {
-                    Box::new(StreamingSumAgg::<I32Array>::try_from(datum)?)
+                (DataTypeKind::Int32, AggKind::Sum, DataTypeKind::Int64, Some(datum)) => {
+                    Box::new(StreamingSumAgg::<I64Array, I32Array>::try_from(datum)?)
                 }
-                (_, AggKind::Sum, DataTypeKind::Int32, None) => {
-                    Box::new(StreamingSumAgg::<I32Array>::new())
+                (DataTypeKind::Int32, AggKind::Sum, DataTypeKind::Int64, None) => {
+                    Box::new(StreamingSumAgg::<I64Array, I32Array>::new())
                 }
-                (_, AggKind::Sum, DataTypeKind::Int16, Some(datum)) => {
-                    Box::new(StreamingSumAgg::<I16Array>::try_from(datum)?)
+                (DataTypeKind::Int16, AggKind::Sum, DataTypeKind::Int64, Some(datum)) => {
+                    Box::new(StreamingSumAgg::<I64Array, I16Array>::try_from(datum)?)
                 }
-                (_, AggKind::Sum, DataTypeKind::Int16, None) => {
-                    Box::new(StreamingSumAgg::<I16Array>::new())
+                (DataTypeKind::Int16, AggKind::Sum, DataTypeKind::Int64, None) => {
+                    Box::new(StreamingSumAgg::<I64Array, I16Array>::new())
                 }
+                (DataTypeKind::Int64, AggKind::Sum, DataTypeKind::Decimal, Some(datum)) => {
+                    Box::new(StreamingSumAgg::<DecimalArray, I64Array>::try_from(datum)?)
+                }
+                (DataTypeKind::Int64, AggKind::Sum, DataTypeKind::Decimal, None) => {
+                    Box::new(StreamingSumAgg::<DecimalArray, I64Array>::new())
+                }
+                // FIXME: handle f32 -> f64
                 (_, AggKind::Sum, DataTypeKind::Float64, Some(datum)) => {
                     Box::new(StreamingFloatSumAgg::<F64Array>::try_from(datum)?)
                 }
@@ -129,11 +136,11 @@ pub fn create_streaming_agg_state(
                 (_, AggKind::Sum, DataTypeKind::Float32, None) => {
                     Box::new(StreamingFloatSumAgg::<F32Array>::new())
                 }
-                (_, AggKind::Sum, DataTypeKind::Decimal, Some(datum)) => {
-                    Box::new(StreamingSumAgg::<DecimalArray>::try_from(datum)?)
-                }
+                (_, AggKind::Sum, DataTypeKind::Decimal, Some(datum)) => Box::new(
+                    StreamingSumAgg::<DecimalArray, DecimalArray>::try_from(datum)?,
+                ),
                 (_, AggKind::Sum, DataTypeKind::Decimal, None) => {
-                    Box::new(StreamingSumAgg::<DecimalArray>::new())
+                    Box::new(StreamingSumAgg::<DecimalArray, DecimalArray>::new())
                 }
                 (_, AggKind::Min, DataTypeKind::Int16, Some(datum)) => {
                     Box::new(StreamingMinAgg::<I16Array>::try_from(datum)?)

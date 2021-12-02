@@ -13,7 +13,8 @@ use risingwave_common::error::{Result, RwError};
 use async_trait::async_trait;
 
 /// `StreamingSumAgg` sums data of the same type.
-pub type StreamingSumAgg<R> = StreamingFoldAgg<R, R, PrimitiveSummable<<R as Array>::OwnedItem>>;
+pub type StreamingSumAgg<R, I> =
+    StreamingFoldAgg<R, I, PrimitiveSummable<<R as Array>::OwnedItem, <I as Array>::OwnedItem>>;
 
 /// `StreamingFloatSumAgg` sums data of the same float type.
 pub type StreamingFloatSumAgg<R> =
