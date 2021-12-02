@@ -102,6 +102,11 @@ impl TableBuilder {
 
     /// Append encoded block bytes to the buffer
     fn finish_block(&mut self) {
+        // try to set smallest key of table
+        if self.meta.smallest_key.is_empty() {
+            self.meta.smallest_key = self.base_key.to_vec();
+        }
+
         // ---------- encode block ----------
         // different behavior: BadgerDB will just return.
         assert!(!self.entry_offsets.is_empty());
@@ -173,6 +178,10 @@ impl TableBuilder {
             self.base_offset = self.data_buf.len() as u32;
             self.entry_offsets.clear();
         }
+
+        // set largest key
+        self.meta.largest_key.clear();
+        self.meta.largest_key.extend_from_slice(key);
 
         self.key_hashes.push(farmhash::fingerprint32(key));
 
@@ -268,11 +277,24 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn test_smallest_key_and_largest_key() {
+        let mut b = TableBuilder::new(default_builder_opt_for_test());
+
+        for i in 0..TEST_KEYS_COUNT {
+            b.add(&test_key_of(i), HummockValue::Put(test_value_of(i)));
+        }
+
+        assert_eq!(test_key_of(0), b.meta.smallest_key);
+        assert_eq!(test_key_of(TEST_KEYS_COUNT - 1), b.meta.largest_key);
+    }
+
+    #[test]
     fn test_header_encode_decode() {
         let mut header = Header {
             overlap: 23333,
             diff: 23334,
         };
+
         let mut buf = BytesMut::new();
         header.encode(&mut buf);
         let mut buf = buf.freeze();
