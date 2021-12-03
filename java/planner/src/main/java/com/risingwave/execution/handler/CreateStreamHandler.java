@@ -60,7 +60,7 @@ public class CreateStreamHandler implements SqlHandler {
   private static PlanFragment serialize(TableCatalog table) {
     TableCatalog.TableId tableId = table.getId();
     CreateStreamNode.Builder createStreamNodeBuilder = CreateStreamNode.newBuilder();
-    for (ColumnCatalog columnCatalog : table.getAllColumns()) {
+    for (ColumnCatalog columnCatalog : table.getAllColumns(true)) {
       com.risingwave.proto.plan.ColumnDesc.Builder columnDescBuilder =
           com.risingwave.proto.plan.ColumnDesc.newBuilder();
 
@@ -68,6 +68,7 @@ public class CreateStreamHandler implements SqlHandler {
           .setName(columnCatalog.getName())
           .setEncoding(com.risingwave.proto.plan.ColumnDesc.ColumnEncodingType.RAW)
           .setColumnType(columnCatalog.getDesc().getDataType().getProtobufType())
+          .setColumnId(columnCatalog.getId().getValue())
           .setIsPrimary(false);
 
       createStreamNodeBuilder.addColumnDescs(columnDescBuilder);

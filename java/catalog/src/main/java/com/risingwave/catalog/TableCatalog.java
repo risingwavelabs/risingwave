@@ -69,7 +69,7 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
     // We remark that we should only insert implicit row id for OLAP table, not MV, not Stream.
     // If an MV happen to have some implicit row id as its pk, it will be added in an explicit
     // manner.
-    if (!stream && !isMaterializedView()) {
+    if (!isMaterializedView()) {
       this.nextColumnId.getAndIncrement();
     }
     this.columns = new ArrayList<>(columns);
@@ -82,7 +82,7 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
     this.rowFormat = rowFormat;
     this.rowIdColumn = buildRowIdColumn();
     this.rowSchemaLocation = rowSchemaLocation;
-    if (!stream && !isMaterializedView()) {
+    if (!isMaterializedView()) {
       // Put row-id column in map but do not put it in list of columns.
       this.columnById.put(rowIdColumn.getId(), rowIdColumn);
       this.columnByName.put(rowIdColumn.getEntityName(), rowIdColumn);

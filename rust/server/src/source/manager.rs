@@ -71,7 +71,9 @@ impl SourceManager for MemSourceManager {
         let source = match config {
             SourceConfig::Kafka(config) => SourceImpl::HighLevelKafka(HighLevelKafkaSource::new(
                 config.clone(),
-                Arc::new(columns.clone()),
+                // todo, The first column is skipped here to hide the _row_id column, which needs
+                // to be fixed in the future
+                Arc::new(columns[1..].to_owned()),
                 parser.clone(),
             )),
         };

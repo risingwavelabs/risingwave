@@ -1,3 +1,12 @@
+use std::convert::TryFrom;
+use std::hash::BuildHasher;
+use std::sync::Arc;
+
+use itertools::Itertools;
+use protobuf::Message;
+
+use risingwave_proto::data::{Column as ColumnProto, DataChunk as DataChunkProto};
+
 use crate::array::column::Column;
 use crate::array::data_chunk_iter::{DataChunkRefIter, RowRef};
 use crate::array::{ArrayBuilderImpl, ArrayImpl};
@@ -6,12 +15,6 @@ use crate::error::ErrorCode::InternalError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::unpack_from_any;
 use crate::util::hash_util::finalize_hashers;
-use itertools::Itertools;
-use protobuf::Message;
-use risingwave_proto::data::{Column as ColumnProto, DataChunk as DataChunkProto};
-use std::convert::TryFrom;
-use std::hash::BuildHasher;
-use std::sync::Arc;
 
 pub struct DataChunkBuilder {
     columns: Vec<Column>,
@@ -337,7 +340,7 @@ pub type DataChunkRef = Arc<DataChunk>;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::array::column::Column;
     use crate::array::*;
     use crate::types::Int32Type;
 

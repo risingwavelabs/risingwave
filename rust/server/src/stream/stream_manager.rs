@@ -380,22 +380,22 @@ impl StreamManagerCore {
                 let (sender, barrier_receiver) = unbounded();
                 self.sender_placeholder.push(sender);
 
+                let column_ids = table_source_node.get_column_ids().to_vec();
+                let source = source_desc.clone().source;
+
+                let mut fields = Vec::with_capacity(column_ids.len());
+                for &column_id in column_ids.iter() {
+                    let column_desc = source_desc
+                        .columns
+                        .iter()
+                        .find(|c| c.column_id == column_id)
+                        .unwrap();
+                    fields.push(Field::new(column_desc.data_type.clone()));
+                }
+                let schema = Schema::new(fields);
+
                 match table_source_node.get_source_type() {
                     SourceType::Table => {
-                        let column_ids = table_source_node.get_column_ids().to_vec();
-                        let source = source_desc.source;
-
-                        let mut fields = Vec::with_capacity(column_ids.len());
-                        for &column_id in column_ids.iter() {
-                            let column_desc = source_desc
-                                .columns
-                                .iter()
-                                .find(|c| c.column_id == column_id)
-                                .unwrap();
-                            fields.push(Field::new(column_desc.data_type.clone()));
-                        }
-                        let schema = Schema::new(fields);
-
                         if let SourceImpl::Table(ref table) = *source {
                             let stream_reader =
                                 table.stream_reader(TableReaderContext {}, column_ids)?;
@@ -414,6 +414,8 @@ impl StreamManagerCore {
                     }
                     SourceType::Stream => Ok(Box::new(StreamSourceExecutor::new(
                         source_desc,
+                        column_ids,
+                        schema,
                         barrier_receiver,
                     )?)),
                 }

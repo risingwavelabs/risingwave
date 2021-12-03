@@ -356,7 +356,6 @@ impl StreamSourceReader for HighLevelKafkaSourceStreamReader {
                 }
 
                 let columns = Self::build_columns(&self.columns, &rows)?;
-
                 Ok(StreamChunk::new(
                     vec![Op::Insert; rows.len()],
                     columns,

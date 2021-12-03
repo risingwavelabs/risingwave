@@ -57,7 +57,7 @@ public class BasicStreamTest {
   @Test
   void testCreateStream() throws InvalidProtocolBufferException {
     String sql =
-        "create stream s (id int not null, name char(8) not null, age int not null) with ( upstream_source = 'file', local_file_path = '/tmp/data.txt' ) row format json";
+        "create stream s (id int not null, name char(8) not null, age int not null) with ( 'upstream.source' = 'file', 'local.file.path' = '/tmp/data.txt' ) row format json";
     SqlNode ast = SqlParser.createCalciteStatement(sql);
     PlanFragment ret =
         ((CreateStreamHandler) sqlHandlerFactory.create(ast, executionContext))
@@ -66,20 +66,20 @@ public class BasicStreamTest {
     assertEquals(root.getNodeType(), PlanNode.PlanNodeType.CREATE_STREAM);
 
     CreateStreamNode node = root.getBody().unpack(CreateStreamNode.class);
-    assertEquals(node.getColumnDescsCount(), 3);
+    assertEquals(node.getColumnDescsCount(), 4);
 
-    assertEquals(node.getColumnDescs(0).getName(), "id");
-    assertEquals(node.getColumnDescs(0).getColumnType().getTypeName(), DataType.TypeName.INT32);
+    assertEquals(node.getColumnDescs(1).getName(), "id");
+    assertEquals(node.getColumnDescs(1).getColumnType().getTypeName(), DataType.TypeName.INT32);
 
-    assertEquals(node.getColumnDescs(1).getName(), "name");
-    assertEquals(node.getColumnDescs(1).getColumnType().getTypeName(), DataType.TypeName.CHAR);
-    assertEquals(node.getColumnDescs(1).getColumnType().getPrecision(), 8);
+    assertEquals(node.getColumnDescs(2).getName(), "name");
+    assertEquals(node.getColumnDescs(2).getColumnType().getTypeName(), DataType.TypeName.CHAR);
+    assertEquals(node.getColumnDescs(2).getColumnType().getPrecision(), 8);
 
-    assertEquals(node.getColumnDescs(2).getName(), "age");
-    assertEquals(node.getColumnDescs(2).getColumnType().getTypeName(), DataType.TypeName.INT32);
+    assertEquals(node.getColumnDescs(3).getName(), "age");
+    assertEquals(node.getColumnDescs(3).getColumnType().getTypeName(), DataType.TypeName.INT32);
 
-    assertEquals(node.getPropertiesMap().get("upstream_source"), "file");
-    assertEquals(node.getPropertiesMap().get("local_file_path"), "/tmp/data.txt");
+    assertEquals(node.getPropertiesMap().get("upstream.source"), "file");
+    assertEquals(node.getPropertiesMap().get("local.file.path"), "/tmp/data.txt");
   }
 
   @Test

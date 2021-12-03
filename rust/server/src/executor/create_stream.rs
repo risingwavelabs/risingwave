@@ -89,13 +89,11 @@ impl BoxedExecutorBuilder for CreateStreamExecutor {
         let columns = node
             .get_column_descs()
             .iter()
-            .enumerate()
-            .map(|(i, c)| {
+            .map(|c| {
                 Ok(SourceColumnDesc {
                     name: c.name.clone(),
                     data_type: build_from_prost(c.get_column_type())?,
-                    // todo, column id should be passed from ColumnDesc
-                    column_id: i as i32,
+                    column_id: c.column_id,
                 })
             })
             .collect::<Result<Vec<SourceColumnDesc>>>()?;
