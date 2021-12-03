@@ -123,18 +123,23 @@ pub fn create_streaming_agg_state(
                 (DataTypeKind::Int64, AggKind::Sum, DataTypeKind::Decimal, None) => {
                     Box::new(StreamingSumAgg::<DecimalArray, I64Array>::new())
                 }
-                // FIXME: handle f32 -> f64
-                (_, AggKind::Sum, DataTypeKind::Float64, Some(datum)) => {
-                    Box::new(StreamingFloatSumAgg::<F64Array>::try_from(datum)?)
+                (DataTypeKind::Float32, AggKind::Sum, DataTypeKind::Float64, Some(datum)) => {
+                    Box::new(StreamingFloatSumAgg::<F64Array, F32Array>::try_from(datum)?)
                 }
-                (_, AggKind::Sum, DataTypeKind::Float64, None) => {
-                    Box::new(StreamingFloatSumAgg::<F64Array>::new())
+                (DataTypeKind::Float32, AggKind::Sum, DataTypeKind::Float64, None) => {
+                    Box::new(StreamingFloatSumAgg::<F64Array, F32Array>::new())
                 }
-                (_, AggKind::Sum, DataTypeKind::Float32, Some(datum)) => {
-                    Box::new(StreamingFloatSumAgg::<F32Array>::try_from(datum)?)
+                (DataTypeKind::Float64, AggKind::Sum, DataTypeKind::Float64, Some(datum)) => {
+                    Box::new(StreamingFloatSumAgg::<F64Array, F64Array>::try_from(datum)?)
                 }
-                (_, AggKind::Sum, DataTypeKind::Float32, None) => {
-                    Box::new(StreamingFloatSumAgg::<F32Array>::new())
+                (DataTypeKind::Float64, AggKind::Sum, DataTypeKind::Float64, None) => {
+                    Box::new(StreamingFloatSumAgg::<F64Array, F64Array>::new())
+                }
+                (DataTypeKind::Float32, AggKind::Sum, DataTypeKind::Float32, Some(datum)) => {
+                    Box::new(StreamingFloatSumAgg::<F32Array, F32Array>::try_from(datum)?)
+                }
+                (DataTypeKind::Float32, AggKind::Sum, DataTypeKind::Float32, None) => {
+                    Box::new(StreamingFloatSumAgg::<F32Array, F32Array>::new())
                 }
                 (_, AggKind::Sum, DataTypeKind::Decimal, Some(datum)) => Box::new(
                     StreamingSumAgg::<DecimalArray, DecimalArray>::try_from(datum)?,

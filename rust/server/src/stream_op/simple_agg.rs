@@ -17,8 +17,11 @@ pub type StreamingSumAgg<R, I> =
     StreamingFoldAgg<R, I, PrimitiveSummable<<R as Array>::OwnedItem, <I as Array>::OwnedItem>>;
 
 /// `StreamingFloatSumAgg` sums data of the same float type.
-pub type StreamingFloatSumAgg<R> =
-    StreamingFoldAgg<R, R, FloatPrimitiveSummable<<R as Array>::OwnedItem>>;
+pub type StreamingFloatSumAgg<R, I> = StreamingFoldAgg<
+    R,
+    I,
+    FloatPrimitiveSummable<<R as Array>::OwnedItem, <I as Array>::OwnedItem>,
+>;
 
 /// `StreamingCountAgg` counts data of any type.
 pub type StreamingCountAgg<S> = StreamingFoldAgg<I64Array, S, Countable<<S as Array>::OwnedItem>>;

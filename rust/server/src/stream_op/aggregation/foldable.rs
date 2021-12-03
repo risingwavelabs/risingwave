@@ -103,29 +103,31 @@ where
 /// `FloatPrimitiveSummable` sums two primitives by `accumulate` and `retract` functions.
 /// It produces the same type of output as input `S`.
 #[derive(Debug)]
-pub struct FloatPrimitiveSummable<S>
+pub struct FloatPrimitiveSummable<S, I>
 where
+    I: Scalar + num_traits::Float + Into<S> + std::ops::Neg<Output = I>,
     S: Scalar
         + std::ops::Add<Output = S>
         + std::ops::Sub<Output = S>
         + num_traits::Float
         + std::ops::Neg<Output = S>,
 {
-    _phantom: PhantomData<S>,
+    _phantom: PhantomData<(S, I)>,
 }
 
-impl<S> StreamingFoldable<S, S> for FloatPrimitiveSummable<S>
+impl<S, I> StreamingFoldable<S, I> for FloatPrimitiveSummable<S, I>
 where
+    I: Scalar + num_traits::Float + Into<S> + std::ops::Neg<Output = I>,
     S: Scalar
         + std::ops::Add<Output = S>
         + std::ops::Sub<Output = S>
         + num_traits::Float
         + std::ops::Neg<Output = S>,
 {
-    fn accumulate(result: Option<&S>, input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
+    fn accumulate(result: Option<&S>, input: Option<I::ScalarRefType<'_>>) -> Result<Option<S>> {
         Ok(match (result, input) {
             (Some(x), Some(y)) => {
-                let v = x.add(y.to_owned_scalar());
+                let v = x.add((y.to_owned_scalar()).into());
                 if v.is_finite() && !v.is_nan() {
                     Some(v)
                 } else {
@@ -133,15 +135,15 @@ where
                 }
             }
             (Some(x), None) => Some(*x),
-            (None, Some(y)) => Some(y.to_owned_scalar()),
+            (None, Some(y)) => Some(y.to_owned_scalar().into()),
             (None, None) => None,
         })
     }
 
-    fn retract(result: Option<&S>, input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
+    fn retract(result: Option<&S>, input: Option<I::ScalarRefType<'_>>) -> Result<Option<S>> {
         Ok(match (result, input) {
             (Some(x), Some(y)) => {
-                let v = x.sub(y.to_owned_scalar());
+                let v = x.sub((y.to_owned_scalar()).into());
                 if v.is_finite() && !v.is_nan() {
                     Some(v)
                 } else {
@@ -149,7 +151,7 @@ where
                 }
             }
             (Some(x), None) => Some(*x),
-            (None, Some(y)) => Some(-y.to_owned_scalar()),
+            (None, Some(y)) => Some((-y.to_owned_scalar()).into()),
             (None, None) => None,
         })
     }
@@ -459,6 +461,7 @@ impl_fold_agg! { I32Array, Int32, I32Array }
 impl_fold_agg! { I64Array, Int64, I64Array }
 impl_fold_agg! { F32Array, Float32, F32Array }
 impl_fold_agg! { F64Array, Float64, F64Array }
+impl_fold_agg! { F64Array, Float64, F32Array }
 impl_fold_agg! { I64Array, Int64, F64Array }
 impl_fold_agg! { I64Array, Int64, F32Array }
 impl_fold_agg! { I64Array, Int64, I32Array }
