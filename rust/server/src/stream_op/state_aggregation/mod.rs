@@ -5,6 +5,14 @@ pub use value::*;
 mod extreme;
 pub use extreme::*;
 
+use super::keyspace::StateStore;
+use bytes::Bytes;
+use risingwave_common::array::stream_chunk::Ops;
+use risingwave_common::array::ArrayImpl;
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::error::Result;
+use risingwave_common::types::Datum;
+
 /// Verify if the data going through the state is valid by checking if `ops.len() ==
 /// visibility.len() == data[x].len()`.
 pub fn verify_batch(
@@ -18,4 +26,50 @@ pub fn verify_batch(
     }
     all_lengths.extend(data.iter().map(|x| x.len()));
     all_lengths.iter().min() == all_lengths.iter().max()
+}
+
+/// All managed state for state aggregation. The managed state will manage the cache and integrate
+/// the state with the underlying state store. Managed states can only be evicted from outer cache
+/// when they are not dirty.
+pub enum ManagedState<S: StateStore> {
+    Value(ManagedValueState<S>),
+    MinI64(ManagedMinState<S, i64>),
+}
+
+impl<S: StateStore> ManagedState<S> {
+    pub async fn apply_batch(
+        &mut self,
+        ops: Ops<'_>,
+        visibility: Option<&Bitmap>,
+        data: &[&ArrayImpl],
+    ) -> Result<()> {
+        match self {
+            Self::Value(state) => state.apply_batch(ops, visibility, data).await,
+            Self::MinI64(state) => state.apply_batch(ops, visibility, data).await,
+        }
+    }
+
+    /// Get the output of the state. Must flush before getting output.
+    pub async fn get_output(&mut self) -> Result<Datum> {
+        match self {
+            Self::Value(state) => state.get_output().await,
+            Self::MinI64(state) => state.get_output().await,
+        }
+    }
+
+    /// Check if this state needs a flush.
+    pub fn is_dirty(&self) -> bool {
+        match self {
+            Self::Value(state) => state.is_dirty(),
+            Self::MinI64(state) => state.is_dirty(),
+        }
+    }
+
+    /// Flush the internal state to a write batch. TODO: add `WriteBatch` to Hummock.
+    pub fn flush(&mut self, write_batch: &mut Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
+        match self {
+            Self::Value(state) => state.flush(write_batch),
+            Self::MinI64(state) => state.flush(write_batch),
+        }
+    }
 }

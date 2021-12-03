@@ -9,7 +9,7 @@ mod panic_store;
 pub use panic_store::*;
 
 #[async_trait]
-pub trait StateStore {
+pub trait StateStore: Send + Sync + 'static + Clone {
     /// Point get a value from the state store.
     async fn get(&self, key: &[u8]) -> Result<Option<Bytes>>;
 
@@ -40,11 +40,26 @@ impl<S: StateStore> Keyspace<S> {
         self.store.get(&self.prefix).await
     }
 
+    /// Scan `limit` keys from the keyspace. If `limit` is None, all keys of the given prefix will
+    /// be returned.
     pub async fn scan(&self, limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
         self.store.scan(&self.prefix, limit).await
     }
 
     pub fn prefix(&self) -> &[u8] {
         &self.prefix[..]
+    }
+
+    /// Get the underlying state store.
+    pub fn state_store(&self) -> S {
+        self.store.clone()
+    }
+
+    /// Get a sub-keyspace.
+    pub fn keyspace(&self, sub_prefix: &[u8]) -> Self {
+        Self {
+            store: self.store.clone(),
+            prefix: [&self.prefix[..], sub_prefix].concat(),
+        }
     }
 }

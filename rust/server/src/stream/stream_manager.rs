@@ -464,11 +464,11 @@ impl StreamManagerCore {
 
                 Ok(Box::new(HashAggExecutor::new(
                     input.remove(0),
-                    agg_calls.clone(),
+                    agg_calls,
                     keys,
-                    InMemoryKeyedState::new(
-                        RowSerializer::new(schema.clone()),
-                        AggStateSerializer::new(agg_calls),
+                    keyspace::Keyspace::new(
+                        keyspace::MemoryStateStore::new(),
+                        b"test_executor_2333".to_vec(),
                     ),
                     schema,
                 )))

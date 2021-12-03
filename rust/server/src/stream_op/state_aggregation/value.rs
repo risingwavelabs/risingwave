@@ -27,17 +27,28 @@ pub struct ManagedValueState<S: StateStore> {
 
 impl<S: StateStore> ManagedValueState<S> {
     /// Create a single-value managed state based on `AggCall` and `Keyspace`.
-    pub async fn new(agg_call: AggCall, keyspace: Keyspace<S>) -> Result<Self> {
-        // View the keyspace as a single-value space, and get the value.
-        let raw_data = keyspace.get().await?;
+    pub async fn new(
+        agg_call: AggCall,
+        keyspace: Keyspace<S>,
+        row_count: Option<usize>,
+    ) -> Result<Self> {
+        let data = if row_count != Some(0) {
+            // View the keyspace as a single-value space, and get the value.
+            let raw_data = keyspace.get().await?;
 
-        // Decode the Datum from the value.
-        let data = if let Some(raw_data) = raw_data {
-            let mut deserializer = memcomparable::Deserializer::from_slice(&raw_data[..]);
-            Some(
-                deserialize_datum_from(&agg_call.return_type.data_type_kind(), &mut deserializer)
+            // Decode the Datum from the value.
+            if let Some(raw_data) = raw_data {
+                let mut deserializer = memcomparable::Deserializer::from_slice(&raw_data[..]);
+                Some(
+                    deserialize_datum_from(
+                        &agg_call.return_type.data_type_kind(),
+                        &mut deserializer,
+                    )
                     .map_err(ErrorCode::MemComparableError)?,
-            )
+                )
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -119,9 +130,10 @@ mod tests {
     async fn test_managed_value_state() {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
-        let mut managed_state = ManagedValueState::new(create_test_count_state(), keyspace)
-            .await
-            .unwrap();
+        let mut managed_state =
+            ManagedValueState::new(create_test_count_state(), keyspace, Some(0))
+                .await
+                .unwrap();
         assert!(!managed_state.is_dirty());
 
         // apply a batch and get the output
@@ -150,7 +162,7 @@ mod tests {
 
         // reload the state and check the output
         let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
-        let mut managed_state = ManagedValueState::new(create_test_count_state(), keyspace)
+        let mut managed_state = ManagedValueState::new(create_test_count_state(), keyspace, None)
             .await
             .unwrap();
         assert_eq!(

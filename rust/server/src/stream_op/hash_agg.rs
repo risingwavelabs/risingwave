@@ -1,17 +1,47 @@
 //! Global Streaming Hash Aggregators
 
 use super::aggregation::*;
+use super::keyspace::{Keyspace, StateStore};
+use super::state_aggregation::{ManagedState, ManagedValueState};
 use super::{AggCall, Barrier, Executor, Message};
 use async_trait::async_trait;
+use bytes::BufMut;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::Row;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
+use risingwave_common::types::Datum;
 use std::collections::HashMap;
 use std::sync::Arc;
+
+pub struct HashValue<S: StateStore> {
+    managed_states: Vec<ManagedState<S>>,
+    prev_states: Option<Vec<Datum>>,
+}
+
+impl<S: StateStore> HashValue<S> {
+    pub async fn row_count(&mut self) -> Result<i64> {
+        Ok(self.managed_states[0]
+            .get_output()
+            .await?
+            .map(|x| *x.as_int64())
+            .unwrap_or(0))
+    }
+
+    pub fn prev_row_count(&self) -> i64 {
+        match &self.prev_states {
+            Some(states) => states[0].as_ref().map(|x| *x.as_int64()).unwrap_or(0),
+            None => 0,
+        }
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.prev_states.is_some()
+    }
+}
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -23,10 +53,7 @@ use std::sync::Arc;
 /// * Upon a barrier is received, the executor will call `.flush` on the storage backend, so that
 ///   all modifications will be flushed to the storage backend. Meanwhile, the executor will go
 ///   through `modified_keys`, and produce a stream chunk based on the state changes.
-pub struct HashAggExecutor<StateBackend>
-where
-    StateBackend: KeyedState<RowSerializer, AggStateSerializer>,
-{
+pub struct HashAggExecutor<S: StateStore> {
     /// Schema of the executor.
     schema: Schema,
 
@@ -35,12 +62,11 @@ where
     // TODO: Create a `Barrier` struct.
     next_barrier_message: Option<Barrier>,
 
-    /// Aggregation state before last barrier.
-    /// The map will be updated iff [`Message::Barrier`] was received.
-    state_entries: StateBackend,
+    /// The executor operates on this keyspace.
+    keyspace: Keyspace<S>,
 
-    /// Keys modified in one epoch. This HashMap stores the states before an epoch begins.
-    modified_states: HashMap<HashKey, Option<HashValue>>,
+    /// The cached states. `HashKey -> (prev_value, value)`.
+    state_map: HashMap<HashKey, HashValue<S>>,
 
     /// The input of the current executor
     input: Box<dyn Executor>,
@@ -72,25 +98,22 @@ pub fn generate_hash_agg_schema(
     Schema { fields }
 }
 
-impl<StateBackend> HashAggExecutor<StateBackend>
-where
-    StateBackend: KeyedState<RowSerializer, AggStateSerializer>,
-{
+impl<S: StateStore> HashAggExecutor<S> {
     pub fn new(
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
         key_indices: Vec<usize>,
-        state_entries: StateBackend,
+        keyspace: Keyspace<S>,
         schema: Schema,
     ) -> Self {
         Self {
             next_barrier_message: None,
-            state_entries,
+            keyspace,
             input,
             agg_calls,
             schema,
             key_indices,
-            modified_states: HashMap::new(),
+            state_map: HashMap::new(),
         }
     }
 
@@ -149,14 +172,34 @@ where
     }
 }
 
-impl<StateBackend> HashAggExecutor<StateBackend>
-where
-    StateBackend: KeyedState<RowSerializer, AggStateSerializer>,
-{
+impl<S: StateStore> HashAggExecutor<S> {
     /// Flush the buffered chunk to the storage backend, and get the edits of the states.
     async fn flush_data(&mut self) -> Result<StreamChunk> {
-        let dirty_cnt = self.modified_states.len();
+        // --- Flush states to the state store ---
+        // Some state will have the correct output only after their internal states have been fully
+        // flushed.
+
+        let mut write_batch = vec![];
+        let mut dirty_cnt = 0;
+
+        for (_, states) in self.state_map.iter_mut() {
+            if states.is_dirty() {
+                dirty_cnt += 1;
+                for state in &mut states.managed_states {
+                    state.flush(&mut write_batch).unwrap();
+                }
+            }
+        }
+
+        self.keyspace
+            .state_store()
+            .ingest_batch(write_batch)
+            .await?;
+
+        // --- Produce the stream chunk ---
+
         let key_len = self.key_indices.len();
+        let dirty_cnt = dirty_cnt;
 
         // --- Create array builders ---
         // As the datatype is retrieved from schema, it contains both group key and aggregation
@@ -177,38 +220,28 @@ where
 
         let mut new_ops = Vec::with_capacity(dirty_cnt);
 
-        for (key, prev_states) in self.modified_states.drain() {
-            let cur_states = self.state_entries.get(&key).await?;
-            // If a state is modified in this epoch, it must be available from the state entries.
-            let cur_states = if let Some(cur_states) = cur_states {
-                cur_states
-            } else {
-                return Err(ErrorCode::InternalError(format!(
-            "state for key {:?} not found in state backend, this might be a bug of state store.",
-            key
-          ))
-                .into());
-            };
+        let mut keys_to_delete = vec![];
 
-            // We assume the first state of aggregation is always `StreamingRowCountAgg`.
-            let row_cnt = {
-                cur_states.agg_states[0]
-                    .get_output()
-                    .unwrap()
-                    .map(|x| *x.as_int64())
-                    .unwrap_or(0)
-            };
-
-            if row_cnt == 0 {
-                self.state_entries.delete(&key);
+        for (key, states) in self.state_map.iter_mut() {
+            if !states.is_dirty() {
+                continue;
             }
 
-            match prev_states {
-                None if row_cnt == 0 => {
+            // We assume the first state of aggregation is always `StreamingRowCountAgg`.
+            let row_count = states.row_count().await?;
+
+            if row_count == 0 {
+                keys_to_delete.push(key.clone());
+            }
+
+            let prev_row_count = states.prev_row_count();
+
+            match (prev_row_count, row_count) {
+                (0, 0) => {
                     // previous state is empty, current state is also empty.
                     continue;
                 }
-                None => {
+                (0, _) => {
                     // previous state is empty, current state is not empty, insert one `Insert` op.
                     new_ops.push(Op::Insert);
                     for (builder, datum) in builders.iter_mut().zip(key.0.iter()) {
@@ -216,26 +249,25 @@ where
                     }
                     for (builder, state) in &mut builders[key_len..]
                         .iter_mut()
-                        .zip(cur_states.agg_states.iter())
+                        .zip(states.managed_states.iter_mut())
                     {
-                        builder.append_datum(&state.get_output()?)?;
+                        builder.append_datum(&state.get_output().await?)?;
                     }
                 }
-                Some(prev_states) if row_cnt == 0 => {
-                    // previous state is not empty, current state is not empty, insert one `Delete`
-                    // op.
+                (_, 0) => {
+                    // previous state is not empty, current state is empty, insert one `Delete` op.
                     new_ops.push(Op::Delete);
                     for (builder, datum) in builders.iter_mut().zip(key.0.iter()) {
                         builder.append_datum(datum)?;
                     }
                     for (builder, state) in &mut builders[key_len..]
                         .iter_mut()
-                        .zip(prev_states.agg_states.iter())
+                        .zip(states.prev_states.as_ref().unwrap().iter())
                     {
-                        builder.append_datum(&state.get_output()?)?;
+                        builder.append_datum(state)?;
                     }
                 }
-                Some(prev_states) => {
+                _ => {
                     // previous state is not empty, current state is not empty, insert two `Update`
                     // op.
                     new_ops.push(Op::UpdateDelete);
@@ -246,14 +278,25 @@ where
                     }
                     for (builder, prev_state, cur_state) in itertools::multizip((
                         builders[key_len..].iter_mut(),
-                        prev_states.agg_states.iter(),
-                        cur_states.agg_states.iter(),
+                        states.prev_states.as_ref().unwrap().iter(),
+                        states.managed_states.iter_mut(),
                     )) {
-                        builder.append_datum(&prev_state.get_output()?)?;
-                        builder.append_datum(&cur_state.get_output()?)?;
+                        builder.append_datum(prev_state)?;
+                        builder.append_datum(&cur_state.get_output().await?)?;
                     }
                 }
             }
+
+            // unmark dirty
+            states.prev_states = None;
+        }
+
+        // vacuum unused states
+        // TODO: find better way to evict empty states and clean state
+        // In current implementation, we need to fetch the RowCount from the state store once a key
+        // is deleted and added again. We should find a way to eliminate this extra fetch.
+        for key_to_delete in keys_to_delete {
+            self.state_map.remove(&key_to_delete);
         }
 
         let columns: Vec<Column> = builders
@@ -269,8 +312,6 @@ where
             ops: new_ops,
             visibility: None,
         };
-
-        self.state_entries.flush().await?;
 
         Ok(chunk)
     }
@@ -317,64 +358,81 @@ where
             .collect::<Vec<_>>();
 
         for (key, vis_map) in unique_keys {
-            // Retrieve previous state from the KeyedState.
-            let prev_state = self.state_entries.get(key).await?;
+            // 1. Retrieve previous state from the KeyedState. If they didn't exist, the
+            // ManagedState will automatically create new ones for them.
 
-            // Mark the key as dirty, and store state, so that we can know what change to output
-            // when flushing chunks. If the key is already marked dirty, we do not need
-            // to do anything here.
-            //
-            // For example, now we find [1, 2, 3]'s previous state, we need to go through
-            // the following steps:
-            //
-            // 1. Check if `[1, 2, 3]` is already in `modified_states`. If so, do not change the
-            // already-stored state and go ahead. Otherwise, store the state in `modified_states`,
-            // thus marking the key as dirty.
-            // 2. If we find that the previous state is empty, create a new state for the key.
-            // 3. Apply the aggregation, and store the state back to the `state_entries`.
+            if !self.state_map.contains_key(key) {
+                let mut managed_states = vec![];
 
-            // Store the key and mark it as dirty.
-            if !self.modified_states.contains_key(key) {
-                // Store the previous state
-                self.modified_states.insert(key.clone(), prev_state.clone());
+                let mut row_count = None;
+                for (idx, agg_call) in self.agg_calls.iter().enumerate() {
+                    // TODO: in pure in-memory engine, we should not do this serialization.
+                    let mut encoded_group_key = key.serialize().unwrap();
+                    encoded_group_key.push(b'/');
+                    encoded_group_key.put_u16(idx as u16);
+                    encoded_group_key.push(b'/');
+
+                    // The prefix of the state is <group key / state id />
+                    let keyspace = self.keyspace.keyspace(&encoded_group_key);
+                    let mut managed_state;
+                    if idx == 0 {
+                        // For the rowcount state, we should record the rowcount.
+                        managed_state = ManagedState::Value(
+                            ManagedValueState::new(agg_call.clone(), keyspace, None).await?,
+                        );
+                        let output = managed_state.get_output().await?;
+                        row_count =
+                            Some(output.as_ref().map(|x| *x.as_int64() as usize).unwrap_or(0));
+                    } else {
+                        // For other states, we can feed the previously-read rowcount into the
+                        // managed state.
+                        managed_state = ManagedState::Value(
+                            ManagedValueState::new(agg_call.clone(), keyspace, row_count).await?,
+                        );
+                    }
+                    managed_states.push(managed_state);
+                }
+                self.state_map.insert(
+                    key.clone(),
+                    HashValue {
+                        managed_states,
+                        prev_states: None,
+                    },
+                );
+            }
+            let states = self.state_map.get_mut(key).unwrap();
+
+            // 2. Mark the state as dirty by filling prev states
+            if !states.is_dirty() {
+                let mut outputs = vec![];
+                for state in states.managed_states.iter_mut() {
+                    outputs.push(state.get_output().await?);
+                }
+                states.prev_states = Some(outputs);
             }
 
-            // Create new state entries for keys not existing before.
-            let mut state = match prev_state {
-                Some(prev_state) => prev_state,
-                None => {
-                    // The previous state is not existing, create new states.
-                    let agg_states = self
-                        .agg_calls
-                        .iter()
-                        .map(|agg| {
-                            create_streaming_agg_state(
-                                agg.args.arg_types(),
-                                &agg.kind,
-                                &agg.return_type,
-                                None,
-                            )
-                        })
-                        .collect::<Result<Vec<_>>>()?;
-                    HashValue::new(agg_states)
+            // 3. Apply batch to each of the state
+
+            for (agg_state, input_arrays) in states
+                .managed_states
+                .iter_mut()
+                .zip(all_agg_input_arrays.iter())
+            {
+                if input_arrays.is_empty() {
+                    agg_state.apply_batch(&ops, Some(&vis_map), &[]).await?;
+                } else {
+                    agg_state
+                        .apply_batch(&ops, Some(&vis_map), &[input_arrays[0]])
+                        .await?;
                 }
-            };
-
-            // Apply the batch to the state.
-            state.apply_batch(&ops, Some(&vis_map), &all_agg_input_arrays)?;
-
-            // Store the state back to the state backend.
-            self.state_entries.put(key.clone(), state);
+            }
         }
         Ok(())
     }
 }
 
 #[async_trait]
-impl<StateBackend> Executor for HashAggExecutor<StateBackend>
-where
-    StateBackend: KeyedState<RowSerializer, AggStateSerializer>,
-{
+impl<S: StateStore> Executor for HashAggExecutor<S> {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -394,8 +452,8 @@ where
                     if barrier.stop {
                         return Ok(Message::Barrier(barrier));
                     }
-                    let dirty_cnt = self.modified_states.len();
-                    if dirty_cnt == 0 {
+                    let is_dirty = self.state_map.iter().any(|(_, v)| v.is_dirty());
+                    if !is_dirty {
                         // No fresh data need to flush, just forward the barrier.
                         return Ok(Message::Barrier(barrier));
                     }
@@ -413,6 +471,8 @@ where
 #[cfg(test)]
 mod tests {
 
+    use super::super::keyspace::MemoryStateStore;
+    use super::*;
     use crate::stream_op::test_utils::*;
     use crate::stream_op::*;
     use crate::*;
@@ -424,56 +484,23 @@ mod tests {
     use risingwave_common::expr::*;
     use risingwave_common::types::{Int64Type, Scalar};
 
-    fn create_in_memory_keyed_state(
-        schema: &Schema,
-        agg_calls: &[AggCall],
-    ) -> impl KeyedState<RowSerializer, AggStateSerializer> {
-        InMemoryKeyedState::new(
-            RowSerializer::new(schema.clone()),
-            AggStateSerializer::new(agg_calls.to_vec()),
-        )
-    }
-
-    fn create_serialized_keyed_state(
-        schema: &Schema,
-        agg_calls: &[AggCall],
-    ) -> impl KeyedState<RowSerializer, AggStateSerializer> {
-        SerializedKeyedState::new(
-            RowSerializer::new(schema.clone()),
-            AggStateSerializer::new(agg_calls.to_vec()),
-        )
+    fn create_in_memory_keyspace() -> Keyspace<impl StateStore> {
+        Keyspace::new(MemoryStateStore::new(), b"test_executor_2333".to_vec())
     }
 
     // --- Test HashAgg with in-memory KeyedState ---
 
     #[tokio::test]
     async fn test_local_hash_aggregation_count_in_memory() {
-        test_local_hash_aggregation_count(create_in_memory_keyed_state).await
+        test_local_hash_aggregation_count(create_in_memory_keyspace()).await
     }
 
     #[tokio::test]
     async fn test_global_hash_aggregation_count_in_memory() {
-        test_global_hash_aggregation_count(create_in_memory_keyed_state).await
+        test_global_hash_aggregation_count(create_in_memory_keyspace()).await
     }
 
-    // --- Test HashAgg with in-memory KeyedState with serialization ---
-    // TODO: remove this when we have Hummock state backend
-
-    #[tokio::test]
-    async fn test_local_hash_aggregation_count_in_memory_serialized() {
-        test_local_hash_aggregation_count(create_serialized_keyed_state).await
-    }
-
-    #[tokio::test]
-    async fn test_global_hash_aggregation_count_in_memory_serialized() {
-        test_global_hash_aggregation_count(create_serialized_keyed_state).await
-    }
-
-    async fn test_local_hash_aggregation_count<F, KS>(create_keyed_state: F)
-    where
-        F: Fn(&Schema, &[AggCall]) -> KS,
-        KS: KeyedState<RowSerializer, AggStateSerializer>,
-    {
+    async fn test_local_hash_aggregation_count(keyspace: Keyspace<impl StateStore>) {
         let chunk1 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert, Op::Insert],
             columns: vec![column_nonnull! { I64Array, Int64Type, [1, 2, 2] }],
@@ -517,9 +544,8 @@ mod tests {
         ];
 
         let schema = generate_hash_agg_schema(&source, &agg_calls, &keys);
-        let keyed_state = create_keyed_state(&schema, &agg_calls);
         let mut hash_agg =
-            HashAggExecutor::new(Box::new(source), agg_calls, keys, keyed_state, schema);
+            HashAggExecutor::new(Box::new(source), agg_calls, keys, keyspace, schema);
 
         let msg = hash_agg.next().await.unwrap();
         if let Message::Chunk(chunk) = msg {
@@ -566,11 +592,7 @@ mod tests {
         }
     }
 
-    async fn test_global_hash_aggregation_count<F, KS>(create_keyed_state: F)
-    where
-        F: Fn(&Schema, &[AggCall]) -> KS,
-        KS: KeyedState<RowSerializer, AggStateSerializer>,
-    {
+    async fn test_global_hash_aggregation_count(keyspace: Keyspace<impl StateStore>) {
         let chunk1 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert, Op::Insert],
             columns: vec![
@@ -631,14 +653,8 @@ mod tests {
         ];
 
         let schema = generate_hash_agg_schema(&source, &agg_calls, &key_indices);
-        let keyed_state = create_keyed_state(&schema, &agg_calls);
-        let mut hash_agg = HashAggExecutor::new(
-            Box::new(source),
-            agg_calls,
-            key_indices,
-            keyed_state,
-            schema,
-        );
+        let mut hash_agg =
+            HashAggExecutor::new(Box::new(source), agg_calls, key_indices, keyspace, schema);
 
         if let Message::Chunk(chunk) = hash_agg.next().await.unwrap() {
             let (data_chunk, ops) = chunk.into_parts();

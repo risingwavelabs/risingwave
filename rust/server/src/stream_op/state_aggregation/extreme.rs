@@ -28,6 +28,14 @@ use super::super::keyspace::{Keyspace, StateStore};
 /// * `sort_key = sort_key_encode(key)`
 /// * `encoded_value = datum_encode(key)`
 /// * `key = datum_decode(encoded_value)`
+///
+/// The `ExtremeState` need some special properties from the storage engine and the executor.
+/// * The storage engine should support delete in-existing keys. In one epoch, a user might first
+///   add a key (namely A) to the state, and then delete it. If A doesn't fall within cache, these
+///   two operations will make `flush_buffer` to have A -> Delete on its record. Therefore, if A was
+///   not in state store before, the phantom delete will be sent to the store.
+/// * The output of an `ExtremeState` is only correct when all changes have been flushed to the
+///   state store.
 pub struct ManagedMinState<S: StateStore, K: Scalar + Ord> {
     /// Top N elements in the state, which stores the mapping of sort key -> (dirty, original
     /// value). This BTreeMap always maintain the elements that we are sure it's top n.
@@ -57,15 +65,13 @@ impl<S: StateStore, K: Scalar + Ord> ManagedMinState<S, K> {
         keyspace: Keyspace<S>,
         data_type: DataTypeRef,
         top_n_count: Option<usize>,
+        row_count: usize,
     ) -> Result<Self> {
-        // TODO: use the RowCount from HashAgg instead of fetching all data from the keyspace.
-        // This is critical to performance.
-        let total_count = keyspace.scan(None).await?.len();
         // Create the internal state based on the value we get.
         Ok(Self {
             top_n: BTreeMap::new(),
             flush_buffer: BTreeMap::new(),
-            total_count,
+            total_count: row_count,
             keyspace,
             top_n_count,
             data_type,
@@ -274,7 +280,7 @@ mod tests {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
         let mut managed_state =
-            ManagedMinState::<_, i64>::new(keyspace, Int64Type::create(false), Some(5))
+            ManagedMinState::<_, i64>::new(keyspace, Int64Type::create(false), Some(5), 0)
                 .await
                 .unwrap();
         assert!(!managed_state.is_dirty());
@@ -402,7 +408,7 @@ mod tests {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
         let mut managed_state =
-            ManagedMinState::<_, i64>::new(keyspace, Int64Type::create(false), Some(3))
+            ManagedMinState::<_, i64>::new(keyspace, Int64Type::create(false), Some(3), 0)
                 .await
                 .unwrap();
         assert!(!managed_state.is_dirty());
@@ -463,7 +469,7 @@ mod tests {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
         let mut managed_state =
-            ManagedMinState::<_, i64>::new(keyspace, Int64Type::create(false), Some(3))
+            ManagedMinState::<_, i64>::new(keyspace, Int64Type::create(false), Some(3), 0)
                 .await
                 .unwrap();
 
