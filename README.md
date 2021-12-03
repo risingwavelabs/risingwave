@@ -102,7 +102,7 @@ to clean-up:
 ```
 
 ## Contributing
-Thanks for your interest in contributing to the project, please refer to the [CONTRIBUTING.md](https://github.com/singularity-data/risingwave/blob/main/CONTRIBUTING.md).
+Thanks for your interest in contributing to the project, please refer to the [CONTRIBUTING.md](https://github.com/singularity-data/risingwave/blob/master/CONTRIBUTING.md).
 
 ## Toolchain
 Currently, we are using nightly toolchain `nightly-2021-11-15`. If anyone needs to upgrade
