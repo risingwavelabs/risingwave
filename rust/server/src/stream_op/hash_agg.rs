@@ -2,7 +2,7 @@
 
 use super::aggregation::*;
 use super::keyspace::{Keyspace, StateStore};
-use super::state_aggregation::{ManagedState, ManagedValueState};
+use super::state_aggregation::ManagedStateImpl;
 use super::{AggCall, Barrier, Executor, Message};
 use async_trait::async_trait;
 use bytes::BufMut;
@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct HashValue<S: StateStore> {
-    managed_states: Vec<ManagedState<S>>,
+    managed_states: Vec<ManagedStateImpl<S>>,
     prev_states: Option<Vec<Datum>>,
 }
 
@@ -374,21 +374,17 @@ impl<S: StateStore> HashAggExecutor<S> {
 
                     // The prefix of the state is <group key / state id />
                     let keyspace = self.keyspace.keyspace(&encoded_group_key);
-                    let mut managed_state;
+                    let mut managed_state = ManagedStateImpl::create_managed_state(
+                        agg_call.clone(),
+                        keyspace,
+                        row_count,
+                    )
+                    .await?;
                     if idx == 0 {
                         // For the rowcount state, we should record the rowcount.
-                        managed_state = ManagedState::Value(
-                            ManagedValueState::new(agg_call.clone(), keyspace, None).await?,
-                        );
                         let output = managed_state.get_output().await?;
                         row_count =
                             Some(output.as_ref().map(|x| *x.as_int64() as usize).unwrap_or(0));
-                    } else {
-                        // For other states, we can feed the previously-read rowcount into the
-                        // managed state.
-                        managed_state = ManagedState::Value(
-                            ManagedValueState::new(agg_call.clone(), keyspace, row_count).await?,
-                        );
                     }
                     managed_states.push(managed_state);
                 }
@@ -500,6 +496,11 @@ mod tests {
         test_global_hash_aggregation_count(create_in_memory_keyspace()).await
     }
 
+    #[tokio::test]
+    async fn test_local_hash_aggregation_max_in_memory() {
+        test_local_hash_aggregation_max(create_in_memory_keyspace()).await
+    }
+
     async fn test_local_hash_aggregation_count(keyspace: Keyspace<impl StateStore>) {
         let chunk1 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert, Op::Insert],
@@ -535,7 +536,6 @@ mod tests {
                 args: AggArgs::Unary(Int64Type::create(false), 0),
                 return_type: Int64Type::create(false),
             },
-            // This is local hash aggregation, so we add another row count state
             AggCall {
                 kind: AggKind::Count,
                 args: AggArgs::None,
@@ -700,6 +700,106 @@ mod tests {
             assert_eq!(rows, expected_rows);
         } else {
             unreachable!();
+        }
+    }
+
+    async fn test_local_hash_aggregation_max(keyspace: Keyspace<impl StateStore>) {
+        let chunk1 = StreamChunk {
+            ops: vec![Op::Insert; 3],
+            columns: vec![
+                // group key column
+                column_nonnull! { I64Array, Int64Type, [1, 1, 2] },
+                // data column to get minimum
+                column_nonnull! { I64Array, Int64Type, [233, 23333, 2333] },
+            ],
+            visibility: None,
+        };
+        let chunk2 = StreamChunk {
+            ops: vec![Op::Delete; 3],
+            columns: vec![
+                // group key column
+                column_nonnull! { I64Array, Int64Type, [1, 1, 2] },
+                // data column to get minimum
+                column_nonnull! { I64Array, Int64Type, [233, 23333, 2333] },
+            ],
+            visibility: Some((vec![true, false, true]).try_into().unwrap()),
+        };
+        let schema = Schema {
+            fields: vec![Field {
+                data_type: Int64Type::create(false),
+            }],
+        };
+        let mut source = MockSource::new(schema);
+        source.push_chunks([chunk1].into_iter());
+        source.push_barrier(1, false);
+        source.push_chunks([chunk2].into_iter());
+        source.push_barrier(2, false);
+
+        // This is local hash aggregation, so we add another row count state
+        let keys = vec![0];
+        let agg_calls = vec![
+            AggCall {
+                kind: AggKind::RowCount,
+                args: AggArgs::None,
+                return_type: Int64Type::create(false),
+            },
+            AggCall {
+                kind: AggKind::Min,
+                args: AggArgs::Unary(Int64Type::create(false), 1),
+                return_type: Int64Type::create(false),
+            },
+        ];
+
+        let schema = generate_hash_agg_schema(&source, &agg_calls, &keys);
+        let mut hash_agg =
+            HashAggExecutor::new(Box::new(source), agg_calls, keys, keyspace, schema);
+
+        let msg = hash_agg.next().await.unwrap();
+        if let Message::Chunk(chunk) = msg {
+            let (data_chunk, ops) = chunk.into_parts();
+            let rows = ops
+                .into_iter()
+                .zip(data_chunk.rows().map(Row::from))
+                .sorted()
+                .collect_vec();
+
+            let expected_rows = [
+                // group key, row count, min data
+                (Op::Insert, row_nonnull![1i64, 2i64, 233i64]),
+                (Op::Insert, row_nonnull![2i64, 1i64, 2333i64]),
+            ]
+            .into_iter()
+            .sorted()
+            .collect_vec();
+
+            assert_eq!(rows, expected_rows);
+        } else {
+            unreachable!("unexpected message {:?}", msg);
+        }
+
+        assert_matches!(hash_agg.next().await.unwrap(), Message::Barrier { .. });
+
+        let msg = hash_agg.next().await.unwrap();
+        if let Message::Chunk(chunk) = msg {
+            let (data_chunk, ops) = chunk.into_parts();
+            let rows = ops
+                .into_iter()
+                .zip(data_chunk.rows().map(Row::from))
+                .sorted()
+                .collect_vec();
+            let expected_rows = [
+                // group key, row count, min data
+                (Op::Delete, row_nonnull![2i64, 1i64, 2333i64]),
+                (Op::UpdateDelete, row_nonnull![1i64, 2i64, 233i64]),
+                (Op::UpdateInsert, row_nonnull![1i64, 1i64, 23333i64]),
+            ]
+            .into_iter()
+            .sorted()
+            .collect_vec();
+
+            assert_eq!(rows, expected_rows);
+        } else {
+            unreachable!("unexpected message {:?}", msg);
         }
     }
 }

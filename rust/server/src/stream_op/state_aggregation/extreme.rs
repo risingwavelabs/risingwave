@@ -1,14 +1,19 @@
+use async_trait::async_trait;
+use bytes::Bytes;
+use rust_decimal::Decimal;
 use std::collections::BTreeMap;
 
-use bytes::Bytes;
 use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::expr::AggKind;
 use risingwave_common::types::{
-    deserialize_datum_not_null_from, serialize_datum_not_null_into, DataTypeRef, Datum, Scalar,
-    ScalarImpl,
+    deserialize_datum_not_null_from, serialize_datum_not_null_into, DataTypeKind, DataTypeRef,
+    Datum, Scalar, ScalarImpl,
 };
+
+use crate::stream_op::{AggArgs, AggCall};
 
 use super::super::keyspace::{Keyspace, StateStore};
 
@@ -57,6 +62,31 @@ pub struct ManagedMinState<S: StateStore, K: Scalar + Ord> {
     keyspace: Keyspace<S>,
 }
 
+/// A trait over all extreme states.
+///
+/// It is true that this interface also fits to other managed state, but we won't implement
+/// `ManagedExtremeState` for them. We want to reduce the overhead of BoxedFuture. For
+/// ManagedValueState, we can directly forward its async functions to `ManagedStateImpl`, instead of
+/// adding a layer of indirection caused by async traits.
+#[async_trait]
+pub trait ManagedExtremeState<S: StateStore>: Send + Sync + 'static {
+    async fn apply_batch(
+        &mut self,
+        ops: Ops<'_>,
+        visibility: Option<&Bitmap>,
+        data: &[&ArrayImpl],
+    ) -> Result<()>;
+
+    /// Get the output of the state. Must flush before getting output.
+    async fn get_output(&mut self) -> Result<Datum>;
+
+    /// Check if this state needs a flush.
+    fn is_dirty(&self) -> bool;
+
+    /// Flush the internal state to a write batch. TODO: add `WriteBatch` to Hummock.
+    fn flush(&mut self, write_batch: &mut Vec<(Bytes, Option<Bytes>)>) -> Result<()>;
+}
+
 impl<S: StateStore, K: Scalar + Ord> ManagedMinState<S, K> {
     /// Create a managed min state based on `Keyspace`. When `top_n_count` is `None`, the cache will
     /// always be retained when flushing the managed state. Otherwise, we will only retain n entries
@@ -77,9 +107,12 @@ impl<S: StateStore, K: Scalar + Ord> ManagedMinState<S, K> {
             data_type,
         })
     }
+}
 
+#[async_trait]
+impl<S: StateStore, K: Scalar + Ord> ManagedExtremeState<S> for ManagedMinState<S, K> {
     /// Apply a batch of data to the state.
-    pub async fn apply_batch(
+    async fn apply_batch(
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
@@ -151,7 +184,7 @@ impl<S: StateStore, K: Scalar + Ord> ManagedMinState<S, K> {
         Ok(())
     }
 
-    pub async fn get_output(&mut self) -> Result<Datum> {
+    async fn get_output(&mut self) -> Result<Datum> {
         // To make things easier, we do not allow get_output before flushing. Otherwise we will need
         // to merge data from flush_buffer and state store, which is hard to implement.
         //
@@ -187,12 +220,12 @@ impl<S: StateStore, K: Scalar + Ord> ManagedMinState<S, K> {
     }
 
     /// Check if this state needs a flush.
-    pub fn is_dirty(&self) -> bool {
+    fn is_dirty(&self) -> bool {
         !self.flush_buffer.is_empty()
     }
 
     /// Flush the internal state to a write batch. TODO: add `WriteBatch` to Hummock.
-    pub fn flush(&mut self, write_batch: &mut Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
+    fn flush(&mut self, write_batch: &mut Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
         debug_assert!(self.is_dirty());
 
         // TODO: we can populate the cache while flushing, but that's hard.
@@ -237,7 +270,9 @@ impl<S: StateStore, K: Scalar + Ord> ManagedMinState<S, K> {
         }
         Ok(())
     }
+}
 
+impl<S: StateStore, K: Scalar + Ord> ManagedMinState<S, K> {
     #[cfg(test)]
     pub async fn iterate_store(&self) -> Result<Vec<K>> {
         let all_data = self.keyspace.scan(None).await?;
@@ -534,5 +569,70 @@ mod tests {
 
             assert_eq!(value, heap.first().cloned());
         }
+    }
+}
+
+pub async fn create_streaming_extreme_state<S: StateStore>(
+    agg_call: AggCall,
+    keyspace: Keyspace<S>,
+    row_count: usize,
+    top_n_count: Option<usize>,
+) -> Result<Box<dyn ManagedExtremeState<S>>> {
+    match &agg_call.args {
+        AggArgs::Unary(x, _) => {
+            if agg_call.return_type.data_type_kind() != x.data_type_kind() {
+                panic!(
+                    "extreme state input doesn't match return value: {:?}",
+                    agg_call
+                );
+            }
+            if x.is_nullable() {
+                panic!("extreme state input should not be nullable: {:?}", agg_call);
+            }
+        }
+        _ => panic!("extreme state should only have one arg: {:?}", agg_call),
+    }
+
+    match (agg_call.kind, agg_call.return_type.data_type_kind()) {
+        (AggKind::Max, _) => {
+            todo!("max is not supported for now");
+        }
+        (AggKind::Min, DataTypeKind::Int64) => Ok(Box::new(
+            ManagedMinState::<_, i64>::new(
+                keyspace,
+                agg_call.return_type.clone(),
+                top_n_count,
+                row_count,
+            )
+            .await?,
+        )),
+        (AggKind::Min, DataTypeKind::Int32) => Ok(Box::new(
+            ManagedMinState::<_, i32>::new(
+                keyspace,
+                agg_call.return_type.clone(),
+                top_n_count,
+                row_count,
+            )
+            .await?,
+        )),
+        (AggKind::Min, DataTypeKind::Int16) => Ok(Box::new(
+            ManagedMinState::<_, i16>::new(
+                keyspace,
+                agg_call.return_type.clone(),
+                top_n_count,
+                row_count,
+            )
+            .await?,
+        )),
+        (AggKind::Min, DataTypeKind::Decimal) => Ok(Box::new(
+            ManagedMinState::<_, Decimal>::new(
+                keyspace,
+                agg_call.return_type.clone(),
+                top_n_count,
+                row_count,
+            )
+            .await?,
+        )),
+        _ => unreachable!("unsupported"),
     }
 }

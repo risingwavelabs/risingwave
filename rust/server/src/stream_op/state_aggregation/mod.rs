@@ -1,11 +1,13 @@
 //! Aggregators with state store support
 
 mod value;
+use risingwave_common::expr::AggKind;
 pub use value::*;
 mod extreme;
 pub use extreme::*;
 
-use super::keyspace::StateStore;
+use super::keyspace::{Keyspace, StateStore};
+use super::AggCall;
 use bytes::Bytes;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::ArrayImpl;
@@ -31,12 +33,12 @@ pub fn verify_batch(
 /// All managed state for state aggregation. The managed state will manage the cache and integrate
 /// the state with the underlying state store. Managed states can only be evicted from outer cache
 /// when they are not dirty.
-pub enum ManagedState<S: StateStore> {
+pub enum ManagedStateImpl<S: StateStore> {
     Value(ManagedValueState<S>),
-    MinI64(ManagedMinState<S, i64>),
+    Extreme(Box<dyn ManagedExtremeState<S>>),
 }
 
-impl<S: StateStore> ManagedState<S> {
+impl<S: StateStore> ManagedStateImpl<S> {
     pub async fn apply_batch(
         &mut self,
         ops: Ops<'_>,
@@ -45,7 +47,7 @@ impl<S: StateStore> ManagedState<S> {
     ) -> Result<()> {
         match self {
             Self::Value(state) => state.apply_batch(ops, visibility, data).await,
-            Self::MinI64(state) => state.apply_batch(ops, visibility, data).await,
+            Self::Extreme(state) => state.apply_batch(ops, visibility, data).await,
         }
     }
 
@@ -53,7 +55,7 @@ impl<S: StateStore> ManagedState<S> {
     pub async fn get_output(&mut self) -> Result<Datum> {
         match self {
             Self::Value(state) => state.get_output().await,
-            Self::MinI64(state) => state.get_output().await,
+            Self::Extreme(state) => state.get_output().await,
         }
     }
 
@@ -61,7 +63,7 @@ impl<S: StateStore> ManagedState<S> {
     pub fn is_dirty(&self) -> bool {
         match self {
             Self::Value(state) => state.is_dirty(),
-            Self::MinI64(state) => state.is_dirty(),
+            Self::Extreme(state) => state.is_dirty(),
         }
     }
 
@@ -69,7 +71,47 @@ impl<S: StateStore> ManagedState<S> {
     pub fn flush(&mut self, write_batch: &mut Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
         match self {
             Self::Value(state) => state.flush(write_batch),
-            Self::MinI64(state) => state.flush(write_batch),
+            Self::Extreme(state) => state.flush(write_batch),
+        }
+    }
+
+    /// Create a managed state from `agg_call`.
+    pub async fn create_managed_state(
+        agg_call: AggCall,
+        keyspace: Keyspace<S>,
+        row_count: Option<usize>,
+    ) -> Result<Self> {
+        match agg_call.kind {
+            AggKind::Max | AggKind::Min => {
+                assert!(
+                    row_count.is_some(),
+                    "should set row_count for value states other than AggKind::RowCount"
+                );
+                Ok(Self::Extreme(
+                    create_streaming_extreme_state(
+                        agg_call,
+                        keyspace,
+                        row_count.unwrap(),
+                        // TODO: estimate a good cache size instead of hard-coding
+                        Some(1024),
+                    )
+                    .await?,
+                ))
+            }
+            // TODO: for append-only lists, we can create `ManagedValueState` instead of
+            // `ManagedExtremeState`.
+            AggKind::Avg | AggKind::Count | AggKind::Sum => {
+                assert!(
+                    row_count.is_some(),
+                    "should set row_count for value states other than AggKind::RowCount"
+                );
+                Ok(Self::Value(
+                    ManagedValueState::new(agg_call, keyspace, row_count).await?,
+                ))
+            }
+            AggKind::RowCount => Ok(Self::Value(
+                ManagedValueState::new(agg_call, keyspace, row_count).await?,
+            )),
         }
     }
 }
