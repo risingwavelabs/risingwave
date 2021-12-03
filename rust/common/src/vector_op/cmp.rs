@@ -87,10 +87,10 @@ where
 {
     let l: T3 = l
         .try_into()
-        .map_err(|_| RwError::from(InternalError("Can't convert left to float".to_string())))?;
+        .map_err(|_| RwError::from(InternalError("Can't convert left to decimal".to_string())))?;
     let r: T3 = r
         .try_into()
-        .map_err(|_| RwError::from(InternalError("Can't convert right to float".to_string())))?;
+        .map_err(|_| RwError::from(InternalError("Can't convert right to decimal".to_string())))?;
     Ok(l > r)
 }
 
@@ -115,10 +115,10 @@ where
 {
     let l: T3 = l
         .try_into()
-        .map_err(|_| RwError::from(InternalError("Can't convert left to float".to_string())))?;
+        .map_err(|_| RwError::from(InternalError("Can't convert left to decimal".to_string())))?;
     let r: T3 = r
         .try_into()
-        .map_err(|_| RwError::from(InternalError("Can't convert right to float".to_string())))?;
+        .map_err(|_| RwError::from(InternalError("Can't convert right to decimal".to_string())))?;
     Ok(l >= r)
 }
 
@@ -143,10 +143,10 @@ where
 {
     let l: T3 = l
         .try_into()
-        .map_err(|_| RwError::from(InternalError("Can't convert left to float".to_string())))?;
+        .map_err(|_| RwError::from(InternalError("Can't convert left to decimal".to_string())))?;
     let r: T3 = r
         .try_into()
-        .map_err(|_| RwError::from(InternalError("Can't convert right to float".to_string())))?;
+        .map_err(|_| RwError::from(InternalError("Can't convert right to decimal".to_string())))?;
     Ok(l < r)
 }
 
@@ -171,10 +171,10 @@ where
 {
     let l: T3 = l
         .try_into()
-        .map_err(|_| RwError::from(InternalError("Can't convert left to float".to_string())))?;
+        .map_err(|_| RwError::from(InternalError("Can't convert left to decimal".to_string())))?;
     let r: T3 = r
         .try_into()
-        .map_err(|_| RwError::from(InternalError("Can't convert right to float".to_string())))?;
+        .map_err(|_| RwError::from(InternalError("Can't convert right to decimal".to_string())))?;
     Ok(l <= r)
 }
 
@@ -199,10 +199,10 @@ where
 {
     let l: T3 = l
         .try_into()
-        .map_err(|_| RwError::from(InternalError("Can't convert left to float".to_string())))?;
+        .map_err(|_| RwError::from(InternalError("Can't convert left to decimal".to_string())))?;
     let r: T3 = r
         .try_into()
-        .map_err(|_| RwError::from(InternalError("Can't convert right to float".to_string())))?;
+        .map_err(|_| RwError::from(InternalError("Can't convert right to decimal".to_string())))?;
     Ok(l == r)
 }
 
@@ -227,10 +227,10 @@ where
 {
     let l: T3 = l
         .try_into()
-        .map_err(|_| RwError::from(InternalError("Can't convert left to float".to_string())))?;
+        .map_err(|_| RwError::from(InternalError("Can't convert left to decimal".to_string())))?;
     let r: T3 = r
         .try_into()
-        .map_err(|_| RwError::from(InternalError("Can't convert right to float".to_string())))?;
+        .map_err(|_| RwError::from(InternalError("Can't convert right to decimal".to_string())))?;
     Ok(l != r)
 }
 
