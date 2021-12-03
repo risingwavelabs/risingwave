@@ -21,11 +21,11 @@ message TableMeta {
   // Estimated size, only used on encryption or compression
   uint32 estimated_size = 3;
 
-  uint64 max_version = 4;
   uint32 key_count = 5;
 
   // Serve as cheap index.
   // Since table is ordered, they are exactly the first key and last key.
+  // The keys are appended by timestamp.
   bytes smallest_key = 6;
   bytes largest_key = 7;
 }

@@ -1,10 +1,10 @@
 use bytes::BufMut;
 use std::{ptr, u64};
 
-/// Append `u64::MAX - timestamp` to user key
+/// Convert user key to full key by appending `u64::MAX - timestamp` to the user key.
 ///
-/// In this way, the keys can be comparable even with the timestamp.
-/// And a key with larger timestamp will be smaller.
+/// In this way, the keys can be comparable even with the timestamp, and a key with a larger
+/// timestamp will be smaller and thus be sorted to a upper position.
 pub fn key_with_ts(mut key: Vec<u8>, ts: u64) -> Vec<u8> {
     let res = (u64::MAX - ts).to_be();
     key.reserve(8);
@@ -32,8 +32,8 @@ pub fn get_ts(key: &[u8]) -> u64 {
 }
 
 /// Extract user key without timestamp part
-pub fn user_key(key: &[u8]) -> &[u8] {
-    &key[..key.len() - 8]
+pub fn user_key(full_key: &[u8]) -> &[u8] {
+    &full_key[..full_key.len() - 8]
 }
 
 #[cfg(test)]
@@ -44,7 +44,7 @@ mod tests {
 
     #[test]
     fn test_key_ts() {
-        let key = key_with_ts("aaa".to_string().encode_to_vec(), 233);
-        assert_eq!(get_ts(&key), 233);
+        let full_key = key_with_ts("aaa".to_string().encode_to_vec(), 233);
+        assert_eq!(get_ts(&full_key), 233);
     }
 }

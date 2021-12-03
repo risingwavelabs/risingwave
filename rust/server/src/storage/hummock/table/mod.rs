@@ -204,19 +204,26 @@ impl Table {
         !self.meta.bloom_filter.is_empty()
     }
 
-    /// Judge whether the key is in the table with the given false positive rate.
-    /// Note: it means that :
-    /// - if the return value is true, then the table surely does not have the value;
-    /// - if the return value is false, then the table may or may not have the value actually,
+    /// Judge whether the user key of the given full key is in the table with the given false
+    /// positive rate.
+    ///
+    /// Note:
+    /// - about full key:
+    ///   - full key is the user key with a timestamp.
+    ///   - when do the judge, the timestamp will be removed.
+    ///
+    /// - about false positive rate:
+    ///   - if the return value is true, then the table surely does not have the user key;
+    ///   - if the return value is false, then the table may or may not have the user key actually,
     /// a.k.a. we don't know the answer.
-    pub fn surely_not_have(&self, key: &[u8]) -> bool {
+    pub fn surely_not_have(&self, full_key: &[u8]) -> bool {
         if self.has_bloom_filter() {
             // remove timestamp
-            let key = user_key(key);
+            let user_key = user_key(full_key);
 
-            let hash = farmhash::fingerprint32(key);
+            let hash = farmhash::fingerprint32(user_key);
             let bloom = Bloom::new(&self.meta.bloom_filter);
-            !bloom.may_contain(hash)
+            bloom.surely_not_have(hash)
         } else {
             false
         }

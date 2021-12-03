@@ -85,22 +85,28 @@ impl<'a> Bloom<'a> {
         filter.freeze()
     }
 
-    /// Check if a Bloom filter may contain some data
-    pub fn may_contain(&self, mut h: u32) -> bool {
+    /// Judge whether the hash value is in the table with the given false positive rate.
+    ///
+    /// Note:
+    ///   - if the return value is true, then the table surely does not have the user key that has
+    ///     the hash;
+    ///   - if the return value is false, then the table may or may not have the user key that has
+    ///     the hash actually, a.k.a. we don't know the answer.
+    pub fn surely_not_have(&self, mut h: u32) -> bool {
         if self.k > 30 {
             // potential new encoding for short Bloom filters
-            true
+            false
         } else {
             let nbits = self.filter.bit_len();
             let delta = (h >> 17) | (h << 15);
             for _ in 0..self.k {
                 let bit_pos = h % (nbits as u32);
                 if !self.filter.get_bit(bit_pos as usize) {
-                    return false;
+                    return true;
                 }
                 h = h.wrapping_add(delta);
             }
-            true
+            false
         }
     }
 }
@@ -130,9 +136,9 @@ mod tests {
         let f = Bloom::new(&buf);
         assert_eq!(f.k, 6);
 
-        assert!(f.may_contain(check_hash[0]));
-        assert!(f.may_contain(check_hash[1]));
-        assert!(!f.may_contain(check_hash[2]));
-        assert!(!f.may_contain(check_hash[3]));
+        assert!(!f.surely_not_have(check_hash[0]));
+        assert!(!f.surely_not_have(check_hash[1]));
+        assert!(f.surely_not_have(check_hash[2]));
+        assert!(f.surely_not_have(check_hash[3]));
     }
 }
