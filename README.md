@@ -101,30 +101,8 @@ to clean-up:
 ./scripts/kill_cluster.sh
 ```
 
-## Code Formatting
-Before submitting your PR, you should format the code first.
-
-For Java code, please run:
-```bash
-cd java
-./gradlew spotlessApply
-```
-
-For Rust code, please run:
-
-```bash
-cd rust
-cargo fmt
-cargo clippy --all-targets --all-features
-```
-
-For Protobufs, we rely on [prototool](https://github.com/uber/prototool#prototool-format) and [buf](https://docs.buf.build/installation) for code formatting and linting.
-Please check out their documents for installation. To check if you violate the rule, please run the commands:
-
-```bash
-prototool format -d
-buf lint
-```
+## Contributing
+Thanks for your interest in contributing to the project, please refer to the [CONTRIBUTING.md](https://github.com/singularity-data/risingwave/blob/main/CONTRIBUTING.md).
 
 ## Toolchain
 Currently, we are using nightly toolchain `nightly-2021-11-15`. If anyone needs to upgrade

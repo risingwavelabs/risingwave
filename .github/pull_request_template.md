@@ -1,23 +1,9 @@
-## What have you changed? (mandatory)
+<!--- Following the [contributing guidelines](https://github.com/singularity-data/risingwave/blob/main/CONTRIBUTING.md) will make it easier for us to review and accept your PR. --->
 
-Please explain **IN DETAIL** what the changes are in this PR and why they are needed:
+## What's changed and what's your intention?
 
-- Summarize your change (mandatory)
-- How does this PR work? Need a brief introduction for the changed logic (optional)
-- Describe clearly one logical change and avoid lazy messages (optional)
-- Describe any limitations of the current code (optional)
 
-## What are the type of the changes? (mandatory)
-
-Pick a type:
-
-- New feature (non-breaking change which adds functionality)
-- Improvement (non-breaking change which is an improvement to an existing feature)
-- Bug fix (non-breaking change which fixes an issue)
-- Breaking change (fix or feature that would cause existing functionality to not work as expected)
-
-## How has this PR been tested? (mandatory)
-
+## How has this PR been tested?
 - [ ] Unit Test
 - [ ] Integration Test
 
