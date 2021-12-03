@@ -468,6 +468,7 @@ impl_fold_agg! { I64Array, Int64, I32Array }
 impl_fold_agg! { I64Array, Int64, I16Array }
 impl_fold_agg! { I64Array, Int64, BoolArray }
 impl_fold_agg! { I64Array, Int64, Utf8Array }
+impl_fold_agg! { I64Array, Int64, DecimalArray }
 impl_fold_agg! { DecimalArray, Decimal, I64Array }
 impl_fold_agg! { DecimalArray, Decimal, DecimalArray }
 

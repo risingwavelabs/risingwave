@@ -8,7 +8,7 @@ statement ok
 create materialized view mv1 as select * from t1;
 
 statement ok
-create materialized view mv2 as select sum(v1) as sum_v1, sum(v2) as sum_v2, sum(v3) as sum_v3 from t1;
+create materialized view mv2 as select sum(v1) as sum_v1, sum(v2) as sum_v2, count(v3) as count_v3 from t1;
 
 query III
 select v1, v2, v3 from mv1;
@@ -17,9 +17,9 @@ select v1, v2, v3 from mv1;
 2 3 3
 
 query III
-select sum_v1, sum_v2, sum_v3 from mv2;
+select sum_v1, sum_v2, count_v3 from mv2;
 ----
-3 7 5
+3 7 2
 
 statement ok
 insert into t1 values (3,4,4), (4,3,5);
@@ -35,6 +35,6 @@ select v1, v2, v3 from mv1
 4 3 5
 
 query III
-select sum_v1, sum_v2, sum_v3 from mv2;
+select sum_v1, sum_v2, count_v3 from mv2;
 ----
-10 14 14
+10 14 4
