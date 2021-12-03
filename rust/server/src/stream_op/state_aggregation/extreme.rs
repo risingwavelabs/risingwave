@@ -470,7 +470,7 @@ mod tests {
         let mut heap = BTreeSet::new();
 
         loop {
-            let insert_cnt = rng.gen_range(1..10);
+            let insert_cnt = rng.gen_range(1..=10);
             let ops = vec![Op::Insert; insert_cnt];
             if remaining_values.len() < insert_cnt {
                 break;
@@ -488,7 +488,7 @@ mod tests {
 
             remaining_values = &remaining_values[insert_cnt..];
 
-            let delete_cnt = rng.gen_range(1..10.min(heap.len()));
+            let delete_cnt = rng.gen_range(1..=10.min(heap.len()));
             let ops = vec![Op::Delete; delete_cnt];
             let mut delete_ids = (0..heap.len()).collect_vec();
             delete_ids.shuffle(&mut rng);
