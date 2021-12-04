@@ -25,7 +25,7 @@ fun Project.getMergeBase(target: String, source: String): String {
 
 /**
  * Get all files that are changed but not deleted nor renamed.
- * Compares to master or the specified target branch.
+ * Compares to main or the specified target branch.
  *
  * @return List of all changed files
  */
@@ -36,9 +36,9 @@ fun Project.getChangedFiles(): List<String> {
 
   println("ghprbTargetBranch: $ghprbTargetBranch, ghprbSourceBranch: $ghprbSourceBranch")
 
-  // Compare to master if no branch specified
+  // Compare to main if no branch specified
   val targetBranch = if (ghprbTargetBranch?.isBlank() != false) {
-    "origin/master"
+    "origin/main"
   } else {
     "origin/$ghprbTargetBranch"
   }

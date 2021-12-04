@@ -1,5 +1,5 @@
 # RisingWave
-[![codecov](https://codecov.io/gh/singularity-data/risingwave/branch/master/graph/badge.svg?token=C5ZX0L0GWK)](https://codecov.io/gh/singularity-data/risingwave)
+[![codecov](https://codecov.io/gh/singularity-data/risingwave/branch/main/graph/badge.svg?token=C5ZX0L0GWK)](https://codecov.io/gh/singularity-data/risingwave)
 ## Download
 Run:
 ```bash
@@ -102,7 +102,7 @@ to clean-up:
 ```
 
 ## Contributing
-Thanks for your interest in contributing to the project, please refer to the [CONTRIBUTING.md](https://github.com/singularity-data/risingwave/blob/master/CONTRIBUTING.md).
+Thanks for your interest in contributing to the project, please refer to the [CONTRIBUTING.md](https://github.com/singularity-data/risingwave/blob/main/CONTRIBUTING.md).
 
 ## Toolchain
 Currently, we are using nightly toolchain `nightly-2021-11-15`. If anyone needs to upgrade

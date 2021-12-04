@@ -2,7 +2,7 @@ name: PR Checklist
 
 on:
   pull_request:
-    branches: [ master ]
+    branches: [ main ]
     types: [opened]
 
 jobs:

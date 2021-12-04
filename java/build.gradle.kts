@@ -105,7 +105,7 @@ subprojects {
 
         apply<com.diffplug.gradle.spotless.SpotlessPlugin>()
         configure<com.diffplug.gradle.spotless.SpotlessExtension> {
-            ratchetFrom = "origin/master"
+            ratchetFrom = "origin/main"
             java {
                 importOrder() // standard import order
                 removeUnusedImports()
