@@ -9,7 +9,6 @@ use table::*;
 mod cloud;
 mod error;
 mod iterator;
-mod keyed_state;
 mod value;
 use self::table::format::key_with_ts;
 use crate::storage::object::ObjectStore;
