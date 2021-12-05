@@ -1,6 +1,5 @@
 use super::*;
 use crate::rpc::service::exchange_service::ExchangeWriter;
-use crate::storage::{Table, TableImpl};
 use core::default::Default as CoreDefault;
 use itertools::Itertools;
 use prost::Message;
@@ -19,6 +18,7 @@ use risingwave_pb::task_service::{
     GetDataResponse, QueryId, StageId, TaskId as ProstTaskId, TaskSinkId as ProstSinkId,
 };
 use risingwave_pb::ToProto;
+use risingwave_storage::{Table, TableImpl};
 
 fn get_num_sinks(plan: &PlanFragment) -> u32 {
     let plan = plan.to_proto::<risingwave_proto::plan::PlanFragment>();

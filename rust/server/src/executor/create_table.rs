@@ -9,11 +9,11 @@ use risingwave_pb::ToProto;
 
 use crate::executor::{Executor, ExecutorBuilder};
 use crate::source::SourceManagerRef;
-use crate::storage::{TableColumnDesc, TableManagerRef};
 use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::Result;
+use risingwave_storage::{TableColumnDesc, TableManagerRef};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 

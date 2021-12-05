@@ -1,7 +1,9 @@
-use crate::storage::StagedRowGroupRef;
-use crate::storage::Table;
-use crate::storage::{MemRowGroup, MemRowGroupRef};
-use crate::storage::{PartitionedRowGroupRef, TableColumnDesc};
+use crate::bummock::PartitionedRowGroupRef;
+use crate::bummock::StagedRowGroupRef;
+use crate::bummock::{MemRowGroup, MemRowGroupRef};
+use crate::Table;
+use crate::TableColumnDesc;
+
 use risingwave_common::array::InternalError;
 use risingwave_common::array::{DataChunk, DataChunkRef};
 use risingwave_common::array::{Op, StreamChunk};
@@ -246,10 +248,13 @@ impl BummockTable {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::{BummockResult, BummockTable, Table, TableColumnDesc};
+    use crate::bummock::{BummockResult, BummockTable};
+    use crate::Table;
+    use crate::TableColumnDesc;
 
     use risingwave_common::array::{Array, DataChunk, I64Array};
     use risingwave_common::catalog::{Field, Schema, TableId};
+    use risingwave_common::column_nonnull;
     use risingwave_common::error::Result;
     use risingwave_common::types::{DecimalType, Int64Type};
 

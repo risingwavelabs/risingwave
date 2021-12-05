@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use crate::storage::hummock::{table::Table, HummockError, HummockResult, REMOTE_DIR};
-use crate::storage::object::ObjectStore;
+use crate::hummock::{table::Table, HummockError, HummockResult, REMOTE_DIR};
+use crate::object::ObjectStore;
 use bytes::{Bytes, BytesMut};
 use risingwave_pb::hummock::TableMeta;
 

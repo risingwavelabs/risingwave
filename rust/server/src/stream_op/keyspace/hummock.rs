@@ -4,7 +4,7 @@ use risingwave_common::error::{Result, ToRwResult};
 
 use super::StateStore;
 
-use crate::storage::hummock::HummockStorage;
+use risingwave_storage::hummock::HummockStorage;
 
 /// A wrapper over [`HummockStorage`] as a state store.
 ///

@@ -477,8 +477,8 @@ mod tests {
     use risingwave_common::array::data_chunk_iter::Row;
     use risingwave_common::array::{I64Array, Op};
     use risingwave_common::catalog::Field;
-    use risingwave_common::expr::*;
     use risingwave_common::types::{Int64Type, Scalar};
+    use risingwave_common::{column_nonnull, expr::*};
 
     fn create_in_memory_keyspace() -> Keyspace<impl StateStore> {
         Keyspace::new(MemoryStateStore::new(), b"test_executor_2333".to_vec())

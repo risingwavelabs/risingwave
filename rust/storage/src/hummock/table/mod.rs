@@ -15,8 +15,8 @@ mod utils;
 use self::format::user_key;
 
 use super::{HummockError, HummockResult};
-use crate::storage::hummock::table::utils::crc32_checksum;
-use crate::storage::object::{BlockLocation, ObjectStore};
+use crate::hummock::table::utils::crc32_checksum;
+use crate::object::{BlockLocation, ObjectStore};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use prost::Message;
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;

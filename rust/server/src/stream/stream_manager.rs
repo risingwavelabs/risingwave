@@ -5,6 +5,8 @@ use std::sync::{Arc, Mutex};
 use async_std::net::SocketAddr;
 use futures::channel::mpsc::{channel, unbounded, Receiver, Sender, UnboundedSender};
 use itertools::Itertools;
+use risingwave_storage::object::InMemObjectStore;
+use risingwave_storage::row_table::RowTable;
 use tokio::task::JoinHandle;
 
 use pb_convert::FromProtobuf;
@@ -23,10 +25,10 @@ use risingwave_pb::ToProto;
 
 use crate::source::Source;
 use crate::source::*;
-use crate::storage::hummock::{HummockOptions, HummockStorage};
-use crate::storage::*;
 use crate::stream_op::*;
 use crate::task::GlobalTaskEnv;
+use risingwave_storage::hummock::{HummockOptions, HummockStorage};
+use risingwave_storage::*;
 
 /// Default capacity of channel if two fragments are on the same node
 pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
@@ -552,7 +554,6 @@ impl StreamManagerCore {
                 let table_ref = table_manager.get_table(&table_id).unwrap();
                 let table = match table_ref {
                     TableImpl::Row(table) => Ok(table as Arc<dyn RowTable>),
-                    TableImpl::TestRow(table) => Ok(table as Arc<dyn RowTable>),
                     _ => Err(RwError::from(InternalError(
                         "Materialized view creation internal error".to_string(),
                     ))),

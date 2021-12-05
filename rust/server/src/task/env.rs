@@ -1,6 +1,6 @@
 use crate::source::{SourceManager, SourceManagerRef};
-use crate::storage::{TableManager, TableManagerRef};
 use crate::task::TaskManager;
+use risingwave_storage::{TableManager, TableManagerRef};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -33,7 +33,7 @@ impl GlobalTaskEnv {
     #[cfg(test)]
     pub fn for_test() -> Self {
         use crate::source::MemSourceManager;
-        use crate::storage::SimpleTableManager;
+        use risingwave_storage::SimpleTableManager;
         GlobalTaskEnv {
             table_manager: Arc::new(SimpleTableManager::new()),
             task_manager: Arc::new(TaskManager::new()),

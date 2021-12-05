@@ -1,5 +1,7 @@
-use crate::storage::object::Bytes;
-use crate::storage::ObjectStore;
+use crate::object::Bytes;
+use crate::object::ObjectStore;
+use risingwave_common::ensure;
+use risingwave_common::gen_error;
 use risingwave_common::{
     array::RwError,
     error::{ErrorCode::InternalError, Result},
@@ -12,6 +14,7 @@ use rusoto_s3::{
     DeleteObjectRequest, GetObjectError, GetObjectRequest, HeadObjectRequest, PutObjectRequest,
     S3Client, S3,
 };
+
 use std::{collections::HashMap, str::FromStr};
 use tokio::io::AsyncReadExt;
 use tokio::sync::Mutex;

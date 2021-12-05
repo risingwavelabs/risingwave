@@ -132,7 +132,7 @@ mod tests {
     use super::super::builder::tests::*;
     use super::*;
     use crate::assert_bytes_eq;
-    use crate::storage::hummock::table::builder::tests::gen_test_table;
+    use crate::hummock::table::builder::tests::gen_test_table;
 
     #[tokio::test]
     async fn test_table_iterator() {

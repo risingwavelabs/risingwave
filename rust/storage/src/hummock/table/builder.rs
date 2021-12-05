@@ -6,9 +6,9 @@
 
 use super::bloom::Bloom;
 use super::utils::bytes_diff;
-use crate::storage::hummock::table::format::user_key;
-use crate::storage::hummock::table::utils::crc32_checksum;
-use crate::storage::hummock::HummockValue;
+use crate::hummock::table::format::user_key;
+use crate::hummock::table::utils::crc32_checksum;
+use crate::hummock::HummockValue;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use prost::Message;
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
@@ -257,10 +257,10 @@ pub(super) mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::storage::hummock::cloud::gen_remote_table;
-    use crate::storage::hummock::table::format::key_with_ts;
-    use crate::storage::hummock::table::Table;
-    use crate::storage::object::{InMemObjectStore, ObjectStore};
+    use crate::hummock::cloud::gen_remote_table;
+    use crate::hummock::table::format::key_with_ts;
+    use crate::hummock::table::Table;
+    use crate::object::{InMemObjectStore, ObjectStore};
     use itertools::Itertools;
 
     /// Number of keys in table generated in `generate_table`.

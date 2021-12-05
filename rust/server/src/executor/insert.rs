@@ -156,13 +156,14 @@ mod tests {
 
     use crate::executor::test_utils::MockExecutor;
     use crate::source::{MemSourceManager, SourceManager};
-    use crate::storage::*;
-    use crate::storage::{SimpleTableManager, TableManager};
     use crate::*;
     use risingwave_common::array::{Array, I64Array};
     use risingwave_common::catalog::{Field, Schema, SchemaId};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::{DataTypeKind, DecimalType, Int64Type};
+    use risingwave_storage::bummock::BummockResult;
+    use risingwave_storage::*;
+    use risingwave_storage::{SimpleTableManager, TableManager};
 
     use super::*;
 

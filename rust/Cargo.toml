@@ -7,6 +7,7 @@ members = [
   "prost/helpers",
   "proto",
   "server",
+  "storage",
   "stream",
   "tests/regress",
   "utils/memcomparable",

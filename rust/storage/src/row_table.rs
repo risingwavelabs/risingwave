@@ -1,3 +1,5 @@
+use async_std::sync::Mutex;
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use std::collections::btree_map::{BTreeMap, Entry};
 use std::sync::{Arc, RwLock};
 
@@ -49,11 +51,21 @@ pub(crate) struct MemRowTableInner {
     data: BTreeMap<(Row, CellId), Cell>,
 }
 
-#[derive(Debug, Default)]
+pub enum RowTableEvent {
+    Ingest(Vec<(Row, Option<Row>)>),
+    Insert(Row, Row),
+    Delete(Row),
+    InsertBatch(Vec<(Row, bool)>),
+    InsertCell(Row, CellId, Cell),
+    DeleteCell(Row, CellId),
+}
+
 pub struct MemRowTable {
     schema: Schema,
-    inner: RwLock<MemRowTableInner>,
     pks: Vec<usize>,
+    inner: RwLock<MemRowTableInner>,
+    sender: UnboundedSender<RowTableEvent>,
+    receiver: Arc<Mutex<UnboundedReceiver<RowTableEvent>>>,
 }
 
 impl MemRowTableInner {
@@ -130,47 +142,54 @@ impl MemRowTable {
     }
 
     /// Init.
-    pub(crate) fn new(schema: Schema, pks: Vec<usize>) -> Self {
+    pub fn new(schema: Schema, pks: Vec<usize>) -> Self {
         let inner = RwLock::new(MemRowTableInner::default());
-        Self { schema, inner, pks }
+        let (tx, rx) = futures::channel::mpsc::unbounded();
+        Self {
+            schema,
+            pks,
+            inner,
+            sender: tx,
+            receiver: Arc::new(Mutex::new(rx)),
+        }
+    }
+
+    pub fn get_receiver(&self) -> Arc<Mutex<UnboundedReceiver<RowTableEvent>>> {
+        self.receiver.clone()
     }
 }
 
 impl RowTable for MemRowTable {
     fn ingest(&self, batch: Vec<(Row, Option<Row>)>) -> Result<()> {
         let mut inner = self.inner.write().unwrap();
-        inner.ingest(batch)
+        inner.ingest(batch.clone())?;
+        self.sender
+            .unbounded_send(RowTableEvent::Ingest(batch))
+            .unwrap();
+        Ok(())
     }
 
     fn insert(&self, key: Row, value: Row) -> Result<()> {
         let mut inner = self.inner.write().unwrap();
-        assert_eq!(value.0.len(), self.schema.fields().len());
-        inner.insert_row(key, value)
-    }
-
-    fn insert_cell(&self, key: Row, cell_id: CellId, cell: Cell) -> Result<()> {
-        let mut inner = self.inner.write().unwrap();
-        inner.insert_cell((key, cell_id), cell)
+        inner.insert_row(key.clone(), value.clone())?;
+        self.sender
+            .unbounded_send(RowTableEvent::Insert(key, value))
+            .unwrap();
+        Ok(())
     }
 
     fn delete(&self, key: Row) -> Result<()> {
         let mut inner = self.inner.write().unwrap();
-        inner.delete_row(key)
-    }
-
-    fn delete_cell(&self, key: Row, cell_id: CellId) -> Result<()> {
-        let mut inner = self.inner.write().unwrap();
-        inner.delete_cell((key, cell_id))
+        inner.delete_row(key.clone())?;
+        self.sender
+            .unbounded_send(RowTableEvent::Delete(key))
+            .unwrap();
+        Ok(())
     }
 
     fn get(&self, key: Row) -> Result<Option<Row>> {
         let inner = self.inner.read().unwrap();
         inner.get_row(key)
-    }
-
-    fn get_cell(&self, key: Row, cell_id: CellId) -> Result<Option<Cell>> {
-        let inner = self.inner.read().unwrap();
-        inner.get_cell((key, cell_id))
     }
 
     fn schema(&self) -> &Schema {
@@ -179,6 +198,29 @@ impl RowTable for MemRowTable {
 
     fn get_pk(&self) -> Vec<usize> {
         self.pks.clone()
+    }
+
+    fn insert_cell(&self, key: Row, cell_id: CellId, cell: Cell) -> Result<()> {
+        let mut inner = self.inner.write().unwrap();
+        inner.insert_cell((key.clone(), cell_id), cell.clone())?;
+        self.sender
+            .unbounded_send(RowTableEvent::InsertCell(key, cell_id, cell))
+            .unwrap();
+        Ok(())
+    }
+
+    fn get_cell(&self, key: Row, cell_id: CellId) -> Result<Option<Cell>> {
+        let inner = self.inner.read().unwrap();
+        inner.get_cell((key, cell_id))
+    }
+
+    fn delete_cell(&self, key: Row, cell_id: CellId) -> Result<()> {
+        let mut inner = self.inner.write().unwrap();
+        inner.delete_cell((key.clone(), cell_id))?;
+        self.sender
+            .unbounded_send(RowTableEvent::DeleteCell(key, cell_id))
+            .unwrap();
+        Ok(())
     }
 }
 

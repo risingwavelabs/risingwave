@@ -6,15 +6,16 @@ use pb_convert::FromProtobuf;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::SeqScanNode;
 use risingwave_pb::ToProto;
+use risingwave_storage::bummock::{BummockResult, BummockTable};
 
 use crate::executor::{Executor, ExecutorBuilder};
-use crate::storage::*;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, DataChunkRef};
 use risingwave_common::catalog::TableId;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::{Result, RwError};
+use risingwave_storage::*;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 
@@ -166,6 +167,7 @@ mod tests {
     use crate::*;
     use risingwave_common::array::{Array, I64Array};
     use risingwave_common::catalog::Field;
+    use risingwave_common::column_nonnull;
     use risingwave_common::types::{DataTypeKind, DecimalType, Int64Type};
 
     use super::*;

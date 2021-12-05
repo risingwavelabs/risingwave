@@ -5,13 +5,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 mod table;
-use table::*;
+pub use table::*;
 mod cloud;
 mod error;
 mod iterator;
 mod value;
 use self::table::format::key_with_ts;
-use crate::storage::object::ObjectStore;
+use crate::object::ObjectStore;
 use cloud::gen_remote_table;
 pub use error::*;
 use tokio::sync::Mutex;

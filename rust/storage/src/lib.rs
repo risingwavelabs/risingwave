@@ -1,22 +1,26 @@
-mod bummock;
-pub use bummock::*;
+#![allow(dead_code)]
+#![warn(clippy::map_flatten)]
+#![warn(clippy::doc_markdown)]
+#![deny(unused_must_use)]
+#![feature(trait_alias)]
+#![feature(generic_associated_types)]
+#![feature(binary_heap_drain_sorted)]
 
-mod row_table;
-pub use row_table::*;
-
+pub mod bummock;
 pub mod hummock;
+pub mod object;
+pub mod row_table;
 
-mod test_row_table;
-pub use test_row_table::*;
-
-mod object;
-pub use object::*;
-
+use crate::bummock::BummockResult;
+use crate::bummock::BummockTable;
+use crate::row_table::MemRowTable;
 use risingwave_common::array::InternalError;
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
+use risingwave_common::ensure;
 use risingwave_common::error::Result;
+use risingwave_common::gen_error;
 use risingwave_common::types::DataTypeRef;
 use risingwave_pb::ToProst;
 use risingwave_proto::plan::ColumnDesc;
@@ -77,7 +81,6 @@ pub trait TableManager: Sync + Send {
 pub enum TableImpl {
     Row(Arc<MemRowTable>),
     Bummock(Arc<BummockTable>),
-    TestRow(Arc<TestRowTable>),
 }
 
 #[derive(Clone, Debug)]
@@ -89,6 +92,7 @@ pub struct TableColumnDesc {
 /// A simple implementation of in memory table for local tests.
 /// It will be replaced in near future when replaced by locally
 /// on-disk files.
+#[derive(Default)]
 pub struct SimpleTableManager {
     tables: Mutex<HashMap<TableId, TableImpl>>,
 }
@@ -138,38 +142,6 @@ impl TableManager for SimpleTableManager {
         Ok(())
     }
 
-    #[cfg(test)]
-    fn create_materialized_view(
-        &self,
-        table_id: &TableId,
-        columns: Vec<ColumnDesc>,
-        pk_columns: Vec<usize>,
-    ) -> Result<()> {
-        let mut tables = self.get_tables()?;
-
-        ensure!(
-            !tables.contains_key(table_id),
-            "Table id already exists: {:?}",
-            table_id
-        );
-        let column_count = columns.len();
-        ensure!(column_count > 0, "There must be more than one column in MV");
-        // TODO: Remove to_prost later.
-        let schema = Schema::try_from(
-            &columns
-                .into_iter()
-                .map(|c| c.to_prost())
-                .collect::<Vec<_>>(),
-        )?;
-        tables.insert(
-            table_id.clone(),
-            TableImpl::TestRow(Arc::new(TestRowTable::new(schema, pk_columns))),
-        );
-
-        Ok(())
-    }
-
-    #[cfg(not(test))]
     fn create_materialized_view(
         &self,
         table_id: &TableId,

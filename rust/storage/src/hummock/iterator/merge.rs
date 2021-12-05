@@ -3,7 +3,7 @@ use std::{collections::BinaryHeap, fmt::Debug};
 
 use bytes::BytesMut;
 
-use crate::storage::hummock::{value::HummockValue, HummockResult};
+use crate::hummock::{value::HummockValue, HummockResult};
 
 use super::HummockIterator;
 
@@ -130,7 +130,7 @@ impl HummockIterator for MergeIterator {
 mod test {
     use std::sync::Arc;
 
-    use crate::storage::hummock::{
+    use crate::hummock::{
         iterator::tests::test::{
             default_builder_opt_for_test, gen_test_table_base, test_key_of, test_value_of,
             TEST_KEYS_COUNT,

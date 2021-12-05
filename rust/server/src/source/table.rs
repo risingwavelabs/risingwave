@@ -1,4 +1,6 @@
 use async_trait::async_trait;
+use risingwave_storage::bummock::{BummockResult, BummockTable};
+use risingwave_storage::Table;
 use std::collections::VecDeque;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -11,7 +13,6 @@ use risingwave_common::error::Result;
 
 use crate::source::*;
 
-use crate::storage::{BummockResult, BummockTable, Table};
 use risingwave_common::array::{Op, StreamChunk};
 
 /// `TableSource` is a special internal source to handle table updates from user,
@@ -264,6 +265,7 @@ impl SourceWriter for TableWriter {
 
 #[cfg(test)]
 mod test {
+    use super::*;
     use assert_matches::assert_matches;
     use itertools::Itertools;
 
@@ -272,9 +274,7 @@ mod test {
     use risingwave_common::column_nonnull;
     use risingwave_common::types::Int64Type;
 
-    use crate::storage::{Table, TableColumnDesc};
-
-    use super::*;
+    use risingwave_storage::{Table, TableColumnDesc};
 
     #[tokio::test]
     async fn test_table_source() {

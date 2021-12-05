@@ -159,6 +159,7 @@ impl BlockIterator {
     }
 
     /// Move to the next position
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> bool {
         self.set_idx(self.idx + 1)
     }
@@ -171,12 +172,12 @@ impl BlockIterator {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::hummock::cloud::gen_remote_table;
+    use crate::hummock::cloud::gen_remote_table;
     use bytes::{Bytes, BytesMut};
     use itertools::Itertools;
 
-    use crate::storage::hummock::HummockValue;
-    use crate::storage::object::{InMemObjectStore, ObjectStore};
+    use crate::hummock::HummockValue;
+    use crate::object::{InMemObjectStore, ObjectStore};
 
     use super::super::{TableBuilder, TableBuilderOptions};
 

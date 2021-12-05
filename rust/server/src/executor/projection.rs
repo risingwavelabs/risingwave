@@ -96,6 +96,7 @@ mod tests {
     use crate::*;
     use risingwave_common::array::{Array, I32Array};
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::column_nonnull;
     use risingwave_common::expr::InputRefExpression;
     use risingwave_common::types::{DataTypeKind, Int32Type};
 

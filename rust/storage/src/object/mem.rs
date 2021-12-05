@@ -1,12 +1,15 @@
-use crate::storage::object::{BlockLocation, ObjectMetadata, ObjectStore};
+use crate::object::{BlockLocation, ObjectMetadata, ObjectStore};
 use bytes::Bytes;
 use risingwave_common::array::RwError;
+use risingwave_common::ensure;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
+use risingwave_common::gen_error;
 use std::collections::HashMap;
 use tokio::sync::Mutex;
 
 /// In-memory object storage, useful for testing.
+#[derive(Default)]
 pub struct InMemObjectStore {
     objects: Mutex<HashMap<String, Bytes>>,
 }

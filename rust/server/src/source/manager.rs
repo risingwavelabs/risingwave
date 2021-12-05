@@ -10,7 +10,7 @@ use risingwave_common::types::DataTypeRef;
 use crate::source::{
     HighLevelKafkaSource, SourceConfig, SourceFormat, SourceImpl, SourceParser, TableSource,
 };
-use crate::storage::BummockTable;
+use risingwave_storage::bummock::BummockTable;
 
 pub type SourceRef = Arc<SourceImpl>;
 

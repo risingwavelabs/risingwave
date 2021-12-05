@@ -432,8 +432,7 @@ impl<const T: JoinTypePrimitive> HashJoinExecutor<T> {
 mod tests {
     use itertools::Itertools;
 
-    use risingwave_common::array::I64Array;
-    use risingwave_common::array::*;
+    use risingwave_common::{array::*, column_nonnull};
 
     use super::{HashJoinExecutor, JoinParams, JoinType};
     use crate::stream_op::test_utils::MockAsyncSource;

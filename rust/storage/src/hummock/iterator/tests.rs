@@ -3,19 +3,17 @@
 pub struct TestIterator;
 
 pub mod test {
+    use crate::hummock::cloud::gen_remote_table;
+    use crate::hummock::HummockValue;
+    use crate::hummock::TableBuilder;
+    use crate::hummock::{Table, TableBuilderOptions};
+    use crate::object::InMemObjectStore;
+    use crate::object::ObjectStore;
     use std::sync::Arc;
 
     pub const TEST_KEYS_COUNT: usize = 10;
     use itertools::Itertools;
 
-    use crate::storage::{
-        hummock::{
-            cloud::gen_remote_table,
-            table::{Table, TableBuilder, TableBuilderOptions},
-            value::HummockValue,
-        },
-        InMemObjectStore, ObjectStore,
-    };
     pub fn default_builder_opt_for_test() -> TableBuilderOptions {
         TableBuilderOptions {
             bloom_false_positive: 0.1,

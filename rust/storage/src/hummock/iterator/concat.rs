@@ -3,10 +3,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use itertools::Itertools;
 
-use crate::storage::hummock::iterator::HummockIterator;
-use crate::storage::hummock::table::{BlockIterator, Table, TableIterator};
-use crate::storage::hummock::value::HummockValue;
-use crate::storage::hummock::HummockResult;
+use crate::hummock::iterator::HummockIterator;
+use crate::hummock::table::{BlockIterator, Table, TableIterator};
+use crate::hummock::value::HummockValue;
+use crate::hummock::HummockResult;
 
 pub struct ConcatIterator {
     tables: Vec<Arc<Table>>,
@@ -92,7 +92,7 @@ impl HummockIterator for ConcatIterator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::hummock::iterator::tests::test::{
+    use crate::hummock::iterator::tests::test::{
         default_builder_opt_for_test, gen_test_table, test_key_of, test_value_of, TEST_KEYS_COUNT,
     };
 

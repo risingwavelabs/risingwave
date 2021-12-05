@@ -162,6 +162,7 @@ mod tests {
     use crate::stream_op::{Executor, Message, StreamChunk};
     use risingwave_common::array::{Array, I64Array, Op};
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::column_nonnull;
     use risingwave_common::expr::InputRefExpression;
     use risingwave_common::types::Int64Type;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};

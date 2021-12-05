@@ -1,6 +1,6 @@
-use crate::risingwave_common::array::{DataChunk, DataChunkRef};
-use crate::risingwave_common::buffer::Bitmap;
 use itertools::Itertools;
+use risingwave_common::array::{DataChunk, DataChunkRef};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use std::sync::{Arc, RwLock};
 

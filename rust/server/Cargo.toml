@@ -37,8 +37,7 @@ rdkafka = { version = "0.27", features = ["cmake-build"] }
 risingwave-pb = { path = "../prost" }
 risingwave-proto = { path = "../proto" }
 risingwave_common = { path = "../common" }
-rusoto_core = "0.47.0"
-rusoto_s3 = "0.47.0"
+risingwave_storage = {path = "../storage"}
 rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }
 serde-protobuf = "0.8.2"
@@ -55,7 +54,6 @@ tonic = "0.5"
 twox-hash = "1.6.1"
 typed-builder = "0.9"
 url = "2.2.2"
-uuid = { version = "0.8", features = ["v4"] }
 
 [dev-dependencies]
 approx = "0.5"

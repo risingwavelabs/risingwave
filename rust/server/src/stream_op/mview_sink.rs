@@ -1,10 +1,10 @@
 use super::Barrier;
 use super::{Executor, Message, Result, SimpleExecutor, StreamChunk};
-use crate::storage::RowTableRef;
 use async_trait::async_trait;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::sort_util::OrderPair;
+use risingwave_storage::row_table::RowTableRef;
 use std::sync::Arc;
 
 /// `MViewSinkExecutor` writes data to a row-based memtable, so that data could
@@ -113,11 +113,13 @@ impl SimpleExecutor for MViewSinkExecutor {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::{RowTable, SimpleTableManager, TableImpl, TableManager};
     use crate::stream_op::test_utils::*;
     use crate::stream_op::*;
     use crate::*;
+    use risingwave_common::column_nonnull;
     use risingwave_pb::ToProto;
+    use risingwave_storage::row_table::RowTable;
+    use risingwave_storage::{SimpleTableManager, TableImpl, TableManager};
 
     use risingwave_common::array::{I32Array, Op, Row};
     use risingwave_common::catalog::{Field, SchemaId, TableId};
@@ -174,7 +176,7 @@ mod tests {
         };
 
         let table_ref = store_mgr.get_table(&table_id).unwrap();
-        if let TableImpl::TestRow(table) = table_ref {
+        if let TableImpl::Row(table) = table_ref {
             // Prepare stream executors.
             let schema = Schema {
                 fields: vec![

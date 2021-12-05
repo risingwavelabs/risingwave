@@ -6,9 +6,10 @@ use pb_convert::FromProtobuf;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::RowSeqScanNode;
 use risingwave_pb::ToProto;
+use risingwave_storage::row_table::{MemRowTable, MemTableRowIter, RowTable};
+use risingwave_storage::TableImpl;
 
 use crate::executor::{Executor, ExecutorBuilder};
-use crate::storage::{MemRowTable, MemTableRowIter, RowTable, TableImpl};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::Schema;
