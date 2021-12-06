@@ -178,7 +178,10 @@ impl TaskExecution {
                     break;
                 }
                 Option::Some(chunk) => {
-                    sender.send(Some(chunk)).await?;
+                    // It is wasteful to send a chunk with cardinality == 0.
+                    if chunk.cardinality() > 0 {
+                        sender.send(Some(chunk)).await?;
+                    }
                 }
             };
         }

@@ -47,11 +47,14 @@ pub(super) struct MergeSortExchangeExecutorImpl<C> {
 }
 
 impl<CS: 'static + CreateSource> MergeSortExchangeExecutorImpl<CS> {
+    /// We assume that the source would always send `Some(chunk)` with cardinality > 0
+    /// or `None`, but never `Some(chunk)` with cardinality == 0.
     async fn get_source_chunk(&mut self, source_idx: usize) -> Result<()> {
         assert!(source_idx < self.source_inputs.len());
         let res = self.sources[source_idx].take_data().await?;
         match res {
             Some(chunk) => {
+                assert_ne!(chunk.cardinality(), 0);
                 let _ =
                     std::mem::replace(&mut self.source_inputs[source_idx], Some(Arc::new(chunk)));
             }
@@ -62,18 +65,18 @@ impl<CS: 'static + CreateSource> MergeSortExchangeExecutorImpl<CS> {
         Ok(())
     }
 
+    // Check whether there is indeed a chunk and there is a visible row sitting at `row_idx`
+    // in the chunk before calling this function.
     fn push_row_into_heap(&mut self, source_idx: usize, row_idx: usize) {
         assert!(source_idx < self.source_inputs.len());
-        if let Some(chunk_ref) = &self.source_inputs[source_idx] {
-            assert!(row_idx < chunk_ref.capacity());
-            self.min_heap.push(HeapElem {
-                order_pairs: self.order_pairs.clone(),
-                chunk: chunk_ref.clone(),
-                chunk_idx: source_idx,
-                elem_idx: row_idx,
-                encoded_chunk: None,
-            });
-        }
+        let chunk_ref = self.source_inputs[source_idx].as_ref().unwrap();
+        self.min_heap.push(HeapElem {
+            order_pairs: self.order_pairs.clone(),
+            chunk: chunk_ref.clone(),
+            chunk_idx: source_idx,
+            elem_idx: row_idx,
+            encoded_chunk: None,
+        });
     }
 }
 
@@ -95,7 +98,13 @@ impl<CS: 'static + CreateSource> Executor for MergeSortExchangeExecutorImpl<CS> 
                     CS::create_source(self.env.clone(), &self.proto_sources[source_idx]).await?;
                 let _ = self.sources.push(new_source);
                 self.get_source_chunk(source_idx).await?;
-                self.push_row_into_heap(source_idx, 0);
+                if let Some(chunk) = &self.source_inputs[source_idx] {
+                    // We assume that we would always get a non-empty chunk from the upstream of
+                    // exchange, therefore we are sure that there is at least
+                    // one visible row.
+                    let next_row_idx = chunk.next_visible_row_idx(0);
+                    self.push_row_into_heap(source_idx, next_row_idx.unwrap());
+                }
             }
             self.first_execution = false;
         }
@@ -133,11 +142,18 @@ impl<CS: 'static + CreateSource> Executor for MergeSortExchangeExecutorImpl<CS> 
             }
             want_to_produce -= 1;
             // check whether we have another row from the same chunk being popped
-            if row_idx == (cur_chunk.capacity() - 1) {
-                self.get_source_chunk(child_idx).await?;
-                self.push_row_into_heap(child_idx, 0);
-            } else {
-                self.push_row_into_heap(child_idx, row_idx + 1);
+            let possible_next_row_idx = cur_chunk.next_visible_row_idx(row_idx + 1);
+            match possible_next_row_idx {
+                Some(next_row_idx) => {
+                    self.push_row_into_heap(child_idx, next_row_idx);
+                }
+                None => {
+                    self.get_source_chunk(child_idx).await?;
+                    if let Some(chunk) = &self.source_inputs[child_idx] {
+                        let next_row_idx = chunk.next_visible_row_idx(0);
+                        self.push_row_into_heap(child_idx, next_row_idx.unwrap());
+                    }
+                }
             }
         }
 

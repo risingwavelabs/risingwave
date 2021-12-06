@@ -118,6 +118,17 @@ impl Bitmap {
         })
     }
 
+    /// Return the next set bit index on or after `bit_idx`.
+    pub fn next_set_bit(&self, bit_idx: usize) -> Option<usize> {
+        for idx in bit_idx..self.len() {
+            // Since `self.len()` guards the range, we can safely call unsafe function here.
+            if unsafe { self.is_set_unchecked(idx) } {
+                return Some(idx);
+            }
+        }
+        None
+    }
+
     pub fn num_high_bits(&self) -> usize {
         self.num_high_bits
     }

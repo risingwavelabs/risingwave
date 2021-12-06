@@ -73,12 +73,26 @@ impl DataChunk {
         }
     }
 
-    /// `new_dummy` creates a data chunk without columns but only a cardinality
+    /// `new_dummy` creates a data chunk without columns but only a cardinality.
     pub fn new_dummy(cardinality: usize) -> Self {
         DataChunk {
             columns: vec![],
             visibility: None,
             cardinality,
+        }
+    }
+
+    /// Return the next visible row index on or after `row_idx`.
+    pub fn next_visible_row_idx(&self, row_idx: usize) -> Option<usize> {
+        match &self.visibility {
+            Some(vis) => vis.next_set_bit(row_idx),
+            None => {
+                if row_idx < self.cardinality {
+                    Some(row_idx)
+                } else {
+                    None
+                }
+            }
         }
     }
 

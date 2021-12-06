@@ -42,6 +42,7 @@ fn generate_hash_values(chunk: &DataChunk, hash_info: &HashInfo) -> Result<Vec<u
     Ok(hash_values)
 }
 
+/// The returned chunks must have cardinality > 0.
 fn generate_new_data_chunks(
     chunk: &DataChunk,
     hash_info: &exchange_info::HashInfo,
@@ -93,9 +94,13 @@ impl HashShuffleSender {
                 sink_id,
                 new_data_chunk.cardinality()
             );
-            self.senders[sink_id]
-                .send(Some(new_data_chunk))
-                .to_rw_result_with("HashShuffleSender::send")?;
+            // The reason we need to add this filter only in HashShuffleSender is that
+            // `generate_new_data_chunks` may generate an empty chunk.
+            if new_data_chunk.cardinality() > 0 {
+                self.senders[sink_id]
+                    .send(Some(new_data_chunk))
+                    .to_rw_result_with("HashShuffleSender::send")?;
+            }
         }
         Ok(())
     }

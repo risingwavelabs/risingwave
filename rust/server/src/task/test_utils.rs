@@ -464,27 +464,30 @@ impl ResultChecker {
     }
 
     fn try_check_result(&mut self, actual: &[GetDataResponse]) -> Result<()> {
-        assert_eq!(actual.len(), 1);
-        let chunk = actual.get(0).unwrap().get_record_batch();
-        assert_eq!(chunk.get_cardinality(), self.cardinality() as u32);
-        assert_eq!(chunk.get_columns().len(), self.col_types.len());
+        if self.cardinality() == 0 {
+            assert_eq!(actual.len(), 0);
+        } else {
+            assert_eq!(actual.len(), 1);
+            let chunk = actual.get(0).unwrap().get_record_batch();
+            assert_eq!(chunk.get_cardinality(), self.cardinality() as u32);
+            assert_eq!(chunk.get_columns().len(), self.col_types.len());
 
-        for i in 0..chunk.get_columns().len() {
-            let col = Column::decode(&chunk.get_columns()[i].value[..]).unwrap();
+            for i in 0..chunk.get_columns().len() {
+                let col = Column::decode(&chunk.get_columns()[i].value[..]).unwrap();
 
-            self.check_column_meta(i, &col);
-            self.check_column_null_bitmap(&col);
+                self.check_column_meta(i, &col);
+                self.check_column_null_bitmap(&col);
 
-            // TODO: Write an iterator for FixedWidthColumn
-            let value_width = Self::get_value_width(&col);
-            let column_bytes = col.get_values()[0].get_body();
-            for j in 0..self.cardinality() {
-                let actual_value = &column_bytes[j * value_width..(j + 1) * value_width];
-                let expected_value = self.columns[i][j].get_body();
-                assert_eq!(expected_value, actual_value);
+                // TODO: Write an iterator for FixedWidthColumn
+                let value_width = Self::get_value_width(&col);
+                let column_bytes = col.get_values()[0].get_body();
+                for j in 0..self.cardinality() {
+                    let actual_value = &column_bytes[j * value_width..(j + 1) * value_width];
+                    let expected_value = self.columns[i][j].get_body();
+                    assert_eq!(expected_value, actual_value);
+                }
             }
         }
-
         Ok(())
     }
 
