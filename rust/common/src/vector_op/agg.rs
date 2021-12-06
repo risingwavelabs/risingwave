@@ -709,7 +709,7 @@ where
 }
 
 macro_rules! impl_sorted_grouper {
-    ($input: ty, $input_variant:ident) => {
+    ($input:ty, $input_variant:ident) => {
         impl SortedGrouper for GeneralSortedGrouper<$input> {
             fn split_groups(&self, input: &ArrayImpl) -> Result<EqGroups> {
                 if let ArrayImpl::$input_variant(i) = input {

@@ -12,7 +12,7 @@ use risingwave_pb::expr::expr_node::Type;
 
 // TODO: consider implement it using generic function.
 macro_rules! gen_stream_null_by_row_count_expr {
-    ($l:expr, $r:expr, $ret: expr, $OA:ty) => {
+    ($l:expr, $r:expr, $ret:expr, $OA:ty) => {
         Box::new(BinaryNullableExpression::<I64Array, $OA, $OA, _> {
             expr_ia1: $l,
             expr_ia2: $r,

@@ -78,7 +78,7 @@ pub fn calc_hash_key_kind(data_types: &[DataTypeRef]) -> HashKeyKind {
 /// ```
 #[macro_export]
 macro_rules! hash_key_dispatch {
-    ($hash_key_kind: expr, $dispatcher: tt, $arg: expr) => {
+    ($hash_key_kind:expr, $dispatcher:tt, $arg:expr) => {
         match $hash_key_kind {
             HashKeyKind::Key16 => $dispatcher::<Key16>::dispatch($arg),
             HashKeyKind::Key32 => $dispatcher::<Key32>::dispatch($arg),

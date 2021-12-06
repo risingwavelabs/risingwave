@@ -16,7 +16,7 @@ use std::mem::size_of;
 use std::sync::Arc;
 
 macro_rules! make_numeric_type {
-    ($name:ident, $native_ty:ty, $data_ty:expr, $proto_ty: expr) => {
+    ($name:ident, $native_ty:ty, $data_ty:expr, $proto_ty:expr) => {
         #[derive(Debug, Eq, PartialEq)]
         pub struct $name {
             nullable: bool,

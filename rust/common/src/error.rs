@@ -153,7 +153,7 @@ pub type Result<T> = std::result::Result<T, RwError>;
 
 #[macro_export]
 macro_rules! gen_error {
-    ($error_code: expr) => {
+    ($error_code:expr) => {
         return std::result::Result::Err($crate::error::RwError::from($error_code));
     };
 }

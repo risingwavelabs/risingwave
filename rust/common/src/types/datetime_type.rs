@@ -31,7 +31,7 @@ pub fn get_mouth_days(year: i32, month: usize) -> i32 {
 /// Generate macros for Time/Timestamp/Timestamp with Timezone.
 /// FIXME: This code is adapted from numeric type. Maybe we should unify them
 macro_rules! make_datetime_type {
-    ($name:ident, $native_ty:ty, $data_ty:expr, $proto_ty: expr) => {
+    ($name:ident, $native_ty:ty, $data_ty:expr, $proto_ty:expr) => {
         #[derive(Debug)]
         pub struct $name {
             nullable: bool,

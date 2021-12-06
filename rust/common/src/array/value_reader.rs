@@ -21,7 +21,7 @@ pub struct F32ValueReader {}
 pub struct F64ValueReader {}
 
 macro_rules! impl_numeric_value_reader {
-    ($value_type:ty, $value_reader:ty,  $read_fn:ident) => {
+    ($value_type:ty, $value_reader:ty, $read_fn:ident) => {
         impl PrimitiveValueReader<$value_type> for $value_reader {
             fn read(cur: &mut Cursor<&[u8]>) -> Result<$value_type> {
                 cur.$read_fn::<BigEndian>().map_err(|e| {
