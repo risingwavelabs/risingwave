@@ -47,8 +47,7 @@ public class BatchPlanner implements Planner<BatchPlan> {
 
   private RelNode plan(SqlNode ast, ExecutionContext context, OptimizerPhase optimizeLevel) {
     SqlConverter sqlConverter = SqlConverter.builder(context).build();
-    RelNode rawPlan = sqlConverter.toRel(ast).rel;
-
+    RelNode rawPlan = sqlConverter.toRel(ast).project();
     OptimizerProgram optimizerProgram = buildOptimizerProgram(optimizeLevel);
     return optimizerProgram.optimize(rawPlan, context);
   }

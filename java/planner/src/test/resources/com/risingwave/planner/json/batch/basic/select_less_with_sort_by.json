@@ -1,0 +1,47 @@
+{
+  "nodeType": "PROJECT",
+  "body": {
+    "@type": "type.googleapis.com/plan.ProjectNode",
+    "selectList": [{
+      "exprType": "INPUT_REF",
+      "returnType": {
+        "typeName": "INT32"
+      },
+      "inputRef": {
+      }
+    }]
+  },
+  "children": [{
+    "nodeType": "ORDER_BY",
+    "body": {
+      "@type": "type.googleapis.com/plan.OrderByNode",
+      "columnOrders": [{
+        "orderType": "ASCENDING",
+        "inputRef": {
+          "columnIdx": 1
+        },
+        "returnType": {
+          "typeName": "INT32"
+        }
+      }]
+    },
+    "children": [{
+      "nodeType": "SEQ_SCAN",
+      "body": {
+        "@type": "type.googleapis.com/plan.SeqScanNode",
+        "tableRefId": {
+          "schemaRefId": {
+            "databaseRefId": {
+            }
+          }
+        },
+        "columnIds": [1, 2],
+        "columnType": [{
+          "typeName": "INT32"
+        }, {
+          "typeName": "INT32"
+        }]
+      }
+    }]
+  }]
+}

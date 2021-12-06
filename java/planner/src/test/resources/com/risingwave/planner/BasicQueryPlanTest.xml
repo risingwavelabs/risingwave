@@ -381,4 +381,20 @@ RwBatchValues(tuples=[[{ false, true }]])
         <Resource name="json" path="batch/basic/bool_literal">
         </Resource>
     </TestCase>
+    <TestCase name="select less with sort by">
+        <Resource name="sql">
+            <![CDATA[
+select v1 from t order by v2;
+]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchProject(v1=[$0])
+  RwBatchSort(sort0=[$1], dir0=[ASC])
+    RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2])
+]]>
+        </Resource>
+        <Resource name="json" path="batch/basic/select_less_with_sort_by">
+        </Resource>
+    </TestCase>
 </Root>
