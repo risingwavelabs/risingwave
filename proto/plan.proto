@@ -182,6 +182,13 @@ message HashJoinNode {
   repeated int32 right_output = 5;
 }
 
+message SortMergeJoinNode {
+  JoinType join_type = 1;
+  repeated int32 left_keys = 2;
+  repeated int32 right_keys = 3;
+  OrderType direction = 4;
+}
+
 message PlanNode {
   enum PlanNodeType {
     INVALID = 0;
@@ -207,6 +214,7 @@ message PlanNode {
     HASH_JOIN = 20;
     DROP_STREAM = 21;
     MERGE_SORT_EXCHANGE = 22;
+    SORT_MERGE_JOIN = 23;
   }
   PlanNodeType node_type = 1;
   google.protobuf.Any body = 2;

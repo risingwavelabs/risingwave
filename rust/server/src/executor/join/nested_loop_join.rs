@@ -249,7 +249,7 @@ impl NestedLoopJoinExecutor {
         if first_probe {
             self.probe_side_source.init().await?;
         }
-        let cur_row = self.probe_side_source.current_row()?;
+        let cur_row = self.probe_side_source.current_row_ref()?;
         // TODO(Bowen): If we assume the scanned chunk is always compact (no invisible tuples),
         // remove this check.
         if let Some((_, vis)) = cur_row {
@@ -296,7 +296,7 @@ impl NestedLoopJoinExecutor {
     fn do_inner_join(&mut self) -> Result<ProbeResult> {
         while self.build_table.chunk_idx < self.build_table.inner_table.len() {
             // Checked the vis and None before.
-            let probe_row = self.probe_side_source.current_row_unchecked();
+            let probe_row = self.probe_side_source.current_row_ref_unchecked();
             let build_side_chunk = &self.build_table.inner_table[self.build_table.chunk_idx];
             let const_row_chunk =
                 self.convert_row_to_chunk(&probe_row, build_side_chunk.capacity())?;
@@ -351,7 +351,7 @@ impl NestedLoopJoinExecutor {
         if ret.cur_row_finished {
             if !self.probe_side_source.cur_row_matched {
                 assert!(ret.chunk.is_none());
-                let mut probe_row = self.probe_side_source.current_row_unchecked();
+                let mut probe_row = self.probe_side_source.current_row_ref_unchecked();
                 for _ in 0..self.build_table.data_source.schema().fields.len() {
                     probe_row.0.push(None);
                 }
@@ -446,7 +446,7 @@ impl NestedLoopJoinExecutor {
 /// This is designed for nested loop join to support row level iteration.
 /// It will managed the scan state of outer table (Reset [`DataChunk`] Iter
 /// when exhaust current chunk) for executor to simplify logic.
-struct ProbeSideSource {
+pub struct ProbeSideSource {
     outer: BoxedExecutor,
     cur_chunk: Option<DataChunk>,
     /// The row index to read in current chunk.
@@ -458,7 +458,7 @@ impl ProbeSideSource {
     /// Note the difference between `new` and `init`. `new` do not load data but `init` will
     /// call executor. The `Done` do not really means there is no more data in outer
     /// table, it is just used for init (Otherwise we have to use Option).
-    fn new(outer: BoxedExecutor) -> Self {
+    pub(crate) fn new(outer: BoxedExecutor) -> Self {
         Self {
             outer,
             cur_chunk: None,
@@ -467,28 +467,42 @@ impl ProbeSideSource {
         }
     }
 
-    async fn init(&mut self) -> Result<()> {
+    pub async fn init(&mut self) -> Result<()> {
         self.outer.open().await?;
-        self.cur_chunk = self.outer.next().await?;
+        self.cur_chunk = self
+            .outer
+            .next()
+            .await?
+            .map(|chunk| chunk.compact().unwrap());
         Ok(())
     }
 
     /// Return the current outer tuple.
-    fn current_row(&self) -> Result<Option<(RowRef<'_>, bool)>> {
+    pub fn current_row_ref(&self) -> Result<Option<(RowRef<'_>, bool)>> {
         match &self.cur_chunk {
-            Some(chunk) => Some(chunk.row_at(self.idx)).transpose(),
+            Some(chunk) => {
+                if self.idx < chunk.capacity() {
+                    Some(chunk.row_at(self.idx)).transpose()
+                } else {
+                    Ok(None)
+                }
+            }
             None => Ok(None),
         }
     }
 
     /// Get current tuple directly without None check.
-    fn current_row_unchecked(&self) -> RowRef<'_> {
-        self.current_row().unwrap().unwrap().0
+    pub fn current_row_ref_unchecked(&self) -> RowRef<'_> {
+        self.current_row_ref().unwrap().unwrap().0
+    }
+
+    pub fn current_row_ref_unchecked_vis(&self) -> Result<Option<RowRef<'_>>> {
+        Ok(self.current_row_ref()?.map(|tuple| tuple.0))
     }
 
     /// Try advance to next outer tuple. If it is Done but still invoked, it's
     /// a developer error.
-    async fn advance(&mut self) -> Result<()> {
+    pub async fn advance(&mut self) -> Result<()> {
         self.idx += 1;
         match &self.cur_chunk {
             Some(chunk) => {
@@ -504,7 +518,7 @@ impl ProbeSideSource {
         Ok(())
     }
 
-    async fn clean(&mut self) -> Result<()> {
+    pub async fn clean(&mut self) -> Result<()> {
         self.outer.close().await
     }
 

@@ -45,9 +45,7 @@ impl<'a> DataChunkRefIter<'a> {
     }
 }
 
-/// TODO: Consider merge with Row in storage. It is end with Ref because it do not own data
-/// and avoid conflict with [`Row`].
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct RowRef<'a>(pub Vec<DatumRef<'a>>);
 
 impl<'a> RowRef<'a> {
@@ -61,6 +59,26 @@ impl<'a> RowRef<'a> {
 
     pub fn size(&self) -> usize {
         self.0.len()
+    }
+
+    /// Get value by slice of index from current row ref.
+    pub fn value_by_slice(&self, idxs: &[usize]) -> RowRef<'_> {
+        let mut row_vec = vec![];
+        for idx in idxs {
+            row_vec.push(self.value_at(*idx));
+        }
+        RowRef::new(row_vec)
+    }
+}
+
+impl<'a> From<&'a Row> for RowRef<'a> {
+    fn from(row: &'a Row) -> Self {
+        RowRef(
+            row.0
+                .iter()
+                .map(|datum| datum.as_ref().map(|v| v.as_scalar_ref_impl()))
+                .collect::<Vec<_>>(),
+        )
     }
 }
 

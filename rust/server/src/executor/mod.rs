@@ -21,6 +21,7 @@ use crate::executor::create_stream::CreateStreamExecutor;
 use crate::executor::create_table::CreateTableExecutor;
 use crate::executor::insert::InsertExecutor;
 use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;
+use crate::executor::join::sort_merge_join::SortMergeJoinExecutor;
 use crate::executor::join::HashJoinExecutorBuilder;
 pub use crate::executor::stream_scan::StreamScanExecutor;
 use crate::executor::values::ValuesExecutor;
@@ -136,6 +137,7 @@ impl<'a> ExecutorBuilder<'a> {
           PlanNodeType::Value => ValuesExecutor,
           PlanNodeType::NestedLoopJoin => NestedLoopJoinExecutor,
           PlanNodeType::HashJoin => HashJoinExecutorBuilder,
+          PlanNodeType::SortMergeJoin => SortMergeJoinExecutor,
           PlanNodeType::DropStream => DropStreamExecutor,
           PlanNodeType::HashAgg => HashAggExecutorBuilder,
           PlanNodeType::MergeSortExchange => MergeSortExchangeExecutor

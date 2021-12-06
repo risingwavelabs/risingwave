@@ -8,6 +8,7 @@ pub use hash_join::*;
 
 mod hash_join_state;
 pub mod nested_loop_join;
+pub mod sort_merge_join;
 
 #[derive(Copy, Clone, Debug)]
 pub(super) enum JoinType {

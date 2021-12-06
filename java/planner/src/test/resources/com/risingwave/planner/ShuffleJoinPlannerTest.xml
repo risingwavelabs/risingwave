@@ -67,10 +67,10 @@ RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], col
         </Resource>
     </TestCase>
 
-    <TestCase name="sort merge join">
+    <TestCase name="sort merge join(asc)">
         <Resource name="sql">
             <![CDATA[
-SELECT * FROM t1 JOIN t2 ON t1.v1 = t2.v1 ORDER BY t1.v1
+SELECT * FROM t1 JOIN t2 ON t1.v1 = t2.v1 ORDER BY t1.v1 ASC
             ]]>
         </Resource>
 
@@ -83,6 +83,69 @@ RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], col
         RwBatchTableScan(table=[[test_schema, t1]], columns=[v1,v2,v3])
     RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[0]])
       RwBatchSort(sort0=[$0], dir0=[ASC])
+        RwBatchTableScan(table=[[test_schema, t2]], columns=[v1,v2])
+            ]]>
+        </Resource>
+    </TestCase>
+
+    <TestCase name="sort merge join(desc)">
+        <Resource name="sql">
+            <![CDATA[
+SELECT * FROM t1 JOIN t2 ON t1.v1 = t2.v1 ORDER BY t1.v1 DESC
+            ]]>
+        </Resource>
+
+        <Resource name="distributed">
+            <![CDATA[
+RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0 DESC]])
+  RwBatchSortMergeJoin(condition=[=($0, $3)], joinType=[inner])
+    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[0 DESC]])
+      RwBatchSort(sort0=[$0], dir0=[DESC])
+        RwBatchTableScan(table=[[test_schema, t1]], columns=[v1,v2,v3])
+    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[0 DESC]])
+      RwBatchSort(sort0=[$0], dir0=[DESC])
+        RwBatchTableScan(table=[[test_schema, t2]], columns=[v1,v2])
+            ]]>
+        </Resource>
+    </TestCase>
+
+    <TestCase name="2 keys sort merge join(asc)">
+        <Resource name="sql">
+            <![CDATA[
+SELECT * FROM t1 JOIN t2 ON t1.v1 = t2.v1 AND t1.v2 = t2.v2 ORDER BY t1.v1,t1.v2 ASC
+            ]]>
+        </Resource>
+
+        <Resource name="distributed">
+            <![CDATA[
+RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0, 1]])
+  RwBatchSortMergeJoin(condition=[AND(=($0, $3), =($1, $4))], joinType=[inner])
+    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[0, 1]])
+      RwBatchSort(sort0=[$0], sort1=[$1], dir0=[ASC], dir1=[ASC])
+        RwBatchTableScan(table=[[test_schema, t1]], columns=[v1,v2,v3])
+    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[0, 1]])
+      RwBatchSort(sort0=[$0], sort1=[$1], dir0=[ASC], dir1=[ASC])
+        RwBatchTableScan(table=[[test_schema, t2]], columns=[v1,v2])
+            ]]>
+        </Resource>
+    </TestCase>
+
+    <TestCase name="2 keys sort merge join(desc)">
+        <Resource name="sql">
+            <![CDATA[
+SELECT * FROM t1 JOIN t2 ON t1.v1 = t2.v1 AND t1.v2 = t2.v2 ORDER BY t1.v1 DESC,t1.v2 DESC
+            ]]>
+        </Resource>
+
+        <Resource name="distributed">
+            <![CDATA[
+RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0 DESC, 1 DESC]])
+  RwBatchSortMergeJoin(condition=[AND(=($0, $3), =($1, $4))], joinType=[inner])
+    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[0 DESC, 1 DESC]])
+      RwBatchSort(sort0=[$0], sort1=[$1], dir0=[DESC], dir1=[DESC])
+        RwBatchTableScan(table=[[test_schema, t1]], columns=[v1,v2,v3])
+    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[0 DESC, 1 DESC]])
+      RwBatchSort(sort0=[$0], sort1=[$1], dir0=[DESC], dir1=[DESC])
         RwBatchTableScan(table=[[test_schema, t2]], columns=[v1,v2])
             ]]>
         </Resource>
