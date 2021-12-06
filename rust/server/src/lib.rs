@@ -9,10 +9,10 @@
 
 #[macro_use]
 extern crate log;
-extern crate risingwave_common;
-extern crate test;
 #[macro_use]
+extern crate risingwave_common;
 extern crate risingwave_storage;
+extern crate test;
 
 mod execution;
 mod executor;

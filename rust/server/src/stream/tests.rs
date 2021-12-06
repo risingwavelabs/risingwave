@@ -11,10 +11,10 @@ use risingwave_pb::task_service::HostAddress;
 use std::sync::Arc;
 
 use crate::source::MemSourceManager;
+use crate::stream::SimpleTableManager;
 use crate::stream_op::Message;
 use crate::task::{GlobalTaskEnv, TaskManager};
 use risingwave_common::util::addr::get_host_port;
-use risingwave_storage::SimpleTableManager;
 
 use super::*;
 

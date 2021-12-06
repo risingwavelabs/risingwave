@@ -9,6 +9,7 @@ use risingwave_pb::ToProto;
 use risingwave_storage::bummock::{BummockResult, BummockTable};
 
 use crate::executor::{Executor, ExecutorBuilder};
+use crate::stream::TableImpl;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, DataChunkRef};
 use risingwave_common::catalog::TableId;

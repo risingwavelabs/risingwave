@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::stream::StreamManager;
+use crate::stream::{SimpleTableManager, StreamManager, TableImpl, TableManager};
 use futures::StreamExt;
 
 use risingwave_common::array::column::Column;
@@ -29,7 +29,7 @@ use risingwave_pb::stream_service::{ActorInfo, BroadcastActorInfoTableRequest};
 use risingwave_pb::task_service::HostAddress;
 use risingwave_storage::row_table::RowTableEvent;
 use risingwave_storage::row_table::*;
-use risingwave_storage::{SimpleTableManager, Table, TableColumnDesc, TableImpl, TableManager};
+use risingwave_storage::{Table, TableColumnDesc};
 
 use crate::source::{MemSourceManager, SourceManager};
 use crate::task::{GlobalTaskEnv, TaskManager};

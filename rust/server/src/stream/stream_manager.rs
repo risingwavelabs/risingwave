@@ -5,8 +5,7 @@ use std::sync::{Arc, Mutex};
 use async_std::net::SocketAddr;
 use futures::channel::mpsc::{channel, unbounded, Receiver, Sender, UnboundedSender};
 use itertools::Itertools;
-use risingwave_storage::object::InMemObjectStore;
-use risingwave_storage::row_table::RowTable;
+
 use tokio::task::JoinHandle;
 
 use pb_convert::FromProtobuf;
@@ -25,10 +24,13 @@ use risingwave_pb::ToProto;
 
 use crate::source::Source;
 use crate::source::*;
+use crate::stream::TableImpl;
 use crate::stream_op::*;
 use crate::task::GlobalTaskEnv;
+
 use risingwave_storage::hummock::{HummockOptions, HummockStorage};
-use risingwave_storage::*;
+use risingwave_storage::object::InMemObjectStore;
+use risingwave_storage::row_table::RowTable;
 
 /// Default capacity of channel if two fragments are on the same node
 pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;

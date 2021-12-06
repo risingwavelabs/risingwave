@@ -113,19 +113,18 @@ impl SimpleExecutor for MViewSinkExecutor {
 
 #[cfg(test)]
 mod tests {
+    use crate::stream::{SimpleTableManager, TableImpl, TableManager};
     use crate::stream_op::test_utils::*;
     use crate::stream_op::*;
     use crate::*;
-    use risingwave_common::column_nonnull;
-    use risingwave_pb::ToProto;
-    use risingwave_storage::row_table::RowTable;
-    use risingwave_storage::{SimpleTableManager, TableImpl, TableManager};
-
     use risingwave_common::array::{I32Array, Op, Row};
     use risingwave_common::catalog::{Field, SchemaId, TableId};
+    use risingwave_common::column_nonnull;
     use risingwave_common::types::{Int32Type, Scalar};
     use risingwave_pb::data::{data_type::TypeName, DataType};
     use risingwave_pb::plan::{column_desc::ColumnEncodingType, ColumnDesc};
+    use risingwave_pb::ToProto;
+    use risingwave_storage::row_table::RowTable;
     use std::sync::Arc;
 
     #[tokio::test]
@@ -207,7 +206,7 @@ mod tests {
             sink_executor.next().await.unwrap();
             // First stream chunk. We check the existence of (3) -> (3,6)
             if let Message::Barrier(_) = sink_executor.next().await.unwrap() {
-                let value_row = Row(vec![Some(3.to_scalar_value())]);
+                let value_row = Row(vec![Some(3_i32.to_scalar_value())]);
                 let res_row = table.get(value_row);
                 if let Ok(res_row_in) = res_row {
                     let datum = res_row_in.unwrap().0.get(1).unwrap().clone();
@@ -225,7 +224,7 @@ mod tests {
             // Second stream chunk. We check the existence of (7) -> (7,8)
             if let Message::Barrier(_) = sink_executor.next().await.unwrap() {
                 // From (7) -> (7,8)
-                let value_row = Row(vec![Some(7.to_scalar_value())]);
+                let value_row = Row(vec![Some(7_i32.to_scalar_value())]);
                 let res_row = table.get(value_row);
                 if let Ok(res_row_in) = res_row {
                     let datum = res_row_in.unwrap().0.get(1).unwrap().clone();

@@ -7,11 +7,11 @@ use risingwave_pb::plan::DropTableNode;
 use risingwave_pb::ToProto;
 
 use crate::executor::{Executor, ExecutorBuilder};
+use crate::stream::TableManagerRef;
 use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::Result;
-use risingwave_storage::TableManagerRef;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 
