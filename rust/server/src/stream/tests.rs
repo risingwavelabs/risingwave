@@ -64,6 +64,7 @@ async fn test_stream_proto() {
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
                     input: vec![],
+                    pk_indices: vec![],
                 }),
                 mergers: vec![Merger {
                     upstream_fragment_id: vec![0],
@@ -87,6 +88,7 @@ async fn test_stream_proto() {
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
                     input: vec![],
+                    pk_indices: vec![],
                 }),
                 mergers: vec![Merger {
                     upstream_fragment_id: vec![1],
@@ -110,6 +112,7 @@ async fn test_stream_proto() {
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
                     input: vec![],
+                    pk_indices: vec![],
                 }),
                 mergers: vec![Merger {
                     upstream_fragment_id: vec![3],
@@ -133,6 +136,7 @@ async fn test_stream_proto() {
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
                     input: vec![],
+                    pk_indices: vec![],
                 }),
                 mergers: vec![Merger {
                     upstream_fragment_id: vec![3],
@@ -156,6 +160,7 @@ async fn test_stream_proto() {
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
                     input: vec![],
+                    pk_indices: vec![],
                 }),
                 mergers: vec![Merger {
                     upstream_fragment_id: vec![7, 11],

@@ -287,6 +287,12 @@ public class PrimaryKeyDerivationVisitor
   public RwStreamingRelVisitor.Result<PrimaryKeyIndicesAndPositionMap> visit(
       RwStreamAgg aggregate) {
     LOGGER.debug("visit RwStreamAgg");
+    // Although we don't need to go beyond Aggregate to find the primary key for materialized
+    // view(root),
+    // the downstream operator(aggregate, join) may need to know the primary key for themselves.
+    // Therefore, we still need to recursively go down.
+    var input = (RisingWaveStreamingRel) aggregate.getInput(0);
+    var p = input.accept(this);
     var groupSet = aggregate.getGroupSet();
     // If the aggregate is a simple aggregate, it has no primary key or let's say it has a one and
     // only unique key.

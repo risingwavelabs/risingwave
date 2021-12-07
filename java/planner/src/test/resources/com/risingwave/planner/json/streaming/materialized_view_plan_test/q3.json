@@ -1,8 +1,11 @@
 {
   "input": [{
+    "pkIndices": [0],
     "input": [{
       "input": [{
+        "pkIndices": [0],
         "input": [{
+          "pkIndices": [2],
           "tableSourceNode": {
             "tableRefId": {
               "schemaRefId": {

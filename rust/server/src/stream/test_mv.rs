@@ -61,6 +61,7 @@ async fn test_stream_mv_proto() {
             source_type: SourceType::Table as i32,
         })),
         input: vec![],
+        pk_indices: vec![],
     };
     let expr_proto = ExprNode {
         expr_type: InputRef as i32,
@@ -83,6 +84,7 @@ async fn test_stream_mv_proto() {
             select_list: vec![expr_proto],
         })),
         input: vec![source_proto],
+        pk_indices: vec![],
     };
     let mview_proto = StreamNode {
         node: Some(Node::MviewNode(MViewNode {
@@ -92,6 +94,7 @@ async fn test_stream_mv_proto() {
             column_orders: vec![],
         })),
         input: vec![project_proto],
+        pk_indices: vec![],
     };
     let fragment_proto = StreamFragment {
         fragment_id: 1,

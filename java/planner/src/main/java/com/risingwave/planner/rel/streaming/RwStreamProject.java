@@ -2,6 +2,7 @@ package com.risingwave.planner.rel.streaming;
 
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
+import com.risingwave.planner.metadata.RisingWaveRelMetadataQuery;
 import com.risingwave.planner.rel.logical.RwLogicalProject;
 import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
 import com.risingwave.proto.streaming.plan.ProjectNode;
@@ -38,7 +39,13 @@ public class RwStreamProject extends Project implements RisingWaveStreamingRel {
     for (int i = 0; i < exps.size(); i++) {
       projectNodeBuilder.addSelectList(exps.get(i).accept(rexVisitor));
     }
-    return StreamNode.newBuilder().setProjectNode(projectNodeBuilder.build()).build();
+    var primaryKeyIndices =
+        ((RisingWaveRelMetadataQuery) getCluster().getMetadataQuery()).getPrimaryKeyIndices(this);
+
+    return StreamNode.newBuilder()
+        .setProjectNode(projectNodeBuilder.build())
+        .addAllPkIndices(primaryKeyIndices)
+        .build();
   }
 
   @Override

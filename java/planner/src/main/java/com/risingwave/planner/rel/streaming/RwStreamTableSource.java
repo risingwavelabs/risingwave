@@ -7,6 +7,7 @@ import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 import com.google.common.collect.ImmutableList;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
+import com.risingwave.planner.metadata.RisingWaveRelMetadataQuery;
 import com.risingwave.planner.rel.common.dist.RwDistributionTrait;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.logical.RwLogicalScan;
@@ -71,7 +72,12 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
                     : TableSourceNode.SourceType.TABLE);
 
     columnIds.forEach(c -> tableSourceNodeBuilder.addColumnIds(c.getValue()));
-    return StreamNode.newBuilder().setTableSourceNode(tableSourceNodeBuilder.build()).build();
+    var primaryKeyIndices =
+        ((RisingWaveRelMetadataQuery) getCluster().getMetadataQuery()).getPrimaryKeyIndices(this);
+    return StreamNode.newBuilder()
+        .setTableSourceNode(tableSourceNodeBuilder.build())
+        .addAllPkIndices(primaryKeyIndices)
+        .build();
   }
 
   /** Derive row type from table catalog */

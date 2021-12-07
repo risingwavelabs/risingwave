@@ -3,6 +3,7 @@
     "input": [{
       "input": [{
         "input": [{
+          "pkIndices": [2],
           "tableSourceNode": {
             "tableRefId": {
               "schemaRefId": {

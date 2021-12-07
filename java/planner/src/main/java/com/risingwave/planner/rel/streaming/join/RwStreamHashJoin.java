@@ -3,6 +3,7 @@ package com.risingwave.planner.rel.streaming.join;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 import static com.risingwave.planner.rel.physical.join.BatchJoinUtils.isEquiJoin;
 
+import com.risingwave.planner.metadata.RisingWaveRelMetadataQuery;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.logical.RwLogicalJoin;
 import com.risingwave.planner.rel.physical.join.BatchJoinUtils;
@@ -56,7 +57,13 @@ public class RwStreamHashJoin extends Join implements RisingWaveStreamingRel {
 
     var hashJoinNode = builder.build();
 
-    return StreamNode.newBuilder().setHashJoinNode(hashJoinNode).build();
+    var primaryKeyIndices =
+        ((RisingWaveRelMetadataQuery) getCluster().getMetadataQuery()).getPrimaryKeyIndices(this);
+
+    return StreamNode.newBuilder()
+        .setHashJoinNode(hashJoinNode)
+        .addAllPkIndices(primaryKeyIndices)
+        .build();
   }
 
   @Override

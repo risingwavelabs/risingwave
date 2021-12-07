@@ -6,6 +6,7 @@ import com.risingwave.common.datatype.RisingWaveTypeFactory;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.planner.cost.RisingWaveCostFactory;
 import com.risingwave.planner.metadata.RisingWaveRelMetadataProvider;
+import com.risingwave.planner.metadata.RisingWaveRelMetadataQuery;
 import com.risingwave.planner.rel.common.dist.RwDistributionTraitDef;
 import java.util.Collections;
 import java.util.List;
@@ -20,6 +21,7 @@ import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.validate.SqlValidator;
 import org.apache.calcite.sql2rel.SqlToRelConverter;
 
+/** SqlConverter */
 public class SqlConverter {
   private final SqlValidator validator;
   private final SqlToRelConverter sqlToRelConverter;
@@ -43,6 +45,7 @@ public class SqlConverter {
     return new Builder(context);
   }
 
+  /** SqlConverter Builder */
   public static class Builder {
     private final ExecutionContext context;
     private final SchemaPlus rootSchema;
@@ -108,6 +111,7 @@ public class SqlConverter {
       if (cluster == null) {
         cluster = RelOptCluster.create(planner, new RexBuilder(typeFactory));
         cluster.setMetadataProvider(RisingWaveRelMetadataProvider.getMetadataProvider());
+        cluster.setMetadataQuerySupplier(RisingWaveRelMetadataQuery::instance);
       }
     }
   }

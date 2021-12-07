@@ -1,5 +1,6 @@
 package com.risingwave.planner.rel.streaming;
 
+import com.risingwave.planner.metadata.RisingWaveRelMetadataQuery;
 import com.risingwave.planner.rel.physical.RwAggregate;
 import com.risingwave.proto.expr.InputRefExpr;
 import com.risingwave.proto.streaming.plan.HashAggNode;
@@ -32,12 +33,18 @@ public class RwStreamAgg extends RwAggregate implements RisingWaveStreamingRel {
   @Override
   public StreamNode serialize() {
     StreamNode node;
+    var primaryKeyIndices =
+        ((RisingWaveRelMetadataQuery) getCluster().getMetadataQuery()).getPrimaryKeyIndices(this);
     if (groupSet.length() == 0) {
       SimpleAggNode.Builder simpleAggNodeBuilder = SimpleAggNode.newBuilder();
       for (AggregateCall aggCall : aggCalls) {
         simpleAggNodeBuilder.addAggCalls(serializeAggCall(aggCall));
       }
-      node = StreamNode.newBuilder().setSimpleAggNode(simpleAggNodeBuilder.build()).build();
+      node =
+          StreamNode.newBuilder()
+              .setSimpleAggNode(simpleAggNodeBuilder.build())
+              .addAllPkIndices(primaryKeyIndices)
+              .build();
     } else {
       HashAggNode.Builder hashAggNodeBuilder = HashAggNode.newBuilder();
       for (int i = groupSet.nextSetBit(0); i >= 0; i = groupSet.nextSetBit(i + 1)) {
@@ -46,7 +53,12 @@ public class RwStreamAgg extends RwAggregate implements RisingWaveStreamingRel {
       for (AggregateCall aggCall : aggCalls) {
         hashAggNodeBuilder.addAggCalls(serializeAggCall(aggCall));
       }
-      node = StreamNode.newBuilder().setHashAggNode(hashAggNodeBuilder.build()).build();
+
+      node =
+          StreamNode.newBuilder()
+              .setHashAggNode(hashAggNodeBuilder.build())
+              .addAllPkIndices(primaryKeyIndices)
+              .build();
     }
     return node;
   }
