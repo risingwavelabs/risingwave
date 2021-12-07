@@ -1,19 +1,11 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use itertools::Itertools;
-
-use risingwave_pb::expr::expr_node::Type as ProstExprType;
-
 use crate::executor::Executor;
-use risingwave_common::array::ArrayImpl;
+
 use risingwave_common::array::DataChunk;
-use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
-use risingwave_common::expr::InputRefExpression;
-use risingwave_common::types::BoolType;
 
 use super::BoxedExecutor;
 
@@ -73,11 +65,6 @@ impl Executor for MockExecutor {
 ///
 /// if want diff ignoring order, add a `order_by` executor in manual currently, when the `schema`
 /// method of `executor` is ready, an order-ignored version will be added.
-pub struct DiffExecutor {
-    actual: BoxedExecutor,
-    expect: BoxedExecutor,
-}
-
 pub async fn diff_executor_output(mut actual: BoxedExecutor, mut expect: BoxedExecutor) {
     let mut expect_cardinality = 0;
     let mut actual_cardinality = 0;
@@ -120,35 +107,21 @@ pub async fn diff_executor_output(mut actual: BoxedExecutor, mut expect: BoxedEx
         .for_each(|(c1, c2)| {
             assert_eq!(c1.data_type().to_protobuf(), c2.data_type().to_protobuf())
         });
-    let columns = expect
-        .columns()
-        .iter()
-        .chain(actual.columns().iter())
-        .cloned()
-        .collect_vec();
 
-    let chunk = DataChunk::builder().columns(columns).build();
-    for idx in 0..col_num {
-        let idy = idx + col_num;
-        let data_type = chunk.columns()[idx].data_type();
-        let except_expr = InputRefExpression::new(data_type.clone(), idx);
-        let actual_expr = InputRefExpression::new(data_type.clone(), idy);
-        let mut expr = new_binary_expr(
-            ProstExprType::Equal,
-            Arc::new(BoolType::new(false)),
-            Box::new(except_expr),
-            Box::new(actual_expr),
-        );
-        let res = expr.eval(&chunk).unwrap();
-        if let ArrayImpl::Bool(res) = res.as_ref() {
-            let res: Bitmap = res.try_into().unwrap();
-            res.iter().for_each(|x| {
-                if !x {
-                    panic!("not equal")
-                }
-            });
-        } else {
-            unreachable!();
-        }
-    }
+    is_data_chunk_eq(&expect, &actual)
+}
+
+fn is_data_chunk_eq(left: &DataChunk, right: &DataChunk) {
+    assert!(left.visibility().is_none());
+    assert!(right.visibility().is_none());
+
+    assert_eq!(
+        left.cardinality(),
+        right.cardinality(),
+        "two chunks cardinality is different"
+    );
+
+    left.iter()
+        .zip(right.iter())
+        .for_each(|(row1, row2)| assert_eq!(row1, row2));
 }
