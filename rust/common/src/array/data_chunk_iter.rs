@@ -6,6 +6,7 @@ use crate::types::{
     deserialize_datum_from, deserialize_datum_not_null_from, serialize_datum_into,
     serialize_datum_not_null_into, DataTypeKind, Datum, DatumRef, ToOwnedDatum,
 };
+use crate::util::sort_util::OrderType;
 
 impl DataChunk {
     pub fn rows(&self) -> DataChunkRefIter<'_> {
@@ -149,6 +150,27 @@ impl Row {
             serialize_datum_not_null_into(v, &mut serializer)?;
         }
         Ok(serializer.into_inner())
+    }
+
+    /// Serialize the row into a memcomparable bytes based on the orderings.
+    pub fn serialize_with_order(
+        &self,
+        orders: &[OrderType],
+    ) -> Result<Vec<u8>, memcomparable::Error> {
+        assert_eq!(self.0.len(), orders.len());
+        let mut res = vec![];
+        for (order, datum) in orders.iter().zip(self.0.iter()) {
+            let mut serializer = memcomparable::Serializer::default();
+            serialize_datum_into(datum, &mut serializer)?;
+            let mut bytes = serializer.into_inner();
+            if let OrderType::Descending = order {
+                bytes.iter_mut().for_each(|byte| {
+                    *byte = !(*byte);
+                });
+            }
+            res.extend_from_slice(&bytes);
+        }
+        Ok(res)
     }
 
     /// Deserialize a datum in the row to a memcomparable bytes. The datum must not be null.

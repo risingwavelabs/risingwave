@@ -4,6 +4,8 @@ mod value;
 use risingwave_common::expr::AggKind;
 pub use value::*;
 mod extreme;
+mod sort_key_serializer;
+
 pub use extreme::*;
 
 use super::keyspace::{Keyspace, StateStore};
