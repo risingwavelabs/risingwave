@@ -11,7 +11,6 @@ use risingwave_common::{ensure, gen_error};
 use risingwave_pb::plan::ColumnDesc;
 
 use risingwave_storage::bummock::BummockTable;
-use risingwave_storage::row_table::MemRowTable;
 use risingwave_storage::TableColumnDesc;
 
 use super::StateStoreImpl;
@@ -48,7 +47,6 @@ pub trait TableManager: Sync + Send {
 /// The enumeration of supported simple tables in `SimpleTableManager`.
 #[derive(Clone)]
 pub enum TableImpl {
-    Row(Arc<MemRowTable>),
     Bummock(Arc<BummockTable>),
     MViewTable(Arc<MViewTable<HummockStateStore>>),
     TestMViewTable(Arc<MViewTable<MemoryStateStore>>),

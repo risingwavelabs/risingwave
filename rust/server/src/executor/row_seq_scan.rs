@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -10,7 +11,6 @@ use pb_convert::FromProtobuf;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::RowSeqScanNode;
 use risingwave_pb::ToProto;
-use risingwave_storage::row_table::{MemRowTable, MemTableRowIter};
 
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
@@ -22,14 +22,12 @@ use risingwave_common::types::DataTypeRef;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 
-fn make_row_iter(table_ref: Arc<MemRowTable>) -> Result<MemTableRowIter> {
-    table_ref.iter()
-}
+type MemoryStateStoreIter = <BTreeMap<Row, Row> as IntoIterator>::IntoIter;
 
 /// Executor that scans data from row table
 pub(super) struct RowSeqScanExecutor {
-    /// An iterator to scan MemRowTable.
-    iter: Option<MemTableRowIter>,
+    /// An iterator to scan MemoryStateStore.
+    iter: Option<MemoryStateStoreIter>,
     // TODO(MrCroxx): Remove me after hummock table iter is impled.
     table: Arc<MViewTable<MemoryStateStore>>,
     data_types: Vec<DataTypeRef>,

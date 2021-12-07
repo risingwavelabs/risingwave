@@ -9,7 +9,6 @@
 pub mod bummock;
 pub mod hummock;
 pub mod object;
-pub mod row_table;
 
 use crate::bummock::BummockResult;
 

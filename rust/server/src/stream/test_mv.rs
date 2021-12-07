@@ -193,9 +193,6 @@ async fn test_stream_mv_proto() {
     let table_id_mv = TableId::new(SchemaId::default(), 1);
     let table = table_manager.get_table(&table_id_mv).unwrap().as_memory();
 
-    // We remark that normal barrier generation initiates in `rpc_serve`. In tests,
-    // we don't have a `server`. Without explicit sending a stop barrier, `MViewSinkExecutor`
-    // won't flush. Thus we can get NO event from `RowTable` and get stuck.
     // FIXME: We have to make sure that `append_chunk` has been processed by the actor first,
     // then we can send the stop barrier.
     tokio::time::sleep(Duration::from_millis(500)).await;
