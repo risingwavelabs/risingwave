@@ -10,12 +10,6 @@ mod row_count;
 use risingwave_common::array::stream_chunk::Ops;
 pub use row_count::*;
 
-mod keyed_state;
-pub use keyed_state::*;
-
-mod hash_kv;
-pub use hash_kv::*;
-
 use super::{
     StreamingCountAgg, StreamingFloatMaxAgg, StreamingFloatMinAgg, StreamingFloatSumAgg,
     StreamingMaxAgg, StreamingMinAgg, StreamingSumAgg,

@@ -1,6 +1,5 @@
 //! Global Streaming Hash Aggregators
 
-use super::aggregation::*;
 use super::keyspace::{Keyspace, StateStore};
 use super::state_aggregation::ManagedStateImpl;
 use super::{AggCall, Barrier, Executor, Message};
@@ -16,6 +15,8 @@ use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
 use std::collections::HashMap;
 use std::sync::Arc;
+
+pub type HashKey = Row;
 
 pub struct HashValue<S: StateStore> {
     managed_states: Vec<ManagedStateImpl<S>>,
