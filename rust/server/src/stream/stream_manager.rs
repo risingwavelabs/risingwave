@@ -375,6 +375,12 @@ impl StreamManagerCore {
         let table_manager = env.table_manager();
         let source_manager = env.source_manager();
 
+        let pk_indices = node
+            .get_pk_indices()
+            .iter()
+            .map(|idx| *idx as usize)
+            .collect::<Vec<_>>();
+
         let executor: Result<Box<dyn Executor>> = match node.get_node() {
             TableSourceNode(table_source_node) => {
                 let table_id = TableId::from_protobuf(
@@ -414,6 +420,7 @@ impl StreamManagerCore {
                             Ok(Box::new(TableSourceExecutor::new(
                                 table_id,
                                 schema,
+                                pk_indices,
                                 stream_reader,
                                 barrier_receiver,
                             )))
@@ -427,6 +434,7 @@ impl StreamManagerCore {
                         source_desc,
                         column_ids,
                         schema,
+                        pk_indices,
                         barrier_receiver,
                     )?)),
                 }
@@ -439,6 +447,7 @@ impl StreamManagerCore {
                     .collect::<Result<Vec<_>>>()?;
                 Ok(Box::new(ProjectExecutor::new(
                     input.remove(0),
+                    pk_indices,
                     project_exprs,
                 )))
             }
@@ -484,6 +493,7 @@ impl StreamManagerCore {
                         b"test_executor_2333".to_vec(),
                     ),
                     schema,
+                    pk_indices,
                 )))
             }
             AppendOnlyTopNNode(top_n_node) => {
@@ -499,6 +509,7 @@ impl StreamManagerCore {
                     Arc::new(order_paris),
                     limit,
                     top_n_node.offset as usize,
+                    pk_indices,
                 )))
             }
             TopNNode(top_n_node) => {
@@ -514,6 +525,7 @@ impl StreamManagerCore {
                     Arc::new(order_paris),
                     limit,
                     top_n_node.offset as usize,
+                    pk_indices,
                 )))
             }
             HashJoinNode(hash_join_node) => {
@@ -535,7 +547,7 @@ impl StreamManagerCore {
                 );
 
                 Ok(Box::new(HashJoinExecutor::<{ JoinType::Inner }>::new(
-                    source_l, source_r, params_l, params_r,
+                    source_l, source_r, params_l, params_r, pk_indices,
                 )))
             }
             MviewNode(materialized_view_node) => {
@@ -674,9 +686,14 @@ impl StreamManagerCore {
 
         if upstreams.len() == 1 {
             // Only one upstream, use `ReceiverExecutor`.
-            Ok(Box::new(ReceiverExecutor::new(schema, rxs.remove(0))))
+            // FIXME: after merger is refactored in proto, put pk_indices into it.
+            Ok(Box::new(ReceiverExecutor::new(
+                schema,
+                vec![],
+                rxs.remove(0),
+            )))
         } else {
-            Ok(Box::new(MergeExecutor::new(schema, rxs)))
+            Ok(Box::new(MergeExecutor::new(schema, vec![], rxs)))
         }
     }
 

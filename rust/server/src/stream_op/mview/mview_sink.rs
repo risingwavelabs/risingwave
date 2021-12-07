@@ -66,6 +66,10 @@ impl<S: StateStore> Executor for MViewSinkExecutor<S> {
     fn schema(&self) -> &Schema {
         &self.schema
     }
+
+    fn pk_indices(&self) -> &[usize] {
+        &self.pk_columns
+    }
 }
 
 impl<S: StateStore> SimpleExecutor for MViewSinkExecutor<S> {

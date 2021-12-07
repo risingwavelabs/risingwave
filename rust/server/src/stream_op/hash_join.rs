@@ -1,5 +1,6 @@
 use super::barrier_align::{AlignedMessage, BarrierAligner};
 use super::{Executor, Message};
+use crate::stream_op::PKVec;
 use async_trait::async_trait;
 use risingwave_common::array::{ArrayBuilderImpl, Op, Row, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
@@ -184,6 +185,8 @@ pub struct HashJoinExecutor<const T: JoinTypePrimitive> {
     new_column_datatypes: Vec<DataTypeRef>,
     /// The schema of the hash join executor
     schema: Schema,
+    /// The primary key indices of the schema
+    pk_indices: PKVec,
     /// The parameters of the left join executor
     side_l: JoinSide,
     /// The parameters of the right join executor
@@ -209,6 +212,10 @@ impl<const T: JoinTypePrimitive> Executor for HashJoinExecutor<T> {
     fn schema(&self) -> &Schema {
         &self.schema
     }
+
+    fn pk_indices(&self) -> &[usize] {
+        &self.pk_indices
+    }
 }
 
 impl<const T: JoinTypePrimitive> HashJoinExecutor<T> {
@@ -217,6 +224,7 @@ impl<const T: JoinTypePrimitive> HashJoinExecutor<T> {
         input_r: Box<dyn Executor>,
         params_l: JoinParams,
         params_r: JoinParams,
+        pk_indices: PKVec,
     ) -> Self {
         let new_column_n = input_l.schema().len() + input_r.schema().len();
         let side_l_column_n = input_l.schema().len();
@@ -266,6 +274,7 @@ impl<const T: JoinTypePrimitive> HashJoinExecutor<T> {
                 col_types: col_r_datatypes,
                 start_pos: side_l_column_n,
             },
+            pk_indices,
         }
     }
 
@@ -501,6 +510,7 @@ mod tests {
             Box::new(source_r),
             params_l,
             params_r,
+            vec![],
         );
 
         // push the 1st left chunk
@@ -643,6 +653,7 @@ mod tests {
             Box::new(source_r),
             params_l,
             params_r,
+            vec![],
         );
 
         // push the 1st left chunk
@@ -812,6 +823,7 @@ mod tests {
             Box::new(source_r),
             params_l,
             params_r,
+            vec![],
         );
 
         // push the 1st left chunk
@@ -974,6 +986,7 @@ mod tests {
             Box::new(source_r),
             params_l,
             params_r,
+            vec![],
         );
 
         // push the 1st left chunk
@@ -1116,6 +1129,7 @@ mod tests {
             Box::new(source_r),
             params_l,
             params_r,
+            vec![],
         );
 
         // push the 1st left chunk

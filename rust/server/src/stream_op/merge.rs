@@ -1,5 +1,6 @@
 use super::{Barrier, Executor, Result};
 use crate::stream::UpDownFragmentIds;
+use crate::stream_op::PKVec;
 use async_trait::async_trait;
 use futures::channel::mpsc::{Receiver, Sender};
 use futures::future::select_all;
@@ -98,12 +99,17 @@ impl RemoteInput {
 /// messages down to the executors.
 pub struct ReceiverExecutor {
     schema: Schema,
+    pk_indices: PKVec,
     receiver: Receiver<Message>,
 }
 
 impl ReceiverExecutor {
-    pub fn new(schema: Schema, receiver: Receiver<Message>) -> Self {
-        Self { schema, receiver }
+    pub fn new(schema: Schema, pk_indices: PKVec, receiver: Receiver<Message>) -> Self {
+        Self {
+            schema,
+            pk_indices,
+            receiver,
+        }
     }
 }
 
@@ -117,6 +123,10 @@ impl Executor for ReceiverExecutor {
     fn schema(&self) -> &Schema {
         &self.schema
     }
+
+    fn pk_indices(&self) -> &[usize] {
+        &self.pk_indices
+    }
 }
 
 /// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
@@ -124,6 +134,9 @@ impl Executor for ReceiverExecutor {
 pub struct MergeExecutor {
     /// Schema of inputs
     schema: Schema,
+
+    /// Primary key indices of inputs
+    pk_indices: PKVec,
 
     /// Number of inputs
     num_inputs: usize,
@@ -143,9 +156,10 @@ pub struct MergeExecutor {
 }
 
 impl MergeExecutor {
-    pub fn new(schema: Schema, inputs: Vec<Receiver<Message>>) -> Self {
+    pub fn new(schema: Schema, pk_indices: PKVec, inputs: Vec<Receiver<Message>>) -> Self {
         Self {
             schema,
+            pk_indices,
             num_inputs: inputs.len(),
             active: inputs,
             blocked: vec![],
@@ -212,6 +226,10 @@ impl Executor for MergeExecutor {
     fn schema(&self) -> &Schema {
         &self.schema
     }
+
+    fn pk_indices(&self) -> &[usize] {
+        &self.pk_indices
+    }
 }
 
 #[cfg(test)]
@@ -253,7 +271,7 @@ mod tests {
             txs.push(tx);
             rxs.push(rx);
         }
-        let mut merger = MergeExecutor::new(Schema::default(), rxs);
+        let mut merger = MergeExecutor::new(Schema::default(), vec![], rxs);
 
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 

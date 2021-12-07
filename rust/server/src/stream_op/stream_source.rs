@@ -20,6 +20,7 @@ use crate::source::{
     HighLevelKafkaSourceReaderContext, SourceDesc, SourceImpl, SourceReaderContext,
     StreamSourceReader,
 };
+use crate::stream_op::PKVec;
 use crate::stream_op::{Executor, Message};
 
 /// `StreamSourceExecutor` is a streaming source from external systems such as Kafka
@@ -27,6 +28,7 @@ pub struct StreamSourceExecutor {
     source_desc: SourceDesc,
     column_ids: Vec<i32>,
     schema: Schema,
+    pk_indices: PKVec,
     reader: Box<dyn StreamSourceReader>,
     barrier_receiver: UnboundedReceiver<Message>,
     /// current allocated row id
@@ -38,6 +40,7 @@ impl StreamSourceExecutor {
         source_desc: SourceDesc,
         column_ids: Vec<i32>,
         schema: Schema,
+        pk_indices: PKVec,
         barrier_receiver: UnboundedReceiver<Message>,
     ) -> Result<Self> {
         let source = source_desc.clone().source;
@@ -58,6 +61,7 @@ impl StreamSourceExecutor {
             source_desc,
             column_ids,
             schema,
+            pk_indices,
             reader,
             barrier_receiver,
             next_row_id: AtomicU64::from(0u64),
@@ -128,6 +132,10 @@ impl Executor for StreamSourceExecutor {
 
     fn schema(&self) -> &Schema {
         &self.schema
+    }
+
+    fn pk_indices(&self) -> &[usize] {
+        &self.pk_indices
     }
 }
 

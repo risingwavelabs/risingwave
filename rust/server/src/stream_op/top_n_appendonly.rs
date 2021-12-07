@@ -8,6 +8,7 @@ use risingwave_common::util::sort_util::{HeapElem, OrderPair};
 
 use std::sync::Arc;
 
+use crate::stream_op::PKVec;
 use crate::stream_op::{Executor, Message, SimpleExecutor, StreamChunk};
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::catalog::Schema;
@@ -30,6 +31,8 @@ pub struct AppendOnlyTopNExecutor {
     limit: Option<usize>,
     /// `OFFSET XXX`. `0` means no offset.
     offset: usize,
+    /// The primary key indices of the `AppendOnlyTopNExecutor`
+    pk_indices: PKVec,
     /// We are only interested in which element is in the range of `[offset, offset+limit)`(right
     /// open interval) but not the rank of such element
     ///
@@ -44,6 +47,7 @@ impl AppendOnlyTopNExecutor {
         order_pairs: Arc<Vec<OrderPair>>,
         limit: Option<usize>,
         offset: usize,
+        pk_indices: PKVec,
     ) -> Self {
         Self {
             input,
@@ -51,6 +55,7 @@ impl AppendOnlyTopNExecutor {
             limit,
             offset,
             heaps: (BinaryHeap::new(), BinaryHeap::new()),
+            pk_indices,
         }
     }
 }
@@ -63,6 +68,10 @@ impl Executor for AppendOnlyTopNExecutor {
 
     fn schema(&self) -> &Schema {
         self.input.schema()
+    }
+
+    fn pk_indices(&self) -> &[usize] {
+        &self.pk_indices
     }
 }
 
@@ -191,8 +200,13 @@ mod tests {
             order_type: OrderType::Ascending,
         }]);
         let source = Box::new(MockSource::with_chunks(schema, vec![chunk1, chunk2]));
-        let mut top_n_executor =
-            AppendOnlyTopNExecutor::new(source as Box<dyn Executor>, order_pairs, Some(4), 3);
+        let mut top_n_executor = AppendOnlyTopNExecutor::new(
+            source as Box<dyn Executor>,
+            order_pairs,
+            Some(4),
+            3,
+            vec![],
+        );
         let res = top_n_executor.next().await.unwrap();
         if let Message::Chunk(res) = res {
             let expected_values = vec![Some(10), Some(9), Some(8)];

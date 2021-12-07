@@ -3,6 +3,7 @@
 use super::keyspace::{Keyspace, StateStore};
 use super::state_aggregation::ManagedStateImpl;
 use super::{AggCall, Barrier, Executor, Message};
+use crate::stream_op::PKVec;
 use async_trait::async_trait;
 use bytes::BufMut;
 use itertools::Itertools;
@@ -58,6 +59,9 @@ pub struct HashAggExecutor<S: StateStore> {
     /// Schema of the executor.
     schema: Schema,
 
+    /// Primary key indices.
+    pk_indices: PKVec,
+
     /// If `next_barrier_message` exists, we should send a Barrier while next called.
     // TODO: This can be optimized while async gen fn stablized.
     // TODO: Create a `Barrier` struct.
@@ -106,6 +110,7 @@ impl<S: StateStore> HashAggExecutor<S> {
         key_indices: Vec<usize>,
         keyspace: Keyspace<S>,
         schema: Schema,
+        pk_indices: PKVec,
     ) -> Self {
         Self {
             next_barrier_message: None,
@@ -115,6 +120,7 @@ impl<S: StateStore> HashAggExecutor<S> {
             schema,
             key_indices,
             state_map: HashMap::new(),
+            pk_indices,
         }
     }
 
@@ -434,6 +440,10 @@ impl<S: StateStore> Executor for HashAggExecutor<S> {
         &self.schema
     }
 
+    fn pk_indices(&self) -> &[usize] {
+        &self.pk_indices
+    }
+
     async fn next(&mut self) -> Result<Message> {
         if let Some(barrier) = self.next_barrier_message {
             self.next_barrier_message = None;
@@ -546,7 +556,7 @@ mod tests {
 
         let schema = generate_hash_agg_schema(&source, &agg_calls, &keys);
         let mut hash_agg =
-            HashAggExecutor::new(Box::new(source), agg_calls, keys, keyspace, schema);
+            HashAggExecutor::new(Box::new(source), agg_calls, keys, keyspace, schema, vec![]);
 
         let msg = hash_agg.next().await.unwrap();
         if let Message::Chunk(chunk) = msg {
@@ -654,8 +664,14 @@ mod tests {
         ];
 
         let schema = generate_hash_agg_schema(&source, &agg_calls, &key_indices);
-        let mut hash_agg =
-            HashAggExecutor::new(Box::new(source), agg_calls, key_indices, keyspace, schema);
+        let mut hash_agg = HashAggExecutor::new(
+            Box::new(source),
+            agg_calls,
+            key_indices,
+            keyspace,
+            schema,
+            vec![],
+        );
 
         if let Message::Chunk(chunk) = hash_agg.next().await.unwrap() {
             let (data_chunk, ops) = chunk.into_parts();
@@ -753,7 +769,7 @@ mod tests {
 
         let schema = generate_hash_agg_schema(&source, &agg_calls, &keys);
         let mut hash_agg =
-            HashAggExecutor::new(Box::new(source), agg_calls, keys, keyspace, schema);
+            HashAggExecutor::new(Box::new(source), agg_calls, keys, keyspace, schema, vec![]);
 
         let msg = hash_agg.next().await.unwrap();
         if let Message::Chunk(chunk) = msg {

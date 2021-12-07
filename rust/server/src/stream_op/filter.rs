@@ -33,6 +33,10 @@ impl Executor for FilterExecutor {
     fn schema(&self) -> &Schema {
         self.input.schema()
     }
+
+    fn pk_indices(&self) -> &[usize] {
+        self.input.pk_indices()
+    }
 }
 
 impl SimpleExecutor for FilterExecutor {

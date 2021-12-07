@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 
+use crate::stream_op::PKVec;
 use itertools::Itertools;
 use risingwave_common::array::{column::Column, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
@@ -13,6 +14,7 @@ use super::{Executor, Message, SimpleExecutor, StreamChunk};
 /// or update element into next operator according to the result of the expression.
 pub struct ProjectExecutor {
     schema: Schema,
+    pk_indices: PKVec,
 
     /// The input of the current operator
     input: Box<dyn Executor>,
@@ -21,7 +23,7 @@ pub struct ProjectExecutor {
 }
 
 impl ProjectExecutor {
-    pub fn new(input: Box<dyn Executor>, exprs: Vec<BoxedExpression>) -> Self {
+    pub fn new(input: Box<dyn Executor>, pk_indices: PKVec, exprs: Vec<BoxedExpression>) -> Self {
         let schema = Schema {
             fields: exprs
                 .iter()
@@ -32,6 +34,7 @@ impl ProjectExecutor {
         };
         Self {
             schema,
+            pk_indices,
             input,
             exprs,
         }
@@ -46,6 +49,10 @@ impl Executor for ProjectExecutor {
 
     fn schema(&self) -> &Schema {
         &self.schema
+    }
+
+    fn pk_indices(&self) -> &[usize] {
+        &self.pk_indices
     }
 }
 
@@ -148,7 +155,7 @@ mod tests {
             Box::new(right_expr),
         );
 
-        let mut project = ProjectExecutor::new(Box::new(source), vec![test_expr]);
+        let mut project = ProjectExecutor::new(Box::new(source), vec![], vec![test_expr]);
 
         if let Message::Chunk(chunk) = project.next().await.unwrap() {
             assert_eq!(chunk.ops, vec![Op::Insert, Op::Insert, Op::Insert]);

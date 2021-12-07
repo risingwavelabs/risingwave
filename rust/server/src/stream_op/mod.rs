@@ -120,7 +120,14 @@ pub trait Executor: Send + 'static {
 
     /// Return the schema of the executor.
     fn schema(&self) -> &Schema;
+
+    /// Return the primary key indices of the executor.
+    /// Schema is used by both OLAP and streaming, therefore
+    /// pk indices are maintained independently.
+    fn pk_indices(&self) -> &[usize];
 }
+
+pub type PKVec = Vec<usize>;
 
 /// `SimpleExecutor` accepts a single chunk as input.
 pub trait SimpleExecutor: Executor {

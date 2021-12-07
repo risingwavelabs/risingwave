@@ -57,7 +57,7 @@ async fn test_merger_sum_aggr() {
                 data_type: Int64Type::create(false),
             }],
         };
-        let input = ReceiverExecutor::new(schema, input_rx);
+        let input = ReceiverExecutor::new(schema, vec![], input_rx);
         // for the local aggregator, we need two states: sum and row count
         let aggregator = SimpleAggExecutor::new(
             Box::new(input),
@@ -104,14 +104,14 @@ async fn test_merger_sum_aggr() {
             data_type: Int64Type::create(false),
         }],
     };
-    let receiver_op = ReceiverExecutor::new(schema.clone(), rx);
+    let receiver_op = ReceiverExecutor::new(schema.clone(), vec![], rx);
     let dispatcher =
         DispatchExecutor::new(Box::new(receiver_op), RoundRobinDataDispatcher::new(inputs));
     let actor = Actor::new(Box::new(dispatcher));
     handles.push(tokio::spawn(actor.run()));
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
-    let merger = MergeExecutor::new(schema, outputs);
+    let merger = MergeExecutor::new(schema, vec![], outputs);
 
     // for global aggregator, we need to sum data and sum row count
     let aggregator = SimpleAggExecutor::new(
@@ -132,6 +132,7 @@ async fn test_merger_sum_aggr() {
     .unwrap();
     let projection = ProjectExecutor::new(
         Box::new(aggregator),
+        vec![],
         vec![
             // TODO: use the new streaming_if_null expression here, and add `None` tests
             Box::new(InputRefExpression::new(Int64Type::create(false), 0)),
@@ -359,10 +360,10 @@ async fn test_tpch_q6() {
     // make an actor after dispatcher, which includes filter, projection, and local aggregator.
     let make_actor = |input_rx| {
         let (_, _, _, _, and, multiply) = make_tpchq6_expr();
-        let input = ReceiverExecutor::new(schema.clone(), input_rx);
+        let input = ReceiverExecutor::new(schema.clone(), vec![], input_rx);
 
         let filter = FilterExecutor::new(Box::new(input), and);
-        let projection = ProjectExecutor::new(Box::new(filter), vec![multiply]);
+        let projection = ProjectExecutor::new(Box::new(filter), vec![], vec![multiply]);
 
         // for local aggregator, we need to sum data and count rows
         let aggregator = SimpleAggExecutor::new(
@@ -405,14 +406,14 @@ async fn test_tpch_q6() {
 
     // create a round robin dispatcher, which dispatches messages to the actors
     let (mut input, rx) = channel(16);
-    let receiver_op = ReceiverExecutor::new(schema.clone(), rx);
+    let receiver_op = ReceiverExecutor::new(schema.clone(), vec![], rx);
     let dispatcher =
         DispatchExecutor::new(Box::new(receiver_op), RoundRobinDataDispatcher::new(inputs));
     let actor = Actor::new(Box::new(dispatcher));
     handles.push(tokio::spawn(actor.run()));
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
-    let merger = MergeExecutor::new(schema.clone(), outputs);
+    let merger = MergeExecutor::new(schema.clone(), vec![], outputs);
 
     // create a global aggregator to sum data and sum row count
     let aggregator = SimpleAggExecutor::new(
@@ -433,6 +434,7 @@ async fn test_tpch_q6() {
     .unwrap();
     let projection = ProjectExecutor::new(
         Box::new(aggregator),
+        vec![],
         vec![
             // TODO: use the new streaming_if_null expression here, and add `None` tests
             Box::new(InputRefExpression::new(Float64Type::create(false), 0)),

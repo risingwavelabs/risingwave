@@ -16,6 +16,7 @@ macro_rules! row_nonnull {
 
 pub struct MockSource {
     schema: Schema,
+    pk_indices: PKVec,
     epoch: u64,
     msgs: VecDeque<Message>,
 }
@@ -24,6 +25,7 @@ impl MockSource {
     pub fn new(schema: Schema) -> Self {
         Self {
             schema,
+            pk_indices: vec![],
             epoch: 0,
             msgs: VecDeque::default(),
         }
@@ -32,6 +34,7 @@ impl MockSource {
     pub fn with_messages(schema: Schema, msgs: Vec<Message>) -> Self {
         Self {
             schema,
+            pk_indices: vec![],
             epoch: 0,
             msgs: msgs.into(),
         }
@@ -40,6 +43,7 @@ impl MockSource {
     pub fn with_chunks(schema: Schema, chunks: Vec<StreamChunk>) -> Self {
         Self {
             schema,
+            pk_indices: vec![],
             epoch: 0,
             msgs: chunks.into_iter().map(Message::Chunk).collect(),
         }
@@ -71,11 +75,16 @@ impl Executor for MockSource {
     fn schema(&self) -> &Schema {
         &self.schema
     }
+
+    fn pk_indices(&self) -> &[usize] {
+        &self.pk_indices
+    }
 }
 
 /// This source takes message from users asynchronously
 pub struct MockAsyncSource {
     schema: Schema,
+    pk_indices: PKVec,
     epoch: u64,
     rx: UnboundedReceiver<Message>,
 }
@@ -84,6 +93,7 @@ impl MockAsyncSource {
     pub fn new(schema: Schema, rx: UnboundedReceiver<Message>) -> Self {
         Self {
             schema,
+            pk_indices: vec![],
             rx,
             epoch: 0,
         }
@@ -119,5 +129,9 @@ impl Executor for MockAsyncSource {
 
     fn schema(&self) -> &Schema {
         &self.schema
+    }
+
+    fn pk_indices(&self) -> &[usize] {
+        &self.pk_indices
     }
 }

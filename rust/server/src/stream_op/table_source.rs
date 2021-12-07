@@ -1,4 +1,5 @@
 use crate::source::{StreamSourceReader, TableStreamReader};
+use crate::stream_op::PKVec;
 use crate::stream_op::{Barrier, Executor, Message};
 use async_trait::async_trait;
 use futures::channel::mpsc::UnboundedReceiver;
@@ -11,6 +12,7 @@ use std::fmt::{Debug, Formatter};
 pub struct TableSourceExecutor {
     table_id: TableId,
     schema: Schema,
+    pk_indices: PKVec,
     stream_reader: Option<TableStreamReader>,
     barrier_receiver: UnboundedReceiver<Message>,
     first_execution: bool,
@@ -20,12 +22,14 @@ impl TableSourceExecutor {
     pub fn new(
         table_id: TableId,
         schema: Schema,
+        pk_indices: PKVec,
         stream_reader: TableStreamReader,
         barrier_receiver: UnboundedReceiver<Message>,
     ) -> Self {
         TableSourceExecutor {
             table_id,
             schema,
+            pk_indices,
             stream_reader: Some(stream_reader),
             barrier_receiver,
             first_execution: true,
@@ -76,6 +80,10 @@ impl Executor for TableSourceExecutor {
 
     fn schema(&self) -> &Schema {
         &self.schema
+    }
+
+    fn pk_indices(&self) -> &[usize] {
+        &self.pk_indices
     }
 }
 
@@ -174,7 +182,7 @@ mod tests {
         let (barrier_sender, barrier_receiver) = unbounded();
 
         let mut source =
-            TableSourceExecutor::new(table_id, schema, stream_reader, barrier_receiver);
+            TableSourceExecutor::new(table_id, schema, vec![], stream_reader, barrier_receiver);
 
         barrier_sender
             .unbounded_send(Message::Barrier(Barrier {
@@ -280,7 +288,7 @@ mod tests {
         let (barrier_sender, barrier_receiver) = unbounded();
 
         let mut source =
-            TableSourceExecutor::new(table_id, schema, stream_reader, barrier_receiver);
+            TableSourceExecutor::new(table_id, schema, vec![], stream_reader, barrier_receiver);
 
         let mut writer = table_source.create_writer()?;
         writer.write(chunk1.clone()).await?;

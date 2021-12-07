@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use super::aggregation::*;
 use super::{Executor, Message, SimpleExecutor};
+use crate::stream_op::PKVec;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::*;
@@ -58,6 +59,8 @@ pub use super::aggregation::StreamingRowCountAgg;
 pub struct SimpleAggExecutor {
     schema: Schema,
 
+    pk_indices: PKVec,
+
     /// Aggregation states of the current operator
     states: Vec<Box<dyn StreamingAggStateImpl>>,
 
@@ -92,6 +95,7 @@ impl SimpleAggExecutor {
         };
         Ok(Self {
             schema,
+            pk_indices: vec![],
             states,
             input,
             first_data: true,
@@ -116,6 +120,10 @@ impl Executor for SimpleAggExecutor {
 
     fn schema(&self) -> &Schema {
         &self.schema
+    }
+
+    fn pk_indices(&self) -> &[usize] {
+        &self.pk_indices
     }
 }
 
