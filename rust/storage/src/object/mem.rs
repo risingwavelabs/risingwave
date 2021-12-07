@@ -35,11 +35,6 @@ impl ObjectStore for InMemObjectStore {
         Ok(ObjectMetadata { total_size })
     }
 
-    async fn close(&self, _path: &str) -> Result<()> {
-        // `InMemObjectStore` is for testing purpose only. No need to do this.
-        Ok(())
-    }
-
     async fn delete(&self, path: &str) -> Result<()> {
         self.objects.lock().await.remove(path);
         Ok(())

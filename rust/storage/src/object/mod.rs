@@ -39,11 +39,6 @@ pub trait ObjectStore: Send + Sync {
     /// Obtain the object metadata.
     async fn metadata(&self, path: &str) -> Result<ObjectMetadata>;
 
-    /// Release the path on the blob, which hints store that reference of the object is decremented.
-    /// When the reference count of an object drops to 0, it would be safe to perform compaction or
-    /// conditional vacuuming.
-    async fn close(&self, path: &str) -> Result<()>;
-
     /// Delete blob permanently.
     async fn delete(&self, path: &str) -> Result<()>;
 }
