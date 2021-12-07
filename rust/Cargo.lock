@@ -1966,6 +1966,7 @@ dependencies = [
  "log",
  "log4rs",
  "num-traits",
+ "parking_lot",
  "paste",
  "pb-convert",
  "pb-convert-derive",

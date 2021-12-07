@@ -1,6 +1,5 @@
 //! Hummock is the state store of the streaming system.
 
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -9,13 +8,15 @@ pub use table::*;
 mod cloud;
 mod error;
 mod iterator;
+mod key_range;
 mod value;
+mod version_manager;
 use self::table::format::key_with_ts;
 use crate::object::ObjectStore;
 use cloud::gen_remote_table;
 pub use error::*;
-use tokio::sync::Mutex;
-pub use value::*;
+use value::*;
+use version_manager::VersionManager;
 
 pub static REMOTE_DIR: &str = "/test/";
 
@@ -36,7 +37,7 @@ pub struct HummockOptions {
 pub struct HummockStorage {
     options: Arc<HummockOptions>,
     unique_id: Arc<AtomicU64>,
-    tables: Arc<Mutex<HashMap<u64, Table>>>,
+    version_manager: Arc<VersionManager>,
     obj_client: Arc<dyn ObjectStore>,
 }
 
@@ -45,7 +46,7 @@ impl HummockStorage {
         Self {
             options: Arc::new(options),
             unique_id: Arc::new(AtomicU64::new(0)),
-            tables: Arc::new(Mutex::new(HashMap::new())),
+            version_manager: Arc::new(VersionManager::new()),
             obj_client,
         }
     }
@@ -90,7 +91,8 @@ impl HummockStorage {
         let table =
             gen_remote_table(self.obj_client.clone(), table_id, blocks, meta, remote_dir).await?;
 
-        self.tables.lock().await.insert(table_id, table);
+        self.version_manager.add_l0_sst(table).await?;
+
         Ok(())
     }
 }
