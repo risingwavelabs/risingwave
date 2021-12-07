@@ -2,8 +2,7 @@ use crate::array::{ArrayBuilder, ArrayBuilderImpl, Utf8ArrayBuilder};
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 use crate::types::{DataSize, DataType, DataTypeKind, DataTypeRef};
-use risingwave_pb::data::{data_type::TypeName, DataType as DataTypeProto};
-use risingwave_pb::ToProto;
+use risingwave_pb::data::{data_type::TypeName, DataType as ProstDataType};
 use std::any::Any;
 use std::convert::TryFrom;
 use std::fmt::Debug;
@@ -29,13 +28,8 @@ impl DataType for StringType {
         Ok(Utf8ArrayBuilder::new(capacity)?.into())
     }
 
-    fn to_protobuf(&self) -> Result<risingwave_proto::data::DataType> {
-        self.to_prost()
-            .map(|x| x.to_proto::<risingwave_proto::data::DataType>())
-    }
-
-    fn to_prost(&self) -> Result<DataTypeProto> {
-        let mut proto = DataTypeProto {
+    fn to_protobuf(&self) -> Result<ProstDataType> {
+        let mut proto = ProstDataType {
             precision: self.width as u32,
             is_nullable: self.nullable,
             ..Default::default()
@@ -67,10 +61,10 @@ impl DataType for StringType {
     }
 }
 
-impl<'a> TryFrom<&'a DataTypeProto> for StringType {
+impl<'a> TryFrom<&'a ProstDataType> for StringType {
     type Error = RwError;
 
-    fn try_from(proto: &'a DataTypeProto) -> Result<Self> {
+    fn try_from(proto: &'a ProstDataType) -> Result<Self> {
         match proto.get_type_name() {
             TypeName::Char | TypeName::Symbol => Ok(Self {
                 nullable: proto.is_nullable,

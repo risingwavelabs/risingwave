@@ -6,7 +6,6 @@ use std::fmt::Formatter;
 use std::sync::Arc;
 
 use backtrace::Backtrace;
-use protobuf::ProtobufError;
 use std::io::Error as IoError;
 use thiserror::Error;
 use tokio::task::JoinError;
@@ -21,8 +20,6 @@ pub enum ErrorCode {
     MemoryError { layout: Layout },
     #[error("internal error: {0}")]
     InternalError(String),
-    #[error(transparent)]
-    ProtobufError(ProtobufError),
     #[error(transparent)]
     ProstError(prost::DecodeError),
     #[error("Feature is not yet implemented: {0}")]
@@ -119,7 +116,6 @@ impl ErrorCode {
             ErrorCode::OK => 0,
             ErrorCode::InternalError(_) => 1,
             ErrorCode::MemoryError { .. } => 2,
-            ErrorCode::ProtobufError(_) => 3,
             ErrorCode::NotImplementedError(_) => 4,
             ErrorCode::IoError(_) => 5,
             ErrorCode::ParseError(_) => 7,

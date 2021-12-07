@@ -3,7 +3,7 @@ use std::ops::Index;
 
 use crate::error::Result;
 use crate::types::{build_from_prost, DataType, DataTypeRef};
-use risingwave_pb::data::DataType as DataTypeProto;
+use risingwave_pb::data::DataType as ProstDataType;
 
 /// The field in the schema of the executor's return data
 #[derive(Clone, Debug)]
@@ -60,7 +60,7 @@ impl Field {
         Self { data_type }
     }
 
-    pub fn try_from(data_type: &DataTypeProto) -> Result<Self> {
+    pub fn try_from(data_type: &ProstDataType) -> Result<Self> {
         Ok(Field {
             data_type: build_from_prost(data_type)?,
         })

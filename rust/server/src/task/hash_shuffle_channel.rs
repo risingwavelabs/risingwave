@@ -6,7 +6,6 @@ use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_pb::plan::exchange_info::hash_info::HashMethod;
 use risingwave_pb::plan::exchange_info::HashInfo;
 use risingwave_pb::plan::*;
-use risingwave_pb::{ToProst, ToProto};
 use std::option::Option;
 use tokio::sync::mpsc;
 
@@ -124,8 +123,10 @@ impl ChanReceiver for HashShuffleReceiver {
 }
 
 pub fn new_hash_shuffle_channel(shuffle: &ExchangeInfo) -> (BoxChanSender, Vec<BoxChanReceiver>) {
-    let shuffle_proto = shuffle.to_proto::<risingwave_proto::plan::ExchangeInfo>();
-    let hash_info = shuffle_proto.get_hash_info();
+    let hash_info = match shuffle.distribution {
+        Some(exchange_info::Distribution::HashInfo(ref v)) => v.clone(),
+        _ => exchange_info::HashInfo::default(),
+    };
 
     let output_count = hash_info.output_count as usize;
     let mut senders = Vec::with_capacity(output_count);
@@ -135,10 +136,7 @@ pub fn new_hash_shuffle_channel(shuffle: &ExchangeInfo) -> (BoxChanSender, Vec<B
         senders.push(s);
         receivers.push(r);
     }
-    let channel_sender = Box::new(HashShuffleSender {
-        senders,
-        hash_info: hash_info.to_prost(),
-    }) as BoxChanSender;
+    let channel_sender = Box::new(HashShuffleSender { senders, hash_info }) as BoxChanSender;
     let channel_receivers = receivers
         .into_iter()
         .map(|receiver| Box::new(HashShuffleReceiver { receiver }) as BoxChanReceiver)

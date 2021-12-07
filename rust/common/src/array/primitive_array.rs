@@ -6,7 +6,7 @@ use crate::error::Result;
 use crate::for_all_native_types;
 use crate::types::{NativeType, Scalar, ScalarRef};
 
-use risingwave_proto::data::{Buffer as BufferProto, Buffer, Buffer_CompressionType};
+use risingwave_pb::data::{buffer::CompressionType, Buffer as ProstBuffer};
 use std::fmt::Debug;
 use std::{
     hash::{Hash, Hasher},
@@ -97,7 +97,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> crate::error::Result<Vec<Buffer>> {
+    fn to_protobuf(&self) -> Result<Vec<ProstBuffer>> {
         let values = {
             let mut output_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<T>());
 
@@ -105,10 +105,10 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
                 v.map(|node| node.to_protobuf(&mut output_buffer));
             }
 
-            let mut b = BufferProto::new();
-            b.set_compression(Buffer_CompressionType::NONE);
-            b.set_body(output_buffer);
-            b
+            ProstBuffer {
+                compression: CompressionType::None as i32,
+                body: output_buffer,
+            }
         };
         Ok(vec![values])
     }

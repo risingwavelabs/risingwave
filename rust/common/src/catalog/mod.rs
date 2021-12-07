@@ -2,10 +2,7 @@ pub mod schema;
 
 pub use schema::*;
 
-use pb_convert_derive::FromProtobuf;
-
-#[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq, FromProtobuf)]
-#[pb_convert(pb_type = "risingwave_proto::plan::DatabaseRefId")]
+#[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
 pub struct DatabaseId {
     database_id: i32,
 }
@@ -16,8 +13,7 @@ impl DatabaseId {
     }
 }
 
-#[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq, FromProtobuf)]
-#[pb_convert(pb_type = "risingwave_proto::plan::SchemaRefId")]
+#[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
 pub struct SchemaId {
     database_ref_id: DatabaseId,
     schema_id: i32,
@@ -32,8 +28,7 @@ impl SchemaId {
     }
 }
 
-#[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq, FromProtobuf)]
-#[pb_convert(pb_type = "risingwave_proto::plan::TableRefId")]
+#[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
 pub struct TableId {
     schema_ref_id: SchemaId,
     table_id: i32,
@@ -44,6 +39,58 @@ impl TableId {
         TableId {
             schema_ref_id,
             table_id,
+        }
+    }
+}
+
+// TODO: replace boilplate code
+impl From<&Option<risingwave_pb::plan::DatabaseRefId>> for DatabaseId {
+    fn from(option: &Option<risingwave_pb::plan::DatabaseRefId>) -> Self {
+        match option {
+            Some(pb) => DatabaseId {
+                database_id: pb.database_id,
+            },
+            None => DatabaseId {
+                database_id: Default::default(),
+            },
+        }
+    }
+}
+
+// TODO: replace boilplate code
+impl From<&Option<risingwave_pb::plan::SchemaRefId>> for SchemaId {
+    fn from(option: &Option<risingwave_pb::plan::SchemaRefId>) -> Self {
+        match option {
+            Some(pb) => SchemaId {
+                database_ref_id: DatabaseId::from(&pb.database_ref_id),
+                schema_id: pb.schema_id,
+            },
+            None => {
+                let pb = risingwave_pb::plan::SchemaRefId::default();
+                SchemaId {
+                    database_ref_id: DatabaseId::from(&pb.database_ref_id),
+                    schema_id: pb.schema_id,
+                }
+            }
+        }
+    }
+}
+
+// TODO: replace boilplate code
+impl From<&Option<risingwave_pb::plan::TableRefId>> for TableId {
+    fn from(option: &Option<risingwave_pb::plan::TableRefId>) -> Self {
+        match option {
+            Some(pb) => TableId {
+                schema_ref_id: SchemaId::from(&pb.schema_ref_id),
+                table_id: pb.table_id,
+            },
+            None => {
+                let pb = risingwave_pb::plan::TableRefId::default();
+                TableId {
+                    schema_ref_id: SchemaId::from(&pb.schema_ref_id),
+                    table_id: pb.table_id,
+                }
+            }
         }
     }
 }

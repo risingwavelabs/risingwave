@@ -61,6 +61,7 @@ rust/**/target_tarpaulin
 rust/proto/src/*.rs
 rust/prost/src/*.rs
 !rust/proto/src/lib.rs
+**/file_descriptor_set.bin
 *.iml
 
 go/bin/

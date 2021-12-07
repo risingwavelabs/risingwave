@@ -2,10 +2,9 @@ use std::sync::Arc;
 
 use prost::Message;
 
-use pb_convert::FromProtobuf;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::SeqScanNode;
-use risingwave_pb::ToProto;
+
 use risingwave_storage::bummock::{BummockResult, BummockTable};
 
 use crate::executor::{Executor, ExecutorBuilder};
@@ -37,12 +36,7 @@ impl BoxedExecutorBuilder for SeqScanExecutor {
         let seq_scan_node = SeqScanNode::decode(&(source.plan_node()).get_body().value[..])
             .map_err(|e| RwError::from(ProstError(e)))?;
 
-        let table_id = TableId::from_protobuf(
-            seq_scan_node
-                .to_proto::<risingwave_proto::plan::SeqScanNode>()
-                .get_table_ref_id(),
-        )
-        .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
+        let table_id = TableId::from(&seq_scan_node.table_ref_id);
 
         let table_ref = source
             .global_task_env()

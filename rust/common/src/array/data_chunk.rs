@@ -3,18 +3,18 @@ use std::hash::BuildHasher;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use protobuf::Message;
 
-use risingwave_proto::data::{Column as ColumnProto, DataChunk as DataChunkProto};
+use risingwave_pb::data::{Column as ProstColumn, DataChunk as ProstDataChunk};
 
 use crate::array::column::Column;
 use crate::array::data_chunk_iter::{DataChunkRefIter, RowRef};
 use crate::array::{ArrayBuilderImpl, ArrayImpl};
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
-use crate::error::{ErrorCode, Result, RwError};
-use crate::unpack_from_any;
+use crate::error::{Result, RwError};
 use crate::util::hash_util::finalize_hashers;
+
+use crate::util::prost::unpack_from_any;
 
 pub struct DataChunkBuilder {
     columns: Vec<Column>,
@@ -152,12 +152,15 @@ impl DataChunk {
         &self.columns
     }
 
-    pub fn to_protobuf(&self) -> Result<DataChunkProto> {
+    pub fn to_protobuf(&self) -> Result<ProstDataChunk> {
         ensure!(self.visibility.is_none());
-        let mut proto = DataChunkProto::new();
-        proto.set_cardinality(self.cardinality() as u32);
+        let mut proto = ProstDataChunk {
+            cardinality: self.cardinality() as u32,
+            columns: Default::default(),
+        };
+        let column_ref = &mut proto.columns;
         for arr in &self.columns {
-            proto.mut_columns().push(arr.to_protobuf()?);
+            column_ref.push(arr.to_protobuf()?);
         }
 
         Ok(proto)
@@ -188,13 +191,12 @@ impl DataChunk {
         }
     }
 
-    pub fn from_protobuf(proto: &DataChunkProto) -> Result<Self> {
+    pub fn from_protobuf(proto: &ProstDataChunk) -> Result<Self> {
         let mut columns = vec![];
-
         for any_col in proto.get_columns() {
-            let col = unpack_from_any!(any_col, ColumnProto);
+            let col = unpack_from_any::<ProstColumn>(any_col).unwrap();
             let cardinality = proto.get_cardinality() as usize;
-            columns.push(Column::from_protobuf(col, cardinality)?);
+            columns.push(Column::from_protobuf(&col, cardinality)?);
         }
 
         let chunk = DataChunk::new(columns, None);

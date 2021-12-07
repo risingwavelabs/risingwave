@@ -4,11 +4,10 @@ use crate::array::column::Column;
 use crate::array::DataChunk;
 use crate::buffer::Bitmap;
 use crate::error::{ErrorCode, Result, RwError};
+use crate::util::prost::unpack_from_any;
 use prost::DecodeError;
-use risingwave_pb::data::Op as ProstOp;
 use risingwave_pb::data::StreamChunk as ProstStreamChunk;
-use risingwave_pb::ToProst;
-use risingwave_pb::ToProto;
+use risingwave_pb::data::{Column as ProstColumn, Op as ProstOp};
 
 /// `Op` represents three operations in `StreamChunk`.
 /// `UpdateDelete` and `UpdateInsert` always appear in pairs.
@@ -156,7 +155,7 @@ impl StreamChunk {
             columns: self
                 .columns
                 .iter()
-                .map(|col| Ok(col.to_protobuf()?.to_prost::<risingwave_pb::data::Column>()))
+                .map(|col| Ok(unpack_from_any::<ProstColumn>(&col.to_protobuf()?).unwrap()))
                 .collect::<Result<Vec<_>>>()?,
         })
     }
@@ -173,10 +172,9 @@ impl StreamChunk {
         }
 
         for column in prost.get_columns() {
-            let proto_column = column.to_proto::<risingwave_proto::data::Column>();
             stream_chunk
                 .columns
-                .push(Column::from_protobuf(proto_column, cardinality)?);
+                .push(Column::from_protobuf(column, cardinality)?);
         }
 
         Ok(stream_chunk)

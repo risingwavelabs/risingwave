@@ -34,7 +34,6 @@ protobuf = "2"
 protobuf-codegen-pure = "2.25.2"
 rand = "0.8"
 risingwave-pb = {path = "../prost"}
-risingwave-proto = {path = "../proto"}
 risingwave_common = {path = "../common"}
 rusoto_core = "0.47.0"
 rusoto_s3 = "0.47.0"

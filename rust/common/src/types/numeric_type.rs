@@ -7,8 +7,7 @@ use crate::types::DataTypeKind;
 use crate::types::DataTypeRef;
 use crate::types::PrimitiveDataType;
 use risingwave_pb::data::data_type::TypeName;
-use risingwave_pb::data::DataType as DataTypeProto;
-use risingwave_pb::ToProto;
+use risingwave_pb::data::DataType as ProstDataType;
 use std::any::Any;
 use std::convert::TryFrom;
 use std::default::Default;
@@ -51,13 +50,8 @@ macro_rules! make_numeric_type {
                 Ok(PrimitiveArrayBuilder::<$native_ty>::new(capacity)?.into())
             }
 
-            fn to_protobuf(&self) -> Result<risingwave_proto::data::DataType> {
-                self.to_prost()
-                    .map(|x| x.to_proto::<risingwave_proto::data::DataType>())
-            }
-
-            fn to_prost(&self) -> Result<DataTypeProto> {
-                let proto = DataTypeProto {
+            fn to_protobuf(&self) -> Result<ProstDataType> {
+                let proto = ProstDataType {
                     type_name: $proto_ty as i32,
                     is_nullable: self.nullable,
                     ..Default::default()
@@ -79,10 +73,10 @@ macro_rules! make_numeric_type {
             type N = $native_ty;
         }
 
-        impl<'a> TryFrom<&'a DataTypeProto> for $name {
+        impl<'a> TryFrom<&'a ProstDataType> for $name {
             type Error = RwError;
 
-            fn try_from(proto: &'a DataTypeProto) -> Result<Self> {
+            fn try_from(proto: &'a ProstDataType) -> Result<Self> {
                 ensure!(proto.get_type_name() == $proto_ty);
                 Ok(Self {
                     nullable: proto.is_nullable,

@@ -1,6 +1,5 @@
 use crate::error::{ErrorCode, Result, RwError};
-use risingwave_pb::data::DataType as DataTypeProto;
-use risingwave_pb::ToProst;
+use risingwave_pb::data::DataType as ProstDataType;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::any::Any;
@@ -66,8 +65,7 @@ pub trait DataType: Debug + Sync + Send + 'static {
     fn data_type_kind(&self) -> DataTypeKind;
     fn is_nullable(&self) -> bool;
     fn create_array_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl>;
-    fn to_protobuf(&self) -> Result<risingwave_proto::data::DataType>;
-    fn to_prost(&self) -> Result<DataTypeProto>;
+    fn to_protobuf(&self) -> Result<ProstDataType>;
     fn as_any(&self) -> &dyn Any;
     fn data_size(&self) -> DataSize;
 }
@@ -87,7 +85,7 @@ macro_rules! build_data_type {
   }
 }
 
-pub fn build_from_prost(proto: &DataTypeProto) -> Result<DataTypeRef> {
+pub fn build_from_prost(proto: &ProstDataType) -> Result<DataTypeRef> {
     build_data_type! {
       proto,
       TypeName::Int16 => Int16Type,
@@ -106,10 +104,6 @@ pub fn build_from_prost(proto: &DataTypeProto) -> Result<DataTypeRef> {
       TypeName::Decimal => DecimalType,
       TypeName::Interval => IntervalType
     }
-}
-
-pub fn build_from_proto(proto: &risingwave_proto::data::DataType) -> Result<DataTypeRef> {
-    build_from_prost(&proto.to_prost::<DataTypeProto>())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]

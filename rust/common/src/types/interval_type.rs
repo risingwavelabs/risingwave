@@ -1,4 +1,4 @@
-use risingwave_pb::{data::data_type::TypeName, ToProto};
+use risingwave_pb::data::data_type::TypeName;
 use serde::{Deserialize, Serialize};
 
 use crate::array::interval_array::IntervalArrayBuilder;
@@ -88,13 +88,8 @@ impl DataType for IntervalType {
         IntervalArrayBuilder::new(capacity).map(|x| x.into())
     }
 
-    fn to_protobuf(&self) -> Result<risingwave_proto::data::DataType> {
-        self.to_prost()
-            .map(|x| x.to_proto::<risingwave_proto::data::DataType>())
-    }
-
-    fn to_prost(&self) -> Result<DataTypeProto> {
-        let proto = DataTypeProto {
+    fn to_protobuf(&self) -> Result<ProstDataType> {
+        let proto = ProstDataType {
             type_name: TypeName::Boolean as i32,
             is_nullable: self.nullable,
             ..Default::default()
@@ -121,10 +116,10 @@ impl IntervalType {
     }
 }
 
-impl<'a> TryFrom<&'a DataTypeProto> for IntervalType {
+impl<'a> TryFrom<&'a ProstDataType> for IntervalType {
     type Error = RwError;
 
-    fn try_from(proto: &'a DataTypeProto) -> Result<Self> {
+    fn try_from(proto: &'a ProstDataType) -> Result<Self> {
         ensure!(proto.get_type_name() == TypeName::Interval);
         Ok(IntervalType::new(proto.get_is_nullable()))
     }

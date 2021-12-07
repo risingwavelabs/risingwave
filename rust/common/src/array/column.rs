@@ -6,11 +6,12 @@ use crate::array::value_reader::{
     I64ValueReader, Utf8ValueReader,
 };
 use crate::array::{ArrayImpl, ArrayRef, DecimalArrayBuilder, Utf8ArrayBuilder};
-use crate::error::ErrorCode::{InternalError, ProtobufError};
+use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
-use crate::types::{build_from_proto, DataType, DataTypeRef};
-use protobuf::well_known_types::Any as AnyProto;
-use risingwave_proto::data::{Column as ColumnProto, DataType_TypeName};
+use crate::types::{build_from_prost, DataType, DataTypeRef};
+use crate::util::prost::pack_to_any;
+use prost_types::Any as ProstAny;
+use risingwave_pb::data::{data_type::TypeName, Column as ProstColumn};
 
 /// Column is owned by `DataChunk`. It consists of logic data type and physical array
 /// implementation.
@@ -25,46 +26,39 @@ impl Column {
         Column { array, data_type }
     }
 
-    pub fn to_protobuf(&self) -> Result<AnyProto> {
-        let mut column = ColumnProto::new();
-        let proto_data_type = self.data_type.to_protobuf()?;
-        column.set_column_type(proto_data_type);
-        column.set_null_bitmap(self.array.null_bitmap().to_protobuf()?);
+    pub fn to_protobuf(&self) -> Result<ProstAny> {
+        let mut column = ProstColumn {
+            column_type: Some(self.data_type.to_protobuf()?),
+            null_bitmap: Some(self.array.null_bitmap().to_protobuf()?),
+            ..Default::default()
+        };
         let values = self.array.to_protobuf()?;
+        let values_ref = &mut column.values;
         for (_idx, buf) in values.into_iter().enumerate() {
-            column.mut_values().push(buf);
+            values_ref.push(buf);
         }
 
-        AnyProto::pack(&column).map_err(|e| RwError::from(ProtobufError(e)))
+        Ok(pack_to_any(&column))
     }
 
-    pub fn from_protobuf(col: ColumnProto, cardinality: usize) -> Result<Self> {
+    pub fn from_protobuf(col: &ProstColumn, cardinality: usize) -> Result<Self> {
         let type_name = col.get_column_type().get_type_name();
         let array = match type_name {
-            DataType_TypeName::INT16 => {
-                read_numeric_column::<i16, I16ValueReader>(&col, cardinality)?
+            TypeName::Int16 => read_numeric_column::<i16, I16ValueReader>(col, cardinality)?,
+            TypeName::Int32 | TypeName::Date => {
+                read_numeric_column::<i32, I32ValueReader>(col, cardinality)?
             }
-            DataType_TypeName::INT32 | DataType_TypeName::DATE => {
-                read_numeric_column::<i32, I32ValueReader>(&col, cardinality)?
+            TypeName::Int64 | TypeName::Timestamp | TypeName::Time | TypeName::Timestampz => {
+                read_numeric_column::<i64, I64ValueReader>(col, cardinality)?
             }
-            DataType_TypeName::INT64
-            | DataType_TypeName::TIMESTAMP
-            | DataType_TypeName::TIME
-            | DataType_TypeName::TIMESTAMPZ => {
-                read_numeric_column::<i64, I64ValueReader>(&col, cardinality)?
+            TypeName::Float => read_numeric_column::<f32, F32ValueReader>(col, cardinality)?,
+            TypeName::Double => read_numeric_column::<f64, F64ValueReader>(col, cardinality)?,
+            TypeName::Boolean => read_bool_column(col, cardinality)?,
+            TypeName::Varchar | TypeName::Char => {
+                read_string_column::<Utf8ArrayBuilder, Utf8ValueReader>(col, cardinality)?
             }
-            DataType_TypeName::FLOAT => {
-                read_numeric_column::<f32, F32ValueReader>(&col, cardinality)?
-            }
-            DataType_TypeName::DOUBLE => {
-                read_numeric_column::<f64, F64ValueReader>(&col, cardinality)?
-            }
-            DataType_TypeName::BOOLEAN => read_bool_column(&col, cardinality)?,
-            DataType_TypeName::VARCHAR | DataType_TypeName::CHAR => {
-                read_string_column::<Utf8ArrayBuilder, Utf8ValueReader>(&col, cardinality)?
-            }
-            DataType_TypeName::DECIMAL => {
-                read_string_column::<DecimalArrayBuilder, DecimalValueReader>(&col, cardinality)?
+            TypeName::Decimal => {
+                read_string_column::<DecimalArrayBuilder, DecimalValueReader>(col, cardinality)?
             }
             _ => {
                 return Err(RwError::from(InternalError(format!(
@@ -73,7 +67,7 @@ impl Column {
                 ))))
             }
         };
-        let data_type = build_from_proto(col.get_column_type())?;
+        let data_type = build_from_prost(col.get_column_type())?;
         Ok(Self { array, data_type })
     }
 
@@ -100,11 +94,9 @@ mod tests {
     use crate::array::{
         Array, ArrayBuilder, BoolArray, BoolArrayBuilder, I32Array, I32ArrayBuilder, Utf8Array,
     };
-    use crate::error::{ErrorCode, Result};
+    use crate::error::Result;
     use crate::types::{BoolType, DataTypeKind, Int32Type, StringType};
-    use crate::unpack_from_any;
-    use protobuf::Message;
-    use risingwave_proto::data::Column as ColumnProto;
+    use crate::util::prost::unpack_from_any;
     use std::sync::Arc;
 
     // Convert a column to protobuf, then convert it back to column, and ensures the two are
@@ -124,14 +116,11 @@ mod tests {
             Arc::new(ArrayImpl::from(builder.finish().unwrap())),
             Int32Type::create(true),
         );
-        let col_proto = unpack_from_any!(col.to_protobuf().unwrap(), ColumnProto);
+        let col_proto = unpack_from_any::<ProstColumn>(&col.to_protobuf().unwrap()).unwrap();
         assert!(col_proto.get_column_type().get_is_nullable());
-        assert_eq!(
-            col_proto.get_column_type().get_type_name(),
-            DataType_TypeName::INT32
-        );
+        assert_eq!(col_proto.get_column_type().get_type_name(), TypeName::Int32);
 
-        let new_col = Column::from_protobuf(col_proto, cardinality).unwrap();
+        let new_col = Column::from_protobuf(&col_proto, cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
         assert_eq!(new_col.data_type.data_type_kind(), DataTypeKind::Int32);
         assert!(new_col.data_type.is_nullable());
@@ -161,14 +150,14 @@ mod tests {
             Arc::new(ArrayImpl::from(builder.finish().unwrap())),
             BoolType::create(true),
         );
-        let col_proto = unpack_from_any!(col.to_protobuf().unwrap(), ColumnProto);
+        let col_proto = unpack_from_any::<ProstColumn>(&col.to_protobuf().unwrap()).unwrap();
         assert!(col_proto.get_column_type().get_is_nullable());
         assert_eq!(
             col_proto.get_column_type().get_type_name(),
-            DataType_TypeName::BOOLEAN
+            TypeName::Boolean
         );
 
-        let new_col = Column::from_protobuf(col_proto, cardinality).unwrap();
+        let new_col = Column::from_protobuf(&col_proto, cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
         assert_eq!(new_col.data_type.data_type_kind(), DataTypeKind::Boolean);
         assert!(new_col.data_type.is_nullable());
@@ -196,8 +185,8 @@ mod tests {
             Arc::new(ArrayImpl::from(builder.finish().unwrap())),
             StringType::create(true, 0, DataTypeKind::Varchar),
         );
-        let col_proto = unpack_from_any!(col.to_protobuf().unwrap(), ColumnProto);
-        let new_col = Column::from_protobuf(col_proto, cardinality).unwrap();
+        let col_proto = unpack_from_any::<ProstColumn>(&col.to_protobuf().unwrap()).unwrap();
+        let new_col = Column::from_protobuf(&col_proto, cardinality).unwrap();
         let arr: &Utf8Array = new_col.array_ref().as_utf8();
         arr.iter().enumerate().for_each(|(i, x)| {
             if i % 2 == 0 {

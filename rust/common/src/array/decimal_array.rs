@@ -7,7 +7,7 @@ use crate::error::Result;
 
 use std::mem::size_of;
 
-use risingwave_proto::data::{Buffer, Buffer_CompressionType};
+use risingwave_pb::data::{buffer::CompressionType, Buffer as ProstBuffer};
 use rust_decimal::Decimal;
 
 #[derive(Debug)]
@@ -48,7 +48,7 @@ impl Array for DecimalArray {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> Result<Vec<Buffer>> {
+    fn to_protobuf(&self) -> Result<Vec<ProstBuffer>> {
         let mut offset_buffer = Vec::<u8>::with_capacity(self.data.len() * size_of::<usize>());
         let mut data_buffer = Vec::<u8>::new();
         let mut offset = 0usize;
@@ -64,13 +64,11 @@ impl Array for DecimalArray {
         offset_buffer.extend_from_slice(&offset.to_be_bytes());
         Ok(vec![offset_buffer, data_buffer]
             .into_iter()
-            .map(|buffer| {
-                let mut b = Buffer::new();
-                b.set_compression(Buffer_CompressionType::NONE);
-                b.set_body(buffer);
-                b
+            .map(|buffer| ProstBuffer {
+                compression: CompressionType::None as i32,
+                body: buffer,
             })
-            .collect::<Vec<Buffer>>())
+            .collect::<Vec<ProstBuffer>>())
     }
 
     fn null_bitmap(&self) -> &Bitmap {
@@ -187,8 +185,8 @@ mod tests {
             None => v,
         });
 
-        assert_eq!(buffers[0].get_body(), offset_buffer);
-        assert_eq!(buffers[1].get_body(), data_buffer);
+        assert_eq!(buffers[0].get_body(), &offset_buffer);
+        assert_eq!(buffers[1].get_body(), &data_buffer);
     }
 
     #[test]

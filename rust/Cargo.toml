@@ -5,7 +5,6 @@ members = [
   "meta",
   "prost",
   "prost/helpers",
-  "proto",
   "server",
   "storage",
   "stream",

@@ -4,7 +4,6 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::plan::exchange_info::BroadcastInfo;
 use risingwave_pb::plan::*;
-use risingwave_pb::{ToProst, ToProto};
 use tokio::sync::mpsc;
 
 /// `BroadcastSender` sends the same chunk to a number of `BroadcastReceiver`s.
@@ -41,8 +40,10 @@ impl ChanReceiver for BroadcastReceiver {
 }
 
 pub fn new_broadcast_channel(shuffle: &ExchangeInfo) -> (BoxChanSender, Vec<BoxChanReceiver>) {
-    let shuffle_proto = shuffle.to_proto::<risingwave_proto::plan::ExchangeInfo>();
-    let broadcast_info = shuffle_proto.get_broadcast_info();
+    let broadcast_info = match shuffle.distribution {
+        Some(exchange_info::Distribution::BroadcastInfo(ref v)) => v.clone(),
+        _ => exchange_info::BroadcastInfo::default(),
+    };
 
     let output_count = broadcast_info.count as usize;
     let mut senders = Vec::with_capacity(output_count);
@@ -54,7 +55,7 @@ pub fn new_broadcast_channel(shuffle: &ExchangeInfo) -> (BoxChanSender, Vec<BoxC
     }
     let channel_sender = Box::new(BroadcastSender {
         senders,
-        broadcast_info: broadcast_info.clone().to_prost(),
+        broadcast_info,
     }) as BoxChanSender;
     let channel_receivers = receivers
         .into_iter()

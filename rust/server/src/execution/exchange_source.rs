@@ -5,7 +5,6 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::{GetDataRequest, GetDataResponse, TaskSinkId};
-use risingwave_pb::ToProto;
 use std::net::SocketAddr;
 use std::time::Duration;
 use tonic::transport::{Channel, Endpoint};
@@ -67,9 +66,7 @@ impl ExchangeSource for GrpcExchangeSource {
         let task_data =
             res.to_rw_result_with(format!("failed to take data from stream ({:?})", self.addr))?;
         Ok(Some(DataChunk::from_protobuf(
-            &task_data
-                .get_record_batch()
-                .to_proto::<risingwave_proto::data::DataChunk>(),
+            task_data.get_record_batch(),
         )?))
     }
 }

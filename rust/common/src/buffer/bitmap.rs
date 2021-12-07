@@ -29,7 +29,7 @@ use crate::array::RwError;
 use crate::buffer::Buffer;
 use crate::error::Result;
 use crate::util::bit_util;
-use risingwave_proto::data::Buffer as BufferProto;
+use risingwave_pb::data::Buffer as ProstBuffer;
 
 #[derive(Default, Debug)]
 pub struct BitmapBuilder {
@@ -195,8 +195,8 @@ impl Bitmap {
         self.bits.capacity() + mem::size_of_val(self)
     }
 
-    pub fn to_protobuf(&self) -> Result<BufferProto> {
-        let mut buf = BufferProto::default();
+    pub fn to_protobuf(&self) -> Result<ProstBuffer> {
+        let mut buf = ProstBuffer::default();
         for b in self.iter() {
             buf.body.push(b as u8);
         }
@@ -277,12 +277,12 @@ impl TryFrom<Vec<bool>> for Bitmap {
     }
 }
 
-impl TryFrom<&BufferProto> for Bitmap {
+impl TryFrom<&ProstBuffer> for Bitmap {
     type Error = RwError;
 
-    fn try_from(buf: &BufferProto) -> Result<Bitmap> {
+    fn try_from(buf: &ProstBuffer) -> Result<Bitmap> {
         let mut builder = BitmapBuilder::default();
-        buf.get_body().iter().for_each(|e| {
+        buf.get_body().as_slice().iter().for_each(|e| {
             builder.append(*e == 1_u8);
         });
 
@@ -339,8 +339,6 @@ impl<'a> std::iter::Iterator for BitmapIter<'a> {
 mod tests {
     use super::*;
     use itertools::Itertools;
-    use pb_construct::make_proto;
-    use risingwave_proto::data::Buffer as BufferProto;
 
     #[test]
     fn test_bitmap_builder() {
@@ -448,7 +446,10 @@ mod tests {
     #[test]
     fn test_bitmap_from_protobuf() {
         let bitmap_bytes = vec![0u8, 1, 0, 1, 0, 0, 1, 0];
-        let buf = make_proto!(BufferProto, { body: bitmap_bytes.clone() });
+        let buf = ProstBuffer {
+            body: bitmap_bytes.clone(),
+            ..Default::default()
+        };
         let bitmap: Bitmap = (&buf).try_into().unwrap();
         let actual_bytes: Vec<u8> = bitmap.iter().map(|b| b as u8).collect();
         assert_eq!(actual_bytes, bitmap_bytes);

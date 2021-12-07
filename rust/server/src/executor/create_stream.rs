@@ -6,7 +6,6 @@ use tempfile::Builder;
 use tokio::fs;
 use url::Url;
 
-use pb_convert::FromProtobuf;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
@@ -18,7 +17,6 @@ use risingwave_common::types::build_from_prost;
 use risingwave_pb::plan::create_stream_node::RowFormatType;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::CreateStreamNode;
-use risingwave_pb::ToProto;
 
 use crate::executor::{Executor, ExecutorBuilder};
 use crate::source::parser::JSONParser;
@@ -80,11 +78,7 @@ impl BoxedExecutorBuilder for CreateStreamExecutor {
         let node = CreateStreamNode::decode(&(source.plan_node()).get_body().value[..])
             .map_err(ProstError)?;
 
-        let table_id = TableId::from_protobuf(
-            node.to_proto::<risingwave_proto::plan::CreateStreamNode>()
-                .get_table_ref_id(),
-        )
-        .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
+        let table_id = TableId::from(&node.table_ref_id);
 
         let columns = node
             .get_column_descs()

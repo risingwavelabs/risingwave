@@ -2,10 +2,8 @@ use std::sync::Arc;
 
 use prost::Message;
 
-use pb_convert::FromProtobuf;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::InsertNode;
-use risingwave_pb::ToProto;
 
 use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
 use crate::source::{Source, SourceImpl, SourceManagerRef, SourceWriter};
@@ -16,7 +14,7 @@ use risingwave_common::array::{
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::TableId;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::ErrorCode::{InternalError, ProstError};
+use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{Int32Type, Int64Type};
 
@@ -122,12 +120,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
         let insert_node =
             InsertNode::decode(&(source.plan_node()).get_body().value[..]).map_err(ProstError)?;
 
-        let table_id = TableId::from_protobuf(
-            insert_node
-                .to_proto::<risingwave_proto::plan::InsertNode>()
-                .get_table_ref_id(),
-        )
-        .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
+        let table_id = TableId::from(&insert_node.table_ref_id);
 
         let proto_child = source.plan_node.get_children().get(0).ok_or_else(|| {
             RwError::from(ErrorCode::InternalError(String::from(

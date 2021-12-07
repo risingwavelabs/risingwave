@@ -4,7 +4,7 @@ use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
 use crate::buffer::Bitmap;
 use crate::buffer::BitmapBuilder;
 use crate::error::Result;
-use risingwave_proto::data::{Buffer as BufferProto, Buffer_CompressionType};
+use risingwave_pb::data::{buffer::CompressionType, Buffer as ProstBuffer};
 use std::mem::size_of;
 
 #[derive(Debug)]
@@ -45,7 +45,7 @@ impl Array for BoolArray {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> Result<Vec<BufferProto>> {
+    fn to_protobuf(&self) -> Result<Vec<ProstBuffer>> {
         let values = {
             let mut output_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<bool>());
 
@@ -54,10 +54,10 @@ impl Array for BoolArray {
                 output_buffer.push(bool_numeric);
             }
 
-            let mut b = BufferProto::new();
-            b.set_compression(Buffer_CompressionType::NONE);
-            b.set_body(output_buffer);
-            b
+            ProstBuffer {
+                compression: CompressionType::None as i32,
+                body: output_buffer,
+            }
         };
         Ok(vec![values])
     }

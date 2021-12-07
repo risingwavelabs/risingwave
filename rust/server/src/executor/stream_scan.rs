@@ -3,14 +3,12 @@ use std::fmt::{Debug, Formatter};
 use itertools::Itertools;
 use prost::Message;
 
-use pb_convert::FromProtobuf;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::TableId;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan::StreamScanNode;
-use risingwave_pb::ToProto;
 
 use crate::executor::{Executor, ExecutorBuilder};
 use crate::source::{
@@ -41,12 +39,7 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
         let stream_scan_node = StreamScanNode::decode(&(source.plan_node()).get_body().value[..])
             .map_err(ProstError)?;
 
-        let table_id = TableId::from_protobuf(
-            stream_scan_node
-                .to_proto::<risingwave_proto::plan::StreamScanNode>()
-                .get_table_ref_id(),
-        )
-        .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
+        let table_id = TableId::from(&stream_scan_node.table_ref_id);
 
         let source_desc = source
             .global_task_env()

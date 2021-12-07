@@ -8,7 +8,6 @@ use itertools::Itertools;
 
 use tokio::task::JoinHandle;
 
-use pb_convert::FromProtobuf;
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -20,7 +19,6 @@ use risingwave_pb::expr;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::table_source_node::SourceType;
 use risingwave_pb::stream_service;
-use risingwave_pb::ToProto;
 
 use crate::source::Source;
 use crate::source::*;
@@ -383,12 +381,7 @@ impl StreamManagerCore {
 
         let executor: Result<Box<dyn Executor>> = match node.get_node() {
             TableSourceNode(table_source_node) => {
-                let table_id = TableId::from_protobuf(
-                    &table_source_node
-                        .get_table_ref_id()
-                        .to_proto::<risingwave_proto::plan::TableRefId>(),
-                )
-                .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
+                let table_id = TableId::from(&table_source_node.table_ref_id);
 
                 let source_desc = source_manager.get_source(&table_id)?;
 
@@ -551,13 +544,7 @@ impl StreamManagerCore {
                 )))
             }
             MviewNode(materialized_view_node) => {
-                let table_id = TableId::from_protobuf(
-                    &materialized_view_node
-                        .get_table_ref_id()
-                        .to_proto::<risingwave_proto::plan::TableRefId>(),
-                )
-                .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
-
+                let table_id = TableId::from(&materialized_view_node.table_ref_id);
                 let columns = materialized_view_node.get_column_descs();
                 let pks = materialized_view_node
                     .pk_indices

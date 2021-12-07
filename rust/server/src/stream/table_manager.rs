@@ -7,7 +7,6 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_common::{ensure, gen_error};
-
 use risingwave_pb::plan::ColumnDesc;
 
 use risingwave_storage::bummock::BummockTable;

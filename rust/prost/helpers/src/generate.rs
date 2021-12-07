@@ -95,6 +95,7 @@ pub fn implement(field: &Field) -> TokenStream2 {
             return quote! {
                 #[inline(always)]
                 pub fn #getter_fn_name(&self) -> &#ty {
+                    // TODO: unwrap can panic when option is None
                     &self.#field_name.as_ref().unwrap()
                 }
             };

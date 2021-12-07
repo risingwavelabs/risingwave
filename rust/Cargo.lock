@@ -378,6 +378,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "convert_case"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
+
+[[package]]
 name = "core-foundation"
 version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1793,7 +1799,6 @@ dependencies = [
  "rand",
  "rdkafka",
  "risingwave-pb",
- "risingwave-proto",
  "risingwave_common",
  "risingwave_storage",
  "rust_decimal",
@@ -1819,21 +1824,13 @@ name = "risingwave-pb"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "convert_case",
  "prost",
  "prost-helpers",
  "prost-types",
- "protobuf",
- "risingwave-proto",
+ "quote",
  "tonic",
  "tonic-build",
-]
-
-[[package]]
-name = "risingwave-proto"
-version = "0.1.0"
-dependencies = [
- "protobuf",
- "protoc-rust",
 ]
 
 [[package]]
@@ -1865,10 +1862,8 @@ dependencies = [
  "pb-convert-derive",
  "prost",
  "prost-types",
- "protobuf",
  "rand",
  "risingwave-pb",
- "risingwave-proto",
  "rust_decimal",
  "serde",
  "serde_json",
@@ -1910,10 +1905,8 @@ dependencies = [
  "pb-convert-derive",
  "prost",
  "prost-types",
- "protobuf",
  "rand",
  "risingwave-pb",
- "risingwave-proto",
  "risingwave_common",
  "rust_decimal",
  "serde",
@@ -1976,7 +1969,6 @@ dependencies = [
  "protobuf-codegen-pure",
  "rand",
  "risingwave-pb",
- "risingwave-proto",
  "risingwave_common",
  "rusoto_core",
  "rusoto_s3",

@@ -17,8 +17,9 @@ pub mod stream_service;
 #[rustfmt::skip]
 pub mod hummock;
 
-mod convert;
-pub use convert::*;
+pub trait TypeUrl {
+    fn type_url() -> &'static str;
+}
 
 #[cfg(test)]
 mod tests {

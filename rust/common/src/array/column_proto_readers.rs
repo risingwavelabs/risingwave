@@ -6,7 +6,7 @@ use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 use byteorder::{BigEndian, ReadBytesExt};
-use risingwave_proto::data::Column as ColumnProto;
+use risingwave_pb::data::Column as ProstColumn;
 use std::io::{Cursor, Read};
 use std::sync::Arc;
 
@@ -14,7 +14,7 @@ use std::sync::Arc;
 // https://arrow.apache.org/docs/format/Flight.html
 
 pub fn read_numeric_column<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>>(
-    col: &ColumnProto,
+    col: &ProstColumn,
     cardinality: usize,
 ) -> Result<ArrayRef> {
     ensure!(
@@ -22,7 +22,7 @@ pub fn read_numeric_column<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>
         "Must have only 1 buffer in a numeric column"
     );
 
-    let buf = col.get_values()[0].get_body();
+    let buf = col.get_values()[0].get_body().as_slice();
     let value_size = std::mem::size_of::<T>();
     ensure!(
         buf.len() % value_size == 0,
@@ -44,13 +44,13 @@ pub fn read_numeric_column<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>
     Ok(Arc::new(arr.into()))
 }
 
-pub fn read_bool_column(col: &ColumnProto, cardinality: usize) -> Result<ArrayRef> {
+pub fn read_bool_column(col: &ProstColumn, cardinality: usize) -> Result<ArrayRef> {
     ensure!(
         col.get_values().len() == 1,
         "Must have only 1 buffer in a bool column"
     );
 
-    let buf = col.get_values()[0].get_body();
+    let buf = col.get_values()[0].get_body().as_slice();
 
     let mut builder = BoolArrayBuilder::new(cardinality)?;
     let bitmap: Bitmap = col.get_null_bitmap().try_into()?;
@@ -77,15 +77,15 @@ fn read_offset(offset_cursor: &mut Cursor<&[u8]>) -> Result<i64> {
 }
 
 pub fn read_string_column<B: ArrayBuilder, R: VarSizedValueReader<B>>(
-    col: &ColumnProto,
+    col: &ProstColumn,
     cardinality: usize,
 ) -> Result<ArrayRef> {
     ensure!(
         col.get_values().len() == 2,
         "Must have exactly 2 buffers in a string column"
     );
-    let offset_buff = col.get_values()[0].get_body();
-    let data_buf = col.get_values()[1].get_body();
+    let offset_buff = col.get_values()[0].get_body().as_slice();
+    let data_buf = col.get_values()[1].get_body().as_slice();
 
     let mut builder = B::new(cardinality)?;
     let bitmap: Bitmap = (col.get_null_bitmap()).try_into()?;

@@ -1,16 +1,28 @@
 use crate::error::{ErrorCode, Result, RwError};
-use protobuf::Message;
-use risingwave_proto::plan;
-use risingwave_proto::task_service;
+use risingwave_pb::{plan, task_service, TypeUrl};
 use serde::Serialize;
 use serde_json::{json, Value};
 use serde_with::skip_serializing_none;
 
-#[macro_export]
-macro_rules! unpack_from_any {
-    ($source:expr, $node_type:ty) => {
-        <$node_type>::parse_from_bytes($source.get_value()).map_err(ErrorCode::ProtobufError)?
-    };
+pub fn pack_to_any<M>(msg: &M) -> prost_types::Any
+where
+    M: prost::Message + TypeUrl,
+{
+    prost_types::Any {
+        type_url: M::type_url().to_owned(),
+        value: msg.encode_to_vec(),
+    }
+}
+
+pub fn unpack_from_any<M>(msg: &prost_types::Any) -> Option<M>
+where
+    M: prost::Message + TypeUrl + Default,
+{
+    if msg.type_url == M::type_url() {
+        Some(M::decode(&msg.value[..]).ok()?)
+    } else {
+        None
+    }
 }
 
 pub trait JsonFormatter {
@@ -34,9 +46,11 @@ struct JsonPlanNode {
 impl JsonFormatter for plan::PlanNode {
     fn to_json(&self) -> Result<Value> {
         let body = match self.get_node_type() {
-            plan::PlanNode_PlanNodeType::EXCHANGE => {
-                Some(unpack_from_any!(self.get_body(), task_service::ExchangeNode).to_json()?)
-            }
+            plan::plan_node::PlanNodeType::Exchange => Some(
+                unpack_from_any::<task_service::ExchangeNode>(self.get_body())
+                    .unwrap()
+                    .to_json()?,
+            ),
             _ => None,
         };
         let mut children = vec![];

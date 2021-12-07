@@ -35,7 +35,6 @@ protobuf = "2"
 protobuf-codegen-pure = "2.25.2"
 rdkafka = { version = "0.27", features = ["cmake-build"] }
 risingwave-pb = { path = "../prost" }
-risingwave-proto = { path = "../proto" }
 risingwave_common = { path = "../common" }
 risingwave_storage = {path = "../storage"}
 rust_decimal = "1"

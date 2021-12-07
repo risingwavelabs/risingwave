@@ -12,26 +12,26 @@ use risingwave_pb::data::{Column, DataType};
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::ConstantValue;
 use risingwave_pb::plan::{
+    exchange_info, exchange_info::Distribution, exchange_info::DistributionMode,
     plan_node::PlanNodeType, values_node::ExprTuple, ColumnDesc, CreateTableNode, ExchangeInfo,
     InsertNode, PlanFragment, PlanNode, SeqScanNode, ValuesNode,
 };
 use risingwave_pb::task_service::{
     GetDataResponse, QueryId, StageId, TaskId as ProstTaskId, TaskSinkId as ProstSinkId,
 };
-use risingwave_pb::ToProto;
 use risingwave_storage::Table;
 
 fn get_num_sinks(plan: &PlanFragment) -> u32 {
-    let plan = plan.to_proto::<risingwave_proto::plan::PlanFragment>();
-    use risingwave_proto::plan::ExchangeInfo_DistributionMode;
-    match plan.get_exchange_info().mode {
-        ExchangeInfo_DistributionMode::SINGLE => 1,
-        ExchangeInfo_DistributionMode::HASH => {
-            plan.get_exchange_info().get_hash_info().output_count
-        }
-        ExchangeInfo_DistributionMode::BROADCAST => {
-            plan.get_exchange_info().get_broadcast_info().count
-        }
+    match plan.get_exchange_info().get_mode() {
+        DistributionMode::Single => 1,
+        DistributionMode::Hash => match plan.get_exchange_info().distribution {
+            Some(Distribution::HashInfo(ref v)) => v.output_count,
+            _ => exchange_info::HashInfo::default().output_count,
+        },
+        DistributionMode::Broadcast => match plan.get_exchange_info().distribution {
+            Some(Distribution::BroadcastInfo(ref v)) => v.count,
+            _ => exchange_info::BroadcastInfo::default().count,
+        },
     }
 }
 
@@ -366,7 +366,7 @@ impl<'a> SelectBuilder<'a> {
                 root: Some(PlanNode {
                     node_type: PlanNodeType::SeqScan as i32,
                     body: Some(Any {
-                        type_url: "".to_string(),
+                        type_url: "/".to_string(),
                         value: scan.encode_to_vec(),
                     }),
                     children: vec![],

@@ -8,9 +8,11 @@ bytes = "1"
 prost = "0.8"
 prost-helpers = { path = "helpers" }
 prost-types = "0.8"
-protobuf = "2"
-risingwave-proto = { path = "../proto" }
 tonic = "0.5"
 
 [build-dependencies]
+convert_case = "0.4"
+prost = "0.8"
+prost-types = "0.8"
+quote = "1"
 tonic-build = "0.5"

@@ -13,8 +13,6 @@ use risingwave_pb::plan::PlanFragment;
 use risingwave_pb::task_service::task_info::TaskStatus;
 use risingwave_pb::task_service::TaskSinkId as ProstSinkId;
 use risingwave_pb::task_service::{GetDataResponse, TaskId as ProstTaskId};
-use risingwave_pb::ToProst;
-use risingwave_pb::ToProto;
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub struct TaskId {
@@ -86,7 +84,7 @@ impl TaskSink {
             };
             let pb = chunk.to_protobuf()?;
             let resp = GetDataResponse {
-                record_batch: Some(pb.to_prost()),
+                record_batch: Some(pb),
                 ..Default::default()
             };
             writer.write(resp).await?;
@@ -137,12 +135,7 @@ impl TaskExecution {
         debug!(
             "Prepare executing plan [{:?}]: {}",
             self.task_id,
-            json_to_pretty_string(
-                &self
-                    .plan
-                    .to_proto::<risingwave_proto::plan::PlanFragment>()
-                    .to_json()?
-            )?
+            json_to_pretty_string(&self.plan.to_json()?)?
         );
         *self.state.lock().unwrap() = TaskStatus::Running;
         let exec = ExecutorBuilder::new(

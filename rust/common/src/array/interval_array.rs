@@ -5,7 +5,7 @@ use crate::buffer::Bitmap;
 use crate::buffer::BitmapBuilder;
 use crate::error::Result;
 use crate::types::interval_type::IntervalUnit;
-use risingwave_proto::data::Buffer;
+use risingwave_pb::data::Buffer as ProstBuffer;
 
 use super::NULL_VAL_FOR_HASH;
 
@@ -62,7 +62,7 @@ impl Array for IntervalArray {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> Result<Vec<Buffer>> {
+    fn to_protobuf(&self) -> Result<Vec<ProstBuffer>> {
         unimplemented!("To protobuf of Interval Array is not implemented for now")
     }
 

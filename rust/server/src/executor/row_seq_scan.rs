@@ -7,17 +7,15 @@ use prost::Message;
 use crate::executor::{Executor, ExecutorBuilder};
 use crate::stream_op::{MViewTable, MemoryStateStore};
 
-use pb_convert::FromProtobuf;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::RowSeqScanNode;
-use risingwave_pb::ToProto;
 
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::{InternalError, ProstError};
-use risingwave_common::error::{Result, RwError, ToRwResult};
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataTypeRef;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
@@ -42,12 +40,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
         let seq_scan_node = RowSeqScanNode::decode(&(source.plan_node()).get_body().value[..])
             .map_err(|e| RwError::from(ProstError(e)))?;
 
-        let table_id = TableId::from_protobuf(
-            seq_scan_node
-                .to_proto::<risingwave_proto::plan::RowSeqScanNode>()
-                .get_table_ref_id(),
-        )
-        .to_rw_result_with("Failed to parse table id")?;
+        let table_id = TableId::from(&seq_scan_node.table_ref_id);
 
         let table = source
             .global_task_env()

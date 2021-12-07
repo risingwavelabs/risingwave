@@ -1,14 +1,12 @@
 use prost::Message;
 
-use pb_convert::FromProtobuf;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::ErrorCode::{InternalError, ProstError};
+use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::Result;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::DropStreamNode;
-use risingwave_pb::ToProto;
 
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 use crate::source::SourceManagerRef;
@@ -48,11 +46,7 @@ impl BoxedExecutorBuilder for DropStreamExecutor {
         let node = DropStreamNode::decode(&(source.plan_node()).get_body().value[..])
             .map_err(ProstError)?;
 
-        let table_id = TableId::from_protobuf(
-            node.to_proto::<risingwave_proto::plan::DropStreamNode>()
-                .get_table_ref_id(),
-        )
-        .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
+        let table_id = TableId::from(&node.table_ref_id);
 
         Ok(Box::new(Self {
             table_id,

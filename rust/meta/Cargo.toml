@@ -26,9 +26,7 @@ pb-convert = { path = "../utils/pb-convert" }
 pb-convert-derive = { path = "../utils/pb-convert-derive" }
 prost = "0.8"
 prost-types = "0.8"
-protobuf = "2"
 risingwave-pb = { path = "../prost" }
-risingwave-proto = { path = "../proto" }
 risingwave_common = { path = "../common" }
 rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }
