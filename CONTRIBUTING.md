@@ -14,19 +14,42 @@ cd java
 ```
 
 For Rust code, please run:
-
 ```bash
 cd rust
 cargo fmt
 cargo clippy --all-targets --all-features
 ```
 
-For Protobufs, we rely on [prototool](https://github.com/uber/prototool#prototool-format) and [buf](https://docs.buf.build/installation) for code formatting and linting.
-Please check out their documents for installation. To check if you violate the rule, please run the commands:
-
+For Protobufs, we rely on [prototool](https://github.com/uber/prototool#prototool-format) and [buf](https://docs.buf.build/installation) for code formatting and linting. Please check out their documents for installation. To check if you violate the rule, please run the commands:
 ```bash
 prototool format -d
 buf lint
+```
+
+## Testing
+We support both unit tests (for Rust only) and end-to-end tests.
+
+### Unit Testing
+To run unit tests for Rust, run the following commands under the root directory:
+```bash
+make rust_test
+```
+
+### End-to-End Testing
+To run end-to-end tests, start the frontend server and a compute server, and then run:
+```bash
+make sqllogictest
+python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/distributed/
+```
+
+To run end-to-end tests with multiple compute-nodes, run the script:
+```bash
+./scripts/start_cluster.sh 3
+```
+
+It will start processes in the background. After testing, you can run the following scriptto clean-up:
+```bash
+./scripts/kill_cluster.sh
 ```
 
 ## Pull Request Title
@@ -50,5 +73,5 @@ For example, a PR title could be:
 You may also check out our previous PRs in the [PR list](https://github.com/singularity-data/risingwave/pulls).
 
 ## Pull Request Description
-- If your PR is large and you have changed a lot, it's better for you to write a lot of details.
-- If it is small (such as a typo fix), you can go brief.
+- If your PR is small (such as a typo fix), you can go brief.
+- If it is large and you have changed a lot, it's better to write more details.

@@ -71,36 +71,6 @@ psql -h localhost -p 4567 -d dev
 
 Now you can use the Postgres shell to try out your SQL command!
 
-## Testing
-
-We support both unit tests (for Rust code only) and end-to-end tests.
-
-To run unit tests, run the following commands under the root directory:
-```bash
-make rust_test
-```
-
-To run end-to-end tests, start the frontend server and a compute server, and then run:
-```bash
-make sqllogictest
-python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/distributed/
-```
-
-## Distributed Testing
-
-To run end-to-end tests with multiple compute-nodes, run the script:
-
-```bash
-./scripts/start_cluster.sh 3
-```
-
-It will start processes in the background. After testing, you can run the following script
-to clean-up:
-
-```bash
-./scripts/kill_cluster.sh
-```
-
 ## Contributing
 Thanks for your interest in contributing to the project, please refer to the [CONTRIBUTING.md](https://github.com/singularity-data/risingwave/blob/main/CONTRIBUTING.md).
 
