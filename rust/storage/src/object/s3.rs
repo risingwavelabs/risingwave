@@ -278,7 +278,7 @@ mod tests {
 
         let s3 = S3ObjectStore::new(conn_info, bucket.to_string());
 
-        // delete an inexistent object should be OK
+        // delete an non-existing object should be OK
         s3.delete(&path).await.unwrap();
 
         s3.upload(&path, block).await.unwrap();

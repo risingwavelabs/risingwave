@@ -478,11 +478,16 @@ mod tests {
 
     #[test]
     fn test_memcomparable() {
+        let memcmp_minus_1 = serialize_datum_not_null_into_vec(-1);
         let memcmp_3874 = serialize_datum_not_null_into_vec(3874);
         let memcmp_45745 = serialize_datum_not_null_into_vec(45745);
         let memcmp_21234 = serialize_datum_not_null_into_vec(21234);
         assert!(memcmp_3874 < memcmp_45745);
         assert!(memcmp_3874 < memcmp_21234);
         assert!(memcmp_21234 < memcmp_45745);
+
+        assert!(memcmp_minus_1 < memcmp_3874);
+        assert!(memcmp_minus_1 < memcmp_21234);
+        assert!(memcmp_minus_1 < memcmp_45745);
     }
 }

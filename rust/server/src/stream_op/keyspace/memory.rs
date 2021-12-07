@@ -12,12 +12,24 @@ use super::StateStore;
 #[derive(Clone, Default)]
 pub struct MemoryStateStore {
     inner: Arc<Mutex<BTreeMap<Bytes, Bytes>>>,
+
+    /// Panic on deleting non-existing keys
+    sanity_check_phantom_delete: bool,
 }
 
 impl MemoryStateStore {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(BTreeMap::new())),
+            sanity_check_phantom_delete: true,
+        }
+    }
+
+    /// Create a `MemoryStateStore` without sanity check
+    pub fn new_without_sanity_check() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(BTreeMap::new())),
+            sanity_check_phantom_delete: false,
         }
     }
 
@@ -38,7 +50,11 @@ impl MemoryStateStore {
             if let Some(value) = value {
                 inner.insert(key, value);
             } else {
-                inner.remove(&key);
+                let res = inner.remove(&key);
+
+                if self.sanity_check_phantom_delete {
+                    debug_assert!(res.is_some(), "delete non-existing key {:?}", key);
+                }
             }
         }
         Ok(())

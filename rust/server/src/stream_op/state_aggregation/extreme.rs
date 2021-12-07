@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use bytes::Bytes;
 use rust_decimal::Decimal;
-use std::collections::BTreeMap;
+use std::collections::{btree_map, BTreeMap};
 
 use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::ArrayImpl;
@@ -35,10 +35,6 @@ use super::super::keyspace::{Keyspace, StateStore};
 /// * `key = datum_decode(encoded_value)`
 ///
 /// The `ExtremeState` need some special properties from the storage engine and the executor.
-/// * The storage engine should support delete in-existing keys. In one epoch, a user might first
-///   add a key (namely A) to the state, and then delete it. If A doesn't fall within cache, these
-///   two operations will make `flush_buffer` to have A -> Delete on its record. Therefore, if A was
-///   not in state store before, the phantom delete will be sent to the store.
 /// * The output of an `ExtremeState` is only correct when all changes have been flushed to the
 ///   state store.
 pub struct ManagedMinState<S: StateStore, K: Scalar + Ord> {
@@ -107,6 +103,15 @@ impl<S: StateStore, K: Scalar + Ord> ManagedMinState<S, K> {
             data_type,
         })
     }
+
+    /// Retain only top n elements in the cache
+    fn retain_top_n(&mut self) {
+        if let Some(count) = self.top_n_count {
+            while self.top_n.len() > count {
+                self.top_n.pop_last();
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -138,7 +143,14 @@ impl<S: StateStore, K: Scalar + Ord> ManagedExtremeState<S> for ManagedMinState<
                     }
                     Op::Delete | Op::UpdateDelete => {
                         self.top_n.remove(&key);
-                        self.flush_buffer.insert(key, None);
+                        match self.flush_buffer.entry(key) {
+                            btree_map::Entry::Vacant(e) => {
+                                e.insert(None);
+                            }
+                            btree_map::Entry::Occupied(e) => {
+                                e.remove();
+                            }
+                        }
                         self.total_count -= 1;
                     }
                 }
@@ -174,12 +186,21 @@ impl<S: StateStore, K: Scalar + Ord> ManagedExtremeState<S> for ManagedMinState<
                     }
                     Op::Delete | Op::UpdateDelete => {
                         self.top_n.remove(&key);
-                        self.flush_buffer.insert(key, None);
+                        match self.flush_buffer.entry(key) {
+                            btree_map::Entry::Vacant(e) => {
+                                e.insert(None);
+                            }
+                            btree_map::Entry::Occupied(e) => {
+                                e.remove();
+                            }
+                        }
                         self.total_count -= 1;
                     }
                 }
             }
         }
+
+        self.retain_top_n();
 
         Ok(())
     }
@@ -226,7 +247,13 @@ impl<S: StateStore, K: Scalar + Ord> ManagedExtremeState<S> for ManagedMinState<
 
     /// Flush the internal state to a write batch. TODO: add `WriteBatch` to Hummock.
     fn flush(&mut self, write_batch: &mut Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
-        debug_assert!(self.is_dirty());
+        // Generally, we require the state the be dirty before flushing. However, it is possible
+        // that after a sequence of operations, the flush buffer becomes empty. Then, the
+        // state becomes "dirty", but we do not need to flush anything.
+        if !self.is_dirty() {
+            self.retain_top_n();
+            return Ok(());
+        }
 
         // TODO: we can populate the cache while flushing, but that's hard.
 
@@ -259,15 +286,8 @@ impl<S: StateStore, K: Scalar + Ord> ManagedExtremeState<S> for ManagedMinState<
             }
         }
 
-        if let Some(count) = self.top_n_count {
-            let old_top_n = std::mem::take(&mut self.top_n);
-            for (idx, (k, v)) in old_top_n.into_iter().enumerate() {
-                if idx >= count {
-                    break;
-                }
-                self.top_n.insert(k, v);
-            }
-        }
+        self.retain_top_n();
+
         Ok(())
     }
 }
@@ -311,7 +331,7 @@ mod tests {
     use risingwave_common::array::{I64Array, Op};
 
     #[tokio::test]
-    async fn test_managed_value_state() {
+    async fn test_managed_extreme_state() {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
         let mut managed_state =
@@ -432,6 +452,21 @@ mod tests {
         store.ingest_batch(write_batch).await.unwrap();
 
         // The minimum should be 30
+        assert_eq!(
+            managed_state.get_output().await.unwrap(),
+            Some(ScalarImpl::Int64(30))
+        );
+
+        let row_count = managed_state.total_count;
+
+        // test recovery
+        let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
+        let mut managed_state =
+            ManagedMinState::<_, i64>::new(keyspace, Int64Type::create(false), Some(5), row_count)
+                .await
+                .unwrap();
+
+        // The minimum should still be 30
         assert_eq!(
             managed_state.get_output().await.unwrap(),
             Some(ScalarImpl::Int64(30))
