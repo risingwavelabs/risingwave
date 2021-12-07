@@ -1,15 +1,17 @@
 use std::sync::Arc;
 
+use itertools::Itertools;
 use prost::Message;
 
-use crate::stream::TableImpl;
+use crate::executor::{Executor, ExecutorBuilder};
+use crate::stream_op::{MViewTable, MemoryStateStore};
+
 use pb_convert::FromProtobuf;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::RowSeqScanNode;
 use risingwave_pb::ToProto;
-use risingwave_storage::row_table::{MemRowTable, MemTableRowIter, RowTable};
+use risingwave_storage::row_table::{MemRowTable, MemTableRowIter};
 
-use crate::executor::{Executor, ExecutorBuilder};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::Schema;
@@ -27,7 +29,9 @@ fn make_row_iter(table_ref: Arc<MemRowTable>) -> Result<MemTableRowIter> {
 /// Executor that scans data from row table
 pub(super) struct RowSeqScanExecutor {
     /// An iterator to scan MemRowTable.
-    iter: MemTableRowIter,
+    iter: Option<MemTableRowIter>,
+    // TODO(MrCroxx): Remove me after hummock table iter is impled.
+    table: Arc<MViewTable<MemoryStateStore>>,
     data_types: Vec<DataTypeRef>,
     column_ids: Vec<usize>,
     schema: Schema,
@@ -47,45 +51,43 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
         )
         .to_rw_result_with("Failed to parse table id")?;
 
-        let table_ref = source
+        let table = source
             .global_task_env()
             .table_manager()
-            .get_table(&table_id)?;
-        if let TableImpl::Row(table_ref) = table_ref {
-            let schema = table_ref.schema();
-            let data_types = schema
-                .fields
-                .iter()
-                .map(|f| f.data_type.clone())
-                .collect::<Vec<_>>();
-            let schema = schema.clone();
+            .get_table(&table_id)?
+            .as_memory();
 
-            Ok(Box::new(Self {
-                data_types,
-                column_ids: seq_scan_node
-                    .get_column_ids()
-                    .iter()
-                    .map(|i| *i as usize)
-                    .collect::<Vec<_>>(),
-                iter: make_row_iter(table_ref)?,
-                schema,
-            }))
-        } else {
-            Err(RwError::from(InternalError(
-                "RowSeqScan requires a row table".to_string(),
-            )))
-        }
+        let schema = table.schema();
+        let data_types = schema
+            .fields
+            .iter()
+            .map(|f| f.data_type.clone())
+            .collect_vec();
+        let schema = schema.clone();
+
+        Ok(Box::new(Self {
+            data_types,
+            column_ids: seq_scan_node
+                .get_column_ids()
+                .iter()
+                .map(|i| *i as usize)
+                .collect_vec(),
+            iter: None,
+            table,
+            schema,
+        }))
     }
 }
 
 #[async_trait::async_trait]
 impl Executor for RowSeqScanExecutor {
     async fn open(&mut self) -> Result<()> {
+        self.iter = Some(self.table.iter().await?);
         Ok(())
     }
 
     async fn next(&mut self) -> Result<Option<DataChunk>> {
-        match self.iter.next() {
+        match self.iter.as_mut().unwrap().next() {
             Some((_key_row, value_row)) => {
                 // Scan through value pairs.
                 // Make rust analyzer happy.
@@ -129,109 +131,73 @@ impl Executor for RowSeqScanExecutor {
 mod tests {
     use risingwave_common::array::Array;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::Scalar;
-    use risingwave_pb::data::{data_type::TypeName, DataType as DataTypeProst};
-    use risingwave_pb::plan::{column_desc::ColumnEncodingType, ColumnDesc};
-    use risingwave_pb::ToProst;
+    use risingwave_common::types::{Int32Type, Scalar};
+
+    use crate::stream_op::{MViewTable, ManagedMViewState, MemoryStateStore};
 
     use super::*;
-
-    fn mock_first_row() -> Row {
-        Row(vec![
-            Some((1_i64).to_scalar_value()),
-            Some((4_i64).to_scalar_value()),
-        ])
-    }
-
-    fn mock_second_row() -> Row {
-        Row(vec![
-            Some((2_i64).to_scalar_value()),
-            Some((5_i64).to_scalar_value()),
-        ])
-    }
-
-    fn mock_first_key_row() -> Row {
-        Row(vec![Some((1_i64).to_scalar_value())])
-    }
-
-    fn mock_second_key_row() -> Row {
-        Row(vec![Some((2_i64).to_scalar_value())])
-    }
 
     #[tokio::test]
     async fn test_row_seq_scan() -> Result<()> {
         // In this test we test if the memtable can be correctly scanned for K-V pair insertions.
-        let column1 = ColumnDesc {
-            column_type: Some(DataTypeProst {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            encoding: ColumnEncodingType::Raw as i32,
-            is_primary: true,
-            name: "test_col1".to_string(),
-            column_id: 0,
-        };
-        let column2 = ColumnDesc {
-            column_type: Some(DataTypeProst {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            encoding: ColumnEncodingType::Raw as i32,
-            is_primary: false,
-            name: "test_col2".to_string(),
-            column_id: 1,
-        };
-        let columns = vec![column1, column2];
+        let state_store = MemoryStateStore::new();
+        let prefix = b"mview-test-42".to_vec();
+        let schema = Schema::new(vec![
+            Field::new(Int32Type::create(false)),
+            Field::new(Int32Type::create(false)),
+        ]);
+        let pk_columns = vec![0];
+        let mut state = ManagedMViewState::new(
+            prefix.clone(),
+            schema.clone(),
+            pk_columns.clone(),
+            state_store.clone(),
+        );
 
-        let columns_revise = &columns
-            .iter()
-            .map(|c| c.to_proto::<risingwave_proto::plan::ColumnDesc>())
-            .collect::<Vec<risingwave_proto::plan::ColumnDesc>>()[..];
+        let table = Arc::new(MViewTable::new(
+            prefix.clone(),
+            schema.clone(),
+            pk_columns.clone(),
+            state_store.clone(),
+        ));
 
-        let fields = columns_revise
-            .iter()
-            .map(|c| {
-                Field::try_from(
-                    &c.get_column_type()
-                        .to_prost::<risingwave_pb::data::DataType>(),
-                )
-                .unwrap()
-            })
-            .collect::<Vec<_>>();
-
-        let schema = Schema::new(fields);
-
-        let data_types = schema
-            .fields
-            .iter()
-            .map(|f| f.data_type.clone())
-            .collect::<Vec<_>>();
-
-        let mem_table = MemRowTable::new(schema.clone(), vec![]);
-        let row1 = mock_first_row();
-        let key1 = mock_first_key_row();
-        let row2 = mock_second_row();
-        let key2 = mock_second_key_row();
-
-        mem_table.insert(key1, row1).unwrap();
-        mem_table.insert(key2, row2).unwrap();
-
-        let mut row_scan_executor = RowSeqScanExecutor {
-            data_types,
+        let mut executor = RowSeqScanExecutor {
+            iter: None,
+            table,
+            data_types: schema
+                .fields
+                .iter()
+                .map(|field| field.data_type.clone())
+                .collect(),
             column_ids: vec![0, 1],
-            iter: mem_table.iter()?,
             schema,
         };
 
-        row_scan_executor.open().await.unwrap();
+        state.put(
+            Row(vec![Some(1_i32.to_scalar_value())]),
+            Row(vec![
+                Some(1_i32.to_scalar_value()),
+                Some(4_i32.to_scalar_value()),
+            ]),
+        );
+        state.put(
+            Row(vec![Some(2_i32.to_scalar_value())]),
+            Row(vec![
+                Some(2_i32.to_scalar_value()),
+                Some(5_i32.to_scalar_value()),
+            ]),
+        );
+        state.flush().await.unwrap();
 
-        let res_chunk = row_scan_executor.next().await?.unwrap();
+        executor.open().await.unwrap();
+
+        let res_chunk = executor.next().await?.unwrap();
         assert_eq!(res_chunk.dimension(), 2);
         assert_eq!(
             res_chunk
                 .column_at(0)?
                 .array()
-                .as_int64()
+                .as_int32()
                 .iter()
                 .collect::<Vec<_>>(),
             vec![Some(1)]
@@ -240,19 +206,19 @@ mod tests {
             res_chunk
                 .column_at(1)?
                 .array()
-                .as_int64()
+                .as_int32()
                 .iter()
                 .collect::<Vec<_>>(),
             vec![Some(4)]
         );
 
-        let res_chunk2 = row_scan_executor.next().await?.unwrap();
+        let res_chunk2 = executor.next().await?.unwrap();
         assert_eq!(res_chunk2.dimension(), 2);
         assert_eq!(
             res_chunk2
                 .column_at(0)?
                 .array()
-                .as_int64()
+                .as_int32()
                 .iter()
                 .collect::<Vec<_>>(),
             vec![Some(2)]
@@ -261,12 +227,12 @@ mod tests {
             res_chunk2
                 .column_at(1)?
                 .array()
-                .as_int64()
+                .as_int32()
                 .iter()
                 .collect::<Vec<_>>(),
             vec![Some(5)]
         );
-        row_scan_executor.close().await.unwrap();
+        executor.close().await.unwrap();
         Ok(())
     }
 }

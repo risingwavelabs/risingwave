@@ -2,7 +2,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::stream::{SimpleTableManager, StreamManager, TableImpl, TableManager};
-use futures::StreamExt;
 
 use risingwave_common::array::column::Column;
 use risingwave_common::array::Row;
@@ -27,8 +26,6 @@ use risingwave_pb::stream_plan::{
 };
 use risingwave_pb::stream_service::{ActorInfo, BroadcastActorInfoTableRequest};
 use risingwave_pb::task_service::HostAddress;
-use risingwave_storage::row_table::RowTableEvent;
-use risingwave_storage::row_table::*;
 use risingwave_storage::{Table, TableColumnDesc};
 
 use crate::source::{MemSourceManager, SourceManager};
@@ -194,7 +191,7 @@ async fn test_stream_mv_proto() {
     // Insert data and check if the materialized view has been updated.
     let _res_app = table_ref.append(append_chunk).await;
     let table_id_mv = TableId::new(SchemaId::default(), 1);
-    let table_ref_mv = table_manager.get_table(&table_id_mv).unwrap();
+    let table = table_manager.get_table(&table_id_mv).unwrap().as_memory();
 
     // We remark that normal barrier generation initiates in `rpc_serve`. In tests,
     // we don't have a `server`. Without explicit sending a stop barrier, `MViewSinkExecutor`
@@ -203,20 +200,16 @@ async fn test_stream_mv_proto() {
     // then we can send the stop barrier.
     tokio::time::sleep(Duration::from_millis(500)).await;
     stream_manager.send_stop_barrier();
-    if let TableImpl::Row(row_table) = table_ref_mv {
-        let rx = row_table.get_receiver();
-        let event = rx.lock().await.next().await.unwrap();
-        assert!(matches!(event, RowTableEvent::Ingest(..)));
-        let value_row = Row(vec![Some(1.to_scalar_value())]);
-        let res_row = row_table.get(value_row);
-        if let Ok(res_row_in) = res_row {
-            let datum = res_row_in.unwrap().0.get(0).unwrap().clone();
-            let d_value = datum.unwrap().into_int32();
-            assert_eq!(d_value, 1);
-        } else {
-            unreachable!();
-        }
-    } else {
-        unreachable!();
-    }
+    // TODO(MrCroxx): fix this
+    // FIXME: use channel when testing hummock to make sure local state has already flushed.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let datum = table
+        .get(Row(vec![Some(1_i32.to_scalar_value())]), 0)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let d_value = datum.unwrap().into_int32();
+    assert_eq!(d_value, 1);
 }

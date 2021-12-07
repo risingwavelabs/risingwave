@@ -21,6 +21,6 @@ impl StateStore for PanicStateStore {
     }
 
     async fn scan(&self, _prefix: &[u8], _limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
-        panic!("should not read from the state store!");
+        panic!("should not read from the panic state store!");
     }
 }

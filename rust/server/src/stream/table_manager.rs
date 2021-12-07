@@ -8,12 +8,14 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_common::{ensure, gen_error};
 
-use risingwave_pb::ToProst;
-use risingwave_proto::plan::ColumnDesc;
+use risingwave_pb::plan::ColumnDesc;
 
 use risingwave_storage::bummock::BummockTable;
 use risingwave_storage::row_table::MemRowTable;
 use risingwave_storage::TableColumnDesc;
+
+use super::StateStoreImpl;
+use crate::stream_op::{HummockStateStore, MViewTable, MemoryStateStore};
 
 #[async_trait::async_trait]
 /// `TableManager` is an abstraction of managing a collection of tables.
@@ -37,9 +39,10 @@ pub trait TableManager: Sync + Send {
     fn create_materialized_view(
         &self,
         table_id: &TableId,
-        columns: Vec<ColumnDesc>,
+        columns: &[ColumnDesc],
         pk_columns: Vec<usize>,
-    ) -> Result<()>;
+        state_store: StateStoreImpl,
+    ) -> Result<Vec<u8>>;
 }
 
 /// The enumeration of supported simple tables in `SimpleTableManager`.
@@ -47,6 +50,17 @@ pub trait TableManager: Sync + Send {
 pub enum TableImpl {
     Row(Arc<MemRowTable>),
     Bummock(Arc<BummockTable>),
+    MViewTable(Arc<MViewTable<HummockStateStore>>),
+    TestMViewTable(Arc<MViewTable<MemoryStateStore>>),
+}
+
+impl TableImpl {
+    pub fn as_memory(&self) -> Arc<MViewTable<MemoryStateStore>> {
+        match self {
+            Self::TestMViewTable(t) => t.clone(),
+            _ => unreachable!(),
+        }
+    }
 }
 
 /// A simple implementation of in memory table for local tests.
@@ -105,11 +119,11 @@ impl TableManager for SimpleTableManager {
     fn create_materialized_view(
         &self,
         table_id: &TableId,
-        columns: Vec<ColumnDesc>,
+        columns: &[ColumnDesc],
         pk_columns: Vec<usize>,
-    ) -> Result<()> {
+        state_store: StateStoreImpl,
+    ) -> Result<Vec<u8>> {
         let mut tables = self.get_tables()?;
-
         ensure!(
             !tables.contains_key(table_id),
             "Table id already exists: {:?}",
@@ -117,19 +131,23 @@ impl TableManager for SimpleTableManager {
         );
         let column_count = columns.len();
         ensure!(column_count > 0, "There must be more than one column in MV");
-        // TODO: Remove to_prost later.
-        let schema = Schema::try_from(
-            &columns
-                .into_iter()
-                .map(|c| c.to_prost())
-                .collect::<Vec<_>>(),
-        )?;
+        let schema = Schema::try_from(columns)?;
+        // TODO(MrCroxx): prefix rule, ref #1801 .
+        let prefix: Vec<u8> = format!("mview-{:?}", table_id).into();
+        // TODO(MrCroxx): use HummockStateStore and MViewTable if not test
         tables.insert(
             table_id.clone(),
-            TableImpl::Row(Arc::new(MemRowTable::new(schema, pk_columns))),
+            TableImpl::TestMViewTable(Arc::new(MViewTable::new(
+                prefix.clone(),
+                schema,
+                pk_columns,
+                match state_store {
+                    StateStoreImpl::MemoryStateStore(s) => s,
+                    _ => unreachable!(),
+                },
+            ))),
         );
-
-        Ok(())
+        Ok(prefix)
     }
 }
 

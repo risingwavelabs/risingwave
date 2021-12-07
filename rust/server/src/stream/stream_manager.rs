@@ -24,13 +24,8 @@ use risingwave_pb::ToProto;
 
 use crate::source::Source;
 use crate::source::*;
-use crate::stream::TableImpl;
 use crate::stream_op::*;
 use crate::task::GlobalTaskEnv;
-
-use risingwave_storage::hummock::{HummockOptions, HummockStorage};
-use risingwave_storage::object::InMemObjectStore;
-use risingwave_storage::row_table::RowTable;
 
 /// Default capacity of channel if two fragments are on the same node
 pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
@@ -38,6 +33,21 @@ pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
 type ConsumableChannelPair = (Option<Sender<Message>>, Option<Receiver<Message>>);
 type ConsumableChannelVecPair = (Vec<Sender<Message>>, Vec<Receiver<Message>>);
 pub type UpDownFragmentIds = (u32, u32);
+
+#[derive(Clone)]
+pub enum StateStoreImpl {
+    HummockStateStore(HummockStateStore),
+    MemoryStateStore(MemoryStateStore),
+}
+
+impl StateStoreImpl {
+    fn as_memory(&self) -> MemoryStateStore {
+        match self {
+            Self::MemoryStateStore(s) => s.clone(),
+            _ => unreachable!(),
+        }
+    }
+}
 
 pub struct StreamManagerCore {
     /// Each processor runs in a future. Upon receiving a `Terminate` message, they will exit.
@@ -86,7 +96,7 @@ pub struct StreamManagerCore {
     addr: SocketAddr,
 
     /// The state store of Hummuck
-    state_store: HummockStorage,
+    state_store: StateStoreImpl,
 }
 
 /// `StreamManager` manages all stream executors in this project.
@@ -223,10 +233,7 @@ impl StreamManagerCore {
             sender_placeholder: vec![],
             mock_source: (Some(tx), Some(rx)),
             addr,
-            state_store: HummockStorage::new(
-                Arc::new(InMemObjectStore::new()),
-                HummockOptions::default(),
-            ),
+            state_store: StateStoreImpl::MemoryStateStore(MemoryStateStore::new()),
         }
     }
 
@@ -539,11 +546,7 @@ impl StreamManagerCore {
                 )
                 .map_err(|e| InternalError(format!("Failed to parse table id: {:?}", e)))?;
 
-                let columns = materialized_view_node
-                    .get_column_descs()
-                    .iter()
-                    .map(|column_desc| column_desc.to_proto::<risingwave_proto::plan::ColumnDesc>())
-                    .collect();
+                let columns = materialized_view_node.get_column_descs();
                 let pks = materialized_view_node
                     .pk_indices
                     .iter()
@@ -552,18 +555,20 @@ impl StreamManagerCore {
 
                 let column_orders = materialized_view_node.get_column_orders();
                 let order_pairs = fetch_orders(column_orders).unwrap();
-                table_manager.create_materialized_view(&table_id, columns, pks.clone())?;
-                let table_ref = table_manager.get_table(&table_id).unwrap();
-                let table = match table_ref {
-                    TableImpl::Row(table) => Ok(table as Arc<dyn RowTable>),
-                    _ => Err(RwError::from(InternalError(
-                        "Materialized view creation internal error".to_string(),
-                    ))),
-                }?;
+
+                let prefix = table_manager.create_materialized_view(
+                    &table_id,
+                    columns,
+                    pks.clone(),
+                    self.state_store.clone(),
+                )?;
+                let state_store = self.state_store.as_memory();
                 let executor = Box::new(MViewSinkExecutor::new(
                     input.remove(0),
-                    table as Arc<dyn RowTable>,
+                    prefix,
+                    Schema::try_from(columns)?,
                     pks,
+                    state_store,
                     Arc::new(order_pairs),
                 ));
                 Ok(executor)

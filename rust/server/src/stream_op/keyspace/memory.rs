@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 use super::StateStore;
 
 /// An in-memory state store
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MemoryStateStore {
     inner: Arc<Mutex<BTreeMap<Bytes, Bytes>>>,
 }

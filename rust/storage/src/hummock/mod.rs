@@ -15,7 +15,7 @@ use crate::object::ObjectStore;
 use cloud::gen_remote_table;
 pub use error::*;
 use tokio::sync::Mutex;
-use value::*;
+pub use value::*;
 
 pub static REMOTE_DIR: &str = "/test/";
 
