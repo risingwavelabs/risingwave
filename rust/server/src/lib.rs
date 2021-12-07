@@ -11,7 +11,6 @@
 extern crate log;
 #[macro_use]
 extern crate risingwave_common;
-extern crate risingwave_storage;
 extern crate test;
 
 mod execution;

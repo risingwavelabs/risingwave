@@ -55,7 +55,7 @@ impl Schedule {
     }
 
     fn parse_from<P: AsRef<Path>>(path: P) -> anyhow::Result<Vec<Vec<String>>> {
-        let file = File::with_options()
+        let file = File::options()
             .read(true)
             .open(path.as_ref())
             .with_context(|| format!("Failed to open schedule file: {:?}", path.as_ref()))?;
@@ -186,13 +186,13 @@ impl TestCase {
         ]);
 
         let input_path = self.file_manager.source_of(&self.test_name)?;
-        let input_file = File::with_options()
+        let input_file = File::options()
             .read(true)
             .open(&input_path)
             .with_context(|| format!("Failed to open {:?} for read.", input_path))?;
 
         let output_path = self.file_manager.output_of(&self.test_name)?;
-        let output_file = File::with_options()
+        let output_file = File::options()
             .create_new(true)
             .write(true)
             .open(&output_path)

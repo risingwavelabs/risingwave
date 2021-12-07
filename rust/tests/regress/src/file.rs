@@ -146,14 +146,14 @@ impl FileManager {
         let test_tablespace = self.test_table_space_dir()?;
 
         let reader = BufReader::new(
-            File::with_options()
+            File::options()
                 .read(true)
                 .open(&input)
                 .with_context(|| format!("Failed to open input file: {:?}", input.as_ref()))?,
         );
 
         let mut writer = BufWriter::new(
-            File::with_options()
+            File::options()
                 .write(true)
                 .create_new(true)
                 .open(&output)

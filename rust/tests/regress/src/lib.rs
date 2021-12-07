@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 #![warn(clippy::map_flatten)]
 #![warn(clippy::doc_markdown)]
-#![feature(with_options)]
 #![feature(path_file_prefix)]
 
 mod opts;

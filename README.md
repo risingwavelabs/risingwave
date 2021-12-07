@@ -105,7 +105,7 @@ to clean-up:
 Thanks for your interest in contributing to the project, please refer to the [CONTRIBUTING.md](https://github.com/singularity-data/risingwave/blob/main/CONTRIBUTING.md).
 
 ## Toolchain
-Currently, we are using nightly toolchain `nightly-2021-11-15`. If anyone needs to upgrade
+Currently, we are using nightly toolchain `nightly-2021-11-30`. If anyone needs to upgrade
 the toolchain, be sure to bump `rust-toolchain` file as well as GitHub workflow.
 
 ## Documentation
