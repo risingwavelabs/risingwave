@@ -3,7 +3,7 @@
 ## What's changed and what's your intention?
 
 
-## Check List:
+## Checklist:
 - [ ] I have written docs and comments
 - [ ] I have passed unit tests and integration tests
 

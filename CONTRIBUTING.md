@@ -4,6 +4,39 @@ If you have questions, please [create a Github issue](https://github.com/singula
 
 There are some tips for you.
 
+## Testing
+We support both unit tests and end-to-end tests.
+
+### Unit Testing
+To run unit tests for Rust, run the following commands under the root directory:
+```bash
+make rust_test
+```
+
+To run unit tests for Java, run the following commands under the root directory:
+```bash
+make java_test
+```
+
+### End-to-End Testing
+To run end-to-end tests with single compute-node:
+```bash
+make sqllogictest
+./scripts/start_cluster.sh 1
+python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/distributed/
+```
+
+To run end-to-end tests with multiple compute-nodes, run the script:
+```bash
+./scripts/start_cluster.sh 3
+python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/distributed/
+```
+
+It will start processes in the background. After testing, you can run the following scriptto clean-up:
+```bash
+./scripts/kill_cluster.sh
+```
+
 ## Code Formatting
 Before submitting your pull request (PR), you should format the code first.
 
@@ -24,32 +57,6 @@ For Protobufs, we rely on [prototool](https://github.com/uber/prototool#prototoo
 ```bash
 prototool format -d
 buf lint
-```
-
-## Testing
-We support both unit tests (for Rust only) and end-to-end tests.
-
-### Unit Testing
-To run unit tests for Rust, run the following commands under the root directory:
-```bash
-make rust_test
-```
-
-### End-to-End Testing
-To run end-to-end tests, start the frontend server and a compute server, and then run:
-```bash
-make sqllogictest
-python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/distributed/
-```
-
-To run end-to-end tests with multiple compute-nodes, run the script:
-```bash
-./scripts/start_cluster.sh 3
-```
-
-It will start processes in the background. After testing, you can run the following scriptto clean-up:
-```bash
-./scripts/kill_cluster.sh
 ```
 
 ## Pull Request Title
