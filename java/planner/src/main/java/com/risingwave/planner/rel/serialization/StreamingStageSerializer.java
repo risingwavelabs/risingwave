@@ -37,6 +37,9 @@ public class StreamingStageSerializer {
           // Only serialize the child if only one non-exchange child exists.
           StreamNode childSerialization = serialize(child);
           builder.addInput(childSerialization);
+        } else {
+          // Serialize the exchange node.
+          builder.addInput(child.serialize());
         }
       } else if (stageRoot.getInputs().size() == 2) {
         RisingWaveStreamingRel leftChild = (RisingWaveStreamingRel) stageRoot.getInputs().get(0);
@@ -45,6 +48,9 @@ public class StreamingStageSerializer {
           // Only serialize the child if only one non-exchange child exists.
           StreamNode childSerialization = serialize(leftChild);
           builder.addInput(childSerialization);
+        } else {
+          // Serialize the exchange node.
+          builder.addInput(leftChild.serialize());
         }
         RisingWaveStreamingRel rightChild = (RisingWaveStreamingRel) stageRoot.getInputs().get(1);
         // Stop the serialization when encountering exchange.
@@ -52,6 +58,9 @@ public class StreamingStageSerializer {
           // Only serialize the child if only one non-exchange child exists.
           StreamNode childSerialization = serialize(rightChild);
           builder.addInput(childSerialization);
+        } else {
+          // Serialize the exchange node.
+          builder.addInput(rightChild.serialize());
         }
       } else {
         throw new AssertionError("Plan node with more than 2 children");

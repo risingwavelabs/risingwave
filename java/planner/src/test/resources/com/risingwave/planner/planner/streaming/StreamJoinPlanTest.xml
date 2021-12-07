@@ -10,8 +10,7 @@ create materialized view T1 as select * from t, t3 where t.v2 = t3.v1;
 RwStreamMaterializedView(name=[t1])
   RwStreamHashJoin(condition=[=($1, $4)], joinType=[inner])
     RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
-      RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-        RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
     RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
       RwStreamTableSource(table=[[test_schema, t3]], columns=[v1,_row_id])
 ]]>

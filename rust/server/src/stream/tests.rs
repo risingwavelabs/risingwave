@@ -63,120 +63,135 @@ async fn test_stream_proto() {
                 fragment_id: 1,
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
-                    input: vec![],
+                    input: vec![StreamNode {
+                        node: Some(Node::MergeNode(MergeNode {
+                            upstream_fragment_id: vec![0],
+                            input_column_descs: vec![ColumnDesc {
+                                column_type: Some(DataType {
+                                    type_name: TypeName::Int32 as i32,
+                                    ..Default::default()
+                                }),
+                                ..Default::default()
+                            }],
+                        })),
+                        input: vec![],
+                        pk_indices: vec![],
+                    }],
                     pk_indices: vec![],
                 }),
-                mergers: vec![Merger {
-                    upstream_fragment_id: vec![0],
-                }],
                 dispatcher: Some(Dispatcher {
                     r#type: dispatcher::DispatcherType::RoundRobin as i32,
                     column_idx: 0,
                 }),
                 downstream_fragment_id: vec![3],
-                input_column_descs: vec![ColumnDesc {
-                    column_type: Some(DataType {
-                        type_name: TypeName::Int32 as i32,
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                }],
             },
             // create 1 -> (3) -> 7, 11
             StreamFragment {
                 fragment_id: 3,
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
-                    input: vec![],
+                    input: vec![StreamNode {
+                        node: Some(Node::MergeNode(MergeNode {
+                            upstream_fragment_id: vec![1],
+                            input_column_descs: vec![ColumnDesc {
+                                column_type: Some(DataType {
+                                    type_name: TypeName::Int32 as i32,
+                                    ..Default::default()
+                                }),
+                                ..Default::default()
+                            }],
+                        })),
+                        input: vec![],
+                        pk_indices: vec![],
+                    }],
                     pk_indices: vec![],
                 }),
-                mergers: vec![Merger {
-                    upstream_fragment_id: vec![1],
-                }],
                 dispatcher: Some(Dispatcher {
                     r#type: dispatcher::DispatcherType::RoundRobin as i32,
                     column_idx: 0,
                 }),
                 downstream_fragment_id: vec![7, 11],
-                input_column_descs: vec![ColumnDesc {
-                    column_type: Some(DataType {
-                        type_name: TypeName::Int32 as i32,
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                }],
             },
             // create 3 -> (7) -> 13
             StreamFragment {
                 fragment_id: 7,
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
-                    input: vec![],
+                    input: vec![StreamNode {
+                        node: Some(Node::MergeNode(MergeNode {
+                            upstream_fragment_id: vec![3],
+                            input_column_descs: vec![ColumnDesc {
+                                column_type: Some(DataType {
+                                    type_name: TypeName::Int32 as i32,
+                                    ..Default::default()
+                                }),
+                                ..Default::default()
+                            }],
+                        })),
+                        input: vec![],
+                        pk_indices: vec![],
+                    }],
                     pk_indices: vec![],
                 }),
-                mergers: vec![Merger {
-                    upstream_fragment_id: vec![3],
-                }],
                 dispatcher: Some(Dispatcher {
                     r#type: dispatcher::DispatcherType::RoundRobin as i32,
                     column_idx: 0,
                 }),
                 downstream_fragment_id: vec![13],
-                input_column_descs: vec![ColumnDesc {
-                    column_type: Some(DataType {
-                        type_name: TypeName::Int32 as i32,
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                }],
             },
             // create 3 -> (11) -> 13
             StreamFragment {
                 fragment_id: 11,
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
-                    input: vec![],
+                    input: vec![StreamNode {
+                        node: Some(Node::MergeNode(MergeNode {
+                            upstream_fragment_id: vec![3],
+                            input_column_descs: vec![ColumnDesc {
+                                column_type: Some(DataType {
+                                    type_name: TypeName::Int32 as i32,
+                                    ..Default::default()
+                                }),
+                                ..Default::default()
+                            }],
+                        })),
+                        input: vec![],
+                        pk_indices: vec![],
+                    }],
                     pk_indices: vec![],
                 }),
-                mergers: vec![Merger {
-                    upstream_fragment_id: vec![3],
-                }],
                 dispatcher: Some(Dispatcher {
                     r#type: dispatcher::DispatcherType::Simple as i32,
                     column_idx: 0,
                 }),
                 downstream_fragment_id: vec![13],
-                input_column_descs: vec![ColumnDesc {
-                    column_type: Some(DataType {
-                        type_name: TypeName::Int32 as i32,
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                }],
             },
             // create 7, 11 -> (13) -> 233
             StreamFragment {
                 fragment_id: 13,
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
-                    input: vec![],
+                    input: vec![StreamNode {
+                        node: Some(Node::MergeNode(MergeNode {
+                            upstream_fragment_id: vec![7, 11],
+                            input_column_descs: vec![ColumnDesc {
+                                column_type: Some(DataType {
+                                    type_name: TypeName::Int32 as i32,
+                                    ..Default::default()
+                                }),
+                                ..Default::default()
+                            }],
+                        })),
+                        input: vec![],
+                        pk_indices: vec![],
+                    }],
                     pk_indices: vec![],
                 }),
-                mergers: vec![Merger {
-                    upstream_fragment_id: vec![7, 11],
-                }],
                 dispatcher: Some(Dispatcher {
                     r#type: dispatcher::DispatcherType::Simple as i32,
                     column_idx: 0,
                 }),
                 downstream_fragment_id: vec![233],
-                input_column_descs: vec![ColumnDesc {
-                    column_type: Some(DataType {
-                        type_name: TypeName::Int32 as i32,
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                }],
             },
         ])
         .unwrap();

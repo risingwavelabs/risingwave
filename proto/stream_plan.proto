@@ -61,6 +61,12 @@ message HashJoinNode {
   repeated int32 right_key = 3;
 }
 
+message MergeNode {
+  repeated uint32 upstream_fragment_id = 1;
+  // The schema of input columns.
+  repeated plan.ColumnDesc input_column_descs = 2;
+}
+
 message StreamNode {
   // Some nodes we can reuse plan nodes from plan.proto.
   // TODO: should we enforce strong typed body on nodes?
@@ -74,6 +80,7 @@ message StreamNode {
     TopNNode append_only_top_n_node = 10;
     HashJoinNode hash_join_node = 11;
     TopNNode top_n_node = 12;
+    MergeNode merge_node = 13;
   }
   // Child node in plan aka. upstream nodes in the streaming DAG
   repeated StreamNode input = 3;
@@ -102,19 +109,8 @@ message Dispatcher {
 message StreamFragment {
   uint32 fragment_id = 1;
   StreamNode nodes = 2;
-  // We assume the given upstream fragment are always previously defined,
-  // i.e, the create stream requests must arrive in order.
-  repeated Merger mergers = 3;
-  Dispatcher dispatcher = 4;
+  Dispatcher dispatcher = 3;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
-  repeated uint32 downstream_fragment_id = 5;
-  // The schema of input columns.
-  repeated plan.ColumnDesc input_column_descs = 6;
+  repeated uint32 downstream_fragment_id = 4;
 }
 
-// Remark: we DO need to explicitly encode mergers in the proto as it is necessary.
-// A fragment can have multiple logical upstream and each logical upstream can have multiple physical fragments.
-// For example, join.
-message Merger {
-  repeated uint32 upstream_fragment_id = 1;
-}

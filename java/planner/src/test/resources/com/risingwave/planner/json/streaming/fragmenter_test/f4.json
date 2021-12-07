@@ -3,6 +3,22 @@
   "nodes": {
     "input": [{
       "input": [{
+        "input": [{
+          "mergeNode": {
+            "upstreamFragmentId": [6],
+            "inputColumnDescs": [{
+              "columnType": {
+                "typeName": "INT32"
+              },
+              "encoding": "RAW"
+            }, {
+              "columnType": {
+                "typeName": "INT32"
+              },
+              "encoding": "RAW"
+            }]
+          }
+        }],
         "filterNode": {
           "searchCondition": {
             "exprType": "GREATER_THAN",
@@ -86,21 +102,7 @@
       }]
     }
   },
-  "mergers": [{
-    "upstreamFragmentId": [6]
-  }],
   "dispatcher": {
   },
-  "downstreamFragmentId": [1],
-  "inputColumnDescs": [{
-    "columnType": {
-      "typeName": "INT32"
-    },
-    "encoding": "RAW"
-  }, {
-    "columnType": {
-      "typeName": "INT32"
-    },
-    "encoding": "RAW"
-  }]
+  "downstreamFragmentId": [1]
 }

@@ -36,5 +36,7 @@ public class StreamingRuleSets {
   // Since there will be fewer operators, these rules should always improve the cost
   public static final RuleSet STREAMING_REMOVE_RULES =
       RuleSets.ofList(
-          StreamingEliminateProjectRule.Config.DEFAULT.toRule(), AGGREGATE_PROJECT_MERGE);
+          StreamingEliminateProjectRule.Config.DEFAULT.toRule(),
+          StreamingEliminateExchangeRule.Config.DEFAULT.toRule(),
+          AGGREGATE_PROJECT_MERGE);
 }

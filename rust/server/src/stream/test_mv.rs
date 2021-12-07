@@ -21,8 +21,8 @@ use risingwave_pb::plan::{ColumnDesc, DatabaseRefId, SchemaRefId, TableRefId};
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::table_source_node::SourceType;
 use risingwave_pb::stream_plan::{
-    dispatcher::DispatcherType, Dispatcher, MViewNode, Merger, ProjectNode, StreamFragment,
-    StreamNode, TableSourceNode,
+    dispatcher::DispatcherType, Dispatcher, MViewNode, ProjectNode, StreamFragment, StreamNode,
+    TableSourceNode,
 };
 use risingwave_pb::stream_service::{ActorInfo, BroadcastActorInfoTableRequest};
 use risingwave_pb::task_service::HostAddress;
@@ -99,21 +99,11 @@ async fn test_stream_mv_proto() {
     let fragment_proto = StreamFragment {
         fragment_id: 1,
         nodes: Some(mview_proto),
-        mergers: vec![Merger {
-            upstream_fragment_id: vec![0],
-        }],
         dispatcher: Some(Dispatcher {
             r#type: DispatcherType::Simple as i32,
             column_idx: 0,
         }),
         downstream_fragment_id: vec![233],
-        input_column_descs: vec![ColumnDesc {
-            column_type: Some(DataType {
-                type_name: TypeName::Int32 as i32,
-                ..Default::default()
-            }),
-            ..Default::default()
-        }],
     };
 
     // Initialize storage.

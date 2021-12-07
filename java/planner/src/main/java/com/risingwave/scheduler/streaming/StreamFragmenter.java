@@ -2,6 +2,8 @@ package com.risingwave.scheduler.streaming;
 
 import static java.util.Objects.requireNonNull;
 
+import com.risingwave.common.exception.PgErrorCode;
+import com.risingwave.common.exception.PgException;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.planner.rel.streaming.RisingWaveStreamingRel;
 import com.risingwave.planner.rel.streaming.RwStreamExchange;
@@ -127,12 +129,16 @@ public class StreamFragmenter {
       // Currently, we assume the parallel degree is at least 4, and grows linearly with more worker
       // nodes added.
       int parallelDegree = Integer.max(context.getWorkerNodeManager().allNodes().size() * 2, 4);
+      var currentStageRoot = currentStage.getRoot();
       for (int i = 0; i < parallelDegree; i++) {
-        if (currentStage.getRoot() instanceof RwStreamExchange) {
+        if (currentStageRoot instanceof RwStreamExchange) {
           RwStreamExchange exchange = (RwStreamExchange) currentStage.getRoot();
           StreamFragment fragment = newStreamFragment(exchange, context.getStreamManager());
           int fragmentId = fragment.getId();
           StreamFragment.FragmentBuilder builder = fragment.toBuilder();
+
+          // Add the upstream fragment id to the exchange node.
+          ((RwStreamExchange) currentStageRoot).addUpStream(fragmentId);
 
           // Add dispatcher.
           RelDistribution distribution = exchange.getDistribution();
@@ -150,30 +156,22 @@ public class StreamFragmenter {
             graphBuilder.addDependency(currentStage.getStageId(), fragmentId, lastId);
           }
           currentStageFragmentList.add(fragmentId);
-
-        } else if (lastStageFragmentList.size() == 1) {
-          StreamFragment fragment =
-              newStreamFragment(currentStage.getRoot(), context.getStreamManager());
-          int fragmentId = fragment.getId();
-          graphBuilder.addFragment(fragmentId, fragment);
-          int lastStageFragmentId = lastStageFragmentList.get(0);
-          // Add dispatcher.
-          StreamFragment.FragmentBuilder builder = fragment.toBuilder();
-          builder.addSimpleDispatcher();
-          // Add fragment and dependencies.
-          graphBuilder.addFragment(fragmentId, builder.build());
-          graphBuilder.addDependency(currentStage.getStageId(), fragmentId, lastStageFragmentId);
-          currentStageFragmentList.add(fragment.getId());
+        } else {
+          throw new PgException(PgErrorCode.INTERNAL_ERROR, "Should not reach this block");
         }
       }
     } else {
       // Stage on the source.
       int parallelDegree = context.getWorkerNodeManager().allNodes().size();
+      var currentStageRoot = currentStage.getRoot();
       for (int i = 0; i < parallelDegree; i++) {
         RwStreamExchange exchange = (RwStreamExchange) currentStage.getRoot();
         StreamFragment fragment = newStreamFragment(exchange, context.getStreamManager());
         int fragmentId = fragment.getId();
         StreamFragment.FragmentBuilder builder = fragment.toBuilder();
+
+        // Add the upstream fragment id to the exchange node.
+        ((RwStreamExchange) currentStageRoot).addUpStream(fragmentId);
 
         // Add dispatcher.
         RelDistribution distribution = exchange.getDistribution();

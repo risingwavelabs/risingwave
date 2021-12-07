@@ -349,26 +349,19 @@ impl StreamManagerCore {
     /// Create a chain(tree) of nodes and return the head executor.
     fn create_nodes(
         &mut self,
+        fragment_id: u32,
         node: &stream_plan::StreamNode,
-        mergers: Vec<Box<dyn Executor>>,
         env: GlobalTaskEnv,
     ) -> Result<Box<dyn Executor>> {
         use stream_plan::stream_node::Node::*;
 
         // Create the input executor before creating itself
-        // Note(eric): Maybe we should put a `Merger` executor in proto
-        let mut input: Vec<Box<dyn Executor>> = {
-            if !node.input.is_empty() {
-                assert_eq!(node.input.len(), mergers.len());
-                node.input
-                    .iter()
-                    .zip(mergers.into_iter())
-                    .map(|(input, merger)| self.create_nodes(input, vec![merger], env.clone()))
-                    .collect::<Result<Vec<_>>>()?
-            } else {
-                mergers
-            }
-        };
+        // The node with no input must be a `MergeNode`
+        let mut input: Vec<Box<dyn Executor>> = node
+            .input
+            .iter()
+            .map(|input| self.create_nodes(fragment_id, input, env.clone()))
+            .collect::<Result<Vec<_>>>()?;
 
         let table_manager = env.table_manager();
         let source_manager = env.source_manager();
@@ -572,12 +565,17 @@ impl StreamManagerCore {
                 ));
                 Ok(executor)
             }
+            MergeNode(merge_node) => {
+                let schema = Schema::try_from(merge_node.get_input_column_descs())?;
+                let upstreams = merge_node.get_upstream_fragment_id();
+                self.create_merge_node(fragment_id, schema, upstreams)
+            }
         };
 
         executor
     }
 
-    fn create_merger(
+    fn create_merge_node(
         &mut self,
         fragment_id: u32,
         schema: Schema,
@@ -688,22 +686,7 @@ impl StreamManagerCore {
         for fragment_id in fragments {
             let fragment = self.fragments.remove(fragment_id).unwrap();
 
-            let schema = Schema::try_from(fragment.get_input_column_descs())?;
-
-            let mergers: Vec<Box<dyn Executor>> = fragment
-                .mergers
-                .iter()
-                .filter_map(|merger| {
-                    let upstream_ids = merger.get_upstream_fragment_id();
-                    if upstream_ids.is_empty() {
-                        None
-                    } else {
-                        Some(self.create_merger(*fragment_id, schema.clone(), upstream_ids))
-                    }
-                })
-                .collect::<Result<Vec<_>>>()?;
-
-            let executor = self.create_nodes(fragment.get_nodes(), mergers, env.clone())?;
+            let executor = self.create_nodes(*fragment_id, fragment.get_nodes(), env.clone())?;
             let dispatcher = self.create_dispatcher(
                 executor,
                 fragment.get_dispatcher(),

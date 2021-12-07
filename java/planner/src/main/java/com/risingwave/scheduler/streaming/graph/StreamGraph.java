@@ -1,9 +1,6 @@
 package com.risingwave.scheduler.streaming.graph;
 
 import com.google.common.collect.ImmutableMap;
-import com.risingwave.catalog.ColumnDesc;
-import com.risingwave.catalog.ColumnEncoding;
-import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.planner.rel.streaming.RisingWaveStreamingRel;
@@ -81,21 +78,7 @@ public class StreamGraph {
           int upStreamExampleId = fragment.getUpstreamSets().get(0).right.asList().get(0);
           StreamFragment upStreamExampleFragment = fragments.get(upStreamExampleId);
           RisingWaveStreamingRel exampleRoot = upStreamExampleFragment.getRoot();
-          // Add every column from its upstream root node.
-          // Here root node would suffice as the streaming plan is still reversed.
-          // E.g. Source -> Filter -> Proj. The root will be project and the schema of project is
-          // what we needed.
-          var rowType = exampleRoot.getRowType();
-          List<ColumnDesc> schema = new ArrayList<>();
-          for (int i = 0; i < rowType.getFieldCount(); i++) {
-            var field = rowType.getFieldList().get(i);
-            ColumnDesc columnDesc =
-                new ColumnDesc((RisingWaveDataType) field.getType(), false, ColumnEncoding.RAW);
-            schema.add(columnDesc);
-          }
-          StreamFragment.FragmentBuilder builder = fragment.toBuilder();
-          builder.addInputSchema(schema);
-          fragments.put(fragment.getId(), builder.build());
+          fragments.put(fragment.getId(), fragment);
         }
       }
       // Build stream graph.

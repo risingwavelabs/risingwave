@@ -3,6 +3,22 @@
   "nodes": {
     "input": [{
       "input": [{
+        "input": [{
+          "mergeNode": {
+            "upstreamFragmentId": [2, 3, 4, 5],
+            "inputColumnDescs": [{
+              "columnType": {
+                "typeName": "INT64"
+              },
+              "encoding": "RAW"
+            }, {
+              "columnType": {
+                "typeName": "INT64"
+              },
+              "encoding": "RAW"
+            }]
+          }
+        }],
         "simpleAggNode": {
           "aggCalls": [{
             "type": "SUM",
@@ -91,21 +107,7 @@
       }]
     }
   },
-  "mergers": [{
-    "upstreamFragmentId": [2, 3, 4, 5]
-  }],
   "dispatcher": {
     "type": "BLACKHOLE"
-  },
-  "inputColumnDescs": [{
-    "columnType": {
-      "typeName": "INT64"
-    },
-    "encoding": "RAW"
-  }, {
-    "columnType": {
-      "typeName": "INT64"
-    },
-    "encoding": "RAW"
-  }]
+  }
 }

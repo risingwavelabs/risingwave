@@ -70,8 +70,7 @@ RwStreamMaterializedView(name=[t_order_after_aggregation], collation=[[1 DESC]])
     RwStreamFilter(condition=[<>($3, 0)])
       RwStreamAgg(group=[{0, 1}], c=[AVG($2)], Row Count=[COUNT()])
         RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
-          RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-            RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3])
+          RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3])
 ]]>
         </Resource>
         <Resource name="primaryKey">
