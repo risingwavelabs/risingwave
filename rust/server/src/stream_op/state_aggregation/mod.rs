@@ -4,6 +4,7 @@ mod value;
 use risingwave_common::expr::AggKind;
 pub use value::*;
 mod extreme;
+mod extreme_serializer;
 mod sort_key_serializer;
 
 pub use extreme::*;
@@ -82,6 +83,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
         agg_call: AggCall,
         keyspace: Keyspace<S>,
         row_count: Option<usize>,
+        pk_length: usize,
     ) -> Result<Self> {
         match agg_call.kind {
             AggKind::Max | AggKind::Min => {
@@ -96,6 +98,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
                         row_count.unwrap(),
                         // TODO: estimate a good cache size instead of hard-coding
                         Some(1024),
+                        pk_length,
                     )
                     .await?,
                 ))

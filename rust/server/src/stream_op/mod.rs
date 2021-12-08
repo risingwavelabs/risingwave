@@ -128,6 +128,7 @@ pub trait Executor: Send + 'static {
 }
 
 pub type PKVec = Vec<usize>;
+pub type PKVecRef<'a> = &'a [usize];
 
 /// `SimpleExecutor` accepts a single chunk as input.
 pub trait SimpleExecutor: Executor {

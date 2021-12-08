@@ -385,6 +385,7 @@ impl<S: StateStore> HashAggExecutor<S> {
                         agg_call.clone(),
                         keyspace,
                         row_count,
+                        self.pk_indices.len(),
                     )
                     .await?;
                     if idx == 0 {
@@ -421,6 +422,7 @@ impl<S: StateStore> HashAggExecutor<S> {
                 .iter_mut()
                 .zip(all_agg_input_arrays.iter())
             {
+                // When applying batch, we will send columns of primary keys to the last N columns.
                 if input_arrays.is_empty() {
                     agg_state.apply_batch(&ops, Some(&vis_map), &[]).await?;
                 } else {

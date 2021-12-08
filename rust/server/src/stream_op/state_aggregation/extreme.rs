@@ -1,21 +1,21 @@
 use async_trait::async_trait;
 use bytes::Bytes;
-use rust_decimal::Decimal;
 use std::collections::{btree_map, BTreeMap};
 
 use risingwave_common::array::stream_chunk::{Op, Ops};
-use risingwave_common::array::ArrayImpl;
+use risingwave_common::array::{Array, ArrayImpl, DecimalArray, I16Array, I32Array, I64Array};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::{
     deserialize_datum_not_null_from, serialize_datum_not_null_into, DataTypeKind, DataTypeRef,
-    Datum, Scalar, ScalarImpl,
+    Datum, ScalarImpl, ScalarRef,
 };
 
-use crate::stream_op::{AggArgs, AggCall};
-
 use super::super::keyspace::{Keyspace, StateStore};
+use super::extreme_serializer::{ExtremePK, ExtremeSerializer};
+use crate::stream_op::{AggArgs, AggCall};
+use itertools::Itertools;
 
 /// Manages a `BTreeMap` in memory for top N entries, and the state store for remaining entries.
 ///
@@ -37,13 +37,17 @@ use super::super::keyspace::{Keyspace, StateStore};
 /// The `ExtremeState` need some special properties from the storage engine and the executor.
 /// * The output of an `ExtremeState` is only correct when all changes have been flushed to the
 ///   state store.
-pub struct ManagedMinState<S: StateStore, K: Scalar + Ord> {
+/// * The `RowIDs` must be i64
+pub struct ManagedMinState<S: StateStore, A: Array>
+where
+    A::OwnedItem: Ord,
+{
     /// Top N elements in the state, which stores the mapping of sort key -> (dirty, original
     /// value). This BTreeMap always maintain the elements that we are sure it's top n.
-    top_n: BTreeMap<K, ScalarImpl>,
+    top_n: BTreeMap<(A::OwnedItem, ExtremePK), ScalarImpl>,
 
     /// The actions that will be taken on next flush
-    flush_buffer: BTreeMap<K, Option<ScalarImpl>>,
+    flush_buffer: BTreeMap<(A::OwnedItem, ExtremePK), Option<ScalarImpl>>,
 
     /// Number of items in the state including those not in top n cache but in state store.
     total_count: usize,
@@ -56,6 +60,12 @@ pub struct ManagedMinState<S: StateStore, K: Scalar + Ord> {
 
     /// The keyspace to operate on.
     keyspace: Keyspace<S>,
+
+    /// The sort key serializer
+    serializer: ExtremeSerializer<A::OwnedItem>,
+
+    /// Length of primary keys
+    pk_length: usize,
 }
 
 /// A trait over all extreme states.
@@ -83,7 +93,11 @@ pub trait ManagedExtremeState<S: StateStore>: Send + Sync + 'static {
     fn flush(&mut self, write_batch: &mut Vec<(Bytes, Option<Bytes>)>) -> Result<()>;
 }
 
-impl<S: StateStore, K: Scalar + Ord> ManagedMinState<S, K> {
+impl<S: StateStore, A: Array> ManagedMinState<S, A>
+where
+    A::OwnedItem: Ord,
+    for<'a> &'a A: From<&'a ArrayImpl>,
+{
     /// Create a managed min state based on `Keyspace`. When `top_n_count` is `None`, the cache will
     /// always be retained when flushing the managed state. Otherwise, we will only retain n entries
     /// after each flush.
@@ -92,6 +106,7 @@ impl<S: StateStore, K: Scalar + Ord> ManagedMinState<S, K> {
         data_type: DataTypeRef,
         top_n_count: Option<usize>,
         row_count: usize,
+        pk_length: usize,
     ) -> Result<Self> {
         // Create the internal state based on the value we get.
         Ok(Self {
@@ -101,6 +116,8 @@ impl<S: StateStore, K: Scalar + Ord> ManagedMinState<S, K> {
             keyspace,
             top_n_count,
             data_type,
+            serializer: ExtremeSerializer::new(pk_length),
+            pk_length,
         })
     }
 
@@ -112,12 +129,9 @@ impl<S: StateStore, K: Scalar + Ord> ManagedMinState<S, K> {
             }
         }
     }
-}
 
-#[async_trait]
-impl<S: StateStore, K: Scalar + Ord> ManagedExtremeState<S> for ManagedMinState<S, K> {
     /// Apply a batch of data to the state.
-    async fn apply_batch(
+    async fn apply_batch_inner(
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
@@ -126,76 +140,68 @@ impl<S: StateStore, K: Scalar + Ord> ManagedExtremeState<S> for ManagedMinState<
         debug_assert!(super::verify_batch(ops, visibility, data));
         assert_eq!(data.len(), 1);
 
-        if self.total_count == self.top_n.len() {
-            // All data resides in memory, we only need to operate on the top n cache.
-            for (id, (op, data)) in ops.iter().zip(data[0].iter()).enumerate() {
-                let visible = visibility.map(|x| x.is_set(id).unwrap()).unwrap_or(true);
-                if !visible {
-                    continue;
-                }
-                let value: ScalarImpl = data.expect("sort key cannot be null").into_scalar_impl();
-                let key: K = value.clone().try_into().unwrap();
-                match op {
-                    Op::Insert | Op::UpdateInsert => {
-                        self.top_n.insert(key.clone(), value.clone());
-                        self.flush_buffer.insert(key, Some(value));
-                        self.total_count += 1;
-                    }
-                    Op::Delete | Op::UpdateDelete => {
-                        self.top_n.remove(&key);
-                        match self.flush_buffer.entry(key) {
-                            btree_map::Entry::Vacant(e) => {
-                                e.insert(None);
-                            }
-                            btree_map::Entry::Occupied(e) => {
-                                e.remove();
-                            }
-                        }
-                        self.total_count -= 1;
-                    }
-                }
-            }
-        } else {
-            // `self.top_n` only contains parts of the top keys. When applying batch, we only:
-            // 1. Insert keys that is in the range of top n, so that we only maintain the top keys
-            // we are sure the minimum.
-            // 2. Delete keys if exists in top_n cache.
-            // If the top n cache becomes empty after applying the batch, we will merge data from
-            // flush_buffer and state store when getting the output.
+        // `self.top_n` only contains parts of the top keys. When applying batch, we only:
+        // 1. Insert keys that is in the range of top n, so that we only maintain the top keys we
+        // are sure the minimum.
+        // 2. Delete keys if exists in top_n cache.
+        // If the top n cache becomes empty after applying the batch, we will merge data from
+        // flush_buffer and state store when getting the output.
 
-            for (id, (op, data)) in ops.iter().zip(data[0].iter()).enumerate() {
-                let visible = visibility.map(|x| x.is_set(id).unwrap()).unwrap_or(true);
-                if !visible {
-                    continue;
+        let data_column: &A = data[0].into();
+        let pk_columns = (0..self.pk_length)
+            .map(|idx| data[idx + 1].as_int64())
+            .collect_vec();
+
+        for (id, (op, key)) in ops.iter().zip(data_column.iter()).enumerate() {
+            let visible = visibility.map(|x| x.is_set(id).unwrap()).unwrap_or(true);
+            if !visible {
+                continue;
+            }
+
+            // Assert key is not null
+            let key = key.expect("sort key can't be null").to_owned_scalar();
+
+            // Concat pk with the original key to create a composed key
+            let composed_key = (
+                key.clone(),
+                // Collect pk from columns
+                pk_columns
+                    .iter()
+                    .map(|col| col.value_at(id).expect("pk can't be null"))
+                    .collect(),
+            );
+
+            match op {
+                Op::Insert | Op::UpdateInsert => {
+                    let mut do_insert = false;
+                    if self.total_count == self.top_n.len() {
+                        // Data fully cached in memory
+                        do_insert = true;
+                    } else if let Some((last_key, _)) = self.top_n.last_key_value() {
+                        if &composed_key < last_key {
+                            do_insert = true;
+                        }
+                    }
+
+                    let value: ScalarImpl = key.clone().into();
+
+                    if do_insert {
+                        self.top_n.insert(composed_key.clone(), value.clone());
+                    }
+                    self.flush_buffer.insert(composed_key, Some(value));
+                    self.total_count += 1;
                 }
-                let value: ScalarImpl = data.expect("sort key cannot be null").into_scalar_impl();
-                let key: K = value.clone().try_into().unwrap();
-                match op {
-                    Op::Insert | Op::UpdateInsert => {
-                        let mut do_insert = false;
-                        if let Some((last_key, _)) = self.top_n.last_key_value() {
-                            if &key < last_key {
-                                do_insert = true;
-                            }
+                Op::Delete | Op::UpdateDelete => {
+                    self.top_n.remove(&composed_key);
+                    match self.flush_buffer.entry(composed_key) {
+                        btree_map::Entry::Vacant(e) => {
+                            e.insert(None);
                         }
-                        if do_insert {
-                            self.top_n.insert(key.clone(), value.clone());
+                        btree_map::Entry::Occupied(e) => {
+                            e.remove();
                         }
-                        self.flush_buffer.insert(key, Some(value));
-                        self.total_count += 1;
                     }
-                    Op::Delete | Op::UpdateDelete => {
-                        self.top_n.remove(&key);
-                        match self.flush_buffer.entry(key) {
-                            btree_map::Entry::Vacant(e) => {
-                                e.insert(None);
-                            }
-                            btree_map::Entry::Occupied(e) => {
-                                e.remove();
-                            }
-                        }
-                        self.total_count -= 1;
-                    }
+                    self.total_count -= 1;
                 }
             }
         }
@@ -205,7 +211,7 @@ impl<S: StateStore, K: Scalar + Ord> ManagedExtremeState<S> for ManagedMinState<
         Ok(())
     }
 
-    async fn get_output(&mut self) -> Result<Datum> {
+    async fn get_output_inner(&mut self) -> Result<Datum> {
         // To make things easier, we do not allow get_output before flushing. Otherwise we will need
         // to merge data from flush_buffer and state store, which is hard to implement.
         //
@@ -220,7 +226,7 @@ impl<S: StateStore, K: Scalar + Ord> ManagedExtremeState<S> for ManagedMinState<
         } else {
             let all_data = self.keyspace.scan(self.top_n_count).await?;
 
-            for (_, raw_value) in all_data {
+            for (raw_key, raw_value) in all_data {
                 let mut deserializer = memcomparable::Deserializer::from_slice(&raw_value[..]);
                 let value = deserialize_datum_not_null_from(
                     &self.data_type.data_type_kind(),
@@ -229,7 +235,8 @@ impl<S: StateStore, K: Scalar + Ord> ManagedExtremeState<S> for ManagedMinState<
                 .map_err(ErrorCode::MemComparableError)?
                 .unwrap();
                 let key = value.clone().try_into().unwrap();
-                self.top_n.insert(key, value);
+                let pks = self.serializer.get_pk(&raw_key[..])?;
+                self.top_n.insert((key, pks), value);
             }
 
             if let Some((_, v)) = self.top_n.first_key_value() {
@@ -240,13 +247,8 @@ impl<S: StateStore, K: Scalar + Ord> ManagedExtremeState<S> for ManagedMinState<
         }
     }
 
-    /// Check if this state needs a flush.
-    fn is_dirty(&self) -> bool {
-        !self.flush_buffer.is_empty()
-    }
-
     /// Flush the internal state to a write batch. TODO: add `WriteBatch` to Hummock.
-    fn flush(&mut self, write_batch: &mut Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
+    fn flush_inner(&mut self, write_batch: &mut Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
         // Generally, we require the state the be dirty before flushing. However, it is possible
         // that after a sequence of operations, the flush buffer becomes empty. Then, the
         // state becomes "dirty", but we do not need to flush anything.
@@ -257,31 +259,20 @@ impl<S: StateStore, K: Scalar + Ord> ManagedExtremeState<S> for ManagedMinState<
 
         // TODO: we can populate the cache while flushing, but that's hard.
 
-        for (k, v) in std::mem::take(&mut self.flush_buffer) {
+        for ((key, pks), v) in std::mem::take(&mut self.flush_buffer) {
+            let key_encoded = self.serializer.serialize(key, &pks)?;
+            let key_encoded = [self.keyspace.prefix(), &key_encoded[..]].concat();
+
             match v {
                 Some(v) => {
-                    let mut serializer = memcomparable::Serializer::default();
-                    serialize_datum_not_null_into(&Some(k.into()), &mut serializer)
-                        .map_err(ErrorCode::MemComparableError)?;
-                    let key = serializer.into_inner();
-
                     let mut serializer = memcomparable::Serializer::default();
                     serialize_datum_not_null_into(&Some(v), &mut serializer)
                         .map_err(ErrorCode::MemComparableError)?;
                     let value = serializer.into_inner();
-
-                    write_batch.push((
-                        [self.keyspace.prefix(), &key[..]].concat().into(),
-                        Some(value.into()),
-                    ));
+                    write_batch.push((key_encoded.into(), Some(value.into())));
                 }
                 None => {
-                    let mut serializer = memcomparable::Serializer::default();
-                    serialize_datum_not_null_into(&Some(k.into()), &mut serializer)
-                        .map_err(ErrorCode::MemComparableError)?;
-                    let key = serializer.into_inner();
-
-                    write_batch.push(([self.keyspace.prefix(), &key[..]].concat().into(), None));
+                    write_batch.push((key_encoded.into(), None));
                 }
             }
         }
@@ -292,13 +283,45 @@ impl<S: StateStore, K: Scalar + Ord> ManagedExtremeState<S> for ManagedMinState<
     }
 }
 
-impl<S: StateStore, K: Scalar + Ord> ManagedMinState<S, K> {
+#[async_trait]
+impl<S: StateStore, A: Array> ManagedExtremeState<S> for ManagedMinState<S, A>
+where
+    A::OwnedItem: Ord,
+    for<'a> &'a A: From<&'a ArrayImpl>,
+{
+    async fn apply_batch(
+        &mut self,
+        ops: Ops<'_>,
+        visibility: Option<&Bitmap>,
+        data: &[&ArrayImpl],
+    ) -> Result<()> {
+        self.apply_batch_inner(ops, visibility, data).await
+    }
+
+    async fn get_output(&mut self) -> Result<Datum> {
+        self.get_output_inner().await
+    }
+
+    /// Check if this state needs a flush.
+    fn is_dirty(&self) -> bool {
+        !self.flush_buffer.is_empty()
+    }
+
+    fn flush(&mut self, write_batch: &mut Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
+        self.flush_inner(write_batch)
+    }
+}
+
+impl<S: StateStore, A: Array> ManagedMinState<S, A>
+where
+    A::OwnedItem: Ord,
+{
     #[cfg(test)]
-    pub async fn iterate_store(&self) -> Result<Vec<K>> {
+    pub async fn iterate_store(&self) -> Result<Vec<(A::OwnedItem, ExtremePK)>> {
         let all_data = self.keyspace.scan(None).await?;
         let mut result = vec![];
 
-        for (_, raw_value) in all_data {
+        for (raw_key, raw_value) in all_data {
             let mut deserializer = memcomparable::Deserializer::from_slice(&raw_value[..]);
             let value = deserialize_datum_not_null_from(
                 &self.data_type.data_type_kind(),
@@ -307,13 +330,14 @@ impl<S: StateStore, K: Scalar + Ord> ManagedMinState<S, K> {
             .map_err(ErrorCode::MemComparableError)?
             .unwrap();
             let key = value.clone().try_into().unwrap();
-            result.push(key);
+            let pks = self.serializer.get_pk(&raw_key[..])?;
+            result.push((key, pks));
         }
         Ok(result)
     }
 
     #[cfg(test)]
-    pub async fn iterate_topn_cache(&self) -> Result<Vec<K>> {
+    pub async fn iterate_topn_cache(&self) -> Result<Vec<(A::OwnedItem, ExtremePK)>> {
         Ok(self.top_n.iter().map(|(k, _)| k.clone()).collect())
     }
 }
@@ -335,7 +359,7 @@ mod tests {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
         let mut managed_state =
-            ManagedMinState::<_, i64>::new(keyspace, Int64Type::create(false), Some(5), 0)
+            ManagedMinState::<_, I64Array>::new(keyspace, Int64Type::create(false), Some(5), 0, 0)
                 .await
                 .unwrap();
         assert!(!managed_state.is_dirty());
@@ -461,10 +485,15 @@ mod tests {
 
         // test recovery
         let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
-        let mut managed_state =
-            ManagedMinState::<_, i64>::new(keyspace, Int64Type::create(false), Some(5), row_count)
-                .await
-                .unwrap();
+        let mut managed_state = ManagedMinState::<_, I64Array>::new(
+            keyspace,
+            Int64Type::create(false),
+            Some(5),
+            row_count,
+            0,
+        )
+        .await
+        .unwrap();
 
         // The minimum should still be 30
         assert_eq!(
@@ -478,7 +507,7 @@ mod tests {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
         let mut managed_state =
-            ManagedMinState::<_, i64>::new(keyspace, Int64Type::create(false), Some(3), 0)
+            ManagedMinState::<_, I64Array>::new(keyspace, Int64Type::create(false), Some(3), 0, 0)
                 .await
                 .unwrap();
         assert!(!managed_state.is_dirty());
@@ -539,7 +568,7 @@ mod tests {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
         let mut managed_state =
-            ManagedMinState::<_, i64>::new(keyspace, Int64Type::create(false), Some(3), 0)
+            ManagedMinState::<_, I64Array>::new(keyspace, Int64Type::create(false), Some(3), 0, 0)
                 .await
                 .unwrap();
 
@@ -612,6 +641,7 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
     keyspace: Keyspace<S>,
     row_count: usize,
     top_n_count: Option<usize>,
+    pk_length: usize,
 ) -> Result<Box<dyn ManagedExtremeState<S>>> {
     match &agg_call.args {
         AggArgs::Unary(x, _) => {
@@ -633,38 +663,42 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
             todo!("max is not supported for now");
         }
         (AggKind::Min, DataTypeKind::Int64) => Ok(Box::new(
-            ManagedMinState::<_, i64>::new(
+            ManagedMinState::<_, I64Array>::new(
                 keyspace,
                 agg_call.return_type.clone(),
                 top_n_count,
                 row_count,
+                pk_length,
             )
             .await?,
         )),
         (AggKind::Min, DataTypeKind::Int32) => Ok(Box::new(
-            ManagedMinState::<_, i32>::new(
+            ManagedMinState::<_, I32Array>::new(
                 keyspace,
                 agg_call.return_type.clone(),
                 top_n_count,
                 row_count,
+                pk_length,
             )
             .await?,
         )),
         (AggKind::Min, DataTypeKind::Int16) => Ok(Box::new(
-            ManagedMinState::<_, i16>::new(
+            ManagedMinState::<_, I16Array>::new(
                 keyspace,
                 agg_call.return_type.clone(),
                 top_n_count,
                 row_count,
+                pk_length,
             )
             .await?,
         )),
         (AggKind::Min, DataTypeKind::Decimal) => Ok(Box::new(
-            ManagedMinState::<_, Decimal>::new(
+            ManagedMinState::<_, DecimalArray>::new(
                 keyspace,
                 agg_call.return_type.clone(),
                 top_n_count,
                 row_count,
+                pk_length,
             )
             .await?,
         )),
