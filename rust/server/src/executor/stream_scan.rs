@@ -1,6 +1,5 @@
 use std::fmt::{Debug, Formatter};
 
-use itertools::Itertools;
 use prost::Message;
 
 use risingwave_common::array::DataChunk;
@@ -11,23 +10,14 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan::StreamScanNode;
 
 use crate::executor::{Executor, ExecutorBuilder};
-use crate::source::{
-    BatchSourceReader, HighLevelKafkaSourceReaderContext, Source, SourceColumnDesc, SourceImpl,
-};
+use crate::source::{BatchSourceReader, HighLevelKafkaSourceReaderContext, Source, SourceImpl};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 
 pub struct StreamScanExecutor {
     reader: Box<dyn BatchSourceReader>,
-    columns: Vec<SourceColumnDesc>,
     done: bool,
     schema: Schema,
-}
-
-impl StreamScanExecutor {
-    pub fn columns(&self) -> &[SourceColumnDesc] {
-        self.columns.as_slice()
-    }
 }
 
 impl BoxedExecutorBuilder for StreamScanExecutor {
@@ -46,49 +36,40 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
             .source_manager()
             .get_source(&table_id)?;
 
-        let column_idxes = stream_scan_node
-            .get_column_ids()
+        let column_ids = stream_scan_node.get_column_ids();
+
+        let fields = column_ids
             .iter()
             .map(|id| {
                 source_desc
                     .columns
                     .iter()
-                    .position(|c| c.column_id == *id)
-                    .ok_or_else::<RwError, _>(|| {
-                        InternalError(format!(
-                            "column id {:?} not found in table {:?}",
+                    .find(|c| c.column_id == *id)
+                    .map(|col| Field {
+                        data_type: col.data_type.clone(),
+                    })
+                    .ok_or_else(|| {
+                        RwError::from(InternalError(format!(
+                            "Failed to find column id: {} in source: {:?}",
                             id, table_id
-                        ))
-                        .into()
+                        )))
                     })
             })
-            .try_collect::<_, Vec<usize>, _>()?;
-
-        let columns = column_idxes
-            .iter()
-            .map(|idx| source_desc.columns[*idx].clone())
-            .collect::<Vec<SourceColumnDesc>>();
-
-        let fields = columns
-            .iter()
-            .map(|col| Field {
-                data_type: col.data_type.clone(),
-            })
-            .collect::<Vec<Field>>();
+            .collect::<Result<Vec<Field>>>()?;
 
         let reader: Box<dyn BatchSourceReader> = match source_desc.source.as_ref() {
-            SourceImpl::HighLevelKafka(k) => {
-                Box::new(k.batch_reader(HighLevelKafkaSourceReaderContext {
+            SourceImpl::HighLevelKafka(k) => Box::new(k.batch_reader(
+                HighLevelKafkaSourceReaderContext {
                     query_id: Some(source.task_id.clone().query_id),
                     bound_timestamp_ms: Some(stream_scan_node.timestamp_ms),
-                })?)
-            }
+                },
+                column_ids.clone(),
+            )?),
             SourceImpl::Table(_) => panic!("use table_scan to scan a table"),
         };
 
         Ok(Box::new(Self {
             reader,
-            columns,
             done: false,
             schema: Schema { fields },
         }))
@@ -117,7 +98,7 @@ impl Executor for StreamScanExecutor {
 impl Debug for StreamScanExecutor {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StreamScanExecutor")
-            .field("columns", &self.columns)
+            .field("schema", &self.schema)
             .field("done", &self.done)
             .finish()
     }

@@ -63,13 +63,17 @@ impl SourceImpl {
     }
 
     /// Create a batch reader
-    pub fn batch_reader(&self, ctx: SourceReaderContext) -> Result<Box<dyn BatchSourceReader>> {
+    pub fn batch_reader(
+        &self,
+        ctx: SourceReaderContext,
+        column_ids: Vec<i32>,
+    ) -> Result<Box<dyn BatchSourceReader>> {
         match (self, ctx) {
             (SourceImpl::HighLevelKafka(source), SourceReaderContext::HighLevelKafka(ctx)) => {
-                Ok(Box::new(source.batch_reader(ctx)?))
+                Ok(Box::new(source.batch_reader(ctx, column_ids)?))
             }
             (SourceImpl::Table(source), SourceReaderContext::Table(ctx)) => {
-                Ok(Box::new(source.batch_reader(ctx)?))
+                Ok(Box::new(source.batch_reader(ctx, column_ids)?))
             }
             _ => Err(RwError::from(ProtocolError(
                 "context type illegal".to_string(),
@@ -86,7 +90,11 @@ pub trait Source: Send + Sync + 'static {
     type Writer: SourceWriter;
 
     /// Create a batch reader
-    fn batch_reader(&self, context: Self::ReaderContext) -> Result<Self::BatchReader>;
+    fn batch_reader(
+        &self,
+        context: Self::ReaderContext,
+        column_ids: Vec<i32>,
+    ) -> Result<Self::BatchReader>;
 
     /// Create a stream reader
     fn stream_reader(

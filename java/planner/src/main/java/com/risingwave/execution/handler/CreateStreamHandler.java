@@ -74,6 +74,8 @@ public class CreateStreamHandler implements SqlHandler {
       createStreamNodeBuilder.addColumnDescs(columnDescBuilder);
     }
 
+    createStreamNodeBuilder.setRowIdIndex(0);
+
     createStreamNodeBuilder.putAllProperties(table.getProperties());
 
     switch (table.getRowFormat().toLowerCase()) {

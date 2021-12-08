@@ -131,6 +131,7 @@ message CreateStreamNode {
   RowFormatType format = 3;
   map<string, string> properties = 4;
   string schema_location = 5;
+  int32 row_id_index = 6;
 }
 
 message DropStreamNode {

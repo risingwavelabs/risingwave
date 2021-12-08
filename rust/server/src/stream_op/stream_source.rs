@@ -50,7 +50,7 @@ impl StreamSourceExecutor {
                     query_id: None,
                     bound_timestamp_ms: None,
                 }),
-                vec![],
+                column_ids.clone(),
             ),
             _ => Err(RwError::from(ProtocolError(
                 "Stream source only supports external source".to_string(),
@@ -70,13 +70,6 @@ impl StreamSourceExecutor {
 }
 
 impl StreamSourceExecutor {
-    fn add_row_id(chunk: &mut StreamChunk, column: Column) {
-        let mut cols = Vec::with_capacity(chunk.columns.len() + 1);
-        cols.insert(0, column);
-        cols.append(&mut chunk.columns);
-        chunk.columns = cols;
-    }
-
     fn gen_row_column(&mut self, len: usize) -> Column {
         let mut builder = I64ArrayBuilder::new(len).unwrap();
 
@@ -92,25 +85,14 @@ impl StreamSourceExecutor {
         )
     }
 
-    fn rearrange_chunk_by_schema(&mut self, chunk: &mut StreamChunk) {
-        let card = chunk.cardinality();
-
-        Self::add_row_id(chunk, self.gen_row_column(card));
-
-        let mut columns = vec![];
-
-        for id in self.column_ids.iter() {
-            let (idx, _) = self
-                .source_desc
-                .columns
-                .iter()
-                .enumerate()
-                .find(|i| i.1.column_id == *id)
-                .unwrap();
-            columns.push(chunk.columns[idx].clone());
+    fn refill_row_id_column(&mut self, chunk: &mut StreamChunk) {
+        if let Some(idx) = self
+            .column_ids
+            .iter()
+            .position(|column_id| *column_id == self.source_desc.row_id_column_id)
+        {
+            chunk.columns[idx] = self.gen_row_column(chunk.cardinality());
         }
-
-        chunk.columns = columns;
     }
 }
 
@@ -120,7 +102,7 @@ impl Executor for StreamSourceExecutor {
         tokio::select! {
           chunk = self.reader.next() => {
              chunk.map(|mut c| {
-              self.rearrange_chunk_by_schema(&mut c);
+              self.refill_row_id_column(&mut c);
               Message::Chunk(c)
             })
           }

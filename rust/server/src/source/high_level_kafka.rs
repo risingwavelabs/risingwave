@@ -209,6 +209,24 @@ impl HighLevelKafkaSource {
             .create_with_context(DefaultConsumerContext)
             .map_err(|e| RwError::from(InternalError(format!("consumer creation failed {}", e))))
     }
+
+    fn get_target_columns(&self, column_ids: Vec<i32>) -> Result<Vec<SourceColumnDesc>> {
+        column_ids
+            .iter()
+            .map(|id| {
+                self.column_descs
+                    .iter()
+                    .find(|c| c.column_id == *id)
+                    .ok_or_else(|| {
+                        RwError::from(InternalError(format!(
+                            "Failed to find column id: {} in source: {:?}",
+                            id, self
+                        )))
+                    })
+                    .map(|col| col.clone())
+            })
+            .collect::<Result<Vec<SourceColumnDesc>>>()
+    }
 }
 
 #[async_trait]
@@ -232,6 +250,7 @@ impl Source for HighLevelKafkaSource {
     fn batch_reader(
         &self,
         context: HighLevelKafkaSourceReaderContext,
+        column_ids: Vec<i32>,
     ) -> Result<Self::BatchReader> {
         let consumer = self.create_consumer(&context)?;
 
@@ -255,10 +274,12 @@ impl Source for HighLevelKafkaSource {
             .fetch_metadata(Some(self.config.topic.as_str()), KAFKA_SYNC_CALL_TIMEOUT)
             .map_err(|e| RwError::from(InternalError(e.to_string())))?;
 
+        let columns = self.get_target_columns(column_ids)?;
+
         Ok(HighLevelKafkaSourceBatchReader {
             consumer: Arc::new(consumer),
             parser: self.parser.clone(),
-            columns: self.column_descs.clone(),
+            columns: Arc::new(columns),
             bounds,
             topic: self.config.topic.to_string(),
             metadata: Arc::new(metadata),
@@ -268,9 +289,11 @@ impl Source for HighLevelKafkaSource {
     fn stream_reader(
         &self,
         context: HighLevelKafkaSourceReaderContext,
-        _column_ids: Vec<i32>, // FIXME: use column_ids
+        column_ids: Vec<i32>,
     ) -> Result<Self::StreamReader> {
         let consumer = self.create_consumer(&context)?;
+
+        let columns = self.get_target_columns(column_ids)?;
 
         let topics: &[&str] = &[&self.config.topic];
 
@@ -284,7 +307,7 @@ impl Source for HighLevelKafkaSource {
         Ok(HighLevelKafkaSourceStreamReader {
             consumer,
             parser: self.parser.clone(),
-            columns: self.column_descs.clone(),
+            columns: Arc::new(columns),
         })
     }
 
@@ -473,8 +496,11 @@ impl BatchSourceReader for HighLevelKafkaSourceBatchReader {
                         self.bounds.clear()
                     }
 
-                    let columns = Self::build_columns(&self.columns, &rows)?;
+                    if self.columns.is_empty() {
+                        return Ok(Some(DataChunk::new_dummy(rows.len())));
+                    }
 
+                    let columns = Self::build_columns(&self.columns, &rows)?;
                     return Ok(Some(DataChunk::builder().columns(columns).build()));
                 }
                 _ => {

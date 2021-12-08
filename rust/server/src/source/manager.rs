@@ -6,11 +6,11 @@ use risingwave_common::ensure;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataTypeRef;
+use risingwave_storage::bummock::BummockTable;
 
 use crate::source::{
     HighLevelKafkaSource, SourceConfig, SourceFormat, SourceImpl, SourceParser, TableSource,
 };
-use risingwave_storage::bummock::BummockTable;
 
 pub type SourceRef = Arc<SourceImpl>;
 
@@ -22,6 +22,7 @@ pub trait SourceManager: Sync + Send {
         parser: Arc<dyn SourceParser>,
         config: &SourceConfig,
         columns: Vec<SourceColumnDesc>,
+        row_id_index: usize,
     ) -> Result<()>;
     fn create_table_source(&self, table_id: &TableId, table: Arc<BummockTable>) -> Result<()>;
     fn get_source(&self, source_id: &TableId) -> Result<SourceDesc>;
@@ -35,6 +36,7 @@ pub struct SourceColumnDesc {
     pub name: String,
     pub data_type: DataTypeRef,
     pub column_id: i32,
+    pub skip_parse: bool,
 }
 
 /// `SourceDesc` is used to describe a `Source`
@@ -43,6 +45,7 @@ pub struct SourceDesc {
     pub source: SourceRef,
     pub format: SourceFormat,
     pub columns: Vec<SourceColumnDesc>,
+    pub row_id_column_id: i32,
 }
 
 pub type SourceManagerRef = Arc<dyn SourceManager>;
@@ -59,6 +62,7 @@ impl SourceManager for MemSourceManager {
         parser: Arc<dyn SourceParser>,
         config: &SourceConfig,
         columns: Vec<SourceColumnDesc>,
+        row_id_index: usize,
     ) -> Result<()> {
         let mut tables = self.get_sources()?;
 
@@ -68,12 +72,12 @@ impl SourceManager for MemSourceManager {
             source_id
         );
 
+        let row_id_column_id = columns[row_id_index].column_id;
+
         let source = match config {
             SourceConfig::Kafka(config) => SourceImpl::HighLevelKafka(HighLevelKafkaSource::new(
                 config.clone(),
-                // todo, The first column is skipped here to hide the _row_id column, which needs
-                // to be fixed in the future
-                Arc::new(columns[1..].to_owned()),
+                Arc::new(columns.clone()),
                 parser.clone(),
             )),
         };
@@ -82,6 +86,7 @@ impl SourceManager for MemSourceManager {
             source: Arc::new(source),
             format,
             columns,
+            row_id_column_id,
         };
 
         tables.insert(source_id.clone(), desc);
@@ -105,6 +110,7 @@ impl SourceManager for MemSourceManager {
                 name: "".to_string(),
                 data_type: c.data_type.clone(),
                 column_id: c.column_id,
+                skip_parse: false,
             })
             .collect();
 
@@ -115,6 +121,7 @@ impl SourceManager for MemSourceManager {
             source: Arc::new(source),
             columns,
             format: SourceFormat::Invalid,
+            row_id_column_id: 0,
         };
 
         sources.insert(table_id.clone(), desc);

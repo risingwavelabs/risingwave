@@ -23,6 +23,10 @@ impl SourceParser for JSONParser {
         let ret = columns
             .iter()
             .map(|column| {
+                if column.skip_parse {
+                    return None;
+                }
+
                 let value = value.get(&column.name);
                 match column.data_type.data_type_kind() {
                     DataTypeKind::Boolean => value
@@ -77,41 +81,49 @@ mod tests {
                 name: "i32".to_string(),
                 data_type: Int32Type::create(false),
                 column_id: 0,
+                skip_parse: false,
             },
             SourceColumnDesc {
                 name: "char".to_string(),
                 data_type: StringType::create(false, 8, DataTypeKind::Char),
                 column_id: 1,
+                skip_parse: false,
             },
             SourceColumnDesc {
                 name: "bool".to_string(),
                 data_type: BoolType::create(false),
                 column_id: 2,
+                skip_parse: false,
             },
             SourceColumnDesc {
                 name: "i16".to_string(),
                 data_type: Int16Type::create(false),
                 column_id: 3,
+                skip_parse: false,
             },
             SourceColumnDesc {
                 name: "i64".to_string(),
                 data_type: Int64Type::create(false),
                 column_id: 4,
+                skip_parse: false,
             },
             SourceColumnDesc {
                 name: "f32".to_string(),
                 data_type: Float32Type::create(false),
                 column_id: 5,
+                skip_parse: false,
             },
             SourceColumnDesc {
                 name: "f64".to_string(),
                 data_type: Float64Type::create(false),
                 column_id: 6,
+                skip_parse: false,
             },
             SourceColumnDesc {
                 name: "varchar".to_string(),
                 data_type: StringType::create(false, 9, DataTypeKind::Varchar),
                 column_id: 7,
+                skip_parse: false,
             },
         ];
 

@@ -95,7 +95,11 @@ impl SourceParser for ProtobufParser {
             _ => return Err(RwError::from(ProtocolError("".to_string()))),
         };
 
-        let ret =  columns.iter().map(|column| {
+        let ret = columns.iter().map(|column| {
+      if column.skip_parse {
+        return None;
+      }
+
       let key = Value::String(column.name.clone());
 
       // Use `remove` instead of `get` to take the ownership of the value
@@ -266,26 +270,31 @@ mod tests {
                 name: "id".to_string(),
                 data_type: Int32Type::create(false),
                 column_id: 0,
+                skip_parse: false,
             },
             SourceColumnDesc {
                 name: "address".to_string(),
                 data_type: StringType::create(false, 16, DataTypeKind::Char),
                 column_id: 1,
+                skip_parse: false,
             },
             SourceColumnDesc {
                 name: "city".to_string(),
                 data_type: StringType::create(false, 8, DataTypeKind::Char),
                 column_id: 2,
+                skip_parse: false,
             },
             SourceColumnDesc {
                 name: "zipcode".to_string(),
                 data_type: Int64Type::create(false),
                 column_id: 3,
+                skip_parse: false,
             },
             SourceColumnDesc {
                 name: "rate".to_string(),
                 data_type: Float32Type::create(false),
                 column_id: 4,
+                skip_parse: false,
             },
         ];
 

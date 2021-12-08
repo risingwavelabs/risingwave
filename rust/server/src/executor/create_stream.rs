@@ -48,6 +48,7 @@ pub(super) struct CreateStreamExecutor {
     properties: HashMap<String, String>,
     schema_location: String,
     schema: Schema,
+    row_id_index: usize,
 }
 
 macro_rules! get_from_properties {
@@ -80,14 +81,18 @@ impl BoxedExecutorBuilder for CreateStreamExecutor {
 
         let table_id = TableId::from(&node.table_ref_id);
 
+        let row_id_index = node.get_row_id_index() as usize;
+
         let columns = node
             .get_column_descs()
             .iter()
-            .map(|c| {
+            .enumerate()
+            .map(|(idx, c)| {
                 Ok(SourceColumnDesc {
                     name: c.name.clone(),
                     data_type: build_from_prost(c.get_column_type())?,
                     column_id: c.column_id,
+                    skip_parse: idx == row_id_index,
                 })
             })
             .collect::<Result<Vec<SourceColumnDesc>>>()?;
@@ -128,6 +133,7 @@ impl BoxedExecutorBuilder for CreateStreamExecutor {
             properties: properties.clone(),
             schema_location: schema_location.clone(),
             parser: None,
+            row_id_index,
         }))
     }
 }
@@ -228,6 +234,7 @@ impl Executor for CreateStreamExecutor {
             self.parser.clone().unwrap(),
             &self.config,
             self.columns.clone(),
+            self.row_id_index,
         )?;
 
         Ok(None)

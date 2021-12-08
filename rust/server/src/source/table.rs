@@ -55,6 +55,7 @@ impl TableSource {
                 name: "".to_string(),
                 data_type: c.data_type.clone(),
                 column_id: c.column_id,
+                skip_parse: false,
             })
             .collect();
 
@@ -198,7 +199,11 @@ impl Source for TableSource {
     type StreamReader = TableStreamReader;
     type Writer = TableWriter;
 
-    fn batch_reader(&self, _context: Self::ReaderContext) -> Result<Self::BatchReader> {
+    fn batch_reader(
+        &self,
+        _context: Self::ReaderContext,
+        _column_ids: Vec<i32>,
+    ) -> Result<Self::BatchReader> {
         Ok(TableBatchReader {
             core: self.core.clone(),
             snapshot: VecDeque::new(),
