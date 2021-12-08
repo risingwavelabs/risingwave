@@ -321,16 +321,24 @@ impl DataChunk {
     /// * `RowRef` - Reference of data tuple
     /// * bool - whether this tuple is visible
     pub fn row_at(&self, pos: usize) -> Result<(RowRef<'_>, bool)> {
-        let mut row = Vec::with_capacity(self.columns.len());
-        for column in &self.columns {
-            row.push(column.array_ref().value_at(pos));
-        }
-        let row = RowRef::new(row);
+        let row = self.row_at_unchecked_vis(pos);
         let vis = match self.visibility.as_ref() {
             Some(bitmap) => bitmap.is_set(pos)?,
             None => true,
         };
         Ok((row, vis))
+    }
+
+    /// Random access a tuple in a data chunk. Return in a row format.
+    /// Note that this function do not return whether the row is visible.
+    /// # Arguments
+    /// * `pos` - Index of look up tuple
+    pub fn row_at_unchecked_vis(&self, pos: usize) -> RowRef<'_> {
+        let mut row = Vec::with_capacity(self.columns.len());
+        for column in &self.columns {
+            row.push(column.array_ref().value_at(pos));
+        }
+        RowRef::new(row)
     }
 }
 

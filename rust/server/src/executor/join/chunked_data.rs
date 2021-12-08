@@ -3,7 +3,7 @@ use std::ops::{Index, IndexMut};
 
 /// Id of one row in chunked data.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
-pub(super) struct RowId {
+pub struct RowId {
     chunk_id: u32,
     row_id: u32,
 }

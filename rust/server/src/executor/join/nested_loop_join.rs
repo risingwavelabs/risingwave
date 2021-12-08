@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use prost::Message;
 
-use crate::executor::join::chunked_data::{ChunkedData, RowId};
+use crate::executor::join::build_table::BuildTable;
+use crate::executor::join::chunked_data::RowId;
 use crate::executor::join::row_level_iter::RowLevelIter;
 use crate::executor::join::JoinType;
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
@@ -18,6 +19,7 @@ use risingwave_common::expr::BoxedExpression;
 use risingwave_common::types::DataTypeRef;
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 use risingwave_pb::plan::{plan_node::PlanNodeType, NestedLoopJoinNode};
+use std::option::Option::Some;
 
 /// Nested loop join executor.
 ///
@@ -25,7 +27,7 @@ use risingwave_pb::plan::{plan_node::PlanNodeType, NestedLoopJoinNode};
 /// OUTER/SEMI/ANTI JOIN will be added in future PR.
 ///
 /// High Level Idea:
-/// 1. Iterate tuple from [`OuterTableSource`]
+/// 1. Iterate tuple from probe table.
 /// 2. Concatenated with inner chunk, eval expression and get sel vector
 /// 3. Create new chunk with new sel vector and yield to upper.
 pub struct NestedLoopJoinExecutor {
@@ -295,10 +297,10 @@ impl NestedLoopJoinExecutor {
     }
 
     fn do_inner_join(&mut self) -> Result<ProbeResult> {
-        while self.build_table.chunk_idx < self.build_table.inner_table.len() {
+        while let Some(build_side_chunk) = self.build_table.get_current_chunk() {
             // Checked the vis and None before.
             let probe_row = self.probe_side_source.current_row_ref_unchecked();
-            let build_side_chunk = &self.build_table.inner_table[self.build_table.chunk_idx];
+            // let build_side_chunk = &self.build_table.inner_table[self.build_table.chunk_idx];
             let const_row_chunk =
                 self.convert_row_to_chunk(&probe_row, build_side_chunk.capacity())?;
             let new_chunk = Self::concatenate(&const_row_chunk, build_side_chunk)?;
@@ -311,7 +313,7 @@ impl NestedLoopJoinExecutor {
                     if vis {
                         if self.join_type.need_join_remaining() {
                             self.build_table.set_build_matched(RowId::new(
-                                self.build_table.chunk_idx,
+                                self.build_table.get_chunk_idx(),
                                 row_idx,
                             ))?;
                         }
@@ -319,6 +321,7 @@ impl NestedLoopJoinExecutor {
                     }
                 }
             }
+            self.build_table.advance_chunk();
             // Note: we can avoid the append chunk in join -- Only do it in the begin of outer loop.
             // But currently seems like it do not have too much gain. Will keep look on
             // it.
@@ -330,15 +333,13 @@ impl NestedLoopJoinExecutor {
                 std::mem::swap(&mut self.last_chunk, &mut left_data_chunk);
                 if let Some(inner_chunk) = return_data_chunk {
                     return Ok(ProbeResult {
-                        cur_row_finished: self.build_table.chunk_idx
-                            >= self.build_table.inner_table.len(),
+                        cur_row_finished: false,
                         chunk: Some(inner_chunk),
                     });
                 }
             }
-            self.build_table.chunk_idx += 1;
         }
-        self.build_table.chunk_idx = 0;
+        self.build_table.reset_chunk();
         Ok(ProbeResult {
             cur_row_finished: true,
             chunk: None,
@@ -353,7 +354,7 @@ impl NestedLoopJoinExecutor {
             if !self.probe_side_source.get_cur_row_matched() {
                 assert!(ret.chunk.is_none());
                 let mut probe_row = self.probe_side_source.current_row_ref_unchecked();
-                for _ in 0..self.build_table.data_source.schema().fields.len() {
+                for _ in 0..self.build_table.get_schema().fields.len() {
                     probe_row.0.push(None);
                 }
                 let ret = self.chunk_builder.append_one_row_ref(probe_row)?;
@@ -368,36 +369,27 @@ impl NestedLoopJoinExecutor {
     }
 
     fn do_probe_remaining(&mut self) -> Result<Option<DataChunk>> {
-        // Iterate build tables, check the build match map and append (None, build_row) if needed.
-        while self.probe_remain_chunk_idx < self.build_table.inner_table.len() {
-            let chunk = &self.build_table.inner_table[self.probe_remain_chunk_idx];
-            while self.probe_remain_row_idx < chunk.capacity() {
-                if !self.build_table.is_build_matched(RowId::new(
-                    self.probe_remain_chunk_idx,
-                    self.probe_remain_row_idx,
-                ))? {
-                    let (cur_row_ref, vis) = chunk.row_at(self.probe_remain_row_idx)?;
-                    // Only proceed visible tuples.
-                    if vis {
-                        let mut cur_row = cur_row_ref.0;
-                        for _ in 0..self.probe_side_source.get_schema().fields.len() {
-                            cur_row.insert(0, None);
-                        }
-                        if let Some(ret_chunk) = self
-                            .chunk_builder
-                            .append_one_row_ref(RowRef::new(cur_row))?
-                        {
-                            return Ok(Some(ret_chunk));
-                        }
-                    }
+        while let Some(cur_row) = self.build_table.get_current_row_ref() {
+            if !self
+                .build_table
+                .is_build_matched(self.build_table.get_current_row_id())?
+            {
+                // let (cur_row_ref, vis) = chunk.row_at(self.probe_remain_row_idx)?;
+                // Only proceed visible tuples.
+                // if vis {
+                let mut cur_row_vec = cur_row.0;
+                for _ in 0..self.probe_side_source.get_schema().fields.len() {
+                    cur_row_vec.insert(0, None);
                 }
-                self.probe_remain_row_idx += 1;
+                if let Some(ret_chunk) = self
+                    .chunk_builder
+                    .append_one_row_ref(RowRef::new(cur_row_vec))?
+                {
+                    return Ok(Some(ret_chunk));
+                }
             }
-            self.probe_remain_row_idx = 0;
-            self.probe_remain_chunk_idx += 1;
+            self.build_table.advance_row();
         }
-        self.probe_remain_chunk_idx = 0;
-        self.probe_remain_row_idx = 0;
         Ok(None)
     }
 
@@ -441,74 +433,6 @@ impl NestedLoopJoinExecutor {
             builder.build()
         };
         Ok(data_chunk)
-    }
-}
-
-/// [`BuildTable`] contains the tuple to be probed. It is also called inner relation in join.
-/// `inner_table` is a buffer for all data. For all probe key, directly fetch data in `inner_table`
-/// without call executor. The executor is only called when building `inner_table`.
-type InnerTable = Vec<DataChunk>;
-struct BuildTable {
-    data_source: BoxedExecutor,
-    /// Buffering of inner table. TODO: Spill to disk or more fine-grained memory management to
-    /// avoid OOM.
-    inner_table: InnerTable,
-    /// Pos of chunk in inner table. Tracks current probing progress.
-    chunk_idx: usize,
-
-    /// Used only when join remaining is required after probing.
-    ///
-    /// See [`JoinType::need_join_remaining`]
-    build_matched: Option<ChunkedData<bool>>,
-}
-
-impl BuildTable {
-    fn new(data_source: BoxedExecutor) -> Self {
-        Self {
-            data_source,
-            inner_table: vec![],
-            chunk_idx: 0,
-            build_matched: None,
-        }
-    }
-
-    /// Load all data of inner relation into buffer.
-    /// Called in first probe so that do not need to invoke executor multiple roundtrip.
-    /// # Arguments
-    /// * `inner_source` - The source executor to load inner table. It is designed to pass as param
-    ///   cuz
-    /// only used in init.
-    async fn load_data(&mut self) -> Result<()> {
-        self.data_source.open().await?;
-        while let Some(chunk) = self.data_source.next().await? {
-            self.inner_table.push(chunk);
-        }
-        self.build_matched = Some(ChunkedData::<bool>::with_chunk_sizes(
-            self.inner_table.iter().map(|c| c.capacity()),
-        )?);
-        self.data_source.close().await
-    }
-
-    /// Copied from hash join. Consider remove the duplication.
-    fn set_build_matched(&mut self, build_row_id: RowId) -> Result<()> {
-        match self.build_matched {
-            Some(ref mut flags) => {
-                flags[build_row_id] = true;
-                Ok(())
-            }
-            None => Err(RwError::from(InternalError(
-                "Build match flags not found!".to_string(),
-            ))),
-        }
-    }
-
-    fn is_build_matched(&self, build_row_id: RowId) -> Result<bool> {
-        match self.build_matched {
-            Some(ref flags) => Ok(flags[build_row_id]),
-            None => Err(RwError::from(InternalError(
-                "Build match flags not found!".to_string(),
-            ))),
-        }
     }
 }
 
