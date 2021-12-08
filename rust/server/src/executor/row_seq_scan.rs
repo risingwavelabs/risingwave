@@ -1,11 +1,10 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
 use prost::Message;
 
 use crate::executor::{Executor, ExecutorBuilder};
-use crate::stream_op::{MViewTable, MemoryStateStore};
+use crate::stream_op::{HummockStateStore, MViewTableIter, MemoryStateStore};
 
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::RowSeqScanNode;
@@ -18,16 +17,25 @@ use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataTypeRef;
 
+enum MViewTableIterImpl {
+    Memory(MViewTableIter<MemoryStateStore>),
+    Hummock(MViewTableIter<HummockStateStore>),
+}
+
+impl MViewTableIterImpl {
+    fn as_mut_memory(&mut self) -> &mut MViewTableIter<MemoryStateStore> {
+        match self {
+            Self::Memory(iter) => iter,
+            _ => unreachable!(),
+        }
+    }
+}
+
 use super::{BoxedExecutor, BoxedExecutorBuilder};
-
-type MemoryStateStoreIter = <BTreeMap<Row, Row> as IntoIterator>::IntoIter;
-
 /// Executor that scans data from row table
 pub(super) struct RowSeqScanExecutor {
     /// An iterator to scan MemoryStateStore.
-    iter: Option<MemoryStateStoreIter>,
-    // TODO(MrCroxx): Remove me after hummock table iter is impled.
-    table: Arc<MViewTable<MemoryStateStore>>,
+    iter: MViewTableIterImpl,
     data_types: Vec<DataTypeRef>,
     column_ids: Vec<usize>,
     schema: Schema,
@@ -63,8 +71,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
                 .iter()
                 .map(|i| *i as usize)
                 .collect_vec(),
-            iter: None,
-            table,
+            iter: MViewTableIterImpl::Memory(table.iter()),
             schema,
         }))
     }
@@ -73,12 +80,12 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
 #[async_trait::async_trait]
 impl Executor for RowSeqScanExecutor {
     async fn open(&mut self) -> Result<()> {
-        self.iter = Some(self.table.iter().await?);
+        self.iter.as_mut_memory().open().await?;
         Ok(())
     }
 
     async fn next(&mut self) -> Result<Option<DataChunk>> {
-        match self.iter.as_mut().unwrap().next() {
+        match self.iter.as_mut_memory().next().await? {
             Some((_key_row, value_row)) => {
                 // Scan through value pairs.
                 // Make rust analyzer happy.
@@ -153,8 +160,7 @@ mod tests {
         ));
 
         let mut executor = RowSeqScanExecutor {
-            iter: None,
-            table,
+            iter: MViewTableIterImpl::Memory(table.iter()),
             data_types: schema
                 .fields
                 .iter()

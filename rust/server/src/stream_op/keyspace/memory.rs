@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use risingwave_common::error::Result;
 use tokio::sync::Mutex;
 
-use super::StateStore;
+use super::{StateStore, StateStoreIter};
 
 /// An in-memory state store
 #[derive(Clone, Default)]
@@ -82,6 +82,8 @@ impl MemoryStateStore {
 
 #[async_trait]
 impl StateStore for MemoryStateStore {
+    type Iter = MemoryStateStoreIter;
+
     async fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
         let inner = self.inner.lock().await;
         Ok(inner.get(key).cloned())
@@ -93,5 +95,46 @@ impl StateStore for MemoryStateStore {
 
     async fn scan(&self, prefix: &[u8], limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
         self.scan_inner(prefix, limit).await
+    }
+
+    fn iter(&self, prefix: &[u8]) -> Self::Iter {
+        MemoryStateStoreIter::new(self.clone(), prefix.to_owned())
+    }
+}
+
+pub struct MemoryStateStoreIter {
+    store: MemoryStateStore,
+    prefix: Vec<u8>,
+    iter: Option<<BTreeMap<Bytes, Bytes> as IntoIterator>::IntoIter>,
+}
+
+impl MemoryStateStoreIter {
+    fn new(store: MemoryStateStore, prefix: Vec<u8>) -> Self {
+        Self {
+            store,
+            prefix,
+            iter: None,
+        }
+    }
+}
+
+#[async_trait]
+impl StateStoreIter for MemoryStateStoreIter {
+    type Item = (Bytes, Bytes);
+
+    async fn open(&mut self) -> Result<()> {
+        debug_assert!(self.iter.is_none());
+        #[allow(clippy::mutable_key_type)]
+        let mut snapshot = {
+            let inner = self.store.inner.lock().await;
+            inner.clone()
+        };
+        snapshot.retain(|key, _| key.starts_with(&self.prefix[..]));
+        self.iter = Some(snapshot.into_iter());
+        Ok(())
+    }
+
+    async fn next(&mut self) -> Result<Option<Self::Item>> {
+        Ok(self.iter.as_mut().unwrap().next())
     }
 }

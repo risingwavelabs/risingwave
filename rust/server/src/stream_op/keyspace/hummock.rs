@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use risingwave_common::error::{Result, ToRwResult};
 
-use super::StateStore;
+use super::{StateStore, StateStoreIter};
 
 use risingwave_storage::hummock::HummockStorage;
 
@@ -17,6 +17,8 @@ pub struct HummockStateStore {
 
 #[async_trait]
 impl StateStore for HummockStateStore {
+    type Iter = HummockStateStoreIter;
+
     async fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
         self.storage
             .get(key)
@@ -43,5 +45,24 @@ impl StateStore for HummockStateStore {
             .await
             .map_err(anyhow::Error::new)
             .to_rw_result()
+    }
+
+    fn iter(&self, _prefix: &[u8]) -> Self::Iter {
+        todo!()
+    }
+}
+
+pub struct HummockStateStoreIter {}
+
+#[async_trait]
+impl StateStoreIter for HummockStateStoreIter {
+    type Item = (Bytes, Bytes);
+
+    async fn open(&mut self) -> Result<()> {
+        todo!()
+    }
+
+    async fn next(&mut self) -> Result<Option<Self::Item>> {
+        todo!()
     }
 }

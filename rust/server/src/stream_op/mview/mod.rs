@@ -29,6 +29,6 @@ fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {
     Ok(serializer.into_inner())
 }
 
-pub use mview_sink::MViewSinkExecutor;
-pub use mview_state::ManagedMViewState;
-pub use mview_table::MViewTable;
+pub use mview_sink::*;
+pub use mview_state::*;
+pub use mview_table::*;
