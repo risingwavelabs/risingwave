@@ -68,7 +68,7 @@ public class TwoPhaseAggRule extends ConverterRule {
 
     var globalAggCalls = getGlobalAggCalls(agg, localAgg, splitters);
 
-    var gobalAgg =
+    var globalAgg =
         (RwAggregate)
             agg.copy(
                 agg.getTraitSet().replace(BATCH_DISTRIBUTED).plus(globalDistribution),
@@ -80,21 +80,21 @@ public class TwoPhaseAggRule extends ConverterRule {
     var allLastCalcAreTrivial = splitters.stream().allMatch(AggSplitter::isLastCalcTrivial);
 
     if (allLastCalcAreTrivial) {
-      return gobalAgg;
+      return globalAgg;
     } else {
       var rexBuilder = agg.getCluster().getRexBuilder();
       var expressions = new ArrayList<RexNode>(agg.getGroupCount() + splitters.size());
       agg.getGroupSet().toList().stream()
-          .map(idx -> rexBuilder.makeInputRef(gobalAgg, idx))
+          .map(idx -> rexBuilder.makeInputRef(globalAgg, idx))
           .forEachOrdered(expressions::add);
 
-      expressions.addAll(SplitUtils.getLastCalcs(agg, gobalAgg, splitters));
+      expressions.addAll(SplitUtils.getLastCalcs(agg, globalAgg, splitters));
 
       return new RwBatchProject(
           agg.getCluster(),
-          gobalAgg.getTraitSet().replace(BATCH_DISTRIBUTED).plus(globalDistribution),
+          globalAgg.getTraitSet().replace(BATCH_DISTRIBUTED).plus(globalDistribution),
           emptyList(),
-          gobalAgg,
+          globalAgg,
           expressions,
           agg.getRowType());
     }

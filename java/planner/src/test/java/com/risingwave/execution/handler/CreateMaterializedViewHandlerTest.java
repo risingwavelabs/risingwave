@@ -153,6 +153,6 @@ public class CreateMaterializedViewHandlerTest {
     StreamingPlan plan = planner.plan(ast, executionContext);
 
     boolean isAliased = handler.isAllAliased(plan.getStreamingPlan());
-    Assertions.assertEquals(true, isAliased);
+    Assertions.assertTrue(isAliased);
   }
 }

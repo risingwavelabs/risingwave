@@ -8,8 +8,8 @@ create materialized view T1 as select sum(v2) as V from t where v1>1
         <Resource name="plan">
             <![CDATA[
 RwStreamMaterializedView(name=[t1])
-  RwStreamProject(v=[$STREAM_NULL_BY_ROW_COUNT($1, $0)])
-    RwStreamAgg(group=[{}], v=[SUM($1)], Row Count=[COUNT()])
+  RwStreamProject(v=[$STREAM_NULL_BY_ROW_COUNT($0, $1)])
+    RwStreamAgg(group=[{}], agg#0=[COUNT()], v=[SUM($1)])
       RwStreamFilter(condition=[>($0, 1)])
         RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
 ]]>
@@ -51,10 +51,9 @@ create materialized view T3 as select v2, sum(v1) as V from t group by v2
         <Resource name="plan">
             <![CDATA[
 RwStreamMaterializedView(name=[t3])
-  RwStreamProject(v2=[$0], v=[$1])
-    RwStreamFilter(condition=[<>($2, 0)])
-      RwStreamAgg(group=[{0}], v=[SUM($1)], Row Count=[COUNT()])
-        RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1])
+  RwStreamProject(v2=[$0], v=[$2])
+    RwStreamAgg(group=[{0}], agg#0=[COUNT()], v=[SUM($1)])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1])
 ]]>
         </Resource>
         <Resource name="json" path="streaming/materialized_view_plan_test/q3">
@@ -70,8 +69,8 @@ create materialized view T4 as select sum(v1)+sum(v2) as V from t
         <Resource name="plan">
             <![CDATA[
 RwStreamMaterializedView(name=[t4])
-  RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($2, $0), $STREAM_NULL_BY_ROW_COUNT($2, $1))])
-    RwStreamAgg(group=[{}], agg#0=[SUM($0)], agg#1=[SUM($1)], Row Count=[COUNT()])
+  RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($0, $1), $STREAM_NULL_BY_ROW_COUNT($0, $2))])
+    RwStreamAgg(group=[{}], agg#0=[COUNT()], agg#1=[SUM($0)], agg#2=[SUM($1)])
       RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
 ]]>
         </Resource>
@@ -88,8 +87,8 @@ create materialized view T5 as select sum(v1+v2) as V from t
         <Resource name="plan">
             <![CDATA[
 RwStreamMaterializedView(name=[t5])
-  RwStreamProject(v=[$STREAM_NULL_BY_ROW_COUNT($1, $0)])
-    RwStreamAgg(group=[{}], v=[SUM($0)], Row Count=[COUNT()])
+  RwStreamProject(v=[$STREAM_NULL_BY_ROW_COUNT($0, $1)])
+    RwStreamAgg(group=[{}], agg#0=[COUNT()], v=[SUM($0)])
       RwStreamProject($f0=[+($0, $1)])
         RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
 ]]>
@@ -107,10 +106,9 @@ create materialized view T6 as select sum(v1) as V from t group by v2
         <Resource name="plan">
             <![CDATA[
 RwStreamMaterializedView(name=[t6])
-  RwStreamProject(v=[$1], v2=[$0])
-    RwStreamFilter(condition=[<>($2, 0)])
-      RwStreamAgg(group=[{0}], v=[SUM($1)], Row Count=[COUNT()])
-        RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1])
+  RwStreamProject(v=[$2], v2=[$0])
+    RwStreamAgg(group=[{0}], agg#0=[COUNT()], v=[SUM($1)])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1])
 ]]>
         </Resource>
         <Resource name="primaryKey">
@@ -131,10 +129,9 @@ create materialized view T7 as select sum(v1)+1 as V from t group by v2
         <Resource name="plan">
             <![CDATA[
 RwStreamMaterializedView(name=[t7])
-  RwStreamProject(v=[+($1, 1)], v2=[$0])
-    RwStreamFilter(condition=[<>($2, 0)])
-      RwStreamAgg(group=[{0}], agg#0=[SUM($1)], Row Count=[COUNT()])
-        RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1])
+  RwStreamProject(v=[+($2, 1)], v2=[$0])
+    RwStreamAgg(group=[{0}], agg#0=[COUNT()], agg#1=[SUM($1)])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1])
 ]]>
         </Resource>
         <Resource name="primaryKey">
@@ -154,8 +151,8 @@ create materialized view T8 as select sum(v1)+1 as V from t where v1>v2
         <Resource name="plan">
             <![CDATA[
 RwStreamMaterializedView(name=[t8])
-  RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($1, $0), 1)])
-    RwStreamAgg(group=[{}], agg#0=[SUM($0)], Row Count=[COUNT()])
+  RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($0, $1), 1)])
+    RwStreamAgg(group=[{}], agg#0=[COUNT()], agg#1=[SUM($0)])
       RwStreamFilter(condition=[>($0, $1)])
         RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
             ]]>

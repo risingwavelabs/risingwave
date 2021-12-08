@@ -6,7 +6,6 @@ import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPh
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.STREAMING;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.SUBQUERY_REWRITE;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
-import static com.risingwave.planner.rules.physical.BatchRuleSets.LOGICAL_CONVERTER_RULES;
 import static com.risingwave.planner.rules.physical.BatchRuleSets.LOGICAL_OPTIMIZATION_RULES;
 import static com.risingwave.planner.rules.physical.BatchRuleSets.LOGICAL_REWRITE_RULES;
 
@@ -122,7 +121,7 @@ public class StreamPlanner implements Planner<StreamingPlan> {
         LOGICAL_CBO,
         VolcanoOptimizerProgram.builder()
             .addRules(BatchRuleSets.LOGICAL_OPTIMIZE_RULES)
-            .addRules(LOGICAL_CONVERTER_RULES)
+            .addRules(StreamingRuleSets.LOGICAL_CONVERTER_RULES)
             .addRules(LOGICAL_OPTIMIZATION_RULES)
             .addRequiredOutputTraits(LOGICAL)
             .build());

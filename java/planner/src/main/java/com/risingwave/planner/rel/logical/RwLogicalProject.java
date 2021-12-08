@@ -14,8 +14,9 @@ import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rex.RexNode;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+/** Customized LogicalProject * */
 public class RwLogicalProject extends Project implements RisingWaveLogicalRel {
-  protected RwLogicalProject(
+  public RwLogicalProject(
       RelOptCluster cluster,
       RelTraitSet traits,
       List<RelHint> hints,
@@ -32,6 +33,7 @@ public class RwLogicalProject extends Project implements RisingWaveLogicalRel {
     return new RwLogicalProject(getCluster(), traitSet, getHints(), input, projects, rowType);
   }
 
+  /** ConverterRule from LogicalProject to RwLogicalProject. * */
   public static class RwProjectConverterRule extends ConverterRule {
     public static final RwLogicalProject.RwProjectConverterRule INSTANCE =
         Config.INSTANCE

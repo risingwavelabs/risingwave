@@ -2,70 +2,41 @@
   "input": [{
     "pkIndices": [1],
     "input": [{
+      "pkIndices": [0],
       "input": [{
-        "pkIndices": [0],
-        "input": [{
-          "pkIndices": [2],
-          "tableSourceNode": {
-            "tableRefId": {
-              "schemaRefId": {
-                "databaseRefId": {
-                }
+        "pkIndices": [2],
+        "tableSourceNode": {
+          "tableRefId": {
+            "schemaRefId": {
+              "databaseRefId": {
               }
-            },
-            "columnIds": [2, 1]
-          }
-        }],
-        "hashAggNode": {
-          "groupKeys": [{
-          }],
-          "aggCalls": [{
-            "type": "SUM",
-            "args": [{
-              "input": {
-                "columnIdx": 1
-              },
-              "type": {
-                "typeName": "INT32"
-              }
-            }],
-            "returnType": {
-              "typeName": "INT64"
             }
-          }, {
-            "type": "COUNT",
-            "returnType": {
-              "typeName": "INT64"
-            }
-          }]
+          },
+          "columnIds": [2, 1]
         }
       }],
-      "filterNode": {
-        "searchCondition": {
-          "exprType": "NOT_EQUAL",
+      "hashAggNode": {
+        "groupKeys": [{
+        }],
+        "aggCalls": [{
+          "type": "COUNT",
           "returnType": {
-            "typeName": "BOOLEAN"
-          },
-          "funcCall": {
-            "children": [{
-              "exprType": "INPUT_REF",
-              "returnType": {
-                "typeName": "INT64"
-              },
-              "inputRef": {
-                "columnIdx": 2
-              }
-            }, {
-              "exprType": "CONSTANT_VALUE",
-              "returnType": {
-                "typeName": "INT64"
-              },
-              "constant": {
-                "body": "AAAAAAAAAAA="
-              }
-            }]
+            "typeName": "INT64"
           }
-        }
+        }, {
+          "type": "SUM",
+          "args": [{
+            "input": {
+              "columnIdx": 1
+            },
+            "type": {
+              "typeName": "INT32"
+            }
+          }],
+          "returnType": {
+            "typeName": "INT64"
+          }
+        }]
       }
     }],
     "projectNode": {
@@ -75,7 +46,7 @@
           "typeName": "INT64"
         },
         "inputRef": {
-          "columnIdx": 1
+          "columnIdx": 2
         }
       }, {
         "exprType": "INPUT_REF",

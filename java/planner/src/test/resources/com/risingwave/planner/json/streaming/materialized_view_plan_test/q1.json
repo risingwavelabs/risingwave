@@ -43,6 +43,11 @@
       }],
       "simpleAggNode": {
         "aggCalls": [{
+          "type": "COUNT",
+          "returnType": {
+            "typeName": "INT64"
+          }
+        }, {
           "type": "SUM",
           "args": [{
             "input": {
@@ -52,11 +57,6 @@
               "typeName": "INT32"
             }
           }],
-          "returnType": {
-            "typeName": "INT64"
-          }
-        }, {
-          "type": "COUNT",
           "returnType": {
             "typeName": "INT64"
           }
@@ -76,7 +76,6 @@
               "typeName": "INT64"
             },
             "inputRef": {
-              "columnIdx": 1
             }
           }, {
             "exprType": "INPUT_REF",
@@ -84,6 +83,7 @@
               "typeName": "INT64"
             },
             "inputRef": {
+              "columnIdx": 1
             }
           }]
         }

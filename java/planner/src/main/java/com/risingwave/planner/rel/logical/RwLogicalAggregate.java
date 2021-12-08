@@ -16,7 +16,7 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 
 /** Logical Aggregate */
 public class RwLogicalAggregate extends Aggregate implements RisingWaveLogicalRel {
-  private RwLogicalAggregate(
+  public RwLogicalAggregate(
       RelOptCluster cluster,
       RelTraitSet traitSet,
       List<RelHint> hints,
@@ -44,29 +44,31 @@ public class RwLogicalAggregate extends Aggregate implements RisingWaveLogicalRe
     return groupSet.isEmpty();
   }
 
-  /** Rule to convert a LogicalAggregate to RwLogicalAggregate */
-  public static class RwAggregateConverterRule extends ConverterRule {
-    public static final RwAggregateConverterRule INSTANCE =
+  /** Rule to convert a Stream LogicalAggregate to RwLogicalAggregate */
+  public static class RwBatchAggregateConverterRule extends ConverterRule {
+    public static final RwBatchAggregateConverterRule INSTANCE =
         Config.INSTANCE
             .withInTrait(Convention.NONE)
             .withOutTrait(LOGICAL)
-            .withRuleFactory(RwAggregateConverterRule::new)
+            .withRuleFactory(RwBatchAggregateConverterRule::new)
             .withOperandSupplier(t -> t.operand(LogicalAggregate.class).anyInputs())
-            .withDescription("RisingWaveLogicalAggregateConverter")
+            .withDescription("RisingWaveBatchLogicalAggregateConverter")
             .as(Config.class)
-            .toRule(RwAggregateConverterRule.class);
+            .toRule(RwBatchAggregateConverterRule.class);
 
-    protected RwAggregateConverterRule(Config config) {
+    protected RwBatchAggregateConverterRule(Config config) {
       super(config);
     }
 
-    /** Convert LogicalAggregate to RwLogicalAggregate */
+    /** Convert Batch LogicalAggregate to RwLogicalAggregate */
     @Override
     public @Nullable RelNode convert(RelNode rel) {
       LogicalAggregate logicalAgg = (LogicalAggregate) rel;
 
-      RelTraitSet newTraitSet = rel.getTraitSet().plus(LOGICAL);
       RelNode newInput = RelOptRule.convert(logicalAgg.getInput(), LOGICAL);
+      RelTraitSet newTraitSet = rel.getTraitSet().plus(LOGICAL);
+      // TODO: We should also normalize batch plan.
+      // return NormalizeAggUtils.convert(logicalAgg, false, newInput, newTraitSet);
       return new RwLogicalAggregate(
           logicalAgg.getCluster(),
           newTraitSet,
@@ -75,6 +77,33 @@ public class RwLogicalAggregate extends Aggregate implements RisingWaveLogicalRe
           logicalAgg.getGroupSet(),
           logicalAgg.getGroupSets(),
           logicalAgg.getAggCallList());
+    }
+  }
+
+  /** Rule to convert a Stream LogicalAggregate to RwLogicalAggregate */
+  public static class RwStreamAggregateConverterRule extends ConverterRule {
+    public static final RwStreamAggregateConverterRule INSTANCE =
+        Config.INSTANCE
+            .withInTrait(Convention.NONE)
+            .withOutTrait(LOGICAL)
+            .withRuleFactory(RwStreamAggregateConverterRule::new)
+            .withOperandSupplier(t -> t.operand(LogicalAggregate.class).anyInputs())
+            .withDescription("RisingWaveBatchLogicalAggregateConverter")
+            .as(Config.class)
+            .toRule(RwStreamAggregateConverterRule.class);
+
+    protected RwStreamAggregateConverterRule(Config config) {
+      super(config);
+    }
+
+    /** Convert Stream LogicalAggregate to RwLogicalAggregate */
+    @Override
+    public @Nullable RelNode convert(RelNode rel) {
+      LogicalAggregate logicalAgg = (LogicalAggregate) rel;
+
+      RelNode newInput = RelOptRule.convert(logicalAgg.getInput(), LOGICAL);
+      RelTraitSet newTraitSet = rel.getTraitSet().plus(LOGICAL);
+      return NormalizeAggUtils.convert(logicalAgg, true, newInput, newTraitSet);
     }
   }
 }

@@ -112,7 +112,7 @@ public class BatchRuleSets {
           RwLogicalInsert.LogicalInsertConverterRule.INSTANCE,
           RwLogicalProject.RwProjectConverterRule.INSTANCE,
           RwLogicalFilter.RwFilterConverterRule.INSTANCE,
-          RwLogicalAggregate.RwAggregateConverterRule.INSTANCE,
+          RwLogicalAggregate.RwBatchAggregateConverterRule.INSTANCE,
           RwLogicalValues.RwValuesConverterRule.INSTANCE,
           RwLogicalScan.RwLogicalScanConverterRule.INSTANCE,
           RwLogicalSort.RwLogicalSortConverterRule.INSTANCE,

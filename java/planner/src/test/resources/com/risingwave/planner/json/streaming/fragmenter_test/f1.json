@@ -67,7 +67,6 @@
                     "typeName": "INT64"
                   },
                   "inputRef": {
-                    "columnIdx": 1
                   }
                 }, {
                   "exprType": "INPUT_REF",
@@ -75,6 +74,7 @@
                     "typeName": "INT64"
                   },
                   "inputRef": {
+                    "columnIdx": 1
                   }
                 }]
               }

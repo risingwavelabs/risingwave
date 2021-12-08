@@ -2,6 +2,14 @@ package com.risingwave.planner.rules.streaming;
 
 import static org.apache.calcite.rel.rules.CoreRules.AGGREGATE_PROJECT_MERGE;
 
+import com.risingwave.planner.rel.logical.RwLogicalAggregate;
+import com.risingwave.planner.rel.logical.RwLogicalFilter;
+import com.risingwave.planner.rel.logical.RwLogicalInsert;
+import com.risingwave.planner.rel.logical.RwLogicalJoin;
+import com.risingwave.planner.rel.logical.RwLogicalProject;
+import com.risingwave.planner.rel.logical.RwLogicalScan;
+import com.risingwave.planner.rel.logical.RwLogicalSort;
+import com.risingwave.planner.rel.logical.RwLogicalValues;
 import com.risingwave.planner.rel.streaming.RwStreamFilter;
 import com.risingwave.planner.rel.streaming.RwStreamProject;
 import com.risingwave.planner.rel.streaming.RwStreamSort;
@@ -16,6 +24,17 @@ import org.apache.calcite.tools.RuleSets;
 /** Rules for converting logical RelNode to stream RelNode */
 public class StreamingRuleSets {
   public StreamingRuleSets() {}
+
+  public static final RuleSet LOGICAL_CONVERTER_RULES =
+      RuleSets.ofList(
+          RwLogicalInsert.LogicalInsertConverterRule.INSTANCE,
+          RwLogicalProject.RwProjectConverterRule.INSTANCE,
+          RwLogicalFilter.RwFilterConverterRule.INSTANCE,
+          RwLogicalAggregate.RwStreamAggregateConverterRule.INSTANCE,
+          RwLogicalValues.RwValuesConverterRule.INSTANCE,
+          RwLogicalScan.RwLogicalScanConverterRule.INSTANCE,
+          RwLogicalSort.RwLogicalSortConverterRule.INSTANCE,
+          RwLogicalJoin.RwLogicalJoinConverterRule.INSTANCE);
 
   public static final RuleSet STREAMING_CONVERTER_RULES =
       RuleSets.ofList(

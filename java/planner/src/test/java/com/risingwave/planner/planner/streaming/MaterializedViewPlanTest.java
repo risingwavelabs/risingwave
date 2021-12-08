@@ -61,8 +61,8 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     String resultPlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
     Assertions.assertEquals(
         "RwStreamMaterializedView(name=[t_test])\n"
-            + "  RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($1, $0), 1)])\n"
-            + "    RwStreamAgg(group=[{}], agg#0=[SUM($0)], Row Count=[COUNT()])\n"
+            + "  RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($0, $1), 1)])\n"
+            + "    RwStreamAgg(group=[{}], agg#0=[COUNT()], agg#1=[SUM($0)])\n"
             + "      RwStreamFilter(condition=[>($0, $1)])\n"
             + "        RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])",
         resultPlan);
@@ -115,14 +115,13 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     String explainExchangePlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
     String expectedPlan =
         "RwStreamMaterializedView(name=[t_distributed])\n"
-            + "  RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($1, $0), 1)])\n"
-            + "    RwStreamAgg(group=[{}], agg#0=[SUM($0)], Row Sum0=[$SUM0($1)])\n"
+            + "  RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($0, $1), 1)])\n"
+            + "    RwStreamAgg(group=[{}], agg#0=[$SUM0($0)], agg#1=[SUM($1)])\n"
             + "      RwStreamExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])\n"
-            + "        RwStreamProject($f0=[$STREAM_NULL_BY_ROW_COUNT($1, $0)], Row Count=[$1])\n"
-            + "          RwStreamAgg(group=[{}], agg#0=[SUM($0)], Row Count=[COUNT()])\n"
-            + "            RwStreamFilter(condition=[>($0, $1)])\n"
-            + "              RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
-            + "                RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])";
+            + "        RwStreamAgg(group=[{}], agg#0=[COUNT()], agg#1=[SUM($0)])\n"
+            + "          RwStreamFilter(condition=[>($0, $1)])\n"
+            + "            RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
+            + "              RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])";
     testLogger.debug("explain the exchange plan:\n" + explainExchangePlan);
     Assertions.assertEquals(expectedPlan, explainExchangePlan);
   }
@@ -148,14 +147,12 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     String explainExchangePlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
     String expectedPlan =
         "RwStreamMaterializedView(name=[t_agg])\n"
-            + "  RwStreamProject(v1=[$0], v=[$1])\n"
-            + "    RwStreamFilter(condition=[<>($2, 0)])\n"
-            + "      RwStreamAgg(group=[{0}], v=[SUM($1)], Row Sum0=[$SUM0($2)])\n"
-            + "        RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
-            + "          RwStreamProject(v1=[$0], v=[$STREAM_NULL_BY_ROW_COUNT($2, $1)], Row Count=[$2])\n"
-            + "            RwStreamAgg(group=[{0}], v=[SUM($1)], Row Count=[COUNT()])\n"
-            + "              RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
-            + "                RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])";
+            + "  RwStreamProject(v1=[$0], v=[$2])\n"
+            + "    RwStreamAgg(group=[{0}], agg#0=[$SUM0($1)], v=[SUM($2)])\n"
+            + "      RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
+            + "        RwStreamAgg(group=[{0}], agg#0=[COUNT()], v=[SUM($1)])\n"
+            + "          RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
+            + "            RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])";
     testLogger.debug("explain the exchange plan:\n" + explainExchangePlan);
     Assertions.assertEquals(expectedPlan, explainExchangePlan);
   }
