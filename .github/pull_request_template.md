@@ -3,8 +3,9 @@
 ## What's changed and what's your intention?
 
 
-## Checklist:
+## Checklist
+
 - [ ] I have written docs and comments
-- [ ] I have passed unit tests and integration tests
+- [ ] I have added unit tests and/or integration tests
 
 ## Refer to a related PR or issue link (optional)
