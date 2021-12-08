@@ -287,4 +287,27 @@ RwStreamMaterializedView(name=[t_wrong_case_two_phase_agg])
 ]]>
         </Resource>
     </TestCase>
+    <TestCase name="query 12">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view T_changed_collation as
+select * from t as t1 join t as t2 on t1.v1 = t2.v2 and t1.v2 = t2.v1 order by t1.v1 DESC, t2.v3, t2.v2 ASC;
+]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[t_changed_collation], collation=[[0 DESC, 6, 5]])
+  RwStreamHashJoin(condition=[AND(=($0, $5), =($1, $4))], joinType=[inner])
+    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
+    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
+]]>
+        </Resource>
+        <Resource name="primaryKey">
+            <![CDATA[
+[0, 6, 5, 3, 7]
+]]>
+        </Resource>
+    </TestCase>
 </Root>

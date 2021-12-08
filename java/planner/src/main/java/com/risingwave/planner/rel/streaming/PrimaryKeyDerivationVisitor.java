@@ -251,7 +251,7 @@ public class PrimaryKeyDerivationVisitor
       var index = collation.getFieldIndex();
       var newIndex = positionMap.getOrDefault(index, index);
       newPrimaryKeyIndices.add(newIndex);
-      var newCollation = collation.withFieldIndex(index);
+      var newCollation = collation.withFieldIndex(newIndex);
       newFieldCollations.add(newCollation);
     }
     for (var oldPrimaryKeyIndex : oldPrimaryKeyIndices) {
@@ -266,13 +266,19 @@ public class PrimaryKeyDerivationVisitor
         newPrimaryKeyIndices.add(oldPrimaryKeyIndex);
       }
     }
-    var newCollation = RelCollations.of(sort.collation.getFieldCollations());
+    var newCollation = RelCollations.of(newFieldCollations);
     LOGGER.debug("old collation:" + sort.collation);
     LOGGER.debug("new collation:" + newCollation);
     LOGGER.debug("old primaryKeyIndices:" + oldPrimaryKeyIndices);
     LOGGER.debug("new primaryKeyIndices:" + newPrimaryKeyIndices);
     var newSort =
-        (RwStreamSort) sort.copy(sort.getTraitSet(), p.node, newCollation, sort.offset, sort.fetch);
+        (RwStreamSort)
+            sort.copy(
+                sort.getTraitSet().replace(newCollation),
+                p.node,
+                newCollation,
+                sort.offset,
+                sort.fetch);
     return new Result<>(
         newSort,
         new PrimaryKeyIndicesAndPositionMap(
