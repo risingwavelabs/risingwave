@@ -17,7 +17,7 @@ statement ok
 create materialized view mv1 as select * from t1;
 
 statement ok
-create materialized view mv2 as select sum(v1) as sum_v1, sum(v2) as sum_v2, count(v3) as count_v3 from t1;
+create materialized view mv2 as select avg(v1) as avg_v1, sum(v2) as sum_v2, count(v3) as count_v3 from t1;
 
 statement ok
 create materialized view mv3 as select * from t1 INNER JOIN t3 ON t1.v1=t3.v1;
@@ -29,9 +29,9 @@ select v1, v2, v3 from mv1;
 2 3 3
 
 query III
-select sum_v1, sum_v2, count_v3 from mv2;
+select avg_v1, sum_v2, count_v3 from mv2;
 ----
-3 7 2
+1 7 2
 
 query IIIIIIII
 select * from mv3;
@@ -53,6 +53,6 @@ select v1, v2, v3 from mv1;
 4 3 5
 
 query III
-select sum_v1, sum_v2, count_v3 from mv2;
+select avg_v1, sum_v2, count_v3 from mv2;
 ----
-10 14 4
+2 14 4

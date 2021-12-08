@@ -80,6 +80,14 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
+        (ProstType::Cast, DataTypeKind::Int32, DataTypeKind::Int64) => {
+            Box::new(UnaryExpression::<I64Array, I32Array, _> {
+                expr_ia1: child_expr,
+                return_type,
+                func: |x: i64| Ok(x as i32),
+                _phantom: PhantomData,
+            })
+        }
         (ProstType::Not, _, _) => Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _> {
             expr_ia1: child_expr,
             return_type,
