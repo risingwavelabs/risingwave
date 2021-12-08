@@ -242,7 +242,38 @@ mod tests {
     use risingwave_pb::expr::{expr_node::Type, ExprNode};
 
     #[test]
-    fn test() {
+    fn test_expr_literal_from() {
+        let v = true;
+        let t = TypeName::Boolean;
+        let bytes = (v as i8).to_be_bytes().to_vec();
+        // construct LiteralExpression in various types below with value 1i8, and expect Err
+        for typ in [
+            TypeName::Int16,
+            TypeName::Int32,
+            TypeName::Int64,
+            TypeName::Float,
+            TypeName::Double,
+            TypeName::Interval,
+            TypeName::Date,
+        ] {
+            assert!(
+                LiteralExpression::try_from(&make_expression(Some(bytes.clone()), typ)).is_err()
+            );
+        }
+        let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();
+        assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
+
+        let v = 1i16;
+        let t = TypeName::Int16;
+        let bytes = v.to_be_bytes().to_vec();
+        assert!(LiteralExpression::try_from(&make_expression(
+            Some(bytes.clone()),
+            TypeName::Boolean
+        ))
+        .is_err());
+        let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();
+        assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
+
         let v = 1i32;
         let t = TypeName::Int32;
         let bytes = v.to_be_bytes().to_vec();
@@ -271,6 +302,23 @@ mod tests {
         let t = TypeName::Float;
         let expr = LiteralExpression::try_from(&make_expression(None, t)).unwrap();
         assert_eq!(v, expr.literal());
+
+        let v = String::from("varchar");
+        let t = TypeName::Varchar;
+        let bytes = v.as_bytes().to_vec();
+        let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();
+        assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
+
+        let v = Decimal::new(3141, 3);
+        let t = TypeName::Decimal;
+        let bytes = v.to_string().as_bytes().to_vec();
+        let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();
+        assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
+
+        let v = String::from("NaN");
+        let t = TypeName::Decimal;
+        let bytes = v.as_bytes().to_vec();
+        assert!(LiteralExpression::try_from(&make_expression(Some(bytes), t)).is_err());
 
         let v = 32i32;
         let t = TypeName::Interval;
