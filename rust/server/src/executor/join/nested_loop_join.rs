@@ -3,6 +3,7 @@ use std::sync::Arc;
 use prost::Message;
 
 use crate::executor::join::chunked_data::{ChunkedData, RowId};
+use crate::executor::join::row_level_iter::RowLevelIter;
 use crate::executor::join::JoinType;
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 use crate::risingwave_common::array::Array;
@@ -43,7 +44,7 @@ pub struct NestedLoopJoinExecutor {
     /// The data type of probe side. Cache to avoid copy too much.
     probe_side_schema: Vec<DataTypeRef>,
     /// Row-level iteration of probe side.
-    probe_side_source: ProbeSideSource,
+    probe_side_source: RowLevelIter,
     /// The table used for look up matched rows.
     build_table: BuildTable,
 
@@ -211,7 +212,7 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                 match join_type {
                     JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter => {
                         // TODO: Support more join type.
-                        let outer_table_source = ProbeSideSource::new(left_child);
+                        let outer_table_source = RowLevelIter::new(left_child);
 
                         let join_state = NestedLoopJoinState::Build;
                         Ok(Box::new(Self {
@@ -314,7 +315,7 @@ impl NestedLoopJoinExecutor {
                                 row_idx,
                             ))?;
                         }
-                        self.probe_side_source.cur_row_matched = true;
+                        self.probe_side_source.set_cur_row_matched(true);
                     }
                 }
             }
@@ -349,7 +350,7 @@ impl NestedLoopJoinExecutor {
         // Append (probed_row, None) to chunk builder if current row finished probing and do not
         // find any match.
         if ret.cur_row_finished {
-            if !self.probe_side_source.cur_row_matched {
+            if !self.probe_side_source.get_cur_row_matched() {
                 assert!(ret.chunk.is_none());
                 let mut probe_row = self.probe_side_source.current_row_ref_unchecked();
                 for _ in 0..self.build_table.data_source.schema().fields.len() {
@@ -361,7 +362,7 @@ impl NestedLoopJoinExecutor {
                     chunk: ret,
                 });
             }
-            self.probe_side_source.cur_row_matched = false;
+            self.probe_side_source.set_cur_row_matched(false);
         }
         Ok(ret)
     }
@@ -379,7 +380,7 @@ impl NestedLoopJoinExecutor {
                     // Only proceed visible tuples.
                     if vis {
                         let mut cur_row = cur_row_ref.0;
-                        for _ in 0..self.probe_side_source.outer.schema().fields.len() {
+                        for _ in 0..self.probe_side_source.get_schema().fields.len() {
                             cur_row.insert(0, None);
                         }
                         if let Some(ret_chunk) = self
@@ -440,90 +441,6 @@ impl NestedLoopJoinExecutor {
             builder.build()
         };
         Ok(data_chunk)
-    }
-}
-
-/// This is designed for nested loop join to support row level iteration.
-/// It will managed the scan state of outer table (Reset [`DataChunk`] Iter
-/// when exhaust current chunk) for executor to simplify logic.
-pub struct ProbeSideSource {
-    outer: BoxedExecutor,
-    cur_chunk: Option<DataChunk>,
-    /// The row index to read in current chunk.
-    idx: usize,
-    cur_row_matched: bool,
-}
-
-impl ProbeSideSource {
-    /// Note the difference between `new` and `init`. `new` do not load data but `init` will
-    /// call executor. The `Done` do not really means there is no more data in outer
-    /// table, it is just used for init (Otherwise we have to use Option).
-    pub(crate) fn new(outer: BoxedExecutor) -> Self {
-        Self {
-            outer,
-            cur_chunk: None,
-            idx: 0,
-            cur_row_matched: false,
-        }
-    }
-
-    pub async fn init(&mut self) -> Result<()> {
-        self.outer.open().await?;
-        self.cur_chunk = self
-            .outer
-            .next()
-            .await?
-            .map(|chunk| chunk.compact().unwrap());
-        Ok(())
-    }
-
-    /// Return the current outer tuple.
-    pub fn current_row_ref(&self) -> Result<Option<(RowRef<'_>, bool)>> {
-        match &self.cur_chunk {
-            Some(chunk) => {
-                if self.idx < chunk.capacity() {
-                    Some(chunk.row_at(self.idx)).transpose()
-                } else {
-                    Ok(None)
-                }
-            }
-            None => Ok(None),
-        }
-    }
-
-    /// Get current tuple directly without None check.
-    pub fn current_row_ref_unchecked(&self) -> RowRef<'_> {
-        self.current_row_ref().unwrap().unwrap().0
-    }
-
-    pub fn current_row_ref_unchecked_vis(&self) -> Result<Option<RowRef<'_>>> {
-        Ok(self.current_row_ref()?.map(|tuple| tuple.0))
-    }
-
-    /// Try advance to next outer tuple. If it is Done but still invoked, it's
-    /// a developer error.
-    pub async fn advance(&mut self) -> Result<()> {
-        self.idx += 1;
-        match &self.cur_chunk {
-            Some(chunk) => {
-                if self.idx >= chunk.capacity() {
-                    self.cur_chunk = self.outer.next().await?;
-                    self.idx = 0;
-                }
-            }
-            None => {
-                unreachable!("Should never advance while no more data to scan")
-            }
-        };
-        Ok(())
-    }
-
-    pub async fn clean(&mut self) -> Result<()> {
-        self.outer.close().await
-    }
-
-    fn get_schema(&self) -> &Schema {
-        self.outer.schema()
     }
 }
 
@@ -600,7 +517,7 @@ mod tests {
     use std::sync::Arc;
 
     use crate::executor::join::nested_loop_join::{
-        BuildTable, NestedLoopJoinExecutor, NestedLoopJoinState, ProbeSideSource,
+        BuildTable, NestedLoopJoinExecutor, NestedLoopJoinState, RowLevelIter,
     };
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::MockExecutor;
@@ -664,7 +581,7 @@ mod tests {
             schema: Schema { fields: vec![] },
             last_chunk: None,
             probe_side_schema: probe_side_schema.data_types_clone(),
-            probe_side_source: ProbeSideSource::new(probe_source),
+            probe_side_source: RowLevelIter::new(probe_source),
             build_table: BuildTable::new(build_source),
             probe_remain_chunk_idx: 0,
             probe_remain_row_idx: 0,

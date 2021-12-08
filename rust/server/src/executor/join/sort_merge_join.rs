@@ -1,4 +1,4 @@
-use crate::executor::join::nested_loop_join::ProbeSideSource;
+use crate::executor::join::row_level_iter::RowLevelIter;
 use crate::executor::join::JoinType;
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 use prost::Message;
@@ -20,9 +20,9 @@ pub struct SortMergeJoinExecutor {
     sort_order: OrderType,
     join_type: JoinType,
     /// Row-level iteration of probe side.
-    probe_side_source: ProbeSideSource,
+    probe_side_source: RowLevelIter,
     /// Row-level iteration of build side.
-    build_side_source: ProbeSideSource,
+    build_side_source: RowLevelIter,
     /// Return data chunk in batch.
     chunk_builder: DataChunkBuilder,
     /// Join result of last row. It only contains the build side. Should concatenate with probe row
@@ -186,8 +186,8 @@ impl SortMergeJoinExecutor {
     pub(super) fn new(
         join_type: JoinType,
         schema: Schema,
-        probe_side_source: ProbeSideSource,
-        build_side_source: ProbeSideSource,
+        probe_side_source: RowLevelIter,
+        build_side_source: RowLevelIter,
         probe_key_idxs: Vec<usize>,
         build_key_idxs: Vec<usize>,
     ) -> Self {
@@ -271,8 +271,8 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
                 match join_type {
                     JoinType::Inner => {
                         // TODO: Support more join type.
-                        let probe_table_source = ProbeSideSource::new(left_child);
-                        let build_table_source = ProbeSideSource::new(right_child);
+                        let probe_table_source = RowLevelIter::new(left_child);
+                        let build_table_source = RowLevelIter::new(right_child);
                         Ok(Box::new(Self::new(
                             join_type,
                             schema,
@@ -292,7 +292,7 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
 
 #[cfg(test)]
 mod tests {
-    use crate::executor::join::nested_loop_join::ProbeSideSource;
+    use crate::executor::join::row_level_iter::RowLevelIter;
     use crate::executor::join::sort_merge_join::SortMergeJoinExecutor;
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::diff_executor_output;
@@ -480,8 +480,8 @@ mod tests {
             Box::new(SortMergeJoinExecutor::new(
                 join_type,
                 schema,
-                ProbeSideSource::new(left_child),
-                ProbeSideSource::new(right_child),
+                RowLevelIter::new(left_child),
+                RowLevelIter::new(right_child),
                 vec![0],
                 vec![0],
             ))
