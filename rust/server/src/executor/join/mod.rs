@@ -5,7 +5,6 @@ mod chunked_data;
 mod hash_join;
 pub use hash_join::*;
 
-pub mod build_table;
 mod hash_join_state;
 pub mod nested_loop_join;
 pub mod row_level_iter;

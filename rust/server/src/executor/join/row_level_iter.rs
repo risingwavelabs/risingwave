@@ -1,87 +1,126 @@
+use crate::executor::join::chunked_data::{ChunkedData, RowId};
 use crate::executor::BoxedExecutor;
 use risingwave_common::array::{DataChunk, RowRef};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{Result, RwError};
 
-/// This is designed for nested loop join/sort merge join to support row level iteration.
-/// TODO: merge this one with [`BuildTable`].
-pub struct RowLevelIter {
-    outer: BoxedExecutor,
-    cur_chunk: Option<DataChunk>,
-    /// The row index to read in current chunk.
+/// `inner_table` is a buffer for all data. For all probe key, directly fetch data in `inner_table`
+/// without call executor. The executor is only called when building `inner_table`.
+pub(crate) struct RowLevelIter {
+    data_source: BoxedExecutor,
+    /// Buffering of inner table. TODO: Spill to disk or more fine-grained memory management to
+    /// avoid OOM.
+    data: Vec<DataChunk>,
+
+    /// Pos of chunk in inner table.
+    chunk_idx: usize,
+    /// Pos of row in current chunk.
     row_idx: usize,
-    /// Whether current row has found matched tuples. Used in outer join.
+
+    /// Used only when join remaining is required after probing (build side).
+    /// See [`JoinType::need_join_remaining`]
+    build_matched: Option<ChunkedData<bool>>,
+    /// Whether current row has found matched tuples. Used in outer join (probe side).
     cur_row_matched: bool,
 }
 
 impl RowLevelIter {
-    pub(crate) fn new(outer: BoxedExecutor) -> Self {
+    pub fn new(data_source: BoxedExecutor) -> Self {
         Self {
-            outer,
-            cur_chunk: None,
+            data_source,
+            data: vec![],
+            chunk_idx: 0,
+            build_matched: None,
             row_idx: 0,
             cur_row_matched: false,
         }
     }
 
-    pub async fn init(&mut self) -> Result<()> {
-        self.outer.open().await?;
-        self.cur_chunk = self
-            .outer
-            .next()
-            .await?
-            .map(|chunk| chunk.compact().unwrap());
-        Ok(())
+    /// Called in the first probe and load all data of inner relation into buffer.
+    pub async fn load_data(&mut self) -> Result<()> {
+        self.data_source.open().await?;
+        while let Some(chunk) = self.data_source.next().await? {
+            // Assuming all data are visible.
+            self.data.push(chunk.compact()?);
+        }
+        self.build_matched = Some(ChunkedData::<bool>::with_chunk_sizes(
+            self.data.iter().map(|c| c.capacity()),
+        )?);
+        self.data_source.close().await
     }
 
-    /// Return the current outer tuple.
-    pub fn current_row_ref(&self) -> Result<Option<(RowRef<'_>, bool)>> {
-        match &self.cur_chunk {
-            Some(chunk) => {
-                if self.row_idx < chunk.capacity() {
-                    Some(chunk.row_at(self.row_idx)).transpose()
-                } else {
-                    Ok(None)
-                }
+    /// Copied from hash join. Consider remove the duplication.
+    pub fn set_build_matched(&mut self, build_row_id: RowId) -> Result<()> {
+        match self.build_matched {
+            Some(ref mut flags) => {
+                flags[build_row_id] = true;
+                Ok(())
             }
-            None => Ok(None),
+            None => Err(RwError::from(InternalError(
+                "Build match flags not found!".to_string(),
+            ))),
         }
     }
 
-    /// Get current tuple directly without None check.
-    pub fn current_row_ref_unchecked(&self) -> RowRef<'_> {
-        self.current_row_ref().unwrap().unwrap().0
+    pub fn is_build_matched(&self, build_row_id: RowId) -> Result<bool> {
+        match self.build_matched {
+            Some(ref flags) => Ok(flags[build_row_id]),
+            None => Err(RwError::from(InternalError(
+                "Build match flags not found!".to_string(),
+            ))),
+        }
     }
 
-    /// Get current tuple without know the visibility.
-    pub fn current_row_ref_unchecked_vis(&self) -> Result<Option<RowRef<'_>>> {
-        Ok(self.current_row_ref()?.map(|tuple| tuple.0))
+    pub fn get_current_chunk(&self) -> Option<&DataChunk> {
+        if self.chunk_idx < self.data.len() {
+            Some(&self.data[self.chunk_idx])
+        } else {
+            None
+        }
     }
 
-    /// Try advance to next outer tuple. If it is Done but still invoked, it's
-    /// a developer error.
-    pub async fn advance(&mut self) -> Result<()> {
+    pub fn get_current_row_ref(&self) -> Option<RowRef<'_>> {
+        if self.chunk_idx >= self.data.len() {
+            return None;
+        }
+
+        if self.row_idx >= self.data[self.chunk_idx].capacity() {
+            return None;
+        }
+
+        Some(self.data[self.chunk_idx].row_at_unchecked_vis(self.row_idx))
+    }
+
+    pub fn get_current_row_id(&self) -> RowId {
+        RowId::new(self.chunk_idx, self.row_idx)
+    }
+
+    pub fn advance_chunk(&mut self) {
+        self.chunk_idx += 1;
+    }
+
+    pub fn advance_row(&mut self) {
         self.row_idx += 1;
-        match &self.cur_chunk {
-            Some(chunk) => {
-                if self.row_idx >= chunk.capacity() {
-                    self.cur_chunk = self.outer.next().await?;
-                    self.row_idx = 0;
-                }
-            }
-            None => {
-                unreachable!("Should never advance while no more data to scan")
-            }
-        };
-        Ok(())
+        // if current chunk is exhausted, advance to next non-zero chunk.
+        while self.chunk_idx < self.data.len()
+            && self.row_idx >= self.data[self.chunk_idx].capacity()
+        {
+            self.row_idx = 0;
+            self.chunk_idx += 1;
+        }
     }
 
-    pub async fn clean(&mut self) -> Result<()> {
-        self.outer.close().await
+    pub fn reset_chunk(&mut self) {
+        self.chunk_idx = 0;
+    }
+
+    pub fn get_chunk_idx(&self) -> usize {
+        self.chunk_idx
     }
 
     pub fn get_schema(&self) -> &Schema {
-        self.outer.schema()
+        self.data_source.schema()
     }
 
     pub fn set_cur_row_matched(&mut self, val: bool) {

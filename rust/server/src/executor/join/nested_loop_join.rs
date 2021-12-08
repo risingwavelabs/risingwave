@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use prost::Message;
 
-use crate::executor::join::build_table::BuildTable;
 use crate::executor::join::chunked_data::RowId;
 use crate::executor::join::row_level_iter::RowLevelIter;
 use crate::executor::join::JoinType;
@@ -48,7 +47,7 @@ pub struct NestedLoopJoinExecutor {
     /// Row-level iteration of probe side.
     probe_side_source: RowLevelIter,
     /// The table used for look up matched rows.
-    build_table: BuildTable,
+    build_table: RowLevelIter,
 
     /// Used in probe remaining iteration.
     probe_remain_chunk_idx: usize,
@@ -81,6 +80,7 @@ impl Executor for NestedLoopJoinExecutor {
     async fn open(&mut self) -> Result<()> {
         match self.state {
             NestedLoopJoinState::Build => {
+                // TODO: Do not all read to memory if OOM.
                 self.build_table.load_data().await?;
                 self.state = NestedLoopJoinState::FirstProbe;
             }
@@ -228,7 +228,7 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                             last_chunk: None,
                             probe_side_schema,
                             probe_side_source: outer_table_source,
-                            build_table: BuildTable::new(right_child),
+                            build_table: RowLevelIter::new(right_child),
                             probe_remain_chunk_idx: 0,
                             probe_remain_row_idx: 0,
                         }))
@@ -250,34 +250,27 @@ impl NestedLoopJoinExecutor {
     /// exhausted.
     async fn probe(&mut self, first_probe: bool) -> Result<Option<DataChunk>> {
         if first_probe {
-            self.probe_side_source.init().await?;
+            self.probe_side_source.load_data().await?;
         }
-        let cur_row = self.probe_side_source.current_row_ref()?;
+        let cur_row = self.probe_side_source.get_current_row_ref();
         // TODO(Bowen): If we assume the scanned chunk is always compact (no invisible tuples),
         // remove this check.
-        if let Some((_, vis)) = cur_row {
-            // Only process visible tuple.
-            if vis {
-                // Dispatch to each kind of join type
-                let probe_result = match self.join_type {
-                    JoinType::Inner => self.do_inner_join(),
-                    JoinType::LeftOuter => self.do_left_outer_join(),
-                    JoinType::RightOuter => self.do_right_outer_join(),
-                    _ => unimplemented!("Do not support other join types!"),
-                }?;
+        if cur_row.is_some() {
+            // Dispatch to each kind of join type
+            let probe_result = match self.join_type {
+                JoinType::Inner => self.do_inner_join(),
+                JoinType::LeftOuter => self.do_left_outer_join(),
+                JoinType::RightOuter => self.do_right_outer_join(),
+                _ => unimplemented!("Do not support other join types!"),
+            }?;
 
-                if probe_result.cur_row_finished {
-                    self.probe_side_source.advance().await?;
-                }
-                if let Some(inner_chunk) = probe_result.chunk {
-                    return Ok(Some(inner_chunk));
-                }
-            } else {
-                // If not visible, proceed to next tuple.
-                self.probe_side_source.advance().await?;
+            if probe_result.cur_row_finished {
+                self.probe_side_source.advance_row();
+            }
+            if let Some(inner_chunk) = probe_result.chunk {
+                return Ok(Some(inner_chunk));
             }
         } else {
-            self.probe_side_source.clean().await?;
             self.state = if self.join_type.need_join_remaining() {
                 NestedLoopJoinState::ProbeRemaining
             } else {
@@ -298,8 +291,8 @@ impl NestedLoopJoinExecutor {
 
     fn do_inner_join(&mut self) -> Result<ProbeResult> {
         while let Some(build_side_chunk) = self.build_table.get_current_chunk() {
-            // Checked the vis and None before.
-            let probe_row = self.probe_side_source.current_row_ref_unchecked();
+            // Checked the option before, so impossible to panic.
+            let probe_row = self.probe_side_source.get_current_row_ref().unwrap();
             // let build_side_chunk = &self.build_table.inner_table[self.build_table.chunk_idx];
             let const_row_chunk =
                 self.convert_row_to_chunk(&probe_row, build_side_chunk.capacity())?;
@@ -353,7 +346,7 @@ impl NestedLoopJoinExecutor {
         if ret.cur_row_finished {
             if !self.probe_side_source.get_cur_row_matched() {
                 assert!(ret.chunk.is_none());
-                let mut probe_row = self.probe_side_source.current_row_ref_unchecked();
+                let mut probe_row = self.probe_side_source.get_current_row_ref().unwrap();
                 for _ in 0..self.build_table.get_schema().fields.len() {
                     probe_row.0.push(None);
                 }
@@ -374,9 +367,6 @@ impl NestedLoopJoinExecutor {
                 .build_table
                 .is_build_matched(self.build_table.get_current_row_id())?
             {
-                // let (cur_row_ref, vis) = chunk.row_at(self.probe_remain_row_idx)?;
-                // Only proceed visible tuples.
-                // if vis {
                 let mut cur_row_vec = cur_row.0;
                 for _ in 0..self.probe_side_source.get_schema().fields.len() {
                     cur_row_vec.insert(0, None);
@@ -415,7 +405,6 @@ impl NestedLoopJoinExecutor {
         let mut concated_columns = Vec::with_capacity(left.columns().len() + right.columns().len());
         concated_columns.extend_from_slice(left.columns());
         concated_columns.extend_from_slice(right.columns());
-        // let vis;
         // Only handle one side is constant row chunk: One of visibility must be None.
         let vis = match (left.visibility(), right.visibility()) {
             (None, _) => right.visibility().clone(),
@@ -441,7 +430,7 @@ mod tests {
     use std::sync::Arc;
 
     use crate::executor::join::nested_loop_join::{
-        BuildTable, NestedLoopJoinExecutor, NestedLoopJoinState, RowLevelIter,
+        NestedLoopJoinExecutor, NestedLoopJoinState, RowLevelIter,
     };
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::MockExecutor;
@@ -506,7 +495,7 @@ mod tests {
             last_chunk: None,
             probe_side_schema: probe_side_schema.data_types_clone(),
             probe_side_source: RowLevelIter::new(probe_source),
-            build_table: BuildTable::new(build_source),
+            build_table: RowLevelIter::new(build_source),
             probe_remain_chunk_idx: 0,
             probe_remain_row_idx: 0,
         };

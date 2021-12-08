@@ -43,8 +43,8 @@ pub struct SortMergeJoinExecutor {
 impl Executor for SortMergeJoinExecutor {
     async fn open(&mut self) -> risingwave_common::error::Result<()> {
         // Init data source.
-        self.probe_side_source.init().await?;
-        self.build_side_source.init().await
+        self.probe_side_source.load_data().await?;
+        self.build_side_source.load_data().await
     }
 
     /// The code logic:
@@ -58,10 +58,8 @@ impl Executor for SortMergeJoinExecutor {
     async fn next(&mut self) -> risingwave_common::error::Result<Option<DataChunk>> {
         loop {
             // If current row is the same with last row. Directly append cached join results.
-            if self.compare_with_last_row(self.probe_side_source.current_row_ref_unchecked_vis()?) {
-                if let Some(cur_probe_row) =
-                    self.probe_side_source.current_row_ref_unchecked_vis()?
-                {
+            if self.compare_with_last_row(self.probe_side_source.get_current_row_ref()) {
+                if let Some(cur_probe_row) = self.probe_side_source.get_current_row_ref() {
                     while self.last_join_results_write_idx < self.last_join_results.len() {
                         let build_row = &self.last_join_results[self.last_join_results_write_idx];
                         self.last_join_results_write_idx += 1;
@@ -74,10 +72,8 @@ impl Executor for SortMergeJoinExecutor {
                     }
                 }
                 self.last_join_results_write_idx = 0;
-                self.probe_side_source.advance().await?;
-                if self
-                    .compare_with_last_row(self.probe_side_source.current_row_ref_unchecked_vis()?)
-                {
+                self.probe_side_source.advance_row();
+                if self.compare_with_last_row(self.probe_side_source.get_current_row_ref()) {
                     continue;
                 } else {
                     // Clear last_join result if not equal occur.
@@ -86,8 +82,8 @@ impl Executor for SortMergeJoinExecutor {
             }
 
             // Do not care the vis.
-            let cur_probe_row_opt = self.probe_side_source.current_row_ref_unchecked_vis()?;
-            let cur_build_row_opt = self.build_side_source.current_row_ref_unchecked_vis()?;
+            let cur_probe_row_opt = self.probe_side_source.get_current_row_ref();
+            let cur_build_row_opt = self.build_side_source.get_current_row_ref();
 
             match (cur_probe_row_opt, cur_build_row_opt) {
                 (Some(cur_probe_row_ref), Some(cur_build_row_ref)) => {
@@ -109,25 +105,25 @@ impl Executor for SortMergeJoinExecutor {
                             if self.sort_order == OrderType::Descending {
                                 // Before advance to next row, record last probe key.
                                 self.last_probe_key = Some(probe_key);
-                                self.probe_side_source.advance().await?;
+                                self.probe_side_source.advance_row();
                                 if !self.compare_with_last_row(
-                                    self.probe_side_source.current_row_ref_unchecked_vis()?,
+                                    self.probe_side_source.get_current_row_ref(),
                                 ) {
                                     self.last_join_results.clear();
                                 }
                             } else {
-                                self.build_side_source.advance().await?;
+                                self.build_side_source.advance_row();
                             }
                         }
 
                         Ordering::Less => {
                             if self.sort_order == OrderType::Descending {
-                                self.build_side_source.advance().await?;
+                                self.build_side_source.advance_row();
                             } else {
                                 self.last_probe_key = Some(probe_key);
-                                self.probe_side_source.advance().await?;
+                                self.probe_side_source.advance_row();
                                 if !self.compare_with_last_row(
-                                    self.probe_side_source.current_row_ref_unchecked_vis()?,
+                                    self.probe_side_source.get_current_row_ref(),
                                 ) {
                                     self.last_join_results.clear();
                                 }
@@ -144,7 +140,7 @@ impl Executor for SortMergeJoinExecutor {
                                 cur_build_row_ref.clone(),
                             );
                             let ret = self.chunk_builder.append_one_row_ref(join_row.clone())?;
-                            self.build_side_source.advance().await?;
+                            self.build_side_source.advance_row();
                             if let Some(ret_chunk) = ret {
                                 return Ok(Some(ret_chunk));
                             }
@@ -158,7 +154,7 @@ impl Executor for SortMergeJoinExecutor {
                             .value_by_slice(&self.probe_key_idxs)
                             .into(),
                     );
-                    self.probe_side_source.advance().await?;
+                    self.probe_side_source.advance_row();
                 }
                 // Once probe row is None, consume all results or terminate.
                 (_, _) => {
@@ -173,8 +169,7 @@ impl Executor for SortMergeJoinExecutor {
     }
 
     async fn close(&mut self) -> risingwave_common::error::Result<()> {
-        self.probe_side_source.clean().await?;
-        self.build_side_source.clean().await
+        Ok(())
     }
 
     fn schema(&self) -> &Schema {
@@ -292,7 +287,7 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
 
 #[cfg(test)]
 mod tests {
-    use crate::executor::join::row_level_iter::RowLevelIter;
+    use crate::executor::join::sort_merge_join::RowLevelIter;
     use crate::executor::join::sort_merge_join::SortMergeJoinExecutor;
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::diff_executor_output;
