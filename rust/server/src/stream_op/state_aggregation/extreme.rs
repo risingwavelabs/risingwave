@@ -17,6 +17,83 @@ use super::extreme_serializer::{ExtremePK, ExtremeSerializer};
 use crate::stream_op::{AggArgs, AggCall};
 use itertools::Itertools;
 
+/// Represents an entry in the `flush_buffer`. No `FlushStatus` associated with a key means no-op.
+///
+/// ```plain
+/// No-op --(insert)-> Insert --(delete)-> No-op
+///  \------(delete)-> Delete --(insert)-> DeleteInsert --(delete)-> Delete
+/// ```
+enum FlushStatus {
+    /// The entry will be deleted.
+    Delete,
+    /// The entry has been deleted in this epoch, and will be inserted.
+    DeleteInsert(ScalarImpl),
+    /// The entry will be inserted.
+    Insert(ScalarImpl),
+}
+
+impl FlushStatus {
+    pub fn is_delete(&self) -> bool {
+        matches!(self, Self::Delete)
+    }
+
+    pub fn is_insert(&self) -> bool {
+        matches!(self, Self::Insert(_))
+    }
+
+    pub fn is_delete_insert(&self) -> bool {
+        matches!(self, Self::DeleteInsert(_))
+    }
+
+    /// Transform `FlushStatus` into an `Option`. If the last operation in the `FlushStatus` is
+    /// `Delete`, return `None`. Otherwise, return the concrete value.
+    pub fn into_option(self) -> Option<ScalarImpl> {
+        match self {
+            Self::DeleteInsert(value) | Self::Insert(value) => Some(value),
+            Self::Delete => None,
+        }
+    }
+
+    /// Insert an entry and modify the corresponding flush state
+    pub fn do_insert<K: Ord>(entry: btree_map::Entry<K, Self>, value: ScalarImpl) {
+        match entry {
+            btree_map::Entry::Vacant(e) => {
+                // No-op -> Insert
+                e.insert(Self::Insert(value));
+            }
+            btree_map::Entry::Occupied(mut e) => {
+                if e.get().is_delete() {
+                    // Delete -> DeleteInsert
+                    e.insert(Self::DeleteInsert(value));
+                } else {
+                    panic!("invalid flush status");
+                }
+            }
+        }
+    }
+
+    /// Delete an entry and modify the corresponding flush state
+    pub fn do_delete<K: Ord>(entry: btree_map::Entry<K, Self>) {
+        match entry {
+            btree_map::Entry::Vacant(e) => {
+                // No-op -> Delete
+                e.insert(Self::Delete);
+            }
+            btree_map::Entry::Occupied(mut e) => {
+                if e.get().is_insert() {
+                    // Insert -> No-op
+                    e.remove();
+                } else if e.get().is_delete_insert() {
+                    // DeleteInsert -> Delete
+                    e.insert(Self::Delete);
+                } else {
+                    panic!("invalid flush status");
+                }
+            }
+        }
+    }
+}
+
 /// Manages a `BTreeMap` in memory for top N entries, and the state store for remaining entries.
 ///
 /// There are several prerequisites for using the `MinState`.
@@ -47,7 +124,7 @@ where
     top_n: BTreeMap<(A::OwnedItem, ExtremePK), ScalarImpl>,
 
     /// The actions that will be taken on next flush
-    flush_buffer: BTreeMap<(A::OwnedItem, ExtremePK), Option<ScalarImpl>>,
+    flush_buffer: BTreeMap<(A::OwnedItem, ExtremePK), FlushStatus>,
 
     /// Number of items in the state including those not in top n cache but in state store.
     total_count: usize,
@@ -188,19 +265,13 @@ where
                     if do_insert {
                         self.top_n.insert(composed_key.clone(), value.clone());
                     }
-                    self.flush_buffer.insert(composed_key, Some(value));
+
+                    FlushStatus::do_insert(self.flush_buffer.entry(composed_key), value);
                     self.total_count += 1;
                 }
                 Op::Delete | Op::UpdateDelete => {
                     self.top_n.remove(&composed_key);
-                    match self.flush_buffer.entry(composed_key) {
-                        btree_map::Entry::Vacant(e) => {
-                            e.insert(None);
-                        }
-                        btree_map::Entry::Occupied(e) => {
-                            e.remove();
-                        }
-                    }
+                    FlushStatus::do_delete(self.flush_buffer.entry(composed_key));
                     self.total_count -= 1;
                 }
             }
@@ -263,7 +334,7 @@ where
             let key_encoded = self.serializer.serialize(key, &pks)?;
             let key_encoded = [self.keyspace.prefix(), &key_encoded[..]].concat();
 
-            match v {
+            match v.into_option() {
                 Some(v) => {
                     let mut serializer = memcomparable::Serializer::default();
                     serialize_datum_not_null_into(&Some(v), &mut serializer)
@@ -339,6 +410,76 @@ where
     #[cfg(test)]
     pub async fn iterate_topn_cache(&self) -> Result<Vec<(A::OwnedItem, ExtremePK)>> {
         Ok(self.top_n.iter().map(|(k, _)| k.clone()).collect())
+    }
+}
+
+pub async fn create_streaming_extreme_state<S: StateStore>(
+    agg_call: AggCall,
+    keyspace: Keyspace<S>,
+    row_count: usize,
+    top_n_count: Option<usize>,
+    pk_length: usize,
+) -> Result<Box<dyn ManagedExtremeState<S>>> {
+    match &agg_call.args {
+        AggArgs::Unary(x, _) => {
+            if agg_call.return_type.data_type_kind() != x.data_type_kind() {
+                panic!(
+                    "extreme state input doesn't match return value: {:?}",
+                    agg_call
+                );
+            }
+            if x.is_nullable() {
+                panic!("extreme state input should not be nullable: {:?}", agg_call);
+            }
+        }
+        _ => panic!("extreme state should only have one arg: {:?}", agg_call),
+    }
+
+    match (agg_call.kind, agg_call.return_type.data_type_kind()) {
+        (AggKind::Max, _) => {
+            todo!("max is not supported for now");
+        }
+        (AggKind::Min, DataTypeKind::Int64) => Ok(Box::new(
+            ManagedMinState::<_, I64Array>::new(
+                keyspace,
+                agg_call.return_type.clone(),
+                top_n_count,
+                row_count,
+                pk_length,
+            )
+            .await?,
+        )),
+        (AggKind::Min, DataTypeKind::Int32) => Ok(Box::new(
+            ManagedMinState::<_, I32Array>::new(
+                keyspace,
+                agg_call.return_type.clone(),
+                top_n_count,
+                row_count,
+                pk_length,
+            )
+            .await?,
+        )),
+        (AggKind::Min, DataTypeKind::Int16) => Ok(Box::new(
+            ManagedMinState::<_, I16Array>::new(
+                keyspace,
+                agg_call.return_type.clone(),
+                top_n_count,
+                row_count,
+                pk_length,
+            )
+            .await?,
+        )),
+        (AggKind::Min, DataTypeKind::Decimal) => Ok(Box::new(
+            ManagedMinState::<_, DecimalArray>::new(
+                keyspace,
+                agg_call.return_type.clone(),
+                top_n_count,
+                row_count,
+                pk_length,
+            )
+            .await?,
+        )),
+        _ => unreachable!("unsupported"),
     }
 }
 
@@ -634,74 +775,83 @@ mod tests {
             assert_eq!(value, heap.first().cloned());
         }
     }
-}
 
-pub async fn create_streaming_extreme_state<S: StateStore>(
-    agg_call: AggCall,
-    keyspace: Keyspace<S>,
-    row_count: usize,
-    top_n_count: Option<usize>,
-    pk_length: usize,
-) -> Result<Box<dyn ManagedExtremeState<S>>> {
-    match &agg_call.args {
-        AggArgs::Unary(x, _) => {
-            if agg_call.return_type.data_type_kind() != x.data_type_kind() {
-                panic!(
-                    "extreme state input doesn't match return value: {:?}",
-                    agg_call
-                );
-            }
-            if x.is_nullable() {
-                panic!("extreme state input should not be nullable: {:?}", agg_call);
-            }
-        }
-        _ => panic!("extreme state should only have one arg: {:?}", agg_call),
+    async fn helper_flush<S: StateStore>(
+        managed_state: &mut impl ManagedExtremeState<S>,
+        store: &S,
+    ) {
+        let mut write_batch = vec![];
+        managed_state.flush(&mut write_batch).unwrap();
+        store.ingest_batch(write_batch).await.unwrap();
     }
 
-    match (agg_call.kind, agg_call.return_type.data_type_kind()) {
-        (AggKind::Max, _) => {
-            todo!("max is not supported for now");
-        }
-        (AggKind::Min, DataTypeKind::Int64) => Ok(Box::new(
-            ManagedMinState::<_, I64Array>::new(
-                keyspace,
-                agg_call.return_type.clone(),
-                top_n_count,
-                row_count,
-                pk_length,
+    #[tokio::test]
+    async fn test_same_value_delete() {
+        // In this test, we test this case:
+        //
+        // Delete 6, insert 6, and delete 6 in one epoch.
+        // The 6 should be deleted from the state store.
+
+        let store = MemoryStateStore::new();
+        let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
+        let mut managed_state =
+            ManagedMinState::<_, I64Array>::new(keyspace, Int64Type::create(false), Some(3), 0, 0)
+                .await
+                .unwrap();
+        assert!(!managed_state.is_dirty());
+
+        let value_buffer =
+            I64Array::from_slice(&[Some(1), Some(2), Some(3), Some(4), Some(5), Some(7)])
+                .unwrap()
+                .into();
+
+        managed_state
+            .apply_batch(&[Op::Insert; 6], None, &[&value_buffer])
+            .await
+            .unwrap();
+
+        managed_state
+            .apply_batch(
+                &[Op::Insert],
+                None,
+                &[&I64Array::from_slice(&[Some(6)]).unwrap().into()],
             )
-            .await?,
-        )),
-        (AggKind::Min, DataTypeKind::Int32) => Ok(Box::new(
-            ManagedMinState::<_, I32Array>::new(
-                keyspace,
-                agg_call.return_type.clone(),
-                top_n_count,
-                row_count,
-                pk_length,
+            .await
+            .unwrap();
+
+        // Now we have 1 to 7 in the state store.
+        helper_flush(&mut managed_state, &store).await;
+
+        // Delete 6, insert 6, delete 6
+        managed_state
+            .apply_batch(
+                &[Op::Delete, Op::Insert, Op::Delete],
+                None,
+                &[&I64Array::from_slice(&[Some(6), Some(6), Some(6)])
+                    .unwrap()
+                    .into()],
             )
-            .await?,
-        )),
-        (AggKind::Min, DataTypeKind::Int16) => Ok(Box::new(
-            ManagedMinState::<_, I16Array>::new(
-                keyspace,
-                agg_call.return_type.clone(),
-                top_n_count,
-                row_count,
-                pk_length,
-            )
-            .await?,
-        )),
-        (AggKind::Min, DataTypeKind::Decimal) => Ok(Box::new(
-            ManagedMinState::<_, DecimalArray>::new(
-                keyspace,
-                agg_call.return_type.clone(),
-                top_n_count,
-                row_count,
-                pk_length,
-            )
-            .await?,
-        )),
-        _ => unreachable!("unsupported"),
+            .await
+            .unwrap();
+
+        // 6 should be deleted by now
+        helper_flush(&mut managed_state, &store).await;
+
+        let value_buffer = I64Array::from_slice(&[Some(1), Some(2), Some(3), Some(4), Some(5)])
+            .unwrap()
+            .into();
+
+        // delete all remaining items
+        managed_state
+            .apply_batch(&[Op::Delete; 5], None, &[&value_buffer])
+            .await
+            .unwrap();
+
+        helper_flush(&mut managed_state, &store).await;
+
+        assert_eq!(
+            managed_state.get_output().await.unwrap(),
+            Some(ScalarImpl::Int64(7))
+        );
     }
 }
