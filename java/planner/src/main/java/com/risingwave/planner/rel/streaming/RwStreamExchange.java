@@ -5,6 +5,7 @@ import static com.google.common.base.Verify.verify;
 import com.risingwave.catalog.ColumnDesc;
 import com.risingwave.catalog.ColumnEncoding;
 import com.risingwave.common.datatype.RisingWaveDataType;
+import com.risingwave.planner.metadata.RisingWaveRelMetadataQuery;
 import com.risingwave.planner.rel.common.dist.RwDistributionTrait;
 import com.risingwave.proto.streaming.plan.MergeNode;
 import com.risingwave.proto.streaming.plan.StreamNode;
@@ -38,6 +39,8 @@ public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel
 
   @Override
   public StreamNode serialize() {
+    var primaryKeyIndices =
+        ((RisingWaveRelMetadataQuery) getCluster().getMetadataQuery()).getPrimaryKeyIndices(this);
     var mergerBuilder = MergeNode.newBuilder();
     this.upstreamSet.forEach(mergerBuilder::addUpstreamFragmentId);
     for (ColumnDesc columnDesc : this.getSchema()) {
@@ -50,7 +53,10 @@ public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel
       mergerBuilder.addInputColumnDescs(columnDescBuilder.build());
     }
     var mergeNode = mergerBuilder.build();
-    return StreamNode.newBuilder().setMergeNode(mergeNode).build();
+    return StreamNode.newBuilder()
+        .setMergeNode(mergeNode)
+        .addAllPkIndices(primaryKeyIndices)
+        .build();
   }
 
   @Override

@@ -299,8 +299,10 @@ public class PrimaryKeyDerivationVisitor
     // This is fine because we would have only one row.
     var groupList = ImmutableList.copyOf(groupSet);
     var info = new PrimaryKeyIndicesAndPositionMap(groupList, ImmutableMap.of());
+    RwStreamAgg newAggregate =
+        (RwStreamAgg) aggregate.copy(aggregate.getTraitSet(), List.of(input));
     LOGGER.debug("leave RwStreamAgg");
-    return new Result<>(aggregate, info);
+    return new Result<>(newAggregate, info);
   }
 
   /**

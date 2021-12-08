@@ -568,7 +568,7 @@ impl StreamManagerCore {
             MergeNode(merge_node) => {
                 let schema = Schema::try_from(merge_node.get_input_column_descs())?;
                 let upstreams = merge_node.get_upstream_fragment_id();
-                self.create_merge_node(fragment_id, schema, upstreams)
+                self.create_merge_node(fragment_id, schema, upstreams, pk_indices)
             }
         };
 
@@ -580,6 +580,7 @@ impl StreamManagerCore {
         fragment_id: u32,
         schema: Schema,
         upstreams: &[u32],
+        pk_indices: PKVec,
     ) -> Result<Box<dyn Executor>> {
         assert!(!upstreams.is_empty());
 
@@ -674,11 +675,11 @@ impl StreamManagerCore {
             // FIXME: after merger is refactored in proto, put pk_indices into it.
             Ok(Box::new(ReceiverExecutor::new(
                 schema,
-                vec![],
+                pk_indices,
                 rxs.remove(0),
             )))
         } else {
-            Ok(Box::new(MergeExecutor::new(schema, vec![], rxs)))
+            Ok(Box::new(MergeExecutor::new(schema, pk_indices, rxs)))
         }
     }
 

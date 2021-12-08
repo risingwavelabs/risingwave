@@ -4,6 +4,7 @@
     "input": [{
       "input": [{
         "input": [{
+          "pkIndices": [2],
           "mergeNode": {
             "upstreamFragmentId": [6],
             "inputColumnDescs": [{
