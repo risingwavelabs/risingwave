@@ -367,8 +367,7 @@ public class PrimaryKeyDerivationVisitor
         };
     var newCondition = condition.accept(inputRefReplaceShuttle);
     var newFilter =
-        new RwStreamFilter(
-            filter.getCluster(), filter.getTraitSet(), filter.getInput(), newCondition);
+        new RwStreamFilter(filter.getCluster(), filter.getTraitSet(), p.node, newCondition);
     var info =
         new PrimaryKeyIndicesAndPositionMap(p.info.getPrimaryKeyIndices(), ImmutableMap.of());
     LOGGER.debug("leave RwStreamFilter");
