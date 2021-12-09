@@ -1,14 +1,13 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 
 use risingwave_common::array::Op::*;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::Schema;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::OrderType;
 
 use super::mview_state::ManagedMViewState;
 use crate::stream_op::keyspace::StateStore;
+use crate::stream_op::state_aggregation::SortedKeySerializer;
 use crate::stream_op::Barrier;
 use crate::stream_op::{Executor, Message, Result, SimpleExecutor, StreamChunk};
 
@@ -19,7 +18,6 @@ pub struct MViewSinkExecutor<S: StateStore> {
     schema: Schema,
     local_state: ManagedMViewState<S>,
     pk_columns: Vec<usize>,
-    order_pairs: Arc<Vec<OrderPair>>,
 }
 
 impl<S: StateStore> MViewSinkExecutor<S> {
@@ -29,8 +27,9 @@ impl<S: StateStore> MViewSinkExecutor<S> {
         schema: Schema,
         pk_columns: Vec<usize>,
         state_store: S,
-        order_pairs: Arc<Vec<OrderPair>>,
+        orderings: Vec<OrderType>,
     ) -> Self {
+        let sort_key_serializer = SortedKeySerializer::new(orderings);
         Self {
             input,
             local_state: ManagedMViewState::new(
@@ -38,10 +37,10 @@ impl<S: StateStore> MViewSinkExecutor<S> {
                 schema.clone(),
                 pk_columns.clone(),
                 state_store,
+                sort_key_serializer,
             ),
             schema,
             pk_columns,
-            order_pairs,
         }
     }
 
@@ -135,6 +134,7 @@ mod tests {
     use risingwave_common::array::{I32Array, Op, Row};
     use risingwave_common::catalog::{Schema, SchemaId, TableId};
     use risingwave_common::types::{Int32Type, Scalar};
+    use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::data::{data_type::TypeName, DataType};
     use risingwave_pb::plan::{column_desc::ColumnEncodingType, ColumnDesc};
     use std::sync::Arc;
@@ -210,7 +210,7 @@ mod tests {
             schema,
             pks,
             state_store.clone(),
-            Arc::new(vec![]),
+            vec![OrderType::Ascending],
         ));
 
         let table = store_mgr.get_table(&table_id).unwrap().as_memory();

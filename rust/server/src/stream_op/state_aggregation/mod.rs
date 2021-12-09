@@ -8,6 +8,7 @@ mod extreme_serializer;
 mod sort_key_serializer;
 
 pub use extreme::*;
+pub use sort_key_serializer::*;
 
 use super::keyspace::{Keyspace, StateStore};
 use super::AggCall;

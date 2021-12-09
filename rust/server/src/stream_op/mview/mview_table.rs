@@ -171,8 +171,9 @@ impl<S: StateStore> MViewTableIter<S> {
 mod tests {
     use risingwave_common::catalog::Field;
     use risingwave_common::types::{Int32Type, Scalar, StringType};
+    use risingwave_common::util::sort_util::OrderType;
 
-    use crate::stream_op::MemoryStateStore;
+    use crate::stream_op::{MemoryStateStore, SortedKeySerializer};
 
     use super::*;
 
@@ -186,12 +187,15 @@ mod tests {
             Field::new(Int32Type::create(false)),
         ]);
         let pk_columns = vec![0];
+        let orderings = vec![OrderType::Ascending];
+        let sort_key_serializer = SortedKeySerializer::new(orderings);
         let prefix = b"test-prefix-42".to_vec();
         let mut state = ManagedMViewState::new(
             prefix.clone(),
             schema.clone(),
             pk_columns.clone(),
             state_store.clone(),
+            sort_key_serializer,
         );
         let table = MViewTable::new(
             prefix.clone(),
@@ -252,12 +256,15 @@ mod tests {
             Field::new(StringType::create(true, 0, DataTypeKind::Varchar)),
         ]);
         let pk_columns = vec![0];
+        let orderings = vec![OrderType::Ascending];
+        let sort_key_serializer = SortedKeySerializer::new(orderings);
         let prefix = b"test-prefix-42".to_vec();
         let mut state = ManagedMViewState::new(
             prefix.clone(),
             schema.clone(),
             pk_columns.clone(),
             state_store.clone(),
+            sort_key_serializer,
         );
         let table = MViewTable::new(
             prefix.clone(),
@@ -322,12 +329,15 @@ mod tests {
             Field::new(Int32Type::create(false)),
         ]);
         let pk_columns = vec![0];
+        let orderings = vec![OrderType::Ascending];
+        let sort_key_serializer = SortedKeySerializer::new(orderings);
         let prefix = b"test-prefix-42".to_vec();
         let mut state = ManagedMViewState::new(
             prefix.clone(),
             schema.clone(),
             pk_columns.clone(),
             state_store.clone(),
+            sort_key_serializer,
         );
         let table = MViewTable::new(
             prefix.clone(),
@@ -385,6 +395,8 @@ mod tests {
             Field::new(StringType::create(true, 0, DataTypeKind::Varchar)),
         ]);
         let pk_columns = vec![0];
+        let orderings = vec![OrderType::Ascending];
+        let sort_key_serializer1 = SortedKeySerializer::new(orderings.clone());
         let prefix_1 = b"test-prefix-1".to_vec();
         let prefix_2 = b"test-prefix-2".to_vec();
 
@@ -393,12 +405,15 @@ mod tests {
             schema_1.clone(),
             pk_columns.clone(),
             state_store.clone(),
+            sort_key_serializer1,
         );
+        let sor_key_serializer2 = SortedKeySerializer::new(orderings);
         let mut state_2 = ManagedMViewState::new(
             prefix_2.clone(),
             schema_2.clone(),
             pk_columns.clone(),
             state_store.clone(),
+            sor_key_serializer2,
         );
 
         let table_1 = MViewTable::new(

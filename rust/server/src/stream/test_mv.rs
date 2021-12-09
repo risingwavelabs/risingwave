@@ -17,7 +17,9 @@ use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::InputRef;
 use risingwave_pb::expr::{ExprNode, InputRefExpr};
 use risingwave_pb::plan::column_desc::ColumnEncodingType;
-use risingwave_pb::plan::{ColumnDesc, DatabaseRefId, SchemaRefId, TableRefId};
+use risingwave_pb::plan::{
+    ColumnDesc, ColumnOrder, DatabaseRefId, OrderType, SchemaRefId, TableRefId,
+};
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::table_source_node::SourceType;
 use risingwave_pb::stream_plan::{
@@ -91,7 +93,14 @@ async fn test_stream_mv_proto() {
             table_ref_id: Some(make_table_ref_id(1)),
             column_descs: vec![column_desc],
             pk_indices: vec![0],
-            column_orders: vec![],
+            column_orders: vec![ColumnOrder {
+                order_type: OrderType::Ascending as i32,
+                input_ref: Some(InputRefExpr { column_idx: 0 }),
+                return_type: Some(DataType {
+                    type_name: TypeName::Int32 as i32,
+                    ..Default::default()
+                }),
+            }],
         })),
         input: vec![project_proto],
         pk_indices: vec![],

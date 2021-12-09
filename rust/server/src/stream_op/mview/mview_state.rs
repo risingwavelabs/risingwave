@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
-use super::{serialize_cell, serialize_cell_idx, serialize_pk};
+use super::{serialize_cell, serialize_cell_idx};
 
 use crate::stream_op::keyspace::StateStore;
 
+use crate::stream_op::state_aggregation::{OrderedSchemaedSerializable, SortedKeySerializer};
 use bytes::Bytes;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::Schema;
@@ -17,16 +18,24 @@ pub struct ManagedMViewState<S: StateStore> {
     pk_columns: Vec<usize>,
     memtable: HashMap<Row, Option<Row>>,
     storage: S,
+    sort_key_serializer: SortedKeySerializer,
 }
 
 impl<S: StateStore> ManagedMViewState<S> {
-    pub fn new(prefix: Vec<u8>, schema: Schema, pk_columns: Vec<usize>, storage: S) -> Self {
+    pub fn new(
+        prefix: Vec<u8>,
+        schema: Schema,
+        pk_columns: Vec<usize>,
+        storage: S,
+        sort_key_serializer: SortedKeySerializer,
+    ) -> Self {
         Self {
             prefix,
             schema,
             pk_columns,
             memtable: HashMap::new(),
             storage,
+            sort_key_serializer,
         }
     }
 
@@ -45,7 +54,7 @@ impl<S: StateStore> ManagedMViewState<S> {
 
         for (pk, cells) in self.memtable.drain() {
             debug_assert_eq!(self.pk_columns.len(), pk.0.len());
-            let pk_buf = serialize_pk(&pk)?;
+            let pk_buf = self.sort_key_serializer.order_based_scehmaed_serialize(&pk);
             for cell_idx in 0..self.schema.len() {
                 // TODO(MrCroxx): More efficient encoding is needed.
                 let key = [
@@ -73,6 +82,7 @@ impl<S: StateStore> ManagedMViewState<S> {
 mod tests {
     use risingwave_common::catalog::Field;
     use risingwave_common::types::{Int32Type, Scalar};
+    use risingwave_common::util::sort_util::OrderType;
 
     use crate::stream_op::MemoryStateStore;
 
@@ -88,9 +98,16 @@ mod tests {
             Field::new(Int32Type::create(false)),
         ]);
         let pk_columns = vec![0];
+        let orderings = vec![OrderType::Ascending];
+        let sort_key_serializer = SortedKeySerializer::new(orderings);
         let prefix = b"test-prefix-42".to_vec();
-        let mut state =
-            ManagedMViewState::new(prefix.clone(), schema, pk_columns, state_store.clone());
+        let mut state = ManagedMViewState::new(
+            prefix.clone(),
+            schema,
+            pk_columns,
+            state_store.clone(),
+            sort_key_serializer,
+        );
 
         state.put(
             Row(vec![Some(1_i32.to_scalar_value())]),

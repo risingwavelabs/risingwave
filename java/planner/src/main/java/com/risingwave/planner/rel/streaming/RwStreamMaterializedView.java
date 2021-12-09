@@ -13,7 +13,9 @@ import com.risingwave.proto.streaming.plan.MViewNode;
 import com.risingwave.proto.streaming.plan.StreamNode;
 import com.risingwave.rpc.Messages;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import javax.annotation.Nullable;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelTraitSet;
@@ -102,7 +104,7 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
   public StreamNode serialize() {
     MViewNode.Builder materializedViewNodeBuilder = MViewNode.newBuilder();
     // Add columns.
-    for (Pair<String, ColumnDesc> pair : getColumns()) {
+    for (Pair<String, ColumnDesc> pair : this.getColumns()) {
       com.risingwave.proto.plan.ColumnDesc.Builder columnDescBuilder =
           com.risingwave.proto.plan.ColumnDesc.newBuilder();
       columnDescBuilder
@@ -116,14 +118,17 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
     // Set table ref id.
     materializedViewNodeBuilder.setTableRefId(Messages.getTableRefId(tableId));
     // Set column orders.
-    // Sort key serialization starts
+    // Sort key serialization starts. The column that is in primary key but not sort key should be
+    // ordered by `Ascending`
+    List<ColumnOrder> columnOrders = new ArrayList<ColumnOrder>();
+    Set<Integer> columnAdded = new HashSet<Integer>();
     if (collation != null) {
-      List<ColumnOrder> columnOrders = new ArrayList<ColumnOrder>();
       List<RelFieldCollation> rfc = collation.getFieldCollations();
       for (RelFieldCollation relFieldCollation : rfc) {
         RexInputRef inputRef =
             getCluster().getRexBuilder().makeInputRef(input, relFieldCollation.getFieldIndex());
         DataType returnType = ((RisingWaveDataType) inputRef.getType()).getProtobufType();
+        columnAdded.add(inputRef.getIndex());
         InputRefExpr inputRefExpr =
             InputRefExpr.newBuilder().setColumnIdx(inputRef.getIndex()).build();
         RelFieldCollation.Direction dir = relFieldCollation.getDirection();
@@ -143,8 +148,26 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
                 .build();
         columnOrders.add(columnOrder);
       }
-      materializedViewNodeBuilder.addAllColumnOrders(columnOrders);
     }
+    for (var primaryKeyIndex : this.getPrimaryKeyIndices()) {
+      if (!columnAdded.contains(primaryKeyIndex)) {
+        RexInputRef inputRef = getCluster().getRexBuilder().makeInputRef(input, primaryKeyIndex);
+        DataType returnType = ((RisingWaveDataType) inputRef.getType()).getProtobufType();
+        columnAdded.add(inputRef.getIndex());
+        InputRefExpr inputRefExpr =
+            InputRefExpr.newBuilder().setColumnIdx(inputRef.getIndex()).build();
+        OrderType orderType = OrderType.ASCENDING;
+        ColumnOrder columnOrder =
+            ColumnOrder.newBuilder()
+                .setOrderType(orderType)
+                .setInputRef(inputRefExpr)
+                .setReturnType(returnType)
+                .build();
+        columnOrders.add(columnOrder);
+        columnAdded.add(primaryKeyIndex);
+      }
+    }
+    materializedViewNodeBuilder.addAllColumnOrders(columnOrders);
     // Sort key serialization ends
     // Build and return.
     MViewNode materializedViewNode = materializedViewNodeBuilder.build();

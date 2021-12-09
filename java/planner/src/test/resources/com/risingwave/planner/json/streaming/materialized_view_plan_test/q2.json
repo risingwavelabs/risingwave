@@ -67,6 +67,15 @@
       },
       "encoding": "RAW"
     }],
-    "pkIndices": [1]
+    "pkIndices": [1],
+    "columnOrders": [{
+      "orderType": "ASCENDING",
+      "inputRef": {
+        "columnIdx": 1
+      },
+      "returnType": {
+        "typeName": "INT64"
+      }
+    }]
   }
 }

@@ -130,8 +130,9 @@ mod tests {
     use risingwave_common::array::Array;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{Int32Type, Scalar};
+    use risingwave_common::util::sort_util::OrderType;
 
-    use crate::stream_op::{MViewTable, ManagedMViewState, MemoryStateStore};
+    use crate::stream_op::{MViewTable, ManagedMViewState, MemoryStateStore, SortedKeySerializer};
 
     use super::*;
 
@@ -145,11 +146,14 @@ mod tests {
             Field::new(Int32Type::create(false)),
         ]);
         let pk_columns = vec![0];
+        let orderings = vec![OrderType::Ascending];
+        let sort_key_serializer = SortedKeySerializer::new(orderings);
         let mut state = ManagedMViewState::new(
             prefix.clone(),
             schema.clone(),
             pk_columns.clone(),
             state_store.clone(),
+            sort_key_serializer,
         );
 
         let table = Arc::new(MViewTable::new(

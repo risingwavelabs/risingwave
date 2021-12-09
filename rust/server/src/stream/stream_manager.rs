@@ -547,6 +547,10 @@ impl StreamManagerCore {
 
                 let column_orders = materialized_view_node.get_column_orders();
                 let order_pairs = fetch_orders(column_orders).unwrap();
+                let orderings = order_pairs
+                    .iter()
+                    .map(|order| order.order_type)
+                    .collect::<Vec<_>>();
 
                 let prefix = table_manager.create_materialized_view(
                     &table_id,
@@ -561,7 +565,7 @@ impl StreamManagerCore {
                     Schema::try_from(columns)?,
                     pks,
                     state_store,
-                    Arc::new(order_pairs),
+                    orderings,
                 ));
                 Ok(executor)
             }

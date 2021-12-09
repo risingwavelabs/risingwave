@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 pub const K_PROCESSING_WINDOW_SIZE: usize = 1024;
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Copy, Clone)]
 pub enum OrderType {
     Ascending,
     Descending,
