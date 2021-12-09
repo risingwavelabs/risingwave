@@ -1,9 +1,13 @@
 package com.risingwave.rpc
 
+import com.risingwave.proto.metanode.AddFragmentToWorkerRequest
+import com.risingwave.proto.metanode.AddFragmentToWorkerResponse
 import com.risingwave.proto.metanode.CreateRequest
 import com.risingwave.proto.metanode.CreateResponse
 import com.risingwave.proto.metanode.DropRequest
 import com.risingwave.proto.metanode.DropResponse
+import com.risingwave.proto.metanode.FetchActorInfoTableRequest
+import com.risingwave.proto.metanode.FetchActorInfoTableResponse
 import com.risingwave.proto.metanode.GetCatalogRequest
 import com.risingwave.proto.metanode.GetCatalogResponse
 import com.risingwave.proto.metanode.GetEpochRequest
@@ -26,4 +30,8 @@ interface MetaClient {
   fun getEpoch(request: GetEpochRequest): GetEpochResponse
 
   fun getId(request: GetIdRequest): GetIdResponse
+
+  fun fetchActorInfoTable(request: FetchActorInfoTableRequest): FetchActorInfoTableResponse
+
+  fun addFragmentToWorker(request: AddFragmentToWorkerRequest): AddFragmentToWorkerResponse
 }

@@ -18,8 +18,8 @@ import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.TestComputeClientManager;
 import com.risingwave.scheduler.QueryManager;
 import com.risingwave.scheduler.RemoteQueryManager;
+import com.risingwave.scheduler.streaming.LocalStreamManager;
 import com.risingwave.scheduler.streaming.StreamManager;
-import com.risingwave.scheduler.streaming.StreamManagerImpl;
 import com.risingwave.scheduler.task.RemoteTaskManager;
 import com.risingwave.scheduler.task.TaskManager;
 
@@ -39,7 +39,7 @@ public class TestPlannerModule extends AbstractModule {
     bind(QueryManager.class).to(RemoteQueryManager.class).in(Singleton.class);
     bind(WorkerNodeManager.class).to(DefaultWorkerNodeManager.class).in(Singleton.class);
     bind(SqlHandlerFactory.class).to(DefaultSqlHandlerFactory.class).in(Singleton.class);
-    bind(StreamManager.class).to(StreamManagerImpl.class).in(Singleton.class);
+    bind(StreamManager.class).to(LocalStreamManager.class).in(Singleton.class);
   }
 
   @Singleton

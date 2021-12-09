@@ -12,8 +12,8 @@ import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.ComputeClientManagerImpl;
 import com.risingwave.scheduler.QueryManager;
 import com.risingwave.scheduler.RemoteQueryManager;
+import com.risingwave.scheduler.streaming.RemoteStreamManager;
 import com.risingwave.scheduler.streaming.StreamManager;
-import com.risingwave.scheduler.streaming.StreamManagerImpl;
 import com.risingwave.scheduler.task.RemoteTaskManager;
 import com.risingwave.scheduler.task.TaskManager;
 
@@ -31,7 +31,7 @@ public class LeaderServerModule extends AbstractModule {
     bind(TaskManager.class).to(RemoteTaskManager.class).in(Singleton.class);
     bind(QueryManager.class).to(RemoteQueryManager.class).in(Singleton.class);
     bind(ComputeClientManager.class).to(ComputeClientManagerImpl.class).in(Singleton.class);
-    bind(StreamManager.class).to(StreamManagerImpl.class).in(Singleton.class);
+    bind(StreamManager.class).to(RemoteStreamManager.class).in(Singleton.class);
   }
 
   @Provides

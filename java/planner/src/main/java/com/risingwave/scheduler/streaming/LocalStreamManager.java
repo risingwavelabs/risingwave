@@ -14,17 +14,20 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-/** The default implementation of the interface <code>StreamManager</code>. */
+/** The implementation of a local <code>StreamManager</code>. All metadata are stored in memory. */
 @Singleton
-public class StreamManagerImpl implements StreamManager {
+public class LocalStreamManager implements StreamManager {
+  private static final Logger LOGGER = LoggerFactory.getLogger(LocalStreamManager.class);
   private int fragmentId = 1;
   private int scheduleId = 0;
   private final WorkerNodeManager workerNodeManager;
   private final Map<WorkerNode, Set<StreamFragment>> fragmentAllocation = new HashMap<>();
 
   @Inject
-  public StreamManagerImpl(WorkerNodeManager workerNodeManager) {
+  public LocalStreamManager(WorkerNodeManager workerNodeManager) {
     this.workerNodeManager = workerNodeManager;
   }
 
@@ -66,6 +69,8 @@ public class StreamManagerImpl implements StreamManager {
   }
 
   private void addFragmentToWorker(WorkerNode node, StreamFragment fragment) {
+    LOGGER.debug(
+        "add fragment {} to worker {}", fragment.getId(), node.getRpcEndPoint().toString());
     if (fragmentAllocation.containsKey(node)) {
       fragmentAllocation.get(node).add(fragment);
     } else {
