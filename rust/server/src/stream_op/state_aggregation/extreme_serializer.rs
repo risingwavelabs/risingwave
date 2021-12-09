@@ -7,13 +7,21 @@ use smallvec::SmallVec;
 
 pub type ExtremePK = SmallVec<[i64; 1]>;
 
+pub mod variants {
+    pub const EXTREME_MIN: usize = 0;
+    pub const EXTREME_MAX: usize = 1;
+}
+
 /// A serializer built specifically for `ManagedExtremeState`
-pub struct ExtremeSerializer<K: Scalar> {
+///
+/// The serializer will encode original key and pks one by one. If `EXTREME_TYPE == EXTREME_MAX`,
+/// we will flip the bits of the whole encoded data (including pks).
+pub struct ExtremeSerializer<K: Scalar, const EXTREME_TYPE: usize> {
     pk_length: usize,
     _phantom: PhantomData<K>,
 }
 
-impl<K: Scalar> ExtremeSerializer<K> {
+impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
     pub fn new(pk_length: usize) -> Self {
         Self {
             pk_length,
@@ -34,7 +42,17 @@ impl<K: Scalar> ExtremeSerializer<K> {
             (*i).serialize(&mut serializer)
                 .map_err(ErrorCode::MemComparableError)?;
         }
-        Ok(serializer.into_inner())
+        let mut encoded_key = serializer.into_inner();
+        match EXTREME_TYPE {
+            variants::EXTREME_MIN => {}
+            variants::EXTREME_MAX => {
+                encoded_key.iter_mut().for_each(|byte| {
+                    *byte = !(*byte);
+                });
+            }
+            _ => unimplemented!(),
+        }
+        Ok(encoded_key)
     }
 
     /// Extract the pks from the sort key
@@ -46,3 +64,5 @@ impl<K: Scalar> ExtremeSerializer<K> {
         }
     }
 }
+
+// TODO: add unit tests

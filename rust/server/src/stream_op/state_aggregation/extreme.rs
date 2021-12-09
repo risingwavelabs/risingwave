@@ -13,7 +13,7 @@ use risingwave_common::types::{
 };
 
 use super::super::keyspace::{Keyspace, StateStore};
-use super::extreme_serializer::{ExtremePK, ExtremeSerializer};
+use super::extreme_serializer::{variants, ExtremePK, ExtremeSerializer};
 use crate::stream_op::{AggArgs, AggCall};
 use itertools::Itertools;
 
@@ -94,6 +94,9 @@ impl FlushStatus {
     }
 }
 
+pub type ManagedMinState<S, A> = GenericManagedState<S, A, { variants::EXTREME_MIN }>;
+pub type ManagedMaxState<S, A> = GenericManagedState<S, A, { variants::EXTREME_MAX }>;
+
 /// Manages a `BTreeMap` in memory for top N entries, and the state store for remaining entries.
 ///
 /// There are several prerequisites for using the `MinState`.
@@ -115,7 +118,7 @@ impl FlushStatus {
 /// * The output of an `ExtremeState` is only correct when all changes have been flushed to the
 ///   state store.
 /// * The `RowIDs` must be i64
-pub struct ManagedMinState<S: StateStore, A: Array>
+pub struct GenericManagedState<S: StateStore, A: Array, const EXTREME_TYPE: usize>
 where
     A::OwnedItem: Ord,
 {
@@ -139,7 +142,7 @@ where
     keyspace: Keyspace<S>,
 
     /// The sort key serializer
-    serializer: ExtremeSerializer<A::OwnedItem>,
+    serializer: ExtremeSerializer<A::OwnedItem, EXTREME_TYPE>,
 
     /// Length of primary keys
     pk_length: usize,
@@ -170,7 +173,7 @@ pub trait ManagedExtremeState<S: StateStore>: Send + Sync + 'static {
     fn flush(&mut self, write_batch: &mut Vec<(Bytes, Option<Bytes>)>) -> Result<()>;
 }
 
-impl<S: StateStore, A: Array> ManagedMinState<S, A>
+impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> GenericManagedState<S, A, EXTREME_TYPE>
 where
     A::OwnedItem: Ord,
     for<'a> &'a A: From<&'a ArrayImpl>,
@@ -201,8 +204,18 @@ where
     /// Retain only top n elements in the cache
     fn retain_top_n(&mut self) {
         if let Some(count) = self.top_n_count {
-            while self.top_n.len() > count {
-                self.top_n.pop_last();
+            match EXTREME_TYPE {
+                variants::EXTREME_MIN => {
+                    while self.top_n.len() > count {
+                        self.top_n.pop_last();
+                    }
+                }
+                variants::EXTREME_MAX => {
+                    while self.top_n.len() > count {
+                        self.top_n.pop_first();
+                    }
+                }
+                _ => unimplemented!(),
             }
         }
     }
@@ -254,9 +267,23 @@ where
                     if self.total_count == self.top_n.len() {
                         // Data fully cached in memory
                         do_insert = true;
-                    } else if let Some((last_key, _)) = self.top_n.last_key_value() {
-                        if &composed_key < last_key {
-                            do_insert = true;
+                    } else {
+                        match EXTREME_TYPE {
+                            variants::EXTREME_MIN => {
+                                if let Some((last_key, _)) = self.top_n.last_key_value() {
+                                    if &composed_key < last_key {
+                                        do_insert = true;
+                                    }
+                                }
+                            }
+                            variants::EXTREME_MAX => {
+                                if let Some((first_key, _)) = self.top_n.first_key_value() {
+                                    if &composed_key > first_key {
+                                        do_insert = true;
+                                    }
+                                }
+                            }
+                            _ => unimplemented!(),
                         }
                     }
 
@@ -282,6 +309,23 @@ where
         Ok(())
     }
 
+    fn get_output_from_cache(&self) -> Option<ScalarImpl> {
+        match EXTREME_TYPE {
+            variants::EXTREME_MIN => {
+                if let Some((_, v)) = self.top_n.first_key_value() {
+                    return Some(v.clone());
+                }
+            }
+            variants::EXTREME_MAX => {
+                if let Some((_, v)) = self.top_n.last_key_value() {
+                    return Some(v.clone());
+                }
+            }
+            _ => unimplemented!(),
+        }
+        None
+    }
+
     async fn get_output_inner(&mut self) -> Result<Datum> {
         // To make things easier, we do not allow get_output before flushing. Otherwise we will need
         // to merge data from flush_buffer and state store, which is hard to implement.
@@ -292,9 +336,15 @@ where
         debug_assert!(!self.is_dirty());
 
         // Firstly, check if datum is available in cache.
-        if let Some((_, v)) = self.top_n.first_key_value() {
-            Ok(Some(v.clone()))
+        if let Some(v) = self.get_output_from_cache() {
+            Ok(Some(v))
         } else {
+            // Then, fetch from the state store.
+            //
+            // To future developers: please make **SURE** you have taken `EXTREME_TYPE` into
+            // account. EXTREME_MIN and EXTREME_MAX will significantly impact the
+            // following logic.
+
             let all_data = self.keyspace.scan(self.top_n_count).await?;
 
             for (raw_key, raw_value) in all_data {
@@ -310,8 +360,8 @@ where
                 self.top_n.insert((key, pks), value);
             }
 
-            if let Some((_, v)) = self.top_n.first_key_value() {
-                Ok(Some(v.clone()))
+            if let Some(v) = self.get_output_from_cache() {
+                Ok(Some(v))
             } else {
                 Ok(None)
             }
@@ -355,7 +405,8 @@ where
 }
 
 #[async_trait]
-impl<S: StateStore, A: Array> ManagedExtremeState<S> for ManagedMinState<S, A>
+impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> ManagedExtremeState<S>
+    for GenericManagedState<S, A, EXTREME_TYPE>
 where
     A::OwnedItem: Ord,
     for<'a> &'a A: From<&'a ArrayImpl>,
@@ -383,7 +434,7 @@ where
     }
 }
 
-impl<S: StateStore, A: Array> ManagedMinState<S, A>
+impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> GenericManagedState<S, A, EXTREME_TYPE>
 where
     A::OwnedItem: Ord,
 {
@@ -436,9 +487,46 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
     }
 
     match (agg_call.kind, agg_call.return_type.data_type_kind()) {
-        (AggKind::Max, _) => {
-            todo!("max is not supported for now");
-        }
+        (AggKind::Max, DataTypeKind::Int64) => Ok(Box::new(
+            ManagedMaxState::<_, I64Array>::new(
+                keyspace,
+                agg_call.return_type.clone(),
+                top_n_count,
+                row_count,
+                pk_length,
+            )
+            .await?,
+        )),
+        (AggKind::Max, DataTypeKind::Int32) => Ok(Box::new(
+            ManagedMaxState::<_, I32Array>::new(
+                keyspace,
+                agg_call.return_type.clone(),
+                top_n_count,
+                row_count,
+                pk_length,
+            )
+            .await?,
+        )),
+        (AggKind::Max, DataTypeKind::Int16) => Ok(Box::new(
+            ManagedMaxState::<_, I16Array>::new(
+                keyspace,
+                agg_call.return_type.clone(),
+                top_n_count,
+                row_count,
+                pk_length,
+            )
+            .await?,
+        )),
+        (AggKind::Max, DataTypeKind::Decimal) => Ok(Box::new(
+            ManagedMaxState::<_, DecimalArray>::new(
+                keyspace,
+                agg_call.return_type.clone(),
+                top_n_count,
+                row_count,
+                pk_length,
+            )
+            .await?,
+        )),
         (AggKind::Min, DataTypeKind::Int64) => Ok(Box::new(
             ManagedMinState::<_, I64Array>::new(
                 keyspace,
@@ -700,7 +788,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn chaos_test() {
+    async fn chaos_test_min() {
+        chaos_test::<{ variants::EXTREME_MIN }>().await;
+    }
+
+    #[tokio::test]
+    async fn chaos_test_max() {
+        chaos_test::<{ variants::EXTREME_MAX }>().await;
+    }
+
+    async fn chaos_test<const EXTREME_TYPE: usize>() {
         let mut rng = thread_rng();
         let mut values_to_insert = (0..5000i64).collect_vec();
         values_to_insert.shuffle(&mut rng);
@@ -708,10 +805,15 @@ mod tests {
 
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
-        let mut managed_state =
-            ManagedMinState::<_, I64Array>::new(keyspace, Int64Type::create(false), Some(3), 0, 0)
-                .await
-                .unwrap();
+        let mut managed_state = GenericManagedState::<_, I64Array, EXTREME_TYPE>::new(
+            keyspace,
+            Int64Type::create(false),
+            Some(3),
+            0,
+            0,
+        )
+        .await
+        .unwrap();
 
         let mut heap = BTreeSet::new();
 
@@ -772,7 +874,11 @@ mod tests {
                 .unwrap()
                 .map(|x| x.into_int64());
 
-            assert_eq!(value, heap.first().cloned());
+            match EXTREME_TYPE {
+                variants::EXTREME_MAX => assert_eq!(value, heap.last().cloned()),
+                variants::EXTREME_MIN => assert_eq!(value, heap.first().cloned()),
+                _ => unimplemented!(),
+            }
         }
     }
 
