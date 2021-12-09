@@ -85,6 +85,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
         keyspace: Keyspace<S>,
         row_count: Option<usize>,
         pk_length: usize,
+        is_row_count: bool,
     ) -> Result<Self> {
         match agg_call.kind {
             AggKind::Max | AggKind::Min => {
@@ -107,18 +108,20 @@ impl<S: StateStore> ManagedStateImpl<S> {
             // TODO: for append-only lists, we can create `ManagedValueState` instead of
             // `ManagedExtremeState`.
             AggKind::Avg | AggKind::Count | AggKind::Sum => {
-                // FIXME: Pass the check temporally.
-                // assert!(
-                //   row_count.is_some(),
-                //   "should set row_count for value states other than AggKind::RowCount"
-                // );
+                assert!(
+                    is_row_count || row_count.is_some(),
+                    "should set row_count for value states other than AggKind::RowCount"
+                );
                 Ok(Self::Value(
                     ManagedValueState::new(agg_call, keyspace, row_count).await?,
                 ))
             }
-            AggKind::RowCount => Ok(Self::Value(
-                ManagedValueState::new(agg_call, keyspace, row_count).await?,
-            )),
+            AggKind::RowCount => {
+                assert!(is_row_count);
+                Ok(Self::Value(
+                    ManagedValueState::new(agg_call, keyspace, row_count).await?,
+                ))
+            }
         }
     }
 }

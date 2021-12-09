@@ -1,3 +1,6 @@
+mod agg_executor;
+pub use agg_executor::*;
+
 mod agg_call;
 use std::any::Any;
 
@@ -10,10 +13,6 @@ mod row_count;
 use risingwave_common::array::stream_chunk::Ops;
 pub use row_count::*;
 
-use super::{
-    StreamingCountAgg, StreamingFloatMaxAgg, StreamingFloatMinAgg, StreamingFloatSumAgg,
-    StreamingMaxAgg, StreamingMinAgg, StreamingSumAgg,
-};
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, BoolArray, DecimalArray, F32Array, F64Array,
     I16Array, I32Array, I64Array, Utf8Array,
@@ -24,6 +23,36 @@ use risingwave_common::expr::AggKind;
 use risingwave_common::types::{DataTypeKind, DataTypeRef, Datum};
 
 use dyn_clone::{self, DynClone};
+
+/// `StreamingSumAgg` sums data of the same type.
+pub type StreamingSumAgg<R, I> =
+    StreamingFoldAgg<R, I, PrimitiveSummable<<R as Array>::OwnedItem, <I as Array>::OwnedItem>>;
+
+/// `StreamingFloatSumAgg` sums data of the same float type.
+pub type StreamingFloatSumAgg<R, I> = StreamingFoldAgg<
+    R,
+    I,
+    FloatPrimitiveSummable<<R as Array>::OwnedItem, <I as Array>::OwnedItem>,
+>;
+
+/// `StreamingCountAgg` counts data of any type.
+pub type StreamingCountAgg<S> = StreamingFoldAgg<I64Array, S, Countable<<S as Array>::OwnedItem>>;
+
+/// `StreamingMinAgg` get minimum data of the same type.
+pub type StreamingMinAgg<S> = StreamingFoldAgg<S, S, Minimizable<<S as Array>::OwnedItem>>;
+
+/// `StreamingFloatMinAgg` get minimum data of the same float type.
+pub type StreamingFloatMinAgg<S> =
+    StreamingFoldAgg<S, S, FloatMinimizable<<S as Array>::OwnedItem>>;
+
+/// `StreamingMaxAgg` get maximum data of the same type.
+pub type StreamingMaxAgg<S> = StreamingFoldAgg<S, S, Maximizable<<S as Array>::OwnedItem>>;
+
+/// `StreamingFloatMaxAgg` get maximum data of the same float type.
+pub type StreamingFloatMaxAgg<S> =
+    StreamingFoldAgg<S, S, FloatMaximizable<<S as Array>::OwnedItem>>;
+
+pub use super::aggregation::StreamingRowCountAgg;
 
 /// `StreamingAggState` records a state of streaming expression. For example,
 /// there will be `StreamingAggCompare` and `StreamingAggSum`.

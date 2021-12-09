@@ -1808,6 +1808,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "smallvec",
+ "static_assertions",
  "tempfile",
  "thiserror",
  "tokio",

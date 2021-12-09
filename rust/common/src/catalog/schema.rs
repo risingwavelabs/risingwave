@@ -1,6 +1,7 @@
 use risingwave_pb::plan::ColumnDesc;
 use std::ops::Index;
 
+use crate::array::ArrayBuilderImpl;
 use crate::error::Result;
 use crate::types::{build_from_prost, DataType, DataTypeRef};
 use risingwave_pb::data::DataType as ProstDataType;
@@ -52,6 +53,14 @@ impl Schema {
                 })
                 .collect::<Result<Vec<_>>>()?,
         })
+    }
+
+    /// Create array builders for all fields in this schema.
+    pub fn create_array_builders(&self, capacity: usize) -> Result<Vec<ArrayBuilderImpl>> {
+        self.fields
+            .iter()
+            .map(|field| field.data_type.create_array_builder(capacity))
+            .collect()
     }
 }
 

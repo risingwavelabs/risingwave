@@ -450,10 +450,16 @@ impl StreamManagerCore {
                     .iter()
                     .map(build_agg_call_from_prost)
                     .try_collect()?;
+
                 Ok(Box::new(SimpleAggExecutor::new(
                     input.remove(0),
                     agg_calls,
-                )?))
+                    keyspace::Keyspace::new(
+                        keyspace::MemoryStateStore::new(),
+                        b"test_executor_2333".to_vec(),
+                    ),
+                    pk_indices,
+                )))
             }
             HashAggNode(aggr_node) => {
                 let keys = aggr_node
@@ -468,8 +474,6 @@ impl StreamManagerCore {
                     .map(build_agg_call_from_prost)
                     .try_collect()?;
 
-                let schema = generate_hash_agg_schema(&*input[0], &agg_calls, &keys);
-
                 Ok(Box::new(HashAggExecutor::new(
                     input.remove(0),
                     agg_calls,
@@ -478,7 +482,6 @@ impl StreamManagerCore {
                         keyspace::MemoryStateStore::new(),
                         b"test_executor_2333".to_vec(),
                     ),
-                    schema,
                     pk_indices,
                 )))
             }

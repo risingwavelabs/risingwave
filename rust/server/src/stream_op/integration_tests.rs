@@ -45,6 +45,10 @@ impl StreamConsumer for MockConsumer {
     }
 }
 
+fn create_in_memory_keyspace() -> Keyspace<impl StateStore> {
+    Keyspace::new(MemoryStateStore::new(), b"test_executor_2333".to_vec())
+}
+
 /// This test creates a merger-dispatcher pair, and run a sum. Each chunk
 /// has 0~9 elements. We first insert the 10 chunks, then delete them,
 /// and do this again and again.
@@ -58,23 +62,24 @@ async fn test_merger_sum_aggr() {
             }],
         };
         let input = ReceiverExecutor::new(schema, vec![], input_rx);
-        // for the local aggregator, we need two states: sum and row count
+        // for the local aggregator, we need two states: row count and sum
         let aggregator = SimpleAggExecutor::new(
             Box::new(input),
             vec![
-                AggCall {
-                    kind: AggKind::Sum,
-                    args: AggArgs::Unary(Int64Type::create(false), 0),
-                    return_type: Int64Type::create(false),
-                },
                 AggCall {
                     kind: AggKind::RowCount,
                     args: AggArgs::None,
                     return_type: Int64Type::create(false),
                 },
+                AggCall {
+                    kind: AggKind::Sum,
+                    args: AggArgs::Unary(Int64Type::create(false), 0),
+                    return_type: Int64Type::create(false),
+                },
             ],
-        )
-        .unwrap();
+            create_in_memory_keyspace(),
+            vec![],
+        );
         let (tx, rx) = channel(16);
         let consumer = SenderConsumer::new(Box::new(aggregator), Box::new(ChannelOutput::new(tx)));
         let actor = Actor::new(Box::new(consumer));
@@ -128,14 +133,16 @@ async fn test_merger_sum_aggr() {
                 return_type: Int64Type::create(false),
             },
         ],
-    )
-    .unwrap();
+        create_in_memory_keyspace(),
+        vec![],
+    );
+
     let projection = ProjectExecutor::new(
         Box::new(aggregator),
         vec![],
         vec![
             // TODO: use the new streaming_if_null expression here, and add `None` tests
-            Box::new(InputRefExpression::new(Int64Type::create(false), 0)),
+            Box::new(InputRefExpression::new(Int64Type::create(false), 1)),
         ],
     );
     let items = Arc::new(Mutex::new(vec![]));
@@ -370,18 +377,19 @@ async fn test_tpch_q6() {
             Box::new(projection),
             vec![
                 AggCall {
-                    kind: AggKind::Sum,
-                    args: AggArgs::Unary(Float64Type::create(false), 0),
-                    return_type: Float64Type::create(false),
-                },
-                AggCall {
                     kind: AggKind::RowCount,
                     args: AggArgs::None,
                     return_type: Int64Type::create(false),
                 },
+                AggCall {
+                    kind: AggKind::Sum,
+                    args: AggArgs::Unary(Float64Type::create(false), 0),
+                    return_type: Float64Type::create(false),
+                },
             ],
-        )
-        .unwrap();
+            create_in_memory_keyspace(),
+            vec![],
+        );
         let (tx, rx) = channel(16);
         let consumer = SenderConsumer::new(Box::new(aggregator), Box::new(ChannelOutput::new(tx)));
         let actor = Actor::new(Box::new(consumer));
@@ -421,23 +429,24 @@ async fn test_tpch_q6() {
         vec![
             AggCall {
                 kind: AggKind::Sum,
-                args: AggArgs::Unary(Float64Type::create(false), 0),
-                return_type: Float64Type::create(false),
+                args: AggArgs::Unary(Int64Type::create(false), 0),
+                return_type: Int64Type::create(false),
             },
             AggCall {
                 kind: AggKind::Sum,
-                args: AggArgs::Unary(Int64Type::create(false), 1),
-                return_type: Int64Type::create(false),
+                args: AggArgs::Unary(Float64Type::create(false), 1),
+                return_type: Float64Type::create(false),
             },
         ],
-    )
-    .unwrap();
+        create_in_memory_keyspace(),
+        vec![],
+    );
     let projection = ProjectExecutor::new(
         Box::new(aggregator),
         vec![],
         vec![
             // TODO: use the new streaming_if_null expression here, and add `None` tests
-            Box::new(InputRefExpression::new(Float64Type::create(false), 0)),
+            Box::new(InputRefExpression::new(Float64Type::create(false), 1)),
         ],
     );
 
@@ -464,6 +473,7 @@ async fn test_tpch_q6() {
     .map(str_to_timestamp)
     .map(Some)
     .collect::<Vec<_>>();
+
     let d_discount = vec![
         0.055, 0.08, 0.055, 0.08, 0.055, 0.08, 0.055, 0.08, 0.055, 0.08,
     ] // odd rows matches condition on discount
@@ -508,10 +518,7 @@ async fn test_tpch_q6() {
             .send(Message::Chunk(make_chunk(Insert)))
             .await
             .unwrap();
-        input
-            .send(Message::Chunk(make_chunk(Delete)))
-            .await
-            .unwrap();
+
         if i % 10 == 0 {
             input
                 .send(Message::Barrier(Barrier {
@@ -527,9 +534,17 @@ async fn test_tpch_q6() {
         .send(Message::Chunk(make_chunk(Insert)))
         .await
         .unwrap();
+
     input
         .send(Message::Barrier(Barrier {
-            epoch: 0,
+            epoch: 100,
+            stop: false,
+        }))
+        .await
+        .unwrap();
+    input
+        .send(Message::Barrier(Barrier {
+            epoch: 200,
             stop: true,
         }))
         .await
@@ -562,8 +577,8 @@ async fn test_tpch_q6() {
                 .as_float64()
                 .value_at(1)
                 .unwrap(),
-            1.1,
-            epsilon = f64::EPSILON * 100.0
+            111.1,
+            epsilon = f64::EPSILON * 1000.0
         );
     }
 }
