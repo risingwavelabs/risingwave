@@ -1,8 +1,8 @@
 use crate::meta::{MetaManager, StreamMetaManager};
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::{
-    AddFragmentToWorkerRequest, AddFragmentToWorkerResponse, AllocateFragmentIdRequest,
-    AllocateFragmentIdResponse, FetchActorInfoTableRequest, FetchActorInfoTableResponse,
+    AddFragmentToWorkerRequest, AddFragmentToWorkerResponse, FetchActorInfoTableRequest,
+    FetchActorInfoTableResponse,
 };
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
@@ -20,14 +20,6 @@ impl StreamServiceImpl {
 
 #[async_trait::async_trait]
 impl StreamManagerService for StreamServiceImpl {
-    async fn allocate_fragment_id(
-        &self,
-        request: Request<AllocateFragmentIdRequest>,
-    ) -> Result<Response<AllocateFragmentIdResponse>, Status> {
-        let _req = request.into_inner();
-        todo!();
-    }
-
     async fn fetch_actor_info_table(
         &self,
         request: Request<FetchActorInfoTableRequest>,

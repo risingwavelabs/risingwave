@@ -191,15 +191,6 @@ service HeartbeatService {
 
 // Below for stream manager.
 
-message AllocateFragmentIdRequest {
-  int32 interval = 1;
-}
-
-message AllocateFragmentIdResponse {
-  common.Status status = 1;
-  int32 start_id = 2;
-}
-
 message FetchActorInfoTableRequest {}
 
 message FetchActorInfoTableResponse {
@@ -217,7 +208,6 @@ message AddFragmentToWorkerResponse {
 }
 
 service StreamManagerService {
-  rpc AllocateFragmentId(AllocateFragmentIdRequest) returns (AllocateFragmentIdResponse);
   rpc FetchActorInfoTable(FetchActorInfoTableRequest) returns (FetchActorInfoTableResponse);
   rpc AddFragmentToWorker(AddFragmentToWorkerRequest) returns (AddFragmentToWorkerResponse);
 }

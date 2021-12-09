@@ -5,6 +5,9 @@ import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.node.WorkerNode;
 import com.risingwave.node.WorkerNodeManager;
+import com.risingwave.proto.common.Status;
+import com.risingwave.proto.metanode.GetIdRequest;
+import com.risingwave.proto.metanode.GetIdResponse;
 import com.risingwave.rpc.MetaClient;
 import com.risingwave.scheduler.streaming.graph.StreamFragment;
 import com.risingwave.scheduler.streaming.graph.StreamGraph;
@@ -38,7 +41,13 @@ public class RemoteStreamManager implements StreamManager {
 
   @Override
   public int createFragment() {
-    return fragmentId++;
+    GetIdRequest request =
+        GetIdRequest.newBuilder().setCategory(GetIdRequest.IdCategory.Fragment).build();
+    GetIdResponse response = metaClient.getId(request);
+    if (response.getStatus().getCode() != Status.Code.OK) {
+      throw new PgException(PgErrorCode.INTERNAL_ERROR, "Get fragment Id failed");
+    }
+    return response.getId();
   }
 
   @Override
