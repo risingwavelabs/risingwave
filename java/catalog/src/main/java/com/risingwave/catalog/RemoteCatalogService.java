@@ -25,9 +25,6 @@ import com.risingwave.proto.metanode.HeartbeatResponse;
 import com.risingwave.proto.metanode.Schema;
 import com.risingwave.proto.metanode.Table;
 import com.risingwave.proto.plan.ColumnDesc;
-import com.risingwave.proto.plan.DatabaseRefId;
-import com.risingwave.proto.plan.SchemaRefId;
-import com.risingwave.proto.plan.TableRefId;
 import com.risingwave.rpc.MetaClient;
 import com.risingwave.rpc.MetaMessages;
 import java.util.HashSet;
@@ -257,25 +254,18 @@ public class RemoteCatalogService implements CatalogService {
       if (schemaCatalog == null) {
         throw RisingWaveException.from(MetaServiceError.SCHEMA_NOT_EXISTS, schemaId);
       }
-      CreateTableInfo.Builder builder = CreateTableInfo.builder(table.getTableName());
-      builder.setMv(table.getIsMaterializedView());
-      builder.setProperties(table.getPropertiesMap());
-      builder.setStream(table.getIsStream());
-      builder.setRowFormat(table.getRowFormat());
-      for (ColumnDesc desc : table.getColumnDescsList()) {
-        builder.addColumn(desc.getName(), new com.risingwave.catalog.ColumnDesc(desc));
+      CreateTableInfo createTableInfo = CatalogCast.tableFromProto(table);
+      if (!table.getIsMaterializedView()) {
+        schemaCatalog
+            .createTableWithId(createTableInfo, table.getTableRefId().getTableId())
+            .setVersion(table.getVersion());
+      } else {
+        schemaCatalog
+            .createMaterializedViewWithId(
+                (CreateMaterializedViewInfo) createTableInfo, table.getTableRefId().getTableId())
+            .setVersion(table.getVersion());
       }
-      schemaCatalog
-          .createTableWithId(builder.build(), table.getTableRefId().getTableId())
-          .setVersion(table.getVersion());
     }
-  }
-
-  private Database buildDatabase(DatabaseCatalog databaseCatalog) {
-    Database.Builder builder = Database.newBuilder();
-    builder.setDatabaseName(databaseCatalog.getEntityName().getValue());
-    builder.setDatabaseRefId(buildDatabaseRefId(databaseCatalog));
-    return builder.build();
   }
 
   @Override
@@ -290,7 +280,8 @@ public class RemoteCatalogService implements CatalogService {
     DatabaseCatalog database =
         new DatabaseCatalog(
             new DatabaseCatalog.DatabaseId(getId(IdCategory.Database)), databaseName);
-    CreateRequest request = MetaMessages.buildCreateDatabaseRequest(buildDatabase(database));
+    CreateRequest request =
+        MetaMessages.buildCreateDatabaseRequest(CatalogCast.databaseToProto(database));
     CreateResponse response = this.metaClient.create(request);
     if (response.getStatus().getCode() != Status.Code.OK) {
       throw new PgException(PgErrorCode.INTERNAL_ERROR, "create database failed");
@@ -322,20 +313,15 @@ public class RemoteCatalogService implements CatalogService {
     return getDatabaseChecked(schemaName.getParent()).getSchema(schemaName);
   }
 
-  private Schema buildSchema(SchemaCatalog schemaCatalog) {
-    Schema.Builder builder = Schema.newBuilder();
-    builder.setSchemaName(schemaCatalog.getEntityName().getValue());
-    builder.setSchemaRefId(buildSchemaRefId(schemaCatalog));
-    return builder.build();
-  }
-
   @Override
   public SchemaCatalog createSchema(SchemaCatalog.SchemaName schemaName) {
     LOGGER.debug("create schema: {}", schemaName);
     DatabaseCatalog databaseCatalog = getDatabaseChecked(schemaName.getParent());
     SchemaCatalog schemaCatalog =
         databaseCatalog.createSchemaWithId(schemaName.getValue(), getId(IdCategory.Schema));
-    CreateRequest request = MetaMessages.buildCreateSchemaRequest(buildSchema(schemaCatalog));
+    CreateRequest request =
+        MetaMessages.buildCreateSchemaRequest(
+            CatalogCast.schemaToProto(databaseCatalog, schemaCatalog));
     CreateResponse response = this.metaClient.create(request);
     if (response.getStatus().getCode() != Status.Code.OK) {
       throw new PgException(PgErrorCode.INTERNAL_ERROR, "create schema failed");
@@ -343,29 +329,6 @@ public class RemoteCatalogService implements CatalogService {
     schemaCatalog.setVersion(response.getVersion());
 
     return schemaCatalog;
-  }
-
-  private Table buildTable(TableCatalog tableCatalog) {
-    Table.Builder builder = Table.newBuilder();
-    builder.setTableName(tableCatalog.getEntityName().getValue());
-    builder.setTableRefId(buildTableRefId(tableCatalog.getEntityName()));
-    builder.setIsMaterializedView(tableCatalog.isMaterializedView());
-    builder.setIsStream(tableCatalog.isStream());
-    builder.setDistType(Table.DistributionType.valueOf(tableCatalog.getDistributionType().name()));
-    builder.setRowFormat(tableCatalog.getRowFormat());
-    builder.putAllProperties(tableCatalog.getProperties());
-    builder.addAllPkColumns(tableCatalog.getPrimaryKeyColumnIds());
-    for (ColumnCatalog columnCatalog : tableCatalog.getAllColumns()) {
-      ColumnDesc.Builder colBuilder = ColumnDesc.newBuilder();
-      colBuilder.setName(columnCatalog.getName());
-      colBuilder.setEncoding(
-          ColumnDesc.ColumnEncodingType.valueOf(columnCatalog.getDesc().getEncoding().name()));
-      colBuilder.setIsPrimary(columnCatalog.getDesc().isPrimary());
-      colBuilder.setColumnType(columnCatalog.getDesc().getDataType().getProtobufType());
-      builder.addColumnDescs(colBuilder.build());
-    }
-
-    return builder.build();
   }
 
   @Override
@@ -377,7 +340,12 @@ public class RemoteCatalogService implements CatalogService {
         new TableCatalog.TableName(createTableInfo.getName(), schemaName);
     creatingTable.put(tableName, true);
     TableCatalog tableCatalog = schema.createTableWithId(createTableInfo, getId(IdCategory.Table));
-    CreateRequest request = MetaMessages.buildCreateTableRequest(buildTable(tableCatalog));
+    CreateRequest request =
+        MetaMessages.buildCreateTableRequest(
+            CatalogCast.tableToProto(
+                getDatabaseChecked(schemaName.getParent()),
+                getSchemaChecked(tableName.getParent()),
+                tableCatalog));
     CreateResponse response = this.metaClient.create(request);
     if (response.getStatus().getCode() != Status.Code.OK) {
       throw new PgException(PgErrorCode.INTERNAL_ERROR, "create table failed");
@@ -399,7 +367,12 @@ public class RemoteCatalogService implements CatalogService {
     creatingTable.put(viewName, true);
     MaterializedViewCatalog viewCatalog =
         schema.createMaterializedViewWithId(createMaterializedViewInfo, getId(IdCategory.Table));
-    CreateRequest request = MetaMessages.buildCreateTableRequest(buildTable(viewCatalog));
+    CreateRequest request =
+        MetaMessages.buildCreateTableRequest(
+            CatalogCast.tableToProto(
+                getDatabaseChecked(schemaName.getParent()),
+                getSchemaChecked(viewName.getParent()),
+                viewCatalog));
     CreateResponse response = this.metaClient.create(request);
     if (response.getStatus().getCode() != Status.Code.OK) {
       throw new PgException(PgErrorCode.INTERNAL_ERROR, "create materialized view failed");
@@ -414,32 +387,13 @@ public class RemoteCatalogService implements CatalogService {
     return getSchemaChecked(tableName.getParent()).getTableCatalog(tableName);
   }
 
-  private DatabaseRefId buildDatabaseRefId(DatabaseCatalog databaseCatalog) {
-    return DatabaseRefId.newBuilder().setDatabaseId(databaseCatalog.getId().getValue()).build();
-  }
-
-  private SchemaRefId buildSchemaRefId(SchemaCatalog schemaCatalog) {
-    DatabaseCatalog databaseCatalog = getDatabaseChecked(schemaCatalog.getEntityName().getParent());
-    SchemaRefId.Builder builder = SchemaRefId.newBuilder();
-    builder.setSchemaId(schemaCatalog.getId().getValue());
-    builder.setDatabaseRefId(buildDatabaseRefId(databaseCatalog));
-
-    return builder.build();
-  }
-
-  private TableRefId buildTableRefId(TableCatalog.TableName tableName) {
-    SchemaCatalog schemaCatalog = getSchemaChecked(tableName.getParent());
-    TableCatalog tableCatalog = schemaCatalog.getTableCatalog(tableName);
-    TableRefId.Builder builder = TableRefId.newBuilder();
-    builder.setTableId(tableCatalog.getId().getValue());
-    builder.setSchemaRefId(buildSchemaRefId(schemaCatalog));
-
-    return builder.build();
-  }
-
   @Override
   public void dropTable(TableCatalog.TableName tableName) {
-    DropRequest request = MetaMessages.buildDropTableRequest(buildTableRefId(tableName));
+    SchemaCatalog schemaCatalog = getSchemaChecked(tableName.getParent());
+    DatabaseCatalog databaseCatalog = getDatabaseChecked(schemaCatalog.getEntityName().getParent());
+    DropRequest request =
+        MetaMessages.buildDropTableRequest(
+            CatalogCast.buildTableRefId(databaseCatalog, schemaCatalog, tableName));
     DropResponse response = this.metaClient.drop(request);
     if (response.getStatus().getCode() != Status.Code.OK) {
       throw new PgException(PgErrorCode.INTERNAL_ERROR, "drop table failed");
