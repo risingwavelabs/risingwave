@@ -164,3 +164,124 @@ impl MemSourceManager {
         })
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::source::*;
+    use risingwave_storage::bummock::BummockTable;
+    use risingwave_storage::{Table, TableColumnDesc};
+
+    use risingwave_common::array::*;
+    use risingwave_common::catalog::{Field, Schema, TableId};
+    use risingwave_common::error::Result;
+    use risingwave_common::types::{DecimalType, Int64Type};
+
+    use std::sync::Arc;
+
+    const KAFKA_TOPIC_KEY: &str = "kafka.topic";
+    const KAFKA_BOOTSTRAP_SERVERS_KEY: &str = "kafka.bootstrap.servers";
+
+    #[tokio::test]
+    async fn test_source() -> Result<()> {
+        // init
+        let table_id = TableId::default();
+        let format = SourceFormat::Json;
+        let parser = Arc::new(JSONParser {});
+
+        let config = SourceConfig::Kafka(HighLevelKafkaSourceConfig {
+            bootstrap_servers: KAFKA_BOOTSTRAP_SERVERS_KEY
+                .split(',')
+                .map(|s| s.to_string())
+                .collect::<Vec<String>>(),
+            topic: KAFKA_TOPIC_KEY.to_string(),
+            properties: Default::default(),
+        });
+
+        let table = Arc::new(BummockTable::new(
+            &TableId::default(),
+            vec![TableColumnDesc {
+                data_type: Arc::new(Int64Type::new(false)),
+                column_id: 0,
+            }],
+        ));
+
+        let chunk0 = StreamChunk::new(
+            vec![Op::Insert],
+            vec![column_nonnull!(I64Array, Int64Type, [0])],
+            None,
+        );
+        table.write(&chunk0).unwrap();
+
+        let source_columns = table
+            .columns()
+            .iter()
+            .map(|c| SourceColumnDesc {
+                name: "123".to_string(),
+                data_type: c.data_type.clone(),
+                column_id: c.column_id,
+            })
+            .collect();
+
+        // create source
+        let mem_source_manager = MemSourceManager::new();
+        let new_source =
+            mem_source_manager.create_source(&table_id, format, parser, &config, source_columns);
+        assert!(new_source.is_ok());
+
+        // get source
+        let get_source_res = mem_source_manager.get_source(&table_id)?;
+        assert_eq!(get_source_res.columns[0].name, "123");
+
+        // drop source
+        let drop_source_res = mem_source_manager.drop_source(&table_id);
+        assert!(drop_source_res.is_ok());
+
+        let get_source_res = mem_source_manager.get_source(&table_id);
+        assert!(get_source_res.is_err());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_table_source() -> Result<()> {
+        let table_id = TableId::default();
+
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
+                },
+                Field {
+                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
+                },
+            ],
+        };
+
+        let table_columns = schema
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(i, f)| TableColumnDesc {
+                data_type: f.data_type.clone(),
+                column_id: i as i32, // use column index as column id
+            })
+            .collect();
+
+        let bummock_table = Arc::new(BummockTable::new(&table_id, table_columns));
+        let mem_source_manager = MemSourceManager::new();
+        let res = mem_source_manager.create_table_source(&table_id, bummock_table);
+        assert!(res.is_ok());
+
+        // get source
+        let get_source_res = mem_source_manager.get_source(&table_id);
+        assert!(get_source_res.is_ok());
+
+        // drop source
+        let drop_source_res = mem_source_manager.drop_source(&table_id);
+        assert!(drop_source_res.is_ok());
+        let get_source_res = mem_source_manager.get_source(&table_id);
+        assert!(get_source_res.is_err());
+
+        Ok(())
+    }
+}
