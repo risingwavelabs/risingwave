@@ -1,8 +1,12 @@
 use crate::error::{ErrorCode, Result, RwError};
-use risingwave_pb::{plan, task_service, TypeUrl};
+use risingwave_pb::{data, plan, task_service};
 use serde::Serialize;
 use serde_json::{json, Value};
 use serde_with::skip_serializing_none;
+
+pub trait TypeUrl {
+    fn type_url() -> &'static str;
+}
 
 pub fn pack_to_any<M>(msg: &M) -> prost_types::Any
 where
@@ -22,6 +26,18 @@ where
         Some(M::decode(&msg.value[..]).ok()?)
     } else {
         None
+    }
+}
+
+impl TypeUrl for task_service::ExchangeNode {
+    fn type_url() -> &'static str {
+        "type.googleapis.com/task_service.ExchangeNode"
+    }
+}
+
+impl TypeUrl for data::Column {
+    fn type_url() -> &'static str {
+        "type.googleapis.com/data.Column"
     }
 }
 

@@ -17,10 +17,6 @@ pub mod stream_service;
 #[rustfmt::skip]
 pub mod hummock;
 
-pub trait TypeUrl {
-    fn type_url() -> &'static str;
-}
-
 #[cfg(test)]
 mod tests {
     use crate::data::{data_type, DataType};
