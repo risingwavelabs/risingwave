@@ -219,13 +219,14 @@ mod test {
                 name: "123".to_string(),
                 data_type: c.data_type.clone(),
                 column_id: c.column_id,
+                skip_parse: false,
             })
             .collect();
 
         // create source
         let mem_source_manager = MemSourceManager::new();
         let new_source =
-            mem_source_manager.create_source(&table_id, format, parser, &config, source_columns);
+            mem_source_manager.create_source(&table_id, format, parser, &config, source_columns, 0);
         assert!(new_source.is_ok());
 
         // get source
