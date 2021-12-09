@@ -106,175 +106,69 @@ fn create_agg_state_unary(
     agg_type: &AggKind,
     return_type: DataTypeRef,
 ) -> Result<Box<dyn Aggregator>> {
-    let state: Box<dyn Aggregator> = match (
+    macro_rules! gen_arms {
+    [$(($agg:ident, $fn:expr, $in_type:ident, $in_arr:ty, $ret_type:ident, $ret_arr:ty)),* $(,)?] => {
+      match (
         input_type.data_type_kind(),
         agg_type,
         return_type.data_type_kind(),
-    ) {
-        // TODO(xiangjin): Ideally count non-null on Array without checking its type.
-        (DataTypeKind::Int16, AggKind::Count, DataTypeKind::Int64) => {
-            Box::new(GeneralAgg::<I16Array, _, _>::new(
-                return_type,
-                input_col_idx,
-                count,
-            ))
+      ) {
+        $(
+        (DataTypeKind::$in_type, AggKind::$agg, DataTypeKind::$ret_type) => {
+          Box::new(GeneralAgg::<$in_arr, _, $ret_arr>::new(
+            return_type,
+            input_col_idx,
+            $fn,
+          ))
         }
-        (DataTypeKind::Int32, AggKind::Count, DataTypeKind::Int64) => {
-            Box::new(GeneralAgg::<I32Array, _, _>::new(
-                return_type,
-                input_col_idx,
-                count,
-            ))
-        }
-        (DataTypeKind::Int64, AggKind::Count, DataTypeKind::Int64) => {
-            Box::new(GeneralAgg::<I64Array, _, _>::new(
-                return_type,
-                input_col_idx,
-                count,
-            ))
-        }
-        (DataTypeKind::Float32, AggKind::Count, DataTypeKind::Int64) => {
-            Box::new(GeneralAgg::<F32Array, _, _>::new(
-                return_type,
-                input_col_idx,
-                count,
-            ))
-        }
-        (DataTypeKind::Float64, AggKind::Count, DataTypeKind::Int64) => {
-            Box::new(GeneralAgg::<F64Array, _, _>::new(
-                return_type,
-                input_col_idx,
-                count,
-            ))
-        }
-        (DataTypeKind::Decimal, AggKind::Count, DataTypeKind::Int64) => {
-            Box::new(GeneralAgg::<DecimalArray, _, _>::new(
-                return_type,
-                input_col_idx,
-                count,
-            ))
-        }
-        (DataTypeKind::Char, AggKind::Count, DataTypeKind::Int64) => {
-            Box::new(GeneralAgg::<Utf8Array, _, _>::new(
-                return_type,
-                input_col_idx,
-                count_str,
-            ))
-        }
-        (DataTypeKind::Boolean, AggKind::Count, DataTypeKind::Int64) => {
-            Box::new(GeneralAgg::<BoolArray, _, _>::new(
-                return_type,
-                input_col_idx,
-                count,
-            ))
-        }
-        (DataTypeKind::Int16, AggKind::Sum, DataTypeKind::Int64) => {
-            Box::new(GeneralAgg::<I16Array, _, I64Array>::new(
-                return_type,
-                input_col_idx,
-                sum,
-            ))
-        }
-        (DataTypeKind::Int32, AggKind::Sum, DataTypeKind::Int64) => {
-            Box::new(GeneralAgg::<I32Array, _, I64Array>::new(
-                return_type,
-                input_col_idx,
-                sum,
-            ))
-        }
-        (DataTypeKind::Int64, AggKind::Sum, DataTypeKind::Decimal) => {
-            Box::new(GeneralAgg::<I64Array, _, DecimalArray>::new(
-                return_type,
-                input_col_idx,
-                sum,
-            ))
-        }
-        (DataTypeKind::Float32, AggKind::Sum, DataTypeKind::Float32) => {
-            Box::new(GeneralAgg::<F32Array, _, F32Array>::new(
-                return_type,
-                input_col_idx,
-                sum,
-            ))
-        }
-        (DataTypeKind::Float64, AggKind::Sum, DataTypeKind::Float64) => {
-            Box::new(GeneralAgg::<F64Array, _, F64Array>::new(
-                return_type,
-                input_col_idx,
-                sum,
-            ))
-        }
-        (DataTypeKind::Decimal, AggKind::Sum, DataTypeKind::Decimal) => {
-            Box::new(GeneralAgg::<DecimalArray, _, DecimalArray>::new(
-                return_type,
-                input_col_idx,
-                sum,
-            ))
-        }
-        (DataTypeKind::Int16, AggKind::Min, DataTypeKind::Int16) => {
-            Box::new(GeneralAgg::<I16Array, _, I16Array>::new(
-                return_type,
-                input_col_idx,
-                min,
-            ))
-        }
-        (DataTypeKind::Int32, AggKind::Min, DataTypeKind::Int32) => {
-            Box::new(GeneralAgg::<I32Array, _, I32Array>::new(
-                return_type,
-                input_col_idx,
-                min,
-            ))
-        }
-        (DataTypeKind::Int64, AggKind::Min, DataTypeKind::Int64) => {
-            Box::new(GeneralAgg::<I64Array, _, I64Array>::new(
-                return_type,
-                input_col_idx,
-                min,
-            ))
-        }
-        (DataTypeKind::Float32, AggKind::Min, DataTypeKind::Float32) => {
-            Box::new(GeneralAgg::<F32Array, _, F32Array>::new(
-                return_type,
-                input_col_idx,
-                min,
-            ))
-        }
-        (DataTypeKind::Float64, AggKind::Min, DataTypeKind::Float64) => {
-            Box::new(GeneralAgg::<F64Array, _, F64Array>::new(
-                return_type,
-                input_col_idx,
-                min,
-            ))
-        }
-        (DataTypeKind::Decimal, AggKind::Min, DataTypeKind::Decimal) => {
-            Box::new(GeneralAgg::<DecimalArray, _, DecimalArray>::new(
-                return_type,
-                input_col_idx,
-                min,
-            ))
-        }
-        (DataTypeKind::Char, AggKind::Min, DataTypeKind::Char) => {
-            Box::new(GeneralAgg::<Utf8Array, _, Utf8Array>::new(
-                return_type,
-                input_col_idx,
-                min_str,
-            ))
-        }
-        // Global Agg
-        (DataTypeKind::Int64, AggKind::Sum, DataTypeKind::Int64) => {
-            Box::new(GeneralAgg::<I64Array, _, I64Array>::new(
-                return_type,
-                input_col_idx,
-                sum,
-            ))
-        }
+        )*
         (unimpl_input, unimpl_agg, unimpl_ret) => {
-            return Err(ErrorCode::InternalError(format!(
-                "unsupported aggregator: type={:?} input={:?} output={:?}",
-                unimpl_agg, unimpl_input, unimpl_ret
+          return Err(
+            ErrorCode::InternalError(format!(
+              "unsupported aggregator: type={:?} input={:?} output={:?}",
+              unimpl_agg, unimpl_input, unimpl_ret
             ))
-            .into())
+            .into(),
+          )
         }
+      }
     };
+  }
+    let state: Box<dyn Aggregator> = gen_arms![
+        (Count, count, Int16, I16Array, Int64, I64Array),
+        (Count, count, Int32, I32Array, Int64, I64Array),
+        (Count, count, Int64, I64Array, Int64, I64Array),
+        (Count, count, Float32, F32Array, Int64, I64Array),
+        (Count, count, Float64, F64Array, Int64, I64Array),
+        (Count, count, Decimal, DecimalArray, Int64, I64Array),
+        (Count, count_str, Char, Utf8Array, Int64, I64Array),
+        (Count, count_str, Varchar, Utf8Array, Int64, I64Array),
+        (Count, count, Boolean, BoolArray, Int64, I64Array),
+        (Sum, sum, Int16, I16Array, Int64, I64Array),
+        (Sum, sum, Int32, I32Array, Int64, I64Array),
+        (Sum, sum, Int64, I64Array, Decimal, DecimalArray),
+        (Sum, sum, Float32, F32Array, Float32, F32Array),
+        (Sum, sum, Float64, F64Array, Float64, F64Array),
+        (Sum, sum, Decimal, DecimalArray, Decimal, DecimalArray),
+        (Min, min, Int16, I16Array, Int16, I16Array),
+        (Min, min, Int32, I32Array, Int32, I32Array),
+        (Min, min, Int64, I64Array, Int64, I64Array),
+        (Min, min, Float32, F32Array, Float32, F32Array),
+        (Min, min, Float64, F64Array, Float64, F64Array),
+        (Min, min, Decimal, DecimalArray, Decimal, DecimalArray),
+        (Min, min_str, Char, Utf8Array, Char, Utf8Array),
+        (Min, min_str, Varchar, Utf8Array, Varchar, Utf8Array),
+        (Max, max, Int16, I16Array, Int16, I16Array),
+        (Max, max, Int32, I32Array, Int32, I32Array),
+        (Max, max, Int64, I64Array, Int64, I64Array),
+        (Max, max, Float32, F32Array, Float32, F32Array),
+        (Max, max, Float64, F64Array, Float64, F64Array),
+        (Max, max, Decimal, DecimalArray, Decimal, DecimalArray),
+        (Max, max_str, Char, Utf8Array, Char, Utf8Array),
+        (Max, max_str, Varchar, Utf8Array, Varchar, Utf8Array),
+        // Global Agg
+        (Sum, sum, Int64, I64Array, Int64, I64Array),
+    ];
     Ok(state)
 }
 
@@ -541,6 +435,21 @@ where
 
 fn min_str<'a>(r: Option<&'a str>, i: Option<&'a str>) -> Option<&'a str> {
     min(r, i)
+}
+
+fn max<'a, T>(result: Option<T>, input: Option<T>) -> Option<T>
+where
+    T: ScalarRef<'a> + PartialOrd,
+{
+    match (result, input) {
+        (None, _) => input,
+        (_, None) => result,
+        (Some(r), Some(i)) => Some(if r > i { r } else { i }),
+    }
+}
+
+fn max_str<'a>(r: Option<&'a str>, i: Option<&'a str>) -> Option<&'a str> {
+    max(r, i)
 }
 
 fn count<T>(result: Option<i64>, input: Option<T>) -> Option<i64> {
@@ -892,6 +801,25 @@ mod tests {
         let actual = actual.as_utf8();
         let actual = actual.iter().collect::<Vec<_>>();
         assert_eq!(actual, vec![Some("aa")]);
+        Ok(())
+    }
+
+    #[test]
+    fn vec_max_char() -> Result<()> {
+        let input = Utf8Array::from_slice(&[Some("b"), Some("aa")])?;
+        let agg_type = AggKind::Max;
+        let input_type = StringType::create(true, 5, DataTypeKind::Varchar);
+        let return_type = StringType::create(true, 5, DataTypeKind::Varchar);
+        let actual = eval_agg(
+            input_type,
+            Arc::new(input.into()),
+            &agg_type,
+            return_type,
+            ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0)?),
+        )?;
+        let actual = actual.as_utf8();
+        let actual = actual.iter().collect::<Vec<_>>();
+        assert_eq!(actual, vec![Some("b")]);
         Ok(())
     }
 
