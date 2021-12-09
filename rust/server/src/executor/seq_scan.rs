@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use prost::Message;
@@ -9,7 +10,6 @@ use risingwave_storage::bummock::{BummockResult, BummockTable};
 
 use crate::executor::{Executor, ExecutorBuilder};
 use crate::stream::TableImpl;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, DataChunkRef};
 use risingwave_common::catalog::TableId;
 use risingwave_common::catalog::{Field, Schema};
@@ -19,14 +19,13 @@ use risingwave_storage::*;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 
+/// Sequential scan executor on column-oriented tables
 pub(super) struct SeqScanExecutor {
     first_execution: bool,
     table: Arc<BummockTable>,
     column_ids: Vec<i32>,
-    column_indices: Vec<usize>,
-    data: Vec<DataChunkRef>,
-    chunk_idx: usize,
     schema: Schema,
+    snapshot: VecDeque<DataChunkRef>,
 }
 
 impl BoxedExecutorBuilder for SeqScanExecutor {
@@ -58,10 +57,8 @@ impl BoxedExecutorBuilder for SeqScanExecutor {
                 first_execution: true,
                 table: table_ref,
                 column_ids: column_ids.to_vec(),
-                column_indices: vec![],
-                chunk_idx: 0,
-                data: Vec::new(),
                 schema,
+                snapshot: VecDeque::new(),
             }))
         } else {
             Err(RwError::from(InternalError(
@@ -74,7 +71,7 @@ impl BoxedExecutorBuilder for SeqScanExecutor {
 #[async_trait::async_trait]
 impl Executor for SeqScanExecutor {
     async fn open(&mut self) -> Result<()> {
-        info!("SeqScanExecutor initing!");
+        info!("SeqScanExecutor init");
         Ok(())
     }
 
@@ -85,44 +82,17 @@ impl Executor for SeqScanExecutor {
             let res = if self.column_ids.is_empty() {
                 self.table.get_dummy_data().await?
             } else {
-                self.table.get_data().await?
+                self.table.get_data_by_columns(&self.column_ids).await?
             };
 
             if let BummockResult::Data(data) = res {
-                self.data = data;
+                self.snapshot = VecDeque::from(data);
             } else {
                 return Ok(None);
             }
-
-            self.column_indices = self
-                .column_ids
-                .iter()
-                .map(|c| self.table.index_of_column_id(*c).unwrap())
-                .collect();
         }
 
-        if self.chunk_idx >= self.data.len() {
-            return Ok(None);
-        }
-
-        let cur_chunk = &self.data[self.chunk_idx];
-
-        let ret = if self.column_indices.is_empty() {
-            DataChunk::new_dummy(cur_chunk.cardinality())
-        } else {
-            let columns = self
-                .column_indices
-                .iter()
-                .map(|idx| cur_chunk.column_at(*idx))
-                .collect::<Result<Vec<Column>>>()?;
-
-            // TODO: visibility map here
-            let ret: DataChunk = DataChunk::builder().columns(columns).build();
-            ret
-        };
-
-        self.chunk_idx += 1;
-        Ok(Some(ret))
+        Ok(self.snapshot.pop_front().map(|c| c.as_ref().clone()))
     }
 
     async fn close(&mut self) -> Result<()> {
@@ -132,28 +102,6 @@ impl Executor for SeqScanExecutor {
 
     fn schema(&self) -> &Schema {
         &self.schema
-    }
-}
-
-impl SeqScanExecutor {
-    pub(crate) fn new(
-        first_execution: bool,
-        table: Arc<BummockTable>,
-        column_ids: Vec<i32>,
-        column_indices: Vec<usize>,
-        data: Vec<DataChunkRef>,
-        chunk_idx: usize,
-        schema: Schema,
-    ) -> Self {
-        Self {
-            first_execution,
-            table,
-            column_ids,
-            column_indices,
-            data,
-            chunk_idx,
-            schema,
-        }
     }
 }
 
@@ -198,10 +146,8 @@ mod tests {
             first_execution: true,
             table: Arc::new(table),
             column_ids: vec![0],
-            column_indices: vec![],
-            data: vec![],
-            chunk_idx: 0,
             schema: Schema { fields },
+            snapshot: VecDeque::new(),
         };
         seq_scan_executor.open().await.unwrap();
 

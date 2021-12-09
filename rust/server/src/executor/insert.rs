@@ -242,7 +242,10 @@ mod tests {
         );
         let table_ref = table_manager.get_table(&insert_executor.table_id)?;
         if let TableImpl::Bummock(table_ref) = table_ref {
-            match table_ref.get_data().await? {
+            match table_ref
+                .get_data_by_columns(&table_ref.get_column_ids())
+                .await?
+            {
                 BummockResult::Data(data_ref) => {
                     assert_eq!(
                         data_ref[0]
@@ -313,7 +316,10 @@ mod tests {
         );
         let table_ref = table_manager.get_table(&insert_executor.table_id)?;
         if let TableImpl::Bummock(table_ref) = table_ref {
-            match table_ref.get_data().await? {
+            match table_ref
+                .get_data_by_columns(&table_ref.get_column_ids())
+                .await?
+            {
                 BummockResult::Data(data_ref) => {
                     assert_eq!(
                         data_ref[1]
@@ -370,7 +376,10 @@ mod tests {
         );
         let table_ref = table_manager.get_table(&insert_executor.table_id)?;
         if let TableImpl::Bummock(table_ref) = table_ref {
-            match table_ref.get_data().await? {
+            match table_ref
+                .get_data_by_columns(&table_ref.get_column_ids())
+                .await?
+            {
                 BummockResult::Data(data_ref) => {
                     assert_eq!(
                         data_ref[0]

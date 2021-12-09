@@ -23,8 +23,10 @@ pub trait Table: Sync + Send {
     /// Append an entry to the table.
     async fn append(&self, data: DataChunk) -> Result<usize>;
 
-    /// Get data from the table.
-    async fn get_data(&self) -> Result<BummockResult>;
+    /// Scan data of specified column ids
+    ///
+    /// In future, it will accept `predicates` for interested filtering conditions.
+    async fn get_data_by_columns(&self, column_ids: &[i32]) -> Result<BummockResult>;
 
     /// Write a batch of changes. For now, we use `StreamChunk` to represent a write batch
     /// An assertion is put to assert only insertion operations are allowed.

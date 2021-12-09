@@ -93,14 +93,40 @@ impl Table for BummockTable {
         Ok(ret_cardinality)
     }
 
-    async fn get_data(&self) -> Result<BummockResult> {
+    async fn get_data_by_columns(&self, column_ids: &[i32]) -> Result<BummockResult> {
         // TODO, traverse other segs as well
         let segs = self.mem_dirty_segs.read().unwrap();
-        match segs.is_empty() {
-            true => Ok(BummockResult::DataEof),
-            false => Ok(BummockResult::Data(
-                segs.last().unwrap().get_data().unwrap(),
-            )),
+        let chunks = if !segs.is_empty() {
+            segs.last().unwrap().get_data().unwrap()
+        } else {
+            vec![]
+        };
+
+        let column_indices: Vec<usize> = column_ids
+            .iter()
+            .map(|c| self.index_of_column_id(*c).unwrap())
+            .collect();
+
+        let ret: Vec<DataChunkRef> = chunks
+            .into_iter()
+            .map(|c| {
+                let columns = column_indices
+                    .iter()
+                    .map(|i| c.columns()[*i].clone())
+                    .collect();
+                let mut builder = DataChunk::builder().columns(columns);
+                if let Some(vis) = c.visibility() {
+                    builder = builder.visibility(vis.clone());
+                }
+                let chunk = builder.build();
+                Arc::new(chunk)
+            })
+            .collect();
+
+        if ret.is_empty() {
+            Ok(BummockResult::DataEof)
+        } else {
+            Ok(BummockResult::Data(ret))
         }
     }
 
@@ -157,25 +183,6 @@ impl BummockTable {
         // then scan `mem_clean_segs`
 
         // then request on-disk segments
-
-        todo!();
-    }
-
-    /// Given a list of `column id`s, return the data chunks.
-    /// Projection pushdown: use `projections` for interested `column_id`s.
-    /// Predicate pushdown: use `predicates` for interested filtering conditions.
-    async fn get_data_by_columns(
-        &self,
-        _projections: Option<Vec<i32>>,
-        _predicates: Option<Vec<(u64, u64)>>,
-    ) -> Result<Vec<DataChunkRef>> {
-        // first scan `mem_dirty_segs`
-
-        // then scan `mem_clean_seg`
-
-        // then request on-disk segments
-
-        // if predicates exist, process them
 
         todo!();
     }
@@ -293,7 +300,9 @@ mod tests {
         let bummock_table = Arc::new(BummockTable::new(&table_id, table_columns));
 
         assert!(matches!(
-            bummock_table.get_data().await?,
+            bummock_table
+                .get_data_by_columns(&bummock_table.get_column_ids())
+                .await?,
             BummockResult::DataEof
         ));
 
@@ -302,7 +311,10 @@ mod tests {
 
         assert_eq!(bummock_table.current_tuple_id.load(Ordering::Relaxed), 5);
 
-        match bummock_table.get_data().await? {
+        match bummock_table
+            .get_data_by_columns(&bummock_table.get_column_ids())
+            .await?
+        {
             BummockResult::Data(v) => {
                 assert_eq!(
                     v[0].column_at(0)

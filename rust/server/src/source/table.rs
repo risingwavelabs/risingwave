@@ -91,7 +91,11 @@ pub struct TableBatchReader {
 impl BatchSourceReader for TableBatchReader {
     async fn open(&mut self) -> Result<()> {
         let core = self.core.read().await;
-        match core.table.get_data().await? {
+        match core
+            .table
+            .get_data_by_columns(&core.table.get_column_ids())
+            .await?
+        {
             BummockResult::Data(snapshot) => {
                 self.snapshot = VecDeque::from(snapshot);
                 Ok(())
@@ -139,7 +143,8 @@ pub struct TableStreamReader {
 impl StreamSourceReader for TableStreamReader {
     async fn open(&mut self) -> Result<()> {
         let core = self.core.read().await;
-        let snapshot = match core.table.get_data().await? {
+        let column_ids = core.table.get_column_ids();
+        let snapshot = match core.table.get_data_by_columns(&column_ids).await? {
             BummockResult::Data(snapshot) => snapshot,
             BummockResult::DataEof => vec![],
         };
