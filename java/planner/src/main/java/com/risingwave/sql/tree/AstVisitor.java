@@ -21,6 +21,12 @@
 
 package com.risingwave.sql.tree;
 
+/**
+ * Ast visitor.
+ *
+ * @param <R> Return type.
+ * @param <C> Context to use.
+ */
 public abstract class AstVisitor<R, C> {
 
   protected R visitNode(Node node, C context) {
@@ -244,6 +250,10 @@ public abstract class AstVisitor<R, C> {
   }
 
   protected R visitSubscriptExpression(SubscriptExpression node, C context) {
+    return visitExpression(node, context);
+  }
+
+  protected R visitBooleanComparisonExpression(BooleanComparisonExpression node, C context) {
     return visitExpression(node, context);
   }
 

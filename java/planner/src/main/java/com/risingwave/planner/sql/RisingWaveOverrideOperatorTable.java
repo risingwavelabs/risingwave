@@ -100,4 +100,24 @@ public class RisingWaveOverrideOperatorTable extends ReflectiveSqlOperatorTable 
           RwReturnTypes.RW_OR_BOOLEAN_NULLABLE,
           InferTypes.BOOLEAN,
           OperandTypes.BOOLEAN_BOOLEAN);
+
+  /** Pg's boolne function */
+  public static final SqlFunction BOOL_NE =
+      new SqlFunction(
+          "BOOLNE",
+          SqlKind.OTHER_FUNCTION,
+          ReturnTypes.BOOLEAN_NULLABLE,
+          InferTypes.BOOLEAN,
+          OperandTypes.BOOLEAN_BOOLEAN,
+          SqlFunctionCategory.SYSTEM);
+
+  /** Pg's booleq function */
+  public static final SqlFunction BOOL_EQ =
+      new SqlFunction(
+          "BOOLEQ",
+          SqlKind.OTHER_FUNCTION,
+          ReturnTypes.BOOLEAN_NULLABLE,
+          InferTypes.BOOLEAN,
+          OperandTypes.BOOLEAN_BOOLEAN,
+          SqlFunctionCategory.SYSTEM);
 }

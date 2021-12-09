@@ -228,6 +228,7 @@ predicate[ParserRuleContext value]
         (ESCAPE escape=valueExpression)?                                             #arrayLike
     | IS NOT? NULL                                                                   #nullPredicate
     | IS NOT? DISTINCT FROM right=valueExpression                                    #distinctFrom
+    | IS NOT? (TRUE | FALSE | UNKNOWN)                                               #booleanComparison
     ;
 
 valueExpression
@@ -724,6 +725,7 @@ IS: 'IS';
 NULL: 'NULL';
 TRUE: 'TRUE';
 FALSE: 'FALSE';
+UNKNOWN: 'UNKNOWN';
 NULLS: 'NULLS';
 FIRST: 'FIRST';
 LAST: 'LAST';

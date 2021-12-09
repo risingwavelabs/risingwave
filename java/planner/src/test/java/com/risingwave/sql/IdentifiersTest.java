@@ -17,7 +17,7 @@ public class IdentifiersTest {
     // adapt this test.
     assertThat(
         (int) Identifiers.KEYWORDS.stream().filter(Identifiers.Keyword::isReserved).count(),
-        is(96));
+        is(97));
   }
 
   @Test

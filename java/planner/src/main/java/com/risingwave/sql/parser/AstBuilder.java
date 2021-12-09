@@ -58,6 +58,7 @@ import com.risingwave.sql.tree.Assignment;
 import com.risingwave.sql.tree.BeginStatement;
 import com.risingwave.sql.tree.BetweenPredicate;
 import com.risingwave.sql.tree.BitString;
+import com.risingwave.sql.tree.BooleanComparisonExpression;
 import com.risingwave.sql.tree.BooleanLiteral;
 import com.risingwave.sql.tree.Cast;
 import com.risingwave.sql.tree.CharFilters;
@@ -210,6 +211,7 @@ import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.antlr.v4.runtime.tree.TerminalNode;
 
+/** An antrl ast visitor to build ast. */
 class AstBuilder extends SqlBaseBaseVisitor<Node> {
 
   private int parameterPosition = 1;
@@ -1882,6 +1884,31 @@ class AstBuilder extends SqlBaseBaseVisitor<Node> {
         context.children.stream()
             .map(c -> c.getText().toLowerCase(Locale.ENGLISH))
             .collect(Collectors.joining(" ")));
+  }
+
+  @Override
+  public Node visitBooleanComparison(SqlBaseParser.BooleanComparisonContext ctx) {
+    var child = (Expression) visit(ctx.value);
+    var hasNot = ctx.NOT() != null;
+    BooleanComparisonExpression.Type cmpType;
+    if (ctx.TRUE() != null) {
+      cmpType =
+          hasNot
+              ? BooleanComparisonExpression.Type.IS_NOT_TRUE
+              : BooleanComparisonExpression.Type.IS_TRUE;
+    } else if (ctx.FALSE() != null) {
+      cmpType =
+          hasNot
+              ? BooleanComparisonExpression.Type.IS_NOT_FALSE
+              : BooleanComparisonExpression.Type.IS_FALSE;
+    } else {
+      cmpType =
+          hasNot
+              ? BooleanComparisonExpression.Type.IS_NOT_UNKNOWN
+              : BooleanComparisonExpression.Type.IS_UNKNOWN;
+    }
+
+    return new BooleanComparisonExpression(cmpType, child);
   }
 
   private static String getObjectType(Token type) {

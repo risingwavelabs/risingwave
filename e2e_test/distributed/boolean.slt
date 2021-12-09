@@ -62,9 +62,26 @@ true false
 statement ok
 CREATE TABLE TB1(v1 bool);
 
-query B
-SELECT TB1.* FROM TB1;
+statement ok
+INSERT INTO TB1(v1) VALUES (true), (false), (NULL);
+
+query BBBBBBBBB
+SELECT v1 is true,
+       v1 is not true,
+       v1 is false,
+       v1 is not false,
+       v1 is unknown,
+       v1 is not unknown,
+       boolne(v1, true),
+       booleq(v1, false),
+       boolne(v1, null)
+FROM TB1;
 ----
+true false false true false true false false NULL
+false true true false false true true true NULL
+false true false true true false NULL NULL NULL
+
+
 
 statement ok
 DROP TABLE TB1;
@@ -88,3 +105,15 @@ query BB
 select not TRUE, not NULL;
 ----
 false NULL
+
+query BBBBBBBB
+select 'true'::bool is true,
+       'true'::bool IS NOT TRUE,
+       'true'::bool IS FALSE,
+       'true'::bool is not false,
+       'true'::bool is unknown,
+       'true'::bool is not unknown,
+       boolne('true'::bool, false),
+       booleq('true'::bool, null);
+----
+true false false true false true true NULL

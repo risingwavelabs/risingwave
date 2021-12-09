@@ -55,6 +55,12 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
           .put(SqlKind.NOT, ExprNode.Type.NOT)
           .put(SqlKind.EXTRACT, ExprNode.Type.EXTRACT)
           .put(SqlKind.CASE, ExprNode.Type.CASE)
+          .put(SqlKind.IS_TRUE, ExprNode.Type.IS_TRUE)
+          .put(SqlKind.IS_NOT_TRUE, ExprNode.Type.IS_NOT_TRUE)
+          .put(SqlKind.IS_FALSE, ExprNode.Type.IS_FALSE)
+          .put(SqlKind.IS_NOT_FALSE, ExprNode.Type.IS_NOT_FALSE)
+          .put(SqlKind.IS_NULL, ExprNode.Type.IS_UNKNOWN)
+          .put(SqlKind.IS_NOT_NULL, ExprNode.Type.IS_NOT_UNKNOWN)
           .build();
   private static final ImmutableMap<String, ExprNode.Type> STRING_TO_FUNC_MAPPING =
       ImmutableMap.<String, ExprNode.Type>builder()
@@ -69,6 +75,8 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
           .put("UPPER", ExprNode.Type.UPPER)
           .put("$STREAM_NULL_BY_ROW_COUNT", ExprNode.Type.STREAM_NULL_BY_ROW_COUNT)
           .put("PG_SLEEP", ExprNode.Type.PG_SLEEP)
+          .put("BOOLNE", ExprNode.Type.NOT_EQUAL)
+          .put("BOOLEQ", ExprNode.Type.EQUAL)
           .build();
 
   public RexToProtoSerializer() {

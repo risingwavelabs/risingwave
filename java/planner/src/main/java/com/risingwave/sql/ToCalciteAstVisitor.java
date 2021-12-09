@@ -23,6 +23,7 @@ import com.risingwave.sql.tree.AllColumns;
 import com.risingwave.sql.tree.ArithmeticExpression;
 import com.risingwave.sql.tree.AstVisitor;
 import com.risingwave.sql.tree.BetweenPredicate;
+import com.risingwave.sql.tree.BooleanComparisonExpression;
 import com.risingwave.sql.tree.BooleanLiteral;
 import com.risingwave.sql.tree.Cast;
 import com.risingwave.sql.tree.ColumnDefinition;
@@ -805,6 +806,14 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
       var childExpression = inner.accept(this, context);
       return new SqlBasicCall(notOperator, new SqlNode[] {childExpression}, SqlParserPos.ZERO);
     }
+  }
+
+  @Override
+  protected SqlNode visitBooleanComparisonExpression(
+      BooleanComparisonExpression node, Void context) {
+    var sqlOperator = lookupOperator(node.getComparisonType().getFunctionName(), SqlSyntax.POSTFIX);
+    var input = node.getChild().accept(this, context);
+    return new SqlBasicCall(sqlOperator, new SqlNode[] {input}, SqlParserPos.ZERO);
   }
 
   private static SqlBasicTypeNameSpec toBasicTypeNameSpec(ColumnType<?> columnType) {

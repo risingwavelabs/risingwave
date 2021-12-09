@@ -5,6 +5,9 @@ use crate::expr::pg_sleep::PgSleepExpression;
 use crate::expr::template::UnaryNullableExpression;
 use crate::expr::BoxedExpression;
 use crate::types::{DataTypeKind, DataTypeRef};
+use crate::vector_op::cmp::{
+    is_false, is_not_false, is_not_true, is_not_unknown, is_true, is_unknown,
+};
 use crate::vector_op::length::length_default;
 use crate::vector_op::ltrim::ltrim;
 use crate::vector_op::rtrim::rtrim;
@@ -118,6 +121,52 @@ pub fn new_unary_expr(
             func: conjunction::not,
             _phantom: PhantomData,
         }),
+        (ProstType::IsTrue, _, _) => Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _> {
+            expr_ia1: child_expr,
+            return_type,
+            func: is_true,
+            _phantom: PhantomData,
+        }),
+        (ProstType::IsNotTrue, _, _) => {
+            Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _> {
+                expr_ia1: child_expr,
+                return_type,
+                func: is_not_true,
+                _phantom: PhantomData,
+            })
+        }
+        (ProstType::IsFalse, _, _) => {
+            Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _> {
+                expr_ia1: child_expr,
+                return_type,
+                func: is_false,
+                _phantom: PhantomData,
+            })
+        }
+        (ProstType::IsNotFalse, _, _) => {
+            Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _> {
+                expr_ia1: child_expr,
+                return_type,
+                func: is_not_false,
+                _phantom: PhantomData,
+            })
+        }
+        (ProstType::IsUnknown, _, _) => {
+            Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _> {
+                expr_ia1: child_expr,
+                return_type,
+                func: is_unknown,
+                _phantom: PhantomData,
+            })
+        }
+        (ProstType::IsNotUnknown, _, _) => {
+            Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _> {
+                expr_ia1: child_expr,
+                return_type,
+                func: is_not_unknown,
+                _phantom: PhantomData,
+            })
+        }
         (ProstType::Upper, _, _) => Box::new(UnaryBytesExpression::<Utf8Array, _> {
             expr_ia1: child_expr,
             return_type,

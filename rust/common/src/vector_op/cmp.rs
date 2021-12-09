@@ -319,6 +319,36 @@ where
     total_order_cmp(l, r, |a, b| a < b)
 }
 
+#[inline(always)]
+pub fn is_true(v: Option<bool>) -> Result<Option<bool>> {
+    Ok(Some(v == Some(true)))
+}
+
+#[inline(always)]
+pub fn is_not_true(v: Option<bool>) -> Result<Option<bool>> {
+    Ok(Some(v != Some(true)))
+}
+
+#[inline(always)]
+pub fn is_false(v: Option<bool>) -> Result<Option<bool>> {
+    Ok(Some(v == Some(false)))
+}
+
+#[inline(always)]
+pub fn is_not_false(v: Option<bool>) -> Result<Option<bool>> {
+    Ok(Some(v != Some(false)))
+}
+
+#[inline(always)]
+pub fn is_unknown(v: Option<bool>) -> Result<Option<bool>> {
+    Ok(Some(v.is_none()))
+}
+
+#[inline(always)]
+pub fn is_not_unknown(v: Option<bool>) -> Result<Option<bool>> {
+    Ok(Some(v.is_some()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
