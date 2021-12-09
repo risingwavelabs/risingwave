@@ -79,6 +79,8 @@ create materialized view source_mv1 as select * from s;
 statement ok
 create materialized view source_mv2 as select sum(v1) as sum_v1, count(v2) as count_v2 from s where v1 > 3;
 
+sleep 1s
+
 query IT rowsort
 select v1, v2 from source_mv1;
 ----
