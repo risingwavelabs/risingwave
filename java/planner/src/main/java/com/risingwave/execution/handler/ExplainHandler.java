@@ -32,7 +32,7 @@ public class ExplainHandler implements SqlHandler {
     var plan = optimize(query, context);
     var explained = ExplainWriter.explainPlan(plan);
 
-    var factory = new RisingWaveTypeFactory();
+    var factory = RisingWaveTypeFactory.INSTANCE;
     var type =
         factory.createStructType(
             List.of(factory.createSqlType(SqlTypeName.VARCHAR)), List.of("QUERY PLAN"));

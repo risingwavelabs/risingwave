@@ -19,7 +19,7 @@ public class ShowParameterHandler implements SqlHandler {
     var plan = (SqlShowParameters) ast;
     var config = context.getSessionConfiguration();
     var ret = config.getByString(plan.getName().toString()).toString();
-    var factory = new RisingWaveTypeFactory();
+    var factory = RisingWaveTypeFactory.INSTANCE;
     // Currently all result are return in string format.
     var type =
         factory.createStructType(

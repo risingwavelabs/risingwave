@@ -21,7 +21,7 @@ public class ColumnDesc {
 
   public ColumnDesc(com.risingwave.proto.plan.ColumnDesc desc) {
     this(
-        new RisingWaveTypeFactory().createDataType(desc.getColumnType()),
+        RisingWaveTypeFactory.INSTANCE.createDataType(desc.getColumnType()),
         desc.getIsPrimary(),
         ColumnEncoding.valueOf(desc.getEncoding().name()));
   }

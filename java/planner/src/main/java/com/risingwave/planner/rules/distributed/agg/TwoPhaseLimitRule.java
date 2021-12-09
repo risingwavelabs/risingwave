@@ -3,7 +3,6 @@ package com.risingwave.planner.rules.distributed.agg;
 import static com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel.BATCH_DISTRIBUTED;
 import static com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel.BATCH_PHYSICAL;
 
-import com.risingwave.common.datatype.RisingWaveTypeFactory;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.physical.RwBatchLimit;
 import org.apache.calcite.plan.RelOptRule;
@@ -55,7 +54,7 @@ public class TwoPhaseLimitRule extends ConverterRule {
     var newInput = RelOptRule.convert(limit.getInput(), requiredInputTraits);
 
     // For the local limit, we need to keep `offset + limit` number of rows
-    RisingWaveTypeFactory typeFactory = new RisingWaveTypeFactory();
+    var typeFactory = rexBuilder.getTypeFactory();
     RexNode zeroOffset = rexBuilder.makeZeroLiteral(typeFactory.createSqlType(SqlTypeName.INTEGER));
     RexNode localFetch = rexBuilder.makeLiteral(fetchValue + offsetValue, globalFetch.getType());
     var localLimit =

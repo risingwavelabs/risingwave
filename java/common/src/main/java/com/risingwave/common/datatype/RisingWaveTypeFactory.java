@@ -26,7 +26,9 @@ import org.apache.calcite.sql.type.SqlTypeName;
 
 /** Overrides Calcite to construct RisingWaveDataType. */
 public class RisingWaveTypeFactory extends JavaTypeFactoryImpl {
-  public RisingWaveTypeFactory() {
+  public static final RisingWaveTypeFactory INSTANCE = new RisingWaveTypeFactory();
+
+  private RisingWaveTypeFactory() {
     super(new RisingWaveDataTypeSystem());
   }
 

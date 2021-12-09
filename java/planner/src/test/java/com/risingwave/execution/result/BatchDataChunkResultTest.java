@@ -24,7 +24,7 @@ class BatchDataChunkResultTest {
   @Test
   public void testEmptyRemoteBatchPlanResult() {
     ArrayList<GetDataResponse> taskDataList = new ArrayList<>();
-    RisingWaveTypeFactory typeFactory = new RisingWaveTypeFactory();
+    RisingWaveTypeFactory typeFactory = RisingWaveTypeFactory.INSTANCE;
     var relDataTypes = Lists.newArrayList(typeFactory.createSqlType(SqlTypeName.INTEGER));
     var fieldNames = Lists.newArrayList("abc");
     for (int i = 0; i < 4; ++i) {
@@ -42,7 +42,7 @@ class BatchDataChunkResultTest {
 
   @Test
   public void testEmptyQueryResult() {
-    RisingWaveTypeFactory typeFactory = new RisingWaveTypeFactory();
+    RisingWaveTypeFactory typeFactory = RisingWaveTypeFactory.INSTANCE;
     // No column.
     var rowType = typeFactory.createStructType(Lists.newArrayList(), Lists.newArrayList());
     BatchDataChunkResult ret =
@@ -56,7 +56,7 @@ class BatchDataChunkResultTest {
   @Test
   public void testSimpleRemoteBatchPlanResult() {
     ArrayList<GetDataResponse> taskDataList = new ArrayList<GetDataResponse>();
-    RisingWaveTypeFactory typeFactory = new RisingWaveTypeFactory();
+    RisingWaveTypeFactory typeFactory = RisingWaveTypeFactory.INSTANCE;
     var relDataTypes = Lists.newArrayList(typeFactory.createSqlType(SqlTypeName.INTEGER));
     var fieldNames = Lists.newArrayList("abc");
     for (int i = 0; i < 4; ++i) {

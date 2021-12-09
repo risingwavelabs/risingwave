@@ -136,7 +136,7 @@ public class CatalogCast {
     if (!table.getIsMaterializedView()) {
       return builder.build();
     }
-    var typeFactory = new RisingWaveTypeFactory();
+    var typeFactory = RisingWaveTypeFactory.INSTANCE;
     var rexBuilder = new RexBuilder(typeFactory);
     var fieldCollations = new ArrayList<RelFieldCollation>();
     for (var columnOrder : table.getColumnOrdersList()) {

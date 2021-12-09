@@ -51,7 +51,7 @@ public class SqlConverter {
     private final SchemaPlus rootSchema;
 
     private final RisingWaveCostFactory costFactory = new RisingWaveCostFactory();
-    private final RisingWaveTypeFactory typeFactory = new RisingWaveTypeFactory();
+    private final RisingWaveTypeFactory typeFactory = RisingWaveTypeFactory.INSTANCE;
 
     private List<String> defaultSchema = Collections.emptyList();
     private SqlToRelConverter.Config config = SqlToRelConverter.config();

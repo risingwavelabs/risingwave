@@ -240,7 +240,7 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
   }
 
   private ColumnCatalog buildRowIdColumn() {
-    final var typeFactory = new RisingWaveTypeFactory();
+    final var typeFactory = RisingWaveTypeFactory.INSTANCE;
     return new ColumnCatalog(
         new ColumnCatalog.ColumnId(ROWID_COLUMN_ID, getId()),
         new ColumnCatalog.ColumnName(ROWID_COLUMN, getEntityName()),
