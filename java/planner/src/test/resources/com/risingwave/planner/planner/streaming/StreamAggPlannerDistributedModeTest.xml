@@ -80,7 +80,7 @@ create materialized view T_has_three_group as select v1, v2, v3, Sum(v1), AVG(v2
         <Resource name="plan">
             <![CDATA[
 RwStreamMaterializedView(name=[t_has_three_group])
-  RwStreamProject(v1=[$0], v2=[$1], v3=[$2], EXPR$3=[$4], EXPR$4=[CAST(/($5, $6)):INTEGER NOT NULL], v=[$7])
+  RwStreamProject(v1=[$0], v2=[$1], v3=[$2], EXPR$3=[$4], EXPR$4=[/(CAST($5):DECIMAL(28,10) NOT NULL, $6)], v=[$7])
     RwStreamAgg(group=[{0, 1, 2}], agg#0=[COUNT()], EXPR$3=[SUM($0)], agg#2=[SUM($1)], agg#3=[COUNT($1)], v=[COUNT()])
       RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1, 2]}], collation=[[]])
         RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3])
@@ -97,7 +97,7 @@ select v1, avg(v3) from t group by v1;
         <Resource name="plan">
             <![CDATA[
 RwStreamMaterializedView(name=[t_one_group_avg])
-  RwStreamProject(v1=[$0], EXPR$1=[/($2, $3)])
+  RwStreamProject(v1=[$0], EXPR$1=[/(CAST($2):DOUBLE NOT NULL, $3)])
     RwStreamAgg(group=[{0}], agg#0=[$SUM0($1)], agg#1=[SUM($2)], agg#2=[$SUM0($3)])
       RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
         RwStreamAgg(group=[{0}], agg#0=[COUNT()], agg#1=[SUM($1)], agg#2=[COUNT($1)])

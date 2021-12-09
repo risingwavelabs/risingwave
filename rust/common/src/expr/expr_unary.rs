@@ -1,6 +1,6 @@
 /// For expression that only accept one value as input (e.g. CAST)
 use super::template::{UnaryBytesExpression, UnaryExpression};
-use crate::array::{BoolArray, I32Array, I64Array, Utf8Array};
+use crate::array::{BoolArray, DecimalArray, F32Array, F64Array, I32Array, I64Array, Utf8Array};
 use crate::expr::pg_sleep::PgSleepExpression;
 use crate::expr::template::UnaryNullableExpression;
 use crate::expr::BoxedExpression;
@@ -69,6 +69,30 @@ pub fn new_unary_expr(
                 expr_ia1: child_expr,
                 return_type,
                 func: cast::str_to_bool,
+                _phantom: PhantomData,
+            })
+        }
+        (ProstType::Cast, DataTypeKind::Decimal, DataTypeKind::Int64) => {
+            Box::new(UnaryExpression::<I64Array, DecimalArray, _> {
+                expr_ia1: child_expr,
+                return_type,
+                func: cast::num_up,
+                _phantom: PhantomData,
+            })
+        }
+        (ProstType::Cast, DataTypeKind::Decimal, DataTypeKind::Decimal) => {
+            Box::new(UnaryExpression::<DecimalArray, DecimalArray, _> {
+                expr_ia1: child_expr,
+                return_type,
+                func: cast::dec_to_dec,
+                _phantom: PhantomData,
+            })
+        }
+        (ProstType::Cast, DataTypeKind::Float64, DataTypeKind::Float32) => {
+            Box::new(UnaryExpression::<F32Array, F64Array, _> {
+                expr_ia1: child_expr,
+                return_type,
+                func: cast::num_up,
                 _phantom: PhantomData,
             })
         }

@@ -1,6 +1,7 @@
 package com.risingwave.planner.rules.aggspliter;
 
 import com.google.common.collect.ImmutableList;
+import com.risingwave.planner.sql.RisingWaveOverrideOperatorTable;
 import org.apache.calcite.rel.core.AggregateCall;
 import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexNode;
@@ -21,7 +22,7 @@ class AvgSplitter extends AbstractAggSplitter {
   protected ImmutableList<AggregateCall> doMakeLocalAggCall(SplitterArgs args) {
     var sumAgg =
         AggregateCall.create(
-            SqlStdOperatorTable.SUM,
+            RisingWaveOverrideOperatorTable.SUM,
             originalAggCall.isDistinct(),
             originalAggCall.isApproximate(),
             originalAggCall.ignoreNulls(),
@@ -94,10 +95,8 @@ class AvgSplitter extends AbstractAggSplitter {
     var sumInputRef = rexBuilder.makeInputRef(input, prevStageIndexes.get(0));
     var sum2InputRef = rexBuilder.makeInputRef(input, prevStageIndexes.get(1));
 
-    // TODO(xiangjin): Replace this short-term mitigation of return type mismatch between calcite
-    // avg and sum/count.
-    var calc = rexBuilder.makeCall(SqlStdOperatorTable.DIVIDE, sumInputRef, sum2InputRef);
-    calc = rexBuilder.ensureType(originalAggCall.getType(), calc, false);
+    var casted = rexBuilder.ensureType(originalAggCall.getType(), sumInputRef, false);
+    var calc = rexBuilder.makeCall(SqlStdOperatorTable.DIVIDE, casted, sum2InputRef);
     return calc;
   }
 

@@ -8,6 +8,19 @@ import org.apache.calcite.sql.type.SqlTypeUtil;
 
 /** Customized DataTypeSystem implementation. */
 public class RisingWaveDataTypeSystem extends RelDataTypeSystemImpl {
+  @Override
+  public RelDataType deriveAvgAggType(RelDataTypeFactory typeFactory, RelDataType argumentType) {
+    if (SqlTypeUtil.isExactNumeric(argumentType)) {
+      return typeFactory.createTypeWithNullability(
+          typeFactory.createSqlType(SqlTypeName.DECIMAL), argumentType.isNullable());
+    } else if (SqlTypeUtil.isApproximateNumeric(argumentType)) {
+      return typeFactory.createTypeWithNullability(
+          typeFactory.createSqlType(SqlTypeName.DOUBLE), argumentType.isNullable());
+    } else {
+      return null;
+    }
+  }
+
   public RelDataType deriveDateWithIntervalType(
       RelDataTypeFactory typeFactory, RelDataType type1, RelDataType type2) {
     if (SqlTypeUtil.isDate(type1) && SqlTypeUtil.isInterval(type2)) {

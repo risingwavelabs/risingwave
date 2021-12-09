@@ -2,9 +2,9 @@ package com.risingwave.planner.rel.logical;
 
 import static java.util.Collections.emptyList;
 
+import com.risingwave.planner.sql.RisingWaveOverrideOperatorTable;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.stream.Collectors;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelCollations;
@@ -94,7 +94,7 @@ public class NormalizeAggUtils {
         final var idx = newAggCalls.size();
         final var sumAgg =
             AggregateCall.create(
-                SqlStdOperatorTable.SUM,
+                RisingWaveOverrideOperatorTable.SUM,
                 aggCall.isDistinct(),
                 aggCall.isApproximate(),
                 aggCall.ignoreNulls(),
@@ -128,13 +128,8 @@ public class NormalizeAggUtils {
                 (rwAgg, refs) -> {
                   final var left = rexBuilder.makeInputRef(rwAgg, refs.get(0));
                   final var right = rexBuilder.makeInputRef(rwAgg, refs.get(1));
-                  var div = rexBuilder.makeCall(SqlStdOperatorTable.DIVIDE, left, right);
-                  // TODO: Should we cast here?
-                  if (aggCall.getType() != div.getType()) {
-                    div =
-                        rexBuilder.makeCall(
-                            aggCall.getType(), SqlStdOperatorTable.CAST, List.of(div));
-                  }
+                  var casted = rexBuilder.ensureType(aggCall.getType(), left, false);
+                  var div = rexBuilder.makeCall(SqlStdOperatorTable.DIVIDE, casted, right);
                   return div;
                 });
       } else {

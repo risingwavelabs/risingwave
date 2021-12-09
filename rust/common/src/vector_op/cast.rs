@@ -1,38 +1,7 @@
-// TODO: delete vector_op. use new vectorized
-use crate::array::{Array, ArrayBuilder, ArrayImpl, ArrayRef, I32Array, I64Array};
 use crate::error::ErrorCode::InvalidInputSyntax;
 use crate::error::{ErrorCode::ParseError, Result, RwError};
-use crate::types::{DataTypeKind, DataTypeRef, Scalar};
 use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
-
-pub fn vec_cast(
-    un_casted_arr: ArrayRef,
-    src_type: DataTypeRef,
-    dst_type: DataTypeRef,
-) -> Result<ArrayImpl> {
-    match (src_type.data_type_kind(), dst_type.data_type_kind()) {
-        (DataTypeKind::Char, DataTypeKind::Date) => {
-            vector_cast_op(un_casted_arr.as_utf8(), str_to_date).map(|arr: I32Array| arr.into())
-        }
-        (DataTypeKind::Char, DataTypeKind::Time) => {
-            vector_cast_op(un_casted_arr.as_utf8(), str_to_time).map(|arr: I64Array| arr.into())
-        }
-        (DataTypeKind::Char, DataTypeKind::Timestamp) => {
-            vector_cast_op(un_casted_arr.as_utf8(), str_to_timestamp)
-                .map(|arr: I64Array| arr.into())
-        }
-        (DataTypeKind::Char, DataTypeKind::Timestampz) => {
-            vector_cast_op(un_casted_arr.as_utf8(), str_to_timestampz)
-                .map(|arr: I64Array| arr.into())
-        }
-
-        (other_src_type, other_dst_type) => todo!(
-            "cast from {:?} to {:?} is not implemented",
-            other_src_type,
-            other_dst_type
-        ),
-    }
-}
+use rust_decimal::Decimal;
 
 // The same as NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce().
 // Minus this magic number to store the number of days since 1970-01-01.
@@ -45,6 +14,22 @@ const TRUE_BOOL_LITERALS: [&str; 9] = ["true", "tru", "tr", "t", "on", "1", "yes
 const FALSE_BOOL_LITERALS: [&str; 10] = [
     "false", "fals", "fal", "fa", "f", "off", "of", "0", "no", "n",
 ];
+
+#[inline(always)]
+pub fn num_up<T, R>(n: T) -> Result<R>
+where
+    T: Into<R>,
+{
+    Ok(n.into())
+}
+
+/// Cast between different precision and scale.
+/// Eg. Decimal(10,5) -> Decimal(20,10)
+/// Currently no-op.
+#[inline(always)]
+pub fn dec_to_dec(n: Decimal) -> Result<Decimal> {
+    Ok(n)
+}
 
 #[inline(always)]
 pub fn str_to_date(elem: &str) -> Result<i32> {
@@ -96,22 +81,4 @@ pub fn str_to_bool(input: &str) -> Result<bool> {
     } else {
         Err(InvalidInputSyntax("boolean".to_string(), input.to_string()).into())
     }
-}
-
-fn vector_cast_op<'a, A1, A2, F>(a: &'a A1, f: F) -> Result<A2>
-where
-    A1: Array,
-    A2: Array,
-    F: Fn(A1::RefItem<'a>) -> Result<A2::OwnedItem>,
-{
-    let mut builder = A2::Builder::new(a.len())?;
-    for elem in a.iter() {
-        if let Some(x) = elem {
-            let casted = f(x)?;
-            builder.append(Some(casted.as_scalar_ref()))?;
-        } else {
-            builder.append(None)?;
-        }
-    }
-    builder.finish()
 }
