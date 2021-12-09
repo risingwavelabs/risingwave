@@ -21,7 +21,6 @@ use super::{BoxedExecutor, BoxedExecutorBuilder};
 
 /// Sequential scan executor on column-oriented tables
 pub(super) struct SeqScanExecutor {
-    first_execution: bool,
     table: Arc<BummockTable>,
     column_ids: Vec<i32>,
     schema: Schema,
@@ -54,7 +53,6 @@ impl BoxedExecutorBuilder for SeqScanExecutor {
             );
 
             Ok(Box::new(Self {
-                first_execution: true,
                 table: table_ref,
                 column_ids: column_ids.to_vec(),
                 schema,
@@ -71,32 +69,22 @@ impl BoxedExecutorBuilder for SeqScanExecutor {
 #[async_trait::async_trait]
 impl Executor for SeqScanExecutor {
     async fn open(&mut self) -> Result<()> {
-        info!("SeqScanExecutor init");
+        info!("SeqScanExecutor opened");
+
+        let res = self.table.get_data_by_columns(&self.column_ids).await?;
+
+        if let BummockResult::Data(data) = res {
+            self.snapshot = VecDeque::from(data);
+        }
         Ok(())
     }
 
     async fn next(&mut self) -> Result<Option<DataChunk>> {
-        if self.first_execution {
-            self.first_execution = false;
-
-            let res = if self.column_ids.is_empty() {
-                self.table.get_dummy_data().await?
-            } else {
-                self.table.get_data_by_columns(&self.column_ids).await?
-            };
-
-            if let BummockResult::Data(data) = res {
-                self.snapshot = VecDeque::from(data);
-            } else {
-                return Ok(None);
-            }
-        }
-
         Ok(self.snapshot.pop_front().map(|c| c.as_ref().clone()))
     }
 
     async fn close(&mut self) -> Result<()> {
-        info!("Table scan closed.");
+        info!("SeqScanExecutor closed.");
         Ok(())
     }
 
@@ -143,7 +131,6 @@ mod tests {
         table.append(data_chunk2).await?;
 
         let mut seq_scan_executor = SeqScanExecutor {
-            first_execution: true,
             table: Arc::new(table),
             column_ids: vec![0],
             schema: Schema { fields },

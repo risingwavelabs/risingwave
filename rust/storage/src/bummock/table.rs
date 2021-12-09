@@ -94,6 +94,10 @@ impl Table for BummockTable {
     }
 
     async fn get_data_by_columns(&self, column_ids: &[i32]) -> Result<BummockResult> {
+        // Query table size only
+        if column_ids.is_empty() {
+            return self.get_dummy_data().await;
+        }
         // TODO, traverse other segs as well
         let segs = self.mem_dirty_segs.read().unwrap();
         let chunks = if !segs.is_empty() {
@@ -237,7 +241,7 @@ impl BummockTable {
     /// is undecided. The `seq_scan` uses `get_data` together with `column_at`
     /// to get around with unimplemented `get_data_by_columns`. So it seems this would be
     /// a temporary workaround anyway?
-    pub async fn get_dummy_data(&self) -> Result<BummockResult> {
+    async fn get_dummy_data(&self) -> Result<BummockResult> {
         let segs = self.mem_dirty_segs.read().unwrap();
         match segs.is_empty() {
             true => Ok(BummockResult::DataEof),
