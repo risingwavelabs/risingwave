@@ -4,6 +4,7 @@ pub struct TestIterator;
 
 pub mod test {
     use crate::hummock::cloud::gen_remote_table;
+    use crate::hummock::format::key_with_ts;
     use crate::hummock::HummockValue;
     use crate::hummock::TableBuilder;
     use crate::hummock::{Table, TableBuilderOptions};
@@ -23,10 +24,14 @@ pub mod test {
     }
 
     /// The key of an index in the test table
-    pub fn test_key_of(table: usize, idx: usize) -> Vec<u8> {
-        format!("{:03}_key_test_{:05}", table, idx)
-            .as_bytes()
-            .to_vec()
+    pub fn iterator_test_key_of(table: usize, idx: usize) -> Vec<u8> {
+        // key format: {prefix_index}_version
+        key_with_ts(
+            format!("{:03}_key_test_{:05}", table, idx)
+                .as_bytes()
+                .to_vec(),
+            233,
+        )
     }
 
     /// The value of an index in the test table
@@ -56,7 +61,7 @@ pub mod test {
 
         for i in 0..TEST_KEYS_COUNT {
             b.add(
-                &test_key_of(table_idx, idx_mapping(i)),
+                &iterator_test_key_of(table_idx, idx_mapping(i)),
                 HummockValue::Put(test_value_of(table_idx, idx_mapping(i))),
             );
         }

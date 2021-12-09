@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use itertools::Itertools;
 
 use crate::hummock::iterator::HummockIterator;
+use crate::hummock::key_range::VersionComparator;
 use crate::hummock::table::{BlockIterator, Table, TableIterator};
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
@@ -33,7 +34,9 @@ impl ConcatIterator {
             let mut block_iter = BlockIterator::new(block.clone());
             block_iter.seek_to_first();
             let (block_key, _) = block_iter.data().unwrap();
-            block_key.partial_cmp(key) == Some(Less)
+
+            // compare by version comparator
+            VersionComparator::compare_key(block_key, key) == Less
         });
         if nth_table > 0 {
             nth_table -= 1
@@ -93,7 +96,8 @@ impl HummockIterator for ConcatIterator {
 mod tests {
     use super::*;
     use crate::hummock::iterator::tests::test::{
-        default_builder_opt_for_test, gen_test_table, test_key_of, test_value_of, TEST_KEYS_COUNT,
+        default_builder_opt_for_test, gen_test_table, iterator_test_key_of, test_value_of,
+        TEST_KEYS_COUNT,
     };
 
     #[tokio::test]
@@ -108,7 +112,10 @@ mod tests {
         loop {
             let table_idx = i / TEST_KEYS_COUNT;
             let (key, val) = iter.next().await.unwrap().unwrap();
-            assert_eq!(key, test_key_of(table_idx, i % TEST_KEYS_COUNT).as_slice());
+            assert_eq!(
+                key,
+                iterator_test_key_of(table_idx, i % TEST_KEYS_COUNT).as_slice()
+            );
             assert_eq!(
                 val.into_put_value().unwrap(),
                 test_value_of(table_idx, i % TEST_KEYS_COUNT).as_slice()
@@ -122,7 +129,7 @@ mod tests {
 
         iter.rewind().await.unwrap();
         let (k, v) = iter.next().await.unwrap().unwrap();
-        assert_eq!(k, test_key_of(0, 0).as_slice());
+        assert_eq!(k, iterator_test_key_of(0, 0).as_slice());
         assert_eq!(v.into_put_value().unwrap(), test_value_of(0, 0).as_slice());
     }
 
@@ -135,31 +142,37 @@ mod tests {
             ConcatIterator::new(vec![Arc::new(table0), Arc::new(table1), Arc::new(table2)]);
 
         // Middle normal case
-        iter.seek(test_key_of(1, 1).as_slice()).await.unwrap();
+        iter.seek(iterator_test_key_of(1, 1).as_slice())
+            .await
+            .unwrap();
         let (k, v) = iter.next().await.unwrap().unwrap();
-        assert_eq!(k, test_key_of(1, 1).as_slice());
+        assert_eq!(k, iterator_test_key_of(1, 1).as_slice());
         assert_eq!(v.into_put_value().unwrap(), test_value_of(1, 1).as_slice());
 
         // Left edge case
-        iter.seek(test_key_of(0, 0).as_slice()).await.unwrap();
+        iter.seek(iterator_test_key_of(0, 0).as_slice())
+            .await
+            .unwrap();
         let (k, v) = iter.next().await.unwrap().unwrap();
-        assert_eq!(k, test_key_of(0, 0).as_slice());
+        assert_eq!(k, iterator_test_key_of(0, 0).as_slice());
         assert_eq!(v.into_put_value().unwrap(), test_value_of(0, 0).as_slice());
 
         // Right edge case
-        iter.seek(test_key_of(2, TEST_KEYS_COUNT - 1).as_slice())
+        iter.seek(iterator_test_key_of(2, TEST_KEYS_COUNT - 1).as_slice())
             .await
             .unwrap();
 
         let (k, v) = iter.next().await.unwrap().unwrap();
-        assert_eq!(k, test_key_of(2, TEST_KEYS_COUNT - 1).as_slice());
+        assert_eq!(k, iterator_test_key_of(2, TEST_KEYS_COUNT - 1).as_slice());
         assert_eq!(
             v.into_put_value().unwrap(),
             test_value_of(2, TEST_KEYS_COUNT - 1).as_slice()
         );
 
         // Right overflow case
-        iter.seek(test_key_of(4, 10).as_slice()).await.unwrap();
+        iter.seek(iterator_test_key_of(4, 10).as_slice())
+            .await
+            .unwrap();
         let res = iter.next().await.unwrap();
         assert!(res.is_none());
     }

@@ -4,6 +4,8 @@ use std::sync::Arc;
 use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
 
+use crate::hummock::key_range::VersionComparator;
+
 use super::{Block, Header, HEADER_SIZE};
 
 pub enum SeekPos {
@@ -121,7 +123,9 @@ impl BlockIterator {
             .collect_vec()
             .partition_point(|idx| {
                 self.set_idx(*idx as isize);
-                matches!(&self.key.partial_cmp(key.as_ref()), Some(Less))
+
+                // compare by version comparator
+                VersionComparator::compare_key(&self.key, key) == Less
             })
             + start_index;
 

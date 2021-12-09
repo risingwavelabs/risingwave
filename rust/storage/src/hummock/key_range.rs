@@ -21,12 +21,12 @@ impl KeyRange {
 }
 
 const VERSION_KEY_SUFFIX_LEN: usize = 8;
-struct VersionComparator();
+pub struct VersionComparator();
 impl VersionComparator {
-    /// Suppose parameter as `full_key` = (`user_key`, timestamp), this function compare `&[u8]` as
-    /// if compare tuple mentioned before.
+    /// Suppose parameter as `full_key` = (`user_key`, `u64::MAX - timestamp`), this function
+    /// compare `&[u8]` as if compare tuple mentioned before.
     #[inline]
-    fn compare_key(lhs: &[u8], rhs: &[u8]) -> cmp::Ordering {
+    pub fn compare_key(lhs: &[u8], rhs: &[u8]) -> cmp::Ordering {
         let (l_p, l_s) = lhs.split_at(lhs.len() - VERSION_KEY_SUFFIX_LEN);
         let (r_p, r_s) = rhs.split_at(rhs.len() - VERSION_KEY_SUFFIX_LEN);
         let res = l_p.cmp(r_p);
@@ -37,7 +37,7 @@ impl VersionComparator {
     }
 
     #[inline]
-    fn same_user_key(lhs: &[u8], rhs: &[u8]) -> bool {
+    pub fn same_user_key(lhs: &[u8], rhs: &[u8]) -> bool {
         let (l_p, _) = lhs.split_at(lhs.len() - VERSION_KEY_SUFFIX_LEN);
         let (r_p, _) = rhs.split_at(rhs.len() - VERSION_KEY_SUFFIX_LEN);
         l_p == r_p

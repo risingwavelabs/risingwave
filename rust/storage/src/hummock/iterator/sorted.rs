@@ -3,7 +3,7 @@ use std::{collections::BinaryHeap, fmt::Debug};
 
 use bytes::BytesMut;
 
-use crate::hummock::{value::HummockValue, HummockResult};
+use crate::hummock::{key_range::VersionComparator, value::HummockValue, HummockResult};
 
 use super::HummockIterator;
 
@@ -20,13 +20,6 @@ impl Debug for HeapNode {
             .field("val", &std::str::from_utf8(&self.key))
             .finish()
     }
-}
-
-pub struct MergeIterator {
-    iterators: Vec<Box<dyn HummockIterator + Send>>,
-    heap: BinaryHeap<HeapNode>,
-    cur_node: Option<HeapNode>,
-    heap_built: bool,
 }
 
 impl HeapNode {
@@ -53,16 +46,25 @@ impl PartialEq for HeapNode {
 
 impl PartialOrd for HeapNode {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(other.cmp(self))
+        // we use max-heap to implement min-heap, so the order is inverse
+        Some(VersionComparator::compare_key(&other.key, &self.key))
     }
 }
 impl Ord for HeapNode {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.key.cmp(&other.key)
+        // we use max-heap to implement min-heap, so the order is inverse
+        VersionComparator::compare_key(&other.key, &self.key)
     }
 }
 
-impl MergeIterator {
+pub struct SortedIterator {
+    iterators: Vec<Box<dyn HummockIterator + Send>>,
+    heap: BinaryHeap<HeapNode>,
+    cur_node: Option<HeapNode>,
+    heap_built: bool,
+}
+
+impl SortedIterator {
     pub fn new(iterators: Vec<Box<dyn HummockIterator + Send>>) -> Self {
         Self {
             iterators,
@@ -78,6 +80,8 @@ impl MergeIterator {
         if self.heap.is_empty() {
             return Ok(None);
         }
+
+        // add the next node of the current node's table iterator to the heap
         self.cur_node = Some(self.heap.pop().unwrap());
         let cur_node = self.cur_node.as_ref().unwrap();
         let iter = &mut self.iterators[cur_node.iterator_idx];
@@ -100,6 +104,7 @@ impl MergeIterator {
         self.build_heap().await
     }
 
+    /// put all table iterator's first node to the heap
     async fn build_heap(&mut self) -> HummockResult<()> {
         self.heap_built = true;
         for (iterator_idx, iter) in &mut self.iterators.iter_mut().enumerate() {
@@ -112,7 +117,7 @@ impl MergeIterator {
 }
 
 #[async_trait]
-impl HummockIterator for MergeIterator {
+impl HummockIterator for SortedIterator {
     async fn next(&mut self) -> HummockResult<Option<(&[u8], HummockValue<&[u8]>)>> {
         self.next_inner().await
     }
@@ -127,19 +132,63 @@ impl HummockIterator for MergeIterator {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use std::sync::Arc;
 
-    use crate::hummock::{
-        iterator::tests::test::{
-            default_builder_opt_for_test, gen_test_table_base, test_key_of, test_value_of,
-            TEST_KEYS_COUNT,
+    use crate::{
+        hummock::{
+            cloud::gen_remote_table,
+            format::key_with_ts,
+            iterator::tests::test::{
+                default_builder_opt_for_test, gen_test_table_base, iterator_test_key_of,
+                test_value_of, TEST_KEYS_COUNT,
+            },
+            iterator::HummockIterator,
+            table::TableIterator,
+            value::HummockValue,
+            TableBuilder,
         },
-        iterator::HummockIterator,
-        table::TableIterator,
+        object::{InMemObjectStore, ObjectStore},
     };
 
-    use super::MergeIterator;
+    use super::SortedIterator;
+
+    #[tokio::test]
+    async fn test_delete() {
+        let mut b = TableBuilder::new(default_builder_opt_for_test());
+        //-----  delete after write  -----
+        b.add(
+            key_with_ts(
+                format!("{:03}_key_test_{:05}", 0, 1).as_bytes().to_vec(),
+                466,
+            )
+            .as_slice(),
+            HummockValue::Put(test_value_of(0, 2)),
+        );
+        b.add(
+            key_with_ts(
+                format!("{:03}_key_test_{:05}", 0, 1).as_bytes().to_vec(),
+                233,
+            )
+            .as_slice(),
+            HummockValue::Delete,
+        );
+        // get remote table
+        let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
+        let (data, meta) = b.finish();
+        let table0 = gen_remote_table(obj_client, 0, data, meta, None)
+            .await
+            .unwrap();
+
+        let iters: Vec<Box<dyn HummockIterator + Send>> =
+            vec![Box::new(TableIterator::new(Arc::new(table0)))];
+        let mut si = SortedIterator::new(iters);
+
+        // should have 2 valid kv pairs
+        si.next().await.unwrap();
+        si.next().await.unwrap();
+        assert!(si.next().await.unwrap().is_none());
+    }
 
     #[tokio::test]
     async fn test_basic() {
@@ -152,16 +201,16 @@ mod test {
             Box::new(TableIterator::new(Arc::new(table2))),
         ];
 
-        let mut mi = MergeIterator::new(iters);
+        let mut si = SortedIterator::new(iters);
         let mut i = 0;
         loop {
-            let (k, v) = mi.next().await.unwrap().unwrap();
-            assert_eq!(k, test_key_of(0, i).as_slice());
+            let (k, v) = si.next().await.unwrap().unwrap();
+            assert_eq!(k, iterator_test_key_of(0, i).as_slice());
             assert_eq!(v.into_put_value().unwrap(), test_value_of(0, i).as_slice());
             i += 1;
 
             if i == TEST_KEYS_COUNT * 3 {
-                assert!(mi.next().await.unwrap().is_none());
+                assert!(si.next().await.unwrap().is_none());
                 break;
             }
         }
@@ -179,28 +228,34 @@ mod test {
         ];
 
         // right edge case
-        let mut mi = MergeIterator::new(iters);
-        mi.seek(test_key_of(0, 3 * TEST_KEYS_COUNT).as_slice())
+        let mut si = SortedIterator::new(iters);
+        si.seek(iterator_test_key_of(0, 3 * TEST_KEYS_COUNT).as_slice())
             .await
             .unwrap();
-        let res = mi.next().await.unwrap();
+        let res = si.next().await.unwrap();
         assert!(res.is_none());
 
         // normal case
-        mi.seek(test_key_of(0, 4).as_slice()).await.unwrap();
-        let (k, v) = mi.next().await.unwrap().unwrap();
-        assert_eq!(k, test_key_of(0, 4).as_slice());
+        si.seek(iterator_test_key_of(0, 4).as_slice())
+            .await
+            .unwrap();
+        let (k, v) = si.next().await.unwrap().unwrap();
+        assert_eq!(k, iterator_test_key_of(0, 4).as_slice());
         assert_eq!(v.into_put_value().unwrap(), test_value_of(0, 4).as_slice());
 
-        mi.seek(test_key_of(0, 17).as_slice()).await.unwrap();
-        let (k, v) = mi.next().await.unwrap().unwrap();
-        assert_eq!(k, test_key_of(0, 17).as_slice());
+        si.seek(iterator_test_key_of(0, 17).as_slice())
+            .await
+            .unwrap();
+        let (k, v) = si.next().await.unwrap().unwrap();
+        assert_eq!(k, iterator_test_key_of(0, 17).as_slice());
         assert_eq!(v.into_put_value().unwrap(), test_value_of(0, 17).as_slice());
 
         // left edge case
-        mi.seek(test_key_of(0, 0).as_slice()).await.unwrap();
-        let (k, v) = mi.next().await.unwrap().unwrap();
-        assert_eq!(k, test_key_of(0, 0).as_slice());
+        si.seek(iterator_test_key_of(0, 0).as_slice())
+            .await
+            .unwrap();
+        let (k, v) = si.next().await.unwrap().unwrap();
+        assert_eq!(k, iterator_test_key_of(0, 0).as_slice());
         assert_eq!(v.into_put_value().unwrap(), test_value_of(0, 0).as_slice());
     }
 }

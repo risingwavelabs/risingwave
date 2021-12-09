@@ -285,11 +285,11 @@ pub(super) mod tests {
         let mut b = TableBuilder::new(default_builder_opt_for_test());
 
         for i in 0..TEST_KEYS_COUNT {
-            b.add(&test_key_of(i), HummockValue::Put(test_value_of(i)));
+            b.add(&builder_test_key_of(i), HummockValue::Put(test_value_of(i)));
         }
 
-        assert_eq!(test_key_of(0), b.meta.smallest_key);
-        assert_eq!(test_key_of(TEST_KEYS_COUNT - 1), b.meta.largest_key);
+        assert_eq!(builder_test_key_of(0), b.meta.smallest_key);
+        assert_eq!(builder_test_key_of(TEST_KEYS_COUNT - 1), b.meta.largest_key);
     }
 
     #[test]
@@ -308,9 +308,9 @@ pub(super) mod tests {
     }
 
     /// The key (with timestamp 0) of an index in the test table
-    pub fn test_key_of(idx: usize) -> Vec<u8> {
+    pub fn builder_test_key_of(idx: usize) -> Vec<u8> {
         let user_key = format!("key_test_{:05}", idx * 2).as_bytes().to_vec();
-        key_with_ts(user_key, 0)
+        key_with_ts(user_key, 233)
     }
 
     /// The value of an index in the test table
@@ -331,7 +331,7 @@ pub(super) mod tests {
         let mut b = TableBuilder::new(opts);
 
         for i in 0..TEST_KEYS_COUNT {
-            b.add(&test_key_of(i), HummockValue::Put(test_value_of(i)));
+            b.add(&builder_test_key_of(i), HummockValue::Put(test_value_of(i)));
         }
 
         // get remote table
@@ -368,7 +368,7 @@ pub(super) mod tests {
 
         assert_eq!(table.has_bloom_filter(), with_blooms);
         for i in 0..key_count {
-            let key = test_key_of(i);
+            let key = builder_test_key_of(i);
             assert!(!table.surely_not_have(key.as_slice()));
         }
     }
