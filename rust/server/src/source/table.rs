@@ -84,6 +84,7 @@ pub struct TableReaderContext {}
 #[derive(Debug)]
 pub struct TableBatchReader {
     core: Arc<RwLock<TableSourceCore>>,
+    column_ids: Vec<i32>,
     snapshot: VecDeque<DataChunkRef>,
 }
 
@@ -91,11 +92,7 @@ pub struct TableBatchReader {
 impl BatchSourceReader for TableBatchReader {
     async fn open(&mut self) -> Result<()> {
         let core = self.core.read().await;
-        match core
-            .table
-            .get_data_by_columns(&core.table.get_column_ids())
-            .await?
-        {
+        match core.table.get_data_by_columns(&self.column_ids).await? {
             BummockResult::Data(snapshot) => {
                 self.snapshot = VecDeque::from(snapshot);
                 Ok(())
@@ -204,14 +201,17 @@ impl Source for TableSource {
     type StreamReader = TableStreamReader;
     type Writer = TableWriter;
 
+    // Note(eric): Currently, the `seq_scan_executor` scans from table directly,
+    // and does not use the `TableBatchReader` here. Not sure whether it's better.
     fn batch_reader(
         &self,
         _context: Self::ReaderContext,
-        _column_ids: Vec<i32>,
+        column_ids: Vec<i32>,
     ) -> Result<Self::BatchReader> {
         Ok(TableBatchReader {
             core: self.core.clone(),
             snapshot: VecDeque::new(),
+            column_ids,
         })
     }
 
@@ -320,6 +320,7 @@ mod test {
 
         let mut writer = source.create_writer().unwrap();
         writer.write(chunk1).await.unwrap();
+        writer.flush().await.unwrap();
 
         // reader 1 sees chunk 0,1
         assert_matches!(reader1.next().await.unwrap(), chunk => {
@@ -345,10 +346,12 @@ mod test {
         let mut writer = source.create_writer().unwrap();
         writer.write(chunk2).await.unwrap();
 
-        // reader 1 sees chunk 2
+        // reader 1 sees chunk 2 (even before flush)
         assert_matches!(reader1.next().await.unwrap(), chunk => {
           assert_eq!(chunk.columns()[0].array_ref().as_int64().iter().collect_vec(), vec![Some(2)]);
         });
+
+        writer.flush().await.unwrap();
 
         // reader 2 sees chunk 0,1,2
         for i in 0..=2 {
@@ -356,5 +359,14 @@ mod test {
               assert_eq!(chunk.columns()[0].array_ref().as_int64().iter().collect_vec(), vec![Some(i)]);
             });
         }
+
+        let mut batch_reader = source.batch_reader(TableReaderContext {}, vec![0]).unwrap();
+        batch_reader.open().await.unwrap();
+        for i in 0..=2 {
+            assert_matches!(batch_reader.next().await.unwrap(), Some(chunk) => {
+              assert_eq!(chunk.columns()[0].array_ref().as_int64().iter().collect_vec(), vec![Some(i)]);
+            });
+        }
+        assert_matches!(batch_reader.next().await.unwrap(), None);
     }
 }
