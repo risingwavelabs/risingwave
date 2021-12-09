@@ -86,6 +86,12 @@ impl From<prost::DecodeError> for RwError {
     }
 }
 
+impl From<MemComparableError> for RwError {
+    fn from(mem_comparable_error: MemComparableError) -> Self {
+        ErrorCode::MemComparableError(mem_comparable_error).into()
+    }
+}
+
 impl Debug for RwError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}, backtrace: {:?}", self.inner, self.backtrace)

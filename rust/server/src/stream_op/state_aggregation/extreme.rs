@@ -5,7 +5,7 @@ use std::collections::{btree_map, BTreeMap};
 use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{Array, ArrayImpl, DecimalArray, I16Array, I32Array, I64Array};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::{
     deserialize_datum_not_null_from, serialize_datum_not_null_into, DataTypeKind, DataTypeRef,
@@ -352,8 +352,7 @@ where
                 let value = deserialize_datum_not_null_from(
                     &self.data_type.data_type_kind(),
                     &mut deserializer,
-                )
-                .map_err(ErrorCode::MemComparableError)?
+                )?
                 .unwrap();
                 let key = value.clone().try_into().unwrap();
                 let pks = self.serializer.get_pk(&raw_key[..])?;
@@ -382,13 +381,12 @@ where
 
         for ((key, pks), v) in std::mem::take(&mut self.flush_buffer) {
             let key_encoded = self.serializer.serialize(key, &pks)?;
-            let key_encoded = [self.keyspace.prefix(), &key_encoded[..]].concat();
+            let key_encoded = [self.keyspace.prefix(), &key_encoded].concat();
 
             match v.into_option() {
                 Some(v) => {
                     let mut serializer = memcomparable::Serializer::default();
-                    serialize_datum_not_null_into(&Some(v), &mut serializer)
-                        .map_err(ErrorCode::MemComparableError)?;
+                    serialize_datum_not_null_into(&Some(v), &mut serializer)?;
                     let value = serializer.into_inner();
                     write_batch.push((key_encoded.into(), Some(value.into())));
                 }
@@ -448,8 +446,7 @@ where
             let value = deserialize_datum_not_null_from(
                 &self.data_type.data_type_kind(),
                 &mut deserializer,
-            )
-            .map_err(ErrorCode::MemComparableError)?
+            )?
             .unwrap();
             let key = value.clone().try_into().unwrap();
             let pks = self.serializer.get_pk(&raw_key[..])?;

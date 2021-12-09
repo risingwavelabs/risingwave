@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_common::types::{Scalar, ScalarImpl};
 use serde::Serialize;
 use smallvec::SmallVec;
@@ -35,12 +35,10 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
     pub fn serialize(&self, key: K, row_ids: &ExtremePK) -> Result<Vec<u8>> {
         let mut serializer = memcomparable::Serializer::default();
         let key: ScalarImpl = key.into();
-        key.serialize(&mut serializer)
-            .map_err(ErrorCode::MemComparableError)?;
+        key.serialize(&mut serializer)?;
         debug_assert_eq!(row_ids.len(), self.pk_length, "mismatch pk length");
         for i in row_ids {
-            (*i).serialize(&mut serializer)
-                .map_err(ErrorCode::MemComparableError)?;
+            (*i).serialize(&mut serializer)?;
         }
         let mut encoded_key = serializer.into_inner();
         match EXTREME_TYPE {

@@ -72,8 +72,7 @@ impl<S: StateStore> MViewTable<S> {
                 let datum = deserialize_datum_from(
                     &self.schema.fields[cell_idx].data_type.data_type_kind(),
                     &mut deserializer,
-                )
-                .map_err(ErrorCode::MemComparableError)?;
+                )?;
                 Ok(Some(datum))
             }
             None => Ok(None),
@@ -120,7 +119,6 @@ impl<S: StateStore> MViewTableIter<S> {
                                 &self.schema.fields[*cell_idx].data_type.data_type_kind(),
                                 &mut pk_deserializer,
                             )
-                            .map_err(ErrorCode::MemComparableError)
                         })
                         .try_collect()?);
                     if restored == 0 {
@@ -134,7 +132,6 @@ impl<S: StateStore> MViewTableIter<S> {
                         &DataTypeKind::Int32,
                         &mut pk_deserializer,
                     )
-                    .map_err(ErrorCode::MemComparableError)
                     .unwrap()
                     .unwrap()
                     .as_int32();
@@ -146,7 +143,6 @@ impl<S: StateStore> MViewTableIter<S> {
                             .data_type_kind(),
                         &mut cell_deserializer,
                     )
-                    .map_err(ErrorCode::MemComparableError)
                     .unwrap();
 
                     columns.0[cell_idx as usize] = cell;

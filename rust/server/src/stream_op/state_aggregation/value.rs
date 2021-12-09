@@ -2,7 +2,7 @@ use bytes::Bytes;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_common::types::{deserialize_datum_from, serialize_datum_into, Datum};
 
 use crate::stream_op::{create_streaming_agg_state, AggCall};
@@ -39,13 +39,10 @@ impl<S: StateStore> ManagedValueState<S> {
             // Decode the Datum from the value.
             if let Some(raw_data) = raw_data {
                 let mut deserializer = memcomparable::Deserializer::from_slice(&raw_data[..]);
-                Some(
-                    deserialize_datum_from(
-                        &agg_call.return_type.data_type_kind(),
-                        &mut deserializer,
-                    )
-                    .map_err(ErrorCode::MemComparableError)?,
-                )
+                Some(deserialize_datum_from(
+                    &agg_call.return_type.data_type_kind(),
+                    &mut deserializer,
+                )?)
             } else {
                 None
             }
@@ -99,7 +96,7 @@ impl<S: StateStore> ManagedValueState<S> {
 
         let v = self.state.get_output()?;
         let mut serializer = memcomparable::Serializer::default();
-        serialize_datum_into(&v, &mut serializer).map_err(ErrorCode::MemComparableError)?;
+        serialize_datum_into(&v, &mut serializer)?;
         write_batch.push((
             self.keyspace.prefix().to_vec().into(),
             Some(serializer.into_inner().into()),
