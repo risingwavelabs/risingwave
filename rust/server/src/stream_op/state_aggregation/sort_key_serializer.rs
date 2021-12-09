@@ -72,7 +72,7 @@ mod tests {
         let bytes3 = serializer.order_based_scehmaed_serialize(&row3);
         let mut array = vec![bytes1, bytes2, bytes3];
         array.sort();
-        // Option 1 byte || number 2 bytes
+        // option 1 byte || number 2 bytes
         assert_eq!(array[0][2], !(-32767i16).to_be_bytes()[1]);
         assert_eq!(array[1][5], (-2i16).to_be_bytes()[1]);
         assert_eq!(array[2][5], (-1i16).to_be_bytes()[1]);

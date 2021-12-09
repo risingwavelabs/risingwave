@@ -11,6 +11,7 @@ pub enum AggKind {
     Count,
     RowCount,
     Avg,
+    StringAgg,
 }
 
 impl TryFrom<Type> for AggKind {
@@ -23,6 +24,7 @@ impl TryFrom<Type> for AggKind {
             Type::Sum => Ok(AggKind::Sum),
             Type::Avg => Ok(AggKind::Avg),
             Type::Count => Ok(AggKind::Count),
+            Type::StringAgg => Ok(AggKind::StringAgg),
             _ => Err(ErrorCode::InternalError("Unrecognized agg.".into()).into()),
         }
     }

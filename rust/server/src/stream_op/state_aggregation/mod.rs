@@ -6,12 +6,14 @@ pub use value::*;
 mod extreme;
 mod extreme_serializer;
 mod sort_key_serializer;
+mod string_agg;
 
 pub use extreme::*;
 pub use sort_key_serializer::*;
 
 use super::keyspace::{Keyspace, StateStore};
 use super::AggCall;
+
 use bytes::Bytes;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::ArrayImpl;
@@ -104,6 +106,10 @@ impl<S: StateStore> ManagedStateImpl<S> {
                     )
                     .await?,
                 ))
+            }
+            AggKind::StringAgg => {
+                // TODO, It seems with `order by`, `StringAgg` needs more stuff from `AggCall`
+                unimplemented!()
             }
             // TODO: for append-only lists, we can create `ManagedValueState` instead of
             // `ManagedExtremeState`.
