@@ -9,7 +9,7 @@ public interface StreamManager {
 
   List<StreamRequest> scheduleStreamGraph(StreamGraph graph);
 
-  int nextScheduleId();
+  String nextScheduleId();
 
   ActorInfoTable getActorInfo(List<Integer> actorIdList);
 }

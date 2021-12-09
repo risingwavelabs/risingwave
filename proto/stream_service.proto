@@ -12,7 +12,7 @@ import "task_service.proto";
 
 // Describe the fragments which will be running on this node
 message UpdateFragmentRequest {
-  uint32 request_id = 1;
+  string request_id = 1;
   repeated stream_plan.StreamFragment fragment = 2;
 }
 
@@ -32,22 +32,22 @@ message BroadcastActorInfoTableRequest {
 
 // Create channels and gRPC connections for a fragment
 message BuildFragmentRequest {
-  uint32 request_id = 1;
+  string request_id = 1;
   repeated uint32 fragment_id = 2;
 }
 
 message BuildFragmentResponse {
-  uint32 request_id = 1;
+  string request_id = 1;
   repeated uint32 fragment_id = 2;
 }
 
 message DropFragmentsRequest {
-  uint32 request_id = 1;
+  string request_id = 1;
   repeated uint32 fragment_ids = 2;
 }
 
 message DropFragmentsResponse {
-  uint32 request_id = 1;
+  string request_id = 1;
   repeated uint32 fragment_ids = 2;
 }
 // Before starting streaming, the leader node broadcast the actor-host table to needed workers.

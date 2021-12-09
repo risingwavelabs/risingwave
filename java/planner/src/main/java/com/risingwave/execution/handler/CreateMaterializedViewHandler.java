@@ -81,12 +81,12 @@ public class CreateMaterializedViewHandler implements SqlHandler {
       log.debug("ActorInfoTable:\n" + Messages.jsonFormat(actorInfoTableRequest));
       client.broadcastActorInfoTable(actorInfoTableRequest);
 
-      int updateRequestId = streamManager.nextScheduleId();
+      String updateRequestId = streamManager.nextScheduleId();
       UpdateFragmentRequest updateFragmentRequest = streamRequest.serialize(updateRequestId);
       log.debug("UpdateFragmentRequest:\n" + Messages.jsonFormat(updateFragmentRequest));
       client.updateFragment(updateFragmentRequest);
 
-      int buildRequestId = streamManager.nextScheduleId();
+      String buildRequestId = streamManager.nextScheduleId();
       BuildFragmentRequest buildFragmentRequest = streamRequest.buildRequest(buildRequestId);
       log.debug("BuildFragmentRequest:\n" + Messages.jsonFormat(buildFragmentRequest));
       client.buildFragment(buildFragmentRequest);

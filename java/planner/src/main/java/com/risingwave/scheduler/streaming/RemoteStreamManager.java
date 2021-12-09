@@ -17,6 +17,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,7 +30,6 @@ public class RemoteStreamManager implements StreamManager {
   private static final Logger LOGGER = LoggerFactory.getLogger(RemoteStreamManager.class);
   private final MetaClient metaClient;
   private int fragmentId = 1;
-  private int scheduleId = 0;
   private final WorkerNodeManager workerNodeManager;
   private final Map<WorkerNode, Set<StreamFragment>> fragmentAllocation = new HashMap<>();
 
@@ -95,8 +95,8 @@ public class RemoteStreamManager implements StreamManager {
   }
 
   @Override
-  public int nextScheduleId() {
-    return scheduleId++;
+  public String nextScheduleId() {
+    return UUID.randomUUID().toString();
   }
 
   @Override

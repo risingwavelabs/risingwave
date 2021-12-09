@@ -59,7 +59,7 @@ impl StreamService for StreamServiceImpl {
                 Err(e.to_grpc_status())
             }
             Ok(()) => Ok(Response::new(BuildFragmentResponse {
-                request_id: 0,
+                request_id: "".to_string(),
                 fragment_id: Vec::new(),
             })),
         }

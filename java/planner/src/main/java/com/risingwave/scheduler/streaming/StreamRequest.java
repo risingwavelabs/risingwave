@@ -37,7 +37,7 @@ public class StreamRequest {
     return idList;
   }
 
-  public UpdateFragmentRequest serialize(int requestId) {
+  public UpdateFragmentRequest serialize(String requestId) {
     UpdateFragmentRequest.Builder builder = UpdateFragmentRequest.newBuilder();
     builder.setRequestId(requestId);
     for (var fragment : fragmentList) {
@@ -46,7 +46,7 @@ public class StreamRequest {
     return builder.build();
   }
 
-  public BuildFragmentRequest buildRequest(int requestId) {
+  public BuildFragmentRequest buildRequest(String requestId) {
     BuildFragmentRequest.Builder builder = BuildFragmentRequest.newBuilder();
     builder.setRequestId(requestId);
     for (int fragmentId : getFragmentIdList()) {
