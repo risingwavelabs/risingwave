@@ -14,7 +14,7 @@ use risingwave_common::error::Result;
 use risingwave_common::error::RwError;
 use risingwave_common::types::{DataTypeKind, Datum, ScalarImpl};
 
-use crate::source::{SourceColumnDesc, SourceParser};
+use crate::{SourceColumnDesc, SourceParser};
 
 /// Parser for Protobuf-encoded bytes.
 #[derive(Debug)]
@@ -149,7 +149,7 @@ mod tests {
         DataTypeKind, Float32Type, Int32Type, Int64Type, ScalarImpl, StringType,
     };
 
-    use crate::source::{ProtobufParser, SourceColumnDesc, SourceParser};
+    use crate::{ProtobufParser, SourceColumnDesc, SourceParser};
 
     static PROTO_FILE_DATA: &str = r#"
     syntax = "proto3";

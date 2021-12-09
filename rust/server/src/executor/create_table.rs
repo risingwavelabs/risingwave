@@ -6,12 +6,12 @@ use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::CreateTableNode;
 
 use crate::executor::{Executor, ExecutorBuilder};
-use crate::source::SourceManagerRef;
 use crate::stream::TableManagerRef;
 use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::Result;
+use risingwave_source::SourceManagerRef;
 use risingwave_storage::TableColumnDesc;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};

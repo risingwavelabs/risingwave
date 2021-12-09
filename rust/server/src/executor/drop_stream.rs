@@ -9,7 +9,7 @@ use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::DropStreamNode;
 
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
-use crate::source::SourceManagerRef;
+use risingwave_source::SourceManagerRef;
 
 pub(super) struct DropStreamExecutor {
     table_id: TableId,

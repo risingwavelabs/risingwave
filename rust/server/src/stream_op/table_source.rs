@@ -1,4 +1,3 @@
-use crate::source::{StreamSourceReader, TableStreamReader};
 use crate::stream_op::PKVec;
 use crate::stream_op::{Barrier, Executor, Message};
 use async_trait::async_trait;
@@ -6,6 +5,7 @@ use futures::channel::mpsc::UnboundedReceiver;
 use futures::StreamExt;
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::Result;
+use risingwave_source::{StreamSourceReader, TableStreamReader};
 use std::fmt::{Debug, Formatter};
 
 /// `TableSourceExecutor` extracts changes from a Table
@@ -98,7 +98,6 @@ impl Debug for TableSourceExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::*;
     use futures::channel::mpsc::unbounded;
     use itertools::Itertools;
     use risingwave_common::array::column::Column;
@@ -108,18 +107,10 @@ mod tests {
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataTypeKind, DataTypeRef, DecimalType, Int32Type, StringType};
+    use risingwave_source::*;
     use risingwave_storage::bummock::BummockTable;
     use risingwave_storage::TableColumnDesc;
     use std::sync::Arc;
-
-    impl SourceImpl {
-        fn as_table(&self) -> &TableSource {
-            match self {
-                SourceImpl::Table(table) => table,
-                _ => panic!("not a table source"),
-            }
-        }
-    }
 
     #[tokio::test]
     async fn test_table_source() -> Result<()> {

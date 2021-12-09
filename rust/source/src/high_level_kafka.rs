@@ -18,7 +18,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::Datum;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 
-use crate::source::{
+use crate::{
     BatchSourceReader, Source, SourceColumnDesc, SourceParser, SourceWriter, StreamSourceReader,
 };
 

@@ -6,7 +6,6 @@ use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::InsertNode;
 
 use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
-use crate::source::{Source, SourceImpl, SourceManagerRef, SourceWriter};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
     ArrayBuilder, ArrayImpl, DataChunk, I64ArrayBuilder, PrimitiveArrayBuilder,
@@ -17,6 +16,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{Int32Type, Int64Type};
+use risingwave_source::{Source, SourceImpl, SourceManagerRef, SourceWriter};
 
 use super::BoxedExecutor;
 
@@ -148,13 +148,13 @@ mod tests {
     use std::sync::Arc;
 
     use crate::executor::test_utils::MockExecutor;
-    use crate::source::{MemSourceManager, SourceManager};
     use crate::stream::{SimpleTableManager, TableImpl, TableManager};
     use crate::*;
     use risingwave_common::array::{Array, I64Array};
     use risingwave_common::catalog::{Field, Schema, SchemaId};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::{DataTypeKind, DecimalType, Int64Type};
+    use risingwave_source::{MemSourceManager, SourceManager};
     use risingwave_storage::bummock::BummockResult;
     use risingwave_storage::*;
 

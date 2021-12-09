@@ -30,8 +30,8 @@ use risingwave_pb::stream_service::{ActorInfo, BroadcastActorInfoTableRequest};
 use risingwave_pb::task_service::HostAddress;
 use risingwave_storage::{Table, TableColumnDesc};
 
-use crate::source::{MemSourceManager, SourceManager};
 use crate::task::{GlobalTaskEnv, TaskManager};
+use risingwave_source::{MemSourceManager, SourceManager};
 
 fn make_int32_type_pb() -> DataType {
     DataType {

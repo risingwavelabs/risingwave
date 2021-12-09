@@ -11,9 +11,9 @@ use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::task_service::TaskServiceImpl;
-use crate::source::MemSourceManager;
 use crate::stream::{SimpleTableManager, StreamManager};
 use crate::task::{GlobalTaskEnv, TaskManager};
+use risingwave_source::MemSourceManager;
 
 pub fn rpc_serve(addr: SocketAddr) -> (JoinHandle<()>, UnboundedSender<()>) {
     let table_mgr = Arc::new(SimpleTableManager::new());

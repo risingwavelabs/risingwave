@@ -10,7 +10,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan::StreamScanNode;
 
 use crate::executor::{Executor, ExecutorBuilder};
-use crate::source::{BatchSourceReader, HighLevelKafkaSourceReaderContext, Source, SourceImpl};
+use risingwave_source::{BatchSourceReader, HighLevelKafkaSourceReaderContext, Source, SourceImpl};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 

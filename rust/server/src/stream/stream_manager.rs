@@ -20,10 +20,10 @@ use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::table_source_node::SourceType;
 use risingwave_pb::stream_service;
 
-use crate::source::Source;
-use crate::source::*;
 use crate::stream_op::*;
 use crate::task::GlobalTaskEnv;
+use risingwave_source::Source;
+use risingwave_source::*;
 
 /// Default capacity of channel if two fragments are on the same node
 pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;

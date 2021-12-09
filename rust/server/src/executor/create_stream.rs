@@ -19,9 +19,9 @@ use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::CreateStreamNode;
 
 use crate::executor::{Executor, ExecutorBuilder};
-use crate::source::parser::JSONParser;
-use crate::source::SourceFormat;
-use crate::source::{
+use risingwave_source::parser::JSONParser;
+use risingwave_source::SourceFormat;
+use risingwave_source::{
     HighLevelKafkaSourceConfig, ProtobufParser, SourceColumnDesc, SourceConfig, SourceManagerRef,
     SourceParser,
 };

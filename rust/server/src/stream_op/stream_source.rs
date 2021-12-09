@@ -16,12 +16,12 @@ use risingwave_common::error::Result;
 use risingwave_common::types::Int64Type;
 use SourceReaderContext::HighLevelKafka;
 
-use crate::source::{
+use crate::stream_op::PKVec;
+use crate::stream_op::{Executor, Message};
+use risingwave_source::{
     HighLevelKafkaSourceReaderContext, SourceDesc, SourceImpl, SourceReaderContext,
     StreamSourceReader,
 };
-use crate::stream_op::PKVec;
-use crate::stream_op::{Executor, Message};
 
 /// `StreamSourceExecutor` is a streaming source from external systems such as Kafka
 pub struct StreamSourceExecutor {

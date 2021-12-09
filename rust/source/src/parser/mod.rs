@@ -5,7 +5,7 @@ pub use protobuf_parser::*;
 use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
 
-use crate::source::SourceColumnDesc;
+use crate::SourceColumnDesc;
 
 mod json_parser;
 mod protobuf_parser;

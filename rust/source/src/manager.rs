@@ -2,13 +2,13 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use risingwave_common::catalog::TableId;
-use risingwave_common::ensure;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataTypeRef;
+use risingwave_common::{ensure, gen_error};
 use risingwave_storage::bummock::BummockTable;
 
-use crate::source::{
+use crate::{
     HighLevelKafkaSource, SourceConfig, SourceFormat, SourceImpl, SourceParser, TableSource,
 };
 
@@ -165,9 +165,16 @@ impl MemSourceManager {
     }
 }
 
+impl Default for MemSourceManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use crate::source::*;
+    use crate::*;
+    use risingwave_common::column_nonnull;
     use risingwave_storage::bummock::BummockTable;
     use risingwave_storage::{Table, TableColumnDesc};
 

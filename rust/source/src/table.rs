@@ -11,7 +11,7 @@ use tokio::sync::{broadcast, RwLock};
 use risingwave_common::array::{DataChunk, DataChunkRef};
 use risingwave_common::error::Result;
 
-use crate::source::*;
+use crate::*;
 
 use risingwave_common::array::{Op, StreamChunk};
 
@@ -123,9 +123,6 @@ impl BatchSourceReader for TableBatchReader {
 pub struct TableStreamReader {
     core: Arc<RwLock<TableSourceCore>>,
 
-    /// Columns to be read
-    columns: Vec<SourceColumnDesc>,
-
     /// Mappings from the source column to the column to be read
     column_indexes: Vec<usize>,
 
@@ -220,7 +217,6 @@ impl Source for TableSource {
         _context: Self::ReaderContext,
         column_ids: Vec<i32>,
     ) -> Result<Self::StreamReader> {
-        let mut columns = vec![];
         let mut column_indexes = vec![];
         for column_id in column_ids {
             let idx = self
@@ -228,7 +224,6 @@ impl Source for TableSource {
                 .iter()
                 .position(|c| c.column_id == column_id)
                 .expect("column id not exists");
-            columns.push(self.columns[idx].clone());
             column_indexes.push(idx);
         }
 
@@ -236,7 +231,6 @@ impl Source for TableSource {
             core: self.core.clone(),
             existing_data: VecDeque::new(),
             read_channel: None,
-            columns,
             column_indexes,
         })
     }

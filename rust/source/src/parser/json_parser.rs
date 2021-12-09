@@ -5,7 +5,7 @@ use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::RwError;
 use risingwave_common::types::{DataTypeKind, Datum, ScalarImpl, ScalarRef};
 
-use crate::source::{SourceColumnDesc, SourceParser};
+use crate::{SourceColumnDesc, SourceParser};
 
 /// Parser for JSON format
 #[derive(Debug)]
@@ -69,7 +69,7 @@ mod tests {
         ScalarImpl, StringType,
     };
 
-    use crate::source::{JSONParser, SourceColumnDesc, SourceParser};
+    use crate::{JSONParser, SourceColumnDesc, SourceParser};
 
     #[test]
     fn test_json_parser() {

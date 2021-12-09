@@ -15,7 +15,6 @@ extern crate test;
 
 mod execution;
 mod executor;
-mod source;
 mod stream;
 mod stream_op;
 mod task;

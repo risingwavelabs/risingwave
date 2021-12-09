@@ -80,6 +80,13 @@ impl SourceImpl {
             ))),
         }
     }
+
+    pub fn as_table(&self) -> &TableSource {
+        match self {
+            SourceImpl::Table(table) => table,
+            _ => panic!("not a table source"),
+        }
+    }
 }
 
 #[async_trait]
