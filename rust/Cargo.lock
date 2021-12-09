@@ -1794,8 +1794,6 @@ dependencies = [
  "pb-convert-derive",
  "prost",
  "prost-types",
- "protobuf",
- "protobuf-codegen-pure",
  "rand",
  "rdkafka",
  "risingwave-pb",
@@ -1804,7 +1802,6 @@ dependencies = [
  "risingwave_storage",
  "rust_decimal",
  "serde",
- "serde-protobuf",
  "serde-value",
  "serde_json",
  "serde_with",
@@ -1875,7 +1872,6 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "twox-hash",
- "typed-builder",
 ]
 
 [[package]]
@@ -1921,7 +1917,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tonic",
- "typed-builder",
 ]
 
 [[package]]
@@ -1951,10 +1946,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "chrono",
- "clap",
- "clap_derive",
  "crc32fast",
- "dyn-clone",
  "either",
  "farmhash",
  "futures",
@@ -1990,11 +1982,8 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
- "tokio-test",
  "tonic",
  "twox-hash",
- "typed-builder",
- "url",
 ]
 
 [[package]]
@@ -2009,10 +1998,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "chrono",
- "clap",
- "clap_derive",
  "crc32fast",
- "dyn-clone",
  "either",
  "farmhash",
  "futures",
@@ -2027,8 +2013,6 @@ dependencies = [
  "pb-convert-derive",
  "prost",
  "prost-types",
- "protobuf",
- "protobuf-codegen-pure",
  "rand",
  "risingwave-pb",
  "risingwave_common",
@@ -2036,8 +2020,6 @@ dependencies = [
  "rusoto_s3",
  "rust_decimal",
  "serde",
- "serde-protobuf",
- "serde-value",
  "serde_json",
  "serde_with",
  "smallvec",
@@ -2046,7 +2028,6 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "twox-hash",
- "typed-builder",
  "uuid",
 ]
 
