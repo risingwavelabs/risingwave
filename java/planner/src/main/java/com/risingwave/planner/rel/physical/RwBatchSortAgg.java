@@ -3,6 +3,7 @@ package com.risingwave.planner.rel.physical;
 import static com.risingwave.common.config.BatchPlannerConfigurations.ENABLE_SORT_AGG;
 import static com.risingwave.execution.context.ExecutionContext.contextOf;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
+import static java.util.Objects.requireNonNull;
 
 import com.google.common.collect.ImmutableList;
 import com.google.protobuf.Any;
@@ -11,21 +12,26 @@ import com.risingwave.planner.rel.logical.RwLogicalAggregate;
 import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.proto.plan.SortAggNode;
+import java.util.ArrayList;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.PhysicalNode;
+import org.apache.calcite.rel.RelCollation;
 import org.apache.calcite.rel.RelCollations;
+import org.apache.calcite.rel.RelFieldCollation;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.convert.ConverterRule;
 import org.apache.calcite.rel.core.Aggregate;
 import org.apache.calcite.rel.core.AggregateCall;
 import org.apache.calcite.rel.hint.RelHint;
+import org.apache.calcite.rex.RexUtil;
 import org.apache.calcite.util.ImmutableBitSet;
 import org.apache.calcite.util.ImmutableIntList;
 import org.apache.calcite.util.Pair;
+import org.apache.calcite.util.mapping.Mappings;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 /** Sort agg assumes that its input are sorted according to it group key. */
@@ -65,6 +71,52 @@ public class RwBatchSortAgg extends RwAggregate implements RisingWaveBatchPhyRel
 
   @Override
   public @Nullable Pair<RelTraitSet, List<RelTraitSet>> passThroughTraits(RelTraitSet required) {
+    // When this rel can't satisfy required collation traits, we will pass through collation traits
+    // to its children.
+    // e.g., When logicalAgg(group keys = v1,v2) -> SortAgg(group keys = v1, v2). The new SortAgg
+    // require collation(v1, v2). In this case, we should pass it to children in order to enforce
+    // required traits
+    if (required.getConvention() != traitSet.getConvention()
+        || required.getTrait(RwDistributionTraitDef.getInstance())
+            != traitSet.getTrait(RwDistributionTraitDef.getInstance())) {
+      return null;
+    }
+    // Skip ROLLUP or CUBE aggregations
+    if (!isSimple(this)) {
+      return null;
+    }
+
+    RelTraitSet inputTraits = getInput().getTraitSet();
+    RelCollation collation =
+        requireNonNull(
+            required.getCollation(),
+            () -> "collation trait is null, required traits are " + required);
+    ImmutableBitSet requiredKeys = ImmutableBitSet.of(RelCollations.ordinals(collation));
+    ImmutableBitSet groupKeys = ImmutableBitSet.range(groupSet.cardinality());
+    Mappings.TargetMapping mapping =
+        Mappings.source(groupSet.toList(), input.getRowType().getFieldCount());
+    // For agg, there are three cases:
+    // 1. group by keys equal the required keys (group by a,b,c order by a,b,c): We can directly
+    // pass through all collations
+    // 2. group by keys contain all the required keys (group by a,b,c order by b,c): After pass
+    // through all collations, we should fix the collation in current node
+    // 3. group by keys don't contain all the required keys (group by a,b order by a,b,c): Nothing
+    // we can do to propagate traits to child nodes.
+    if (requiredKeys.equals(groupKeys)) {
+      // case 1
+      RelCollation inputCollation = RexUtil.apply(mapping, collation);
+      return Pair.of(required, ImmutableList.of(inputTraits.replace(inputCollation)));
+    } else if (groupKeys.contains(requiredKeys)) {
+      // case 2
+      List<RelFieldCollation> list = new ArrayList<>(collation.getFieldCollations());
+      groupKeys.except(requiredKeys).forEach(k -> list.add(new RelFieldCollation(k)));
+      RelCollation aggCollation = RelCollations.of(list);
+      RelCollation inputCollation = RexUtil.apply(mapping, aggCollation);
+      return Pair.of(
+          traitSet.replace(aggCollation), ImmutableList.of(inputTraits.replace(inputCollation)));
+    }
+
+    // case 3
     return null;
   }
 

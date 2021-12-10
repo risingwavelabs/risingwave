@@ -93,4 +93,32 @@ RwBatchSortAgg(group=[{0, 1}], EXPR$2=[COUNT()])
 ]]>
         </Resource>
     </TestCase>
+    <TestCase name="group by with sort, SortAgg passThroughTraits case 1">
+        <Resource name="sql">
+            <![CDATA[
+select v1,v2,v3 from t group by v1,v2,v3 order by v1,v2,v3
+            ]]>
+        </Resource>
+        <Resource name="physical">
+            <![CDATA[
+RwBatchSortAgg(group=[{0, 1, 2}])
+  RwBatchSort(sort0=[$0], sort1=[$1], sort2=[$2], dir0=[ASC], dir1=[ASC], dir2=[ASC])
+    RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="group by with sort case 2, SortAgg passThroughTraits case 2">
+        <Resource name="sql">
+            <![CDATA[
+select v1,v2,v3 from t group by v1,v2,v3 order by v1,v2
+            ]]>
+        </Resource>
+        <Resource name="physical">
+            <![CDATA[
+RwBatchSortAgg(group=[{0, 1, 2}])
+  RwBatchSort(sort0=[$0], sort1=[$1], sort2=[$2], dir0=[ASC], dir1=[ASC], dir2=[ASC])
+    RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
+]]>
+        </Resource>
+    </TestCase>
 </Root>

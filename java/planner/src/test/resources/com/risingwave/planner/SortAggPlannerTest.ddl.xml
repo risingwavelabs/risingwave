@@ -100,4 +100,9 @@ CREATE TABLE region (
         r_comment VARCHAR(152));
         ]]>
     </Resource>
+    <Resource>
+        <![CDATA[
+create table t(v1 int not null, v2 int not null, v3 float not null)
+        ]]>
+    </Resource>
 </Root>
