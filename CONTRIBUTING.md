@@ -23,13 +23,13 @@ To run end-to-end tests with single compute-node:
 ```bash
 make sqllogictest
 ./scripts/start_cluster.sh 1
-python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/distributed/
+python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/
 ```
 
 To run end-to-end tests with multiple compute-nodes, run the script:
 ```bash
 ./scripts/start_cluster.sh 3
-python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/distributed/
+python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/
 ```
 
 It will start processes in the background. After testing, you can run the following scriptto clean-up:
