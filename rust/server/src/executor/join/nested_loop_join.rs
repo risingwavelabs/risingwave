@@ -427,19 +427,26 @@ impl NestedLoopJoinExecutor {
 
 #[cfg(test)]
 mod tests {
+    use std::convert::TryFrom;
     use std::sync::Arc;
 
     use crate::executor::join::nested_loop_join::{
         NestedLoopJoinExecutor, NestedLoopJoinState, RowLevelIter,
     };
     use crate::executor::join::JoinType;
+    use crate::executor::test_utils::diff_executor_output;
     use crate::executor::test_utils::MockExecutor;
+    use crate::executor::BoxedExecutor;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
     use risingwave_common::expr::InputRefExpression;
-    use risingwave_common::types::{Int32Type, ScalarRefImpl};
+    use risingwave_common::types::{
+        BoolType, DataTypeRef, Float32Type, Float64Type, Int32Type, ScalarRefImpl,
+    };
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+    use risingwave_pb::expr::expr_node::Type;
 
     /// Test combine two chunk into one.
     #[test]
@@ -505,5 +512,278 @@ mod tests {
             const_row_chunk.row_at(2).unwrap().0.value_at(0),
             Some(ScalarRefImpl::Int32(3))
         );
+    }
+
+    struct TestFixture {
+        left_types: Vec<DataTypeRef>,
+        right_types: Vec<DataTypeRef>,
+        join_type: JoinType,
+    }
+
+    /// Sql for creating test data:
+    /// ```sql
+    /// drop table t1 if exists;
+    /// create table t1(v1 int, v2 float);
+    /// insert into t1 values
+    /// (1, 6.1::FLOAT), (2, 8.4::FLOAT), (3, 3.9::FLOAT), (3, 6.6::FLOAT), (4, 0.7::FLOAT),
+    /// (6, 5.5::FLOAT), (6, 5.6::FLOAT), (8, 7.0::FLOAT);
+    ///
+    /// drop table t2 if exists;
+    /// create table t2(v1 int, v2 real);
+    /// insert into t2 values
+    /// (2, 6.1::REAL), (3, 8.9::REAL), (6, 3.4::REAL), (8, 3.5::REAL), (9, 7.5::REAL),
+    /// (10, null), (11, 8::REAL), (12, null), (20, 5.7::REAL), (30, 9.6::REAL),
+    /// (100, null), (200, 8.18::REAL);
+    /// ```
+    impl TestFixture {
+        fn with_join_type(join_type: JoinType) -> Self {
+            Self {
+                left_types: vec![
+                    Arc::new(Int32Type::new(false)),
+                    Arc::new(Float32Type::new(true)),
+                ],
+                right_types: vec![
+                    Arc::new(Int32Type::new(false)),
+                    Arc::new(Float64Type::new(true)),
+                ],
+                join_type,
+            }
+        }
+
+        fn create_left_executor(&self) -> BoxedExecutor {
+            let schema = Schema {
+                fields: vec![
+                    Field {
+                        data_type: Int32Type::create(false),
+                    },
+                    Field {
+                        data_type: Float32Type::create(true),
+                    },
+                ],
+            };
+            let mut executor = MockExecutor::new(schema);
+
+            {
+                let column1 = Column::new(
+                    Arc::new(array! {I32Array, [Some(1), Some(2), Some(3)]}.into()),
+                    self.left_types[0].clone(),
+                );
+                let column2 = Column::new(
+                    Arc::new(array! {F32Array, [Some(6.1f32), Some(8.4f32), Some(3.9f32)]}.into()),
+                    self.left_types[1].clone(),
+                );
+
+                let chunk =
+                    DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
+                executor.add(chunk);
+            }
+
+            {
+                let column1 = Column::new(
+                    Arc::new(
+                        array! {I32Array, [Some(3), Some(4), Some(6), Some(6), Some(8)]}.into(),
+                    ),
+                    self.left_types[0].clone(),
+                );
+                let column2 = Column::new(
+          Arc::new(array! {F32Array, [Some(6.6f32), Some(0.7f32), Some(5.5f32), Some(5.6f32), Some(7.0f32)]}.into()),
+          self.left_types[1].clone(),
+        );
+
+                let chunk =
+                    DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
+                executor.add(chunk);
+            }
+
+            Box::new(executor)
+        }
+
+        fn create_right_executor(&self) -> BoxedExecutor {
+            let schema = Schema {
+                fields: vec![
+                    Field {
+                        data_type: Int32Type::create(false),
+                    },
+                    Field {
+                        data_type: Float64Type::create(true),
+                    },
+                ],
+            };
+            let mut executor = MockExecutor::new(schema);
+
+            {
+                let column1 = Column::new(
+                    Arc::new(array! {I32Array, [Some(2), Some(3), Some(6), Some(8)]}.into()),
+                    self.right_types[0].clone(),
+                );
+
+                let column2 = Column::new(
+                    Arc::new(
+                        array! {F64Array, [Some(6.1f64), Some(8.9f64), Some(3.4f64), Some(3.5f64)]}
+                            .into(),
+                    ),
+                    self.right_types[1].clone(),
+                );
+
+                let chunk =
+                    DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
+                executor.add(chunk);
+            }
+
+            {
+                let column1 = Column::new(
+                    Arc::new(array! {I32Array, [Some(9), Some(10), Some(11), Some(12)]}.into()),
+                    self.right_types[0].clone(),
+                );
+
+                let column2 = Column::new(
+                    Arc::new(array! {F64Array, [Some(7.5f64), None, Some(8f64), None]}.into()),
+                    self.right_types[1].clone(),
+                );
+
+                let chunk =
+                    DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
+                executor.add(chunk);
+            }
+
+            {
+                let column1 = Column::new(
+                    Arc::new(array! {I32Array, [Some(20), Some(30), Some(100), Some(200)]}.into()),
+                    self.right_types[0].clone(),
+                );
+
+                let column2 = Column::new(
+                    Arc::new(
+                        array! {F64Array, [Some(5.7f64),  Some(9.6f64), None, Some(8.18f64)]}
+                            .into(),
+                    ),
+                    self.right_types[1].clone(),
+                );
+
+                let chunk =
+                    DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
+                executor.add(chunk);
+            }
+
+            Box::new(executor)
+        }
+
+        fn create_join_executor(&self) -> BoxedExecutor {
+            let join_type = self.join_type;
+
+            let left_child = self.create_left_executor();
+            let right_child = self.create_right_executor();
+
+            let fields = left_child
+                .schema()
+                .fields
+                .iter()
+                .chain(right_child.schema().fields.iter())
+                .map(|f| Field {
+                    data_type: f.data_type.clone(),
+                })
+                .collect();
+            let schema = Schema { fields };
+            let probe_side_schema = left_child.schema().data_types_clone();
+
+            Box::new(NestedLoopJoinExecutor {
+                join_expr: new_binary_expr(
+                    Type::Equal,
+                    BoolType::create(false),
+                    Box::new(InputRefExpression::new(Int32Type::create(false), 0)),
+                    Box::new(InputRefExpression::new(Int32Type::create(false), 2)),
+                ),
+                join_type,
+                state: NestedLoopJoinState::Build,
+                schema: schema.clone(),
+                chunk_builder: DataChunkBuilder::new_with_default_size(schema.data_types_clone()),
+                last_chunk: None,
+                probe_side_schema,
+                probe_side_source: RowLevelIter::new(left_child),
+                build_table: RowLevelIter::new(right_child),
+                probe_remain_chunk_idx: 0,
+                probe_remain_row_idx: 0,
+            })
+        }
+
+        async fn do_test(&self, expected: DataChunk) {
+            let join_executor = self.create_join_executor();
+            let mut expected_mock_exec = MockExecutor::new(join_executor.schema().clone());
+            expected_mock_exec.add(expected);
+
+            diff_executor_output(join_executor, Box::new(expected_mock_exec)).await;
+        }
+    }
+
+    /// sql: select * from t1, t2 where t1.v1 = t2.v1
+    #[tokio::test]
+    async fn test_inner_join() {
+        let test_fixture = TestFixture::with_join_type(JoinType::Inner);
+
+        let column1 = Column::new(
+            Arc::new(
+                array! {I32Array, [Some(2), Some(3), Some(3), Some(6), Some(6), Some(8)]}.into(),
+            ),
+            test_fixture.left_types[0].clone(),
+        );
+
+        let column2 = Column::new(
+      Arc::new(array! {F32Array, [Some(8.4f32), Some(3.9f32), Some(6.6f32), Some(5.5f32), Some(5.6f32), Some(7.0f32)]}.into()),
+      test_fixture.left_types[1].clone(),
+    );
+
+        let column3 = Column::new(
+            Arc::new(
+                array! {I32Array, [Some(2), Some(3), Some(3), Some(6), Some(6), Some(8)]}.into(),
+            ),
+            test_fixture.right_types[0].clone(),
+        );
+
+        let column4 = Column::new(
+      Arc::new(array! {F64Array, [Some(6.1f64), Some(8.9f64), Some(8.9f64), Some(3.4f64), Some(3.4f64), Some(3.5f64)]}.into()),
+      test_fixture.right_types[1].clone(),
+    );
+
+        let expected_chunk = DataChunk::try_from(vec![column1, column2, column3, column4])
+            .expect("Failed to create chunk!");
+
+        test_fixture.do_test(expected_chunk).await;
+    }
+
+    /// sql: select * from t1 left outer join t2 on t1.v1 = t2.v1
+    #[tokio::test]
+    async fn test_left_outer_join() {
+        let test_fixture = TestFixture::with_join_type(JoinType::LeftOuter);
+
+        let column1 = Column::new(
+      Arc::new(
+        array! {I32Array, [Some(1), Some(2), Some(3), Some(3), Some(4), Some(6), Some(6), Some(8)]}
+          .into(),
+      ),
+      test_fixture.left_types[0].clone(),
+    );
+
+        let column2 = Column::new(
+      Arc::new(array! {F32Array, [Some(6.1f32), Some(8.4f32), Some(3.9f32), Some(6.6f32), Some(0.7f32), Some(5.5f32), Some(5.6f32), Some(7.0f32)]}.into()),
+      test_fixture.left_types[1].clone(),
+    );
+
+        let column3 = Column::new(
+      Arc::new(
+        array! {I32Array, [None, Some(2), Some(3), Some(3), None, Some(6), Some(6), Some(8)]}
+          .into(),
+      ),
+      test_fixture.right_types[0].clone(),
+    );
+
+        let column4 = Column::new(
+      Arc::new(array! {F64Array, [None, Some(6.1f64), Some(8.9f64), Some(8.9f64), None, Some(3.4f64), Some(3.4f64), Some(3.5f64)]}.into()),
+      test_fixture.right_types[1].clone(),
+    );
+
+        let expected_chunk = DataChunk::try_from(vec![column1, column2, column3, column4])
+            .expect("Failed to create chunk!");
+
+        test_fixture.do_test(expected_chunk).await;
     }
 }
