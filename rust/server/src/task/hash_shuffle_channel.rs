@@ -114,11 +114,12 @@ impl HashShuffleSender {
 #[async_trait::async_trait]
 impl ChanReceiver for HashShuffleReceiver {
     async fn recv(&mut self) -> Result<Option<DataChunk>> {
-        self.receiver
-            .recv()
-            .await
-            .ok_or_else(|| InternalError("broken hash_shuffle_channel".to_string()).into())
-        // We never call on a closed channel.
+        match self.receiver.recv().await {
+            Some(data_chunk) => Ok(data_chunk),
+            // Here the channel is close, we should not return an error using channel close error,
+            // since true error are stored in TaskExecution.
+            None => Ok(None),
+        }
     }
 }
 
@@ -245,7 +246,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_recv_fail_on_closed_channel() {
+    async fn test_recv_not_fail_on_closed_channel() {
         let (sender, mut receivers) = new_hash_shuffle_channel(&ExchangeInfo {
             mode: DistributionMode::Hash as i32,
             distribution: Some(exchange_info::Distribution::HashInfo(HashInfo {
@@ -258,6 +259,6 @@ mod tests {
         drop(sender);
 
         let receiver = receivers.get_mut(0).unwrap();
-        assert!(receiver.recv().await.is_err());
+        assert!(receiver.recv().await.is_ok());
     }
 }

@@ -11,6 +11,7 @@ dependencies {
     api("org.slf4j:slf4j-api")
 
     implementation(project(":common"))
+    implementation(project(":proto"))
     implementation(kotlin("stdlib-jdk8"))
     implementation("io.ktor:ktor-network")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")

@@ -1,5 +1,5 @@
 use crate::meta::{MetaStoreRef, SINGLE_VERSION_EPOCH};
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI32, Ordering};
 
@@ -34,7 +34,10 @@ impl StoredIdGenerator {
         let current_id = match res {
             Ok(value) => i32::from_be_bytes(value.as_slice().try_into().unwrap()),
             Err(err) => {
-                if err.to_grpc_status().code() != tonic::Code::NotFound {
+                if !matches!(
+                    err.inner(),
+                    ErrorCode::ItemNotFound(_) | ErrorCode::TaskNotFound
+                ) {
                     panic!("{}", err)
                 }
                 0

@@ -6,8 +6,10 @@ import com.risingwave.pgwire.database.PgFieldDescriptor;
 import com.risingwave.pgwire.database.TransactionStatus;
 import com.risingwave.pgwire.types.PgValue;
 import io.netty.buffer.ByteBuf;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
+/** Postgresql compatible message protocol implementation. */
 public class Messages {
 
   public static PgMessage createRegularPacket(byte tag, byte[] buf) throws PgException {
@@ -187,7 +189,7 @@ public class Messages {
   //               +-----------------+-------------------+
   public static void writeErrorResponse(PgException err, ByteBuf buf) {
     int totalLen = 4; // header
-    totalLen += 1 + 1; // 'S' severity '\0'
+    totalLen += 1 + 5 + 1; // 'S' severity '\0'
     totalLen += 1 + err.getMessage().length() + 1; // 'M' message '\0'
     totalLen += 1 + 5 + 1; // 'C' error_code '\0'
     totalLen += 1;
@@ -195,6 +197,7 @@ public class Messages {
     buf.writeByte('E');
     buf.writeInt(totalLen);
     buf.writeByte('S');
+    buf.writeCharSequence("ERROR", StandardCharsets.UTF_8);
     buf.writeByte('\0');
     buf.writeByte('M');
     buf.writeBytes(err.getMessage().getBytes());

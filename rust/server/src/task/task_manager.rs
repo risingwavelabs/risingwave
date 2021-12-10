@@ -163,7 +163,7 @@ mod tests {
                 .unwrap_err()
                 .to_grpc_status()
                 .code(),
-            Code::NotFound
+            Code::Internal
         );
 
         let sink_id = ProstTaskSinkId {
@@ -179,7 +179,7 @@ mod tests {
             sink_id: 0,
         };
         match manager.take_sink(&sink_id) {
-            Err(e) => assert_eq!(e.to_grpc_status().code(), Code::NotFound),
+            Err(e) => assert_eq!(e.to_grpc_status().code(), Code::Internal),
             Ok(_) => unreachable!(),
         };
     }

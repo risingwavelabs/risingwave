@@ -11,6 +11,13 @@ use thiserror::Error;
 use tokio::task::JoinError;
 
 use memcomparable::Error as MemComparableError;
+use prost::Message;
+use risingwave_pb::common::Status;
+use tonic::metadata::{MetadataMap, MetadataValue};
+use tonic::Code;
+
+/// Header used to store serialized [`RwError`] in grpc status.
+pub const RW_ERROR_GRPC_HEADER: &str = "risingwave-error-bin";
 
 #[derive(Error, Debug)]
 pub enum ErrorCode {
@@ -52,13 +59,36 @@ pub struct RwError {
 impl RwError {
     /// Turns a crate-wide `RwError` into grpc error.
     pub fn to_grpc_status(&self) -> tonic::Status {
-        let code = match *self.inner {
-            ErrorCode::OK => tonic::Code::Ok,
-            ErrorCode::NotImplementedError(_) => tonic::Code::Unimplemented,
-            ErrorCode::TaskNotFound | ErrorCode::ItemNotFound(_) => tonic::Code::NotFound,
-            _ => tonic::Code::Internal,
-        };
-        tonic::Status::new(code, self.to_string())
+        match *self.inner {
+            ErrorCode::OK => tonic::Status::ok(self.to_string()),
+            _ => {
+                let bytes = {
+                    let status = self.to_status();
+                    let mut bytes = Vec::<u8>::with_capacity(status.encoded_len());
+                    status.encode(&mut bytes).expect("Failed to encode status.");
+                    bytes
+                };
+                let mut header = MetadataMap::new();
+                header.insert_bin(RW_ERROR_GRPC_HEADER, MetadataValue::from_bytes(&bytes));
+                tonic::Status::with_metadata(Code::Internal, self.to_string(), header)
+            }
+        }
+    }
+
+    /// Converting to risingwave's status.
+    ///
+    /// We can't use grpc/tonic's library directly because we need to customized error code and
+    /// information.
+    fn to_status(&self) -> Status {
+        // TODO: We need better error reporting for stacktrace.
+        Status {
+            code: self.inner.get_code() as i32,
+            message: self.to_string(),
+        }
+    }
+
+    pub fn inner(&self) -> &ErrorCode {
+        &self.inner
     }
 }
 
@@ -395,11 +425,11 @@ mod tests {
             assert_eq!(RwError::from(ec).to_grpc_status().code(), grpc_code);
         }
 
-        check_grpc_error(ErrorCode::TaskNotFound, Code::NotFound);
+        check_grpc_error(ErrorCode::TaskNotFound, Code::Internal);
         check_grpc_error(ErrorCode::InternalError(String::new()), Code::Internal);
         check_grpc_error(
             ErrorCode::NotImplementedError(String::new()),
-            Code::Unimplemented,
+            Code::Internal,
         );
     }
 

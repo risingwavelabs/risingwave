@@ -1,6 +1,5 @@
 use crate::task::channel::{BoxChanReceiver, BoxChanSender, ChanReceiver, ChanSender};
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use tokio::sync::mpsc;
 
@@ -24,11 +23,12 @@ impl ChanSender for FifoSender {
 #[async_trait::async_trait]
 impl ChanReceiver for FifoReceiver {
     async fn recv(&mut self) -> Result<Option<DataChunk>> {
-        self.receiver
-            .recv()
-            .await
-            .ok_or_else(|| InternalError("broken fifo_channel".to_string()).into())
-        // We never call on a closed channel.
+        match self.receiver.recv().await {
+            Some(data_chunk) => Ok(data_chunk),
+            // Here the channel is close, we should not return an error using channel close error,
+            // since true error are stored in TaskExecution.
+            None => Ok(None),
+        }
     }
 }
 
@@ -42,7 +42,7 @@ pub fn new_fifo_channel() -> (BoxChanSender, Vec<BoxChanReceiver>) {
 
 mod tests {
     #[tokio::test]
-    async fn test_recv_fail_on_closed_channel() {
+    async fn test_recv_not_fail_on_closed_channel() {
         use crate::task::fifo_channel::new_fifo_channel;
 
         let (sender, mut receivers) = new_fifo_channel();
@@ -50,9 +50,6 @@ mod tests {
         drop(sender);
 
         let receiver = receivers.get_mut(0).unwrap();
-        assert_eq!(
-            receiver.recv().await.unwrap_err().to_string(),
-            "internal error: broken fifo_channel"
-        );
+        assert!(receiver.recv().await.is_ok());
     }
 }

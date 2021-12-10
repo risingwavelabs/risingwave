@@ -3,7 +3,7 @@ use crate::meta::{
     SchemaMetaManager, TableMetaManager, SINGLE_VERSION_EPOCH,
 };
 use prost::Message;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::meta::{Catalog, EpochState};
 use tokio::sync::RwLock;
 
@@ -51,7 +51,10 @@ impl MetaManager {
                 manager.stable_epoch = Epoch::from(proto.get_stable_epoch());
             }
             Err(err) => {
-                if err.to_grpc_status().code() != tonic::Code::NotFound {
+                if !matches!(
+                    err.inner(),
+                    ErrorCode::ItemNotFound(_) | ErrorCode::TaskNotFound
+                ) {
                     panic!("{}", err)
                 }
             }

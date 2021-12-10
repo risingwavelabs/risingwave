@@ -6,6 +6,7 @@ import com.risingwave.pgwire.database.DatabaseManager
 import com.risingwave.pgwire.msg.Messages
 import com.risingwave.pgwire.msg.PgMessage
 import com.risingwave.pgwire.msg.PgMsgType
+import io.grpc.StatusRuntimeException
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.ByteWriteChannel
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
@@ -51,6 +52,8 @@ class PgProtocol(
       }
     } catch (exp: IOException) {
       throw PgException(PgErrorCode.CONNECTION_EXCEPTION, exp)
+    } catch (exp: StatusRuntimeException) {
+      throw PgException.fromGrpcException(exp)
     } catch (exp: PgException) {
       throw exp
     } catch (exp: ClosedReceiveChannelException) {

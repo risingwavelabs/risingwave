@@ -1,7 +1,6 @@
 package com.risingwave.pgserver.database
 
 import com.risingwave.catalog.CatalogService
-import com.risingwave.common.exception.PgErrorCode
 import com.risingwave.common.exception.PgException
 import com.risingwave.execution.context.ExecutionContext
 import com.risingwave.execution.context.FrontendEnv
@@ -30,7 +29,7 @@ class RisingWaveDatabase internal constructor(
     return try {
       QueryExecution(executionContext, sqlStmt).call()
     } catch (e: Exception) {
-      throw PgException(PgErrorCode.INTERNAL_ERROR, e)
+      throw PgException.from(e)
     }
   }
 

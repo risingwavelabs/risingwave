@@ -1,7 +1,7 @@
 use crate::meta::{Epoch, MetaManager, SINGLE_VERSION_EPOCH};
 use async_trait::async_trait;
 use prost::Message;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::meta::cluster::Node;
 use risingwave_pb::meta::FragmentLocation;
 
@@ -56,7 +56,7 @@ impl StreamMetaManager for MetaManager {
                 ));
             }
             Err(err) => {
-                if err.to_grpc_status().code() != tonic::Code::NotFound {
+                if !matches!(err.inner(), ErrorCode::ItemNotFound(_)) {
                     return Err(err);
                 }
                 write_batch.push((
@@ -147,7 +147,7 @@ mod test {
             },
             (0..5).collect(),
         );
-        assert!(meta_manager.add_fragments_to_node(&location).await.is_ok());
+        meta_manager.add_fragments_to_node(&location).await?;
 
         let locations = meta_manager.load_all_fragments().await.unwrap();
         assert_eq!(locations.len(), 1);
