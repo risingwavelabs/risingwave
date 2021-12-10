@@ -15,6 +15,8 @@ pub enum HummockError {
     MockError(String),
     #[error("Object Store IO Error {0}")]
     ObjectIoError(String),
+    #[error("End Of An Iterator")]
+    EOF,
 }
 
 impl From<prost::DecodeError> for HummockError {

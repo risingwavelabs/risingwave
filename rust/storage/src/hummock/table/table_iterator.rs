@@ -1,109 +1,105 @@
 use std::sync::Arc;
 
-use super::super::{iterator::HummockIterator, HummockResult, HummockValue};
+use super::super::{HummockResult, HummockValue};
 use super::{BlockIterator, SeekPos, Table};
+use crate::hummock::iterator::HummockIterator;
 use crate::hummock::key_range::VersionComparator;
+use crate::hummock::HummockError;
 use async_trait::async_trait;
-use std::cmp::Ordering::Less;
+use std::cmp::Ordering::{Equal, Less};
 
 /// Iterates on a table
 pub struct TableIterator {
     /// The iterator of the current block.
     block_iter: Option<BlockIterator>,
 
-    /// Whether this is the first operation after seek. If so, we need some special
-    /// handling.
-    first_op_after_seek: bool,
+    /// Current block idx.
+    cur_idx: usize,
 
     /// Reference to the table
     table: Arc<Table>,
-
-    /// The next block to fetch when the current block has been finished (`block_iter` becomes
-    /// `None`).
-    next_blk: usize,
 }
 
 impl TableIterator {
     pub fn new(table: Arc<Table>) -> Self {
         Self {
             table,
+            cur_idx: 0,
             block_iter: None,
-            next_blk: 0,
-            first_op_after_seek: false,
         }
     }
 
     /// Seek to a block and return the first value of the data.
-    async fn seek_and_get(&mut self, idx: usize) -> HummockResult<(&[u8], &[u8])> {
-        let mut block_iter = BlockIterator::new(self.table.block(idx).await?);
-        block_iter.seek_to_first();
-        self.block_iter = Some(block_iter);
-        Ok(self.block_iter.as_ref().unwrap().data().unwrap())
-    }
-    pub fn is_valid(&self) -> bool {
-        if self.next_blk == 0 && self.block_iter.is_none() {
-            return true;
+    async fn seek_idx(&mut self, idx: usize) -> HummockResult<()> {
+        self.cur_idx = idx;
+        if idx >= self.table.block_count() {
+            self.block_iter = None;
+            Ok(())
+        } else {
+            let mut block_iter = BlockIterator::new(self.table.block(idx).await?);
+            block_iter.seek_to_first();
+            self.block_iter = Some(block_iter);
+            Ok(())
         }
+    }
 
-        if let Some(cur) = &self.block_iter {
-            if !self.first_op_after_seek && cur.is_last() {
-                return false;
-            }
-            return cur.is_valid();
-        }
-        false
+    pub fn key(&self) -> HummockResult<&[u8]> {
+        self.block_iter
+            .as_ref()
+            .and_then(|x| x.data().map(|(k, _)| k))
+            .ok_or(HummockError::EOF)
     }
-    async fn next_inner(&mut self) -> HummockResult<Option<(&[u8], HummockValue<&[u8]>)>> {
-        let data_available = match &mut self.block_iter {
-            Some(block_iter) => {
-                if self.first_op_after_seek {
-                    // If this is the first operation after any seek operation, we do not need to
-                    // advance the block iterator. The data should be already
-                    // available.
-                    self.first_op_after_seek = false;
-                    // It is possible that we seek to a position that a key is not available.
-                    self.block_iter.as_ref().unwrap().is_valid()
+    pub fn value(&self) -> HummockResult<HummockValue<&[u8]>> {
+        match self
+            .block_iter
+            .as_ref()
+            .and_then(|x| x.data().map(|(_, v)| v))
+        {
+            Some(val) => Ok(HummockValue::from_slice(val)?),
+            None => Err(HummockError::EOF),
+        }
+    }
+
+    async fn next_inner(&mut self) -> HummockResult<()> {
+        match &mut self.block_iter {
+            Some(iter) => {
+                iter.next();
+                if !iter.is_valid() {
+                    self.seek_idx(self.cur_idx + 1).await
                 } else {
-                    // Try to get the next value for the block iterator. The function will return
-                    // false when we reach the end of a block.
-                    block_iter.next()
+                    Ok(())
                 }
             }
-            _ => false,
-        };
-        let (key, raw_value) = if data_available {
-            self.block_iter.as_ref().unwrap().data().unwrap()
-        } else {
-            if self.next_blk >= self.table.block_count() {
-                // We reached the end of the table
-                return Ok(None);
-            }
-            let this_blk = self.next_blk;
-            self.next_blk += 1;
-            // Move to the next block and get the first entry in the block
-            self.seek_and_get(this_blk).await?
-        };
-        Ok(Some((key, HummockValue::from_slice(raw_value)?)))
+            None => Err(HummockError::EOF),
+        }
     }
 
     async fn rewind_inner(&mut self) -> HummockResult<()> {
-        self.next_blk = 0;
-        self.block_iter = None;
-        Ok(())
+        self.seek_idx(0).await
     }
 
     async fn seek_inner(&mut self, key: &[u8]) -> HummockResult<()> {
         let block_idx = self.table.meta.block_metas.partition_point(|offset| {
             // compare by version comparator
-            VersionComparator::compare_key(offset.smallest_key.as_slice(), key) == Less
+            let ord = VersionComparator::compare_key(offset.smallest_key.as_slice(), key);
+            ord == Less || ord == Equal
         });
         let block_idx = if block_idx > 0 { block_idx - 1 } else { 0 };
 
+        self.cur_idx = block_idx;
         let mut block_iter = BlockIterator::new(self.table.block(block_idx).await?);
         block_iter.seek(key, SeekPos::Origin);
-        self.block_iter = Some(block_iter);
-        self.first_op_after_seek = true;
-        self.next_blk = block_idx + 1;
+        if self.cur_idx < self.table.block_count() - 1 && !block_iter.is_valid() {
+            self.cur_idx += 1;
+            block_iter = BlockIterator::new(self.table.block(block_idx + 1).await?);
+            block_iter.seek_to_first();
+        }
+
+        self.block_iter = if block_iter.is_valid() {
+            Some(block_iter)
+        } else {
+            None
+        };
 
         Ok(())
     }
@@ -111,8 +107,16 @@ impl TableIterator {
 
 #[async_trait]
 impl HummockIterator for TableIterator {
-    async fn next(&mut self) -> HummockResult<Option<(&[u8], HummockValue<&[u8]>)>> {
+    async fn next(&mut self) -> HummockResult<()> {
         self.next_inner().await
+    }
+
+    fn key(&self) -> HummockResult<&[u8]> {
+        self.key()
+    }
+
+    fn value(&self) -> HummockResult<HummockValue<&[u8]>> {
+        self.value()
     }
 
     async fn rewind(&mut self) -> HummockResult<()> {
@@ -145,11 +149,19 @@ mod tests {
 
         let mut table_iter = TableIterator::new(Arc::new(table));
         let mut cnt = 0;
-        while let Some((key, value)) = table_iter.next().await.unwrap() {
+        table_iter.rewind().await.unwrap();
+        loop {
+            let key = table_iter.key().unwrap();
+            let value = table_iter.value().unwrap();
             assert_bytes_eq!(key, builder_test_key_of(cnt));
             assert_bytes_eq!(value.into_put_value().unwrap(), test_value_of(cnt));
             cnt += 1;
+            table_iter.next().await.unwrap();
+            if table_iter.key().is_err() {
+                break;
+            }
         }
+
         assert_eq!(cnt, TEST_KEYS_COUNT);
     }
 
@@ -168,31 +180,33 @@ mod tests {
         // We seek and access all the keys in random order
         for i in all_key_to_test {
             table_iter.seek(&builder_test_key_of(i)).await.unwrap();
-            let (key, _) = table_iter.next().await.unwrap().unwrap();
+            // table_iter.next().await.unwrap();
+            let key = table_iter.key().unwrap();
             assert_bytes_eq!(key, builder_test_key_of(i));
         }
 
         // Seek to key #500 and start iterating.
         table_iter.seek(&builder_test_key_of(500)).await.unwrap();
         for i in 500..TEST_KEYS_COUNT {
-            let (key, _) = table_iter.next().await.unwrap().unwrap();
+            let key = table_iter.key().unwrap();
             assert_eq!(key, builder_test_key_of(i));
+            table_iter.next().await.unwrap();
         }
-        assert!(matches!(table_iter.next().await.unwrap(), None));
+        assert!(matches!(table_iter.next().await, Err(HummockError::EOF)));
 
         // Seek to < first key
+
         let smallest_key = key_with_ts(format!("key_aaaa_{:05}", 0).as_bytes().to_vec(), 233);
         table_iter.seek(smallest_key.as_slice()).await.unwrap();
-        let (key, _) = table_iter.next().await.unwrap().unwrap();
+        let key = table_iter.key().unwrap();
         assert_eq!(key, builder_test_key_of(0));
 
         // Seek to > last key
         let largest_key = key_with_ts(format!("key_zzzz_{:05}", 0).as_bytes().to_vec(), 233);
         table_iter.seek(largest_key.as_slice()).await.unwrap();
-        assert!(matches!(table_iter.next().await.unwrap(), None));
+        assert!(matches!(table_iter.next().await, Err(HummockError::EOF)));
 
         // Seek to non-existing key
-        table_iter.seek(&builder_test_key_of(500)).await.unwrap();
         for idx in 1..TEST_KEYS_COUNT {
             // Seek to the previous key of each existing key. e.g.,
             // Our key space is `key_test_00000`, `key_test_00002`, `key_test_00004`, ...
@@ -209,9 +223,10 @@ mod tests {
                 .await
                 .unwrap();
 
-            let (key, _) = table_iter.next().await.unwrap().unwrap();
+            let key = table_iter.key().unwrap();
             assert_eq!(key, builder_test_key_of(idx));
+            table_iter.next().await.unwrap();
         }
-        assert!(matches!(table_iter.next().await.unwrap(), None));
+        assert!(matches!(table_iter.next().await, Err(HummockError::EOF)));
     }
 }

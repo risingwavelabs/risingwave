@@ -18,7 +18,15 @@ use async_trait::async_trait;
 pub trait HummockIterator {
     /// Get the next key/value pair in the table. If `None` is returned, the iterator must be
     /// rewinded to retrieve new values.
-    async fn next(&mut self) -> HummockResult<Option<(&[u8], HummockValue<&[u8]>)>>;
+    async fn next(&mut self) -> HummockResult<()>;
+
+    fn key(&self) -> HummockResult<&[u8]>;
+
+    fn value(&self) -> HummockResult<HummockValue<&[u8]>>;
+
+    fn is_valid(&self) -> bool {
+        self.key().is_ok()
+    }
 
     /// Reset the position of the iterator
     async fn rewind(&mut self) -> HummockResult<()>;

@@ -7,11 +7,13 @@ use crate::hummock::iterator::HummockIterator;
 use crate::hummock::key_range::VersionComparator;
 use crate::hummock::table::{BlockIterator, Table, TableIterator};
 use crate::hummock::value::HummockValue;
-use crate::hummock::HummockResult;
+use crate::hummock::{HummockError, HummockResult};
 
 pub struct ConcatIterator {
     tables: Vec<Arc<Table>>,
     table_count: usize,
+    // `None` means this iterator is not initialized yet. `Some` means this iterator can be
+    // accessed or arrives at EOF.
     cur_iter: Option<TableIterator>,
     cur_table_idx: usize,
 }
@@ -34,7 +36,6 @@ impl ConcatIterator {
             let mut block_iter = BlockIterator::new(block.clone());
             block_iter.seek_to_first();
             let (block_key, _) = block_iter.data().unwrap();
-
             // compare by version comparator
             VersionComparator::compare_key(block_key, key) == Less
         });
@@ -57,30 +58,57 @@ impl ConcatIterator {
         self.set_iter(0).await
     }
 
-    async fn next_inner(&mut self) -> HummockResult<Option<(&[u8], HummockValue<&[u8]>)>> {
+    async fn next_inner(&mut self) -> HummockResult<()> {
         if self.cur_iter.is_none() {
-            // call the iterator without rewinding
+            // This action should be in the constructor, but the `new` can not invoke async
+            // function.
             self.rewind_inner().await?;
         }
-        let valid = self.cur_iter.as_mut().unwrap().is_valid();
-        if valid {
-            return self.cur_iter.as_mut().unwrap().next().await;
-        }
+        self.cur_iter.as_mut().unwrap().next().await?;
 
-        if self.cur_table_idx + 1 < self.table_count {
-            // if still remains tables to iterate.
-            self.set_iter(self.cur_table_idx + 1).await?;
-            self.cur_iter.as_mut().unwrap().next().await
-        } else {
-            Ok(None)
+        match self.cur_iter.as_ref().unwrap().key() {
+            // this iterator is still valid.
+            Ok(_) => Ok(()),
+
+            // current table arrives at EOF, check if we can switch to the next table.
+            Err(HummockError::EOF) => {
+                if self.cur_table_idx + 1 < self.table_count {
+                    self.set_iter(self.cur_table_idx + 1).await?;
+                    Ok(())
+                } else {
+                    Err(HummockError::EOF)
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn key(&self) -> HummockResult<&[u8]> {
+        match &self.cur_iter {
+            Some(iter) => iter.key(),
+            None => Err(HummockError::EOF),
+        }
+    }
+    pub fn value(&self) -> HummockResult<HummockValue<&[u8]>> {
+        match &self.cur_iter {
+            Some(iter) => iter.value(),
+            None => Err(HummockError::EOF),
         }
     }
 }
 
 #[async_trait]
 impl HummockIterator for ConcatIterator {
-    async fn next(&mut self) -> HummockResult<Option<(&[u8], HummockValue<&[u8]>)>> {
+    async fn next(&mut self) -> HummockResult<()> {
         self.next_inner().await
+    }
+
+    fn key(&self) -> HummockResult<&[u8]> {
+        self.key()
+    }
+
+    fn value(&self) -> HummockResult<HummockValue<&[u8]>> {
+        self.value()
     }
 
     async fn rewind(&mut self) -> HummockResult<()> {
@@ -111,7 +139,8 @@ mod tests {
         iter.rewind().await.unwrap();
         loop {
             let table_idx = i / TEST_KEYS_COUNT;
-            let (key, val) = iter.next().await.unwrap().unwrap();
+            let key = iter.key().unwrap();
+            let val = iter.value().unwrap();
             assert_eq!(
                 key,
                 iterator_test_key_of(table_idx, i % TEST_KEYS_COUNT).as_slice()
@@ -122,15 +151,20 @@ mod tests {
             );
             i += 1;
             if i == TEST_KEYS_COUNT * 3 {
-                assert!(iter.next().await.unwrap().is_none());
+                assert!(matches!(iter.next().await, Err(HummockError::EOF)));
                 break;
             }
+            iter.next().await.unwrap();
         }
 
         iter.rewind().await.unwrap();
-        let (k, v) = iter.next().await.unwrap().unwrap();
-        assert_eq!(k, iterator_test_key_of(0, 0).as_slice());
-        assert_eq!(v.into_put_value().unwrap(), test_value_of(0, 0).as_slice());
+        let key = iter.key().unwrap();
+        let val = iter.value().unwrap();
+        assert_eq!(key, iterator_test_key_of(0, 0).as_slice());
+        assert_eq!(
+            val.into_put_value().unwrap(),
+            test_value_of(0, 0).as_slice()
+        );
     }
 
     #[tokio::test]
@@ -145,27 +179,37 @@ mod tests {
         iter.seek(iterator_test_key_of(1, 1).as_slice())
             .await
             .unwrap();
-        let (k, v) = iter.next().await.unwrap().unwrap();
-        assert_eq!(k, iterator_test_key_of(1, 1).as_slice());
-        assert_eq!(v.into_put_value().unwrap(), test_value_of(1, 1).as_slice());
+
+        let key = iter.key().unwrap();
+        let val = iter.value().unwrap();
+        assert_eq!(key, iterator_test_key_of(1, 1).as_slice());
+        assert_eq!(
+            val.into_put_value().unwrap(),
+            test_value_of(1, 1).as_slice()
+        );
 
         // Left edge case
         iter.seek(iterator_test_key_of(0, 0).as_slice())
             .await
             .unwrap();
-        let (k, v) = iter.next().await.unwrap().unwrap();
-        assert_eq!(k, iterator_test_key_of(0, 0).as_slice());
-        assert_eq!(v.into_put_value().unwrap(), test_value_of(0, 0).as_slice());
+        let key = iter.key().unwrap();
+        let val = iter.value().unwrap();
+        assert_eq!(key, iterator_test_key_of(0, 0).as_slice());
+        assert_eq!(
+            val.into_put_value().unwrap(),
+            test_value_of(0, 0).as_slice()
+        );
 
         // Right edge case
         iter.seek(iterator_test_key_of(2, TEST_KEYS_COUNT - 1).as_slice())
             .await
             .unwrap();
 
-        let (k, v) = iter.next().await.unwrap().unwrap();
-        assert_eq!(k, iterator_test_key_of(2, TEST_KEYS_COUNT - 1).as_slice());
+        let key = iter.key().unwrap();
+        let val = iter.value().unwrap();
+        assert_eq!(key, iterator_test_key_of(2, TEST_KEYS_COUNT - 1).as_slice());
         assert_eq!(
-            v.into_put_value().unwrap(),
+            val.into_put_value().unwrap(),
             test_value_of(2, TEST_KEYS_COUNT - 1).as_slice()
         );
 
@@ -173,7 +217,7 @@ mod tests {
         iter.seek(iterator_test_key_of(4, 10).as_slice())
             .await
             .unwrap();
-        let res = iter.next().await.unwrap();
-        assert!(res.is_none());
+        let res = iter.next().await;
+        assert!(matches!(res, Err(HummockError::EOF)));
     }
 }
