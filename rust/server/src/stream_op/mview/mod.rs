@@ -2,24 +2,23 @@ mod mview_sink;
 mod mview_state;
 mod mview_table;
 
+use bytes::BufMut;
+
 use risingwave_common::array::Row;
 use risingwave_common::error::Result;
-use risingwave_common::types::{
-    serialize_datum_into, serialize_datum_not_null_into, Datum, Scalar,
-};
+use risingwave_common::types::{serialize_datum_into, Datum};
 
-fn serialize_pk(pk: &Row) -> Result<Vec<u8>> {
-    let mut pk_serializer = memcomparable::Serializer::default();
-    for datum in &pk.0 {
-        serialize_datum_into(datum, &mut pk_serializer)?;
-    }
-    Ok(pk_serializer.into_inner())
+use super::{OrderedSchemaedSerializable, SortedKeySerializer};
+
+fn serialize_pk(pk: &Row, serializer: &SortedKeySerializer) -> Result<Vec<u8>> {
+    Ok(serializer.order_based_scehmaed_serialize(pk))
 }
 
-fn serialize_cell_idx(cell_idx: i32) -> Result<Vec<u8>> {
-    let mut serializer = memcomparable::Serializer::default();
-    serialize_datum_not_null_into(&Some(cell_idx.to_scalar_value()), &mut serializer)?;
-    Ok(serializer.into_inner())
+fn serialize_cell_idx(cell_idx: u32) -> Result<Vec<u8>> {
+    let mut buf = Vec::with_capacity(4);
+    buf.put_u32_le(cell_idx);
+    debug_assert_eq!(buf.len(), 4);
+    Ok(buf)
 }
 
 fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {

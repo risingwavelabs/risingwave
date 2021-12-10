@@ -7,7 +7,6 @@ use risingwave_common::util::sort_util::OrderType;
 
 use super::mview_state::ManagedMViewState;
 use crate::stream_op::keyspace::StateStore;
-use crate::stream_op::state_aggregation::SortedKeySerializer;
 use crate::stream_op::Barrier;
 use crate::stream_op::{Executor, Message, Result, SimpleExecutor, StreamChunk};
 
@@ -29,15 +28,14 @@ impl<S: StateStore> MViewSinkExecutor<S> {
         state_store: S,
         orderings: Vec<OrderType>,
     ) -> Self {
-        let sort_key_serializer = SortedKeySerializer::new(orderings);
         Self {
             input,
             local_state: ManagedMViewState::new(
                 prefix,
                 schema.clone(),
                 pk_columns.clone(),
+                orderings,
                 state_store,
-                sort_key_serializer,
             ),
             schema,
             pk_columns,
@@ -168,12 +166,19 @@ mod tests {
             },
         ];
         let pks = vec![0_usize];
+        let orderings = vec![OrderType::Ascending];
 
         let state_store = MemoryStateStore::new();
         let state_store_impl = StateStoreImpl::MemoryStateStore(state_store.clone());
 
         let prefix = store_mgr
-            .create_materialized_view(&table_id, &columns, pks.clone(), state_store_impl)
+            .create_materialized_view(
+                &table_id,
+                &columns,
+                pks.clone(),
+                orderings,
+                state_store_impl,
+            )
             .unwrap();
         // Prepare source chunks.
         let chunk1 = StreamChunk {

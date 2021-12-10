@@ -559,6 +559,7 @@ impl StreamManagerCore {
                     &table_id,
                     columns,
                     pks.clone(),
+                    orderings.clone(),
                     self.state_store.clone(),
                 )?;
                 let state_store = self.state_store.as_memory();

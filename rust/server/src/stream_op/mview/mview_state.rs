@@ -1,14 +1,15 @@
 use std::collections::HashMap;
 
-use super::{serialize_cell, serialize_cell_idx};
+use super::{serialize_cell, serialize_cell_idx, serialize_pk};
 
 use crate::stream_op::keyspace::StateStore;
 
-use crate::stream_op::state_aggregation::{OrderedSchemaedSerializable, SortedKeySerializer};
+use crate::stream_op::state_aggregation::SortedKeySerializer;
 use bytes::Bytes;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::util::sort_util::OrderType;
 
 /// `ManagedMviewState` buffers recent mutations. Data will be written
 /// to backend storage on calling `flush`.
@@ -16,9 +17,9 @@ pub struct ManagedMViewState<S: StateStore> {
     prefix: Vec<u8>,
     schema: Schema,
     pk_columns: Vec<usize>,
+    sort_key_serializer: SortedKeySerializer,
     memtable: HashMap<Row, Option<Row>>,
     storage: S,
-    sort_key_serializer: SortedKeySerializer,
 }
 
 impl<S: StateStore> ManagedMViewState<S> {
@@ -26,8 +27,8 @@ impl<S: StateStore> ManagedMViewState<S> {
         prefix: Vec<u8>,
         schema: Schema,
         pk_columns: Vec<usize>,
+        orderings: Vec<OrderType>,
         storage: S,
-        sort_key_serializer: SortedKeySerializer,
     ) -> Self {
         Self {
             prefix,
@@ -35,7 +36,7 @@ impl<S: StateStore> ManagedMViewState<S> {
             pk_columns,
             memtable: HashMap::new(),
             storage,
-            sort_key_serializer,
+            sort_key_serializer: SortedKeySerializer::new(orderings),
         }
     }
 
@@ -54,13 +55,14 @@ impl<S: StateStore> ManagedMViewState<S> {
 
         for (pk, cells) in self.memtable.drain() {
             debug_assert_eq!(self.pk_columns.len(), pk.0.len());
-            let pk_buf = self.sort_key_serializer.order_based_scehmaed_serialize(&pk);
+            let pk_buf = serialize_pk(&pk, &self.sort_key_serializer)?;
             for cell_idx in 0..self.schema.len() {
                 // TODO(MrCroxx): More efficient encoding is needed.
+                // format: [ prefix | pk_buf | cell_idx (4B)]
                 let key = [
                     &self.prefix[..],
                     &pk_buf[..],
-                    &serialize_cell_idx(cell_idx as i32)?[..],
+                    &serialize_cell_idx(cell_idx as u32)?[..],
                 ]
                 .concat();
                 let value = match &cells {
@@ -99,14 +101,13 @@ mod tests {
         ]);
         let pk_columns = vec![0];
         let orderings = vec![OrderType::Ascending];
-        let sort_key_serializer = SortedKeySerializer::new(orderings);
         let prefix = b"test-prefix-42".to_vec();
         let mut state = ManagedMViewState::new(
             prefix.clone(),
             schema,
             pk_columns,
+            orderings,
             state_store.clone(),
-            sort_key_serializer,
         );
 
         state.put(

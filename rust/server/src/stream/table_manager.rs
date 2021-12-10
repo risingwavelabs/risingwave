@@ -6,6 +6,7 @@ use risingwave_common::array::InternalError;
 use risingwave_common::catalog::Schema;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::{ensure, gen_error};
 use risingwave_pb::plan::ColumnDesc;
 
@@ -39,6 +40,7 @@ pub trait TableManager: Sync + Send {
         table_id: &TableId,
         columns: &[ColumnDesc],
         pk_columns: Vec<usize>,
+        orderings: Vec<OrderType>,
         state_store: StateStoreImpl,
     ) -> Result<Vec<u8>>;
 }
@@ -118,6 +120,7 @@ impl TableManager for SimpleTableManager {
         table_id: &TableId,
         columns: &[ColumnDesc],
         pk_columns: Vec<usize>,
+        orderings: Vec<OrderType>,
         state_store: StateStoreImpl,
     ) -> Result<Vec<u8>> {
         let mut tables = self.get_tables()?;
@@ -138,6 +141,7 @@ impl TableManager for SimpleTableManager {
                 prefix.clone(),
                 schema,
                 pk_columns,
+                orderings,
                 match state_store {
                     StateStoreImpl::MemoryStateStore(s) => s,
                     _ => unreachable!(),

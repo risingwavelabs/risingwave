@@ -86,7 +86,7 @@ impl Executor for RowSeqScanExecutor {
 
     async fn next(&mut self) -> Result<Option<DataChunk>> {
         match self.iter.as_mut_memory().next().await? {
-            Some((_key_row, value_row)) => {
+            Some(value_row) => {
                 // Scan through value pairs.
                 // Make rust analyzer happy.
                 let row = value_row as Row;
@@ -132,7 +132,7 @@ mod tests {
     use risingwave_common::types::{Int32Type, Scalar};
     use risingwave_common::util::sort_util::OrderType;
 
-    use crate::stream_op::{MViewTable, ManagedMViewState, MemoryStateStore, SortedKeySerializer};
+    use crate::stream_op::{MViewTable, ManagedMViewState, MemoryStateStore};
 
     use super::*;
 
@@ -147,19 +147,19 @@ mod tests {
         ]);
         let pk_columns = vec![0];
         let orderings = vec![OrderType::Ascending];
-        let sort_key_serializer = SortedKeySerializer::new(orderings);
         let mut state = ManagedMViewState::new(
             prefix.clone(),
             schema.clone(),
             pk_columns.clone(),
+            orderings.clone(),
             state_store.clone(),
-            sort_key_serializer,
         );
 
         let table = Arc::new(MViewTable::new(
             prefix.clone(),
             schema.clone(),
             pk_columns.clone(),
+            orderings,
             state_store.clone(),
         ));
 
