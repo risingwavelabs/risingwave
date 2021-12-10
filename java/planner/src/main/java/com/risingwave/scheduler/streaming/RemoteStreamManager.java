@@ -32,17 +32,18 @@ import java.util.stream.IntStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/**
- * The implementation of a stream manager synchronized with meta service.
- *
- * <p>Note 2021.12.09: copied from local stream manager.
- */
+/** The implementation of a stream manager synchronized with meta service. */
 public class RemoteStreamManager implements StreamManager {
   private static final Logger LOGGER = LoggerFactory.getLogger(RemoteStreamManager.class);
   private final MetaClient metaClient;
   private final WorkerNodeManager workerNodeManager;
   private final Map<WorkerNode, Set<com.risingwave.proto.streaming.plan.StreamFragment>>
       fragmentAllocation = new HashMap<>();
+
+  // Used for id generation.
+  private final int idInterval = 100;
+  private int fragmentId = 1;
+  private int fragmentIdCap = 1;
 
   @Inject
   public RemoteStreamManager(MetaClient client, WorkerNodeManager workerNodeManager) {
@@ -84,17 +85,36 @@ public class RemoteStreamManager implements StreamManager {
         addFragmentToWorker(nodeList.get(nodes.get(host)), fragment);
       }
     }
+
+    // Init Id allocation variables.
+    GetIdRequest idRequest =
+        GetIdRequest.newBuilder()
+            .setCategory(GetIdRequest.IdCategory.Fragment)
+            .setInterval(idInterval)
+            .build();
+    GetIdResponse idResponse = metaClient.getId(idRequest);
+    if (response.getStatus().getCode() != Status.Code.OK) {
+      throw new PgException(PgErrorCode.INTERNAL_ERROR, "Get fragment Id failed");
+    }
+    fragmentId = idResponse.getId();
+    fragmentIdCap = fragmentId + idInterval - 1;
   }
 
   @Override
   public int createFragment() {
-    GetIdRequest request =
-        GetIdRequest.newBuilder().setCategory(GetIdRequest.IdCategory.Fragment).build();
-    GetIdResponse response = metaClient.getId(request);
-    if (response.getStatus().getCode() != Status.Code.OK) {
-      throw new PgException(PgErrorCode.INTERNAL_ERROR, "Get fragment Id failed");
+    if (fragmentId <= fragmentIdCap) {
+      return fragmentId++;
+    } else {
+      GetIdRequest idRequest =
+          GetIdRequest.newBuilder()
+              .setCategory(GetIdRequest.IdCategory.Fragment)
+              .setInterval(idInterval)
+              .build();
+      GetIdResponse idResponse = metaClient.getId(idRequest);
+      fragmentId = idResponse.getId();
+      fragmentIdCap = fragmentId + idInterval - 1;
+      return fragmentId;
     }
-    return response.getId();
   }
 
   @Override

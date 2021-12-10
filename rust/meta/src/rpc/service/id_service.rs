@@ -24,12 +24,13 @@ impl IdGeneratorService for IdGeneratorServiceImpl {
     ) -> Result<Response<GetIdResponse>, Status> {
         let req = request.into_inner();
         let category = req.get_category();
+        let interval = req.get_interval();
         Ok(Response::new(GetIdResponse {
             status: None,
             id: self
                 .mmc
                 .id_gen_manager
-                .generate(category)
+                .generate(category, interval)
                 .await
                 .map_err(|e| e.to_grpc_status())?,
         }))
