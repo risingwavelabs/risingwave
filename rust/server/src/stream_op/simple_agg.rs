@@ -2,9 +2,9 @@
 
 use std::sync::Arc;
 
-use super::{aggregation::*, Barrier, Keyspace, StateStore};
+use super::{aggregation::*, pk_input_arrays, Barrier, Keyspace, PkIndicesRef, StateStore};
 use super::{Executor, Message};
-use crate::stream_op::PKVec;
+use crate::stream_op::PkIndices;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::*;
@@ -31,7 +31,7 @@ pub struct SimpleAggExecutor<S: StateStore> {
     schema: Schema,
 
     /// Primary key indices.
-    pk_indices: PKVec,
+    pk_indices: PkIndices,
 
     /// If `next_barrier_message` exists, we should send a Barrier while next called.
     // TODO: This can be optimized while async gen fn stablized.
@@ -43,7 +43,7 @@ pub struct SimpleAggExecutor<S: StateStore> {
     /// Aggregation states of the current operator.
     /// This is an `Option` and the initial state is built when `Executor::next` is called, since
     /// we may not want `Self::new` to be an `async` function.
-    state: Option<AggState<S>>,
+    states: Option<AggState<S>>,
 
     /// The input of the current operator.
     input: Box<dyn Executor>,
@@ -57,8 +57,9 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
         keyspace: Keyspace<S>,
-        pk_indices: PKVec,
+        pk_indices: PkIndices,
     ) -> Self {
+        // simple agg does not have group key
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
 
         Self {
@@ -66,7 +67,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             pk_indices,
             cached_barrier_message: None,
             keyspace,
-            state: None,
+            states: None,
             input,
             agg_calls,
         }
@@ -88,35 +89,35 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
 
         // --- Retrieve all aggregation inputs in advance ---
         let all_agg_input_arrays = agg_input_arrays(&self.agg_calls, &columns);
+        let pk_input_arrays = pk_input_arrays(self.input.pk_indices(), &columns);
+        let input_pk_length = self.input.pk_indices().len();
+
+        // When applying batch, we will send columns of primary keys to the last N columns.
+        let all_agg_data = all_agg_input_arrays
+            .into_iter()
+            .map(|mut input_arrays| {
+                input_arrays.extend(pk_input_arrays.iter());
+                input_arrays
+            })
+            .collect_vec();
 
         // 1. Retrieve previous state from the KeyedState. If they didn't exist, the ManagedState
         // will automatically create new ones for them.
-        if self.state.is_none() {
+        if self.states.is_none() {
             let state =
-                generate_agg_state(None, &self.agg_calls, &self.keyspace, self.pk_indices.len())
-                    .await?;
-            self.state = Some(state);
+                generate_agg_state(None, &self.agg_calls, &self.keyspace, input_pk_length).await?;
+            self.states = Some(state);
         }
-        let state = self.state.as_mut().unwrap();
+        let states = self.states.as_mut().unwrap();
 
         // 2. Mark the state as dirty by filling prev states
-        state.may_mark_as_dirty().await?;
+        states.may_mark_as_dirty().await?;
 
-        // 3. Apply batch to each of the state
-        for (agg_state, input_arrays) in state
-            .managed_states
-            .iter_mut()
-            .zip(all_agg_input_arrays.iter())
-        {
-            if input_arrays.is_empty() {
-                agg_state
-                    .apply_batch(&ops, visibility.as_ref(), &[])
-                    .await?;
-            } else {
-                agg_state
-                    .apply_batch(&ops, visibility.as_ref(), &[input_arrays[0]]) // TODO: multiple args
-                    .await?;
-            }
+        // 3. Apply batch to each of the state (per agg_call)
+        for (agg_state, data) in states.managed_states.iter_mut().zip(all_agg_data.iter()) {
+            agg_state
+                .apply_batch(&ops, visibility.as_ref(), data)
+                .await?;
         }
 
         Ok(())
@@ -127,7 +128,7 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
         // Some state will have the correct output only after their internal states have been fully
         // flushed.
 
-        let states = match self.state.as_mut() {
+        let states = match self.states.as_mut() {
             Some(states) if states.is_dirty() => states,
             _ => return Ok(None), // Nothing to flush.
         };
@@ -185,7 +186,7 @@ impl<S: StateStore> Executor for SimpleAggExecutor<S> {
         &self.schema
     }
 
-    fn pk_indices(&self) -> &[usize] {
+    fn pk_indices(&self) -> PkIndicesRef {
         &self.pk_indices
     }
 }
@@ -217,6 +218,8 @@ mod tests {
             columns: vec![
                 column_nonnull! { I64Array, Int64Type, [100, 10, 4] },
                 column_nonnull! { I64Array, Int64Type, [200, 14, 300] },
+                // primary key column
+                column_nonnull! { I64Array, Int64Type, [1001, 1002, 1003] },
             ],
             visibility: None,
         };
@@ -225,6 +228,8 @@ mod tests {
             columns: vec![
                 column_nonnull! { I64Array, Int64Type, [100, 10, 4, 104] },
                 column_nonnull! { I64Array, Int64Type, [200, 14, 300, 500] },
+                // primary key column
+                column_nonnull! { I64Array, Int64Type, [1001, 1002, 1003, 1004] },
             ],
             visibility: Some((vec![true, false, true, true]).try_into().unwrap()),
         };
@@ -236,10 +241,14 @@ mod tests {
                 Field {
                     data_type: Int64Type::create(false),
                 },
+                // primary key column
+                Field {
+                    data_type: Int64Type::create(false),
+                },
             ],
         };
 
-        let mut source = MockSource::new(schema);
+        let mut source = MockSource::new(schema, vec![2]); // pk
         source.push_chunks([chunk1].into_iter());
         source.push_barrier(1, false);
         source.push_chunks([chunk2].into_iter());

@@ -13,7 +13,7 @@ use risingwave_common::types::{
 };
 
 use super::super::keyspace::{Keyspace, StateStore};
-use super::extreme_serializer::{variants, ExtremePK, ExtremeSerializer};
+use super::extreme_serializer::{variants, ExtremePk, ExtremeSerializer};
 use crate::stream_op::{AggArgs, AggCall};
 use itertools::Itertools;
 
@@ -124,10 +124,10 @@ where
 {
     /// Top N elements in the state, which stores the mapping of sort key -> (dirty, original
     /// value). This BTreeMap always maintain the elements that we are sure it's top n.
-    top_n: BTreeMap<(A::OwnedItem, ExtremePK), ScalarImpl>,
+    top_n: BTreeMap<(A::OwnedItem, ExtremePk), ScalarImpl>,
 
     /// The actions that will be taken on next flush
-    flush_buffer: BTreeMap<(A::OwnedItem, ExtremePK), FlushStatus>,
+    flush_buffer: BTreeMap<(A::OwnedItem, ExtremePk), FlushStatus>,
 
     /// Number of items in the state including those not in top n cache but in state store.
     total_count: usize,
@@ -189,6 +189,8 @@ where
         pk_length: usize,
     ) -> Result<Self> {
         // Create the internal state based on the value we get.
+        let kind = data_type.data_type_kind();
+
         Ok(Self {
             top_n: BTreeMap::new(),
             flush_buffer: BTreeMap::new(),
@@ -196,7 +198,7 @@ where
             keyspace,
             top_n_count,
             data_type,
-            serializer: ExtremeSerializer::new(pk_length),
+            serializer: ExtremeSerializer::new(kind, pk_length),
             pk_length,
         })
     }
@@ -228,7 +230,19 @@ where
         data: &[&ArrayImpl],
     ) -> Result<()> {
         debug_assert!(super::verify_batch(ops, visibility, data));
-        assert_eq!(data.len(), 1);
+
+        // For extreme state, there's only one column for data, and following columns are for
+        // primary keys!
+        assert_eq!(
+            data.len(),
+            1 + self.pk_length,
+            "mismatched data input with pk_length"
+        );
+
+        let data_column: &A = data[0].into();
+        let pk_columns = (0..self.pk_length)
+            .map(|idx| data[idx + 1].as_int64()) // FIXME: assuming primary keys are i64
+            .collect_vec();
 
         // `self.top_n` only contains parts of the top keys. When applying batch, we only:
         // 1. Insert keys that is in the range of top n, so that we only maintain the top keys we
@@ -236,11 +250,6 @@ where
         // 2. Delete keys if exists in top_n cache.
         // If the top n cache becomes empty after applying the batch, we will merge data from
         // flush_buffer and state store when getting the output.
-
-        let data_column: &A = data[0].into();
-        let pk_columns = (0..self.pk_length)
-            .map(|idx| data[idx + 1].as_int64())
-            .collect_vec();
 
         for (id, (op, key)) in ops.iter().zip(data_column.iter()).enumerate() {
             let visible = visibility.map(|x| x.is_set(id).unwrap()).unwrap_or(true);
@@ -345,15 +354,12 @@ where
             // account. EXTREME_MIN and EXTREME_MAX will significantly impact the
             // following logic.
 
-            let all_data = self.keyspace.scan(self.top_n_count).await?;
+            let all_data = self.keyspace.scan_strip_prefix(self.top_n_count).await?;
+            let kind = self.data_type.data_type_kind();
 
             for (raw_key, raw_value) in all_data {
                 let mut deserializer = memcomparable::Deserializer::new(&raw_value[..]);
-                let value = deserialize_datum_not_null_from(
-                    &self.data_type.data_type_kind(),
-                    &mut deserializer,
-                )?
-                .unwrap();
+                let value = deserialize_datum_not_null_from(&kind, &mut deserializer)?.unwrap();
                 let key = value.clone().try_into().unwrap();
                 let pks = self.serializer.get_pk(&raw_key[..])?;
                 self.top_n.insert((key, pks), value);
@@ -381,7 +387,7 @@ where
 
         for ((key, pks), v) in std::mem::take(&mut self.flush_buffer) {
             let key_encoded = self.serializer.serialize(key, &pks)?;
-            let key_encoded = [self.keyspace.prefix(), &key_encoded].concat();
+            let key_encoded = self.keyspace.prefixed_key(key_encoded);
 
             match v.into_option() {
                 Some(v) => {
@@ -437,9 +443,10 @@ where
     A::OwnedItem: Ord,
 {
     #[cfg(test)]
-    pub async fn iterate_store(&self) -> Result<Vec<(A::OwnedItem, ExtremePK)>> {
-        let all_data = self.keyspace.scan(None).await?;
+    pub async fn iterate_store(&self) -> Result<Vec<(A::OwnedItem, ExtremePk)>> {
+        let all_data = self.keyspace.scan_strip_prefix(None).await?;
         let mut result = vec![];
+        let _kind = self.data_type.data_type_kind();
 
         for (raw_key, raw_value) in all_data {
             let mut deserializer = memcomparable::Deserializer::new(&raw_value[..]);
@@ -456,7 +463,7 @@ where
     }
 
     #[cfg(test)]
-    pub async fn iterate_topn_cache(&self) -> Result<Vec<(A::OwnedItem, ExtremePK)>> {
+    pub async fn iterate_topn_cache(&self) -> Result<Vec<(A::OwnedItem, ExtremePk)>> {
         Ok(self.top_n.iter().map(|(k, _)| k.clone()).collect())
     }
 }
@@ -729,7 +736,102 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_same_value() {
+    async fn test_replicated_value_min() {
+        test_replicated_value::<{ variants::EXTREME_MIN }>().await
+    }
+
+    #[tokio::test]
+    async fn test_replicated_value_max() {
+        test_replicated_value::<{ variants::EXTREME_MAX }>().await
+    }
+
+    async fn test_replicated_value<const EXTREME_TYPE: usize>() {
+        let store = MemoryStateStore::new();
+        let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
+
+        let pk_length = 1;
+        let mut managed_state = GenericManagedState::<_, I64Array, EXTREME_TYPE>::new(
+            keyspace,
+            Int64Type::create(false),
+            Some(3),
+            0,
+            pk_length,
+        )
+        .await
+        .unwrap();
+        assert!(!managed_state.is_dirty());
+
+        let value_buffer =
+            I64Array::from_slice(&[Some(1), Some(1), Some(4), Some(5), Some(1), Some(4)])
+                .unwrap()
+                .into();
+
+        let pk_buffer = I64Array::from_slice(&[
+            Some(1001),
+            Some(1002),
+            Some(1003),
+            Some(1004),
+            Some(1005),
+            Some(1006),
+        ])
+        .unwrap()
+        .into();
+
+        let extreme = ScalarImpl::Int64(match EXTREME_TYPE {
+            variants::EXTREME_MIN => 1,
+            variants::EXTREME_MAX => 5,
+            _ => unreachable!(),
+        });
+
+        // insert 1, 5
+        managed_state
+            .apply_batch(
+                &[Op::Insert; 2],
+                None,
+                &[
+                    &I64Array::from_slice(&[Some(1), Some(5)]).unwrap().into(),
+                    &I64Array::from_slice(&[Some(2001), Some(2002)])
+                        .unwrap()
+                        .into(),
+                ],
+            )
+            .await
+            .unwrap();
+
+        // insert 1 1 4 5 1 4
+        managed_state
+            .apply_batch(&[Op::Insert; 6], None, &[&value_buffer, &pk_buffer])
+            .await
+            .unwrap();
+
+        // flush
+        let mut write_batch = vec![];
+        managed_state.flush(&mut write_batch).unwrap();
+        store.ingest_batch(write_batch).await.unwrap();
+
+        // The minimum should be 1, or the maximum should be 5
+        assert_eq!(
+            managed_state.get_output().await.unwrap(),
+            Some(extreme.clone())
+        );
+
+        // delete 1 1 4 5 1 4
+        managed_state
+            .apply_batch(&[Op::Delete; 6], None, &[&value_buffer, &pk_buffer])
+            .await
+            .unwrap();
+
+        // flush
+        let mut write_batch = vec![];
+        managed_state.flush(&mut write_batch).unwrap();
+        store.ingest_batch(write_batch).await.unwrap();
+
+        // The minimum should still be 1, or the maximum should still be 5
+        assert_eq!(managed_state.get_output().await.unwrap(), Some(extreme));
+    }
+
+    #[tokio::test]
+    async fn test_same_group_of_value() {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
         let mut managed_state =
@@ -776,7 +878,7 @@ mod tests {
             managed_state.flush(&mut write_batch).unwrap();
             store.ingest_batch(write_batch).await.unwrap();
 
-            // The minimum should be 0
+            // The minimum should be 6
             assert_eq!(
                 managed_state.get_output().await.unwrap(),
                 Some(ScalarImpl::Int64(6))

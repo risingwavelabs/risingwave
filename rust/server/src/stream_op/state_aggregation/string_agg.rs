@@ -83,7 +83,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
 impl<S: StateStore> ManagedStringAggState<S> {
     async fn read_all_into_memory(&mut self) -> Result<()> {
         // Read all.
-        let all_data = self.keyspace.scan(None).await?;
+        let all_data = self.keyspace.scan_strip_prefix(None).await?;
         for (raw_key, raw_value) in all_data {
             // We only need to deserialize the value, and keep the key as bytes.
             let mut deserializer = memcomparable::Deserializer::new(&raw_value[..]);

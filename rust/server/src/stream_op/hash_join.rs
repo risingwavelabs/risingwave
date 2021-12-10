@@ -1,6 +1,6 @@
 use super::barrier_align::{AlignedMessage, BarrierAligner};
 use super::{Executor, Message};
-use crate::stream_op::PKVec;
+use crate::stream_op::{PkIndices, PkIndicesRef};
 use async_trait::async_trait;
 use risingwave_common::array::{ArrayBuilderImpl, Op, Row, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
@@ -186,7 +186,7 @@ pub struct HashJoinExecutor<const T: JoinTypePrimitive> {
     /// The schema of the hash join executor
     schema: Schema,
     /// The primary key indices of the schema
-    pk_indices: PKVec,
+    pk_indices: PkIndices,
     /// The parameters of the left join executor
     side_l: JoinSide,
     /// The parameters of the right join executor
@@ -213,7 +213,7 @@ impl<const T: JoinTypePrimitive> Executor for HashJoinExecutor<T> {
         &self.schema
     }
 
-    fn pk_indices(&self) -> &[usize] {
+    fn pk_indices(&self) -> PkIndicesRef {
         &self.pk_indices
     }
 }
@@ -224,7 +224,7 @@ impl<const T: JoinTypePrimitive> HashJoinExecutor<T> {
         input_r: Box<dyn Executor>,
         params_l: JoinParams,
         params_r: JoinParams,
-        pk_indices: PKVec,
+        pk_indices: PkIndices,
     ) -> Self {
         let new_column_n = input_l.schema().len() + input_r.schema().len();
         let side_l_column_n = input_l.schema().len();

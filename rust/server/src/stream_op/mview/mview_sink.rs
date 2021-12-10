@@ -8,6 +8,7 @@ use risingwave_common::util::sort_util::OrderType;
 use super::mview_state::ManagedMViewState;
 use crate::stream_op::keyspace::StateStore;
 use crate::stream_op::Barrier;
+use crate::stream_op::PkIndicesRef;
 use crate::stream_op::{Executor, Message, Result, SimpleExecutor, StreamChunk};
 
 /// `MViewSinkExecutor` writes data to a row-based memtable, so that data could
@@ -64,7 +65,7 @@ impl<S: StateStore> Executor for MViewSinkExecutor<S> {
         &self.schema
     }
 
-    fn pk_indices(&self) -> &[usize] {
+    fn pk_indices(&self) -> PkIndicesRef {
         &self.pk_columns
     }
 }
@@ -202,6 +203,7 @@ mod tests {
         let schema = Schema::try_from(&columns).unwrap();
         let source = MockSource::with_messages(
             schema.clone(),
+            PkIndices::new(),
             vec![
                 Message::Chunk(chunk1),
                 Message::Barrier(Barrier::default()),

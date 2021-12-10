@@ -4,7 +4,7 @@ use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op};
 use risingwave_common::error::Result;
 use risingwave_common::{catalog::Schema, expr::BoxedExpression};
 
-use super::{Executor, Message, SimpleExecutor, StreamChunk};
+use super::{Executor, Message, PkIndicesRef, SimpleExecutor, StreamChunk};
 
 /// `FilterExecutor` filters data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a boolean array on whether each item should be retained. And then,
@@ -34,7 +34,7 @@ impl Executor for FilterExecutor {
         self.input.schema()
     }
 
-    fn pk_indices(&self) -> &[usize] {
+    fn pk_indices(&self) -> PkIndicesRef {
         self.input.pk_indices()
     }
 }
@@ -147,7 +147,7 @@ mod tests {
     use risingwave_pb::expr::expr_node::Type as ProstExprType;
 
     use crate::stream_op::test_utils::MockSource;
-    use crate::stream_op::{Executor, FilterExecutor, Message};
+    use crate::stream_op::{Executor, FilterExecutor, Message, PkIndices};
     use crate::*;
     use risingwave_common::column_nonnull;
     use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
@@ -191,7 +191,7 @@ mod tests {
                 },
             ],
         };
-        let source = MockSource::with_chunks(schema, vec![chunk1, chunk2]);
+        let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);
 
         let left_type = Int64Type::create(false);
         let left_expr = InputRefExpression::new(left_type, 0);

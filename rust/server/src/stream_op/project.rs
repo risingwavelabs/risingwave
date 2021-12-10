@@ -1,20 +1,20 @@
 use async_trait::async_trait;
 
-use crate::stream_op::PKVec;
+use crate::stream_op::PkIndices;
 use itertools::Itertools;
 use risingwave_common::array::{column::Column, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::expr::BoxedExpression;
 
-use super::{Executor, Message, SimpleExecutor, StreamChunk};
+use super::{Executor, Message, PkIndicesRef, SimpleExecutor, StreamChunk};
 
 /// `ProjectExecutor` project data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a new data chunk. And then, `ProjectExecutor` will insert, delete
 /// or update element into next operator according to the result of the expression.
 pub struct ProjectExecutor {
     schema: Schema,
-    pk_indices: PKVec,
+    pk_indices: PkIndices,
 
     /// The input of the current operator
     input: Box<dyn Executor>,
@@ -23,7 +23,11 @@ pub struct ProjectExecutor {
 }
 
 impl ProjectExecutor {
-    pub fn new(input: Box<dyn Executor>, pk_indices: PKVec, exprs: Vec<BoxedExpression>) -> Self {
+    pub fn new(
+        input: Box<dyn Executor>,
+        pk_indices: PkIndices,
+        exprs: Vec<BoxedExpression>,
+    ) -> Self {
         let schema = Schema {
             fields: exprs
                 .iter()
@@ -51,7 +55,7 @@ impl Executor for ProjectExecutor {
         &self.schema
     }
 
-    fn pk_indices(&self) -> &[usize] {
+    fn pk_indices(&self) -> PkIndicesRef {
         &self.pk_indices
     }
 }
@@ -103,7 +107,7 @@ impl SimpleExecutor for ProjectExecutor {
 #[cfg(test)]
 mod tests {
     use crate::stream_op::test_utils::MockSource;
-    use crate::stream_op::{Executor, Message, ProjectExecutor};
+    use crate::stream_op::{Executor, Message, PkIndices, ProjectExecutor};
     use crate::*;
     use itertools::Itertools;
     use risingwave_common::array::I64Array;
@@ -142,7 +146,7 @@ mod tests {
                 },
             ],
         };
-        let source = MockSource::with_chunks(schema, vec![chunk1, chunk2]);
+        let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);
 
         let left_type = Int64Type::create(false);
         let left_expr = InputRefExpression::new(left_type, 0);

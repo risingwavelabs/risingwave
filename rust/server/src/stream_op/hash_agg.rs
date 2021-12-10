@@ -3,10 +3,10 @@
 use super::aggregation::{AggState, HashKey};
 use super::keyspace::{Keyspace, StateStore};
 use super::{
-    agg_executor_next, agg_input_arrays, generate_agg_schema, generate_agg_state, AggCall,
-    AggExecutor, Barrier, Executor, Message,
+    agg_executor_next, agg_input_arrays, generate_agg_schema, generate_agg_state, pk_input_arrays,
+    AggCall, AggExecutor, Barrier, Executor, Message, PkIndicesRef,
 };
-use crate::stream_op::PKVec;
+use crate::stream_op::PkIndices;
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
@@ -33,7 +33,7 @@ pub struct HashAggExecutor<S: StateStore> {
     schema: Schema,
 
     /// Primary key indices.
-    pk_indices: PKVec,
+    pk_indices: PkIndices,
 
     /// If `next_barrier_message` exists, we should send a Barrier while next called.
     // TODO: This can be optimized while async gen fn stablized.
@@ -62,7 +62,7 @@ impl<S: StateStore> HashAggExecutor<S> {
         agg_calls: Vec<AggCall>,
         key_indices: Vec<usize>,
         keyspace: Keyspace<S>,
-        pk_indices: PKVec,
+        pk_indices: PkIndices,
     ) -> Self {
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
 
@@ -170,6 +170,17 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
         // --- Retrieve all aggregation inputs in advance ---
         // Previously, this is done in `unique_keys` inner loop, which is very inefficient.
         let all_agg_input_arrays = agg_input_arrays(&self.agg_calls, &columns);
+        let pk_input_arrays = pk_input_arrays(self.input.pk_indices(), &columns);
+        let input_pk_length = self.input.pk_indices().len();
+
+        // When applying batch, we will send columns of primary keys to the last N columns.
+        let all_agg_data = all_agg_input_arrays
+            .into_iter()
+            .map(|mut input_arrays| {
+                input_arrays.extend(pk_input_arrays.iter());
+                input_arrays
+            })
+            .collect_vec();
 
         for (key, vis_map) in unique_keys {
             // 1. Retrieve previous state from the KeyedState. If they didn't exist, the
@@ -181,7 +192,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
                         Some(key),
                         &self.agg_calls,
                         &self.keyspace,
-                        self.pk_indices.len(),
+                        input_pk_length,
                     )
                     .await?;
                     v.insert(state)
@@ -191,20 +202,9 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
             // 2. Mark the state as dirty by filling prev states
             states.may_mark_as_dirty().await?;
 
-            // 3. Apply batch to each of the state
-            for (agg_state, input_arrays) in states
-                .managed_states
-                .iter_mut()
-                .zip(all_agg_input_arrays.iter())
-            {
-                // When applying batch, we will send columns of primary keys to the last N columns.
-                if input_arrays.is_empty() {
-                    agg_state.apply_batch(&ops, Some(&vis_map), &[]).await?;
-                } else {
-                    agg_state
-                        .apply_batch(&ops, Some(&vis_map), &[input_arrays[0]]) // TODO: multiple args
-                        .await?;
-                }
+            // 3. Apply batch to each of the state (per agg_call)
+            for (agg_state, data) in states.managed_states.iter_mut().zip(all_agg_data.iter()) {
+                agg_state.apply_batch(&ops, Some(&vis_map), data).await?;
             }
         }
 
@@ -298,7 +298,7 @@ impl<S: StateStore> Executor for HashAggExecutor<S> {
         &self.schema
     }
 
-    fn pk_indices(&self) -> &[usize] {
+    fn pk_indices(&self) -> PkIndicesRef {
         &self.pk_indices
     }
 
@@ -360,7 +360,7 @@ mod tests {
                 data_type: Int64Type::create(false),
             }],
         };
-        let mut source = MockSource::new(schema);
+        let mut source = MockSource::new(schema, PkIndices::new());
         source.push_chunks([chunk1].into_iter());
         source.push_barrier(1, false);
         source.push_chunks([chunk2].into_iter());
@@ -467,7 +467,7 @@ mod tests {
             ],
         };
 
-        let mut source = MockSource::new(schema);
+        let mut source = MockSource::new(schema, PkIndices::new());
         source.push_chunks([chunk1].into_iter());
         source.push_barrier(1, false);
         source.push_chunks([chunk2].into_iter());
@@ -552,6 +552,8 @@ mod tests {
                 column_nonnull! { I64Array, Int64Type, [1, 1, 2] },
                 // data column to get minimum
                 column_nonnull! { I64Array, Int64Type, [233, 23333, 2333] },
+                // primary key column
+                column_nonnull! { I64Array, Int64Type, [1001, 1002, 1003] },
             ],
             visibility: None,
         };
@@ -562,15 +564,26 @@ mod tests {
                 column_nonnull! { I64Array, Int64Type, [1, 1, 2] },
                 // data column to get minimum
                 column_nonnull! { I64Array, Int64Type, [233, 23333, 2333] },
+                // primary key column
+                column_nonnull! { I64Array, Int64Type, [1001, 1002, 1003] },
             ],
             visibility: Some((vec![true, false, true]).try_into().unwrap()),
         };
         let schema = Schema {
-            fields: vec![Field {
-                data_type: Int64Type::create(false),
-            }],
+            fields: vec![
+                Field {
+                    data_type: Int64Type::create(false),
+                },
+                Field {
+                    data_type: Int64Type::create(false),
+                },
+                // primary key column
+                Field {
+                    data_type: Int64Type::create(false),
+                },
+            ],
         };
-        let mut source = MockSource::new(schema);
+        let mut source = MockSource::new(schema, vec![2]); // pk
         source.push_chunks([chunk1].into_iter());
         source.push_barrier(1, false);
         source.push_chunks([chunk2].into_iter());

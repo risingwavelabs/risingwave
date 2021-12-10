@@ -9,7 +9,8 @@ pub use keyspace::*;
 pub use merge::*;
 pub use mview::*;
 pub use project::*;
-use risingwave_common::array::{DataChunk, StreamChunk};
+use risingwave_common::array::column::Column;
+use risingwave_common::array::{ArrayImpl, DataChunk, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
@@ -119,17 +120,25 @@ impl Message {
 pub trait Executor: Send + 'static {
     async fn next(&mut self) -> Result<Message>;
 
-    /// Return the schema of the executor.
+    /// Return the schema of the OUTPUT of the executor.
     fn schema(&self) -> &Schema;
 
-    /// Return the primary key indices of the executor.
+    /// Return the primary key indices of the OUTPUT of the executor.
     /// Schema is used by both OLAP and streaming, therefore
     /// pk indices are maintained independently.
-    fn pk_indices(&self) -> &[usize];
+    fn pk_indices(&self) -> PkIndicesRef;
 }
 
-pub type PKVec = Vec<usize>;
-pub type PKVecRef<'a> = &'a [usize];
+pub type PkIndices = Vec<usize>;
+pub type PkIndicesRef<'a> = &'a [usize];
+
+// Get inputs by given `pk_indices` from `columns`.
+pub fn pk_input_arrays<'a>(pk_indices: PkIndicesRef, columns: &'a [Column]) -> Vec<&'a ArrayImpl> {
+    pk_indices
+        .iter()
+        .map(|pk_idx| columns[*pk_idx].array_ref())
+        .collect()
+}
 
 /// `SimpleExecutor` accepts a single chunk as input.
 pub trait SimpleExecutor: Executor {

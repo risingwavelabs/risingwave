@@ -1,6 +1,6 @@
-use super::{Barrier, Executor, Result};
+use super::{Barrier, Executor, PkIndicesRef, Result};
 use crate::stream::UpDownFragmentIds;
-use crate::stream_op::PKVec;
+use crate::stream_op::PkIndices;
 use async_trait::async_trait;
 use futures::channel::mpsc::{Receiver, Sender};
 use futures::future::select_all;
@@ -99,12 +99,12 @@ impl RemoteInput {
 /// messages down to the executors.
 pub struct ReceiverExecutor {
     schema: Schema,
-    pk_indices: PKVec,
+    pk_indices: PkIndices,
     receiver: Receiver<Message>,
 }
 
 impl ReceiverExecutor {
-    pub fn new(schema: Schema, pk_indices: PKVec, receiver: Receiver<Message>) -> Self {
+    pub fn new(schema: Schema, pk_indices: PkIndices, receiver: Receiver<Message>) -> Self {
         Self {
             schema,
             pk_indices,
@@ -124,7 +124,7 @@ impl Executor for ReceiverExecutor {
         &self.schema
     }
 
-    fn pk_indices(&self) -> &[usize] {
+    fn pk_indices(&self) -> PkIndicesRef {
         &self.pk_indices
     }
 }
@@ -136,7 +136,7 @@ pub struct MergeExecutor {
     schema: Schema,
 
     /// Primary key indices of inputs
-    pk_indices: PKVec,
+    pk_indices: PkIndices,
 
     /// Number of inputs
     num_inputs: usize,
@@ -156,7 +156,7 @@ pub struct MergeExecutor {
 }
 
 impl MergeExecutor {
-    pub fn new(schema: Schema, pk_indices: PKVec, inputs: Vec<Receiver<Message>>) -> Self {
+    pub fn new(schema: Schema, pk_indices: PkIndices, inputs: Vec<Receiver<Message>>) -> Self {
         Self {
             schema,
             pk_indices,
@@ -227,7 +227,7 @@ impl Executor for MergeExecutor {
         &self.schema
     }
 
-    fn pk_indices(&self) -> &[usize] {
+    fn pk_indices(&self) -> PkIndicesRef {
         &self.pk_indices
     }
 }

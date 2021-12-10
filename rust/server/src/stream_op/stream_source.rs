@@ -16,8 +16,8 @@ use risingwave_common::error::Result;
 use risingwave_common::types::Int64Type;
 use SourceReaderContext::HighLevelKafka;
 
-use crate::stream_op::PKVec;
 use crate::stream_op::{Executor, Message};
+use crate::stream_op::{PkIndices, PkIndicesRef};
 use risingwave_source::{
     HighLevelKafkaSourceReaderContext, SourceDesc, SourceImpl, SourceReaderContext,
     StreamSourceReader,
@@ -28,7 +28,7 @@ pub struct StreamSourceExecutor {
     source_desc: SourceDesc,
     column_ids: Vec<i32>,
     schema: Schema,
-    pk_indices: PKVec,
+    pk_indices: PkIndices,
     reader: Box<dyn StreamSourceReader>,
     barrier_receiver: UnboundedReceiver<Message>,
     /// current allocated row id
@@ -40,7 +40,7 @@ impl StreamSourceExecutor {
         source_desc: SourceDesc,
         column_ids: Vec<i32>,
         schema: Schema,
-        pk_indices: PKVec,
+        pk_indices: PkIndices,
         barrier_receiver: UnboundedReceiver<Message>,
     ) -> Result<Self> {
         let source = source_desc.clone().source;
@@ -116,7 +116,7 @@ impl Executor for StreamSourceExecutor {
         &self.schema
     }
 
-    fn pk_indices(&self) -> &[usize] {
+    fn pk_indices(&self) -> PkIndicesRef {
         &self.pk_indices
     }
 }

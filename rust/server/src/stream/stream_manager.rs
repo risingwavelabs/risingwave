@@ -588,7 +588,7 @@ impl StreamManagerCore {
         fragment_id: u32,
         schema: Schema,
         upstreams: &[u32],
-        pk_indices: PKVec,
+        pk_indices: PkIndices,
     ) -> Result<Box<dyn Executor>> {
         assert!(!upstreams.is_empty());
 

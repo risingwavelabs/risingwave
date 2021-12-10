@@ -1,4 +1,4 @@
-use crate::stream_op::PKVec;
+use crate::stream_op::PkIndices;
 use crate::stream_op::{Executor, Message, SimpleExecutor, StreamChunk};
 use async_trait::async_trait;
 use risingwave_common::array::{DataChunk, Op};
@@ -10,6 +10,8 @@ use std::cmp::{Ordering, Reverse};
 use std::collections::BTreeSet;
 use std::ops::Bound::{Excluded, Unbounded};
 use std::sync::Arc;
+
+use super::PkIndicesRef;
 
 type MinHeapElem = Reverse<HeapElem>;
 
@@ -26,7 +28,7 @@ pub struct TopNExecutor {
     offset: usize,
 
     /// The primary key indices of the `TopNExecutor`
-    pk_indices: PKVec,
+    pk_indices: PkIndices,
 
     /// We are interested in which element is in the range of [offset, offset+limit).
     /// Here we use A BTreeSet to store all received elements, offset/limit elem refer
@@ -42,7 +44,7 @@ impl TopNExecutor {
         order_pairs: Arc<Vec<OrderPair>>,
         limit: Option<usize>,
         offset: usize,
-        pk_indices: PKVec,
+        pk_indices: PkIndices,
     ) -> Self {
         Self {
             input,
@@ -67,7 +69,7 @@ impl Executor for TopNExecutor {
         self.input.schema()
     }
 
-    fn pk_indices(&self) -> &[usize] {
+    fn pk_indices(&self) -> PkIndicesRef {
         &self.pk_indices
     }
 }
@@ -298,7 +300,11 @@ mod tests {
             order: Box::new(input_ref_1),
             order_type: OrderType::Ascending,
         }]);
-        let source = Box::new(MockSource::with_chunks(schema, vec![chunk1, chunk2]));
+        let source = Box::new(MockSource::with_chunks(
+            schema,
+            PkIndices::new(),
+            vec![chunk1, chunk2],
+        ));
         let mut top_n_executor =
             TopNExecutor::new(source as Box<dyn Executor>, order_pairs, Some(3), 2, vec![]);
 

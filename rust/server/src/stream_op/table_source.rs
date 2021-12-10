@@ -1,4 +1,4 @@
-use crate::stream_op::PKVec;
+use crate::stream_op::PkIndices;
 use crate::stream_op::{Barrier, Executor, Message};
 use async_trait::async_trait;
 use futures::channel::mpsc::UnboundedReceiver;
@@ -8,11 +8,13 @@ use risingwave_common::error::Result;
 use risingwave_source::{StreamSourceReader, TableStreamReader};
 use std::fmt::{Debug, Formatter};
 
+use super::PkIndicesRef;
+
 /// `TableSourceExecutor` extracts changes from a Table
 pub struct TableSourceExecutor {
     table_id: TableId,
     schema: Schema,
-    pk_indices: PKVec,
+    pk_indices: PkIndices,
     stream_reader: Option<TableStreamReader>,
     barrier_receiver: UnboundedReceiver<Message>,
     first_execution: bool,
@@ -22,7 +24,7 @@ impl TableSourceExecutor {
     pub fn new(
         table_id: TableId,
         schema: Schema,
-        pk_indices: PKVec,
+        pk_indices: PkIndices,
         stream_reader: TableStreamReader,
         barrier_receiver: UnboundedReceiver<Message>,
     ) -> Self {
@@ -82,7 +84,7 @@ impl Executor for TableSourceExecutor {
         &self.schema
     }
 
-    fn pk_indices(&self) -> &[usize] {
+    fn pk_indices(&self) -> PkIndicesRef {
         &self.pk_indices
     }
 }

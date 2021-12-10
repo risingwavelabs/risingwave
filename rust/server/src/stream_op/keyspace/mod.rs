@@ -38,6 +38,7 @@ pub trait StateStoreIter: Send + Sync + 'static {
 }
 
 /// Provides API to read key-value pairs of a prefix in the storage backend.
+#[derive(Clone)]
 pub struct Keyspace<S: StateStore> {
     store: S,
     prefix: Vec<u8>,
@@ -59,8 +60,24 @@ impl<S: StateStore> Keyspace<S> {
         self.store.scan(&self.prefix, limit).await
     }
 
+    /// Scan from the keyspace, and then strip the prefix of this keyspace.
+    ///
+    /// See also: [`Keyspace::scan`]
+    pub async fn scan_strip_prefix(&self, limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
+        let mut pairs = self.scan(limit).await?;
+        pairs
+            .iter_mut()
+            .for_each(|(k, _v)| *k = k.slice(self.prefix.len()..));
+        Ok(pairs)
+    }
+
     pub fn prefix(&self) -> &[u8] {
-        &self.prefix[..]
+        &self.prefix
+    }
+
+    /// Concatenate prefix of this keyspace and the given key to produce a prefixed key.
+    pub fn prefixed_key(&self, key: impl AsRef<[u8]>) -> Vec<u8> {
+        [self.prefix.as_slice(), key.as_ref()].concat()
     }
 
     /// Get the underlying state store.

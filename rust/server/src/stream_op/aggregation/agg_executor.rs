@@ -224,17 +224,18 @@ pub async fn agg_executor_next<E: AggExecutor>(executor: &mut E) -> Result<Messa
     }
 }
 
-/// Generate [`HashAgg`]'s schema from `input`, `agg_calls` and `key_indices`.
+/// Generate [`HashAgg`]'s schema from `input`, `agg_calls` and `group_key_indices`. For
+/// [`HashAggExecutor`], the group key indices should be provided.
 pub fn generate_agg_schema(
     input: &dyn Executor,
     agg_calls: &[AggCall],
-    key_indices: Option<&[usize]>,
+    group_key_indices: Option<&[usize]>,
 ) -> Schema {
     let aggs = agg_calls.iter().map(|agg| Field {
         data_type: agg.return_type.clone(),
     });
 
-    let fields = if let Some(key_indices) = key_indices {
+    let fields = if let Some(key_indices) = group_key_indices {
         let keys = key_indices
             .iter()
             .map(|idx| input.schema().fields[*idx].clone());
