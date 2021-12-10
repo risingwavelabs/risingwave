@@ -95,7 +95,7 @@ impl HummockIterator for ConcatIterator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hummock::iterator::tests::test::{
+    use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_test_table, iterator_test_key_of, test_value_of,
         TEST_KEYS_COUNT,
     };

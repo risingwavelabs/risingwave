@@ -118,7 +118,7 @@ impl IdGeneratorManager {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use crate::meta::MemStore;
     use futures::future;

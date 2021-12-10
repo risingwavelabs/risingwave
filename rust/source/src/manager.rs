@@ -172,7 +172,7 @@ impl Default for MemSourceManager {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use crate::*;
     use risingwave_common::column_nonnull;
     use risingwave_storage::bummock::BummockTable;

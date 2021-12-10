@@ -69,7 +69,7 @@ impl TableMetaManager for MetaManager {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use crate::meta::{Config, IdGeneratorManager, MemEpochGenerator, MemStore};
     use futures::future;

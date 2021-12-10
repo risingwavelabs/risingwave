@@ -56,14 +56,14 @@ impl UserKeyIterator {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use std::sync::Arc;
 
     use crate::{
         hummock::{
             cloud::gen_remote_table,
             format::{key_with_ts, user_key},
-            iterator::tests::test::{
+            iterator::test_utils::{
                 default_builder_opt_for_test, gen_test_table_base, iterator_test_key_of,
                 test_value_of, TEST_KEYS_COUNT,
             },

@@ -8,7 +8,7 @@ mod user_key;
 pub use user_key::*;
 
 #[cfg(test)]
-mod tests;
+mod test_utils;
 
 use async_trait::async_trait;
 
@@ -34,5 +34,5 @@ pub enum HummockIteratorImpl {
     Concat(Box<ConcatIterator>),
     Sorted(SortedIterator),
     #[cfg(test)]
-    Test(tests::TestIterator),
+    Test(test_utils::TestIterator),
 }
