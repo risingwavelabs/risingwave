@@ -1,8 +1,9 @@
-use crate::meta::{MetaStoreRef, SINGLE_VERSION_EPOCH};
+use crate::manager::SINGLE_VERSION_EPOCH;
 use risingwave_common::error::{ErrorCode, Result};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI32, Ordering};
 
+use crate::storage::MetaStoreRef;
 use risingwave_pb::meta::get_id_request::IdCategory;
 use tokio::sync::RwLock;
 
@@ -34,10 +35,7 @@ impl StoredIdGenerator {
         let current_id = match res {
             Ok(value) => i32::from_be_bytes(value.as_slice().try_into().unwrap()),
             Err(err) => {
-                if !matches!(
-                    err.inner(),
-                    ErrorCode::ItemNotFound(_) | ErrorCode::TaskNotFound
-                ) {
+                if !matches!(err.inner(), ErrorCode::ItemNotFound(_)) {
                     panic!("{}", err)
                 }
                 0
@@ -137,7 +135,7 @@ impl IdGeneratorManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::meta::MemStore;
+    use crate::storage::MemStore;
     use futures::future;
     use std::sync::Arc;
 

@@ -1,4 +1,4 @@
-use crate::meta::MetaManager;
+use crate::manager::MetaManager;
 use risingwave_common::array::RwError;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_pb::meta::heartbeat_request::NodeType;

@@ -1,4 +1,4 @@
-use crate::meta::{Epoch, MetaManager, SINGLE_VERSION_EPOCH};
+use crate::manager::{Epoch, MetaManager, SINGLE_VERSION_EPOCH};
 use async_trait::async_trait;
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
@@ -102,7 +102,8 @@ impl StreamMetaManager for MetaManager {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::meta::{Config, IdGeneratorManager, MemEpochGenerator, MemStore};
+    use crate::manager::{Config, IdGeneratorManager, MemEpochGenerator};
+    use crate::storage::MemStore;
     use risingwave_pb::meta::cluster::Node;
     use risingwave_pb::stream_plan::StreamFragment;
     use risingwave_pb::task_service::HostAddress;

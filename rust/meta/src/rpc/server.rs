@@ -1,9 +1,10 @@
-use crate::meta::{Config, IdGeneratorManager, MemEpochGenerator, MemStore, MetaManager};
+use crate::manager::{Config, IdGeneratorManager, MemEpochGenerator, MetaManager};
 use crate::rpc::service::catalog_service::CatalogServiceImpl;
 use crate::rpc::service::epoch_service::EpochServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::id_service::IdGeneratorServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
+use crate::storage::MemStore;
 use risingwave_pb::meta::catalog_service_server::CatalogServiceServer;
 use risingwave_pb::meta::epoch_service_server::EpochServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;

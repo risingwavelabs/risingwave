@@ -1,4 +1,4 @@
-use crate::meta::Epoch;
+use crate::manager::Epoch;
 use async_trait::async_trait;
 use risingwave_common::array::RwError;
 use risingwave_common::error::ErrorCode::ItemNotFound;

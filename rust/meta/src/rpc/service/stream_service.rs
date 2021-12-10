@@ -1,4 +1,5 @@
-use crate::meta::{MetaManager, StreamMetaManager};
+use crate::manager::MetaManager;
+use crate::stream::StreamMetaManager;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::{
     AddFragmentsToNodeRequest, AddFragmentsToNodeResponse, LoadAllFragmentsRequest,

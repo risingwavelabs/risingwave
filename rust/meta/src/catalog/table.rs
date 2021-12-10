@@ -1,4 +1,4 @@
-use crate::meta::{Epoch, MetaManager};
+use crate::manager::{Epoch, MetaManager};
 use async_trait::async_trait;
 use prost::Message;
 use risingwave_common::error::Result;
@@ -71,7 +71,8 @@ impl TableMetaManager for MetaManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::meta::{Config, IdGeneratorManager, MemEpochGenerator, MemStore};
+    use crate::manager::{Config, IdGeneratorManager, MemEpochGenerator};
+    use crate::storage::MemStore;
     use futures::future;
     use std::sync::Arc;
 

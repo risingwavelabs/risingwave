@@ -1,7 +1,8 @@
-use crate::meta::{
-    Config, DatabaseMetaManager, Epoch, EpochGeneratorRef, IdGeneratorManager, MetaStoreRef,
-    SchemaMetaManager, TableMetaManager, SINGLE_VERSION_EPOCH,
-};
+use crate::catalog::DatabaseMetaManager;
+use crate::catalog::SchemaMetaManager;
+use crate::catalog::TableMetaManager;
+use crate::manager::{Config, Epoch, EpochGeneratorRef, IdGeneratorManager, SINGLE_VERSION_EPOCH};
+use crate::storage::MetaStoreRef;
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::meta::{Catalog, EpochState};
@@ -51,10 +52,7 @@ impl MetaManager {
                 manager.stable_epoch = Epoch::from(proto.get_stable_epoch());
             }
             Err(err) => {
-                if !matches!(
-                    err.inner(),
-                    ErrorCode::ItemNotFound(_) | ErrorCode::TaskNotFound
-                ) {
+                if !matches!(err.inner(), ErrorCode::ItemNotFound(_)) {
                     panic!("{}", err)
                 }
             }

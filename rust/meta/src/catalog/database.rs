@@ -1,4 +1,4 @@
-use crate::meta::{Epoch, MetaManager};
+use crate::manager::{Epoch, MetaManager};
 use async_trait::async_trait;
 use prost::Message;
 
@@ -71,7 +71,8 @@ impl DatabaseMetaManager for MetaManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::meta::{Config, IdGeneratorManager, MemEpochGenerator, MemStore};
+    use crate::manager::{Config, IdGeneratorManager, MemEpochGenerator};
+    use crate::storage::MemStore;
     use futures::future;
     use risingwave_pb::meta::Database;
     use std::sync::Arc;

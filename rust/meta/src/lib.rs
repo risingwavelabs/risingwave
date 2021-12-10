@@ -5,5 +5,9 @@
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 
-mod meta;
+mod catalog;
+mod cluster;
+mod manager;
 pub mod rpc;
+mod storage;
+mod stream;

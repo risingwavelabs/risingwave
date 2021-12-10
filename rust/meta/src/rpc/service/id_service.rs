@@ -1,4 +1,4 @@
-use crate::meta::MetaManager;
+use crate::manager::MetaManager;
 use risingwave_pb::meta::id_generator_service_server::IdGeneratorService;
 use risingwave_pb::meta::{GetIdRequest, GetIdResponse};
 use std::sync::Arc;

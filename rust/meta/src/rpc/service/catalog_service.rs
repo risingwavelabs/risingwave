@@ -1,4 +1,7 @@
-use crate::meta::{DatabaseMetaManager, MetaManager, SchemaMetaManager, TableMetaManager};
+use crate::catalog::DatabaseMetaManager;
+use crate::catalog::SchemaMetaManager;
+use crate::catalog::TableMetaManager;
+use crate::manager::MetaManager;
 use risingwave_pb::meta::catalog_service_server::CatalogService;
 use risingwave_pb::meta::create_request::CatalogBody;
 use risingwave_pb::meta::drop_request::CatalogId;

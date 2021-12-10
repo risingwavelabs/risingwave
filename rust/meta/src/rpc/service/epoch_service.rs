@@ -1,4 +1,4 @@
-use crate::meta::MetaManager;
+use crate::manager::MetaManager;
 use risingwave_pb::meta::epoch_service_server::EpochService;
 use risingwave_pb::meta::{GetEpochRequest, GetEpochResponse};
 use std::sync::Arc;
