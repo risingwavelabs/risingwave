@@ -1,11 +1,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use itertools::Itertools;
 
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::key_range::VersionComparator;
-use crate::hummock::table::{BlockIterator, Table, TableIterator};
+use crate::hummock::table::{Table, TableIterator};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockError, HummockResult};
 
@@ -29,15 +28,10 @@ impl ConcatIterator {
         }
     }
     async fn seek_inner(&mut self, key: &[u8]) -> HummockResult<()> {
-        let first_keys = futures::future::join_all(self.tables.iter().map(|x| x.block(0))).await;
-        let first_keys = first_keys.into_iter().map(|e| e.unwrap()).collect_vec();
-        let mut nth_table = first_keys.partition_point(|block| {
+        let mut nth_table = self.tables.partition_point(|table| {
             use std::cmp::Ordering::Less;
-            let mut block_iter = BlockIterator::new(block.clone());
-            block_iter.seek_to_first();
-            let (block_key, _) = block_iter.data().unwrap();
             // compare by version comparator
-            VersionComparator::compare_key(block_key, key) == Less
+            VersionComparator::compare_key(&table.meta.smallest_key, key) == Less
         });
         if nth_table > 0 {
             nth_table -= 1
