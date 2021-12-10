@@ -2,16 +2,14 @@ package com.risingwave.rpc
 
 import com.risingwave.common.exception.PgErrorCode
 import com.risingwave.common.exception.PgException
-import com.risingwave.proto.metanode.AddFragmentToWorkerRequest
-import com.risingwave.proto.metanode.AddFragmentToWorkerResponse
+import com.risingwave.proto.metanode.AddFragmentsToNodeRequest
+import com.risingwave.proto.metanode.AddFragmentsToNodeResponse
 import com.risingwave.proto.metanode.CatalogServiceGrpc
 import com.risingwave.proto.metanode.CreateRequest
 import com.risingwave.proto.metanode.CreateResponse
 import com.risingwave.proto.metanode.DropRequest
 import com.risingwave.proto.metanode.DropResponse
 import com.risingwave.proto.metanode.EpochServiceGrpc
-import com.risingwave.proto.metanode.FetchActorInfoTableRequest
-import com.risingwave.proto.metanode.FetchActorInfoTableResponse
 import com.risingwave.proto.metanode.GetCatalogRequest
 import com.risingwave.proto.metanode.GetCatalogResponse
 import com.risingwave.proto.metanode.GetEpochRequest
@@ -22,6 +20,8 @@ import com.risingwave.proto.metanode.HeartbeatRequest
 import com.risingwave.proto.metanode.HeartbeatResponse
 import com.risingwave.proto.metanode.HeartbeatServiceGrpc
 import com.risingwave.proto.metanode.IdGeneratorServiceGrpc
+import com.risingwave.proto.metanode.LoadAllFragmentsRequest
+import com.risingwave.proto.metanode.LoadAllFragmentsResponse
 import com.risingwave.proto.metanode.StreamManagerServiceGrpc
 import io.grpc.Channel
 import io.grpc.StatusRuntimeException
@@ -97,23 +97,23 @@ class GrpcMetaClient(private val channel: Channel) : MetaClient {
     }
   }
 
-  override fun fetchActorInfoTable(request: FetchActorInfoTableRequest): FetchActorInfoTableResponse {
+  override fun loadAllFragments(request: LoadAllFragmentsRequest): LoadAllFragmentsResponse {
     val stub = StreamManagerServiceGrpc.newBlockingStub(channel)
     try {
-      return stub.fetchActorInfoTable(request)
+      return stub.loadAllFragments(request)
     } catch (e: StatusRuntimeException) {
       LOGGER.warn("RPC failed: {}", e.status)
-      throw rpcException("getId", e)
+      throw rpcException("loadAllFragments", e)
     }
   }
 
-  override fun addFragmentToWorker(request: AddFragmentToWorkerRequest): AddFragmentToWorkerResponse {
+  override fun addFragmentsToNode(request: AddFragmentsToNodeRequest): AddFragmentsToNodeResponse {
     val stub = StreamManagerServiceGrpc.newBlockingStub(channel)
     try {
-      return stub.addFragmentToWorker(request)
+      return stub.addFragmentsToNode(request)
     } catch (e: StatusRuntimeException) {
       LOGGER.warn("RPC failed: {}", e.status)
-      throw rpcException("getId", e)
+      throw rpcException("addFragmentsToNode", e)
     }
   }
 }

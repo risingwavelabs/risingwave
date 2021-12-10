@@ -13,6 +13,7 @@ pub struct MetaManager {
     pub id_gen_manager: IdGeneratorManager,
     pub config: Config,
     pub catalog_lock: RwLock<()>,
+    pub fragment_lock: RwLock<()>,
 
     // TODO: more data could cached for single node deployment mode.
     // Backend state fields.
@@ -34,6 +35,7 @@ impl MetaManager {
             config,
 
             catalog_lock: RwLock::new(()),
+            fragment_lock: RwLock::new(()),
             current_epoch: Epoch::from(0),
             stable_epoch: Epoch::from(0),
         };

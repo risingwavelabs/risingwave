@@ -1,5 +1,6 @@
 package com.risingwave.common.error;
 
+/** Meta service error definition. */
 public enum MetaServiceError implements ErrorCode {
   DATABASE_ALREADY_EXISTS(1001, "Database %s already exists!"),
   SCHEMA_ALREADY_EXISTS(1002, "Schema %s already exists in %s!"),

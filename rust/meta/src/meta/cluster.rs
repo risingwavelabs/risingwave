@@ -87,7 +87,10 @@ mod tests {
             assert!(meta_manager
                 .put_cluster(Cluster {
                     id: i,
-                    nodes: vec![Node { id: i * 2 }],
+                    nodes: vec![Node {
+                        id: i * 2,
+                        host: None
+                    }],
                     config: Default::default()
                 })
                 .await

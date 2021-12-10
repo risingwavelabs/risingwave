@@ -11,6 +11,7 @@ import "data.proto";
 import "plan.proto";
 import "stream_service.proto";
 import "stream_plan.proto";
+import "task_service.proto";
 
 message Table {
   enum DistributionType {
@@ -57,6 +58,7 @@ message Schema {
 message Cluster {
   message Node {
     uint32 id = 1;
+    task_service.HostAddress host = 2;
   }
   uint32 id = 1;
   repeated Node nodes = 2;
@@ -191,23 +193,27 @@ service HeartbeatService {
 
 // Below for stream manager.
 
-message FetchActorInfoTableRequest {}
-
-message FetchActorInfoTableResponse {
-  common.Status status = 1;
-  repeated stream_service.ActorInfo info = 2;
+message FragmentLocation {
+  Cluster.Node node = 1;
+  repeated stream_plan.StreamFragment fragments = 2;
 }
 
-message AddFragmentToWorkerRequest {
-  stream_plan.StreamFragment fragment = 1;
-  Cluster.Node node = 2;
+message AddFragmentsToNodeRequest {
+  FragmentLocation location = 1;
 }
 
-message AddFragmentToWorkerResponse {
+message AddFragmentsToNodeResponse {
   common.Status status = 1;
+}
+
+message LoadAllFragmentsRequest {}
+
+message LoadAllFragmentsResponse {
+  common.Status status = 1;
+  repeated FragmentLocation locations = 2;
 }
 
 service StreamManagerService {
-  rpc FetchActorInfoTable(FetchActorInfoTableRequest) returns (FetchActorInfoTableResponse);
-  rpc AddFragmentToWorker(AddFragmentToWorkerRequest) returns (AddFragmentToWorkerResponse);
+  rpc AddFragmentsToNode(AddFragmentsToNodeRequest) returns (AddFragmentsToNodeResponse);
+  rpc LoadAllFragments(LoadAllFragmentsRequest) returns (LoadAllFragmentsResponse);
 }

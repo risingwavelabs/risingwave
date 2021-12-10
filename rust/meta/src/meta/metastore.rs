@@ -16,14 +16,14 @@ pub const DEFAULT_COLUMN_FAMILY: &str = "default";
 pub trait MetaStore: Sync + Send {
     async fn list(&self) -> Result<Vec<Vec<u8>>>;
     async fn put(&self, key: &[u8], value: &[u8], version: Epoch) -> Result<()>;
-    async fn put_batch(&self, tuples: Vec<(&[u8], &[u8], Epoch)>) -> Result<()>;
+    async fn put_batch(&self, tuples: Vec<(Vec<u8>, Vec<u8>, Epoch)>) -> Result<()>;
     async fn get(&self, key: &[u8], version: Epoch) -> Result<Vec<u8>>;
     async fn delete(&self, key: &[u8], version: Epoch) -> Result<()>;
     async fn delete_all(&self, key: &[u8]) -> Result<()>;
 
     async fn list_cf(&self, cf: &str) -> Result<Vec<Vec<u8>>>;
     async fn put_cf(&self, cf: &str, key: &[u8], value: &[u8], version: Epoch) -> Result<()>;
-    async fn put_batch_cf(&self, tuples: Vec<(&str, &[u8], &[u8], Epoch)>) -> Result<()>;
+    async fn put_batch_cf(&self, tuples: Vec<(&str, Vec<u8>, Vec<u8>, Epoch)>) -> Result<()>;
     async fn get_cf(&self, cf: &str, key: &[u8], version: Epoch) -> Result<Vec<u8>>;
     async fn delete_cf(&self, cf: &str, key: &[u8], version: Epoch) -> Result<()>;
     async fn delete_all_cf(&self, cf: &str, key: &[u8]) -> Result<()>;
@@ -103,17 +103,17 @@ impl MetaStore for MemStore {
             .await
     }
 
-    async fn put_batch(&self, tuples: Vec<(&[u8], &[u8], Epoch)>) -> Result<()> {
+    async fn put_batch(&self, tuples: Vec<(Vec<u8>, Vec<u8>, Epoch)>) -> Result<()> {
         let mut entities = self.entities.lock().unwrap();
         for (key, value, version) in tuples {
-            match entities.get_mut(&(key.to_vec(), String::from(DEFAULT_COLUMN_FAMILY))) {
+            match entities.get_mut(&(key.clone(), String::from(DEFAULT_COLUMN_FAMILY))) {
                 Some(entry) => {
-                    entry.insert(version, value.to_vec());
+                    entry.insert(version, value);
                 }
                 None => {
                     let mut entry = BTreeMap::new();
-                    entry.insert(version, value.to_vec());
-                    entities.insert((key.to_vec(), String::from(DEFAULT_COLUMN_FAMILY)), entry);
+                    entry.insert(version, value);
+                    entities.insert((key, String::from(DEFAULT_COLUMN_FAMILY)), entry);
                 }
             }
         }
@@ -157,17 +157,17 @@ impl MetaStore for MemStore {
         Ok(())
     }
 
-    async fn put_batch_cf(&self, tuples: Vec<(&str, &[u8], &[u8], Epoch)>) -> Result<()> {
+    async fn put_batch_cf(&self, tuples: Vec<(&str, Vec<u8>, Vec<u8>, Epoch)>) -> Result<()> {
         let mut entities = self.entities.lock().unwrap();
         for (cf, key, value, version) in tuples {
-            match entities.get_mut(&(key.to_vec(), String::from(cf))) {
+            match entities.get_mut(&(key.clone(), String::from(cf))) {
                 Some(entry) => {
-                    entry.insert(version, value.to_vec());
+                    entry.insert(version, value);
                 }
                 None => {
                     let mut entry = BTreeMap::new();
-                    entry.insert(version, value.to_vec());
-                    entities.insert((key.to_vec(), String::from(cf)), entry);
+                    entry.insert(version, value);
+                    entities.insert((key, String::from(cf)), entry);
                 }
             }
         }
@@ -230,16 +230,26 @@ mod tests {
         assert!(store.delete_cf("test_cf", k, version).await.is_ok());
         assert_eq!(store.list_cf("test_cf").await.unwrap().len(), 0);
 
-        let batch_values: Vec<(&[u8], &[u8], Epoch)> = vec![
-            (b"key_1", b"value_1", Epoch::from(2)),
-            (b"key_2", b"value_2", Epoch::from(2)),
-            (b"key_3", b"value_3", Epoch::from(2)),
+        let batch_values: Vec<(Vec<u8>, Vec<u8>, Epoch)> = vec![
+            (b"key_1".to_vec(), b"value_1".to_vec(), Epoch::from(2)),
+            (b"key_2".to_vec(), b"value_2".to_vec(), Epoch::from(2)),
+            (b"key_3".to_vec(), b"value_3".to_vec(), Epoch::from(2)),
         ];
         assert!(store.put_batch(batch_values).await.is_ok());
 
-        let batch_values: Vec<(&str, &[u8], &[u8], Epoch)> = vec![
-            ("test_cf", b"key_1", b"value_1", Epoch::from(2)),
-            ("test_cf", b"key_2", b"value_2", Epoch::from(2)),
+        let batch_values: Vec<(&str, Vec<u8>, Vec<u8>, Epoch)> = vec![
+            (
+                "test_cf",
+                b"key_1".to_vec(),
+                b"value_1".to_vec(),
+                Epoch::from(2),
+            ),
+            (
+                "test_cf",
+                b"key_2".to_vec(),
+                b"value_2".to_vec(),
+                Epoch::from(2),
+            ),
         ];
         assert!(store.put_batch_cf(batch_values).await.is_ok());
 

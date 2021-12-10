@@ -1,13 +1,11 @@
 package com.risingwave.rpc
 
-import com.risingwave.proto.metanode.AddFragmentToWorkerRequest
-import com.risingwave.proto.metanode.AddFragmentToWorkerResponse
+import com.risingwave.proto.metanode.AddFragmentsToNodeRequest
+import com.risingwave.proto.metanode.AddFragmentsToNodeResponse
 import com.risingwave.proto.metanode.CreateRequest
 import com.risingwave.proto.metanode.CreateResponse
 import com.risingwave.proto.metanode.DropRequest
 import com.risingwave.proto.metanode.DropResponse
-import com.risingwave.proto.metanode.FetchActorInfoTableRequest
-import com.risingwave.proto.metanode.FetchActorInfoTableResponse
 import com.risingwave.proto.metanode.GetCatalogRequest
 import com.risingwave.proto.metanode.GetCatalogResponse
 import com.risingwave.proto.metanode.GetEpochRequest
@@ -16,6 +14,8 @@ import com.risingwave.proto.metanode.GetIdRequest
 import com.risingwave.proto.metanode.GetIdResponse
 import com.risingwave.proto.metanode.HeartbeatRequest
 import com.risingwave.proto.metanode.HeartbeatResponse
+import com.risingwave.proto.metanode.LoadAllFragmentsRequest
+import com.risingwave.proto.metanode.LoadAllFragmentsResponse
 
 /** A client connecting to meta node. */
 interface MetaClient {
@@ -31,7 +31,7 @@ interface MetaClient {
 
   fun getId(request: GetIdRequest): GetIdResponse
 
-  fun fetchActorInfoTable(request: FetchActorInfoTableRequest): FetchActorInfoTableResponse
+  fun loadAllFragments(request: LoadAllFragmentsRequest): LoadAllFragmentsResponse
 
-  fun addFragmentToWorker(request: AddFragmentToWorkerRequest): AddFragmentToWorkerResponse
+  fun addFragmentsToNode(request: AddFragmentsToNodeRequest): AddFragmentsToNodeResponse
 }

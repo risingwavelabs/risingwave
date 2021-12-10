@@ -128,9 +128,7 @@ public class FrontendServerModule extends AbstractModule {
     MetaClient client =
         metaClientManager.getOrCreate(
             node.getRpcEndPoint().getHost(), node.getRpcEndPoint().getPort());
-    StreamManager streamManager = new RemoteStreamManager(client, workerNodeManager);
-
-    return streamManager;
+    return new RemoteStreamManager(client, workerNodeManager);
   }
 
   // Required by QueryManager.
