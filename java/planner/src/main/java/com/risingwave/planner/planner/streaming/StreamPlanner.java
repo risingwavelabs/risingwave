@@ -78,6 +78,8 @@ public class StreamPlanner implements Planner<StreamingPlan> {
     log.debug("Before adding Materialized View, the plan:\n" + ExplainWriter.explainPlan(rawPlan));
     RwStreamMaterializedView materializedViewPlan = addMaterializedViewNode(rawPlan, name);
     log.debug("Create streaming plan:\n" + ExplainWriter.explainPlan(materializedViewPlan));
+    log.debug(
+        "Primary key of Materialized View is:\n" + materializedViewPlan.getPrimaryKeyIndices());
     return materializedViewPlan;
   }
 

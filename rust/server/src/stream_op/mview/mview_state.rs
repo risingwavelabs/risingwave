@@ -4,7 +4,7 @@ use super::{serialize_cell, serialize_cell_idx, serialize_pk};
 
 use crate::stream_op::keyspace::StateStore;
 
-use crate::stream_op::state_aggregation::SortedKeySerializer;
+use crate::stream_op::state_aggregation::OrderedRowSerializer;
 use bytes::Bytes;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::Schema;
@@ -17,7 +17,7 @@ pub struct ManagedMViewState<S: StateStore> {
     prefix: Vec<u8>,
     schema: Schema,
     pk_columns: Vec<usize>,
-    sort_key_serializer: SortedKeySerializer,
+    sort_key_serializer: OrderedRowSerializer,
     memtable: HashMap<Row, Option<Row>>,
     storage: S,
 }
@@ -30,13 +30,17 @@ impl<S: StateStore> ManagedMViewState<S> {
         orderings: Vec<OrderType>,
         storage: S,
     ) -> Self {
+        let order_pairs = orderings
+            .into_iter()
+            .zip(pk_columns.clone().into_iter())
+            .collect::<Vec<_>>();
         Self {
             prefix,
             schema,
             pk_columns,
             memtable: HashMap::new(),
             storage,
-            sort_key_serializer: SortedKeySerializer::new(orderings),
+            sort_key_serializer: OrderedRowSerializer::new(order_pairs),
         }
     }
 

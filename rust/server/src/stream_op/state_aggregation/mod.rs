@@ -5,11 +5,11 @@ use risingwave_common::expr::AggKind;
 pub use value::*;
 mod extreme;
 mod extreme_serializer;
-mod sort_key_serializer;
+mod ordered_serializer;
 mod string_agg;
 
 pub use extreme::*;
-pub use sort_key_serializer::*;
+pub use ordered_serializer::*;
 
 use super::keyspace::{Keyspace, StateStore};
 use super::AggCall;

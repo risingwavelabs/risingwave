@@ -27,7 +27,7 @@ create materialized view T_select_aggregate as select v1, C from ( select v1, v2
         <Resource name="plan">
             <![CDATA[
 RwStreamMaterializedView(name=[t_select_aggregate])
-  RwStreamProject(v1=[$0], c=[$3], v2=[$1])
+  RwStreamProject(v1=[$0], c=[$3], v2_copy=[$1])
     RwStreamAgg(group=[{0, 1}], agg#0=[COUNT()], c=[COUNT()])
       RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
         RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])
@@ -221,15 +221,15 @@ on t1.v1 = t2.v1;
         <Resource name="plan">
             <![CDATA[
 RwStreamMaterializedView(name=[t_wrong_case_shuffle_agg])
-  RwStreamProject(v1=[$0], v2=[$1], v10=[$2], v20=[$3])
+  RwStreamProject(v1=[$0], v2_copy_copy=[$1], v10_copy=[$2], v2_copy0_copy=[$3])
     RwStreamHashJoin(condition=[=($0, $2)], joinType=[inner])
       RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-        RwStreamProject(v1=[$0], v2=[$1])
+        RwStreamProject(v1=[$0], v2_copy=[$1])
           RwStreamAgg(group=[{0, 1}], agg#0=[COUNT()], EXPR$2=[SUM($2)])
             RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
               RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3])
       RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-        RwStreamProject(v1=[$0], v2=[$1])
+        RwStreamProject(v1=[$0], v2_copy=[$1])
           RwStreamAgg(group=[{0, 1}], agg#0=[COUNT()], agg#1=[SUM($2)], agg#2=[COUNT($2)])
             RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
               RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3])
@@ -255,7 +255,7 @@ on t1.v1 = t2.v1;
         <Resource name="plan">
             <![CDATA[
 RwStreamMaterializedView(name=[t_wrong_case_two_phase_agg])
-  RwStreamProject(v1=[$0], v10=[$1])
+  RwStreamProject(v1=[$0], v10_copy=[$1])
     RwStreamHashJoin(condition=[=($0, $1)], joinType=[inner])
       RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
         RwStreamProject(v1=[$0])

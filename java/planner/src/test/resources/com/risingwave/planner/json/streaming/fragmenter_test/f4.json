@@ -1,6 +1,7 @@
 {
   "fragmentId": 4,
   "nodes": {
+    "pkIndices": [0, 1],
     "input": [{
       "input": [{
         "pkIndices": [2],

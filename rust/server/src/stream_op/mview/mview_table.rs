@@ -17,7 +17,7 @@ pub struct MViewTable<S: StateStore> {
     prefix: Vec<u8>,
     schema: Schema,
     pk_columns: Vec<usize>,
-    sort_key_serializer: SortedKeySerializer,
+    sort_key_serializer: OrderedRowSerializer,
     storage: S,
 }
 
@@ -29,11 +29,15 @@ impl<S: StateStore> MViewTable<S> {
         orderings: Vec<OrderType>,
         storage: S,
     ) -> Self {
+        let order_pairs = orderings
+            .into_iter()
+            .zip(pk_columns.clone().into_iter())
+            .collect::<Vec<_>>();
         Self {
             prefix,
             schema,
             pk_columns,
-            sort_key_serializer: SortedKeySerializer::new(orderings),
+            sort_key_serializer: OrderedRowSerializer::new(order_pairs),
             storage,
         }
     }

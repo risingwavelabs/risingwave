@@ -214,6 +214,29 @@ for_all_scalar_variants! { scalar_impl_enum }
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
 
+pub fn serialize_datum_ref_into(
+    datum_ref: &DatumRef,
+    serializer: &mut memcomparable::Serializer,
+) -> memcomparable::Result<()> {
+    if let Some(datum_ref) = datum_ref {
+        1u8.serialize(&mut *serializer)?;
+        datum_ref.serialize(serializer)?;
+    } else {
+        0u8.serialize(serializer)?;
+    }
+    Ok(())
+}
+
+pub fn serialize_datum_ref_not_null_into(
+    datum_ref: &DatumRef,
+    serializer: &mut memcomparable::Serializer,
+) -> memcomparable::Result<()> {
+    datum_ref
+        .as_ref()
+        .expect("datum cannot be null")
+        .serialize(serializer)
+}
+
 // TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
 pub fn serialize_datum_into(
     datum: &Datum,
@@ -415,6 +438,24 @@ impl std::hash::Hash for ScalarImpl {
       };
     }
         for_all_native_types! { impl_all_hash, self }
+    }
+}
+
+impl<'a> ScalarRefImpl<'a> {
+    /// Serialize the scalar ref.
+    pub fn serialize(&self, ser: &mut memcomparable::Serializer) -> memcomparable::Result<()> {
+        match self {
+            &Self::Int16(v) => v.serialize(ser)?,
+            &Self::Int32(v) => v.serialize(ser)?,
+            &Self::Int64(v) => v.serialize(ser)?,
+            &Self::Float32(v) => v.serialize(ser)?,
+            &Self::Float64(v) => v.serialize(ser)?,
+            Self::Utf8(v) => v.serialize(ser)?,
+            &Self::Bool(v) => v.serialize(ser)?,
+            &Self::Decimal(v) => ser.serialize_decimal(v.mantissa(), v.scale() as u8)?,
+            Self::Interval(v) => v.serialize(ser)?,
+        };
+        Ok(())
     }
 }
 

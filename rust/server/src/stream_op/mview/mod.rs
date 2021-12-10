@@ -8,10 +8,12 @@ use risingwave_common::array::Row;
 use risingwave_common::error::Result;
 use risingwave_common::types::{serialize_datum_into, Datum};
 
-use super::{OrderedSchemaedSerializable, SortedKeySerializer};
+use super::OrderedRowSerializer;
 
-fn serialize_pk(pk: &Row, serializer: &SortedKeySerializer) -> Result<Vec<u8>> {
-    Ok(serializer.order_based_scehmaed_serialize(pk))
+fn serialize_pk(pk: &Row, serializer: &OrderedRowSerializer) -> Result<Vec<u8>> {
+    let mut result = vec![];
+    serializer.order_based_scehmaed_serialize(pk, &mut result);
+    Ok(std::mem::take(&mut result[0]))
 }
 
 fn serialize_cell_idx(cell_idx: u32) -> Result<Vec<u8>> {

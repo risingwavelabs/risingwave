@@ -10,8 +10,10 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.stream.IntStream;
 import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelFieldCollation;
+import org.apache.calcite.rel.type.RelDataTypeFieldImpl;
 import org.apache.calcite.rex.RexInputRef;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexShuttle;
@@ -300,11 +302,15 @@ public class PrimaryKeyDerivationVisitor
     var input = (RisingWaveStreamingRel) aggregate.getInput(0);
     var p = input.accept(this);
     var groupSet = aggregate.getGroupSet();
-    // If the aggregate is a simple aggregate, it has no primary key or let's say it has a one and
-    // only unique key.
-    // This is fine because we would have only one row.
-    var groupList = ImmutableList.copyOf(groupSet);
-    var info = new PrimaryKeyIndicesAndPositionMap(groupList, ImmutableMap.of());
+    // If the aggregate is a simple aggregate, we use all of its columns as primary key.
+    List<Integer> groupList = new ArrayList<Integer>();
+    if (groupSet.isEmpty()) {
+      IntStream.range(0, aggregate.getRowType().getFieldCount()).forEachOrdered(groupList::add);
+    } else {
+      groupList = ImmutableList.copyOf(groupSet);
+    }
+    var info =
+        new PrimaryKeyIndicesAndPositionMap(ImmutableList.copyOf(groupList), ImmutableMap.of());
     RwStreamAgg newAggregate =
         (RwStreamAgg) aggregate.copy(aggregate.getTraitSet(), List.of(input));
     LOGGER.debug("leave RwStreamAgg");
@@ -439,7 +445,10 @@ public class PrimaryKeyDerivationVisitor
       if (!exist) {
         var field = newInputRowType.getFieldList().get(primaryKeyIndex);
         newProjects.add(rexBuilder.makeInputRef(field.getType(), primaryKeyIndex));
-        newFields.add(field);
+        // We need to change the name of the field otherwise calcite would complain
+        var newField =
+            new RelDataTypeFieldImpl(field.getName() + "_copy", field.getIndex(), field.getType());
+        newFields.add(newField);
         newOutputPrimaryKeyIndices.add(newProjects.size() - 1);
       }
     }

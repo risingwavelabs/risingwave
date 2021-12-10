@@ -1,6 +1,8 @@
 {
   "input": [{
+    "pkIndices": [1, 2],
     "input": [{
+      "pkIndices": [0, 1],
       "input": [{
         "input": [{
           "pkIndices": [2],
@@ -102,6 +104,21 @@
             }
           }]
         }
+      }, {
+        "exprType": "INPUT_REF",
+        "returnType": {
+          "typeName": "INT64"
+        },
+        "inputRef": {
+        }
+      }, {
+        "exprType": "INPUT_REF",
+        "returnType": {
+          "typeName": "INT64"
+        },
+        "inputRef": {
+          "columnIdx": 1
+        }
       }]
     }
   }],
@@ -118,6 +135,34 @@
         "typeName": "INT64"
       },
       "encoding": "RAW"
+    }, {
+      "columnType": {
+        "typeName": "INT64"
+      },
+      "encoding": "RAW"
+    }, {
+      "columnType": {
+        "typeName": "INT64"
+      },
+      "encoding": "RAW"
+    }],
+    "pkIndices": [1, 2],
+    "columnOrders": [{
+      "orderType": "ASCENDING",
+      "inputRef": {
+        "columnIdx": 1
+      },
+      "returnType": {
+        "typeName": "INT64"
+      }
+    }, {
+      "orderType": "ASCENDING",
+      "inputRef": {
+        "columnIdx": 2
+      },
+      "returnType": {
+        "typeName": "INT64"
+      }
     }]
   }
 }

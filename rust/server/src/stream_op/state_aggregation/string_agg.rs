@@ -5,20 +5,20 @@ use std::collections::BTreeMap;
 
 use risingwave_common::array::stream_chunk::Op;
 use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::{ArrayImpl, Row};
+use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 
+use crate::stream_op::OrderedArraysSerializer;
 use risingwave_common::types::{
     deserialize_datum_not_null_from, serialize_datum_not_null_into, DataTypeKind, Datum, Scalar,
 };
 
-use crate::stream_op::state_aggregation::sort_key_serializer::OrderedSchemaedSerializable;
 use crate::stream_op::state_aggregation::ManagedExtremeState;
 
 use super::super::keyspace::{Keyspace, StateStore};
 
-pub struct ManagedStringAggState<S: StateStore, Ser: OrderedSchemaedSerializable<Input = Row>> {
+pub struct ManagedStringAggState<S: StateStore> {
     cache: BTreeMap<Bytes, String>,
 
     /// A cached result.
@@ -53,10 +53,10 @@ pub struct ManagedStringAggState<S: StateStore, Ser: OrderedSchemaedSerializable
     keyspace: Keyspace<S>,
 
     /// Serializer to get the bytes of sorted columns.
-    sort_key_serializer: Ser,
+    sorted_arrays_serializer: OrderedArraysSerializer,
 }
 
-impl<S: StateStore, Ser: OrderedSchemaedSerializable<Input = Row>> ManagedStringAggState<S, Ser> {
+impl<S: StateStore> ManagedStringAggState<S> {
     /// Create a managed string agg state based on `Keyspace`.
     pub async fn new(
         keyspace: Keyspace<S>,
@@ -64,7 +64,7 @@ impl<S: StateStore, Ser: OrderedSchemaedSerializable<Input = Row>> ManagedString
         sort_key_indices: Vec<usize>,
         value_index: usize,
         delimiter: String,
-        sort_key_serializer: Ser,
+        sort_key_serializer: OrderedArraysSerializer,
     ) -> Result<Self> {
         Ok(Self {
             cache: BTreeMap::new(),
@@ -75,12 +75,12 @@ impl<S: StateStore, Ser: OrderedSchemaedSerializable<Input = Row>> ManagedString
             value_index,
             delimiter,
             keyspace,
-            sort_key_serializer,
+            sorted_arrays_serializer: sort_key_serializer,
         })
     }
 }
 
-impl<S: StateStore, Ser: OrderedSchemaedSerializable<Input = Row>> ManagedStringAggState<S, Ser> {
+impl<S: StateStore> ManagedStringAggState<S> {
     async fn read_all_into_memory(&mut self) -> Result<()> {
         // Read all.
         let all_data = self.keyspace.scan(None).await?;
@@ -104,9 +104,7 @@ impl<S: StateStore, Ser: OrderedSchemaedSerializable<Input = Row>> ManagedString
 }
 
 #[async_trait]
-impl<S: StateStore, Ser: OrderedSchemaedSerializable<Input = Row>> ManagedExtremeState<S>
-    for ManagedStringAggState<S, Ser>
-{
+impl<S: StateStore> ManagedExtremeState<S> for ManagedStringAggState<S> {
     async fn apply_batch(
         &mut self,
         ops: Ops<'_>,
@@ -126,7 +124,11 @@ impl<S: StateStore, Ser: OrderedSchemaedSerializable<Input = Row>> ManagedExtrem
             self.read_all_into_memory().await?;
         }
 
-        for (op, row_idx) in ops.iter().zip(0..data[0].len()) {
+        let mut row_keys = vec![];
+        self.sorted_arrays_serializer
+            .order_based_scehmaed_serialize(data, &mut row_keys);
+
+        for (row_idx, (op, key_bytes)) in ops.iter().zip(row_keys.into_iter()).enumerate() {
             let visible = visibility
                 .map(|x| x.is_set(row_idx).unwrap())
                 .unwrap_or(true);
@@ -134,27 +136,17 @@ impl<S: StateStore, Ser: OrderedSchemaedSerializable<Input = Row>> ManagedExtrem
                 continue;
             }
 
-            let mut datums = vec![];
-            for sort_key_index in &self.sort_key_indices {
-                datums.push(data[*sort_key_index].datum_at(row_idx));
-            }
-            let row = Row(datums);
-            let key_bytes = self
-                .sort_key_serializer
-                .order_based_scehmaed_serialize(&row)
-                .into();
-
             let value = match data[self.value_index].datum_at(row_idx) {
                 Some(scalar) => scalar.into_utf8(),
                 None => "".to_string(),
             };
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    self.cache.insert(key_bytes, value);
+                    self.cache.insert(key_bytes.into(), value);
                     self.total_count += 1;
                 }
                 Op::Delete | Op::UpdateDelete => {
-                    self.cache.remove(&key_bytes);
+                    self.cache.remove::<Bytes>(&(key_bytes.into()));
                     self.total_count -= 1;
                 }
             }
@@ -213,7 +205,7 @@ impl<S: StateStore, Ser: OrderedSchemaedSerializable<Input = Row>> ManagedExtrem
 
 #[cfg(test)]
 mod tests {
-    use crate::stream_op::state_aggregation::sort_key_serializer::SortedKeySerializer;
+    use crate::stream_op::state_aggregation::ordered_serializer::OrderedArraysSerializer;
     use crate::stream_op::state_aggregation::string_agg::ManagedStringAggState;
     use crate::stream_op::state_aggregation::ManagedExtremeState;
     use crate::stream_op::StateStore;
@@ -229,7 +221,12 @@ mod tests {
         let sort_key_indices = vec![0, 1];
         let value_index = 0;
         let orderings = vec![OrderType::Descending, OrderType::Ascending];
-        let sort_key_serializer = SortedKeySerializer::new(orderings);
+        let order_pairs = orderings
+            .clone()
+            .into_iter()
+            .zip(sort_key_indices.clone().into_iter())
+            .collect::<Vec<_>>();
+        let sort_key_serializer = OrderedArraysSerializer::new(order_pairs);
         let mut managed_state = ManagedStringAggState::new(
             keyspace,
             0,
