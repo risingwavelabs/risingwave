@@ -7,12 +7,12 @@
 use super::bloom::Bloom;
 use super::utils::bytes_diff;
 use crate::hummock::table::format::user_key;
-use crate::hummock::table::utils::crc32_checksum;
+use crate::hummock::table::utils::checksum;
 use crate::hummock::HummockValue;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use prost::Message;
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
-use risingwave_pb::hummock::{BlockMeta, Checksum, TableMeta};
+use risingwave_pb::hummock::{BlockMeta, TableMeta};
 
 /// Entry header stores the difference between current key and block base key. `overlap` is the
 /// common prefix of key and base key, and diff is the length of different part.
@@ -51,6 +51,9 @@ pub struct TableBuilderOptions {
 
     /// False positive probability of Bloom filter
     pub bloom_false_positive: f64,
+
+    /// Checksum algorithm
+    pub checksum_algo: ChecksumAlg,
 }
 
 /// Builder is used in building a table.
@@ -119,10 +122,10 @@ impl TableBuilder {
         self.data_buf.put_u32(self.entry_offsets.len() as u32);
 
         // encode checksum and its length
-        let checksum = Checksum {
-            sum: crc32_checksum(&self.data_buf[self.base_offset as usize..]),
-            algo: ChecksumAlg::Crc32c as i32,
-        };
+        let checksum = checksum(
+            self.options.checksum_algo,
+            &self.data_buf[self.base_offset as usize..],
+        );
         let mut cs_bytes = BytesMut::new();
         checksum.encode(&mut cs_bytes).unwrap();
         let ck_len = cs_bytes.len() as u32;
@@ -273,6 +276,7 @@ pub(super) mod tests {
             bloom_false_positive: 0.1,
             block_size: 4096,
             table_capacity: 0,
+            checksum_algo: risingwave_pb::hummock::checksum::Algorithm::XxHash64,
         };
 
         let b = TableBuilder::new(opt);
@@ -351,6 +355,7 @@ pub(super) mod tests {
             bloom_false_positive: 0.1,
             block_size: 16384,               // 16KB
             table_capacity: 256 * (1 << 20), // 256MB
+            checksum_algo: risingwave_pb::hummock::checksum::Algorithm::XxHash64,
         }
     }
 
@@ -361,6 +366,7 @@ pub(super) mod tests {
             bloom_false_positive: if with_blooms { 0.01 } else { 0.0 },
             block_size: 4096,
             table_capacity: 0,
+            checksum_algo: risingwave_pb::hummock::checksum::Algorithm::XxHash64,
         };
 
         // build remote table

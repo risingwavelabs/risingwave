@@ -19,6 +19,7 @@ pub fn default_builder_opt_for_test() -> TableBuilderOptions {
         bloom_false_positive: 0.1,
         block_size: 16384,               // 16KB
         table_capacity: 256 * (1 << 20), // 256MB
+        checksum_algo: risingwave_pb::hummock::checksum::Algorithm::XxHash64,
     }
 }
 

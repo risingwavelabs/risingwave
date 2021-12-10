@@ -44,17 +44,29 @@ pub fn bytes_diff<'a, 'b>(base: &'a [u8], target: &'b [u8]) -> &'b [u8] {
 }
 
 /// Calculate the CRC32 of the given data.
-pub fn crc32_checksum(data: &[u8]) -> u64 {
+fn crc32_checksum(data: &[u8]) -> u64 {
     let mut hasher = crc32fast::Hasher::new();
     hasher.update(data);
     hasher.finalize() as u64
 }
 
 /// Calculate the ``XxHash`` of the given data.
-pub fn xxhash64_checksum(data: &[u8]) -> u64 {
+fn xxhash64_checksum(data: &[u8]) -> u64 {
     let mut hasher = twox_hash::XxHash64::with_seed(0);
     hasher.write(data);
     hasher.finish() as u64
+}
+
+/// Calculate the checksum of the given `data` using `algo`.
+pub fn checksum(algo: ChecksumAlg, data: &[u8]) -> Checksum {
+    let sum = match algo {
+        ChecksumAlg::Crc32c => crc32_checksum(data),
+        ChecksumAlg::XxHash64 => xxhash64_checksum(data),
+    };
+    Checksum {
+        sum,
+        algo: algo as i32,
+    }
 }
 
 /// Verify the checksum of the data equals the given checksum.

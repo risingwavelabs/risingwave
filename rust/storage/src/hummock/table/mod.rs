@@ -15,7 +15,7 @@ mod utils;
 use self::format::user_key;
 
 use super::{HummockError, HummockResult};
-use crate::hummock::table::utils::crc32_checksum;
+use crate::hummock::table::utils::checksum;
 use crate::object::{BlockLocation, ObjectStore};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use prost::Message;
@@ -169,10 +169,10 @@ impl Table {
         assert!(raw_meta.len() < u32::MAX as usize);
 
         // encode checksum and its length
-        let checksum = Checksum {
-            sum: crc32_checksum(&raw_meta),
-            algo: ChecksumAlg::Crc32c as i32,
-        };
+        let checksum = checksum(
+            ChecksumAlg::XxHash64, // TODO: may add an option for meta checksum algorithm
+            &raw_meta,
+        );
         let mut cs_bytes = BytesMut::new();
         checksum.encode(&mut cs_bytes).unwrap();
         let cs_len = cs_bytes.len() as u32;

@@ -193,6 +193,7 @@ mod tests {
             bloom_false_positive: 0.0,
             block_size: 16384,
             table_capacity: 0,
+            checksum_algo: risingwave_pb::hummock::checksum::Algorithm::XxHash64,
         };
 
         let mut b = TableBuilder::new(opt);

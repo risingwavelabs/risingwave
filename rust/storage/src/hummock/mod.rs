@@ -15,6 +15,7 @@ use self::table::format::key_with_ts;
 use crate::object::ObjectStore;
 use cloud::gen_remote_table;
 pub use error::*;
+use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use value::*;
 use version_manager::VersionManager;
 
@@ -30,6 +31,8 @@ pub struct HummockOptions {
     pub bloom_false_positive: f64,
     /// remote directory for storing data and metadata objects
     pub remote_dir: String,
+    /// checksum algorithm
+    pub checksum_algo: ChecksumAlg,
 }
 
 /// Hummock is the state store backend.
@@ -73,6 +76,7 @@ impl HummockStorage {
                 table_capacity: options.table_size,
                 block_size: options.block_size,
                 bloom_false_positive: options.bloom_false_positive,
+                checksum_algo: options.checksum_algo,
             })
         };
 
