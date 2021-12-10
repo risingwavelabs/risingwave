@@ -12,7 +12,7 @@
               }
             }
           },
-          "columnIds": [2, 1]
+          "columnIds": [2, 1, 0]
         }
       }],
       "hashAggNode": {

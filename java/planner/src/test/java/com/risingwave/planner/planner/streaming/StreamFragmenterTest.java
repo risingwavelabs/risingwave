@@ -66,7 +66,7 @@ public class StreamFragmenterTest extends StreamPlanTestBase {
             + "        RwStreamAgg(group=[{}], agg#0=[COUNT()], agg#1=[SUM($0)])\n"
             + "          RwStreamFilter(condition=[>($0, $1)])\n"
             + "            RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
-            + "              RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])";
+            + "              RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,_row_id])";
     Assertions.assertEquals(expectedPlan, explainExchangePlan);
 
     // Test building stages in the fragmenter.
@@ -80,7 +80,7 @@ public class StreamFragmenterTest extends StreamPlanTestBase {
             + "    RwStreamFilter(condition=[>($0, $1)])";
     String expectedStage2 =
         "RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
-            + "  RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])";
+            + "  RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,_row_id])";
     String[] expectedStages = {expectedStage0, expectedStage1, expectedStage2};
     var rootStage = streamFragmenter.generateStageGraph(plan, executionContext);
     var stages = rootStage.getStages();

@@ -59,13 +59,13 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     SqlNode ast = parseSql(sql);
     StreamingPlan plan = streamPlanner.plan(ast, executionContext);
     String resultPlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
-    Assertions.assertEquals(
+    String expectedPlan =
         "RwStreamMaterializedView(name=[t_test])\n"
             + "  RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($0, $1), 1)], $f0_copy=[$0], $f1_copy=[$1])\n"
             + "    RwStreamAgg(group=[{}], agg#0=[COUNT()], agg#1=[SUM($0)])\n"
             + "      RwStreamFilter(condition=[>($0, $1)])\n"
-            + "        RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])",
-        resultPlan);
+            + "        RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,_row_id])";
+    Assertions.assertEquals(expectedPlan, resultPlan);
 
     CreateMaterializedViewHandler handler = new CreateMaterializedViewHandler();
     SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
@@ -121,7 +121,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
             + "        RwStreamAgg(group=[{}], agg#0=[COUNT()], agg#1=[SUM($0)])\n"
             + "          RwStreamFilter(condition=[>($0, $1)])\n"
             + "            RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
-            + "              RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])";
+            + "              RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,_row_id])";
     testLogger.debug("explain the exchange plan:\n" + explainExchangePlan);
     Assertions.assertEquals(expectedPlan, explainExchangePlan);
   }
@@ -152,7 +152,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
             + "      RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
             + "        RwStreamAgg(group=[{0}], agg#0=[COUNT()], v=[SUM($1)])\n"
             + "          RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
-            + "            RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2])";
+            + "            RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,_row_id])";
     testLogger.debug("explain the exchange plan:\n" + explainExchangePlan);
     Assertions.assertEquals(expectedPlan, explainExchangePlan);
   }

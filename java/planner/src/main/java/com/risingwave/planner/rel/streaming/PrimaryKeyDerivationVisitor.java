@@ -312,7 +312,7 @@ public class PrimaryKeyDerivationVisitor
     var info =
         new PrimaryKeyIndicesAndPositionMap(ImmutableList.copyOf(groupList), ImmutableMap.of());
     RwStreamAgg newAggregate =
-        (RwStreamAgg) aggregate.copy(aggregate.getTraitSet(), List.of(input));
+        (RwStreamAgg) aggregate.copy(aggregate.getTraitSet(), List.of(p.node));
     LOGGER.debug("leave RwStreamAgg");
     return new Result<>(newAggregate, info);
   }

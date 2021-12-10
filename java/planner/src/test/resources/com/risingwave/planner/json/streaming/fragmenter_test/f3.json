@@ -17,6 +17,11 @@
               "typeName": "INT32"
             },
             "encoding": "RAW"
+          }, {
+            "columnType": {
+              "typeName": "INT64"
+            },
+            "encoding": "RAW"
           }]
         }
       }],

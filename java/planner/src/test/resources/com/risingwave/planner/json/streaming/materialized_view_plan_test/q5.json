@@ -14,7 +14,7 @@
                 }
               }
             },
-            "columnIds": [1, 2]
+            "columnIds": [1, 2, 0]
           }
         }],
         "projectNode": {
@@ -40,6 +40,14 @@
                   "columnIdx": 1
                 }
               }]
+            }
+          }, {
+            "exprType": "INPUT_REF",
+            "returnType": {
+              "typeName": "INT64"
+            },
+            "inputRef": {
+              "columnIdx": 2
             }
           }]
         }

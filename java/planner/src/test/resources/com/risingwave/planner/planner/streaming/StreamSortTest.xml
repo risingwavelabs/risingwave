@@ -69,7 +69,7 @@ RwStreamMaterializedView(name=[t_order_after_aggregation], collation=[[1 DESC]])
   RwStreamProject(v1=[$0], c=[/(CAST($3):DOUBLE NOT NULL, $4)], v2_copy=[$1])
     RwStreamAgg(group=[{0, 1}], agg#0=[COUNT()], agg#1=[SUM($2)], agg#2=[COUNT($2)])
       RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
-        RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3])
+        RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
 ]]>
         </Resource>
         <Resource name="primaryKey">

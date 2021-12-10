@@ -12,7 +12,7 @@
               }
             }
           },
-          "columnIds": [1, 2]
+          "columnIds": [1, 2, 0]
         }
       }],
       "simpleAggNode": {
