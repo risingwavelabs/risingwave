@@ -348,7 +348,7 @@ where
             let all_data = self.keyspace.scan(self.top_n_count).await?;
 
             for (raw_key, raw_value) in all_data {
-                let mut deserializer = memcomparable::Deserializer::from_slice(&raw_value[..]);
+                let mut deserializer = memcomparable::Deserializer::new(&raw_value[..]);
                 let value = deserialize_datum_not_null_from(
                     &self.data_type.data_type_kind(),
                     &mut deserializer,
@@ -385,7 +385,7 @@ where
 
             match v.into_option() {
                 Some(v) => {
-                    let mut serializer = memcomparable::Serializer::default();
+                    let mut serializer = memcomparable::Serializer::new(vec![]);
                     serialize_datum_not_null_into(&Some(v), &mut serializer)?;
                     let value = serializer.into_inner();
                     write_batch.push((key_encoded.into(), Some(value.into())));
@@ -442,7 +442,7 @@ where
         let mut result = vec![];
 
         for (raw_key, raw_value) in all_data {
-            let mut deserializer = memcomparable::Deserializer::from_slice(&raw_value[..]);
+            let mut deserializer = memcomparable::Deserializer::new(&raw_value[..]);
             let value = deserialize_datum_not_null_from(
                 &self.data_type.data_type_kind(),
                 &mut deserializer,

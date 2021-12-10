@@ -25,22 +25,15 @@ impl OrderedArraysSerializer {
         append_to: &mut Vec<Vec<u8>>,
     ) {
         for row_idx in 0..data[0].len() {
-            let mut bytes = vec![];
+            let mut serializer = memcomparable::Serializer::new(vec![]);
             for order_pair in &self.order_pairs {
-                let mut serializer = memcomparable::Serializer::default();
                 let order = order_pair.0;
                 let pk_index = order_pair.1;
+                serializer.set_reverse(order == OrderType::Descending);
                 serialize_datum_ref_into(&data[pk_index].value_at(row_idx), &mut serializer)
                     .unwrap();
-                let mut bytes_datum = serializer.into_inner();
-                if order == OrderType::Descending {
-                    bytes_datum.iter_mut().for_each(|byte| {
-                        *byte = !(*byte);
-                    });
-                }
-                bytes.extend_from_slice(&bytes_datum);
             }
-            append_to.push(bytes);
+            append_to.push(serializer.into_inner());
         }
     }
 }
@@ -55,14 +48,11 @@ impl OrderedRowSerializer {
     }
 
     pub fn order_based_scehmaed_serialize(&self, data: &Row, append_to: &mut Vec<Vec<u8>>) {
-        for (datum, order_type) in data.0.iter().zip(self.order_pairs.iter()) {
-            let mut serializer = memcomparable::Serializer::default();
+        for (datum, &(order, _)) in data.0.iter().zip(self.order_pairs.iter()) {
+            let mut serializer = memcomparable::Serializer::new(vec![]);
+            serializer.set_reverse(order == OrderType::Descending);
             serialize_datum_into(datum, &mut serializer).unwrap();
-            let mut datum_bytes = serializer.into_inner();
-            if order_type.0 == OrderType::Descending {
-                datum_bytes.iter_mut().for_each(|byte| *byte = !(*byte));
-            }
-            append_to.push(datum_bytes);
+            append_to.push(serializer.into_inner());
         }
     }
 }
@@ -106,10 +96,11 @@ mod tests {
         let mut array = vec![];
         serializer.order_based_scehmaed_serialize(&input_arrays, &mut array);
         array.sort();
-        // option 1 bytes || string 9 bytes
+        // option 1 bytes || string 10 bytes
         assert_eq!(
-            array[0][..10],
+            array[0][..11],
             [
+                !(1u8),
                 !(1u8),
                 !(b'a'),
                 !(b'b'),
@@ -122,7 +113,7 @@ mod tests {
                 !(3u8)
             ]
         );
-        assert_eq!(array[1][10..], [1, b'j', b'm', b'z', 0, 0, 0, 0, 0, 3u8]);
-        assert_eq!(array[2][10..], [1, b'm', b'j', b'z', 0, 0, 0, 0, 0, 3u8]);
+        assert_eq!(array[1][11..], [1, 1, b'j', b'm', b'z', 0, 0, 0, 0, 0, 3u8]);
+        assert_eq!(array[2][11..], [1, 1, b'm', b'j', b'z', 0, 0, 0, 0, 0, 3u8]);
     }
 }

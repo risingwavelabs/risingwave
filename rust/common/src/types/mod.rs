@@ -1,4 +1,5 @@
 use crate::error::{ErrorCode, Result, RwError};
+use bytes::{Buf, BufMut};
 use risingwave_pb::data::DataType as ProstDataType;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -216,7 +217,7 @@ pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
 
 pub fn serialize_datum_ref_into(
     datum_ref: &DatumRef,
-    serializer: &mut memcomparable::Serializer,
+    serializer: &mut memcomparable::Serializer<impl BufMut>,
 ) -> memcomparable::Result<()> {
     if let Some(datum_ref) = datum_ref {
         1u8.serialize(&mut *serializer)?;
@@ -229,7 +230,7 @@ pub fn serialize_datum_ref_into(
 
 pub fn serialize_datum_ref_not_null_into(
     datum_ref: &DatumRef,
-    serializer: &mut memcomparable::Serializer,
+    serializer: &mut memcomparable::Serializer<impl BufMut>,
 ) -> memcomparable::Result<()> {
     datum_ref
         .as_ref()
@@ -240,7 +241,7 @@ pub fn serialize_datum_ref_not_null_into(
 // TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
 pub fn serialize_datum_into(
     datum: &Datum,
-    serializer: &mut memcomparable::Serializer,
+    serializer: &mut memcomparable::Serializer<impl BufMut>,
 ) -> memcomparable::Result<()> {
     if let Some(datum) = datum {
         1u8.serialize(&mut *serializer)?;
@@ -254,7 +255,7 @@ pub fn serialize_datum_into(
 // TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
 pub fn serialize_datum_not_null_into(
     datum: &Datum,
-    serializer: &mut memcomparable::Serializer,
+    serializer: &mut memcomparable::Serializer<impl BufMut>,
 ) -> memcomparable::Result<()> {
     datum
         .as_ref()
@@ -265,7 +266,7 @@ pub fn serialize_datum_not_null_into(
 // TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
 pub fn deserialize_datum_from(
     ty: &DataTypeKind,
-    deserializer: &mut memcomparable::Deserializer,
+    deserializer: &mut memcomparable::Deserializer<impl Buf>,
 ) -> memcomparable::Result<Datum> {
     match u8::deserialize(&mut *deserializer)? {
         0 => Ok(None),
@@ -277,7 +278,7 @@ pub fn deserialize_datum_from(
 // TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
 pub fn deserialize_datum_not_null_from(
     ty: &DataTypeKind,
-    deserializer: &mut memcomparable::Deserializer,
+    deserializer: &mut memcomparable::Deserializer<impl Buf>,
 ) -> memcomparable::Result<Datum> {
     Ok(Some(ScalarImpl::deserialize(*ty, deserializer)?))
 }
@@ -441,16 +442,19 @@ impl std::hash::Hash for ScalarImpl {
     }
 }
 
-impl<'a> ScalarRefImpl<'a> {
-    /// Serialize the scalar ref.
-    pub fn serialize(&self, ser: &mut memcomparable::Serializer) -> memcomparable::Result<()> {
+impl ScalarRefImpl<'_> {
+    /// Serialize the scalar.
+    pub fn serialize(
+        &self,
+        ser: &mut memcomparable::Serializer<impl BufMut>,
+    ) -> memcomparable::Result<()> {
         match self {
             &Self::Int16(v) => v.serialize(ser)?,
             &Self::Int32(v) => v.serialize(ser)?,
             &Self::Int64(v) => v.serialize(ser)?,
             &Self::Float32(v) => v.serialize(ser)?,
             &Self::Float64(v) => v.serialize(ser)?,
-            Self::Utf8(v) => v.serialize(ser)?,
+            &Self::Utf8(v) => v.serialize(ser)?,
             &Self::Bool(v) => v.serialize(ser)?,
             &Self::Decimal(v) => ser.serialize_decimal(v.mantissa(), v.scale() as u8)?,
             Self::Interval(v) => v.serialize(ser)?,
@@ -461,25 +465,17 @@ impl<'a> ScalarRefImpl<'a> {
 
 impl ScalarImpl {
     /// Serialize the scalar.
-    pub fn serialize(&self, ser: &mut memcomparable::Serializer) -> memcomparable::Result<()> {
-        match self {
-            &Self::Int16(v) => v.serialize(ser)?,
-            &Self::Int32(v) => v.serialize(ser)?,
-            &Self::Int64(v) => v.serialize(ser)?,
-            &Self::Float32(v) => v.serialize(ser)?,
-            &Self::Float64(v) => v.serialize(ser)?,
-            Self::Utf8(v) => v.serialize(ser)?,
-            &Self::Bool(v) => v.serialize(ser)?,
-            &Self::Decimal(v) => ser.serialize_decimal(v.mantissa(), v.scale() as u8)?,
-            Self::Interval(v) => v.serialize(ser)?,
-        };
-        Ok(())
+    pub fn serialize(
+        &self,
+        ser: &mut memcomparable::Serializer<impl BufMut>,
+    ) -> memcomparable::Result<()> {
+        self.as_scalar_ref_impl().serialize(ser)
     }
 
     /// Deserialize the scalar.
     pub fn deserialize(
         ty: DataTypeKind,
-        de: &mut memcomparable::Deserializer<'_>,
+        de: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
         use DataTypeKind as Ty;
         Ok(match ty {
@@ -506,7 +502,7 @@ mod tests {
     use super::*;
 
     fn serialize_datum_not_null_into_vec(data: i64) -> Vec<u8> {
-        let mut serializer = memcomparable::Serializer::default();
+        let mut serializer = memcomparable::Serializer::new(vec![]);
         serialize_datum_not_null_into(&Some(ScalarImpl::Int64(data)), &mut serializer).unwrap();
         serializer.into_inner()
     }

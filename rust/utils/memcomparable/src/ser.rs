@@ -3,35 +3,77 @@ use bytes::BufMut;
 use serde::{ser, Serialize};
 
 /// A structure for serializing Rust values into a memcomparable bytes.
-#[derive(Default)]
-pub struct Serializer {
-    // This string starts empty and bytes are appended as values are serialized.
-    output: Vec<u8>,
+pub struct Serializer<B: BufMut> {
+    output: MaybeFlip<B>,
 }
 
-impl Serializer {
+impl<B: BufMut> Serializer<B> {
     /// Create a new `Serializer`.
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(buffer: B) -> Self {
+        Serializer {
+            output: MaybeFlip {
+                output: buffer,
+                flip: false,
+            },
+        }
     }
 
-    /// Unwrap the `Vec<u8>` from the `Serializer`.
-    pub fn into_inner(self) -> Vec<u8> {
-        self.output
+    /// Unwrap the inner buffer from the `Serializer`.
+    pub fn into_inner(self) -> B {
+        self.output.output
+    }
+
+    /// Set whether data is serialized in reverse order.
+    pub fn set_reverse(&mut self, reverse: bool) {
+        self.output.flip = reverse;
     }
 }
 
 /// Serialize the given data structure as a memcomparable byte vector.
 pub fn to_vec(value: &impl Serialize) -> Result<Vec<u8>> {
-    let mut serializer = Serializer { output: Vec::new() };
+    let mut serializer = Serializer::new(vec![]);
     value.serialize(&mut serializer)?;
-    Ok(serializer.output)
+    Ok(serializer.into_inner())
+}
+
+/// A wrapper around `BufMut` that can flip bits when putting data.
+struct MaybeFlip<B: BufMut> {
+    output: B,
+    flip: bool,
+}
+
+macro_rules! def_method {
+    ($name:ident, $ty:ty) => {
+        fn $name(&mut self, value: $ty) {
+            self.output.$name(if self.flip { !value } else { value });
+        }
+    };
+}
+
+impl<B: BufMut> MaybeFlip<B> {
+    def_method!(put_u8, u8);
+    def_method!(put_u16, u16);
+    def_method!(put_u32, u32);
+    def_method!(put_u64, u64);
+    def_method!(put_i32, i32);
+
+    fn put_slice(&mut self, src: &[u8]) {
+        for &val in src {
+            let val = if self.flip { !val } else { val };
+            self.output.put_u8(val);
+        }
+    }
+
+    fn put_bytes(&mut self, val: u8, cnt: usize) {
+        let val = if self.flip { !val } else { val };
+        self.output.put_bytes(val, cnt);
+    }
 }
 
 // Format Reference:
 // https://github.com/facebook/mysql-5.6/wiki/MyRocks-record-format#memcomparable-format
 // https://haxisnake.github.io/2020/11/06/TIDB源码学习笔记-基本类型编解码方案/
-impl<'a> ser::Serializer for &'a mut Serializer {
+impl<'a, B: BufMut> ser::Serializer for &'a mut Serializer<B> {
     type Ok = ();
     type Error = Error;
 
@@ -118,6 +160,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     }
 
     fn serialize_bytes(self, v: &[u8]) -> Result<()> {
+        self.output.put_u8(if v.is_empty() { 0 } else { 1 });
         let mut len = 0;
         for chunk in v.chunks(8) {
             self.output.put_slice(chunk);
@@ -240,7 +283,7 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     }
 }
 
-impl<'a> ser::SerializeSeq for &'a mut Serializer {
+impl<'a, B: BufMut> ser::SerializeSeq for &'a mut Serializer<B> {
     type Ok = ();
     type Error = Error;
 
@@ -260,7 +303,7 @@ impl<'a> ser::SerializeSeq for &'a mut Serializer {
     }
 }
 
-impl<'a> ser::SerializeTuple for &'a mut Serializer {
+impl<'a, B: BufMut> ser::SerializeTuple for &'a mut Serializer<B> {
     type Ok = ();
     type Error = Error;
 
@@ -276,7 +319,7 @@ impl<'a> ser::SerializeTuple for &'a mut Serializer {
     }
 }
 
-impl<'a> ser::SerializeTupleStruct for &'a mut Serializer {
+impl<'a, B: BufMut> ser::SerializeTupleStruct for &'a mut Serializer<B> {
     type Ok = ();
     type Error = Error;
 
@@ -292,7 +335,7 @@ impl<'a> ser::SerializeTupleStruct for &'a mut Serializer {
     }
 }
 
-impl<'a> ser::SerializeTupleVariant for &'a mut Serializer {
+impl<'a, B: BufMut> ser::SerializeTupleVariant for &'a mut Serializer<B> {
     type Ok = ();
     type Error = Error;
 
@@ -308,7 +351,7 @@ impl<'a> ser::SerializeTupleVariant for &'a mut Serializer {
     }
 }
 
-impl<'a> ser::SerializeMap for &'a mut Serializer {
+impl<'a, B: BufMut> ser::SerializeMap for &'a mut Serializer<B> {
     type Ok = ();
     type Error = Error;
 
@@ -331,7 +374,7 @@ impl<'a> ser::SerializeMap for &'a mut Serializer {
     }
 }
 
-impl<'a> ser::SerializeStruct for &'a mut Serializer {
+impl<'a, B: BufMut> ser::SerializeStruct for &'a mut Serializer<B> {
     type Ok = ();
     type Error = Error;
 
@@ -347,7 +390,7 @@ impl<'a> ser::SerializeStruct for &'a mut Serializer {
     }
 }
 
-impl<'a> ser::SerializeStructVariant for &'a mut Serializer {
+impl<'a, B: BufMut> ser::SerializeStructVariant for &'a mut Serializer<B> {
     type Ok = ();
     type Error = Error;
 
@@ -363,7 +406,7 @@ impl<'a> ser::SerializeStructVariant for &'a mut Serializer {
     }
 }
 
-impl Serializer {
+impl<B: BufMut> Serializer<B> {
     /// Serialize a decimal value.
     ///
     /// - `mantissa`: From `rust_decimal::Decimal::mantissa()`. A 96-bits signed integer.
@@ -509,29 +552,45 @@ mod tests {
 
     #[test]
     fn test_string() {
+        assert_eq!(to_vec(&"").unwrap(), [0]);
         assert_eq!(
             to_vec(&"123").unwrap(),
-            [b'1', b'2', b'3', 0, 0, 0, 0, 0, 3]
+            [1, b'1', b'2', b'3', 0, 0, 0, 0, 0, 3]
         );
         assert_eq!(
             to_vec(&"12345678").unwrap(),
-            [b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', 8]
+            [1, b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', 8]
         );
         assert_eq!(
             to_vec(&"1234567890").unwrap(),
-            [b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', 9, b'9', b'0', 0, 0, 0, 0, 0, 0, 2]
+            [
+                1, b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', 9, b'9', b'0', 0, 0, 0, 0, 0, 0,
+                2
+            ]
         );
     }
 
     #[test]
     fn test_string_order() {
+        fn to_vec_desc(s: &str) -> Vec<u8> {
+            let mut ser = Serializer::new(vec![]);
+            ser.set_reverse(true);
+            s.serialize(&mut ser).unwrap();
+            ser.into_inner()
+        }
+
         for _ in 0..1000 {
             let s = rand_string(0..16);
             let a = s.clone() + &rand_string(0..16);
             let b = s + &rand_string(0..16);
+
             let ea = to_vec(&a).unwrap();
             let eb = to_vec(&b).unwrap();
             assert_eq!(a.cmp(&b), ea.cmp(&eb));
+
+            let ra = to_vec_desc(&a);
+            let rb = to_vec_desc(&b);
+            assert_eq!(a.cmp(&b), ra.cmp(&rb).reverse());
         }
     }
 
@@ -553,8 +612,26 @@ mod tests {
     }
 
     fn serialize_decimal(mantissa: i128, scale: u8) -> Vec<u8> {
-        let mut serializer = Serializer::default();
+        let mut serializer = Serializer::new(vec![]);
         serializer.serialize_decimal(mantissa, scale).unwrap();
         serializer.into_inner()
+    }
+
+    #[test]
+    fn test_reverse_order() {
+        // Order: (ASC, DESC)
+        let v1 = (0u8, 1i32);
+        let v2 = (0u8, -1i32);
+        let v3 = (1u8, -1i32);
+
+        fn serialize(v: (u8, i32)) -> Vec<u8> {
+            let mut ser = Serializer::new(vec![]);
+            v.0.serialize(&mut ser).unwrap();
+            ser.set_reverse(true);
+            v.1.serialize(&mut ser).unwrap();
+            ser.into_inner()
+        }
+        assert!(serialize(v1) < serialize(v2));
+        assert!(serialize(v2) < serialize(v3));
     }
 }

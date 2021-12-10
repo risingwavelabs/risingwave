@@ -79,7 +79,7 @@ impl<S: StateStore> MViewTable<S> {
             .map_err(|err| ErrorCode::InternalError(err.to_string()))?;
         match buf {
             Some(buf) => {
-                let mut deserializer = memcomparable::Deserializer::from_slice(&buf);
+                let mut deserializer = memcomparable::Deserializer::new(buf);
                 let datum = deserialize_datum_from(
                     &self.schema.fields[cell_idx].data_type.data_type_kind(),
                     &mut deserializer,
@@ -137,7 +137,7 @@ impl<S: StateStore> MViewTableIter<S> {
                     // get cell_idx
                     let cell_idx = (&key[key.len() - 4..]).get_u32_le();
 
-                    let mut cell_deserializer = memcomparable::Deserializer::from_slice(&value);
+                    let mut cell_deserializer = memcomparable::Deserializer::new(value);
                     let cell = deserialize_datum_from(
                         &self.schema.fields[cell_idx as usize]
                             .data_type

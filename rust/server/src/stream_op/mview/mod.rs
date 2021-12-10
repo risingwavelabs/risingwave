@@ -24,7 +24,7 @@ fn serialize_cell_idx(cell_idx: u32) -> Result<Vec<u8>> {
 }
 
 fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {
-    let mut serializer = memcomparable::Serializer::default();
+    let mut serializer = memcomparable::Serializer::new(vec![]);
     serialize_datum_into(cell, &mut serializer)?;
     Ok(serializer.into_inner())
 }

@@ -5,16 +5,26 @@ use serde::de::{
 };
 
 /// A structure that deserializes memcomparable bytes into Rust values.
-pub struct Deserializer<'de> {
-    // This string starts with the input data and characters are truncated off
-    // the beginning as data is parsed.
-    input: &'de [u8],
+pub struct Deserializer<B: Buf> {
+    input: MaybeFlip<B>,
 }
 
-impl<'de> Deserializer<'de> {
-    /// Creates a deserializer from a `&[u8]`.
-    pub fn from_slice(input: &'de [u8]) -> Self {
-        Deserializer { input }
+impl<B: Buf> Deserializer<B> {
+    /// Creates a deserializer from a buffer.
+    pub fn new(input: B) -> Self {
+        Deserializer {
+            input: MaybeFlip { input, flip: false },
+        }
+    }
+
+    /// Set whether data is serialized in reverse order.
+    pub fn set_reverse(&mut self, reverse: bool) {
+        self.input.flip = reverse;
+    }
+
+    /// Unwrap the inner buffer from the `Deserializer`.
+    pub fn into_inner(self) -> B {
+        self.input.input
     }
 }
 
@@ -23,7 +33,7 @@ pub fn from_slice<'a, T>(bytes: &'a [u8]) -> Result<T>
 where
     T: serde::Deserialize<'a>,
 {
-    let mut deserializer = Deserializer::from_slice(bytes);
+    let mut deserializer = Deserializer::new(bytes);
     let t = T::deserialize(&mut deserializer)?;
     if deserializer.input.is_empty() {
         Ok(t)
@@ -32,12 +42,55 @@ where
     }
 }
 
-impl Deserializer<'_> {
+/// A wrapper around `Buf` that can flip bits when getting data.
+struct MaybeFlip<B: Buf> {
+    input: B,
+    flip: bool,
+}
+
+macro_rules! def_method {
+    ($name:ident, $ty:ty) => {
+        fn $name(&mut self) -> $ty {
+            let v = self.input.$name();
+            if self.flip {
+                !v
+            } else {
+                v
+            }
+        }
+    };
+}
+
+impl<B: Buf> MaybeFlip<B> {
+    def_method!(get_u8, u8);
+    def_method!(get_u16, u16);
+    def_method!(get_u32, u32);
+    def_method!(get_u64, u64);
+    def_method!(get_i32, i32);
+
+    fn copy_to_slice(&mut self, dst: &mut [u8]) {
+        self.input.copy_to_slice(dst);
+        if self.flip {
+            dst.iter_mut().for_each(|x| *x = !*x);
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.input.remaining() == 0
+    }
+}
+
+impl<B: Buf> Deserializer<B> {
     fn read_bytes(&mut self) -> Result<Vec<u8>> {
+        match self.input.get_u8() {
+            0 => return Ok(vec![]), // empty slice
+            1 => {}                 // non-empty slice
+            v => return Err(Error::InvalidBytesEncoding(v)),
+        }
         let mut bytes = vec![];
+        let mut chunk = [0u8; 9];
         loop {
-            let (chunk, remain) = self.input.split_at(9);
-            self.input = remain;
+            self.input.copy_to_slice(&mut chunk);
             match chunk[8] {
                 len @ 1..=8 => {
                     bytes.extend_from_slice(&chunk[..len as usize]);
@@ -53,7 +106,7 @@ impl Deserializer<'_> {
 // Format Reference:
 // https://github.com/facebook/mysql-5.6/wiki/MyRocks-record-format#memcomparable-format
 // https://haxisnake.github.io/2020/11/06/TIDB源码学习笔记-基本类型编解码方案/
-impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
+impl<'de, 'a, B: Buf + 'de> de::Deserializer<'de> for &'a mut Deserializer<B> {
     type Error = Error;
 
     fn deserialize_any<V>(self, _visitor: V) -> Result<V::Value>
@@ -238,10 +291,10 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        struct Access<'de, 'a> {
-            deserializer: &'a mut Deserializer<'de>,
+        struct Access<'a, B: Buf> {
+            deserializer: &'a mut Deserializer<B>,
         }
-        impl<'de, 'a> SeqAccess<'de> for Access<'de, 'a> {
+        impl<'de, 'a, B: Buf + 'de> SeqAccess<'de> for Access<'a, B> {
             type Error = Error;
 
             fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>>
@@ -266,12 +319,12 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        struct Access<'de, 'a> {
-            deserializer: &'a mut Deserializer<'de>,
+        struct Access<'a, B: Buf> {
+            deserializer: &'a mut Deserializer<B>,
             len: usize,
         }
 
-        impl<'de, 'a> SeqAccess<'de> for Access<'de, 'a> {
+        impl<'de, 'a, B: Buf + 'de> SeqAccess<'de> for Access<'a, B> {
             type Error = Error;
 
             fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>>
@@ -338,7 +391,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        impl<'de, 'a> EnumAccess<'de> for &'a mut Deserializer<'de> {
+        impl<'de, 'a, B: Buf + 'de> EnumAccess<'de> for &'a mut Deserializer<B> {
             type Error = Error;
             type Variant = Self;
 
@@ -372,7 +425,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
 
 // `VariantAccess` is provided to the `Visitor` to give it the ability to see
 // the content of the single variant that it decided to deserialize.
-impl<'de, 'a> VariantAccess<'de> for &'a mut Deserializer<'de> {
+impl<'de, 'a, B: Buf + 'de> VariantAccess<'de> for &'a mut Deserializer<B> {
     type Error = Error;
 
     fn unit_variant(self) -> Result<()> {
@@ -401,7 +454,7 @@ impl<'de, 'a> VariantAccess<'de> for &'a mut Deserializer<'de> {
     }
 }
 
-impl Deserializer<'_> {
+impl<B: Buf> Deserializer<B> {
     /// Deserialize a decimal value. Returns `(mantissa, scale)`.
     pub fn deserialize_decimal(&mut self) -> Result<(i128, u8)> {
         let scale = self.input.get_u8();
@@ -527,24 +580,30 @@ mod tests {
 
     #[test]
     fn test_string() {
+        assert_eq!(from_slice::<String>(&[0]).unwrap(), "".to_string());
         assert_eq!(
-            from_slice::<String>(&[b'1', b'2', b'3', 0, 0, 0, 0, 0, 3]).unwrap(),
+            from_slice::<String>(&[1, b'1', b'2', b'3', 0, 0, 0, 0, 0, 3]).unwrap(),
             "123".to_string()
         );
         assert_eq!(
-            from_slice::<String>(&[b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', 8]).unwrap(),
+            from_slice::<String>(&[1, b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', 8]).unwrap(),
             "12345678".to_string()
         );
         assert_eq!(
             from_slice::<String>(&[
-                b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', 9, b'9', b'0', 0, 0, 0, 0, 0, 0, 2
+                1, b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', 9, b'9', b'0', 0, 0, 0, 0, 0, 0,
+                2
             ])
             .unwrap(),
             "1234567890".to_string()
         );
         assert_eq!(
-            from_slice::<String>(&[0, 0, 0, 0, 0, 0, 0, 0, 10]),
+            from_slice::<String>(&[1, 0, 0, 0, 0, 0, 0, 0, 0, 10]),
             Err(Error::InvalidBytesEncoding(10))
+        );
+        assert_eq!(
+            from_slice::<String>(&[2]),
+            Err(Error::InvalidBytesEncoding(2))
         );
     }
 
@@ -556,13 +615,13 @@ mod tests {
     }
 
     fn serialize_decimal(mantissa: i128, scale: u8) -> Vec<u8> {
-        let mut serializer = crate::Serializer::default();
+        let mut serializer = crate::Serializer::new(vec![]);
         serializer.serialize_decimal(mantissa, scale).unwrap();
         serializer.into_inner()
     }
 
     fn deserialize_decimal(bytes: &[u8]) -> (i128, u8) {
-        let mut deserializer = Deserializer::from_slice(bytes);
+        let mut deserializer = Deserializer::new(bytes);
         deserializer.deserialize_decimal().unwrap()
     }
 }

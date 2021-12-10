@@ -38,7 +38,7 @@ impl<S: StateStore> ManagedValueState<S> {
 
             // Decode the Datum from the value.
             if let Some(raw_data) = raw_data {
-                let mut deserializer = memcomparable::Deserializer::from_slice(&raw_data[..]);
+                let mut deserializer = memcomparable::Deserializer::new(&raw_data[..]);
                 Some(deserialize_datum_from(
                     &agg_call.return_type.data_type_kind(),
                     &mut deserializer,
@@ -95,7 +95,7 @@ impl<S: StateStore> ManagedValueState<S> {
         debug_assert!(self.is_dirty());
 
         let v = self.state.get_output()?;
-        let mut serializer = memcomparable::Serializer::default();
+        let mut serializer = memcomparable::Serializer::new(vec![]);
         serialize_datum_into(&v, &mut serializer)?;
         write_batch.push((
             self.keyspace.prefix().to_vec().into(),

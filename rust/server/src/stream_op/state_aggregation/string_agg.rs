@@ -86,7 +86,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
         let all_data = self.keyspace.scan(None).await?;
         for (raw_key, raw_value) in all_data {
             // We only need to deserialize the value, and keep the key as bytes.
-            let mut deserializer = memcomparable::Deserializer::from_slice(&raw_value[..]);
+            let mut deserializer = memcomparable::Deserializer::new(&raw_value[..]);
             let value =
                 deserialize_datum_not_null_from(&DataTypeKind::Char, &mut deserializer)?.unwrap();
             let value_string: String = value.into_utf8();
@@ -193,7 +193,7 @@ impl<S: StateStore> ManagedExtremeState<S> for ManagedStringAggState<S> {
 
         for (key, value) in std::mem::take(&mut self.cache) {
             let key_encoded = [self.keyspace.prefix(), &key[..]].concat();
-            let mut serializer = memcomparable::Serializer::default();
+            let mut serializer = memcomparable::Serializer::new(vec![]);
             serialize_datum_not_null_into(&Some(value.to_scalar_value()), &mut serializer)?;
             let value = serializer.into_inner();
             write_batch.push((key_encoded.into(), Some(value.into())));

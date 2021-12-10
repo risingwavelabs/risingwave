@@ -33,7 +33,7 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
     ///
     /// TODO: support `&K` instead of `K` as parameter.
     pub fn serialize(&self, key: K, row_ids: &ExtremePK) -> Result<Vec<u8>> {
-        let mut serializer = memcomparable::Serializer::default();
+        let mut serializer = memcomparable::Serializer::new(vec![]);
         let key: ScalarImpl = key.into();
         key.serialize(&mut serializer)?;
         debug_assert_eq!(row_ids.len(), self.pk_length, "mismatch pk length");
