@@ -59,6 +59,8 @@ impl PartialOrd for HeapNode {
 }
 impl Ord for HeapNode {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // Note: to implement min-heap by using max-heap internally, the comparing
+        // order should be changed.
         VersionComparator::compare_key(&other.key, &self.key)
     }
 }
@@ -72,6 +74,8 @@ impl SortedIterator {
             heap_built: false,
         }
     }
+
+    /// Merge different sorted tables by using merge sort.
     async fn next_inner(&mut self) -> HummockResult<()> {
         if !self.heap_built {
             self.build_heap().await?;
@@ -85,6 +89,8 @@ impl SortedIterator {
         let iter = &mut self.iterators[cur_node.iterator_idx];
 
         if iter.is_valid() {
+            // put the next kv pair into the heap
+
             let key = iter.key()?;
             let val = iter.value()?;
             self.heap

@@ -62,9 +62,16 @@ impl UserKeyIterator {
                 }
             }
 
-            if matches!(self.iterator.next().await, Err(HummockError::EOF)) {
-                // already reach to the end of the iterator
-                return Ok(None);
+            match self.iterator.next().await {
+                Ok(()) => {}
+                Err(HummockError::EOF) => {
+                    // already reach to the end of the iterator
+                    return Ok(None);
+                }
+                Err(err) => {
+                    // other error
+                    return Err(err);
+                }
             }
         }
     }
