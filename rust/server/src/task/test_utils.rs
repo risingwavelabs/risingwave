@@ -454,7 +454,7 @@ impl ResultChecker {
     pub fn check_result(&mut self, actual: &[GetDataResponse]) {
         // Ensure the testing data itself is correct.
         assert_eq!(self.columns.len(), self.col_types.len());
-        for col in self.columns.iter() {
+        for col in &self.columns {
             assert_eq!(col.len(), self.cardinality());
         }
         self.try_check_result(actual).unwrap();

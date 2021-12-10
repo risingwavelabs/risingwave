@@ -137,7 +137,7 @@ impl Row {
     /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
     pub fn serialize(&self) -> Result<Vec<u8>, memcomparable::Error> {
         let mut serializer = memcomparable::Serializer::default();
-        for v in self.0.iter() {
+        for v in &self.0 {
             serialize_datum_into(v, &mut serializer)?;
         }
         Ok(serializer.into_inner())
@@ -146,7 +146,7 @@ impl Row {
     /// Serialize the row into a memcomparable bytes. All values must not be null.
     pub fn serialize_not_null(&self) -> Result<Vec<u8>, memcomparable::Error> {
         let mut serializer = memcomparable::Serializer::default();
-        for v in self.0.iter() {
+        for v in &self.0 {
             serialize_datum_not_null_into(v, &mut serializer)?;
         }
         Ok(serializer.into_inner())
@@ -201,7 +201,7 @@ impl RowDeserializer {
         let mut values = vec![];
         values.reserve(self.schema.len());
         let mut deserializer = memcomparable::Deserializer::from_slice(data);
-        for &ty in self.schema.iter() {
+        for &ty in &self.schema {
             values.push(deserialize_datum_from(&ty, &mut deserializer)?);
         }
         Ok(Row(values))
@@ -212,7 +212,7 @@ impl RowDeserializer {
         let mut values = vec![];
         values.reserve(self.schema.len());
         let mut deserializer = memcomparable::Deserializer::from_slice(data);
-        for &ty in self.schema.iter() {
+        for &ty in &self.schema {
             values.push(deserialize_datum_not_null_from(&ty, &mut deserializer)?);
         }
         Ok(Row(values))

@@ -231,7 +231,7 @@ mod tests {
                 let mut res_checker = ResultChecker::new();
                 let row_id_column = &row_id_columns[sink_id];
                 res_checker.add_i64_column(false, row_id_column);
-                for column in each_sink_output_columns[sink_id].iter() {
+                for column in &each_sink_output_columns[sink_id] {
                     res_checker.add_i32_column(false, column.as_slice());
                 }
                 res_checker.check_result(&col);

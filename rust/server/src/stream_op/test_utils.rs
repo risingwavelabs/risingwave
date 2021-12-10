@@ -103,7 +103,7 @@ impl MockAsyncSource {
         tx: &mut UnboundedSender<Message>,
         chunks: impl IntoIterator<Item = StreamChunk>,
     ) {
-        for chunk in chunks.into_iter() {
+        for chunk in chunks {
             tx.send(Message::Chunk(chunk)).expect("Receiver closed");
         }
     }

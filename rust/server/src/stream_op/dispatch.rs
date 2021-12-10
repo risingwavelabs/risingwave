@@ -365,7 +365,7 @@ mod tests {
             .collect_vec();
         let mut output_cols = vec![vec![vec![]; dimension]; num_outputs];
         let mut output_ops = vec![vec![]; num_outputs];
-        for op in ops.iter() {
+        for op in &ops {
             let hash_builder = CRC32FastBuilder {};
             let mut hasher = hash_builder.build_hasher();
             let one_row = (0..dimension).map(|_| start.next().unwrap()).collect_vec();

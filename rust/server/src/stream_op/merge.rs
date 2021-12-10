@@ -179,7 +179,7 @@ impl Executor for MergeExecutor {
                 futures.push(ch.into_future());
             }
             let ((message, from), _id, remains) = select_all(futures).await;
-            for fut in remains.into_iter() {
+            for fut in remains {
                 self.active.push(fut.into_inner().unwrap());
             }
 

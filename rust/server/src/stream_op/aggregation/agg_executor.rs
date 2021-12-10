@@ -63,7 +63,7 @@ impl<S: StateStore> AggState<S> {
         }
 
         let mut outputs = vec![];
-        for state in self.managed_states.iter_mut() {
+        for state in &mut self.managed_states {
             outputs.push(state.get_output().await?);
         }
         self.prev_states = Some(outputs);

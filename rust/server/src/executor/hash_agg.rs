@@ -183,7 +183,7 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        for (key, states) in mem::take(&mut self.groups).into_iter() {
+        for (key, states) in mem::take(&mut self.groups) {
             key.deserialize_to_builders(&mut group_builders)?;
             states
                 .into_iter()

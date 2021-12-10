@@ -58,7 +58,7 @@ pub struct StreamChunk {
 
 impl StreamChunk {
     pub fn new(ops: Vec<Op>, columns: Vec<Column>, visibility: Option<Bitmap>) -> Self {
-        for col in columns.iter() {
+        for col in &columns {
             assert_eq!(col.array_ref().len(), ops.len());
         }
         StreamChunk {

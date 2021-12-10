@@ -102,7 +102,7 @@ impl EncodableArray<'_> {
                     if (buf[0] & 128) == 0 {
                         buf[0] |= 128;
                     } else {
-                        for b in buf.iter_mut() {
+                        for b in &mut buf {
                             *b = !*b;
                         }
                     }
@@ -118,7 +118,7 @@ impl EncodableArray<'_> {
                     if (buf[0] & 128) == 0 {
                         buf[0] |= 128;
                     } else {
-                        for b in buf.iter_mut() {
+                        for b in &mut buf {
                             *b = !*b;
                         }
                     }

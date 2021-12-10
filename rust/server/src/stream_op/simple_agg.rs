@@ -133,7 +133,7 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
         };
 
         let mut write_batch = vec![];
-        for state in states.managed_states.iter_mut() {
+        for state in &mut states.managed_states {
             state.flush(&mut write_batch)?;
         }
 

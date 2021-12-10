@@ -220,7 +220,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
             let mut write_batch = vec![];
             let mut dirty_cnt = 0;
 
-            for (_, states) in self.state_map.iter_mut() {
+            for states in self.state_map.values_mut() {
                 if states.is_dirty() {
                     dirty_cnt += 1;
                     for state in &mut states.managed_states {
@@ -253,7 +253,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
         // --- Retrieve modified states and put the changes into the builders ---
         let mut keys_to_delete = vec![];
 
-        for (key, states) in self.state_map.iter_mut() {
+        for (key, states) in &mut self.state_map {
             let to_delete = states
                 .build_changes(&mut builders, &mut new_ops, Some(key))
                 .await?;

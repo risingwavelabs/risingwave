@@ -387,7 +387,7 @@ impl StreamManagerCore {
                 let source = source_desc.clone().source;
 
                 let mut fields = Vec::with_capacity(column_ids.len());
-                for &column_id in column_ids.iter() {
+                for &column_id in &column_ids {
                     let column_desc = source_desc
                         .columns
                         .iter()
