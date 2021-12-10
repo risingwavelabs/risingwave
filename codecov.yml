@@ -2,6 +2,16 @@ codecov:
   notify:
     # do not notify until 3 builds collected (java & rust & e2e)
     after_n_builds: 3
+coverage:
+  status:
+    patch: off # disable patch status
+    project: 
+      default: false  # disable the default status that measures entire project
+      rust:
+        only_pulls: true # no status will be posted for commits not on a pull request
+        paths: "rust/"
+        target: auto # compared with the coverage from the base commit
+        threshold: 0.1% # allow the coverage to drop by 0.1% and posting a success status
 comment:
   # do not comment until 3 builds collected (java & rust & e2e)
   after_n_builds: 3
