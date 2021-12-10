@@ -1,3 +1,7 @@
+# codecov config
+# Reference: https://docs.codecov.com/docs/codecovyml-reference
+# Tips. You may run following command to validate before committing any changes
+#   curl --data-binary @codecov.yml https://codecov.io/validate
 codecov:
   notify:
     # do not notify until 3 builds collected (java & rust & e2e)
@@ -9,7 +13,8 @@ coverage:
       default: false  # disable the default status that measures entire project
       rust:
         only_pulls: true # no status will be posted for commits not on a pull request
-        paths: "rust/"
+        paths:
+          - "rust/"
         target: auto # compared with the coverage from the base commit
         threshold: 0.1% # allow the coverage to drop by 0.1% and posting a success status
 comment:
