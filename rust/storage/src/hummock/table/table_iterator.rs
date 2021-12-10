@@ -49,6 +49,7 @@ impl TableIterator {
             .and_then(|x| x.data().map(|(k, _)| k))
             .ok_or(HummockError::EOF)
     }
+
     pub fn value(&self) -> HummockResult<HummockValue<&[u8]>> {
         match self
             .block_iter

@@ -107,6 +107,7 @@ impl SortedIterator {
             None => Err(HummockError::EOF),
         }
     }
+
     pub fn value(&self) -> HummockResult<HummockValue<&[u8]>> {
         match &self.cur_node {
             Some(node) => Ok(node.pair().1),

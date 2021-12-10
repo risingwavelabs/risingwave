@@ -158,6 +158,18 @@ impl VersionManager {
         }
     }
 
+    /// Get the iterators on the underlying tables.
+    /// Caller should be expected to pin a snapshot to get a consistent view.
+    pub fn tables(&self) -> HummockResult<Vec<Arc<Table>>> {
+        let mut out: Vec<Arc<Table>> = Vec::new();
+        let inner = self.inner.lock();
+        for (_, table) in inner.tables.iter() {
+            out.push(table.clone());
+        }
+
+        Ok(out)
+    }
+
     /// Add a L0 SST and return a new epoch number
     pub async fn add_l0_sst(&self, table: Table) -> HummockResult<u64> {
         let table_id = table.id;
