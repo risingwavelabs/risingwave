@@ -12,18 +12,19 @@ use std::sync::Arc;
 
 pub const K_PROCESSING_WINDOW_SIZE: usize = 1024;
 
-#[derive(PartialEq, Copy, Clone)]
+#[derive(PartialEq, Copy, Clone, Debug)]
 pub enum OrderType {
     Ascending,
     Descending,
 }
 
+#[derive(Debug)]
 pub struct OrderPair {
     pub order_type: OrderType,
     pub order: Box<InputRefExpression>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct HeapElem {
     pub order_pairs: Arc<Vec<OrderPair>>,
     pub chunk: DataChunkRef,
@@ -38,14 +39,14 @@ pub struct HeapElem {
 
 impl Ord for HeapElem {
     fn cmp(&self, other: &Self) -> Ordering {
-        if let (Some(lhs_encoded_chunk), Some(rhs_encoded_chunk)) =
+        let ord = if let (Some(lhs_encoded_chunk), Some(rhs_encoded_chunk)) =
             (self.encoded_chunk.as_ref(), other.encoded_chunk.as_ref())
         {
             lhs_encoded_chunk[self.elem_idx]
                 .as_slice()
                 .mem_cmp(rhs_encoded_chunk[other.elem_idx].as_slice())
         } else {
-            match compare_two_row(
+            compare_two_row(
                 self.order_pairs.as_ref(),
                 self.chunk.as_ref(),
                 self.elem_idx,
@@ -53,11 +54,11 @@ impl Ord for HeapElem {
                 other.elem_idx,
             )
             .unwrap()
-            {
-                Ordering::Less => Ordering::Greater,
-                Ordering::Equal => Ordering::Equal,
-                Ordering::Greater => Ordering::Less,
-            }
+        };
+        match ord {
+            Ordering::Less => Ordering::Greater,
+            Ordering::Greater => Ordering::Less,
+            Ordering::Equal => Ordering::Equal,
         }
     }
 }

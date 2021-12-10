@@ -149,6 +149,36 @@ select case when v3 = 2 then '2' when v3 = 3 then '3' when v3 = 4 then '4' when 
 statement ok
 drop table t
 
+statement ok
+create table t (v1 text, v2 bool, v3 int);
+
+statement ok
+insert into t values ('true', true, 1);
+
+statement ok
+insert into t values ('false', false, 2);
+
+statement ok
+insert into t values ('null', null, 3);
+
+query TBI
+select * from t order by v3 desc;
+----
+null   NULL   3
+false  false  2
+true   true   1
+
+query TBI
+select * from t order by v3 asc;
+----
+true   true   1
+false  false  2
+null   NULL   3
+
+statement ok
+drop table t;
+
+
 # Date/Time related
 statement ok
 create table t (v1 date not null, v2 time not null, v3 timestamp not null)
