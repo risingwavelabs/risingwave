@@ -1,7 +1,7 @@
 use std::convert::TryFrom;
 
-use risingwave_pb::expr::expr_node::RexNode;
-use risingwave_pb::expr::{expr_node::Type, ExprNode as ProstExprNode};
+use risingwave_pb::expr::expr_node::{RexNode, Type};
+use risingwave_pb::expr::ExprNode as ProstExprNode;
 
 use crate::array::{ArrayRef, DataChunk};
 use crate::error::{ErrorCode, Result, RwError};

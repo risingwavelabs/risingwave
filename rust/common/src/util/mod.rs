@@ -1,8 +1,6 @@
-use std::any::type_name;
-use std::any::Any;
+use std::any::{type_name, Any};
 
 pub use self::prost::*;
-
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 

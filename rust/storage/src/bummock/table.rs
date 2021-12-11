@@ -1,20 +1,13 @@
-use crate::bummock::PartitionedRowGroupRef;
-use crate::bummock::StagedRowGroupRef;
-use crate::bummock::{MemRowGroup, MemRowGroupRef};
-use crate::Table;
-use crate::TableColumnDesc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
 
-use risingwave_common::array::InternalError;
-use risingwave_common::array::{DataChunk, DataChunkRef};
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{DataChunk, DataChunkRef, InternalError, Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
-use std::sync::RwLock;
 
 use super::BummockResult;
+use crate::bummock::{MemRowGroup, MemRowGroupRef, PartitionedRowGroupRef, StagedRowGroupRef};
+use crate::{Table, TableColumnDesc};
 
 #[derive(Debug)]
 pub struct BummockTable {
@@ -259,9 +252,8 @@ impl BummockTable {
 
 #[cfg(test)]
 mod tests {
-    use crate::bummock::{BummockResult, BummockTable};
-    use crate::Table;
-    use crate::TableColumnDesc;
+    use std::sync::atomic::Ordering;
+    use std::sync::Arc;
 
     use risingwave_common::array::{Array, DataChunk, I64Array};
     use risingwave_common::catalog::{Field, Schema, TableId};
@@ -269,8 +261,8 @@ mod tests {
     use risingwave_common::error::Result;
     use risingwave_common::types::{DecimalType, Int64Type};
 
-    use std::sync::atomic::Ordering;
-    use std::sync::Arc;
+    use crate::bummock::{BummockResult, BummockTable};
+    use crate::{Table, TableColumnDesc};
 
     #[tokio::test]
     async fn test_table_basic_read_write() -> Result<()> {

@@ -1,8 +1,9 @@
+use std::sync::{Arc, RwLock};
+
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, DataChunkRef};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
-use std::sync::{Arc, RwLock};
 
 /// `MemRowGroup` implements the in-memory part `RowGroup` of `Bummock` design.
 /// The in-memory information will be encoded to underlying on-disk formats.

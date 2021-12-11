@@ -1,23 +1,18 @@
-use crate::array::RwError;
-use crate::error::{ErrorCode, Result};
-use crate::expr::build_from_prost as expr_build_from_prost;
-use crate::expr::expr_binary_bytes::new_substr_start;
-use crate::expr::expr_binary_nonnull::new_binary_expr;
-use crate::expr::expr_binary_nonnull::new_like_default;
-use crate::expr::expr_binary_nonnull::new_position_expr;
-use crate::expr::expr_binary_nullable::new_nullable_binary_expr;
-use crate::expr::expr_case::{CaseExpression, WhenClause};
-use crate::expr::expr_ternary_bytes::new_replace_expr;
-use crate::expr::expr_ternary_bytes::new_substr_start_end;
-use crate::expr::expr_unary::new_length_default;
-use crate::expr::expr_unary::new_ltrim_expr;
-use crate::expr::expr_unary::new_rtrim_expr;
-use crate::expr::expr_unary::new_trim_expr;
-use crate::expr::expr_unary::new_unary_expr;
-use crate::expr::BoxedExpression;
-use crate::types::{build_from_prost as type_build_from_prost, DataTypeKind, DataTypeRef};
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::ExprNode as ProstExprNode;
+
+use crate::array::RwError;
+use crate::error::{ErrorCode, Result};
+use crate::expr::expr_binary_bytes::new_substr_start;
+use crate::expr::expr_binary_nonnull::{new_binary_expr, new_like_default, new_position_expr};
+use crate::expr::expr_binary_nullable::new_nullable_binary_expr;
+use crate::expr::expr_case::{CaseExpression, WhenClause};
+use crate::expr::expr_ternary_bytes::{new_replace_expr, new_substr_start_end};
+use crate::expr::expr_unary::{
+    new_length_default, new_ltrim_expr, new_rtrim_expr, new_trim_expr, new_unary_expr,
+};
+use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
+use crate::types::{build_from_prost as type_build_from_prost, DataTypeKind, DataTypeRef};
 
 fn get_return_type_and_children(
     prost: &ProstExprNode,
@@ -183,12 +178,12 @@ pub fn build_case_expr(prost: &ProstExprNode) -> Result<BoxedExpression> {
 mod tests {
     use std::vec;
 
+    use risingwave_pb::data::data_type::{IntervalType, TypeName};
+    use risingwave_pb::data::DataType;
+    use risingwave_pb::expr::expr_node::{RexNode, Type};
+    use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall};
+
     use super::*;
-    use risingwave_pb::data::{data_type::IntervalType, data_type::TypeName, DataType};
-    use risingwave_pb::expr::{
-        expr_node::{RexNode, Type},
-        ConstantValue, ExprNode, FunctionCall,
-    };
 
     #[test]
     fn test_build_case_expr() {

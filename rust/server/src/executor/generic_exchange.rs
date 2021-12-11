@@ -3,21 +3,19 @@ use std::net::SocketAddr;
 
 use prost::Message;
 use risingwave_common::array::DataChunk;
-
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::task_service::exchange_node::Field as ExchangeNodeField;
-use risingwave_pb::task_service::{ExchangeNode, ExchangeSource as ProstExchangeSource};
-
-use crate::execution::exchange_source::{ExchangeSource, GrpcExchangeSource, LocalExchangeSource};
-use crate::executor::{Executor, ExecutorBuilder};
-use crate::task::GlobalTaskEnv;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::Result;
 use risingwave_common::types::build_from_prost as type_build_from_prost;
 use risingwave_common::util::addr::{get_host_port, is_local_address};
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::task_service::exchange_node::Field as ExchangeNodeField;
+use risingwave_pb::task_service::{ExchangeNode, ExchangeSource as ProstExchangeSource};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
+use crate::execution::exchange_source::{ExchangeSource, GrpcExchangeSource, LocalExchangeSource};
+use crate::executor::{Executor, ExecutorBuilder};
+use crate::task::GlobalTaskEnv;
 
 pub(super) type ExchangeExecutor = GenericExchangeExecutor<DefaultCreateSource>;
 

@@ -173,17 +173,17 @@ impl Default for MemSourceManager {
 
 #[cfg(test)]
 mod tests {
-    use crate::*;
-    use risingwave_common::column_nonnull;
-    use risingwave_storage::bummock::BummockTable;
-    use risingwave_storage::{Table, TableColumnDesc};
+    use std::sync::Arc;
 
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema, TableId};
+    use risingwave_common::column_nonnull;
     use risingwave_common::error::Result;
     use risingwave_common::types::{DecimalType, Int64Type};
+    use risingwave_storage::bummock::BummockTable;
+    use risingwave_storage::{Table, TableColumnDesc};
 
-    use std::sync::Arc;
+    use crate::*;
 
     const KAFKA_TOPIC_KEY: &str = "kafka.topic";
     const KAFKA_BOOTSTRAP_SERVERS_KEY: &str = "kafka.bootstrap.servers";

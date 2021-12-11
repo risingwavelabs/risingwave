@@ -5,9 +5,6 @@ use std::sync::{Arc, Mutex};
 use async_std::net::SocketAddr;
 use futures::channel::mpsc::{channel, unbounded, Receiver, Sender, UnboundedSender};
 use itertools::Itertools;
-
-use tokio::task::JoinHandle;
-
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -15,15 +12,13 @@ use risingwave_common::expr::{build_from_prost as build_expr_from_prost, AggKind
 use risingwave_common::types::build_from_prost as build_type_from_prost;
 use risingwave_common::util::addr::{get_host_port, is_local_address};
 use risingwave_common::util::sort_util::fetch_orders;
-use risingwave_pb::expr;
-use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::table_source_node::SourceType;
-use risingwave_pb::stream_service;
+use risingwave_pb::{expr, stream_plan, stream_service};
+use risingwave_source::{Source, *};
+use tokio::task::JoinHandle;
 
 use crate::stream_op::*;
 use crate::task::GlobalTaskEnv;
-use risingwave_source::Source;
-use risingwave_source::*;
 
 /// Default capacity of channel if two fragments are on the same node
 pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;

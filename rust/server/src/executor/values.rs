@@ -1,19 +1,17 @@
 use std::sync::Arc;
 
 use prost::Message;
-
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::ValuesNode;
-
-use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 use risingwave_common::array::column::Column;
-use risingwave_common::array::I32Array;
-use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
+use risingwave_common::array::{ArrayBuilderImpl, DataChunk, I32Array};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::expr::{build_from_prost, BoxedExpression};
 use risingwave_common::types::{build_from_prost as type_build_from_prost, DataTypeRef, Int32Type};
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::ValuesNode;
+
+use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 
 /// `ValuesExecutor` implements Values executor.
 pub(super) struct ValuesExecutor {

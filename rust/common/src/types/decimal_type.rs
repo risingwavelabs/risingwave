@@ -1,11 +1,13 @@
-use crate::array::{ArrayBuilder, ArrayBuilderImpl, DecimalArrayBuilder};
-use crate::error::{Result, RwError};
-use crate::types::{DataSize, DataType, DataTypeKind, DataTypeRef};
-use risingwave_pb::data::data_type::TypeName;
-use risingwave_pb::data::DataType as ProstDataType;
 use std::any::Any;
 use std::convert::TryFrom;
 use std::sync::Arc;
+
+use risingwave_pb::data::data_type::TypeName;
+use risingwave_pb::data::DataType as ProstDataType;
+
+use crate::array::{ArrayBuilder, ArrayBuilderImpl, DecimalArrayBuilder};
+use crate::error::{Result, RwError};
+use crate::types::{DataSize, DataType, DataTypeKind, DataTypeRef};
 
 pub const MAX_PRECISION: u32 = 28;
 

@@ -14,9 +14,8 @@ use risingwave_common::array::{ArrayImpl, DataChunk, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_pb::data::{
-    stream_message::StreamMessage, Barrier as ProstBarrier, StreamMessage as ProstStreamMessage,
-};
+use risingwave_pb::data::stream_message::StreamMessage;
+use risingwave_pb::data::{Barrier as ProstBarrier, StreamMessage as ProstStreamMessage};
 pub use simple_agg::*;
 pub use state_aggregation::{OrderedArraysSerializer, OrderedRowSerializer};
 pub use stream_source::*;

@@ -1,14 +1,16 @@
-use crate::task::{GlobalTaskEnv, TaskSink};
+use std::net::SocketAddr;
+use std::time::Duration;
+
 use futures::StreamExt;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::{GetDataRequest, GetDataResponse, TaskSinkId};
-use std::net::SocketAddr;
-use std::time::Duration;
 use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
+
+use crate::task::{GlobalTaskEnv, TaskSink};
 
 /// Each ExchangeSource maps to one task, it takes the execution result from task chunk by chunk.
 #[async_trait::async_trait]
@@ -92,22 +94,23 @@ impl ExchangeSource for LocalExchangeSource {
 
 #[cfg(test)]
 mod tests {
-    use crate::execution::exchange_source::{ExchangeSource, GrpcExchangeSource};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::thread::sleep;
+    use std::time::Duration;
+
     use risingwave_common::util::addr::get_host_port;
-    use risingwave_pb::data::DataChunk;
-    use risingwave_pb::data::StreamMessage;
+    use risingwave_pb::data::{DataChunk, StreamMessage};
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
     };
     use risingwave_pb::task_service::{
         GetDataRequest, GetDataResponse, GetStreamRequest, TaskSinkId,
     };
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
-    use std::thread::sleep;
-    use std::time::Duration;
     use tokio_stream::wrappers::ReceiverStream;
     use tonic::{Request, Response, Status};
+
+    use crate::execution::exchange_source::{ExchangeSource, GrpcExchangeSource};
 
     struct FakeExchangeService {
         rpc_called: Arc<AtomicBool>,

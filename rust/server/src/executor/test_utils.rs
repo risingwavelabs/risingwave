@@ -1,13 +1,12 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use crate::executor::Executor;
-
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
 use super::BoxedExecutor;
+use crate::executor::Executor;
 
 // MockExecutor is to mock the input of executor.
 // You can bind one or more MockExecutor as the children of the executor to test,

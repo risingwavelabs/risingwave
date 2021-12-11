@@ -1,5 +1,6 @@
-use crate::stream_op::StreamConsumer;
 use risingwave_common::error::Result;
+
+use crate::stream_op::StreamConsumer;
 
 /// `Actor` is the basic execution unit in the streaming framework.
 pub struct Actor {

@@ -1,10 +1,12 @@
-use crate::Opts;
-use anyhow::{bail, Context};
-use log::info;
 use std::ffi::OsStr;
 use std::fs::{create_dir_all, read_dir, File};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
+
+use anyhow::{bail, Context};
+use log::info;
+
+use crate::Opts;
 
 pub(crate) struct FileManager {
     opts: Opts,

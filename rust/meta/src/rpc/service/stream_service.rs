@@ -1,12 +1,14 @@
-use crate::manager::MetaManager;
-use crate::stream::StreamMetaManager;
+use std::sync::Arc;
+
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::{
     AddFragmentsToNodeRequest, AddFragmentsToNodeResponse, LoadAllFragmentsRequest,
     LoadAllFragmentsResponse,
 };
-use std::sync::Arc;
 use tonic::{Request, Response, Status};
+
+use crate::manager::MetaManager;
+use crate::stream::StreamMetaManager;
 
 #[derive(Clone)]
 pub struct StreamServiceImpl {

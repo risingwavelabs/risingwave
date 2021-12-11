@@ -1,8 +1,9 @@
-use crate::error::{Error, Result};
 use bytes::Buf;
 use serde::de::{
     self, DeserializeSeed, EnumAccess, IntoDeserializer, SeqAccess, VariantAccess, Visitor,
 };
+
+use crate::error::{Error, Result};
 
 /// A structure that deserializes memcomparable bytes into Rust values.
 pub struct Deserializer<B: Buf> {
@@ -467,8 +468,9 @@ impl<B: Buf> Deserializer<B> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde::Deserialize;
+
+    use super::*;
 
     #[test]
     fn test_unit() {

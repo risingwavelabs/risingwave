@@ -1,7 +1,8 @@
-use async_trait::async_trait;
-use bytes::Bytes;
 use std::collections::{btree_map, BTreeMap};
 
+use async_trait::async_trait;
+use bytes::Bytes;
+use itertools::Itertools;
 use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{Array, ArrayImpl, DecimalArray, I16Array, I32Array, I64Array};
 use risingwave_common::buffer::Bitmap;
@@ -15,7 +16,6 @@ use risingwave_common::types::{
 use super::super::keyspace::{Keyspace, StateStore};
 use super::extreme_serializer::{variants, ExtremePk, ExtremeSerializer};
 use crate::stream_op::{AggArgs, AggCall};
-use itertools::Itertools;
 
 /// Represents an entry in the `flush_buffer`. No `FlushStatus` associated with a key means no-op.
 ///
@@ -579,13 +579,13 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
 mod tests {
     use std::collections::{BTreeSet, HashSet};
 
+    use itertools::Itertools;
+    use rand::prelude::*;
+    use risingwave_common::array::{I64Array, Op};
     use risingwave_common::types::{Int64Type, ScalarImpl};
 
     use super::*;
     use crate::stream_op::keyspace::MemoryStateStore;
-    use itertools::Itertools;
-    use rand::prelude::*;
-    use risingwave_common::array::{I64Array, Op};
 
     #[tokio::test]
     async fn test_managed_extreme_state() {

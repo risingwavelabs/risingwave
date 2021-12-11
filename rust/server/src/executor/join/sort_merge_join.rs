@@ -1,6 +1,5 @@
-use crate::executor::join::row_level_iter::RowLevelIter;
-use crate::executor::join::JoinType;
-use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
+use std::cmp::Ordering;
+
 use prost::Message;
 use risingwave_common::array::{DataChunk, Row, RowRef};
 use risingwave_common::catalog::{Field, Schema};
@@ -8,9 +7,12 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::plan::OrderType as OrderTypeProst;
-use risingwave_pb::plan::{plan_node::PlanNodeType, SortMergeJoinNode};
-use std::cmp::Ordering;
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::{OrderType as OrderTypeProst, SortMergeJoinNode};
+
+use crate::executor::join::row_level_iter::RowLevelIter;
+use crate::executor::join::JoinType;
+use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 
 /// [`SortMergeJoinExecutor`] will not sort the data. If the join key is not sorted, optimizer
 /// should insert a sort executor above the data source.
@@ -287,19 +289,18 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
 
 #[cfg(test)]
 mod tests {
-    use crate::executor::join::sort_merge_join::RowLevelIter;
-    use crate::executor::join::sort_merge_join::SortMergeJoinExecutor;
-    use crate::executor::join::JoinType;
-    use crate::executor::test_utils::diff_executor_output;
-    use crate::executor::test_utils::MockExecutor;
-    use crate::executor::BoxedExecutor;
-    use risingwave_common::array::column::Column;
-    use risingwave_common::array::DataChunk;
-    use risingwave_common::array::{F32Array, F64Array, I32Array};
-    use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::{DataTypeRef, Float32Type, Float64Type, Int32Type};
     use std::convert::TryFrom;
     use std::sync::Arc;
+
+    use risingwave_common::array::column::Column;
+    use risingwave_common::array::{DataChunk, F32Array, F64Array, I32Array};
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::{DataTypeRef, Float32Type, Float64Type, Int32Type};
+
+    use crate::executor::join::sort_merge_join::{RowLevelIter, SortMergeJoinExecutor};
+    use crate::executor::join::JoinType;
+    use crate::executor::test_utils::{diff_executor_output, MockExecutor};
+    use crate::executor::BoxedExecutor;
 
     struct TestFixture {
         left_types: Vec<DataTypeRef>,

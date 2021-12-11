@@ -1,3 +1,7 @@
+use prost_types::Any as ProstAny;
+use risingwave_pb::data::data_type::TypeName;
+use risingwave_pb::data::Column as ProstColumn;
+
 use crate::array::column_proto_readers::{
     read_bool_column, read_numeric_column, read_string_column,
 };
@@ -10,8 +14,6 @@ use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 use crate::types::{build_from_prost, DataType, DataTypeRef};
 use crate::util::prost::pack_to_any;
-use prost_types::Any as ProstAny;
-use risingwave_pb::data::{data_type::TypeName, Column as ProstColumn};
 
 /// Column is owned by `DataChunk`. It consists of logic data type and physical array
 /// implementation.
@@ -90,6 +92,8 @@ impl Column {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::array::{
         Array, ArrayBuilder, BoolArray, BoolArrayBuilder, I32Array, I32ArrayBuilder, Utf8Array,
@@ -97,7 +101,6 @@ mod tests {
     use crate::error::Result;
     use crate::types::{BoolType, DataTypeKind, Int32Type, StringType};
     use crate::util::prost::unpack_from_any;
-    use std::sync::Arc;
 
     // Convert a column to protobuf, then convert it back to column, and ensures the two are
     // identical.

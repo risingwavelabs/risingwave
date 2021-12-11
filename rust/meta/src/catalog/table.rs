@@ -1,10 +1,10 @@
-use crate::manager::{Epoch, MetaManager};
 use async_trait::async_trait;
 use prost::Message;
 use risingwave_common::error::Result;
-
 use risingwave_pb::meta::Table;
 use risingwave_pb::plan::TableRefId;
+
+use crate::manager::{Epoch, MetaManager};
 
 #[async_trait]
 pub trait TableMetaManager {
@@ -70,11 +70,13 @@ impl TableMetaManager for MetaManager {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use futures::future;
+
     use super::*;
     use crate::manager::{Config, IdGeneratorManager, MemEpochGenerator};
     use crate::storage::MemStore;
-    use futures::future;
-    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_table_manager() -> Result<()> {

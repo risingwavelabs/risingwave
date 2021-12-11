@@ -1,7 +1,8 @@
+use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
+
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 use crate::vector_op::cast::UNIX_EPOCH_DAYS;
-use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
 
 fn extract_time<T>(time: T, time_unit: &str) -> Result<i64>
 where

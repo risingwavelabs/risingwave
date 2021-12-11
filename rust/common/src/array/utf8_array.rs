@@ -1,12 +1,13 @@
-use super::NULL_VAL_FOR_HASH;
-use super::{Array, ArrayBuilder, ArrayIterator};
-use crate::buffer::Bitmap;
-use crate::buffer::BitmapBuilder;
-use crate::error::Result;
-use risingwave_pb::data::{buffer::CompressionType, Buffer as ProstBuffer};
 use std::hash::{Hash, Hasher};
 use std::iter;
 use std::mem::size_of;
+
+use risingwave_pb::data::buffer::CompressionType;
+use risingwave_pb::data::Buffer as ProstBuffer;
+
+use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
+use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::error::Result;
 
 /// `Utf8Array` is a collection of Rust Utf8 `String`s.
 #[derive(Debug)]
@@ -239,10 +240,10 @@ impl BytesGuard {
 
 #[cfg(test)]
 mod tests {
-    use crate::error::Result;
+    use itertools::Itertools;
 
     use super::*;
-    use itertools::Itertools;
+    use crate::error::Result;
 
     #[test]
     fn test_utf8_builder() {
@@ -323,9 +324,11 @@ mod tests {
 
     #[test]
     fn test_utf8_array_hash() {
-        use super::super::test_util::{hash_finish, test_hash};
         use std::hash::BuildHasher;
+
         use twox_hash::RandomXxHashBuilder64;
+
+        use super::super::test_util::{hash_finish, test_hash};
 
         const ARR_NUM: usize = 3;
         const ARR_LEN: usize = 90;

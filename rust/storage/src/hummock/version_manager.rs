@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use bytes::Bytes;
-
 use parking_lot::Mutex as PLMutex;
 use tokio::sync::Mutex;
 
@@ -238,9 +237,10 @@ impl VersionManager {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_pb::hummock::TableMeta;
+
     use super::*;
     use crate::object::InMemObjectStore;
-    use risingwave_pb::hummock::TableMeta;
 
     #[tokio::test]
     async fn test_version_manager() -> HummockResult<()> {

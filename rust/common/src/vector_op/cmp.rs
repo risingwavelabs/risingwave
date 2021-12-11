@@ -1,10 +1,12 @@
+use core::convert::From;
+use std::any::type_name;
+use std::fmt::Debug;
+
+use num_traits::AsPrimitive;
+
 use crate::array::{PrimitiveArrayItemType, RwError};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
-use core::convert::From;
-use num_traits::AsPrimitive;
-use std::any::type_name;
-use std::fmt::Debug;
 
 #[inline(always)]
 pub fn prim_eq<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
@@ -351,9 +353,11 @@ pub fn is_not_unknown(v: Option<bool>) -> Result<Option<bool>> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use rust_decimal::Decimal;
     use std::str::FromStr;
+
+    use rust_decimal::Decimal;
+
+    use super::*;
 
     #[test]
     fn test_deci_f() {

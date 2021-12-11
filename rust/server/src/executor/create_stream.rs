@@ -2,31 +2,26 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use prost::Message;
-use tempfile::Builder;
-use tokio::fs;
-use url::Url;
-
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::Schema;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::ensure;
 use risingwave_common::error::ErrorCode::{InternalError, ProstError, ProtocolError};
-use risingwave_common::error::Result;
-use risingwave_common::error::RwError;
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::build_from_prost;
 use risingwave_pb::plan::create_stream_node::RowFormatType;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::CreateStreamNode;
-
-use crate::executor::{Executor, ExecutorBuilder};
 use risingwave_source::parser::JSONParser;
-use risingwave_source::SourceFormat;
 use risingwave_source::{
-    HighLevelKafkaSourceConfig, ProtobufParser, SourceColumnDesc, SourceConfig, SourceManagerRef,
-    SourceParser,
+    HighLevelKafkaSourceConfig, ProtobufParser, SourceColumnDesc, SourceConfig, SourceFormat,
+    SourceManagerRef, SourceParser,
 };
+use tempfile::Builder;
+use tokio::fs;
+use url::Url;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
+use crate::executor::{Executor, ExecutorBuilder};
 
 const UPSTREAM_SOURCE_KEY: &str = "upstream.source";
 const KAFKA_SOURCE: &str = "kafka";

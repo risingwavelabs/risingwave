@@ -1,11 +1,13 @@
-use crate::error::{ErrorCode, Result, RwError};
+use std::any::Any;
+use std::convert::TryFrom;
+use std::sync::Arc;
+
 use bytes::{Buf, BufMut};
 use risingwave_pb::data::DataType as ProstDataType;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use std::any::Any;
-use std::convert::TryFrom;
-use std::sync::Arc;
+
+use crate::error::{ErrorCode, Result, RwError};
 
 mod numeric_type;
 pub use numeric_type::*;
@@ -14,12 +16,13 @@ pub use primitive_data_type::*;
 mod native_type;
 
 mod scalar_impl;
+use std::fmt::Debug;
+
+pub use native_type::*;
+use risingwave_pb::data::data_type::TypeName;
 pub use scalar_impl::*;
 
 use crate::error::ErrorCode::InternalError;
-pub use native_type::*;
-use risingwave_pb::data::data_type::TypeName;
-use std::fmt::Debug;
 
 mod bool_type;
 mod datetime_type;
@@ -31,10 +34,10 @@ pub use bool_type::*;
 pub use datetime_type::*;
 pub use decimal_type::*;
 pub use interval_type::*;
+use paste::paste;
 pub use string_type::*;
 
 use crate::array::{ArrayBuilderImpl, PrimitiveArrayItemType};
-use paste::paste;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub enum DataTypeKind {

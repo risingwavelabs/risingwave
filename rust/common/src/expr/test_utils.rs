@@ -1,12 +1,10 @@
-use super::*;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType as DataTypeProst;
-use risingwave_pb::data::DataType;
-use risingwave_pb::expr::expr_node::RexNode;
-use risingwave_pb::expr::expr_node::Type as ProstExprType;
 use risingwave_pb::expr::expr_node::Type::InputRef;
-use risingwave_pb::expr::FunctionCall;
-use risingwave_pb::expr::{ExprNode, InputRefExpr};
+use risingwave_pb::expr::expr_node::{RexNode, Type as ProstExprType};
+use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
+
+use super::*;
 
 pub fn make_expression(kind: ProstExprType, rets: &[TypeName], indices: &[i32]) -> ProstExprNode {
     let mut exprs = Vec::new();
@@ -31,7 +29,7 @@ pub fn make_expression(kind: ProstExprType, rets: &[TypeName], indices: &[i32]) 
 pub fn make_input_ref(idx: i32, ret: TypeName) -> ExprNode {
     ExprNode {
         expr_type: InputRef as i32,
-        return_type: Some(DataType {
+        return_type: Some(DataTypeProst {
             type_name: ret as i32,
             ..Default::default()
         }),

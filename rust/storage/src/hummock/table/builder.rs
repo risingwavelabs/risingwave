@@ -4,15 +4,16 @@
 
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 
+use bytes::{Buf, BufMut, Bytes, BytesMut};
+use prost::Message;
+use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
+use risingwave_pb::hummock::{BlockMeta, TableMeta};
+
 use super::bloom::Bloom;
 use super::utils::bytes_diff;
 use crate::hummock::table::format::user_key;
 use crate::hummock::table::utils::checksum;
 use crate::hummock::HummockValue;
-use bytes::{Buf, BufMut, Bytes, BytesMut};
-use prost::Message;
-use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
-use risingwave_pb::hummock::{BlockMeta, TableMeta};
 
 /// Entry header stores the difference between current key and block base key. `overlap` is the
 /// common prefix of key and base key, and diff is the length of different part.
@@ -259,12 +260,13 @@ impl TableBuilder {
 pub(super) mod tests {
     use std::sync::Arc;
 
+    use itertools::Itertools;
+
     use super::*;
     use crate::hummock::cloud::gen_remote_table;
     use crate::hummock::table::format::key_with_ts;
     use crate::hummock::table::Table;
     use crate::object::{InMemObjectStore, ObjectStore};
-    use itertools::Itertools;
 
     /// Number of keys in table generated in `generate_table`.
     pub const TEST_KEYS_COUNT: usize = 10000;

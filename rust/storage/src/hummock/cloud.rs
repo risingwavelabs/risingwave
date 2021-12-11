@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
-use crate::hummock::{table::Table, HummockError, HummockResult, REMOTE_DIR};
-use crate::object::ObjectStore;
 use bytes::{Bytes, BytesMut};
 use risingwave_pb::hummock::TableMeta;
+
+use crate::hummock::table::Table;
+use crate::hummock::{HummockError, HummockResult, REMOTE_DIR};
+use crate::object::ObjectStore;
 
 /// Upload table to remote object storage and return the URL
 pub async fn gen_remote_table(

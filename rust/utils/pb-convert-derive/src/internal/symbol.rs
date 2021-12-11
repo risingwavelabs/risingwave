@@ -1,7 +1,7 @@
 use std::fmt;
 use std::fmt::Display;
-use syn::Ident;
-use syn::Path;
+
+use syn::{Ident, Path};
 
 #[derive(Copy, Clone)]
 pub struct Symbol(&'static str);

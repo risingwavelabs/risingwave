@@ -8,18 +8,17 @@ mod extreme_serializer;
 mod ordered_serializer;
 mod string_agg;
 
+use bytes::Bytes;
 pub use extreme::*;
 pub use ordered_serializer::*;
-
-use super::keyspace::{Keyspace, StateStore};
-use super::AggCall;
-
-use bytes::Bytes;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
+
+use super::keyspace::{Keyspace, StateStore};
+use super::AggCall;
 
 /// Verify if the data going through the state is valid by checking if `ops.len() ==
 /// visibility.len() == data[x].len()`.

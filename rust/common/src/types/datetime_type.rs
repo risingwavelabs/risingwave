@@ -1,17 +1,15 @@
-use crate::array::{ArrayBuilder, ArrayBuilderImpl, PrimitiveArrayBuilder};
-use crate::error::Result;
-use crate::error::RwError;
-use crate::types::DataSize;
-use crate::types::DataType;
-use crate::types::DataTypeKind;
-use crate::types::DataTypeRef;
-use risingwave_pb::data::data_type::TypeName;
-use risingwave_pb::data::DataType as ProstDataType;
 use std::any::Any;
 use std::convert::TryFrom;
 use std::default::Default;
 use std::mem::size_of;
 use std::sync::Arc;
+
+use risingwave_pb::data::data_type::TypeName;
+use risingwave_pb::data::DataType as ProstDataType;
+
+use crate::array::{ArrayBuilder, ArrayBuilderImpl, PrimitiveArrayBuilder};
+use crate::error::{Result, RwError};
+use crate::types::{DataSize, DataType, DataTypeKind, DataTypeRef};
 
 const LEAP_DAYS: &[i32] = &[0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 const NORMAL_DAYS: &[i32] = &[0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];

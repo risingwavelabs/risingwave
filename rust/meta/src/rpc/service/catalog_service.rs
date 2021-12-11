@@ -1,15 +1,15 @@
-use crate::catalog::DatabaseMetaManager;
-use crate::catalog::SchemaMetaManager;
-use crate::catalog::TableMetaManager;
-use crate::manager::MetaManager;
+use std::sync::Arc;
+
 use risingwave_pb::meta::catalog_service_server::CatalogService;
 use risingwave_pb::meta::create_request::CatalogBody;
 use risingwave_pb::meta::drop_request::CatalogId;
 use risingwave_pb::meta::{
     CreateRequest, CreateResponse, DropRequest, DropResponse, GetCatalogRequest, GetCatalogResponse,
 };
-use std::sync::Arc;
 use tonic::{Request, Response, Status};
+
+use crate::catalog::{DatabaseMetaManager, SchemaMetaManager, TableMetaManager};
+use crate::manager::MetaManager;
 
 #[derive(Clone)]
 pub struct CatalogServiceImpl {

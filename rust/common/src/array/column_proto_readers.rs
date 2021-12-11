@@ -1,3 +1,9 @@
+use std::io::{Cursor, Read};
+use std::sync::Arc;
+
+use byteorder::{BigEndian, ReadBytesExt};
+use risingwave_pb::data::Column as ProstColumn;
+
 use crate::array::value_reader::{PrimitiveValueReader, VarSizedValueReader};
 use crate::array::{
     ArrayBuilder, ArrayRef, BoolArrayBuilder, PrimitiveArrayBuilder, PrimitiveArrayItemType,
@@ -5,10 +11,6 @@ use crate::array::{
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
-use byteorder::{BigEndian, ReadBytesExt};
-use risingwave_pb::data::Column as ProstColumn;
-use std::io::{Cursor, Read};
-use std::sync::Arc;
 
 // TODO: Use techniques like apache arrow flight RPC to eliminate deserialization.
 // https://arrow.apache.org/docs/format/Flight.html

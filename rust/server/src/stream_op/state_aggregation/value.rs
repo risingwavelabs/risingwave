@@ -5,10 +5,9 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::types::{deserialize_datum_from, serialize_datum_into, Datum};
 
-use crate::stream_op::{create_streaming_agg_state, AggCall};
-
 use super::super::aggregation::StreamingAggStateImpl;
 use super::super::keyspace::{Keyspace, StateStore};
+use crate::stream_op::{create_streaming_agg_state, AggCall};
 
 /// A wrapper around [`StreamingAggStateImpl`], which fetches data from the state store and helps
 /// update the state. We don't use any trait to wrap around all `ManagedXxxState`, so as to reduce
@@ -108,12 +107,12 @@ impl<S: StateStore> ManagedValueState<S> {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::array::{I64Array, Op};
     use risingwave_common::types::{Int64Type, ScalarImpl};
 
     use super::*;
     use crate::stream_op::keyspace::MemoryStateStore;
     use crate::stream_op::AggArgs;
-    use risingwave_common::array::{I64Array, Op};
 
     fn create_test_count_state() -> AggCall {
         AggCall {

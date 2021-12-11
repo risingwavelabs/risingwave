@@ -1,7 +1,8 @@
-use crate::internal::symbol::PB_CONVERT;
 use anyhow::{anyhow, bail};
 use darling::FromMeta;
 use syn::{Attribute, Meta, NestedMeta, Path};
+
+use crate::internal::symbol::PB_CONVERT;
 
 #[derive(FromMeta)]
 pub(crate) struct ContainerAttrs {

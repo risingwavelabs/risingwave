@@ -1,8 +1,9 @@
+use itertools::Itertools;
+
 use crate::array::{ArrayRef, DataChunk};
 use crate::error::Result;
 use crate::expr::{BoxedExpression, DataType, Expression};
 use crate::types::DataTypeRef;
-use itertools::Itertools;
 
 #[derive(Debug)]
 pub struct WhenClause {
@@ -84,14 +85,16 @@ impl Expression for CaseExpression {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::array::{column::Column, PrimitiveArray};
-    use crate::expr::{
-        expr_binary_nonnull::new_binary_expr, InputRefExpression, LiteralExpression,
-    };
-    use crate::types::{BoolType, Float32Type, Int32Type, Scalar};
-    use risingwave_pb::expr::expr_node::Type as ProstExprType;
     use std::sync::Arc;
+
+    use risingwave_pb::expr::expr_node::Type as ProstExprType;
+
+    use super::*;
+    use crate::array::column::Column;
+    use crate::array::PrimitiveArray;
+    use crate::expr::expr_binary_nonnull::new_binary_expr;
+    use crate::expr::{InputRefExpression, LiteralExpression};
+    use crate::types::{BoolType, Float32Type, Int32Type, Scalar};
 
     fn create_column_i32(vec: &[Option<i32>]) -> Result<Column> {
         let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;

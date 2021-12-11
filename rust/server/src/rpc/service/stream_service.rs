@@ -1,13 +1,12 @@
 use std::sync::Arc;
 
-use tonic::{Request, Response, Status};
-
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BroadcastActorInfoTableResponse, BuildFragmentRequest,
     BuildFragmentResponse, DropFragmentsRequest, DropFragmentsResponse, UpdateFragmentRequest,
     UpdateFragmentResponse,
 };
+use tonic::{Request, Response, Status};
 
 use crate::stream::StreamManager;
 use crate::task::GlobalTaskEnv;

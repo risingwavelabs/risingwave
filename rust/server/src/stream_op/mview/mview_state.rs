@@ -1,15 +1,14 @@
 use std::collections::HashMap;
 
-use super::{serialize_cell, serialize_cell_idx, serialize_pk};
-
-use crate::stream_op::keyspace::StateStore;
-
-use crate::stream_op::state_aggregation::OrderedRowSerializer;
 use bytes::Bytes;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::sort_util::OrderType;
+
+use super::{serialize_cell, serialize_cell_idx, serialize_pk};
+use crate::stream_op::keyspace::StateStore;
+use crate::stream_op::state_aggregation::OrderedRowSerializer;
 
 /// `ManagedMviewState` buffers recent mutations. Data will be written
 /// to backend storage on calling `flush`.
@@ -90,9 +89,8 @@ mod tests {
     use risingwave_common::types::{Int32Type, Scalar};
     use risingwave_common::util::sort_util::OrderType;
 
-    use crate::stream_op::MemoryStateStore;
-
     use super::*;
+    use crate::stream_op::MemoryStateStore;
 
     #[tokio::test]
     async fn test_mview_state() {

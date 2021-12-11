@@ -1,3 +1,7 @@
+use std::marker::PhantomData;
+
+use risingwave_pb::expr::expr_node::Type as ProstType;
+
 /// For expression that only accept one value as input (e.g. CAST)
 use super::template::{UnaryBytesExpression, UnaryExpression};
 use crate::array::{BoolArray, DecimalArray, F32Array, F64Array, I32Array, I64Array, Utf8Array};
@@ -14,8 +18,6 @@ use crate::vector_op::rtrim::rtrim;
 use crate::vector_op::trim::trim;
 use crate::vector_op::upper::upper;
 use crate::vector_op::{cast, conjunction};
-use risingwave_pb::expr::expr_node::Type as ProstType;
-use std::marker::PhantomData;
 
 pub fn new_unary_expr(
     expr_type: ProstType,
@@ -220,14 +222,15 @@ pub fn new_rtrim_expr(expr_ia1: BoxedExpression, return_type: DataTypeRef) -> Bo
 
 #[cfg(test)]
 mod tests {
+    use risingwave_pb::data::data_type::TypeName;
+    use risingwave_pb::expr::expr_node::Type as ProstExprType;
+
     use super::super::*;
     use crate::array::column::Column;
     use crate::array::*;
     use crate::expr::test_utils::make_expression;
     use crate::types::{BoolType, DateType, Scalar};
     use crate::vector_op::cast::date_to_timestamp;
-    use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::expr::expr_node::Type as ProstExprType;
 
     #[test]
     fn test_unary() {

@@ -1,12 +1,15 @@
-use crate::array::{ArrayBuilder, ArrayBuilderImpl, Utf8ArrayBuilder};
-use crate::error::ErrorCode::InternalError;
-use crate::error::{Result, RwError};
-use crate::types::{DataSize, DataType, DataTypeKind, DataTypeRef};
-use risingwave_pb::data::{data_type::TypeName, DataType as ProstDataType};
 use std::any::Any;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::sync::Arc;
+
+use risingwave_pb::data::data_type::TypeName;
+use risingwave_pb::data::DataType as ProstDataType;
+
+use crate::array::{ArrayBuilder, ArrayBuilderImpl, Utf8ArrayBuilder};
+use crate::error::ErrorCode::InternalError;
+use crate::error::{Result, RwError};
+use crate::types::{DataSize, DataType, DataTypeKind, DataTypeRef};
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct StringType {

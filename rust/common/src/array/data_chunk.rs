@@ -3,7 +3,6 @@ use std::hash::BuildHasher;
 use std::sync::Arc;
 
 use itertools::Itertools;
-
 use risingwave_pb::data::{Column as ProstColumn, DataChunk as ProstDataChunk};
 
 use crate::array::column::Column;
@@ -13,7 +12,6 @@ use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 use crate::util::hash_util::finalize_hashers;
-
 use crate::util::prost::unpack_from_any;
 
 pub struct DataChunkBuilder {

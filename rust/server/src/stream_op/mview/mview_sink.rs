@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-
 use risingwave_common::array::Op::*;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::Schema;
@@ -7,9 +6,9 @@ use risingwave_common::util::sort_util::OrderType;
 
 use super::mview_state::ManagedMViewState;
 use crate::stream_op::keyspace::StateStore;
-use crate::stream_op::Barrier;
-use crate::stream_op::PkIndicesRef;
-use crate::stream_op::{Executor, Message, Result, SimpleExecutor, StreamChunk};
+use crate::stream_op::{
+    Barrier, Executor, Message, PkIndicesRef, Result, SimpleExecutor, StreamChunk,
+};
 
 /// `MViewSinkExecutor` writes data to a row-based memtable, so that data could
 /// be queried by the AP engine.
@@ -125,18 +124,21 @@ impl<S: StateStore> SimpleExecutor for MViewSinkExecutor<S> {
 
 #[cfg(test)]
 mod tests {
-    use crate::stream::{SimpleTableManager, StateStoreImpl, TableManager};
-    use crate::stream_op::test_utils::*;
-    use crate::stream_op::*;
-    use crate::*;
+    use std::sync::Arc;
 
     use risingwave_common::array::{I32Array, Op, Row};
     use risingwave_common::catalog::{Schema, SchemaId, TableId};
     use risingwave_common::types::{Int32Type, Scalar};
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_pb::data::{data_type::TypeName, DataType};
-    use risingwave_pb::plan::{column_desc::ColumnEncodingType, ColumnDesc};
-    use std::sync::Arc;
+    use risingwave_pb::data::data_type::TypeName;
+    use risingwave_pb::data::DataType;
+    use risingwave_pb::plan::column_desc::ColumnEncodingType;
+    use risingwave_pb::plan::ColumnDesc;
+
+    use crate::stream::{SimpleTableManager, StateStoreImpl, TableManager};
+    use crate::stream_op::test_utils::*;
+    use crate::stream_op::*;
+    use crate::*;
 
     #[tokio::test]
     async fn test_sink() {

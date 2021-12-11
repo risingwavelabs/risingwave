@@ -1,15 +1,13 @@
 use bytes::Buf;
-
 use risingwave_common::array::Row;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{deserialize_datum_from, Datum};
 use risingwave_common::util::sort_util::OrderType;
 
+use super::*;
 use crate::stream_op::keyspace::StateStore;
 use crate::stream_op::StateStoreIter;
-
-use super::*;
 
 /// `MViewTable` provides a readable cell-based row table interface,
 /// so that data can be queried by AP engine.
@@ -170,9 +168,8 @@ mod tests {
     use risingwave_common::types::{DataTypeKind, Int32Type, Scalar, StringType};
     use risingwave_common::util::sort_util::OrderType;
 
-    use crate::stream_op::MemoryStateStore;
-
     use super::*;
+    use crate::stream_op::MemoryStateStore;
 
     #[tokio::test]
     async fn test_mview_table() {

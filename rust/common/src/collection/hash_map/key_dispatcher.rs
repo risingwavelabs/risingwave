@@ -94,12 +94,13 @@ pub use hash_key_dispatch;
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use crate::collection::hash_map::{calc_hash_key_kind, HashKeyKind};
     use crate::types::{
         BoolType, DataTypeKind, DataTypeRef, DecimalType, Float32Type, Float64Type, Int16Type,
         Int32Type, Int64Type, StringType,
     };
-    use std::sync::Arc;
 
     fn all_data_types() -> Vec<DataTypeRef> {
         vec![

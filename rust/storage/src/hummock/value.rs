@@ -1,5 +1,6 @@
-use super::{HummockError, HummockResult};
 use bytes::{Buf, BufMut};
+
+use super::{HummockError, HummockResult};
 
 pub const VALUE_DELETE: u8 = 1 << 0;
 pub const VALUE_PUT: u8 = 0;

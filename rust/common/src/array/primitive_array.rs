@@ -1,17 +1,16 @@
+use std::fmt::Debug;
+use std::hash::{Hash, Hasher};
+use std::mem::size_of;
+
+use risingwave_pb::data::buffer::CompressionType;
+use risingwave_pb::data::Buffer as ProstBuffer;
+
 use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
 use crate::array::ArrayImpl;
-use crate::buffer::Bitmap;
-use crate::buffer::BitmapBuilder;
+use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
 use crate::for_all_native_types;
 use crate::types::{NativeType, Scalar, ScalarRef};
-
-use risingwave_pb::data::{buffer::CompressionType, Buffer as ProstBuffer};
-use std::fmt::Debug;
-use std::{
-    hash::{Hash, Hasher},
-    mem::size_of,
-};
 
 /// Physical type of array items. It differs from `NativeType` with more limited type set.
 /// Specifically, it doesn't support u8/u16/u32/u64.

@@ -8,9 +8,8 @@ pub fn upper(s: &str, writer: BytesWriter) -> Result<BytesGuard> {
 
 #[cfg(test)]
 mod tests {
-    use crate::array::{Array, ArrayBuilder, Utf8ArrayBuilder};
-
     use super::*;
+    use crate::array::{Array, ArrayBuilder, Utf8ArrayBuilder};
 
     #[test]
     fn test_upper() -> Result<()> {

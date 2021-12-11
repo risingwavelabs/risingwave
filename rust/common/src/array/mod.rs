@@ -13,17 +13,10 @@ mod primitive_array;
 pub mod stream_chunk;
 mod utf8_array;
 mod value_reader;
-use crate::array::iterator::ArrayImplIterator;
-use crate::buffer::Bitmap;
-pub use crate::error::ErrorCode::InternalError;
-use crate::error::Result;
-pub use crate::error::RwError;
-use crate::types::{BoolType, IntervalType, ScalarImpl};
-use crate::types::{
-    DataTypeKind, DateType, DecimalType, Float32Type, Float64Type, Int16Type, Int32Type, Int64Type,
-    TimestampType,
-};
-use crate::types::{Datum, DatumRef, Scalar, ScalarRef, ScalarRefImpl};
+use std::convert::From;
+use std::hash::Hasher;
+use std::sync::Arc;
+
 pub use bool_array::{BoolArray, BoolArrayBuilder};
 pub use data_chunk::{DataChunk, DataChunkRef};
 pub use data_chunk_iter::{Row, RowRef};
@@ -33,11 +26,19 @@ pub use iterator::ArrayIterator;
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
 use risingwave_pb::data::Buffer as ProstBuffer;
-use std::convert::From;
-use std::hash::Hasher;
-use std::sync::Arc;
 pub use stream_chunk::{Op, StreamChunk};
 pub use utf8_array::*;
+
+use crate::array::iterator::ArrayImplIterator;
+use crate::buffer::Bitmap;
+pub use crate::error::ErrorCode::InternalError;
+use crate::error::Result;
+pub use crate::error::RwError;
+use crate::types::{
+    BoolType, DataTypeKind, DateType, Datum, DatumRef, DecimalType, Float32Type, Float64Type,
+    Int16Type, Int32Type, Int64Type, IntervalType, Scalar, ScalarImpl, ScalarRef, ScalarRefImpl,
+    TimestampType,
+};
 
 pub type I64Array = PrimitiveArray<i64>;
 pub type I32Array = PrimitiveArray<i32>;
@@ -599,9 +600,11 @@ mod tests {
 }
 #[cfg(test)]
 mod test_util {
-    use super::Array;
-    use itertools::Itertools;
     use std::hash::{BuildHasher, Hasher};
+
+    use itertools::Itertools;
+
+    use super::Array;
 
     pub fn hash_finish<H: Hasher>(hashers: &mut Vec<H>) -> Vec<u64> {
         return hashers

@@ -1,13 +1,14 @@
-use crate::task::env::GlobalTaskEnv;
-use crate::task::task::{TaskExecution, TaskId};
-use crate::task::TaskSink;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
 use risingwave_common::error::ErrorCode::TaskNotFound;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan::PlanFragment;
 use risingwave_pb::task_service::{TaskId as ProstTaskId, TaskSinkId as ProstSinkId};
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use crate::task::env::GlobalTaskEnv;
+use crate::task::task::{TaskExecution, TaskId};
+use crate::task::TaskSink;
 
 #[derive(Clone)]
 pub struct TaskManager {
@@ -83,12 +84,15 @@ impl Default for TaskManager {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_pb::plan::plan_node::PlanNodeType;
+    use risingwave_pb::plan::{ExchangeInfo, PlanFragment, PlanNode};
+    use risingwave_pb::task_service::{
+        QueryId, StageId, TaskId as ProstTaskId, TaskSinkId as ProstTaskSinkId,
+    };
+    use tonic::Code;
+
     use crate::task::test_utils::{ResultChecker, TestRunner};
     use crate::task::{GlobalTaskEnv, TaskId, TaskManager};
-    use risingwave_pb::plan::{plan_node::PlanNodeType, ExchangeInfo, PlanFragment, PlanNode};
-    use risingwave_pb::task_service::TaskSinkId as ProstTaskSinkId;
-    use risingwave_pb::task_service::{QueryId, StageId, TaskId as ProstTaskId};
-    use tonic::Code;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_select_all() {

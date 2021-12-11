@@ -1,18 +1,15 @@
 use std::alloc::Layout;
 use std::error::Error;
-use std::fmt::Debug;
-use std::fmt::Display;
-use std::fmt::Formatter;
+use std::fmt::{Debug, Display, Formatter};
+use std::io::Error as IoError;
 use std::sync::Arc;
 
 use backtrace::Backtrace;
-use std::io::Error as IoError;
-use thiserror::Error;
-use tokio::task::JoinError;
-
 use memcomparable::Error as MemComparableError;
 use prost::Message;
 use risingwave_pb::common::Status;
+use thiserror::Error;
+use tokio::task::JoinError;
 use tonic::metadata::{MetadataMap, MetadataValue};
 use tonic::Code;
 

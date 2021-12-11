@@ -1,12 +1,8 @@
 use std::sync::Arc;
 
 use prost::Message as _;
-
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::SortAggNode;
-
-use crate::executor::{BoxedExecutor, Executor, ExecutorBuilder};
-use risingwave_common::array::{column::Column, DataChunk};
+use risingwave_common::array::column::Column;
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -14,8 +10,11 @@ use risingwave_common::expr::{build_from_prost, BoxedExpression};
 use risingwave_common::vector_op::agg::{
     self, AggStateFactory, BoxedAggState, BoxedSortedGrouper, EqGroups,
 };
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::SortAggNode;
 
 use super::BoxedExecutorBuilder;
+use crate::executor::{BoxedExecutor, Executor, ExecutorBuilder};
 
 /// `SortAggExecutor` implements the sort aggregate algorithm, where tuples
 /// belonging to the same group are continuous because they are sorted by the
@@ -171,18 +170,20 @@ impl Executor for SortAggExecutor {
 
 #[cfg(test)]
 mod tests {
-    use crate::executor::test_utils::MockExecutor;
     use risingwave_common::array::{Array as _, I32Array, I64Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::expr::build_from_prost;
     use risingwave_common::types::{DataTypeKind, Int32Type};
-    use risingwave_pb::data::{data_type::TypeName, DataType as DataTypeProst};
+    use risingwave_pb::data::data_type::TypeName;
+    use risingwave_pb::data::DataType as DataTypeProst;
+    use risingwave_pb::expr::agg_call::{Arg, Type};
     use risingwave_pb::expr::expr_node::RexNode;
     use risingwave_pb::expr::expr_node::Type::InputRef;
-    use risingwave_pb::expr::{agg_call::Arg, agg_call::Type, AggCall, ExprNode, InputRefExpr};
+    use risingwave_pb::expr::{AggCall, ExprNode, InputRefExpr};
 
     use super::*;
+    use crate::executor::test_utils::MockExecutor;
 
     #[tokio::test]
     #[allow(clippy::many_single_char_names)]

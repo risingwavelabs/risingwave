@@ -4,9 +4,8 @@ use std::sync::Arc;
 use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
 
-use crate::hummock::key_range::VersionComparator;
-
 use super::{Block, Header, HEADER_SIZE};
+use crate::hummock::key_range::VersionComparator;
 
 pub enum SeekPos {
     Origin,
@@ -176,16 +175,14 @@ impl BlockIterator {
 
 #[cfg(test)]
 mod tests {
-    use crate::hummock::cloud::gen_remote_table;
     use bytes::{Bytes, BytesMut};
     use itertools::Itertools;
 
+    use super::super::{TableBuilder, TableBuilderOptions};
+    use super::*;
+    use crate::hummock::cloud::gen_remote_table;
     use crate::hummock::HummockValue;
     use crate::object::{InMemObjectStore, ObjectStore};
-
-    use super::super::{TableBuilder, TableBuilderOptions};
-
-    use super::*;
 
     #[tokio::test]
     async fn basic_test() {

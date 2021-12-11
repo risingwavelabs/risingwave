@@ -1,13 +1,15 @@
-use crate::schedule::TestResult::{Different, Same};
-use crate::{init_env, FileManager, Opts, Psql};
-use anyhow::{bail, Context};
-use log::{debug, error, info};
 use std::collections::HashMap;
 use std::fs::{read, File};
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::sync::Arc;
+
+use anyhow::{bail, Context};
+use log::{debug, error, info};
 use tokio::process::Command;
+
+use crate::schedule::TestResult::{Different, Same};
+use crate::{init_env, FileManager, Opts, Psql};
 
 /// Result of each test case.
 #[derive(PartialEq)]

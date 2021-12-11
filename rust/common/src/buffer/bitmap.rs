@@ -20,16 +20,14 @@
 //! This file is adapted from [arrow-rs](https://github.com/apache/arrow-rs)
 
 use std::mem;
-use std::ops::BitAnd;
-use std::ops::BitOr;
+use std::ops::{BitAnd, BitOr};
 
-use crate::array::Array;
-use crate::array::BoolArray;
-use crate::array::RwError;
+use risingwave_pb::data::Buffer as ProstBuffer;
+
+use crate::array::{Array, BoolArray, RwError};
 use crate::buffer::Buffer;
 use crate::error::Result;
 use crate::util::bit_util;
-use risingwave_pb::data::Buffer as ProstBuffer;
 
 #[derive(Default, Debug)]
 pub struct BitmapBuilder {
@@ -337,8 +335,9 @@ impl<'a> std::iter::Iterator for BitmapIter<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use itertools::Itertools;
+
+    use super::*;
 
     #[test]
     fn test_bitmap_builder() {

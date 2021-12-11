@@ -1,10 +1,11 @@
-use risingwave_pb::plan::ColumnDesc;
 use std::ops::Index;
+
+use risingwave_pb::data::DataType as ProstDataType;
+use risingwave_pb::plan::ColumnDesc;
 
 use crate::array::ArrayBuilderImpl;
 use crate::error::Result;
 use crate::types::{build_from_prost, DataType, DataTypeRef};
-use risingwave_pb::data::DataType as ProstDataType;
 
 /// The field in the schema of the executor's return data
 #[derive(Clone, Debug)]

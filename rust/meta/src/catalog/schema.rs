@@ -1,9 +1,10 @@
-use crate::manager::{Epoch, MetaManager};
 use async_trait::async_trait;
 use prost::Message;
 use risingwave_common::error::Result;
 use risingwave_pb::meta::Schema;
 use risingwave_pb::plan::SchemaRefId;
+
+use crate::manager::{Epoch, MetaManager};
 
 #[async_trait]
 pub trait SchemaMetaManager {
@@ -69,12 +70,14 @@ impl SchemaMetaManager for MetaManager {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use futures::future;
+    use risingwave_pb::meta::Schema;
+
     use super::*;
     use crate::manager::{Config, IdGeneratorManager, MemEpochGenerator};
     use crate::storage::MemStore;
-    use futures::future;
-    use risingwave_pb::meta::Schema;
-    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_schema_manager() -> Result<()> {

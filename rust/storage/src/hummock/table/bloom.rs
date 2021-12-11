@@ -1,7 +1,8 @@
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 
-use bytes::{BufMut, Bytes, BytesMut};
 use std::f64;
+
+use bytes::{BufMut, Bytes, BytesMut};
 
 pub trait BitSlice {
     fn get_bit(&self, idx: usize) -> bool;

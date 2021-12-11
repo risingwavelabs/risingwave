@@ -1,25 +1,25 @@
-use super::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
-use crate::executor::BoxedExecutor;
+use std::collections::HashMap;
+use std::marker::PhantomData;
+use std::sync::Arc;
+use std::{mem, vec};
+
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, RwError};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::collection::hash_map::hash_key_dispatch;
-use risingwave_common::collection::hash_map::PrecomputedBuildHasher;
-use risingwave_common::collection::hash_map::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_common::collection::hash_map::{
-    HashKeyKind, Key128, Key16, Key256, Key32, Key64, KeySerialized,
+    calc_hash_key_kind, hash_key_dispatch, HashKey, HashKeyDispatcher, HashKeyKind, Key128, Key16,
+    Key256, Key32, Key64, KeySerialized, PrecomputedBuildHasher,
 };
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataTypeRef;
 use risingwave_common::vector_op::agg::{AggStateFactory, BoxedAggState};
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::HashAggNode;
-use std::collections::HashMap;
-use std::marker::PhantomData;
-use std::sync::Arc;
-use std::{mem, vec};
+
+use super::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
+use crate::executor::BoxedExecutor;
 
 type AggHashMap<K> = HashMap<K, Vec<BoxedAggState>, PrecomputedBuildHasher>;
 
@@ -227,14 +227,17 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::executor::test_utils::{diff_executor_output, MockExecutor};
     use risingwave_common::array::{I32Array, I64Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{Int32Type, Int64Type};
-    use risingwave_pb::data::{data_type::TypeName, DataType as DataTypeProst};
-    use risingwave_pb::expr::{agg_call::Arg, agg_call::Type, AggCall, InputRefExpr};
+    use risingwave_pb::data::data_type::TypeName;
+    use risingwave_pb::data::DataType as DataTypeProst;
+    use risingwave_pb::expr::agg_call::{Arg, Type};
+    use risingwave_pb::expr::{AggCall, InputRefExpr};
+
+    use super::*;
+    use crate::executor::test_utils::{diff_executor_output, MockExecutor};
 
     #[tokio::test]
     async fn execute_int32_grouped() {

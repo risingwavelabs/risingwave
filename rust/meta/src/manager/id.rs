@@ -1,11 +1,12 @@
-use crate::manager::SINGLE_VERSION_EPOCH;
-use risingwave_common::error::{ErrorCode, Result};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI32, Ordering};
 
-use crate::storage::MetaStoreRef;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::meta::get_id_request::IdCategory;
 use tokio::sync::RwLock;
+
+use crate::manager::SINGLE_VERSION_EPOCH;
+use crate::storage::MetaStoreRef;
 
 pub const ID_PREALLOCATE_INTERVAL: i32 = 1000;
 
@@ -134,10 +135,12 @@ impl IdGeneratorManager {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use futures::future;
+
     use super::*;
     use crate::storage::MemStore;
-    use futures::future;
-    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_id_generator() -> Result<()> {

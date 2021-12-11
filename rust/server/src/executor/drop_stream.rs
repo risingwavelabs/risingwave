@@ -1,15 +1,13 @@
 use prost::Message;
-
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::Schema;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::Result;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::DropStreamNode;
+use risingwave_source::SourceManagerRef;
 
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
-use risingwave_source::SourceManagerRef;
 
 pub(super) struct DropStreamExecutor {
     table_id: TableId,

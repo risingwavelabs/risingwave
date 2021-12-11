@@ -1,6 +1,7 @@
+use std::cmp::{max, min};
+
 use crate::array::{BytesGuard, BytesWriter};
 use crate::error::{ErrorCode, Result};
-use std::cmp::{max, min};
 
 #[inline(always)]
 pub fn substr_start(s: &str, start: i32, writer: BytesWriter) -> Result<BytesGuard> {

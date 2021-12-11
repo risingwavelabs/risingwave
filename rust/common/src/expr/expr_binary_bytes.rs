@@ -1,10 +1,11 @@
+use std::marker::PhantomData;
+
 /// For expression that only accept two arguments + 1 bytes writer as input.
 use crate::array::{I32Array, Utf8Array};
 use crate::expr::template::BinaryBytesExpression;
 use crate::expr::BoxedExpression;
 use crate::types::DataTypeRef;
 use crate::vector_op::substr::*;
-use std::marker::PhantomData;
 
 pub fn new_substr_start(
     expr_ia1: BoxedExpression,

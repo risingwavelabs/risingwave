@@ -1,15 +1,9 @@
-use prost::Message;
 use std::collections::BinaryHeap;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use crate::execution::exchange_source::ExchangeSource;
-use crate::executor::CreateSource;
-use crate::executor::{
-    BoxedExecutor, BoxedExecutorBuilder, DefaultCreateSource, Executor, ExecutorBuilder,
-};
-use crate::task::GlobalTaskEnv;
+use prost::Message;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, DataChunkRef};
 use risingwave_common::catalog::{Field, Schema};
@@ -21,8 +15,14 @@ use risingwave_common::util::sort_util::{
 };
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::task_service::exchange_node::Field as ExchangeNodeField;
-use risingwave_pb::task_service::ExchangeSource as ProstExchangeSource;
-use risingwave_pb::task_service::MergeSortExchangeNode;
+use risingwave_pb::task_service::{ExchangeSource as ProstExchangeSource, MergeSortExchangeNode};
+
+use crate::execution::exchange_source::ExchangeSource;
+use crate::executor::{
+    BoxedExecutor, BoxedExecutorBuilder, CreateSource, DefaultCreateSource, Executor,
+    ExecutorBuilder,
+};
+use crate::task::GlobalTaskEnv;
 
 pub(super) type MergeSortExchangeExecutor = MergeSortExchangeExecutorImpl<DefaultCreateSource>;
 
@@ -224,8 +224,7 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::array::column::Column;
-    use risingwave_common::array::Array;
-    use risingwave_common::array::{DataChunk, I32Array};
+    use risingwave_common::array::{Array, DataChunk, I32Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::expr::InputRefExpression;
     use risingwave_common::types::Int32Type;

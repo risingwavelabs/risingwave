@@ -2,14 +2,12 @@ use std::cmp::min;
 
 use itertools::Itertools;
 use prost::Message;
-
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::LimitNode as LimitProto;
-
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::Result;
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::LimitNode as LimitProto;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 
@@ -119,13 +117,13 @@ mod tests {
     use std::sync::Arc;
     use std::vec;
 
-    use crate::executor::test_utils::MockExecutor;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{Array, BoolArray, DataChunk, PrimitiveArray};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{BoolType, DataTypeKind, Int32Type};
 
     use super::*;
+    use crate::executor::test_utils::MockExecutor;
 
     fn create_column(vec: &[Option<i32>]) -> Result<Column> {
         let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;

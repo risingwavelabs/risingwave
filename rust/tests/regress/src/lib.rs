@@ -14,9 +14,8 @@ pub(crate) use env::*;
 mod file;
 pub(crate) use file::*;
 mod schedule;
-pub(crate) use schedule::*;
-
 use log::{error, info};
+pub(crate) use schedule::*;
 
 pub async fn regress_main() {
     let opts = Opts::parse();

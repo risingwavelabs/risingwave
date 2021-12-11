@@ -4,29 +4,26 @@ use std::iter::Iterator;
 use std::sync::Arc;
 use std::vec::Vec;
 
-use prost::Message;
-
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::OrderByNode as OrderByProto;
-
-use crate::executor::{Executor, ExecutorBuilder};
-use crate::risingwave_common::expr::Expression;
 use itertools::Itertools;
 use mem_cmp::*;
+use prost::Message;
+use risingwave_common::array::column::Column;
 use risingwave_common::array::{
-    column::Column, Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, DataChunkRef,
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, DataChunkRef,
 };
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{
-    ErrorCode::{InternalError, ProstError},
-    Result,
-};
+use risingwave_common::error::ErrorCode::{InternalError, ProstError};
+use risingwave_common::error::Result;
 use risingwave_common::util::encoding_for_comparison::{encode_chunk, is_type_encodable};
 use risingwave_common::util::sort_util::{
     compare_two_row, fetch_orders, HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE,
 };
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::OrderByNode as OrderByProto;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
+use crate::executor::{Executor, ExecutorBuilder};
+use crate::risingwave_common::expr::Expression;
 
 pub(super) struct OrderByExecutor {
     child: BoxedExecutor,
@@ -210,15 +207,11 @@ impl Executor for OrderByExecutor {
 mod tests {
     use std::sync::Arc;
 
-    use crate::executor::test_utils::MockExecutor;
     use itertools::Itertools;
-    use rand::{
-        distributions::{Alphanumeric, Standard, Uniform},
-        Rng,
-    };
-    use risingwave_common::array::{
-        column::Column, BoolArray, DataChunk, PrimitiveArray, Utf8Array,
-    };
+    use rand::distributions::{Alphanumeric, Standard, Uniform};
+    use rand::Rng;
+    use risingwave_common::array::column::Column;
+    use risingwave_common::array::{BoolArray, DataChunk, PrimitiveArray, Utf8Array};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::expr::InputRefExpression;
     use risingwave_common::types::{
@@ -228,6 +221,7 @@ mod tests {
     use test::Bencher;
 
     use super::*;
+    use crate::executor::test_utils::MockExecutor;
 
     fn create_column_i32(vec: &[Option<i32>]) -> Result<Column> {
         let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;

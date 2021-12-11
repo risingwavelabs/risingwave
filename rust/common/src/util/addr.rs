@@ -1,8 +1,8 @@
-use crate::error::ErrorCode::InternalError;
-use crate::error::Result;
-use crate::error::RwError;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::str::FromStr;
+
+use crate::error::ErrorCode::InternalError;
+use crate::error::{Result, RwError};
 
 pub fn is_local_address(server_addr: &SocketAddr, peer_addr: &SocketAddr) -> bool {
     let peer_ip = peer_addr.ip();

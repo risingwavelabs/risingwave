@@ -1,10 +1,7 @@
-use std::alloc::alloc;
-use std::alloc::dealloc;
-use std::alloc::Layout;
+use std::alloc::{alloc, dealloc, Layout};
 use std::ptr::NonNull;
 
-use crate::error::ErrorCode;
-use crate::error::Result;
+use crate::error::{ErrorCode, Result};
 
 const ALIGNMENT: usize = 1 << 6;
 

@@ -1,9 +1,11 @@
+use std::sync::Arc;
+
+use log::debug;
+
 use crate::array::{ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I32ArrayBuilder};
 use crate::error::Result;
 use crate::expr::{BoxedExpression, Expression};
 use crate::types::{DataType, DataTypeRef, Int32Type};
-use log::debug;
-use std::sync::Arc;
 
 /// `PG_SLEEP` sleeps on current session for given duration (double precision in seconds),
 /// and returns `NULL` for all inputs.
@@ -36,8 +38,9 @@ impl Expression for PgSleepExpression {
     }
 
     fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef> {
-        use num_traits::ToPrimitive;
         use std::time::Duration;
+
+        use num_traits::ToPrimitive;
 
         let child_result = self.child_expr.eval(input)?;
         let mut array_builder = I32ArrayBuilder::new(input.cardinality())?;
@@ -60,13 +63,14 @@ impl Expression for PgSleepExpression {
 
 #[cfg(test)]
 mod tests {
+    use rust_decimal::prelude::FromStr;
+    use rust_decimal::Decimal;
+
     use super::*;
     use crate::array::column::Column;
     use crate::array::DecimalArrayBuilder;
     use crate::expr::InputRefExpression;
     use crate::types::DecimalType;
-    use rust_decimal::prelude::FromStr;
-    use rust_decimal::Decimal;
 
     #[test]
     fn test_pg_sleep() -> Result<()> {

@@ -1,16 +1,18 @@
-use crate::executor::join::chunked_data::{ChunkedData, RowId};
-use crate::executor::join::hash_join::EquiJoinParams;
-use crate::executor::join::JoinType;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::convert::TryFrom;
+use std::ops::{Deref, DerefMut};
+
 use either::Either;
 use risingwave_common::array::{ArrayImpl, DataChunk};
 use risingwave_common::collection::hash_map::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::ops::{Deref, DerefMut};
+
+use crate::executor::join::chunked_data::{ChunkedData, RowId};
+use crate::executor::join::hash_join::EquiJoinParams;
+use crate::executor::join::JoinType;
 
 const MAX_BUILD_ROW_COUNT: usize = u32::MAX as usize;
 

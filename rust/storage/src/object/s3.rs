@@ -1,25 +1,21 @@
-use crate::object::Bytes;
-use crate::object::ObjectStore;
-use risingwave_common::ensure;
-use risingwave_common::gen_error;
-use risingwave_common::{
-    array::RwError,
-    error::{ErrorCode::InternalError, Result},
-};
-use rusoto_core::{
-    credential::{AwsCredentials, StaticProvider},
-    ByteStream, HttpClient, Region, RusotoError,
-};
+use std::collections::HashMap;
+use std::str::FromStr;
+
+use risingwave_common::array::RwError;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::Result;
+use risingwave_common::{ensure, gen_error};
+use rusoto_core::credential::{AwsCredentials, StaticProvider};
+use rusoto_core::{ByteStream, HttpClient, Region, RusotoError};
 use rusoto_s3::{
     DeleteObjectRequest, GetObjectError, GetObjectRequest, HeadObjectRequest, PutObjectRequest,
     S3Client, S3,
 };
-
-use std::{collections::HashMap, str::FromStr};
 use tokio::io::AsyncReadExt;
 use tokio::sync::Mutex;
 
 use super::{BlockLocation, ObjectMetadata};
+use crate::object::{Bytes, ObjectStore};
 
 /// Implement object store on S3.
 pub struct S3ObjectStore {
@@ -233,9 +229,10 @@ impl S3ObjectStore {
 /// [Run S3 tests](https://singularity-data.larksuite.com/docs/docuszYRfc00x6Q0QhqidP2AxEg)
 #[cfg(test)]
 mod tests {
-    use super::*;
     use bytes::Bytes;
     use uuid::Uuid;
+
+    use super::*;
 
     #[tokio::test]
     #[ignore]

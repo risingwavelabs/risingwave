@@ -1,16 +1,11 @@
-use std::ops::BitAnd;
-use std::ops::BitOr;
-use std::ops::Not;
-use std::ptr::NonNull;
-use std::slice::from_raw_parts;
-use std::slice::from_raw_parts_mut;
-
-use crate::alloc::alloc_aligned;
-use crate::alloc::free_aligned;
-use crate::error::ErrorCode;
-use crate::error::Result;
-use crate::types::NativeType;
 use std::mem::{size_of, transmute};
+use std::ops::{BitAnd, BitOr, Not};
+use std::ptr::NonNull;
+use std::slice::{from_raw_parts, from_raw_parts_mut};
+
+use crate::alloc::{alloc_aligned, free_aligned};
+use crate::error::{ErrorCode, Result};
+use crate::types::NativeType;
 
 #[derive(Debug)]
 pub struct Buffer {

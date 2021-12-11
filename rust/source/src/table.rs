@@ -1,19 +1,17 @@
-use async_trait::async_trait;
-use risingwave_storage::bummock::{BummockResult, BummockTable};
-use risingwave_storage::Table;
 use std::collections::VecDeque;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+
+use async_trait::async_trait;
+use risingwave_common::array::{DataChunk, DataChunkRef, Op, StreamChunk};
+use risingwave_common::error::Result;
+use risingwave_storage::bummock::{BummockResult, BummockTable};
+use risingwave_storage::Table;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{broadcast, RwLock};
 
-use risingwave_common::array::{DataChunk, DataChunkRef};
-use risingwave_common::error::Result;
-
 use crate::*;
-
-use risingwave_common::array::{Op, StreamChunk};
 
 /// `TableSource` is a special internal source to handle table updates from user,
 /// including insert/delete/update statements via SQL interface.
@@ -269,16 +267,15 @@ impl SourceWriter for TableWriter {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use assert_matches::assert_matches;
     use itertools::Itertools;
-
     use risingwave_common::array::{Array, I64Array, Op};
     use risingwave_common::catalog::TableId;
     use risingwave_common::column_nonnull;
     use risingwave_common::types::Int64Type;
-
     use risingwave_storage::{Table, TableColumnDesc};
+
+    use super::*;
 
     #[tokio::test]
     async fn test_table_source() {

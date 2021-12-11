@@ -1,14 +1,14 @@
-use crate::stream_op::PkIndices;
-use crate::stream_op::{Barrier, Executor, Message};
+use std::fmt::{Debug, Formatter};
+
 use async_trait::async_trait;
 use futures::channel::mpsc::UnboundedReceiver;
 use futures::StreamExt;
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_source::{StreamSourceReader, TableStreamReader};
-use std::fmt::{Debug, Formatter};
 
 use super::PkIndicesRef;
+use crate::stream_op::{Barrier, Executor, Message, PkIndices};
 
 /// `TableSourceExecutor` extracts changes from a Table
 pub struct TableSourceExecutor {
@@ -99,20 +99,20 @@ impl Debug for TableSourceExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::Arc;
+
     use futures::channel::mpsc::unbounded;
     use itertools::Itertools;
     use risingwave_common::array::column::Column;
-    use risingwave_common::array::ArrayImpl;
-    use risingwave_common::array::{I32Array, Utf8Array};
-    use risingwave_common::array::{Op, StreamChunk};
+    use risingwave_common::array::{ArrayImpl, I32Array, Op, StreamChunk, Utf8Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataTypeKind, DataTypeRef, DecimalType, Int32Type, StringType};
     use risingwave_source::*;
     use risingwave_storage::bummock::BummockTable;
     use risingwave_storage::TableColumnDesc;
-    use std::sync::Arc;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_table_source() -> Result<()> {

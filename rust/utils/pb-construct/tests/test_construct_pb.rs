@@ -1,10 +1,7 @@
 mod proto;
 
-use proto::gen::message::OuterEnumProto;
-use proto::gen::message::OuterMessageProto;
-use proto::gen::message::SubMessageProto;
-
 use pb_construct::make_proto;
+use proto::gen::message::{OuterEnumProto, OuterMessageProto, SubMessageProto};
 
 #[test]
 fn test_into_pb() {

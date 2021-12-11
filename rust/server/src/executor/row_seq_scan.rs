@@ -2,20 +2,17 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use prost::Message;
-
-use crate::executor::{Executor, ExecutorBuilder};
-use crate::stream_op::{HummockStateStore, MViewTableIter, MemoryStateStore};
-
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::RowSeqScanNode;
-
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
-use risingwave_common::catalog::Schema;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataTypeRef;
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::RowSeqScanNode;
+
+use crate::executor::{Executor, ExecutorBuilder};
+use crate::stream_op::{HummockStateStore, MViewTableIter, MemoryStateStore};
 
 enum MViewTableIterImpl {
     Memory(MViewTableIter<MemoryStateStore>),
@@ -132,9 +129,8 @@ mod tests {
     use risingwave_common::types::{Int32Type, Scalar};
     use risingwave_common::util::sort_util::OrderType;
 
-    use crate::stream_op::{MViewTable, ManagedMViewState, MemoryStateStore};
-
     use super::*;
+    use crate::stream_op::{MViewTable, ManagedMViewState, MemoryStateStore};
 
     #[tokio::test]
     async fn test_row_seq_scan() -> Result<()> {

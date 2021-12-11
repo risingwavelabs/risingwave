@@ -1,8 +1,9 @@
-use crate::error::{ErrorCode, Result, RwError};
 use risingwave_pb::{data, plan, task_service};
 use serde::Serialize;
 use serde_json::{json, Value};
 use serde_with::skip_serializing_none;
+
+use crate::error::{ErrorCode, Result, RwError};
 
 pub trait TypeUrl {
     fn type_url() -> &'static str;

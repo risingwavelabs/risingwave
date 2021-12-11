@@ -1,9 +1,9 @@
-use crate::internal::{ContainerAttrs, FieldAttrs, VariantAttrs};
 use anyhow::{anyhow, bail};
 use proc_macro2::TokenStream as TokenStream2;
-use quote::format_ident;
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::parse_quote;
+
+use crate::internal::{ContainerAttrs, FieldAttrs, VariantAttrs};
 
 pub(crate) type TokenStream2s = Vec<TokenStream2>;
 

@@ -14,14 +14,15 @@ mod iterator;
 mod key_range;
 mod value;
 mod version_manager;
-use self::iterator::SortedIterator;
-use self::table::format::key_with_ts;
-use crate::object::ObjectStore;
 use cloud::gen_remote_table;
 pub use error::*;
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use value::*;
 use version_manager::VersionManager;
+
+use self::iterator::SortedIterator;
+use self::table::format::key_with_ts;
+use crate::object::ObjectStore;
 
 pub static REMOTE_DIR: &str = "/test/";
 
@@ -154,12 +155,12 @@ macro_rules! assert_bytes_eq {
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
     use std::sync::Arc;
 
-    use crate::object::InMemObjectStore;
+    use bytes::Bytes;
 
     use super::{HummockOptions, HummockStorage};
+    use crate::object::InMemObjectStore;
 
     #[tokio::test]
     async fn test_basic() {

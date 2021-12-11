@@ -1,9 +1,8 @@
-use rust_decimal::Decimal;
-use serde_json::Value;
-
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::RwError;
 use risingwave_common::types::{DataTypeKind, Datum, ScalarImpl, ScalarRef};
+use rust_decimal::Decimal;
+use serde_json::Value;
 
 use crate::{SourceColumnDesc, SourceParser};
 

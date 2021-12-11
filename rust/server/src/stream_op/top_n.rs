@@ -1,17 +1,17 @@
-use crate::stream_op::PkIndices;
-use crate::stream_op::{Executor, Message, SimpleExecutor, StreamChunk};
+use std::cmp::{Ordering, Reverse};
+use std::collections::BTreeSet;
+use std::ops::Bound::{Excluded, Unbounded};
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::sort_util::{HeapElem, OrderPair};
-use std::cmp::{Ordering, Reverse};
-use std::collections::BTreeSet;
-use std::ops::Bound::{Excluded, Unbounded};
-use std::sync::Arc;
 
 use super::PkIndicesRef;
+use crate::stream_op::{Executor, Message, PkIndices, SimpleExecutor, StreamChunk};
 
 type MinHeapElem = Reverse<HeapElem>;
 
@@ -262,14 +262,15 @@ impl SimpleExecutor for TopNExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::stream_op::test_utils::MockSource;
     use risingwave_common::array::{Array, I64Array};
     use risingwave_common::catalog::Field;
     use risingwave_common::column_nonnull;
     use risingwave_common::expr::InputRefExpression;
     use risingwave_common::types::Int64Type;
     use risingwave_common::util::sort_util::OrderType;
+
+    use super::*;
+    use crate::stream_op::test_utils::MockSource;
 
     #[tokio::test]
     async fn test_top_n_executor() {

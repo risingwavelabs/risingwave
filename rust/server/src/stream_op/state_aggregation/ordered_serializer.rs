@@ -59,8 +59,9 @@ impl OrderedRowSerializer {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use risingwave_common::array::{I16Array, Utf8Array};
+
+    use super::*;
 
     #[test]
     fn test_sort_key_serializer() {

@@ -1,17 +1,15 @@
 use prost::Message;
-
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::ProjectNode;
-
-use crate::executor::{Executor, ExecutorBuilder};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::{build_from_prost, BoxedExpression};
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::ProjectNode;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
+use crate::executor::{Executor, ExecutorBuilder};
 
 pub(super) struct ProjectionExecutor {
     expr: Vec<BoxedExpression>,
@@ -92,8 +90,6 @@ impl BoxedExecutorBuilder for ProjectionExecutor {
 
 #[cfg(test)]
 mod tests {
-    use crate::executor::test_utils::MockExecutor;
-    use crate::*;
     use risingwave_common::array::{Array, I32Array};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::column_nonnull;
@@ -101,6 +97,8 @@ mod tests {
     use risingwave_common::types::{DataTypeKind, Int32Type};
 
     use super::*;
+    use crate::executor::test_utils::MockExecutor;
+    use crate::*;
 
     #[tokio::test]
     async fn test_project_executor() -> Result<()> {

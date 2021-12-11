@@ -1,9 +1,10 @@
-use crate::manager::{Epoch, MetaManager, SINGLE_VERSION_EPOCH};
 use async_trait::async_trait;
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::meta::cluster::Node;
 use risingwave_pb::meta::FragmentLocation;
+
+use crate::manager::{Epoch, MetaManager, SINGLE_VERSION_EPOCH};
 
 #[async_trait]
 pub trait StreamMetaManager {
@@ -101,14 +102,16 @@ impl StreamMetaManager for MetaManager {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use crate::manager::{Config, IdGeneratorManager, MemEpochGenerator};
-    use crate::storage::MemStore;
+    use std::collections::HashSet;
+    use std::sync::Arc;
+
     use risingwave_pb::meta::cluster::Node;
     use risingwave_pb::stream_plan::StreamFragment;
     use risingwave_pb::task_service::HostAddress;
-    use std::collections::HashSet;
-    use std::sync::Arc;
+
+    use super::*;
+    use crate::manager::{Config, IdGeneratorManager, MemEpochGenerator};
+    use crate::storage::MemStore;
 
     fn make_location(node: Node, fragment_ids: Vec<u32>) -> FragmentLocation {
         FragmentLocation {

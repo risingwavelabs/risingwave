@@ -3,11 +3,9 @@ use std::sync::{Arc, Mutex};
 use approx::assert_relative_eq;
 use futures::channel::mpsc::channel;
 use futures::SinkExt;
-
 use risingwave_common::array::column::Column;
 use risingwave_common::array::Op::*;
-use risingwave_common::array::*;
-use risingwave_common::array::{I64Array, Op};
+use risingwave_common::array::{I64Array, Op, *};
 use risingwave_common::catalog::Field;
 use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_common::expr::expr_binary_nullable::new_nullable_binary_expr;
@@ -16,8 +14,7 @@ use risingwave_common::expr::*;
 use risingwave_common::types::*;
 use risingwave_pb::expr::expr_node::Type as ProstExprType;
 
-use super::ReceiverExecutor;
-use super::*;
+use super::{ReceiverExecutor, *};
 
 pub struct MockConsumer {
     input: Box<dyn Executor>,

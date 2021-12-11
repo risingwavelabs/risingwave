@@ -1,5 +1,16 @@
 //! Global Streaming Hash Aggregators
 
+use std::collections::{hash_map, HashMap};
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use itertools::Itertools;
+use risingwave_common::array::column::Column;
+use risingwave_common::array::{Row, StreamChunk};
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::Schema;
+use risingwave_common::error::Result;
+
 use super::aggregation::{AggState, HashKey};
 use super::keyspace::{Keyspace, StateStore};
 use super::{
@@ -7,16 +18,6 @@ use super::{
     AggCall, AggExecutor, Barrier, Executor, Message, PkIndicesRef,
 };
 use crate::stream_op::PkIndices;
-use async_trait::async_trait;
-use itertools::Itertools;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::Row;
-use risingwave_common::array::StreamChunk;
-use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
-use std::collections::{hash_map, HashMap};
-use std::sync::Arc;
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -310,18 +311,20 @@ impl<S: StateStore> Executor for HashAggExecutor<S> {
 #[cfg(test)]
 mod tests {
 
-    use super::super::keyspace::MemoryStateStore;
-    use super::*;
-    use crate::stream_op::test_utils::*;
-    use crate::stream_op::*;
-    use crate::*;
     use assert_matches::assert_matches;
     use itertools::Itertools;
     use risingwave_common::array::data_chunk_iter::Row;
     use risingwave_common::array::{I64Array, Op};
     use risingwave_common::catalog::Field;
+    use risingwave_common::column_nonnull;
+    use risingwave_common::expr::*;
     use risingwave_common::types::{Int64Type, Scalar};
-    use risingwave_common::{column_nonnull, expr::*};
+
+    use super::super::keyspace::MemoryStateStore;
+    use super::*;
+    use crate::stream_op::test_utils::*;
+    use crate::stream_op::*;
+    use crate::*;
 
     fn create_in_memory_keyspace() -> Keyspace<impl StateStore> {
         Keyspace::new(MemoryStateStore::new(), b"test_executor_2333".to_vec())

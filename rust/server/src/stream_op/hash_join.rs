@@ -1,16 +1,16 @@
+use std::collections::hash_map::{Entry, HashMap};
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use risingwave_common::array::column::Column;
+use risingwave_common::array::{ArrayBuilderImpl, DataChunk, Op, Row, RowRef, StreamChunk};
+use risingwave_common::catalog::Schema;
+use risingwave_common::error::Result;
+use risingwave_common::types::{DataTypeRef, ToOwnedDatum};
+
 use super::barrier_align::{AlignedMessage, BarrierAligner};
 use super::{Executor, Message};
 use crate::stream_op::{PkIndices, PkIndicesRef};
-use async_trait::async_trait;
-use risingwave_common::array::{ArrayBuilderImpl, Op, Row, RowRef, StreamChunk};
-use risingwave_common::catalog::Schema;
-use risingwave_common::types::{DataTypeRef, ToOwnedDatum};
-use risingwave_common::{
-    array::{column::Column, DataChunk},
-    error::Result,
-};
-use std::collections::hash_map::{Entry, HashMap};
-use std::sync::Arc;
 
 // The `JoinType` and `SideType` are to mimic a enum, because currently
 // enum is not supported in const generic.
@@ -440,16 +440,16 @@ impl<const T: JoinTypePrimitive> HashJoinExecutor<T> {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-
-    use risingwave_common::{array::*, column_nonnull};
+    use risingwave_common::array::*;
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::column_nonnull;
+    use risingwave_common::types::Int64Type;
+    use tokio::sync::mpsc::unbounded_channel;
 
     use super::{HashJoinExecutor, JoinParams, JoinType};
     use crate::stream_op::test_utils::MockAsyncSource;
     use crate::stream_op::{Barrier, Executor, Message};
     use crate::*;
-    use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::Int64Type;
-    use tokio::sync::mpsc::unbounded_channel;
 
     #[tokio::test]
     async fn test_streaming_hash_inner_join() {

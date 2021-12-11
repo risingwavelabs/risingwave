@@ -3,16 +3,14 @@ use std::path::Path;
 use itertools::Itertools;
 use protobuf::descriptor::FileDescriptorSet;
 use protobuf::RepeatedField;
+use risingwave_common::error::ErrorCode::ProtocolError;
+use risingwave_common::error::{Result, RwError};
+use risingwave_common::types::{DataTypeKind, Datum, ScalarImpl};
 use rust_decimal::Decimal;
 use serde::de::Deserialize;
 use serde_protobuf::de::Deserializer;
 use serde_protobuf::descriptor::Descriptors;
 use serde_value::Value;
-
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::Result;
-use risingwave_common::error::RwError;
-use risingwave_common::types::{DataTypeKind, Datum, ScalarImpl};
 
 use crate::{SourceColumnDesc, SourceParser};
 
@@ -141,13 +139,12 @@ impl SourceParser for ProtobufParser {
 mod tests {
     use std::io::Write;
 
-    use serde_value::Value;
-    use tempfile::Builder;
-
     use risingwave_common::error::Result;
     use risingwave_common::types::{
         DataTypeKind, Float32Type, Int32Type, Int64Type, ScalarImpl, StringType,
     };
+    use serde_value::Value;
+    use tempfile::Builder;
 
     use crate::{ProtobufParser, SourceColumnDesc, SourceParser};
 

@@ -1,21 +1,17 @@
-use async_trait::async_trait;
-
-use risingwave_common::error::Result;
-use risingwave_common::types::Datum;
 use std::cmp::Reverse;
-
-use risingwave_common::util::sort_util::{HeapElem, OrderPair};
-
+use std::collections::BinaryHeap;
 use std::sync::Arc;
 
-use crate::stream_op::PkIndices;
-use crate::stream_op::{Executor, Message, SimpleExecutor, StreamChunk};
+use async_trait::async_trait;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::Result;
+use risingwave_common::types::Datum;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use std::collections::BinaryHeap;
+use risingwave_common::util::sort_util::{HeapElem, OrderPair};
 
 use super::PkIndicesRef;
+use crate::stream_op::{Executor, Message, PkIndices, SimpleExecutor, StreamChunk};
 
 pub type HashKey = Vec<Datum>;
 
@@ -168,16 +164,18 @@ impl SimpleExecutor for AppendOnlyTopNExecutor {
 
 #[cfg(test)]
 mod tests {
-    use crate::stream_op::test_utils::MockSource;
-    use crate::stream_op::top_n_appendonly::AppendOnlyTopNExecutor;
-    use crate::stream_op::{Executor, Message, PkIndices, StreamChunk};
+    use std::sync::Arc;
+
     use risingwave_common::array::{Array, I64Array, Op};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::column_nonnull;
     use risingwave_common::expr::InputRefExpression;
     use risingwave_common::types::Int64Type;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
-    use std::sync::Arc;
+
+    use crate::stream_op::test_utils::MockSource;
+    use crate::stream_op::top_n_appendonly::AppendOnlyTopNExecutor;
+    use crate::stream_op::{Executor, Message, PkIndices, StreamChunk};
 
     #[tokio::test]
     async fn test_appendonly_top_n_executor() {

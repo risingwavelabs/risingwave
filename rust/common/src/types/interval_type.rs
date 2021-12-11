@@ -1,9 +1,8 @@
 use risingwave_pb::data::data_type::TypeName;
 use serde::{Deserialize, Serialize};
 
-use crate::array::interval_array::IntervalArrayBuilder;
-
 use super::*;
+use crate::array::interval_array::IntervalArrayBuilder;
 
 /// Every interval can be represented by a `IntervalUnit`.
 /// Note that the difference between Interval and Instant.

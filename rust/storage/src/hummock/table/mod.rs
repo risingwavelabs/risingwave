@@ -12,17 +12,18 @@ pub use builder::*;
 mod table_iterator;
 pub use table_iterator::*;
 mod utils;
-use self::format::user_key;
+use std::sync::Arc;
 
-use super::{HummockError, HummockResult};
-use crate::hummock::table::utils::checksum;
-use crate::object::{BlockLocation, ObjectStore};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use prost::Message;
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_pb::hummock::{Checksum, TableMeta};
-use std::sync::Arc;
 use utils::verify_checksum;
+
+use self::format::user_key;
+use super::{HummockError, HummockResult};
+use crate::hummock::table::utils::checksum;
+use crate::object::{BlockLocation, ObjectStore};
 
 /// Block contains several entries. It can be obtained from an SST.
 #[derive(Default)]

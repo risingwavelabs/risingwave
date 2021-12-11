@@ -1,11 +1,11 @@
-use super::{Message, Result, StreamChunk};
-use crate::stream_op::{Executor, StreamConsumer};
 use async_trait::async_trait;
 use futures::channel::mpsc::Sender;
 use futures::SinkExt;
-use risingwave_common::array::DataChunk;
-use risingwave_common::array::Op;
+use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
+
+use super::{Message, Result, StreamChunk};
+use crate::stream_op::{Executor, StreamConsumer};
 
 /// `Output` provides an interface for `Dispatcher` to send data into downstream fragments.
 #[async_trait]
@@ -309,13 +309,15 @@ impl StreamConsumer for SenderConsumer {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::hash::{BuildHasher, Hasher};
+    use std::sync::{Arc, Mutex};
+
     use itertools::Itertools;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
     use risingwave_common::types::Int32Type;
-    use std::hash::{BuildHasher, Hasher};
-    use std::sync::{Arc, Mutex};
+
+    use super::*;
 
     pub struct MockOutput {
         data: Arc<Mutex<Vec<Message>>>,

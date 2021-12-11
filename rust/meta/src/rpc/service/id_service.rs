@@ -1,8 +1,10 @@
-use crate::manager::MetaManager;
+use std::sync::Arc;
+
 use risingwave_pb::meta::id_generator_service_server::IdGeneratorService;
 use risingwave_pb::meta::{GetIdRequest, GetIdResponse};
-use std::sync::Arc;
 use tonic::{Request, Response, Status};
+
+use crate::manager::MetaManager;
 
 #[derive(Clone)]
 pub struct IdGeneratorServiceImpl {

@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
+use prost::DecodeError;
+use risingwave_pb::data::{Column as ProstColumn, Op as ProstOp, StreamChunk as ProstStreamChunk};
+
 use crate::array::column::Column;
 use crate::array::DataChunk;
 use crate::buffer::Bitmap;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::util::prost::unpack_from_any;
-use prost::DecodeError;
-use risingwave_pb::data::StreamChunk as ProstStreamChunk;
-use risingwave_pb::data::{Column as ProstColumn, Op as ProstOp};
 
 /// `Op` represents three operations in `StreamChunk`.
 /// `UpdateDelete` and `UpdateInsert` always appear in pairs.

@@ -1,14 +1,14 @@
 /// For expression that only accept two nullable arguments as input.
 use std::marker::PhantomData;
 
+use risingwave_pb::expr::expr_node::Type;
+
 use super::BoxedExpression;
 use crate::array::{BoolArray, DecimalArray, F32Array, F64Array, I16Array, I32Array, I64Array};
 use crate::error::Result;
 use crate::expr::template::BinaryNullableExpression;
-use crate::types::DataTypeKind;
-use crate::types::DataTypeRef;
+use crate::types::{DataTypeKind, DataTypeRef};
 use crate::vector_op::conjunction::{and, or};
-use risingwave_pb::expr::expr_node::Type;
 
 // TODO: consider implement it using generic function.
 macro_rules! gen_stream_null_by_row_count_expr {

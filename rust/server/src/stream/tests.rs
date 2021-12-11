@@ -1,6 +1,7 @@
-use crate::stream_op::Barrier;
-use futures::SinkExt;
-use futures::StreamExt;
+use std::sync::Arc;
+
+use futures::{SinkExt, StreamExt};
+use risingwave_common::util::addr::get_host_port;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::plan::ColumnDesc;
@@ -8,15 +9,12 @@ use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::*;
 use risingwave_pb::stream_service::*;
 use risingwave_pb::task_service::HostAddress;
-use std::sync::Arc;
-
-use crate::stream::SimpleTableManager;
-use crate::stream_op::Message;
-use crate::task::{GlobalTaskEnv, TaskManager};
-use risingwave_common::util::addr::get_host_port;
 use risingwave_source::MemSourceManager;
 
 use super::*;
+use crate::stream::SimpleTableManager;
+use crate::stream_op::{Barrier, Message};
+use crate::task::{GlobalTaskEnv, TaskManager};
 
 const PORT: i32 = 2333;
 

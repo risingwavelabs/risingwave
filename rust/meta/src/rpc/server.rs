@@ -1,3 +1,14 @@
+use std::net::SocketAddr;
+use std::sync::Arc;
+
+use risingwave_pb::meta::catalog_service_server::CatalogServiceServer;
+use risingwave_pb::meta::epoch_service_server::EpochServiceServer;
+use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
+use risingwave_pb::meta::id_generator_service_server::IdGeneratorServiceServer;
+use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::task::JoinHandle;
+
 use crate::manager::{Config, IdGeneratorManager, MemEpochGenerator, MetaManager};
 use crate::rpc::service::catalog_service::CatalogServiceImpl;
 use crate::rpc::service::epoch_service::EpochServiceImpl;
@@ -5,15 +16,6 @@ use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::id_service::IdGeneratorServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::storage::MemStore;
-use risingwave_pb::meta::catalog_service_server::CatalogServiceServer;
-use risingwave_pb::meta::epoch_service_server::EpochServiceServer;
-use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
-use risingwave_pb::meta::id_generator_service_server::IdGeneratorServiceServer;
-use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use tokio::sync::mpsc::UnboundedSender;
-use tokio::task::JoinHandle;
 
 pub async fn rpc_serve(addr: SocketAddr) -> (JoinHandle<()>, UnboundedSender<()>) {
     let meta_store_ref = Arc::new(MemStore::new());
@@ -56,8 +58,9 @@ pub async fn rpc_serve(addr: SocketAddr) -> (JoinHandle<()>, UnboundedSender<()>
 
 #[cfg(test)]
 mod tests {
-    use crate::rpc::server::rpc_serve;
     use risingwave_common::util::addr::get_host_port;
+
+    use crate::rpc::server::rpc_serve;
 
     #[tokio::test]
     async fn test_server_shutdown() {

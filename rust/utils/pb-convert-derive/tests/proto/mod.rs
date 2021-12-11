@@ -1,5 +1,4 @@
-use pb_convert_derive::FromProtobuf;
-use pb_convert_derive::IntoProtobuf;
+use pb_convert_derive::{FromProtobuf, IntoProtobuf};
 
 pub mod gen {
     include!(concat!(env!("OUT_DIR"), "/mod.rs"));

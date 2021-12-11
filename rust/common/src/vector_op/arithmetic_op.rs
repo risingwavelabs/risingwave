@@ -1,15 +1,14 @@
 use std::cmp::min;
 use std::ops::{Add, Div, Mul, Rem, Sub};
 
+use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime};
+use num_traits::{AsPrimitive, CheckedAdd, CheckedDiv, CheckedMul, CheckedRem, CheckedSub, Float};
+
 use crate::array::PrimitiveArrayItemType;
-use crate::error::ErrorCode::InternalError;
-use crate::error::ErrorCode::NumericValueOutOfRange;
+use crate::error::ErrorCode::{InternalError, NumericValueOutOfRange};
 use crate::error::{Result, RwError};
 use crate::types::{get_mouth_days, IntervalUnit};
 use crate::vector_op::cast::UNIX_EPOCH_DAYS;
-use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime};
-use num_traits::CheckedRem;
-use num_traits::{AsPrimitive, CheckedAdd, CheckedDiv, CheckedMul, CheckedSub, Float};
 
 #[inline(always)]
 pub fn int_add<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
@@ -373,9 +372,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::deci_add;
-    use rust_decimal::Decimal;
     use std::str::FromStr;
+
+    use rust_decimal::Decimal;
+
+    use super::deci_add;
 
     #[test]
     fn test() {

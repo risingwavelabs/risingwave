@@ -1,14 +1,13 @@
+use std::str::FromStr;
+
+use chrono::{Datelike, NaiveDate, NaiveDateTime};
+use rust_decimal::Decimal;
+
 use crate::types::IntervalUnit;
 use crate::vector_op::arithmetic_op::*;
-use crate::vector_op::cast::date_to_timestamp;
-use crate::vector_op::cast::UNIX_EPOCH_DAYS;
+use crate::vector_op::cast::{date_to_timestamp, UNIX_EPOCH_DAYS};
 use crate::vector_op::cmp::*;
 use crate::vector_op::conjunction::*;
-use chrono::Datelike;
-use chrono::NaiveDate;
-use chrono::NaiveDateTime;
-use rust_decimal::Decimal;
-use std::str::FromStr;
 #[test]
 fn test_arithmetic() {
     assert_eq!(

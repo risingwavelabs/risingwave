@@ -5,9 +5,8 @@ use std::marker::PhantomData;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::{
-    ErrorCode::NotImplementedError, ErrorCode::NumericValueOutOfRange, Result, RwError,
-};
+use risingwave_common::error::ErrorCode::{NotImplementedError, NumericValueOutOfRange};
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{Datum, Scalar, ScalarRef};
 
 use super::{StreamingAggFunction, StreamingAggState, StreamingAggStateImpl};
@@ -474,9 +473,10 @@ impl_fold_agg! { DecimalArray, Decimal, DecimalArray }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use risingwave_common::array::I64Array;
     use risingwave_common::{array, array_nonnull};
+
+    use super::*;
 
     type TestStreamingSumAgg<R> =
         StreamingFoldAgg<R, R, PrimitiveSummable<<R as Array>::OwnedItem, <R as Array>::OwnedItem>>;

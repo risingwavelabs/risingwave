@@ -11,17 +11,19 @@ pub mod expr_unary;
 mod pg_sleep;
 mod template;
 
+use std::convert::TryFrom;
+use std::sync::Arc;
+
+pub use agg::AggKind;
+pub use expr_input_ref::InputRefExpression;
+pub use expr_literal::*;
+use risingwave_pb::expr::ExprNode as ProstExprNode;
+
 use crate::array::{ArrayRef, DataChunk};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 use crate::expr::build_expr_from_prost::*;
 use crate::types::{DataType, DataTypeRef};
-pub use agg::AggKind;
-pub use expr_input_ref::InputRefExpression;
-pub use expr_literal::*;
-use risingwave_pb::expr::ExprNode as ProstExprNode;
-use std::convert::TryFrom;
-use std::sync::Arc;
 
 pub type ExpressionRef = Arc<dyn Expression>;
 

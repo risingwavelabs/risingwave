@@ -1,21 +1,23 @@
+use std::convert::{TryFrom, TryInto};
+use std::ops::Deref;
+use std::str::FromStr;
+use std::sync::Arc;
+
+use prost::DecodeError;
+use risingwave_pb::data::data_type::IntervalType::*;
+use risingwave_pb::data::data_type::{IntervalType, TypeName};
+use risingwave_pb::expr::expr_node::{RexNode, Type};
+use risingwave_pb::expr::ExprNode;
+use rust_decimal::Decimal;
+
 use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk};
 use crate::error::ErrorCode::InternalError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::Expression;
-use crate::types::{build_from_prost as type_build_from_prost, Scalar};
-use crate::types::{DataType, DataTypeKind, DataTypeRef, Datum, IntervalUnit, ScalarImpl};
-use prost::DecodeError;
-use risingwave_pb::data::{
-    data_type::IntervalType, data_type::IntervalType::*, data_type::TypeName,
+use crate::types::{
+    build_from_prost as type_build_from_prost, DataType, DataTypeKind, DataTypeRef, Datum,
+    IntervalUnit, Scalar, ScalarImpl,
 };
-use risingwave_pb::expr::expr_node::RexNode;
-use risingwave_pb::expr::{expr_node::Type, ExprNode};
-use rust_decimal::Decimal;
-use std::convert::TryFrom;
-use std::convert::TryInto;
-use std::ops::Deref;
-use std::str::FromStr;
-use std::sync::Arc;
 
 macro_rules! array_impl_literal_append {
   ([$arr_builder: ident, $literal: ident, $cardinality: ident], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
@@ -232,14 +234,15 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
 mod tests {
     use std::sync::Arc;
 
+    use risingwave_pb::data::data_type::IntervalType;
+    use risingwave_pb::data::DataType;
+    use risingwave_pb::expr::expr_node::Type;
+    use risingwave_pb::expr::{ConstantValue, ExprNode};
+
     use super::*;
     use crate::array::column::Column;
     use crate::array::PrimitiveArray;
     use crate::types::Int32Type;
-    use risingwave_pb::data::data_type::IntervalType;
-    use risingwave_pb::data::DataType;
-    use risingwave_pb::expr::ConstantValue;
-    use risingwave_pb::expr::{expr_node::Type, ExprNode};
 
     #[test]
     fn test_expr_literal_from() {

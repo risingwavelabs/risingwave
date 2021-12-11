@@ -1,10 +1,9 @@
 use async_trait::async_trait;
 use bytes::Bytes;
 use risingwave_common::error::{Result, ToRwResult};
+use risingwave_storage::hummock::HummockStorage;
 
 use super::{StateStore, StateStoreIter};
-
-use risingwave_storage::hummock::HummockStorage;
 
 /// A wrapper over [`HummockStorage`] as a state store.
 ///

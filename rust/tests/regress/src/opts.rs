@@ -1,9 +1,9 @@
-use anyhow::Context;
-use clap::Parser;
-use clap::ValueHint;
-use path_absolutize::*;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::path::{Path, PathBuf};
+
+use anyhow::Context;
+use clap::{Parser, ValueHint};
+use path_absolutize::*;
 
 #[derive(Parser, Debug, Clone)]
 pub(crate) struct Opts {

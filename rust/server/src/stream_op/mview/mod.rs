@@ -3,7 +3,6 @@ mod mview_state;
 mod mview_table;
 
 use bytes::BufMut;
-
 use risingwave_common::array::Row;
 use risingwave_common::error::Result;
 use risingwave_common::types::{serialize_datum_into, Datum};

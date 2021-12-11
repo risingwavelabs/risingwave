@@ -1,9 +1,11 @@
+use std::marker::PhantomData;
+
+use risingwave_pb::expr::AggCall;
+
 use crate::array::*;
 use crate::error::{ErrorCode, Result};
 use crate::expr::AggKind;
 use crate::types::*;
-use risingwave_pb::expr::AggCall;
-use std::marker::PhantomData;
 
 /// An `Aggregator` supports `update` data and `output` result.
 pub trait Aggregator: Send + 'static {
@@ -670,12 +672,16 @@ impl_sorted_grouper! { I64Array, Int64 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use risingwave_pb::data::data_type::TypeName;
+    use risingwave_pb::data::DataType as DataTypeProst;
+    use risingwave_pb::expr::agg_call::Type;
+    use risingwave_pb::expr::AggCall;
+    use rust_decimal::Decimal;
+
     use super::*;
     use crate::array::column::Column;
-    use risingwave_pb::data::{data_type::TypeName, DataType as DataTypeProst};
-    use risingwave_pb::expr::{agg_call::Type, AggCall};
-    use rust_decimal::Decimal;
-    use std::sync::Arc;
 
     fn eval_agg(
         input_type: DataTypeRef,

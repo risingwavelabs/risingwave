@@ -1,10 +1,8 @@
-use proc_macro2::TokenStream as TokenStream2;
-use proc_macro2::{Ident, Span};
+use proc_macro2::{Ident, Span, TokenStream as TokenStream2};
 use proc_macro_error::abort;
-use syn::{
-    self, ext::IdentExt, spanned::Spanned, Field, GenericArgument, Lit, Meta, PathArguments,
-    PathSegment, Type,
-};
+use syn::ext::IdentExt;
+use syn::spanned::Spanned;
+use syn::{self, Field, GenericArgument, Lit, Meta, PathArguments, PathSegment, Type};
 
 fn extract_type_from_option(option_segment: &PathSegment) -> Type {
     let generic_arg = match &option_segment.arguments {
@@ -23,7 +21,8 @@ fn extract_type_from_option(option_segment: &PathSegment) -> Type {
 ///
 /// Returns "data_type::TypeName".
 fn extract_enum_type_from_field(field: &Field) -> Option<Type> {
-    use syn::{punctuated::Punctuated, Token};
+    use syn::punctuated::Punctuated;
+    use syn::Token;
 
     // The type must be i32.
     match &field.ty {

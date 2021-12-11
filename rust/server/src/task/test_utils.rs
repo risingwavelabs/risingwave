@@ -1,7 +1,5 @@
-use super::*;
-use crate::rpc::service::exchange_service::ExchangeWriter;
-use crate::stream::TableImpl;
 use core::default::Default as CoreDefault;
+
 use itertools::Itertools;
 use prost::Message;
 use prost_types::Any;
@@ -11,15 +9,21 @@ use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::{Column, DataType};
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::ConstantValue;
+use risingwave_pb::plan::exchange_info::{Distribution, DistributionMode};
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::values_node::ExprTuple;
 use risingwave_pb::plan::{
-    exchange_info, exchange_info::Distribution, exchange_info::DistributionMode,
-    plan_node::PlanNodeType, values_node::ExprTuple, ColumnDesc, CreateTableNode, ExchangeInfo,
-    InsertNode, PlanFragment, PlanNode, SeqScanNode, ValuesNode,
+    exchange_info, ColumnDesc, CreateTableNode, ExchangeInfo, InsertNode, PlanFragment, PlanNode,
+    SeqScanNode, ValuesNode,
 };
 use risingwave_pb::task_service::{
     GetDataResponse, QueryId, StageId, TaskId as ProstTaskId, TaskSinkId as ProstSinkId,
 };
 use risingwave_storage::Table;
+
+use super::*;
+use crate::rpc::service::exchange_service::ExchangeWriter;
+use crate::stream::TableImpl;
 
 fn get_num_sinks(plan: &PlanFragment) -> u32 {
     match plan.get_exchange_info().get_mode() {

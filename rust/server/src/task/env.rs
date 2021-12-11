@@ -1,8 +1,10 @@
-use crate::stream::{TableManager, TableManagerRef};
-use crate::task::TaskManager;
-use risingwave_source::{SourceManager, SourceManagerRef};
 use std::net::SocketAddr;
 use std::sync::Arc;
+
+use risingwave_source::{SourceManager, SourceManagerRef};
+
+use crate::stream::{TableManager, TableManagerRef};
+use crate::task::TaskManager;
 
 /// The global environment for task execution.
 /// The instance will be shared by every task.
@@ -32,8 +34,9 @@ impl GlobalTaskEnv {
     // Create an instance for testing purpose.
     #[cfg(test)]
     pub fn for_test() -> Self {
-        use crate::stream::SimpleTableManager;
         use risingwave_source::MemSourceManager;
+
+        use crate::stream::SimpleTableManager;
         GlobalTaskEnv {
             table_manager: Arc::new(SimpleTableManager::new()),
             task_manager: Arc::new(TaskManager::new()),

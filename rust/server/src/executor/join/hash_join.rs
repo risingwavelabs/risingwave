@@ -4,22 +4,22 @@ use std::mem::take;
 
 use either::Either;
 use prost::Message;
+use risingwave_common::array::{DataChunk, RwError};
+use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::collection::hash_map::{
+    calc_hash_key_kind, hash_key_dispatch, HashKey, HashKeyDispatcher, HashKeyKind, Key128, Key16,
+    Key256, Key32, Key64, KeySerialized,
+};
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::DataTypeRef;
+use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::HashJoinNode;
 
 use crate::executor::join::hash_join::HashJoinState::{Done, FirstProbe, Probe, ProbeRemaining};
 use crate::executor::join::hash_join_state::{BuildTable, ProbeTable};
 use crate::executor::join::JoinType;
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
-use risingwave_common::array::{DataChunk, RwError};
-use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::collection::hash_map::hash_key_dispatch;
-use risingwave_common::collection::hash_map::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
-use risingwave_common::collection::hash_map::{
-    HashKeyKind, Key128, Key16, Key256, Key32, Key64, KeySerialized,
-};
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataTypeRef;
-use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
-use risingwave_pb::plan::{plan_node::PlanNodeType, HashJoinNode};
 
 /// Parameters of equi-join.
 ///
@@ -373,21 +373,20 @@ mod tests {
     use std::sync::Arc;
 
     use either::Either;
-
-    use crate::executor::join::hash_join::{EquiJoinParams, HashJoinExecutor};
-    use crate::executor::join::JoinType;
-    use crate::executor::test_utils::MockExecutor;
-    use crate::executor::BoxedExecutor;
     use risingwave_common::array;
     use risingwave_common::array::column::Column;
-    use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
-    use risingwave_common::array::{F32Array, F64Array, I32Array};
+    use risingwave_common::array::{ArrayBuilderImpl, DataChunk, F32Array, F64Array, I32Array};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::collection::hash_map::Key32;
     use risingwave_common::error::Result;
     use risingwave_common::types::{
         DataTypeKind, DataTypeRef, Float32Type, Float64Type, Int32Type,
     };
+
+    use crate::executor::join::hash_join::{EquiJoinParams, HashJoinExecutor};
+    use crate::executor::join::JoinType;
+    use crate::executor::test_utils::MockExecutor;
+    use crate::executor::BoxedExecutor;
 
     struct DataChunkMerger {
         data_types: Vec<DataTypeRef>,

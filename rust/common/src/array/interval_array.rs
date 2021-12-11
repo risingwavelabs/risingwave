@@ -1,13 +1,12 @@
 use std::hash::Hash;
 
-use crate::array::{Array, ArrayBuilder, ArrayIterator};
-use crate::buffer::Bitmap;
-use crate::buffer::BitmapBuilder;
-use crate::error::Result;
-use crate::types::interval_type::IntervalUnit;
 use risingwave_pb::data::Buffer as ProstBuffer;
 
 use super::NULL_VAL_FOR_HASH;
+use crate::array::{Array, ArrayBuilder, ArrayIterator};
+use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::error::Result;
+use crate::types::interval_type::IntervalUnit;
 
 #[derive(Debug)]
 pub struct IntervalArray {
@@ -122,10 +121,9 @@ impl ArrayBuilder for IntervalArrayBuilder {
 
 #[cfg(test)]
 mod tests {
+    use super::IntervalArray;
     use crate::array::interval_array::{IntervalArrayBuilder, IntervalUnit};
     use crate::array::{Array, ArrayBuilder};
-
-    use super::IntervalArray;
 
     #[test]
     fn test_interval_array() {

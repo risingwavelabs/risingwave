@@ -1,12 +1,13 @@
+use std::cmp::Ordering::{Equal, Less};
 use std::sync::Arc;
+
+use async_trait::async_trait;
 
 use super::super::{HummockResult, HummockValue};
 use super::{BlockIterator, SeekPos, Table};
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::key_range::VersionComparator;
 use crate::hummock::HummockError;
-use async_trait::async_trait;
-use std::cmp::Ordering::{Equal, Less};
 
 /// Iterates on a table
 pub struct TableIterator {

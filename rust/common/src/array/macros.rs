@@ -56,8 +56,7 @@ macro_rules! column_nonnull {
 
 #[cfg(test)]
 mod tests {
-    use crate::array::Array;
-    use crate::array::I16Array;
+    use crate::array::{Array, I16Array};
     use crate::types::Int16Type;
 
     #[test]

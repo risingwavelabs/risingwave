@@ -1,9 +1,10 @@
-use crate::task::channel::{BoxChanReceiver, BoxChanSender, ChanReceiver, ChanSender};
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::plan::exchange_info::BroadcastInfo;
 use risingwave_pb::plan::*;
 use tokio::sync::mpsc;
+
+use crate::task::channel::{BoxChanReceiver, BoxChanSender, ChanReceiver, ChanSender};
 
 /// `BroadcastSender` sends the same chunk to a number of `BroadcastReceiver`s.
 pub struct BroadcastSender {
@@ -66,12 +67,12 @@ pub fn new_broadcast_channel(shuffle: &ExchangeInfo) -> (BoxChanSender, Vec<BoxC
 
 #[cfg(test)]
 mod tests {
-    use crate::task::broadcast_channel::new_broadcast_channel;
-    use crate::task::test_utils::{ResultChecker, TestRunner};
     use rand::Rng;
     use risingwave_pb::plan::exchange_info::BroadcastInfo;
-    use risingwave_pb::plan::ExchangeInfo;
-    use risingwave_pb::plan::*;
+    use risingwave_pb::plan::{ExchangeInfo, *};
+
+    use crate::task::broadcast_channel::new_broadcast_channel;
+    use crate::task::test_utils::{ResultChecker, TestRunner};
 
     fn broadcast_plan(plan: &mut PlanFragment, num_sinks: u32) {
         let broadcast_info = exchange_info::BroadcastInfo { count: num_sinks };

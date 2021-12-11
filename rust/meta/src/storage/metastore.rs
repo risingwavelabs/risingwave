@@ -1,13 +1,15 @@
-use crate::manager::Epoch;
-use async_trait::async_trait;
-use risingwave_common::array::RwError;
-use risingwave_common::error::ErrorCode::ItemNotFound;
-use risingwave_common::error::Result;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Display, Formatter};
 use std::str;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
+
+use async_trait::async_trait;
+use risingwave_common::array::RwError;
+use risingwave_common::error::ErrorCode::ItemNotFound;
+use risingwave_common::error::Result;
+
+use crate::manager::Epoch;
 
 pub const DEFAULT_COLUMN_FAMILY: &str = "default";
 
@@ -203,8 +205,9 @@ impl MetaStore for MemStore {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::str;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_memory_store() -> Result<()> {

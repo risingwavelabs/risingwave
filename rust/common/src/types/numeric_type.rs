@@ -1,18 +1,15 @@
-use crate::array::{ArrayBuilder, ArrayBuilderImpl, PrimitiveArrayBuilder};
-use crate::error::Result;
-use crate::error::RwError;
-use crate::types::DataSize;
-use crate::types::DataType;
-use crate::types::DataTypeKind;
-use crate::types::DataTypeRef;
-use crate::types::PrimitiveDataType;
-use risingwave_pb::data::data_type::TypeName;
-use risingwave_pb::data::DataType as ProstDataType;
 use std::any::Any;
 use std::convert::TryFrom;
 use std::default::Default;
 use std::mem::size_of;
 use std::sync::Arc;
+
+use risingwave_pb::data::data_type::TypeName;
+use risingwave_pb::data::DataType as ProstDataType;
+
+use crate::array::{ArrayBuilder, ArrayBuilderImpl, PrimitiveArrayBuilder};
+use crate::error::{Result, RwError};
+use crate::types::{DataSize, DataType, DataTypeKind, DataTypeRef, PrimitiveDataType};
 
 macro_rules! make_numeric_type {
     ($name:ident, $native_ty:ty, $data_ty:expr, $proto_ty:expr) => {

@@ -1,5 +1,7 @@
 use super::{HummockIterator, SortedIterator};
-use crate::hummock::{format::user_key, value::HummockValue, HummockError, HummockResult};
+use crate::hummock::format::user_key;
+use crate::hummock::value::HummockValue;
+use crate::hummock::{HummockError, HummockResult};
 
 /// ``UserKeyIterator`` can be used be user directly.
 pub struct UserKeyIterator {
@@ -93,23 +95,18 @@ impl UserKeyIterator {
 mod tests {
     use std::sync::Arc;
 
-    use crate::{
-        hummock::{
-            cloud::gen_remote_table,
-            format::{key_with_ts, user_key},
-            iterator::test_utils::{
-                default_builder_opt_for_test, gen_test_table_base, iterator_test_key_of,
-                test_value_of, TEST_KEYS_COUNT,
-            },
-            iterator::HummockIterator,
-            table::TableIterator,
-            value::HummockValue,
-            TableBuilder,
-        },
-        object::{InMemObjectStore, ObjectStore},
-    };
-
     use super::{SortedIterator, UserKeyIterator};
+    use crate::hummock::cloud::gen_remote_table;
+    use crate::hummock::format::{key_with_ts, user_key};
+    use crate::hummock::iterator::test_utils::{
+        default_builder_opt_for_test, gen_test_table_base, iterator_test_key_of, test_value_of,
+        TEST_KEYS_COUNT,
+    };
+    use crate::hummock::iterator::HummockIterator;
+    use crate::hummock::table::TableIterator;
+    use crate::hummock::value::HummockValue;
+    use crate::hummock::TableBuilder;
+    use crate::object::{InMemObjectStore, ObjectStore};
 
     #[tokio::test]
     async fn test_basic() {

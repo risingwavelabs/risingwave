@@ -1,13 +1,13 @@
-use async_trait::async_trait;
-use std::{collections::BinaryHeap, fmt::Debug};
+use std::collections::BinaryHeap;
+use std::fmt::Debug;
 
+use async_trait::async_trait;
 use bytes::BytesMut;
 
-use crate::hummock::{
-    key_range::VersionComparator, value::HummockValue, HummockError, HummockResult,
-};
-
 use super::HummockIterator;
+use crate::hummock::key_range::VersionComparator;
+use crate::hummock::value::HummockValue;
+use crate::hummock::{HummockError, HummockResult};
 
 struct HeapNode {
     iterator_idx: usize,
@@ -185,17 +185,14 @@ impl HummockIterator for SortedIterator {
 mod test {
     use std::sync::Arc;
 
-    use crate::hummock::{
-        iterator::test_utils::{
-            default_builder_opt_for_test, gen_test_table_base, iterator_test_key_of, test_value_of,
-            TEST_KEYS_COUNT,
-        },
-        iterator::HummockIterator,
-        table::TableIterator,
-        HummockError,
-    };
-
     use super::SortedIterator;
+    use crate::hummock::iterator::test_utils::{
+        default_builder_opt_for_test, gen_test_table_base, iterator_test_key_of, test_value_of,
+        TEST_KEYS_COUNT,
+    };
+    use crate::hummock::iterator::HummockIterator;
+    use crate::hummock::table::TableIterator;
+    use crate::hummock::HummockError;
 
     #[tokio::test]
     async fn test_basic() {

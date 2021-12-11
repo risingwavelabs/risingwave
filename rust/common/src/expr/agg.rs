@@ -1,6 +1,8 @@
-use crate::error::{ErrorCode, Result, RwError};
-use risingwave_pb::expr::agg_call::Type;
 use std::convert::TryFrom;
+
+use risingwave_pb::expr::agg_call::Type;
+
+use crate::error::{ErrorCode, Result, RwError};
 
 /// Kind of aggregation function
 #[derive(Debug, Clone)]

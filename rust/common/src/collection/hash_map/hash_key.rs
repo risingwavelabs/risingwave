@@ -1,14 +1,14 @@
-use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk};
-use crate::error::Result;
-use crate::types::{Datum, Scalar};
-use crate::types::{IntervalUnit, ScalarRef};
-use crate::util::hash_util::CRC32FastBuilder;
-use rust_decimal::Decimal;
 use std::convert::TryInto;
 use std::default::Default;
 use std::hash::{BuildHasher, Hash, Hasher};
-use std::io::Cursor;
-use std::io::Read;
+use std::io::{Cursor, Read};
+
+use rust_decimal::Decimal;
+
+use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk};
+use crate::error::Result;
+use crate::types::{Datum, IntervalUnit, Scalar, ScalarRef};
+use crate::util::hash_util::CRC32FastBuilder;
 
 /// Max element count in [`FixedSizeKeyWithHashCode`]
 pub const MAX_FIXED_SIZE_KEY_ELEMENTS: usize = 8;
@@ -505,6 +505,11 @@ impl HashKey for SerializedKey {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::convert::TryFrom;
+    use std::str::FromStr;
+    use std::sync::Arc;
+
     use super::*;
     use crate::array;
     use crate::array::column::Column;
@@ -520,10 +525,6 @@ mod tests {
         BoolType, DataTypeKind, Datum, DecimalType, Float32Type, Float64Type, Int16Type, Int32Type,
         Int64Type, StringType,
     };
-    use std::collections::HashMap;
-    use std::convert::TryFrom;
-    use std::str::FromStr;
-    use std::sync::Arc;
 
     #[derive(Hash, PartialEq, Eq)]
     struct Row(Vec<Datum>);

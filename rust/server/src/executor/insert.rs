@@ -1,24 +1,20 @@
 use std::sync::Arc;
 
 use prost::Message;
-
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::InsertNode;
-
-use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
-    ArrayBuilder, ArrayImpl, DataChunk, I64ArrayBuilder, PrimitiveArrayBuilder,
+    ArrayBuilder, ArrayImpl, DataChunk, I64ArrayBuilder, Op, PrimitiveArrayBuilder, StreamChunk,
 };
-use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::TableId;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{Int32Type, Int64Type};
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::InsertNode;
 use risingwave_source::{Source, SourceImpl, SourceManagerRef, SourceWriter};
 
 use super::BoxedExecutor;
+use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
 
 /// `InsertExecutor` implements table insertion with values from its child executor.
 pub(super) struct InsertExecutor {
@@ -147,9 +143,6 @@ impl BoxedExecutorBuilder for InsertExecutor {
 mod tests {
     use std::sync::Arc;
 
-    use crate::executor::test_utils::MockExecutor;
-    use crate::stream::{SimpleTableManager, TableImpl, TableManager};
-    use crate::*;
     use risingwave_common::array::{Array, I64Array};
     use risingwave_common::catalog::{Field, Schema, SchemaId};
     use risingwave_common::column_nonnull;
@@ -159,6 +152,9 @@ mod tests {
     use risingwave_storage::*;
 
     use super::*;
+    use crate::executor::test_utils::MockExecutor;
+    use crate::stream::{SimpleTableManager, TableImpl, TableManager};
+    use crate::*;
 
     #[tokio::test]
     async fn test_insert_executor() -> Result<()> {

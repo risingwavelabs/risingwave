@@ -1,9 +1,10 @@
+use std::mem::swap;
+use std::sync::Arc;
+
 use crate::array::column::Column;
 use crate::array::{ArrayBuilderImpl, ArrayImpl, DataChunk, RowRef};
 use crate::error::Result;
 use crate::types::DataTypeRef;
-use std::mem::swap;
-use std::sync::Arc;
 
 pub const DEFAULT_CHUNK_BUFFER_SIZE: usize = 2048;
 
@@ -224,14 +225,13 @@ impl SlicedDataChunk {
 
 #[cfg(test)]
 mod tests {
-    use crate::array;
-    use crate::array::DataChunk;
-    use crate::array::{I32Array, I64Array};
+    use std::sync::Arc;
+
+    use crate::array::{DataChunk, I32Array, I64Array};
     use crate::buffer::Bitmap;
-    use crate::column;
     use crate::types::{Int32Type, Int64Type};
     use crate::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
-    use std::sync::Arc;
+    use crate::{array, column};
 
     #[test]
     fn test_append_chunk() {

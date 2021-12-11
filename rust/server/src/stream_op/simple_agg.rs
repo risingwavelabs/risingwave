@@ -2,16 +2,16 @@
 
 use std::sync::Arc;
 
-use super::{aggregation::*, pk_input_arrays, Barrier, Keyspace, PkIndicesRef, StateStore};
-use super::{Executor, Message};
-use crate::stream_op::PkIndices;
+use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::*;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
-use async_trait::async_trait;
+use super::aggregation::*;
+use super::{pk_input_arrays, Barrier, Executor, Keyspace, Message, PkIndicesRef, StateStore};
+use crate::stream_op::PkIndices;
 
 /// `SimpleAggExecutor` is the aggregation operator for streaming system.
 /// To create an aggregation operator, states and expressions should be passed along the
@@ -195,7 +195,9 @@ impl<S: StateStore> Executor for SimpleAggExecutor<S> {
 mod tests {
     use assert_matches::assert_matches;
     use risingwave_common::catalog::Field;
-    use risingwave_common::{column_nonnull, expr::*, types::*};
+    use risingwave_common::column_nonnull;
+    use risingwave_common::expr::*;
+    use risingwave_common::types::*;
 
     use super::super::keyspace::MemoryStateStore;
     use super::*;

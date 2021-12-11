@@ -1,7 +1,8 @@
-use crate::Opts;
 use anyhow::{bail, Context};
 use log::{debug, info};
 use tokio::process::Command;
+
+use crate::Opts;
 
 const PG_DB_NAME: &str = "postgres";
 

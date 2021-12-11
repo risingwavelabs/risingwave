@@ -1,8 +1,10 @@
-use crate::manager::MetaManager;
+use std::sync::Arc;
+
 use risingwave_pb::meta::epoch_service_server::EpochService;
 use risingwave_pb::meta::{GetEpochRequest, GetEpochResponse};
-use std::sync::Arc;
 use tonic::{Request, Response, Status};
+
+use crate::manager::MetaManager;
 
 #[derive(Clone)]
 pub struct EpochServiceImpl {

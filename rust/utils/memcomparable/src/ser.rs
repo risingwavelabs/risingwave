@@ -1,6 +1,7 @@
-use crate::error::{Error, Result};
 use bytes::BufMut;
 use serde::{ser, Serialize};
+
+use crate::error::{Error, Result};
 
 /// A structure for serializing Rust values into a memcomparable bytes.
 pub struct Serializer<B: BufMut> {
@@ -426,9 +427,11 @@ impl<B: BufMut> Serializer<B> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use rand::{distributions::Alphanumeric, Rng};
+    use rand::distributions::Alphanumeric;
+    use rand::Rng;
     use serde::Serialize;
+
+    use super::*;
 
     #[test]
     fn test_unit() {

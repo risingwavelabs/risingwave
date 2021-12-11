@@ -1,13 +1,13 @@
 use async_trait::async_trait;
-
-use crate::stream_op::PkIndices;
 use itertools::Itertools;
-use risingwave_common::array::{column::Column, DataChunk};
+use risingwave_common::array::column::Column;
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::expr::BoxedExpression;
 
 use super::{Executor, Message, PkIndicesRef, SimpleExecutor, StreamChunk};
+use crate::stream_op::PkIndices;
 
 /// `ProjectExecutor` project data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a new data chunk. And then, `ProjectExecutor` will insert, delete
@@ -106,17 +106,18 @@ impl SimpleExecutor for ProjectExecutor {
 
 #[cfg(test)]
 mod tests {
-    use crate::stream_op::test_utils::MockSource;
-    use crate::stream_op::{Executor, Message, PkIndices, ProjectExecutor};
-    use crate::*;
     use itertools::Itertools;
-    use risingwave_common::array::I64Array;
+    use risingwave_common::array::{I64Array, *};
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::column_nonnull;
     use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
     use risingwave_common::expr::InputRefExpression;
     use risingwave_common::types::Int64Type;
-    use risingwave_common::{array::*, column_nonnull};
     use risingwave_pb::expr::expr_node::Type as ProstExprType;
+
+    use crate::stream_op::test_utils::MockSource;
+    use crate::stream_op::{Executor, Message, PkIndices, ProjectExecutor};
+    use crate::*;
 
     #[tokio::test]
     async fn test_projection() {

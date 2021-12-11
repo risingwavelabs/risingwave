@@ -1,5 +1,6 @@
-use crate::executor::join::JoinType::Inner;
 use risingwave_pb::plan::JoinType as JoinTypeProst;
+
+use crate::executor::join::JoinType::Inner;
 
 mod chunked_data;
 mod hash_join;

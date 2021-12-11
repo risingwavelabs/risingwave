@@ -1,9 +1,10 @@
-use crate::executor::join::chunked_data::{ChunkedData, RowId};
-use crate::executor::BoxedExecutor;
 use risingwave_common::array::{DataChunk, RowRef};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
+
+use crate::executor::join::chunked_data::{ChunkedData, RowId};
+use crate::executor::BoxedExecutor;
 
 /// `inner_table` is a buffer for all data. For all probe key, directly fetch data in `inner_table`
 /// without call executor. The executor is only called when building `inner_table`.

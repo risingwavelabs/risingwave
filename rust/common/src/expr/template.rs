@@ -1,3 +1,9 @@
+use std::fmt;
+use std::sync::Arc;
+
+use itertools::multizip;
+use paste::paste;
+
 /// Template macro to generate code for unary/binary/ternary expression.
 use crate::array::{
     Array, ArrayBuilder, ArrayImpl, ArrayRef, BytesGuard, BytesWriter, DataChunk, Utf8ArrayBuilder,
@@ -5,10 +11,6 @@ use crate::array::{
 use crate::error::Result;
 use crate::expr::{BoxedExpression, Expression};
 use crate::types::{option_as_scalar_ref, DataType, DataTypeRef, Scalar};
-use itertools::multizip;
-use paste::paste;
-use std::fmt;
-use std::sync::Arc;
 
 macro_rules! gen_expr_normal {
   ($ty_name:ident,$($arg:ident),*) => {

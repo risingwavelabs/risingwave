@@ -1,9 +1,9 @@
-use crate::error::ErrorCode::IoError;
-use crate::error::Result;
-use crate::error::RwError;
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
+
+use crate::error::ErrorCode::IoError;
+use crate::error::{Result, RwError};
 
 pub trait NativeType:
     PartialOrd + PartialEq + Debug + Copy + Send + Sync + Sized + Default + 'static

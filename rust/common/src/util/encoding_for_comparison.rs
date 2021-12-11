@@ -1,3 +1,7 @@
+use std::sync::Arc;
+
+use itertools::Itertools;
+
 use crate::array::{
     Array, ArrayImpl, BoolArray, DataChunk, F32Array, F64Array, I16Array, I32Array, I64Array,
     Utf8Array,
@@ -5,8 +9,6 @@ use crate::array::{
 use crate::error::{ErrorCode, Result};
 use crate::types::{DataTypeKind, DataTypeRef};
 use crate::util::sort_util::{OrderPair, OrderType};
-use itertools::Itertools;
-use std::sync::Arc;
 
 struct EncodedColumn {
     pub buf: Vec<u8>,

@@ -1,12 +1,11 @@
-use crate::catalog::DatabaseMetaManager;
-use crate::catalog::SchemaMetaManager;
-use crate::catalog::TableMetaManager;
-use crate::manager::{Config, Epoch, EpochGeneratorRef, IdGeneratorManager, SINGLE_VERSION_EPOCH};
-use crate::storage::MetaStoreRef;
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::meta::{Catalog, EpochState};
 use tokio::sync::RwLock;
+
+use crate::catalog::{DatabaseMetaManager, SchemaMetaManager, TableMetaManager};
+use crate::manager::{Config, Epoch, EpochGeneratorRef, IdGeneratorManager, SINGLE_VERSION_EPOCH};
+use crate::storage::MetaStoreRef;
 
 pub struct MetaManager {
     pub meta_store_ref: MetaStoreRef,

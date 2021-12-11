@@ -1,8 +1,8 @@
 use async_trait::async_trait;
-
 use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op};
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_common::{catalog::Schema, expr::BoxedExpression};
+use risingwave_common::expr::BoxedExpression;
 
 use super::{Executor, Message, PkIndicesRef, SimpleExecutor, StreamChunk};
 
@@ -144,15 +144,15 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::{I64Array, Op, StreamChunk};
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::column_nonnull;
+    use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
+    use risingwave_common::expr::InputRefExpression;
+    use risingwave_common::types::{BoolType, Int64Type};
     use risingwave_pb::expr::expr_node::Type as ProstExprType;
 
     use crate::stream_op::test_utils::MockSource;
     use crate::stream_op::{Executor, FilterExecutor, Message, PkIndices};
     use crate::*;
-    use risingwave_common::column_nonnull;
-    use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
-    use risingwave_common::expr::InputRefExpression;
-    use risingwave_common::types::{BoolType, Int64Type};
 
     #[tokio::test]
     async fn test_filter() {

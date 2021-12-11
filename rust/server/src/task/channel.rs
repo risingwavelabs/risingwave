@@ -1,11 +1,11 @@
+use risingwave_common::array::DataChunk;
+use risingwave_common::error::Result;
+use risingwave_pb::plan::exchange_info::DistributionMode as ShuffleDistributionMode;
+use risingwave_pb::plan::ExchangeInfo;
+
 use crate::task::broadcast_channel::new_broadcast_channel;
 use crate::task::fifo_channel::new_fifo_channel;
 use crate::task::hash_shuffle_channel::new_hash_shuffle_channel;
-use risingwave_common::array::DataChunk;
-use risingwave_common::error::Result;
-use risingwave_pb::plan::{
-    exchange_info::DistributionMode as ShuffleDistributionMode, ExchangeInfo,
-};
 
 #[async_trait::async_trait]
 pub trait ChanSender: Send {

@@ -1,18 +1,19 @@
-use risingwave_common::array::DataChunk;
 use std::fmt::{Debug, Formatter};
 use std::sync::{Arc, Mutex};
 
-use crate::executor::{BoxedExecutor, ExecutorBuilder};
-use crate::rpc::service::exchange_service::ExchangeWriter;
-use crate::task::channel::{create_output_channel, BoxChanReceiver, BoxChanSender};
-use crate::task::GlobalTaskEnv;
-use crate::task::TaskManager;
+use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::{json_to_pretty_string, JsonFormatter};
 use risingwave_pb::plan::PlanFragment;
 use risingwave_pb::task_service::task_info::TaskStatus;
-use risingwave_pb::task_service::TaskSinkId as ProstSinkId;
-use risingwave_pb::task_service::{GetDataResponse, TaskId as ProstTaskId};
+use risingwave_pb::task_service::{
+    GetDataResponse, TaskId as ProstTaskId, TaskSinkId as ProstSinkId,
+};
+
+use crate::executor::{BoxedExecutor, ExecutorBuilder};
+use crate::rpc::service::exchange_service::ExchangeWriter;
+use crate::task::channel::{create_output_channel, BoxChanReceiver, BoxChanSender};
+use crate::task::{GlobalTaskEnv, TaskManager};
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub struct TaskId {

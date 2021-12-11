@@ -10,9 +10,8 @@ mod foldable;
 pub use foldable::*;
 
 mod row_count;
+use dyn_clone::{self, DynClone};
 use risingwave_common::array::stream_chunk::Ops;
-pub use row_count::*;
-
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, BoolArray, DecimalArray, F32Array, F64Array,
     I16Array, I32Array, I64Array, Utf8Array,
@@ -21,8 +20,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::{DataTypeKind, DataTypeRef, Datum};
-
-use dyn_clone::{self, DynClone};
+pub use row_count::*;
 
 /// `StreamingSumAgg` sums data of the same type.
 pub type StreamingSumAgg<R, I> =

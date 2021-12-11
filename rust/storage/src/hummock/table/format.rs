@@ -1,5 +1,6 @@
-use bytes::BufMut;
 use std::{ptr, u64};
+
+use bytes::BufMut;
 
 /// Convert user key to full key by appending `u64::MAX - timestamp` to the user key.
 ///

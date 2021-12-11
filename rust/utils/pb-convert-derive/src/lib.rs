@@ -98,10 +98,10 @@ extern crate proc_macro;
 extern crate quote;
 extern crate syn;
 
-use crate::internal::Container;
 use proc_macro::TokenStream;
-use syn::parse_macro_input;
-use syn::DeriveInput;
+use syn::{parse_macro_input, DeriveInput};
+
+use crate::internal::Container;
 
 #[proc_macro_derive(FromProtobuf, attributes(pb_convert))]
 pub fn derive_from_pb(input: TokenStream) -> TokenStream {

@@ -2,16 +2,17 @@
 //!
 //! Use [`seed_rand_array`] to generate an random array.
 
-use crate::array::{Array, ArrayBuilder, ArrayRef};
-use crate::types::Scalar;
-use crate::types::{IntervalUnit, NativeType};
+use std::sync::Arc;
+
 use rand::distributions::Standard;
 use rand::prelude::Distribution;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
-use std::sync::Arc;
+
+use crate::array::{Array, ArrayBuilder, ArrayRef};
+use crate::types::{IntervalUnit, NativeType, Scalar};
 
 pub trait RandValue {
     fn rand_value<R: Rng>(rand: &mut R) -> Self;

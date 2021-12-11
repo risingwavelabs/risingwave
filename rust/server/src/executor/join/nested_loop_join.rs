@@ -1,24 +1,24 @@
+use std::option::Option::Some;
 use std::sync::Arc;
 
 use prost::Message;
-
-use crate::executor::join::chunked_data::RowId;
-use crate::executor::join::row_level_iter::RowLevelIter;
-use crate::executor::join::JoinType;
-use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
-use crate::risingwave_common::array::Array;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::data_chunk_iter::RowRef;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::expr::build_from_prost as expr_build_from_prost;
-use risingwave_common::expr::BoxedExpression;
+use risingwave_common::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 use risingwave_common::types::DataTypeRef;
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
-use risingwave_pb::plan::{plan_node::PlanNodeType, NestedLoopJoinNode};
-use std::option::Option::Some;
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::NestedLoopJoinNode;
+
+use crate::executor::join::chunked_data::RowId;
+use crate::executor::join::row_level_iter::RowLevelIter;
+use crate::executor::join::JoinType;
+use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
+use crate::risingwave_common::array::Array;
 
 /// Nested loop join executor.
 ///
@@ -430,13 +430,6 @@ mod tests {
     use std::convert::TryFrom;
     use std::sync::Arc;
 
-    use crate::executor::join::nested_loop_join::{
-        NestedLoopJoinExecutor, NestedLoopJoinState, RowLevelIter,
-    };
-    use crate::executor::join::JoinType;
-    use crate::executor::test_utils::diff_executor_output;
-    use crate::executor::test_utils::MockExecutor;
-    use crate::executor::BoxedExecutor;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
@@ -447,6 +440,13 @@ mod tests {
     };
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
     use risingwave_pb::expr::expr_node::Type;
+
+    use crate::executor::join::nested_loop_join::{
+        NestedLoopJoinExecutor, NestedLoopJoinState, RowLevelIter,
+    };
+    use crate::executor::join::JoinType;
+    use crate::executor::test_utils::{diff_executor_output, MockExecutor};
+    use crate::executor::BoxedExecutor;
 
     /// Test combine two chunk into one.
     #[test]

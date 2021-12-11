@@ -1,6 +1,7 @@
-use super::{Barrier, Executor, Message, StreamChunk};
 use risingwave_common::error::Result;
 use tokio::select;
+
+use super::{Barrier, Executor, Message, StreamChunk};
 
 #[derive(Debug, PartialEq)]
 enum BarrierWaitState {

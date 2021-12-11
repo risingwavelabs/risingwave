@@ -1,19 +1,20 @@
+use std::marker::PhantomData;
+
+use risingwave_pb::expr::expr_node::Type as ProstExprType;
+
 /// For expression that only accept two non null arguments as input.
 use crate::array::{Array, BoolArray, DataTypeTrait, DecimalArray, I32Array, I64Array, Utf8Array};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 use crate::expr::template::BinaryExpression;
 use crate::expr::BoxedExpression;
-use crate::types::DataTypeRef;
-use crate::types::*;
+use crate::types::{DataTypeRef, *};
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::cmp::*;
 use crate::vector_op::extract::{extract_from_date, extract_from_timestamp};
 use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
 use crate::vector_op::round::round_digits;
-use risingwave_pb::expr::expr_node::Type as ProstExprType;
-use std::marker::PhantomData;
 
 // this is a placeholder function that return bool in gen_binary_expr
 pub fn cmp_placeholder<T1, T2, T3>(_l: T1, _r: T2) -> Result<bool> {
@@ -278,6 +279,10 @@ pub fn new_position_expr(
 
 #[cfg(test)]
 mod tests {
+    use risingwave_pb::data::data_type::TypeName;
+    use risingwave_pb::expr::expr_node::Type as ProstExprType;
+    use rust_decimal::Decimal;
+
     use super::super::*;
     use crate::array::column::Column;
     use crate::array::interval_array::IntervalArray;
@@ -285,9 +290,6 @@ mod tests {
     use crate::expr::test_utils::make_expression;
     use crate::types::{DateType, DecimalType, Int32Type, IntervalType, IntervalUnit, Scalar};
     use crate::vector_op::arithmetic_op::{date_interval_add, date_interval_sub};
-    use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::expr::expr_node::Type as ProstExprType;
-    use rust_decimal::Decimal;
 
     #[test]
     fn test_binary() {

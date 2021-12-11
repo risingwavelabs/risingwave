@@ -1,12 +1,14 @@
-use crate::manager::MetaManager;
+use std::sync::Arc;
+
 use risingwave_common::array::RwError;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_pb::meta::heartbeat_request::NodeType;
 use risingwave_pb::meta::heartbeat_response::Body;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatService;
 use risingwave_pb::meta::{HeartbeatRequest, HeartbeatResponse};
-use std::sync::Arc;
 use tonic::{Request, Response, Status};
+
+use crate::manager::MetaManager;
 
 #[derive(Clone)]
 pub struct HeartbeatServiceImpl {

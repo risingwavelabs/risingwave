@@ -97,8 +97,9 @@ impl From<&Option<risingwave_pb::plan::TableRefId>> for TableId {
 
 #[cfg(test)]
 mod tests {
-    use crate::catalog::{DatabaseId, SchemaId, TableId};
     use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
+
+    use crate::catalog::{DatabaseId, SchemaId, TableId};
 
     fn generate_database_id_pb() -> DatabaseRefId {
         DatabaseRefId { database_id: 32 }

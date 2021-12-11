@@ -1,9 +1,9 @@
-use crate::manager::{MetaManager, SINGLE_VERSION_EPOCH};
 use async_trait::async_trait;
 use prost::Message;
 use risingwave_common::error::Result;
-
 use risingwave_pb::meta::Cluster;
+
+use crate::manager::{MetaManager, SINGLE_VERSION_EPOCH};
 
 #[async_trait]
 pub trait ClusterMetaManager {
@@ -64,11 +64,13 @@ impl ClusterMetaManager for MetaManager {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use risingwave_pb::meta::cluster::Node;
+
     use super::*;
     use crate::manager::{Config, IdGeneratorManager, MemEpochGenerator};
     use crate::storage::MemStore;
-    use risingwave_pb::meta::cluster::Node;
-    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_cluster_manager() -> Result<()> {

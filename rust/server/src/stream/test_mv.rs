@@ -1,11 +1,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::stream::{SimpleTableManager, StreamManager, TableImpl, TableManager};
-
 use risingwave_common::array::column::Column;
-use risingwave_common::array::Row;
-use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder};
+use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder, Row};
 use risingwave_common::catalog::{SchemaId, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::RwError;
@@ -20,18 +17,19 @@ use risingwave_pb::plan::column_desc::ColumnEncodingType;
 use risingwave_pb::plan::{
     ColumnDesc, ColumnOrder, DatabaseRefId, OrderType, SchemaRefId, TableRefId,
 };
+use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::table_source_node::SourceType;
 use risingwave_pb::stream_plan::{
-    dispatcher::DispatcherType, Dispatcher, MViewNode, ProjectNode, StreamFragment, StreamNode,
-    TableSourceNode,
+    Dispatcher, MViewNode, ProjectNode, StreamFragment, StreamNode, TableSourceNode,
 };
 use risingwave_pb::stream_service::{ActorInfo, BroadcastActorInfoTableRequest};
 use risingwave_pb::task_service::HostAddress;
+use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::{Table, TableColumnDesc};
 
+use crate::stream::{SimpleTableManager, StreamManager, TableImpl, TableManager};
 use crate::task::{GlobalTaskEnv, TaskManager};
-use risingwave_source::{MemSourceManager, SourceManager};
 
 fn make_int32_type_pb() -> DataType {
     DataType {

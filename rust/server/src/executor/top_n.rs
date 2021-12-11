@@ -4,20 +4,16 @@ use std::sync::Arc;
 use std::vec::Vec;
 
 use prost::Message;
-
+use risingwave_common::array::{DataChunk, DataChunkRef};
+use risingwave_common::catalog::Schema;
+use risingwave_common::error::ErrorCode::{InternalError, ProstError};
+use risingwave_common::error::Result;
+use risingwave_common::util::sort_util::{fetch_orders, HeapElem, OrderPair};
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::TopNNode;
 
-use crate::executor::{Executor, ExecutorBuilder};
-use risingwave_common::array::{DataChunk, DataChunkRef};
-use risingwave_common::catalog::Schema;
-use risingwave_common::error::{
-    ErrorCode::{InternalError, ProstError},
-    Result,
-};
-use risingwave_common::util::sort_util::{fetch_orders, HeapElem, OrderPair};
-
 use super::{BoxedExecutor, BoxedExecutorBuilder};
+use crate::executor::{Executor, ExecutorBuilder};
 
 struct TopNHeap {
     order_pairs: Arc<Vec<OrderPair>>,
@@ -141,7 +137,6 @@ impl Executor for TopNExecutor {
 mod tests {
     use std::sync::Arc;
 
-    use crate::executor::test_utils::MockExecutor;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{Array, DataChunk, PrimitiveArray};
     use risingwave_common::catalog::{Field, Schema};
@@ -150,6 +145,7 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
+    use crate::executor::test_utils::MockExecutor;
 
     fn create_column(vec: &[Option<i32>]) -> Result<Column> {
         let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;

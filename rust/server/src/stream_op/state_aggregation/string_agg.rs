@@ -1,22 +1,18 @@
-use async_trait::async_trait;
-use bytes::Bytes;
-
 use std::collections::BTreeMap;
 
-use risingwave_common::array::stream_chunk::Op;
-use risingwave_common::array::stream_chunk::Ops;
+use async_trait::async_trait;
+use bytes::Bytes;
+use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
-
-use crate::stream_op::OrderedArraysSerializer;
 use risingwave_common::types::{
     deserialize_datum_not_null_from, serialize_datum_not_null_into, DataTypeKind, Datum, Scalar,
 };
 
-use crate::stream_op::state_aggregation::ManagedExtremeState;
-
 use super::super::keyspace::{Keyspace, StateStore};
+use crate::stream_op::state_aggregation::ManagedExtremeState;
+use crate::stream_op::OrderedArraysSerializer;
 
 pub struct ManagedStringAggState<S: StateStore> {
     cache: BTreeMap<Bytes, String>,
@@ -205,14 +201,14 @@ impl<S: StateStore> ManagedExtremeState<S> for ManagedStringAggState<S> {
 
 #[cfg(test)]
 mod tests {
-    use crate::stream_op::state_aggregation::ordered_serializer::OrderedArraysSerializer;
-    use crate::stream_op::state_aggregation::string_agg::ManagedStringAggState;
-    use crate::stream_op::state_aggregation::ManagedExtremeState;
-    use crate::stream_op::StateStore;
-    use crate::stream_op::{Keyspace, MemoryStateStore};
     use risingwave_common::array::{I64Array, Op, Utf8Array};
     use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::sort_util::OrderType;
+
+    use crate::stream_op::state_aggregation::ordered_serializer::OrderedArraysSerializer;
+    use crate::stream_op::state_aggregation::string_agg::ManagedStringAggState;
+    use crate::stream_op::state_aggregation::ManagedExtremeState;
+    use crate::stream_op::{Keyspace, MemoryStateStore, StateStore};
 
     #[tokio::test]
     async fn test_managed_string_agg_state() {

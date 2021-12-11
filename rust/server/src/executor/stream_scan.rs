@@ -1,18 +1,15 @@
 use std::fmt::{Debug, Formatter};
 
 use prost::Message;
-
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::TableId;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan::StreamScanNode;
-
-use crate::executor::{Executor, ExecutorBuilder};
 use risingwave_source::{BatchSourceReader, HighLevelKafkaSourceReaderContext, Source, SourceImpl};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
+use crate::executor::{Executor, ExecutorBuilder};
 
 pub struct StreamScanExecutor {
     reader: Box<dyn BatchSourceReader>,

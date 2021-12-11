@@ -5,7 +5,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::channel::mpsc::UnboundedReceiver;
 use futures::StreamExt;
-
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
     ArrayBuilder, ArrayImpl, I64ArrayBuilder, InternalError, RwError, StreamChunk,
@@ -14,14 +13,13 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::Result;
 use risingwave_common::types::Int64Type;
-use SourceReaderContext::HighLevelKafka;
-
-use crate::stream_op::{Executor, Message};
-use crate::stream_op::{PkIndices, PkIndicesRef};
 use risingwave_source::{
     HighLevelKafkaSourceReaderContext, SourceDesc, SourceImpl, SourceReaderContext,
     StreamSourceReader,
 };
+use SourceReaderContext::HighLevelKafka;
+
+use crate::stream_op::{Executor, Message, PkIndices, PkIndicesRef};
 
 /// `StreamSourceExecutor` is a streaming source from external systems such as Kafka
 pub struct StreamSourceExecutor {

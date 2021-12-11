@@ -1,4 +1,5 @@
-use crate::task::channel::{BoxChanReceiver, BoxChanSender, ChanReceiver, ChanSender};
+use std::option::Option;
+
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
@@ -6,8 +7,9 @@ use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_pb::plan::exchange_info::hash_info::HashMethod;
 use risingwave_pb::plan::exchange_info::HashInfo;
 use risingwave_pb::plan::*;
-use std::option::Option;
 use tokio::sync::mpsc;
+
+use crate::task::channel::{BoxChanReceiver, BoxChanSender, ChanReceiver, ChanSender};
 
 pub struct HashShuffleSender {
     senders: Vec<mpsc::UnboundedSender<Option<DataChunk>>>,
@@ -147,15 +149,16 @@ pub fn new_hash_shuffle_channel(shuffle: &ExchangeInfo) -> (BoxChanSender, Vec<B
 
 #[cfg(test)]
 mod tests {
-    use crate::task::hash_shuffle_channel::new_hash_shuffle_channel;
-    use crate::task::test_utils::{ResultChecker, TestRunner};
+    use std::hash::BuildHasher;
+
     use rand::Rng;
     use risingwave_common::util::hash_util::CRC32FastBuilder;
     use risingwave_pb::plan::exchange_info::hash_info::HashMethod;
-    use risingwave_pb::plan::exchange_info::DistributionMode;
-    use risingwave_pb::plan::exchange_info::HashInfo;
+    use risingwave_pb::plan::exchange_info::{DistributionMode, HashInfo};
     use risingwave_pb::plan::*;
-    use std::hash::BuildHasher;
+
+    use crate::task::hash_shuffle_channel::new_hash_shuffle_channel;
+    use crate::task::test_utils::{ResultChecker, TestRunner};
 
     pub fn hash_shuffle_plan(plan: &mut PlanFragment, keys: Vec<u32>, num_sinks: u32) {
         let hash_info = HashInfo {

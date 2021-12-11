@@ -1,6 +1,6 @@
-use crate::stream::StreamManager;
-use crate::stream_op::Message;
-use crate::task::{TaskManager, TaskSinkId};
+use std::net::SocketAddr;
+use std::sync::Arc;
+
 use futures::channel::mpsc::Receiver;
 use futures::StreamExt;
 use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
@@ -9,10 +9,12 @@ use risingwave_pb::task_service::exchange_service_server::ExchangeService;
 use risingwave_pb::task_service::{
     GetDataRequest, GetDataResponse, GetStreamRequest, TaskSinkId as ProtoTaskSinkId,
 };
-use std::net::SocketAddr;
-use std::sync::Arc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
+
+use crate::stream::StreamManager;
+use crate::stream_op::Message;
+use crate::task::{TaskManager, TaskSinkId};
 
 #[derive(Clone)]
 pub struct ExchangeServiceImpl {
@@ -182,8 +184,9 @@ impl ExchangeWriter for GrpcExchangeWriter {
 
 #[cfg(test)]
 mod tests {
-    use crate::rpc::service::exchange_service::{ExchangeWriter, GrpcExchangeWriter};
     use risingwave_pb::task_service::GetDataResponse;
+
+    use crate::rpc::service::exchange_service::{ExchangeWriter, GrpcExchangeWriter};
 
     #[tokio::test]
     async fn test_exchange_writer() {

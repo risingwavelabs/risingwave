@@ -1,6 +1,5 @@
 use super::*;
-use crate::for_all_native_types;
-use crate::for_all_scalar_variants;
+use crate::{for_all_native_types, for_all_scalar_variants};
 
 /// `ScalarPartialOrd` allows comparison between `Scalar` and `ScalarRef`.
 ///

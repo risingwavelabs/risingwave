@@ -1,7 +1,8 @@
-use crate::error::ErrorCode::InvalidInputSyntax;
-use crate::error::{ErrorCode::ParseError, Result, RwError};
 use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 use rust_decimal::Decimal;
+
+use crate::error::ErrorCode::{InvalidInputSyntax, ParseError};
+use crate::error::{Result, RwError};
 
 // The same as NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce().
 // Minus this magic number to store the number of days since 1970-01-01.

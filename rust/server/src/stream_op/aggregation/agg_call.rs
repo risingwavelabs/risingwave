@@ -1,6 +1,7 @@
+use std::slice;
+
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::DataTypeRef;
-use std::slice;
 
 /// An aggregation function may accept 0, 1 or 2 arguments.
 #[derive(Clone, Debug)]

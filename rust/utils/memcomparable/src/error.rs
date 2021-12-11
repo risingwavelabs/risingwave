@@ -1,5 +1,6 @@
-use serde::{de, ser};
 use std::fmt::Display;
+
+use serde::{de, ser};
 use thiserror::Error;
 
 /// The result of a serialization or deserialization operation.

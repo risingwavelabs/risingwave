@@ -1,9 +1,4 @@
 use prost::Message;
-
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::FilterNode;
-
-use crate::executor::{Executor, ExecutorBuilder};
 use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
@@ -13,8 +8,11 @@ use risingwave_common::expr::{build_from_prost, BoxedExpression};
 use risingwave_common::util::chunk_coalesce::{
     DataChunkBuilder, SlicedDataChunk, DEFAULT_CHUNK_BUFFER_SIZE,
 };
+use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::FilterNode;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
+use crate::executor::{Executor, ExecutorBuilder};
 
 pub(super) struct FilterExecutor {
     expr: BoxedExpression,
@@ -115,23 +113,19 @@ impl BoxedExecutorBuilder for FilterExecutor {
 mod tests {
     use std::sync::Arc;
 
-    use risingwave_common::expr::build_from_prost;
-    use risingwave_pb::data::DataType as DataTypeProst;
-    use risingwave_pb::expr::expr_node::Type::InputRef;
-    use risingwave_pb::expr::expr_node::{RexNode, Type as ProstExprType};
-    use risingwave_pb::expr::ExprNode as ProstExprNode;
-    use risingwave_pb::expr::ExprNode;
-    use risingwave_pb::expr::FunctionCall;
-    use risingwave_pb::expr::InputRefExpr;
-
-    use crate::executor::test_utils::MockExecutor;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{Array, DataChunk, PrimitiveArray};
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::expr::build_from_prost;
     use risingwave_common::types::{DataTypeKind, Int32Type};
     use risingwave_pb::data::data_type::TypeName;
+    use risingwave_pb::data::DataType as DataTypeProst;
+    use risingwave_pb::expr::expr_node::Type::InputRef;
+    use risingwave_pb::expr::expr_node::{RexNode, Type as ProstExprType};
+    use risingwave_pb::expr::{ExprNode as ProstExprNode, FunctionCall, InputRefExpr};
 
     use super::*;
+    use crate::executor::test_utils::MockExecutor;
 
     #[tokio::test]
     async fn test_filter_executor() {
@@ -197,8 +191,8 @@ mod tests {
         }
     }
 
-    fn make_inputref(idx: i32) -> ExprNode {
-        ExprNode {
+    fn make_inputref(idx: i32) -> ProstExprNode {
+        ProstExprNode {
             expr_type: InputRef as i32,
             return_type: Some(DataTypeProst {
                 type_name: TypeName::Int32 as i32,

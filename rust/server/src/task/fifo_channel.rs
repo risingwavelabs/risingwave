@@ -1,7 +1,8 @@
-use crate::task::channel::{BoxChanReceiver, BoxChanSender, ChanReceiver, ChanSender};
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{Result, ToRwResult};
 use tokio::sync::mpsc;
+
+use crate::task::channel::{BoxChanReceiver, BoxChanSender, ChanReceiver, ChanSender};
 
 pub struct FifoSender {
     sender: mpsc::UnboundedSender<Option<DataChunk>>,

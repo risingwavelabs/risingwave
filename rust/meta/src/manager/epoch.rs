@@ -1,8 +1,9 @@
-use risingwave_common::error::Result;
 use std::fmt;
 use std::hash::Hash;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use risingwave_common::error::Result;
 
 /// Epoch keeping for some specific key types.
 pub(crate) const SINGLE_VERSION_EPOCH: Epoch = Epoch(0);

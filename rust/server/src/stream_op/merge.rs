@@ -1,6 +1,6 @@
-use super::{Barrier, Executor, PkIndicesRef, Result};
-use crate::stream::UpDownFragmentIds;
-use crate::stream_op::PkIndices;
+use std::net::SocketAddr;
+use std::time::Duration;
+
 use async_trait::async_trait;
 use futures::channel::mpsc::{Receiver, Sender};
 use futures::future::select_all;
@@ -11,13 +11,12 @@ use risingwave_common::error::ToRwResult;
 use risingwave_pb::data::StreamMessage;
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::GetStreamRequest;
-use std::net::SocketAddr;
-use std::time::Duration;
 use tonic::transport::{Channel, Endpoint};
-use tonic::Request;
-use tonic::Streaming;
+use tonic::{Request, Streaming};
 
-use super::Message;
+use super::{Barrier, Executor, Message, PkIndicesRef, Result};
+use crate::stream::UpDownFragmentIds;
+use crate::stream_op::PkIndices;
 
 /// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
 pub struct RemoteInput {
@@ -234,7 +233,11 @@ impl Executor for MergeExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::thread::sleep;
+    use std::time::Duration;
+
     use assert_matches::assert_matches;
     use futures::channel::mpsc::channel;
     use futures::SinkExt;
@@ -245,12 +248,10 @@ mod tests {
         ExchangeService, ExchangeServiceServer,
     };
     use risingwave_pb::task_service::{GetDataRequest, GetDataResponse};
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
-    use std::thread::sleep;
-    use std::time::Duration;
     use tokio_stream::wrappers::ReceiverStream;
     use tonic::{Response, Status};
+
+    use super::*;
 
     fn build_test_chunk(epoch: u64) -> StreamChunk {
         let mut chunk = StreamChunk::default();

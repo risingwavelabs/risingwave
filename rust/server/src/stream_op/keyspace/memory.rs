@@ -1,8 +1,8 @@
-use bytes::Bytes;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use risingwave_common::error::Result;
 use tokio::sync::Mutex;
 

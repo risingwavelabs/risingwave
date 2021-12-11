@@ -1,14 +1,15 @@
-use crate::array::{Array, ArrayImpl, DataChunk, DataChunkRef};
-use crate::error::{ErrorCode::InternalError, Result, RwError};
-use crate::expr::InputRefExpression;
-use crate::types::build_from_prost;
-use crate::types::{ScalarPartialOrd, ScalarRef};
-use mem_cmp::*;
-use risingwave_pb::expr::InputRefExpr;
-use risingwave_pb::plan::ColumnOrder;
-use risingwave_pb::plan::OrderType as ProstOrderType;
 use std::cmp::{Ord, Ordering};
 use std::sync::Arc;
+
+use mem_cmp::*;
+use risingwave_pb::expr::InputRefExpr;
+use risingwave_pb::plan::{ColumnOrder, OrderType as ProstOrderType};
+
+use crate::array::{Array, ArrayImpl, DataChunk, DataChunkRef};
+use crate::error::ErrorCode::InternalError;
+use crate::error::{Result, RwError};
+use crate::expr::InputRefExpression;
+use crate::types::{build_from_prost, ScalarPartialOrd, ScalarRef};
 
 pub const K_PROCESSING_WINDOW_SIZE: usize = 1024;
 

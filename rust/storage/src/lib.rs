@@ -10,11 +10,11 @@ pub mod bummock;
 pub mod hummock;
 pub mod object;
 
-use crate::bummock::BummockResult;
-
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataTypeRef;
+
+use crate::bummock::BummockResult;
 
 /// `Table` is an abstraction of the collection of columns and rows.
 /// Each `Table` can be viewed as a flat sheet of a user created table.

@@ -1,11 +1,13 @@
-use crate::task::{GlobalTaskEnv, TaskManager};
+use std::sync::Arc;
+
 use risingwave_pb::task_service::task_service_server::TaskService;
 use risingwave_pb::task_service::{
     AbortTaskRequest, AbortTaskResponse, CreateTaskRequest, CreateTaskResponse, GetTaskInfoRequest,
     GetTaskInfoResponse,
 };
-use std::sync::Arc;
 use tonic::{Request, Response, Status};
+
+use crate::task::{GlobalTaskEnv, TaskManager};
 
 #[derive(Clone)]
 pub struct TaskServiceImpl {

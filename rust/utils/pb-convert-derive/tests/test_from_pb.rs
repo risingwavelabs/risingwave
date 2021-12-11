@@ -1,10 +1,9 @@
 mod proto;
 
-use crate::proto::{OuterEnum, OuterMessage, SubMessage};
 use pb_convert::FromProtobuf;
-use proto::gen::message::OuterEnumProto;
-use proto::gen::message::OuterMessageProto;
-use proto::gen::message::SubMessageProto;
+use proto::gen::message::{OuterEnumProto, OuterMessageProto, SubMessageProto};
+
+use crate::proto::{OuterEnum, OuterMessage, SubMessage};
 
 #[test]
 fn test_from_pb() {

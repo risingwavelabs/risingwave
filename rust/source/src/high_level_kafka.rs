@@ -5,14 +5,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
 use futures::StreamExt;
 use rdkafka::config::RDKafkaLogLevel;
-use rdkafka::consumer::{CommitMode, StreamConsumer};
-use rdkafka::consumer::{Consumer, DefaultConsumerContext};
+use rdkafka::consumer::{CommitMode, Consumer, DefaultConsumerContext, StreamConsumer};
 use rdkafka::metadata::Metadata;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
-
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{ArrayBuilderImpl, DataChunk, Op, StreamChunk};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::Datum;

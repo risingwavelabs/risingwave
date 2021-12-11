@@ -1,12 +1,13 @@
-use crate::object::{BlockLocation, ObjectMetadata, ObjectStore};
+use std::collections::HashMap;
+
 use bytes::Bytes;
 use risingwave_common::array::RwError;
-use risingwave_common::ensure;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
-use risingwave_common::gen_error;
-use std::collections::HashMap;
+use risingwave_common::{ensure, gen_error};
 use tokio::sync::Mutex;
+
+use crate::object::{BlockLocation, ObjectMetadata, ObjectStore};
 
 /// In-memory object storage, useful for testing.
 #[derive(Default)]
@@ -70,8 +71,9 @@ fn find_block(obj: &Bytes, block: BlockLocation) -> Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use bytes::Bytes;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_upload() {

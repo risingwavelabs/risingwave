@@ -1,14 +1,13 @@
 use std::hash::{Hash, Hasher};
-
-use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
-use crate::buffer::Bitmap;
-use crate::buffer::BitmapBuilder;
-use crate::error::Result;
-
 use std::mem::size_of;
 
-use risingwave_pb::data::{buffer::CompressionType, Buffer as ProstBuffer};
+use risingwave_pb::data::buffer::CompressionType;
+use risingwave_pb::data::Buffer as ProstBuffer;
 use rust_decimal::Decimal;
+
+use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
+use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::error::Result;
 
 #[derive(Debug)]
 pub struct DecimalArray {
@@ -134,10 +133,11 @@ impl ArrayBuilder for DecimalArrayBuilder {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use itertools::Itertools;
     use num_traits::FromPrimitive;
     use rust_decimal::prelude::*;
+
+    use super::*;
 
     #[test]
     fn test_decimal_builder() {
@@ -191,9 +191,11 @@ mod tests {
 
     #[test]
     fn test_decimal_array_hash() {
-        use super::super::test_util::{hash_finish, test_hash};
         use std::hash::BuildHasher;
+
         use twox_hash::RandomXxHashBuilder64;
+
+        use super::super::test_util::{hash_finish, test_hash};
 
         const ARR_NUM: usize = 3;
         const ARR_LEN: usize = 270;

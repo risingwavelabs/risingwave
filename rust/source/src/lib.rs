@@ -1,14 +1,12 @@
 use std::fmt::Debug;
 
 use async_trait::async_trait;
-
 pub use high_level_kafka::*;
 pub use manager::*;
 pub use parser::*;
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::Result;
-use risingwave_common::error::RwError;
+use risingwave_common::error::{Result, RwError};
 pub use table::*;
 
 pub mod parser;

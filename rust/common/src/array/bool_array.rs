@@ -1,11 +1,12 @@
 use std::hash::{Hash, Hasher};
+use std::mem::size_of;
+
+use risingwave_pb::data::buffer::CompressionType;
+use risingwave_pb::data::Buffer as ProstBuffer;
 
 use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
-use crate::buffer::Bitmap;
-use crate::buffer::BitmapBuilder;
+use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
-use risingwave_pb::data::{buffer::CompressionType, Buffer as ProstBuffer};
-use std::mem::size_of;
 
 #[derive(Debug)]
 pub struct BoolArray {
@@ -129,8 +130,9 @@ impl ArrayBuilder for BoolArrayBuilder {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use itertools::Itertools;
+
+    use super::*;
 
     fn helper_test_builder(data: Vec<Option<bool>>) -> BoolArray {
         let mut builder = BoolArrayBuilder::new(data.len()).unwrap();
@@ -160,9 +162,11 @@ mod tests {
 
     #[test]
     fn test_bool_array_hash() {
-        use super::super::test_util::{hash_finish, test_hash};
         use std::hash::BuildHasher;
+
         use twox_hash::RandomXxHashBuilder64;
+
+        use super::super::test_util::{hash_finish, test_hash};
 
         const ARR_NUM: usize = 2;
         const ARR_LEN: usize = 48;
