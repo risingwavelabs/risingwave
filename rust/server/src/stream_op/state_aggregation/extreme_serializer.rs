@@ -1,7 +1,5 @@
-use std::borrow::Cow;
 use std::marker::PhantomData;
 
-use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_common::types::{deserialize_datum_not_null_from, DataTypeKind, Scalar, ScalarImpl};
 use serde::{Deserialize, Serialize};
@@ -37,11 +35,21 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
         }
     }
 
+    fn is_reversed_order(&self) -> bool {
+        match EXTREME_TYPE {
+            variants::EXTREME_MAX => true,
+            variants::EXTREME_MIN => false,
+            _ => unimplemented!(),
+        }
+    }
+
     /// Serialize key and `pk` (or, `row_id`s) into a sort key
     ///
     /// TODO: support `&K` instead of `K` as parameter.
     pub fn serialize(&self, key: K, pk: &ExtremePk) -> Result<Vec<u8>> {
         let mut serializer = memcomparable::Serializer::new(vec![]);
+        serializer.set_reverse(self.is_reversed_order());
+
         // 1. key
         let key: ScalarImpl = key.into();
         key.serialize(&mut serializer)?;
@@ -52,18 +60,8 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
             (*i).serialize(&mut serializer)?;
         }
 
-        // 3. take, flip if necessary
-        let mut encoded_key = serializer.into_inner();
-        match EXTREME_TYPE {
-            variants::EXTREME_MIN => {}
-            variants::EXTREME_MAX => {
-                // flip all bits for reversed order
-                encoded_key.iter_mut().for_each(|byte| {
-                    *byte = !(*byte);
-                });
-            }
-            _ => unimplemented!(),
-        }
+        // 3. take
+        let encoded_key = serializer.into_inner();
         Ok(encoded_key)
     }
 
@@ -73,22 +71,13 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
             return Ok(ExtremePk::default());
         }
 
-        // 1. flip if necessary
-        let data = match EXTREME_TYPE {
-            variants::EXTREME_MIN => Cow::Borrowed(data),
-            variants::EXTREME_MAX => {
-                // flip all bits for reversed order
-                let original_data = data.iter().map(|byte| !(*byte)).collect_vec();
-                Cow::Owned(original_data)
-            }
-            _ => unimplemented!(),
-        };
-        let mut deserializer = memcomparable::Deserializer::new(data.as_ref());
+        let mut deserializer = memcomparable::Deserializer::new(data);
+        deserializer.set_reverse(self.is_reversed_order());
 
-        // 2. key
+        // 1. key
         let _key = deserialize_datum_not_null_from(&self.data_type_kind, &mut deserializer)?;
 
-        // 3. pk
+        // 2. pk
         let mut pk = ExtremePk::with_capacity(self.pk_length);
         for _ in 0..self.pk_length {
             let i = ExtremePkItem::deserialize(&mut deserializer)?;
