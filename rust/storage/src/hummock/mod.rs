@@ -20,6 +20,7 @@ pub use error::*;
 use parking_lot::Mutex as PLMutex;
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use tokio::select;
+use tokio::sync::mpsc;
 use value::*;
 use version_manager::{CompactTask, Level, LevelEntry, VersionManager};
 
@@ -52,15 +53,15 @@ pub struct HummockStorage {
     obj_client: Arc<dyn ObjectStore>,
 
     /// Notify the compactor to compact after every write_batch().
-    tx: tokio::sync::mpsc::UnboundedSender<()>,
+    tx: mpsc::UnboundedSender<()>,
 
     /// Receiver of the compactor.
-    rx: Arc<PLMutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>>,
+    rx: Arc<PLMutex<Option<mpsc::UnboundedReceiver<()>>>>,
 }
 
 impl HummockStorage {
     pub fn new(obj_client: Arc<dyn ObjectStore>, options: HummockOptions) -> Self {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::unbounded_channel();
         Self {
             options: Arc::new(options),
             unique_id: Arc::new(AtomicU64::new(0)),
@@ -340,7 +341,7 @@ impl HummockStorage {
 
     async fn start_compactor(
         self: &Arc<Self>,
-        mut stop: tokio::sync::mpsc::UnboundedReceiver<()>,
+        mut stop: mpsc::UnboundedReceiver<()>,
     ) -> HummockResult<()> {
         let mut compact_notifier = self.rx.lock().take().unwrap();
         loop {

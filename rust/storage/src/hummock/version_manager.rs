@@ -420,9 +420,7 @@ impl VersionManager {
                         *l_n = itertools::merge_join_by(
                             old_ln,
                             output_table_compact_entries,
-                            |lft_status, rht_status| {
-                                lft_status.key_range.cmp(&rht_status.key_range)
-                            },
+                            |l, r| l.key_range.cmp(&r.key_range),
                         )
                         .map(|either_or_both| {
                             either_or_both.reduce(|_, _| panic!("duplicated table found"))
