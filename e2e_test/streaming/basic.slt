@@ -69,7 +69,7 @@ select avg_v1, sum_v2, count_v3 from mv2;
 2.5 14 4
 
 query IIII
-select * from mv4 order by sum_v1;
+select sum_v1, min_v1, max_v1, v3 from mv4 order by sum_v1;
 ----
 0  0 0 3
 6  1 5 4

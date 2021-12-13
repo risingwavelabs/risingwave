@@ -8,7 +8,7 @@ create materialized view T_no_group_no_count_single as select sum(v1) as V from 
         <Resource name="plan">
             <![CDATA[
 RwStreamMaterializedView(name=[t_no_group_no_count_single])
-  RwStreamProject(v=[$STREAM_NULL_BY_ROW_COUNT($0, $1)], $f0_copy=[$0], v_copy=[$1])
+  RwStreamProject(v=[$STREAM_NULL_BY_ROW_COUNT($0, $1)], $f0=[$0], v_copy=[$1])
     RwStreamAgg(group=[{}], agg#0=[COUNT()], v=[SUM($0)])
       RwStreamTableSource(table=[[test_schema, t]], columns=[v1,_row_id])
 ]]>

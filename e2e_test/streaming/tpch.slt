@@ -171,3 +171,12 @@ query RIR
 select * from tpch_q6;
 ----
 2384.1828 2 2384.1828
+
+statement ok
+drop table lineitem
+
+statement ok
+drop table tpch_q1
+
+statement ok
+drop table tpch_q6

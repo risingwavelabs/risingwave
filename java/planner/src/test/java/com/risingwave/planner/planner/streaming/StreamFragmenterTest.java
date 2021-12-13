@@ -60,7 +60,7 @@ public class StreamFragmenterTest extends StreamPlanTestBase {
     String explainExchangePlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
     String expectedPlan =
         "RwStreamMaterializedView(name=[t_distributed])\n"
-            + "  RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($0, $1), 1)], $f0_copy=[$0], $f1_copy=[$1])\n"
+            + "  RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($0, $1), 1)], $f0=[$0], $f1=[$1])\n"
             + "    RwStreamAgg(group=[{}], agg#0=[$SUM0($0)], agg#1=[SUM($1)])\n"
             + "      RwStreamExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])\n"
             + "        RwStreamAgg(group=[{}], agg#0=[COUNT()], agg#1=[SUM($0)])\n"
@@ -72,7 +72,7 @@ public class StreamFragmenterTest extends StreamPlanTestBase {
     // Test building stages in the fragmenter.
     String expectedStage0 =
         "RwStreamMaterializedView(name=[t_distributed])\n"
-            + "  RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($0, $1), 1)], $f0_copy=[$0], $f1_copy=[$1])\n"
+            + "  RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($0, $1), 1)], $f0=[$0], $f1=[$1])\n"
             + "    RwStreamAgg(group=[{}], agg#0=[$SUM0($0)], agg#1=[SUM($1)])";
     String expectedStage1 =
         "RwStreamExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])\n"

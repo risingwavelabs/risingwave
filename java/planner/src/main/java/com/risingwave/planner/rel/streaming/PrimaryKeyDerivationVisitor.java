@@ -10,9 +10,11 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.IntStream;
 import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelFieldCollation;
+import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rel.type.RelDataTypeFieldImpl;
 import org.apache.calcite.rex.RexInputRef;
 import org.apache.calcite.rex.RexNode;
@@ -403,7 +405,10 @@ public class PrimaryKeyDerivationVisitor
     LOGGER.debug("newInputRowType:" + newInputRowType);
 
     RwStreamProject newProject;
-
+    Set<String> oldNames = new HashSet<String>();
+    for (var field : project.getRowType().getFieldList()) {
+      oldNames.add(field.getName());
+    }
     RexShuttle inputRefReplaceShuttle =
         new RexShuttle() {
           @Override
@@ -445,9 +450,16 @@ public class PrimaryKeyDerivationVisitor
       if (!exist) {
         var field = newInputRowType.getFieldList().get(primaryKeyIndex);
         newProjects.add(rexBuilder.makeInputRef(field.getType(), primaryKeyIndex));
-        // We need to change the name of the field otherwise calcite would complain
-        var newField =
-            new RelDataTypeFieldImpl(field.getName() + "_copy", field.getIndex(), field.getType());
+        RelDataTypeField newField;
+        if (oldNames.contains(field.getName())) {
+          // We need to change the name of the field otherwise calcite would complain
+          newField =
+              new RelDataTypeFieldImpl(
+                  field.getName() + "_copy", field.getIndex(), field.getType());
+          oldNames.add(newField.getName());
+        } else {
+          newField = field;
+        }
         newFields.add(newField);
         newOutputPrimaryKeyIndices.add(newProjects.size() - 1);
       }

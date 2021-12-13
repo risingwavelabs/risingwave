@@ -61,7 +61,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     String resultPlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
     String expectedPlan =
         "RwStreamMaterializedView(name=[t_test])\n"
-            + "  RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($0, $1), 1)], $f0_copy=[$0], $f1_copy=[$1])\n"
+            + "  RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($0, $1), 1)], $f0=[$0], $f1=[$1])\n"
             + "    RwStreamAgg(group=[{}], agg#0=[COUNT()], agg#1=[SUM($0)])\n"
             + "      RwStreamFilter(condition=[>($0, $1)])\n"
             + "        RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,_row_id])";
@@ -87,7 +87,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     String resultPlan = ExplainWriter.explainPlan(plan.getRoot());
     String expectedPlan =
         "RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])\n"
-            + "  RwBatchMaterializedViewScan(table=[[test_schema, t_test]], columns=[v,$f0_copy,$f1_copy])";
+            + "  RwBatchMaterializedViewScan(table=[[test_schema, t_test]], columns=[v,$f0,$f1])";
     testLogger.debug("result plan:\n" + resultPlan);
     Assertions.assertEquals(expectedPlan, resultPlan);
   }
@@ -115,7 +115,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     String explainExchangePlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
     String expectedPlan =
         "RwStreamMaterializedView(name=[t_distributed])\n"
-            + "  RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($0, $1), 1)], $f0_copy=[$0], $f1_copy=[$1])\n"
+            + "  RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($0, $1), 1)], $f0=[$0], $f1=[$1])\n"
             + "    RwStreamAgg(group=[{}], agg#0=[$SUM0($0)], agg#1=[SUM($1)])\n"
             + "      RwStreamExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])\n"
             + "        RwStreamAgg(group=[{}], agg#0=[COUNT()], agg#1=[SUM($0)])\n"
