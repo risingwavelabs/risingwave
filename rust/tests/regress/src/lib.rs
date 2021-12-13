@@ -17,16 +17,19 @@ mod schedule;
 use log::{error, info};
 pub(crate) use schedule::*;
 
-pub async fn regress_main() {
+/// Exit code of this process
+pub async fn regress_main() -> i32 {
     let opts = Opts::parse();
     log4rs::init_file(opts.log4rs_config_path(), Default::default()).unwrap();
 
     match run_schedules(opts).await {
         Ok(_) => {
             info!("Risingwave regress test completed successfully!");
+            0
         }
         Err(e) => {
             error!("Risingwave regress test failed: {:?}", e);
+            1
         }
     }
 }
