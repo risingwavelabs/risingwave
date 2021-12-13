@@ -80,7 +80,7 @@ impl HummockStorage {
     pub async fn get(&self, key: &[u8]) -> HummockResult<Option<Vec<u8>>> {
         let mut table_iters: Vec<Box<dyn HummockIterator + Send + Sync>> = Vec::new();
 
-        for table in self.version_manager.tables().unwrap().iter() {
+        for table in &self.version_manager.tables().unwrap() {
             // bloom filter tells us the key could possibly exist, go get it
             if !table.surely_not_have(key) {
                 let iter = Box::new(TableIterator::new(table.clone()));

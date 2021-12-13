@@ -147,7 +147,7 @@ impl Schedule {
 
         let mut result = HashMap::new();
 
-        for (test_name, join_handle) in join_handles.into_iter() {
+        for (test_name, join_handle) in join_handles {
             let ret = join_handle
                 .await
                 .with_context(|| format!("Running test case {} panicked!", test_name))??;

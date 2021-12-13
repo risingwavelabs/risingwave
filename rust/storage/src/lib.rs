@@ -1,4 +1,6 @@
 #![allow(dead_code)]
+#![warn(clippy::explicit_into_iter_loop)]
+#![warn(clippy::explicit_iter_loop)]
 #![warn(clippy::map_flatten)]
 #![warn(clippy::doc_markdown)]
 #![deny(unused_must_use)]

@@ -197,7 +197,7 @@ impl VersionManager {
     pub fn tables(&self) -> HummockResult<Vec<Arc<Table>>> {
         let mut out: Vec<Arc<Table>> = Vec::new();
         let inner = self.inner.lock();
-        for (_, table) in inner.tables.iter() {
+        for table in inner.tables.values() {
             out.push(table.clone());
         }
 

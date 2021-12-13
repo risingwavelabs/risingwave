@@ -67,7 +67,7 @@ impl Table for BummockTable {
 
         let (data_chunk, ops) = chunk.clone().into_parts();
 
-        for op in ops.iter() {
+        for op in &ops {
             assert_eq!(*op, Op::Insert);
         }
 
