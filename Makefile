@@ -33,11 +33,9 @@ rust_cargo_sort_check:
 	cd rust && cargo sort -c -w
 
 rust_test:
-	cd rust && mkdir -p proto
 	cd rust && RUSTFLAGS=-Dwarnings cargo test
 
 rust_test_no_run:
-	cd rust && mkdir -p proto
 	cd rust && RUSTFLAGS=-Dwarnings cargo test --no-run
 
 rust_check_all: rust_fmt rust_check rust_cargo_sort_check
@@ -45,7 +43,6 @@ rust_check_all: rust_fmt rust_check rust_cargo_sort_check
 # Note: "--skip-clean" must be used along with "CARGO_TARGET_DIR=..."
 # See also https://github.com/xd009642/tarpaulin/issues/777
 rust_test_with_coverage:
-	cd rust && mkdir -p proto
 	cd rust && RUSTFLAGS=-Dwarnings CARGO_TARGET_DIR=target_tarpaulin cargo tarpaulin --workspace --exclude risingwave-proto --exclude-files tests/* --out Xml --skip-clean
 
 rust_build:

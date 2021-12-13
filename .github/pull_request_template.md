@@ -5,7 +5,7 @@
 
 ## Checklist
 
-- [ ] I have written docs and comments
-- [ ] I have added unit tests and/or integration tests
+- [ ] I have written necessary docs and comments
+- [ ] I have added necessary unit tests and integration tests
 
 ## Refer to a related PR or issue link (optional)

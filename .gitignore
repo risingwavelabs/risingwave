@@ -1,70 +1,43 @@
-# Prerequisites
-*.d
+# macOS
+.DS_Store
 
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
+# Visual Studio Code
+.vscode/
+.devcontainer/
 
-# Precompiled Headers
-*.gch
-*.pch
+# JetBrains
+.idea/
+*.iml
 
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
+# CLion
+cmake-build-debug/
+/cmake-build-wsl_profile/
 
-# Fortran module files
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
+# build
 *.exe
 *.app
-
 build/
 
-# visual studio code
-.vscode/
-.DS_Store
-.devcontainer/
+# Golang
+go/bin/
+
+# Java
+**/.idea
+**/.gradle
+java/**/build
+
+# Rust
+rust/**/target
+rust/**/target_tarpaulin
+rust/proto/
+rust/prost/src/*.rs
+**/file_descriptor_set.bin
+# runtime log
+rust/log/
+# rusty-tags
+**/rusty-tags.vi
 
 # ctags
 **/tags
 
-# runtime log
-rust/log/
 log/
-
-# CLion
-cmake-build-debug/
-.idea/
-/cmake-build-wsl_profile/
-
-cpp/third_party/cmake-build-debug
-cpp/third_party/output
-cpp/third_party/abseil-cpp/
-**/.idea
-**/.gradle
-cpp/cmake-build
-java/**/build
-
-rust/**/target
-rust/**/target_tarpaulin
-rust/proto/src/*.rs
-rust/prost/src/*.rs
-!rust/proto/src/lib.rs
-**/file_descriptor_set.bin
-*.iml
-
-go/bin/
-
-# rusty-tags
-**/rusty-tags.vi
