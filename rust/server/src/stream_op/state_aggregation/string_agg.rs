@@ -11,16 +11,16 @@ use risingwave_common::types::{
 };
 
 use super::super::keyspace::{Keyspace, StateStore};
-use crate::stream_op::state_aggregation::ManagedExtremeState;
+use crate::stream_op::state_aggregation::{FlushStatus, ManagedExtremeState};
 use crate::stream_op::OrderedArraysSerializer;
 
 pub struct ManagedStringAggState<S: StateStore> {
-    cache: BTreeMap<Bytes, String>,
+    cache: BTreeMap<Bytes, FlushStatus>,
 
     /// A cached result.
     result: Option<String>,
 
-    /// Marks whether there are modifications.
+    /// Marks whether there are modifications, i.e. cache != storage
     dirty: bool,
 
     /// Number of items in the state.
@@ -64,7 +64,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
     ) -> Result<Self> {
         Ok(Self {
             cache: BTreeMap::new(),
-            result: Some(String::from("")),
+            result: None,
             dirty: false,
             total_count: row_count,
             sort_key_indices,
@@ -74,10 +74,18 @@ impl<S: StateStore> ManagedStringAggState<S> {
             sorted_arrays_serializer: sort_key_serializer,
         })
     }
+
+    #[cfg(test)]
+    pub fn get_row_count(&self) -> usize {
+        self.total_count
+    }
 }
 
 impl<S: StateStore> ManagedStringAggState<S> {
     async fn read_all_into_memory(&mut self) -> Result<()> {
+        // We cannot read from storage into memory when the cache has not been flushed onto the
+        // storage.
+        assert!(!self.is_dirty());
         // Read all.
         let all_data = self.keyspace.scan_strip_prefix(None).await?;
         for (raw_key, raw_value) in all_data {
@@ -86,16 +94,36 @@ impl<S: StateStore> ManagedStringAggState<S> {
             let value =
                 deserialize_datum_not_null_from(&DataTypeKind::Char, &mut deserializer)?.unwrap();
             let value_string: String = value.into_utf8();
-            self.cache.insert(raw_key, value_string.clone());
+            self.cache.insert(
+                raw_key,
+                // Here we abuse the semantics of `DeleteInsert` for those values already existed
+                // on the storage, and now we are loading them into memory.
+                FlushStatus::DeleteInsert(value_string.to_scalar_value()),
+            );
         }
         self.dirty = false;
         Ok(())
     }
 
     fn concat_strings_in_cache_into_result(&mut self) {
+        if self.result.is_some() {
+            return;
+        }
+        if self.total_count == 0 {
+            return;
+        }
         use itertools::Itertools;
-        let res = self.cache.values().join(&self.delimiter);
+        let res = self
+            .cache
+            .values()
+            .filter_map(|value| value.as_option())
+            .map(|scalar| scalar.as_utf8())
+            .join(&self.delimiter);
         self.result = Some(res);
+    }
+
+    fn get_result(&self) -> Datum {
+        self.result.as_ref().map(|res| res.clone().into())
     }
 }
 
@@ -115,8 +143,8 @@ impl<S: StateStore> ManagedExtremeState<S> for ManagedStringAggState<S> {
 
         if self.total_count > self.cache.len() {
             assert_eq!(self.cache.len(), 0);
-            // Not all the state is in the memory.
-            // The current policy is all-or-nothing.
+            // The current policy is all-or-nothing, so no values in the memory.
+            // It means the cache gets flushed onto disk.
             self.read_all_into_memory().await?;
         }
 
@@ -138,11 +166,14 @@ impl<S: StateStore> ManagedExtremeState<S> for ManagedStringAggState<S> {
             };
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    self.cache.insert(key_bytes.into(), value);
+                    FlushStatus::do_insert(
+                        self.cache.entry(key_bytes.into()),
+                        value.to_scalar_value(),
+                    );
                     self.total_count += 1;
                 }
                 Op::Delete | Op::UpdateDelete => {
-                    self.cache.remove::<Bytes>(&(key_bytes.into()));
+                    FlushStatus::do_delete(self.cache.entry(key_bytes.into()));
                     self.total_count -= 1;
                 }
             }
@@ -157,25 +188,30 @@ impl<S: StateStore> ManagedExtremeState<S> for ManagedStringAggState<S> {
         // We allow people to get output when the data is dirty.
         // As this is easier compared to `ManagedMinState` as we have a all-or-nothing cache policy
         // here.
-        if !self.dirty {
+        if !self.is_dirty() {
             // If we have already cached the result, we return it directly.
             if let Some(res) = &self.result {
                 return Ok(Some(res.clone().into()));
-            } else {
+            } else if self.total_count == 0 {
                 // If there is simply no data, we return empty string.
-                if self.total_count == 0 {
-                    return Ok(Some(String::from("").into()));
-                } else if !self.cache.is_empty() {
-                    self.concat_strings_in_cache_into_result();
-                    return Ok(Some(self.result.clone().unwrap().into()));
-                }
+                return Ok(None);
+            } else if !self.cache.is_empty() {
+                // Since we have a all-or-nothing policy, cache must either contain all the values
+                // or be empty.
+                self.concat_strings_in_cache_into_result();
+                return Ok(Some(self.result.clone().unwrap().into()));
             }
         }
-        // If the state is dirty or we don't have the state in memory,
-        // then we need to load all the state from the memory.
-        self.read_all_into_memory().await?;
+        if self.is_dirty() {
+            // If the state is dirty, we must have a non-empty cache.
+            // do nothing
+        } else {
+            // or we don't have the state in memory,
+            // then we need to load all the state from the memory.
+            self.read_all_into_memory().await?;
+        }
         self.concat_strings_in_cache_into_result();
-        Ok(Some(self.result.clone().unwrap().into()))
+        Ok(self.get_result())
     }
 
     fn is_dirty(&self) -> bool {
@@ -183,16 +219,24 @@ impl<S: StateStore> ManagedExtremeState<S> for ManagedStringAggState<S> {
     }
 
     fn flush(&mut self, write_batch: &mut Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
-        if !self.dirty {
+        if !self.is_dirty() {
             return Ok(());
         }
 
         for (key, value) in std::mem::take(&mut self.cache) {
             let key_encoded = [self.keyspace.prefix(), &key[..]].concat();
             let mut serializer = memcomparable::Serializer::new(vec![]);
-            serialize_datum_not_null_into(&Some(value.to_scalar_value()), &mut serializer)?;
-            let value = serializer.into_inner();
-            write_batch.push((key_encoded.into(), Some(value.into())));
+            let value = value.into_option();
+            match value {
+                Some(val) => {
+                    serialize_datum_not_null_into(&Some(val), &mut serializer)?;
+                    let val = serializer.into_inner();
+                    write_batch.push((key_encoded.into(), Some(val.into())));
+                }
+                None => {
+                    write_batch.push((key_encoded.into(), None));
+                }
+            }
         }
         self.dirty = false;
         Ok(())
@@ -210,9 +254,10 @@ mod tests {
     use crate::stream_op::state_aggregation::ManagedExtremeState;
     use crate::stream_op::{Keyspace, MemoryStateStore, StateStore};
 
-    #[tokio::test]
-    async fn test_managed_string_agg_state() {
-        let store = MemoryStateStore::new();
+    async fn create_managed_state<S: StateStore>(
+        store: &S,
+        row_count: usize,
+    ) -> ManagedStringAggState<S> {
         let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
         let sort_key_indices = vec![0, 1];
         let value_index = 0;
@@ -223,18 +268,26 @@ mod tests {
             .zip(sort_key_indices.clone().into_iter())
             .collect::<Vec<_>>();
         let sort_key_serializer = OrderedArraysSerializer::new(order_pairs);
-        let mut managed_state = ManagedStringAggState::new(
+        let managed_state = ManagedStringAggState::new(
             keyspace,
-            0,
+            row_count,
             sort_key_indices,
             value_index,
-            "|".to_string(),
+            "||".to_string(),
             sort_key_serializer,
         )
         .await
         .unwrap();
+        managed_state
+    }
+
+    #[tokio::test]
+    async fn test_managed_string_agg_state() {
+        let store = MemoryStateStore::new();
+        let mut managed_state = create_managed_state(&store, 0).await;
         assert!(!managed_state.is_dirty());
 
+        // Insert.
         managed_state
             .apply_batch(
                 &[Op::Insert, Op::Insert, Op::Insert],
@@ -252,9 +305,10 @@ mod tests {
             .unwrap();
         assert!(managed_state.is_dirty());
 
+        // Check output after insertion.
         assert_eq!(
             managed_state.get_output().await.unwrap(),
-            Some(ScalarImpl::Utf8("ghi|def|abc".to_string()))
+            Some(ScalarImpl::Utf8("ghi||def||abc".to_string()))
         );
 
         let mut write_batch = vec![];
@@ -262,6 +316,7 @@ mod tests {
         store.ingest_batch(write_batch).await.unwrap();
         assert!(!managed_state.is_dirty());
 
+        // Insert and delete.
         managed_state
             .apply_batch(
                 &[Op::Insert, Op::Delete, Op::Insert],
@@ -279,9 +334,10 @@ mod tests {
             .unwrap();
         assert!(managed_state.is_dirty());
 
+        // Check output after insertion and deletion.
         assert_eq!(
             managed_state.get_output().await.unwrap(),
-            Some(ScalarImpl::Utf8("ghi|def|def|abc".to_string()))
+            Some(ScalarImpl::Utf8("ghi||def||def||abc".to_string()))
         );
 
         let mut write_batch = vec![];
@@ -289,6 +345,7 @@ mod tests {
         store.ingest_batch(write_batch).await.unwrap();
         assert!(!managed_state.is_dirty());
 
+        // Deletion.
         managed_state
             .apply_batch(
                 &[Op::Delete, Op::Delete, Op::Delete],
@@ -307,6 +364,7 @@ mod tests {
 
         assert!(managed_state.is_dirty());
 
+        // Check output after deletion.
         assert_eq!(
             managed_state.get_output().await.unwrap(),
             Some(ScalarImpl::Utf8("ghi".to_string()))
@@ -317,10 +375,151 @@ mod tests {
         store.ingest_batch(write_batch).await.unwrap();
         assert!(!managed_state.is_dirty());
 
-        // Get the output after flush.
+        // Check output after flush.
         assert_eq!(
             managed_state.get_output().await.unwrap(),
             Some(ScalarImpl::Utf8("ghi".to_string()))
+        );
+
+        // Drop the state like machine crashes.
+        let row_count = managed_state.get_row_count();
+        drop(managed_state);
+
+        // Recover the state by `row_count`.
+        let mut managed_state = create_managed_state(&store, row_count).await;
+        assert!(!managed_state.is_dirty());
+        // Get the output after recovery
+        assert_eq!(
+            managed_state.get_output().await.unwrap(),
+            Some(ScalarImpl::Utf8("ghi".to_string()))
+        );
+
+        // Insert and delete the same string.
+        managed_state
+            .apply_batch(
+                &[Op::Insert, Op::Delete, Op::Insert],
+                None,
+                &[
+                    &Utf8Array::from_slice(&[Some("ghi"), Some("ghi"), Some("ghi")])
+                        .unwrap()
+                        .into(),
+                    &I64Array::from_slice(&[Some(5), Some(2), Some(6)])
+                        .unwrap()
+                        .into(),
+                ],
+            )
+            .await
+            .unwrap();
+        assert!(managed_state.is_dirty());
+        assert_eq!(
+            managed_state.get_output().await.unwrap(),
+            Some(ScalarImpl::Utf8("ghi||ghi".to_string()))
+        );
+        // Check dirtiness after getting the output.
+        // Since no flushing happened, it is still dirty.
+        assert!(managed_state.is_dirty());
+
+        // Delete all the strings.
+        managed_state
+            .apply_batch(
+                &[Op::Delete, Op::Delete],
+                None,
+                &[
+                    &Utf8Array::from_slice(&[Some("ghi"), Some("ghi")])
+                        .unwrap()
+                        .into(),
+                    &I64Array::from_slice(&[Some(5), Some(6)]).unwrap().into(),
+                ],
+            )
+            .await
+            .unwrap();
+        assert!(managed_state.is_dirty());
+        assert_eq!(managed_state.get_output().await.unwrap(), None,);
+        assert_eq!(managed_state.get_row_count(), 0);
+
+        managed_state
+            .apply_batch(
+                &[Op::Insert, Op::Insert],
+                None,
+                &[
+                    &Utf8Array::from_slice(&[Some("code"), Some("miko")])
+                        .unwrap()
+                        .into(),
+                    &I64Array::from_slice(&[Some(7), Some(8)]).unwrap().into(),
+                ],
+            )
+            .await
+            .unwrap();
+        let mut write_batch = vec![];
+        managed_state.flush(&mut write_batch).unwrap();
+        store.ingest_batch(write_batch).await.unwrap();
+        assert!(!managed_state.is_dirty());
+        let row_count = managed_state.get_row_count();
+
+        drop(managed_state);
+        let mut managed_state = create_managed_state(&store, row_count).await;
+        // Delete right after recovery.
+        managed_state
+            .apply_batch(
+                &[Op::Delete, Op::Insert],
+                None,
+                &[
+                    &Utf8Array::from_slice(&[Some("code"), Some("miko")])
+                        .unwrap()
+                        .into(),
+                    &I64Array::from_slice(&[Some(7), Some(9)]).unwrap().into(),
+                ],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            managed_state.get_output().await.unwrap(),
+            Some(ScalarImpl::Utf8("miko||miko".to_string()))
+        );
+        let mut write_batch = vec![];
+        managed_state.flush(&mut write_batch).unwrap();
+        store.ingest_batch(write_batch).await.unwrap();
+        assert!(!managed_state.is_dirty());
+
+        let row_count = managed_state.get_row_count();
+
+        drop(managed_state);
+        let mut managed_state = create_managed_state(&store, row_count).await;
+        assert_eq!(
+            managed_state.get_output().await.unwrap(),
+            Some(ScalarImpl::Utf8("miko||miko".to_string()))
+        );
+
+        // Insert and Delete but not flush before crash.
+        managed_state
+            .apply_batch(
+                &[Op::Insert, Op::Delete, Op::Insert],
+                None,
+                &[
+                    &Utf8Array::from_slice(&[Some("naive"), Some("miko"), Some("simple")])
+                        .unwrap()
+                        .into(),
+                    &I64Array::from_slice(&[Some(10), Some(9), Some(11)])
+                        .unwrap()
+                        .into(),
+                ],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            managed_state.get_output().await.unwrap(),
+            Some(ScalarImpl::Utf8("simple||naive||miko".to_string()))
+        );
+
+        let row_count = managed_state.get_row_count();
+
+        drop(managed_state);
+        let mut managed_state = create_managed_state(&store, row_count).await;
+        // As we didn't flush the changes, the result should be the same as the result before last
+        // changes.
+        assert_eq!(
+            managed_state.get_output().await.unwrap(),
+            Some(ScalarImpl::Utf8("miko||miko".to_string()))
         );
     }
 }
