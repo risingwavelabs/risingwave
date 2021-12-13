@@ -5,8 +5,8 @@ use bytes::Bytes;
 /// TODO: Ord Trait with 'a'+ts>'aa'+ts issue
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct KeyRange {
-    left: Bytes,
-    right: Bytes,
+    pub left: Bytes,
+    pub right: Bytes,
     inf: bool,
 }
 
@@ -17,6 +17,21 @@ impl KeyRange {
             right,
             inf: false,
         }
+    }
+
+    pub fn inf() -> Self {
+        Self {
+            left: Bytes::new(),
+            right: Bytes::new(),
+            inf: true,
+        }
+    }
+
+    pub fn full_key_overlap(&self, other: &Self) -> bool {
+        self.inf
+            || other.inf
+            || (VersionComparator::compare_key(&self.right, &other.left) != cmp::Ordering::Less
+                && VersionComparator::compare_key(&other.right, &self.left) != cmp::Ordering::Less)
     }
 }
 

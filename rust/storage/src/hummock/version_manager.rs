@@ -5,24 +5,19 @@ use bytes::Bytes;
 use parking_lot::Mutex as PLMutex;
 use tokio::sync::Mutex;
 
-use super::key_range::KeyRange;
+use super::key_range::{KeyRange, VersionComparator};
+use super::level_handler::{LevelHandler, TableStat};
 use super::{HummockError, HummockResult, Table};
 
 #[derive(Clone)]
-enum Level {
+pub enum Level {
+    /// Leveling Indicates no key overlays in this level
     Leveling(Vec<u64>),
     Tiering(Vec<u64>),
 }
-#[derive(Clone)]
-struct TableStat {
-    key_range: KeyRange,
-    table_id: u64,
-    compact_task: Option<u64>,
-}
-#[derive(Clone)]
-enum LevelHandler {
-    Leveling(Vec<TableStat>),
-    Tiering(Vec<TableStat>),
+pub struct LevelEntry {
+    level_idx: u8,
+    pub level: Level,
 }
 
 /// We store the full information of a snapshot in one [`Snapshot`] object. In the future, we should
@@ -33,8 +28,26 @@ struct Snapshot {
     /// objects from version manager later.
     levels: Vec<Level>,
 }
+struct CompactStatus {
+    level_handlers: Vec<LevelHandler>,
+    next_compact_task_id: u64,
+}
+pub struct CompactTask {
+    /// SSTs to be compacted, which will be removed from LSM after compaction
+    pub input_ssts: Vec<LevelEntry>,
+    /// In ideal case, the compaction will generate `splits.len()` tables which have key range
+    /// corresponding to that in [`splits`], respectively
+    pub splits: Vec<KeyRange>,
+    /// compacion output, which will be added to [`target_level`] of LSM after compaction
+    pub sorted_output_ssts: Vec<Table>,
+    /// task id assigned by hummock storage service
+    task_id: u64,
+    /// compacion output will be added to [`target_level`] of LSM after compaction
+    target_level: u8,
+    /// indicate whether compaction succeeds, initially Err(HummockError::Ok)
+    pub result: HummockResult<()>,
+}
 
-#[derive(Default)]
 struct VersionManagerInner {
     /// To make things easy, we store the full snapshot of each epoch. In the future, we will use a
     /// MVCC structure for this, and only record changes compared with last epoch.
@@ -51,6 +64,25 @@ struct VersionManagerInner {
 
     /// Current epoch number.
     epoch: u64,
+
+    /// Notify the vacuum of outer struct [`VersionManager`] to apply changes from one epoch.
+    tx: tokio::sync::mpsc::UnboundedSender<()>,
+}
+
+impl VersionManagerInner {
+    /// Unpin a snapshot of one epoch. When reference counter becomes 0, files might be vacuumed.
+    fn unpin(&mut self, epoch: u64) {
+        let ref_cnt = self.ref_cnt.get_mut(&epoch).expect("epoch not registered!");
+        *ref_cnt -= 1;
+        if *ref_cnt == 0 {
+            self.ref_cnt.remove(&epoch).unwrap();
+
+            if epoch != self.epoch {
+                // TODO: precisely pass the epoch number that can be vacuum.
+                self.tx.send(()).unwrap();
+            }
+        }
+    }
 }
 
 /// Manages the state history of the storage engine and vacuum the stale files in storage.
@@ -86,7 +118,7 @@ pub struct VersionManager {
     inner: PLMutex<VersionManagerInner>,
 
     /// Current compaction status.
-    compact_status: Mutex<Vec<LevelHandler>>,
+    compact_status: Mutex<CompactStatus>,
 
     /// Notify the vacuum to apply changes from one epoch.
     tx: tokio::sync::mpsc::UnboundedSender<()>,
@@ -97,7 +129,16 @@ pub struct VersionManager {
 
 impl VersionManager {
     pub fn new() -> Self {
-        let mut init_epoch_vm = VersionManagerInner::default();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let mut init_epoch_vm = VersionManagerInner {
+            status: HashMap::new(),
+            tables: HashMap::new(),
+            ref_cnt: BTreeMap::new(),
+            table_deletion_to_apply: BTreeMap::new(),
+            epoch: 0,
+            tx: tx.clone(),
+        };
         *init_epoch_vm
             .ref_cnt
             .entry(init_epoch_vm.epoch)
@@ -105,20 +146,42 @@ impl VersionManager {
         init_epoch_vm.status.insert(
             init_epoch_vm.epoch,
             Arc::new(Snapshot {
-                levels: vec![Level::Tiering(vec![])],
+                levels: vec![Level::Tiering(vec![]), Level::Leveling(vec![])],
             }),
         );
 
-        let vec_handler_having_l0 = vec![LevelHandler::Tiering(vec![])];
-
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let vec_handler_having_l0 = vec![
+            LevelHandler::Tiering(vec![]),
+            LevelHandler::Leveling(vec![]),
+        ];
 
         Self {
             inner: PLMutex::new(init_epoch_vm),
-            compact_status: Mutex::new(vec_handler_having_l0),
+            compact_status: Mutex::new(CompactStatus {
+                level_handlers: vec_handler_having_l0,
+                next_compact_task_id: 1,
+            }),
             tx,
             rx: PLMutex::new(Some(rx)),
         }
+    }
+
+    pub fn pick_few_tables(&self, table_ids: &[u64]) -> HummockResult<Vec<Arc<Table>>> {
+        let mut ret = Vec::with_capacity(table_ids.len());
+        let inner = self.inner.lock();
+        for table_id in table_ids {
+            match inner.tables.get(table_id) {
+                Some(table) => {
+                    ret.push(table.clone());
+                }
+                None => {
+                    return Err(HummockError::ObjectIoError(String::from(
+                        "Table Not Exist.",
+                    )));
+                }
+            }
+        }
+        Ok(ret)
     }
 
     /// Pin a snapshot of one epoch, so that all files at this epoch won't be deleted.
@@ -127,34 +190,6 @@ impl VersionManager {
         let epoch = inner.epoch;
         *inner.ref_cnt.entry(epoch).or_default() += 1;
         (epoch, inner.status.get(&epoch).unwrap().clone())
-    }
-
-    /// Unpin a snapshot of one epoch. When reference counter becomes 0, files might be vacuumed.
-    fn unpin_inner(&self, inner: &mut VersionManagerInner, epoch: u64) {
-        let ref_cnt = inner
-            .ref_cnt
-            .get_mut(&epoch)
-            .expect("epoch not registered!");
-        *ref_cnt -= 1;
-        if *ref_cnt == 0 {
-            inner.ref_cnt.remove(&epoch).unwrap();
-
-            if epoch != inner.epoch {
-                // TODO: precisely pass the epoch number that can be vacuum.
-                self.tx.send(()).unwrap();
-            }
-        }
-    }
-
-    fn unpin(&self, option_inner: Option<&mut VersionManagerInner>, epoch: u64) {
-        match option_inner {
-            Some(inner) => {
-                self.unpin_inner(inner, epoch);
-            }
-            None => {
-                self.unpin_inner(&mut self.inner.lock(), epoch);
-            }
-        }
     }
 
     /// Get the iterators on the underlying tables.
@@ -215,10 +250,10 @@ impl VersionManager {
             *inner.ref_cnt.entry(epoch).or_default() += 1;
             inner.status.insert(epoch, Arc::new(snapshot));
 
-            self.unpin(Some(&mut inner), old_epoch);
+            inner.unpin(old_epoch);
         }
 
-        match compact_status.first_mut().unwrap() {
+        match compact_status.level_handlers.first_mut().unwrap() {
             LevelHandler::Tiering(vec_tier) => {
                 vec_tier.push(TableStat {
                     key_range: KeyRange::new(smallest_ky, largest_ky),
@@ -232,6 +267,217 @@ impl VersionManager {
         }
 
         Ok(epoch)
+    }
+
+    /// We assume that SSTs will only be deleted in compaction, otherwise `get_compact_task` need to
+    /// `pin`
+    pub async fn get_compact_task(&self) -> HummockResult<CompactTask> {
+        let select_level = 0u8;
+
+        enum SearchResult {
+            Found(Vec<LevelEntry>, Vec<KeyRange>),
+            NotFound,
+        }
+
+        let mut found = SearchResult::NotFound;
+        let mut compact_status = self.compact_status.lock().await;
+        let next_task_id = compact_status.next_compact_task_id;
+        let (prior, posterior) = compact_status
+            .level_handlers
+            .split_at_mut(select_level as usize + 1);
+        let (prior, posterior) = (prior.last_mut().unwrap(), posterior.first_mut().unwrap());
+        let is_select_level_leveling = matches!(prior, LevelHandler::Leveling(_));
+        match prior {
+            LevelHandler::Tiering(l_n) | LevelHandler::Leveling(l_n) => {
+                for TableStat {
+                    key_range,
+                    table_id,
+                    compact_task,
+                } in l_n
+                {
+                    if compact_task.is_none() {
+                        // TODO: if `select_level` == 0, we need compact more than 1 table in L0
+                        match posterior {
+                            LevelHandler::Tiering(_) => unimplemented!(),
+                            LevelHandler::Leveling(l_n_suc) => {
+                                // TODO: use pointer last time to avoid binary search
+                                let overlap_begin = l_n_suc.partition_point(|table_status| {
+                                    VersionComparator::compare_key(
+                                        &table_status.key_range.right,
+                                        &key_range.left,
+                                    ) == std::cmp::Ordering::Less
+                                });
+                                let mut overlap_end = overlap_begin;
+                                let mut overlap_all_idle = true;
+                                let l_n_suc_len = l_n_suc.len();
+                                while overlap_end < l_n_suc_len
+                                    && l_n_suc[overlap_end].key_range.full_key_overlap(key_range)
+                                {
+                                    if l_n_suc[overlap_end].compact_task.is_some() {
+                                        overlap_all_idle = false;
+                                        break;
+                                    }
+                                    overlap_end += 1;
+                                }
+                                if overlap_all_idle {
+                                    let mut suc_table_ids =
+                                        Vec::with_capacity(overlap_end - overlap_begin);
+
+                                    let mut splits =
+                                        Vec::with_capacity(overlap_end - overlap_begin);
+                                    splits.push(KeyRange::new(Bytes::new(), Bytes::new()));
+                                    let mut key_split_append = |key_before_last: &Bytes| {
+                                        splits.last_mut().unwrap().right = key_before_last.clone();
+                                        splits.push(KeyRange::new(
+                                            key_before_last.clone(),
+                                            Bytes::new(),
+                                        ));
+                                    };
+
+                                    *compact_task = Some(next_task_id);
+                                    let mut overlap_idx = overlap_begin;
+                                    while overlap_idx < overlap_end {
+                                        l_n_suc[overlap_idx].compact_task = Some(next_task_id);
+                                        suc_table_ids.push(l_n_suc[overlap_idx].table_id);
+                                        if overlap_idx > overlap_begin {
+                                            // TODO: We do not need to add splits every time. We can
+                                            // add every K SSTs.
+                                            key_split_append(&l_n_suc[overlap_idx].key_range.left);
+                                        }
+                                        overlap_idx += 1;
+                                    }
+
+                                    found = SearchResult::Found(
+                                        vec![
+                                            LevelEntry {
+                                                level_idx: select_level,
+                                                level: if is_select_level_leveling {
+                                                    Level::Leveling(vec![*table_id])
+                                                } else {
+                                                    Level::Tiering(vec![*table_id])
+                                                },
+                                            },
+                                            LevelEntry {
+                                                level_idx: select_level + 1,
+                                                level: Level::Leveling(suc_table_ids),
+                                            },
+                                        ],
+                                        splits,
+                                    );
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        match found {
+            SearchResult::Found(input_ssts, splits) => {
+                compact_status.next_compact_task_id += 1;
+                Ok(CompactTask {
+                    input_ssts,
+                    splits,
+                    sorted_output_ssts: vec![],
+                    task_id: next_task_id,
+                    target_level: select_level + 1,
+                    result: Err(HummockError::OK),
+                })
+            }
+            SearchResult::NotFound => Err(HummockError::OK),
+        }
+    }
+
+    #[allow(clippy::needless_collect)]
+    pub async fn report_compact_task(&self, compact_task: CompactTask) {
+        let output_table_compact_entries: Vec<_> = compact_task
+            .sorted_output_ssts
+            .iter()
+            .map(|table| TableStat {
+                key_range: KeyRange::new(
+                    Bytes::copy_from_slice(&table.meta.smallest_key),
+                    Bytes::copy_from_slice(&table.meta.largest_key),
+                ),
+                table_id: table.id,
+                compact_task: None,
+            })
+            .collect();
+        let mut compact_status = self.compact_status.lock().await;
+        match compact_task.result {
+            Ok(()) => {
+                let mut delete_table_ids = vec![];
+                for LevelEntry { level_idx, .. } in compact_task.input_ssts {
+                    delete_table_ids.extend(
+                        compact_status.level_handlers[level_idx as usize]
+                            .pop_task_input(compact_task.task_id)
+                            .into_iter(),
+                    );
+                }
+                match &mut compact_status.level_handlers[compact_task.target_level as usize] {
+                    LevelHandler::Tiering(l_n) | LevelHandler::Leveling(l_n) => {
+                        let old_ln = std::mem::take(l_n);
+                        *l_n = itertools::merge_join_by(
+                            old_ln,
+                            output_table_compact_entries,
+                            |lft_status, rht_status| {
+                                lft_status.key_range.cmp(&rht_status.key_range)
+                            },
+                        )
+                        .map(|either_or_both| {
+                            either_or_both.reduce(|_, _| panic!("duplicated table found"))
+                        })
+                        .collect();
+                    }
+                }
+                {
+                    let mut inner = self.inner.lock();
+                    let old_epoch = inner.epoch;
+
+                    let snapshot = Snapshot {
+                        levels: compact_status
+                            .level_handlers
+                            .iter()
+                            .map(|level_handler| match level_handler {
+                                LevelHandler::Tiering(l_n) => Level::Tiering(
+                                    l_n.iter()
+                                        .map(|TableStat { table_id, .. }| *table_id)
+                                        .collect(),
+                                ),
+                                LevelHandler::Leveling(l_n) => Level::Leveling(
+                                    l_n.iter()
+                                        .map(|TableStat { table_id, .. }| *table_id)
+                                        .collect(),
+                                ),
+                            })
+                            .collect(),
+                    };
+
+                    inner.tables.extend(
+                        compact_task
+                            .sorted_output_ssts
+                            .into_iter()
+                            .map(|table| (table.id, Arc::new(table))),
+                    );
+
+                    // Add epoch number and make the modified snapshot available.
+                    inner.epoch += 1;
+                    let epoch = inner.epoch;
+                    *inner.ref_cnt.entry(epoch).or_default() += 1;
+                    inner.status.insert(epoch, Arc::new(snapshot));
+                    inner
+                        .table_deletion_to_apply
+                        .insert(epoch, delete_table_ids);
+
+                    inner.unpin(old_epoch);
+                }
+            }
+            Err(_) => {
+                for level_handler in &mut compact_status.level_handlers {
+                    level_handler.unassign_task(compact_task.task_id);
+                }
+            }
+        }
     }
 }
 
