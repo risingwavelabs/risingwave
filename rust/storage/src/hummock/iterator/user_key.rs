@@ -1,5 +1,5 @@
 use super::{HummockIterator, SortedIterator};
-use crate::hummock::format::user_key;
+use crate::hummock::format::{key_with_ts, user_key};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockError, HummockResult};
 
@@ -85,9 +85,10 @@ impl UserKeyIterator {
     }
 
     /// Reset the iterating position to the first position where the key >= provided key.
-    pub async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
+    pub async fn seek(&mut self, user_key: Vec<u8>) -> HummockResult<()> {
         self.last_key.clear();
-        self.iterator.seek(key).await
+        let full_key = &key_with_ts(user_key, u64::MAX);
+        self.iterator.seek(full_key).await
     }
 }
 
@@ -222,19 +223,19 @@ mod tests {
         si.rewind().await.unwrap();
         let mut uki = UserKeyIterator::new(si);
         let res = uki
-            .seek(iterator_test_key_of(0, 3 * TEST_KEYS_COUNT).as_slice())
+            .seek(user_key(&iterator_test_key_of(0, 3 * TEST_KEYS_COUNT)).to_vec())
             .await;
         assert!(res.is_err());
 
         // normal case
-        uki.seek(iterator_test_key_of(0, 4).as_slice())
+        uki.seek(user_key(&iterator_test_key_of(0, 4)).to_vec())
             .await
             .unwrap();
         let (k, v) = uki.next().await.unwrap().unwrap();
         assert_eq!(k, user_key(iterator_test_key_of(0, 4).as_slice()));
         assert_eq!(v, test_value_of(0, 4).as_slice());
 
-        uki.seek(iterator_test_key_of(0, 17).as_slice())
+        uki.seek(user_key(&iterator_test_key_of(0, 17)).to_vec())
             .await
             .unwrap();
         let (k, v) = uki.next().await.unwrap().unwrap();
@@ -242,7 +243,7 @@ mod tests {
         assert_eq!(v, test_value_of(0, 17).as_slice());
 
         // left edge case
-        uki.seek(iterator_test_key_of(0, 0).as_slice())
+        uki.seek(user_key(&iterator_test_key_of(0, 0)).to_vec())
             .await
             .unwrap();
         let (k, v) = uki.next().await.unwrap().unwrap();
