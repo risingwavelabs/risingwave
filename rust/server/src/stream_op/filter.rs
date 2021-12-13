@@ -148,7 +148,7 @@ mod tests {
     use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
     use risingwave_common::expr::InputRefExpression;
     use risingwave_common::types::{BoolType, Int64Type};
-    use risingwave_pb::expr::expr_node::Type as ProstExprType;
+    use risingwave_pb::expr::expr_node::Type;
 
     use crate::stream_op::test_utils::MockSource;
     use crate::stream_op::{Executor, FilterExecutor, Message, PkIndices};
@@ -198,7 +198,7 @@ mod tests {
         let right_type = Int64Type::create(false);
         let right_expr = InputRefExpression::new(right_type, 1);
         let test_expr = new_binary_expr(
-            ProstExprType::GreaterThan,
+            Type::GreaterThan,
             BoolType::create(false),
             Box::new(left_expr),
             Box::new(right_expr),

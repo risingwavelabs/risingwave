@@ -62,14 +62,14 @@ impl DataType for DecimalType {
     }
 
     fn to_protobuf(&self) -> Result<ProstDataType> {
-        let proto = ProstDataType {
+        let prost = ProstDataType {
             type_name: TypeName::Decimal as i32,
             is_nullable: self.nullable,
             scale: self.scale,
             precision: self.precision,
             ..Default::default()
         };
-        Ok(proto)
+        Ok(prost)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -84,12 +84,12 @@ impl DataType for DecimalType {
 impl<'a> TryFrom<&'a ProstDataType> for DecimalType {
     type Error = RwError;
 
-    fn try_from(proto: &'a ProstDataType) -> Result<Self> {
-        ensure!(proto.get_type_name() == TypeName::Decimal);
+    fn try_from(prost: &'a ProstDataType) -> Result<Self> {
+        ensure!(prost.get_type_name() == TypeName::Decimal);
         DecimalType::new(
-            proto.get_is_nullable(),
-            proto.get_precision(),
-            proto.get_scale(),
+            prost.get_is_nullable(),
+            prost.get_precision(),
+            prost.get_scale(),
         )
     }
 }

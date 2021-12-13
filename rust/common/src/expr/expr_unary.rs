@@ -223,7 +223,7 @@ pub fn new_rtrim_expr(expr_ia1: BoxedExpression, return_type: DataTypeRef) -> Bo
 #[cfg(test)]
 mod tests {
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::expr::expr_node::Type as ProstExprType;
+    use risingwave_pb::expr::expr_node::Type;
 
     use super::super::*;
     use crate::array::column::Column;
@@ -234,11 +234,11 @@ mod tests {
 
     #[test]
     fn test_unary() {
-        test_unary_bool::<BoolArray, _>(|x| !x, ProstExprType::Not);
-        test_unary_date::<I64Array, _>(|x| date_to_timestamp(x).unwrap(), ProstExprType::Cast);
+        test_unary_bool::<BoolArray, _>(|x| !x, Type::Not);
+        test_unary_date::<I64Array, _>(|x| date_to_timestamp(x).unwrap(), Type::Cast);
     }
 
-    fn test_unary_bool<A, F>(f: F, kind: ProstExprType)
+    fn test_unary_bool<A, F>(f: F, kind: Type)
     where
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
@@ -277,7 +277,7 @@ mod tests {
         }
     }
 
-    fn test_unary_date<A, F>(f: F, kind: ProstExprType)
+    fn test_unary_date<A, F>(f: F, kind: Type)
     where
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,

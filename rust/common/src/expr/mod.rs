@@ -17,7 +17,7 @@ use std::sync::Arc;
 pub use agg::AggKind;
 pub use expr_input_ref::InputRefExpression;
 pub use expr_literal::*;
-use risingwave_pb::expr::ExprNode as ProstExprNode;
+use risingwave_pb::expr::ExprNode;
 
 use crate::array::{ArrayRef, DataChunk};
 use crate::error::ErrorCode::InternalError;
@@ -42,7 +42,7 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
 
 pub type BoxedExpression = Box<dyn Expression>;
 
-pub fn build_from_prost(prost: &ProstExprNode) -> Result<BoxedExpression> {
+pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     use risingwave_pb::expr::expr_node::Type::*;
 
     match prost.get_expr_type() {

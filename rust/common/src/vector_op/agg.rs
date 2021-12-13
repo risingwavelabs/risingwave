@@ -675,7 +675,7 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType as DataTypeProst;
+    use risingwave_pb::data::DataType;
     use risingwave_pb::expr::agg_call::Type;
     use risingwave_pb::expr::AggCall;
     use rust_decimal::Decimal;
@@ -944,7 +944,7 @@ mod tests {
         let prost = AggCall {
             r#type: Type::Count as i32,
             args: vec![],
-            return_type: Some(DataTypeProst {
+            return_type: Some(DataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),

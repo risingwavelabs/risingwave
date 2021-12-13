@@ -1326,37 +1326,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pb-construct"
-version = "0.1.0"
-dependencies = [
- "paste",
- "protobuf",
- "protoc-rust",
-]
-
-[[package]]
-name = "pb-convert"
-version = "0.1.0"
-dependencies = [
- "anyhow",
-]
-
-[[package]]
-name = "pb-convert-derive"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "darling",
- "pb-convert",
- "phf",
- "proc-macro2",
- "protobuf",
- "protoc-rust",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "percent-encoding"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1370,50 +1339,6 @@ checksum = "467d164a6de56270bd7c4d070df81d07beace25012d5103ced4e9ff08d6afdb7"
 dependencies = [
  "fixedbitset",
  "indexmap",
-]
-
-[[package]]
-name = "phf"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9fc3db1018c4b59d7d582a739436478b6035138b6aecbce989fc91c3e98409f"
-dependencies = [
- "phf_macros",
- "phf_shared",
- "proc-macro-hack",
-]
-
-[[package]]
-name = "phf_generator"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d5285893bb5eb82e6aaf5d59ee909a06a16737a8970984dd7746ba9283498d6"
-dependencies = [
- "phf_shared",
- "rand",
-]
-
-[[package]]
-name = "phf_macros"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58fdf3184dd560f160dd73922bea2d5cd6e8f064bf4b13110abd81b03697b4e0"
-dependencies = [
- "phf_generator",
- "phf_shared",
- "proc-macro-hack",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "phf_shared"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6796ad771acdc0123d2a88dc428b5e38ef24456743ddb1744ed628f9815c096"
-dependencies = [
- "siphasher",
 ]
 
 [[package]]
@@ -1508,12 +1433,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "proc-macro-hack"
-version = "0.5.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dbf0c48bc1d91375ae5c3cd81e3722dff1abcf81a30960240640d223f59fe0e5"
-
-[[package]]
 name = "proc-macro2"
 version = "1.0.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1606,28 +1525,6 @@ checksum = "394a73e2a819405364df8d30042c0f1174737a763e0170497ec9d36f8a2ea8f7"
 dependencies = [
  "protobuf",
  "protobuf-codegen",
-]
-
-[[package]]
-name = "protoc"
-version = "2.25.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ac70cfc8935f5db2a29c0929db697035d02284011a9b78a5ef5d48092ce9673"
-dependencies = [
- "log",
- "which",
-]
-
-[[package]]
-name = "protoc-rust"
-version = "2.25.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6bad71c8404e3e09024fccbab55aae36e3662662167dc4530a242c8cc8ef8d20"
-dependencies = [
- "protobuf",
- "protobuf-codegen",
- "protoc",
- "tempfile",
 ]
 
 [[package]]
@@ -1789,9 +1686,6 @@ dependencies = [
  "memcomparable",
  "num-traits",
  "paste",
- "pb-construct",
- "pb-convert",
- "pb-convert-derive",
  "prost",
  "prost-types",
  "rand",
@@ -1856,9 +1750,6 @@ dependencies = [
  "memcomparable",
  "num-traits",
  "paste",
- "pb-construct",
- "pb-convert",
- "pb-convert-derive",
  "prost",
  "prost-types",
  "rand",
@@ -1898,9 +1789,6 @@ dependencies = [
  "log4rs",
  "num-traits",
  "paste",
- "pb-construct",
- "pb-convert",
- "pb-convert-derive",
  "prost",
  "prost-types",
  "rand",
@@ -1958,9 +1846,6 @@ dependencies = [
  "memcomparable",
  "num-traits",
  "paste",
- "pb-construct",
- "pb-convert",
- "pb-convert-derive",
  "prost",
  "prost-types",
  "protobuf",
@@ -2009,8 +1894,6 @@ dependencies = [
  "num-traits",
  "parking_lot",
  "paste",
- "pb-convert",
- "pb-convert-derive",
  "prost",
  "prost-types",
  "rand",
@@ -2316,12 +2199,6 @@ checksum = "e51e73328dc4ac0c7ccbda3a494dfa03df1de2f46018127f60c693f2648455b0"
 dependencies = [
  "libc",
 ]
-
-[[package]]
-name = "siphasher"
-version = "0.3.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "533494a8f9b724d33625ab53c6c4800f7cc445895924a8ef649222dcb76e938b"
 
 [[package]]
 name = "slab"

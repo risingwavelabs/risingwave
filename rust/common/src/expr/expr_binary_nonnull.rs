@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use risingwave_pb::expr::expr_node::Type as ProstExprType;
+use risingwave_pb::expr::expr_node::Type;
 
 /// For expression that only accept two non null arguments as input.
 use crate::array::{Array, BoolArray, DataTypeTrait, DecimalArray, I32Array, I64Array, Utf8Array};
@@ -178,68 +178,66 @@ fn build_extract_expr(ret: DataTypeRef, l: BoxedExpression, r: BoxedExpression) 
 }
 
 pub fn new_binary_expr(
-    expr_type: ProstExprType,
+    expr_type: Type,
     ret: DataTypeRef,
     l: BoxedExpression,
     r: BoxedExpression,
 ) -> BoxedExpression {
     match expr_type {
-        ProstExprType::Equal => {
+        Type::Equal => {
             gen_binary_expr! {comparison_impl, prim_eq, prim_eq, deci_f_eq, deci_eq, cmp_placeholder,
             cmp_placeholder, total_order_eq, l, r, ret}
         }
-        ProstExprType::NotEqual => {
+        Type::NotEqual => {
             gen_binary_expr! {comparison_impl, prim_neq, prim_neq, deci_f_neq, deci_neq,
             cmp_placeholder, cmp_placeholder, total_order_ne, l, r, ret}
         }
-        ProstExprType::LessThan => {
+        Type::LessThan => {
             gen_binary_expr! {comparison_impl, prim_lt, prim_lt, deci_f_lt, deci_lt, cmp_placeholder,
             cmp_placeholder, total_order_lt, l, r, ret}
         }
-        ProstExprType::GreaterThan => {
+        Type::GreaterThan => {
             gen_binary_expr! {comparison_impl, prim_gt, prim_gt, deci_f_gt, deci_gt, cmp_placeholder,
             cmp_placeholder, total_order_gt, l, r, ret}
         }
-        ProstExprType::GreaterThanOrEqual => {
+        Type::GreaterThanOrEqual => {
             gen_binary_expr! {comparison_impl, prim_geq, prim_geq, deci_f_geq, deci_geq,
             cmp_placeholder, cmp_placeholder, total_order_ge, l, r, ret}
         }
-        ProstExprType::LessThanOrEqual => {
+        Type::LessThanOrEqual => {
             gen_binary_expr! {comparison_impl, prim_leq, prim_leq, deci_f_leq, deci_leq,
             cmp_placeholder, cmp_placeholder, total_order_le, l, r, ret}
         }
-        ProstExprType::Add => {
+        Type::Add => {
             gen_binary_expr! {arithmetic_impl, int_add, float_add, deci_f_add, deci_add,
             interval_date_add, date_interval_add, atm_placeholder, l, r, ret}
         }
-        ProstExprType::Subtract => {
+        Type::Subtract => {
             gen_binary_expr! {arithmetic_impl, int_sub, float_sub, deci_f_sub, deci_sub,
             atm_placeholder, date_interval_sub, atm_placeholder, l, r, ret}
         }
-        ProstExprType::Multiply => {
+        Type::Multiply => {
             gen_binary_expr! {arithmetic_impl, int_mul, float_mul, deci_f_mul, deci_mul,
             atm_placeholder, atm_placeholder, atm_placeholder, l, r, ret}
         }
-        ProstExprType::Divide => {
+        Type::Divide => {
             gen_binary_expr! {arithmetic_impl, int_div, float_div, deci_f_div, deci_div,
             atm_placeholder, atm_placeholder, atm_placeholder, l, r, ret}
         }
-        ProstExprType::Modulus => {
+        Type::Modulus => {
             gen_binary_expr! {arithmetic_impl, prim_mod, prim_mod, deci_f_mod, deci_mod,
             atm_placeholder, atm_placeholder, atm_placeholder, l, r, ret}
         }
-        ProstExprType::Extract => build_extract_expr(ret, l, r),
-        ProstExprType::RoundDigit => {
-            Box::new(
-                BinaryExpression::<DecimalArray, I32Array, DecimalArray, _> {
-                    expr_ia1: l,
-                    expr_ia2: r,
-                    return_type: ret,
-                    func: round_digits,
-                    _phantom: PhantomData,
-                },
-            )
-        }
+        Type::Extract => build_extract_expr(ret, l, r),
+        Type::RoundDigit => Box::new(
+            BinaryExpression::<DecimalArray, I32Array, DecimalArray, _> {
+                expr_ia1: l,
+                expr_ia2: r,
+                return_type: ret,
+                func: round_digits,
+                _phantom: PhantomData,
+            },
+        ),
         tp => {
             unimplemented!(
                 "The expression {:?} using vectorized expression framework is not supported yet!",
@@ -280,7 +278,7 @@ pub fn new_position_expr(
 #[cfg(test)]
 mod tests {
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::expr::expr_node::Type as ProstExprType;
+    use risingwave_pb::expr::expr_node::Type;
     use rust_decimal::Decimal;
 
     use super::super::*;
@@ -293,37 +291,37 @@ mod tests {
 
     #[test]
     fn test_binary() {
-        test_binary_i32::<I32Array, _>(|x, y| x + y, ProstExprType::Add);
-        test_binary_i32::<I32Array, _>(|x, y| x - y, ProstExprType::Subtract);
-        test_binary_i32::<I32Array, _>(|x, y| x * y, ProstExprType::Multiply);
-        test_binary_i32::<I32Array, _>(|x, y| x / y, ProstExprType::Divide);
-        test_binary_i32::<BoolArray, _>(|x, y| x == y, ProstExprType::Equal);
-        test_binary_i32::<BoolArray, _>(|x, y| x != y, ProstExprType::NotEqual);
-        test_binary_i32::<BoolArray, _>(|x, y| x > y, ProstExprType::GreaterThan);
-        test_binary_i32::<BoolArray, _>(|x, y| x >= y, ProstExprType::GreaterThanOrEqual);
-        test_binary_i32::<BoolArray, _>(|x, y| x < y, ProstExprType::LessThan);
-        test_binary_i32::<BoolArray, _>(|x, y| x <= y, ProstExprType::LessThanOrEqual);
-        test_binary_decimal::<DecimalArray, _>(|x, y| x + y, ProstExprType::Add);
-        test_binary_decimal::<DecimalArray, _>(|x, y| x - y, ProstExprType::Subtract);
-        test_binary_decimal::<DecimalArray, _>(|x, y| x * y, ProstExprType::Multiply);
-        test_binary_decimal::<DecimalArray, _>(|x, y| x / y, ProstExprType::Divide);
-        test_binary_decimal::<BoolArray, _>(|x, y| x == y, ProstExprType::Equal);
-        test_binary_decimal::<BoolArray, _>(|x, y| x != y, ProstExprType::NotEqual);
-        test_binary_decimal::<BoolArray, _>(|x, y| x > y, ProstExprType::GreaterThan);
-        test_binary_decimal::<BoolArray, _>(|x, y| x >= y, ProstExprType::GreaterThanOrEqual);
-        test_binary_decimal::<BoolArray, _>(|x, y| x < y, ProstExprType::LessThan);
-        test_binary_decimal::<BoolArray, _>(|x, y| x <= y, ProstExprType::LessThanOrEqual);
+        test_binary_i32::<I32Array, _>(|x, y| x + y, Type::Add);
+        test_binary_i32::<I32Array, _>(|x, y| x - y, Type::Subtract);
+        test_binary_i32::<I32Array, _>(|x, y| x * y, Type::Multiply);
+        test_binary_i32::<I32Array, _>(|x, y| x / y, Type::Divide);
+        test_binary_i32::<BoolArray, _>(|x, y| x == y, Type::Equal);
+        test_binary_i32::<BoolArray, _>(|x, y| x != y, Type::NotEqual);
+        test_binary_i32::<BoolArray, _>(|x, y| x > y, Type::GreaterThan);
+        test_binary_i32::<BoolArray, _>(|x, y| x >= y, Type::GreaterThanOrEqual);
+        test_binary_i32::<BoolArray, _>(|x, y| x < y, Type::LessThan);
+        test_binary_i32::<BoolArray, _>(|x, y| x <= y, Type::LessThanOrEqual);
+        test_binary_decimal::<DecimalArray, _>(|x, y| x + y, Type::Add);
+        test_binary_decimal::<DecimalArray, _>(|x, y| x - y, Type::Subtract);
+        test_binary_decimal::<DecimalArray, _>(|x, y| x * y, Type::Multiply);
+        test_binary_decimal::<DecimalArray, _>(|x, y| x / y, Type::Divide);
+        test_binary_decimal::<BoolArray, _>(|x, y| x == y, Type::Equal);
+        test_binary_decimal::<BoolArray, _>(|x, y| x != y, Type::NotEqual);
+        test_binary_decimal::<BoolArray, _>(|x, y| x > y, Type::GreaterThan);
+        test_binary_decimal::<BoolArray, _>(|x, y| x >= y, Type::GreaterThanOrEqual);
+        test_binary_decimal::<BoolArray, _>(|x, y| x < y, Type::LessThan);
+        test_binary_decimal::<BoolArray, _>(|x, y| x <= y, Type::LessThanOrEqual);
         test_binary_interval::<I64Array, _>(
             |x, y| date_interval_add::<i32, i32, i64>(x, y).unwrap(),
-            ProstExprType::Add,
+            Type::Add,
         );
         test_binary_interval::<I64Array, _>(
             |x, y| date_interval_sub::<i32, i32, i64>(x, y).unwrap(),
-            ProstExprType::Subtract,
+            Type::Subtract,
         );
     }
 
-    fn test_binary_i32<A, F>(f: F, kind: ProstExprType)
+    fn test_binary_i32<A, F>(f: F, kind: Type)
     where
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
@@ -376,7 +374,7 @@ mod tests {
         }
     }
 
-    fn test_binary_interval<A, F>(f: F, kind: ProstExprType)
+    fn test_binary_interval<A, F>(f: F, kind: Type)
     where
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
@@ -421,7 +419,7 @@ mod tests {
         }
     }
 
-    fn test_binary_decimal<A, F>(f: F, kind: ProstExprType)
+    fn test_binary_decimal<A, F>(f: F, kind: Type)
     where
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,

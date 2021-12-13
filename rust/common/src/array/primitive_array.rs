@@ -3,7 +3,7 @@ use std::hash::{Hash, Hasher};
 use std::mem::size_of;
 
 use risingwave_pb::data::buffer::CompressionType;
-use risingwave_pb::data::Buffer as ProstBuffer;
+use risingwave_pb::data::Buffer;
 
 use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
 use crate::array::ArrayImpl;
@@ -96,7 +96,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> Result<Vec<ProstBuffer>> {
+    fn to_protobuf(&self) -> Result<Vec<Buffer>> {
         let values = {
             let mut output_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<T>());
 
@@ -104,7 +104,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
                 v.map(|node| node.to_protobuf(&mut output_buffer));
             }
 
-            ProstBuffer {
+            Buffer {
                 compression: CompressionType::None as i32,
                 body: output_buffer,
             }

@@ -11,9 +11,6 @@ members = [
   "stream",
   "tests/regress",
   "utils/memcomparable",
-  "utils/pb-construct",
-  "utils/pb-convert",
-  "utils/pb-convert-derive",
 ]
 
 [profile.dev]

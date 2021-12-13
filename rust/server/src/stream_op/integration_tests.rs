@@ -12,7 +12,7 @@ use risingwave_common::expr::expr_binary_nullable::new_nullable_binary_expr;
 use risingwave_common::expr::expr_unary::new_unary_expr;
 use risingwave_common::expr::*;
 use risingwave_common::types::*;
-use risingwave_pb::expr::expr_node::Type as ProstExprType;
+use risingwave_pb::expr::expr_node::Type;
 
 use super::{ReceiverExecutor, *};
 
@@ -234,82 +234,67 @@ fn make_tpchq6_expr() -> (
     let l_extended_price = InputRefExpression::new(t_extended_price.clone(), 3);
 
     let l_shipdate_geq_cast = new_unary_expr(
-        ProstExprType::Cast,
+        Type::Cast,
         TimestampType::create(false, 10),
         Box::new(const_1994_01_01),
     );
 
     let l_shipdate_le_cast = new_unary_expr(
-        ProstExprType::Cast,
+        Type::Cast,
         TimestampType::create(false, 10),
         Box::new(const_1995_01_01),
     );
 
     let l_shipdate_geq = new_binary_expr(
-        ProstExprType::GreaterThanOrEqual,
+        Type::GreaterThanOrEqual,
         BoolType::create(false),
         Box::new(l_shipdate),
         l_shipdate_geq_cast,
     );
 
     let l_shipdate_le = new_binary_expr(
-        ProstExprType::LessThanOrEqual,
+        Type::LessThanOrEqual,
         BoolType::create(false),
         Box::new(l_shipdate_2),
         l_shipdate_le_cast,
     );
 
     let l_discount_geq = new_binary_expr(
-        ProstExprType::GreaterThanOrEqual,
+        Type::GreaterThanOrEqual,
         BoolType::create(false),
         Box::new(l_discount),
         Box::new(const_0_05),
     );
 
     let l_discount_leq = new_binary_expr(
-        ProstExprType::LessThanOrEqual,
+        Type::LessThanOrEqual,
         BoolType::create(false),
         Box::new(l_discount_2),
         Box::new(const_0_07),
     );
 
     let l_quantity_le = new_binary_expr(
-        ProstExprType::LessThan,
+        Type::LessThan,
         BoolType::create(false),
         Box::new(l_quantity),
         Box::new(const_24),
     );
 
     let and = new_nullable_binary_expr(
-        ProstExprType::And,
+        Type::And,
         BoolType::create(false),
         l_shipdate_geq,
         l_shipdate_le,
     );
 
-    let and = new_nullable_binary_expr(
-        ProstExprType::And,
-        BoolType::create(false),
-        and,
-        l_discount_geq,
-    );
+    let and = new_nullable_binary_expr(Type::And, BoolType::create(false), and, l_discount_geq);
 
-    let and = new_nullable_binary_expr(
-        ProstExprType::And,
-        BoolType::create(false),
-        and,
-        l_discount_leq,
-    );
+    let and = new_nullable_binary_expr(Type::And, BoolType::create(false), and, l_discount_leq);
 
-    let and = new_nullable_binary_expr(
-        ProstExprType::And,
-        BoolType::create(false),
-        and,
-        l_quantity_le,
-    );
+    let and = new_nullable_binary_expr(Type::And, BoolType::create(false), and, l_quantity_le);
 
     let multiply = new_binary_expr(
-        ProstExprType::Multiply,
+        Type::Multiply,
         Float64Type::create(false),
         Box::new(l_extended_price),
         Box::new(l_discount_3),

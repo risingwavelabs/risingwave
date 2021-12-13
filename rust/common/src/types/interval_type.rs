@@ -88,12 +88,12 @@ impl DataType for IntervalType {
     }
 
     fn to_protobuf(&self) -> Result<ProstDataType> {
-        let proto = ProstDataType {
+        let prost = ProstDataType {
             type_name: TypeName::Boolean as i32,
             is_nullable: self.nullable,
             ..Default::default()
         };
-        Ok(proto)
+        Ok(prost)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -118,8 +118,8 @@ impl IntervalType {
 impl<'a> TryFrom<&'a ProstDataType> for IntervalType {
     type Error = RwError;
 
-    fn try_from(proto: &'a ProstDataType) -> Result<Self> {
-        ensure!(proto.get_type_name() == TypeName::Interval);
-        Ok(IntervalType::new(proto.get_is_nullable()))
+    fn try_from(prost: &'a ProstDataType) -> Result<Self> {
+        ensure!(prost.get_type_name() == TypeName::Interval);
+        Ok(IntervalType::new(prost.get_is_nullable()))
     }
 }

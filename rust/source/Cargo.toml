@@ -24,8 +24,6 @@ mem_cmp = "0.1.4"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
 paste = "1"
-pb-convert = { path = "../utils/pb-convert" }
-pb-convert-derive = { path = "../utils/pb-convert-derive" }
 prost = "0.8"
 prost-types = "0.8"
 protobuf = "2"
@@ -52,6 +50,5 @@ twox-hash = "1.6.1"
 [dev-dependencies]
 approx = "0.5"
 assert_matches = "1.5"
-pb-construct = { path = "../utils/pb-construct" }
 rand = "0.8"
 tempfile = "3"

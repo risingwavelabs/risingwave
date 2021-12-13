@@ -87,7 +87,7 @@ impl Expression for CaseExpression {
 mod tests {
     use std::sync::Arc;
 
-    use risingwave_pb::expr::expr_node::Type as ProstExprType;
+    use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
     use crate::array::column::Column;
@@ -108,7 +108,7 @@ mod tests {
         // when x <= 2 then 3.1
         let when_clauses = vec![WhenClause::new(
             new_binary_expr(
-                ProstExprType::LessThanOrEqual,
+                Type::LessThanOrEqual,
                 BoolType::create(false),
                 Box::new(InputRefExpression::new(Int32Type::create(false), 0)),
                 Box::new(LiteralExpression::new(
@@ -143,7 +143,7 @@ mod tests {
         // when x <= 3 then 3.1
         let when_clauses = vec![WhenClause::new(
             new_binary_expr(
-                ProstExprType::LessThanOrEqual,
+                Type::LessThanOrEqual,
                 BoolType::create(false),
                 Box::new(InputRefExpression::new(Int32Type::create(false), 0)),
                 Box::new(LiteralExpression::new(

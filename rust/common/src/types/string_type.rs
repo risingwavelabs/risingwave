@@ -32,7 +32,7 @@ impl DataType for StringType {
     }
 
     fn to_protobuf(&self) -> Result<ProstDataType> {
-        let mut proto = ProstDataType {
+        let mut prost = ProstDataType {
             precision: self.width as u32,
             is_nullable: self.nullable,
             ..Default::default()
@@ -40,12 +40,12 @@ impl DataType for StringType {
 
         match self.kind {
             DataTypeKind::Char => {
-                proto.set_type_name(TypeName::Char);
-                Ok(proto)
+                prost.set_type_name(TypeName::Char);
+                Ok(prost)
             }
             DataTypeKind::Varchar => {
-                proto.set_type_name(TypeName::Varchar);
-                Ok(proto)
+                prost.set_type_name(TypeName::Varchar);
+                Ok(prost)
             }
             _ => Err(InternalError(format!(
                 "Incorrect data type kind for string type: {:?}",
@@ -67,21 +67,21 @@ impl DataType for StringType {
 impl<'a> TryFrom<&'a ProstDataType> for StringType {
     type Error = RwError;
 
-    fn try_from(proto: &'a ProstDataType) -> Result<Self> {
-        match proto.get_type_name() {
+    fn try_from(prost: &'a ProstDataType) -> Result<Self> {
+        match prost.get_type_name() {
             TypeName::Char | TypeName::Symbol => Ok(Self {
-                nullable: proto.is_nullable,
-                width: proto.precision as usize,
+                nullable: prost.is_nullable,
+                width: prost.precision as usize,
                 kind: DataTypeKind::Char,
             }),
             TypeName::Varchar => Ok(Self {
-                nullable: proto.is_nullable,
-                width: proto.precision as usize,
+                nullable: prost.is_nullable,
+                width: prost.precision as usize,
                 kind: DataTypeKind::Varchar,
             }),
             _ => Err(InternalError(format!(
                 "Incorrect data type kind for string type: {:?}",
-                proto.get_type_name()
+                prost.get_type_name()
             ))
             .into()),
         }

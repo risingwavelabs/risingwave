@@ -3,7 +3,7 @@ use std::iter;
 use std::mem::size_of;
 
 use risingwave_pb::data::buffer::CompressionType;
-use risingwave_pb::data::Buffer as ProstBuffer;
+use risingwave_pb::data::Buffer;
 
 use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
 use crate::buffer::{Bitmap, BitmapBuilder};
@@ -40,7 +40,7 @@ impl Array for Utf8Array {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> Result<Vec<ProstBuffer>> {
+    fn to_protobuf(&self) -> Result<Vec<Buffer>> {
         let offset_buffer = self
             .offset
             .iter()
@@ -66,11 +66,11 @@ impl Array for Utf8Array {
 
         Ok(vec![offset_buffer, data_buffer]
             .into_iter()
-            .map(|buffer| ProstBuffer {
+            .map(|buffer| Buffer {
                 compression: CompressionType::None as i32,
                 body: buffer,
             })
-            .collect::<Vec<ProstBuffer>>())
+            .collect::<Vec<Buffer>>())
     }
 
     fn null_bitmap(&self) -> &Bitmap {

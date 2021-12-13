@@ -1,7 +1,7 @@
 use std::convert::TryFrom;
 
 use risingwave_pb::expr::expr_node::{RexNode, Type};
-use risingwave_pb::expr::ExprNode as ProstExprNode;
+use risingwave_pb::expr::ExprNode;
 
 use crate::array::{ArrayRef, DataChunk};
 use crate::error::{ErrorCode, Result, RwError};
@@ -39,10 +39,10 @@ impl InputRefExpression {
     }
 }
 
-impl<'a> TryFrom<&'a ProstExprNode> for InputRefExpression {
+impl<'a> TryFrom<&'a ExprNode> for InputRefExpression {
     type Error = RwError;
 
-    fn try_from(prost: &'a ProstExprNode) -> Result<Self> {
+    fn try_from(prost: &'a ExprNode) -> Result<Self> {
         ensure!(prost.get_expr_type() == Type::InputRef);
 
         let ret_type = type_build_from_prost(prost.get_return_type())?;

@@ -232,7 +232,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{Int32Type, Int64Type};
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType as DataTypeProst;
+    use risingwave_pb::data::DataType;
     use risingwave_pb::expr::agg_call::{Arg, Type};
     use risingwave_pb::expr::{AggCall, InputRefExpr};
 
@@ -275,12 +275,12 @@ mod tests {
             r#type: Type::Sum as i32,
             args: vec![Arg {
                 input: Some(InputRefExpr { column_idx: 2 }),
-                r#type: Some(DataTypeProst {
+                r#type: Some(DataType {
                     type_name: TypeName::Int32 as i32,
                     ..Default::default()
                 }),
             }],
-            return_type: Some(DataTypeProst {
+            return_type: Some(DataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
@@ -345,7 +345,7 @@ mod tests {
         let agg_call = AggCall {
             r#type: Type::Count as i32,
             args: vec![],
-            return_type: Some(DataTypeProst {
+            return_type: Some(DataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),

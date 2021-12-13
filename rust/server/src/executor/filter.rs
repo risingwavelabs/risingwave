@@ -119,10 +119,10 @@ mod tests {
     use risingwave_common::expr::build_from_prost;
     use risingwave_common::types::{DataTypeKind, Int32Type};
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType as DataTypeProst;
+    use risingwave_pb::data::DataType;
     use risingwave_pb::expr::expr_node::Type::InputRef;
-    use risingwave_pb::expr::expr_node::{RexNode, Type as ProstExprType};
-    use risingwave_pb::expr::{ExprNode as ProstExprNode, FunctionCall, InputRefExpr};
+    use risingwave_pb::expr::expr_node::{RexNode, Type};
+    use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -144,7 +144,7 @@ mod tests {
         };
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(data_chunk);
-        let expr = make_expression(ProstExprType::Equal);
+        let expr = make_expression(Type::Equal);
         let chunk_builder = DataChunkBuilder::new(
             mock_executor.schema().data_types_clone(),
             DEFAULT_CHUNK_BUFFER_SIZE,
@@ -171,7 +171,7 @@ mod tests {
         filter_executor.close().await.unwrap();
     }
 
-    fn make_expression(kind: ProstExprType) -> ProstExprNode {
+    fn make_expression(kind: Type) -> ExprNode {
         let lhs = make_inputref(0);
         let rhs = make_inputref(1);
         let function_call = FunctionCall {
@@ -184,17 +184,17 @@ mod tests {
             is_nullable: false,
             interval_type: 0,
         };
-        ProstExprNode {
+        ExprNode {
             expr_type: kind as i32,
             return_type: Some(return_type),
             rex_node: Some(RexNode::FuncCall(function_call)),
         }
     }
 
-    fn make_inputref(idx: i32) -> ProstExprNode {
-        ProstExprNode {
+    fn make_inputref(idx: i32) -> ExprNode {
+        ExprNode {
             expr_type: InputRef as i32,
-            return_type: Some(DataTypeProst {
+            return_type: Some(DataType {
                 type_name: TypeName::Int32 as i32,
                 ..Default::default()
             }),

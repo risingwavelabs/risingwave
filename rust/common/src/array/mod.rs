@@ -25,7 +25,7 @@ use interval_array::{IntervalArray, IntervalArrayBuilder};
 pub use iterator::ArrayIterator;
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
-use risingwave_pb::data::Buffer as ProstBuffer;
+use risingwave_pb::data::Buffer;
 pub use stream_chunk::{Op, StreamChunk};
 pub use utf8_array::*;
 
@@ -138,7 +138,7 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     /// Get iterator of current array.
     fn iter(&self) -> Self::Iter<'_>;
 
-    fn to_protobuf(&self) -> Result<Vec<ProstBuffer>>;
+    fn to_protobuf(&self) -> Result<Vec<Buffer>>;
 
     /// Get the null `Bitmap` from `Array`.
     fn null_bitmap(&self) -> &Bitmap;
@@ -397,7 +397,7 @@ macro_rules! impl_array {
         }
       }
 
-      pub fn to_protobuf(&self) -> Result<Vec<ProstBuffer>> {
+      pub fn to_protobuf(&self) -> Result<Vec<Buffer>> {
         match self {
           $( Self::$variant_name(inner) => inner.to_protobuf(), )*
         }

@@ -2,7 +2,7 @@ use std::hash::{Hash, Hasher};
 use std::mem::size_of;
 
 use risingwave_pb::data::buffer::CompressionType;
-use risingwave_pb::data::Buffer as ProstBuffer;
+use risingwave_pb::data::Buffer;
 use rust_decimal::Decimal;
 
 use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
@@ -47,7 +47,7 @@ impl Array for DecimalArray {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> Result<Vec<ProstBuffer>> {
+    fn to_protobuf(&self) -> Result<Vec<Buffer>> {
         let mut offset_buffer = Vec::<u8>::with_capacity(self.data.len() * size_of::<usize>());
         let mut data_buffer = Vec::<u8>::new();
         let mut offset = 0usize;
@@ -63,11 +63,11 @@ impl Array for DecimalArray {
         offset_buffer.extend_from_slice(&offset.to_be_bytes());
         Ok(vec![offset_buffer, data_buffer]
             .into_iter()
-            .map(|buffer| ProstBuffer {
+            .map(|buffer| Buffer {
                 compression: CompressionType::None as i32,
                 body: buffer,
             })
-            .collect::<Vec<ProstBuffer>>())
+            .collect::<Vec<Buffer>>())
     }
 
     fn null_bitmap(&self) -> &Bitmap {

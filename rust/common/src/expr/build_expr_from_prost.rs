@@ -1,5 +1,5 @@
 use risingwave_pb::expr::expr_node::RexNode;
-use risingwave_pb::expr::ExprNode as ProstExprNode;
+use risingwave_pb::expr::ExprNode;
 
 use crate::array::RwError;
 use crate::error::{ErrorCode, Result};
@@ -14,9 +14,7 @@ use crate::expr::expr_unary::{
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 use crate::types::{build_from_prost as type_build_from_prost, DataTypeKind, DataTypeRef};
 
-fn get_return_type_and_children(
-    prost: &ProstExprNode,
-) -> Result<(Vec<ProstExprNode>, DataTypeRef)> {
+fn get_return_type_and_children(prost: &ExprNode) -> Result<(Vec<ExprNode>, DataTypeRef)> {
     let ret_type = type_build_from_prost(prost.get_return_type())?;
     if let RexNode::FuncCall(func_call) = prost.get_rex_node() {
         Ok((func_call.get_children().to_vec(), ret_type))
@@ -27,14 +25,14 @@ fn get_return_type_and_children(
     }
 }
 
-pub fn build_unary_expr_prost(prost: &ProstExprNode) -> Result<BoxedExpression> {
+pub fn build_unary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_return_type_and_children(prost)?;
     ensure!(children.len() == 1);
     let child_expr = expr_build_from_prost(&children[0])?;
     Ok(new_unary_expr(prost.get_expr_type(), ret_type, child_expr))
 }
 
-pub fn build_binary_expr_prost(prost: &ProstExprNode) -> Result<BoxedExpression> {
+pub fn build_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_return_type_and_children(prost)?;
     ensure!(children.len() == 2);
     let left_expr = expr_build_from_prost(&children[0])?;
@@ -47,7 +45,7 @@ pub fn build_binary_expr_prost(prost: &ProstExprNode) -> Result<BoxedExpression>
     ))
 }
 
-pub fn build_nullable_binary_expr_prost(prost: &ProstExprNode) -> Result<BoxedExpression> {
+pub fn build_nullable_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_return_type_and_children(prost)?;
     ensure!(children.len() == 2);
     let left_expr = expr_build_from_prost(&children[0])?;
@@ -60,7 +58,7 @@ pub fn build_nullable_binary_expr_prost(prost: &ProstExprNode) -> Result<BoxedEx
     ))
 }
 
-pub fn build_substr_expr(prost: &ProstExprNode) -> Result<BoxedExpression> {
+pub fn build_substr_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_return_type_and_children(prost)?;
     let child = expr_build_from_prost(&children[0])?;
     ensure!(children.len() == 2 || children.len() == 3);
@@ -76,7 +74,7 @@ pub fn build_substr_expr(prost: &ProstExprNode) -> Result<BoxedExpression> {
     }
 }
 
-pub fn build_position_expr(prost: &ProstExprNode) -> Result<BoxedExpression> {
+pub fn build_position_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_return_type_and_children(prost)?;
     ensure!(children.len() == 2);
     let str = expr_build_from_prost(&children[0])?;
@@ -84,7 +82,7 @@ pub fn build_position_expr(prost: &ProstExprNode) -> Result<BoxedExpression> {
     Ok(new_position_expr(str, sub_str, ret_type))
 }
 
-pub fn build_trim_expr(prost: &ProstExprNode) -> Result<BoxedExpression> {
+pub fn build_trim_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_return_type_and_children(prost)?;
     // TODO: add expr with the delimiter parameter
     ensure!(children.len() == 1);
@@ -92,7 +90,7 @@ pub fn build_trim_expr(prost: &ProstExprNode) -> Result<BoxedExpression> {
     Ok(new_trim_expr(child, ret_type))
 }
 
-pub fn build_ltrim_expr(prost: &ProstExprNode) -> Result<BoxedExpression> {
+pub fn build_ltrim_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_return_type_and_children(prost)?;
     // TODO: add expr with the delimiter parameter
     ensure!(children.len() == 1);
@@ -100,7 +98,7 @@ pub fn build_ltrim_expr(prost: &ProstExprNode) -> Result<BoxedExpression> {
     Ok(new_ltrim_expr(child, ret_type))
 }
 
-pub fn build_rtrim_expr(prost: &ProstExprNode) -> Result<BoxedExpression> {
+pub fn build_rtrim_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_return_type_and_children(prost)?;
     // TODO: add expr with the delimiter parameter
     ensure!(children.len() == 1);
@@ -108,7 +106,7 @@ pub fn build_rtrim_expr(prost: &ProstExprNode) -> Result<BoxedExpression> {
     Ok(new_rtrim_expr(child, ret_type))
 }
 
-pub fn build_replace_expr(prost: &ProstExprNode) -> Result<BoxedExpression> {
+pub fn build_replace_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_return_type_and_children(prost)?;
     ensure!(children.len() == 3);
     let s = expr_build_from_prost(&children[0])?;
@@ -117,7 +115,7 @@ pub fn build_replace_expr(prost: &ProstExprNode) -> Result<BoxedExpression> {
     Ok(new_replace_expr(s, from_str, to_str, ret_type))
 }
 
-pub fn build_length_expr(prost: &ProstExprNode) -> Result<BoxedExpression> {
+pub fn build_length_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_return_type_and_children(prost)?;
     // TODO: add encoding length expr
     ensure!(children.len() == 1);
@@ -125,7 +123,7 @@ pub fn build_length_expr(prost: &ProstExprNode) -> Result<BoxedExpression> {
     Ok(new_length_default(child, ret_type))
 }
 
-pub fn build_like_expr(prost: &ProstExprNode) -> Result<BoxedExpression> {
+pub fn build_like_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_return_type_and_children(prost)?;
     ensure!(children.len() == 2);
     let expr_ia1 = expr_build_from_prost(&children[0])?;
@@ -133,7 +131,7 @@ pub fn build_like_expr(prost: &ProstExprNode) -> Result<BoxedExpression> {
     Ok(new_like_default(expr_ia1, expr_ia2, ret_type))
 }
 
-pub fn build_case_expr(prost: &ProstExprNode) -> Result<BoxedExpression> {
+pub fn build_case_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_return_type_and_children(prost)?;
     // children: (when, then)+, (else_clause)?
     let len = children.len();
