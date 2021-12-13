@@ -100,3 +100,82 @@ impl Debug for StreamScanExecutor {
             .finish()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use itertools::Itertools;
+    use risingwave_common::array::column::Column;
+    use risingwave_common::array::{Array, I32Array};
+    use risingwave_common::types::Int32Type;
+
+    use super::*;
+
+    struct MockSourceReader {}
+
+    #[async_trait]
+    impl BatchSourceReader for MockSourceReader {
+        async fn open(&mut self) -> Result<()> {
+            Ok(())
+        }
+
+        async fn next(&mut self) -> Result<Option<DataChunk>> {
+            let chunk = DataChunk::builder()
+                .columns(vec![Column::new(
+                    Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into()),
+                    Int32Type::create(false),
+                )])
+                .build();
+            Ok(Some(chunk))
+        }
+
+        async fn close(&mut self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sctrean_scan() {
+        let reader = MockSourceReader {};
+        let mut executor = StreamScanExecutor {
+            reader: Box::new(reader),
+            done: false,
+            schema: Schema::new(vec![Field::new(Int32Type::create(false))]),
+        };
+        executor.open().await.unwrap();
+
+        let chunk1 = executor.next().await.unwrap();
+        assert!(chunk1.is_some());
+        let chunk1 = chunk1.unwrap();
+        assert_eq!(1, chunk1.dimension());
+        assert_eq!(
+            chunk1
+                .column_at(0)
+                .unwrap()
+                .array()
+                .as_int32()
+                .iter()
+                .collect_vec(),
+            vec![Some(1), Some(2), Some(3)]
+        );
+
+        let chunk2 = executor.next().await.unwrap();
+        assert!(chunk2.is_some());
+        let chunk2 = chunk2.unwrap();
+        assert_eq!(1, chunk2.dimension());
+        assert_eq!(
+            chunk2
+                .column_at(0)
+                .unwrap()
+                .array()
+                .as_int32()
+                .iter()
+                .collect_vec(),
+            vec![Some(1), Some(2), Some(3)]
+        );
+
+        executor.close().await.unwrap();
+    }
+}
