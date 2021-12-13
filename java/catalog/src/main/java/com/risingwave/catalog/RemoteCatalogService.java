@@ -190,7 +190,7 @@ public class RemoteCatalogService implements CatalogService {
 
   // Get identifier of database/schema/table from meta service.
   private Integer getId(IdCategory category) {
-    GetIdRequest request = GetIdRequest.newBuilder().setCategory(category).build();
+    GetIdRequest request = GetIdRequest.newBuilder().setInterval(1).setCategory(category).build();
     GetIdResponse response = this.metaClient.getId(request);
     if (response.getStatus().getCode() != Status.Code.OK) {
       throw new PgException(PgErrorCode.INTERNAL_ERROR, "Get Id failed");

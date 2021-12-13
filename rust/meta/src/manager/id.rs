@@ -14,7 +14,8 @@ type Id = i32;
 
 #[async_trait::async_trait]
 pub trait IdGenerator: Sync + Send {
-    async fn generate(&self, interval: Id) -> Result<Id>;
+    async fn generate(&self) -> Result<Id>;
+    async fn generate_interval(&self, interval: i32) -> Result<Id>;
 }
 
 pub type IdGeneratorRef = Box<dyn IdGenerator>;
@@ -28,7 +29,7 @@ pub struct StoredIdGenerator {
 }
 
 impl StoredIdGenerator {
-    pub async fn new(meta_store_ref: MetaStoreRef, category: &str) -> Self {
+    pub async fn new(meta_store_ref: MetaStoreRef, category: &str, start: Option<Id>) -> Self {
         let category_gen_key = format!("{}_id_next_generator", category);
         let res = meta_store_ref
             .get(category_gen_key.as_bytes(), SINGLE_VERSION_EPOCH)
@@ -39,7 +40,7 @@ impl StoredIdGenerator {
                 if !matches!(err.inner(), ErrorCode::ItemNotFound(_)) {
                     panic!("{}", err)
                 }
-                0
+                start.unwrap_or(0)
             }
         };
 
@@ -66,7 +67,11 @@ impl StoredIdGenerator {
 
 #[async_trait::async_trait]
 impl IdGenerator for StoredIdGenerator {
-    async fn generate(&self, interval: Id) -> Result<Id> {
+    async fn generate(&self) -> Result<Id> {
+        self.generate_interval(1).await
+    }
+
+    async fn generate_interval(&self, interval: i32) -> Result<Id> {
         let id = self.current_id.fetch_add(interval, Ordering::Relaxed);
         let next_allocate_id = { *self.next_allocate_id.read().await };
         if id + interval > next_allocate_id {
@@ -97,39 +102,37 @@ pub struct IdGeneratorManager {
 impl IdGeneratorManager {
     pub async fn new(meta_store_ref: MetaStoreRef) -> Self {
         let mut inner = HashMap::new();
-        for (category, name) in [
-            (IdCategory::Default, "default"),
-            (IdCategory::Database, "database"),
-            (IdCategory::Schema, "schema"),
-            (IdCategory::Table, "table"),
+        for (category, name, start) in [
+            (IdCategory::Default, "default", None),
+            (IdCategory::Database, "database", None),
+            (IdCategory::Schema, "schema", None),
+            (IdCategory::Table, "table", None),
+            (IdCategory::Fragment, "fragment", Some(1)),
         ] {
             inner.insert(
                 category,
-                Box::new(StoredIdGenerator::new(meta_store_ref.clone(), name).await)
+                Box::new(StoredIdGenerator::new(meta_store_ref.clone(), name, start).await)
                     as IdGeneratorRef,
             );
         }
-
-        // Trick: let fragment Id start from 1.
-        let fragment_id_generator =
-            Box::new(StoredIdGenerator::new(meta_store_ref.clone(), "fragment").await);
-        let _res = fragment_id_generator.generate(1).await.unwrap();
-        inner.insert(
-            IdCategory::Fragment,
-            fragment_id_generator as IdGeneratorRef,
-        );
 
         // Return the manager.
         IdGeneratorManager { inner }
     }
 
-    /// ['generate'] function generates a current Id, the next Id will be added by the given
-    /// interval.
-    pub async fn generate(&self, category: IdCategory, interval: Id) -> Result<Id> {
-        match category {
-            IdCategory::Fragment => self.inner.get(&category).unwrap().generate(interval).await,
-            _ => self.inner.get(&category).unwrap().generate(1).await,
-        }
+    /// [`generate`] function generates id as `current_id`.
+    pub async fn generate(&self, category: IdCategory) -> Result<Id> {
+        self.inner.get(&category).unwrap().generate().await
+    }
+
+    /// [`generate_interval`] function generates ids as [`current_id`, `current_id` + interval), the
+    /// next id will be `current_id` + interval.
+    pub async fn generate_interval(&self, category: IdCategory, interval: i32) -> Result<Id> {
+        self.inner
+            .get(&category)
+            .unwrap()
+            .generate_interval(interval)
+            .await
     }
 }
 
@@ -145,30 +148,32 @@ mod tests {
     #[tokio::test]
     async fn test_id_generator() -> Result<()> {
         let meta_store_ref = Arc::new(MemStore::new());
-        let id_generator = StoredIdGenerator::new(meta_store_ref.clone(), "default").await;
+        let id_generator = StoredIdGenerator::new(meta_store_ref.clone(), "default", None).await;
         let ids = future::join_all((0..10000).map(|_i| {
             let id_generator = &id_generator;
-            async move { id_generator.generate(1).await }
+            async move { id_generator.generate().await }
         }))
         .await
         .into_iter()
         .collect::<Result<Vec<_>>>()?;
         assert_eq!(ids, (0..10000).collect::<Vec<_>>());
 
-        let id_generator_two = StoredIdGenerator::new(meta_store_ref.clone(), "default").await;
+        let id_generator_two =
+            StoredIdGenerator::new(meta_store_ref.clone(), "default", None).await;
         let ids = future::join_all((0..10000).map(|_i| {
             let id_generator = &id_generator_two;
-            async move { id_generator.generate(1).await }
+            async move { id_generator.generate().await }
         }))
         .await
         .into_iter()
         .collect::<Result<Vec<_>>>()?;
         assert_eq!(ids, (10000..20000).collect::<Vec<_>>());
 
-        let id_generator_three = StoredIdGenerator::new(meta_store_ref.clone(), "table").await;
+        let id_generator_three =
+            StoredIdGenerator::new(meta_store_ref.clone(), "table", None).await;
         let ids = future::join_all((0..10000).map(|_i| {
             let id_generator = &id_generator_three;
-            async move { id_generator.generate(1).await }
+            async move { id_generator.generate().await }
         }))
         .await
         .into_iter()
@@ -176,28 +181,29 @@ mod tests {
         assert_eq!(ids, (0..10000).collect::<Vec<_>>());
 
         let fragment_id_generator =
-            StoredIdGenerator::new(meta_store_ref.clone(), "fragment").await;
+            StoredIdGenerator::new(meta_store_ref.clone(), "fragment", Some(1)).await;
         let ids = future::join_all((0..100).map(|_i| {
             let id_generator = &fragment_id_generator;
-            async move { id_generator.generate(100).await }
+            async move { id_generator.generate_interval(100).await }
         }))
         .await
         .into_iter()
         .collect::<Result<Vec<_>>>()?;
 
-        let vec_expect = (0..100).map(|e| e * 100).collect::<Vec<_>>();
+        let vec_expect = (0..100).map(|e| e * 100 + 1).collect::<Vec<_>>();
         assert_eq!(ids, vec_expect);
 
-        let fragment_id_generator_two = StoredIdGenerator::new(meta_store_ref, "fragment").await;
+        let fragment_id_generator_two =
+            StoredIdGenerator::new(meta_store_ref, "fragment", None).await;
         let ids = future::join_all((0..100).map(|_i| {
             let id_generator = &fragment_id_generator_two;
-            async move { id_generator.generate(10).await }
+            async move { id_generator.generate_interval(10).await }
         }))
         .await
         .into_iter()
         .collect::<Result<Vec<_>>>()?;
 
-        let vec_expect = (0..100).map(|e| 10000 + e * 10).collect::<Vec<_>>();
+        let vec_expect = (0..100).map(|e| 10001 + e * 10).collect::<Vec<_>>();
         assert_eq!(ids, vec_expect);
 
         Ok(())
@@ -209,7 +215,7 @@ mod tests {
         let manager = IdGeneratorManager::new(meta_store_ref).await;
         let ids = future::join_all((0..10000).map(|_i| {
             let manager = &manager;
-            async move { manager.generate(IdCategory::Default, 1).await }
+            async move { manager.generate(IdCategory::Default).await }
         }))
         .await
         .into_iter()
@@ -218,7 +224,7 @@ mod tests {
 
         let ids = future::join_all((0..10000).map(|_i| {
             let manager = &manager;
-            async move { manager.generate(IdCategory::Table, 1).await }
+            async move { manager.generate(IdCategory::Table).await }
         }))
         .await
         .into_iter()
@@ -227,7 +233,7 @@ mod tests {
 
         let ids = future::join_all((0..100).map(|_i| {
             let manager = &manager;
-            async move { manager.generate(IdCategory::Fragment, 100).await }
+            async move { manager.generate_interval(IdCategory::Fragment, 100).await }
         }))
         .await
         .into_iter()

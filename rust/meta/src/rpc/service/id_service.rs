@@ -32,7 +32,7 @@ impl IdGeneratorService for IdGeneratorServiceImpl {
             id: self
                 .mmc
                 .id_gen_manager
-                .generate(category, interval)
+                .generate_interval(category, interval)
                 .await
                 .map_err(|e| e.to_grpc_status())?,
         }))
