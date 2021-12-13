@@ -12,7 +12,7 @@ import com.risingwave.common.config.Configuration;
 import com.risingwave.common.config.LeaderServerConfigurations;
 import com.risingwave.execution.handler.DefaultSqlHandlerFactory;
 import com.risingwave.execution.handler.SqlHandlerFactory;
-import com.risingwave.node.DefaultWorkerNodeManager;
+import com.risingwave.node.LocalWorkerNodeManager;
 import com.risingwave.node.WorkerNodeManager;
 import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.TestComputeClientManager;
@@ -37,7 +37,7 @@ public class TestPlannerModule extends AbstractModule {
     bind(ComputeClientManager.class).to(TestComputeClientManager.class).in(Singleton.class);
     bind(TaskManager.class).to(RemoteTaskManager.class).in(Singleton.class);
     bind(QueryManager.class).to(RemoteQueryManager.class).in(Singleton.class);
-    bind(WorkerNodeManager.class).to(DefaultWorkerNodeManager.class).in(Singleton.class);
+    bind(WorkerNodeManager.class).to(LocalWorkerNodeManager.class).in(Singleton.class);
     bind(SqlHandlerFactory.class).to(DefaultSqlHandlerFactory.class).in(Singleton.class);
     bind(StreamManager.class).to(LocalStreamManager.class).in(Singleton.class);
   }

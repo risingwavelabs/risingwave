@@ -15,7 +15,7 @@ import com.risingwave.common.config.LeaderServerConfigurations;
 import com.risingwave.execution.handler.DefaultSqlHandlerFactory;
 import com.risingwave.execution.handler.SqlHandlerFactory;
 import com.risingwave.node.DefaultWorkerNode;
-import com.risingwave.node.DefaultWorkerNodeManager;
+import com.risingwave.node.RemoteWorkerNodeManager;
 import com.risingwave.node.WorkerNodeManager;
 import com.risingwave.pgserver.database.RisingWaveDatabaseManager;
 import com.risingwave.pgwire.PgServer;
@@ -51,7 +51,7 @@ public class FrontendServerModule extends AbstractModule {
     bind(DatabaseManager.class).to(RisingWaveDatabaseManager.class).in(Singleton.class);
     bind(SqlHandlerFactory.class).to(DefaultSqlHandlerFactory.class).in(Singleton.class);
     bind(ComputeClientManager.class).to(ComputeClientManagerImpl.class).in(Singleton.class);
-    bind(WorkerNodeManager.class).to(DefaultWorkerNodeManager.class).in(Singleton.class);
+    bind(WorkerNodeManager.class).to(RemoteWorkerNodeManager.class).in(Singleton.class);
     if (options.combineLeader) {
       bind(TaskManager.class).to(RemoteTaskManager.class).in(Singleton.class);
       bind(QueryManager.class).to(RemoteQueryManager.class).in(Singleton.class);

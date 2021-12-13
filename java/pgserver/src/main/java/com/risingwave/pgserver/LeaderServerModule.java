@@ -6,7 +6,7 @@ import com.google.inject.AbstractModule;
 import com.google.inject.Provides;
 import com.google.inject.Singleton;
 import com.risingwave.common.config.Configuration;
-import com.risingwave.node.DefaultWorkerNodeManager;
+import com.risingwave.node.RemoteWorkerNodeManager;
 import com.risingwave.node.WorkerNodeManager;
 import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.ComputeClientManagerImpl;
@@ -27,7 +27,7 @@ public class LeaderServerModule extends AbstractModule {
 
   @Override
   protected void configure() {
-    bind(WorkerNodeManager.class).to(DefaultWorkerNodeManager.class).in(Singleton.class);
+    bind(WorkerNodeManager.class).to(RemoteWorkerNodeManager.class).in(Singleton.class);
     bind(TaskManager.class).to(RemoteTaskManager.class).in(Singleton.class);
     bind(QueryManager.class).to(RemoteQueryManager.class).in(Singleton.class);
     bind(ComputeClientManager.class).to(ComputeClientManagerImpl.class).in(Singleton.class);

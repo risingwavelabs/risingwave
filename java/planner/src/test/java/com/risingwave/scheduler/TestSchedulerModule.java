@@ -6,7 +6,7 @@ import com.google.inject.AbstractModule;
 import com.google.inject.Provides;
 import com.risingwave.common.config.Configuration;
 import com.risingwave.common.config.LeaderServerConfigurations;
-import com.risingwave.node.DefaultWorkerNodeManager;
+import com.risingwave.node.LocalWorkerNodeManager;
 import com.risingwave.node.WorkerNodeManager;
 import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.TestComputeClientManager;
@@ -22,7 +22,7 @@ public class TestSchedulerModule extends AbstractModule {
     bind(ComputeClientManager.class).to(TestComputeClientManager.class).in(Singleton.class);
     bind(TaskManager.class).to(RemoteTaskManager.class).in(Singleton.class);
     bind(QueryManager.class).to(RemoteQueryManager.class).in(Singleton.class);
-    bind(WorkerNodeManager.class).to(DefaultWorkerNodeManager.class).in(Singleton.class);
+    bind(WorkerNodeManager.class).to(LocalWorkerNodeManager.class).in(Singleton.class);
   }
 
   @Singleton
