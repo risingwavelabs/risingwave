@@ -1,7 +1,7 @@
 use super::{HummockIterator, SortedIterator};
 use crate::hummock::format::{key_with_ts, user_key};
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockError, HummockResult};
+use crate::hummock::HummockResult;
 
 /// ``UserKeyIterator`` can be used be user directly.
 pub struct UserKeyIterator {
@@ -10,6 +10,7 @@ pub struct UserKeyIterator {
     last_val: Vec<u8>,
 }
 
+// TODO: decide whether this should also impl `HummockIterator`
 impl UserKeyIterator {
     pub fn new(iterator: SortedIterator) -> Self {
         Self {
@@ -40,9 +41,9 @@ impl UserKeyIterator {
     ///   say the newest one will be returned. If the final write about the key is a Delete command,
     ///   then the kv pair will never be returned.
     pub async fn next(&mut self) -> HummockResult<Option<(&[u8], &[u8])>> {
-        loop {
+        while self.iterator.is_valid() {
             // we need to ensure that the iterator is valid before enters the loop
-            let key = self.iterator.key().unwrap();
+            let key = self.iterator.key();
             let key = user_key(key);
             // since the table is sorted, if the key equals to the last_key,
             // then its timestamp is not biggest among keys with the same user_key
@@ -50,7 +51,7 @@ impl UserKeyIterator {
                 self.last_key.clear();
                 self.last_key.extend_from_slice(key);
 
-                match self.iterator.value().unwrap() {
+                match self.iterator.value() {
                     HummockValue::Put(val) => {
                         self.last_val.clear();
                         self.last_val.extend_from_slice(val);
@@ -64,18 +65,10 @@ impl UserKeyIterator {
                 }
             }
 
-            match self.iterator.next().await {
-                Ok(()) => {}
-                Err(HummockError::EOF) => {
-                    // already reach to the end of the iterator
-                    return Ok(None);
-                }
-                Err(err) => {
-                    // other error
-                    return Err(err);
-                }
-            }
+            self.iterator.next().await?;
         }
+
+        Ok(None) // not valid, eof
     }
 
     /// Reset the iterating position to the beginning.
@@ -90,20 +83,24 @@ impl UserKeyIterator {
         let full_key = &key_with_ts(user_key, u64::MAX);
         self.iterator.seek(full_key).await
     }
+
+    pub fn is_valid(&self) -> bool {
+        self.iterator.is_valid()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
-    use super::{SortedIterator, UserKeyIterator};
+    use super::*;
     use crate::hummock::cloud::gen_remote_table;
     use crate::hummock::format::{key_with_ts, user_key};
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_test_table_base, iterator_test_key_of, test_value_of,
         TEST_KEYS_COUNT,
     };
-    use crate::hummock::iterator::HummockIterator;
+    use crate::hummock::iterator::{BoxedHummockIterator, HummockIterator};
     use crate::hummock::table::TableIterator;
     use crate::hummock::value::HummockValue;
     use crate::hummock::TableBuilder;
@@ -114,7 +111,7 @@ mod tests {
         let table2 = gen_test_table_base(0, default_builder_opt_for_test(), &|x| x * 3).await;
         let table1 = gen_test_table_base(0, default_builder_opt_for_test(), &|x| x * 3 + 1).await;
         let table0 = gen_test_table_base(0, default_builder_opt_for_test(), &|x| x * 3 + 2).await;
-        let iters: Vec<Box<dyn HummockIterator + Send + Sync>> = vec![
+        let iters: Vec<BoxedHummockIterator> = vec![
             Box::new(TableIterator::new(Arc::new(table0))),
             Box::new(TableIterator::new(Arc::new(table1))),
             Box::new(TableIterator::new(Arc::new(table2))),
@@ -189,7 +186,7 @@ mod tests {
             .await
             .unwrap();
 
-        let iters: Vec<Box<dyn HummockIterator + Send + Sync>> = vec![
+        let iters: Vec<BoxedHummockIterator> = vec![
             Box::new(TableIterator::new(Arc::new(table0))),
             Box::new(TableIterator::new(Arc::new(table1))),
         ];
@@ -212,7 +209,7 @@ mod tests {
         let table2 = gen_test_table_base(0, default_builder_opt_for_test(), &|x| x * 3).await;
         let table1 = gen_test_table_base(0, default_builder_opt_for_test(), &|x| x * 3 + 1).await;
         let table0 = gen_test_table_base(0, default_builder_opt_for_test(), &|x| x * 3 + 2).await;
-        let iters: Vec<Box<dyn HummockIterator + Sync + Send>> = vec![
+        let iters: Vec<BoxedHummockIterator> = vec![
             Box::new(TableIterator::new(Arc::new(table0))),
             Box::new(TableIterator::new(Arc::new(table1))),
             Box::new(TableIterator::new(Arc::new(table2))),
@@ -222,10 +219,10 @@ mod tests {
         let mut si = SortedIterator::new(iters);
         si.rewind().await.unwrap();
         let mut uki = UserKeyIterator::new(si);
-        let res = uki
-            .seek(user_key(&iterator_test_key_of(0, 3 * TEST_KEYS_COUNT)).to_vec())
-            .await;
-        assert!(res.is_err());
+        uki.seek(user_key(&iterator_test_key_of(0, 3 * TEST_KEYS_COUNT)).to_vec())
+            .await
+            .unwrap();
+        assert!(!uki.is_valid());
 
         // normal case
         uki.seek(user_key(&iterator_test_key_of(0, 4)).to_vec())

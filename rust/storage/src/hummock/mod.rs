@@ -24,7 +24,7 @@ use tokio::sync::mpsc;
 use value::*;
 use version_manager::{CompactTask, Level, LevelEntry, VersionManager};
 
-use self::iterator::SortedIterator;
+use self::iterator::{BoxedHummockIterator, SortedIterator};
 use self::table::format::key_with_ts;
 use crate::object::ObjectStore;
 
@@ -78,7 +78,7 @@ impl HummockStorage {
     /// the key is not found. If `Err()` is returned, the searching for the key
     /// failed due to other non-EOF errors.
     pub async fn get(&self, key: &[u8]) -> HummockResult<Option<Vec<u8>>> {
-        let mut table_iters: Vec<Box<dyn HummockIterator + Send + Sync>> = Vec::new();
+        let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
 
         for table in &self.version_manager.tables().unwrap() {
             // bloom filter tells us the key could possibly exist, go get it
@@ -91,13 +91,8 @@ impl HummockStorage {
         let mut it = SortedIterator::new(table_iters);
 
         // Use `SortedIterator` to seek for they key with latest version to
-        // get the latest key. `Err(EOF)` will be directly transformed to `Ok(None)`.
-        if let Err(err) = it.seek(&key_with_ts(key.to_vec(), u64::MAX)).await {
-            match err {
-                HummockError::EOF => return Ok(None),
-                _ => return Err(err),
-            }
-        }
+        // get the latest key.
+        it.seek(&key_with_ts(key.to_vec(), u64::MAX)).await?;
 
         // Iterator has seeked passed the borders.
         if !it.is_valid() {
@@ -106,8 +101,8 @@ impl HummockStorage {
 
         // Iterator gets us the key, we tell if it's the key we want
         // or key next to it.
-        match user_key(it.key()?) == key {
-            true => Ok(it.value()?.into_put_value().map(|x| x.to_vec())),
+        match user_key(it.key()) == key {
+            true => Ok(it.value().into_put_value().map(|x| x.to_vec())),
             false => Ok(None),
         }
     }

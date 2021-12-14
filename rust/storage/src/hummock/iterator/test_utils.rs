@@ -53,7 +53,7 @@ pub async fn gen_test_table(table_idx: usize, opts: TableBuilderOptions) -> Tabl
 pub async fn gen_test_table_base(
     table_idx: usize,
     opts: TableBuilderOptions,
-    idx_mapping: &dyn Fn(usize) -> usize,
+    idx_mapping: impl Fn(usize) -> usize,
 ) -> Table {
     let mut b = TableBuilder::new(opts);
 

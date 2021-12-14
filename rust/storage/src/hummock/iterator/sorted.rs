@@ -1,183 +1,116 @@
-use std::collections::BinaryHeap;
-use std::fmt::Debug;
+use std::collections::binary_heap::PeekMut;
+use std::collections::{BinaryHeap, LinkedList};
 
 use async_trait::async_trait;
-use bytes::BytesMut;
 
-use super::HummockIterator;
+use super::{BoxedHummockIterator, HummockIterator};
 use crate::hummock::key_range::VersionComparator;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockError, HummockResult};
+use crate::hummock::HummockResult;
 
-struct HeapNode {
-    iterator_idx: usize,
-    key: BytesMut,
-    val: BytesMut,
-}
-impl Debug for HeapNode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HeapNode")
-            .field("iterator_idx", &self.iterator_idx)
-            .field("key", &std::str::from_utf8(&self.key))
-            .finish()
-    }
-}
+/// Used as node of the min-heap for merge-sorting the key-value pairs from iterators.
+///
+/// Since the iterators are ordered by their first keys by calling [`HummockIterator::key`], all of
+/// them must be ensured valid or panic occurs.
+struct Node(BoxedHummockIterator);
 
-pub struct SortedIterator {
-    iterators: Vec<Box<dyn HummockIterator + Send + Sync>>,
-    heap: BinaryHeap<HeapNode>,
-    cur_node: Option<HeapNode>,
-    heap_built: bool,
-}
-
-impl HeapNode {
-    fn new(idx: usize, key: &[u8], val: HummockValue<&[u8]>) -> Self {
-        let mut buf = vec![];
-        val.encode(&mut buf);
-        HeapNode {
-            iterator_idx: idx,
-            key: BytesMut::from(key),
-            val: BytesMut::from(buf.as_slice()),
-        }
-    }
-
-    fn pair(&self) -> (&[u8], HummockValue<&[u8]>) {
-        (&self.key, HummockValue::from_slice(&self.val).unwrap())
-    }
-}
-impl Eq for HeapNode {}
-impl PartialEq for HeapNode {
+impl PartialEq for Node {
     fn eq(&self, other: &Self) -> bool {
-        self.key == other.key
+        self.0.key() == other.0.key()
     }
 }
+impl Eq for Node {}
 
-impl PartialOrd for HeapNode {
+impl PartialOrd for Node {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(VersionComparator::compare_key(&other.key, &self.key))
+        Some(self.cmp(other))
     }
 }
-impl Ord for HeapNode {
+impl Ord for Node {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // Note: to implement min-heap by using max-heap internally, the comparing
-        // order should be changed.
-        VersionComparator::compare_key(&other.key, &self.key)
+        // order should be reversed.
+        VersionComparator::compare_key(other.0.key(), self.0.key())
     }
+}
+
+/// Iterates on multiple iterators, a.k.a. `MergeIterator`.
+pub struct SortedIterator {
+    /// Invalid or non-initialized iterators.
+    unused_iters: LinkedList<BoxedHummockIterator>,
+
+    /// The heap for merge sort.
+    heap: BinaryHeap<Node>,
 }
 
 impl SortedIterator {
-    pub fn new(iterators: Vec<Box<dyn HummockIterator + Send + Sync>>) -> Self {
+    pub fn new(iterators: impl IntoIterator<Item = BoxedHummockIterator>) -> Self {
         Self {
-            iterators,
+            unused_iters: iterators.into_iter().collect(),
             heap: BinaryHeap::new(),
-            cur_node: None,
-            heap_built: false,
         }
     }
 
-    /// Merge different sorted tables by using merge sort.
-    async fn next_inner(&mut self) -> HummockResult<()> {
-        if !self.heap_built {
-            self.build_heap().await?;
-        }
-        if self.heap.is_empty() {
-            return Err(HummockError::EOF);
-        }
-        self.cur_node = Some(self.heap.pop().unwrap());
-
-        let cur_node = self.cur_node.as_ref().unwrap();
-        let iter = &mut self.iterators[cur_node.iterator_idx];
-
-        if iter.is_valid() {
-            // put the next kv pair into the heap
-
-            let key = iter.key()?;
-            let val = iter.value()?;
-            self.heap
-                .push(HeapNode::new(cur_node.iterator_idx, key, val));
-            iter.next().await.unwrap_or(());
-        }
-
-        Ok(())
+    /// Move all iterators from the `heap` to the linked list.
+    fn reset_heap(&mut self) {
+        self.unused_iters.extend(self.heap.drain().map(|n| n.0));
     }
 
-    pub fn key(&self) -> HummockResult<&[u8]> {
-        match &self.cur_node {
-            Some(node) => Ok(node.pair().0),
-            None => Err(HummockError::EOF),
-        }
-    }
+    /// After some of the iterators in `unused_iterators` are seeked or rewound, call this function
+    /// to construct a new heap using the valid ones.
+    fn build_heap(&mut self) {
+        assert!(self.heap.is_empty());
 
-    pub fn value(&self) -> HummockResult<HummockValue<&[u8]>> {
-        match &self.cur_node {
-            Some(node) => Ok(node.pair().1),
-            None => Err(HummockError::EOF),
-        }
-    }
-
-    async fn rewind_inner(&mut self) -> HummockResult<()> {
-        futures::future::join_all(self.iterators.iter_mut().map(|x| x.rewind())).await;
-        self.heap.clear();
-        self.build_heap().await
-    }
-
-    async fn seek_inner(&mut self, key: &[u8]) -> HummockResult<()> {
-        futures::future::join_all(self.iterators.iter_mut().map(|x| x.seek(key))).await;
-        self.heap.clear();
-        self.build_heap().await
-    }
-
-    async fn build_heap(&mut self) -> HummockResult<()> {
-        self.heap_built = true;
-        for (iterator_idx, iter) in &mut self.iterators.iter_mut().enumerate() {
-            if iter.is_valid() {
-                let key = iter.key()?;
-                let val = iter.value()?;
-                self.heap.push(HeapNode::new(iterator_idx, key, val));
-                iter.next().await?;
-            }
-        }
-
-        let node = self.heap.pop();
-        if node.is_none() {
-            return Err(HummockError::EOF);
-        }
-        let node = node.unwrap();
-        let index = node.iterator_idx;
-        self.cur_node = Some(node);
-        let iter = &mut self.iterators[index];
-
-        if iter.is_valid() {
-            let key = iter.key()?;
-            let val = iter.value()?;
-            self.heap.push(HeapNode::new(index, key, val));
-            iter.next().await.unwrap_or(());
-        }
-
-        Ok(())
+        self.heap = self
+            .unused_iters
+            .drain_filter(|i| i.is_valid())
+            .map(Node)
+            .collect();
     }
 }
 
 #[async_trait]
 impl HummockIterator for SortedIterator {
     async fn next(&mut self) -> HummockResult<()> {
-        self.next_inner().await
+        let mut node = self.heap.peek_mut().expect("no inner iter");
+
+        node.0.next().await?;
+        if !node.0.is_valid() {
+            // put back to `unused_iters`
+            let node = PeekMut::pop(node);
+            self.unused_iters.push_back(node.0);
+        } else {
+            // this will update the heap top
+            drop(node);
+        }
+
+        Ok(())
+    }
+
+    fn key(&self) -> &[u8] {
+        self.heap.peek().expect("no inner iter").0.key()
+    }
+
+    fn value(&self) -> HummockValue<&[u8]> {
+        self.heap.peek().expect("no inner iter").0.value()
+    }
+
+    fn is_valid(&self) -> bool {
+        self.heap.peek().map_or(false, |n| n.0.is_valid())
     }
 
     async fn rewind(&mut self) -> HummockResult<()> {
-        self.rewind_inner().await
+        self.reset_heap();
+        futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.rewind())).await?;
+        self.build_heap();
+        Ok(())
     }
 
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
-        self.seek_inner(key).await
-    }
-
-    fn key(&self) -> HummockResult<&[u8]> {
-        self.key()
-    }
-
-    fn value(&self) -> HummockResult<HummockValue<&[u8]>> {
-        self.value()
+        self.reset_heap();
+        futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.seek(key))).await?;
+        self.build_heap();
+        Ok(())
     }
 }
 
@@ -185,21 +118,20 @@ impl HummockIterator for SortedIterator {
 mod test {
     use std::sync::Arc;
 
-    use super::SortedIterator;
+    use super::*;
     use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, gen_test_table_base, iterator_test_key_of, test_value_of,
-        TEST_KEYS_COUNT,
+        default_builder_opt_for_test, gen_test_table, gen_test_table_base, iterator_test_key_of,
+        test_value_of, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::HummockIterator;
     use crate::hummock::table::TableIterator;
-    use crate::hummock::HummockError;
 
     #[tokio::test]
     async fn test_basic() {
         let table2 = gen_test_table_base(0, default_builder_opt_for_test(), &|x| x * 3).await;
         let table1 = gen_test_table_base(0, default_builder_opt_for_test(), &|x| x * 3 + 1).await;
         let table0 = gen_test_table_base(0, default_builder_opt_for_test(), &|x| x * 3 + 2).await;
-        let iters: Vec<Box<dyn HummockIterator + Send + Sync>> = vec![
+        let iters: Vec<BoxedHummockIterator> = vec![
             Box::new(TableIterator::new(Arc::new(table0))),
             Box::new(TableIterator::new(Arc::new(table1))),
             Box::new(TableIterator::new(Arc::new(table2))),
@@ -208,9 +140,9 @@ mod test {
         let mut mi = SortedIterator::new(iters);
         let mut i = 0;
         mi.rewind().await.unwrap();
-        loop {
-            let key = mi.key().unwrap();
-            let val = mi.value().unwrap();
+        while mi.is_valid() {
+            let key = mi.key();
+            let val = mi.value();
             assert_eq!(key, iterator_test_key_of(0, i).as_slice());
             assert_eq!(
                 val.into_put_value().unwrap(),
@@ -218,12 +150,11 @@ mod test {
             );
             i += 1;
 
+            mi.next().await.unwrap();
             if i == TEST_KEYS_COUNT * 3 {
-                assert!(matches!(mi.next().await, Err(HummockError::EOF)));
+                assert!(!mi.is_valid());
                 break;
             }
-
-            mi.next().await.unwrap();
         }
     }
 
@@ -232,7 +163,7 @@ mod test {
         let table2 = gen_test_table_base(0, default_builder_opt_for_test(), &|x| x * 3).await;
         let table1 = gen_test_table_base(0, default_builder_opt_for_test(), &|x| x * 3 + 1).await;
         let table0 = gen_test_table_base(0, default_builder_opt_for_test(), &|x| x * 3 + 2).await;
-        let iters: Vec<Box<dyn HummockIterator + Send + Sync>> = vec![
+        let iters: Vec<BoxedHummockIterator> = vec![
             Box::new(TableIterator::new(Arc::new(table0))),
             Box::new(TableIterator::new(Arc::new(table1))),
             Box::new(TableIterator::new(Arc::new(table2))),
@@ -240,25 +171,25 @@ mod test {
 
         // right edge case
         let mut mi = SortedIterator::new(iters);
-        let res = mi
-            .seek(iterator_test_key_of(0, 3 * TEST_KEYS_COUNT).as_slice())
-            .await;
-        assert!(res.is_err());
+        mi.seek(iterator_test_key_of(0, 3 * TEST_KEYS_COUNT).as_slice())
+            .await
+            .unwrap();
+        assert!(!mi.is_valid());
 
         // normal case
         mi.seek(iterator_test_key_of(0, 4).as_slice())
             .await
             .unwrap();
-        let k = mi.key().unwrap();
-        let v = mi.value().unwrap();
+        let k = mi.key();
+        let v = mi.value();
         assert_eq!(k, iterator_test_key_of(0, 4).as_slice());
         assert_eq!(v.into_put_value().unwrap(), test_value_of(0, 4).as_slice());
 
         mi.seek(iterator_test_key_of(0, 17).as_slice())
             .await
             .unwrap();
-        let k = mi.key().unwrap();
-        let v = mi.value().unwrap();
+        let k = mi.key();
+        let v = mi.value();
         assert_eq!(k, iterator_test_key_of(0, 17).as_slice());
         assert_eq!(v.into_put_value().unwrap(), test_value_of(0, 17).as_slice());
 
@@ -266,9 +197,37 @@ mod test {
         mi.seek(iterator_test_key_of(0, 0).as_slice())
             .await
             .unwrap();
-        let k = mi.key().unwrap();
-        let v = mi.value().unwrap();
+        let k = mi.key();
+        let v = mi.value();
         assert_eq!(k, iterator_test_key_of(0, 0).as_slice());
         assert_eq!(v.into_put_value().unwrap(), test_value_of(0, 0).as_slice());
+    }
+
+    #[tokio::test]
+    async fn test_invalidate_reset() {
+        let table0 = gen_test_table(0, default_builder_opt_for_test()).await;
+        let table1 = gen_test_table(1, default_builder_opt_for_test()).await;
+        let iters: Vec<BoxedHummockIterator> = vec![
+            Box::new(TableIterator::new(Arc::new(table0))),
+            Box::new(TableIterator::new(Arc::new(table1))),
+        ];
+
+        let mut si = SortedIterator::new(iters);
+
+        si.rewind().await.unwrap();
+        let mut count = 0;
+        while si.is_valid() {
+            count += 1;
+            si.next().await.unwrap();
+        }
+        assert_eq!(count, TEST_KEYS_COUNT * 2);
+
+        si.rewind().await.unwrap();
+        let mut count = 0;
+        while si.is_valid() {
+            count += 1;
+            si.next().await.unwrap();
+        }
+        assert_eq!(count, TEST_KEYS_COUNT * 2);
     }
 }

@@ -7,14 +7,13 @@ use super::super::{HummockResult, HummockValue};
 use super::{BlockIterator, SeekPos, Table};
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::key_range::VersionComparator;
-use crate::hummock::HummockError;
 
-/// Iterates on a table
+/// Iterates on a table.
 pub struct TableIterator {
     /// The iterator of the current block.
     block_iter: Option<BlockIterator>,
 
-    /// Current block idx.
+    /// Current block index.
     cur_idx: usize,
 
     /// Reference to the table
@@ -24,84 +23,27 @@ pub struct TableIterator {
 impl TableIterator {
     pub fn new(table: Arc<Table>) -> Self {
         Self {
-            table,
-            cur_idx: 0,
             block_iter: None,
+            cur_idx: 0,
+            table,
         }
     }
 
-    /// Seek to a block and return the first value of the data.
-    async fn seek_idx(&mut self, idx: usize) -> HummockResult<()> {
-        self.cur_idx = idx;
+    /// Seek to a block, and then seek to the key if `seek_key` is given.
+    async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
         if idx >= self.table.block_count() {
             self.block_iter = None;
-            Ok(())
         } else {
             let mut block_iter = BlockIterator::new(self.table.block(idx).await?);
-            block_iter.seek_to_first();
-            self.block_iter = Some(block_iter);
-            Ok(())
-        }
-    }
-
-    pub fn key(&self) -> HummockResult<&[u8]> {
-        self.block_iter
-            .as_ref()
-            .and_then(|x| x.data().map(|(k, _)| k))
-            .ok_or(HummockError::EOF)
-    }
-
-    pub fn value(&self) -> HummockResult<HummockValue<&[u8]>> {
-        match self
-            .block_iter
-            .as_ref()
-            .and_then(|x| x.data().map(|(_, v)| v))
-        {
-            Some(val) => Ok(HummockValue::from_slice(val)?),
-            None => Err(HummockError::EOF),
-        }
-    }
-
-    async fn next_inner(&mut self) -> HummockResult<()> {
-        match &mut self.block_iter {
-            Some(iter) => {
-                iter.next();
-                if !iter.is_valid() {
-                    self.seek_idx(self.cur_idx + 1).await
-                } else {
-                    Ok(())
-                }
+            if let Some(key) = seek_key {
+                block_iter.seek(key, SeekPos::Origin);
+            } else {
+                block_iter.seek_to_first();
             }
-            None => Err(HummockError::EOF),
+
+            self.block_iter = Some(block_iter);
+            self.cur_idx = idx;
         }
-    }
-
-    async fn rewind_inner(&mut self) -> HummockResult<()> {
-        self.seek_idx(0).await
-    }
-
-    async fn seek_inner(&mut self, key: &[u8]) -> HummockResult<()> {
-        let block_idx = self.table.meta.block_metas.partition_point(|offset| {
-            // compare by version comparator
-            let ord = VersionComparator::compare_key(offset.smallest_key.as_slice(), key);
-            ord == Less || ord == Equal
-        });
-        let block_idx = if block_idx > 0 { block_idx - 1 } else { 0 };
-
-        self.cur_idx = block_idx;
-        let mut block_iter = BlockIterator::new(self.table.block(block_idx).await?);
-        block_iter.seek(key, SeekPos::Origin);
-        if self.cur_idx < self.table.block_count() - 1 && !block_iter.is_valid() {
-            self.cur_idx += 1;
-            block_iter = BlockIterator::new(self.table.block(block_idx + 1).await?);
-            block_iter.seek_to_first();
-        }
-
-        self.block_iter = if block_iter.is_valid() {
-            Some(block_iter)
-        } else {
-            None
-        };
 
         Ok(())
     }
@@ -110,23 +52,65 @@ impl TableIterator {
 #[async_trait]
 impl HummockIterator for TableIterator {
     async fn next(&mut self) -> HummockResult<()> {
-        self.next_inner().await
+        let block_iter = self.block_iter.as_mut().expect("no block iter");
+        block_iter.next();
+
+        if block_iter.is_valid() {
+            Ok(())
+        } else {
+            // seek to next block
+            self.seek_idx(self.cur_idx + 1, None).await
+        }
     }
 
-    fn key(&self) -> HummockResult<&[u8]> {
-        self.key()
+    fn key(&self) -> &[u8] {
+        self.block_iter
+            .as_ref()
+            .expect("no block iter")
+            .key()
+            .expect("invalid iter")
     }
 
-    fn value(&self) -> HummockResult<HummockValue<&[u8]>> {
-        self.value()
+    fn value(&self) -> HummockValue<&[u8]> {
+        let raw_value = self
+            .block_iter
+            .as_ref()
+            .expect("no block iter")
+            .value()
+            .expect("invalid iter");
+
+        HummockValue::from_slice(raw_value).expect("decode error")
+    }
+
+    fn is_valid(&self) -> bool {
+        self.block_iter.as_ref().map_or(false, |i| i.is_valid())
     }
 
     async fn rewind(&mut self) -> HummockResult<()> {
-        self.rewind_inner().await
+        self.seek_idx(0, None).await
     }
 
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
-        self.seek_inner(key).await
+        let block_idx = self
+            .table
+            .meta
+            .block_metas
+            .partition_point(|block_meta| {
+                // compare by version comparator
+                // Note: we are comparing against the `smallest_key` of the `block`, thus the
+                // partition point should be `prev(<=)` instead of `<`.
+                let ord = VersionComparator::compare_key(block_meta.smallest_key.as_slice(), key);
+                ord == Less || ord == Equal
+            })
+            .saturating_sub(1); // considering the boundary of 0
+
+        self.seek_idx(block_idx, Some(key)).await?;
+        if !self.is_valid() {
+            // seek to next block
+            self.seek_idx(block_idx + 1, None).await?;
+        }
+
+        Ok(())
     }
 }
 
@@ -152,16 +136,14 @@ mod tests {
         let mut table_iter = TableIterator::new(Arc::new(table));
         let mut cnt = 0;
         table_iter.rewind().await.unwrap();
-        loop {
-            let key = table_iter.key().unwrap();
-            let value = table_iter.value().unwrap();
+
+        while table_iter.is_valid() {
+            let key = table_iter.key();
+            let value = table_iter.value();
             assert_bytes_eq!(key, builder_test_key_of(cnt));
             assert_bytes_eq!(value.into_put_value().unwrap(), test_value_of(cnt));
             cnt += 1;
             table_iter.next().await.unwrap();
-            if table_iter.key().is_err() {
-                break;
-            }
         }
 
         assert_eq!(cnt, TEST_KEYS_COUNT);
@@ -183,30 +165,30 @@ mod tests {
         for i in all_key_to_test {
             table_iter.seek(&builder_test_key_of(i)).await.unwrap();
             // table_iter.next().await.unwrap();
-            let key = table_iter.key().unwrap();
+            let key = table_iter.key();
             assert_bytes_eq!(key, builder_test_key_of(i));
         }
 
         // Seek to key #500 and start iterating.
         table_iter.seek(&builder_test_key_of(500)).await.unwrap();
         for i in 500..TEST_KEYS_COUNT {
-            let key = table_iter.key().unwrap();
+            let key = table_iter.key();
             assert_eq!(key, builder_test_key_of(i));
             table_iter.next().await.unwrap();
         }
-        assert!(matches!(table_iter.next().await, Err(HummockError::EOF)));
+        assert!(!table_iter.is_valid());
 
         // Seek to < first key
 
         let smallest_key = key_with_ts(format!("key_aaaa_{:05}", 0).as_bytes().to_vec(), 233);
         table_iter.seek(smallest_key.as_slice()).await.unwrap();
-        let key = table_iter.key().unwrap();
+        let key = table_iter.key();
         assert_eq!(key, builder_test_key_of(0));
 
         // Seek to > last key
         let largest_key = key_with_ts(format!("key_zzzz_{:05}", 0).as_bytes().to_vec(), 233);
         table_iter.seek(largest_key.as_slice()).await.unwrap();
-        assert!(matches!(table_iter.next().await, Err(HummockError::EOF)));
+        assert!(!table_iter.is_valid());
 
         // Seek to non-existing key
         for idx in 1..TEST_KEYS_COUNT {
@@ -225,10 +207,10 @@ mod tests {
                 .await
                 .unwrap();
 
-            let key = table_iter.key().unwrap();
+            let key = table_iter.key();
             assert_eq!(key, builder_test_key_of(idx));
             table_iter.next().await.unwrap();
         }
-        assert!(matches!(table_iter.next().await, Err(HummockError::EOF)));
+        assert!(!table_iter.is_valid());
     }
 }

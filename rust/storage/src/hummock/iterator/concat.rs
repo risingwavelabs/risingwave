@@ -1,3 +1,4 @@
+use std::cmp::Ordering::{Equal, Less};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -6,111 +7,98 @@ use crate::hummock::iterator::HummockIterator;
 use crate::hummock::key_range::VersionComparator;
 use crate::hummock::table::{Table, TableIterator};
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockError, HummockResult};
+use crate::hummock::HummockResult;
 
+/// Iterates on multiple non-overlapping tables.
 pub struct ConcatIterator {
+    // The iterator of the current table.
+    table_iter: Option<TableIterator>,
+
+    /// Current table index.
+    cur_idx: usize,
+
+    /// All non-overlapping tables.
     tables: Vec<Arc<Table>>,
-    table_count: usize,
-    // `None` means this iterator is not initialized yet. `Some` means this iterator can be
-    // accessed or arrives at EOF.
-    cur_iter: Option<TableIterator>,
-    cur_table_idx: usize,
 }
 
 impl ConcatIterator {
+    /// Caller should make sure that `tables` are ordered and non-overlapping.
     pub fn new(tables: Vec<Arc<Table>>) -> Self {
-        let table_count = tables.len();
         Self {
+            table_iter: None,
+            cur_idx: 0,
             tables,
-            table_count,
-            cur_iter: None,
-            cur_table_idx: 0,
         }
     }
-    async fn seek_inner(&mut self, key: &[u8]) -> HummockResult<()> {
-        let mut nth_table = self.tables.partition_point(|table| {
-            use std::cmp::Ordering::Less;
-            // compare by version comparator
-            VersionComparator::compare_key(&table.meta.smallest_key, key) == Less
-        });
-        if nth_table > 0 {
-            nth_table -= 1
-        }
-        self.set_iter(nth_table).await?;
-        self.cur_iter.as_mut().unwrap().seek(key).await?;
-        Ok(())
-    }
 
-    async fn set_iter(&mut self, table_idx: usize) -> HummockResult<()> {
-        let mut iter = TableIterator::new(self.tables[table_idx].clone());
-        iter.rewind().await?;
-        self.cur_iter = Some(iter);
-        self.cur_table_idx = table_idx;
-        Ok(())
-    }
-    async fn rewind_inner(&mut self) -> HummockResult<()> {
-        self.set_iter(0).await
-    }
-
-    async fn next_inner(&mut self) -> HummockResult<()> {
-        if self.cur_iter.is_none() {
-            // This action should be in the constructor, but the `new` can not invoke async
-            // function.
-            self.rewind_inner().await?;
-        }
-        self.cur_iter.as_mut().unwrap().next().await?;
-
-        match self.cur_iter.as_ref().unwrap().key() {
-            // this iterator is still valid.
-            Ok(_) => Ok(()),
-
-            // current table arrives at EOF, check if we can switch to the next table.
-            Err(HummockError::EOF) => {
-                if self.cur_table_idx + 1 < self.table_count {
-                    self.set_iter(self.cur_table_idx + 1).await?;
-                    Ok(())
-                } else {
-                    Err(HummockError::EOF)
-                }
+    /// Seek to a table, and then seek to the key if `seek_key` is given.
+    async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
+        if idx >= self.tables.len() {
+            self.table_iter = None;
+        } else {
+            let mut table_iter = TableIterator::new(self.tables[idx].clone());
+            if let Some(key) = seek_key {
+                table_iter.seek(key).await?;
+            } else {
+                table_iter.rewind().await?;
             }
-            Err(e) => Err(e),
-        }
-    }
 
-    pub fn key(&self) -> HummockResult<&[u8]> {
-        match &self.cur_iter {
-            Some(iter) => iter.key(),
-            None => Err(HummockError::EOF),
+            self.table_iter = Some(table_iter);
+            self.cur_idx = idx;
         }
-    }
-    pub fn value(&self) -> HummockResult<HummockValue<&[u8]>> {
-        match &self.cur_iter {
-            Some(iter) => iter.value(),
-            None => Err(HummockError::EOF),
-        }
+
+        Ok(())
     }
 }
 
 #[async_trait]
 impl HummockIterator for ConcatIterator {
     async fn next(&mut self) -> HummockResult<()> {
-        self.next_inner().await
+        let table_iter = self.table_iter.as_mut().expect("no table iter");
+        table_iter.next().await?;
+
+        if table_iter.is_valid() {
+            Ok(())
+        } else {
+            // seek to next table
+            self.seek_idx(self.cur_idx + 1, None).await
+        }
     }
 
-    fn key(&self) -> HummockResult<&[u8]> {
-        self.key()
+    fn key(&self) -> &[u8] {
+        self.table_iter.as_ref().expect("no table iter").key()
     }
 
-    fn value(&self) -> HummockResult<HummockValue<&[u8]>> {
-        self.value()
+    fn value(&self) -> HummockValue<&[u8]> {
+        self.table_iter.as_ref().expect("no table iter").value()
+    }
+
+    fn is_valid(&self) -> bool {
+        self.table_iter.as_ref().map_or(false, |i| i.is_valid())
     }
 
     async fn rewind(&mut self) -> HummockResult<()> {
-        self.rewind_inner().await
+        self.seek_idx(0, None).await
     }
 
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
-        self.seek_inner(key).await
+        let table_idx = self
+            .tables
+            .partition_point(|table| {
+                // compare by version comparator
+                // Note: we are comparing against the `smallest_key` of the `table`, thus the
+                // partition point should be `prev(<=)` instead of `<`.
+                let ord = VersionComparator::compare_key(&table.meta.smallest_key, key);
+                ord == Less || ord == Equal
+            })
+            .saturating_sub(1); // considering the boundary of 0
+
+        self.seek_idx(table_idx, Some(key)).await?;
+        if !self.is_valid() {
+            // seek to next block
+            self.seek_idx(table_idx + 1, None).await?;
+        }
+        Ok(())
     }
 }
 
@@ -118,23 +106,25 @@ impl HummockIterator for ConcatIterator {
 mod tests {
     use super::*;
     use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, gen_test_table, iterator_test_key_of, test_value_of,
-        TEST_KEYS_COUNT,
+        default_builder_opt_for_test, gen_test_table, gen_test_table_base, iterator_test_key_of,
+        test_value_of, TEST_KEYS_COUNT,
     };
 
     #[tokio::test]
-    async fn hello() {
+    async fn test_concat_iterator() {
         let table0 = gen_test_table(0, default_builder_opt_for_test()).await;
         let table1 = gen_test_table(1, default_builder_opt_for_test()).await;
         let table2 = gen_test_table(2, default_builder_opt_for_test()).await;
+
         let mut iter =
             ConcatIterator::new(vec![Arc::new(table0), Arc::new(table1), Arc::new(table2)]);
         let mut i = 0;
         iter.rewind().await.unwrap();
-        loop {
+
+        while iter.is_valid() {
             let table_idx = i / TEST_KEYS_COUNT;
-            let key = iter.key().unwrap();
-            let val = iter.value().unwrap();
+            let key = iter.key();
+            let val = iter.value();
             assert_eq!(
                 key,
                 iterator_test_key_of(table_idx, i % TEST_KEYS_COUNT).as_slice()
@@ -144,16 +134,17 @@ mod tests {
                 test_value_of(table_idx, i % TEST_KEYS_COUNT).as_slice()
             );
             i += 1;
+
+            iter.next().await.unwrap();
             if i == TEST_KEYS_COUNT * 3 {
-                assert!(matches!(iter.next().await, Err(HummockError::EOF)));
+                assert!(!iter.is_valid());
                 break;
             }
-            iter.next().await.unwrap();
         }
 
         iter.rewind().await.unwrap();
-        let key = iter.key().unwrap();
-        let val = iter.value().unwrap();
+        let key = iter.key();
+        let val = iter.value();
         assert_eq!(key, iterator_test_key_of(0, 0).as_slice());
         assert_eq!(
             val.into_put_value().unwrap(),
@@ -162,20 +153,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn seek_test() {
+    async fn test_concat_seek() {
         let table0 = gen_test_table(0, default_builder_opt_for_test()).await;
         let table1 = gen_test_table(1, default_builder_opt_for_test()).await;
         let table2 = gen_test_table(2, default_builder_opt_for_test()).await;
         let mut iter =
             ConcatIterator::new(vec![Arc::new(table0), Arc::new(table1), Arc::new(table2)]);
 
-        // Middle normal case
         iter.seek(iterator_test_key_of(1, 1).as_slice())
             .await
             .unwrap();
 
-        let key = iter.key().unwrap();
-        let val = iter.value().unwrap();
+        let key = iter.key();
+        let val = iter.value();
         assert_eq!(key, iterator_test_key_of(1, 1).as_slice());
         assert_eq!(
             val.into_put_value().unwrap(),
@@ -186,8 +176,8 @@ mod tests {
         iter.seek(iterator_test_key_of(0, 0).as_slice())
             .await
             .unwrap();
-        let key = iter.key().unwrap();
-        let val = iter.value().unwrap();
+        let key = iter.key();
+        let val = iter.value();
         assert_eq!(key, iterator_test_key_of(0, 0).as_slice());
         assert_eq!(
             val.into_put_value().unwrap(),
@@ -199,8 +189,8 @@ mod tests {
             .await
             .unwrap();
 
-        let key = iter.key().unwrap();
-        let val = iter.value().unwrap();
+        let key = iter.key();
+        let val = iter.value();
         assert_eq!(key, iterator_test_key_of(2, TEST_KEYS_COUNT - 1).as_slice());
         assert_eq!(
             val.into_put_value().unwrap(),
@@ -211,7 +201,39 @@ mod tests {
         iter.seek(iterator_test_key_of(4, 10).as_slice())
             .await
             .unwrap();
-        let res = iter.next().await;
-        assert!(matches!(res, Err(HummockError::EOF)));
+        assert!(!iter.is_valid());
+    }
+
+    #[tokio::test]
+    async fn test_concat_seek_not_exists() {
+        let table0 = gen_test_table_base(0, default_builder_opt_for_test(), |x| x * 2).await;
+        let table1 = gen_test_table_base(1, default_builder_opt_for_test(), |x| x * 2).await;
+        let table2 = gen_test_table_base(2, default_builder_opt_for_test(), |x| x * 2).await;
+        let mut iter =
+            ConcatIterator::new(vec![Arc::new(table0), Arc::new(table1), Arc::new(table2)]);
+
+        iter.seek(iterator_test_key_of(1, 1).as_slice())
+            .await
+            .unwrap();
+
+        let key = iter.key();
+        let val = iter.value();
+        assert_eq!(key, iterator_test_key_of(1, 2).as_slice());
+        assert_eq!(
+            val.into_put_value().unwrap(),
+            test_value_of(1, 2).as_slice()
+        );
+
+        iter.seek(iterator_test_key_of(1, TEST_KEYS_COUNT * 114514).as_slice())
+            .await
+            .unwrap();
+
+        let key = iter.key();
+        let val = iter.value();
+        assert_eq!(key, iterator_test_key_of(2, 0).as_slice());
+        assert_eq!(
+            val.into_put_value().unwrap(),
+            test_value_of(2, 0).as_slice()
+        );
     }
 }

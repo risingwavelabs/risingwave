@@ -145,11 +145,19 @@ impl BlockIterator {
 
     /// Return the key and value of the previous operation
     pub fn data(&self) -> Option<(&[u8], &[u8])> {
-        if self.idx >= 0 && self.idx < self.entry_offsets().len() as isize {
+        if self.is_valid() {
             Some((&self.key[..], &self.val[..]))
         } else {
             None
         }
+    }
+
+    pub fn key(&self) -> Option<&[u8]> {
+        self.data().map(|(k, _v)| k)
+    }
+
+    pub fn value(&self) -> Option<&[u8]> {
+        self.data().map(|(_k, v)| v)
     }
 
     /// Check whether the iterator is at the last position
