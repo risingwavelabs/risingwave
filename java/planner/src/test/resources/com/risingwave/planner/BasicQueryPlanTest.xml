@@ -310,12 +310,12 @@ RwBatchHashJoin(condition=[=($0, $3)], joinType=[inner])
     <TestCase name="select interval">
         <Resource name="sql">
             <![CDATA[
-            select date '2021-10-1' + interval '1' year + interval '1' day;
+            select date '2021-10-1' + interval '1024' year + interval '1024' day;
 ]]>
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwBatchProject(EXPR$0=[+(+(2021-10-01, 12:INTERVAL YEAR), 86400000:INTERVAL DAY)])
+RwBatchProject(EXPR$0=[+(+(2021-10-01, 12288:INTERVAL YEAR(9)), 88473600000:INTERVAL DAY(9))])
   RwBatchValues(tuples=[[{ 0 }]])
 ]]>
         </Resource>

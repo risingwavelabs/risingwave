@@ -47,9 +47,8 @@ RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], col
         RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
           RwBatchHashAgg(group=[{0, 1}], sum_qty=[SUM($2)], sum_base_price=[SUM($3)], sum_disc_price=[SUM($4)], sum_charge=[SUM($5)], agg#4=[SUM($2)], agg#5=[COUNT($2)], agg#6=[SUM($3)], agg#7=[COUNT($3)], agg#8=[SUM($6)], agg#9=[COUNT($6)], count_order=[COUNT()])
             RwBatchProject(l_returnflag=[$4], l_linestatus=[$5], l_quantity=[$0], l_extendedprice=[$1], $f4=[*($1, -(1, $2))], $f5=[*(*($1, -(1, $2)), +(1, $3))], l_discount=[$2])
-              RwBatchFilter(condition=[<=(CAST($6):TIMESTAMP(0), -(1998-12-01, 6134400000:INTERVAL DAY))])
-                RwBatchTableScan(table=[[test_schema, lineitem]], columns=[l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate])
-            ]]>
+              RwBatchFilter(condition=[<=(CAST($6):TIMESTAMP(0), -(1998-12-01, 6134400000:INTERVAL DAY(9)))])
+                RwBatchTableScan(table=[[test_schema, lineitem]], columns=[l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate])            ]]>
         </Resource>
     </TestCase>
     <TestCase name="q2">
@@ -250,7 +249,7 @@ RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], col
             RwBatchHashJoin(condition=[=($0, $2)], joinType=[inner])
               RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
                 RwBatchProject(o_orderkey=[$0], o_orderpriority=[$2])
-                  RwBatchFilter(condition=[AND(>=($1, 1997-07-01), <(CAST($1):TIMESTAMP(0), +(1997-07-01, 3:INTERVAL MONTH)), IS NOT NULL($0))])
+                  RwBatchFilter(condition=[AND(>=($1, 1997-07-01), <(CAST($1):TIMESTAMP(0), +(1997-07-01, 3:INTERVAL MONTH(9))), IS NOT NULL($0))])
                     RwBatchTableScan(table=[[test_schema, orders]], columns=[o_orderkey,o_orderdate,o_orderpriority])
               RwBatchProject(l_orderkey=[$0])
                 RwBatchHashAgg(group=[{0}], agg#0=[MIN($1)])
@@ -316,7 +315,7 @@ RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], col
                                         RwBatchTableScan(table=[[test_schema, customer]], columns=[c_custkey,c_nationkey])
                                       RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
                                         RwBatchProject(o_orderkey=[$0], o_custkey=[$1])
-                                          RwBatchFilter(condition=[AND(>=($2, 1994-01-01), <(CAST($2):TIMESTAMP(0), +(1994-01-01, 12:INTERVAL YEAR)))])
+                                          RwBatchFilter(condition=[AND(>=($2, 1994-01-01), <(CAST($2):TIMESTAMP(0), +(1994-01-01, 12:INTERVAL YEAR(9))))])
                                             RwBatchTableScan(table=[[test_schema, orders]], columns=[o_orderkey,o_custkey,o_orderdate])
                                 RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
                                   RwBatchProject(l_orderkey=[$0], l_suppkey=[$1], *=[*($2, -(1, $3))])
@@ -353,7 +352,7 @@ RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
   RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
     RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
       RwBatchProject($f0=[*($1, $2)])
-        RwBatchFilter(condition=[AND(>=($3, 1994-01-01), <(CAST($3):TIMESTAMP(0), +(1994-01-01, 12:INTERVAL YEAR)), OR(AND(>=($2, -(0.08:DECIMAL(3,2), 0.01:DECIMAL(3,2))), <=($2, +(0.08:DECIMAL(3,2), 0.01:DECIMAL(3,2)))), AND(>=($2, +(0.08:DECIMAL(3,2), 0.01:DECIMAL(3,2))), <=($2, -(0.08:DECIMAL(3,2), 0.01:DECIMAL(3,2))))), <($0, 24))])
+        RwBatchFilter(condition=[AND(>=($3, 1994-01-01), <(CAST($3):TIMESTAMP(0), +(1994-01-01, 12:INTERVAL YEAR(9))), OR(AND(>=($2, -(0.08:DECIMAL(3,2), 0.01:DECIMAL(3,2))), <=($2, +(0.08:DECIMAL(3,2), 0.01:DECIMAL(3,2)))), AND(>=($2, +(0.08:DECIMAL(3,2), 0.01:DECIMAL(3,2))), <=($2, -(0.08:DECIMAL(3,2), 0.01:DECIMAL(3,2))))), <($0, 24))])
           RwBatchTableScan(table=[[test_schema, lineitem]], columns=[l_quantity,l_extendedprice,l_discount,l_shipdate])
               ]]>
         </Resource>
@@ -671,7 +670,7 @@ RwBatchSort(sort0=[$2], dir0=[DESC], fetch=[20])
                               RwBatchTableScan(table=[[test_schema, customer]], columns=[c_custkey,c_name,c_address,c_nationkey,c_phone,c_acctbal,c_comment])
                             RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
                               RwBatchProject(o_orderkey=[$0], o_custkey=[$1])
-                                RwBatchFilter(condition=[AND(>=($2, 1994-01-01), <(CAST($2):TIMESTAMP(0), +(1994-01-01, 3:INTERVAL MONTH)))])
+                                RwBatchFilter(condition=[AND(>=($2, 1994-01-01), <(CAST($2):TIMESTAMP(0), +(1994-01-01, 3:INTERVAL MONTH(9))))])
                                   RwBatchTableScan(table=[[test_schema, orders]], columns=[o_orderkey,o_custkey,o_orderdate])
                       RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
                         RwBatchProject(l_orderkey=[$0], *=[*($1, -(1, $2))])
@@ -807,7 +806,7 @@ RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], col
                   RwBatchTableScan(table=[[test_schema, orders]], columns=[o_orderkey,o_orderpriority])
               RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
                 RwBatchProject(l_orderkey=[$0], l_shipmode=[$4])
-                  RwBatchFilter(condition=[AND(OR(=($4, 'FOB'), =($4, 'SHIP')), <($2, $3), <($1, $2), >=($3, 1994-01-01), <(CAST($3):TIMESTAMP(0), +(1994-01-01, 12:INTERVAL YEAR)))])
+                  RwBatchFilter(condition=[AND(OR(=($4, 'FOB'), =($4, 'SHIP')), <($2, $3), <($1, $2), >=($3, 1994-01-01), <(CAST($3):TIMESTAMP(0), +(1994-01-01, 12:INTERVAL YEAR(9))))])
                     RwBatchTableScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_shipdate,l_commitdate,l_receiptdate,l_shipmode])
 ]]>
         </Resource>
@@ -888,7 +887,7 @@ RwBatchProject(promo_revenue=[/(*(100.0:DECIMAL(4,1), $0), $1)])
                 RwBatchTableScan(table=[[test_schema, part]], columns=[p_partkey,p_type])
             RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
               RwBatchProject(l_partkey=[$0], *=[*($1, -(1, $2))])
-                RwBatchFilter(condition=[AND(>=($3, 1994-03-01), <(CAST($3):TIMESTAMP(0), +(1994-03-01, 1:INTERVAL MONTH)))])
+                RwBatchFilter(condition=[AND(>=($3, 1994-03-01), <(CAST($3):TIMESTAMP(0), +(1994-03-01, 1:INTERVAL MONTH(9))))])
                   RwBatchTableScan(table=[[test_schema, lineitem]], columns=[l_partkey,l_extendedprice,l_discount,l_shipdate])
 ]]>
         </Resource>
@@ -954,7 +953,7 @@ RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], col
                 RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
                   RwBatchHashAgg(group=[{0}], EXPR$1=[SUM($1)])
                     RwBatchProject(l_suppkey=[$0], $f1=[*($1, -(1, $2))])
-                      RwBatchFilter(condition=[AND(>=($3, 1993-01-01), <(CAST($3):TIMESTAMP(0), +(1993-01-01, 3:INTERVAL MONTH)))])
+                      RwBatchFilter(condition=[AND(>=($3, 1993-01-01), <(CAST($3):TIMESTAMP(0), +(1993-01-01, 3:INTERVAL MONTH(9))))])
                         RwBatchTableScan(table=[[test_schema, lineitem]], columns=[l_suppkey,l_extendedprice,l_discount,l_shipdate])
         RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
           RwBatchSortAgg(group=[{}], EXPR$0=[MAX($0)])
@@ -965,7 +964,7 @@ RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], col
                     RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
                       RwBatchHashAgg(group=[{0}], EXPR$1=[SUM($1)])
                         RwBatchProject(l_suppkey=[$0], $f1=[*($1, -(1, $2))])
-                          RwBatchFilter(condition=[AND(>=($3, 1993-01-01), <(CAST($3):TIMESTAMP(0), +(1993-01-01, 3:INTERVAL MONTH)))])
+                          RwBatchFilter(condition=[AND(>=($3, 1993-01-01), <(CAST($3):TIMESTAMP(0), +(1993-01-01, 3:INTERVAL MONTH(9))))])
                             RwBatchTableScan(table=[[test_schema, lineitem]], columns=[l_suppkey,l_extendedprice,l_discount,l_shipdate])
 ]]>
         </Resource>
@@ -1295,7 +1294,7 @@ RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], col
                         RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
                           RwBatchHashAgg(group=[{0, 1}], agg#0=[SUM($2)])
                             RwBatchProject(l_partkey=[$0], l_suppkey=[$1], l_quantity=[$2])
-                              RwBatchFilter(condition=[AND(>=($3, 1994-01-01), <(CAST($3):TIMESTAMP(0), +(1994-01-01, 12:INTERVAL YEAR)), IS NOT NULL($0), IS NOT NULL($1))])
+                              RwBatchFilter(condition=[AND(>=($3, 1994-01-01), <(CAST($3):TIMESTAMP(0), +(1994-01-01, 12:INTERVAL YEAR(9))), IS NOT NULL($0), IS NOT NULL($1))])
                                 RwBatchTableScan(table=[[test_schema, lineitem]], columns=[l_partkey,l_suppkey,l_quantity,l_shipdate])
 ]]>
         </Resource>

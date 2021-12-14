@@ -116,6 +116,7 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 /** A visitor for transforming sqlNode to calcite node */
 public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
   private final RisingWaveOperatorTable operatorTable = new RisingWaveOperatorTable();
+  final int intervalPrecision = 9;
 
   @Override
   public SqlNode visitCreateTable(CreateTable<?> node, Void context) {
@@ -514,7 +515,11 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
             .map(IntervalLiteral.IntervalField::name)
             .map(TimeUnit::valueOf)
             .orElse(null);
-    var intervalQualifier = new SqlIntervalQualifier(startUnit, endUnit, SqlParserPos.ZERO);
+    // In TypeSystem, the max precision is 9. And the backend use int32 to store year/month.
+    // Therefore, we hard code the precision 9 here.
+    var intervalQualifier =
+        new SqlIntervalQualifier(
+            startUnit, intervalPrecision, endUnit, intervalPrecision, SqlParserPos.ZERO);
     return SqlLiteral.createInterval(sign, node.getValue(), intervalQualifier, SqlParserPos.ZERO);
   }
 
