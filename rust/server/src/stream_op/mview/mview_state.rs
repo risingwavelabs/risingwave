@@ -8,7 +8,7 @@ use risingwave_common::util::sort_util::OrderType;
 
 use super::{serialize_cell, serialize_cell_idx, serialize_pk};
 use crate::stream_op::keyspace::StateStore;
-use crate::stream_op::state_aggregation::OrderedRowSerializer;
+use crate::stream_op::state_aggregation::OrderedRowsSerializer;
 
 /// `ManagedMviewState` buffers recent mutations. Data will be written
 /// to backend storage on calling `flush`.
@@ -16,7 +16,7 @@ pub struct ManagedMViewState<S: StateStore> {
     prefix: Vec<u8>,
     schema: Schema,
     pk_columns: Vec<usize>,
-    sort_key_serializer: OrderedRowSerializer,
+    sort_key_serializer: OrderedRowsSerializer,
     memtable: HashMap<Row, Option<Row>>,
     storage: S,
 }
@@ -39,7 +39,7 @@ impl<S: StateStore> ManagedMViewState<S> {
             pk_columns,
             memtable: HashMap::new(),
             storage,
-            sort_key_serializer: OrderedRowSerializer::new(order_pairs),
+            sort_key_serializer: OrderedRowsSerializer::new(order_pairs),
         }
     }
 

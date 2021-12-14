@@ -38,21 +38,25 @@ impl OrderedArraysSerializer {
     }
 }
 
-pub struct OrderedRowSerializer {
+pub struct OrderedRowsSerializer {
     order_pairs: Vec<OrderPair>,
 }
 
-impl OrderedRowSerializer {
+impl OrderedRowsSerializer {
     pub fn new(order_pairs: Vec<OrderPair>) -> Self {
         Self { order_pairs }
     }
 
-    pub fn order_based_scehmaed_serialize(&self, data: &Row, append_to: &mut Vec<Vec<u8>>) {
-        for (datum, &(order, _)) in data.0.iter().zip(self.order_pairs.iter()) {
-            let mut serializer = memcomparable::Serializer::new(vec![]);
-            serializer.set_reverse(order == OrderType::Descending);
-            serialize_datum_into(datum, &mut serializer).unwrap();
-            append_to.push(serializer.into_inner());
+    pub fn order_based_scehmaed_serialize(&self, data: &[&Row], append_to: &mut Vec<Vec<u8>>) {
+        for row in data {
+            let mut row_bytes = vec![];
+            for (datum, &(order, _)) in row.0.iter().zip(self.order_pairs.iter()) {
+                let mut serializer = memcomparable::Serializer::new(vec![]);
+                serializer.set_reverse(order == OrderType::Descending);
+                serialize_datum_into(datum, &mut serializer).unwrap();
+                row_bytes.extend(serializer.into_inner());
+            }
+            append_to.push(row_bytes);
         }
     }
 }
@@ -60,11 +64,28 @@ impl OrderedRowSerializer {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{I16Array, Utf8Array};
+    use risingwave_common::types::ScalarImpl::{Int16, Utf8};
 
     use super::*;
 
     #[test]
-    fn test_sort_key_serializer() {
+    fn test_ordered_row_serializer() {
+        let orders = vec![(OrderType::Descending, 0), (OrderType::Ascending, 1)];
+        let serializer = OrderedRowsSerializer::new(orders);
+        let row1 = Row(vec![Some(Int16(5)), Some(Utf8("abc".to_string()))]);
+        let row2 = Row(vec![Some(Int16(5)), Some(Utf8("abd".to_string()))]);
+        let row3 = Row(vec![Some(Int16(6)), Some(Utf8("abc".to_string()))]);
+        let mut array = vec![];
+        serializer.order_based_scehmaed_serialize(&[&row1, &row2, &row3], &mut array);
+        array.sort();
+        // option 1 byte || number 2 bytes
+        assert_eq!(array[0][2], !6i16.to_be_bytes()[1]);
+        assert_eq!(&array[1][3..], [1, 1, b'a', b'b', b'c', 0, 0, 0, 0, 0, 3u8]);
+        assert_eq!(&array[2][3..], [1, 1, b'a', b'b', b'd', 0, 0, 0, 0, 0, 3u8]);
+    }
+
+    #[test]
+    fn test_ordered_arrays_serializer() {
         let orders = vec![(OrderType::Descending, 0), (OrderType::Ascending, 1)];
         let serializer = OrderedArraysSerializer::new(orders);
         let array0 = array_nonnull! { I16Array, [3,2,2] }.into();

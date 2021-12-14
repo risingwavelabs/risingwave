@@ -17,7 +17,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::data::stream_message::StreamMessage;
 use risingwave_pb::data::{Barrier as ProstBarrier, StreamMessage as ProstStreamMessage};
 pub use simple_agg::*;
-pub use state_aggregation::{OrderedArraysSerializer, OrderedRowSerializer};
+pub use state_aggregation::{OrderedArraysSerializer, OrderedRowsSerializer};
 pub use stream_source::*;
 pub use table_source::*;
 pub use top_n::*;

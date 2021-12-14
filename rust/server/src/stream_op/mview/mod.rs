@@ -7,11 +7,11 @@ use risingwave_common::array::Row;
 use risingwave_common::error::Result;
 use risingwave_common::types::{serialize_datum_into, Datum};
 
-use super::OrderedRowSerializer;
+use super::OrderedRowsSerializer;
 
-fn serialize_pk(pk: &Row, serializer: &OrderedRowSerializer) -> Result<Vec<u8>> {
+fn serialize_pk(pk: &Row, serializer: &OrderedRowsSerializer) -> Result<Vec<u8>> {
     let mut result = vec![];
-    serializer.order_based_scehmaed_serialize(pk, &mut result);
+    serializer.order_based_scehmaed_serialize(&[pk], &mut result);
     Ok(std::mem::take(&mut result[0]))
 }
 
