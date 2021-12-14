@@ -52,8 +52,8 @@ impl GrpcExchangeSource {
         Ok(Self {
             client,
             stream,
-            sink_id,
             addr,
+            sink_id,
         })
     }
 }

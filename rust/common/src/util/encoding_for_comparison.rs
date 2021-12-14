@@ -172,7 +172,7 @@ impl EncodableArray<'_> {
             };
             buf.extend_from_slice(sub.as_slice());
         }
-        EncodedColumn { width, buf }
+        EncodedColumn { buf, width }
     }
 }
 

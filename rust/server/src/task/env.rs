@@ -25,8 +25,8 @@ impl GlobalTaskEnv {
     ) -> Self {
         GlobalTaskEnv {
             table_manager,
-            task_manager,
             server_addr,
+            task_manager,
             source_manager,
         }
     }

@@ -1,8 +1,9 @@
 #![allow(dead_code)]
+#![warn(clippy::doc_markdown)]
 #![warn(clippy::explicit_into_iter_loop)]
 #![warn(clippy::explicit_iter_loop)]
+#![warn(clippy::inconsistent_struct_constructor)]
 #![warn(clippy::map_flatten)]
-#![warn(clippy::doc_markdown)]
 #![feature(path_file_prefix)]
 
 mod opts;

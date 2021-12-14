@@ -130,9 +130,9 @@ impl Table {
     ) -> HummockResult<Self> {
         Ok(Table {
             id,
+            meta,
             obj_client,
             data_path,
-            meta,
         })
     }
 
