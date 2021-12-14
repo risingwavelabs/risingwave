@@ -8,13 +8,12 @@ use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{CommitMode, Consumer, DefaultConsumerContext, StreamConsumer};
 use rdkafka::metadata::Metadata;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
-use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilderImpl, DataChunk, Op, StreamChunk};
+use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::Datum;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 
+use crate::common::SourceChunkBuilder;
 use crate::{
     BatchSourceReader, Source, SourceColumnDesc, SourceParser, SourceWriter, StreamSourceReader,
 };
@@ -313,42 +312,9 @@ impl Source for HighLevelKafkaSource {
     }
 }
 
-trait KafkaSourceChunkBuilder {
-    fn build_columns(
-        column_descs: &[SourceColumnDesc],
-        rows: &[Vec<Datum>],
-    ) -> Result<Vec<Column>> {
-        let mut builders = column_descs
-            .iter()
-            .map(|k| k.data_type.create_array_builder(DEFAULT_CHUNK_BUFFER_SIZE))
-            .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
+impl SourceChunkBuilder for HighLevelKafkaSourceStreamReader {}
 
-        for row in rows {
-            row.iter()
-                .zip(&mut builders)
-                .try_for_each(|(datum, builder)| builder.append_datum(datum))?
-        }
-
-        builders
-            .into_iter()
-            .zip(column_descs.iter().map(|c| c.data_type.clone()))
-            .map(|(builder, data_type)| {
-                builder
-                    .finish()
-                    .map(|arr| Column::new(Arc::new(arr), data_type.clone()))
-            })
-            .collect::<Result<Vec<Column>>>()
-    }
-
-    fn build_datachunk(column_desc: &[SourceColumnDesc], rows: &[Vec<Datum>]) -> Result<DataChunk> {
-        let columns = Self::build_columns(column_desc, rows)?;
-        Ok(DataChunk::builder().columns(columns).build())
-    }
-}
-
-impl KafkaSourceChunkBuilder for HighLevelKafkaSourceStreamReader {}
-
-impl KafkaSourceChunkBuilder for HighLevelKafkaSourceBatchReader {}
+impl SourceChunkBuilder for HighLevelKafkaSourceBatchReader {}
 
 #[async_trait]
 impl StreamSourceReader for HighLevelKafkaSourceStreamReader {

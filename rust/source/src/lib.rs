@@ -14,6 +14,8 @@ pub mod parser;
 mod high_level_kafka;
 mod manager;
 
+mod common;
+mod pulsar;
 mod table;
 
 #[derive(Clone, Debug)]
