@@ -275,7 +275,7 @@ impl VersionManager {
         let select_level = 0u8;
 
         enum SearchResult {
-            Found(Vec<LevelEntry>, Vec<KeyRange>),
+            Found(Vec<u64>, Vec<u64>, Vec<KeyRange>),
             NotFound,
         }
 
@@ -287,16 +287,44 @@ impl VersionManager {
             .split_at_mut(select_level as usize + 1);
         let (prior, posterior) = (prior.last_mut().unwrap(), posterior.first_mut().unwrap());
         let is_select_level_leveling = matches!(prior, LevelHandler::Leveling(_));
+        let is_select_next_level_leveling = matches!(posterior, LevelHandler::Leveling(_));
         match prior {
             LevelHandler::Tiering(l_n) | LevelHandler::Leveling(l_n) => {
-                for TableStat {
-                    key_range,
-                    table_id,
-                    compact_task,
-                } in l_n
+                for (
+                    sst_idx,
+                    TableStat {
+                        key_range: sst_key_range,
+                        table_id,
+                        compact_task,
+                    },
+                ) in l_n.iter().enumerate()
                 {
                     if compact_task.is_none() {
-                        // TODO: if `select_level` == 0, we need compact more than 1 table in L0
+                        let mut select_level_inputs = vec![*table_id];
+                        let key_range;
+                        let mut l0_key_range;
+                        if select_level == 0 {
+                            l0_key_range = sst_key_range.clone();
+                            // TODO: we need to improve our select strategy
+                            for TableStat {
+                                key_range: other_key_range,
+                                table_id: other_table_id,
+                                compact_task: other_compact_task,
+                            } in &l_n[sst_idx + 1..]
+                            {
+                                if other_compact_task.is_none() {
+                                    if l0_key_range.full_key_overlap(other_key_range) {
+                                        select_level_inputs.push(*other_table_id);
+                                        l0_key_range.full_key_extend(other_key_range);
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            }
+                            key_range = &l0_key_range;
+                        } else {
+                            key_range = sst_key_range;
+                        }
                         match posterior {
                             LevelHandler::Tiering(_) => unimplemented!(),
                             LevelHandler::Leveling(l_n_suc) => {
@@ -334,7 +362,6 @@ impl VersionManager {
                                         ));
                                     };
 
-                                    *compact_task = Some(next_task_id);
                                     let mut overlap_idx = overlap_begin;
                                     while overlap_idx < overlap_end {
                                         l_n_suc[overlap_idx].compact_task = Some(next_task_id);
@@ -348,20 +375,8 @@ impl VersionManager {
                                     }
 
                                     found = SearchResult::Found(
-                                        vec![
-                                            LevelEntry {
-                                                level_idx: select_level,
-                                                level: if is_select_level_leveling {
-                                                    Level::Leveling(vec![*table_id])
-                                                } else {
-                                                    Level::Tiering(vec![*table_id])
-                                                },
-                                            },
-                                            LevelEntry {
-                                                level_idx: select_level + 1,
-                                                level: Level::Leveling(suc_table_ids),
-                                            },
-                                        ],
+                                        select_level_inputs,
+                                        suc_table_ids,
                                         splits,
                                     );
                                     break;
@@ -370,14 +385,55 @@ impl VersionManager {
                         }
                     }
                 }
+                match &found {
+                    SearchResult::Found(select_ln_ids, _, _) => {
+                        let mut select_ln_iter = select_ln_ids.iter();
+                        if let Some(first_id) = select_ln_iter.next() {
+                            let mut current_id = first_id;
+                            for TableStat {
+                                table_id,
+                                compact_task,
+                                ..
+                            } in l_n
+                            {
+                                if table_id == current_id {
+                                    *compact_task = Some(next_task_id);
+                                    match select_ln_iter.next() {
+                                        Some(next_id) => {
+                                            current_id = next_id;
+                                        }
+                                        None => break,
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    SearchResult::NotFound => {}
+                }
             }
         }
-
         match found {
-            SearchResult::Found(input_ssts, splits) => {
+            SearchResult::Found(select_ln_ids, select_lnsuc_ids, splits) => {
                 compact_status.next_compact_task_id += 1;
                 Ok(CompactTask {
-                    input_ssts,
+                    input_ssts: vec![
+                        LevelEntry {
+                            level_idx: select_level,
+                            level: if is_select_level_leveling {
+                                Level::Leveling(select_ln_ids)
+                            } else {
+                                Level::Tiering(select_ln_ids)
+                            },
+                        },
+                        LevelEntry {
+                            level_idx: select_level + 1,
+                            level: if is_select_next_level_leveling {
+                                Level::Leveling(select_lnsuc_ids)
+                            } else {
+                                Level::Tiering(select_lnsuc_ids)
+                            },
+                        },
+                    ],
                     splits,
                     sorted_output_ssts: vec![],
                     task_id: next_task_id,

@@ -33,6 +33,24 @@ impl KeyRange {
             || (VersionComparator::compare_key(&self.right, &other.left) != cmp::Ordering::Less
                 && VersionComparator::compare_key(&other.right, &self.left) != cmp::Ordering::Less)
     }
+
+    pub fn full_key_extend(&mut self, other: &Self) {
+        if self.inf {
+            return;
+        }
+        if other.inf {
+            self.inf = true;
+            self.left = Bytes::new();
+            self.right = Bytes::new();
+            return;
+        }
+        if VersionComparator::compare_key(&other.left, &self.left) == cmp::Ordering::Less {
+            self.left = other.left.clone();
+        }
+        if VersionComparator::compare_key(&other.right, &self.right) == cmp::Ordering::Greater {
+            self.right = other.right.clone();
+        }
+    }
 }
 
 const VERSION_KEY_SUFFIX_LEN: usize = 8;
