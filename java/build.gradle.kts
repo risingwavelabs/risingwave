@@ -5,8 +5,13 @@ buildscript {
     dependencies {
         classpath("com.diffplug.spotless:spotless-plugin-gradle:5.17.1")
         classpath("com.google.protobuf:protobuf-gradle-plugin:0.8.17")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.5.31")
+        classpath("org.jacoco:org.jacoco.agent:0.8.7")
+        classpath("org.jacoco:org.jacoco.core:0.8.7")
     }
 }
+
+apply(plugin = "org.jetbrains.kotlin.jvm")
 
 plugins {
     java

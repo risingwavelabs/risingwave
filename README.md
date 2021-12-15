@@ -54,7 +54,8 @@ cd rust
 To start the frontend server, create one terminal and then type:
 ```bash
 cd java
-./gradlew -p pgserver run
+./gradlew -p pgserver run 
+# Or it can be specified by the parameter  ./gradlew -p pgserver run --args="-c ./src/main/resources/server.properties"
 ```
 
 To start the compute server, create one terminal and then type:

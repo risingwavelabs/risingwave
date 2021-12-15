@@ -2,7 +2,7 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
     antlr
-    kotlin("jvm") version "1.5.21"
+    kotlin("jvm")
 }
 
 // TODO: We need to figure out one way to manage all version in one place
@@ -46,13 +46,13 @@ tasks.generateGrammarSource {
 
 val compileKotlin: KotlinCompile by tasks
 compileKotlin.kotlinOptions {
-    jvmTarget = "1.8"
+    jvmTarget = "11"
 }
 compileKotlin.dependsOn(tasks.generateGrammarSource)
 
 val compileTestKotlin: KotlinCompile by tasks
 compileTestKotlin.kotlinOptions {
-    jvmTarget = "1.8"
+    jvmTarget = "11"
 }
 
 tasks.spotlessJava {

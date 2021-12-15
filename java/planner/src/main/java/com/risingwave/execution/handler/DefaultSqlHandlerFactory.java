@@ -12,7 +12,11 @@ import javax.inject.Singleton;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
 import org.reflections.Reflections;
+import org.reflections.scanners.SubTypesScanner;
+import org.reflections.scanners.TypeAnnotationsScanner;
+import org.reflections.util.ClasspathHelper;
 import org.reflections.util.ConfigurationBuilder;
+import org.reflections.util.FilterBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -67,7 +71,12 @@ public class DefaultSqlHandlerFactory implements SqlHandlerFactory {
 
   private static ImmutableMap<SqlKind, Constructor<? extends SqlHandler>>
       createSqlHandlerFactory() {
-    Reflections reflections = new Reflections(new ConfigurationBuilder().forPackages(PACKAGE_NAME));
+    Reflections reflections =
+        new Reflections(
+            new ConfigurationBuilder()
+                .setUrls(ClasspathHelper.forPackage(PACKAGE_NAME))
+                .setScanners(new SubTypesScanner(), new TypeAnnotationsScanner())
+                .filterInputsBy(new FilterBuilder().includePackage(PACKAGE_NAME)));
 
     ImmutableMap.Builder<SqlKind, Constructor<? extends SqlHandler>> builder =
         ImmutableMap.builder();

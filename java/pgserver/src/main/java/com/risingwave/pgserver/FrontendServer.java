@@ -8,6 +8,10 @@ import java.util.Collections;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * The RisingWave database entry will start the PostgreSql process on the port in the configuration
+ * file.
+ */
 public class FrontendServer {
   private static final Logger LOGGER = LoggerFactory.getLogger(FrontendServer.class);
 
@@ -15,6 +19,7 @@ public class FrontendServer {
     OptionsParser parser = OptionsParser.newOptionsParser(FrontendServerOptions.class);
     parser.parseAndExitUponError(args);
     FrontendServerOptions options = parser.getOptions(FrontendServerOptions.class);
+    assert options != null;
     if (!options.isValid()) {
       printUsage(parser);
       return;
@@ -29,7 +34,7 @@ public class FrontendServer {
   }
 
   private static void printUsage(OptionsParser parser) {
-    System.out.println("Usage: java -jar server.jar OPTIONS");
+    System.out.println("Usage: java -jar risingwave-fe-runnable.jar OPTIONS");
     System.out.println(
         parser.describeOptions(Collections.emptyMap(), OptionsParser.HelpVerbosity.LONG));
   }

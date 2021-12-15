@@ -31,8 +31,12 @@ start_compute_node() {
 
 start_frontend() {
     log_dir="../log/frontend.out"
+    pgserver_build_dir="${SCRIPT_PATH}/../java/pgserver/build/"
     echo "Starting frontend ... logging to $log_dir"
-    nohup ./gradlew -p pgserver run > $log_dir &
+    run_cmd="nohup java -Dlogback.configurationFile=${pgserver_build_dir}resources/main/logback.xml -jar \
+        ${pgserver_build_dir}libs/risingwave-fe-runnable.jar -c \
+        ${pgserver_build_dir}../src/main/resources/server.properties > ${log_dir} &"
+    eval "${run_cmd}"
     wait_server 4567
 }
 

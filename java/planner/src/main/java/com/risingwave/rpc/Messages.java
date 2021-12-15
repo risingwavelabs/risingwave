@@ -18,17 +18,26 @@ import com.risingwave.proto.plan.TableRefId;
 import java.util.Random;
 import java.util.UUID;
 import org.reflections.Reflections;
+import org.reflections.scanners.SubTypesScanner;
+import org.reflections.scanners.TypeAnnotationsScanner;
+import org.reflections.util.ClasspathHelper;
 import org.reflections.util.ConfigurationBuilder;
+import org.reflections.util.FilterBuilder;
 
 /** Protobuf static helpers. */
 public class Messages {
   private static final JsonFormat.TypeRegistry PROTOBUF_JSON_TYPE_REGISTRY = createTypeRegistry();
+  private static final String PROTO_PACKAGE_NAME = "com.risingwave.proto";
 
   private static JsonFormat.TypeRegistry createTypeRegistry() {
     try {
-      String packageName = "com.risingwave.proto";
       Reflections reflections =
-          new Reflections(new ConfigurationBuilder().forPackages(packageName));
+          new Reflections(
+              new ConfigurationBuilder()
+                  .setUrls(ClasspathHelper.forPackage(PROTO_PACKAGE_NAME))
+                  .setScanners(new SubTypesScanner(), new TypeAnnotationsScanner())
+                  .filterInputsBy(new FilterBuilder().includePackage(PROTO_PACKAGE_NAME)));
+
       JsonFormat.TypeRegistry.Builder typeRegistry = JsonFormat.TypeRegistry.newBuilder();
 
       for (Class<?> klass : reflections.getSubTypesOf(GeneratedMessageV3.class)) {

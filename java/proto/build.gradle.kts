@@ -5,7 +5,7 @@ plugins {
     id("com.google.protobuf")
     // We need this to add generate source file to intellij
     id("idea")
-    kotlin("jvm") version "1.5.31"
+    kotlin("jvm")
 }
 
 dependencies {
