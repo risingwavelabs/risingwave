@@ -119,6 +119,12 @@ impl From<MemComparableError> for RwError {
     }
 }
 
+impl From<std::io::Error> for RwError {
+    fn from(io_err: IoError) -> Self {
+        ErrorCode::IoError(io_err).into()
+    }
+}
+
 impl Debug for RwError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}, backtrace: {:?}", self.inner, self.backtrace)

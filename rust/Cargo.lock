@@ -1505,6 +1505,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pgwire"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "log",
+ "log4rs",
+ "risingwave_common",
+ "tokio",
+]
+
+[[package]]
 name = "pin-project"
 version = "1.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"

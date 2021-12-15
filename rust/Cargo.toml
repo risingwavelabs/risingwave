@@ -3,6 +3,7 @@ members = [
   "batch",
   "common",
   "meta",
+  "pgwire",
   "prost",
   "prost/helpers",
   "server",
