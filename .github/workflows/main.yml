@@ -10,9 +10,6 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-concurrency:
-  group: environment-${{ github.ref }}
-  cancel-in-progress: false
 env:
   RUST_TOOLCHAIN: nightly-2021-11-30
 jobs:
@@ -148,7 +145,7 @@ jobs:
           directory: java
           flags: java
   start-runner:
-    name: start-ec2
+    name: ec2-start
     runs-on: ubuntu-latest
     outputs:
       label: ${{ steps.start-ec2-runner.outputs.label }}
@@ -270,6 +267,7 @@ jobs:
           flags: rust
   shell-check:
     runs-on: ubuntu-latest
+    name: shell-check
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -280,7 +278,7 @@ jobs:
         with:
           ignore_paths: java
   stop-runner:
-    name: stop-ec2
+    name: ec2-stop
     needs:
       - start-runner
       - compute-node-build

@@ -4,14 +4,12 @@ name:
 
 on:
 
-concurrency:
-
 env:
   RUST_TOOLCHAIN: nightly-2021-11-30
 
 jobs:
   frontend-check:
-    name: check-frontend
+    name: frontend-check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -46,7 +44,7 @@ jobs:
           flags: java
 
   end-to-end:
-    name: test-e2e
+    name: e2e-test
     needs:
       - start-runner # required to start the main job when the runner is ready
       - compute-node-build
@@ -204,7 +202,7 @@ jobs:
     container:
       image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
       options: --security-opt seccomp=unconfined
-    name: build-compute-node
+    name: compute-node-build
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -271,7 +269,7 @@ jobs:
     container:
       image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
       options: --security-opt seccomp=unconfined
-    name: test-compute-node
+    name: compute-node-test
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -310,9 +308,9 @@ jobs:
           directory: rust
           flags: rust
 
-  misc-check:
+  shell-check:
     runs-on: ubuntu-latest
-    name: check-misc
+    name: shell-check
     steps:
       - name: Checkout
         uses: actions/checkout@v2
