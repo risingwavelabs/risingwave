@@ -37,7 +37,7 @@ pub use crate::error::RwError;
 use crate::types::{
     BoolType, DataTypeKind, DateType, Datum, DatumRef, DecimalType, Float32Type, Float64Type,
     Int16Type, Int32Type, Int64Type, IntervalType, Scalar, ScalarImpl, ScalarRef, ScalarRefImpl,
-    TimestampType,
+    StringType, TimestampType,
 };
 
 pub type I64Array = PrimitiveArray<i64>;
@@ -524,6 +524,13 @@ impl DataTypeTrait for IntervalType {
     const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Interval;
     type ArrayType = IntervalArray;
 }
+
+impl DataTypeTrait for StringType {
+    // TODO: How about char?
+    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Varchar;
+    type ArrayType = Utf8Array;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

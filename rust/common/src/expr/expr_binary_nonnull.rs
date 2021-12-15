@@ -91,7 +91,7 @@ macro_rules! comparison_impl {
   };
 }
 
-/// `gen_binary_expr` list all possible combination of input type and out put type
+/// `gen_binary_expr_cmp` list all possible combination of input type and out put type
 /// Specifically, the first type is left input, the second type is right input and the third is the
 /// cast type For different data type, the scalar function may be different. Therefore we need to
 /// pass all possible scalar function
@@ -102,7 +102,104 @@ macro_rules! comparison_impl {
 ///   will be cast to decimal
 /// * `deci_f_f`: the scalar function for decimal with float. In this scalar function, all inputs
 ///   will be cast to float
-macro_rules! gen_binary_expr {
+/// * `str_f`: compare function with &str.
+macro_rules! gen_binary_expr_cmp {
+    (
+        $macro:tt,
+        $int_f:ident,
+        $float_f:ident,
+        $deci_f_f:ident,
+        $deci_f:ident,
+        $str_f:ident,
+        $bool_f:ident,
+        $l:expr,
+        $r:expr,
+        $ret:expr
+    ) => {
+        match (
+            $l.return_type().data_type_kind(),
+            $r.return_type().data_type_kind(),
+        ) {
+            (DataTypeKind::Varchar, DataTypeKind::Varchar) => {
+                Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _> {
+                    expr_ia1: $l,
+                    expr_ia2: $r,
+                    return_type: $ret,
+                    func: $str_f,
+                    _phantom: PhantomData,
+                })
+            }
+            (DataTypeKind::Varchar, DataTypeKind::Char) => {
+                Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _> {
+                    expr_ia1: $l,
+                    expr_ia2: $r,
+                    return_type: $ret,
+                    func: $str_f,
+                    _phantom: PhantomData,
+                })
+            }
+            (DataTypeKind::Char, DataTypeKind::Char) => {
+                Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _> {
+                    expr_ia1: $l,
+                    expr_ia2: $r,
+                    return_type: $ret,
+                    func: $str_f,
+                    _phantom: PhantomData,
+                })
+            }
+            _ => {
+                $macro! {
+                      [$l, $r, $ret],
+                      { Int16Type, Int16Type, Int16Type, $int_f },
+                      { Int16Type, Int32Type, Int32Type, $int_f },
+                      { Int16Type, Int64Type, Int64Type, $int_f },
+                      { Int16Type, Float32Type, Float32Type, $float_f },
+                      { Int16Type, Float64Type, Float64Type, $float_f },
+                      { Int32Type, Int16Type, Int32Type, $int_f },
+                      { Int32Type, Int32Type, Int32Type, $int_f },
+                      { Int32Type, Int64Type, Int64Type, $int_f },
+                      { Int32Type, Float32Type, Float32Type, $float_f },
+                      { Int32Type, Float64Type, Float64Type, $float_f },
+                      { Int64Type, Int16Type,Int64Type, $int_f },
+                      { Int64Type, Int32Type,Int64Type, $int_f },
+                      { Int64Type, Int64Type, Int64Type, $int_f },
+                      { Int64Type, Float32Type, Float32Type , $float_f},
+                      { Int64Type, Float64Type, Float64Type, $float_f },
+                      { Float32Type, Int16Type, Float32Type, $float_f },
+                      { Float32Type, Int32Type, Float32Type, $float_f },
+                      { Float32Type, Int64Type, Float32Type , $float_f},
+                      { Float32Type, Float32Type, Float32Type, $float_f },
+                      { Float32Type, Float64Type, Float64Type, $float_f },
+                      { Float64Type, Int16Type, Float64Type, $float_f },
+                      { Float64Type, Int32Type, Float64Type, $float_f },
+                      { Float64Type, Int64Type, Float64Type, $float_f },
+                      { Float64Type, Float32Type, Float64Type, $float_f },
+                      { Float64Type, Float64Type, Float64Type, $float_f },
+                      { DecimalType, Int16Type, DecimalType, $deci_f },
+                      { DecimalType, Int32Type, DecimalType, $deci_f },
+                      { DecimalType, Int64Type, DecimalType, $deci_f },
+                      { DecimalType, Float32Type, DecimalType, $deci_f_f },
+                      { DecimalType, Float64Type, DecimalType, $deci_f_f },
+                      { Int16Type, DecimalType, DecimalType, $deci_f },
+                      { Int32Type, DecimalType, DecimalType, $deci_f },
+                      { Int64Type, DecimalType, DecimalType, $deci_f },
+                      { DecimalType, DecimalType, DecimalType, $deci_f },
+                      { Float32Type, DecimalType, DecimalType, $deci_f_f },
+                      { Float64Type, DecimalType, DecimalType, $deci_f_f },
+                      { TimestampType, TimestampType, TimestampType, $int_f },
+                      { DateType, DateType, Int32Type, $int_f },
+                      { BoolType, BoolType, BoolType, $bool_f }
+                }
+            }
+        }
+    };
+}
+
+/// `gen_binary_expr_atm` is similar to `gen_binary_expr_cmp`.
+///  `atm` means arithmetic here.
+/// They are differentiate cuz one type may not support atm and cmp at the same time. For example,
+/// Varchar can support compare but not arithmetic.
+macro_rules! gen_binary_expr_atm {
   ($macro:tt, $int_f:ident, $float_f:ident, $deci_f_f:ident, $deci_f:ident,
   $interval_date_f:ident, $date_interval_f:ident, $bool_f: ident $(, $x:tt)* ) => {
     $macro! {
@@ -146,8 +243,7 @@ macro_rules! gen_binary_expr {
       { TimestampType, TimestampType, TimestampType, $int_f },
       { DateType, DateType, Int32Type, $int_f },
       { DateType, IntervalType, TimestampType, $date_interval_f },
-      { IntervalType, DateType, TimestampType, $interval_date_f },
-      { BoolType, BoolType, BoolType, $bool_f }
+      { IntervalType, DateType, TimestampType, $interval_date_f }
     }
   };
 }
@@ -185,47 +281,47 @@ pub fn new_binary_expr(
 ) -> BoxedExpression {
     match expr_type {
         Type::Equal => {
-            gen_binary_expr! {comparison_impl, prim_eq, prim_eq, deci_f_eq, deci_eq, cmp_placeholder,
-            cmp_placeholder, total_order_eq, l, r, ret}
+            gen_binary_expr_cmp! {comparison_impl, prim_eq, prim_eq, deci_f_eq, deci_eq, str_eq,
+            total_order_eq, l, r, ret}
         }
         Type::NotEqual => {
-            gen_binary_expr! {comparison_impl, prim_neq, prim_neq, deci_f_neq, deci_neq,
-            cmp_placeholder, cmp_placeholder, total_order_ne, l, r, ret}
+            gen_binary_expr_cmp! {comparison_impl, prim_neq, prim_neq, deci_f_neq, deci_neq, str_ne,
+            total_order_ne, l, r, ret}
         }
         Type::LessThan => {
-            gen_binary_expr! {comparison_impl, prim_lt, prim_lt, deci_f_lt, deci_lt, cmp_placeholder,
-            cmp_placeholder, total_order_lt, l, r, ret}
+            gen_binary_expr_cmp! {comparison_impl, prim_lt, prim_lt, deci_f_lt, deci_lt, str_lt,
+            total_order_lt, l, r, ret}
         }
         Type::GreaterThan => {
-            gen_binary_expr! {comparison_impl, prim_gt, prim_gt, deci_f_gt, deci_gt, cmp_placeholder,
-            cmp_placeholder, total_order_gt, l, r, ret}
+            gen_binary_expr_cmp! {comparison_impl, prim_gt, prim_gt, deci_f_gt, deci_gt, str_gt,
+            total_order_gt, l, r, ret}
         }
         Type::GreaterThanOrEqual => {
-            gen_binary_expr! {comparison_impl, prim_geq, prim_geq, deci_f_geq, deci_geq,
-            cmp_placeholder, cmp_placeholder, total_order_ge, l, r, ret}
+            gen_binary_expr_cmp! {comparison_impl, prim_geq, prim_geq, deci_f_geq, deci_geq,  str_ge,
+            total_order_ge, l, r, ret}
         }
         Type::LessThanOrEqual => {
-            gen_binary_expr! {comparison_impl, prim_leq, prim_leq, deci_f_leq, deci_leq,
-            cmp_placeholder, cmp_placeholder, total_order_le, l, r, ret}
+            gen_binary_expr_cmp! {comparison_impl, prim_leq, prim_leq, deci_f_leq, deci_leq,  str_le,
+            total_order_le, l, r, ret}
         }
         Type::Add => {
-            gen_binary_expr! {arithmetic_impl, int_add, float_add, deci_f_add, deci_add,
+            gen_binary_expr_atm! {arithmetic_impl, int_add, float_add, deci_f_add, deci_add,
             interval_date_add, date_interval_add, atm_placeholder, l, r, ret}
         }
         Type::Subtract => {
-            gen_binary_expr! {arithmetic_impl, int_sub, float_sub, deci_f_sub, deci_sub,
+            gen_binary_expr_atm! {arithmetic_impl, int_sub, float_sub, deci_f_sub, deci_sub,
             atm_placeholder, date_interval_sub, atm_placeholder, l, r, ret}
         }
         Type::Multiply => {
-            gen_binary_expr! {arithmetic_impl, int_mul, float_mul, deci_f_mul, deci_mul,
+            gen_binary_expr_atm! {arithmetic_impl, int_mul, float_mul, deci_f_mul, deci_mul,
             atm_placeholder, atm_placeholder, atm_placeholder, l, r, ret}
         }
         Type::Divide => {
-            gen_binary_expr! {arithmetic_impl, int_div, float_div, deci_f_div, deci_div,
+            gen_binary_expr_atm! {arithmetic_impl, int_div, float_div, deci_f_div, deci_div,
             atm_placeholder, atm_placeholder, atm_placeholder, l, r, ret}
         }
         Type::Modulus => {
-            gen_binary_expr! {arithmetic_impl, prim_mod, prim_mod, deci_f_mod, deci_mod,
+            gen_binary_expr_atm! {arithmetic_impl, prim_mod, prim_mod, deci_f_mod, deci_mod,
             atm_placeholder, atm_placeholder, atm_placeholder, l, r, ret}
         }
         Type::Extract => build_extract_expr(ret, l, r),

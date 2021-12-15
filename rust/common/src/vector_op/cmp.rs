@@ -322,6 +322,44 @@ where
 }
 
 #[inline(always)]
+fn str_cmp<F>(l: &str, r: &str, func: F) -> Result<bool>
+where
+    F: FnOnce(&str, &str) -> bool,
+{
+    Ok(func(l, r))
+}
+
+#[inline(always)]
+pub fn str_eq(l: &str, r: &str) -> Result<bool> {
+    str_cmp(l, r, |a, b| a == b)
+}
+
+#[inline(always)]
+pub fn str_ne(l: &str, r: &str) -> Result<bool> {
+    str_cmp(l, r, |a, b| a != b)
+}
+
+#[inline(always)]
+pub fn str_ge(l: &str, r: &str) -> Result<bool> {
+    str_cmp(l, r, |a, b| a >= b)
+}
+
+#[inline(always)]
+pub fn str_gt(l: &str, r: &str) -> Result<bool> {
+    str_cmp(l, r, |a, b| a > b)
+}
+
+#[inline(always)]
+pub fn str_le(l: &str, r: &str) -> Result<bool> {
+    str_cmp(l, r, |a, b| a <= b)
+}
+
+#[inline(always)]
+pub fn str_lt(l: &str, r: &str) -> Result<bool> {
+    str_cmp(l, r, |a, b| a < b)
+}
+
+#[inline(always)]
 pub fn is_true(v: Option<bool>) -> Result<Option<bool>> {
     Ok(Some(v == Some(true)))
 }
