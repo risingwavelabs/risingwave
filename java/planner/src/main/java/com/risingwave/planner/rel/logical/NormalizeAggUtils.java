@@ -5,6 +5,7 @@ import static java.util.Collections.emptyList;
 import com.risingwave.planner.sql.RisingWaveOverrideOperatorTable;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.stream.Collectors;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelCollations;
@@ -163,15 +164,24 @@ public class NormalizeAggUtils {
 
     var aggCallSet = new HashMap<AggregateCall, Integer>();
     var refRewriteMapping = new HashMap<Integer, Integer>();
-    for (int idx = 0; idx < aggCalls.size(); idx++) {
+    var newIdx = 0;
+    for (int idx = 0; idx < newAggCalls.size(); idx++) {
       var aggCall = newAggCalls.get(idx);
       if (aggCallSet.containsKey(aggCall)) {
-        var prevIdx = aggCallSet.get(aggCall);
-        refRewriteMapping.put(groupCount + idx, groupCount + prevIdx);
+        var updatedIdx = aggCallSet.get(aggCall);
+        refRewriteMapping.put(groupCount + idx, groupCount + updatedIdx);
       } else {
-        aggCallSet.put(aggCall, idx);
+        aggCallSet.put(aggCall, newIdx);
+        refRewriteMapping.put(groupCount + idx, groupCount + newIdx);
+        newIdx++;
       }
     }
+
+    var newAggCalls2 =
+        aggCallSet.entrySet().stream()
+            .sorted(Map.Entry.comparingByValue())
+            .map(Map.Entry::getKey)
+            .collect(Collectors.toList());
 
     var expressionClosures2 =
         expressionClosures.stream()
@@ -192,7 +202,7 @@ public class NormalizeAggUtils {
             newInput,
             logicalAgg.getGroupSet(),
             logicalAgg.getGroupSets(),
-            newAggCalls);
+            newAggCalls2);
 
     var expressions =
         expressionClosures2

@@ -27,8 +27,8 @@ create materialized view T_select_aggregate as select v1, C from ( select v1, v2
         <Resource name="plan">
             <![CDATA[
 RwStreamMaterializedView(name=[t_select_aggregate])
-  RwStreamProject(v1=[$0], c=[$3], v2=[$1])
-    RwStreamAgg(group=[{0, 1}], agg#0=[COUNT()], c=[COUNT()])
+  RwStreamProject(v1=[$0], c=[$2], v2=[$1])
+    RwStreamAgg(group=[{0, 1}], agg#0=[COUNT()])
       RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
         RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,_row_id])
 ]]>
@@ -139,10 +139,9 @@ create materialized view T_left_group_inner_join as select * from (select v1, v2
 RwStreamMaterializedView(name=[t_left_group_inner_join])
   RwStreamHashJoin(condition=[=($1, $3)], joinType=[inner])
     RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
-      RwStreamProject(v1=[$0], v2=[$1], EXPR$2=[$3])
-        RwStreamAgg(group=[{0, 1}], agg#0=[COUNT()], EXPR$2=[COUNT()])
-          RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
-            RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,_row_id])
+      RwStreamAgg(group=[{0, 1}], agg#0=[COUNT()])
+        RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+          RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,_row_id])
     RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
       RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
 ]]>
@@ -167,10 +166,9 @@ join
 RwStreamMaterializedView(name=[t_left_group_right_group_inner_join])
   RwStreamHashJoin(condition=[=($1, $3)], joinType=[inner])
     RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
-      RwStreamProject(v1=[$0], v2=[$1], EXPR$2=[$3])
-        RwStreamAgg(group=[{0, 1}], agg#0=[COUNT()], EXPR$2=[COUNT()])
-          RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
-            RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,_row_id])
+      RwStreamAgg(group=[{0, 1}], agg#0=[COUNT()])
+        RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+          RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,_row_id])
     RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
       RwStreamProject(v1=[$0], v2=[$1], EXPR$2=[/(CAST($3):DOUBLE NOT NULL, $4)])
         RwStreamAgg(group=[{0, 1}], agg#0=[COUNT()], agg#1=[SUM($2)], agg#2=[COUNT($2)])
@@ -311,10 +309,10 @@ create materialized view t_avg_sum_count as select round(avg(v1), 1) as avg_v1, 
         <Resource name="plan">
             <![CDATA[
 RwStreamMaterializedView(name=[t_avg_sum_count])
-  RwStreamProject(avg_v1=[ROUND($STREAM_NULL_BY_ROW_COUNT($0, /(CAST($1):DECIMAL(28,10), $2)), 1)], sum_v2=[$STREAM_NULL_BY_ROW_COUNT($0, $3)], count_v3=[$4], $f0=[$0], $f1=[$1], $f2=[$2], sum_v2_copy=[$3])
-    RwStreamAgg(group=[{}], agg#0=[$SUM0($0)], agg#1=[SUM($1)], agg#2=[$SUM0($2)], sum_v2=[SUM($3)], count_v3=[$SUM0($4)])
+  RwStreamProject(avg_v1=[ROUND($STREAM_NULL_BY_ROW_COUNT($0, /(CAST($1):DECIMAL(28,10), $2)), 1)], sum_v2=[$STREAM_NULL_BY_ROW_COUNT($0, $3)], count_v3=[$0], $f1=[$1], $f2=[$2], sum_v2_copy=[$3])
+    RwStreamAgg(group=[{}], agg#0=[$SUM0($0)], agg#1=[SUM($1)], agg#2=[$SUM0($2)], sum_v2=[SUM($3)])
       RwStreamExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
-        RwStreamAgg(group=[{}], agg#0=[COUNT()], agg#1=[SUM($0)], agg#2=[COUNT($0)], sum_v2=[SUM($1)], count_v3=[COUNT()])
+        RwStreamAgg(group=[{}], agg#0=[COUNT()], agg#1=[SUM($0)], agg#2=[COUNT($0)], sum_v2=[SUM($1)])
           RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
             RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,_row_id])
 ]]>

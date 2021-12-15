@@ -23,8 +23,8 @@ create materialized view T_no_group_has_count_single as select Count(*), Sum(v1)
         <Resource name="plan">
             <![CDATA[
 RwStreamMaterializedView(name=[t_no_group_has_count_single])
-  RwStreamProject(EXPR$0=[$0], v=[$STREAM_NULL_BY_ROW_COUNT($0, $2)], EXPR$0_copy=[$1], v_copy=[$2])
-    RwStreamAgg(group=[{}], agg#0=[COUNT()], EXPR$0=[COUNT()], v=[SUM($0)])
+  RwStreamProject(EXPR$0=[$0], v=[$STREAM_NULL_BY_ROW_COUNT($0, $1)], v_copy=[$1])
+    RwStreamAgg(group=[{}], agg#0=[COUNT()], v=[SUM($0)])
       RwStreamTableSource(table=[[test_schema, t]], columns=[v1,_row_id])
 ]]>
         </Resource>
@@ -38,9 +38,8 @@ create materialized view T_has_group_has_count_single as select v2, Count(*), Su
         <Resource name="plan">
             <![CDATA[
 RwStreamMaterializedView(name=[t_has_group_has_count_single])
-  RwStreamProject(v2=[$0], EXPR$1=[$1], v=[$3])
-    RwStreamAgg(group=[{0}], agg#0=[COUNT()], EXPR$1=[COUNT()], v=[SUM($1)])
-      RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1,_row_id])
+  RwStreamAgg(group=[{0}], agg#0=[COUNT()], v=[SUM($1)])
+    RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1,_row_id])
 ]]>
         </Resource>
     </TestCase>
