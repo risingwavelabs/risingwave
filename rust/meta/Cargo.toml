@@ -22,8 +22,8 @@ log = "0.4"
 log4rs = "1"
 num-traits = "0.2"
 paste = "1"
-prost = "0.8"
-prost-types = "0.8"
+prost = "0.9"
+prost-types = "0.9"
 risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
 rust_decimal = "1"
@@ -35,7 +35,7 @@ smallvec = "1"
 thiserror = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 tokio-stream = "0.1.7"
-tonic = "0.5"
+tonic = "0.6"
 uuid = { version = "0.8", features = ["v4"] }
 
 [dev-dependencies]

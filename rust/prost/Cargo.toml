@@ -5,14 +5,14 @@ version = "0.1.0"
 
 [dependencies]
 bytes = "1"
-prost = "0.8"
+prost = "0.9"
 prost-helpers = { path = "helpers" }
-prost-types = "0.8"
-tonic = "0.5"
+prost-types = "0.9"
+tonic = "0.6"
 
 [build-dependencies]
 convert_case = "0.4"
-prost = "0.8"
-prost-types = "0.8"
+prost = "0.9"
+prost-types = "0.9"
 quote = "1"
-tonic-build = "0.5"
+tonic-build = "0.6"
