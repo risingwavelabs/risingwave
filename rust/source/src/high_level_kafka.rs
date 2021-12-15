@@ -8,7 +8,7 @@ use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{CommitMode, Consumer, DefaultConsumerContext, StreamConsumer};
 use rdkafka::metadata::Metadata;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
-use risingwave_common::array::{DataChunk, Op, StreamChunk};
+use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
@@ -332,19 +332,26 @@ impl StreamSourceReader for HighLevelKafkaSourceStreamReader {
         {
             None => Ok(StreamChunk::default()),
             Some(batch) => {
-                let mut rows = Vec::with_capacity(batch.len());
+                let mut events = Vec::with_capacity(batch.len());
 
                 for msg in batch {
                     let msg = msg.map_err(|e| RwError::from(InternalError(e.to_string())))?;
                     if let Some(payload) = msg.payload() {
-                        rows.push(self.parser.parse(payload, &self.columns)?);
+                        events.push(self.parser.parse(payload, &self.columns)?);
                     }
                 }
 
-                let columns = Self::build_columns(&self.columns, &rows)?;
+                let mut ops = vec![];
+                let mut rows = vec![];
+
+                for mut event in events {
+                    rows.append(&mut event.rows);
+                    ops.append(&mut event.ops);
+                }
+
                 Ok(StreamChunk::new(
-                    vec![Op::Insert; rows.len()],
-                    columns,
+                    ops,
+                    Self::build_columns(&self.columns, rows.as_ref())?,
                     None,
                 ))
             }
@@ -415,7 +422,7 @@ impl BatchSourceReader for HighLevelKafkaSourceBatchReader {
             .await
             {
                 Ok(Some(batch)) => {
-                    let mut rows = Vec::with_capacity(batch.len());
+                    let mut events = Vec::with_capacity(batch.len());
 
                     for msg in batch {
                         let msg = msg.map_err(|e| RwError::from(InternalError(e.to_string())))?;
@@ -434,7 +441,7 @@ impl BatchSourceReader for HighLevelKafkaSourceBatchReader {
                         }
 
                         if let Some(payload) = msg.payload() {
-                            rows.push(self.parser.parse(payload, &self.columns)?);
+                            events.push(self.parser.parse(payload, &self.columns)?);
                         }
 
                         self.consumer
@@ -446,7 +453,7 @@ impl BatchSourceReader for HighLevelKafkaSourceBatchReader {
                         .commit_consumer_state(CommitMode::Sync)
                         .map_err(|e| RwError::from(InternalError(e.to_string())))?;
 
-                    if rows.is_empty()
+                    if events.is_empty()
                         && Self::check_bounds(
                             self.consumer.clone(),
                             self.topic.as_str(),
@@ -460,11 +467,22 @@ impl BatchSourceReader for HighLevelKafkaSourceBatchReader {
                     }
 
                     if self.columns.is_empty() {
-                        return Ok(Some(DataChunk::new_dummy(rows.len())));
+                        return Ok(Some(DataChunk::new_dummy(events.len())));
                     }
 
-                    let columns = Self::build_columns(&self.columns, &rows)?;
-                    return Ok(Some(DataChunk::builder().columns(columns).build()));
+                    let mut ops = vec![];
+                    let mut rows = vec![];
+
+                    for mut event in events {
+                        rows.append(&mut event.rows);
+                        ops.append(&mut event.ops);
+                    }
+
+                    return Ok(Some(
+                        DataChunk::builder()
+                            .columns(Self::build_columns(&self.columns, rows.as_ref())?)
+                            .build(),
+                    ));
                 }
                 _ => {
                     if Self::check_bounds(

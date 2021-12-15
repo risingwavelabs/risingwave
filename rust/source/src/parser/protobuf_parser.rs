@@ -3,6 +3,7 @@ use std::path::Path;
 use itertools::Itertools;
 use protobuf::descriptor::FileDescriptorSet;
 use protobuf::RepeatedField;
+use risingwave_common::array::Op;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataTypeKind, Datum, ScalarImpl};
@@ -12,7 +13,7 @@ use serde_protobuf::de::Deserializer;
 use serde_protobuf::descriptor::Descriptors;
 use serde_value::Value;
 
-use crate::{SourceColumnDesc, SourceParser};
+use crate::{Event, SourceColumnDesc, SourceParser};
 
 /// Parser for Protobuf-encoded bytes.
 #[derive(Debug)]
@@ -87,13 +88,13 @@ macro_rules! protobuf_match_type {
 }
 
 impl SourceParser for ProtobufParser {
-    fn parse(&self, payload: &[u8], columns: &[SourceColumnDesc]) -> Result<Vec<Datum>> {
+    fn parse(&self, payload: &[u8], columns: &[SourceColumnDesc]) -> Result<Event> {
         let mut map = match self.decode(payload)? {
             Value::Map(m) => m,
             _ => return Err(RwError::from(ProtocolError("".to_string()))),
         };
 
-        let ret = columns.iter().map(|column| {
+        let row = columns.iter().map(|column| {
       if column.skip_parse {
         return None;
       }
@@ -131,7 +132,10 @@ impl SourceParser for ProtobufParser {
       }
     }).collect::<Vec<Datum>>();
 
-        Ok(ret)
+        Ok(Event {
+            ops: vec![Op::Insert],
+            rows: vec![row],
+        })
     }
 }
 
@@ -297,7 +301,8 @@ mod tests {
 
         let result = parser.parse(PRE_GEN_PROTO_DATA, &descs);
         assert!(result.is_ok());
-        let data = result.unwrap();
+        let event = result.unwrap();
+        let data = event.rows.first().unwrap();
         assert_eq!(data.len(), descs.len());
         assert!(data[0].eq(&Some(ScalarImpl::Int32(123))));
         assert!(data[1].eq(&Some(ScalarImpl::Utf8("test address".to_string()))));

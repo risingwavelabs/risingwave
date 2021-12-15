@@ -6,7 +6,7 @@ use futures::StreamExt;
 use log::info;
 use pulsar::reader::Reader;
 use pulsar::TokioExecutor;
-use risingwave_common::array::{DataChunk, InternalError, Op, StreamChunk};
+use risingwave_common::array::{DataChunk, InternalError, StreamChunk};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
@@ -131,24 +131,30 @@ impl StreamSourceReader for PulsarReader {
         match next {
             None => Ok(StreamChunk::default()),
             Some(batch) => {
-                let mut rows = Vec::with_capacity(batch.len());
+                let mut events = Vec::with_capacity(batch.len());
 
                 for msg in batch {
                     let msg = msg.map_err(|e| RwError::from(InternalError(e.to_string())))?;
 
                     if !msg.payload.data.is_empty() {
-                        rows.push(
+                        events.push(
                             self.parser
                                 .parse(msg.payload.data.as_ref(), &self.columns)?,
                         );
                     }
                 }
 
-                let columns = Self::build_columns(&self.columns, &rows)?;
+                let mut ops = Vec::with_capacity(events.len());
+                let mut rows = Vec::with_capacity(events.len());
+
+                for mut event in events {
+                    rows.append(&mut event.rows);
+                    ops.append(&mut event.ops);
+                }
 
                 Ok(StreamChunk::new(
-                    vec![Op::Insert; rows.len()],
-                    columns,
+                    ops,
+                    Self::build_columns(&self.columns, rows.as_ref())?,
                     None,
                 ))
             }
@@ -182,7 +188,8 @@ impl BatchSourceReader for PulsarReader {
             Some(batch) => batch,
         };
 
-        let mut rows = Vec::with_capacity(batch.len());
+        let mut events = Vec::with_capacity(batch.len());
+
         for msg in batch {
             let msg = msg.map_err(|e| RwError::from(InternalError(e.to_string())))?;
 
@@ -205,19 +212,27 @@ impl BatchSourceReader for PulsarReader {
             }
 
             if !msg.payload.data.is_empty() {
-                rows.push(
+                events.push(
                     self.parser
                         .parse(msg.payload.data.as_ref(), &self.columns)?,
                 );
             }
         }
 
-        if rows.is_empty() {
+        if events.is_empty() {
             self.done = true;
             return Ok(None);
         }
 
-        let columns = Self::build_columns(&self.columns, &rows)?;
+        let mut ops = vec![];
+        let mut rows = vec![];
+
+        for mut event in events {
+            rows.append(&mut event.rows);
+            ops.append(&mut event.ops);
+        }
+
+        let columns = Self::build_columns(&self.columns, rows.as_ref())?;
 
         return Ok(Some(DataChunk::builder().columns(columns).build()));
     }

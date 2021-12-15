@@ -1,63 +1,34 @@
+use risingwave_common::array::Op;
 use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::RwError;
-use risingwave_common::types::{DataTypeKind, Datum, ScalarImpl, ScalarRef};
-use rust_decimal::Decimal;
+use risingwave_common::error::{Result, RwError};
+use risingwave_common::types::Datum;
 use serde_json::Value;
 
-use crate::{SourceColumnDesc, SourceParser};
+use crate::parser::common::json_parse_value;
+use crate::{Event, SourceColumnDesc, SourceParser};
 
 /// Parser for JSON format
 #[derive(Debug)]
 pub struct JSONParser;
 
 impl SourceParser for JSONParser {
-    fn parse(
-        &self,
-        payload: &[u8],
-        columns: &[SourceColumnDesc],
-    ) -> risingwave_common::error::Result<Vec<Datum>> {
+    fn parse(&self, payload: &[u8], columns: &[SourceColumnDesc]) -> Result<Event> {
         let value: Value = serde_json::from_slice(payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-        let ret = columns
-            .iter()
-            .map(|column| {
-                if column.skip_parse {
-                    return None;
-                }
-
-                let value = value.get(&column.name);
-                match column.data_type.data_type_kind() {
-                    DataTypeKind::Boolean => value
-                        .and_then(|v| v.as_bool())
-                        .map(|v| ScalarImpl::Bool(v as bool)),
-                    DataTypeKind::Int16 => value
-                        .and_then(|v| v.as_i64())
-                        .map(|v| ScalarImpl::Int16(v as i16)),
-                    DataTypeKind::Int32 => value
-                        .and_then(|v| v.as_i64())
-                        .map(|v| ScalarImpl::Int32(v as i32)),
-                    DataTypeKind::Int64 => value
-                        .and_then(|v| v.as_i64())
-                        .map(|v| ScalarImpl::Int64(v as i64)),
-                    DataTypeKind::Float32 => value
-                        .and_then(|v| v.as_f64())
-                        .map(|v| ScalarImpl::Float32(v as f32)),
-                    DataTypeKind::Float64 => value
-                        .and_then(|v| v.as_f64())
-                        .map(|v| ScalarImpl::Float64(v as f64)),
-                    DataTypeKind::Decimal => value
-                        .and_then(|v| v.as_u64())
-                        .map(|v| ScalarImpl::Decimal(Decimal::from(v))),
-                    DataTypeKind::Char | DataTypeKind::Varchar => value
-                        .and_then(|v| v.as_str())
-                        .map(|v| ScalarImpl::Utf8(v.to_owned_scalar())),
-                    _ => unimplemented!(),
-                }
-            })
-            .collect::<Vec<Datum>>();
-
-        Ok(ret)
+        Ok(Event {
+            ops: vec![Op::Insert],
+            rows: vec![columns
+                .iter()
+                .map(|column| {
+                    if column.skip_parse {
+                        None
+                    } else {
+                        json_parse_value(column, value.get(&column.name))
+                    }
+                })
+                .collect::<Vec<Datum>>()],
+        })
     }
 }
 
@@ -128,24 +99,26 @@ mod tests {
 
         let result = parser.parse(payload, &descs);
         assert!(result.is_ok());
-        let datums = result.unwrap();
-        assert_eq!(datums.len(), descs.len());
-        assert!(datums[0].eq(&Some(ScalarImpl::Int32(1))));
-        assert!(datums[1].eq(&Some(ScalarImpl::Utf8("char".to_string()))));
-        assert!(datums[2].eq(&Some(ScalarImpl::Bool(true))));
-        assert!(datums[3].eq(&Some(ScalarImpl::Int16(1))));
-        assert!(datums[4].eq(&Some(ScalarImpl::Int64(12345678))));
-        assert!(datums[5].eq(&Some(ScalarImpl::Float32(1.23))));
-        assert!(datums[6].eq(&Some(ScalarImpl::Float64(1.2345))));
-        assert!(datums[7].eq(&Some(ScalarImpl::Utf8("varchar".to_string()))));
+        let event = result.unwrap();
+        let row = event.rows.first().unwrap();
+        assert_eq!(row.len(), descs.len());
+        assert!(row[0].eq(&Some(ScalarImpl::Int32(1))));
+        assert!(row[1].eq(&Some(ScalarImpl::Utf8("char".to_string()))));
+        assert!(row[2].eq(&Some(ScalarImpl::Bool(true))));
+        assert!(row[3].eq(&Some(ScalarImpl::Int16(1))));
+        assert!(row[4].eq(&Some(ScalarImpl::Int64(12345678))));
+        assert!(row[5].eq(&Some(ScalarImpl::Float32(1.23))));
+        assert!(row[6].eq(&Some(ScalarImpl::Float64(1.2345))));
+        assert!(row[7].eq(&Some(ScalarImpl::Utf8("varchar".to_string()))));
 
         let payload = r#"{"i32":1}"#.as_bytes();
         let result = parser.parse(payload, &descs);
         assert!(result.is_ok());
-        let datums = result.unwrap();
-        assert_eq!(datums.len(), descs.len());
-        assert!(datums[0].eq(&Some(ScalarImpl::Int32(1))));
-        assert!(datums[1].eq(&None));
+        let event = result.unwrap();
+        let row = event.rows.first().unwrap();
+        assert_eq!(row.len(), descs.len());
+        assert!(row[0].eq(&Some(ScalarImpl::Int32(1))));
+        assert!(row[1].eq(&None));
 
         let payload = r#"{"i32:1}"#.as_bytes();
         let result = parser.parse(payload, &descs);
