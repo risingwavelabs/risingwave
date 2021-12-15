@@ -1,34 +1,71 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::meta::cluster::Node;
-use risingwave_pb::meta::FragmentLocation;
+use risingwave_pb::meta::{FragmentLocation, TableFragments};
+use risingwave_pb::plan::TableRefId;
+use tokio::sync::RwLock;
 
-use crate::manager::{Epoch, MetaManager, SINGLE_VERSION_EPOCH};
+use crate::manager::{Config, Epoch, SINGLE_VERSION_EPOCH};
+use crate::storage::MetaStoreRef;
 
 #[async_trait]
-pub trait StreamMetaManager {
+pub trait StreamMetaManager: Sync + Send {
     /// [`add_fragments_to_node`] adds fragments to its belonging node.
     async fn add_fragments_to_node(&self, location: &FragmentLocation) -> Result<()>;
     /// [`load_all_fragments`] loads all fragments for all nodes.
     async fn load_all_fragments(&self) -> Result<Vec<FragmentLocation>>;
     /// [`get_fragment_node`] returns which node the fragment belongs to.
     async fn get_fragment_node(&self, fragment_id: u32) -> Result<Node>;
+    /// [`add_table_fragments`] stores table related fragments.
+    async fn add_table_fragments(
+        &self,
+        table_id: &TableRefId,
+        fragments: &TableFragments,
+    ) -> Result<()>;
+    /// [`get_table_fragments`] returns table related fragments.
+    async fn get_table_fragments(&self, table_id: &TableRefId) -> Result<TableFragments>;
+    /// [`drop_table_fragments`] drops table fragments info, used when `Drop MV`.
+    async fn drop_table_fragments(&self, table_id: &TableRefId) -> Result<()>;
+}
+
+pub type StreamMetaManagerRef = Arc<dyn StreamMetaManager>;
+
+/// [`StoredStreamMetaManager`] manages stream meta data using `metastore`.
+pub struct StoredStreamMetaManager {
+    config: Config,
+    meta_store_ref: MetaStoreRef,
+    fragment_lock: RwLock<()>,
+}
+
+impl StoredStreamMetaManager {
+    pub fn new(config: Config, meta_store_ref: MetaStoreRef) -> Self {
+        Self {
+            config,
+            meta_store_ref,
+            fragment_lock: RwLock::new(()),
+        }
+    }
 }
 
 #[async_trait]
-impl StreamMetaManager for MetaManager {
+impl StreamMetaManager for StoredStreamMetaManager {
     /// [`MetaManager`] manages streaming related meta data. fragments stored as follow category
     /// in meta store:
     ///
     /// cf(node_fragment): `node` -> `FragmentLocation`, defines all included fragments in the node.
     ///
-    /// cf(fragment): `fragment_id` -> `node`, defines which node the fragment belongs.
+    /// cf(fragment): `fragment_id` -> `Node`, defines which node the fragment belongs.
+    ///
+    /// cf(table_fragment): `table_ref_id` -> `TableFragments`, defines table included fragments.
     async fn add_fragments_to_node(&self, location: &FragmentLocation) -> Result<()> {
+        self.fragment_lock.write().await;
         let node = location.get_node().encode_to_vec();
         let fragments = location.get_fragments();
         let mut write_batch: Vec<(&str, Vec<u8>, Vec<u8>, Epoch)> = vec![];
-        for f in fragments.clone() {
+        for f in fragments {
             write_batch.push((
                 self.config.get_fragment_cf(),
                 f.get_fragment_id().to_be_bytes().to_vec(),
@@ -75,6 +112,7 @@ impl StreamMetaManager for MetaManager {
     }
 
     async fn load_all_fragments(&self) -> Result<Vec<FragmentLocation>> {
+        self.fragment_lock.read().await;
         let locations_pb = self
             .meta_store_ref
             .list_cf(self.config.get_node_fragment_cf())
@@ -87,6 +125,7 @@ impl StreamMetaManager for MetaManager {
     }
 
     async fn get_fragment_node(&self, fragment_id: u32) -> Result<Node> {
+        self.fragment_lock.read().await;
         let node_pb = self
             .meta_store_ref
             .get_cf(
@@ -97,6 +136,50 @@ impl StreamMetaManager for MetaManager {
             .await?;
 
         Ok(Node::decode(node_pb.as_slice())?)
+    }
+
+    async fn add_table_fragments(
+        &self,
+        table_id: &TableRefId,
+        fragments: &TableFragments,
+    ) -> Result<()> {
+        self.fragment_lock.write().await;
+        self.meta_store_ref
+            .put_cf(
+                self.config.get_table_fragment_cf(),
+                &table_id.encode_to_vec(),
+                &fragments.encode_to_vec(),
+                SINGLE_VERSION_EPOCH,
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    async fn get_table_fragments(&self, table_id: &TableRefId) -> Result<TableFragments> {
+        self.fragment_lock.read().await;
+        let fragments_pb = self
+            .meta_store_ref
+            .get_cf(
+                self.config.get_table_fragment_cf(),
+                &table_id.encode_to_vec(),
+                SINGLE_VERSION_EPOCH,
+            )
+            .await?;
+
+        Ok(TableFragments::decode(fragments_pb.as_slice())?)
+    }
+
+    async fn drop_table_fragments(&self, table_id: &TableRefId) -> Result<()> {
+        self.fragment_lock.write().await;
+        self.meta_store_ref
+            .delete_cf(
+                self.config.get_table_fragment_cf(),
+                &table_id.encode_to_vec(),
+                SINGLE_VERSION_EPOCH,
+            )
+            .await?;
+        Ok(())
     }
 }
 
@@ -110,7 +193,7 @@ mod test {
     use risingwave_pb::task_service::HostAddress;
 
     use super::*;
-    use crate::manager::{Config, IdGeneratorManager, MemEpochGenerator};
+    use crate::manager::Config;
     use crate::storage::MemStore;
 
     fn make_location(node: Node, fragment_ids: Vec<u32>) -> FragmentLocation {
@@ -129,18 +212,12 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_fragment_management() -> Result<()> {
+    async fn test_node_fragment() -> Result<()> {
         let meta_store_ref = Arc::new(MemStore::new());
-        let meta_manager = MetaManager::new(
-            meta_store_ref.clone(),
-            Box::new(MemEpochGenerator::new()),
-            IdGeneratorManager::new(meta_store_ref).await,
-            Config::default(),
-        )
-        .await;
+        let meta_manager = StoredStreamMetaManager::new(Config::default(), meta_store_ref);
 
         // Add fragments to node 1.
-        assert_eq!(meta_manager.load_all_fragments().await.unwrap().len(), 0);
+        assert_eq!(meta_manager.load_all_fragments().await?.len(), 0);
         let location = make_location(
             Node {
                 id: 1,
@@ -153,7 +230,7 @@ mod test {
         );
         meta_manager.add_fragments_to_node(&location).await?;
 
-        let locations = meta_manager.load_all_fragments().await.unwrap();
+        let locations = meta_manager.load_all_fragments().await?;
         assert_eq!(locations.len(), 1);
         let location = locations.get(0).unwrap();
         assert_eq!(location.get_node().get_id(), 1);
@@ -178,10 +255,10 @@ mod test {
             },
             (5..10).collect(),
         );
-        assert!(meta_manager.add_fragments_to_node(&location).await.is_ok());
+        meta_manager.add_fragments_to_node(&location).await?;
 
         // Check new fragments added result.
-        let locations = meta_manager.load_all_fragments().await.unwrap();
+        let locations = meta_manager.load_all_fragments().await?;
         assert_eq!(locations.len(), 1);
         let location = locations.get(0).unwrap();
         assert_eq!(location.get_node().get_id(), 1);
@@ -206,8 +283,8 @@ mod test {
             },
             (10..15).collect(),
         );
-        assert!(meta_manager.add_fragments_to_node(&location).await.is_ok());
-        let locations = meta_manager.load_all_fragments().await.unwrap();
+        meta_manager.add_fragments_to_node(&location).await?;
+        let locations = meta_manager.load_all_fragments().await?;
         assert_eq!(locations.len(), 2);
         let location0 = locations.get(0).unwrap();
         let location1 = locations.get(1).unwrap();
@@ -222,10 +299,41 @@ mod test {
             HashSet::from_iter(0..15)
         );
 
-        let node = meta_manager.get_fragment_node(0).await.unwrap();
+        let node = meta_manager.get_fragment_node(0).await?;
         assert_eq!(node.id, 1);
-        let node = meta_manager.get_fragment_node(10).await.unwrap();
+        let node = meta_manager.get_fragment_node(10).await?;
         assert_eq!(node.id, 2);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_table_fragment() -> Result<()> {
+        let meta_store_ref = Arc::new(MemStore::new());
+        let meta_manager = StoredStreamMetaManager::new(Config::default(), meta_store_ref);
+
+        let table_ref_id = TableRefId {
+            schema_ref_id: None,
+            table_id: 0,
+        };
+        let fragment_ids = (0..5).collect::<Vec<u32>>();
+
+        meta_manager
+            .add_table_fragments(
+                &table_ref_id,
+                &TableFragments {
+                    table_ref_id: Some(table_ref_id.clone()),
+                    fragment_ids: fragment_ids.clone(),
+                },
+            )
+            .await?;
+
+        let fragments = meta_manager.get_table_fragments(&table_ref_id).await?;
+        assert_eq!(*fragments.get_fragment_ids(), fragment_ids);
+
+        meta_manager.drop_table_fragments(&table_ref_id).await?;
+        let res = meta_manager.get_table_fragments(&table_ref_id).await;
+        assert!(res.is_err());
 
         Ok(())
     }

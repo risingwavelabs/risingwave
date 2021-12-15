@@ -16,15 +16,22 @@ use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::id_service::IdGeneratorServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::storage::MemStore;
+use crate::stream::StoredStreamMetaManager;
 
 pub async fn rpc_serve(addr: SocketAddr) -> (JoinHandle<()>, UnboundedSender<()>) {
     let meta_store_ref = Arc::new(MemStore::new());
+    let config = Config::default();
+
+    let stream_meta_manager = Arc::new(StoredStreamMetaManager::new(
+        config.clone(),
+        meta_store_ref.clone(),
+    ));
     let meta_manager = Arc::new(
         MetaManager::new(
             meta_store_ref.clone(),
             Box::new(MemEpochGenerator::new()),
             IdGeneratorManager::new(meta_store_ref).await,
-            Config::default(),
+            config,
         )
         .await,
     );
@@ -32,8 +39,8 @@ pub async fn rpc_serve(addr: SocketAddr) -> (JoinHandle<()>, UnboundedSender<()>
     let epoch_srv = EpochServiceImpl::new(meta_manager.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new(meta_manager.clone());
     let catalog_srv = CatalogServiceImpl::new(meta_manager.clone());
-    let id_generator_srv = IdGeneratorServiceImpl::new(meta_manager.clone());
-    let stream_srv = StreamServiceImpl::new(meta_manager);
+    let id_generator_srv = IdGeneratorServiceImpl::new(meta_manager);
+    let stream_srv = StreamServiceImpl::new(stream_meta_manager);
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {

@@ -36,6 +36,7 @@ thiserror = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 tokio-stream = "0.1.7"
 tonic = "0.5"
+uuid = { version = "0.8", features = ["v4"] }
 
 [dev-dependencies]
 approx = "0.5"

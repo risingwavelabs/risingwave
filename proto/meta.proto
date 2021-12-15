@@ -193,6 +193,10 @@ service HeartbeatService {
 }
 
 // Below for stream manager.
+message TableFragments {
+  plan.TableRefId table_ref_id = 1;
+  repeated uint32 fragment_ids = 2;
+}
 
 message FragmentLocation {
   Cluster.Node node = 1;

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::{
     AddFragmentsToNodeRequest, AddFragmentsToNodeResponse, LoadAllFragmentsRequest,
@@ -7,17 +5,16 @@ use risingwave_pb::meta::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::manager::MetaManager;
-use crate::stream::StreamMetaManager;
+use crate::stream::StreamMetaManagerRef;
 
 #[derive(Clone)]
 pub struct StreamServiceImpl {
-    mmc: Arc<MetaManager>,
+    smm: StreamMetaManagerRef,
 }
 
 impl StreamServiceImpl {
-    pub fn new(mmc: Arc<MetaManager>) -> Self {
-        StreamServiceImpl { mmc }
+    pub fn new(smm: StreamMetaManagerRef) -> Self {
+        StreamServiceImpl { smm }
     }
 }
 
@@ -29,8 +26,7 @@ impl StreamManagerService for StreamServiceImpl {
         request: Request<AddFragmentsToNodeRequest>,
     ) -> Result<Response<AddFragmentsToNodeResponse>, Status> {
         let req = request.into_inner();
-        self.mmc.fragment_lock.write().await;
-        let result = self.mmc.add_fragments_to_node(req.get_location()).await;
+        let result = self.smm.add_fragments_to_node(req.get_location()).await;
         match result {
             Ok(()) => Ok(Response::new(AddFragmentsToNodeResponse { status: None })),
             Err(e) => Err(e.to_grpc_status()),
@@ -43,11 +39,10 @@ impl StreamManagerService for StreamServiceImpl {
         request: Request<LoadAllFragmentsRequest>,
     ) -> Result<Response<LoadAllFragmentsResponse>, Status> {
         let _req = request.into_inner();
-        self.mmc.fragment_lock.read().await;
         Ok(Response::new(LoadAllFragmentsResponse {
             status: None,
             locations: self
-                .mmc
+                .smm
                 .load_all_fragments()
                 .await
                 .map_err(|e| e.to_grpc_status())?,
