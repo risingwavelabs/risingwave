@@ -147,13 +147,14 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema, SchemaId};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::{DataTypeKind, DecimalType, Int64Type};
+    use risingwave_common::util::downcast_arc;
     use risingwave_source::{MemSourceManager, SourceManager};
-    use risingwave_storage::bummock::BummockResult;
+    use risingwave_storage::bummock::{BummockResult, BummockTable};
+    use risingwave_storage::table::{ScannableTable, SimpleTableManager, TableManager};
     use risingwave_storage::*;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
-    use crate::stream::{SimpleTableManager, TableImpl, TableManager};
     use crate::*;
 
     #[tokio::test]
@@ -206,9 +207,12 @@ mod tests {
 
         // Create the first table.
         let table_id = TableId::new(SchemaId::default(), 0);
-        let table = table_manager
-            .create_table(&table_id, table_columns.to_vec())
-            .await?;
+        let table = downcast_arc::<BummockTable>(
+            table_manager
+                .create_table(&table_id, table_columns.to_vec())
+                .await?
+                .into_any(),
+        )?;
         source_manager.create_table_source(&table_id, table)?;
 
         let mut insert_executor = InsertExecutor {
@@ -236,49 +240,50 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![Some(5)]
         );
-        let table_ref = table_manager.get_table(&insert_executor.table_id)?;
-        if let TableImpl::Bummock(table_ref) = table_ref {
-            match table_ref
-                .get_data_by_columns(&table_ref.get_column_ids())
-                .await?
-            {
-                BummockResult::Data(data_ref) => {
-                    assert_eq!(
-                        data_ref[0]
-                            .column_at(0)?
-                            .array()
-                            .as_int64()
-                            .iter()
-                            .collect::<Vec<_>>(),
-                        vec![Some(0), Some(1), Some(2), Some(3), Some(4)]
-                    );
+        let table_ref = downcast_arc::<BummockTable>(
+            table_manager
+                .get_table(&insert_executor.table_id)?
+                .into_any(),
+        )?;
+        match table_ref
+            .get_data_by_columns(&table_ref.get_column_ids())
+            .await?
+        {
+            BummockResult::Data(data_ref) => {
+                assert_eq!(
+                    data_ref[0]
+                        .column_at(0)?
+                        .array()
+                        .as_int64()
+                        .iter()
+                        .collect::<Vec<_>>(),
+                    vec![Some(0), Some(1), Some(2), Some(3), Some(4)]
+                );
 
-                    assert_eq!(
-                        data_ref[0]
-                            .column_at(1)?
-                            .array()
-                            .as_int64()
-                            .iter()
-                            .collect::<Vec<_>>(),
-                        vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
-                    );
-                    assert_eq!(
-                        data_ref[0]
-                            .column_at(2)?
-                            .array()
-                            .as_int64()
-                            .iter()
-                            .collect::<Vec<_>>(),
-                        vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
-                    );
-                }
-                BummockResult::DataEof => {
-                    panic!("Empty data returned.")
-                }
+                assert_eq!(
+                    data_ref[0]
+                        .column_at(1)?
+                        .array()
+                        .as_int64()
+                        .iter()
+                        .collect::<Vec<_>>(),
+                    vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
+                );
+                assert_eq!(
+                    data_ref[0]
+                        .column_at(2)?
+                        .array()
+                        .as_int64()
+                        .iter()
+                        .collect::<Vec<_>>(),
+                    vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
+                );
             }
-        } else {
-            panic!("invalid table type found.")
+            BummockResult::DataEof => {
+                panic!("Empty data returned.")
+            }
         }
+
         // First insertion test ends.
 
         // Insert to the same table by a new executor. The result should have growing row ids from
@@ -310,29 +315,29 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![Some(5)]
         );
-        let table_ref = table_manager.get_table(&insert_executor.table_id)?;
-        if let TableImpl::Bummock(table_ref) = table_ref {
-            match table_ref
-                .get_data_by_columns(&table_ref.get_column_ids())
-                .await?
-            {
-                BummockResult::Data(data_ref) => {
-                    assert_eq!(
-                        data_ref[1]
-                            .column_at(0)?
-                            .array()
-                            .as_int64()
-                            .iter()
-                            .collect::<Vec<_>>(),
-                        vec![Some(5), Some(6), Some(7), Some(8), Some(9)]
-                    );
-                }
-                BummockResult::DataEof => {
-                    panic!("Empty data returned.")
-                }
+        let table_ref = downcast_arc::<BummockTable>(
+            table_manager
+                .get_table(&insert_executor.table_id)?
+                .into_any(),
+        )?;
+        match table_ref
+            .get_data_by_columns(&table_ref.get_column_ids())
+            .await?
+        {
+            BummockResult::Data(data_ref) => {
+                assert_eq!(
+                    data_ref[1]
+                        .column_at(0)?
+                        .array()
+                        .as_int64()
+                        .iter()
+                        .collect::<Vec<_>>(),
+                    vec![Some(5), Some(6), Some(7), Some(8), Some(9)]
+                );
             }
-        } else {
-            panic!("invalid table type found.")
+            BummockResult::DataEof => {
+                panic!("Empty data returned.")
+            }
         }
         // Second insertion test ends.
 
@@ -351,9 +356,12 @@ mod tests {
                 }],
             },
         };
-        let table2 = table_manager
-            .create_table(&table_id2, table_columns)
-            .await?;
+        let table2 = downcast_arc::<BummockTable>(
+            table_manager
+                .create_table(&table_id2, table_columns)
+                .await?
+                .into_any(),
+        )?;
         source_manager.create_table_source(&table_id2, table2)?;
 
         insert_executor.open().await.unwrap();
@@ -370,48 +378,48 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![Some(5)]
         );
-        let table_ref = table_manager.get_table(&insert_executor.table_id)?;
-        if let TableImpl::Bummock(table_ref) = table_ref {
-            match table_ref
-                .get_data_by_columns(&table_ref.get_column_ids())
-                .await?
-            {
-                BummockResult::Data(data_ref) => {
-                    assert_eq!(
-                        data_ref[0]
-                            .column_at(0)?
-                            .array()
-                            .as_int64()
-                            .iter()
-                            .collect::<Vec<_>>(),
-                        vec![Some(0), Some(1), Some(2), Some(3), Some(4)]
-                    );
+        let table_ref = downcast_arc::<BummockTable>(
+            table_manager
+                .get_table(&insert_executor.table_id)?
+                .into_any(),
+        )?;
+        match table_ref
+            .get_data_by_columns(&table_ref.get_column_ids())
+            .await?
+        {
+            BummockResult::Data(data_ref) => {
+                assert_eq!(
+                    data_ref[0]
+                        .column_at(0)?
+                        .array()
+                        .as_int64()
+                        .iter()
+                        .collect::<Vec<_>>(),
+                    vec![Some(0), Some(1), Some(2), Some(3), Some(4)]
+                );
 
-                    assert_eq!(
-                        data_ref[0]
-                            .column_at(1)?
-                            .array()
-                            .as_int64()
-                            .iter()
-                            .collect::<Vec<_>>(),
-                        vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
-                    );
-                    assert_eq!(
-                        data_ref[0]
-                            .column_at(2)?
-                            .array()
-                            .as_int64()
-                            .iter()
-                            .collect::<Vec<_>>(),
-                        vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
-                    );
-                }
-                BummockResult::DataEof => {
-                    panic!("Empty data returned.")
-                }
+                assert_eq!(
+                    data_ref[0]
+                        .column_at(1)?
+                        .array()
+                        .as_int64()
+                        .iter()
+                        .collect::<Vec<_>>(),
+                    vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
+                );
+                assert_eq!(
+                    data_ref[0]
+                        .column_at(2)?
+                        .array()
+                        .as_int64()
+                        .iter()
+                        .collect::<Vec<_>>(),
+                    vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
+                );
             }
-        } else {
-            panic!("invalid table type found.")
+            BummockResult::DataEof => {
+                panic!("Empty data returned.")
+            }
         }
         // Third insertion test ends.
 

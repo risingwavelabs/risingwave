@@ -4,6 +4,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{deserialize_datum_from, Datum};
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_storage::table::TableIter;
 
 use super::*;
 use crate::stream_op::keyspace::StateStore;
@@ -105,12 +106,15 @@ impl<S: StateStore> MViewTableIter<S> {
             pk_columns,
         }
     }
+}
 
-    pub async fn open(&mut self) -> Result<()> {
+#[async_trait::async_trait]
+impl<S: StateStore> TableIter for MViewTableIter<S> {
+    async fn open(&mut self) -> Result<()> {
         self.inner.open().await
     }
 
-    pub async fn next(&mut self) -> Result<Option<Row>> {
+    async fn next(&mut self) -> Result<Option<Row>> {
         // TODO(MrCroxx): this implementation is inefficient, refactor me.
         let mut pk_buf = vec![];
         let mut columns = Row(vec![None; self.schema.len()]);

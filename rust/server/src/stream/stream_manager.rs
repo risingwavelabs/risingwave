@@ -17,8 +17,8 @@ use risingwave_pb::{expr, stream_plan, stream_service};
 use risingwave_source::{Source, *};
 use tokio::task::JoinHandle;
 
+use crate::stream::StreamTaskEnv;
 use crate::stream_op::*;
-use crate::task::GlobalTaskEnv;
 
 /// Default capacity of channel if two fragments are on the same node
 pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
@@ -173,7 +173,7 @@ impl StreamManager {
     }
 
     /// This function could only be called once during the lifecycle of `StreamManager` for now.
-    pub fn build_fragment(&self, fragments: &[u32], env: GlobalTaskEnv) -> Result<()> {
+    pub fn build_fragment(&self, fragments: &[u32], env: StreamTaskEnv) -> Result<()> {
         let mut core = self.core.lock().unwrap();
         core.build_fragment(fragments, env)
     }
@@ -346,7 +346,7 @@ impl StreamManagerCore {
         &mut self,
         fragment_id: u32,
         node: &stream_plan::StreamNode,
-        env: GlobalTaskEnv,
+        env: StreamTaskEnv,
     ) -> Result<Box<dyn Executor>> {
         use stream_plan::stream_node::Node::*;
 
@@ -686,7 +686,7 @@ impl StreamManagerCore {
         }
     }
 
-    fn build_fragment(&mut self, fragments: &[u32], env: GlobalTaskEnv) -> Result<()> {
+    fn build_fragment(&mut self, fragments: &[u32], env: StreamTaskEnv) -> Result<()> {
         for fragment_id in fragments {
             let fragment = self.fragments.remove(fragment_id).unwrap();
 

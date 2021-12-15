@@ -11,9 +11,9 @@ use risingwave_pb::task_service::{
 };
 
 use crate::executor::{BoxedExecutor, ExecutorBuilder};
-use crate::rpc::service::exchange_service::ExchangeWriter;
+use crate::rpc::service::exchange::ExchangeWriter;
 use crate::task::channel::{create_output_channel, BoxChanReceiver, BoxChanSender};
-use crate::task::{GlobalTaskEnv, TaskManager};
+use crate::task::{BatchTaskEnv, TaskManager};
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub struct TaskId {
@@ -110,13 +110,13 @@ pub struct TaskExecution {
     plan: PlanFragment,
     state: Mutex<TaskStatus>,
     receivers: Mutex<Vec<Option<BoxChanReceiver>>>,
-    env: GlobalTaskEnv,
+    env: BatchTaskEnv,
     // The execution failure.
     failure: Arc<Mutex<Option<RwError>>>,
 }
 
 impl TaskExecution {
-    pub fn new(prost_tid: &ProstTaskId, plan: PlanFragment, env: GlobalTaskEnv) -> Self {
+    pub fn new(prost_tid: &ProstTaskId, plan: PlanFragment, env: BatchTaskEnv) -> Self {
         TaskExecution {
             task_id: TaskId::from(prost_tid),
             plan,

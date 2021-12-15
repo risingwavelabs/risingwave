@@ -7,16 +7,16 @@ use risingwave_pb::task_service::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::task::{GlobalTaskEnv, TaskManager};
+use crate::task::{BatchTaskEnv, TaskManager};
 
 #[derive(Clone)]
 pub struct TaskServiceImpl {
     mgr: Arc<TaskManager>,
-    env: GlobalTaskEnv,
+    env: BatchTaskEnv,
 }
 
 impl TaskServiceImpl {
-    pub fn new(mgr: Arc<TaskManager>, env: GlobalTaskEnv) -> Self {
+    pub fn new(mgr: Arc<TaskManager>, env: BatchTaskEnv) -> Self {
         TaskServiceImpl { mgr, env }
     }
 }

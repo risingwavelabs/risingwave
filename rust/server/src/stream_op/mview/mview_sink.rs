@@ -128,14 +128,17 @@ mod tests {
 
     use risingwave_common::array::{I32Array, Op, Row};
     use risingwave_common::catalog::{Schema, SchemaId, TableId};
+    use risingwave_common::column_nonnull;
     use risingwave_common::types::{Int32Type, Scalar};
+    use risingwave_common::util::downcast_arc;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType;
     use risingwave_pb::plan::column_desc::ColumnEncodingType;
     use risingwave_pb::plan::ColumnDesc;
+    use risingwave_storage::table::TableManager;
 
-    use crate::stream::{SimpleTableManager, StateStoreImpl, TableManager};
+    use crate::stream::{SimpleTableManager, StateStoreImpl, StreamTableManager, TableImpl};
     use crate::stream_op::test_utils::*;
     use crate::stream_op::*;
     use crate::*;
@@ -222,7 +225,9 @@ mod tests {
             vec![OrderType::Ascending],
         ));
 
-        let table = store_mgr.get_table(&table_id).unwrap().as_memory();
+        let table = downcast_arc::<TableImpl>(store_mgr.get_table(&table_id).unwrap().into_any())
+            .unwrap()
+            .as_memory();
 
         sink_executor.next().await.unwrap();
         // First stream chunk. We check the existence of (3) -> (3,6)

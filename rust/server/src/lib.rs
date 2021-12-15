@@ -10,16 +10,15 @@
 #![feature(test)]
 #![feature(map_first_last)]
 
-#[macro_use]
-extern crate log;
+// This is a bug of rustc which warn me to remove macro_use, I have add this.
+#[allow(unused_imports)]
 #[macro_use]
 extern crate risingwave_common;
+#[macro_use]
+extern crate log;
 extern crate test;
 
-mod execution;
-mod executor;
-mod stream;
-mod stream_op;
-mod task;
+pub mod stream;
+pub mod stream_op;
 
 pub mod rpc;

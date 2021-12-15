@@ -47,6 +47,12 @@ impl StreamingRowCountAgg {
     }
 }
 
+impl Default for StreamingRowCountAgg {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StreamingAggStateImpl for StreamingRowCountAgg {
     fn apply_batch(
         &mut self,

@@ -13,24 +13,20 @@
 pub mod bummock;
 pub mod hummock;
 pub mod object;
+pub mod table;
 
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataTypeRef;
 
-use crate::bummock::BummockResult;
+use crate::table::ScannableTable;
 
 /// `Table` is an abstraction of the collection of columns and rows.
 /// Each `Table` can be viewed as a flat sheet of a user created table.
 #[async_trait::async_trait]
-pub trait Table: Sync + Send {
+pub trait Table: ScannableTable {
     /// Append an entry to the table.
     async fn append(&self, data: DataChunk) -> Result<usize>;
-
-    /// Scan data of specified column ids
-    ///
-    /// In future, it will accept `predicates` for interested filtering conditions.
-    async fn get_data_by_columns(&self, column_ids: &[i32]) -> Result<BummockResult>;
 
     /// Write a batch of changes. For now, we use `StreamChunk` to represent a write batch
     /// An assertion is put to assert only insertion operations are allowed.

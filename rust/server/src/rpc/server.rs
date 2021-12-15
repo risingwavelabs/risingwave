@@ -1,6 +1,8 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use risingwave_batch::rpc::service::task_service::TaskServiceImpl;
+use risingwave_batch::task::{BatchTaskEnv, TaskManager};
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
@@ -10,9 +12,7 @@ use tokio::task::JoinHandle;
 
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
-use crate::rpc::service::task_service::TaskServiceImpl;
-use crate::stream::{SimpleTableManager, StreamManager};
-use crate::task::{GlobalTaskEnv, TaskManager};
+use crate::stream::{SimpleTableManager, StreamManager, StreamTaskEnv};
 
 pub fn rpc_serve(addr: SocketAddr) -> (JoinHandle<()>, UnboundedSender<()>) {
     let table_mgr = Arc::new(SimpleTableManager::new());
@@ -32,10 +32,16 @@ pub fn rpc_serve(addr: SocketAddr) -> (JoinHandle<()>, UnboundedSender<()>) {
         }
     });
 
-    let env = GlobalTaskEnv::new(table_mgr, source_mgr, task_mgr.clone(), addr);
-    let task_srv = TaskServiceImpl::new(task_mgr.clone(), env.clone());
+    let batch_env = BatchTaskEnv::new(
+        table_mgr.clone(),
+        source_mgr.clone(),
+        task_mgr.clone(),
+        addr,
+    );
+    let stream_env = StreamTaskEnv::new(table_mgr, source_mgr, addr);
+    let task_srv = TaskServiceImpl::new(task_mgr.clone(), batch_env);
     let exchange_srv = ExchangeServiceImpl::new(task_mgr, stream_mgr.clone());
-    let stream_srv = StreamServiceImpl::new(stream_mgr, env);
+    let stream_srv = StreamServiceImpl::new(stream_mgr, stream_env);
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {

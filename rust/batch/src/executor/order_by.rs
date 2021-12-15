@@ -14,6 +14,7 @@ use risingwave_common::array::{
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::Result;
+use risingwave_common::expr::Expression;
 use risingwave_common::util::encoding_for_comparison::{encode_chunk, is_type_encodable};
 use risingwave_common::util::sort_util::{
     compare_two_row, fetch_orders, HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE,
@@ -23,7 +24,6 @@ use risingwave_pb::plan::OrderByNode as OrderByProto;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
-use crate::risingwave_common::expr::Expression;
 
 pub(super) struct OrderByExecutor {
     child: BoxedExecutor,

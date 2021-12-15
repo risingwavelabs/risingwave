@@ -31,6 +31,7 @@ prost = "0.8"
 prost-types = "0.8"
 rdkafka = { version = "0.27", features = ["cmake-build"] }
 risingwave-pb = { path = "../prost" }
+risingwave_batch = { path = "../batch" }
 risingwave_common = { path = "../common" }
 risingwave_source = { path = "../source" }
 risingwave_storage = { path = "../storage" }

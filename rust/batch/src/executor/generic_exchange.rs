@@ -15,14 +15,14 @@ use risingwave_pb::task_service::{ExchangeNode, ExchangeSource as ProstExchangeS
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::execution::exchange_source::{ExchangeSource, GrpcExchangeSource, LocalExchangeSource};
 use crate::executor::{Executor, ExecutorBuilder};
-use crate::task::GlobalTaskEnv;
+use crate::task::BatchTaskEnv;
 
 pub(super) type ExchangeExecutor = GenericExchangeExecutor<DefaultCreateSource>;
 
 pub struct GenericExchangeExecutor<C> {
     sources: Vec<ProstExchangeSource>,
     server_addr: SocketAddr,
-    env: GlobalTaskEnv,
+    env: BatchTaskEnv,
 
     source_idx: usize,
     current_source: Option<Box<dyn ExchangeSource>>,
@@ -36,7 +36,7 @@ pub struct GenericExchangeExecutor<C> {
 #[async_trait::async_trait]
 pub trait CreateSource: Send {
     async fn create_source(
-        env: GlobalTaskEnv,
+        env: BatchTaskEnv,
         value: &ProstExchangeSource,
     ) -> Result<Box<dyn ExchangeSource>>;
 }
@@ -46,7 +46,7 @@ pub struct DefaultCreateSource {}
 #[async_trait::async_trait]
 impl CreateSource for DefaultCreateSource {
     async fn create_source(
-        env: GlobalTaskEnv,
+        env: BatchTaskEnv,
         value: &ProstExchangeSource,
     ) -> Result<Box<dyn ExchangeSource>> {
         let peer_addr = get_host_port(
@@ -174,7 +174,7 @@ mod tests {
         #[async_trait::async_trait]
         impl CreateSource for FakeCreateSource {
             async fn create_source(
-                _: GlobalTaskEnv,
+                _: BatchTaskEnv,
                 _: &ProstExchangeSource,
             ) -> Result<Box<dyn ExchangeSource>> {
                 let chunk = DataChunk::builder()
@@ -198,7 +198,7 @@ mod tests {
             source_idx: 0,
             current_source: None,
             source_creator: PhantomData,
-            env: GlobalTaskEnv::for_test(),
+            env: BatchTaskEnv::for_test(),
             schema: Schema {
                 fields: vec![Field {
                     data_type: Int32Type::create(false),

@@ -5,6 +5,7 @@ use prost::Message;
 use prost_types::Any;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
+use risingwave_common::util::downcast_arc;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::{Column, DataType};
 use risingwave_pb::expr::expr_node::RexNode;
@@ -19,11 +20,11 @@ use risingwave_pb::plan::{
 use risingwave_pb::task_service::{
     GetDataResponse, QueryId, StageId, TaskId as ProstTaskId, TaskSinkId as ProstSinkId,
 };
+use risingwave_storage::bummock::BummockTable;
 use risingwave_storage::Table;
 
 use super::*;
-use crate::rpc::service::exchange_service::ExchangeWriter;
-use crate::stream::TableImpl;
+use crate::rpc::service::exchange::ExchangeWriter;
 
 fn get_num_sinks(plan: &PlanFragment) -> u32 {
     match plan.get_exchange_info().get_mode() {
@@ -55,7 +56,7 @@ impl ExchangeWriter for FakeExchangeWriter {
 
 pub struct TestRunner {
     tid: ProstTaskId,
-    env: GlobalTaskEnv,
+    env: BatchTaskEnv,
 }
 
 impl TestRunner {
@@ -71,7 +72,7 @@ impl TestRunner {
         };
         Self {
             tid,
-            env: GlobalTaskEnv::for_test(),
+            env: BatchTaskEnv::for_test(),
         }
     }
 
@@ -116,7 +117,7 @@ impl TestRunner {
         Ok(res)
     }
 
-    fn get_global_env(&self) -> GlobalTaskEnv {
+    fn get_global_env(&self) -> BatchTaskEnv {
         self.env.clone()
     }
 
@@ -358,7 +359,7 @@ impl<'a> SelectBuilder<'a> {
             .table_manager_ref()
             .get_table(&TableId::default())
             .unwrap();
-        if let TableImpl::Bummock(column_table_ref) = table_ref {
+        if let Ok(column_table_ref) = downcast_arc::<BummockTable>(table_ref.into_any()) {
             let column_ids = column_table_ref.get_column_ids();
             let scan = SeqScanNode {
                 table_ref_id: None,

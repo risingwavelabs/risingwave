@@ -106,6 +106,12 @@ impl BlackHoleDispatcher {
     }
 }
 
+impl Default for BlackHoleDispatcher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl DataDispatcher for BlackHoleDispatcher {
     async fn dispatch_data(&mut self, _chunk: StreamChunk) -> Result<()> {

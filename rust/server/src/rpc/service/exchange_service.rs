@@ -3,7 +3,9 @@ use std::sync::Arc;
 
 use futures::channel::mpsc::Receiver;
 use futures::StreamExt;
-use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
+use risingwave_batch::rpc::service::exchange::GrpcExchangeWriter;
+use risingwave_batch::task::{TaskManager, TaskSinkId};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::data::StreamMessage;
 use risingwave_pb::task_service::exchange_service_server::ExchangeService;
 use risingwave_pb::task_service::{
@@ -14,7 +16,6 @@ use tonic::{Request, Response, Status};
 
 use crate::stream::StreamManager;
 use crate::stream_op::Message;
-use crate::task::{TaskManager, TaskSinkId};
 
 #[derive(Clone)]
 pub struct ExchangeServiceImpl {
@@ -29,7 +30,6 @@ impl ExchangeServiceImpl {
 }
 
 type ExchangeDataStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
-type ExchangeDataSender = tokio::sync::mpsc::Sender<std::result::Result<GetDataResponse, Status>>;
 
 #[async_trait::async_trait]
 impl ExchangeService for ExchangeServiceImpl {
@@ -145,63 +145,5 @@ impl ExchangeServiceImpl {
             }
         });
         Ok(Response::new(ReceiverStream::new(rx)))
-    }
-}
-
-#[async_trait::async_trait]
-pub trait ExchangeWriter: Send {
-    async fn write(&mut self, resp: GetDataResponse) -> Result<()>;
-}
-
-pub struct GrpcExchangeWriter {
-    sender: ExchangeDataSender,
-    written_chunks: usize,
-}
-
-impl GrpcExchangeWriter {
-    fn new(sender: ExchangeDataSender) -> Self {
-        Self {
-            sender,
-            written_chunks: 0,
-        }
-    }
-
-    fn written_chunks(&self) -> usize {
-        self.written_chunks
-    }
-}
-
-#[async_trait::async_trait]
-impl ExchangeWriter for GrpcExchangeWriter {
-    async fn write(&mut self, data: GetDataResponse) -> Result<()> {
-        self.written_chunks += 1;
-        self.sender
-            .send(Ok(data))
-            .await
-            .to_rw_result_with("failed to write data to ExchangeWriter")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use risingwave_pb::task_service::GetDataResponse;
-
-    use crate::rpc::service::exchange_service::{ExchangeWriter, GrpcExchangeWriter};
-
-    #[tokio::test]
-    async fn test_exchange_writer() {
-        let (tx, _rx) = tokio::sync::mpsc::channel(10);
-        let mut writer = GrpcExchangeWriter::new(tx);
-        writer.write(GetDataResponse::default()).await.unwrap();
-        assert_eq!(writer.written_chunks(), 1);
-    }
-
-    #[tokio::test]
-    async fn test_write_to_closed_channel() {
-        let (tx, rx) = tokio::sync::mpsc::channel(10);
-        drop(rx);
-        let mut writer = GrpcExchangeWriter::new(tx);
-        let res = writer.write(GetDataResponse::default()).await;
-        assert!(res.is_err());
     }
 }

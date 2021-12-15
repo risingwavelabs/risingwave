@@ -5,10 +5,10 @@ use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::Result;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::DropTableNode;
+use risingwave_storage::table::TableManagerRef;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
-use crate::stream::TableManagerRef;
 
 pub(super) struct DropTableExecutor {
     table_id: TableId,

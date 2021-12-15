@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -7,7 +8,8 @@ use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::{ensure, gen_error};
 use risingwave_pb::plan::ColumnDesc;
-use risingwave_storage::bummock::BummockTable;
+use risingwave_storage::bummock::{BummockResult, BummockTable};
+use risingwave_storage::table::{ScannableTable, ScannableTableRef, TableIterRef, TableManager};
 use risingwave_storage::TableColumnDesc;
 
 use super::StateStoreImpl;
@@ -17,20 +19,7 @@ use crate::stream_op::{HummockStateStore, MViewTable, MemoryStateStore};
 /// `TableManager` is an abstraction of managing a collection of tables.
 /// The interface between executors and storage should be table-oriented.
 /// `Database` is a logical concept and stored as metadata information.
-pub trait TableManager: Sync + Send {
-    /// Create a specific table.
-    async fn create_table(
-        &self,
-        table_id: &TableId,
-        table_columns: Vec<TableColumnDesc>,
-    ) -> Result<Arc<BummockTable>>;
-
-    /// Get a specific table.
-    fn get_table(&self, table_id: &TableId) -> Result<TableImpl>;
-
-    /// Drop a specific table.
-    async fn drop_table(&self, table_id: &TableId) -> Result<()>;
-
+pub trait StreamTableManager: TableManager {
     /// Create materialized view.
     fn create_materialized_view(
         &self,
@@ -57,6 +46,44 @@ impl TableImpl {
             _ => unreachable!(),
         }
     }
+
+    pub fn as_bummock(&self) -> Arc<BummockTable> {
+        match self {
+            Self::Bummock(t) => t.clone(),
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl ScannableTable for TableImpl {
+    fn iter(&self) -> Result<TableIterRef> {
+        match self {
+            TableImpl::Bummock(t) => t.iter(),
+            TableImpl::MViewTable(t) => Ok(Box::new(t.iter())),
+            TableImpl::TestMViewTable(t) => Ok(Box::new(t.iter())),
+        }
+    }
+
+    async fn get_data_by_columns(&self, column_ids: &[i32]) -> Result<BummockResult> {
+        match self {
+            TableImpl::Bummock(t) => t.get_data_by_columns(column_ids).await,
+            TableImpl::MViewTable(_) => unimplemented!(),
+            TableImpl::TestMViewTable(_) => unimplemented!(),
+        }
+    }
+
+    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Sync + Send> {
+        self
+    }
+
+    fn schema(&self) -> Schema {
+        match self {
+            TableImpl::Bummock(t) => t.schema(),
+            TableImpl::MViewTable(t) => t.schema().clone(),
+            TableImpl::TestMViewTable(t) => t.schema().clone(),
+        }
+    }
 }
 
 /// A simple implementation of in memory table for local tests.
@@ -67,13 +94,19 @@ pub struct SimpleTableManager {
     tables: Mutex<HashMap<TableId, TableImpl>>,
 }
 
+impl AsRef<dyn Any> for SimpleTableManager {
+    fn as_ref(&self) -> &dyn Any {
+        self as &dyn Any
+    }
+}
+
 #[async_trait::async_trait]
 impl TableManager for SimpleTableManager {
     async fn create_table(
         &self,
         table_id: &TableId,
         table_columns: Vec<TableColumnDesc>,
-    ) -> Result<Arc<BummockTable>> {
+    ) -> Result<ScannableTableRef> {
         let mut tables = self.get_tables()?;
 
         ensure!(
@@ -93,11 +126,12 @@ impl TableManager for SimpleTableManager {
         Ok(table)
     }
 
-    fn get_table(&self, table_id: &TableId) -> Result<TableImpl> {
+    fn get_table(&self, table_id: &TableId) -> Result<ScannableTableRef> {
         let tables = self.get_tables()?;
         tables
             .get(table_id)
             .cloned()
+            .map(|t| Arc::new(t) as ScannableTableRef)
             .ok_or_else(|| InternalError(format!("Table id not exists: {:?}", table_id)).into())
     }
 
@@ -111,7 +145,10 @@ impl TableManager for SimpleTableManager {
         tables.remove(table_id);
         Ok(())
     }
+}
 
+#[async_trait::async_trait]
+impl StreamTableManager for SimpleTableManager {
     fn create_materialized_view(
         &self,
         table_id: &TableId,
@@ -161,5 +198,4 @@ impl SimpleTableManager {
     }
 }
 
-/// Reference of a `TableManager`.
-pub type TableManagerRef = Arc<dyn TableManager>;
+pub type StreamTableManagerRef = Arc<dyn StreamTableManager>;

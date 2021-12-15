@@ -8,17 +8,16 @@ use risingwave_pb::stream_service::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::stream::StreamManager;
-use crate::task::GlobalTaskEnv;
+use crate::stream::{StreamManager, StreamTaskEnv};
 
 #[derive(Clone)]
 pub struct StreamServiceImpl {
     mgr: Arc<StreamManager>,
-    env: GlobalTaskEnv,
+    env: StreamTaskEnv,
 }
 
 impl StreamServiceImpl {
-    pub fn new(mgr: Arc<StreamManager>, env: GlobalTaskEnv) -> Self {
+    pub fn new(mgr: Arc<StreamManager>, env: StreamTaskEnv) -> Self {
         StreamServiceImpl { mgr, env }
     }
 }

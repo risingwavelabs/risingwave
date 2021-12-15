@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
@@ -7,6 +8,7 @@ use risingwave_common::error::{Result, RwError};
 
 use super::BummockResult;
 use crate::bummock::{MemRowGroup, MemRowGroupRef, PartitionedRowGroupRef, StagedRowGroupRef};
+use crate::table::{ScannableTable, TableIter};
 use crate::{Table, TableColumnDesc};
 
 #[derive(Debug)]
@@ -39,6 +41,67 @@ pub struct BummockTable {
 
     /// synchronization protection
     rwlock: Arc<RwLock<i32>>,
+}
+
+#[async_trait::async_trait]
+impl ScannableTable for BummockTable {
+    fn iter(&self) -> Result<Box<dyn TableIter>> {
+        unimplemented!()
+    }
+
+    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Sync + Send> {
+        self
+    }
+
+    async fn get_data_by_columns(&self, column_ids: &[i32]) -> Result<BummockResult> {
+        // Query table size only
+        if column_ids.is_empty() {
+            return self.get_dummy_data().await;
+        }
+        // TODO, traverse other segs as well
+        let segs = self.mem_dirty_segs.read().unwrap();
+        let chunks = if !segs.is_empty() {
+            segs.last().unwrap().get_data().unwrap()
+        } else {
+            vec![]
+        };
+
+        let column_indices: Vec<usize> = column_ids
+            .iter()
+            .map(|c| self.index_of_column_id(*c).unwrap())
+            .collect();
+
+        let ret: Vec<DataChunkRef> = chunks
+            .into_iter()
+            .map(|c| {
+                let columns = column_indices
+                    .iter()
+                    .map(|i| c.columns()[*i].clone())
+                    .collect();
+                let mut builder = DataChunk::builder().columns(columns);
+                if let Some(vis) = c.visibility() {
+                    builder = builder.visibility(vis.clone());
+                }
+                let chunk = builder.build();
+                Arc::new(chunk)
+            })
+            .collect();
+
+        if ret.is_empty() {
+            Ok(BummockResult::DataEof)
+        } else {
+            Ok(BummockResult::Data(ret))
+        }
+    }
+
+    fn schema(&self) -> Schema {
+        Schema::new(
+            self.table_columns
+                .iter()
+                .map(|c| Field::new(c.data_type.clone()))
+                .collect(),
+        )
+    }
 }
 
 #[async_trait::async_trait]
@@ -86,47 +149,6 @@ impl Table for BummockTable {
         Ok(ret_cardinality)
     }
 
-    async fn get_data_by_columns(&self, column_ids: &[i32]) -> Result<BummockResult> {
-        // Query table size only
-        if column_ids.is_empty() {
-            return self.get_dummy_data().await;
-        }
-        // TODO, traverse other segs as well
-        let segs = self.mem_dirty_segs.read().unwrap();
-        let chunks = if !segs.is_empty() {
-            segs.last().unwrap().get_data().unwrap()
-        } else {
-            vec![]
-        };
-
-        let column_indices: Vec<usize> = column_ids
-            .iter()
-            .map(|c| self.index_of_column_id(*c).unwrap())
-            .collect();
-
-        let ret: Vec<DataChunkRef> = chunks
-            .into_iter()
-            .map(|c| {
-                let columns = column_indices
-                    .iter()
-                    .map(|i| c.columns()[*i].clone())
-                    .collect();
-                let mut builder = DataChunk::builder().columns(columns);
-                if let Some(vis) = c.visibility() {
-                    builder = builder.visibility(vis.clone());
-                }
-                let chunk = builder.build();
-                Arc::new(chunk)
-            })
-            .collect();
-
-        if ret.is_empty() {
-            Ok(BummockResult::DataEof)
-        } else {
-            Ok(BummockResult::Data(ret))
-        }
-    }
-
     fn get_column_ids(&self) -> Vec<i32> {
         self.table_columns.iter().map(|c| c.column_id).collect()
     }
@@ -162,15 +184,6 @@ impl BummockTable {
 
     pub fn columns(&self) -> &[TableColumnDesc] {
         &self.table_columns
-    }
-
-    pub fn schema(&self) -> Schema {
-        Schema::new(
-            self.table_columns
-                .iter()
-                .map(|c| Field::new(c.data_type.clone()))
-                .collect(),
-        )
     }
 
     /// Get a tuple with `tuple_id`. This is a basic operation to fetch a tuple.
@@ -262,7 +275,7 @@ mod tests {
     use risingwave_common::types::{DecimalType, Int64Type};
 
     use crate::bummock::{BummockResult, BummockTable};
-    use crate::{Table, TableColumnDesc};
+    use crate::{ScannableTable, Table, TableColumnDesc};
 
     #[tokio::test]
     async fn test_table_basic_read_write() -> Result<()> {

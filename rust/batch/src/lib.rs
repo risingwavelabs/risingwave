@@ -1,8 +1,21 @@
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
-    }
-}
+#![allow(dead_code)]
+#![warn(clippy::explicit_into_iter_loop)]
+#![warn(clippy::explicit_iter_loop)]
+#![warn(clippy::map_flatten)]
+#![warn(clippy::doc_markdown)]
+#![feature(trait_alias)]
+#![feature(generic_associated_types)]
+#![feature(binary_heap_drain_sorted)]
+#![feature(test)]
+#![feature(map_first_last)]
+
+pub mod execution;
+pub mod executor;
+pub mod rpc;
+pub mod task;
+
+#[macro_use]
+extern crate log;
+#[macro_use]
+extern crate risingwave_common;
+extern crate test;

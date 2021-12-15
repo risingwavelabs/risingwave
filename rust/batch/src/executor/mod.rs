@@ -13,7 +13,7 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::PlanNode;
-use row_seq_scan::*;
+pub use row_seq_scan::*;
 use seq_scan::*;
 use sort_agg::*;
 use top_n::*;
@@ -26,7 +26,7 @@ use crate::executor::join::sort_merge_join::SortMergeJoinExecutor;
 use crate::executor::join::HashJoinExecutorBuilder;
 pub use crate::executor::stream_scan::StreamScanExecutor;
 use crate::executor::values::ValuesExecutor;
-use crate::task::{GlobalTaskEnv, TaskId};
+use crate::task::{BatchTaskEnv, TaskId};
 
 mod create_stream;
 mod create_table;
@@ -79,7 +79,7 @@ pub trait BoxedExecutorBuilder {
 pub struct ExecutorBuilder<'a> {
     plan_node: &'a PlanNode,
     task_id: &'a TaskId,
-    env: GlobalTaskEnv,
+    env: BatchTaskEnv,
 }
 
 macro_rules! build_executor {
@@ -96,7 +96,7 @@ macro_rules! build_executor {
 }
 
 impl<'a> ExecutorBuilder<'a> {
-    pub fn new(plan_node: &'a PlanNode, task_id: &'a TaskId, env: GlobalTaskEnv) -> Self {
+    pub fn new(plan_node: &'a PlanNode, task_id: &'a TaskId, env: BatchTaskEnv) -> Self {
         Self {
             plan_node,
             task_id,
@@ -149,7 +149,7 @@ impl<'a> ExecutorBuilder<'a> {
         self.plan_node
     }
 
-    pub fn global_task_env(&self) -> &GlobalTaskEnv {
+    pub fn global_task_env(&self) -> &BatchTaskEnv {
         &self.env
     }
 }
@@ -159,7 +159,7 @@ mod tests {
     use risingwave_pb::plan::PlanNode;
 
     use crate::executor::ExecutorBuilder;
-    use crate::task::{GlobalTaskEnv, TaskId};
+    use crate::task::{BatchTaskEnv, TaskId};
 
     #[test]
     fn test_clone_for_plan() {
@@ -171,7 +171,7 @@ mod tests {
             stage_id: 1,
             query_id: "test_query_id".to_string(),
         };
-        let builder = ExecutorBuilder::new(&plan_node, task_id, GlobalTaskEnv::for_test());
+        let builder = ExecutorBuilder::new(&plan_node, task_id, BatchTaskEnv::for_test());
         let child_plan = &PlanNode {
             ..Default::default()
         };

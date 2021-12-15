@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use risingwave_common::array::{DataChunk, DataChunkRef, Op, StreamChunk};
 use risingwave_common::error::Result;
 use risingwave_storage::bummock::{BummockResult, BummockTable};
+use risingwave_storage::table::ScannableTable;
 use risingwave_storage::Table;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{broadcast, RwLock};

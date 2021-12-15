@@ -10,7 +10,7 @@ use risingwave_pb::task_service::{GetDataRequest, GetDataResponse, TaskSinkId};
 use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
 
-use crate::task::{GlobalTaskEnv, TaskSink};
+use crate::task::{BatchTaskEnv, TaskSink};
 
 /// Each ExchangeSource maps to one task, it takes the execution result from task chunk by chunk.
 #[async_trait::async_trait]
@@ -79,7 +79,7 @@ pub struct LocalExchangeSource {
 }
 
 impl LocalExchangeSource {
-    pub fn create(sink_id: TaskSinkId, env: GlobalTaskEnv) -> Result<Self> {
+    pub fn create(sink_id: TaskSinkId, env: BatchTaskEnv) -> Result<Self> {
         let task_sink = env.task_manager().take_sink(&sink_id)?;
         Ok(Self { task_sink })
     }

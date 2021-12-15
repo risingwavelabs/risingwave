@@ -388,6 +388,20 @@ where
     }
 }
 
+impl<R, I, S> Default for StreamingFoldAgg<R, I, S>
+where
+    R: Array,
+    I: Array,
+    S: StreamingFoldable<R::OwnedItem, I::OwnedItem>,
+{
+    fn default() -> Self {
+        Self {
+            result: S::initial(),
+            _phantom: PhantomData,
+        }
+    }
+}
+
 impl<R, I, S> StreamingFoldAgg<R, I, S>
 where
     R: Array,
@@ -395,12 +409,8 @@ where
     S: StreamingFoldable<R::OwnedItem, I::OwnedItem>,
 {
     pub fn new() -> Self {
-        Self {
-            result: S::initial(),
-            _phantom: PhantomData,
-        }
+        Self::default()
     }
-
     /// Get current state without using an array builder
     pub fn get_state(&self) -> &Option<R::OwnedItem> {
         &self.result

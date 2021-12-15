@@ -6,7 +6,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan::PlanFragment;
 use risingwave_pb::task_service::{TaskId as ProstTaskId, TaskSinkId as ProstSinkId};
 
-use crate::task::env::GlobalTaskEnv;
+use crate::task::env::BatchTaskEnv;
 use crate::task::task::{TaskExecution, TaskId};
 use crate::task::TaskSink;
 
@@ -24,7 +24,7 @@ impl TaskManager {
 
     pub fn fire_task(
         &self,
-        env: GlobalTaskEnv,
+        env: BatchTaskEnv,
         tid: &ProstTaskId,
         plan: PlanFragment,
     ) -> Result<()> {
@@ -92,7 +92,7 @@ mod tests {
     use tonic::Code;
 
     use crate::task::test_utils::{ResultChecker, TestRunner};
-    use crate::task::{GlobalTaskEnv, TaskId, TaskManager};
+    use crate::task::{BatchTaskEnv, TaskId, TaskManager};
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_select_all() {
@@ -123,7 +123,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_bad_node_type() {
-        let env = GlobalTaskEnv::for_test();
+        let env = BatchTaskEnv::for_test();
         let manager = TaskManager::new();
         let plan = PlanFragment {
             root: Some(PlanNode {

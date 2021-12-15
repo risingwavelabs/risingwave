@@ -2,28 +2,28 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use risingwave_source::{SourceManager, SourceManagerRef};
+use risingwave_storage::table::{TableManager, TableManagerRef};
 
-use crate::stream::{TableManager, TableManagerRef};
 use crate::task::TaskManager;
 
 /// The global environment for task execution.
 /// The instance will be shared by every task.
 #[derive(Clone)]
-pub struct GlobalTaskEnv {
+pub struct BatchTaskEnv {
     table_manager: TableManagerRef,
     server_addr: SocketAddr,
     task_manager: Arc<TaskManager>,
     source_manager: SourceManagerRef,
 }
 
-impl GlobalTaskEnv {
+impl BatchTaskEnv {
     pub fn new(
         table_manager: TableManagerRef,
         source_manager: SourceManagerRef,
         task_manager: Arc<TaskManager>,
         server_addr: SocketAddr,
     ) -> Self {
-        GlobalTaskEnv {
+        BatchTaskEnv {
             table_manager,
             server_addr,
             task_manager,
@@ -35,9 +35,8 @@ impl GlobalTaskEnv {
     #[cfg(test)]
     pub fn for_test() -> Self {
         use risingwave_source::MemSourceManager;
-
-        use crate::stream::SimpleTableManager;
-        GlobalTaskEnv {
+        use risingwave_storage::table::SimpleTableManager;
+        BatchTaskEnv {
             table_manager: Arc::new(SimpleTableManager::new()),
             task_manager: Arc::new(TaskManager::new()),
             server_addr: SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),

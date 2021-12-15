@@ -4,14 +4,16 @@ use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::Result;
 use risingwave_common::types::build_from_prost;
+use risingwave_common::util::downcast_arc;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::CreateTableNode;
 use risingwave_source::SourceManagerRef;
+use risingwave_storage::bummock::BummockTable;
+use risingwave_storage::table::TableManagerRef;
 use risingwave_storage::TableColumnDesc;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
-use crate::stream::TableManagerRef;
 
 pub(super) struct CreateTableExecutor {
     table_id: TableId,
@@ -58,8 +60,10 @@ impl Executor for CreateTableExecutor {
             .table_manager
             .create_table(&self.table_id, table_columns)
             .await?;
-        self.source_manager
-            .create_table_source(&self.table_id, table)?;
+        self.source_manager.create_table_source(
+            &self.table_id,
+            downcast_arc::<BummockTable>(table.into_any())?,
+        )?;
         Ok(())
     }
 

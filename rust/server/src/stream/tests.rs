@@ -12,9 +12,9 @@ use risingwave_pb::task_service::HostAddress;
 use risingwave_source::MemSourceManager;
 
 use super::*;
+use crate::stream::env::StreamTaskEnv;
 use crate::stream::SimpleTableManager;
 use crate::stream_op::{Barrier, Message};
-use crate::task::{GlobalTaskEnv, TaskManager};
 
 const PORT: i32 = 2333;
 
@@ -194,10 +194,9 @@ async fn test_stream_proto() {
         ])
         .unwrap();
 
-    let env = GlobalTaskEnv::new(
+    let env = StreamTaskEnv::new(
         Arc::new(SimpleTableManager::new()),
         Arc::new(MemSourceManager::new()),
-        Arc::new(TaskManager::new()),
         std::net::SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
     );
     stream_manager

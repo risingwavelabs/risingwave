@@ -4,10 +4,9 @@ use std::time::Duration;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder, Row};
 use risingwave_common::catalog::{SchemaId, TableId};
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::RwError;
 use risingwave_common::types::{DecimalType, Int32Type, Scalar};
 use risingwave_common::util::addr::get_host_port;
+use risingwave_common::util::downcast_arc;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::expr::expr_node::RexNode;
@@ -26,10 +25,11 @@ use risingwave_pb::stream_plan::{
 use risingwave_pb::stream_service::{ActorInfo, BroadcastActorInfoTableRequest};
 use risingwave_pb::task_service::HostAddress;
 use risingwave_source::{MemSourceManager, SourceManager};
+use risingwave_storage::bummock::BummockTable;
+use risingwave_storage::table::TableManager;
 use risingwave_storage::{Table, TableColumnDesc};
 
-use crate::stream::{SimpleTableManager, StreamManager, TableImpl, TableManager};
-use crate::task::{GlobalTaskEnv, TaskManager};
+use crate::stream::{SimpleTableManager, StreamManager, StreamTaskEnv, TableImpl};
 
 fn make_int32_type_pb() -> DataType {
     DataType {
@@ -132,18 +132,16 @@ async fn test_stream_mv_proto() {
         .await
         .unwrap();
     source_manager
-        .create_table_source(&table_id, table)
+        .create_table_source(
+            &table_id,
+            downcast_arc::<BummockTable>(table.into_any()).unwrap(),
+        )
         .unwrap();
 
     let table_ref =
-        (if let TableImpl::Bummock(table_ref) = table_manager.get_table(&table_id).unwrap() {
-            Ok(table_ref)
-        } else {
-            Err(RwError::from(InternalError(
-                "Only columnar table support insert".to_string(),
-            )))
-        })
-        .unwrap();
+        downcast_arc::<TableImpl>(table_manager.get_table(&table_id).unwrap().into_any())
+            .unwrap()
+            .as_bummock();
     // Mock initial data.
     // One row of (1,2)
     let mut array_builder1 = PrimitiveArrayBuilder::<i32>::new(1).unwrap();
@@ -160,12 +158,7 @@ async fn test_stream_mv_proto() {
     // Build stream actor.
     let socket_addr = get_host_port(&format!("127.0.0.1:{}", port)).unwrap();
     let stream_manager = StreamManager::new(socket_addr);
-    let env = GlobalTaskEnv::new(
-        table_manager.clone(),
-        source_manager,
-        Arc::new(TaskManager::new()),
-        socket_addr,
-    );
+    let env = StreamTaskEnv::new(table_manager.clone(), source_manager, socket_addr);
 
     let actor_info_proto = ActorInfo {
         fragment_id: 1,
@@ -191,7 +184,10 @@ async fn test_stream_mv_proto() {
     // Insert data and check if the materialized view has been updated.
     let _res_app = table_ref.append(append_chunk).await;
     let table_id_mv = TableId::new(SchemaId::default(), 1);
-    let table = table_manager.get_table(&table_id_mv).unwrap().as_memory();
+    let table =
+        downcast_arc::<TableImpl>(table_manager.get_table(&table_id_mv).unwrap().into_any())
+            .unwrap()
+            .as_memory();
 
     // FIXME: We have to make sure that `append_chunk` has been processed by the actor first,
     // then we can send the stop barrier.

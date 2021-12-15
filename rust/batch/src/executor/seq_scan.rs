@@ -1,23 +1,21 @@
 use std::collections::VecDeque;
-use std::sync::Arc;
 
 use prost::Message;
 use risingwave_common::array::{DataChunk, DataChunkRef};
 use risingwave_common::catalog::{Field, Schema, TableId};
-use risingwave_common::error::ErrorCode::{InternalError, ProstError};
+use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::SeqScanNode;
-use risingwave_storage::bummock::{BummockResult, BummockTable};
-use risingwave_storage::*;
+use risingwave_storage::bummock::BummockResult;
+use risingwave_storage::table::ScannableTableRef;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
-use crate::stream::TableImpl;
 
 /// Sequential scan executor on column-oriented tables
 pub(super) struct SeqScanExecutor {
-    table: Arc<BummockTable>,
+    table: ScannableTableRef,
     column_ids: Vec<i32>,
     schema: Schema,
     snapshot: VecDeque<DataChunkRef>,
@@ -37,28 +35,22 @@ impl BoxedExecutorBuilder for SeqScanExecutor {
             .table_manager()
             .get_table(&table_id)?;
 
-        if let TableImpl::Bummock(table_ref) = table_ref {
-            let column_ids = seq_scan_node.get_column_ids();
+        let column_ids = seq_scan_node.get_column_ids();
 
-            let schema = Schema::new(
-                seq_scan_node
-                    .get_column_type()
-                    .iter()
-                    .map(Field::try_from)
-                    .collect::<Result<Vec<Field>>>()?,
-            );
+        let schema = Schema::new(
+            seq_scan_node
+                .get_column_type()
+                .iter()
+                .map(Field::try_from)
+                .collect::<Result<Vec<Field>>>()?,
+        );
 
-            Ok(Box::new(Self {
-                table: table_ref,
-                column_ids: column_ids.to_vec(),
-                schema,
-                snapshot: VecDeque::new(),
-            }))
-        } else {
-            Err(RwError::from(InternalError(
-                "SeqScan requires a columnar table".to_string(),
-            )))
-        }
+        Ok(Box::new(Self {
+            table: table_ref,
+            column_ids: column_ids.to_vec(),
+            schema,
+            snapshot: VecDeque::new(),
+        }))
     }
 }
 
@@ -91,10 +83,15 @@ impl Executor for SeqScanExecutor {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use risingwave_common::array::{Array, I64Array};
     use risingwave_common::catalog::Field;
     use risingwave_common::column_nonnull;
     use risingwave_common::types::{DataTypeKind, DecimalType, Int64Type};
+    use risingwave_storage::bummock::BummockTable;
+    use risingwave_storage::table::ScannableTable;
+    use risingwave_storage::{Table, TableColumnDesc};
 
     use super::*;
     use crate::*;
