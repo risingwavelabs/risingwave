@@ -5,14 +5,13 @@
 #
 # ========================================================================
 
-name: CI (main)
+name: CI
 on:
-  push:
+  pull_request:
     branches: [main]
-  workflow_dispatch:
 concurrency:
   group: environment-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 env:
   RUST_TOOLCHAIN: nightly-2021-11-30
 jobs:

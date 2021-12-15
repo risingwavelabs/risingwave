@@ -1,0 +1,11 @@
+# Override `template.yml` with contents in this file. Please run `generate.sh` to update the corresponding files.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: environment-${{ github.ref }}
+  cancel-in-progress: true

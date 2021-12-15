@@ -82,3 +82,35 @@ You may also check out our previous PRs in the [PR list](https://github.com/sing
 ## Pull Request Description
 - If your PR is small (such as a typo fix), you can go brief.
 - If it is large and you have changed a lot, it's better to write more details.
+
+## Shell Check
+
+We apply `shellcheck` on bash files. Please run the following commands before commit.
+
+```shell
+brew install shellcheck
+shellcheck <new file>
+```
+
+## GitHub Action
+
+We use scripts to generate GitHub Action configurations based on templates in `.github/workflow-template`.
+
+To edit the workflow files, you will need to install `yq` >= 4.16.
+
+```shell
+> brew install yq
+> yq --version
+yq (https://github.com/mikefarah/yq/) version 4.16.1
+```
+
+Then, you may edit the files in `workflow-template`.
+
+* `template.yml` + `main-override.yml` = `main.yml`
+* `template.yml` + `pr-override.yml` = `pull-request.yml`
+
+After that, run `generate.sh` to update the final workflow config.
+
+```shell
+./.github/workflow-template/generate.sh
+```

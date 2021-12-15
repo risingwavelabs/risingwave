@@ -1,0 +1,15 @@
+# Override `template.yml` with contents in this file. Please run `generate.sh` to update the corresponding files.
+
+name: CI (main)
+
+on:
+  # Triggers the workflow on push or pull request events but only for the main branch
+  push:
+    branches: [main]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+concurrency:
+  group: environment-${{ github.ref }}
+  cancel-in-progress: false
