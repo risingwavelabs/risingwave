@@ -32,19 +32,20 @@ start_compute_node() {
 start_frontend() {
     log_dir="../log/frontend.out"
     pgserver_build_dir="${SCRIPT_PATH}/../java/pgserver/build/"
-    echo "Starting frontend ... logging to $log_dir"
-    run_cmd="nohup java -Dlogback.configurationFile=${pgserver_build_dir}resources/main/logback.xml -jar \
-        ${pgserver_build_dir}libs/risingwave-fe-runnable.jar -c \
-        ${pgserver_build_dir}../src/main/resources/server.properties > ${log_dir} &"
+    conf_file=$1
+    echo "Starting frontend with config file $conf_file ... logging to $log_dir"
+    run_cmd="nohup java -cp ${pgserver_build_dir}libs/risingwave-fe-runnable.jar \
+           -Dlogback.configurationFile=${pgserver_build_dir}resources/main/logback.xml \
+           com.risingwave.pgserver.FrontendServer -c ${conf_file} > ${log_dir} &"
     eval "${run_cmd}"
     wait_server 4567
 }
 
 start_meta_node() {
-  log_dir="../log/meta.out"
-  echo "Starting meta service ... logging to $log_dir"
-  nohup ./target/debug/meta-node --log4rs-config config/log4rs.yaml > "$log_dir" &
-  wait_server 5690
+    log_dir="../log/meta.out"
+    echo "Starting meta service ... logging to $log_dir"
+    nohup ./target/debug/meta-node --log4rs-config config/log4rs.yaml > "$log_dir" &
+    wait_server 5690
 }
 
 start_n_nodes_cluster() {
@@ -75,18 +76,29 @@ start_n_nodes_cluster() {
     echo ""
 
     FRONTEND_CFG_FILE=pgserver/src/main/resources/server.properties
+    FRONTEND_CFG_FILE_BASENAME=$(basename $FRONTEND_CFG_FILE)
+
     cd ../java || exit 1
+
+    TEMP_DIR=$(mktemp -d "risingwave.XXXXXX")
+
+    cp $FRONTEND_CFG_FILE "$TEMP_DIR"
+
+    CONF_FILE="$TEMP_DIR/$FRONTEND_CFG_FILE_BASENAME"
+
+    echo "Using temp conf $CONF_FILE"
+
     addr_str=$(IFS=, ; echo "${addresses[*]}")
-    sed -i".bak" -e "s/.*computenodes.*/risingwave.leader.computenodes=$addr_str/" $FRONTEND_CFG_FILE
+    sed -i -e "s/.*computenodes.*/risingwave.leader.computenodes=$addr_str/" "$CONF_FILE"
 
-    echo "Rewritten $FRONTEND_CFG_FILE:"
+    echo "Rewritten $CONF_FILE:"
     echo ""
-    cat "$FRONTEND_CFG_FILE"
+    cat "$CONF_FILE"
     echo ""
 
-    start_frontend
+    start_frontend "$CONF_FILE"
 
-    mv "$FRONTEND_CFG_FILE.bak" $FRONTEND_CFG_FILE
+    rm -rf "$TEMP_DIR"
 }
 
 list_nodes_in_cluster() {
@@ -94,7 +106,7 @@ list_nodes_in_cluster() {
 }
 
 list_meta_node_in_cluster() {
-  pgrep -fl meta-node || true
+    pgrep -fl meta-node || true
 }
 
 if [ $# -ne 1 ]; then
