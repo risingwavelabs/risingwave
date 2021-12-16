@@ -39,7 +39,9 @@ use core::ops::{
 use core::str::FromStr;
 
 pub use num_traits::Float;
-use num_traits::{Bounded, FromPrimitive, Num, NumCast, One, Signed, ToPrimitive, Zero};
+use num_traits::{
+    Bounded, CheckedAdd, CheckedSub, FromPrimitive, Num, NumCast, One, Signed, ToPrimitive, Zero,
+};
 
 // masks for the parts of the IEEE 754 float
 const SIGN_MASK: u64 = 0x8000000000000000u64;
@@ -362,6 +364,24 @@ impl_ordered_float_binop! {Sub, sub, SubAssign, sub_assign}
 impl_ordered_float_binop! {Mul, mul, MulAssign, mul_assign}
 impl_ordered_float_binop! {Div, div, DivAssign, div_assign}
 impl_ordered_float_binop! {Rem, rem, RemAssign, rem_assign}
+
+impl<T> CheckedAdd for OrderedFloat<T>
+where
+    T: Float,
+{
+    fn checked_add(&self, v: &Self) -> Option<Self> {
+        Some(self.add(*v))
+    }
+}
+
+impl<T> CheckedSub for OrderedFloat<T>
+where
+    T: Float,
+{
+    fn checked_sub(&self, v: &Self) -> Option<Self> {
+        Some(self.sub(*v))
+    }
+}
 
 /// Adds a float directly.
 impl<T: Float + Sum> Sum for OrderedFloat<T> {

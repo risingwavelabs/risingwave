@@ -26,13 +26,6 @@ pub use row_count::*;
 pub type StreamingSumAgg<R, I> =
     StreamingFoldAgg<R, I, PrimitiveSummable<<R as Array>::OwnedItem, <I as Array>::OwnedItem>>;
 
-/// `StreamingFloatSumAgg` sums data of the same float type.
-pub type StreamingFloatSumAgg<R, I> = StreamingFoldAgg<
-    R,
-    I,
-    FloatPrimitiveSummable<<R as Array>::OwnedItem, <I as Array>::OwnedItem>,
->;
-
 /// `StreamingCountAgg` counts data of any type.
 pub type StreamingCountAgg<S> = StreamingFoldAgg<I64Array, S, Countable<<S as Array>::OwnedItem>>;
 
@@ -152,24 +145,9 @@ pub fn create_streaming_agg_state(
                     (Sum, Int16, Int64, StreamingSumAgg::<I64Array, I16Array>),
                     (Sum, Int32, Int32, StreamingSumAgg::<I32Array, I32Array>),
                     (Sum, Int16, Int16, StreamingSumAgg::<I16Array, I16Array>),
-                    (
-                        Sum,
-                        Float32,
-                        Float64,
-                        StreamingFloatSumAgg::<F64Array, F32Array>
-                    ),
-                    (
-                        Sum,
-                        Float32,
-                        Float32,
-                        StreamingFloatSumAgg::<F32Array, F32Array>
-                    ),
-                    (
-                        Sum,
-                        Float64,
-                        Float64,
-                        StreamingFloatSumAgg::<F64Array, F64Array>
-                    ),
+                    (Sum, Float32, Float64, StreamingSumAgg::<F64Array, F32Array>),
+                    (Sum, Float32, Float32, StreamingSumAgg::<F32Array, F32Array>),
+                    (Sum, Float64, Float64, StreamingSumAgg::<F64Array, F64Array>),
                     (
                         Sum,
                         Decimal,

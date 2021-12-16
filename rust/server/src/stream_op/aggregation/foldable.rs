@@ -99,63 +99,6 @@ where
     }
 }
 
-/// `FloatPrimitiveSummable` sums two primitives by `accumulate` and `retract` functions.
-/// It produces the same type of output as input `S`.
-#[derive(Debug)]
-pub struct FloatPrimitiveSummable<S, I>
-where
-    I: Scalar + num_traits::Float + Into<S> + std::ops::Neg<Output = I>,
-    S: Scalar
-        + std::ops::Add<Output = S>
-        + std::ops::Sub<Output = S>
-        + num_traits::Float
-        + std::ops::Neg<Output = S>,
-{
-    _phantom: PhantomData<(S, I)>,
-}
-
-impl<S, I> StreamingFoldable<S, I> for FloatPrimitiveSummable<S, I>
-where
-    I: Scalar + num_traits::Float + Into<S> + std::ops::Neg<Output = I>,
-    S: Scalar
-        + std::ops::Add<Output = S>
-        + std::ops::Sub<Output = S>
-        + num_traits::Float
-        + std::ops::Neg<Output = S>,
-{
-    fn accumulate(result: Option<&S>, input: Option<I::ScalarRefType<'_>>) -> Result<Option<S>> {
-        Ok(match (result, input) {
-            (Some(x), Some(y)) => {
-                let v = x.add((y.to_owned_scalar()).into());
-                if v.is_finite() && !v.is_nan() {
-                    Some(v)
-                } else {
-                    return Err(RwError::from(NumericValueOutOfRange));
-                }
-            }
-            (Some(x), None) => Some(*x),
-            (None, Some(y)) => Some(y.to_owned_scalar().into()),
-            (None, None) => None,
-        })
-    }
-
-    fn retract(result: Option<&S>, input: Option<I::ScalarRefType<'_>>) -> Result<Option<S>> {
-        Ok(match (result, input) {
-            (Some(x), Some(y)) => {
-                let v = x.sub((y.to_owned_scalar()).into());
-                if v.is_finite() && !v.is_nan() {
-                    Some(v)
-                } else {
-                    return Err(RwError::from(NumericValueOutOfRange));
-                }
-            }
-            (Some(x), None) => Some(*x),
-            (None, Some(y)) => Some((-y.to_owned_scalar()).into()),
-            (None, None) => None,
-        })
-    }
-}
-
 /// `Countable` do counts. The behavior of `Countable` is somehow counterintuitive.
 /// In SQL logic, if there is no item in aggregation, count will return `null`.
 /// However, this `Countable` will always return 0 if there is no item.
@@ -484,6 +427,7 @@ impl_fold_agg! { DecimalArray, Decimal, DecimalArray }
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::I64Array;
+    use risingwave_common::types::OrderedF64;
     use risingwave_common::{array, array_nonnull};
 
     use super::*;
@@ -523,7 +467,7 @@ mod tests {
     }
 
     #[test]
-    fn test_primitive_sum() {
+    fn test_primitive_sum_i64() {
         let mut agg = TestStreamingSumAgg::<I64Array>::new();
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
@@ -540,6 +484,42 @@ mod tests {
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &5);
+    }
+
+    #[test]
+    fn test_primitive_sum_f64() {
+        let testcases = [
+            (vec![('+', 1.0), ('+', 2.0), ('+', 3.0), ('-', 4.0)], 2.0),
+            (
+                vec![('+', 1.0), ('+', f64::INFINITY), ('+', 3.0), ('-', 3.0)],
+                f64::INFINITY,
+            ),
+            (vec![('+', 0.0), ('-', f64::NEG_INFINITY)], f64::INFINITY),
+            (vec![('+', 1.0), ('+', f64::NAN), ('+', 1926.0)], f64::NAN),
+        ];
+
+        for (input, expected) in testcases {
+            let (ops, data): (Vec<_>, Vec<_>) = input
+                .into_iter()
+                .map(|(c, v)| {
+                    (
+                        if c == '+' { Op::Insert } else { Op::Delete },
+                        Some(OrderedF64::from(v)),
+                    )
+                })
+                .unzip();
+            let mut agg = TestStreamingSumAgg::<F64Array>::new();
+            agg.apply_batch(
+                &ops,
+                None,
+                &[&ArrayImpl::Float64(F64Array::from_slice(&data).unwrap())],
+            )
+            .unwrap();
+            assert_eq!(
+                agg.get_output().unwrap().unwrap().as_float64(),
+                &OrderedF64::from(expected)
+            );
+        }
     }
 
     #[test]
