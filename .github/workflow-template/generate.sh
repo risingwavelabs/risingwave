@@ -27,3 +27,10 @@ echo "$HEADER" > ../workflows/pull-request.yml
 # shellcheck disable=SC2016
 yq ea '. as $item ireduce ({}; . * $item )' template.yml pr-override.yml | yq eval '... comments=""' - >> ../workflows/pull-request.yml
 echo "$HEADER" >> ../workflows/pull-request.yml
+
+if [ "$1" == "--check" ] ; then
+ if ! git diff --exit-code; then
+    echo "Please run generate.sh and commit after editing the workflow templates. Refer to CONTRIBUTING.md for more information."
+    exit 1
+ fi
+fi

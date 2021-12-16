@@ -308,14 +308,24 @@ jobs:
           directory: rust
           flags: rust
 
-  shell-check:
+  misc-check:
     runs-on: ubuntu-latest
-    name: shell-check
+    name: misc-check
     steps:
       - name: Checkout
         uses: actions/checkout@v2
         with:
           fetch-depth: 0
+
+      - name: Install yq
+        run: |
+          wget https://github.com/mikefarah/yq/releases/download/${VERSION}/${BINARY}.tar.gz -O - | tar xz && sudo mv ${BINARY} /usr/bin/yq
+        env:
+          VERSION: v4.16.1
+          BINARY: yq_linux_amd64
+      - name: Check CI workflows are up-to-date
+        run: |
+          ./.github/workflow-template/generate.sh --check
 
       - name: Run ShellCheck
         uses: ludeeus/action-shellcheck@master
