@@ -15,14 +15,14 @@ fn serialize_pk(pk: &Row, serializer: &OrderedRowsSerializer) -> Result<Vec<u8>>
     Ok(std::mem::take(&mut result[0]))
 }
 
-fn serialize_cell_idx(cell_idx: u32) -> Result<Vec<u8>> {
+pub fn serialize_cell_idx(cell_idx: u32) -> Result<Vec<u8>> {
     let mut buf = Vec::with_capacity(4);
     buf.put_u32_le(cell_idx);
     debug_assert_eq!(buf.len(), 4);
     Ok(buf)
 }
 
-fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {
+pub fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {
     let mut serializer = memcomparable::Serializer::new(vec![]);
     serialize_datum_into(cell, &mut serializer)?;
     Ok(serializer.into_inner())

@@ -453,19 +453,28 @@ impl StreamManagerCore {
                 )))
             }
             AppendOnlyTopNNode(top_n_node) => {
-                let column_orders = &top_n_node.column_orders;
-                let order_paris = fetch_orders(column_orders)?;
+                let _column_orders = &top_n_node.column_orders;
+                // FIXME: change when refactor TopNNode together
+                let order_types = vec![];
                 let limit = if top_n_node.limit == 0 {
                     None
                 } else {
                     Some(top_n_node.limit as usize)
                 };
+                let cache_size = Some(1024);
+                // FIXME: change when refactor TopNNode together
+                let total_count = (0, 0);
                 Ok(Box::new(AppendOnlyTopNExecutor::new(
                     input.remove(0),
-                    Arc::new(order_paris),
-                    limit,
-                    top_n_node.offset as usize,
+                    order_types,
+                    (top_n_node.offset as usize, limit),
                     pk_indices,
+                    Keyspace::new(
+                        MemoryStateStore::new(),
+                        b"test_append_only_top_n_executor".to_vec(),
+                    ),
+                    cache_size,
+                    total_count,
                 )))
             }
             TopNNode(top_n_node) => {
