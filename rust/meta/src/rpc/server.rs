@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
 use risingwave_pb::meta::catalog_service_server::CatalogServiceServer;
 use risingwave_pb::meta::epoch_service_server::EpochServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
@@ -9,10 +10,12 @@ use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServ
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
+use crate::hummock;
 use crate::manager::{Config, IdGeneratorManager, MemEpochGenerator, MetaManager};
 use crate::rpc::service::catalog_service::CatalogServiceImpl;
 use crate::rpc::service::epoch_service::EpochServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
+use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::id_service::IdGeneratorServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::storage::MemStore;
@@ -26,21 +29,30 @@ pub async fn rpc_serve(addr: SocketAddr) -> (JoinHandle<()>, UnboundedSender<()>
         config.clone(),
         meta_store_ref.clone(),
     ));
+    let id_generator_manager_ref = Arc::new(IdGeneratorManager::new(meta_store_ref.clone()).await);
     let meta_manager = Arc::new(
         MetaManager::new(
             meta_store_ref.clone(),
             Box::new(MemEpochGenerator::new()),
-            IdGeneratorManager::new(meta_store_ref).await,
-            config,
+            id_generator_manager_ref.clone(),
+            config.clone(),
         )
         .await,
     );
+    let hummock_manager = hummock::DefaultHummockManager::new(
+        meta_store_ref.clone(),
+        id_generator_manager_ref.clone(),
+        config.clone(),
+        hummock::Config::default(),
+    )
+    .await;
 
     let epoch_srv = EpochServiceImpl::new(meta_manager.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new(meta_manager.clone());
     let catalog_srv = CatalogServiceImpl::new(meta_manager.clone());
     let id_generator_srv = IdGeneratorServiceImpl::new(meta_manager);
     let stream_srv = StreamServiceImpl::new(stream_meta_manager);
+    let hummock_srv = HummockServiceImpl::new(hummock_manager);
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {
@@ -50,6 +62,7 @@ pub async fn rpc_serve(addr: SocketAddr) -> (JoinHandle<()>, UnboundedSender<()>
             .add_service(CatalogServiceServer::new(catalog_srv))
             .add_service(IdGeneratorServiceServer::new(id_generator_srv))
             .add_service(StreamManagerServiceServer::new(stream_srv))
+            .add_service(HummockManagerServiceServer::new(hummock_srv))
             .serve_with_shutdown(addr, async move {
                 tokio::select! {
                   _ = tokio::signal::ctrl_c() => {},

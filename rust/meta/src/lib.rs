@@ -10,6 +10,7 @@
 
 mod catalog;
 mod cluster;
+mod hummock;
 mod manager;
 pub mod rpc;
 mod storage;

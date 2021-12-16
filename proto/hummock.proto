@@ -6,6 +6,8 @@ option java_multiple_files = true;
 option java_package = "com.risingwave.proto.hummock";
 option optimize_for = SPEED;
 
+import "common.proto";
+
 message BlockMeta {
   bytes smallest_key = 1;
   uint32 offset = 2;
@@ -40,4 +42,73 @@ message Checksum {
   Algorithm algo = 1;
 
   uint64 sum = 2;
+}
+
+message HummockContext {
+  int32 identifier = 1;
+  string group = 2;
+  uint64 ttl = 3; //ms
+}
+
+message CreateHummockContextRequest {
+  string group = 1;
+}
+
+message CreateHummockContextResponse {
+  common.Status status = 1;
+  HummockContext hummock_context = 2;
+}
+
+message InvalidateHummockContextRequest {
+  int32 context_identifier = 1;
+}
+
+message InvalidateHummockContextResponse {
+  common.Status status = 1;
+}
+
+message AddSstWatermarkRequest {
+  int32 context_identifier = 1;
+}
+
+message AddSstWatermarkResponse {
+  common.Status status = 1;
+}
+
+message RemoveSstWatermarkRequest {
+  int32 context_identifier = 1;
+}
+
+message RemoveSstWatermarkResponse {
+  common.Status status = 1;
+}
+
+message AddSstsRequest {
+  message Sst {
+    uint64 id = 1;
+    string path = 2;
+  }
+  int32 context_identifier = 1;
+  repeated Sst Ssts = 2;
+}
+
+message AddSstsResponse {
+  common.Status status = 1;
+}
+
+message RefreshHummockContextRequest {
+  int32 context_identifier = 1;
+}
+
+message RefreshHummockContextResponse {
+  common.Status status = 1;
+}
+
+service HummockManagerService {
+  rpc CreateHummockContext(CreateHummockContextRequest) returns (CreateHummockContextResponse);
+  rpc InvalidateHummockContext(InvalidateHummockContextRequest) returns (InvalidateHummockContextResponse);
+  rpc AddSstWatermark(AddSstWatermarkRequest) returns (AddSstWatermarkResponse);
+  rpc RemoveSstWatermark(RemoveSstWatermarkRequest) returns (RemoveSstWatermarkResponse);
+  rpc AddSsts(AddSstsRequest) returns (AddSstsResponse);
+  rpc RefreshHummockContext(RefreshHummockContextRequest) returns (RefreshHummockContextResponse);
 }

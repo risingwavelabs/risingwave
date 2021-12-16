@@ -106,6 +106,7 @@ message GetIdRequest {
     Schema = 2;
     Table = 3;
     Fragment = 4;
+    HummockContext = 5;
   }
   IdCategory category = 1;
   int32 interval = 2;

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::Arc;
 
 use num_integer::Integer;
 use risingwave_common::error::{ErrorCode, Result};
@@ -95,6 +96,8 @@ impl IdGenerator for StoredIdGenerator {
     }
 }
 
+pub type IdGeneratorManagerRef = Arc<IdGeneratorManager>;
+
 /// [`IdGeneratorManager`] manages id generators in all categories,
 /// which defined as [`IdCategory`] in [`meta.proto`].
 pub struct IdGeneratorManager {
@@ -110,6 +113,7 @@ impl IdGeneratorManager {
             (IdCategory::Schema, "schema", None),
             (IdCategory::Table, "table", None),
             (IdCategory::Fragment, "fragment", Some(1)),
+            (IdCategory::HummockContext, "hummock_context", Some(1)),
         ] {
             inner.insert(
                 category,

@@ -14,6 +14,8 @@ const TABLE_FRAGMENT_CF_NAME: &str = "cf/table_fragment";
 const FRAGMENT_CF_NAME: &str = "cf/fragment";
 /// Epoch state key, we store epoch state in default column family.
 const EPOCH_STATE_KEY: &str = "epoch_state";
+/// Column family name for hummock context.
+const HUMMOCK_CONTEXT_CF_NAME: &str = "cf/hummock_context";
 
 #[derive(Clone)]
 pub struct Config {
@@ -27,6 +29,8 @@ pub struct Config {
 
     cluster_state_cf: String,
     epoch_state_key: String,
+
+    hummock_context_cf: String,
 }
 
 impl Config {
@@ -93,6 +97,13 @@ impl Config {
     pub fn get_epoch_state_key(&self) -> &str {
         self.epoch_state_key.as_str()
     }
+
+    pub fn set_hummock_context_cf(&mut self, hummock_context_cf: String) {
+        self.hummock_context_cf = hummock_context_cf;
+    }
+    pub fn get_hummock_context_cf(&self) -> &str {
+        &self.hummock_context_cf
+    }
 }
 
 impl Default for Config {
@@ -106,6 +117,7 @@ impl Default for Config {
             epoch_state_key: EPOCH_STATE_KEY.to_owned(),
             cluster_state_cf: CLUSTER_CF_NAME.to_owned(),
             fragment_cf: FRAGMENT_CF_NAME.to_string(),
+            hummock_context_cf: HUMMOCK_CONTEXT_CF_NAME.to_owned(),
         }
     }
 }

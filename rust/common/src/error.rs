@@ -45,6 +45,11 @@ pub enum ErrorCode {
     InvalidInputSyntax(String, String),
     #[error("Can not compare in memory: {0}")]
     MemComparableError(MemComparableError),
+
+    #[error("Hummock context {0} not found")]
+    HummockContextNotFound(i32),
+    #[error("Hummock context group {0} in use")]
+    HummockContextGroupInUse(String),
 }
 
 #[derive(Clone)]
@@ -165,6 +170,8 @@ impl ErrorCode {
             ErrorCode::ItemNotFound(_) => 13,
             ErrorCode::InvalidInputSyntax(_, _) => 14,
             ErrorCode::MemComparableError(_) => 15,
+            ErrorCode::HummockContextNotFound(_) => 16,
+            ErrorCode::HummockContextGroupInUse(_) => 17,
         }
     }
 }

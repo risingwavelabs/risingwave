@@ -4,13 +4,15 @@ use risingwave_pb::meta::{Catalog, EpochState};
 use tokio::sync::RwLock;
 
 use crate::catalog::{DatabaseMetaManager, SchemaMetaManager, TableMetaManager};
-use crate::manager::{Config, Epoch, EpochGeneratorRef, IdGeneratorManager, SINGLE_VERSION_EPOCH};
+use crate::manager::{
+    Config, Epoch, EpochGeneratorRef, IdGeneratorManagerRef, SINGLE_VERSION_EPOCH,
+};
 use crate::storage::MetaStoreRef;
 
 pub struct MetaManager {
     pub meta_store_ref: MetaStoreRef,
     pub epoch_generator: EpochGeneratorRef,
-    pub id_gen_manager: IdGeneratorManager,
+    pub id_gen_manager_ref: IdGeneratorManagerRef,
     pub config: Config,
     pub catalog_lock: RwLock<()>,
     pub fragment_lock: RwLock<()>,
@@ -25,13 +27,13 @@ impl MetaManager {
     pub async fn new(
         meta_store_ref: MetaStoreRef,
         epoch_generator: EpochGeneratorRef,
-        id_gen_manager: IdGeneratorManager,
+        id_gen_manager_ref: IdGeneratorManagerRef,
         config: Config,
     ) -> Self {
         let mut manager = MetaManager {
             meta_store_ref,
             epoch_generator,
-            id_gen_manager,
+            id_gen_manager_ref,
             config,
 
             catalog_lock: RwLock::new(()),
