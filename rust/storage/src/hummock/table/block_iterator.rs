@@ -5,7 +5,7 @@ use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
 
 use super::{Block, Header, HEADER_SIZE};
-use crate::hummock::key_range::VersionComparator;
+use crate::hummock::version_cmp::VersionComparator;
 
 pub enum SeekPos {
     Origin,

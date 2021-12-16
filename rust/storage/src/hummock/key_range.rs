@@ -2,6 +2,8 @@ use std::cmp;
 
 use bytes::Bytes;
 
+use super::version_cmp::VersionComparator;
+
 /// TODO: Ord Trait with 'a'+ts>'aa'+ts issue
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct KeyRange {
@@ -53,42 +55,12 @@ impl KeyRange {
     }
 }
 
-const VERSION_KEY_SUFFIX_LEN: usize = 8;
-pub struct VersionComparator();
-impl VersionComparator {
-    /// Suppose parameter as `full_key` = (`user_key`, `u64::MAX - timestamp`), this function
-    /// compare `&[u8]` as if compare tuple mentioned before.
-    #[inline]
-    pub fn compare_key(lhs: &[u8], rhs: &[u8]) -> cmp::Ordering {
-        let (l_p, l_s) = lhs.split_at(lhs.len() - VERSION_KEY_SUFFIX_LEN);
-        let (r_p, r_s) = rhs.split_at(rhs.len() - VERSION_KEY_SUFFIX_LEN);
-        let res = l_p.cmp(r_p);
-        match res {
-            cmp::Ordering::Greater | cmp::Ordering::Less => res,
-            cmp::Ordering::Equal => l_s.cmp(r_s),
-        }
-    }
-
-    #[inline]
-    pub fn same_user_key(lhs: &[u8], rhs: &[u8]) -> bool {
-        let (l_p, _) = lhs.split_at(lhs.len() - VERSION_KEY_SUFFIX_LEN);
-        let (r_p, _) = rhs.split_at(rhs.len() - VERSION_KEY_SUFFIX_LEN);
-        l_p == r_p
-    }
-}
-
 impl Ord for KeyRange {
     fn cmp(&self, other: &Self) -> cmp::Ordering {
         match (self.inf, other.inf) {
-            (false, false) => {
-                let lft_res = VersionComparator::compare_key(&self.left, &other.left);
-                match lft_res {
-                    cmp::Ordering::Greater | cmp::Ordering::Less => lft_res,
-                    cmp::Ordering::Equal => {
-                        VersionComparator::compare_key(&self.right, &other.right)
-                    }
-                }
-            }
+            (false, false) => VersionComparator::compare_key(&self.left, &other.left)
+                .then_with(|| VersionComparator::compare_key(&self.right, &other.right)),
+
             (false, true) => cmp::Ordering::Less,
             (true, false) => cmp::Ordering::Greater,
             (true, true) => cmp::Ordering::Equal,
@@ -104,8 +76,8 @@ impl PartialOrd for KeyRange {
 
 #[cfg(test)]
 mod tests {
-    use super::super::table::format::key_with_ts;
     use super::*;
+    use crate::hummock::key::key_with_ts;
 
     #[test]
     fn test_key_range_compare() {

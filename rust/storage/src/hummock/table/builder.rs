@@ -11,7 +11,7 @@ use risingwave_pb::hummock::{BlockMeta, TableMeta};
 
 use super::bloom::Bloom;
 use super::utils::bytes_diff;
-use crate::hummock::table::format::user_key;
+use crate::hummock::key::user_key;
 use crate::hummock::table::utils::checksum;
 use crate::hummock::HummockValue;
 
@@ -264,7 +264,7 @@ pub(super) mod tests {
 
     use super::*;
     use crate::hummock::cloud::gen_remote_table;
-    use crate::hummock::table::format::key_with_ts;
+    use crate::hummock::key::key_with_ts;
     use crate::hummock::table::Table;
     use crate::object::{InMemObjectStore, ObjectStore};
 

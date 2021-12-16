@@ -56,11 +56,8 @@ impl Ord for HeapElem {
             )
             .unwrap()
         };
-        match ord {
-            Ordering::Less => Ordering::Greater,
-            Ordering::Greater => Ordering::Less,
-            Ordering::Equal => Ordering::Equal,
-        }
+
+        ord.reverse()
     }
 }
 

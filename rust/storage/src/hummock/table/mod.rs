@@ -6,7 +6,6 @@ mod block_iterator;
 mod bloom;
 use bloom::Bloom;
 pub mod builder;
-pub mod format;
 pub use block_iterator::*;
 pub use builder::*;
 mod table_iterator;
@@ -20,7 +19,7 @@ use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_pb::hummock::{Checksum, TableMeta};
 use utils::verify_checksum;
 
-use self::format::user_key;
+use super::key::user_key;
 use super::{HummockError, HummockResult};
 use crate::hummock::table::utils::checksum;
 use crate::object::{BlockLocation, ObjectStore};

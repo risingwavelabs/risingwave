@@ -5,9 +5,10 @@ use bytes::Bytes;
 use parking_lot::Mutex as PLMutex;
 use tokio::sync::Mutex;
 
-use super::key_range::{KeyRange, VersionComparator};
+use super::key_range::KeyRange;
 use super::level_handler::{LevelHandler, TableStat};
 use super::{HummockError, HummockResult, Table};
+use crate::hummock::version_cmp::VersionComparator;
 
 #[derive(Clone)]
 pub enum Level {

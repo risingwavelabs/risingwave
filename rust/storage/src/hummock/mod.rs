@@ -9,17 +9,19 @@ use risingwave_common::error::{Result, ToRwResult};
 
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::key::FullKey;
-use crate::hummock::table::format::user_key;
 
 mod table;
 pub use table::*;
 mod cloud;
 mod error;
 mod iterator;
+mod key;
 mod key_range;
 mod level_handler;
 mod value;
+mod version_cmp;
 mod version_manager;
+
 use cloud::gen_remote_table;
 pub use error::*;
 use parking_lot::Mutex as PLMutex;
@@ -27,11 +29,10 @@ use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use tokio::select;
 use tokio::sync::mpsc;
 use value::*;
-mod key;
 use version_manager::{CompactTask, Level, LevelEntry, VersionManager};
 
 use self::iterator::{BoxedHummockIterator, SortedIterator, UserKeyIterator};
-use self::table::format::key_with_ts;
+use self::key::{key_with_ts, user_key};
 use crate::object::ObjectStore;
 use crate::{StateStore, StateStoreIter};
 

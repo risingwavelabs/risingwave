@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use super::super::{HummockResult, HummockValue};
 use super::{BlockIterator, SeekPos, Table};
 use crate::hummock::iterator::HummockIterator;
-use crate::hummock::key_range::VersionComparator;
+use crate::hummock::version_cmp::VersionComparator;
 
 /// Iterates on a table.
 pub struct TableIterator {
@@ -122,7 +122,7 @@ mod tests {
     use super::super::builder::tests::*;
     use super::*;
     use crate::assert_bytes_eq;
-    use crate::hummock::format::key_with_ts;
+    use crate::hummock::key::key_with_ts;
     use crate::hummock::table::builder::tests::gen_test_table;
 
     /// `assert_eq` two `Vec<u8>` with human-readable format.

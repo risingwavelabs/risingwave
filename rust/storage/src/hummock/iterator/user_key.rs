@@ -1,5 +1,5 @@
 use super::{HummockIterator, SortedIterator};
-use crate::hummock::format::{key_with_ts, user_key as to_user_key};
+use crate::hummock::key::{key_with_ts, user_key as to_user_key};
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 
@@ -135,12 +135,12 @@ mod tests {
 
     use super::*;
     use crate::hummock::cloud::gen_remote_table;
-    use crate::hummock::format::{key_with_ts, user_key};
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_test_table_base, iterator_test_key_of, test_value_of,
         TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::BoxedHummockIterator;
+    use crate::hummock::key::user_key;
     use crate::hummock::table::{Table, TableIterator};
     use crate::hummock::value::HummockValue;
     use crate::hummock::TableBuilder;

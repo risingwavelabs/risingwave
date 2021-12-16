@@ -4,8 +4,8 @@ use std::collections::{BinaryHeap, LinkedList};
 use async_trait::async_trait;
 
 use super::{BoxedHummockIterator, HummockIterator};
-use crate::hummock::key_range::VersionComparator;
 use crate::hummock::value::HummockValue;
+use crate::hummock::version_cmp::VersionComparator;
 use crate::hummock::HummockResult;
 
 /// Used as node of the min-heap for merge-sorting the key-value pairs from iterators.

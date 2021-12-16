@@ -5,7 +5,7 @@ pub struct TestIterator;
 use std::sync::Arc;
 
 use crate::hummock::cloud::gen_remote_table;
-use crate::hummock::format::key_with_ts;
+use crate::hummock::key::key_with_ts;
 use crate::hummock::{HummockValue, Table, TableBuilder, TableBuilderOptions};
 use crate::object::{InMemObjectStore, ObjectStore};
 

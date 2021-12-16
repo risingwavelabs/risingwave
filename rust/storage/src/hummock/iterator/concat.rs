@@ -4,9 +4,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::hummock::iterator::HummockIterator;
-use crate::hummock::key_range::VersionComparator;
 use crate::hummock::table::{Table, TableIterator};
 use crate::hummock::value::HummockValue;
+use crate::hummock::version_cmp::VersionComparator;
 use crate::hummock::HummockResult;
 
 /// Iterates on multiple non-overlapping tables.
