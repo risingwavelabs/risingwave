@@ -121,7 +121,7 @@ impl SourceManager for MemSourceManager {
             source: Arc::new(source),
             columns,
             format: SourceFormat::Invalid,
-            row_id_column_id: 0,
+            row_id_column_id: 0, // always use the first column as row_id
         };
 
         sources.insert(table_id.clone(), desc);

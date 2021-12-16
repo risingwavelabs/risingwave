@@ -6,15 +6,12 @@ use async_std::net::SocketAddr;
 use futures::channel::mpsc::{channel, unbounded, Receiver, Sender, UnboundedSender};
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, TableId};
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::{build_from_prost as build_expr_from_prost, AggKind};
 use risingwave_common::types::build_from_prost as build_type_from_prost;
 use risingwave_common::util::addr::{get_host_port, is_local_address};
 use risingwave_common::util::sort_util::fetch_orders;
-use risingwave_pb::stream_plan::table_source_node::SourceType;
 use risingwave_pb::{expr, stream_plan, stream_service};
-use risingwave_source::{Source, *};
 use tokio::task::JoinHandle;
 
 use crate::stream::StreamTaskEnv;
@@ -368,19 +365,16 @@ impl StreamManagerCore {
             .collect::<Vec<_>>();
 
         let executor: Result<Box<dyn Executor>> = match node.get_node() {
-            TableSourceNode(table_source_node) => {
-                let table_id = TableId::from(&table_source_node.table_ref_id);
-
-                let source_desc = source_manager.get_source(&table_id)?;
+            TableSourceNode(node) => {
+                let source_id = TableId::from(&node.table_ref_id);
+                let source_desc = source_manager.get_source(&source_id)?;
 
                 // TODO: The channel pair should be created by the Checkpoint manger. So this line
                 // may be removed later.
                 let (sender, barrier_receiver) = unbounded();
                 self.sender_placeholder.push(sender);
 
-                let column_ids = table_source_node.get_column_ids().to_vec();
-                let source = source_desc.clone().source;
-
+                let column_ids = node.get_column_ids().to_vec();
                 let mut fields = Vec::with_capacity(column_ids.len());
                 for &column_id in &column_ids {
                     let column_desc = source_desc
@@ -392,33 +386,14 @@ impl StreamManagerCore {
                 }
                 let schema = Schema::new(fields);
 
-                match table_source_node.get_source_type() {
-                    SourceType::Table => {
-                        if let SourceImpl::Table(ref table) = *source {
-                            let stream_reader =
-                                table.stream_reader(TableReaderContext {}, column_ids)?;
-
-                            Ok(Box::new(TableSourceExecutor::new(
-                                table_id,
-                                schema,
-                                pk_indices,
-                                stream_reader,
-                                barrier_receiver,
-                            )))
-                        } else {
-                            Err(RwError::from(InternalError(
-                                "Streaming source only supports table source".to_string(),
-                            )))
-                        }
-                    }
-                    SourceType::Stream => Ok(Box::new(StreamSourceExecutor::new(
-                        source_desc,
-                        column_ids,
-                        schema,
-                        pk_indices,
-                        barrier_receiver,
-                    )?)),
-                }
+                Ok(Box::new(StreamSourceExecutor::new(
+                    source_id,
+                    source_desc,
+                    column_ids,
+                    schema,
+                    pk_indices,
+                    barrier_receiver,
+                )?))
             }
             ProjectNode(project_node) => {
                 let project_exprs = project_node

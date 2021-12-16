@@ -19,7 +19,6 @@ use risingwave_pb::data::{Barrier as ProstBarrier, StreamMessage as ProstStreamM
 pub use simple_agg::*;
 pub use state_aggregation::{OrderedArraysSerializer, OrderedRowsSerializer};
 pub use stream_source::*;
-pub use table_source::*;
 pub use top_n::*;
 pub use top_n_appendonly::*;
 
@@ -37,7 +36,6 @@ mod project;
 mod simple_agg;
 mod state_aggregation;
 mod stream_source;
-mod table_source;
 mod top_n;
 mod top_n_appendonly;
 

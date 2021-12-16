@@ -319,7 +319,7 @@ impl SourceChunkBuilder for HighLevelKafkaSourceBatchReader {}
 #[async_trait]
 impl StreamSourceReader for HighLevelKafkaSourceStreamReader {
     async fn open(&mut self) -> Result<()> {
-        todo!()
+        Ok(())
     }
 
     async fn next(&mut self) -> Result<StreamChunk> {
