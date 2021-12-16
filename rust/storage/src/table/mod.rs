@@ -30,7 +30,7 @@ pub trait TableManager: Sync + Send + AsRef<dyn Any> {
 }
 
 #[async_trait::async_trait]
-pub trait TableIter: Sync + Send {
+pub trait TableIter: Send {
     async fn open(&mut self) -> Result<()>;
     async fn next(&mut self) -> Result<Option<Row>>;
 }

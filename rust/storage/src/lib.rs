@@ -46,7 +46,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 }
 
 #[async_trait]
-pub trait StateStoreIter: Send + Sync + 'static {
+pub trait StateStoreIter: Send + 'static {
     type Item;
 
     async fn open(&mut self) -> Result<()>;
