@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI32, Ordering};
 
+use num_integer::Integer;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::meta::get_id_request::IdCategory;
 use tokio::sync::RwLock;
@@ -77,7 +78,8 @@ impl IdGenerator for StoredIdGenerator {
         if id + interval > next_allocate_id {
             let mut next = self.next_allocate_id.write().await;
             if id + interval > *next {
-                let next_allocate_id = *next + ID_PREALLOCATE_INTERVAL;
+                let weight = (id + interval - *next).div_ceil(&ID_PREALLOCATE_INTERVAL);
+                let next_allocate_id = *next + ID_PREALLOCATE_INTERVAL * weight;
                 self.meta_store_ref
                     .put(
                         self.category_gen_key.as_bytes(),
@@ -212,7 +214,7 @@ mod tests {
     #[tokio::test]
     async fn test_id_generator_manager() -> Result<()> {
         let meta_store_ref = Arc::new(MemStore::new());
-        let manager = IdGeneratorManager::new(meta_store_ref).await;
+        let manager = IdGeneratorManager::new(meta_store_ref.clone()).await;
         let ids = future::join_all((0..10000).map(|_i| {
             let manager = &manager;
             async move { manager.generate(IdCategory::Default).await }
@@ -233,13 +235,17 @@ mod tests {
 
         let ids = future::join_all((0..100).map(|_i| {
             let manager = &manager;
-            async move { manager.generate_interval(IdCategory::Fragment, 100).await }
+            async move { manager.generate_interval(IdCategory::Fragment, 9999).await }
         }))
         .await
         .into_iter()
         .collect::<Result<Vec<_>>>()?;
-        let vec_expect = (0..100).map(|e| e * 100 + 1).collect::<Vec<_>>();
+        let vec_expect = (0..100).map(|e| e * 9999 + 1).collect::<Vec<_>>();
         assert_eq!(ids, vec_expect);
+
+        let manager = IdGeneratorManager::new(meta_store_ref).await;
+        let id = manager.generate_interval(IdCategory::Fragment, 10).await?;
+        assert_eq!(id, 1000001);
 
         Ok(())
     }

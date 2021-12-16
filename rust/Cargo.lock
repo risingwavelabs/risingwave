@@ -2056,6 +2056,7 @@ dependencies = [
  "lazy_static",
  "log",
  "log4rs",
+ "num-integer",
  "num-traits",
  "paste",
  "prost",
