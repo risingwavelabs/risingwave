@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs::{read, File};
 use std::io::{BufRead, BufReader};
 use std::path::Path;
+use std::str::from_utf8;
 use std::sync::Arc;
 
 use anyhow::{bail, Context};
@@ -128,7 +129,7 @@ impl Schedule {
         different_tests
       )
         } else {
-            info!("Risingwave regress tests failed passed.");
+            info!("Risingwave regress tests passed.");
             Ok(())
         }
     }
@@ -252,6 +253,8 @@ impl TestCase {
         if expected_output == actual_output {
             Ok(Same)
         } else {
+            error!("Expected output of [{:?}] is different from actual output.\nExpected is:\n{:?}\nActual is:\n{:?}", 
+        self.test_name, from_utf8(&expected_output).unwrap(), from_utf8(&actual_output).unwrap());
             Ok(Different)
         }
     }

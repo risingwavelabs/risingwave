@@ -14,7 +14,7 @@ git clone https://github.com/singularity-data/risingwave.git
 * CMake
 * Protocol Buffers
 * OpenSSL
-* PostgreSQL (psql)
+* PostgreSQL (psql) (>= 14.1)
 
 To install compilers in macOS, run:
 ```bash

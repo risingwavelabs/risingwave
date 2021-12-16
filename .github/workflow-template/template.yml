@@ -49,6 +49,7 @@ jobs:
       - start-runner # required to start the main job when the runner is ready
       - compute-node-build
       - frontend-check
+      - compute-node-test
     runs-on: ubuntu-latest
     timeout-minutes: 15 # NOTE: Increase this number when we have more tests.
     env:
@@ -93,6 +94,12 @@ jobs:
         with:
           go-version: "1.13"
 
+      # Install latest postgresql client, our tests requires 14.1+
+      - name: Install postgres client
+        run: |
+          sudo apt-get update -yy
+          sudo apt-get install --upgrade -yy postgresql
+
       - name: Build sqllogictest
         run: |
           make sqllogictest
@@ -107,6 +114,11 @@ jobs:
           name: meta-node
           path: ./rust/target/debug
 
+      - uses: actions/download-artifact@v2
+        with:
+          name: risingwave_regress_test
+          path: ./rust/target/debug
+        
       - name: Build java frontend
         run: make java_build
 
@@ -121,6 +133,20 @@ jobs:
           chmod +x ./rust/target/debug/meta-node
           ./scripts/start_cluster.sh 3
           python3 ./scripts/sqllogictest.py -p ${{ env.RW_PORT }} -db dev -f ./e2e_test/batch/
+
+      - name: Run 3-node regress tests (batch)
+        run: |
+          sleep 5
+          chmod +x ./rust/target/debug/compute-node
+          chmod +x ./rust/target/debug/meta-node
+          chmod +x ./rust/target/debug/risingwave_regress_test
+          ./scripts/start_cluster.sh 3
+          psql --version
+          cd rust && target/debug/risingwave_regress_test -h 127.0.0.1 \
+            -p ${{ env.RW_PORT }} \
+            --input `pwd`/tests/regress/data \
+            --output `pwd`/tests/regress/output \
+            --schedule `pwd`/tests/regress/data/schedule
 
       - name: Run single-node end-to-end tests (streaming)
         run: |
@@ -260,6 +286,14 @@ jobs:
           if-no-files-found: error # 'warn' or 'ignore' are also available, defaults to `warn`
           path: |
             rust/target/debug/meta-node
+      
+      - uses: actions/upload-artifact@v2
+        with:
+          name: risingwave_regress_test
+          if-no-files-found: error # 'warn' or 'ignore' are also available, defaults to `warn`
+          path: |
+            rust/target/debug/risingwave_regress_test
+      
 
   compute-node-test:
     needs: start-runner # required to start the main job when the runner is ready

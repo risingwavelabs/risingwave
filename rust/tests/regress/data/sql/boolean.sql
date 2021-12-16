@@ -209,15 +209,15 @@ INSERT INTO BOOLTBL3 (d, b, o) VALUES ('true', true, 1);
 INSERT INTO BOOLTBL3 (d, b, o) VALUES ('false', false, 2);
 INSERT INTO BOOLTBL3 (d, b, o) VALUES ('null', null, 3);
 
-SELECT
-    d,
-    b IS TRUE AS istrue,
-    b IS NOT TRUE AS isnottrue,
-    b IS FALSE AS isfalse,
-    b IS NOT FALSE AS isnotfalse,
-    b IS UNKNOWN AS isunknown,
-    b IS NOT UNKNOWN AS isnotunknown
-FROM booltbl3 ORDER BY o;
+-- SELECT
+--     d,
+--     b IS TRUE AS istrue,
+--     b IS NOT TRUE AS isnottrue,
+--     b IS FALSE AS isfalse,
+--     b IS NOT FALSE AS isnotfalse,
+--     b IS UNKNOWN AS isunknown,
+--     b IS NOT UNKNOWN AS isnotunknown
+-- FROM booltbl3 ORDER BY o;
 
 
 -- Test to make sure short-circuiting and NULL handling is

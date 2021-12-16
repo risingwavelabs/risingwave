@@ -35,6 +35,7 @@ start_frontend() {
     conf_file=$1
     echo "Starting frontend with config file $conf_file ... logging to $log_dir"
     run_cmd="nohup java -cp ${pgserver_build_dir}libs/risingwave-fe-runnable.jar \
+           -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=0.0.0.0:5005 \
            -Dlogback.configurationFile=${pgserver_build_dir}resources/main/logback.xml \
            com.risingwave.pgserver.FrontendServer -c ${conf_file} > ${log_dir} &"
     eval "${run_cmd}"
