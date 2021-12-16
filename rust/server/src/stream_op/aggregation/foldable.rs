@@ -170,44 +170,6 @@ where
     }
 }
 
-/// `FloatMinimizable` return minimum float value overall.
-/// It produces the same type of output as input `S`.
-#[derive(Debug)]
-pub struct FloatMinimizable<S>
-where
-    S: Scalar + num_traits::Float,
-{
-    _phantom: PhantomData<S>,
-}
-
-impl<S> StreamingFoldable<S, S> for FloatMinimizable<S>
-where
-    S: Scalar + num_traits::Float,
-{
-    fn accumulate(result: Option<&S>, input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
-        let valid = |val: S| -> bool { val.is_finite() && !val.is_nan() };
-
-        Ok(match (result, input) {
-            (Some(x), Some(y)) => {
-                if valid(*x) && valid(y.to_owned_scalar()) {
-                    Some((*x).min(y.to_owned_scalar()))
-                } else {
-                    return Err(RwError::from(NumericValueOutOfRange));
-                }
-            }
-            (None, Some(y)) => Some(y.to_owned_scalar()),
-            (Some(x), None) => Some(*x),
-            (None, None) => None,
-        })
-    }
-
-    fn retract(_result: Option<&S>, _input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
-        Err(RwError::from(NotImplementedError(
-            "insert only for float minimum".to_string(),
-        )))
-    }
-}
-
 /// `Maximizable` return maximum value overall.
 /// It produces the same type of output as input `S`.
 #[derive(Debug)]
@@ -234,44 +196,6 @@ where
     fn retract(_result: Option<&S>, _input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
         Err(RwError::from(NotImplementedError(
             "insert only for maximum".to_string(),
-        )))
-    }
-}
-
-/// `FloatMaximizable` return maximum float value overall.
-/// It produces the same type of output as input `S`.
-#[derive(Debug)]
-pub struct FloatMaximizable<S>
-where
-    S: Scalar + num_traits::Float,
-{
-    _phantom: PhantomData<S>,
-}
-
-impl<S> StreamingFoldable<S, S> for FloatMaximizable<S>
-where
-    S: Scalar + num_traits::Float,
-{
-    fn accumulate(result: Option<&S>, input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
-        let valid = |val: S| -> bool { val.is_finite() && !val.is_nan() };
-
-        Ok(match (result, input) {
-            (Some(x), Some(y)) => {
-                if valid(*x) && valid(y.to_owned_scalar()) {
-                    Some((*x).max(y.to_owned_scalar()))
-                } else {
-                    return Err(RwError::from(NumericValueOutOfRange));
-                }
-            }
-            (None, Some(y)) => Some(y.to_owned_scalar()),
-            (Some(x), None) => Some(*x),
-            (None, None) => None,
-        })
-    }
-
-    fn retract(_result: Option<&S>, _input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
-        Err(RwError::from(NotImplementedError(
-            "insert only for float maximum".to_string(),
         )))
     }
 }
@@ -438,9 +362,6 @@ mod tests {
     type TestStreamingCountAgg<R> = StreamingFoldAgg<R, R, Countable<<R as Array>::OwnedItem>>;
 
     type TestStreamingMinAgg<R> = StreamingFoldAgg<R, R, Minimizable<<R as Array>::OwnedItem>>;
-
-    type TestStreamingFloatMinAgg<R> =
-        StreamingFoldAgg<R, R, FloatMinimizable<<R as Array>::OwnedItem>>;
 
     type TestStreamingMaxAgg<R> = StreamingFoldAgg<R, R, Maximizable<<R as Array>::OwnedItem>>;
 
@@ -611,7 +532,7 @@ mod tests {
 
     #[test]
     fn test_minimum_float() {
-        let mut agg = TestStreamingFloatMinAgg::<F64Array>::new();
+        let mut agg = TestStreamingMinAgg::<F64Array>::new();
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
             None,
