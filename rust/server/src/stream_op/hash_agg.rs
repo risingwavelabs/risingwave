@@ -10,9 +10,9 @@ use risingwave_common::array::{Row, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
+use risingwave_storage::{Keyspace, StateStore};
 
 use super::aggregation::{AggState, HashKey};
-use super::keyspace::{Keyspace, StateStore};
 use super::{
     agg_executor_next, agg_input_arrays, generate_agg_schema, generate_agg_state, pk_input_arrays,
     AggCall, AggExecutor, Barrier, Executor, Message, PkIndicesRef,
@@ -319,8 +319,8 @@ mod tests {
     use risingwave_common::column_nonnull;
     use risingwave_common::expr::*;
     use risingwave_common::types::Int64Type;
+    use risingwave_storage::memory::MemoryStateStore;
 
-    use super::super::keyspace::MemoryStateStore;
     use super::*;
     use crate::stream_op::test_utils::*;
     use crate::stream_op::*;

@@ -12,6 +12,9 @@ use risingwave_common::types::build_from_prost as build_type_from_prost;
 use risingwave_common::util::addr::{get_host_port, is_local_address};
 use risingwave_common::util::sort_util::fetch_orders;
 use risingwave_pb::{expr, stream_plan, stream_service};
+use risingwave_storage::hummock::HummockStateStore;
+use risingwave_storage::memory::MemoryStateStore;
+use risingwave_storage::Keyspace;
 use tokio::task::JoinHandle;
 
 use crate::stream::StreamTaskEnv;
@@ -424,10 +427,7 @@ impl StreamManagerCore {
                 Ok(Box::new(SimpleAggExecutor::new(
                     input.remove(0),
                     agg_calls,
-                    keyspace::Keyspace::new(
-                        keyspace::MemoryStateStore::new(),
-                        b"test_executor_2333".to_vec(),
-                    ),
+                    Keyspace::new(MemoryStateStore::new(), b"test_executor_2333".to_vec()),
                     pk_indices,
                 )))
             }
@@ -448,10 +448,7 @@ impl StreamManagerCore {
                     input.remove(0),
                     agg_calls,
                     keys,
-                    keyspace::Keyspace::new(
-                        keyspace::MemoryStateStore::new(),
-                        b"test_executor_2333".to_vec(),
-                    ),
+                    Keyspace::new(MemoryStateStore::new(), b"test_executor_2333".to_vec()),
                     pk_indices,
                 )))
             }

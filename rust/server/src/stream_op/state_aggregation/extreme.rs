@@ -12,8 +12,8 @@ use risingwave_common::types::{
     deserialize_datum_not_null_from, serialize_datum_not_null_into, DataTypeKind, DataTypeRef,
     Datum, ScalarImpl, ScalarRef,
 };
+use risingwave_storage::{Keyspace, StateStore};
 
-use super::super::keyspace::{Keyspace, StateStore};
 use super::extreme_serializer::{variants, ExtremePk, ExtremeSerializer};
 use crate::stream_op::state_aggregation::FlushStatus;
 use crate::stream_op::{AggArgs, AggCall};
@@ -507,9 +507,9 @@ mod tests {
     use rand::prelude::*;
     use risingwave_common::array::{I64Array, Op};
     use risingwave_common::types::{Int64Type, ScalarImpl};
+    use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
-    use crate::stream_op::keyspace::MemoryStateStore;
 
     #[tokio::test]
     async fn test_managed_extreme_state() {

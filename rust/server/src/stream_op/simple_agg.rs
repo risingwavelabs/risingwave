@@ -8,9 +8,10 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::*;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
+use risingwave_storage::{Keyspace, StateStore};
 
 use super::aggregation::*;
-use super::{pk_input_arrays, Barrier, Executor, Keyspace, Message, PkIndicesRef, StateStore};
+use super::{pk_input_arrays, Barrier, Executor, Message, PkIndicesRef};
 use crate::stream_op::PkIndices;
 
 /// `SimpleAggExecutor` is the aggregation operator for streaming system.
@@ -198,8 +199,8 @@ mod tests {
     use risingwave_common::column_nonnull;
     use risingwave_common::expr::*;
     use risingwave_common::types::*;
+    use risingwave_storage::memory::MemoryStateStore;
 
-    use super::super::keyspace::MemoryStateStore;
     use super::*;
     use crate::stream_op::test_utils::*;
     use crate::stream_op::*;

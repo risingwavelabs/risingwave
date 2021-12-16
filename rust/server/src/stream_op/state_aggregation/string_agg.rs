@@ -9,8 +9,8 @@ use risingwave_common::error::Result;
 use risingwave_common::types::{
     deserialize_datum_not_null_from, serialize_datum_not_null_into, DataTypeKind, Datum,
 };
+use risingwave_storage::{Keyspace, StateStore};
 
-use super::super::keyspace::{Keyspace, StateStore};
 use crate::stream_op::state_aggregation::{FlushStatus, ManagedExtremeState};
 use crate::stream_op::OrderedArraysSerializer;
 
@@ -245,11 +245,12 @@ mod tests {
     use risingwave_common::array::{I64Array, Op, Utf8Array};
     use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::{Keyspace, StateStore};
 
     use crate::stream_op::state_aggregation::ordered_serializer::OrderedArraysSerializer;
     use crate::stream_op::state_aggregation::string_agg::ManagedStringAggState;
     use crate::stream_op::state_aggregation::ManagedExtremeState;
-    use crate::stream_op::{Keyspace, MemoryStateStore, StateStore};
 
     async fn create_managed_state<S: StateStore>(
         store: &S,

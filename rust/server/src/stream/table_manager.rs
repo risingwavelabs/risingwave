@@ -9,11 +9,13 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::{ensure, gen_error};
 use risingwave_pb::plan::ColumnDesc;
 use risingwave_storage::bummock::{BummockResult, BummockTable};
+use risingwave_storage::hummock::HummockStateStore;
+use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::{ScannableTable, ScannableTableRef, TableIterRef, TableManager};
 use risingwave_storage::TableColumnDesc;
 
 use super::StateStoreImpl;
-use crate::stream_op::{HummockStateStore, MViewTable, MemoryStateStore};
+use crate::stream_op::MViewTable;
 
 #[async_trait::async_trait]
 /// `TableManager` is an abstraction of managing a collection of tables.

@@ -125,6 +125,18 @@ mod tests {
     use crate::hummock::format::key_with_ts;
     use crate::hummock::table::builder::tests::gen_test_table;
 
+    /// `assert_eq` two `Vec<u8>` with human-readable format.
+    #[macro_export]
+    macro_rules! assert_bytes_eq {
+        ($left:expr, $right:expr) => {{
+            use bytes::Bytes;
+            assert_eq!(
+                Bytes::copy_from_slice(&$left),
+                Bytes::copy_from_slice(&$right)
+            )
+        }};
+    }
+
     #[tokio::test]
     async fn test_table_iterator() {
         // build remote table

@@ -3,9 +3,9 @@ use risingwave_common::array::Op::*;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_storage::StateStore;
 
 use super::mview_state::ManagedMViewState;
-use crate::stream_op::keyspace::StateStore;
 use crate::stream_op::{
     Barrier, Executor, Message, PkIndicesRef, Result, SimpleExecutor, StreamChunk,
 };
@@ -136,6 +136,7 @@ mod tests {
     use risingwave_pb::data::DataType;
     use risingwave_pb::plan::column_desc::ColumnEncodingType;
     use risingwave_pb::plan::ColumnDesc;
+    use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::TableManager;
 
     use crate::stream::{SimpleTableManager, StateStoreImpl, StreamTableManager, TableImpl};

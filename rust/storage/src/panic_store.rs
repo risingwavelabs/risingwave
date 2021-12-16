@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use risingwave_common::error::Result;
 
-use super::{StateStore, StateStoreIter};
+use crate::{StateStore, StateStoreIter};
 
 /// A panic state store. If a workload is fully in-memory, we can use this state store, so as to
 /// ensure that no data is stored in the state store and no serialization will happen.

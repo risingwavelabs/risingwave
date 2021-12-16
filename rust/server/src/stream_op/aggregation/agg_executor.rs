@@ -5,11 +5,12 @@ use risingwave_common::array::{ArrayBuilderImpl, ArrayImpl, Op, Row, StreamChunk
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
+use risingwave_storage::{Keyspace, StateStore};
 use static_assertions::const_assert_eq;
 
 use super::AggCall;
 use crate::stream_op::state_aggregation::ManagedStateImpl;
-use crate::stream_op::{Barrier, Executor, Keyspace, Message, StateStore};
+use crate::stream_op::{Barrier, Executor, Message};
 
 /// Hash key for [`HashAggExecutor`].
 pub type HashKey = Row;

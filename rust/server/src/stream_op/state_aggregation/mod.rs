@@ -19,8 +19,8 @@ use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::types::{Datum, ScalarImpl};
+use risingwave_storage::{Keyspace, StateStore};
 
-use super::keyspace::{Keyspace, StateStore};
 use super::AggCall;
 
 /// Represents an entry in the `flush_buffer`. No `FlushStatus` associated with a key means no-op.

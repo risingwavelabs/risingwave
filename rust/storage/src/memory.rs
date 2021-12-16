@@ -6,7 +6,7 @@ use bytes::Bytes;
 use risingwave_common::error::Result;
 use tokio::sync::Mutex;
 
-use super::{StateStore, StateStoreIter};
+use crate::{StateStore, StateStoreIter};
 
 /// An in-memory state store
 #[derive(Clone, Default)]

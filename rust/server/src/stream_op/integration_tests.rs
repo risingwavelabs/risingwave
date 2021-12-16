@@ -13,6 +13,8 @@ use risingwave_common::expr::expr_unary::new_unary_expr;
 use risingwave_common::expr::*;
 use risingwave_common::types::*;
 use risingwave_pb::expr::expr_node::Type;
+use risingwave_storage::memory::MemoryStateStore;
+use risingwave_storage::{Keyspace, StateStore};
 
 use super::{ReceiverExecutor, *};
 

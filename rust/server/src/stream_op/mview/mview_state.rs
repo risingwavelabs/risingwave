@@ -5,9 +5,9 @@ use risingwave_common::array::Row;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_storage::StateStore;
 
 use super::{serialize_cell, serialize_cell_idx, serialize_pk};
-use crate::stream_op::keyspace::StateStore;
 use crate::stream_op::state_aggregation::OrderedRowsSerializer;
 
 /// `ManagedMviewState` buffers recent mutations. Data will be written
@@ -88,9 +88,9 @@ mod tests {
     use risingwave_common::catalog::Field;
     use risingwave_common::types::Int32Type;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
-    use crate::stream_op::MemoryStateStore;
 
     #[tokio::test]
     async fn test_mview_state() {
