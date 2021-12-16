@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use crate::hummock::iterator::HummockIterator;
+use crate::hummock::key::FullKey;
 use crate::hummock::table::format::user_key;
 
 mod table;
@@ -22,9 +23,10 @@ use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use tokio::select;
 use tokio::sync::mpsc;
 use value::*;
+mod key;
 use version_manager::{CompactTask, Level, LevelEntry, VersionManager};
 
-use self::iterator::{BoxedHummockIterator, SortedIterator};
+use self::iterator::{BoxedHummockIterator, SortedIterator, UserKeyIterator};
 use self::table::format::key_with_ts;
 use crate::object::ObjectStore;
 
@@ -107,6 +109,36 @@ impl HummockStorage {
         }
     }
 
+    /// Return an iterator that scan from the begin key to the end key
+    pub async fn range_scan(&self, begin: Vec<u8>, end: Vec<u8>) -> HummockResult<UserKeyIterator> {
+        if begin > end {
+            return Err(HummockError::DecodeError("invalid range".to_string()));
+        }
+
+        // TODO: not a good implementation, consider change the type of smallest_key and largest_key
+        // in table meta
+        let begin_fk_clone = key_with_ts(begin.clone(), u64::MAX);
+        let begin_fk = FullKey::from_slice(begin_fk_clone.as_slice());
+        let end_fk_clone = key_with_ts(end.clone(), u64::MIN);
+        let end_fk = FullKey::from_slice(end_fk_clone.as_slice());
+
+        let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
+        for table in self.version_manager.tables()? {
+            // TODO: change the type of smallest_key and largest_key
+            let tsk = FullKey::from_slice(table.meta.smallest_key.as_slice());
+            let tlk = FullKey::from_slice(table.meta.largest_key.as_slice());
+
+            // decide whether the two ranges have common sub-range
+            if !(tsk > end_fk || tlk < begin_fk) {
+                let iter = Box::new(TableIterator::new(table.clone()));
+                table_iters.push(iter);
+            }
+        }
+
+        let si = SortedIterator::new(table_iters);
+        Ok(UserKeyIterator::new(si, Some((begin, end))))
+    }
+
     /// Write batch to storage. The batch should be:
     /// * Ordered. KV pairs will be directly written to the table, so it must be ordered.
     /// * Locally unique. There should not be two or more operations on the same key in one write
@@ -132,6 +164,9 @@ impl HummockStorage {
         let mut table_builder = get_builder(&self.options);
         let table_id = self.unique_id.fetch_add(1, Ordering::SeqCst);
         for (k, v) in kv_pairs {
+            // do not allow empty key
+            assert!(!k.is_empty());
+
             let k = key_with_ts(k, table_id);
             table_builder.add(k.as_slice(), v);
         }
