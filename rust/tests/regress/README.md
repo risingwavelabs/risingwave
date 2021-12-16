@@ -24,7 +24,7 @@ tests: boolean
 * Start risingwave cluster.
 * Enter `rust` folder of your workspace.
 * Run 
-```bash
+```shell
 RUST_BACKTRACE=1 target/debug/risingwave_regress_test -h 127.0.0.1 \
   -p 4567 \
   --input `pwd`/tests/regress/data \

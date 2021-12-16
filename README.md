@@ -2,7 +2,7 @@
 [![codecov](https://codecov.io/gh/singularity-data/risingwave/branch/main/graph/badge.svg?token=C5ZX0L0GWK)](https://codecov.io/gh/singularity-data/risingwave)
 ## Download
 Run:
-```bash
+```shell
 git clone https://github.com/singularity-data/risingwave.git
 ```
 
@@ -17,7 +17,7 @@ git clone https://github.com/singularity-data/risingwave.git
 * PostgreSQL (psql) (>= 14.1)
 
 To install compilers in macOS, run:
-```bash
+```shell
 brew install java11
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 brew install golang
@@ -45,28 +45,28 @@ and then passes the physical plan to the corresponding to compute server(s).
 - The meta server performs epoch, id generation and metadata management.
 
 To start the meta server, create one terminal and then type:
-```bash
+```shell
 make rust_build ## Not necessary if previously built
 cd rust
 ./target/debug/meta-node --log4rs-config config/log4rs.yaml
 ```
 
 To start the frontend server, create one terminal and then type:
-```bash
+```shell
 cd java
 ./gradlew -p pgserver run 
 # Or it can be specified by the parameter  ./gradlew -p pgserver run --args="-c ./src/main/resources/server.properties"
 ```
 
 To start the compute server, create one terminal and then type:
-```bash
+```shell
 make rust_build
 cd rust
 ./target/debug/compute-node --log4rs-config config/log4rs.yaml
 ```
 
 To start the Postgres shell, create one terminal and then type:
-```bash
+```shell
 psql -h localhost -p 4567 -d dev
 ```
 
@@ -83,7 +83,7 @@ the toolchain, be sure to bump `rust-toolchain` file as well as GitHub workflow.
 
 The Rust codebase is documented with docstring, and you could view the documentation by:
 
-```bash
+```shell
 make rust_doc
 cd rust/target/doc
 open risingwave/index.html
