@@ -42,3 +42,4 @@ rust/log/
 **/tags
 
 log/
+.git
