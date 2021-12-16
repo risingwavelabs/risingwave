@@ -7,7 +7,7 @@ use rust_decimal::Decimal;
 
 use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk};
 use crate::error::Result;
-use crate::types::{Datum, IntervalUnit, Scalar, ScalarRef};
+use crate::types::{Datum, IntervalUnit, OrderedF32, OrderedF64, ScalarRef};
 use crate::util::hash_util::CRC32FastBuilder;
 
 /// Max element count in [`FixedSizeKeyWithHashCode`]
@@ -212,7 +212,7 @@ impl HashKeySerDe<'_> for i64 {
     }
 }
 
-impl HashKeySerDe<'_> for f32 {
+impl HashKeySerDe<'_> for OrderedF32 {
     type S = [u8; 4];
 
     fn serialize(self) -> Self::S {
@@ -221,11 +221,11 @@ impl HashKeySerDe<'_> for f32 {
 
     fn deserialize<R: Read>(source: &mut R) -> Self {
         let value = Self::read_fixed_size_bytes::<R, 4>(source);
-        Self::from_ne_bytes(value)
+        f32::from_ne_bytes(value).into()
     }
 }
 
-impl HashKeySerDe<'_> for f64 {
+impl HashKeySerDe<'_> for OrderedF64 {
     type S = [u8; 8];
 
     fn serialize(self) -> Self::S {
@@ -234,7 +234,7 @@ impl HashKeySerDe<'_> for f64 {
 
     fn deserialize<R: Read>(source: &mut R) -> Self {
         let value = Self::read_fixed_size_bytes::<R, 8>(source);
-        Self::from_ne_bytes(value)
+        f64::from_ne_bytes(value).into()
     }
 }
 
@@ -398,8 +398,7 @@ impl HashKeySerializer for SerializedKeySerializer {
     fn append<'a, D: HashKeySerDe<'a>>(&mut self, data: Option<D>) -> Result<()> {
         match data {
             Some(v) => {
-                self.buffer
-                    .push(Some(v.to_owned_scalar().to_scalar_value()));
+                self.buffer.push(Some(v.to_owned_scalar().into()));
             }
             None => {
                 self.buffer.push(None);

@@ -39,16 +39,8 @@ pub type StreamingCountAgg<S> = StreamingFoldAgg<I64Array, S, Countable<<S as Ar
 /// `StreamingMinAgg` get minimum data of the same type.
 pub type StreamingMinAgg<S> = StreamingFoldAgg<S, S, Minimizable<<S as Array>::OwnedItem>>;
 
-/// `StreamingFloatMinAgg` get minimum data of the same float type.
-pub type StreamingFloatMinAgg<S> =
-    StreamingFoldAgg<S, S, FloatMinimizable<<S as Array>::OwnedItem>>;
-
 /// `StreamingMaxAgg` get maximum data of the same type.
 pub type StreamingMaxAgg<S> = StreamingFoldAgg<S, S, Maximizable<<S as Array>::OwnedItem>>;
-
-/// `StreamingFloatMaxAgg` get maximum data of the same float type.
-pub type StreamingFloatMaxAgg<S> =
-    StreamingFoldAgg<S, S, FloatMaximizable<<S as Array>::OwnedItem>>;
 
 pub use super::aggregation::StreamingRowCountAgg;
 
@@ -189,15 +181,15 @@ pub fn create_streaming_agg_state(
                     (Min, Int32, Int32, StreamingMinAgg::<I32Array>),
                     (Min, Int64, Int64, StreamingMinAgg::<I64Array>),
                     (Min, Decimal, Decimal, StreamingMinAgg::<DecimalArray>),
-                    (Min, Float32, Float32, StreamingFloatMinAgg::<F32Array>),
-                    (Min, Float64, Float64, StreamingFloatMinAgg::<F64Array>),
+                    (Min, Float32, Float32, StreamingMinAgg::<F32Array>),
+                    (Min, Float64, Float64, StreamingMinAgg::<F64Array>),
                     // Max
                     (Max, Int16, Int16, StreamingMaxAgg::<I16Array>),
                     (Max, Int32, Int32, StreamingMaxAgg::<I32Array>),
                     (Max, Int64, Int64, StreamingMaxAgg::<I64Array>),
                     (Max, Decimal, Decimal, StreamingMaxAgg::<DecimalArray>),
-                    (Max, Float32, Float32, StreamingFloatMaxAgg::<F32Array>),
-                    (Max, Float64, Float64, StreamingFloatMaxAgg::<F64Array>),
+                    (Max, Float32, Float32, StreamingMaxAgg::<F32Array>),
+                    (Max, Float64, Float64, StreamingMaxAgg::<F64Array>),
                 ]
             )
         }

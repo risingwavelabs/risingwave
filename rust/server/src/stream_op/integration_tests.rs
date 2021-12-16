@@ -216,10 +216,14 @@ fn make_tpchq6_expr() -> (
         StringType::create(true, 20, DataTypeKind::Char),
         Some(ScalarImpl::Utf8("1995-01-01 00:00:00".to_string())),
     );
-    let const_0_05 =
-        LiteralExpression::new(Float64Type::create(false), Some(ScalarImpl::Float64(0.05)));
-    let const_0_07 =
-        LiteralExpression::new(Float64Type::create(false), Some(ScalarImpl::Float64(0.07)));
+    let const_0_05 = LiteralExpression::new(
+        Float64Type::create(false),
+        Some(ScalarImpl::Float64(0.05.into())),
+    );
+    let const_0_07 = LiteralExpression::new(
+        Float64Type::create(false),
+        Some(ScalarImpl::Float64(0.07.into())),
+    );
     let const_24 = LiteralExpression::new(Int32Type::create(false), Some(ScalarImpl::Int32(24)));
     let t_shipdate = TimestampType::create(false, 10);
     let l_shipdate = InputRefExpression::new(t_shipdate.clone(), 0);
@@ -460,13 +464,18 @@ async fn test_tpch_q6() {
         0.055, 0.08, 0.055, 0.08, 0.055, 0.08, 0.055, 0.08, 0.055, 0.08,
     ] // odd rows matches condition on discount
     .into_iter()
-    .map(Some)
+    .map(|f| Some(f.into()))
     .collect::<Vec<_>>();
+
     let d_quantity = vec![20f64, 20.0, 20.0, 20.0, 20.0, 30.0, 30.0, 30.0, 30.0, 30.0] // first 5 elements matches condition on quantity
         .into_iter()
-        .map(Some)
+        .map(|f| Some(f.into()))
         .collect::<Vec<_>>();
-    let d_extended_price = vec![10f64; 10].into_iter().map(Some).collect::<Vec<_>>();
+
+    let d_extended_price = vec![10f64; 10]
+        .into_iter()
+        .map(|f| Some(f.into()))
+        .collect::<Vec<_>>();
 
     let make_chunk = |op: Op| StreamChunk {
         ops: vec![op; 10],
@@ -547,7 +556,7 @@ async fn test_tpch_q6() {
         assert_eq!(chunk.columns.len(), 1);
         assert_eq!(
             chunk.columns[0].array_ref().as_float64().value_at(0),
-            Some(1.1)
+            Some(1.1.into())
         );
 
         let chunk = result.last().unwrap();
@@ -558,7 +567,8 @@ async fn test_tpch_q6() {
                 .array_ref()
                 .as_float64()
                 .value_at(1)
-                .unwrap(),
+                .unwrap()
+                .0,
             111.1,
             epsilon = f64::EPSILON * 1000.0
         );

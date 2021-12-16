@@ -107,8 +107,8 @@ mod tests {
         assert!(row[2].eq(&Some(ScalarImpl::Bool(true))));
         assert!(row[3].eq(&Some(ScalarImpl::Int16(1))));
         assert!(row[4].eq(&Some(ScalarImpl::Int64(12345678))));
-        assert!(row[5].eq(&Some(ScalarImpl::Float32(1.23))));
-        assert!(row[6].eq(&Some(ScalarImpl::Float64(1.2345))));
+        assert!(row[5].eq(&Some(ScalarImpl::Float32(1.23.into()))));
+        assert!(row[6].eq(&Some(ScalarImpl::Float64(1.2345.into()))));
         assert!(row[7].eq(&Some(ScalarImpl::Utf8("varchar".to_string()))));
 
         let payload = r#"{"i32":1}"#.as_bytes();

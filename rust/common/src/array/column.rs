@@ -12,7 +12,7 @@ use crate::array::value_reader::{
 use crate::array::{ArrayImpl, ArrayRef, DecimalArrayBuilder, Utf8ArrayBuilder};
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
-use crate::types::{build_from_prost, DataType, DataTypeRef};
+use crate::types::{build_from_prost, DataType, DataTypeRef, OrderedF32, OrderedF64};
 use crate::util::prost::pack_to_any;
 
 /// Column is owned by `DataChunk`. It consists of logic data type and physical array
@@ -53,8 +53,10 @@ impl Column {
             TypeName::Int64 | TypeName::Timestamp | TypeName::Time | TypeName::Timestampz => {
                 read_numeric_column::<i64, I64ValueReader>(col, cardinality)?
             }
-            TypeName::Float => read_numeric_column::<f32, F32ValueReader>(col, cardinality)?,
-            TypeName::Double => read_numeric_column::<f64, F64ValueReader>(col, cardinality)?,
+            TypeName::Float => read_numeric_column::<OrderedF32, F32ValueReader>(col, cardinality)?,
+            TypeName::Double => {
+                read_numeric_column::<OrderedF64, F64ValueReader>(col, cardinality)?
+            }
             TypeName::Boolean => read_bool_column(col, cardinality)?,
             TypeName::Varchar | TypeName::Char => {
                 read_string_column::<Utf8ArrayBuilder, Utf8ValueReader>(col, cardinality)?

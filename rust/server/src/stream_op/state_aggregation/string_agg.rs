@@ -7,7 +7,7 @@ use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::types::{
-    deserialize_datum_not_null_from, serialize_datum_not_null_into, DataTypeKind, Datum, Scalar,
+    deserialize_datum_not_null_from, serialize_datum_not_null_into, DataTypeKind, Datum,
 };
 
 use super::super::keyspace::{Keyspace, StateStore};
@@ -98,7 +98,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
                 raw_key,
                 // Here we abuse the semantics of `DeleteInsert` for those values already existed
                 // on the storage, and now we are loading them into memory.
-                FlushStatus::DeleteInsert(value_string.to_scalar_value()),
+                FlushStatus::DeleteInsert(value_string.into()),
             );
         }
         self.dirty = false;
@@ -166,10 +166,7 @@ impl<S: StateStore> ManagedExtremeState<S> for ManagedStringAggState<S> {
             };
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    FlushStatus::do_insert(
-                        self.cache.entry(key_bytes.into()),
-                        value.to_scalar_value(),
-                    );
+                    FlushStatus::do_insert(self.cache.entry(key_bytes.into()), value.into());
                     self.total_count += 1;
                 }
                 Op::Delete | Op::UpdateDelete => {

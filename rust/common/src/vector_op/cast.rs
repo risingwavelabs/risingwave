@@ -3,6 +3,7 @@ use rust_decimal::Decimal;
 
 use crate::error::ErrorCode::{InvalidInputSyntax, ParseError};
 use crate::error::{Result, RwError};
+use crate::types::{OrderedF32, OrderedF64};
 
 // The same as NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce().
 // Minus this magic number to store the number of days since 1970-01-01.
@@ -22,6 +23,11 @@ where
     T: Into<R>,
 {
     Ok(n.into())
+}
+
+#[inline(always)]
+pub fn float_up(n: OrderedF32) -> Result<OrderedF64> {
+    Ok((n.0 as f64).into())
 }
 
 /// Cast between different precision and scale.

@@ -36,21 +36,21 @@ use crate::error::Result;
 pub use crate::error::RwError;
 use crate::types::{
     BoolType, DataTypeKind, DateType, Datum, DatumRef, DecimalType, Float32Type, Float64Type,
-    Int16Type, Int32Type, Int64Type, IntervalType, Scalar, ScalarImpl, ScalarRef, ScalarRefImpl,
-    StringType, TimestampType,
+    Int16Type, Int32Type, Int64Type, IntervalType, OrderedF32, OrderedF64, Scalar, ScalarImpl,
+    ScalarRef, ScalarRefImpl, StringType, TimestampType,
 };
 
 pub type I64Array = PrimitiveArray<i64>;
 pub type I32Array = PrimitiveArray<i32>;
 pub type I16Array = PrimitiveArray<i16>;
-pub type F64Array = PrimitiveArray<f64>;
-pub type F32Array = PrimitiveArray<f32>;
+pub type F64Array = PrimitiveArray<OrderedF64>;
+pub type F32Array = PrimitiveArray<OrderedF32>;
 
 pub type I64ArrayBuilder = PrimitiveArrayBuilder<i64>;
 pub type I32ArrayBuilder = PrimitiveArrayBuilder<i32>;
 pub type I16ArrayBuilder = PrimitiveArrayBuilder<i16>;
-pub type F64ArrayBuilder = PrimitiveArrayBuilder<f64>;
-pub type F32ArrayBuilder = PrimitiveArrayBuilder<f32>;
+pub type F64ArrayBuilder = PrimitiveArrayBuilder<OrderedF64>;
+pub type F32ArrayBuilder = PrimitiveArrayBuilder<OrderedF32>;
 
 /// The hash source for `None` values when hashing an item.
 static NULL_VAL_FOR_HASH: u32 = 0xfffffff0;

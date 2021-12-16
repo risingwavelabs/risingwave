@@ -7,6 +7,7 @@ use std::sync::Arc;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType as ProstDataType;
 
+use super::{OrderedF32, OrderedF64};
 use crate::array::{ArrayBuilder, ArrayBuilderImpl, PrimitiveArrayBuilder};
 use crate::error::{Result, RwError};
 use crate::types::{DataSize, DataType, DataTypeKind, DataTypeRef, PrimitiveDataType};
@@ -86,6 +87,16 @@ macro_rules! make_numeric_type {
 make_numeric_type!(Int16Type, i16, DataTypeKind::Int16, TypeName::Int16);
 make_numeric_type!(Int32Type, i32, DataTypeKind::Int32, TypeName::Int32);
 make_numeric_type!(Int64Type, i64, DataTypeKind::Int64, TypeName::Int64);
-make_numeric_type!(Float32Type, f32, DataTypeKind::Float32, TypeName::Float);
-make_numeric_type!(Float64Type, f64, DataTypeKind::Float64, TypeName::Double);
+make_numeric_type!(
+    Float32Type,
+    OrderedF32,
+    DataTypeKind::Float32,
+    TypeName::Float
+);
+make_numeric_type!(
+    Float64Type,
+    OrderedF64,
+    DataTypeKind::Float64,
+    TypeName::Double
+);
 make_numeric_type!(DateType, i32, DataTypeKind::Date, TypeName::Date);

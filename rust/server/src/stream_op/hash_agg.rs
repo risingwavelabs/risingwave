@@ -318,7 +318,7 @@ mod tests {
     use risingwave_common::catalog::Field;
     use risingwave_common::column_nonnull;
     use risingwave_common::expr::*;
-    use risingwave_common::types::{Int64Type, Scalar};
+    use risingwave_common::types::Int64Type;
 
     use super::super::keyspace::MemoryStateStore;
     use super::*;

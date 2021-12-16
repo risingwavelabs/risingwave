@@ -8,7 +8,7 @@ use risingwave_batch::executor::{Executor, RowSeqScanExecutor};
 use risingwave_common::array::{Array, Row};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::types::{Int32Type, Scalar};
+use risingwave_common::types::Int32Type;
 use risingwave_common::util::sort_util::OrderType;
 
 #[tokio::test]
@@ -50,18 +50,12 @@ async fn test_row_seq_scan() -> Result<()> {
     );
 
     state.put(
-        Row(vec![Some(1_i32.to_scalar_value())]),
-        Row(vec![
-            Some(1_i32.to_scalar_value()),
-            Some(4_i32.to_scalar_value()),
-        ]),
+        Row(vec![Some(1_i32.into())]),
+        Row(vec![Some(1_i32.into()), Some(4_i32.into())]),
     );
     state.put(
-        Row(vec![Some(2_i32.to_scalar_value())]),
-        Row(vec![
-            Some(2_i32.to_scalar_value()),
-            Some(5_i32.to_scalar_value()),
-        ]),
+        Row(vec![Some(2_i32.into())]),
+        Row(vec![Some(2_i32.into()), Some(5_i32.into())]),
     );
     state.flush().await.unwrap();
 

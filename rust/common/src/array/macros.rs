@@ -6,9 +6,10 @@ macro_rules! array {
       use $crate::array::Array;
       use $crate::array::ArrayBuilder;
       let mut builder = <$array as Array>::Builder::new(0).unwrap();
-      $(
-        builder.append($value).unwrap();
-      )*
+      for value in [$($value),*] {
+        let value: Option<<$array as Array>::RefItem<'_>> = value.map(Into::into);
+        builder.append(value).unwrap();
+      }
       builder.finish().unwrap()
     }
   };
@@ -22,9 +23,10 @@ macro_rules! array_nonnull {
       use $crate::array::Array;
       use $crate::array::ArrayBuilder;
       let mut builder = <$array as Array>::Builder::new(0).unwrap();
-      $(
-        builder.append(Some($value)).unwrap();
-      )*
+      for value in [$($value),*] {
+        let value: <$array as Array>::RefItem<'_> = value.into();
+        builder.append(Some(value)).unwrap();
+      }
       builder.finish().unwrap()
     }
   };
@@ -61,17 +63,17 @@ mod tests {
 
     #[test]
     fn test_build_array() {
-        let a = array! { I16Array, [Some(1), None, Some(3)] };
+        let a = array! { I16Array, [Some(1i16), None, Some(3)] };
         assert_eq!(a.len(), 3);
-        let a = array_nonnull! { I16Array, [1, 2, 3] };
+        let a = array_nonnull! { I16Array, [1i16, 2, 3] };
         assert_eq!(a.len(), 3);
     }
 
     #[test]
     fn test_build_column() {
-        let c = column! { I16Array, Int16Type, [Some(1), None, Some(3)] };
+        let c = column! { I16Array, Int16Type, [Some(1i16), None, Some(3)] };
         assert_eq!(c.array_ref().len(), 3);
-        let c = column_nonnull! { I16Array, Int16Type, [1, 2, 3] };
+        let c = column_nonnull! { I16Array, Int16Type, [1i16, 2, 3] };
         assert_eq!(c.array_ref().len(), 3);
     }
 }

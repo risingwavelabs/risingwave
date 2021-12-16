@@ -196,7 +196,7 @@ mod test {
         assert!(row[0].eq(&Some(ScalarImpl::Int32(101))));
         assert!(row[1].eq(&Some(ScalarImpl::Utf8("scooter".to_string()))));
         assert!(row[2].eq(&Some(ScalarImpl::Utf8("Small 2-wheel scooter".to_string()))));
-        assert!(row[3].eq(&Some(ScalarImpl::Float64(1.234))));
+        assert!(row[3].eq(&Some(ScalarImpl::Float64(1.234.into()))));
     }
 
     #[test]
@@ -222,7 +222,7 @@ mod test {
         assert!(row[0].eq(&Some(ScalarImpl::Int32(102))));
         assert!(row[1].eq(&Some(ScalarImpl::Utf8("car battery".to_string()))));
         assert!(row[2].eq(&Some(ScalarImpl::Utf8("12V car battery".to_string()))));
-        assert!(row[3].eq(&Some(ScalarImpl::Float64(8.1))));
+        assert!(row[3].eq(&Some(ScalarImpl::Float64(8.1.into()))));
     }
 
     #[test]
@@ -248,7 +248,7 @@ mod test {
         assert!(row[0].eq(&Some(ScalarImpl::Int32(101))));
         assert!(row[1].eq(&Some(ScalarImpl::Utf8("scooter".to_string()))));
         assert!(row[2].eq(&Some(ScalarImpl::Utf8("Small 2-wheel scooter".to_string()))));
-        assert!(row[3].eq(&Some(ScalarImpl::Float64(1.234))));
+        assert!(row[3].eq(&Some(ScalarImpl::Float64(1.234.into()))));
     }
 
     #[test]
@@ -280,7 +280,7 @@ mod test {
         assert!(row[0].eq(&Some(ScalarImpl::Int32(102))));
         assert!(row[1].eq(&Some(ScalarImpl::Utf8("car battery".to_string()))));
         assert!(row[2].eq(&Some(ScalarImpl::Utf8("12V car battery".to_string()))));
-        assert!(row[3].eq(&Some(ScalarImpl::Float64(8.1))));
+        assert!(row[3].eq(&Some(ScalarImpl::Float64(8.1.into()))));
 
         let row = result.rows.last().unwrap();
         assert_eq!(row.capacity(), 4);
@@ -288,7 +288,7 @@ mod test {
         assert!(row[0].eq(&Some(ScalarImpl::Int32(102))));
         assert!(row[1].eq(&Some(ScalarImpl::Utf8("car battery".to_string()))));
         assert!(row[2].eq(&Some(ScalarImpl::Utf8("24V car battery".to_string()))));
-        assert!(row[3].eq(&Some(ScalarImpl::Float64(9.1))));
+        assert!(row[3].eq(&Some(ScalarImpl::Float64(9.1.into()))));
     }
 
     #[test]

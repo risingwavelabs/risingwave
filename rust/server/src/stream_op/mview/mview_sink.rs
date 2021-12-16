@@ -129,7 +129,7 @@ mod tests {
     use risingwave_common::array::{I32Array, Op, Row};
     use risingwave_common::catalog::{Schema, SchemaId, TableId};
     use risingwave_common::column_nonnull;
-    use risingwave_common::types::{Int32Type, Scalar};
+    use risingwave_common::types::Int32Type;
     use risingwave_common::util::downcast_arc;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::data::data_type::TypeName;
@@ -234,7 +234,7 @@ mod tests {
         match sink_executor.next().await.unwrap() {
             Message::Barrier(_) => {
                 let datum = table
-                    .get(Row(vec![Some(3_i32.to_scalar_value())]), 1)
+                    .get(Row(vec![Some(3_i32.into())]), 1)
                     .await
                     .unwrap()
                     .unwrap();
@@ -250,7 +250,7 @@ mod tests {
         match sink_executor.next().await.unwrap() {
             Message::Barrier(_) => {
                 let datum = table
-                    .get(Row(vec![Some(7_i32.to_scalar_value())]), 1)
+                    .get(Row(vec![Some(7_i32.into())]), 1)
                     .await
                     .unwrap()
                     .unwrap();

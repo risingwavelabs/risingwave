@@ -23,10 +23,10 @@ pub(crate) fn json_parse_value(
             .map(|v| ScalarImpl::Int64(v as i64)),
         DataTypeKind::Float32 => value
             .and_then(|v| v.as_f64())
-            .map(|v| ScalarImpl::Float32(v as f32)),
+            .map(|v| ScalarImpl::Float32((v as f32).into())),
         DataTypeKind::Float64 => value
             .and_then(|v| v.as_f64())
-            .map(|v| ScalarImpl::Float64(v as f64)),
+            .map(|v| ScalarImpl::Float64(v.into())),
         DataTypeKind::Decimal => value
             .and_then(|v| v.as_u64())
             .map(|v| ScalarImpl::Decimal(Decimal::from(v))),

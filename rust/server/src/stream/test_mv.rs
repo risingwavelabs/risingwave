@@ -4,7 +4,7 @@ use std::time::Duration;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder, Row};
 use risingwave_common::catalog::{SchemaId, TableId};
-use risingwave_common::types::{DecimalType, Int32Type, Scalar};
+use risingwave_common::types::{DecimalType, Int32Type};
 use risingwave_common::util::addr::get_host_port;
 use risingwave_common::util::downcast_arc;
 use risingwave_pb::data::data_type::TypeName;
@@ -198,7 +198,7 @@ async fn test_stream_mv_proto() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let datum = table
-        .get(Row(vec![Some(1_i32.to_scalar_value())]), 0)
+        .get(Row(vec![Some(1_i32.into())]), 0)
         .await
         .unwrap()
         .unwrap();

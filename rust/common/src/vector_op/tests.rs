@@ -3,7 +3,7 @@ use std::str::FromStr;
 use chrono::{Datelike, NaiveDate, NaiveDateTime};
 use rust_decimal::Decimal;
 
-use crate::types::IntervalUnit;
+use crate::types::{IntervalUnit, OrderedF32};
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::cast::{date_to_timestamp, UNIX_EPOCH_DAYS};
 use crate::vector_op::cmp::*;
@@ -56,10 +56,30 @@ fn test_arithmetic() {
         deci_f_mod::<Decimal, f32, Decimal>(Decimal::from_str("0.0").unwrap(), 1f32).unwrap(),
         Decimal::from_str("0.0").unwrap()
     );
-    assert!(float_add::<i32, f32, f32>(-1i32, 1f32).unwrap().abs() < f32::EPSILON);
-    assert!(float_sub::<i32, f32, f32>(1i32, 1f32).unwrap().abs() < f32::EPSILON);
-    assert!(float_mul::<i32, f32, f32>(0i32, 1f32).unwrap().abs() < f32::EPSILON);
-    assert!(float_div::<i32, f32, f32>(0i32, 1f32).unwrap().abs() < f32::EPSILON);
+    assert!(
+        float_add::<i32, OrderedF32, OrderedF32>(-1i32, 1f32.into())
+            .unwrap()
+            .abs()
+            < f32::EPSILON
+    );
+    assert!(
+        float_sub::<i32, OrderedF32, OrderedF32>(1i32, 1f32.into())
+            .unwrap()
+            .abs()
+            < f32::EPSILON
+    );
+    assert!(
+        float_mul::<i32, OrderedF32, OrderedF32>(0i32, 1f32.into())
+            .unwrap()
+            .abs()
+            < f32::EPSILON
+    );
+    assert!(
+        float_div::<i32, OrderedF32, OrderedF32>(0i32, 1f32.into())
+            .unwrap()
+            .abs()
+            < f32::EPSILON
+    );
     assert_eq!(
         date_interval_add::<i32, i32, i64>(
             NaiveDate::from_ymd(1994, 1, 1).num_days_from_ce() - UNIX_EPOCH_DAYS,
@@ -109,12 +129,12 @@ fn test_comparison() {
     assert!(!deci_f_geq::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 2.1).unwrap());
     assert!(deci_lt::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 2).unwrap());
     assert!(deci_f_lt::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 2.1).unwrap());
-    assert!(prim_eq::<f32, i32, f32>(1.0, 1).unwrap());
-    assert!(!prim_neq::<f32, i32, f32>(1.0, 1).unwrap());
-    assert!(!prim_lt::<f32, i32, f32>(1.0, 1).unwrap());
-    assert!(prim_leq::<f32, i32, f32>(1.0, 1).unwrap());
-    assert!(!prim_gt::<f32, i32, f32>(1.0, 1).unwrap());
-    assert!(prim_geq::<f32, i32, f32>(1.0, 1).unwrap());
+    assert!(prim_eq::<OrderedF32, i32, OrderedF32>(1.0.into(), 1).unwrap());
+    assert!(!prim_neq::<OrderedF32, i32, OrderedF32>(1.0.into(), 1).unwrap());
+    assert!(!prim_lt::<OrderedF32, i32, OrderedF32>(1.0.into(), 1).unwrap());
+    assert!(prim_leq::<OrderedF32, i32, OrderedF32>(1.0.into(), 1).unwrap());
+    assert!(!prim_gt::<OrderedF32, i32, OrderedF32>(1.0.into(), 1).unwrap());
+    assert!(prim_geq::<OrderedF32, i32, OrderedF32>(1.0.into(), 1).unwrap());
     assert!(prim_eq::<i64, i32, i64>(1i64, 1).unwrap());
     assert!(!prim_neq::<i64, i32, i64>(1i64, 1).unwrap());
     assert!(!prim_lt::<i64, i32, i64>(1i64, 1).unwrap());

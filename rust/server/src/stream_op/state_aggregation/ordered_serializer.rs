@@ -88,8 +88,8 @@ mod tests {
     fn test_ordered_arrays_serializer() {
         let orders = vec![(OrderType::Descending, 0), (OrderType::Ascending, 1)];
         let serializer = OrderedArraysSerializer::new(orders);
-        let array0 = array_nonnull! { I16Array, [3,2,2] }.into();
-        let array1 = array_nonnull! { I16Array, [1,2,3] }.into();
+        let array0 = array_nonnull! { I16Array, [3i16,2,2] }.into();
+        let array1 = array_nonnull! { I16Array, [1i16,2,3] }.into();
         let input_arrays = vec![&array0, &array1];
         let mut array = vec![];
         serializer.order_based_scehmaed_serialize(&input_arrays, &mut array);
@@ -100,8 +100,8 @@ mod tests {
         assert_eq!(array[2][5], 3i16.to_be_bytes()[1]);
 
         // test negative numbers
-        let array0 = array_nonnull! { I16Array, [-32768, -32768, -32767] }.into();
-        let array1 = array_nonnull! { I16Array, [-2, -1, -1] }.into();
+        let array0 = array_nonnull! { I16Array, [-32768i16, -32768, -32767] }.into();
+        let array1 = array_nonnull! { I16Array, [-2i16, -1, -1] }.into();
         let input_arrays = vec![&array0, &array1];
         let mut array = vec![];
         serializer.order_based_scehmaed_serialize(&input_arrays, &mut array);

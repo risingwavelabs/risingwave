@@ -30,14 +30,19 @@ mod decimal_type;
 pub mod interval_type;
 mod string_type;
 
+mod ordered_float;
 pub use bool_type::*;
 pub use datetime_type::*;
 pub use decimal_type::*;
 pub use interval_type::*;
+pub use ordered_float::IntoOrdered;
 use paste::paste;
 pub use string_type::*;
 
 use crate::array::{ArrayBuilderImpl, PrimitiveArrayItemType};
+
+pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
+pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub enum DataTypeKind {
@@ -185,8 +190,8 @@ macro_rules! for_all_scalar_variants {
       { Int16, int16, i16, i16 },
       { Int32, int32, i32, i32 },
       { Int64, int64, i64, i64 },
-      { Float32, float32, f32, f32 },
-      { Float64, float64, f64, f64 },
+      { Float32, float32, OrderedF32, OrderedF32 },
+      { Float64, float64, OrderedF64, OrderedF64 },
       { Utf8, utf8, String, &'scalar str },
       { Bool, bool, bool, bool },
       { Decimal, decimal, Decimal, Decimal  },
@@ -199,14 +204,14 @@ macro_rules! for_all_scalar_variants {
 macro_rules! scalar_impl_enum {
   ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
     /// `ScalarImpl` embeds all possible scalars in the evaluation framework.
-    #[derive(Debug, Clone, PartialEq, PartialOrd)]
+    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
     pub enum ScalarImpl {
       $( $variant_name($scalar) ),*
     }
 
     /// `ScalarRefImpl` embeds all possible scalar references in the evaluation
     /// framework.
-    #[derive(Debug, Copy, Clone, PartialEq)]
+    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
     pub enum ScalarRefImpl<'scalar> {
       $( $variant_name($scalar_ref) ),*
     }
@@ -298,9 +303,6 @@ impl ToOwnedDatum for DatumRef<'_> {
     }
 }
 
-// FIXME: `f32` is not `Eq`, and this is not safe. Consider using `ordered_float` in our project.
-impl Eq for ScalarImpl {}
-
 /// `for_all_native_types` includes all native variants of our scalar types.
 #[macro_export]
 macro_rules! for_all_native_types {
@@ -310,8 +312,8 @@ macro_rules! for_all_native_types {
       { i16, Int16 },
       { i32, Int32 },
       { i64, Int64 },
-      { f32, Float32 },
-      { f64, Float64 }
+      { $crate::types::OrderedF32, Float32 },
+      { $crate::types::OrderedF64, Float64 }
     }
   };
 }
@@ -324,45 +326,45 @@ macro_rules! for_all_native_types {
 macro_rules! impl_convert {
   ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
     $(
+      impl From<$scalar> for ScalarImpl {
+        fn from(val: $scalar) -> Self {
+          ScalarImpl::$variant_name(val)
+        }
+      }
+
+      impl TryFrom<ScalarImpl> for $scalar {
+        type Error = RwError;
+
+        fn try_from(val: ScalarImpl) -> Result<Self> {
+          match val {
+            ScalarImpl::$variant_name(scalar) => Ok(scalar),
+            other_scalar => Err(ErrorCode::InternalError(
+              format!("cannot convert ScalarImpl::{} to concrete type", other_scalar.get_ident())
+            ).into())
+          }
+        }
+      }
+
+      impl <'scalar> From<$scalar_ref> for ScalarRefImpl<'scalar> {
+        fn from(val: $scalar_ref) -> Self {
+          ScalarRefImpl::$variant_name(val)
+        }
+      }
+
+      impl <'scalar> TryFrom<ScalarRefImpl<'scalar>> for $scalar_ref {
+        type Error = RwError;
+
+        fn try_from(val: ScalarRefImpl<'scalar>) -> Result<Self> {
+          match val {
+            ScalarRefImpl::$variant_name(scalar_ref) => Ok(scalar_ref),
+            other_scalar => Err(ErrorCode::InternalError(
+              format!("cannot convert ScalarRefImpl::{} to concrete type", other_scalar.get_ident())
+            ).into())
+          }
+        }
+      }
+
       paste! {
-        impl From<$scalar> for ScalarImpl {
-          fn from(val: $scalar) -> Self {
-            ScalarImpl::$variant_name(val)
-          }
-        }
-
-        impl TryFrom<ScalarImpl> for $scalar {
-          type Error = RwError;
-
-          fn try_from(val: ScalarImpl) -> Result<Self> {
-            match val {
-              ScalarImpl::$variant_name(scalar) => Ok(scalar),
-              other_scalar => Err(ErrorCode::InternalError(
-                format!("cannot convert ScalarImpl::{} to concrete type", other_scalar.get_ident())
-              ).into())
-            }
-          }
-        }
-
-        impl <'scalar> From<$scalar_ref> for ScalarRefImpl<'scalar> {
-          fn from(val: $scalar_ref) -> Self {
-            ScalarRefImpl::$variant_name(val)
-          }
-        }
-
-        impl <'scalar> TryFrom<ScalarRefImpl<'scalar>> for $scalar_ref {
-          type Error = RwError;
-
-          fn try_from(val: ScalarRefImpl<'scalar>) -> Result<Self> {
-            match val {
-              ScalarRefImpl::$variant_name(scalar_ref) => Ok(scalar_ref),
-              other_scalar => Err(ErrorCode::InternalError(
-                format!("cannot convert ScalarRefImpl::{} to concrete type", other_scalar.get_ident())
-              ).into())
-            }
-          }
-        }
-
         impl ScalarImpl {
           pub fn [<as_ $suffix_name>](&self) -> &$scalar {
             match self {
@@ -394,6 +396,18 @@ macro_rules! impl_convert {
 }
 
 for_all_scalar_variants! { impl_convert }
+
+// Implement `From<raw float>` for `ScalarImpl` manually/
+impl From<f32> for ScalarImpl {
+    fn from(f: f32) -> Self {
+        Self::Float32(f.into())
+    }
+}
+impl From<f64> for ScalarImpl {
+    fn from(f: f64) -> Self {
+        Self::Float64(f.into())
+    }
+}
 
 macro_rules! impl_scalar_impl_ref_conversion {
  ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
@@ -485,8 +499,8 @@ impl ScalarImpl {
             Ty::Int16 => Self::Int16(i16::deserialize(de)?),
             Ty::Int32 => Self::Int32(i32::deserialize(de)?),
             Ty::Int64 => Self::Int64(i64::deserialize(de)?),
-            Ty::Float32 => Self::Float32(f32::deserialize(de)?),
-            Ty::Float64 => Self::Float64(f64::deserialize(de)?),
+            Ty::Float32 => Self::Float32(f32::deserialize(de)?.into()),
+            Ty::Float64 => Self::Float64(f64::deserialize(de)?.into()),
             Ty::Char | Ty::Varchar => Self::Utf8(String::deserialize(de)?),
             Ty::Boolean => Self::Bool(bool::deserialize(de)?),
             Ty::Decimal => Self::Decimal({

@@ -97,7 +97,7 @@ pub fn new_unary_expr(
             Box::new(UnaryExpression::<F32Array, F64Array, _> {
                 expr_ia1: child_expr,
                 return_type,
-                func: cast::num_up,
+                func: cast::float_up,
                 _phantom: PhantomData,
             })
         }

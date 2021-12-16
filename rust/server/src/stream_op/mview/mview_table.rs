@@ -169,7 +169,7 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::Field;
-    use risingwave_common::types::{DataTypeKind, Int32Type, Scalar, StringType};
+    use risingwave_common::types::{DataTypeKind, Int32Type, StringType};
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
@@ -202,100 +202,55 @@ mod tests {
         );
 
         state.put(
+            Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
             Row(vec![
-                Some(1_i32.to_scalar_value()),
-                Some(11_i32.to_scalar_value()),
-            ]),
-            Row(vec![
-                Some(1_i32.to_scalar_value()),
-                Some(11_i32.to_scalar_value()),
-                Some(111_i32.to_scalar_value()),
+                Some(1_i32.into()),
+                Some(11_i32.into()),
+                Some(111_i32.into()),
             ]),
         );
         state.put(
+            Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
             Row(vec![
-                Some(2_i32.to_scalar_value()),
-                Some(22_i32.to_scalar_value()),
-            ]),
-            Row(vec![
-                Some(2_i32.to_scalar_value()),
-                Some(22_i32.to_scalar_value()),
-                Some(222_i32.to_scalar_value()),
+                Some(2_i32.into()),
+                Some(22_i32.into()),
+                Some(222_i32.into()),
             ]),
         );
-        state.delete(Row(vec![
-            Some(2_i32.to_scalar_value()),
-            Some(22_i32.to_scalar_value()),
-        ]));
+        state.delete(Row(vec![Some(2_i32.into()), Some(22_i32.into())]));
         state.flush().await.unwrap();
 
         let cell_1_0 = table
-            .get(
-                Row(vec![
-                    Some(1_i32.to_scalar_value()),
-                    Some(11_i32.to_scalar_value()),
-                ]),
-                0,
-            )
+            .get(Row(vec![Some(1_i32.into()), Some(11_i32.into())]), 0)
             .await
             .unwrap();
         assert!(cell_1_0.is_some());
         assert_eq!(*cell_1_0.unwrap().unwrap().as_int32(), 1);
         let cell_1_1 = table
-            .get(
-                Row(vec![
-                    Some(1_i32.to_scalar_value()),
-                    Some(11_i32.to_scalar_value()),
-                ]),
-                1,
-            )
+            .get(Row(vec![Some(1_i32.into()), Some(11_i32.into())]), 1)
             .await
             .unwrap();
         assert!(cell_1_1.is_some());
         assert_eq!(*cell_1_1.unwrap().unwrap().as_int32(), 11);
         let cell_1_2 = table
-            .get(
-                Row(vec![
-                    Some(1_i32.to_scalar_value()),
-                    Some(11_i32.to_scalar_value()),
-                ]),
-                2,
-            )
+            .get(Row(vec![Some(1_i32.into()), Some(11_i32.into())]), 2)
             .await
             .unwrap();
         assert!(cell_1_2.is_some());
         assert_eq!(*cell_1_2.unwrap().unwrap().as_int32(), 111);
 
         let cell_2_0 = table
-            .get(
-                Row(vec![
-                    Some(2_i32.to_scalar_value()),
-                    Some(22_i32.to_scalar_value()),
-                ]),
-                0,
-            )
+            .get(Row(vec![Some(2_i32.into()), Some(22_i32.into())]), 0)
             .await
             .unwrap();
         assert!(cell_2_0.is_none());
         let cell_2_1 = table
-            .get(
-                Row(vec![
-                    Some(2_i32.to_scalar_value()),
-                    Some(22_i32.to_scalar_value()),
-                ]),
-                1,
-            )
+            .get(Row(vec![Some(2_i32.into()), Some(22_i32.into())]), 1)
             .await
             .unwrap();
         assert!(cell_2_1.is_none());
         let cell_2_2 = table
-            .get(
-                Row(vec![
-                    Some(2_i32.to_scalar_value()),
-                    Some(22_i32.to_scalar_value()),
-                ]),
-                2,
-            )
+            .get(Row(vec![Some(2_i32.into()), Some(22_i32.into())]), 2)
             .await
             .unwrap();
         assert!(cell_2_2.is_none());
@@ -463,31 +418,22 @@ mod tests {
         );
 
         state.put(
+            Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
             Row(vec![
-                Some(1_i32.to_scalar_value()),
-                Some(11_i32.to_scalar_value()),
-            ]),
-            Row(vec![
-                Some(1_i32.to_scalar_value()),
-                Some(11_i32.to_scalar_value()),
-                Some(111_i32.to_scalar_value()),
+                Some(1_i32.into()),
+                Some(11_i32.into()),
+                Some(111_i32.into()),
             ]),
         );
         state.put(
+            Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
             Row(vec![
-                Some(2_i32.to_scalar_value()),
-                Some(22_i32.to_scalar_value()),
-            ]),
-            Row(vec![
-                Some(2_i32.to_scalar_value()),
-                Some(22_i32.to_scalar_value()),
-                Some(222_i32.to_scalar_value()),
+                Some(2_i32.into()),
+                Some(22_i32.into()),
+                Some(222_i32.into()),
             ]),
         );
-        state.delete(Row(vec![
-            Some(2_i32.to_scalar_value()),
-            Some(22_i32.to_scalar_value()),
-        ]));
+        state.delete(Row(vec![Some(2_i32.into()), Some(22_i32.into())]));
         state.flush().await.unwrap();
 
         let mut iter = table.iter();
@@ -497,9 +443,9 @@ mod tests {
         assert!(res.is_some());
         assert_eq!(
             Row(vec![
-                Some(1_i32.to_scalar_value()),
-                Some(11_i32.to_scalar_value()),
-                Some(111_i32.to_scalar_value())
+                Some(1_i32.into()),
+                Some(11_i32.into()),
+                Some(111_i32.into())
             ]),
             res.unwrap()
         );
@@ -557,31 +503,22 @@ mod tests {
         );
 
         state_1.put(
+            Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
             Row(vec![
-                Some(1_i32.to_scalar_value()),
-                Some(11_i32.to_scalar_value()),
-            ]),
-            Row(vec![
-                Some(1_i32.to_scalar_value()),
-                Some(11_i32.to_scalar_value()),
-                Some(111_i32.to_scalar_value()),
+                Some(1_i32.into()),
+                Some(11_i32.into()),
+                Some(111_i32.into()),
             ]),
         );
         state_1.put(
+            Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
             Row(vec![
-                Some(2_i32.to_scalar_value()),
-                Some(22_i32.to_scalar_value()),
-            ]),
-            Row(vec![
-                Some(2_i32.to_scalar_value()),
-                Some(22_i32.to_scalar_value()),
-                Some(222_i32.to_scalar_value()),
+                Some(2_i32.into()),
+                Some(22_i32.into()),
+                Some(222_i32.into()),
             ]),
         );
-        state_1.delete(Row(vec![
-            Some(2_i32.to_scalar_value()),
-            Some(22_i32.to_scalar_value()),
-        ]));
+        state_1.delete(Row(vec![Some(2_i32.into()), Some(22_i32.into())]));
 
         state_2.put(
             Row(vec![
@@ -622,9 +559,9 @@ mod tests {
         assert!(res_1_1.is_some());
         assert_eq!(
             Row(vec![
-                Some(1_i32.to_scalar_value()),
-                Some(11_i32.to_scalar_value()),
-                Some(111_i32.to_scalar_value()),
+                Some(1_i32.into()),
+                Some(11_i32.into()),
+                Some(111_i32.into()),
             ]),
             res_1_1.unwrap()
         );

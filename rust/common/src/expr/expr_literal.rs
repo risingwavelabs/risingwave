@@ -172,16 +172,18 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
                         InternalError(format!("Failed to deserialize i64, reason: {:?}", e))
                     })?,
                 )),
-                TypeName::Float => ScalarImpl::Float32(f32::from_be_bytes(
-                    prost_value.get_body().as_slice().try_into().map_err(|e| {
-                        InternalError(format!("Failed to deserialize f32, reason: {:?}", e))
-                    })?,
-                )),
-                TypeName::Double => ScalarImpl::Float64(f64::from_be_bytes(
-                    prost_value.get_body().as_slice().try_into().map_err(|e| {
-                        InternalError(format!("Failed to deserialize f64, reason: {:?}", e))
-                    })?,
-                )),
+                TypeName::Float => ScalarImpl::Float32(
+                    f32::from_be_bytes(prost_value.get_body().as_slice().try_into().map_err(
+                        |e| InternalError(format!("Failed to deserialize f32, reason: {:?}", e)),
+                    )?)
+                    .into(),
+                ),
+                TypeName::Double => ScalarImpl::Float64(
+                    f64::from_be_bytes(prost_value.get_body().as_slice().try_into().map_err(
+                        |e| InternalError(format!("Failed to deserialize f64, reason: {:?}", e)),
+                    )?)
+                    .into(),
+                ),
                 TypeName::Char | TypeName::Symbol => ScalarImpl::Utf8(
                     std::str::from_utf8(prost_value.get_body())
                         .map_err(|e| {
@@ -242,7 +244,7 @@ mod tests {
     use super::*;
     use crate::array::column::Column;
     use crate::array::PrimitiveArray;
-    use crate::types::Int32Type;
+    use crate::types::{Int32Type, IntoOrdered};
 
     #[test]
     fn test_expr_literal_from() {
@@ -289,13 +291,13 @@ mod tests {
         let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();
         assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
 
-        let v = 1f32;
+        let v = 1f32.into_ordered();
         let t = TypeName::Float;
         let bytes = v.to_be_bytes().to_vec();
         let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();
         assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
 
-        let v = 1f64;
+        let v = 1f64.into_ordered();
         let t = TypeName::Double;
         let bytes = v.to_be_bytes().to_vec();
         let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();

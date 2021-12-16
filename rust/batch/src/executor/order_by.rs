@@ -215,7 +215,8 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::expr::InputRefExpression;
     use risingwave_common::types::{
-        BoolType, DataTypeKind, Float32Type, Float64Type, Int16Type, Int32Type, StringType,
+        BoolType, DataTypeKind, Float32Type, Float64Type, Int16Type, Int32Type, OrderedF32,
+        OrderedF64, StringType,
     };
     use risingwave_common::util::sort_util::OrderType;
     use test::Bencher;
@@ -242,13 +243,15 @@ mod tests {
     }
 
     fn create_column_f32(vec: &[Option<f32>]) -> Result<Column> {
-        let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
+        let vec = vec.iter().map(|o| o.map(OrderedF32::from)).collect_vec();
+        let array = PrimitiveArray::from_slice(&vec).map(|x| Arc::new(x.into()))?;
         let data_type = Float32Type::create(false);
         Ok(Column::new(array, data_type))
     }
 
     fn create_column_f64(vec: &[Option<f64>]) -> Result<Column> {
-        let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
+        let vec = vec.iter().map(|o| o.map(OrderedF64::from)).collect_vec();
+        let array = PrimitiveArray::from_slice(&vec).map(|x| Arc::new(x.into()))?;
         let data_type = Float64Type::create(false);
         Ok(Column::new(array, data_type))
     }
@@ -368,11 +371,11 @@ mod tests {
         assert!(matches!(res, Some(_)));
         if let Some(res) = res {
             let col0 = res.column_at(0).unwrap();
-            assert_eq!(col0.array().as_float32().value_at(0), Some(3.3));
-            assert_eq!(col0.array().as_float32().value_at(1), Some(2.2));
-            assert_eq!(col0.array().as_float32().value_at(2), Some(1.1));
-            assert_eq!(col0.array().as_float32().value_at(3), Some(-1.1));
-            assert_eq!(col0.array().as_float32().value_at(4), Some(-2.2));
+            assert_eq!(col0.array().as_float32().value_at(0), Some(3.3.into()));
+            assert_eq!(col0.array().as_float32().value_at(1), Some(2.2.into()));
+            assert_eq!(col0.array().as_float32().value_at(2), Some(1.1.into()));
+            assert_eq!(col0.array().as_float32().value_at(3), Some((-1.1).into()));
+            assert_eq!(col0.array().as_float32().value_at(4), Some((-2.2).into()));
         }
     }
 

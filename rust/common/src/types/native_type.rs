@@ -2,6 +2,7 @@ use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 
+use super::{OrderedF32, OrderedF64};
 use crate::error::ErrorCode::IoError;
 use crate::error::{Result, RwError};
 
@@ -48,7 +49,7 @@ impl NativeType for i64 {
     }
 }
 
-impl NativeType for f32 {
+impl NativeType for OrderedF32 {
     fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
         output
             .write(&self.to_be_bytes())
@@ -56,11 +57,11 @@ impl NativeType for f32 {
     }
 
     fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
-        state.write_i32(*self as i32);
+        state.write_i32(self.0 as i32);
     }
 }
 
-impl NativeType for f64 {
+impl NativeType for OrderedF64 {
     fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
         output
             .write(&self.to_be_bytes())
@@ -68,7 +69,7 @@ impl NativeType for f64 {
     }
 
     fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
-        state.write_i64(*self as i64);
+        state.write_i64(self.0 as i64);
     }
 }
 

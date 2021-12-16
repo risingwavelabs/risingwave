@@ -94,7 +94,7 @@ mod tests {
     use crate::array::PrimitiveArray;
     use crate::expr::expr_binary_nonnull::new_binary_expr;
     use crate::expr::{InputRefExpression, LiteralExpression};
-    use crate::types::{BoolType, Float32Type, Int32Type, Scalar};
+    use crate::types::{BoolType, Float32Type, Int32Type};
 
     fn create_column_i32(vec: &[Option<i32>]) -> Result<Column> {
         let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
@@ -113,28 +113,28 @@ mod tests {
                 Box::new(InputRefExpression::new(Int32Type::create(false), 0)),
                 Box::new(LiteralExpression::new(
                     Float32Type::create(false),
-                    Some(2f32.to_scalar_value()),
+                    Some(2f32.into()),
                 )),
             ),
             Box::new(LiteralExpression::new(
                 Float32Type::create(false),
-                Some(3.1f32.to_scalar_value()),
+                Some(3.1f32.into()),
             )),
         )];
         // else 4.1
         let els = Box::new(LiteralExpression::new(
             Float32Type::create(false),
-            Some(4.1f32.to_scalar_value()),
+            Some(4.1f32.into()),
         ));
         let mut searched_case_expr = CaseExpression::new(ret_type, when_clauses, Some(els));
         let col = create_column_i32(&[Some(1), Some(2), Some(3), Some(4), Some(5)]).unwrap();
         let input = DataChunk::builder().columns([col].to_vec()).build();
         let output = searched_case_expr.eval(&input).unwrap();
-        assert_eq!(output.datum_at(0), Some(3.1f32.to_scalar_value()));
-        assert_eq!(output.datum_at(1), Some(3.1f32.to_scalar_value()));
-        assert_eq!(output.datum_at(2), Some(4.1f32.to_scalar_value()));
-        assert_eq!(output.datum_at(3), Some(4.1f32.to_scalar_value()));
-        assert_eq!(output.datum_at(4), Some(4.1f32.to_scalar_value()));
+        assert_eq!(output.datum_at(0), Some(3.1f32.into()));
+        assert_eq!(output.datum_at(1), Some(3.1f32.into()));
+        assert_eq!(output.datum_at(2), Some(4.1f32.into()));
+        assert_eq!(output.datum_at(3), Some(4.1f32.into()));
+        assert_eq!(output.datum_at(4), Some(4.1f32.into()));
     }
 
     #[test]
@@ -148,21 +148,21 @@ mod tests {
                 Box::new(InputRefExpression::new(Int32Type::create(false), 0)),
                 Box::new(LiteralExpression::new(
                     Float32Type::create(false),
-                    Some(3f32.to_scalar_value()),
+                    Some(3f32.into()),
                 )),
             ),
             Box::new(LiteralExpression::new(
                 Float32Type::create(true),
-                Some(3.1f32.to_scalar_value()),
+                Some(3.1f32.into()),
             )),
         )];
         let mut searched_case_expr = CaseExpression::new(ret_type, when_clauses, None);
         let col = create_column_i32(&[Some(3), Some(4), Some(3), Some(4)]).unwrap();
         let input = DataChunk::builder().columns([col].to_vec()).build();
         let output = searched_case_expr.eval(&input).unwrap();
-        assert_eq!(output.datum_at(0), Some(3.1f32.to_scalar_value()));
+        assert_eq!(output.datum_at(0), Some(3.1f32.into()));
         assert_eq!(output.datum_at(1), None);
-        assert_eq!(output.datum_at(2), Some(3.1f32.to_scalar_value()));
+        assert_eq!(output.datum_at(2), Some(3.1f32.into()));
         assert_eq!(output.datum_at(3), None);
     }
 }

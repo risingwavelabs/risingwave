@@ -91,6 +91,8 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::types::OrderedF64;
+
     use super::*;
 
     #[test]
@@ -105,10 +107,13 @@ mod tests {
 
     fn test_extreme_serde<const EXTREME_TYPE: usize>() -> Result<()> {
         let pk_length_cases = [0, 1, 10];
-        let key_cases = [1.14, 5.14, 19.19, 8.10];
+        let key_cases = [1.14, 5.14, 19.19, 8.10].map(OrderedF64::from);
 
         for pk_length in pk_length_cases {
-            let s = ExtremeSerializer::<f64, EXTREME_TYPE>::new(DataTypeKind::Float64, pk_length);
+            let s = ExtremeSerializer::<OrderedF64, EXTREME_TYPE>::new(
+                DataTypeKind::Float64,
+                pk_length,
+            );
             let pk = (0..pk_length).map(|x| x as i64).collect();
             for key in key_cases {
                 let encoded_key = s.serialize(key, &pk)?;

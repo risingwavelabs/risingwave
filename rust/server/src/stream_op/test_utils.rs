@@ -11,6 +11,7 @@ use crate::stream_op::*;
 macro_rules! row_nonnull {
   [$( $value:expr ),*] => {
     {
+      use risingwave_common::types::Scalar;
       Row(vec![$(Some($value.to_scalar_value()), )*])
     }
   };

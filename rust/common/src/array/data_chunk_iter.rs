@@ -240,8 +240,8 @@ mod tests {
             Some(ScalarImpl::Int16(1)),
             Some(ScalarImpl::Int32(2)),
             Some(ScalarImpl::Int64(3)),
-            Some(ScalarImpl::Float32(4.)),
-            Some(ScalarImpl::Float64(5.)),
+            Some(ScalarImpl::Float32(4.0.into())),
+            Some(ScalarImpl::Float64(5.0.into())),
             Some(ScalarImpl::Decimal("-233.3".parse().unwrap())),
             Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
         ]);
@@ -271,8 +271,8 @@ mod tests {
             Some(ScalarImpl::Int16(1)),
             Some(ScalarImpl::Int32(2)),
             Some(ScalarImpl::Int64(3)),
-            Some(ScalarImpl::Float32(4.)),
-            Some(ScalarImpl::Float64(5.)),
+            Some(ScalarImpl::Float32(4.0.into())),
+            Some(ScalarImpl::Float64(5.0.into())),
             Some(ScalarImpl::Decimal("-233.3".parse().unwrap())),
             Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
         ]);

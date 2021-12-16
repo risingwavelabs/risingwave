@@ -6,7 +6,7 @@ use protobuf::RepeatedField;
 use risingwave_common::array::Op;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataTypeKind, Datum, ScalarImpl};
+use risingwave_common::types::{DataTypeKind, Datum, OrderedF32, OrderedF64, ScalarImpl};
 use rust_decimal::Decimal;
 use serde::de::Deserialize;
 use serde_protobuf::de::Deserializer;
@@ -117,10 +117,10 @@ impl SourceParser for ProtobufParser {
           protobuf_match_type!(value, ScalarImpl::Int64, { I8, I16, I32, I64, U8, U16, U32 }, i64)
         }
         DataTypeKind::Float32 => {
-          protobuf_match_type!(value, ScalarImpl::Float32, { I8, I16, U8, U16, F32 }, f32)
+          protobuf_match_type!(value, ScalarImpl::Float32, { I8, I16, U8, U16, F32 }, OrderedF32)
         }
         DataTypeKind::Float64 => {
-          protobuf_match_type!(value, ScalarImpl::Float64, { I8, I16, I32, U8, U16, U32, F32, F64}, f64)
+          protobuf_match_type!(value, ScalarImpl::Float64, { I8, I16, I32, U8, U16, U32, F32, F64}, OrderedF64)
         }
         DataTypeKind::Decimal => {
           protobuf_match_type!(value, ScalarImpl::Decimal, { I8, I16, I32, I64, U8, U16, U32, U64}, Decimal)
@@ -308,6 +308,6 @@ mod tests {
         assert!(data[1].eq(&Some(ScalarImpl::Utf8("test address".to_string()))));
         assert!(data[2].eq(&Some(ScalarImpl::Utf8("test city".to_string()))));
         assert!(data[3].eq(&Some(ScalarImpl::Int64(456))));
-        assert!(data[4].eq(&Some(ScalarImpl::Float32(1.2345))));
+        assert!(data[4].eq(&Some(ScalarImpl::Float32(1.2345.into()))));
     }
 }

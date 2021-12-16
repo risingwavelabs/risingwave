@@ -10,6 +10,7 @@ use crate::array::{
 };
 use crate::error::ErrorCode::InternalError;
 use crate::error::{ErrorCode, Result, RwError};
+use crate::types::{OrderedF32, OrderedF64};
 
 /// Reads an encoded buffer into a value.
 pub trait PrimitiveValueReader<T: PrimitiveArrayItemType> {
@@ -26,7 +27,7 @@ macro_rules! impl_numeric_value_reader {
     ($value_type:ty, $value_reader:ty, $read_fn:ident) => {
         impl PrimitiveValueReader<$value_type> for $value_reader {
             fn read(cur: &mut Cursor<&[u8]>) -> Result<$value_type> {
-                cur.$read_fn::<BigEndian>().map_err(|e| {
+                cur.$read_fn::<BigEndian>().map(Into::into).map_err(|e| {
                     RwError::from(ErrorCode::InternalError(format!(
                         "Failed to read value from buffer: {}",
                         e
@@ -40,8 +41,8 @@ macro_rules! impl_numeric_value_reader {
 impl_numeric_value_reader!(i16, I16ValueReader, read_i16);
 impl_numeric_value_reader!(i32, I32ValueReader, read_i32);
 impl_numeric_value_reader!(i64, I64ValueReader, read_i64);
-impl_numeric_value_reader!(f32, F32ValueReader, read_f32);
-impl_numeric_value_reader!(f64, F64ValueReader, read_f64);
+impl_numeric_value_reader!(OrderedF32, F32ValueReader, read_f32);
+impl_numeric_value_reader!(OrderedF64, F64ValueReader, read_f64);
 
 pub trait VarSizedValueReader<AB: ArrayBuilder> {
     fn read(buf: &[u8]) -> Result<<<AB as ArrayBuilder>::ArrayType as Array>::RefItem<'_>>;

@@ -774,7 +774,8 @@ mod tests {
 
     #[test]
     fn vec_min_float32() -> Result<()> {
-        let input = F32Array::from_slice(&[Some(1.), Some(2.), Some(3.)]).unwrap();
+        let input =
+            F32Array::from_slice(&[Some(1.0.into()), Some(2.0.into()), Some(3.0.into())]).unwrap();
         let agg_type = AggKind::Min;
         let input_type = Float32Type::create(true);
         let return_type = Float32Type::create(true);
@@ -787,7 +788,7 @@ mod tests {
         )?;
         let actual = actual.as_float32();
         let actual = actual.iter().collect::<Vec<_>>();
-        assert_eq!(actual, &[Some(1.)]);
+        assert_eq!(actual, &[Some(1.0.into())]);
         Ok(())
     }
 

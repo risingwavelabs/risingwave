@@ -86,7 +86,7 @@ impl<S: StateStore> ManagedMViewState<S> {
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::Field;
-    use risingwave_common::types::{Int32Type, Scalar};
+    use risingwave_common::types::Int32Type;
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
@@ -113,34 +113,25 @@ mod tests {
         );
 
         state.put(
-            Row(vec![Some(1_i32.to_scalar_value())]),
-            Row(vec![
-                Some(1_i32.to_scalar_value()),
-                Some(11_i32.to_scalar_value()),
-            ]),
+            Row(vec![Some(1_i32.into())]),
+            Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
         );
         state.put(
-            Row(vec![Some(2_i32.to_scalar_value())]),
-            Row(vec![
-                Some(2_i32.to_scalar_value()),
-                Some(22_i32.to_scalar_value()),
-            ]),
+            Row(vec![Some(2_i32.into())]),
+            Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
         );
         state.put(
-            Row(vec![Some(3_i32.to_scalar_value())]),
-            Row(vec![
-                Some(3_i32.to_scalar_value()),
-                Some(33_i32.to_scalar_value()),
-            ]),
+            Row(vec![Some(3_i32.into())]),
+            Row(vec![Some(3_i32.into()), Some(33_i32.into())]),
         );
-        state.delete(Row(vec![Some(2_i32.to_scalar_value())]));
+        state.delete(Row(vec![Some(2_i32.into())]));
 
         state.flush().await.unwrap();
         let data = state_store.scan(&prefix[..], None).await.unwrap();
         // cell-based storage has 4 cells
         assert_eq!(data.len(), 4);
 
-        state.delete(Row(vec![Some(3_i32.to_scalar_value())]));
+        state.delete(Row(vec![Some(3_i32.into())]));
         state.flush().await.unwrap();
         let data = state_store.scan(&prefix[..], None).await.unwrap();
         assert_eq!(data.len(), 2);
