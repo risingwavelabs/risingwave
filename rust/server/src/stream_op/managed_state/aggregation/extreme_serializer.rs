@@ -1,12 +1,15 @@
 use std::marker::PhantomData;
 
 use risingwave_common::error::Result;
-use risingwave_common::types::{deserialize_datum_not_null_from, DataTypeKind, Scalar, ScalarImpl};
-use serde::{Deserialize, Serialize};
+use risingwave_common::types::{
+    deserialize_datum_from, deserialize_datum_not_null_from, serialize_datum_into, DataTypeKind,
+    Datum, Scalar, ScalarImpl,
+};
 use smallvec::SmallVec;
 
-// FIXME: support pk type besides i64
-type ExtremePkItem = i64;
+use crate::stream_op::PkDataTypeKinds;
+
+type ExtremePkItem = Datum;
 
 pub type ExtremePk = SmallVec<[ExtremePkItem; 1]>;
 
@@ -21,16 +24,16 @@ pub mod variants {
 /// The serializer will encode original key and pks one by one. If `EXTREME_TYPE == EXTREME_MAX`,
 /// we will flip the bits of the whole encoded data (including pks).
 pub struct ExtremeSerializer<K: Scalar, const EXTREME_TYPE: usize> {
-    data_type_kind: DataTypeKind,
-    pk_length: usize,
+    pub data_type_kind: DataTypeKind,
+    pub pk_data_type_kinds: PkDataTypeKinds,
     _phantom: PhantomData<K>,
 }
 
 impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
-    pub fn new(data_type_kind: DataTypeKind, pk_length: usize) -> Self {
+    pub fn new(data_type_kind: DataTypeKind, pk_data_type_kinds: PkDataTypeKinds) -> Self {
         Self {
             data_type_kind,
-            pk_length,
+            pk_data_type_kinds,
             _phantom: PhantomData,
         }
     }
@@ -55,9 +58,13 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
         key.serialize(&mut serializer)?;
 
         // 2. pk
-        assert_eq!(pk.len(), self.pk_length, "mismatch pk length");
+        assert_eq!(
+            pk.len(),
+            self.pk_data_type_kinds.len(),
+            "mismatch pk length"
+        );
         for i in pk {
-            (*i).serialize(&mut serializer)?;
+            serialize_datum_into(i, &mut serializer)?;
         }
 
         // 3. take
@@ -67,7 +74,7 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
 
     /// Extract the pks from the sort key
     pub fn get_pk(&self, data: &[u8]) -> Result<ExtremePk> {
-        if self.pk_length == 0 {
+        if self.pk_data_type_kinds.is_empty() {
             return Ok(ExtremePk::default());
         }
 
@@ -78,12 +85,11 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
         let _key = deserialize_datum_not_null_from(&self.data_type_kind, &mut deserializer)?;
 
         // 2. pk
-        let mut pk = ExtremePk::with_capacity(self.pk_length);
-        for _ in 0..self.pk_length {
-            let i = ExtremePkItem::deserialize(&mut deserializer)?;
+        let mut pk = ExtremePk::with_capacity(self.pk_data_type_kinds.len());
+        for kind in self.pk_data_type_kinds.iter() {
+            let i = deserialize_datum_from(kind, &mut deserializer)?;
             pk.push(i);
         }
-        assert_eq!(pk.len(), self.pk_length, "mismatch pk length");
 
         Ok(pk)
     }
@@ -92,6 +98,7 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
 #[cfg(test)]
 mod tests {
     use risingwave_common::types::OrderedF64;
+    use smallvec::smallvec;
 
     use super::*;
 
@@ -112,9 +119,11 @@ mod tests {
         for pk_length in pk_length_cases {
             let s = ExtremeSerializer::<OrderedF64, EXTREME_TYPE>::new(
                 DataTypeKind::Float64,
-                pk_length,
+                smallvec![DataTypeKind::Int64; pk_length],
             );
-            let pk = (0..pk_length).map(|x| x as i64).collect();
+            let pk = (0..pk_length)
+                .map(|x| (x as i64).to_scalar_value().into())
+                .collect();
             for key in key_cases {
                 let encoded_key = s.serialize(key, &pk)?;
                 let decoded_pk = s.get_pk(&encoded_key)?;

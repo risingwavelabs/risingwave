@@ -16,7 +16,7 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::extreme_serializer::{variants, ExtremePk, ExtremeSerializer};
 use crate::stream_op::managed_state::flush_status::FlushStatus;
-use crate::stream_op::{AggArgs, AggCall};
+use crate::stream_op::{AggArgs, AggCall, PkDataTypeKinds};
 
 pub type ManagedMinState<S, A> = GenericManagedState<S, A, { variants::EXTREME_MIN }>;
 pub type ManagedMaxState<S, A> = GenericManagedState<S, A, { variants::EXTREME_MAX }>;
@@ -67,9 +67,6 @@ where
 
     /// The sort key serializer
     serializer: ExtremeSerializer<A::OwnedItem, EXTREME_TYPE>,
-
-    /// Length of primary keys
-    pk_length: usize,
 }
 
 /// A trait over all extreme states.
@@ -110,7 +107,7 @@ where
         data_type: DataTypeRef,
         top_n_count: Option<usize>,
         row_count: usize,
-        pk_length: usize,
+        pk_data_type_kinds: PkDataTypeKinds,
     ) -> Result<Self> {
         // Create the internal state based on the value we get.
         let kind = data_type.data_type_kind();
@@ -122,9 +119,16 @@ where
             keyspace,
             top_n_count,
             data_type,
-            serializer: ExtremeSerializer::new(kind, pk_length),
-            pk_length,
+            serializer: ExtremeSerializer::new(kind, pk_data_type_kinds),
         })
+    }
+
+    fn pk_data_type_kinds(&self) -> &[DataTypeKind] {
+        self.serializer.pk_data_type_kinds.as_slice()
+    }
+
+    fn pk_length(&self) -> usize {
+        self.pk_data_type_kinds().len()
     }
 
     /// Retain only top n elements in the cache
@@ -159,14 +163,12 @@ where
         // primary keys!
         assert_eq!(
             data.len(),
-            1 + self.pk_length,
+            1 + self.pk_length(),
             "mismatched data input with pk_length"
         );
 
         let data_column: &A = data[0].into();
-        let pk_columns = (0..self.pk_length)
-            .map(|idx| data[idx + 1].as_int64()) // FIXME: assuming primary keys are i64
-            .collect_vec();
+        let pk_columns = (0..self.pk_length()).map(|idx| data[idx + 1]).collect_vec();
 
         // `self.top_n` only contains parts of the top keys. When applying batch, we only:
         // 1. Insert keys that is in the range of top n, so that we only maintain the top keys we
@@ -188,10 +190,7 @@ where
             let composed_key = (
                 key.clone(),
                 // Collect pk from columns
-                pk_columns
-                    .iter()
-                    .map(|col| col.value_at(id).expect("pk can't be null"))
-                    .collect(),
+                pk_columns.iter().map(|col| col.datum_at(id)).collect(),
             );
 
             match op {
@@ -397,7 +396,7 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
     keyspace: Keyspace<S>,
     row_count: usize,
     top_n_count: Option<usize>,
-    pk_length: usize,
+    pk_data_type_kinds: PkDataTypeKinds,
 ) -> Result<Box<dyn ManagedExtremeState<S>>> {
     match &agg_call.args {
         AggArgs::Unary(x, _) => {
@@ -423,10 +422,10 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
       match (agg_call.kind, agg_call.return_type.data_type_kind()) {
         $(
           (AggKind::Max, $( $kind )|+) => Ok(Box::new(
-            ManagedMaxState::<_, $array>::new(keyspace, data_type, top_n_count, row_count, pk_length).await?,
+            ManagedMaxState::<_, $array>::new(keyspace, data_type, top_n_count, row_count, pk_data_type_kinds).await?,
           )),
           (AggKind::Min, $( $kind )|+) => Ok(Box::new(
-            ManagedMinState::<_, $array>::new(keyspace, data_type, top_n_count, row_count, pk_length).await?,
+            ManagedMinState::<_, $array>::new(keyspace, data_type, top_n_count, row_count, pk_data_type_kinds).await?,
           )),
         )*
         (kind, return_type) => unimplemented!("unsupported extreme agg, kind: {:?}, return type: {:?}", kind, return_type),
@@ -456,6 +455,7 @@ mod tests {
     use risingwave_common::array::{I64Array, Op};
     use risingwave_common::types::{Int64Type, ScalarImpl};
     use risingwave_storage::memory::MemoryStateStore;
+    use smallvec::smallvec;
 
     use super::*;
 
@@ -463,10 +463,15 @@ mod tests {
     async fn test_managed_extreme_state() {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
-        let mut managed_state =
-            ManagedMinState::<_, I64Array>::new(keyspace, Int64Type::create(false), Some(5), 0, 0)
-                .await
-                .unwrap();
+        let mut managed_state = ManagedMinState::<_, I64Array>::new(
+            keyspace,
+            Int64Type::create(false),
+            Some(5),
+            0,
+            PkDataTypeKinds::new(),
+        )
+        .await
+        .unwrap();
         assert!(!managed_state.is_dirty());
 
         // insert 0, 10, 20
@@ -595,7 +600,7 @@ mod tests {
             Int64Type::create(false),
             Some(5),
             row_count,
-            0,
+            PkDataTypeKinds::new(),
         )
         .await
         .unwrap();
@@ -621,13 +626,12 @@ mod tests {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
 
-        let pk_length = 1;
         let mut managed_state = GenericManagedState::<_, I64Array, EXTREME_TYPE>::new(
             keyspace,
             Int64Type::create(false),
             Some(3),
             0,
-            pk_length,
+            smallvec![DataTypeKind::Int64],
         )
         .await
         .unwrap();
@@ -706,10 +710,15 @@ mod tests {
     async fn test_same_group_of_value() {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
-        let mut managed_state =
-            ManagedMinState::<_, I64Array>::new(keyspace, Int64Type::create(false), Some(3), 0, 0)
-                .await
-                .unwrap();
+        let mut managed_state = ManagedMinState::<_, I64Array>::new(
+            keyspace,
+            Int64Type::create(false),
+            Some(3),
+            0,
+            PkDataTypeKinds::new(),
+        )
+        .await
+        .unwrap();
         assert!(!managed_state.is_dirty());
 
         let value_buffer =
@@ -781,7 +790,7 @@ mod tests {
             Int64Type::create(false),
             Some(3),
             0,
-            0,
+            PkDataTypeKinds::new(),
         )
         .await
         .unwrap();
@@ -871,10 +880,15 @@ mod tests {
 
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
-        let mut managed_state =
-            ManagedMinState::<_, I64Array>::new(keyspace, Int64Type::create(false), Some(3), 0, 0)
-                .await
-                .unwrap();
+        let mut managed_state = ManagedMinState::<_, I64Array>::new(
+            keyspace,
+            Int64Type::create(false),
+            Some(3),
+            0,
+            PkDataTypeKinds::new(),
+        )
+        .await
+        .unwrap();
         assert!(!managed_state.is_dirty());
 
         let value_buffer =

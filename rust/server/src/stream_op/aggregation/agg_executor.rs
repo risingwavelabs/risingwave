@@ -10,7 +10,7 @@ use static_assertions::const_assert_eq;
 
 use super::AggCall;
 use crate::stream_op::managed_state::aggregation::ManagedStateImpl;
-use crate::stream_op::{Barrier, Executor, Message};
+use crate::stream_op::{Barrier, Executor, Message, PkDataTypeKinds};
 
 /// Hash key for [`HashAggExecutor`].
 pub type HashKey = Row;
@@ -252,7 +252,7 @@ pub async fn generate_agg_state<S: StateStore>(
     key: Option<&HashKey>,
     agg_calls: &[AggCall],
     keyspace: &Keyspace<S>,
-    pk_length: usize,
+    pk_data_type_kinds: PkDataTypeKinds,
 ) -> Result<AggState<S>> {
     let mut managed_states = vec![];
 
@@ -278,7 +278,7 @@ pub async fn generate_agg_state<S: StateStore>(
             agg_call.clone(),
             keyspace,
             row_count,
-            pk_length,
+            pk_data_type_kinds.clone(),
             idx == ROW_COUNT_COLUMN,
         )
         .await?;

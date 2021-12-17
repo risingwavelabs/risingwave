@@ -172,7 +172,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
         // Previously, this is done in `unique_keys` inner loop, which is very inefficient.
         let all_agg_input_arrays = agg_input_arrays(&self.agg_calls, &columns);
         let pk_input_arrays = pk_input_arrays(self.input.pk_indices(), &columns);
-        let input_pk_length = self.input.pk_indices().len();
+        let input_pk_data_type_kinds = self.input.pk_data_type_kinds();
 
         // When applying batch, we will send columns of primary keys to the last N columns.
         let all_agg_data = all_agg_input_arrays
@@ -193,7 +193,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
                         Some(key),
                         &self.agg_calls,
                         &self.keyspace,
-                        input_pk_length,
+                        input_pk_data_type_kinds.clone(),
                     )
                     .await?;
                     v.insert(state)

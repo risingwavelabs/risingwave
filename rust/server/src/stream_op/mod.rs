@@ -14,9 +14,11 @@ use risingwave_common::array::{ArrayImpl, DataChunk, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
+use risingwave_common::types::DataTypeKind;
 use risingwave_pb::data::stream_message::StreamMessage;
 use risingwave_pb::data::{Barrier as ProstBarrier, StreamMessage as ProstStreamMessage};
 pub use simple_agg::*;
+use smallvec::SmallVec;
 pub use stream_source::*;
 pub use top_n::*;
 pub use top_n_appendonly::*;
@@ -122,10 +124,19 @@ pub trait Executor: Send + 'static {
     /// Schema is used by both OLAP and streaming, therefore
     /// pk indices are maintained independently.
     fn pk_indices(&self) -> PkIndicesRef;
+
+    fn pk_data_type_kinds(&self) -> PkDataTypeKinds {
+        let schema = self.schema();
+        self.pk_indices()
+            .iter()
+            .map(|idx| schema.fields[*idx].data_type.data_type_kind())
+            .collect()
+    }
 }
 
 pub type PkIndices = Vec<usize>;
 pub type PkIndicesRef<'a> = &'a [usize];
+pub type PkDataTypeKinds = SmallVec<[DataTypeKind; 1]>;
 
 // Get inputs by given `pk_indices` from `columns`.
 pub fn pk_input_arrays<'a>(pk_indices: PkIndicesRef, columns: &'a [Column]) -> Vec<&'a ArrayImpl> {

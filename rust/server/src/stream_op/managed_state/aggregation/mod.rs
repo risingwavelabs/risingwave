@@ -19,7 +19,7 @@ use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::stream_op::AggCall;
+use crate::stream_op::{AggCall, PkDataTypeKinds};
 
 /// Verify if the data going through the state is valid by checking if `ops.len() ==
 /// visibility.len() == data[x].len()`.
@@ -86,7 +86,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
         agg_call: AggCall,
         keyspace: Keyspace<S>,
         row_count: Option<usize>,
-        pk_length: usize,
+        pk_data_type_kinds: PkDataTypeKinds,
         is_row_count: bool,
     ) -> Result<Self> {
         match agg_call.kind {
@@ -102,7 +102,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
                         row_count.unwrap(),
                         // TODO: estimate a good cache size instead of hard-coding
                         Some(1024),
-                        pk_length,
+                        pk_data_type_kinds,
                     )
                     .await?,
                 ))

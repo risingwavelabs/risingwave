@@ -91,7 +91,7 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
         // --- Retrieve all aggregation inputs in advance ---
         let all_agg_input_arrays = agg_input_arrays(&self.agg_calls, &columns);
         let pk_input_arrays = pk_input_arrays(self.input.pk_indices(), &columns);
-        let input_pk_length = self.input.pk_indices().len();
+        let input_pk_data_type_kinds = self.input.pk_data_type_kinds();
 
         // When applying batch, we will send columns of primary keys to the last N columns.
         let all_agg_data = all_agg_input_arrays
@@ -105,8 +105,13 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
         // 1. Retrieve previous state from the KeyedState. If they didn't exist, the ManagedState
         // will automatically create new ones for them.
         if self.states.is_none() {
-            let state =
-                generate_agg_state(None, &self.agg_calls, &self.keyspace, input_pk_length).await?;
+            let state = generate_agg_state(
+                None,
+                &self.agg_calls,
+                &self.keyspace,
+                input_pk_data_type_kinds,
+            )
+            .await?;
             self.states = Some(state);
         }
         let states = self.states.as_mut().unwrap();
