@@ -1202,6 +1202,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "rand",
+ "rust_decimal",
  "serde",
  "thiserror",
 ]

@@ -67,7 +67,7 @@ impl<B: Buf> MaybeFlip<B> {
     def_method!(get_u16, u16);
     def_method!(get_u32, u32);
     def_method!(get_u64, u64);
-    def_method!(get_i32, i32);
+    def_method!(get_i128, i128);
 
     fn copy_to_slice(&mut self, dst: &mut [u8]) {
         self.input.copy_to_slice(dst);
@@ -459,15 +459,16 @@ impl<B: Buf> Deserializer<B> {
     /// Deserialize a decimal value. Returns `(mantissa, scale)`.
     pub fn deserialize_decimal(&mut self) -> Result<(i128, u8)> {
         let scale = self.input.get_u8();
-        let hi = self.input.get_i32() ^ (1 << 31);
-        let lo = self.input.get_u64();
-        let mantissa = ((hi as i128) << 64) | (lo as i128);
+        let mantissa = self.input.get_i128() ^ (1 << 127);
         Ok((mantissa, scale))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
+    use rust_decimal::Decimal;
     use serde::Deserialize;
 
     use super::*;
@@ -612,6 +613,14 @@ mod tests {
     #[test]
     fn test_decimal() {
         let (mantissa, scale) = (-12_3456_7890_1234, 4);
+        let (mantissa0, scale0) = deserialize_decimal(&serialize_decimal(mantissa, scale));
+        assert_eq!((mantissa, scale), (mantissa0, scale0));
+    }
+
+    #[test]
+    fn test_decimal_issue_1941() {
+        let d = Decimal::from_str("41721.900909090909090909090909").unwrap();
+        let (mantissa, scale) = (d.mantissa(), d.scale() as u8);
         let (mantissa0, scale0) = deserialize_decimal(&serialize_decimal(mantissa, scale));
         assert_eq!((mantissa, scale), (mantissa0, scale0));
     }

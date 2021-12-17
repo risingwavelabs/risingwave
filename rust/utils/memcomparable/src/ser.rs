@@ -56,7 +56,7 @@ impl<B: BufMut> MaybeFlip<B> {
     def_method!(put_u16, u16);
     def_method!(put_u32, u32);
     def_method!(put_u64, u64);
-    def_method!(put_i32, i32);
+    def_method!(put_i128, i128);
 
     fn put_slice(&mut self, src: &[u8]) {
         for &val in src {
@@ -429,8 +429,7 @@ impl<B: BufMut> Serializer<B> {
         // TODO(wrj): variable-length encoding
         // https://github.com/pingcap/tidb/blob/fec2938c1379270bf9939822c1abfe3d7244c174/types/mydecimal.go#L1133
         self.output.put_u8(scale);
-        self.output.put_i32((mantissa >> 64) as i32 ^ (1 << 31));
-        self.output.put_u64(mantissa as u64);
+        self.output.put_i128(mantissa ^ (1 << 127));
         Ok(())
     }
 }
