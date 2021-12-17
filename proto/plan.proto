@@ -92,6 +92,7 @@ message CreateTableNode {
   repeated ColumnDesc column_descs = 2;
   // Other fields not included yet:
   // primarykey_col_ids, dist_type, distkey_col_id, append_only
+
 }
 
 enum OrderType {
@@ -100,7 +101,8 @@ enum OrderType {
   DESCENDING = 2;
 }
 
-message ColumnOrder { // maybe other name
+message ColumnOrder {
+  // maybe other name
   OrderType order_type = 1;
   expr.InputRefExpr input_ref = 2;
   data.DataType return_type = 3;

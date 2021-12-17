@@ -113,4 +113,3 @@ message StreamFragment {
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_fragment_id = 4;
 }
-

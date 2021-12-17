@@ -17,14 +17,10 @@ message BlockMeta {
 message TableMeta {
   // Offsets of different blocks
   repeated BlockMeta block_metas = 1;
-
   bytes bloom_filter = 2;
-
   // Estimated size, only used on encryption or compression
   uint32 estimated_size = 3;
-
   uint32 key_count = 5;
-
   // Serve as cheap index.
   // Since table is ordered, they are exactly the first key and last key.
   // The keys are appended by timestamp.
@@ -37,10 +33,8 @@ message Checksum {
     CRC32C = 0;
     XXHash64 = 1;
   }
-
   // For storing type of Checksum algorithm used
   Algorithm algo = 1;
-
   uint64 sum = 2;
 }
 

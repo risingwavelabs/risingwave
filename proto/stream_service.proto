@@ -50,6 +50,7 @@ message DropFragmentsResponse {
   string request_id = 1;
   repeated uint32 fragment_ids = 2;
 }
+
 // Before starting streaming, the leader node broadcast the actor-host table to needed workers.
 message BroadcastActorInfoTableResponse {
   common.Status status = 1;

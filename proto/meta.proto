@@ -9,7 +9,6 @@ option optimize_for = SPEED;
 import "common.proto";
 import "data.proto";
 import "plan.proto";
-import "stream_service.proto";
 import "stream_plan.proto";
 import "task_service.proto";
 
@@ -19,7 +18,6 @@ message Table {
     ALL = 1;
     KEY = 2;
   }
-
   plan.TableRefId table_ref_id = 1;
   string table_name = 2;
   uint32 column_count = 3;
@@ -32,13 +30,10 @@ message Table {
   map<string, string> properties = 10;
   string row_format = 11;
   string row_schema_location = 12;
-
-
   // Fields for materialized view
   repeated plan.ColumnOrder column_orders = 13;
   uint32 offset = 14;
   uint32 limit = 15;
-
   uint64 version = 16;
 }
 

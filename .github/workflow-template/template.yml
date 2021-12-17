@@ -118,7 +118,7 @@ jobs:
         with:
           name: risingwave_regress_test
           path: ./rust/target/debug
-        
+
       - name: Build java frontend
         run: make java_build
 
@@ -286,14 +286,13 @@ jobs:
           if-no-files-found: error # 'warn' or 'ignore' are also available, defaults to `warn`
           path: |
             rust/target/debug/meta-node
-      
+
       - uses: actions/upload-artifact@v2
         with:
           name: risingwave_regress_test
           if-no-files-found: error # 'warn' or 'ignore' are also available, defaults to `warn`
           path: |
             rust/target/debug/risingwave_regress_test
-      
 
   compute-node-test:
     needs: start-runner # required to start the main job when the runner is ready
@@ -351,12 +350,21 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install yq
+      - name: Install required tools
         run: |
-          wget https://github.com/mikefarah/yq/releases/download/${VERSION}/${BINARY}.tar.gz -O - | tar xz && sudo mv ${BINARY} /usr/bin/yq
+          wget https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/${BINARY}.tar.gz -O - | tar xz && sudo mv ${BINARY} /usr/bin/yq
+          sudo apt install -y protobuf-compiler
+          curl -sSL \
+            https://github.com/uber/prototool/releases/download/v1.8.0/prototool-$(uname -s)-$(uname -m).tar.gz | \
+            sudo tar -C /usr/local --strip-components 1 -xz
+          curl -sSL \
+            "https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}/buf-$(uname -s)-$(uname -m).tar.gz" | \
+            sudo tar -xvzf - -C /usr/local --strip-components 1
         env:
-          VERSION: v4.16.1
+          YQ_VERSION: v4.16.1
           BINARY: yq_linux_amd64
+          BUF_VERSION: 1.0.0-rc6
+
       - name: Check CI workflows are up-to-date
         run: |
           ./.github/workflow-template/generate.sh --check
@@ -365,6 +373,16 @@ jobs:
         uses: ludeeus/action-shellcheck@master
         with:
           ignore_paths: java # we assume java folder has no script. gradle wrapper also won't pass shellcheck.
+
+      - name: Check protobuf code format
+        run: |
+          prototool format -d
+        working-directory: proto
+
+      - name: Lint protobuf (not enabled)
+        run: |
+          buf lint || true
+        working-directory: proto
 
   stop-runner:
     name: ec2-stop
