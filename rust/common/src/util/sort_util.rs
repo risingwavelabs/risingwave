@@ -2,7 +2,6 @@ use std::cmp::{Ord, Ordering};
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use mem_cmp::*;
 use risingwave_pb::expr::InputRefExpr;
 use risingwave_pb::plan::{ColumnOrder, OrderType as ProstOrderType};
 
@@ -47,7 +46,7 @@ impl Ord for HeapElem {
         {
             lhs_encoded_chunk[self.elem_idx]
                 .as_slice()
-                .mem_cmp(rhs_encoded_chunk[other.elem_idx].as_slice())
+                .cmp(rhs_encoded_chunk[other.elem_idx].as_slice())
         } else {
             compare_two_row(
                 self.order_pairs.as_ref(),
@@ -58,7 +57,6 @@ impl Ord for HeapElem {
             )
             .unwrap()
         };
-
         ord.reverse()
     }
 }

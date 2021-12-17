@@ -42,7 +42,7 @@ pub fn dec_to_dec(n: Decimal) -> Result<Decimal> {
 pub fn str_to_date(elem: &str) -> Result<i32> {
     NaiveDate::parse_from_str(elem, "%Y-%m-%d")
         .map(|ret| ret.num_days_from_ce() - UNIX_EPOCH_DAYS)
-        .map_err(|e| RwError::from(ParseError(e)))
+        .map_err(|e| RwError::from(ParseError(Box::new(e))))
 }
 
 #[inline(always)]
@@ -50,21 +50,33 @@ pub fn str_to_time(elem: &str) -> Result<i64> {
     NaiveTime::parse_from_str(elem, "%H:%M:%S")
         // FIXME: add support for precision in microseconds.
         .map(|ret| ret.num_seconds_from_midnight() as i64 * 1000 * 1000)
-        .map_err(|e| RwError::from(ParseError(e)))
+        .map_err(|e| RwError::from(ParseError(Box::new(e))))
 }
 
 #[inline(always)]
 pub fn str_to_timestamp(elem: &str) -> Result<i64> {
     NaiveDateTime::parse_from_str(elem, "%Y-%m-%d %H:%M:%S")
         .map(|ret| ret.timestamp_nanos() / 1000)
-        .map_err(|e| RwError::from(ParseError(e)))
+        .map_err(|e| RwError::from(ParseError(Box::new(e))))
 }
 
 #[inline(always)]
 pub fn str_to_timestampz(elem: &str) -> Result<i64> {
     DateTime::parse_from_str(elem, "%Y-%m-%d %H:%M:%S %:z")
         .map(|ret| ret.timestamp_nanos() / 1000)
-        .map_err(|e| RwError::from(ParseError(e)))
+        .map_err(|e| RwError::from(ParseError(Box::new(e))))
+}
+
+#[inline(always)]
+pub fn str_to_real(elem: &str) -> Result<OrderedF32> {
+    elem.parse()
+        .map_err(|e| RwError::from(ParseError(Box::new(e))))
+}
+
+#[inline(always)]
+pub fn str_to_double(elem: &str) -> Result<OrderedF64> {
+    elem.parse()
+        .map_err(|e| RwError::from(ParseError(Box::new(e))))
 }
 
 #[inline(always)]

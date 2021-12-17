@@ -770,6 +770,21 @@ impl<T: Float + Num> Num for OrderedFloat<T> {
     }
 }
 
+impl<T: Float> OrderedFloat<T> {
+    /// Normalize `-NaN` and `-0.0` to positive form.
+    pub fn normalized(self) -> Self {
+        if self.is_nan() {
+            // normalize -NaN
+            Self::nan()
+        } else if self.is_zero() {
+            // normalize -0.0
+            Self::zero()
+        } else {
+            self
+        }
+    }
+}
+
 #[inline]
 fn hash_float<F: Float, H: Hasher>(f: &F, state: &mut H) {
     raw_double_bits(f).hash(state);

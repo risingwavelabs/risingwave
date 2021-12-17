@@ -130,7 +130,12 @@ impl<'a, B: BufMut> ser::Serializer for &'a mut Serializer<B> {
         Ok(())
     }
 
-    fn serialize_f32(self, v: f32) -> Result<()> {
+    fn serialize_f32(self, mut v: f32) -> Result<()> {
+        if v.is_nan() {
+            v = f32::NAN; // normalize pos/neg NaN
+        } else if v == 0.0 {
+            v = 0.0; // normalize pos/neg zero
+        }
         let u = v.to_bits();
         let u = if v.is_sign_positive() {
             u | (1 << 31)
@@ -141,7 +146,12 @@ impl<'a, B: BufMut> ser::Serializer for &'a mut Serializer<B> {
         Ok(())
     }
 
-    fn serialize_f64(self, v: f64) -> Result<()> {
+    fn serialize_f64(self, mut v: f64) -> Result<()> {
+        if v.is_nan() {
+            v = f64::NAN; // normalize pos/neg NaN
+        } else if v == 0.0 {
+            v = 0.0; // normalize pos/neg zero
+        }
         let u = v.to_bits();
         let u = if v.is_sign_positive() {
             u | (1 << 63)

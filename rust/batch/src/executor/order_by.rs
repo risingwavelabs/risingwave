@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::vec::Vec;
 
 use itertools::Itertools;
-use mem_cmp::*;
 use prost::Message;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
@@ -105,9 +104,9 @@ impl OrderByExecutor {
                 )
                 .unwrap_or(Ordering::Equal)
             } else {
-                let lhs_key = &self.encoded_keys[idx][*ia];
-                let rhs_key = &self.encoded_keys[idx][*ib];
-                lhs_key.as_slice().mem_cmp(rhs_key.as_slice())
+                let lhs_key = self.encoded_keys[idx][*ia].as_slice();
+                let rhs_key = self.encoded_keys[idx][*ib].as_slice();
+                lhs_key.cmp(rhs_key)
             }
         });
         index

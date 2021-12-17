@@ -16,6 +16,8 @@ use tonic::Code;
 /// Header used to store serialized [`RwError`] in grpc status.
 pub const RW_ERROR_GRPC_HEADER: &str = "risingwave-error-bin";
 
+pub type BoxedError = Box<dyn Error + Send + Sync>;
+
 #[derive(Error, Debug)]
 pub enum ErrorCode {
     #[error("ok")]
@@ -31,7 +33,7 @@ pub enum ErrorCode {
     #[error(transparent)]
     IoError(IoError),
     #[error("Parse string error: {0}")]
-    ParseError(chrono::format::ParseError),
+    ParseError(BoxedError),
     #[error("Out of range")]
     NumericValueOutOfRange,
     #[error("protocol error: {0}")]

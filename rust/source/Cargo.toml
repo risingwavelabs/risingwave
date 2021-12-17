@@ -20,7 +20,6 @@ itertools = "0.10"
 lazy_static = "1.4.0"
 log = "0.4"
 log4rs = "1"
-mem_cmp = "0.1.4"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
 paste = "1"

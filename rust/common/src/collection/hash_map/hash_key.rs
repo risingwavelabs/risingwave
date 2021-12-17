@@ -216,7 +216,7 @@ impl HashKeySerDe<'_> for OrderedF32 {
     type S = [u8; 4];
 
     fn serialize(self) -> Self::S {
-        self.to_ne_bytes()
+        self.normalized().to_ne_bytes()
     }
 
     fn deserialize<R: Read>(source: &mut R) -> Self {
@@ -229,7 +229,7 @@ impl HashKeySerDe<'_> for OrderedF64 {
     type S = [u8; 8];
 
     fn serialize(self) -> Self::S {
-        self.to_ne_bytes()
+        self.normalized().to_ne_bytes()
     }
 
     fn deserialize<R: Read>(source: &mut R) -> Self {

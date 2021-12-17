@@ -223,6 +223,7 @@ for_all_scalar_variants! { scalar_impl_enum }
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
 
+// TODO: specify `NULL FIRST` or `NULL LAST`.
 pub fn serialize_datum_ref_into(
     datum_ref: &DatumRef,
     serializer: &mut memcomparable::Serializer<impl BufMut>,
@@ -247,6 +248,7 @@ pub fn serialize_datum_ref_not_null_into(
 }
 
 // TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
+// TODO: specify `NULL FIRST` or `NULL LAST`.
 pub fn serialize_datum_into(
     datum: &Datum,
     serializer: &mut memcomparable::Serializer<impl BufMut>,
@@ -516,6 +518,11 @@ impl ScalarImpl {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Neg;
+
+    use itertools::Itertools;
+    use rand::thread_rng;
+
     use super::*;
 
     fn serialize_datum_not_null_into_vec(data: i64) -> Vec<u8> {
@@ -537,5 +544,56 @@ mod tests {
         assert!(memcmp_minus_1 < memcmp_3874);
         assert!(memcmp_minus_1 < memcmp_21234);
         assert!(memcmp_minus_1 < memcmp_45745);
+    }
+
+    #[test]
+    fn test_issue_2057_ordered_float_memcomparable() {
+        use num_traits::*;
+        use rand::seq::SliceRandom;
+
+        fn serialize(f: OrderedF32) -> Vec<u8> {
+            let mut serializer = memcomparable::Serializer::new(vec![]);
+            serialize_datum_not_null_into(&Some(f.into()), &mut serializer).unwrap();
+            serializer.into_inner()
+        }
+
+        fn deserialize(data: Vec<u8>) -> OrderedF32 {
+            let mut deserializer = memcomparable::Deserializer::new(data.as_slice());
+            let datum =
+                deserialize_datum_not_null_from(&DataTypeKind::Float32, &mut deserializer).unwrap();
+            datum.unwrap().try_into().unwrap()
+        }
+
+        let floats = vec![
+            // -inf
+            OrderedF32::neg_infinity(),
+            // -1
+            OrderedF32::one().neg(),
+            // 0, -0 should be treated the same
+            OrderedF32::zero(),
+            OrderedF32::neg_zero(),
+            OrderedF32::zero(),
+            // 1
+            OrderedF32::one(),
+            // inf
+            OrderedF32::infinity(),
+            // nan, -nan should be treated the same
+            OrderedF32::nan(),
+            OrderedF32::nan().neg(),
+            OrderedF32::nan(),
+        ];
+        assert!(floats.is_sorted());
+
+        let mut floats_clone = floats.clone();
+        floats_clone.shuffle(&mut thread_rng());
+        floats_clone.sort();
+        assert_eq!(floats, floats_clone);
+
+        let memcomparables = floats.clone().into_iter().map(serialize).collect_vec();
+        assert!(memcomparables.is_sorted());
+
+        let decoded_floats = memcomparables.into_iter().map(deserialize).collect_vec();
+        assert!(decoded_floats.is_sorted());
+        assert_eq!(floats, decoded_floats);
     }
 }
