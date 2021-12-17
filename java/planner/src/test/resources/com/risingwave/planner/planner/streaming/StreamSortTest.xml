@@ -87,9 +87,10 @@ select * from t order by v1 limit 100 offset 10;
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[t_order_limit], collation=[[0]], offset=[10], limit=[100])
-  RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-    RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
+RwStreamMaterializedView(name=[t_order_limit], collation=[[0]])
+  RwStreamSort(sort0=[$0], dir0=[ASC], offset=[10], fetch=[100])
+    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
 ]]>
         </Resource>
         <Resource name="primaryKey">

@@ -10,7 +10,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::{build_from_prost as build_expr_from_prost, AggKind};
 use risingwave_common::types::build_from_prost as build_type_from_prost;
 use risingwave_common::util::addr::{get_host_port, is_local_address};
-use risingwave_common::util::sort_util::fetch_orders;
+use risingwave_common::util::sort_util::{fetch_orders, fetch_orders_with_pk};
 use risingwave_pb::{expr, stream_plan, stream_service};
 use risingwave_storage::hummock::HummockStateStore;
 use risingwave_storage::memory::MemoryStateStore;
@@ -479,14 +479,15 @@ impl StreamManagerCore {
             }
             TopNNode(top_n_node) => {
                 let column_orders = &top_n_node.column_orders;
-                let order_paris = fetch_orders(column_orders)?;
+                let input = input.remove(0);
+                let order_paris = fetch_orders_with_pk(column_orders, input.schema(), &pk_indices)?;
                 let limit = if top_n_node.limit == 0 {
                     None
                 } else {
                     Some(top_n_node.limit as usize)
                 };
                 Ok(Box::new(TopNExecutor::new(
-                    input.remove(0),
+                    input,
                     Arc::new(order_paris),
                     limit,
                     top_n_node.offset as usize,

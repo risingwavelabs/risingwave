@@ -14,6 +14,7 @@ public class MaterializedViewCatalog extends TableCatalog {
   private final RexNode offset;
   private final RexNode fetch;
 
+  // TODO: remove fields offset/limit if not necessary any more in the future.
   public MaterializedViewCatalog(
       TableId id,
       TableName name,

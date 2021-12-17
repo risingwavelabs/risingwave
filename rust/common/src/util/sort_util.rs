@@ -1,4 +1,5 @@
 use std::cmp::{Ord, Ordering};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use mem_cmp::*;
@@ -6,6 +7,7 @@ use risingwave_pb::expr::InputRefExpr;
 use risingwave_pb::plan::{ColumnOrder, OrderType as ProstOrderType};
 
 use crate::array::{Array, ArrayImpl, DataChunk, DataChunkRef};
+use crate::catalog::Schema;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 use crate::expr::InputRefExpression;
@@ -158,5 +160,46 @@ pub fn fetch_orders(column_orders: &[ColumnOrder]) -> Result<Vec<OrderPair>> {
             order: Box::new(input_ref_expr),
         });
     }
+    Ok(order_pairs)
+}
+
+pub fn fetch_orders_with_pk(
+    column_orders: &[ColumnOrder],
+    schema: &Schema,
+    pk_indices: &[usize],
+) -> Result<Vec<OrderPair>> {
+    let mut order_pairs = Vec::<OrderPair>::new();
+    let mut pair_set = HashSet::new();
+    for column_order in column_orders {
+        let order_type: ProstOrderType = column_order.get_order_type();
+        let return_type = build_from_prost(column_order.get_return_type())?;
+        let input_ref: &InputRefExpr = column_order.get_input_ref();
+        pair_set.insert(input_ref.column_idx);
+        let input_ref_expr = InputRefExpression::new(return_type, input_ref.column_idx as usize);
+        order_pairs.push(OrderPair {
+            order_type: match order_type {
+                ProstOrderType::Ascending => Ok(OrderType::Ascending),
+                ProstOrderType::Descending => Ok(OrderType::Descending),
+                ProstOrderType::Invalid => Err(RwError::from(InternalError(String::from(
+                    "Invalid OrderType",
+                )))),
+            }?,
+            order: Box::new(input_ref_expr),
+        });
+    }
+
+    // Inject primary keys not exist in column order.
+    for &pk_idx in pk_indices {
+        if !pair_set.contains(&(pk_idx as i32)) {
+            order_pairs.push(OrderPair {
+                order_type: OrderType::Ascending,
+                order: Box::new(InputRefExpression::new(
+                    schema.data_types_clone().get(pk_idx).unwrap().clone(),
+                    pk_idx,
+                )),
+            })
+        }
+    }
+
     Ok(order_pairs)
 }

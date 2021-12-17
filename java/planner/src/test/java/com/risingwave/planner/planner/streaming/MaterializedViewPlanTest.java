@@ -166,9 +166,10 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     StreamingPlan plan = streamPlanner.plan(ast, executionContext);
     String resultPlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
     String expectedPlan =
-        "RwStreamMaterializedView(name=[t_test_order_limit], collation=[[0, 1]], offset=[10], limit=[100])\n"
-            + "  RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
-            + "    RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])";
+        "RwStreamMaterializedView(name=[t_test_order_limit], collation=[[0, 1]])\n"
+            + "  RwStreamSort(sort0=[$0], sort1=[$1], dir0=[ASC], dir1=[ASC], offset=[10], fetch=[100])\n"
+            + "    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
+            + "      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])";
     testLogger.debug("result plan:\n" + resultPlan);
     Assertions.assertEquals(expectedPlan, resultPlan);
 
@@ -187,10 +188,8 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     BatchPlan plan = batchPlanner.plan(parseSql(sql), executionContext);
     String resultPlan = ExplainWriter.explainPlan(plan.getRoot());
     String expectedPlan =
-        "RwBatchLimit(offset=[10], fetch=[100])\n"
-            + "  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0, 1]])\n"
-            + "    RwBatchLimit(offset=[0], fetch=[110])\n"
-            + "      RwBatchMaterializedViewScan(table=[[test_schema, t_test_order_limit]], columns=[v1,v2,v3,_row_id])";
+        "RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0, 1]])\n"
+            + "  RwBatchMaterializedViewScan(table=[[test_schema, t_test_order_limit]], columns=[v1,v2,v3,_row_id])";
     testLogger.debug("result plan:\n" + resultPlan);
     Assertions.assertEquals(expectedPlan, resultPlan);
   }
@@ -205,10 +204,8 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     BatchPlan plan = batchPlanner.plan(parseSql(sql), executionContext);
     String resultPlan = ExplainWriter.explainPlan(plan.getRoot());
     String expectedPlan =
-        "RwBatchLimit(offset=[10], fetch=[100])\n"
-            + "  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0, 1]])\n"
-            + "    RwBatchLimit(offset=[0], fetch=[110])\n"
-            + "      RwBatchMaterializedViewScan(table=[[test_schema, t_test_order_limit]], columns=[v1,v2,v3,_row_id])";
+        "RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0, 1]])\n"
+            + "  RwBatchMaterializedViewScan(table=[[test_schema, t_test_order_limit]], columns=[v1,v2,v3,_row_id])";
     testLogger.debug("result plan:\n" + resultPlan);
     Assertions.assertEquals(expectedPlan, resultPlan);
   }
@@ -222,11 +219,9 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     BatchPlan plan = batchPlanner.plan(parseSql(sql), executionContext);
     String resultPlan = ExplainWriter.explainPlan(plan.getRoot());
     String expectedPlan =
-        "RwBatchSort(sort0=[$2], sort1=[$1], sort2=[$0], dir0=[ASC], dir1=[ASC], dir2=[ASC])\n"
-            + "  RwBatchLimit(offset=[10], fetch=[100])\n"
-            + "    RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0, 1]])\n"
-            + "      RwBatchLimit(offset=[0], fetch=[110])\n"
-            + "        RwBatchMaterializedViewScan(table=[[test_schema, t_test_order_limit]], columns=[v1,v2,v3,_row_id])";
+        "RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[2, 1, 0]])\n"
+            + "  RwBatchSort(sort0=[$2], sort1=[$1], sort2=[$0], dir0=[ASC], dir1=[ASC], dir2=[ASC])\n"
+            + "    RwBatchMaterializedViewScan(table=[[test_schema, t_test_order_limit]], columns=[v1,v2,v3,_row_id])";
     testLogger.debug("result plan:\n" + resultPlan);
     Assertions.assertEquals(expectedPlan, resultPlan);
   }
@@ -240,9 +235,10 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     StreamingPlan plan = streamPlanner.plan(ast, executionContext);
     String resultPlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
     String expectedPlan =
-        "RwStreamMaterializedView(name=[t_test_order_zero_limit], collation=[[0, 1]], offset=[10])\n"
-            + "  RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
-            + "    RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])";
+        "RwStreamMaterializedView(name=[t_test_order_zero_limit], collation=[[0, 1]])\n"
+            + "  RwStreamSort(sort0=[$0], sort1=[$1], dir0=[ASC], dir1=[ASC], offset=[10])\n"
+            + "    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
+            + "      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])";
     testLogger.debug("result plan:\n" + resultPlan);
     Assertions.assertEquals(expectedPlan, resultPlan);
 
@@ -261,9 +257,8 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     BatchPlan plan = batchPlanner.plan(parseSql(sql), executionContext);
     String resultPlan = ExplainWriter.explainPlan(plan.getRoot());
     String expectedPlan =
-        "RwBatchLimit(offset=[10])\n"
-            + "  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0, 1]])\n"
-            + "    RwBatchMaterializedViewScan(table=[[test_schema, t_test_order_zero_limit]], columns=[v1,v2,v3,_row_id])";
+        "RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0, 1]])\n"
+            + "  RwBatchMaterializedViewScan(table=[[test_schema, t_test_order_zero_limit]], columns=[v1,v2,v3,_row_id])";
     testLogger.debug("result plan:\n" + resultPlan);
     Assertions.assertEquals(expectedPlan, resultPlan);
   }

@@ -87,20 +87,25 @@ public class StreamPlanner implements Planner<StreamingPlan> {
       RisingWaveStreamingRel root, SqlIdentifier name) {
     var visitor = new PrimaryKeyDerivationVisitor();
     var p = root.accept(visitor);
-    // There are two cases:
-    // 1. Sort/Limit/TopN is the root. We merge them into the new RwStreamMaterializedView
-    // 2. Otherwise, we just add a RwStreamMaterializedView.
     if (p.node instanceof RwStreamSort) {
       RwStreamSort sort = (RwStreamSort) p.node;
+      // Here RwStreamSort only implements limit/fetch right now, we handle
+      // ordering inside RwStreamMaterializedView. There is one case we could
+      // do some optimize: when limit and fetch are not provided, we could
+      // merge RwStreamSort into RwStreamMaterializedView.
+      RelNode input = sort;
+      if (sort.offset == null && sort.fetch == null) {
+        input = sort.getInput();
+      }
       return new RwStreamMaterializedView(
           sort.getCluster(),
           sort.getTraitSet(),
-          sort.getInput(),
+          input,
           name,
           p.info.getPrimaryKeyIndices(),
           sort.getCollation(),
-          sort.offset,
-          sort.fetch);
+          null,
+          null);
     } else {
       return new RwStreamMaterializedView(
           p.node.getCluster(), p.node.getTraitSet(), p.node, name, p.info.getPrimaryKeyIndices());

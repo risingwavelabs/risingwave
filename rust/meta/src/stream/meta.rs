@@ -151,9 +151,7 @@ impl StreamMetaManager for StoredStreamMetaManager {
                 &fragments.encode_to_vec(),
                 SINGLE_VERSION_EPOCH,
             )
-            .await?;
-
-        Ok(())
+            .await
     }
 
     async fn get_table_fragments(&self, table_id: &TableRefId) -> Result<TableFragments> {
@@ -178,8 +176,7 @@ impl StreamMetaManager for StoredStreamMetaManager {
                 &table_id.encode_to_vec(),
                 SINGLE_VERSION_EPOCH,
             )
-            .await?;
-        Ok(())
+            .await
     }
 }
 
