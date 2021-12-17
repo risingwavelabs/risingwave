@@ -1,5 +1,4 @@
-use bytes::Buf;
-use risingwave_common::array::Row;
+use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{deserialize_datum_from, Datum};
@@ -114,10 +113,9 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
     }
 
     async fn next(&mut self) -> Result<Option<Row>> {
-        // TODO(MrCroxx): this implementation is inefficient, refactor me.
         let mut pk_buf = vec![];
-        let mut columns = Row(vec![None; self.schema.len()]);
         let mut restored = 0;
+        let mut row_bytes = vec![];
         loop {
             match self.inner.next().await? {
                 Some((key, value)) => {
@@ -135,23 +133,11 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
                         return Err(ErrorCode::InternalError("incomplete item".to_owned()).into());
                     }
 
-                    // get cell_idx
-                    let cell_idx = (&key[key.len() - 4..]).get_u32_le();
-
-                    let mut cell_deserializer = memcomparable::Deserializer::new(value);
-                    let cell = deserialize_datum_from(
-                        &self.schema.fields[cell_idx as usize]
-                            .data_type
-                            .data_type_kind(),
-                        &mut cell_deserializer,
-                    )
-                    .unwrap();
-
-                    columns.0[cell_idx as usize] = cell;
+                    row_bytes.extend_from_slice(&value);
 
                     restored += 1;
                     if restored == self.schema.len() {
-                        return Ok(Some(columns));
+                        break;
                     }
 
                     // continue loop
@@ -162,6 +148,15 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
                 None => return Err(ErrorCode::InternalError("incomplete item".to_owned()).into()),
             }
         }
+        let schema = self
+            .schema
+            .data_types_clone()
+            .into_iter()
+            .map(|data_type| data_type.data_type_kind())
+            .collect::<Vec<_>>();
+        let row_deserializer = RowDeserializer::new(schema);
+        let row = row_deserializer.deserialize(&row_bytes)?;
+        Ok(Some(row))
     }
 }
 

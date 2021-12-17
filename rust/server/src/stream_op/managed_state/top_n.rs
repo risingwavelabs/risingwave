@@ -1,10 +1,9 @@
 use std::collections::BTreeMap;
 
 use bytes::Bytes;
-use risingwave_common::array::Row;
+use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_common::types::deserialize_datum_from;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::stream_op::{serialize_cell, serialize_cell_idx};
@@ -122,22 +121,24 @@ impl<S: StateStore> ManagedTopNState<S> {
         // We must have enough cells to restore a complete row.
         debug_assert_eq!(pk_row_bytes.len() % self.schema.len(), 0);
         // cell-based storage format, so `self.schema.len()`
-        let mut cells = vec![];
-        let mut cell_idx = 0;
+        let mut row_bytes = vec![];
+        let mut cell_restored = 0;
+        let schema = self
+            .schema
+            .data_types_clone()
+            .into_iter()
+            .map(|data_type| data_type.data_type_kind())
+            .collect::<Vec<_>>();
         for (pk, cell_bytes) in pk_row_bytes {
-            let mut deserializer = memcomparable::Deserializer::new(cell_bytes);
-            let datum = deserialize_datum_from(
-                &self.schema[cell_idx].data_type.data_type_kind(),
-                &mut deserializer,
-            )?;
-            cells.push(datum);
-            cell_idx += 1;
-            cell_idx %= self.schema.len();
-            if cells.len() == self.schema.len() {
+            row_bytes.extend_from_slice(&cell_bytes);
+            cell_restored += 1;
+            if cell_restored == self.schema.len() {
+                cell_restored = 0;
+                let deserializer = RowDeserializer::new(schema.clone());
+                let row = deserializer.deserialize(&std::mem::take(&mut row_bytes))?;
                 // format: [pk_buf | cell_idx (4B)]
                 // Take `pk_buf` out.
                 let pk_without_cell_idx = pk.slice(0..pk.len() - 4);
-                let row = Row(std::mem::take(&mut cells));
                 let prev_element = self.top_n.insert(pk_without_cell_idx, row.clone());
                 if let Some(prev_row) = prev_element {
                     debug_assert_eq!(prev_row, row);
@@ -234,6 +235,7 @@ mod tests {
         managed_state
             .insert((rows_bytes[3].clone().into(), row4.clone()))
             .await;
+        // now (4, "ab")
 
         assert_eq!(
             managed_state.top_element(),
@@ -245,6 +247,7 @@ mod tests {
         managed_state
             .insert((rows_bytes[2].clone().into(), row3.clone()))
             .await;
+        // now (3, "abd") -> (4, "ab")
 
         assert_eq!(
             managed_state.top_element(),
@@ -256,6 +259,8 @@ mod tests {
         managed_state
             .insert((rows_bytes[1].clone().into(), row2.clone()))
             .await;
+        // now (3, "abd") -> (3, "abc") -> (4, "ab")
+
         assert_eq!(
             managed_state.top_element(),
             Some((&Bytes::from(rows_bytes[2].clone()), &row3))
@@ -272,6 +277,7 @@ mod tests {
         let mut managed_state = create_managed_top_n_state(&store, row_count);
         assert_eq!(managed_state.top_element(), None);
         managed_state.fill_in_cache().await.unwrap();
+        // now (3, "abd") -> (3, "abc") -> (4, "ab")
         assert_eq!(
             managed_state.top_element(),
             Some((&Bytes::from(rows_bytes[2].clone()), &row3))
