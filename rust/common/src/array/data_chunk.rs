@@ -309,7 +309,7 @@ impl DataChunk {
     }
 
     /// Get an iterator for visible rows.
-    pub fn iter(&self) -> DataChunkRefIter<'_> {
+    pub fn rows(&self) -> DataChunkRefIter<'_> {
         DataChunkRefIter::new(self)
     }
 
@@ -447,7 +447,7 @@ mod tests {
             ))
         }
         let chunk: DataChunk = DataChunk::builder().columns(columns).build();
-        for row in chunk.iter() {
+        for row in chunk.rows() {
             for i in 0..num_of_columns {
                 let val = row.value_at(i).unwrap();
                 assert_eq!(val.into_int32(), i as i32);

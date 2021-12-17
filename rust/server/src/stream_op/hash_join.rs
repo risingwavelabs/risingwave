@@ -348,7 +348,7 @@ impl<const T: JoinTypePrimitive> HashJoinExecutor<T> {
             side_match.start_pos,
         )?;
 
-        for (row, op) in data_chunk.iter().zip(ops.iter()) {
+        for (row, op) in data_chunk.rows().zip(ops.iter()) {
             let key = Self::hash_key_from_row_ref(&row, &side_update.key_indices);
             let value = Self::hash_value_item_from_row_ref(&row);
             let matched_rows = Self::hash_eq_match(&key, &side_match.ht);

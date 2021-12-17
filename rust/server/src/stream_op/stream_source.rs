@@ -66,9 +66,7 @@ impl StreamSourceExecutor {
             first_execution: true,
         })
     }
-}
 
-impl StreamSourceExecutor {
     fn gen_row_column(&mut self, len: usize) -> Column {
         let mut builder = I64ArrayBuilder::new(len).unwrap();
 

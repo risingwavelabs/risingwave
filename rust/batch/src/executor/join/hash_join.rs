@@ -439,8 +439,8 @@ mod tests {
             return false;
         }
 
-        left.iter()
-            .zip(right.iter())
+        left.rows()
+            .zip(right.rows())
             .all(|(row1, row2)| row1 == row2)
     }
 

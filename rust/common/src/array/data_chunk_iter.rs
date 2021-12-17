@@ -8,15 +8,6 @@ use crate::types::{
 };
 use crate::util::sort_util::OrderType;
 
-impl DataChunk {
-    pub fn rows(&self) -> DataChunkRefIter<'_> {
-        DataChunkRefIter {
-            chunk: self,
-            idx: 0,
-        }
-    }
-}
-
 pub struct DataChunkRefIter<'a> {
     chunk: &'a DataChunk,
     idx: usize,
@@ -92,12 +83,6 @@ impl<'a> ops::Index<usize> for RowRef<'a> {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Row(pub Vec<Datum>);
-
-impl Row {
-    pub fn size(&self) -> usize {
-        self.0.len()
-    }
-}
 
 impl ops::Index<usize> for Row {
     type Output = Datum;
@@ -175,6 +160,11 @@ impl Row {
         let mut serializer = memcomparable::Serializer::new(vec![]);
         serialize_datum_into(&self.0[datum_idx], &mut serializer)?;
         Ok(serializer.into_inner())
+    }
+
+    /// Return number of cells in the row.
+    pub fn size(&self) -> usize {
+        self.0.len()
     }
 }
 

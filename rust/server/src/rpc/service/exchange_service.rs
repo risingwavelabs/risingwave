@@ -23,12 +23,6 @@ pub struct ExchangeServiceImpl {
     stream_mgr: Arc<StreamManager>,
 }
 
-impl ExchangeServiceImpl {
-    pub fn new(mgr: Arc<TaskManager>, stream_mgr: Arc<StreamManager>) -> Self {
-        ExchangeServiceImpl { mgr, stream_mgr }
-    }
-}
-
 type ExchangeDataStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
 
 #[async_trait::async_trait]
@@ -84,6 +78,10 @@ impl ExchangeService for ExchangeServiceImpl {
 }
 
 impl ExchangeServiceImpl {
+    pub fn new(mgr: Arc<TaskManager>, stream_mgr: Arc<StreamManager>) -> Self {
+        ExchangeServiceImpl { mgr, stream_mgr }
+    }
+
     #[cfg(not(tarpaulin_include))]
     async fn get_data_impl(
         &self,

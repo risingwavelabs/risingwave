@@ -120,7 +120,7 @@ fn is_data_chunk_eq(left: &DataChunk, right: &DataChunk) {
         "two chunks cardinality is different"
     );
 
-    left.iter()
-        .zip(right.iter())
+    left.rows()
+        .zip(right.rows())
         .for_each(|(row1, row2)| assert_eq!(row1, row2));
 }
