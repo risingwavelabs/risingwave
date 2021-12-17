@@ -56,5 +56,8 @@ compileTestKotlin.kotlinOptions {
 }
 
 tasks.spotlessJava {
+    onlyIf {
+        hasProperty("changedFiles")
+    }
     dependsOn(tasks.generateGrammarSource)
 }

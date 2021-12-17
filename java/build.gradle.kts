@@ -30,13 +30,31 @@ if (JavaVersion.current() != javaVersion) {
     throw GradleException("Only $javaVersion is supported!")
 }
 
+tasks {
+    javadoc {
+        options.encoding = "UTF-8"
+    }
+    compileJava {
+        options.encoding = "UTF-8"
+    }
+    compileTestJava {
+        options.encoding = "UTF-8"
+    }
+}
+
 val bomProject = "bom"
 val appProjects = setOf("pgserver")
 
-apply(plugin = "git")
+if (System.getenv("RISINGWAVE_FE_BUILD_ENV") == null) {
+    apply(plugin = "git")
+}
 // Absolute paths of all changed files
-val changedFiles: List<String> by extra
-println("Changed files: $changedFiles")
+var changedFiles: List<String> = listOf()
+// val changedFiles: List<String> by extra
+if (hasProperty("changedFiles")) {
+    changedFiles = extra.get("changedFiles") as List<String>
+}
+println("BuildEnv = " + System.getenv("RISINGWAVE_FE_BUILD_ENV") + ",Changed files: $changedFiles")
 
 apply(plugin = "jacoco")
 tasks.register<JacocoReport>("jacocoRootReport") {
@@ -110,7 +128,9 @@ subprojects {
 
         apply<com.diffplug.gradle.spotless.SpotlessPlugin>()
         configure<com.diffplug.gradle.spotless.SpotlessExtension> {
-            ratchetFrom = "origin/main"
+            if (System.getenv("RISINGWAVE_FE_BUILD_ENV") == null) {
+                ratchetFrom = "origin/main"
+            }
             java {
                 importOrder() // standard import order
                 removeUnusedImports()
