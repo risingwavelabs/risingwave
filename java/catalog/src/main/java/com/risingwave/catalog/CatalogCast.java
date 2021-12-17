@@ -1,7 +1,6 @@
 package com.risingwave.catalog;
 
 import com.risingwave.common.datatype.RisingWaveTypeFactory;
-import com.risingwave.proto.data.DataType;
 import com.risingwave.proto.expr.InputRefExpr;
 import com.risingwave.proto.metanode.Database;
 import com.risingwave.proto.metanode.Schema;
@@ -15,8 +14,6 @@ import java.util.ArrayList;
 import java.util.List;
 import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelFieldCollation;
-import org.apache.calcite.rex.RexBuilder;
-import org.apache.calcite.rex.RexLiteral;
 import org.apache.commons.lang3.SerializationException;
 
 /** CatalogCast provides static cast functions for catalog. */
@@ -106,12 +103,6 @@ public class CatalogCast {
           builder.addColumnOrders(columnOrder);
         }
       }
-      if (materializedViewCatalog.getFetch() != null) {
-        builder.setLimit(RexLiteral.intValue(materializedViewCatalog.getFetch()));
-      }
-      if (materializedViewCatalog.getOffset() != null) {
-        builder.setOffset(RexLiteral.intValue(materializedViewCatalog.getOffset()));
-      }
     }
 
     return builder.build();
@@ -137,7 +128,6 @@ public class CatalogCast {
       return builder.build();
     }
     var typeFactory = RisingWaveTypeFactory.INSTANCE;
-    var rexBuilder = new RexBuilder(typeFactory);
     var fieldCollations = new ArrayList<RelFieldCollation>();
     for (var columnOrder : table.getColumnOrdersList()) {
       var orderType = columnOrder.getOrderType();
@@ -155,22 +145,6 @@ public class CatalogCast {
     if (!fieldCollations.isEmpty()) {
       ((CreateMaterializedViewInfo.Builder) builder)
           .setCollation(RelCollations.of(fieldCollations));
-    }
-    if (table.getOffset() != 0) {
-      ((CreateMaterializedViewInfo.Builder) builder)
-          .setOffset(
-              rexBuilder.makeLiteral(
-                  table.getOffset(),
-                  typeFactory.createDataType(
-                      DataType.newBuilder().setTypeName(DataType.TypeName.INT32).build())));
-    }
-    if (table.getLimit() != 0) {
-      ((CreateMaterializedViewInfo.Builder) builder)
-          .setLimit(
-              rexBuilder.makeLiteral(
-                  table.getLimit(),
-                  typeFactory.createDataType(
-                      DataType.newBuilder().setTypeName(DataType.TypeName.INT32).build())));
     }
     return builder.build();
   }

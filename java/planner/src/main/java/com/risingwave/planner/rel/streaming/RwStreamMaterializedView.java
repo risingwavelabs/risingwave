@@ -25,7 +25,6 @@ import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.SingleRel;
 import org.apache.calcite.rex.RexInputRef;
-import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.util.Pair;
 import org.apache.commons.lang3.SerializationException;
@@ -45,17 +44,13 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
 
   private final RelCollation collation;
 
-  private final RexNode offset;
-
-  private final RexNode fetch;
-
   public RwStreamMaterializedView(
       RelOptCluster cluster,
       RelTraitSet traits,
       RelNode input,
       SqlIdentifier name,
       ImmutableList<Integer> primaryKeyIndices) {
-    this(cluster, traits, input, name, primaryKeyIndices, null, null, null);
+    this(cluster, traits, input, name, primaryKeyIndices, null);
   }
 
   public RwStreamMaterializedView(
@@ -64,16 +59,12 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
       RelNode input,
       SqlIdentifier name,
       ImmutableList<Integer> primaryKeyIndices,
-      @Nullable RelCollation relCollation,
-      @Nullable RexNode offset,
-      @Nullable RexNode fetch) {
+      @Nullable RelCollation relCollation) {
     super(cluster, traits, input);
     checkConvention();
     this.name = name;
     this.primaryKeyIndices = primaryKeyIndices;
     this.collation = relCollation;
-    this.offset = offset;
-    this.fetch = fetch;
   }
 
   public List<Integer> getPrimaryKeyIndices() {
@@ -82,14 +73,6 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
 
   public RelCollation getCollation() {
     return collation;
-  }
-
-  public RexNode getOffset() {
-    return offset;
-  }
-
-  public RexNode getFetch() {
-    return fetch;
   }
 
   /**
@@ -185,12 +168,6 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
     var writer = super.explainTerms(pw).item("name", name);
     if (collation != null) {
       writer = writer.item("collation", collation);
-    }
-    if (offset != null) {
-      writer = writer.item("offset", offset);
-    }
-    if (fetch != null) {
-      writer = writer.item("limit", fetch);
     }
     return writer;
   }

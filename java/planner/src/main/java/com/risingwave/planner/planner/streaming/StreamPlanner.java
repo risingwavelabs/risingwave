@@ -103,9 +103,7 @@ public class StreamPlanner implements Planner<StreamingPlan> {
           input,
           name,
           p.info.getPrimaryKeyIndices(),
-          sort.getCollation(),
-          null,
-          null);
+          sort.getCollation());
     } else {
       return new RwStreamMaterializedView(
           p.node.getCluster(), p.node.getTraitSet(), p.node, name, p.info.getPrimaryKeyIndices());

@@ -21,7 +21,6 @@ import com.risingwave.rpc.Messages;
 import com.risingwave.scheduler.streaming.StreamFragmenter;
 import com.risingwave.scheduler.streaming.StreamManager;
 import com.risingwave.scheduler.streaming.graph.StreamGraph;
-import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlCreateMaterializedView;
@@ -107,10 +106,6 @@ public class CreateMaterializedViewHandler implements SqlHandler {
       builder.addColumn(column.getKey(), column.getValue());
     }
     builder.setCollation(rootNode.getCollation());
-    RexNode fetch = rootNode.getFetch();
-    RexNode offset = rootNode.getOffset();
-    builder.setLimit(fetch);
-    builder.setOffset(offset);
     builder.setMv(true);
     CreateMaterializedViewInfo mvInfo = builder.build();
     MaterializedViewCatalog viewCatalog =

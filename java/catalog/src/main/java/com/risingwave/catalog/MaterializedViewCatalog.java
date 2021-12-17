@@ -3,7 +3,6 @@ package com.risingwave.catalog;
 import com.google.common.collect.ImmutableMap;
 import java.util.Collection;
 import org.apache.calcite.rel.RelCollation;
-import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.schema.Schema;
 import org.apache.calcite.util.ImmutableIntList;
 
@@ -11,10 +10,7 @@ import org.apache.calcite.util.ImmutableIntList;
 public class MaterializedViewCatalog extends TableCatalog {
 
   private final RelCollation collation;
-  private final RexNode offset;
-  private final RexNode fetch;
 
-  // TODO: remove fields offset/limit if not necessary any more in the future.
   public MaterializedViewCatalog(
       TableId id,
       TableName name,
@@ -25,9 +21,7 @@ public class MaterializedViewCatalog extends TableCatalog {
       ImmutableMap<String, String> properties,
       String rowFormat,
       String rowSchemaLocation,
-      RelCollation collation,
-      RexNode offset,
-      RexNode limit) {
+      RelCollation collation) {
     super(
         id,
         name,
@@ -39,20 +33,10 @@ public class MaterializedViewCatalog extends TableCatalog {
         rowFormat,
         rowSchemaLocation);
     this.collation = collation;
-    this.offset = offset;
-    this.fetch = limit;
   }
 
   public RelCollation getCollation() {
     return collation;
-  }
-
-  public RexNode getOffset() {
-    return offset;
-  }
-
-  public RexNode getFetch() {
-    return fetch;
   }
 
   @Override

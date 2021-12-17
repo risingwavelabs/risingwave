@@ -32,9 +32,7 @@ message Table {
   string row_schema_location = 12;
   // Fields for materialized view
   repeated plan.ColumnOrder column_orders = 13;
-  uint32 offset = 14;
-  uint32 limit = 15;
-  uint64 version = 16;
+  uint64 version = 14;
 }
 
 message Database {

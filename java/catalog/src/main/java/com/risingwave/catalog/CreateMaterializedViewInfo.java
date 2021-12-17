@@ -4,7 +4,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import javax.annotation.Nullable;
 import org.apache.calcite.rel.RelCollation;
-import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.util.Pair;
 
 /**
@@ -22,12 +21,6 @@ import org.apache.calcite.util.Pair;
  */
 public class CreateMaterializedViewInfo extends CreateTableInfo {
   private final RelCollation collation;
-  // RexNode is used by Calcite to represent these two fields. Since we need to pass around offset
-  // and limit
-  // several times, and finally set them as RwBatchLimit's field. Here we follow
-  // the convention of Calcite.
-  private final RexNode offset;
-  private final RexNode limit;
 
   private CreateMaterializedViewInfo(
       String tableName,
@@ -36,25 +29,13 @@ public class CreateMaterializedViewInfo extends CreateTableInfo {
       boolean appendOnly,
       String rowFormat,
       String rowSchemaLocation,
-      @Nullable RelCollation collation,
-      @Nullable RexNode offset,
-      @Nullable RexNode limit) {
+      @Nullable RelCollation collation) {
     super(tableName, columns, properties, appendOnly, false, rowFormat, rowSchemaLocation);
     this.collation = collation;
-    this.offset = offset;
-    this.limit = limit;
   }
 
   public RelCollation getCollation() {
     return collation;
-  }
-
-  public RexNode getOffset() {
-    return offset;
-  }
-
-  public RexNode getLimit() {
-    return limit;
   }
 
   @Override
@@ -69,8 +50,6 @@ public class CreateMaterializedViewInfo extends CreateTableInfo {
   /** Builder */
   public static class Builder extends CreateTableInfo.Builder {
     private RelCollation collation = null;
-    private RexNode offset = null;
-    private RexNode limit = null;
 
     private Builder(String tableName) {
       super(tableName);
@@ -78,14 +57,6 @@ public class CreateMaterializedViewInfo extends CreateTableInfo {
 
     public void setCollation(RelCollation collation) {
       this.collation = collation;
-    }
-
-    public void setOffset(RexNode offset) {
-      this.offset = offset;
-    }
-
-    public void setLimit(RexNode limit) {
-      this.limit = limit;
     }
 
     public CreateMaterializedViewInfo build() {
@@ -96,9 +67,7 @@ public class CreateMaterializedViewInfo extends CreateTableInfo {
           appendOnly,
           rowFormat,
           rowSchemaLocation,
-          collation,
-          offset,
-          limit);
+          collation);
     }
   }
 }
