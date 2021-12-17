@@ -12,7 +12,11 @@ use crate::array::interval_array::IntervalArrayBuilder;
 /// One month may contain 28/31 days. One day may contain 23/25 hours.
 /// This internals is learned from PG:
 /// <https://www.postgresql.org/docs/9.1/datatype-datetime.html#:~:text=field%20is%20negative.-,Internally,-interval%20values%20are>
-#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Hash, Default, Serialize, Deserialize)]
+///
+/// FIXME: if this derives `PartialEq` and `PartialOrd`, caller must guarantee the fields are valid.
+#[derive(
+    Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
 pub struct IntervalUnit {
     months: i32,
     days: i32,
@@ -69,6 +73,7 @@ impl IntervalUnit {
         }
     }
 }
+
 #[derive(Debug, Eq, PartialEq)]
 pub struct IntervalType {
     nullable: bool,

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::{Op, Ops};
-use risingwave_common::array::{Array, ArrayImpl, DecimalArray, I16Array, I32Array, I64Array};
+use risingwave_common::array::{Array, ArrayImpl};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::expr::AggKind;
@@ -414,89 +414,37 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
         _ => panic!("extreme state should only have one arg: {:?}", agg_call),
     }
 
-    match (agg_call.kind, agg_call.return_type.data_type_kind()) {
-        (AggKind::Max, DataTypeKind::Int64) => Ok(Box::new(
-            ManagedMaxState::<_, I64Array>::new(
-                keyspace,
-                agg_call.return_type.clone(),
-                top_n_count,
-                row_count,
-                pk_length,
-            )
-            .await?,
-        )),
-        (AggKind::Max, DataTypeKind::Int32) => Ok(Box::new(
-            ManagedMaxState::<_, I32Array>::new(
-                keyspace,
-                agg_call.return_type.clone(),
-                top_n_count,
-                row_count,
-                pk_length,
-            )
-            .await?,
-        )),
-        (AggKind::Max, DataTypeKind::Int16) => Ok(Box::new(
-            ManagedMaxState::<_, I16Array>::new(
-                keyspace,
-                agg_call.return_type.clone(),
-                top_n_count,
-                row_count,
-                pk_length,
-            )
-            .await?,
-        )),
-        (AggKind::Max, DataTypeKind::Decimal) => Ok(Box::new(
-            ManagedMaxState::<_, DecimalArray>::new(
-                keyspace,
-                agg_call.return_type.clone(),
-                top_n_count,
-                row_count,
-                pk_length,
-            )
-            .await?,
-        )),
-        (AggKind::Min, DataTypeKind::Int64) => Ok(Box::new(
-            ManagedMinState::<_, I64Array>::new(
-                keyspace,
-                agg_call.return_type.clone(),
-                top_n_count,
-                row_count,
-                pk_length,
-            )
-            .await?,
-        )),
-        (AggKind::Min, DataTypeKind::Int32) => Ok(Box::new(
-            ManagedMinState::<_, I32Array>::new(
-                keyspace,
-                agg_call.return_type.clone(),
-                top_n_count,
-                row_count,
-                pk_length,
-            )
-            .await?,
-        )),
-        (AggKind::Min, DataTypeKind::Int16) => Ok(Box::new(
-            ManagedMinState::<_, I16Array>::new(
-                keyspace,
-                agg_call.return_type.clone(),
-                top_n_count,
-                row_count,
-                pk_length,
-            )
-            .await?,
-        )),
-        (AggKind::Min, DataTypeKind::Decimal) => Ok(Box::new(
-            ManagedMinState::<_, DecimalArray>::new(
-                keyspace,
-                agg_call.return_type.clone(),
-                top_n_count,
-                row_count,
-                pk_length,
-            )
-            .await?,
-        )),
-        _ => unreachable!("unsupported"),
-    }
+    macro_rules! match_new_extreme_state {
+    ($( { $( $kind:pat_param )|+, $array:ty } ),* $(,)?) => {{
+      use DataTypeKind::*;
+      use risingwave_common::array::*;
+
+      let data_type = agg_call.return_type.clone();
+      match (agg_call.kind, agg_call.return_type.data_type_kind()) {
+        $(
+          (AggKind::Max, $( $kind )|+) => Ok(Box::new(
+            ManagedMaxState::<_, $array>::new(keyspace, data_type, top_n_count, row_count, pk_length).await?,
+          )),
+          (AggKind::Min, $( $kind )|+) => Ok(Box::new(
+            ManagedMinState::<_, $array>::new(keyspace, data_type, top_n_count, row_count, pk_length).await?,
+          )),
+        )*
+        (kind, return_type) => unimplemented!("unsupported extreme agg, kind: {:?}, return type: {:?}", kind, return_type),
+      }
+    }};
+  }
+
+    match_new_extreme_state!(
+      {Boolean, BoolArray},
+      {Int64, I64Array},
+      {Int32, I32Array},
+      {Int16, I16Array},
+      {Float64, F64Array},
+      {Float32, F32Array},
+      {Decimal, DecimalArray},
+      {Char | Varchar, Utf8Array},
+      {Interval, IntervalArray},
+    )
 }
 
 #[cfg(test)]

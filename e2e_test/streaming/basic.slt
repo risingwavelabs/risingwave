@@ -8,7 +8,7 @@ statement ok
 create table t3 (v1 int not null, v2 int not null, v3 int not null);
 
 statement ok
-create table t4 (v1 int not null, v2 int not null, v3 bigint not null);
+create table t4 (v1 real not null, v2 int not null, v3 bigint not null);
 
 statement ok
 insert into t1 values (1,4,2), (2,3,3);
@@ -68,7 +68,7 @@ select avg_v1, sum_v2, count_v3 from mv2;
 ----
 2.5 14 4
 
-query IIII
+query RRRI
 select sum_v1, min_v1, max_v1, v3 from mv4 order by sum_v1;
 ----
 0  0 0 3
