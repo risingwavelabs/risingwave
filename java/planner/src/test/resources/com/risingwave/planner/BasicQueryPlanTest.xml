@@ -387,11 +387,19 @@ RwBatchValues(tuples=[[{ false, true }]])
 select v1 from t order by v2;
 ]]>
         </Resource>
-        <Resource name="plan">
+        <Resource name="physcial">
             <![CDATA[
 RwBatchProject(v1=[$0])
   RwBatchSort(sort0=[$1], dir0=[ASC])
     RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2])
+]]>
+        </Resource>
+        <Resource name="distributed">
+            <![CDATA[
+RwBatchProject(v1=[$0])
+  RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[1]])
+    RwBatchSort(sort0=[$1], dir0=[ASC])
+      RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2])
 ]]>
         </Resource>
         <Resource name="json" path="batch/basic/select_less_with_sort_by">

@@ -26,10 +26,14 @@ import com.risingwave.planner.program.VolcanoOptimizerProgram;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.physical.BatchPlan;
 import com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel;
+import com.risingwave.planner.rel.physical.RwBatchProject;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
 import com.risingwave.planner.rules.physical.BatchRuleSets;
 import com.risingwave.planner.sql.SqlConverter;
+import org.apache.calcite.rel.RelCollation;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.RelRoot;
+import org.apache.calcite.rel.logical.LogicalProject;
 import org.apache.calcite.sql.SqlNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,9 +51,21 @@ public class BatchPlanner implements Planner<BatchPlan> {
 
   private RelNode plan(SqlNode ast, ExecutionContext context, OptimizerPhase optimizeLevel) {
     SqlConverter sqlConverter = SqlConverter.builder(context).build();
-    RelNode rawPlan = sqlConverter.toRel(ast).project();
-    OptimizerProgram optimizerProgram = buildOptimizerProgram(optimizeLevel);
-    return optimizerProgram.optimize(rawPlan, context);
+    RelRoot rawRoot = sqlConverter.toRel(ast);
+    OptimizerProgram optimizerProgram = buildOptimizerProgram(optimizeLevel, rawRoot.collation);
+    RelNode optimized = optimizerProgram.optimize(rawRoot.rel, context);
+    if (!rawRoot.isRefTrivial()) {
+      LogicalProject proj = (LogicalProject) rawRoot.withRel(optimized).project(true);
+      optimized =
+          new RwBatchProject(
+              proj.getCluster(),
+              proj.getTraitSet().plus(optimized.getConvention()),
+              proj.getHints(),
+              optimized,
+              proj.getProjects(),
+              proj.getRowType());
+    }
+    return optimized;
   }
 
   public RelNode planLogical(SqlNode ast, ExecutionContext context) {
@@ -72,7 +88,8 @@ public class BatchPlanner implements Planner<BatchPlan> {
     return new BatchPlan(root);
   }
 
-  private static OptimizerProgram buildOptimizerProgram(OptimizerPhase optimizeLevel) {
+  private static OptimizerProgram buildOptimizerProgram(
+      OptimizerPhase optimizeLevel, RelCollation requiredCollation) {
     ChainedOptimizerProgram.Builder builder = ChainedOptimizerProgram.builder(optimizeLevel);
 
     builder.addLast(SUBQUERY_REWRITE, SubQueryRewriteProgram.INSTANCE);
@@ -95,6 +112,7 @@ public class BatchPlanner implements Planner<BatchPlan> {
         VolcanoOptimizerProgram.builder()
             .addRules(PHYSICAL_CONVERTER_RULES)
             .addRequiredOutputTraits(RisingWaveBatchPhyRel.BATCH_PHYSICAL)
+            .addRequiredOutputTraits(requiredCollation)
             .setTopDownOpt(true);
     builder.addLast(PHYSICAL, physical.build());
 
@@ -102,6 +120,7 @@ public class BatchPlanner implements Planner<BatchPlan> {
         VolcanoOptimizerProgram.builder()
             .addRules(DISTRIBUTED_CONVERTER_RULES)
             .addRules(DISTRIBUTION_RULES)
+            .addRequiredOutputTraits(requiredCollation)
             .addRequiredOutputTraits(RisingWaveBatchPhyRel.BATCH_DISTRIBUTED)
             .addRequiredOutputTraits(RwDistributions.SINGLETON)
             .setTopDownOpt(true);
