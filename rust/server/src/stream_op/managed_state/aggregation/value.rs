@@ -6,8 +6,7 @@ use risingwave_common::error::Result;
 use risingwave_common::types::{deserialize_datum_from, serialize_datum_into, Datum};
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::super::aggregation::StreamingAggStateImpl;
-use crate::stream_op::{create_streaming_agg_state, AggCall};
+use crate::stream_op::{create_streaming_agg_state, AggCall, StreamingAggStateImpl};
 
 /// A wrapper around [`StreamingAggStateImpl`], which fetches data from the state store and helps
 /// update the state. We don't use any trait to wrap around all `ManagedXxxState`, so as to reduce

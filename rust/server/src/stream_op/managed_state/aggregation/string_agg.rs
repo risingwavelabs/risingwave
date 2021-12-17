@@ -7,15 +7,16 @@ use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::types::{
-    deserialize_datum_not_null_from, serialize_datum_not_null_into, DataTypeKind, Datum,
+    deserialize_datum_not_null_from, serialize_datum_not_null_into, DataTypeKind, Datum, ScalarImpl,
 };
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::stream_op::state_aggregation::{FlushStatus, ManagedExtremeState};
+use crate::stream_op::managed_state::aggregation::ManagedExtremeState;
+use crate::stream_op::managed_state::flush_status::FlushStatus;
 use crate::stream_op::OrderedArraysSerializer;
 
 pub struct ManagedStringAggState<S: StateStore> {
-    cache: BTreeMap<Bytes, FlushStatus>,
+    cache: BTreeMap<Bytes, FlushStatus<ScalarImpl>>,
 
     /// A cached result.
     result: Option<String>,
@@ -248,9 +249,9 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::{Keyspace, StateStore};
 
-    use crate::stream_op::state_aggregation::ordered_serializer::OrderedArraysSerializer;
-    use crate::stream_op::state_aggregation::string_agg::ManagedStringAggState;
-    use crate::stream_op::state_aggregation::ManagedExtremeState;
+    use crate::stream_op::managed_state::aggregation::ordered_serializer::OrderedArraysSerializer;
+    use crate::stream_op::managed_state::aggregation::string_agg::ManagedStringAggState;
+    use crate::stream_op::managed_state::aggregation::ManagedExtremeState;
 
     async fn create_managed_state<S: StateStore>(
         store: &S,

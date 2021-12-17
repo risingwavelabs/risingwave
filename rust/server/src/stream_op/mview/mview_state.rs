@@ -8,7 +8,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::StateStore;
 
 use super::{serialize_cell, serialize_cell_idx, serialize_pk};
-use crate::stream_op::state_aggregation::OrderedRowsSerializer;
+use crate::stream_op::managed_state::aggregation::OrderedRowsSerializer;
 
 /// `ManagedMviewState` buffers recent mutations. Data will be written
 /// to backend storage on calling `flush`.

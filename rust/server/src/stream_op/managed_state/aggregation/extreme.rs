@@ -15,7 +15,7 @@ use risingwave_common::types::{
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::extreme_serializer::{variants, ExtremePk, ExtremeSerializer};
-use crate::stream_op::state_aggregation::FlushStatus;
+use crate::stream_op::managed_state::flush_status::FlushStatus;
 use crate::stream_op::{AggArgs, AggCall};
 
 pub type ManagedMinState<S, A> = GenericManagedState<S, A, { variants::EXTREME_MIN }>;
@@ -51,7 +51,7 @@ where
     top_n: BTreeMap<(A::OwnedItem, ExtremePk), ScalarImpl>,
 
     /// The actions that will be taken on next flush
-    flush_buffer: BTreeMap<(A::OwnedItem, ExtremePk), FlushStatus>,
+    flush_buffer: BTreeMap<(A::OwnedItem, ExtremePk), FlushStatus<ScalarImpl>>,
 
     /// Number of items in the state including those not in top n cache but in state store.
     total_count: usize,
