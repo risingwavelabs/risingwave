@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::table::{Table, TableIterator};
 use crate::hummock::value::HummockValue;
-use crate::hummock::version_cmp::VersionComparator;
+use crate::hummock::version_cmp::VersionedComparator;
 use crate::hummock::HummockResult;
 
 /// Iterates on multiple non-overlapping tables.
@@ -88,7 +88,7 @@ impl HummockIterator for ConcatIterator {
                 // compare by version comparator
                 // Note: we are comparing against the `smallest_key` of the `table`, thus the
                 // partition point should be `prev(<=)` instead of `<`.
-                let ord = VersionComparator::compare_key(&table.meta.smallest_key, key);
+                let ord = VersionedComparator::compare_key(&table.meta.smallest_key, key);
                 ord == Less || ord == Equal
             })
             .saturating_sub(1); // considering the boundary of 0

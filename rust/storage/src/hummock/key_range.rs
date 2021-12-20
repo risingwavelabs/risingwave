@@ -2,7 +2,7 @@ use std::cmp;
 
 use bytes::Bytes;
 
-use super::version_cmp::VersionComparator;
+use super::version_cmp::VersionedComparator;
 
 /// TODO: Ord Trait with 'a'+ts>'aa'+ts issue
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -32,8 +32,9 @@ impl KeyRange {
     pub fn full_key_overlap(&self, other: &Self) -> bool {
         self.inf
             || other.inf
-            || (VersionComparator::compare_key(&self.right, &other.left) != cmp::Ordering::Less
-                && VersionComparator::compare_key(&other.right, &self.left) != cmp::Ordering::Less)
+            || (VersionedComparator::compare_key(&self.right, &other.left) != cmp::Ordering::Less
+                && VersionedComparator::compare_key(&other.right, &self.left)
+                    != cmp::Ordering::Less)
     }
 
     pub fn full_key_extend(&mut self, other: &Self) {
@@ -46,10 +47,10 @@ impl KeyRange {
             self.right = Bytes::new();
             return;
         }
-        if VersionComparator::compare_key(&other.left, &self.left) == cmp::Ordering::Less {
+        if VersionedComparator::compare_key(&other.left, &self.left) == cmp::Ordering::Less {
             self.left = other.left.clone();
         }
-        if VersionComparator::compare_key(&other.right, &self.right) == cmp::Ordering::Greater {
+        if VersionedComparator::compare_key(&other.right, &self.right) == cmp::Ordering::Greater {
             self.right = other.right.clone();
         }
     }
@@ -58,8 +59,8 @@ impl KeyRange {
 impl Ord for KeyRange {
     fn cmp(&self, other: &Self) -> cmp::Ordering {
         match (self.inf, other.inf) {
-            (false, false) => VersionComparator::compare_key(&self.left, &other.left)
-                .then_with(|| VersionComparator::compare_key(&self.right, &other.right)),
+            (false, false) => VersionedComparator::compare_key(&self.left, &other.left)
+                .then_with(|| VersionedComparator::compare_key(&self.right, &other.right)),
 
             (false, true) => cmp::Ordering::Less,
             (true, false) => cmp::Ordering::Greater,
@@ -95,7 +96,7 @@ mod tests {
             KeyRange::new(a1.clone(), a2).partial_cmp(&KeyRange::new(a1, b1)),
             Some(cmp::Ordering::Less)
         );
-        assert!(VersionComparator::same_user_key(a1_slice, a2_slice));
-        assert!(!VersionComparator::same_user_key(a1_slice, b1_slice));
+        assert!(VersionedComparator::same_user_key(a1_slice, a2_slice));
+        assert!(!VersionedComparator::same_user_key(a1_slice, b1_slice));
     }
 }

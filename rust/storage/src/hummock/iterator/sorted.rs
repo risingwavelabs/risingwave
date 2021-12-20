@@ -5,7 +5,7 @@ use async_trait::async_trait;
 
 use super::{BoxedHummockIterator, HummockIterator};
 use crate::hummock::value::HummockValue;
-use crate::hummock::version_cmp::VersionComparator;
+use crate::hummock::version_cmp::VersionedComparator;
 use crate::hummock::HummockResult;
 
 /// Used as node of the min-heap for merge-sorting the key-value pairs from iterators.
@@ -30,7 +30,7 @@ impl Ord for Node {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // Note: to implement min-heap by using max-heap internally, the comparing
         // order should be reversed.
-        VersionComparator::compare_key(other.0.key(), self.0.key())
+        VersionedComparator::compare_key(other.0.key(), self.0.key())
     }
 }
 

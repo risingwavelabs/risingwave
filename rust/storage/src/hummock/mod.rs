@@ -8,7 +8,6 @@ use bytes::Bytes;
 use risingwave_common::error::{Result, ToRwResult};
 
 use crate::hummock::iterator::HummockIterator;
-use crate::hummock::key::FullKey;
 
 mod table;
 pub use table::*;
@@ -32,7 +31,7 @@ use value::*;
 use version_manager::{CompactTask, Level, LevelEntry, VersionManager};
 
 use self::iterator::{BoxedHummockIterator, SortedIterator, UserKeyIterator};
-use self::key::{key_with_ts, user_key};
+use self::key::{key_with_ts, user_key, FullKey};
 use crate::object::ObjectStore;
 use crate::{StateStore, StateStoreIter};
 
@@ -116,33 +115,44 @@ impl HummockStorage {
     }
 
     /// Return an iterator that scan from the begin key to the end key
-    pub async fn range_scan(&self, begin: Vec<u8>, end: Vec<u8>) -> HummockResult<UserKeyIterator> {
-        if begin > end {
-            return Err(HummockError::DecodeError("invalid range".to_string()));
+    pub async fn range_scan(
+        &self,
+        begin_key: Option<Vec<u8>>,
+        end_key: Option<Vec<u8>>,
+    ) -> HummockResult<UserKeyIterator> {
+        if begin_key.is_some() && end_key.is_some() {
+            assert!(begin_key.clone().unwrap() <= end_key.clone().unwrap());
         }
 
-        // TODO: not a good implementation, consider change the type of smallest_key and largest_key
-        // in table meta
-        let begin_fk_clone = key_with_ts(begin.clone(), u64::MAX);
-        let begin_fk = FullKey::from_slice(begin_fk_clone.as_slice());
-        let end_fk_clone = key_with_ts(end.clone(), u64::MIN);
-        let end_fk = FullKey::from_slice(end_fk_clone.as_slice());
+        let begin_key_copy = match &begin_key {
+            Some(begin_key) => key_with_ts(begin_key.clone(), u64::MAX),
+            None => Vec::new(),
+        };
+        let begin_fk = FullKey::from_slice(begin_key_copy.as_slice());
+
+        let end_key_copy = match &end_key {
+            Some(end_key) => key_with_ts(end_key.clone(), u64::MIN),
+            None => Vec::new(),
+        };
+        let end_fk = FullKey::from_slice(end_key_copy.as_slice());
 
         let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
         for table in self.version_manager.tables()? {
-            // TODO: change the type of smallest_key and largest_key
-            let tsk = FullKey::from_slice(table.meta.smallest_key.as_slice());
             let tlk = FullKey::from_slice(table.meta.largest_key.as_slice());
+            let table_too_left = begin_key.is_some() && tlk < begin_fk;
+
+            let tsk = FullKey::from_slice(table.meta.smallest_key.as_slice());
+            let table_too_right = end_key.is_some() && tsk > end_fk;
 
             // decide whether the two ranges have common sub-range
-            if !(tsk > end_fk || tlk < begin_fk) {
+            if !(table_too_left || table_too_right) {
                 let iter = Box::new(TableIterator::new(table.clone()));
                 table_iters.push(iter);
             }
         }
 
         let si = SortedIterator::new(table_iters);
-        Ok(UserKeyIterator::new(si, Some((begin, end))))
+        Ok(UserKeyIterator::new(si, begin_key, end_key))
     }
 
     /// Write batch to storage. The batch should be:

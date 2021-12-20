@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 use super::key_range::KeyRange;
 use super::level_handler::{LevelHandler, TableStat};
 use super::{HummockError, HummockResult, Table};
-use crate::hummock::version_cmp::VersionComparator;
+use crate::hummock::version_cmp::VersionedComparator;
 
 #[derive(Clone)]
 pub enum Level {
@@ -331,7 +331,7 @@ impl VersionManager {
                             LevelHandler::Leveling(l_n_suc) => {
                                 // TODO: use pointer last time to avoid binary search
                                 let overlap_begin = l_n_suc.partition_point(|table_status| {
-                                    VersionComparator::compare_key(
+                                    VersionedComparator::compare_key(
                                         &table_status.key_range.right,
                                         &key_range.left,
                                     ) == std::cmp::Ordering::Less

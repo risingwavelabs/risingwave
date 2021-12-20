@@ -5,7 +5,7 @@ use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
 
 use super::{Block, Header, HEADER_SIZE};
-use crate::hummock::version_cmp::VersionComparator;
+use crate::hummock::version_cmp::VersionedComparator;
 
 pub enum SeekPos {
     Origin,
@@ -124,7 +124,7 @@ impl BlockIterator {
                 self.set_idx(*idx as isize);
 
                 // compare by version comparator
-                VersionComparator::compare_key(&self.key, key) == Less
+                VersionedComparator::compare_key(&self.key, key) == Less
             })
             + start_index;
 

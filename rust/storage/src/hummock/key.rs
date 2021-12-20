@@ -2,7 +2,7 @@ use std::{ptr, u64};
 
 use bytes::BufMut;
 
-use super::version_cmp::VersionComparator;
+use super::version_cmp::VersionedComparator;
 
 type Timestamp = u64;
 const TS_LEN: usize = std::mem::size_of::<Timestamp>();
@@ -88,7 +88,7 @@ impl FullKey<Vec<u8>> {
 
 impl<T: Eq + AsRef<[u8]>> Ord for FullKey<T> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        VersionComparator::compare_key(self.0.as_ref(), other.0.as_ref())
+        VersionedComparator::compare_key(self.0.as_ref(), other.0.as_ref())
     }
 }
 

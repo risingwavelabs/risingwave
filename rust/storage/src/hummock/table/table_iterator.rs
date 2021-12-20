@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use super::super::{HummockResult, HummockValue};
 use super::{BlockIterator, SeekPos, Table};
 use crate::hummock::iterator::HummockIterator;
-use crate::hummock::version_cmp::VersionComparator;
+use crate::hummock::version_cmp::VersionedComparator;
 
 /// Iterates on a table.
 pub struct TableIterator {
@@ -99,7 +99,7 @@ impl HummockIterator for TableIterator {
                 // compare by version comparator
                 // Note: we are comparing against the `smallest_key` of the `block`, thus the
                 // partition point should be `prev(<=)` instead of `<`.
-                let ord = VersionComparator::compare_key(block_meta.smallest_key.as_slice(), key);
+                let ord = VersionedComparator::compare_key(block_meta.smallest_key.as_slice(), key);
                 ord == Less || ord == Equal
             })
             .saturating_sub(1); // considering the boundary of 0

@@ -3,9 +3,9 @@ use std::cmp;
 use super::key::{split_key_timestamp, user_key};
 
 /// Compare two full keys first by their user keys, then by their versions (timestamps).
-pub struct VersionComparator;
+pub struct VersionedComparator;
 
-impl VersionComparator {
+impl VersionedComparator {
     /// Suppose parameter as `full_key` = (`user_key`, `u64::MAX - timestamp`), this function
     /// compare `&[u8]` as if compare tuple mentioned before.
     #[inline]

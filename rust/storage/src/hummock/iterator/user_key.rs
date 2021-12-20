@@ -6,23 +6,31 @@ use crate::hummock::HummockResult;
 /// ``UserKeyIterator`` can be used by user directly.
 pub struct UserKeyIterator {
     iterator: SortedIterator,
-    /// last user key
+    /// Last user key
     last_key: Vec<u8>,
-    /// last user value
+    /// Last user value
     last_val: Vec<u8>,
 
-    // flag for whether the iterator reach over the range. Use when key_range is non-None only.
+    // Flag for whether the iterator reach over the right end of the range.
     out_of_range: bool,
-    key_range: Option<(Vec<u8>, Vec<u8>)>,
+    // Closed left end of the given range. None means the left end is negative infinity.
+    begin_key: Option<Vec<u8>>,
+    // Closed right end of the given range. None means the right end is infinity.
+    end_key: Option<Vec<u8>>,
 }
 
 // TODO: decide whether this should also impl `HummockIterator`
 impl UserKeyIterator {
-    pub fn new(iterator: SortedIterator, key_range: Option<(Vec<u8>, Vec<u8>)>) -> Self {
+    pub fn new(
+        iterator: SortedIterator,
+        begin_key: Option<Vec<u8>>,
+        end_key: Option<Vec<u8>>,
+    ) -> Self {
         Self {
             iterator,
-            key_range,
             out_of_range: false,
+            begin_key,
+            end_key,
             last_key: Vec::new(),
             last_val: Vec::new(),
         }
@@ -50,7 +58,7 @@ impl UserKeyIterator {
                         self.last_val.extend_from_slice(val);
 
                         // handle range scan
-                        if let Some((_, end_key)) = &self.key_range {
+                        if let Some(end_key) = &self.end_key {
                             self.out_of_range = key > end_key.as_slice();
                         }
 
@@ -92,7 +100,7 @@ impl UserKeyIterator {
     /// Reset the iterating position to the beginning.
     pub async fn rewind(&mut self) -> HummockResult<()> {
         // handle range scan
-        if let Some((begin_key, _)) = &self.key_range {
+        if let Some(begin_key) = &self.begin_key {
             let full_key = &key_with_ts(begin_key.clone(), u64::MAX);
             self.iterator.seek(full_key).await?;
         } else {
@@ -108,8 +116,8 @@ impl UserKeyIterator {
     /// Reset the iterating position to the first position where the key >= provided key.
     pub async fn seek(&mut self, user_key: &[u8]) -> HummockResult<()> {
         // handle range scan when key < begin_key
-        let user_key = match &self.key_range {
-            Some((begin_key, _)) if begin_key.as_slice() > user_key => begin_key.clone(),
+        let user_key = match &self.begin_key {
+            Some(begin_key) if begin_key.as_slice() > user_key => begin_key.clone(),
             _ => Vec::from(user_key),
         };
 
@@ -158,7 +166,7 @@ mod tests {
         ];
 
         let si = SortedIterator::new(iters);
-        let mut uki = UserKeyIterator::new(si, None);
+        let mut uki = UserKeyIterator::new(si, None, None);
         uki.rewind().await.unwrap();
 
         let mut i = 0;
@@ -190,7 +198,7 @@ mod tests {
         ];
 
         let si = SortedIterator::new(iters);
-        let mut uki = UserKeyIterator::new(si, None);
+        let mut uki = UserKeyIterator::new(si, None, None);
 
         // right edge case
         uki.seek(user_key(&iterator_test_key_of(0, 3 * TEST_KEYS_COUNT)))
@@ -245,7 +253,7 @@ mod tests {
             Box::new(TableIterator::new(Arc::new(table1))),
         ];
         let si = SortedIterator::new(iters);
-        let mut uki = UserKeyIterator::new(si, None);
+        let mut uki = UserKeyIterator::new(si, None, None);
         uki.rewind().await.unwrap();
 
         // verify
@@ -259,12 +267,15 @@ mod tests {
         assert!(!uki.is_valid());
     }
 
+    // [left_end, right_end]
     #[tokio::test]
-    async fn test_range_scan() {
+    async fn test_closed_end_range_scan() {
         // key=[table, idx, ts], value
         let kv_pairs: Vec<(usize, usize, u64, HummockValue<Vec<u8>>)> = vec![
-            (0, 1, 200, HummockValue::Delete),
-            (0, 1, 100, HummockValue::Put(test_value_of(0, 1))),
+            (0, 0, 200, HummockValue::Delete),
+            (0, 0, 100, HummockValue::Put(test_value_of(0, 0))),
+            (0, 1, 200, HummockValue::Put(test_value_of(0, 1))),
+            (0, 1, 100, HummockValue::Delete),
             (0, 2, 300, HummockValue::Put(test_value_of(0, 2))),
             (0, 2, 200, HummockValue::Delete),
             (0, 2, 100, HummockValue::Delete),
@@ -280,11 +291,10 @@ mod tests {
         let iters: Vec<BoxedHummockIterator> = vec![Box::new(TableIterator::new(Arc::new(table)))];
         let si = SortedIterator::new(iters);
 
-        let begin_key = user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec();
-        let end_key = user_key(key_range_test_key(0, 7, 0).as_slice()).to_vec();
-        let key_range = Some((begin_key, end_key));
+        let begin_key = Some(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
+        let end_key = Some(user_key(key_range_test_key(0, 7, 0).as_slice()).to_vec());
 
-        let mut uki = UserKeyIterator::new(si, key_range);
+        let mut uki = UserKeyIterator::new(si, begin_key, end_key);
 
         // ----- basic iterate -----
         uki.rewind().await.unwrap();
@@ -328,6 +338,166 @@ mod tests {
 
         // ----- after-end-range iterate -----
         uki.seek(user_key(iterator_test_key_of(0, 8).as_slice()))
+            .await
+            .unwrap();
+        assert!(!uki.is_valid());
+    }
+
+    // (left_end, right_end]
+    #[tokio::test]
+    async fn test_left_open_range_scan() {
+        // key=[table, idx, ts], value
+        let kv_pairs: Vec<(usize, usize, u64, HummockValue<Vec<u8>>)> = vec![
+            (0, 0, 200, HummockValue::Delete),
+            (0, 0, 100, HummockValue::Put(test_value_of(0, 0))),
+            (0, 1, 200, HummockValue::Put(test_value_of(0, 1))),
+            (0, 1, 100, HummockValue::Delete),
+            (0, 2, 300, HummockValue::Put(test_value_of(0, 2))),
+            (0, 2, 200, HummockValue::Delete),
+            (0, 2, 100, HummockValue::Delete),
+            (0, 3, 100, HummockValue::Put(test_value_of(0, 3))),
+            (0, 5, 200, HummockValue::Delete),
+            (0, 5, 100, HummockValue::Put(test_value_of(0, 5))),
+            (0, 6, 100, HummockValue::Put(test_value_of(0, 6))),
+            (0, 7, 200, HummockValue::Delete),
+            (0, 7, 100, HummockValue::Put(test_value_of(0, 7))),
+            (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
+        ];
+        let table = add_kv_pair(kv_pairs).await;
+        let iters: Vec<BoxedHummockIterator> = vec![Box::new(TableIterator::new(Arc::new(table)))];
+        let si = SortedIterator::new(iters);
+        let end_key = Some(user_key(key_range_test_key(0, 7, 0).as_slice()).to_vec());
+
+        let mut uki = UserKeyIterator::new(si, None, end_key);
+
+        // ----- basic iterate -----
+        uki.rewind().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 1).as_slice()));
+        uki.next().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
+        uki.next().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
+        uki.next().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
+        uki.next().await.unwrap();
+        assert!(!uki.is_valid());
+
+        // ----- begin-range iterate -----
+        uki.seek(user_key(iterator_test_key_of(0, 0).as_slice()))
+            .await
+            .unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 1).as_slice()));
+        uki.next().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
+        uki.next().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
+        uki.next().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
+        uki.next().await.unwrap();
+        assert!(!uki.is_valid());
+
+        // ----- in-range iterate -----
+        uki.seek(user_key(iterator_test_key_of(0, 2).as_slice()))
+            .await
+            .unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
+        uki.next().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
+        uki.next().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
+        uki.next().await.unwrap();
+        assert!(!uki.is_valid());
+
+        // ----- end-range iterate -----
+        uki.seek(user_key(iterator_test_key_of(0, 7).as_slice()))
+            .await
+            .unwrap();
+        assert!(!uki.is_valid());
+
+        // ----- after-end-range iterate -----
+        uki.seek(user_key(iterator_test_key_of(0, 8).as_slice()))
+            .await
+            .unwrap();
+        assert!(!uki.is_valid());
+    }
+
+    // [left_end, right_end)
+    #[tokio::test]
+    async fn test_right_open_range_scan() {
+        // key=[table, idx, ts], value
+        let kv_pairs: Vec<(usize, usize, u64, HummockValue<Vec<u8>>)> = vec![
+            (0, 0, 200, HummockValue::Delete),
+            (0, 0, 100, HummockValue::Put(test_value_of(0, 0))),
+            (0, 1, 200, HummockValue::Put(test_value_of(0, 1))),
+            (0, 1, 100, HummockValue::Delete),
+            (0, 2, 300, HummockValue::Put(test_value_of(0, 2))),
+            (0, 2, 200, HummockValue::Delete),
+            (0, 2, 100, HummockValue::Delete),
+            (0, 3, 100, HummockValue::Put(test_value_of(0, 3))),
+            (0, 5, 200, HummockValue::Delete),
+            (0, 5, 100, HummockValue::Put(test_value_of(0, 5))),
+            (0, 6, 100, HummockValue::Put(test_value_of(0, 6))),
+            (0, 7, 200, HummockValue::Delete),
+            (0, 7, 100, HummockValue::Put(test_value_of(0, 7))),
+            (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
+        ];
+        let table = add_kv_pair(kv_pairs).await;
+        let iters: Vec<BoxedHummockIterator> = vec![Box::new(TableIterator::new(Arc::new(table)))];
+        let si = SortedIterator::new(iters);
+        let begin_key = Some(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
+
+        let mut uki = UserKeyIterator::new(si, begin_key, None);
+
+        // ----- basic iterate -----
+        uki.rewind().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
+        uki.next().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
+        uki.next().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
+        uki.next().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 8).as_slice()));
+        uki.next().await.unwrap();
+        assert!(!uki.is_valid());
+
+        // ----- begin-range iterate -----
+        uki.seek(user_key(iterator_test_key_of(0, 2).as_slice()))
+            .await
+            .unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
+        uki.next().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
+        uki.next().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
+        uki.next().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 8).as_slice()));
+        uki.next().await.unwrap();
+        assert!(!uki.is_valid());
+
+        // ----- in-range iterate -----
+        uki.seek(user_key(iterator_test_key_of(0, 2).as_slice()))
+            .await
+            .unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
+        uki.next().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
+        uki.next().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
+        uki.next().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 8).as_slice()));
+        uki.next().await.unwrap();
+        assert!(!uki.is_valid());
+
+        // ----- end-range iterate -----
+        uki.seek(user_key(iterator_test_key_of(0, 8).as_slice()))
+            .await
+            .unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 8).as_slice()));
+        uki.next().await.unwrap();
+        assert!(!uki.is_valid());
+
+        // ----- after-end-range iterate -----
+        uki.seek(user_key(iterator_test_key_of(0, 9).as_slice()))
             .await
             .unwrap();
         assert!(!uki.is_valid());
