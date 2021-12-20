@@ -65,11 +65,6 @@ message DataType {
   IntervalType interval_type = 5;
 }
 
-message ColumnCommon {
-  DataType column_type = 1;
-  Buffer null_bitmap = 2;
-}
-
 // New column proto def to replace fixed width column. This def
 // aims to include all column type. Currently it do not support struct/array
 // but capable of extending in future by add other fields.
