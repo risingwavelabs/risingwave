@@ -1,4 +1,4 @@
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, DataChunkRef};
@@ -29,7 +29,6 @@ pub struct MemRowGroup {
 
     /// `dbmp` is the delete map of deletions with the same range of transactions happened.
     dbmp: Option<Bitmap>,
-    rwlock: Arc<RwLock<i32>>,
     // TODO: [xiangyhu] footers
 }
 
@@ -47,7 +46,6 @@ impl MemRowGroup {
             column_ids: (0..column_count as i32).collect_vec().into(),
             data_chunks: Vec::new(),
             dbmp: None,
-            rwlock: Arc::new(RwLock::new(1)),
         }
     }
 
@@ -59,8 +57,6 @@ impl MemRowGroup {
         start_tuple_id: u64,
         datachunk: DataChunk,
     ) -> Result<(u64, usize)> {
-        let _write_guard = self.rwlock.write().unwrap();
-
         // push data
         let cardinality = datachunk.cardinality();
         self.data_chunks.push(Arc::new(datachunk));
@@ -75,7 +71,6 @@ impl MemRowGroup {
 
     /// Get data chunks of this `RowGroup`
     pub fn get_data(&self) -> Result<Vec<DataChunkRef>> {
-        let _read_guard = self.rwlock.read().unwrap();
         Ok(self.data_chunks.clone())
     }
 
