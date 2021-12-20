@@ -4,7 +4,7 @@ use bytes::BufMut;
 
 use super::version_cmp::VersionedComparator;
 
-type Timestamp = u64;
+pub type Timestamp = u64;
 const TS_LEN: usize = std::mem::size_of::<Timestamp>();
 
 /// Convert user key to full key by appending `u64::MAX - timestamp` to the user key.
@@ -61,6 +61,12 @@ pub fn user_key(full_key: &[u8]) -> &[u8] {
 /// Its format is (`user_key`, `u64::MAX - timestamp`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FullKey<T: AsRef<[u8]>>(T);
+
+impl<T: AsRef<[u8]>> FullKey<T> {
+    pub fn get_inner(self) -> T {
+        self.0
+    }
+}
 
 impl<'a> FullKey<&'a [u8]> {
     pub fn from_slice(full_key: &'a [u8]) -> Self {

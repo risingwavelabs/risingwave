@@ -12,6 +12,7 @@ use crate::hummock::iterator::HummockIterator;
 mod table;
 pub use table::*;
 mod cloud;
+mod compactor;
 mod error;
 mod iterator;
 mod key;
@@ -22,13 +23,14 @@ mod version_cmp;
 mod version_manager;
 
 use cloud::gen_remote_table;
+use compactor::Compactor;
 pub use error::*;
 use parking_lot::Mutex as PLMutex;
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use tokio::select;
 use tokio::sync::mpsc;
 use value::*;
-use version_manager::{CompactTask, Level, LevelEntry, VersionManager};
+use version_manager::VersionManager;
 
 use self::iterator::{BoxedHummockIterator, SortedIterator, UserKeyIterator};
 use self::key::{key_with_ts, user_key, FullKey};
@@ -89,7 +91,7 @@ impl HummockStorage {
 
         for table in &self.version_manager.tables().unwrap() {
             // bloom filter tells us the key could possibly exist, go get it
-            if !table.surely_not_have(key) {
+            if !table.surely_not_have(&key_with_ts(key.to_vec(), u64::MAX)) {
                 let iter = Box::new(TableIterator::new(table.clone()));
                 table_iters.push(iter);
             }
@@ -202,197 +204,24 @@ impl HummockStorage {
         Ok(())
     }
 
-    async fn run_compact(self: &Arc<Self>, compact_task: &mut CompactTask) -> HummockResult<()> {
-        let mut iters = vec![];
-        for LevelEntry { level, .. } in &compact_task.input_ssts {
-            match level {
-                Level::Tiering(input_sst_ids) => {
-                    let tables = self.version_manager.pick_few_tables(input_sst_ids)?;
-                    iters.extend(tables.into_iter().map(
-                        |table| -> Box<dyn HummockIterator + Send> {
-                            Box::new(TableIterator::new(table))
-                        },
-                    ));
-                }
-                Level::Leveling(_) => {
-                    unimplemented!();
-                }
-            }
-        }
-        todo!();
-        // let mut iter = SortedIterator::new(iters);
-        //
-        // compact_task
-        // .sorted_output_ssts
-        // .reserve(compact_task.splits.len());
-        //
+    fn get_builder(options: &HummockOptions) -> TableBuilder {
         // TODO: avoid repeating code in write_batch()
         // TODO: use different option values (especially table_size) for compaction
-        // let get_builder = |options: &HummockOptions| {
-        // TableBuilder::new(TableBuilderOptions {
-        // table_capacity: options.table_size,
-        // block_size: options.block_size,
-        // bloom_false_positive: options.bloom_false_positive,
-        // })
-        // };
-        //
-        // TODO: we can speed up by parallelling compaction (each with different kr)
-        // let mut skip_key = BytesMut::new();
-        // for kr in &compact_task.splits {
-        // TODO: purge tombstone if possible
-        // NOTICE: should be user_key overlap, NOT full_key overlap!
-        // let _has_overlap = true;
-        //
-        // if !kr.left.is_empty() {
-        // iter.seek(&kr.left).await?;
-        // } else {
-        // iter.rewind().await?;
-        // }
-        //
-        // skip_key.clear();
-        // let mut last_key = BytesMut::new();
-        // let mut _num_versions = 0;
-        //
-        // let mut ky;
-        // let mut val;
-        // let mut is_valid;
-        //
-        // is_valid = if let Ok(Some((tmp_ky, tmp_val))) = iter.next().await {
-        // ky = tmp_ky;
-        // val = tmp_val;
-        // true
-        // } else {
-        // ky = b"";
-        // val = HummockValue::Delete;
-        // false
-        // };
-        //
-        // while is_valid {
-        // if !kr.right.is_empty()
-        // && VersionComparator::compare_key(ky, &kr.right) != std::cmp::Ordering::Less
-        // {
-        // break;
-        // }
-        //
-        // let mut table_builder = get_builder(&self.options);
-        //
-        // while is_valid {
-        // let iter_key = Bytes::copy_from_slice(ky);
-        //
-        // if !skip_key.is_empty() {
-        // if VersionComparator::same_user_key(&iter_key, &skip_key) {
-        // is_valid = if let Ok(Some((tmp_ky, tmp_val))) = iter.next().await {
-        // ky = tmp_ky;
-        // val = tmp_val;
-        // true
-        // } else {
-        // ky = b"";
-        // val = HummockValue::Delete;
-        // false
-        // };
-        // continue;
-        // } else {
-        // skip_key.clear();
-        // }
-        // }
-        //
-        // if !VersionComparator::same_user_key(&iter_key, &last_key) {
-        // if !kr.right.is_empty()
-        // && VersionComparator::compare_key(&iter_key, &kr.right) != std::cmp::Ordering::Less
-        // {
-        // break;
-        // }
-        //
-        // if table_builder.reach_capacity() {
-        // break;
-        // }
-        //
-        // last_key.clear();
-        // last_key.extend_from_slice(ky);
-        //
-        // _num_versions = 0;
-        // }
-        //
-        // TODO: discard_ts logic
-        //
-        // table_builder.add(
-        // &iter_key,
-        // match val {
-        // HummockValue::Put(slice_val) => HummockValue::Put(Vec::from(slice_val)),
-        // HummockValue::Delete => HummockValue::Delete,
-        // },
-        // );
-        //
-        // is_valid = if let Ok(Some((tmp_ky, tmp_val))) = iter.next().await {
-        // ky = tmp_ky;
-        // val = tmp_val;
-        // true
-        // } else {
-        // ky = b"";
-        // val = HummockValue::Delete;
-        // false
-        // };
-        // }
-        //
-        // if table_builder.is_empty() {
-        // continue;
-        // }
-        //
-        // TODO: avoid repeating code in write_batch()
-        // let (blocks, meta) = table_builder.finish();
-        // let table_id = self.unique_id.fetch_add(1, Ordering::SeqCst);
-        // let remote_dir = Some(self.options.remote_dir.as_str());
-        // let table =
-        // gen_remote_table(self.obj_client.clone(), table_id, blocks, meta, remote_dir).await?;
-        //
-        // compact_task.sorted_output_ssts.push(table);
-        // }
-        // }
-        // Ok(())
+        TableBuilder::new(TableBuilderOptions {
+            table_capacity: options.table_size,
+            block_size: options.block_size,
+            bloom_false_positive: options.bloom_false_positive,
+            checksum_algo: options.checksum_algo,
+        })
     }
-
-    async fn compact_tasking(self: &Arc<Self>) -> HummockResult<()> {
-        let mut compact_task = match self.version_manager.get_compact_task().await {
-            Ok(task) => task,
-            Err(HummockError::OK) => {
-                return Ok(());
-            }
-            Err(err) => {
-                return Err(err);
-            }
-        };
-
-        compact_task.result = self.run_compact(&mut compact_task).await;
-        if compact_task.result.is_err() {
-            for _sst_to_delete in &compact_task.sorted_output_ssts {
-                // TODO: delete these tables in (S3) storage
-                // However, if we request a table_id from hummock storage service every time we
-                // generate a table, we would not delete here, or we should notify
-                // hummock storage service to delete them.
-            }
-            compact_task.sorted_output_ssts.clear();
-        }
-        let is_task_ok = compact_task.result.is_ok();
-
-        self.version_manager.report_compact_task(compact_task).await;
-
-        if is_task_ok {
-            Ok(())
-        } else {
-            Err(HummockError::ObjectIoError(String::from(
-                "compaction failed.",
-            )))
-        }
-    }
-
-    async fn start_compactor(
+    pub async fn start_compactor(
         self: &Arc<Self>,
         mut stop: mpsc::UnboundedReceiver<()>,
     ) -> HummockResult<()> {
         let mut compact_notifier = self.rx.lock().take().unwrap();
         loop {
             select! {
-                Some(_) = compact_notifier.recv() => self.compact_tasking().await?,
+                Some(_) = compact_notifier.recv() => Compactor::compact_tasking(self).await?,
                 Some(_) = stop.recv() => break
             }
         }

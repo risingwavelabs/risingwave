@@ -8,7 +8,8 @@ use tokio::sync::Mutex;
 use super::key_range::KeyRange;
 use super::level_handler::{LevelHandler, TableStat};
 use super::{HummockError, HummockResult, Table};
-use crate::hummock::version_cmp::VersionedComparator;
+use crate::hummock::key::Timestamp;
+use crate::hummock::{user_key, FullKey};
 
 #[derive(Clone)]
 pub enum Level {
@@ -331,16 +332,15 @@ impl VersionManager {
                             LevelHandler::Leveling(l_n_suc) => {
                                 // TODO: use pointer last time to avoid binary search
                                 let overlap_begin = l_n_suc.partition_point(|table_status| {
-                                    VersionedComparator::compare_key(
-                                        &table_status.key_range.right,
-                                        &key_range.left,
-                                    ) == std::cmp::Ordering::Less
+                                    user_key(&table_status.key_range.right)
+                                        < user_key(&key_range.left)
                                 });
                                 let mut overlap_end = overlap_begin;
                                 let mut overlap_all_idle = true;
                                 let l_n_suc_len = l_n_suc.len();
                                 while overlap_end < l_n_suc_len
-                                    && l_n_suc[overlap_end].key_range.full_key_overlap(key_range)
+                                    && user_key(&l_n_suc[overlap_end].key_range.left)
+                                        <= user_key(&key_range.right)
                                 {
                                     if l_n_suc[overlap_end].compact_task.is_some() {
                                         overlap_all_idle = false;
@@ -370,7 +370,14 @@ impl VersionManager {
                                         if overlap_idx > overlap_begin {
                                             // TODO: We do not need to add splits every time. We can
                                             // add every K SSTs.
-                                            key_split_append(&l_n_suc[overlap_idx].key_range.left);
+                                            key_split_append(
+                                                &FullKey::from_user_key_slice(
+                                                    user_key(&l_n_suc[overlap_idx].key_range.left),
+                                                    Timestamp::MAX,
+                                                )
+                                                .get_inner()
+                                                .into(),
+                                            );
                                         }
                                         overlap_idx += 1;
                                     }
@@ -528,6 +535,7 @@ impl VersionManager {
                 }
             }
             Err(_) => {
+                // TODO: loop only in input levels
                 for level_handler in &mut compact_status.level_handlers {
                     level_handler.unassign_task(compact_task.task_id);
                 }
