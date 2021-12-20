@@ -104,18 +104,7 @@ macro_rules! comparison_impl {
 ///   will be cast to float
 /// * `str_f`: compare function with &str.
 macro_rules! gen_binary_expr_cmp {
-    (
-        $macro:tt,
-        $int_f:ident,
-        $float_f:ident,
-        $deci_f_f:ident,
-        $deci_f:ident,
-        $str_f:ident,
-        $bool_f:ident,
-        $l:expr,
-        $r:expr,
-        $ret:expr
-    ) => {
+    ($macro:tt, $general:ident, $str_f:ident, $l:expr, $r:expr, $ret:expr) => {
         match (
             $l.return_type().data_type_kind(),
             $r.return_type().data_type_kind(),
@@ -150,45 +139,44 @@ macro_rules! gen_binary_expr_cmp {
             _ => {
                 $macro! {
                       [$l, $r, $ret],
-                      { Int16Type, Int16Type, Int16Type, $int_f },
-                      { Int16Type, Int32Type, Int32Type, $int_f },
-                      { Int16Type, Int64Type, Int64Type, $int_f },
-                      { Int16Type, Float32Type, Float32Type, $float_f },
-                      { Int16Type, Float64Type, Float64Type, $float_f },
-                      { Int32Type, Int16Type, Int32Type, $int_f },
-                      { Int32Type, Int32Type, Int32Type, $int_f },
-                      { Int32Type, Int64Type, Int64Type, $int_f },
-                      { Int32Type, Float32Type, Float32Type, $float_f },
-                      { Int32Type, Float64Type, Float64Type, $float_f },
-                      { Int64Type, Int16Type,Int64Type, $int_f },
-                      { Int64Type, Int32Type,Int64Type, $int_f },
-                      { Int64Type, Int64Type, Int64Type, $int_f },
-                      { Int64Type, Float32Type, Float32Type , $float_f},
-                      { Int64Type, Float64Type, Float64Type, $float_f },
-                      { Float32Type, Int16Type, Float32Type, $float_f },
-                      { Float32Type, Int32Type, Float32Type, $float_f },
-                      { Float32Type, Int64Type, Float32Type , $float_f},
-                      { Float32Type, Float32Type, Float32Type, $float_f },
-                      { Float32Type, Float64Type, Float64Type, $float_f },
-                      { Float64Type, Int16Type, Float64Type, $float_f },
-                      { Float64Type, Int32Type, Float64Type, $float_f },
-                      { Float64Type, Int64Type, Float64Type, $float_f },
-                      { Float64Type, Float32Type, Float64Type, $float_f },
-                      { Float64Type, Float64Type, Float64Type, $float_f },
-                      { DecimalType, Int16Type, DecimalType, $deci_f },
-                      { DecimalType, Int32Type, DecimalType, $deci_f },
-                      { DecimalType, Int64Type, DecimalType, $deci_f },
-                      { DecimalType, Float32Type, DecimalType, $deci_f_f },
-                      { DecimalType, Float64Type, DecimalType, $deci_f_f },
-                      { Int16Type, DecimalType, DecimalType, $deci_f },
-                      { Int32Type, DecimalType, DecimalType, $deci_f },
-                      { Int64Type, DecimalType, DecimalType, $deci_f },
-                      { DecimalType, DecimalType, DecimalType, $deci_f },
-                      { Float32Type, DecimalType, DecimalType, $deci_f_f },
-                      { Float64Type, DecimalType, DecimalType, $deci_f_f },
-                      { TimestampType, TimestampType, TimestampType, $int_f },
-                      { DateType, DateType, Int32Type, $int_f },
-                      { BoolType, BoolType, BoolType, $bool_f }
+                      { Int16Type, Int16Type, Int16Type, $general },
+                      { Int16Type, Int64Type, Int64Type, $general },
+                      { Int16Type, Float32Type, Float32Type, $general },
+                      { Int16Type, Float64Type, Float64Type, $general },
+                      { Int32Type, Int16Type, Int32Type, $general },
+                      { Int32Type, Int32Type, Int32Type, $general },
+                      { Int32Type, Int64Type, Int64Type, $general },
+                      { Int32Type, Float32Type, Float64Type, $general },
+                      { Int32Type, Float64Type, Float64Type, $general },
+                      { Int64Type, Int16Type,Int64Type, $general },
+                      { Int64Type, Int32Type,Int64Type, $general },
+                      { Int64Type, Int64Type, Int64Type, $general },
+                      { Int64Type, Float32Type, DecimalType , $general},
+                      { Int64Type, Float64Type, DecimalType, $general },
+                      { Float32Type, Int16Type, Float32Type, $general },
+                      { Float32Type, Int32Type, Float64Type, $general },
+                      { Float32Type, Int64Type, DecimalType , $general},
+                      { Float32Type, Float32Type, Float32Type, $general },
+                      { Float32Type, Float64Type, Float64Type, $general },
+                      { Float64Type, Int16Type, Float64Type, $general },
+                      { Float64Type, Int32Type, Float64Type, $general },
+                      { Float64Type, Int64Type, DecimalType, $general },
+                      { Float64Type, Float32Type, Float64Type, $general },
+                      { Float64Type, Float64Type, Float64Type, $general },
+                      { DecimalType, Int16Type, DecimalType, $general },
+                      { DecimalType, Int32Type, DecimalType, $general },
+                      { DecimalType, Int64Type, DecimalType, $general },
+                      { DecimalType, Float32Type, DecimalType, $general },
+                      { DecimalType, Float64Type, DecimalType, $general },
+                      { Int16Type, DecimalType, DecimalType, $general },
+                      { Int32Type, DecimalType, DecimalType, $general },
+                      { Int64Type, DecimalType, DecimalType, $general },
+                      { DecimalType, DecimalType, DecimalType, $general },
+                      { Float32Type, DecimalType, DecimalType, $general },
+                      { Float64Type, DecimalType, DecimalType, $general },
+                      { TimestampType, TimestampType, TimestampType, $general },
+                      { DateType, DateType, Int32Type, $general },
+                      { BoolType, BoolType, BoolType, $general }
                 }
             }
         }
@@ -281,28 +269,22 @@ pub fn new_binary_expr(
 ) -> BoxedExpression {
     match expr_type {
         Type::Equal => {
-            gen_binary_expr_cmp! {comparison_impl, prim_eq, prim_eq, deci_f_eq, deci_eq, str_eq,
-            total_order_eq, l, r, ret}
+            gen_binary_expr_cmp! {comparison_impl, total_order_eq, str_eq, l, r, ret}
         }
         Type::NotEqual => {
-            gen_binary_expr_cmp! {comparison_impl, prim_neq, prim_neq, deci_f_neq, deci_neq, str_ne,
-            total_order_ne, l, r, ret}
+            gen_binary_expr_cmp! {comparison_impl, total_order_ne, str_ne, l, r, ret}
         }
         Type::LessThan => {
-            gen_binary_expr_cmp! {comparison_impl, prim_lt, prim_lt, deci_f_lt, deci_lt, str_lt,
-            total_order_lt, l, r, ret}
+            gen_binary_expr_cmp! {comparison_impl, total_order_lt, str_lt, l, r, ret}
         }
         Type::GreaterThan => {
-            gen_binary_expr_cmp! {comparison_impl, prim_gt, prim_gt, deci_f_gt, deci_gt, str_gt,
-            total_order_gt, l, r, ret}
+            gen_binary_expr_cmp! {comparison_impl, total_order_gt, str_gt, l, r, ret}
         }
         Type::GreaterThanOrEqual => {
-            gen_binary_expr_cmp! {comparison_impl, prim_geq, prim_geq, deci_f_geq, deci_geq,  str_ge,
-            total_order_ge, l, r, ret}
+            gen_binary_expr_cmp! {comparison_impl, total_order_ge, str_ge, l, r, ret}
         }
         Type::LessThanOrEqual => {
-            gen_binary_expr_cmp! {comparison_impl, prim_leq, prim_leq, deci_f_leq, deci_leq,  str_le,
-            total_order_le, l, r, ret}
+            gen_binary_expr_cmp! {comparison_impl, total_order_le, str_le, l, r, ret}
         }
         Type::Add => {
             gen_binary_expr_atm! {arithmetic_impl, int_add, float_add, deci_f_add, deci_add,

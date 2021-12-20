@@ -3,7 +3,7 @@ use std::str::FromStr;
 use chrono::{Datelike, NaiveDate, NaiveDateTime};
 use rust_decimal::Decimal;
 
-use crate::types::{IntervalUnit, OrderedF32};
+use crate::types::{IntervalUnit, OrderedF32, OrderedF64};
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::cast::{date_to_timestamp, UNIX_EPOCH_DAYS};
 use crate::vector_op::cmp::*;
@@ -117,30 +117,48 @@ fn test_arithmetic() {
 
 #[test]
 fn test_comparison() {
-    assert!(deci_eq::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 1).unwrap());
-    assert!(deci_f_eq::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 1.0).unwrap());
-    assert!(!deci_neq::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 1).unwrap());
-    assert!(!deci_f_neq::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 1.0).unwrap());
-    assert!(!deci_gt::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 2).unwrap());
-    assert!(!deci_f_gt::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 2.0).unwrap());
-    assert!(deci_leq::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 2).unwrap());
-    assert!(deci_f_leq::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 2.1).unwrap());
-    assert!(!deci_geq::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 2).unwrap());
-    assert!(!deci_f_geq::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 2.1).unwrap());
-    assert!(deci_lt::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 2).unwrap());
-    assert!(deci_f_lt::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 2.1).unwrap());
-    assert!(prim_eq::<OrderedF32, i32, OrderedF32>(1.0.into(), 1).unwrap());
-    assert!(!prim_neq::<OrderedF32, i32, OrderedF32>(1.0.into(), 1).unwrap());
-    assert!(!prim_lt::<OrderedF32, i32, OrderedF32>(1.0.into(), 1).unwrap());
-    assert!(prim_leq::<OrderedF32, i32, OrderedF32>(1.0.into(), 1).unwrap());
-    assert!(!prim_gt::<OrderedF32, i32, OrderedF32>(1.0.into(), 1).unwrap());
-    assert!(prim_geq::<OrderedF32, i32, OrderedF32>(1.0.into(), 1).unwrap());
-    assert!(prim_eq::<i64, i32, i64>(1i64, 1).unwrap());
-    assert!(!prim_neq::<i64, i32, i64>(1i64, 1).unwrap());
-    assert!(!prim_lt::<i64, i32, i64>(1i64, 1).unwrap());
-    assert!(prim_leq::<i64, i32, i64>(1i64, 1).unwrap());
-    assert!(!prim_gt::<i64, i32, i64>(1i64, 1).unwrap());
-    assert!(prim_geq::<i64, i32, i64>(1i64, 1).unwrap());
+    assert!(total_order_eq::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 1).unwrap());
+    assert!(
+        total_order_eq::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 1.0).unwrap()
+    );
+    assert!(
+        !total_order_ne::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 1).unwrap()
+    );
+    assert!(
+        !total_order_ne::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 1.0).unwrap()
+    );
+    assert!(
+        !total_order_gt::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 2).unwrap()
+    );
+    assert!(
+        !total_order_gt::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 2.0).unwrap()
+    );
+    assert!(total_order_le::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 2).unwrap());
+    assert!(
+        total_order_le::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 2.1).unwrap()
+    );
+    assert!(
+        !total_order_ge::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 2).unwrap()
+    );
+    assert!(
+        !total_order_ge::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 2.1).unwrap()
+    );
+    assert!(total_order_lt::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 2).unwrap());
+    assert!(
+        total_order_lt::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 2.1).unwrap()
+    );
+    assert!(total_order_eq::<OrderedF32, i32, OrderedF64>(1.0.into(), 1).unwrap());
+    assert!(!total_order_ne::<OrderedF32, i32, OrderedF64>(1.0.into(), 1).unwrap());
+    assert!(!total_order_lt::<OrderedF32, i32, OrderedF64>(1.0.into(), 1).unwrap());
+    assert!(total_order_le::<OrderedF32, i32, OrderedF64>(1.0.into(), 1).unwrap());
+    assert!(!total_order_gt::<OrderedF32, i32, OrderedF64>(1.0.into(), 1).unwrap());
+    assert!(total_order_ge::<OrderedF32, i32, OrderedF64>(1.0.into(), 1).unwrap());
+    assert!(total_order_eq::<i64, i32, i64>(1i64, 1).unwrap());
+    assert!(!total_order_ne::<i64, i32, i64>(1i64, 1).unwrap());
+    assert!(!total_order_lt::<i64, i32, i64>(1i64, 1).unwrap());
+    assert!(total_order_le::<i64, i32, i64>(1i64, 1).unwrap());
+    assert!(!total_order_gt::<i64, i32, i64>(1i64, 1).unwrap());
+    assert!(total_order_ge::<i64, i32, i64>(1i64, 1).unwrap());
 }
 
 #[test]
