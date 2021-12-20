@@ -11,3 +11,4 @@ log = "0.4"
 log4rs = "1"
 risingwave_common = { path = "../common" }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
+tokio-postgres = "0.7.5"

@@ -2,6 +2,7 @@
 pub enum PgMessage {
     Ssl(SslMessage),
     Startup(StartupMessage),
+    Query(QueryMessage),
     Terminate(TerminateMessage),
 }
 
@@ -30,6 +31,24 @@ impl StartupMessage {
 impl Default for StartupMessage {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Query message contains the string sql.
+pub struct QueryMessage {
+    sql: String,
+}
+
+impl QueryMessage {
+    pub fn new(buf: &[u8]) -> Self {
+        match std::str::from_utf8(buf) {
+            Ok(v) => Self { sql: v.to_string() },
+            Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
+        }
+    }
+
+    pub fn get_sql(&self) -> &str {
+        &self.sql
     }
 }
 
