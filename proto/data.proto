@@ -70,17 +70,6 @@ message ColumnCommon {
   Buffer null_bitmap = 2;
 }
 
-// FixedWidthColumn is a subtype of column where types are fixed-width,
-// including:
-//  - Numeric types, INT/FLOAT, etc.
-//  - Time types, timestamp/time/interval.
-//  - CHAR.
-message FixedWidthColumn {
-  ColumnCommon common_parts = 1;
-  Buffer values = 2;
-  uint64 value_width = 3;
-}
-
 // New column proto def to replace fixed width column. This def
 // aims to include all column type. Currently it do not support struct/array
 // but capable of extending in future by add other fields.
