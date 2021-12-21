@@ -8,6 +8,8 @@ import com.risingwave.pgwire.database.PgResult;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.pgwire.types.PgValue;
 import com.risingwave.proto.computenode.GetDataResponse;
+import com.risingwave.proto.data.Array;
+import com.risingwave.proto.data.ArrayType;
 import com.risingwave.proto.data.Buffer;
 import com.risingwave.proto.data.Column;
 import com.risingwave.proto.data.DataChunk;
@@ -69,24 +71,29 @@ class BatchDataChunkResultTest {
                               Column.newBuilder()
                                   .setColumnType(
                                       DataType.newBuilder().setTypeName(DataType.TypeName.INT32))
-                                  .addValues(
-                                      Buffer.newBuilder()
+                                  .setArray(
+                                      Array.newBuilder().addValues(Buffer.newBuilder()
                                           .setBody(
                                               ByteString.copyFrom(
                                                   ByteBuffer.allocate(4).putInt(i).array())))
+                                          .setArrayType(ArrayType.INT32)
+                                          .build())
                                   .build()))
                       .addColumns(
                           Any.pack(
                               Column.newBuilder()
                                   .setColumnType(
                                       DataType.newBuilder().setTypeName(DataType.TypeName.BOOLEAN))
-                                  .addValues(
-                                      Buffer.newBuilder()
-                                          .setBody(
-                                              ByteString.copyFrom(
-                                                  ByteBuffer.allocate(2)
-                                                      .put(Byte.parseByte(i % 2 + "", 2))
-                                                      .array())))
+                                  .setArray(
+                                      Array.newBuilder()
+                                          .addValues(Buffer.newBuilder()
+                                              .setBody(
+                                                  ByteString.copyFrom(
+                                                      ByteBuffer.allocate(2)
+                                                          .put(Byte.parseByte(i % 2 + "", 2))
+                                                          .array())))
+                                          .setArrayType(ArrayType.BOOL)
+                                          .build())
                                   .build()))
                       .setCardinality(1))
               .build();

@@ -25,7 +25,7 @@ pub use interval_array::{IntervalArray, IntervalArrayBuilder};
 pub use iterator::ArrayIterator;
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
-use risingwave_pb::data::Buffer;
+use risingwave_pb::data::Array as ProstArray;
 pub use stream_chunk::{Op, StreamChunk};
 pub use utf8_array::*;
 
@@ -34,11 +34,7 @@ use crate::buffer::Bitmap;
 pub use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 pub use crate::error::RwError;
-use crate::types::{
-    BoolType, DataTypeKind, DateType, Datum, DatumRef, DecimalType, Float32Type, Float64Type,
-    Int16Type, Int32Type, Int64Type, IntervalType, OrderedF32, OrderedF64, Scalar, ScalarImpl,
-    ScalarRef, ScalarRefImpl, StringType, TimestampType,
-};
+use crate::types::*;
 
 pub type I64Array = PrimitiveArray<i64>;
 pub type I32Array = PrimitiveArray<i32>;
@@ -138,7 +134,8 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     /// Get iterator of current array.
     fn iter(&self) -> Self::Iter<'_>;
 
-    fn to_protobuf(&self) -> Result<Vec<Buffer>>;
+    /// Serialize to protobuf
+    fn to_protobuf(&self) -> Result<ProstArray>;
 
     /// Get the null `Bitmap` from `Array`.
     fn null_bitmap(&self) -> &Bitmap;
@@ -397,7 +394,7 @@ macro_rules! impl_array {
         }
       }
 
-      pub fn to_protobuf(&self) -> Result<Vec<Buffer>> {
+      pub fn to_protobuf(&self) -> Result<ProstArray> {
         match self {
           $( Self::$variant_name(inner) => inner.to_protobuf(), )*
         }

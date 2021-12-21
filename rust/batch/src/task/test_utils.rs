@@ -486,7 +486,7 @@ impl ResultChecker {
 
                 // TODO: Write an iterator for FixedWidthColumn
                 let value_width = Self::get_value_width(&col);
-                let column_bytes = col.get_values()[0].get_body();
+                let column_bytes = col.get_array().get_values()[0].get_body();
                 for j in 0..self.cardinality() {
                     let actual_value = &column_bytes[j * value_width..(j + 1) * value_width];
                     let expected_value = self.columns[i][j].get_body();
@@ -517,7 +517,7 @@ impl ResultChecker {
 
     // We assume that currently no column is nullable.
     fn check_column_null_bitmap(&self, col: &Column) {
-        let null_bytes = col.get_null_bitmap().get_body();
+        let null_bytes = col.get_array().get_null_bitmap().get_body();
         assert_eq!(null_bytes.len(), self.cardinality());
         for b in null_bytes {
             // 0 for null. 1 for non-null.

@@ -3,7 +3,7 @@ use std::iter;
 use std::mem::size_of;
 
 use risingwave_pb::data::buffer::CompressionType;
-use risingwave_pb::data::Buffer;
+use risingwave_pb::data::{Array as ProstArray, ArrayType, Buffer};
 
 use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
 use crate::buffer::{Bitmap, BitmapBuilder};
@@ -40,7 +40,7 @@ impl Array for Utf8Array {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> Result<Vec<Buffer>> {
+    fn to_protobuf(&self) -> Result<ProstArray> {
         let offset_buffer = self
             .offset
             .iter()
@@ -64,13 +64,22 @@ impl Array for Utf8Array {
 
         let data_buffer = self.data.clone();
 
-        Ok(vec![offset_buffer, data_buffer]
-            .into_iter()
-            .map(|buffer| Buffer {
+        let values = vec![
+            Buffer {
                 compression: CompressionType::None as i32,
-                body: buffer,
-            })
-            .collect::<Vec<Buffer>>())
+                body: offset_buffer,
+            },
+            Buffer {
+                compression: CompressionType::None as i32,
+                body: data_buffer,
+            },
+        ];
+        let null_bitmap = self.null_bitmap().to_protobuf()?;
+        Ok(ProstArray {
+            null_bitmap: Some(null_bitmap),
+            values,
+            array_type: ArrayType::Utf8 as i32,
+        })
     }
 
     fn null_bitmap(&self) -> &Bitmap {
@@ -318,7 +327,7 @@ mod tests {
         let array = result_array.unwrap();
         let result_buffers = array.to_protobuf();
         assert!(result_buffers.is_ok());
-        let buffers = result_buffers.unwrap();
+        let buffers = result_buffers.unwrap().values;
         assert!(buffers.len() >= 2);
     }
 

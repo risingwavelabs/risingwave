@@ -65,13 +65,30 @@ message DataType {
   IntervalType interval_type = 5;
 }
 
+enum ArrayType {
+  INT16 = 0;
+  INT32 = 1;
+  INT64 = 2;
+  FLOAT32 = 3;
+  FLOAT64 = 4;
+  UTF8 = 5;
+  BOOL = 6;
+  DECIMAL = 7;
+  INTERVAL = 8;
+}
+
+message Array {
+  ArrayType array_type = 1;
+  Buffer null_bitmap = 2;
+  repeated Buffer values = 3;
+}
+
 // New column proto def to replace fixed width column. This def
 // aims to include all column type. Currently it do not support struct/array
 // but capable of extending in future by add other fields.
 message Column {
   DataType column_type = 1;
-  Buffer null_bitmap = 2;
-  repeated Buffer values = 3;
+  Array array = 2;
 }
 
 message DataChunk {

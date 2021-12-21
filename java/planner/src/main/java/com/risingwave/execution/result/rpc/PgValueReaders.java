@@ -18,6 +18,9 @@ import java.io.InputStream;
 import java.util.List;
 import javax.annotation.Nullable;
 
+/**
+ * Postgres value readers
+ */
 public class PgValueReaders {
   public static PgValueReader create(Any column) {
     try {
@@ -54,14 +57,14 @@ public class PgValueReaders {
 
   private static PgValueReader createStringReader(Column column) {
     BooleanBufferReader nullBitmap = getNullBitmap(column);
-    List<Buffer> bufferList = column.getValuesList();
+    List<Buffer> bufferList = column.getArray().getValuesList();
 
     if (bufferList.size() < 2) {
       throw new PgException(PgErrorCode.INTERNAL_ERROR, "Column buffer illegal");
     }
 
-    InputStream offsetStream = BufferReaders.decode(column.getValues(0));
-    InputStream dataStream = BufferReaders.decode(column.getValues(1));
+    InputStream offsetStream = BufferReaders.decode(column.getArray().getValues(0));
+    InputStream dataStream = BufferReaders.decode(column.getArray().getValues(1));
 
     switch (column.getColumnType().getTypeName()) {
       case CHAR:
@@ -83,7 +86,7 @@ public class PgValueReaders {
     BooleanBufferReader nullBitmap = getNullBitmap(column);
     // FIXME: currently the length of buffer size is 1 so directly get from it.
     //  Should fix here when handle other types like char/varchar.
-    InputStream valuesStream = BufferReaders.decode(column.getValues(0));
+    InputStream valuesStream = BufferReaders.decode(column.getArray().getValues(0));
 
     switch (column.getColumnType().getTypeName()) {
       case INT16:
@@ -126,8 +129,8 @@ public class PgValueReaders {
   @Nullable
   protected static BooleanBufferReader getNullBitmap(Column columnCommon) {
     BooleanBufferReader nullBitmap = null;
-    if (columnCommon.hasNullBitmap()) {
-      nullBitmap = new BooleanBufferReader(BufferReaders.decode(columnCommon.getNullBitmap()));
+    if (columnCommon.getArray().hasNullBitmap()) {
+      nullBitmap = new BooleanBufferReader(BufferReaders.decode(columnCommon.getArray().getNullBitmap()));
     }
 
     return nullBitmap;

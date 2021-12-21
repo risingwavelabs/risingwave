@@ -3,7 +3,7 @@ use std::hash::{Hash, Hasher};
 use std::mem::size_of;
 
 use risingwave_pb::data::buffer::CompressionType;
-use risingwave_pb::data::Buffer;
+use risingwave_pb::data::{Array as ProstArray, ArrayType, Buffer};
 
 use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
 use crate::array::ArrayImpl;
@@ -27,6 +27,9 @@ where
 
   /// A helper to convert `ArrayImpl` to self.
   fn try_into_array_ref(arr: &ArrayImpl) -> Option<&PrimitiveArray<Self>>;
+
+  /// Returns array type of the primitive array
+  fn array_type() -> ArrayType;
 }
 
 macro_rules! impl_primitive_array_item_type {
@@ -49,6 +52,10 @@ macro_rules! impl_primitive_array_item_type {
             ArrayImpl::$variant_type(inner) => Some(inner),
             _ => None,
           }
+        }
+
+        fn array_type() -> ArrayType {
+          ArrayType::$variant_type
         }
       }
     )*
@@ -96,20 +103,23 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> Result<Vec<Buffer>> {
-        let values = {
-            let mut output_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<T>());
+    fn to_protobuf(&self) -> Result<ProstArray> {
+        let mut output_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<T>());
 
-            for v in self.iter() {
-                v.map(|node| node.to_protobuf(&mut output_buffer));
-            }
+        for v in self.iter() {
+            v.map(|node| node.to_protobuf(&mut output_buffer));
+        }
 
-            Buffer {
-                compression: CompressionType::None as i32,
-                body: output_buffer,
-            }
+        let buffer = Buffer {
+            compression: CompressionType::None as i32,
+            body: output_buffer,
         };
-        Ok(vec![values])
+        let null_bitmap = self.null_bitmap().to_protobuf()?;
+        Ok(ProstArray {
+            null_bitmap: Some(null_bitmap),
+            values: vec![buffer],
+            array_type: T::array_type() as i32,
+        })
     }
 
     fn null_bitmap(&self) -> &Bitmap {

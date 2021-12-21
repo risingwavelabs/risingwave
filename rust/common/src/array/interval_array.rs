@@ -1,6 +1,6 @@
 use std::hash::Hash;
 
-use risingwave_pb::data::Buffer;
+use risingwave_pb::data::Array as ProstArray;
 
 use super::NULL_VAL_FOR_HASH;
 use crate::array::{Array, ArrayBuilder, ArrayIterator};
@@ -61,7 +61,7 @@ impl Array for IntervalArray {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> Result<Vec<Buffer>> {
+    fn to_protobuf(&self) -> Result<ProstArray> {
         unimplemented!("To protobuf of Interval Array is not implemented for now")
     }
 

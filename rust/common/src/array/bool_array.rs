@@ -2,7 +2,7 @@ use std::hash::{Hash, Hasher};
 use std::mem::size_of;
 
 use risingwave_pb::data::buffer::CompressionType;
-use risingwave_pb::data::Buffer;
+use risingwave_pb::data::{Array as ProstArray, ArrayType, Buffer};
 
 use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
 use crate::buffer::{Bitmap, BitmapBuilder};
@@ -46,21 +46,24 @@ impl Array for BoolArray {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> Result<Vec<Buffer>> {
-        let values = {
-            let mut output_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<bool>());
+    fn to_protobuf(&self) -> Result<ProstArray> {
+        let mut output_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<bool>());
 
-            for v in self.iter().flatten() {
-                let bool_numeric = if v { 1 } else { 0 } as u8;
-                output_buffer.push(bool_numeric);
-            }
+        for v in self.iter().flatten() {
+            let bool_numeric = if v { 1 } else { 0 } as u8;
+            output_buffer.push(bool_numeric);
+        }
 
-            Buffer {
-                compression: CompressionType::None as i32,
-                body: output_buffer,
-            }
+        let values = Buffer {
+            compression: CompressionType::None as i32,
+            body: output_buffer,
         };
-        Ok(vec![values])
+        let null_bitmap = self.null_bitmap().to_protobuf()?;
+        Ok(ProstArray {
+            null_bitmap: Some(null_bitmap),
+            values: vec![values],
+            array_type: ArrayType::Bool as i32,
+        })
     }
 
     fn null_bitmap(&self) -> &Bitmap {

@@ -1,10 +1,7 @@
 use prost_types::Any as ProstAny;
-use risingwave_pb::data::data_type::TypeName;
-use risingwave_pb::data::Column as ProstColumn;
+use risingwave_pb::data::{ArrayType, Column as ProstColumn};
 
-use crate::array::column_proto_readers::{
-    read_bool_column, read_numeric_column, read_string_column,
-};
+use crate::array::column_proto_readers::{read_bool_array, read_numeric_array, read_string_array};
 use crate::array::value_reader::{
     DecimalValueReader, F32ValueReader, F64ValueReader, I16ValueReader, I32ValueReader,
     I64ValueReader, Utf8ValueReader,
@@ -29,45 +26,37 @@ impl Column {
     }
 
     pub fn to_protobuf(&self) -> Result<ProstAny> {
-        let mut column = ProstColumn {
+        let array = self.array.to_protobuf()?;
+        let column = ProstColumn {
             column_type: Some(self.data_type.to_protobuf()?),
-            null_bitmap: Some(self.array.null_bitmap().to_protobuf()?),
-            ..Default::default()
+            array: Some(array),
         };
-        let values = self.array.to_protobuf()?;
-        let values_ref = &mut column.values;
-        for (_idx, buf) in values.into_iter().enumerate() {
-            values_ref.push(buf);
-        }
-
         Ok(pack_to_any(&column))
     }
 
     pub fn from_protobuf(col: &ProstColumn, cardinality: usize) -> Result<Self> {
-        let type_name = col.get_column_type().get_type_name();
-        let array = match type_name {
-            TypeName::Int16 => read_numeric_column::<i16, I16ValueReader>(col, cardinality)?,
-            TypeName::Int32 | TypeName::Date => {
-                read_numeric_column::<i32, I32ValueReader>(col, cardinality)?
+        let array = col.get_array();
+        let array = match array.array_type() {
+            ArrayType::Int16 => read_numeric_array::<i16, I16ValueReader>(array, cardinality)?,
+            ArrayType::Int32 => read_numeric_array::<i32, I32ValueReader>(array, cardinality)?,
+            ArrayType::Int64 => read_numeric_array::<i64, I64ValueReader>(array, cardinality)?,
+            ArrayType::Float32 => {
+                read_numeric_array::<OrderedF32, F32ValueReader>(array, cardinality)?
             }
-            TypeName::Int64 | TypeName::Timestamp | TypeName::Time | TypeName::Timestampz => {
-                read_numeric_column::<i64, I64ValueReader>(col, cardinality)?
+            ArrayType::Float64 => {
+                read_numeric_array::<OrderedF64, F64ValueReader>(array, cardinality)?
             }
-            TypeName::Float => read_numeric_column::<OrderedF32, F32ValueReader>(col, cardinality)?,
-            TypeName::Double => {
-                read_numeric_column::<OrderedF64, F64ValueReader>(col, cardinality)?
+            ArrayType::Bool => read_bool_array(array, cardinality)?,
+            ArrayType::Utf8 => {
+                read_string_array::<Utf8ArrayBuilder, Utf8ValueReader>(array, cardinality)?
             }
-            TypeName::Boolean => read_bool_column(col, cardinality)?,
-            TypeName::Varchar | TypeName::Char => {
-                read_string_column::<Utf8ArrayBuilder, Utf8ValueReader>(col, cardinality)?
-            }
-            TypeName::Decimal => {
-                read_string_column::<DecimalArrayBuilder, DecimalValueReader>(col, cardinality)?
+            ArrayType::Decimal => {
+                read_string_array::<DecimalArrayBuilder, DecimalValueReader>(array, cardinality)?
             }
             _ => {
                 return Err(RwError::from(InternalError(format!(
-                    "unsupported conversion from Column to Array: {:?}",
-                    type_name
+                    "unsupported array type: {:?}",
+                    array.array_type()
                 ))))
             }
         };
@@ -95,6 +84,8 @@ impl Column {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+
+    use risingwave_pb::data::data_type::TypeName;
 
     use super::*;
     use crate::array::{

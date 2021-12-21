@@ -2,7 +2,7 @@ use std::io::{Cursor, Read};
 use std::sync::Arc;
 
 use byteorder::{BigEndian, ReadBytesExt};
-use risingwave_pb::data::Column as ProstColumn;
+use risingwave_pb::data::Array as ProstArray;
 
 use crate::array::value_reader::{PrimitiveValueReader, VarSizedValueReader};
 use crate::array::{
@@ -15,24 +15,24 @@ use crate::error::Result;
 // TODO: Use techniques like apache arrow flight RPC to eliminate deserialization.
 // https://arrow.apache.org/docs/format/Flight.html
 
-pub fn read_numeric_column<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>>(
-    col: &ProstColumn,
+pub fn read_numeric_array<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>>(
+    array: &ProstArray,
     cardinality: usize,
 ) -> Result<ArrayRef> {
     ensure!(
-        col.get_values().len() == 1,
-        "Must have only 1 buffer in a numeric column"
+        array.get_values().len() == 1,
+        "Must have only 1 buffer in a numeric array"
     );
 
-    let buf = col.get_values()[0].get_body().as_slice();
+    let buf = array.get_values()[0].get_body().as_slice();
     let value_size = std::mem::size_of::<T>();
     ensure!(
         buf.len() % value_size == 0,
-        "Unexpected memory layout of numeric column"
+        "Unexpected memory layout of numeric array"
     );
 
     let mut builder = PrimitiveArrayBuilder::<T>::new(cardinality)?;
-    let bitmap: Bitmap = (col.get_null_bitmap()).try_into()?;
+    let bitmap: Bitmap = (array.get_null_bitmap()).try_into()?;
     let mut cursor = Cursor::new(buf);
     for not_null in bitmap.iter() {
         if not_null {
@@ -46,16 +46,16 @@ pub fn read_numeric_column<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>
     Ok(Arc::new(arr.into()))
 }
 
-pub fn read_bool_column(col: &ProstColumn, cardinality: usize) -> Result<ArrayRef> {
+pub fn read_bool_array(array: &ProstArray, cardinality: usize) -> Result<ArrayRef> {
     ensure!(
-        col.get_values().len() == 1,
-        "Must have only 1 buffer in a bool column"
+        array.get_values().len() == 1,
+        "Must have only 1 buffer in a bool array"
     );
 
-    let buf = col.get_values()[0].get_body().as_slice();
+    let buf = array.get_values()[0].get_body().as_slice();
 
     let mut builder = BoolArrayBuilder::new(cardinality)?;
-    let bitmap: Bitmap = col.get_null_bitmap().try_into()?;
+    let bitmap: Bitmap = array.get_null_bitmap().try_into()?;
     let mut cursor = Cursor::new(buf);
     for not_null in bitmap.iter() {
         if not_null {
@@ -78,19 +78,19 @@ fn read_offset(offset_cursor: &mut Cursor<&[u8]>) -> Result<i64> {
     Ok(offset)
 }
 
-pub fn read_string_column<B: ArrayBuilder, R: VarSizedValueReader<B>>(
-    col: &ProstColumn,
+pub fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
+    array: &ProstArray,
     cardinality: usize,
 ) -> Result<ArrayRef> {
     ensure!(
-        col.get_values().len() == 2,
-        "Must have exactly 2 buffers in a string column"
+        array.get_values().len() == 2,
+        "Must have exactly 2 buffers in a string array"
     );
-    let offset_buff = col.get_values()[0].get_body().as_slice();
-    let data_buf = col.get_values()[1].get_body().as_slice();
+    let offset_buff = array.get_values()[0].get_body().as_slice();
+    let data_buf = array.get_values()[1].get_body().as_slice();
 
     let mut builder = B::new(cardinality)?;
-    let bitmap: Bitmap = (col.get_null_bitmap()).try_into()?;
+    let bitmap: Bitmap = (array.get_null_bitmap()).try_into()?;
     let mut offset_cursor = Cursor::new(offset_buff);
     let mut data_cursor = Cursor::new(data_buf);
     let mut prev_offset: i64 = -1;
