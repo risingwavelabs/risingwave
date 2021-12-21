@@ -25,6 +25,7 @@ go/bin/
 **/.idea
 **/.gradle
 java/**/build
+java/**/bin
 
 # Rust
 rust/**/target
