@@ -29,10 +29,9 @@ impl<S: StateStore> ManagedMViewState<S> {
         orderings: Vec<OrderType>,
         storage: S,
     ) -> Self {
-        let order_pairs = orderings
-            .into_iter()
-            .zip(pk_columns.clone().into_iter())
-            .collect::<Vec<_>>();
+        // We use `0..` because `mview_sink` would assemble pk for us.
+        // Therefore, we don't need the original pk indices any more.
+        let order_pairs = orderings.into_iter().zip(0..).collect::<Vec<_>>();
         Self {
             prefix,
             schema,

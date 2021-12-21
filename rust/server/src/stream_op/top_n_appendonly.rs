@@ -192,7 +192,7 @@ impl<S: StateStore> TopNExecutor for AppendOnlyTopNExecutor<S> {
             if self.managed_lower_state.total_count() < self.offset {
                 // `elem` is in the range of `[0, offset)`,
                 // we ignored it for now as it is not in the result set.
-                self.managed_lower_state.insert((pk_bytes, row)).await;
+                self.managed_lower_state.insert(pk_bytes, row).await;
                 continue;
             }
 
@@ -209,7 +209,10 @@ impl<S: StateStore> TopNExecutor for AppendOnlyTopNExecutor<S> {
 
             if self.managed_higher_state.total_count() < num_need_to_keep {
                 self.managed_higher_state
-                    .insert(element_to_compare_with_upper.clone())
+                    .insert(
+                        element_to_compare_with_upper.0,
+                        element_to_compare_with_upper.1.clone(),
+                    )
                     .await;
                 new_ops.push(Op::Insert);
                 new_rows.push(element_to_compare_with_upper.1);
@@ -223,7 +226,10 @@ impl<S: StateStore> TopNExecutor for AppendOnlyTopNExecutor<S> {
                 new_ops.push(Op::Insert);
                 new_rows.push(element_to_compare_with_upper.1.clone());
                 self.managed_higher_state
-                    .insert(element_to_compare_with_upper)
+                    .insert(
+                        element_to_compare_with_upper.0,
+                        element_to_compare_with_upper.1,
+                    )
                     .await;
             }
             // The "else" case can only be that `element_to_compare_with_upper` is larger than
@@ -276,17 +282,26 @@ mod tests {
     async fn test_append_only_top_n_executor() {
         let chunk1 = StreamChunk {
             ops: vec![Op::Insert; 6],
-            columns: vec![column_nonnull! { I64Array, Int64Type, [1, 2, 3, 10, 9, 8] }],
+            columns: vec![
+                column_nonnull! { I64Array, Int64Type, [1, 2, 3, 10, 9, 8] },
+                column_nonnull! { I64Array, Int64Type, [0, 1, 2, 3, 4, 5] },
+            ],
             visibility: None,
         };
         let chunk2 = StreamChunk {
             ops: vec![Op::Insert; 4],
-            columns: vec![column_nonnull! { I64Array, Int64Type, [7, 3, 1, 9] }],
+            columns: vec![
+                column_nonnull! { I64Array, Int64Type, [7, 3, 1, 9] },
+                column_nonnull! { I64Array, Int64Type, [6, 7, 8, 9, 10, 11] },
+            ],
             visibility: None,
         };
         let chunk3 = StreamChunk {
             ops: vec![Op::Insert; 4],
-            columns: vec![column_nonnull! { I64Array, Int64Type, [1, 1, 2, 3] }],
+            columns: vec![
+                column_nonnull! { I64Array, Int64Type, [1, 1, 2, 3] },
+                column_nonnull! { I64Array, Int64Type, [12, 13, 14, 15] },
+            ],
             visibility: None,
         };
         let schema = Schema {
@@ -294,7 +309,7 @@ mod tests {
                 data_type: Int64Type::create(false),
             }],
         };
-        let order_types = vec![OrderType::Ascending];
+        let order_types = vec![OrderType::Ascending, OrderType::Ascending];
         let source = Box::new(MockSource::with_messages(
             schema,
             PkIndices::new(),
@@ -313,12 +328,12 @@ mod tests {
             ],
         ));
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
+        let keyspace = Keyspace::new(store.clone(), b"top_n_appendonly".to_vec());
         let mut top_n_executor = AppendOnlyTopNExecutor::new(
             source as Box<dyn Executor>,
             order_types,
             (3, Some(4)),
-            vec![0],
+            vec![0, 1],
             keyspace,
             Some(2),
             (0, 0),

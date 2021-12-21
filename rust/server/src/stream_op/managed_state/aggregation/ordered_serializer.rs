@@ -50,10 +50,10 @@ impl OrderedRowsSerializer {
     pub fn order_based_scehmaed_serialize(&self, data: &[&Row], append_to: &mut Vec<Vec<u8>>) {
         for row in data {
             let mut row_bytes = vec![];
-            for (datum, &(order, _)) in row.0.iter().zip(self.order_pairs.iter()) {
+            for (order, pk_index) in &self.order_pairs {
                 let mut serializer = memcomparable::Serializer::new(vec![]);
-                serializer.set_reverse(order == OrderType::Descending);
-                serialize_datum_into(datum, &mut serializer).unwrap();
+                serializer.set_reverse(*order == OrderType::Descending);
+                serialize_datum_into(&row.0[*pk_index], &mut serializer).unwrap();
                 row_bytes.extend(serializer.into_inner());
             }
             append_to.push(row_bytes);
