@@ -81,9 +81,6 @@ public class StreamFragment {
         case SIMPLE:
           builder.addSimpleDispatcher();
           break;
-        case ROUND_ROBIN:
-          builder.addRoundRobinDispatcher();
-          break;
         case HASH:
           builder.addHashDispatcher(this.dispatcher.getDispatcherColumn());
           break;
@@ -125,10 +122,6 @@ public class StreamFragment {
 
     public void addSimpleDispatcher() {
       dispatcher = StreamDispatcher.createSimpleDispatcher();
-    }
-
-    public void addRoundRobinDispatcher() {
-      dispatcher = StreamDispatcher.createRoundRobinDispatcher();
     }
 
     public void addHashDispatcher(List<Integer> columns) {

@@ -29,10 +29,6 @@ public class StreamDispatcher {
     return new StreamDispatcher(DispatcherType.SIMPLE, Collections.emptyList());
   }
 
-  public static StreamDispatcher createRoundRobinDispatcher() {
-    return new StreamDispatcher(DispatcherType.ROUND_ROBIN, Collections.emptyList());
-  }
-
   public static StreamDispatcher createHashDispatcher(List<Integer> columns) {
     return new StreamDispatcher(DispatcherType.HASH, columns);
   }
@@ -48,7 +44,6 @@ public class StreamDispatcher {
   /** The enum of types of dispatchers. */
   public enum DispatcherType {
     SIMPLE("Dispatch data to the downstream actor, assuming there is only one downstream."),
-    ROUND_ROBIN("Dispatch data to multiple downstream actors by round robin strategy."),
     HASH("Dispatch data to multiple downstream actors by hash distribution on a certain column."),
     BROADCAST("Dispatch every data chunk to all downstream actors."),
     BLACK_HOLE("Do not dispatch data.");
@@ -65,9 +60,6 @@ public class StreamDispatcher {
     Dispatcher.DispatcherType type = Dispatcher.DispatcherType.SIMPLE;
     switch (this.dispatcherType) {
       case SIMPLE:
-        break;
-      case ROUND_ROBIN:
-        type = Dispatcher.DispatcherType.ROUND_ROBIN;
         break;
       case HASH:
         type = Dispatcher.DispatcherType.HASH;

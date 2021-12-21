@@ -78,7 +78,7 @@ async fn test_stream_proto() {
                     pk_indices: vec![],
                 }),
                 dispatcher: Some(Dispatcher {
-                    r#type: dispatcher::DispatcherType::RoundRobin as i32,
+                    r#type: dispatcher::DispatcherType::Hash as i32,
                     column_idx: 0,
                 }),
                 downstream_fragment_id: vec![3],
@@ -105,7 +105,7 @@ async fn test_stream_proto() {
                     pk_indices: vec![],
                 }),
                 dispatcher: Some(Dispatcher {
-                    r#type: dispatcher::DispatcherType::RoundRobin as i32,
+                    r#type: dispatcher::DispatcherType::Hash as i32,
                     column_idx: 0,
                 }),
                 downstream_fragment_id: vec![7, 11],
@@ -132,7 +132,7 @@ async fn test_stream_proto() {
                     pk_indices: vec![],
                 }),
                 dispatcher: Some(Dispatcher {
-                    r#type: dispatcher::DispatcherType::RoundRobin as i32,
+                    r#type: dispatcher::DispatcherType::Hash as i32,
                     column_idx: 0,
                 }),
                 downstream_fragment_id: vec![13],

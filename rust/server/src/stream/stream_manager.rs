@@ -288,13 +288,6 @@ impl StreamManagerCore {
 
         use stream_plan::dispatcher::DispatcherType::*;
         let dispatcher: Box<dyn StreamConsumer> = match dispatcher.get_type() {
-            RoundRobin => {
-                assert!(!outputs.is_empty());
-                Box::new(DispatchExecutor::new(
-                    input,
-                    RoundRobinDataDispatcher::new(outputs),
-                ))
-            }
             Hash => {
                 assert!(!outputs.is_empty());
                 Box::new(DispatchExecutor::new(

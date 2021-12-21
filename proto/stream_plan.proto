@@ -92,10 +92,9 @@ message StreamNode {
 message Dispatcher {
   enum DispatcherType {
     SIMPLE = 0;
-    ROUND_ROBIN = 1;
-    HASH = 2;
-    BROADCAST = 3;
-    BLACKHOLE = 4;
+    HASH = 1;
+    BROADCAST = 2;
+    BLACKHOLE = 3;
   }
   DispatcherType type = 1;
   int32 column_idx = 2;
