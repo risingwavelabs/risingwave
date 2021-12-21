@@ -98,31 +98,6 @@ pub trait DataDispatcher {
     fn get_outputs(&mut self) -> &mut [Box<dyn Output>];
 }
 
-pub struct BlackHoleDispatcher {}
-
-impl BlackHoleDispatcher {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
-impl Default for BlackHoleDispatcher {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[async_trait]
-impl DataDispatcher for BlackHoleDispatcher {
-    async fn dispatch_data(&mut self, _chunk: StreamChunk) -> Result<()> {
-        Ok(())
-    }
-
-    fn get_outputs(&mut self) -> &mut [Box<dyn Output>] {
-        &mut []
-    }
-}
-
 pub struct RoundRobinDataDispatcher {
     outputs: Vec<Box<dyn Output>>,
     cur: usize,

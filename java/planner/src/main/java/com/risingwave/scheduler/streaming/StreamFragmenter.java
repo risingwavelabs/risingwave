@@ -116,9 +116,9 @@ public class StreamFragmenter {
       // Root stage, generate an actor without dispatcher.
       StreamFragment rootFragment =
           newStreamFragment(currentStage.getRoot(), context.getStreamManager());
-      // Add blackhole dispatcher.
+      // Add a broadcast dispatcher without outputs.
       StreamFragment.FragmentBuilder builder = rootFragment.toBuilder();
-      builder.addBlackHoleDispatcher();
+      builder.addBroadcastDispatcher();
       // Add fragment. No dependency is needed.
       graphBuilder.addFragment(rootFragment.getId(), builder.build());
       currentStageFragmentList.add(rootFragment.getId());

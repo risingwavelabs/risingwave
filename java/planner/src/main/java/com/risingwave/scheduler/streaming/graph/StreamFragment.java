@@ -87,9 +87,6 @@ public class StreamFragment {
         case BROADCAST:
           builder.addBroadcastDispatcher();
           break;
-        case BLACK_HOLE:
-          builder.addBlackHoleDispatcher();
-          break;
         default:
           break;
       }
@@ -130,10 +127,6 @@ public class StreamFragment {
 
     public void addBroadcastDispatcher() {
       dispatcher = StreamDispatcher.createBroadcastDispatcher();
-    }
-
-    public void addBlackHoleDispatcher() {
-      dispatcher = StreamDispatcher.createBlackHoleDispatcher();
     }
 
     public void addUpstream(int upstreamStageId, int upstreamFragmentId) {

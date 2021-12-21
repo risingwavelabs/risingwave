@@ -154,6 +154,6 @@
     }
   },
   "dispatcher": {
-    "type": "BLACKHOLE"
+    "type": "BROADCAST"
   }
 }

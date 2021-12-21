@@ -37,16 +37,11 @@ public class StreamDispatcher {
     return new StreamDispatcher(DispatcherType.BROADCAST, Collections.emptyList());
   }
 
-  public static StreamDispatcher createBlackHoleDispatcher() {
-    return new StreamDispatcher(DispatcherType.BLACK_HOLE, Collections.emptyList());
-  }
-
   /** The enum of types of dispatchers. */
   public enum DispatcherType {
     SIMPLE("Dispatch data to the downstream actor, assuming there is only one downstream."),
     HASH("Dispatch data to multiple downstream actors by hash distribution on a certain column."),
-    BROADCAST("Dispatch every data chunk to all downstream actors."),
-    BLACK_HOLE("Do not dispatch data.");
+    BROADCAST("Dispatch every data chunk to all downstream actors.");
 
     private final String description;
 
@@ -67,9 +62,6 @@ public class StreamDispatcher {
         break;
       case BROADCAST:
         type = Dispatcher.DispatcherType.BROADCAST;
-        break;
-      case BLACK_HOLE:
-        type = Dispatcher.DispatcherType.BLACKHOLE;
         break;
       default:
         throw new PgException(PgErrorCode.PROTOCOL_VIOLATION, "No such dispatcher type.");

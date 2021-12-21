@@ -295,19 +295,15 @@ impl StreamManagerCore {
                     HashDataDispatcher::new(outputs, vec![dispatcher.get_column_idx() as usize]),
                 ))
             }
-            Broadcast => {
-                assert!(!outputs.is_empty());
-                Box::new(DispatchExecutor::new(
-                    input,
-                    BroadcastDispatcher::new(outputs),
-                ))
-            }
+            Broadcast => Box::new(DispatchExecutor::new(
+                input,
+                BroadcastDispatcher::new(outputs),
+            )),
             Simple => {
                 assert_eq!(outputs.len(), 1);
                 let output = outputs.into_iter().next().unwrap();
                 Box::new(DispatchExecutor::new(input, SimpleDispatcher::new(output)))
             }
-            Blackhole => Box::new(DispatchExecutor::new(input, BlackHoleDispatcher::new())),
         };
         Ok(dispatcher)
     }

@@ -94,7 +94,6 @@ message Dispatcher {
     SIMPLE = 0;
     HASH = 1;
     BROADCAST = 2;
-    BLACKHOLE = 3;
   }
   DispatcherType type = 1;
   int32 column_idx = 2;
