@@ -91,7 +91,7 @@ impl HummockStorage {
 
         for table in &self.version_manager.tables().unwrap() {
             // bloom filter tells us the key could possibly exist, go get it
-            if !table.surely_not_have(&key_with_ts(key.to_vec(), u64::MAX)) {
+            if !table.surely_not_have_user_key(key) {
                 let iter = Box::new(TableIterator::new(table.clone()));
                 table_iters.push(iter);
             }

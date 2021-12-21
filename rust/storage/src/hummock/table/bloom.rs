@@ -93,7 +93,7 @@ impl<'a> Bloom<'a> {
     ///     the hash;
     ///   - if the return value is false, then the table may or may not have the user key that has
     ///     the hash actually, a.k.a. we don't know the answer.
-    pub fn surely_not_have(&self, mut h: u32) -> bool {
+    pub fn surely_not_have_hash(&self, mut h: u32) -> bool {
         if self.k > 30 {
             // potential new encoding for short Bloom filters
             false
@@ -137,9 +137,9 @@ mod tests {
         let f = Bloom::new(&buf);
         assert_eq!(f.k, 6);
 
-        assert!(!f.surely_not_have(check_hash[0]));
-        assert!(!f.surely_not_have(check_hash[1]));
-        assert!(f.surely_not_have(check_hash[2]));
-        assert!(f.surely_not_have(check_hash[3]));
+        assert!(!f.surely_not_have_hash(check_hash[0]));
+        assert!(!f.surely_not_have_hash(check_hash[1]));
+        assert!(f.surely_not_have_hash(check_hash[2]));
+        assert!(f.surely_not_have_hash(check_hash[3]));
     }
 }

@@ -376,8 +376,8 @@ pub(super) mod tests {
 
         assert_eq!(table.has_bloom_filter(), with_blooms);
         for i in 0..key_count {
-            let key = builder_test_key_of(i);
-            assert!(!table.surely_not_have(key.as_slice()));
+            let full_key = builder_test_key_of(i);
+            assert!(!table.surely_not_have_user_key(user_key(full_key.as_slice())));
         }
     }
 
