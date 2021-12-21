@@ -405,4 +405,16 @@ RwBatchProject(v1=[$0])
         <Resource name="json" path="batch/basic/select_less_with_sort_by">
         </Resource>
     </TestCase>
+    <TestCase name="cast minus numeric">
+        <Resource name="sql">
+            <![CDATA[
+    select -1::int2::int4::int8, -2.1::float4::float8;
+]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwBatchValues(tuples=[[{ -1, -2.1 }]])
+]]>
+        </Resource>
+    </TestCase>
 </Root>

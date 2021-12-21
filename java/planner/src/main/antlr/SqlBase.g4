@@ -427,8 +427,9 @@ stringLiteralOrIdentifierOrQname
     ;
 
 numericLiteral
-    : decimalLiteral
-    | integerLiteral
+    : decimalLiteral                                #numeric
+    | integerLiteral                                #numeric
+    | sign=(PLUS | MINUS) numericLiteral            #signNumeric
     ;
 
 intervalLiteral

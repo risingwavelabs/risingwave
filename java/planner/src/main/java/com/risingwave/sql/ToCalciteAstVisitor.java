@@ -828,17 +828,22 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
       case "BOOL":
         return new SqlBasicTypeNameSpec(SqlTypeName.BOOLEAN, SqlParserPos.ZERO);
       case "SMALLINT":
+      case "INT2":
         return new SqlBasicTypeNameSpec(SqlTypeName.SMALLINT, SqlParserPos.ZERO);
       case "INT":
+      case "INT4":
       case "INTEGER":
         return new SqlBasicTypeNameSpec(SqlTypeName.INTEGER, SqlParserPos.ZERO);
       case "BIGINT":
+      case "INT8":
         return new SqlBasicTypeNameSpec(SqlTypeName.BIGINT, SqlParserPos.ZERO);
       case "FLOAT":
       case "REAL":
+      case "FLOAT4":
         return new SqlBasicTypeNameSpec(SqlTypeName.FLOAT, SqlParserPos.ZERO);
       case "DOUBLE":
       case "DOUBLE PRECISION":
+      case "FLOAT8":
         return new SqlBasicTypeNameSpec(SqlTypeName.DOUBLE, SqlParserPos.ZERO);
       case "DATE":
         return new SqlBasicTypeNameSpec(SqlTypeName.DATE, SqlParserPos.ZERO);

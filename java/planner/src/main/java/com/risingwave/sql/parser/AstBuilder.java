@@ -1792,6 +1792,14 @@ class AstBuilder extends SqlBaseBaseVisitor<Node> {
   }
 
   @Override
+  public Node visitSignNumeric(SqlBaseParser.SignNumericContext context) {
+    if (context.sign.getType() == SqlBaseParser.MINUS) {
+      return new NegativeExpression((Expression) visit(context.numericLiteral()));
+    }
+    return visit(context.numericLiteral());
+  }
+
+  @Override
   public Node visitDecimalLiteral(SqlBaseParser.DecimalLiteralContext context) {
     return new DoubleLiteral(context.getText());
   }
