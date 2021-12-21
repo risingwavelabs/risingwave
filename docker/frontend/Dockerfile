@@ -5,8 +5,7 @@ ENV RISINGWAVE_FE_HOME=/risingwave_fe
 ENV RISINGWAVE_FE_BUILD_ENV=docker
 ENV JAVA_TOOL_OPTIONS=-Dfile.encoding=UTF8
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install git \
-    && mkdir -p $RISINGWAVE_FE_HOME/proto $RISINGWAVE_FE_HOME/java
+RUN mkdir -p $RISINGWAVE_FE_HOME/proto $RISINGWAVE_FE_HOME/java
 
 WORKDIR $RISINGWAVE_FE_HOME
 COPY proto ./proto
@@ -16,7 +15,7 @@ COPY java ./
 
 RUN ./gradlew build
 
-FROM openjdk:11.0.13-jdk-bullseye
+FROM openjdk:11.0.13-jre-slim-bullseye
 
 RUN mkdir dir -p /risingwave_fe/conf /risingwave_fe/lib
 
