@@ -118,24 +118,36 @@ impl HummockIterator for SortedIterator {
 mod test {
     use std::sync::Arc;
 
+    use itertools::Itertools;
+
     use super::*;
     use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, gen_test_table, gen_test_table_base, iterator_test_key_of,
-        test_value_of, TEST_KEYS_COUNT,
+        default_builder_opt_for_test, gen_test_table, iterator_test_key_of, test_key,
+        test_value_of, TestIteratorBuilder, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::HummockIterator;
     use crate::hummock::table::TableIterator;
 
     #[tokio::test]
     async fn test_basic() {
-        let table2 = gen_test_table_base(0, default_builder_opt_for_test(), &|x| x * 3).await;
-        let table1 = gen_test_table_base(0, default_builder_opt_for_test(), &|x| x * 3 + 1).await;
-        let table0 = gen_test_table_base(0, default_builder_opt_for_test(), &|x| x * 3 + 2).await;
-        let iters: Vec<BoxedHummockIterator> = vec![
-            Box::new(TableIterator::new(Arc::new(table0))),
-            Box::new(TableIterator::new(Arc::new(table1))),
-            Box::new(TableIterator::new(Arc::new(table2))),
-        ];
+        let (iters, validators): (Vec<_>, Vec<_>) = (0..3)
+            .map(|iter_id| {
+                TestIteratorBuilder::default()
+                    .id(0)
+                    .map_key(Box::new(move |id, x| {
+                        iterator_test_key_of(id, x * 3 + (iter_id as usize) + 1)
+                    }))
+                    .map_value(Box::new(move |id, x| {
+                        test_value_of(id, x * 3 + (iter_id as usize) + 1)
+                    }))
+                    .finish()
+            })
+            .unzip();
+
+        let iters: Vec<BoxedHummockIterator> = iters
+            .into_iter()
+            .map(|x| Box::new(x) as BoxedHummockIterator)
+            .collect_vec();
 
         let mut mi = SortedIterator::new(iters);
         let mut i = 0;
@@ -143,64 +155,64 @@ mod test {
         while mi.is_valid() {
             let key = mi.key();
             let val = mi.value();
-            assert_eq!(key, iterator_test_key_of(0, i).as_slice());
-            assert_eq!(
-                val.into_put_value().unwrap(),
-                test_value_of(0, i).as_slice()
-            );
+            validators[i % 3].assert_key(i / 3, key);
+            validators[i % 3].assert_hummock_value(i / 3, val);
             i += 1;
-
             mi.next().await.unwrap();
             if i == TEST_KEYS_COUNT * 3 {
                 assert!(!mi.is_valid());
                 break;
             }
         }
+        assert!(i >= TEST_KEYS_COUNT);
     }
 
     #[tokio::test]
     async fn test_seek() {
-        let table2 = gen_test_table_base(0, default_builder_opt_for_test(), &|x| x * 3).await;
-        let table1 = gen_test_table_base(0, default_builder_opt_for_test(), &|x| x * 3 + 1).await;
-        let table0 = gen_test_table_base(0, default_builder_opt_for_test(), &|x| x * 3 + 2).await;
-        let iters: Vec<BoxedHummockIterator> = vec![
-            Box::new(TableIterator::new(Arc::new(table0))),
-            Box::new(TableIterator::new(Arc::new(table1))),
-            Box::new(TableIterator::new(Arc::new(table2))),
-        ];
+        let (iters, validators): (Vec<_>, Vec<_>) = (0..3)
+            .map(|iter_id| {
+                TestIteratorBuilder::default()
+                    .id(0)
+                    .total(20)
+                    .map_key(Box::new(move |id, x| {
+                        iterator_test_key_of(id, x * 3 + (iter_id as usize))
+                    }))
+                    .finish()
+            })
+            .unzip();
+        let iters: Vec<BoxedHummockIterator> = iters
+            .into_iter()
+            .map(|x| Box::new(x) as BoxedHummockIterator)
+            .collect_vec();
+
+        let mut mi = SortedIterator::new(iters);
+        let test_validator = &validators[2];
 
         // right edge case
-        let mut mi = SortedIterator::new(iters);
-        mi.seek(iterator_test_key_of(0, 3 * TEST_KEYS_COUNT).as_slice())
+        mi.seek(test_key!(test_validator, 3 * TEST_KEYS_COUNT))
             .await
             .unwrap();
         assert!(!mi.is_valid());
 
         // normal case
-        mi.seek(iterator_test_key_of(0, 4).as_slice())
-            .await
-            .unwrap();
+        mi.seek(test_key!(test_validator, 4)).await.unwrap();
         let k = mi.key();
         let v = mi.value();
-        assert_eq!(k, iterator_test_key_of(0, 4).as_slice());
-        assert_eq!(v.into_put_value().unwrap(), test_value_of(0, 4).as_slice());
+        test_validator.assert_hummock_value(4, v);
+        test_validator.assert_key(4, k);
 
-        mi.seek(iterator_test_key_of(0, 17).as_slice())
-            .await
-            .unwrap();
+        mi.seek(test_key!(test_validator, 17)).await.unwrap();
         let k = mi.key();
         let v = mi.value();
-        assert_eq!(k, iterator_test_key_of(0, 17).as_slice());
-        assert_eq!(v.into_put_value().unwrap(), test_value_of(0, 17).as_slice());
+        test_validator.assert_hummock_value(17, v);
+        test_validator.assert_key(17, k);
 
         // left edge case
-        mi.seek(iterator_test_key_of(0, 0).as_slice())
-            .await
-            .unwrap();
+        mi.seek(test_key!(test_validator, 0)).await.unwrap();
         let k = mi.key();
         let v = mi.value();
-        assert_eq!(k, iterator_test_key_of(0, 0).as_slice());
-        assert_eq!(v.into_put_value().unwrap(), test_value_of(0, 0).as_slice());
+        test_validator.assert_hummock_value(0, v);
+        test_validator.assert_key(0, k);
     }
 
     #[tokio::test]

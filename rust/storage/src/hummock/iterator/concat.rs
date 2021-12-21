@@ -122,7 +122,7 @@ mod tests {
         iter.rewind().await.unwrap();
 
         while iter.is_valid() {
-            let table_idx = i / TEST_KEYS_COUNT;
+            let table_idx = (i / TEST_KEYS_COUNT) as u64;
             let key = iter.key();
             let val = iter.value();
             assert_eq!(
