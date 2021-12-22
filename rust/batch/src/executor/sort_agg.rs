@@ -145,13 +145,10 @@ impl Executor for SortAggExecutor {
             .zip(&mut array_builders)
             .try_for_each(|(state, builder)| state.output(builder))?;
 
-        let columns = self
-            .group_exprs
-            .iter()
-            .map(|e| e.return_type_ref())
-            .chain(self.agg_states.iter().map(|e| e.return_type_ref()))
-            .zip(group_builders.into_iter().chain(array_builders))
-            .map(|(t, b)| Ok(Column::new(Arc::new(b.finish()?), t)))
+        let columns = group_builders
+            .into_iter()
+            .chain(array_builders)
+            .map(|b| Ok(Column::new(Arc::new(b.finish()?))))
             .collect::<Result<Vec<_>>>()?;
 
         let ret = DataChunk::builder().columns(columns).build();
@@ -189,10 +186,7 @@ mod tests {
     #[allow(clippy::many_single_char_names)]
     async fn execute_sum_int32() -> Result<()> {
         let a = Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into());
-        let t32 = Int32Type::create(false);
-        let chunk = DataChunk::builder()
-            .columns(vec![Column::new(a, t32)])
-            .build();
+        let chunk = DataChunk::builder().columns(vec![Column::new(a)]).build();
         let schema = Schema {
             fields: vec![Field {
                 data_type: Int32Type::create(false),
@@ -255,18 +249,11 @@ mod tests {
     async fn execute_sum_int32_grouped() -> Result<()> {
         use risingwave_common::array::ArrayImpl;
         let a: Arc<ArrayImpl> = Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into());
-        let t32 = Int32Type::create(false);
         let chunk = DataChunk::builder()
             .columns(vec![
-                Column::new(a.clone(), t32.clone()),
-                Column::new(
-                    Arc::new(array_nonnull! { I32Array, [1, 1, 3] }.into()),
-                    t32.clone(),
-                ),
-                Column::new(
-                    Arc::new(array_nonnull! { I32Array, [7, 8, 8] }.into()),
-                    t32.clone(),
-                ),
+                Column::new(a.clone()),
+                Column::new(Arc::new(array_nonnull! { I32Array, [1, 1, 3] }.into())),
+                Column::new(Arc::new(array_nonnull! { I32Array, [7, 8, 8] }.into())),
             ])
             .build();
         let schema = Schema {
@@ -286,12 +273,9 @@ mod tests {
         child.add(chunk);
         let chunk = DataChunk::builder()
             .columns(vec![
-                Column::new(a, t32.clone()),
-                Column::new(
-                    Arc::new(array_nonnull! { I32Array, [3, 4, 4] }.into()),
-                    t32.clone(),
-                ),
-                Column::new(Arc::new(array_nonnull! { I32Array, [8, 8, 8] }.into()), t32),
+                Column::new(a),
+                Column::new(Arc::new(array_nonnull! { I32Array, [3, 4, 4] }.into())),
+                Column::new(Arc::new(array_nonnull! { I32Array, [8, 8, 8] }.into())),
             ])
             .build();
         child.add(chunk);

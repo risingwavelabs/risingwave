@@ -296,7 +296,6 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
-    use risingwave_common::types::Int32Type;
 
     use super::*;
 
@@ -372,7 +371,7 @@ mod tests {
             .into_iter()
             .map(|builder| {
                 let array = builder.finish().unwrap();
-                Column::new(Arc::new(array.into()), Int32Type::create(false))
+                Column::new(Arc::new(array.into()))
             })
             .collect::<Vec<_>>();
 

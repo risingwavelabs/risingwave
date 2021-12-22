@@ -123,10 +123,9 @@ mod tests {
 
         async fn next(&mut self) -> Result<Option<DataChunk>> {
             let chunk = DataChunk::builder()
-                .columns(vec![Column::new(
-                    Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into()),
-                    Int32Type::create(false),
-                )])
+                .columns(vec![Column::new(Arc::new(
+                    array_nonnull! { I32Array, [1, 2, 3] }.into(),
+                ))])
                 .build();
             Ok(Some(chunk))
         }

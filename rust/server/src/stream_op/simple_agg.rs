@@ -162,10 +162,7 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
 
         let columns: Vec<Column> = builders
             .into_iter()
-            .zip(self.schema.data_types_clone())
-            .map(|(builder, data_type)| -> Result<_> {
-                Ok(Column::new(Arc::new(builder.finish()?), data_type))
-            })
+            .map(|builder| -> Result<_> { Ok(Column::new(Arc::new(builder.finish()?))) })
             .try_collect()?;
 
         let chunk = StreamChunk {

@@ -8,7 +8,7 @@ use risingwave_common::array::{
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::{Int32Type, Int64Type};
+use risingwave_common::types::Int64Type;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::InsertNode;
 use risingwave_source::{Source, SourceImpl, SourceManagerRef, SourceWriter};
@@ -62,10 +62,7 @@ impl Executor for InsertExecutor {
                     .append(Some(table_source.next_row_id() as i64))
                     .unwrap();
             }
-            let rowid_column = Column::new(
-                Arc::new(ArrayImpl::from(builder.finish().unwrap())),
-                Int64Type::create(false),
-            );
+            let rowid_column = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
             columns.insert(0, rowid_column);
 
             for col in child_chunk.columns().iter() {
@@ -83,15 +80,12 @@ impl Executor for InsertExecutor {
 
         // create ret value
         {
-            let mut array_builder = PrimitiveArrayBuilder::<i32>::new(1)?;
-            array_builder.append(Some(rows_inserted as i32))?;
+            let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1)?;
+            array_builder.append(Some(rows_inserted as i64))?;
 
             let array = array_builder.finish()?;
             let ret_chunk = DataChunk::builder()
-                .columns(vec![Column::new(
-                    Arc::new(array.into()),
-                    Int32Type::create(false),
-                )])
+                .columns(vec![Column::new(Arc::new(array.into()))])
                 .build();
 
             self.executed = true;
@@ -132,7 +126,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             executed: false,
             schema: Schema {
                 fields: vec![Field {
-                    data_type: Int32Type::create(false),
+                    data_type: Int64Type::create(false),
                 }],
             },
         }))
@@ -222,20 +216,20 @@ mod tests {
             executed: false,
             schema: Schema {
                 fields: vec![Field {
-                    data_type: Int32Type::create(false),
+                    data_type: Int64Type::create(false),
                 }],
             },
         };
         insert_executor.open().await.unwrap();
         let fields = &insert_executor.schema().fields;
-        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
+        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int64);
         let result = insert_executor.next().await?.unwrap();
         insert_executor.close().await.unwrap();
         assert_eq!(
             result
                 .column_at(0)?
                 .array()
-                .as_int32()
+                .as_int64()
                 .iter()
                 .collect::<Vec<_>>(),
             vec![Some(5)]
@@ -297,20 +291,20 @@ mod tests {
             executed: false,
             schema: Schema {
                 fields: vec![Field {
-                    data_type: Int32Type::create(false),
+                    data_type: Int64Type::create(false),
                 }],
             },
         };
         insert_executor.open().await.unwrap();
         let fields = &insert_executor.schema().fields;
-        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
+        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int64);
         let result = insert_executor.next().await?.unwrap();
         insert_executor.close().await.unwrap();
         assert_eq!(
             result
                 .column_at(0)?
                 .array()
-                .as_int32()
+                .as_int64()
                 .iter()
                 .collect::<Vec<_>>(),
             vec![Some(5)]
@@ -352,7 +346,7 @@ mod tests {
             executed: false,
             schema: Schema {
                 fields: vec![Field {
-                    data_type: Int32Type::create(false),
+                    data_type: Int64Type::create(false),
                 }],
             },
         };
@@ -366,14 +360,14 @@ mod tests {
 
         insert_executor.open().await.unwrap();
         let fields = &insert_executor.schema().fields;
-        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
+        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int64);
         let result = insert_executor.next().await?.unwrap();
         insert_executor.close().await.unwrap();
         assert_eq!(
             result
                 .column_at(0)?
                 .array()
-                .as_int32()
+                .as_int64()
                 .iter()
                 .collect::<Vec<_>>(),
             vec![Some(5)]

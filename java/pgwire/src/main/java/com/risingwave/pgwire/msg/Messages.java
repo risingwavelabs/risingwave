@@ -172,7 +172,7 @@ public class Messages {
 
       buf.writeInt(fd.tableOid);
       buf.writeShort(fd.colAttrNum);
-      buf.writeInt(fd.typeOid);
+      buf.writeInt(fd.typeOid.asInt());
       buf.writeShort(fd.typeLen);
       buf.writeInt(fd.typeModifier);
       buf.writeShort(fd.formatCode);

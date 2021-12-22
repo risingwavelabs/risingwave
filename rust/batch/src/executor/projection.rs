@@ -31,10 +31,7 @@ impl Executor for ProjectionExecutor {
                 let arrays: Vec<Column> = self
                     .expr
                     .iter_mut()
-                    .map(|expr| {
-                        expr.eval(&child_chunk)
-                            .map(|arr| Column::new(arr, expr.return_type_ref()))
-                    })
+                    .map(|expr| expr.eval(&child_chunk).map(Column::new))
                     .collect::<Result<Vec<_>>>()?;
                 let ret = DataChunk::builder().columns(arrays).build();
                 Ok(Some(ret))

@@ -272,7 +272,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema, TableId};
     use risingwave_common::column_nonnull;
     use risingwave_common::error::Result;
-    use risingwave_common::types::{DecimalType, Int64Type};
+    use risingwave_common::types::DecimalType;
 
     use crate::bummock::{BummockResult, BummockTable};
     use crate::{ScannableTable, Table, TableColumnDesc};

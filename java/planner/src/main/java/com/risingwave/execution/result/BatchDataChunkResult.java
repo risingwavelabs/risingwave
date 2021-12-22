@@ -83,10 +83,13 @@ public class BatchDataChunkResult extends AbstractQueryResult {
       // Currently our insert return 0 results so check to avoid out of bound error.
       if (data.size() != 0) {
         DataChunk curData = data.get(index).getRecordBatch();
-        List<PgValueReader> readers =
-            curData.getColumnsList().stream()
-                .map(PgValueReaders::create)
-                .collect(ImmutableList.toImmutableList());
+        var builder = ImmutableList.<PgValueReader>builder();
+        for (int i = 0; i < fields.size(); i++) {
+          var col = curData.getColumnsList().get(i);
+          var type = fields.get(i).typeOid;
+          builder.add(PgValueReaders.create(col, type));
+        }
+        var readers = builder.build();
         this.internalIter = new DataChunkIter(readers, curData.getCardinality());
       }
     }

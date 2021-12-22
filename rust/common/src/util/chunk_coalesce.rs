@@ -183,18 +183,15 @@ impl DataChunkBuilder {
         swap(&mut new_array_builders, &mut self.array_builders);
         self.buffered_count = 0;
 
-        let columns = new_array_builders
-            .into_iter()
-            .zip(&self.data_types)
-            .try_fold(
-                Vec::with_capacity(self.data_types.len()),
-                |mut vec, (array_builder, data_type)| -> Result<Vec<Column>> {
-                    let array = array_builder.finish()?;
-                    let column = Column::new(Arc::new(array), data_type.clone());
-                    vec.push(column);
-                    Ok(vec)
-                },
-            )?;
+        let columns = new_array_builders.into_iter().try_fold(
+            Vec::with_capacity(self.data_types.len()),
+            |mut vec, array_builder| -> Result<Vec<Column>> {
+                let array = array_builder.finish()?;
+                let column = Column::new(Arc::new(array));
+                vec.push(column);
+                Ok(vec)
+            },
+        )?;
 
         DataChunk::try_from(columns)
     }

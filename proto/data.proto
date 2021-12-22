@@ -87,7 +87,6 @@ message Array {
 // aims to include all column type. Currently it do not support struct/array
 // but capable of extending in future by add other fields.
 message Column {
-  DataType column_type = 1;
   Array array = 2;
 }
 

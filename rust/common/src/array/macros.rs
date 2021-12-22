@@ -33,13 +33,14 @@ macro_rules! array_nonnull {
 }
 
 /// `column` builds a `Column` with `Option`.
+// TODO
 #[macro_export]
 macro_rules! column {
   ($array:tt, $type:tt, [$( $value:expr ),*]) => {
     {
       use crate::array::column::Column;
       let arr = array! { $array, [ $( $value ),* ] };
-      Column::new(std::sync::Arc::new(arr.into()), $type::create(true))
+      Column::new(std::sync::Arc::new(arr.into()))
     }
   };
 }
@@ -51,7 +52,7 @@ macro_rules! column_nonnull {
     {
       use $crate::array::column::Column;
       let arr = $crate::array_nonnull! { $array, [ $( $value ),* ] };
-      Column::new(std::sync::Arc::new(arr.into()), $type::create(false))
+      Column::new(std::sync::Arc::new(arr.into()))
     }
   };
 }
@@ -59,7 +60,6 @@ macro_rules! column_nonnull {
 #[cfg(test)]
 mod tests {
     use crate::array::{Array, I16Array};
-    use crate::types::Int16Type;
 
     #[test]
     fn test_build_array() {

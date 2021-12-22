@@ -520,10 +520,7 @@ mod tests {
         HashKey, Key128, Key16, Key256, Key32, Key64, KeySerialized, PrecomputedBuildHasher,
     };
     use crate::test_utils::rand_array::seed_rand_array_ref;
-    use crate::types::{
-        BoolType, DataTypeKind, Datum, DecimalType, Float32Type, Float64Type, Int16Type, Int32Type,
-        Int64Type, StringType,
-    };
+    use crate::types::Datum;
 
     #[derive(Hash, PartialEq, Eq)]
     struct Row(Vec<Datum>);
@@ -532,38 +529,14 @@ mod tests {
         let capacity = 128;
         let seed = 10244021u64;
         let columns = vec![
-            Column::new(
-                seed_rand_array_ref::<BoolArray>(capacity, seed),
-                BoolType::create(true),
-            ),
-            Column::new(
-                seed_rand_array_ref::<I16Array>(capacity, seed),
-                Int16Type::create(true),
-            ),
-            Column::new(
-                seed_rand_array_ref::<I32Array>(capacity, seed),
-                Int32Type::create(true),
-            ),
-            Column::new(
-                seed_rand_array_ref::<I64Array>(capacity, seed),
-                Int64Type::create(true),
-            ),
-            Column::new(
-                seed_rand_array_ref::<F32Array>(capacity, seed),
-                Float32Type::create(true),
-            ),
-            Column::new(
-                seed_rand_array_ref::<F64Array>(capacity, seed),
-                Float64Type::create(true),
-            ),
-            Column::new(
-                seed_rand_array_ref::<DecimalArray>(capacity, seed),
-                Arc::new(DecimalType::new(true, 20, 10).expect("Failed to create decimal type")),
-            ),
-            Column::new(
-                seed_rand_array_ref::<Utf8Array>(capacity, seed),
-                StringType::create(true, 20, DataTypeKind::Varchar),
-            ),
+            Column::new(seed_rand_array_ref::<BoolArray>(capacity, seed)),
+            Column::new(seed_rand_array_ref::<I16Array>(capacity, seed)),
+            Column::new(seed_rand_array_ref::<I32Array>(capacity, seed)),
+            Column::new(seed_rand_array_ref::<I64Array>(capacity, seed)),
+            Column::new(seed_rand_array_ref::<F32Array>(capacity, seed)),
+            Column::new(seed_rand_array_ref::<F64Array>(capacity, seed)),
+            Column::new(seed_rand_array_ref::<DecimalArray>(capacity, seed)),
+            Column::new(seed_rand_array_ref::<Utf8Array>(capacity, seed)),
         ];
 
         DataChunk::try_from(columns).expect("Failed to create data chunk")
@@ -634,8 +607,8 @@ mod tests {
             .iter()
             .map(|idx| {
                 data.columns()[*idx]
-                    .data_type_ref()
-                    .create_array_builder(1024)
+                    .array_ref()
+                    .create_builder(1024)
                     .unwrap()
             })
             .collect::<Vec<ArrayBuilderImpl>>();
@@ -706,19 +679,16 @@ mod tests {
     }
 
     fn generate_decimal_test_data() -> DataChunk {
-        let columns = vec![Column::new(
-            Arc::new(
-                array! { DecimalArray,
-                  [Some(Decimal::from_str("1.2").unwrap()),
-                   None,
-                   Some(Decimal::from_str("1.200").unwrap()),
-                   Some(Decimal::from_str("0.00").unwrap()),
-                   Some(Decimal::from_str("0.0").unwrap())]
-                }
-                .into(),
-            ) as ArrayRef,
-            Arc::new(DecimalType::new(true, 20, 10).expect("Failed to create decimal type")),
-        )];
+        let columns = vec![Column::new(Arc::new(
+            array! { DecimalArray,
+              [Some(Decimal::from_str("1.2").unwrap()),
+               None,
+               Some(Decimal::from_str("1.200").unwrap()),
+               Some(Decimal::from_str("0.00").unwrap()),
+               Some(Decimal::from_str("0.0").unwrap())]
+            }
+            .into(),
+        ) as ArrayRef)];
 
         DataChunk::try_from(columns).expect("Failed to create data chunk")
     }

@@ -3,6 +3,7 @@ package com.risingwave.pgwire.database;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 
+/** FieldDescriptor in PG Protocol */
 public class PgFieldDescriptor {
   public final String name;
   public final int tableOid;
@@ -11,7 +12,7 @@ public class PgFieldDescriptor {
   // NOTE: Static code for data type. To see the oid of a specific type in Postgres,
   // use the following command:
   //   SELECT oid FROM pg_type WHERE typname = 'int4';
-  public final int typeOid;
+  public final TypeOid typeOid;
 
   public final short typeLen;
   public final int typeModifier;
@@ -21,7 +22,7 @@ public class PgFieldDescriptor {
     this.typeModifier = -1;
     this.name = name;
     this.formatCode = 0; /*text*/
-    this.typeOid = toid.asInt();
+    this.typeOid = toid;
     this.tableOid = 0;
     this.colAttrNum = 0; // Useful only when it's a struct/ref.
 

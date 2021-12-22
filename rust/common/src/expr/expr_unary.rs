@@ -274,8 +274,9 @@ mod tests {
     use crate::array::column::Column;
     use crate::array::*;
     use crate::expr::test_utils::{make_expression, make_input_ref};
-    use crate::types::{BoolType, DataTypeKind, DateType, Scalar, StringType};
+    use crate::types::Scalar;
     use crate::vector_op::cast::{date_to_timestamp, str_to_i16};
+
     #[test]
     fn test_unary() {
         test_unary_bool::<BoolArray, _>(|x| !x, Type::Not);
@@ -306,7 +307,6 @@ mod tests {
             Utf8Array::from_slice(&input.iter().map(|x| x.as_ref().map(|x| &**x)).collect_vec())
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
-            StringType::create(true, 2, DataTypeKind::Char),
         );
         let data_chunk = DataChunk::builder().columns(vec![col1]).build();
         let return_type = DataType {
@@ -356,7 +356,6 @@ mod tests {
             BoolArray::from_slice(&input)
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
-            BoolType::create(true),
         );
         let data_chunk = DataChunk::builder().columns(vec![col1]).build();
         let expr = make_expression(kind, &[TypeName::Boolean], &[0]);
@@ -392,7 +391,6 @@ mod tests {
             I32Array::from_slice(&input)
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
-            DateType::create(true),
         );
         let data_chunk = DataChunk::builder().columns(vec![col1]).build();
         let expr = make_expression(kind, &[TypeName::Date], &[0]);

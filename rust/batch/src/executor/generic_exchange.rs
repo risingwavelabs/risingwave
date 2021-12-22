@@ -178,10 +178,9 @@ mod tests {
                 _: &ProstExchangeSource,
             ) -> Result<Box<dyn ExchangeSource>> {
                 let chunk = DataChunk::builder()
-                    .columns(vec![Column::new(
-                        Arc::new(array_nonnull! { I32Array, [3, 4, 4] }.into()),
-                        Int32Type::create(false),
-                    )])
+                    .columns(vec![Column::new(Arc::new(
+                        array_nonnull! { I32Array, [3, 4, 4] }.into(),
+                    ))])
                     .build();
                 Ok(Box::new(FakeExchangeSource { chunk: Some(chunk) }))
             }

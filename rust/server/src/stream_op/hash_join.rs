@@ -105,7 +105,7 @@ impl StreamChunkBuilder {
 
     // TODO: Remove this `data_types` when we replace columns with arrays
     // https://github.com/singularity-data/risingwave/issues/1373
-    fn finish(self, data_types: &[DataTypeRef]) -> Result<StreamChunk> {
+    fn finish(self) -> Result<StreamChunk> {
         let new_arrays = self
             .column_builders
             .into_iter()
@@ -114,8 +114,7 @@ impl StreamChunkBuilder {
 
         let new_columns = new_arrays
             .into_iter()
-            .zip(data_types.iter())
-            .map(|(array_impl, data_type)| Column::new(Arc::new(array_impl), data_type.to_owned()))
+            .map(|array_impl| Column::new(Arc::new(array_impl)))
             .collect::<Vec<_>>();
 
         let new_chunk = StreamChunk {
@@ -431,7 +430,7 @@ impl<const T: JoinTypePrimitive> HashJoinExecutor<T> {
             }
         }
 
-        let new_chunk = stream_chunk_builder.finish(&self.new_column_datatypes)?;
+        let new_chunk = stream_chunk_builder.finish()?;
 
         Ok(Message::Chunk(new_chunk))
     }

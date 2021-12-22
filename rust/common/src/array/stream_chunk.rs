@@ -102,10 +102,9 @@ impl StreamChunk {
                     .into_iter()
                     .map(|col| {
                         let array = col.array();
-                        let data_type = col.data_type();
                         array
                             .compact(visibility, cardinality)
-                            .map(|array| Column::new(Arc::new(array), data_type))
+                            .map(|array| Column::new(Arc::new(array)))
                     })
                     .collect::<Result<Vec<_>>>()?;
                 let mut ops = Vec::with_capacity(cardinality);

@@ -6,7 +6,7 @@ use risingwave_pb::data::buffer::CompressionType;
 use risingwave_pb::data::{Array as ProstArray, ArrayType, Buffer};
 
 use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
-use crate::array::ArrayImpl;
+use crate::array::{ArrayBuilderImpl, ArrayImpl};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
 use crate::for_all_native_types;
@@ -30,6 +30,9 @@ where
 
   /// Returns array type of the primitive array
   fn array_type() -> ArrayType;
+
+  /// Creates an `ArrayBuilder` for this primitive type
+  fn create_array_builder(capacity: usize) -> Result<ArrayBuilderImpl>;
 }
 
 macro_rules! impl_primitive_array_item_type {
@@ -56,6 +59,11 @@ macro_rules! impl_primitive_array_item_type {
 
         fn array_type() -> ArrayType {
           ArrayType::$variant_type
+        }
+
+        fn create_array_builder(capacity: usize) -> Result<ArrayBuilderImpl> {
+          let array_builder = PrimitiveArrayBuilder::<$scalar_type>::new(capacity)?;
+          Ok(ArrayBuilderImpl::$variant_type(array_builder))
         }
       }
     )*
@@ -133,6 +141,10 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
         } else {
             NULL_VAL_FOR_HASH.hash(state);
         }
+    }
+
+    fn create_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl> {
+        T::create_array_builder(capacity)
     }
 }
 

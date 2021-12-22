@@ -7,7 +7,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::expr::{build_from_prost, BoxedExpression};
-use risingwave_common::types::{build_from_prost as type_build_from_prost, DataTypeRef, Int32Type};
+use risingwave_common::types::{build_from_prost as type_build_from_prost, DataTypeRef};
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::ValuesNode;
 
@@ -55,10 +55,7 @@ impl Executor for ValuesExecutor {
         // We need a one row chunk rather than an empty chunk because constant expression's eval
         // result is same size as input chunk cardinality.
         let one_row_chunk = DataChunk::builder()
-            .columns(vec![Column::new(
-                Arc::new(one_row_array.into()),
-                Int32Type::create(false),
-            )])
+            .columns(vec![Column::new(Arc::new(one_row_array.into()))])
             .build();
 
         for row in &mut self.rows {
@@ -74,12 +71,7 @@ impl Executor for ValuesExecutor {
 
         let columns = array_builders
             .into_iter()
-            .zip(self.rows[0].iter())
-            .map(|(builder, expr)| {
-                builder
-                    .finish()
-                    .map(|arr| Column::new(Arc::new(arr), expr.return_type_ref()))
-            })
+            .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
             .collect::<Result<Vec<Column>>>()?;
 
         let chunk = DataChunk::builder().columns(columns).build();

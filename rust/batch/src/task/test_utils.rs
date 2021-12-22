@@ -123,7 +123,7 @@ impl TestRunner {
 
     fn validate_insert_result(result: &[GetDataResponse], inserted_rows: usize) {
         ResultChecker::new()
-            .add_i32_column(false, &[inserted_rows as i32])
+            .add_i64_column(false, &[inserted_rows as i64])
             .check_result(result)
     }
 }
@@ -481,7 +481,6 @@ impl ResultChecker {
             for i in 0..chunk.get_columns().len() {
                 let col = Column::decode(&chunk.get_columns()[i].value[..]).unwrap();
 
-                self.check_column_meta(i, &col);
                 self.check_column_null_bitmap(&col);
 
                 // TODO: Write an iterator for FixedWidthColumn
@@ -498,21 +497,12 @@ impl ResultChecker {
     }
 
     fn get_value_width(col: &Column) -> usize {
-        match col.get_column_type().get_type_name() {
-            TypeName::Int32 => 4,
-            TypeName::Int64 => 8,
+        use risingwave_pb::data::ArrayType;
+        match col.get_array().get_array_type() {
+            ArrayType::Int32 => 4,
+            ArrayType::Int64 => 8,
             _ => 0,
         }
-    }
-    fn check_column_meta(&self, col_idx: usize, column: &Column) {
-        assert_eq!(
-            column.get_column_type().get_type_name(),
-            self.col_types[col_idx].get_type_name()
-        );
-        assert_eq!(
-            column.get_column_type().get_is_nullable(),
-            self.col_types[col_idx].get_is_nullable()
-        );
     }
 
     // We assume that currently no column is nullable.

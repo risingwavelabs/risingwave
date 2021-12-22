@@ -88,7 +88,7 @@ mod tests {
     use risingwave_common::array::{Array, I64Array};
     use risingwave_common::catalog::Field;
     use risingwave_common::column_nonnull;
-    use risingwave_common::types::{DataTypeKind, DecimalType, Int64Type};
+    use risingwave_common::types::{DataTypeKind, DecimalType};
     use risingwave_storage::bummock::BummockTable;
     use risingwave_storage::table::ScannableTable;
     use risingwave_storage::{Table, TableColumnDesc};

@@ -178,10 +178,9 @@ impl DataChunk {
                     .into_iter()
                     .map(|col| {
                         let array = col.array();
-                        let data_type = col.data_type();
                         array
                             .compact(visibility, cardinality)
-                            .map(|array| Column::new(Arc::new(array), data_type))
+                            .map(|array| Column::new(Arc::new(array)))
                     })
                     .collect::<Result<Vec<_>>>()?;
                 Ok(Self::builder().columns(columns).build())
@@ -220,12 +219,6 @@ impl DataChunk {
         }
         assert!(!chunks[0].columns.is_empty());
 
-        let column_types = chunks[0]
-            .columns
-            .iter()
-            .map(|col| col.data_type())
-            .collect::<Vec<_>>();
-
         let mut total_capacity = chunks
             .iter()
             .map(|chunk| chunk.capacity())
@@ -239,9 +232,10 @@ impl DataChunk {
         let mut start_row_idx = 0;
         // how many rows does this new chunk need?
         let mut new_chunk_require = std::cmp::min(total_capacity, each_size_limit);
-        let mut array_builders: Vec<ArrayBuilderImpl> = column_types
+        let mut array_builders: Vec<ArrayBuilderImpl> = chunks[0]
+            .columns
             .iter()
-            .map(|col_type| col_type.create_array_builder(new_chunk_require))
+            .map(|col| col.array_ref().create_builder(new_chunk_require))
             .try_collect()?;
         let mut new_chunks = Vec::with_capacity(num_chunks);
         while chunk_idx < chunks.len() {
@@ -254,8 +248,8 @@ impl DataChunk {
                 .zip(chunks[chunk_idx].columns())
                 .try_for_each(|(builder, column)| {
                     let mut array_builder = column
-                        .data_type_ref()
-                        .create_array_builder(end_row_idx - start_row_idx + 1)?;
+                        .array_ref()
+                        .create_builder(end_row_idx - start_row_idx + 1)?;
                     for row_idx in start_row_idx..=end_row_idx {
                         array_builder.append_datum_ref(column.array_ref().value_at(row_idx))?;
                     }
@@ -274,20 +268,20 @@ impl DataChunk {
             if new_chunk_require == 0 {
                 let new_columns: Vec<Column> = array_builders
                     .drain(..)
-                    .zip(column_types.iter())
-                    .map(|(builder, col_type)| {
+                    .map(|builder| {
                         let array = builder.finish()?;
-                        Ok::<_, RwError>(Column::new(Arc::new(array), col_type.clone()))
+                        Ok::<_, RwError>(Column::new(Arc::new(array)))
                     })
+                    .try_collect()?;
+
+                array_builders = new_columns
+                    .iter()
+                    .map(|col_type| col_type.array_ref().create_builder(new_chunk_require))
                     .try_collect()?;
 
                 let data_chunk = DataChunk::builder().columns(new_columns).build();
                 new_chunks.push(data_chunk);
 
-                array_builders = column_types
-                    .iter()
-                    .map(|col_type| col_type.create_array_builder(new_chunk_require))
-                    .try_collect()?;
                 new_chunk_require = std::cmp::min(total_capacity, each_size_limit);
             }
         }
@@ -364,7 +358,6 @@ pub type DataChunkRef = Arc<DataChunk>;
 mod tests {
     use crate::array::column::Column;
     use crate::array::*;
-    use crate::types::Int32Type;
 
     #[test]
     fn test_rechunk() {
@@ -376,10 +369,9 @@ mod tests {
                     builder.append(Some(i as i32)).unwrap();
                 }
                 let chunk = DataChunk::builder()
-                    .columns(vec![Column::new(
-                        Arc::new(builder.finish().unwrap().into()),
-                        Int32Type::create(false),
-                    )])
+                    .columns(vec![Column::new(Arc::new(
+                        builder.finish().unwrap().into(),
+                    ))])
                     .build();
                 chunks.push(Arc::new(chunk));
             }
@@ -441,10 +433,7 @@ mod tests {
                 builder.append(Some(i as i32)).unwrap();
             }
             let arr = builder.finish().unwrap();
-            columns.push(Column::new(
-                Arc::new(arr.into()),
-                Arc::new(Int32Type::new(false)),
-            ))
+            columns.push(Column::new(Arc::new(arr.into())))
         }
         let chunk: DataChunk = DataChunk::builder().columns(columns).build();
         for row in chunk.rows() {

@@ -26,12 +26,7 @@ pub(crate) trait SourceChunkBuilder {
 
         builders
             .into_iter()
-            .zip(column_descs.iter().map(|c| c.data_type.clone()))
-            .map(|(builder, data_type)| {
-                builder
-                    .finish()
-                    .map(|arr| Column::new(Arc::new(arr), data_type.clone()))
-            })
+            .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
             .collect::<Result<Vec<Column>>>()
     }
 

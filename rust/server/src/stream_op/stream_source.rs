@@ -11,7 +11,6 @@ use risingwave_common::array::{
 };
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::Result;
-use risingwave_common::types::Int64Type;
 use risingwave_source::*;
 
 use crate::stream_op::{Executor, Message, PkIndices, PkIndicesRef};
@@ -76,10 +75,7 @@ impl StreamSourceExecutor {
                 .unwrap();
         }
 
-        Column::new(
-            Arc::new(ArrayImpl::from(builder.finish().unwrap())),
-            Int64Type::create(false),
-        )
+        Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())))
     }
 
     fn refill_row_id_column(&mut self, chunk: &mut StreamChunk) {
@@ -196,17 +192,17 @@ mod tests {
             Arc::new(Utf8Array::from_slice(&[Some("hello"), None, Some("world")])?.into());
 
         let chunk1 = {
-            let rowid = Column::new(rowid_arr1.clone(), rowid_type.clone());
-            let col1 = Column::new(col1_arr1.clone(), col1_type.clone());
-            let col2 = Column::new(col2_arr1.clone(), col2_type.clone());
+            let rowid = Column::new(rowid_arr1.clone());
+            let col1 = Column::new(col1_arr1.clone());
+            let col2 = Column::new(col2_arr1.clone());
             let vis = vec![Op::Insert, Op::Insert, Op::Insert];
             StreamChunk::new(vis, vec![rowid, col1, col2], None)
         };
 
         let chunk2 = {
-            let rowid = Column::new(rowid_arr2.clone(), rowid_type.clone());
-            let col1 = Column::new(col1_arr2.clone(), col1_type.clone());
-            let col2 = Column::new(col2_arr2.clone(), col2_type.clone());
+            let rowid = Column::new(rowid_arr2.clone());
+            let col1 = Column::new(col1_arr2.clone());
+            let col2 = Column::new(col2_arr2.clone());
             let vis = vec![Op::Insert, Op::Insert, Op::Insert];
             StreamChunk::new(vis, vec![rowid, col1, col2], None)
         };
@@ -329,9 +325,9 @@ mod tests {
             Arc::new(array_nonnull! { Utf8Array, ["foo", "bar", "baz"] }.into());
 
         let chunk1 = {
-            let rowid = Column::new(rowid_arr1.clone(), rowid_type.clone());
-            let col1 = Column::new(col1_arr1.clone(), col1_type.clone());
-            let col2 = Column::new(col2_arr1.clone(), col2_type.clone());
+            let rowid = Column::new(rowid_arr1.clone());
+            let col1 = Column::new(col1_arr1.clone());
+            let col2 = Column::new(col2_arr1.clone());
             let vis = vec![Op::Insert, Op::Insert, Op::Insert];
             StreamChunk::new(vis, vec![rowid, col1, col2], None)
         };

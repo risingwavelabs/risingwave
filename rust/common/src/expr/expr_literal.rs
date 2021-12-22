@@ -244,7 +244,7 @@ mod tests {
     use super::*;
     use crate::array::column::Column;
     use crate::array::PrimitiveArray;
-    use crate::types::{Int32Type, IntoOrdered};
+    use crate::types::IntoOrdered;
 
     #[test]
     fn test_expr_literal_from() {
@@ -349,7 +349,6 @@ mod tests {
 
     fn create_column(vec: &[Option<i32>]) -> Result<Column> {
         let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
-        let data_type = Int32Type::create(false);
-        Ok(Column::new(array, data_type))
+        Ok(Column::new(array))
     }
 }

@@ -157,6 +157,8 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    fn create_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl>;
 }
 
 /// Implement `compact` on array, which removes element according to `visibility`.
@@ -444,6 +446,12 @@ macro_rules! impl_array {
       pub fn value_at(&self, idx: usize) -> DatumRef<'_> {
         match self {
           $( Self::$variant_name(inner) => inner.value_at(idx).map(ScalarRefImpl::$variant_name), )*
+        }
+      }
+
+      pub fn create_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl> {
+        match self {
+          $( Self::$variant_name(inner) => inner.create_builder(capacity), )*
         }
       }
     }

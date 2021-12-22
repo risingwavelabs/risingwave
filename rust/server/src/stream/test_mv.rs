@@ -4,7 +4,7 @@ use std::time::Duration;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder, Row};
 use risingwave_common::catalog::{SchemaId, TableId};
-use risingwave_common::types::{DecimalType, Int32Type};
+use risingwave_common::types::DecimalType;
 use risingwave_common::util::addr::get_host_port;
 use risingwave_common::util::downcast_arc;
 use risingwave_pb::common::HostAddress;
@@ -147,11 +147,11 @@ async fn test_stream_mv_proto() {
     let mut array_builder1 = PrimitiveArrayBuilder::<i32>::new(1).unwrap();
     array_builder1.append(Some(1_i32)).unwrap();
     let array1 = array_builder1.finish().unwrap();
-    let column1 = Column::new(Arc::new(array1.into()), Int32Type::create(false));
+    let column1 = Column::new(Arc::new(array1.into()));
     let mut array_builder2 = PrimitiveArrayBuilder::<i32>::new(1).unwrap();
     array_builder2.append(Some(2_i32)).unwrap();
     let array2 = array_builder2.finish().unwrap();
-    let column2 = Column::new(Arc::new(array2.into()), Int32Type::create(false));
+    let column2 = Column::new(Arc::new(array2.into()));
     let columns = vec![column1, column2];
     let append_chunk = DataChunk::builder().columns(columns).build();
 

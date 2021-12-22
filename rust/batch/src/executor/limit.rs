@@ -127,8 +127,7 @@ mod tests {
 
     fn create_column(vec: &[Option<i32>]) -> Result<Column> {
         let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
-        let data_type = Arc::new(Int32Type::new(false));
-        Ok(Column::new(array, data_type))
+        Ok(Column::new(array))
     }
 
     async fn test_limit_all_visible(
@@ -272,10 +271,7 @@ mod tests {
         )
         .unwrap();
 
-        let col1 = Column::new(
-            Arc::new(visible_array.into()),
-            Arc::new(BoolType::new(false)),
-        );
+        let col1 = Column::new(Arc::new(visible_array.into()));
         let schema = Schema {
             fields: vec![
                 Field {

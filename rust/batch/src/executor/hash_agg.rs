@@ -191,13 +191,10 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
                 .try_for_each(|(aggregator, builder)| aggregator.output(builder))?;
         }
 
-        let columns = self
-            .schema
-            .fields
-            .iter()
-            .cloned()
-            .zip(group_builders.into_iter().chain(agg_builders))
-            .map(|(t, b)| Ok(Column::new(Arc::new(b.finish()?), t.data_type)))
+        let columns = group_builders
+            .into_iter()
+            .chain(agg_builders)
+            .map(|b| Ok(Column::new(Arc::new(b.finish()?))))
             .collect::<Result<Vec<_>>>()?;
 
         let ret = DataChunk::builder().columns(columns).build();
@@ -251,9 +248,9 @@ mod tests {
         let src_exec = MockExecutor::with_chunk(
             DataChunk::builder()
                 .columns(vec![
-                    Column::new(key1_col, t32.clone()),
-                    Column::new(key2_col, t32.clone()),
-                    Column::new(sum_col, t32.clone()),
+                    Column::new(key1_col),
+                    Column::new(key2_col),
+                    Column::new(sum_col),
                 ])
                 .build(),
             Schema {
@@ -316,9 +313,9 @@ mod tests {
         let expect_exec = MockExecutor::with_chunk(
             DataChunk::builder()
                 .columns(vec![
-                    Column::new(group1_col, t32.clone()),
-                    Column::new(group2_col, t32.clone()),
-                    Column::new(anssum_col, t64.clone()),
+                    Column::new(group1_col),
+                    Column::new(group2_col),
+                    Column::new(anssum_col),
                 ])
                 .build(),
             schema,
@@ -330,11 +327,8 @@ mod tests {
     async fn execute_count_star() {
         let col = Arc::new(array_nonnull! { I32Array, [0,1,0,1,1,0,1,0] }.into());
         let t32 = Int32Type::create(false);
-        let t64 = Int64Type::create(false);
         let src_exec = MockExecutor::with_chunk(
-            DataChunk::builder()
-                .columns(vec![Column::new(col, t32.clone())])
-                .build(),
+            DataChunk::builder().columns(vec![Column::new(col)]).build(),
             Schema {
                 fields: vec![Field {
                     data_type: t32.clone(),
@@ -366,9 +360,7 @@ mod tests {
         let res = Arc::new(array_nonnull! { I64Array, [8] }.into());
 
         let expect_exec = MockExecutor::with_chunk(
-            DataChunk::builder()
-                .columns(vec![Column::new(res, t64.clone())])
-                .build(),
+            DataChunk::builder().columns(vec![Column::new(res)]).build(),
             schema,
         );
         diff_executor_output(actual_exec, Box::new(expect_exec)).await;

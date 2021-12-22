@@ -204,7 +204,6 @@ mod tests {
 
     fn create_column(vec: &[Option<i32>]) -> Result<Column> {
         let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
-        let data_type = Int32Type::create(false);
-        Ok(Column::new(array, data_type))
+        Ok(Column::new(array))
     }
 }

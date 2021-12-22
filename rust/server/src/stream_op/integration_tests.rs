@@ -154,14 +154,11 @@ async fn test_merger_sum_aggr() {
         for i in 0..10 {
             let chunk = StreamChunk {
                 ops: vec![op; i],
-                columns: vec![Column::new(
-                    Arc::new(
-                        I64Array::from_slice(vec![Some(1); i].as_slice())
-                            .unwrap()
-                            .into(),
-                    ),
-                    Int64Type::create(false),
-                )],
+                columns: vec![Column::new(Arc::new(
+                    I64Array::from_slice(vec![Some(1); i].as_slice())
+                        .unwrap()
+                        .into(),
+                ))],
                 visibility: None,
             };
             input.send(Message::Chunk(chunk)).await.unwrap();
@@ -197,14 +194,7 @@ fn str_to_timestamp(elem: &str) -> i64 {
     str_to_timestamp(elem).unwrap()
 }
 
-fn make_tpchq6_expr() -> (
-    DataTypeRef,
-    DataTypeRef,
-    DataTypeRef,
-    DataTypeRef,
-    BoxedExpression,
-    BoxedExpression,
-) {
+fn make_tpchq6_expr() -> (BoxedExpression, BoxedExpression) {
     let const_1994_01_01 = LiteralExpression::new(
         StringType::create(true, 20, DataTypeKind::Char),
         Some(ScalarImpl::Utf8("1994-01-01 00:00:00".to_string())),
@@ -301,14 +291,7 @@ fn make_tpchq6_expr() -> (
         Box::new(l_discount_3),
     );
 
-    (
-        t_shipdate,
-        t_discount,
-        t_quantity,
-        t_extended_price,
-        and,
-        multiply,
-    )
+    (and, multiply)
 }
 
 // select
@@ -328,8 +311,6 @@ fn make_tpchq6_expr() -> (
 // 3. l_extendedprice DOUBLE
 #[tokio::test]
 async fn test_tpch_q6() {
-    let (t_shipdate, t_discount, t_quantity, t_extended_price, _, _) = make_tpchq6_expr();
-
     let schema = Schema {
         fields: vec![
             Field {
@@ -349,7 +330,7 @@ async fn test_tpch_q6() {
 
     // make an actor after dispatcher, which includes filter, projection, and local aggregator.
     let make_actor = |input_rx| {
-        let (_, _, _, _, and, multiply) = make_tpchq6_expr();
+        let (and, multiply) = make_tpchq6_expr();
         let input = ReceiverExecutor::new(schema.clone(), vec![], input_rx);
 
         let filter = FilterExecutor::new(Box::new(input), and);
@@ -478,26 +459,20 @@ async fn test_tpch_q6() {
         ops: vec![op; 10],
         visibility: None,
         columns: vec![
-            Column::new(
-                Arc::new(I64Array::from_slice(d_shipdate.as_slice()).unwrap().into()),
-                t_shipdate.clone(),
-            ),
-            Column::new(
-                Arc::new(F64Array::from_slice(d_discount.as_slice()).unwrap().into()),
-                t_discount.clone(),
-            ),
-            Column::new(
-                Arc::new(F64Array::from_slice(d_quantity.as_slice()).unwrap().into()),
-                t_quantity.clone(),
-            ),
-            Column::new(
-                Arc::new(
-                    F64Array::from_slice(d_extended_price.as_slice())
-                        .unwrap()
-                        .into(),
-                ),
-                t_extended_price.clone(),
-            ),
+            Column::new(Arc::new(
+                I64Array::from_slice(d_shipdate.as_slice()).unwrap().into(),
+            )),
+            Column::new(Arc::new(
+                F64Array::from_slice(d_discount.as_slice()).unwrap().into(),
+            )),
+            Column::new(Arc::new(
+                F64Array::from_slice(d_quantity.as_slice()).unwrap().into(),
+            )),
+            Column::new(Arc::new(
+                F64Array::from_slice(d_extended_price.as_slice())
+                    .unwrap()
+                    .into(),
+            )),
         ],
     };
 

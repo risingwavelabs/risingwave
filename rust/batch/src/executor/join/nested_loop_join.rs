@@ -168,12 +168,7 @@ impl NestedLoopJoinExecutor {
         // Finish each array builder and get Column.
         let result_columns = output_array_builders
             .into_iter()
-            .zip(data_types.iter())
-            .map(|(builder, data_type)| {
-                builder
-                    .finish()
-                    .map(|arr| Column::new(Arc::new(arr), data_type.clone()))
-            })
+            .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
             .collect::<Result<Vec<Column>>>()?;
 
         Ok(DataChunk::builder().columns(result_columns).build())
@@ -460,7 +455,7 @@ mod tests {
                 builder.append(Some(i as i32)).unwrap();
             }
             let arr = builder.finish().unwrap();
-            columns.push(Column::new(Arc::new(arr.into()), Int32Type::create(false)))
+            columns.push(Column::new(Arc::new(arr.into())))
         }
         let chunk1: DataChunk = DataChunk::builder().columns(columns.clone()).build();
         let bool_vec = vec![true, false, true, false, false];
@@ -564,14 +559,12 @@ mod tests {
             let mut executor = MockExecutor::new(schema);
 
             {
-                let column1 = Column::new(
-                    Arc::new(array! {I32Array, [Some(1), Some(2), Some(3)]}.into()),
-                    self.left_types[0].clone(),
-                );
-                let column2 = Column::new(
-                    Arc::new(array! {F32Array, [Some(6.1f32), Some(8.4f32), Some(3.9f32)]}.into()),
-                    self.left_types[1].clone(),
-                );
+                let column1 = Column::new(Arc::new(
+                    array! {I32Array, [Some(1), Some(2), Some(3)]}.into(),
+                ));
+                let column2 = Column::new(Arc::new(
+                    array! {F32Array, [Some(6.1f32), Some(8.4f32), Some(3.9f32)]}.into(),
+                ));
 
                 let chunk =
                     DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
@@ -579,16 +572,13 @@ mod tests {
             }
 
             {
-                let column1 = Column::new(
-                    Arc::new(
-                        array! {I32Array, [Some(3), Some(4), Some(6), Some(6), Some(8)]}.into(),
-                    ),
-                    self.left_types[0].clone(),
-                );
-                let column2 = Column::new(
-          Arc::new(array! {F32Array, [Some(6.6f32), Some(0.7f32), Some(5.5f32), Some(5.6f32), Some(7.0f32)]}.into()),
-          self.left_types[1].clone(),
-        );
+                let column1 = Column::new(Arc::new(
+                    array! {I32Array, [Some(3), Some(4), Some(6), Some(6), Some(8)]}.into(),
+                ));
+                let column2 = Column::new(Arc::new(
+          array! {F32Array, [Some(6.6f32), Some(0.7f32), Some(5.5f32), Some(5.6f32), Some(7.0f32)]}
+            .into(),
+        ));
 
                 let chunk =
                     DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
@@ -612,18 +602,14 @@ mod tests {
             let mut executor = MockExecutor::new(schema);
 
             {
-                let column1 = Column::new(
-                    Arc::new(array! {I32Array, [Some(2), Some(3), Some(6), Some(8)]}.into()),
-                    self.right_types[0].clone(),
-                );
+                let column1 = Column::new(Arc::new(
+                    array! {I32Array, [Some(2), Some(3), Some(6), Some(8)]}.into(),
+                ));
 
-                let column2 = Column::new(
-                    Arc::new(
-                        array! {F64Array, [Some(6.1f64), Some(8.9f64), Some(3.4f64), Some(3.5f64)]}
-                            .into(),
-                    ),
-                    self.right_types[1].clone(),
-                );
+                let column2 = Column::new(Arc::new(
+                    array! {F64Array, [Some(6.1f64), Some(8.9f64), Some(3.4f64), Some(3.5f64)]}
+                        .into(),
+                ));
 
                 let chunk =
                     DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
@@ -631,15 +617,13 @@ mod tests {
             }
 
             {
-                let column1 = Column::new(
-                    Arc::new(array! {I32Array, [Some(9), Some(10), Some(11), Some(12)]}.into()),
-                    self.right_types[0].clone(),
-                );
+                let column1 = Column::new(Arc::new(
+                    array! {I32Array, [Some(9), Some(10), Some(11), Some(12)]}.into(),
+                ));
 
-                let column2 = Column::new(
-                    Arc::new(array! {F64Array, [Some(7.5f64), None, Some(8f64), None]}.into()),
-                    self.right_types[1].clone(),
-                );
+                let column2 = Column::new(Arc::new(
+                    array! {F64Array, [Some(7.5f64), None, Some(8f64), None]}.into(),
+                ));
 
                 let chunk =
                     DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
@@ -647,18 +631,13 @@ mod tests {
             }
 
             {
-                let column1 = Column::new(
-                    Arc::new(array! {I32Array, [Some(20), Some(30), Some(100), Some(200)]}.into()),
-                    self.right_types[0].clone(),
-                );
+                let column1 = Column::new(Arc::new(
+                    array! {I32Array, [Some(20), Some(30), Some(100), Some(200)]}.into(),
+                ));
 
-                let column2 = Column::new(
-                    Arc::new(
-                        array! {F64Array, [Some(5.7f64),  Some(9.6f64), None, Some(8.18f64)]}
-                            .into(),
-                    ),
-                    self.right_types[1].clone(),
-                );
+                let column2 = Column::new(Arc::new(
+                    array! {F64Array, [Some(5.7f64),  Some(9.6f64), None, Some(8.18f64)]}.into(),
+                ));
 
                 let chunk =
                     DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
@@ -720,29 +699,17 @@ mod tests {
     async fn test_inner_join() {
         let test_fixture = TestFixture::with_join_type(JoinType::Inner);
 
-        let column1 = Column::new(
-            Arc::new(
-                array! {I32Array, [Some(2), Some(3), Some(3), Some(6), Some(6), Some(8)]}.into(),
-            ),
-            test_fixture.left_types[0].clone(),
-        );
+        let column1 = Column::new(Arc::new(
+            array! {I32Array, [Some(2), Some(3), Some(3), Some(6), Some(6), Some(8)]}.into(),
+        ));
 
-        let column2 = Column::new(
-      Arc::new(array! {F32Array, [Some(8.4f32), Some(3.9f32), Some(6.6f32), Some(5.5f32), Some(5.6f32), Some(7.0f32)]}.into()),
-      test_fixture.left_types[1].clone(),
-    );
+        let column2 = Column::new(Arc::new(array! {F32Array, [Some(8.4f32), Some(3.9f32), Some(6.6f32), Some(5.5f32), Some(5.6f32), Some(7.0f32)]}.into()));
 
-        let column3 = Column::new(
-            Arc::new(
-                array! {I32Array, [Some(2), Some(3), Some(3), Some(6), Some(6), Some(8)]}.into(),
-            ),
-            test_fixture.right_types[0].clone(),
-        );
+        let column3 = Column::new(Arc::new(
+            array! {I32Array, [Some(2), Some(3), Some(3), Some(6), Some(6), Some(8)]}.into(),
+        ));
 
-        let column4 = Column::new(
-      Arc::new(array! {F64Array, [Some(6.1f64), Some(8.9f64), Some(8.9f64), Some(3.4f64), Some(3.4f64), Some(3.5f64)]}.into()),
-      test_fixture.right_types[1].clone(),
-    );
+        let column4 = Column::new(Arc::new(array! {F64Array, [Some(6.1f64), Some(8.9f64), Some(8.9f64), Some(3.4f64), Some(3.4f64), Some(3.5f64)]}.into()));
 
         let expected_chunk = DataChunk::try_from(vec![column1, column2, column3, column4])
             .expect("Failed to create chunk!");
@@ -755,31 +722,19 @@ mod tests {
     async fn test_left_outer_join() {
         let test_fixture = TestFixture::with_join_type(JoinType::LeftOuter);
 
-        let column1 = Column::new(
-      Arc::new(
-        array! {I32Array, [Some(1), Some(2), Some(3), Some(3), Some(4), Some(6), Some(6), Some(8)]}
-          .into(),
-      ),
-      test_fixture.left_types[0].clone(),
-    );
+        let column1 = Column::new(Arc::new(
+      array! {I32Array, [Some(1), Some(2), Some(3), Some(3), Some(4), Some(6), Some(6), Some(8)]}
+        .into(),
+    ));
 
-        let column2 = Column::new(
-      Arc::new(array! {F32Array, [Some(6.1f32), Some(8.4f32), Some(3.9f32), Some(6.6f32), Some(0.7f32), Some(5.5f32), Some(5.6f32), Some(7.0f32)]}.into()),
-      test_fixture.left_types[1].clone(),
-    );
+        let column2 = Column::new(Arc::new(array! {F32Array, [Some(6.1f32), Some(8.4f32), Some(3.9f32), Some(6.6f32), Some(0.7f32), Some(5.5f32), Some(5.6f32), Some(7.0f32)]}.into()));
 
-        let column3 = Column::new(
-      Arc::new(
-        array! {I32Array, [None, Some(2), Some(3), Some(3), None, Some(6), Some(6), Some(8)]}
-          .into(),
-      ),
-      test_fixture.right_types[0].clone(),
-    );
+        let column3 = Column::new(Arc::new(
+            array! {I32Array, [None, Some(2), Some(3), Some(3), None, Some(6), Some(6), Some(8)]}
+                .into(),
+        ));
 
-        let column4 = Column::new(
-      Arc::new(array! {F64Array, [None, Some(6.1f64), Some(8.9f64), Some(8.9f64), None, Some(3.4f64), Some(3.4f64), Some(3.5f64)]}.into()),
-      test_fixture.right_types[1].clone(),
-    );
+        let column4 = Column::new(Arc::new(array! {F64Array, [None, Some(6.1f64), Some(8.9f64), Some(8.9f64), None, Some(3.4f64), Some(3.4f64), Some(3.5f64)]}.into()));
 
         let expected_chunk = DataChunk::try_from(vec![column1, column2, column3, column4])
             .expect("Failed to create chunk!");

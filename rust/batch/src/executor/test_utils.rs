@@ -103,9 +103,7 @@ pub async fn diff_executor_output(mut actual: BoxedExecutor, mut expect: BoxedEx
         .columns()
         .iter()
         .zip(actual.columns().iter())
-        .for_each(|(c1, c2)| {
-            assert_eq!(c1.data_type().to_protobuf(), c2.data_type().to_protobuf())
-        });
+        .for_each(|(c1, c2)| assert_eq!(c1.array().to_protobuf(), c2.array().to_protobuf()));
 
     is_data_chunk_eq(&expect, &actual)
 }

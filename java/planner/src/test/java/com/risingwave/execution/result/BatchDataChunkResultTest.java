@@ -1,5 +1,6 @@
 package com.risingwave.execution.result;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.protobuf.Any;
 import com.google.protobuf.ByteString;
@@ -25,17 +26,13 @@ class BatchDataChunkResultTest {
 
   @Test
   public void testEmptyRemoteBatchPlanResult() {
-    ArrayList<GetDataResponse> taskDataList = new ArrayList<>();
     RisingWaveTypeFactory typeFactory = RisingWaveTypeFactory.INSTANCE;
     var relDataTypes = Lists.newArrayList(typeFactory.createSqlType(SqlTypeName.INTEGER));
     var fieldNames = Lists.newArrayList("abc");
-    for (int i = 0; i < 4; ++i) {
-      taskDataList.add(GetDataResponse.newBuilder().build());
-    }
     BatchDataChunkResult ret =
         new BatchDataChunkResult(
             StatementType.SELECT,
-            taskDataList,
+            ImmutableList.of(),
             typeFactory.createStructType(relDataTypes, fieldNames));
     PgResult.PgIter iter = ret.createIterator();
     Assertions.assertFalse(iter.next());
@@ -59,8 +56,11 @@ class BatchDataChunkResultTest {
   public void testSimpleRemoteBatchPlanResult() {
     ArrayList<GetDataResponse> taskDataList = new ArrayList<GetDataResponse>();
     RisingWaveTypeFactory typeFactory = RisingWaveTypeFactory.INSTANCE;
-    var relDataTypes = Lists.newArrayList(typeFactory.createSqlType(SqlTypeName.INTEGER));
-    var fieldNames = Lists.newArrayList("abc");
+    var relDataTypes = Lists.newArrayList(
+        typeFactory.createSqlType(SqlTypeName.INTEGER),
+        typeFactory.createSqlType(SqlTypeName.BOOLEAN)
+    );
+    var fieldNames = Lists.newArrayList("col1", "col2");
     for (int i = 0; i < 4; ++i) {
       GetDataResponse data =
           GetDataResponse.newBuilder()
@@ -69,8 +69,6 @@ class BatchDataChunkResultTest {
                       .addColumns(
                           Any.pack(
                               Column.newBuilder()
-                                  .setColumnType(
-                                      DataType.newBuilder().setTypeName(DataType.TypeName.INT32))
                                   .setArray(
                                       Array.newBuilder().addValues(Buffer.newBuilder()
                                           .setBody(
@@ -82,8 +80,6 @@ class BatchDataChunkResultTest {
                       .addColumns(
                           Any.pack(
                               Column.newBuilder()
-                                  .setColumnType(
-                                      DataType.newBuilder().setTypeName(DataType.TypeName.BOOLEAN))
                                   .setArray(
                                       Array.newBuilder()
                                           .addValues(Buffer.newBuilder()

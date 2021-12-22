@@ -184,10 +184,9 @@ impl Executor for OrderByExecutor {
         if chunk_size == 0 {
             return Ok(None);
         }
-        let columns = data_types
-            .iter()
-            .zip(builders)
-            .map(|(d, b)| Ok(Column::new(Arc::new(b.finish()?), d.clone())))
+        let columns = builders
+            .into_iter()
+            .map(|b| Ok(Column::new(Arc::new(b.finish()?))))
             .collect::<Result<Vec<_>>>()?;
         let chunk = DataChunk::builder().columns(columns).build();
         Ok(Some(chunk))
@@ -225,34 +224,29 @@ mod tests {
 
     fn create_column_i32(vec: &[Option<i32>]) -> Result<Column> {
         let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
-        let data_type = Int32Type::create(false);
-        Ok(Column::new(array, data_type))
+        Ok(Column::new(array))
     }
 
     fn create_column_i16(vec: &[Option<i16>]) -> Result<Column> {
         let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
-        let data_type = Int16Type::create(false);
-        Ok(Column::new(array, data_type))
+        Ok(Column::new(array))
     }
 
     fn create_column_bool(vec: &[Option<bool>]) -> Result<Column> {
         let array = BoolArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
-        let data_type = BoolType::create(false);
-        Ok(Column::new(array, data_type))
+        Ok(Column::new(array))
     }
 
     fn create_column_f32(vec: &[Option<f32>]) -> Result<Column> {
         let vec = vec.iter().map(|o| o.map(OrderedF32::from)).collect_vec();
         let array = PrimitiveArray::from_slice(&vec).map(|x| Arc::new(x.into()))?;
-        let data_type = Float32Type::create(false);
-        Ok(Column::new(array, data_type))
+        Ok(Column::new(array))
     }
 
     fn create_column_f64(vec: &[Option<f64>]) -> Result<Column> {
         let vec = vec.iter().map(|o| o.map(OrderedF64::from)).collect_vec();
         let array = PrimitiveArray::from_slice(&vec).map(|x| Arc::new(x.into()))?;
-        let data_type = Float64Type::create(false);
-        Ok(Column::new(array, data_type))
+        Ok(Column::new(array))
     }
 
     fn create_column_string(vec: &[Option<String>]) -> Result<Column> {
@@ -261,8 +255,7 @@ mod tests {
             .map(|s| s.as_ref().map(|s| s.as_str()))
             .collect_vec();
         let array = Utf8Array::from_slice(&str_vec).map(|x| Arc::new(x.into()))?;
-        let data_type = StringType::create(false, 0, DataTypeKind::Varchar);
-        Ok(Column::new(array, data_type))
+        Ok(Column::new(array))
     }
 
     #[tokio::test]

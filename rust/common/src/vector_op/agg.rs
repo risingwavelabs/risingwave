@@ -691,7 +691,7 @@ mod tests {
         mut builder: ArrayBuilderImpl,
     ) -> Result<ArrayImpl> {
         let input_chunk = DataChunk::builder()
-            .columns(vec![Column::new(input, input_type.clone())])
+            .columns(vec![Column::new(input)])
             .build();
         let mut agg_state = create_agg_state_unary(input_type, 0, agg_type, return_type.clone())?;
         agg_state.update(&input_chunk)?;
@@ -955,7 +955,6 @@ mod tests {
             .create_agg_state()
             .unwrap();
         let mut a_builder = a.return_type_ref().create_array_builder(0).unwrap();
-        let t32 = Arc::new(Int32Type::new(true));
 
         let input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]).unwrap();
         let eq = g0.split_groups_concrete(&input).unwrap();
@@ -963,7 +962,7 @@ mod tests {
             .unwrap();
         a.update_and_output_with_sorted_groups(
             &DataChunk::builder()
-                .columns(vec![Column::new(Arc::new(input.into()), t32.clone())])
+                .columns(vec![Column::new(Arc::new(input.into()))])
                 .build(),
             &mut a_builder,
             &eq,
@@ -976,7 +975,7 @@ mod tests {
             .unwrap();
         a.update_and_output_with_sorted_groups(
             &DataChunk::builder()
-                .columns(vec![Column::new(Arc::new(input.into()), t32.clone())])
+                .columns(vec![Column::new(Arc::new(input.into()))])
                 .build(),
             &mut a_builder,
             &eq,
@@ -989,7 +988,7 @@ mod tests {
             .unwrap();
         a.update_and_output_with_sorted_groups(
             &DataChunk::builder()
-                .columns(vec![Column::new(Arc::new(input.into()), t32)])
+                .columns(vec![Column::new(Arc::new(input.into()))])
                 .build(),
             &mut a_builder,
             &eq,

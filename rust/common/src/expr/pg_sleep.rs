@@ -87,10 +87,7 @@ mod tests {
         };
 
         let input_chunk = DataChunk::builder()
-            .columns(vec![Column::new(
-                Arc::new(ArrayImpl::Decimal(input_array)),
-                decimal_type,
-            )])
+            .columns(vec![Column::new(Arc::new(ArrayImpl::Decimal(input_array)))])
             .build();
         let result_array = expr.eval(&input_chunk).unwrap();
         assert_eq!(3, result_array.len());

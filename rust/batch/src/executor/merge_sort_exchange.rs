@@ -157,17 +157,9 @@ impl<CS: 'static + CreateSource> Executor for MergeSortExchangeExecutorImpl<CS> 
             }
         }
 
-        let columns = self
-            .schema()
-            .fields
-            .iter()
-            .zip(builders)
-            .map(|(field, builder)| {
-                Ok(Column::new(
-                    Arc::new(builder.finish()?),
-                    field.data_type.clone(),
-                ))
-            })
+        let columns = builders
+            .into_iter()
+            .map(|builder| Ok(Column::new(Arc::new(builder.finish()?))))
             .collect::<Result<Vec<_>>>()?;
         let chunk = DataChunk::builder().columns(columns).build();
         Ok(Some(chunk))
@@ -255,10 +247,9 @@ mod tests {
                 _: &ProstExchangeSource,
             ) -> Result<Box<dyn ExchangeSource>> {
                 let chunk = DataChunk::builder()
-                    .columns(vec![Column::new(
-                        Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into()),
-                        Int32Type::create(false),
-                    )])
+                    .columns(vec![Column::new(Arc::new(
+                        array_nonnull! { I32Array, [1, 2, 3] }.into(),
+                    ))])
                     .build();
                 Ok(Box::new(FakeExchangeSource { chunk: Some(chunk) }))
             }

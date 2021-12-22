@@ -86,10 +86,7 @@ impl SimpleExecutor for ProjectExecutor {
         let projected_columns = self
             .exprs
             .iter_mut()
-            .map(|expr| {
-                expr.eval(&data_chunk)
-                    .map(|array| Column::new(array, expr.return_type_ref()))
-            })
+            .map(|expr| expr.eval(&data_chunk).map(Column::new))
             .collect::<Result<Vec<Column>>>()?;
 
         drop(data_chunk);

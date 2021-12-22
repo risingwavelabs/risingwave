@@ -99,7 +99,7 @@ impl Executor for RowSeqScanExecutor {
                             let mut builder = data_type.create_array_builder(1)?;
                             builder.append_datum(datum)?;
                             let array = builder.finish()?;
-                            Ok(Column::new(Arc::new(array), data_type.clone()))
+                            Ok(Column::new(Arc::new(array)))
                         } else {
                             Err(RwError::from(InternalError("No column found".to_string())))
                         }

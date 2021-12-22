@@ -364,7 +364,7 @@ mod tests {
     use crate::array::interval_array::IntervalArray;
     use crate::array::*;
     use crate::expr::test_utils::make_expression;
-    use crate::types::{DateType, DecimalType, Int32Type, IntervalType, IntervalUnit, Scalar};
+    use crate::types::{IntervalUnit, Scalar};
     use crate::vector_op::arithmetic_op::{date_interval_add, date_interval_sub};
 
     #[test]
@@ -433,13 +433,11 @@ mod tests {
             I32Array::from_slice(&lhs)
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
-            Int32Type::create(true),
         );
         let col2 = Column::new(
             I32Array::from_slice(&rhs)
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
-            Int32Type::create(true),
         );
         let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
         let expr = make_expression(kind, &[TypeName::Int32, TypeName::Int32], &[0, 1]);
@@ -478,13 +476,11 @@ mod tests {
             I32Array::from_slice(&lhs)
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
-            DateType::create(true),
         );
         let col2 = Column::new(
             IntervalArray::from_slice(&rhs)
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
-            IntervalType::create(true),
         );
         let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
         let expr = make_expression(kind, &[TypeName::Date, TypeName::Interval], &[0, 1]);
@@ -531,13 +527,11 @@ mod tests {
             DecimalArray::from_slice(&lhs)
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
-            DecimalType::create(true, 10, 5).unwrap(),
         );
         let col2 = Column::new(
             DecimalArray::from_slice(&rhs)
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
-            DecimalType::create(true, 10, 5).unwrap(),
         );
         let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
         let expr = make_expression(kind, &[TypeName::Decimal, TypeName::Decimal], &[0, 1]);

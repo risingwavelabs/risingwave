@@ -3,7 +3,7 @@ use std::hash::Hash;
 use risingwave_pb::data::Array as ProstArray;
 
 use super::NULL_VAL_FOR_HASH;
-use crate::array::{Array, ArrayBuilder, ArrayIterator};
+use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayIterator};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
 use crate::types::interval_type::IntervalUnit;
@@ -75,6 +75,11 @@ impl Array for IntervalArray {
         } else {
             NULL_VAL_FOR_HASH.hash(state);
         }
+    }
+
+    fn create_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl> {
+        let array_builder = IntervalArrayBuilder::new(capacity)?;
+        Ok(ArrayBuilderImpl::Interval(array_builder))
     }
 }
 
