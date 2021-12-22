@@ -10,6 +10,7 @@ use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServ
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
+use crate::catalog::StoredCatalogManager;
 use crate::hummock;
 use crate::manager::{Config, IdGeneratorManager, MemEpochGenerator, MetaManager};
 use crate::rpc::service::catalog_service::CatalogServiceImpl;
@@ -33,10 +34,16 @@ pub async fn rpc_serve(
         meta_store_ref.clone(),
     ));
     let id_generator_manager_ref = Arc::new(IdGeneratorManager::new(meta_store_ref.clone()).await);
+    let epoch_generator_ref = Arc::new(MemEpochGenerator::new());
+    let catalog_manager_ref = Arc::new(StoredCatalogManager::new(
+        config.clone(),
+        meta_store_ref.clone(),
+        epoch_generator_ref.clone(),
+    ));
     let meta_manager = Arc::new(
         MetaManager::new(
             meta_store_ref.clone(),
-            Box::new(MemEpochGenerator::new()),
+            epoch_generator_ref,
             id_generator_manager_ref.clone(),
             config.clone(),
         )
@@ -51,8 +58,8 @@ pub async fn rpc_serve(
     .await;
 
     let epoch_srv = EpochServiceImpl::new(meta_manager.clone());
-    let heartbeat_srv = HeartbeatServiceImpl::new(meta_manager.clone());
-    let catalog_srv = CatalogServiceImpl::new(meta_manager.clone());
+    let heartbeat_srv = HeartbeatServiceImpl::new(catalog_manager_ref.clone());
+    let catalog_srv = CatalogServiceImpl::new(catalog_manager_ref);
     let id_generator_srv = IdGeneratorServiceImpl::new(meta_manager);
     let stream_srv = StreamServiceImpl::new(stream_meta_manager);
     let hummock_srv = HummockServiceImpl::new(hummock_manager);

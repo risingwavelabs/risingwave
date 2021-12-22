@@ -4,7 +4,8 @@ use risingwave_common::error::Result;
 use risingwave_pb::meta::Table;
 use risingwave_pb::plan::TableRefId;
 
-use crate::manager::{Epoch, MetaManager};
+use crate::catalog::StoredCatalogManager;
+use crate::manager::Epoch;
 
 #[async_trait]
 pub trait TableMetaManager {
@@ -15,7 +16,7 @@ pub trait TableMetaManager {
 }
 
 #[async_trait]
-impl TableMetaManager for MetaManager {
+impl TableMetaManager for StoredCatalogManager {
     async fn list_tables(&self) -> Result<Vec<Table>> {
         let tables_pb = self
             .meta_store_ref
@@ -32,6 +33,7 @@ impl TableMetaManager for MetaManager {
         let version = self.epoch_generator.generate()?;
         table.version = version.into_inner();
         let table_ref_id = table.get_table_ref_id();
+
         self.meta_store_ref
             .put_cf(
                 self.config.get_table_cf(),
@@ -75,22 +77,20 @@ mod tests {
     use futures::future;
 
     use super::*;
-    use crate::manager::{Config, IdGeneratorManager, MemEpochGenerator};
+    use crate::manager::{Config, MemEpochGenerator};
     use crate::storage::MemStore;
 
     #[tokio::test]
     async fn test_table_manager() -> Result<()> {
         let meta_store_ref = Arc::new(MemStore::new());
-        let meta_manager = MetaManager::new(
-            meta_store_ref.clone(),
-            Box::new(MemEpochGenerator::new()),
-            Arc::new(IdGeneratorManager::new(meta_store_ref).await),
+        let catalog_manager = StoredCatalogManager::new(
             Config::default(),
-        )
-        .await;
+            meta_store_ref.clone(),
+            Arc::new(MemEpochGenerator::new()),
+        );
 
-        assert!(meta_manager.list_tables().await.is_ok());
-        assert!(meta_manager
+        assert!(catalog_manager.list_tables().await.is_ok());
+        assert!(catalog_manager
             .get_table(
                 &TableRefId {
                     schema_ref_id: None,
@@ -102,7 +102,7 @@ mod tests {
             .is_err());
 
         let versions = future::join_all((0..100).map(|i| {
-            let meta_manager = &meta_manager;
+            let meta_manager = &catalog_manager;
             async move {
                 let table = Table {
                     table_ref_id: Some(TableRefId {
@@ -120,7 +120,7 @@ mod tests {
         .into_iter()
         .collect::<Result<Vec<_>>>()?;
         for (i, &version) in versions.iter().enumerate() {
-            let table = meta_manager
+            let table = catalog_manager
                 .get_table(
                     &TableRefId {
                         schema_ref_id: None,
@@ -135,7 +135,7 @@ mod tests {
             assert_eq!(table.version, version.into_inner());
         }
 
-        let tables = meta_manager.list_tables().await?;
+        let tables = catalog_manager.list_tables().await?;
         assert_eq!(tables.len(), 100);
 
         let table = Table {
@@ -148,11 +148,11 @@ mod tests {
             ..Default::default()
         };
 
-        let version = meta_manager.create_table(table).await?;
+        let version = catalog_manager.create_table(table).await?;
         assert_ne!(version, versions[0]);
 
         for i in 0..100 {
-            assert!(meta_manager
+            assert!(catalog_manager
                 .drop_table(&TableRefId {
                     schema_ref_id: None,
                     table_id: i as i32
@@ -160,7 +160,7 @@ mod tests {
                 .await
                 .is_ok());
         }
-        let tables = meta_manager.list_tables().await?;
+        let tables = catalog_manager.list_tables().await?;
         assert_eq!(tables.len(), 0);
 
         Ok(())

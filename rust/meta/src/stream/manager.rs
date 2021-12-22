@@ -21,7 +21,7 @@ use uuid::Uuid;
 use crate::stream::{NodeManagerRef, ScheduleCategory, Scheduler, StreamMetaManagerRef};
 
 #[async_trait]
-pub trait StreamManager: Sync + Send {
+pub trait StreamManager: Sync + Send + 'static {
     /// [`create_materialized_view`] creates materialized view using its stream fragments. Stream
     /// graph is generated in frontend, we only handle schedule and persistence here.
     async fn create_materialized_view(

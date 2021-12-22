@@ -77,7 +77,7 @@ mod tests {
         let meta_store_ref = Arc::new(MemStore::new());
         let meta_manager = MetaManager::new(
             meta_store_ref.clone(),
-            Box::new(MemEpochGenerator::new()),
+            Arc::new(MemEpochGenerator::new()),
             Arc::new(IdGeneratorManager::new(meta_store_ref).await),
             Config::default(),
         )

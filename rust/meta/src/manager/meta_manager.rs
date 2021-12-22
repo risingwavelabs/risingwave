@@ -1,9 +1,7 @@
 use prost::Message;
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::meta::{Catalog, EpochState};
-use tokio::sync::RwLock;
+use risingwave_common::error::ErrorCode;
+use risingwave_pb::meta::EpochState;
 
-use crate::catalog::{DatabaseMetaManager, SchemaMetaManager, TableMetaManager};
 use crate::manager::{
     Config, Epoch, EpochGeneratorRef, IdGeneratorManagerRef, SINGLE_VERSION_EPOCH,
 };
@@ -14,8 +12,6 @@ pub struct MetaManager {
     pub epoch_generator: EpochGeneratorRef,
     pub id_gen_manager_ref: IdGeneratorManagerRef,
     pub config: Config,
-    pub catalog_lock: RwLock<()>,
-    pub fragment_lock: RwLock<()>,
 
     // TODO: more data could cached for single node deployment mode.
     // Backend state fields.
@@ -36,8 +32,6 @@ impl MetaManager {
             id_gen_manager_ref,
             config,
 
-            catalog_lock: RwLock::new(()),
-            fragment_lock: RwLock::new(()),
             current_epoch: Epoch::from(0),
             stable_epoch: Epoch::from(0),
         };
@@ -60,17 +54,5 @@ impl MetaManager {
         }
 
         manager
-    }
-
-    pub async fn get_catalog(&self) -> Result<Catalog> {
-        let databases = self.list_databases().await?;
-        let schemas = self.list_schemas().await?;
-        let tables = self.list_tables().await?;
-
-        Ok(Catalog {
-            databases,
-            schemas,
-            tables,
-        })
     }
 }

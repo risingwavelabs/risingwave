@@ -1,6 +1,6 @@
 use std::fmt;
 use std::hash::Hash;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use risingwave_common::error::Result;
@@ -64,7 +64,7 @@ pub trait EpochGenerator: Sync + Send {
     fn generate(&self) -> Result<Epoch>;
 }
 
-pub type EpochGeneratorRef = Box<dyn EpochGenerator>;
+pub type EpochGeneratorRef = Arc<dyn EpochGenerator>;
 
 pub struct MemEpochGenerator {
     current_epoch: Mutex<Epoch>,

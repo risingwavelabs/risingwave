@@ -10,7 +10,7 @@ use risingwave_pb::common::WorkerNode;
 /// FIXME: This is a mock trait, replace it when worker management implementation ready in cluster
 /// mod.
 #[async_trait]
-pub trait NodeManager: Sync + Send {
+pub trait NodeManager: Sync + Send + 'static {
     async fn list_nodes(&self) -> Result<Vec<WorkerNode>>;
 }
 

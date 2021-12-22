@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use risingwave_pb::meta::catalog_service_server::CatalogService;
 use risingwave_pb::meta::create_request::CatalogBody;
 use risingwave_pb::meta::drop_request::CatalogId;
@@ -8,17 +6,16 @@ use risingwave_pb::meta::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::catalog::{DatabaseMetaManager, SchemaMetaManager, TableMetaManager};
-use crate::manager::MetaManager;
+use crate::catalog::CatalogManagerRef;
 
 #[derive(Clone)]
 pub struct CatalogServiceImpl {
-    mmc: Arc<MetaManager>,
+    cmr: CatalogManagerRef,
 }
 
 impl CatalogServiceImpl {
-    pub fn new(mmc: Arc<MetaManager>) -> Self {
-        CatalogServiceImpl { mmc }
+    pub fn new(cmr: CatalogManagerRef) -> Self {
+        CatalogServiceImpl { cmr }
     }
 }
 
@@ -30,11 +27,10 @@ impl CatalogService for CatalogServiceImpl {
         request: Request<GetCatalogRequest>,
     ) -> Result<Response<GetCatalogResponse>, Status> {
         let _req = request.into_inner();
-        let _g = self.mmc.catalog_lock.read().await;
         Ok(Response::new(GetCatalogResponse {
             status: None,
             catalog: Some(
-                self.mmc
+                self.cmr
                     .get_catalog()
                     .await
                     .map_err(|e| e.to_grpc_status())?,
@@ -48,11 +44,10 @@ impl CatalogService for CatalogServiceImpl {
         request: Request<CreateRequest>,
     ) -> Result<Response<CreateResponse>, Status> {
         let req = request.into_inner();
-        let _g = self.mmc.catalog_lock.write().await;
         let result = match req.get_catalog_body() {
-            CatalogBody::Database(database) => self.mmc.create_database(database.clone()).await,
-            CatalogBody::Schema(schema) => self.mmc.create_schema(schema.clone()).await,
-            CatalogBody::Table(table) => self.mmc.create_table(table.clone()).await,
+            CatalogBody::Database(database) => self.cmr.create_database(database.clone()).await,
+            CatalogBody::Schema(schema) => self.cmr.create_schema(schema.clone()).await,
+            CatalogBody::Table(table) => self.cmr.create_table(table.clone()).await,
         };
 
         match result {
@@ -67,11 +62,10 @@ impl CatalogService for CatalogServiceImpl {
     #[cfg(not(tarpaulin_include))]
     async fn drop(&self, request: Request<DropRequest>) -> Result<Response<DropResponse>, Status> {
         let req = request.into_inner();
-        let _g = self.mmc.catalog_lock.write().await;
         let result = match req.get_catalog_id() {
-            CatalogId::DatabaseId(database_id) => self.mmc.drop_database(database_id).await,
-            CatalogId::SchemaId(schema_id) => self.mmc.drop_schema(schema_id).await,
-            CatalogId::TableId(table_id) => self.mmc.drop_table(table_id).await,
+            CatalogId::DatabaseId(database_id) => self.cmr.drop_database(database_id).await,
+            CatalogId::SchemaId(schema_id) => self.cmr.drop_schema(schema_id).await,
+            CatalogId::TableId(table_id) => self.cmr.drop_table(table_id).await,
         };
 
         match result {

@@ -15,7 +15,7 @@ pub const DEFAULT_COLUMN_FAMILY: &str = "default";
 
 /// `MetaStore` defines the functions used to operate metadata.
 #[async_trait]
-pub trait MetaStore: Sync + Send {
+pub trait MetaStore: Sync + Send + 'static {
     async fn list(&self) -> Result<Vec<Vec<u8>>>;
     async fn put(&self, key: &[u8], value: &[u8], version: Epoch) -> Result<()>;
     async fn put_batch(&self, tuples: Vec<(Vec<u8>, Vec<u8>, Epoch)>) -> Result<()>;
@@ -24,6 +24,7 @@ pub trait MetaStore: Sync + Send {
     async fn delete_all(&self, key: &[u8]) -> Result<()>;
 
     async fn list_cf(&self, cf: &str) -> Result<Vec<Vec<u8>>>;
+    async fn list_batch_cf(&self, cfs: Vec<&str>) -> Result<Vec<Vec<Vec<u8>>>>;
     async fn put_cf(&self, cf: &str, key: &[u8], value: &[u8], version: Epoch) -> Result<()>;
     async fn put_batch_cf(&self, tuples: Vec<(&str, Vec<u8>, Vec<u8>, Epoch)>) -> Result<()>;
     async fn get_cf(&self, cf: &str, key: &[u8], version: Epoch) -> Result<Vec<u8>>;
@@ -143,6 +144,21 @@ impl MetaStore for MemStore {
             .collect::<Vec<_>>())
     }
 
+    async fn list_batch_cf(&self, cfs: Vec<&str>) -> Result<Vec<Vec<Vec<u8>>>> {
+        let entities = self.entities.lock().unwrap();
+
+        Ok(cfs
+            .iter()
+            .map(|&cf| {
+                entities
+                    .iter()
+                    .filter(|(k, v)| k.1 == cf && !v.is_empty())
+                    .map(|(_, v)| v.iter().last().unwrap().1.clone())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>())
+    }
+
     async fn put_cf(&self, cf: &str, key: &[u8], value: &[u8], version: Epoch) -> Result<()> {
         let mut entities = self.entities.lock().unwrap();
         match entities.get_mut(&(key.to_vec(), String::from(cf))) {
@@ -258,6 +274,14 @@ mod tests {
 
         assert_eq!(store.list().await.unwrap().len(), 3);
         assert_eq!(store.list_cf("test_cf").await.unwrap().len(), 2);
+        assert_eq!(
+            store
+                .list_batch_cf(vec!["test_cf", DEFAULT_COLUMN_FAMILY])
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
 
         assert!(store
             .put(b"key_3", b"value_3_new", Epoch::from(3))

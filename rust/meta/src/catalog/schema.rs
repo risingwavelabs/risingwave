@@ -4,7 +4,8 @@ use risingwave_common::error::Result;
 use risingwave_pb::meta::Schema;
 use risingwave_pb::plan::SchemaRefId;
 
-use crate::manager::{Epoch, MetaManager};
+use crate::catalog::StoredCatalogManager;
+use crate::manager::Epoch;
 
 #[async_trait]
 pub trait SchemaMetaManager {
@@ -15,7 +16,7 @@ pub trait SchemaMetaManager {
 }
 
 #[async_trait]
-impl SchemaMetaManager for MetaManager {
+impl SchemaMetaManager for StoredCatalogManager {
     async fn list_schemas(&self) -> Result<Vec<Schema>> {
         let schemas_pb = self
             .meta_store_ref
@@ -32,6 +33,7 @@ impl SchemaMetaManager for MetaManager {
         let version = self.epoch_generator.generate()?;
         schema.version = version.into_inner();
         let schema_ref_id = schema.get_schema_ref_id();
+
         self.meta_store_ref
             .put_cf(
                 self.config.get_schema_cf(),
@@ -76,22 +78,20 @@ mod tests {
     use risingwave_pb::meta::Schema;
 
     use super::*;
-    use crate::manager::{Config, IdGeneratorManager, MemEpochGenerator};
+    use crate::manager::{Config, MemEpochGenerator};
     use crate::storage::MemStore;
 
     #[tokio::test]
     async fn test_schema_manager() -> Result<()> {
         let meta_store_ref = Arc::new(MemStore::new());
-        let meta_manager = MetaManager::new(
-            meta_store_ref.clone(),
-            Box::new(MemEpochGenerator::new()),
-            Arc::new(IdGeneratorManager::new(meta_store_ref).await),
+        let catalog_manager = StoredCatalogManager::new(
             Config::default(),
-        )
-        .await;
+            meta_store_ref.clone(),
+            Arc::new(MemEpochGenerator::new()),
+        );
 
-        assert!(meta_manager.list_schemas().await.is_ok());
-        assert!(meta_manager
+        assert!(catalog_manager.list_schemas().await.is_ok());
+        assert!(catalog_manager
             .get_schema(
                 &SchemaRefId {
                     database_ref_id: None,
@@ -103,7 +103,7 @@ mod tests {
             .is_err());
 
         let versions = future::join_all((0..100).map(|i| {
-            let meta_manager = &meta_manager;
+            let meta_manager = &catalog_manager;
             async move {
                 let schema = Schema {
                     schema_ref_id: Some(SchemaRefId {
@@ -121,7 +121,7 @@ mod tests {
         .into_iter()
         .collect::<Result<Vec<_>>>()?;
         for (i, &version) in versions.iter().enumerate() {
-            let schema = meta_manager
+            let schema = catalog_manager
                 .get_schema(
                     &SchemaRefId {
                         database_ref_id: None,
@@ -135,10 +135,10 @@ mod tests {
             assert_eq!(schema.version, version.into_inner());
         }
 
-        let schemas = meta_manager.list_schemas().await?;
+        let schemas = catalog_manager.list_schemas().await?;
         assert_eq!(schemas.len(), 100);
 
-        let version = meta_manager
+        let version = catalog_manager
             .create_schema(Schema {
                 schema_ref_id: Some(SchemaRefId {
                     database_ref_id: None,
@@ -152,7 +152,7 @@ mod tests {
         assert_ne!(version, versions[0]);
 
         for i in 0..100 {
-            assert!(meta_manager
+            assert!(catalog_manager
                 .drop_schema(&SchemaRefId {
                     database_ref_id: None,
                     schema_id: i
@@ -160,7 +160,7 @@ mod tests {
                 .await
                 .is_ok());
         }
-        let schemas = meta_manager.list_schemas().await?;
+        let schemas = catalog_manager.list_schemas().await?;
         assert_eq!(schemas.len(), 0);
 
         Ok(())

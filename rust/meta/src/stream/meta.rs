@@ -12,7 +12,7 @@ use crate::manager::{Config, Epoch, SINGLE_VERSION_EPOCH};
 use crate::storage::MetaStoreRef;
 
 #[async_trait]
-pub trait StreamMetaManager: Sync + Send {
+pub trait StreamMetaManager: Sync + Send + 'static {
     /// [`add_fragments_to_node`] adds fragments to its belonging node.
     async fn add_fragments_to_node(&self, location: &FragmentLocation) -> Result<()>;
     /// [`load_all_fragments`] loads all fragments for all nodes.

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use risingwave_common::array::RwError;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_pb::meta::heartbeat_request::NodeType;
@@ -8,16 +6,16 @@ use risingwave_pb::meta::heartbeat_service_server::HeartbeatService;
 use risingwave_pb::meta::{HeartbeatRequest, HeartbeatResponse};
 use tonic::{Request, Response, Status};
 
-use crate::manager::MetaManager;
+use crate::catalog::CatalogManagerRef;
 
 #[derive(Clone)]
 pub struct HeartbeatServiceImpl {
-    mmc: Arc<MetaManager>,
+    cmr: CatalogManagerRef,
 }
 
 impl HeartbeatServiceImpl {
-    pub fn new(mmc: Arc<MetaManager>) -> Self {
-        HeartbeatServiceImpl { mmc }
+    pub fn new(cmr: CatalogManagerRef) -> Self {
+        HeartbeatServiceImpl { cmr }
     }
 }
 
@@ -34,7 +32,7 @@ impl HeartbeatService for HeartbeatServiceImpl {
                 return Ok(Response::new(HeartbeatResponse {
                     status: None,
                     body: Some(Body::Catalog(
-                        self.mmc
+                        self.cmr
                             .get_catalog()
                             .await
                             .map_err(|e| e.to_grpc_status())?,
