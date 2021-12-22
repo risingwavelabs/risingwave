@@ -96,6 +96,7 @@ message RefreshHummockContextRequest {
 
 message RefreshHummockContextResponse {
   common.Status status = 1;
+  uint64 ttl = 2; //ms
 }
 
 service HummockManagerService {

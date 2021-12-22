@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::ops::Add;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -18,9 +18,9 @@ use crate::storage::MetaStoreRef;
 #[derive(Clone)]
 pub struct Config {
     // millisecond
-    context_ttl: u64,
+    pub context_ttl: u64,
     // millisecond
-    context_check_interval: u64,
+    pub context_check_interval: u64,
 }
 
 impl Default for Config {
@@ -36,7 +36,7 @@ impl Default for Config {
 pub trait HummockManager: Sync + Send + 'static {
     async fn create_hummock_context(&self, group: &str) -> Result<HummockContext>;
     async fn invalidate_hummock_context(&self, context_id: i32) -> Result<()>;
-    async fn refresh_hummock_context(&self, context_id: i32) -> Result<()>;
+    async fn refresh_hummock_context(&self, context_id: i32) -> Result<u64>;
 }
 
 pub struct DefaultHummockManager {
@@ -64,7 +64,9 @@ impl DefaultHummockManager {
             manager_config,
             hummock_config,
         });
-        instance.clone().start_hummock_context_tracker().await;
+        tokio::spawn(Self::start_hummock_context_tracker(Arc::downgrade(
+            &instance,
+        )));
         instance.clone().restore_hummock_context().await;
         instance
     }
@@ -87,30 +89,34 @@ impl DefaultHummockManager {
         });
     }
 
-    async fn start_hummock_context_tracker(self: Arc<Self>) {
-        tokio::spawn(async move {
-            loop {
-                let mut interval = tokio::time::interval(Duration::from_millis(
-                    self.hummock_config.context_check_interval,
-                ));
-                interval.tick().await;
-                interval.tick().await;
-                let context_to_invalidate: Vec<i32>;
-                {
-                    let guard = self.context_expires_at.read().await;
-                    context_to_invalidate = guard
-                        .iter()
-                        .filter(|kv| {
-                            Instant::now().saturating_duration_since(*kv.1) > Duration::ZERO
-                        })
-                        .map(|kv| *kv.0)
-                        .collect();
-                }
-                for context_id in context_to_invalidate {
-                    self.invalidate_hummock_context(context_id).await.unwrap();
-                }
+    async fn start_hummock_context_tracker(weak_self: Weak<Self>) {
+        loop {
+            let hummock_manager_ref = weak_self.upgrade();
+            if hummock_manager_ref.is_none() {
+                break;
             }
-        });
+            let hummock_manager = hummock_manager_ref.unwrap();
+            let mut interval = tokio::time::interval(Duration::from_millis(
+                hummock_manager.hummock_config.context_check_interval,
+            ));
+            interval.tick().await;
+            interval.tick().await;
+            let context_to_invalidate: Vec<i32>;
+            {
+                let guard = hummock_manager.context_expires_at.read().await;
+                context_to_invalidate = guard
+                    .iter()
+                    .filter(|kv| Instant::now().saturating_duration_since(*kv.1) > Duration::ZERO)
+                    .map(|kv| *kv.0)
+                    .collect();
+            }
+            for context_id in context_to_invalidate {
+                hummock_manager
+                    .invalidate_hummock_context(context_id)
+                    .await
+                    .unwrap();
+            }
+        }
     }
 }
 
@@ -119,7 +125,6 @@ impl HummockManager for DefaultHummockManager {
     /// [`DefaultHummockManager`] manages hummock related meta data.
     /// cf(hummock_context): `identifier` -> `HummockContext`
     async fn create_hummock_context(&self, group: &str) -> Result<HummockContext> {
-        self.meta_store_lock.write().await;
         let context_id = self
             .id_generator_manager_ref
             .generate(IdCategory::HummockContext)
@@ -129,33 +134,38 @@ impl HummockManager for DefaultHummockManager {
             group: group.to_owned(),
             ttl: self.hummock_config.context_ttl,
         };
-        let hummock_context_list = self
-            .meta_store_ref
-            .list_cf(self.manager_config.get_hummock_context_cf())
-            .await;
-        match hummock_context_list {
-            Ok(value) => {
-                let is_group_used = value.iter().any(|v| -> bool {
-                    let old_context: HummockContext = HummockContext::decode(v.as_slice()).unwrap();
-                    old_context.group == group
-                });
-                if is_group_used {
-                    return Err(RwError::from(ErrorCode::HummockContextGroupInUse(
-                        group.to_owned(),
-                    )));
+        let result;
+        {
+            self.meta_store_lock.write().await;
+            let hummock_context_list = self
+                .meta_store_ref
+                .list_cf(self.manager_config.get_hummock_context_cf())
+                .await;
+            match hummock_context_list {
+                Ok(value) => {
+                    let is_group_used = value.iter().any(|v| -> bool {
+                        let old_context: HummockContext =
+                            HummockContext::decode(v.as_slice()).unwrap();
+                        old_context.group == group
+                    });
+                    if is_group_used {
+                        return Err(RwError::from(ErrorCode::HummockContextGroupInUse(
+                            group.to_owned(),
+                        )));
+                    }
                 }
-            }
-            Err(_err) => {}
-        };
-        let result = self
-            .meta_store_ref
-            .put_cf(
-                self.manager_config.get_hummock_context_cf(),
-                &new_context.identifier.to_be_bytes().to_vec(),
-                &new_context.encode_to_vec(),
-                SINGLE_VERSION_EPOCH,
-            )
-            .await;
+                Err(_err) => {}
+            };
+            result = self
+                .meta_store_ref
+                .put_cf(
+                    self.manager_config.get_hummock_context_cf(),
+                    &new_context.identifier.to_be_bytes().to_vec(),
+                    &new_context.encode_to_vec(),
+                    SINGLE_VERSION_EPOCH,
+                )
+                .await;
+        }
         match result {
             Ok(()) => {
                 let mut guard = self.context_expires_at.write().await;
@@ -184,15 +194,16 @@ impl HummockManager for DefaultHummockManager {
             .await
     }
 
-    async fn refresh_hummock_context(&self, context_id: i32) -> Result<()> {
+    async fn refresh_hummock_context(&self, context_id: i32) -> Result<u64> {
         let mut guard = self.context_expires_at.write().await;
         match guard.get_mut(&context_id) {
             Some(_) => {
+                let new_ttl = self.hummock_config.context_ttl;
                 guard.insert(
                     context_id,
-                    Instant::now().add(Duration::from_millis(self.hummock_config.context_ttl)),
+                    Instant::now().add(Duration::from_millis(new_ttl)),
                 );
-                Ok(())
+                Ok(new_ttl)
             }
             None => Err(RwError::from(ErrorCode::HummockContextNotFound(context_id))),
         }
@@ -200,7 +211,7 @@ impl HummockManager for DefaultHummockManager {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use std::sync::Arc;
 
     use assert_matches::assert_matches;

@@ -21,7 +21,10 @@ use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::storage::MemStore;
 use crate::stream::StoredStreamMetaManager;
 
-pub async fn rpc_serve(addr: SocketAddr) -> (JoinHandle<()>, UnboundedSender<()>) {
+pub async fn rpc_serve(
+    addr: SocketAddr,
+    hummock_config: Option<hummock::Config>,
+) -> (JoinHandle<()>, UnboundedSender<()>) {
     let meta_store_ref = Arc::new(MemStore::new());
     let config = Config::default();
 
@@ -43,7 +46,7 @@ pub async fn rpc_serve(addr: SocketAddr) -> (JoinHandle<()>, UnboundedSender<()>
         meta_store_ref.clone(),
         id_generator_manager_ref.clone(),
         config.clone(),
-        hummock::Config::default(),
+        hummock_config.unwrap_or_default(),
     )
     .await;
 
@@ -85,7 +88,7 @@ mod tests {
     #[tokio::test]
     async fn test_server_shutdown() {
         let addr = get_host_port("127.0.0.1:9527").unwrap();
-        let (join_handle, shutdown_send) = rpc_serve(addr).await;
+        let (join_handle, shutdown_send) = rpc_serve(addr, None).await;
         shutdown_send.send(()).unwrap();
         join_handle.await.unwrap();
     }

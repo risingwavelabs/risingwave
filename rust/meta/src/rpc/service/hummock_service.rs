@@ -76,8 +76,19 @@ impl HummockManagerService for HummockServiceImpl {
 
     async fn refresh_hummock_context(
         &self,
-        _request: tonic::Request<RefreshHummockContextRequest>,
+        request: tonic::Request<RefreshHummockContextRequest>,
     ) -> Result<tonic::Response<RefreshHummockContextResponse>, tonic::Status> {
-        todo!()
+        let req = request.into_inner();
+        let result = self
+            .hummock_manager
+            .refresh_hummock_context(req.context_identifier)
+            .await;
+        match result {
+            Ok(ttl) => Ok(Response::new(RefreshHummockContextResponse {
+                status: None,
+                ttl,
+            })),
+            Err(e) => Err(e.to_grpc_status()),
+        }
     }
 }

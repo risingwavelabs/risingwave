@@ -21,6 +21,6 @@ async fn main() {
 
     let addr = get_host_port(opts.host.as_str()).unwrap();
     info!("Starting meta server at {}", addr);
-    let (join_handle, _shutdown_send) = rpc_serve(addr).await;
+    let (join_handle, _shutdown_send) = rpc_serve(addr, None).await;
     join_handle.await.unwrap();
 }
