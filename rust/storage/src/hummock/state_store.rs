@@ -30,7 +30,7 @@ impl HummockStateStore {
 /// # Examples
 ///
 /// ```
-/// use keys::next_key;
+/// use risingwave_storage::hummock::next_key;
 /// assert_eq!(next_key(b"123"), b"124");
 /// assert_eq!(next_key(b"12\xff"), b"13");
 /// assert_eq!(next_key(b"\xff\xff"), b"");
