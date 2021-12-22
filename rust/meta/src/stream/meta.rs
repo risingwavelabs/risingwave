@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::meta::cluster::Node;
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::{FragmentLocation, TableFragments};
 use risingwave_pb::plan::TableRefId;
 use tokio::sync::RwLock;
@@ -18,7 +18,7 @@ pub trait StreamMetaManager: Sync + Send {
     /// [`load_all_fragments`] loads all fragments for all nodes.
     async fn load_all_fragments(&self) -> Result<Vec<FragmentLocation>>;
     /// [`get_fragment_node`] returns which node the fragment belongs to.
-    async fn get_fragment_node(&self, fragment_id: u32) -> Result<Node>;
+    async fn get_fragment_node(&self, fragment_id: u32) -> Result<WorkerNode>;
     /// [`add_table_fragments`] stores table related fragments.
     async fn add_table_fragments(
         &self,
@@ -124,7 +124,7 @@ impl StreamMetaManager for StoredStreamMetaManager {
             .collect::<Vec<_>>())
     }
 
-    async fn get_fragment_node(&self, fragment_id: u32) -> Result<Node> {
+    async fn get_fragment_node(&self, fragment_id: u32) -> Result<WorkerNode> {
         self.fragment_lock.read().await;
         let node_pb = self
             .meta_store_ref
@@ -135,7 +135,7 @@ impl StreamMetaManager for StoredStreamMetaManager {
             )
             .await?;
 
-        Ok(Node::decode(node_pb.as_slice())?)
+        Ok(WorkerNode::decode(node_pb.as_slice())?)
     }
 
     async fn add_table_fragments(
@@ -185,15 +185,14 @@ mod test {
     use std::collections::HashSet;
     use std::sync::Arc;
 
-    use risingwave_pb::meta::cluster::Node;
+    use risingwave_pb::common::{HostAddress, WorkerNode};
     use risingwave_pb::stream_plan::StreamFragment;
-    use risingwave_pb::task_service::HostAddress;
 
     use super::*;
     use crate::manager::Config;
     use crate::storage::MemStore;
 
-    fn make_location(node: Node, fragment_ids: Vec<u32>) -> FragmentLocation {
+    fn make_location(node: WorkerNode, fragment_ids: Vec<u32>) -> FragmentLocation {
         FragmentLocation {
             node: Some(node),
             fragments: fragment_ids
@@ -216,7 +215,7 @@ mod test {
         // Add fragments to node 1.
         assert_eq!(meta_manager.load_all_fragments().await?.len(), 0);
         let location = make_location(
-            Node {
+            WorkerNode {
                 id: 1,
                 host: Some(HostAddress {
                     host: "127.0.0.1".to_string(),
@@ -243,7 +242,7 @@ mod test {
 
         // Add more fragments to same node 1.
         let location = make_location(
-            Node {
+            WorkerNode {
                 id: 1,
                 host: Some(HostAddress {
                     host: "127.0.0.1".to_string(),
@@ -271,7 +270,7 @@ mod test {
 
         // Add fragments to another node 2.
         let location = make_location(
-            Node {
+            WorkerNode {
                 id: 2,
                 host: Some(HostAddress {
                     host: "127.0.0.1".to_string(),

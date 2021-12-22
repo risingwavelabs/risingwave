@@ -6,7 +6,7 @@ use log::debug;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::util::addr::get_host_port;
-use risingwave_pb::meta::cluster::Node;
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::{FragmentLocation, TableFragments};
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::StreamFragment;
@@ -50,7 +50,7 @@ impl DefaultStreamManager {
         }
     }
 
-    async fn get_client(&self, node: Node) -> Result<StreamServiceClient<Channel>> {
+    async fn get_client(&self, node: WorkerNode) -> Result<StreamServiceClient<Channel>> {
         {
             let guard = self.clients.read().await;
             let client = guard.get(&node.get_id());
@@ -118,7 +118,7 @@ impl StreamManager for DefaultStreamManager {
         let node_map = nodes
             .iter()
             .map(|n| (n.get_id(), n.clone()))
-            .collect::<HashMap<u32, Node>>();
+            .collect::<HashMap<u32, WorkerNode>>();
 
         let fragment_map = fragments
             .iter()
@@ -213,6 +213,7 @@ mod test {
     use std::sync::{Arc, Mutex};
     use std::thread::sleep;
 
+    use risingwave_pb::common::HostAddress;
     use risingwave_pb::stream_service::stream_service_server::{
         StreamService, StreamServiceServer,
     };
@@ -220,7 +221,6 @@ mod test {
         BroadcastActorInfoTableResponse, BuildFragmentResponse, DropFragmentsRequest,
         DropFragmentsResponse, UpdateFragmentResponse,
     };
-    use risingwave_pb::task_service::HostAddress;
     use tonic::{Request, Response, Status};
 
     use super::*;
@@ -232,8 +232,8 @@ mod test {
 
     #[async_trait]
     impl NodeManager for MockNodeManager {
-        async fn list_nodes(&self) -> Result<Vec<Node>> {
-            Ok(vec![Node {
+        async fn list_nodes(&self) -> Result<Vec<WorkerNode>> {
+            Ok(vec![WorkerNode {
                 id: 0,
                 host: Some(HostAddress {
                     host: "127.0.0.1".to_string(),

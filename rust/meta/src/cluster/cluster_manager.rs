@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use prost::Message;
 use risingwave_common::error::Result;
-use risingwave_pb::meta::Cluster;
+use risingwave_pb::common::Cluster;
 
 use crate::manager::{MetaManager, SINGLE_VERSION_EPOCH};
 
@@ -66,7 +66,7 @@ impl ClusterMetaManager for MetaManager {
 mod tests {
     use std::sync::Arc;
 
-    use risingwave_pb::meta::cluster::Node;
+    use risingwave_pb::common::WorkerNode;
 
     use super::*;
     use crate::manager::{Config, IdGeneratorManager, MemEpochGenerator};
@@ -90,7 +90,7 @@ mod tests {
             assert!(meta_manager
                 .put_cluster(Cluster {
                     id: i,
-                    nodes: vec![Node {
+                    nodes: vec![WorkerNode {
                         id: i * 2,
                         host: None
                     }],

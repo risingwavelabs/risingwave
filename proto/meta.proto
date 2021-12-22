@@ -10,7 +10,6 @@ import "common.proto";
 import "data.proto";
 import "plan.proto";
 import "stream_plan.proto";
-import "task_service.proto";
 
 message Table {
   enum DistributionType {
@@ -46,16 +45,6 @@ message Schema {
   string schema_name = 2;
   repeated data.DataType fields = 3;
   uint64 version = 4;
-}
-
-message Cluster {
-  message Node {
-    uint32 id = 1;
-    task_service.HostAddress host = 2;
-  }
-  uint32 id = 1;
-  repeated Node nodes = 2;
-  map<string, string> config = 3;
 }
 
 message EpochState {
@@ -193,7 +182,7 @@ message TableFragments {
 }
 
 message FragmentLocation {
-  Cluster.Node node = 1;
+  common.WorkerNode node = 1;
   repeated stream_plan.StreamFragment fragments = 2;
 }
 
@@ -215,4 +204,48 @@ message LoadAllFragmentsResponse {
 service StreamManagerService {
   rpc AddFragmentsToNode(AddFragmentsToNodeRequest) returns (AddFragmentsToNodeResponse);
   rpc LoadAllFragments(LoadAllFragmentsRequest) returns (LoadAllFragmentsResponse);
+}
+
+// Below for cluster management.
+// We assume only two clusters exist: OLAP, streaming.
+// Potentially we can add FE cluster into the cluster management as well.
+
+enum ClusterType {
+  OLAP = 0;
+  streaming = 1;
+  unknown = 2;
+}
+
+message AddWorkerNodeRequest {
+  ClusterType cluster_type = 1;
+  common.HostAddress host = 2;
+}
+
+message AddWorkerNodeResponse {
+  common.Status status = 1;
+  common.WorkerNode node = 2;
+}
+
+message DeleteWorkerNodeRequest {
+  ClusterType cluster_type = 1;
+  common.WorkerNode node = 2;
+}
+
+message DeleteWorkerNodeResponse {
+  common.Status status = 1;
+}
+
+message ListAllNodesRequest {
+  ClusterType cluster_type = 1;
+}
+
+message ListAllNodesResponse {
+  common.Status status = 1;
+  repeated common.WorkerNode nodes = 2;
+}
+
+service ClusterService {
+  rpc AddWorkerNode(AddWorkerNodeRequest) returns (AddWorkerNodeResponse);
+  rpc DeleteWorkerNode(DeleteWorkerNodeRequest) returns (DeleteWorkerNodeResponse);
+  rpc ListAllNodes(ListAllNodesRequest) returns (ListAllNodesResponse);
 }

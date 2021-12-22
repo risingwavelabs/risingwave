@@ -5,13 +5,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
-use risingwave_pb::meta::cluster::Node;
+use risingwave_pb::common::WorkerNode;
 
 /// FIXME: This is a mock trait, replace it when worker management implementation ready in cluster
 /// mod.
 #[async_trait]
 pub trait NodeManager: Sync + Send {
-    async fn list_nodes(&self) -> Result<Vec<Node>>;
+    async fn list_nodes(&self) -> Result<Vec<WorkerNode>>;
 }
 
 pub type NodeManagerRef = Arc<dyn NodeManager>;
@@ -41,7 +41,7 @@ impl Scheduler {
     }
 
     /// [`schedule`] schedules node for input fragments.
-    pub async fn schedule(&self, fragments: &[u32]) -> Result<Vec<Node>> {
+    pub async fn schedule(&self, fragments: &[u32]) -> Result<Vec<WorkerNode>> {
         let nodes = self.node_manager_ref.list_nodes().await?;
         if nodes.is_empty() {
             return Err(InternalError("no available node exist".to_string()).into());
@@ -69,17 +69,16 @@ impl Scheduler {
 
 #[cfg(test)]
 mod test {
-    use risingwave_pb::task_service::HostAddress;
+    use risingwave_pb::common::HostAddress;
 
     use super::*;
-
     pub struct MockNodeManager {}
 
     #[async_trait]
     impl NodeManager for MockNodeManager {
-        async fn list_nodes(&self) -> Result<Vec<Node>> {
+        async fn list_nodes(&self) -> Result<Vec<WorkerNode>> {
             Ok((0..10)
-                .map(|i| Node {
+                .map(|i| WorkerNode {
                     id: i,
                     host: Some(HostAddress {
                         host: "127.0.0.1".to_string(),

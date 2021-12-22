@@ -43,14 +43,9 @@ message TaskInfo {
   TaskStatus task_status = 2;
 }
 
-message HostAddress {
-  string host = 1;
-  int32 port = 2;
-}
-
 message ExchangeSource {
   TaskSinkId sink_id = 1;
-  HostAddress host = 2;
+  common.HostAddress host = 2;
 }
 
 message ExchangeNode {

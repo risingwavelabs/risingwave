@@ -7,6 +7,7 @@ use risingwave_common::catalog::{SchemaId, TableId};
 use risingwave_common::types::{DecimalType, Int32Type};
 use risingwave_common::util::addr::get_host_port;
 use risingwave_common::util::downcast_arc;
+use risingwave_pb::common::HostAddress;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::expr::expr_node::RexNode;
@@ -23,7 +24,6 @@ use risingwave_pb::stream_plan::{
     Dispatcher, MViewNode, ProjectNode, StreamFragment, StreamNode, TableSourceNode,
 };
 use risingwave_pb::stream_service::{ActorInfo, BroadcastActorInfoTableRequest};
-use risingwave_pb::task_service::HostAddress;
 use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::bummock::BummockTable;
 use risingwave_storage::table::TableManager;

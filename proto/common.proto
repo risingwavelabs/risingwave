@@ -13,3 +13,20 @@ message Status {
   Code code = 1;
   string message = 2;
 }
+
+message HostAddress {
+  string host = 1;
+  int32 port = 2;
+}
+
+message WorkerNode {
+  uint32 id = 1;
+  HostAddress host = 2;
+}
+
+// A cluster can be either a set of OLAP compute nodes, or a set of streaming compute nodes.
+message Cluster {
+  uint32 id = 1;
+  repeated common.WorkerNode nodes = 2;
+  map<string, string> config = 3;
+}

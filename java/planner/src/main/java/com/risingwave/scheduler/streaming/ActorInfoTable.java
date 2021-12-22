@@ -3,7 +3,7 @@ package com.risingwave.scheduler.streaming;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.risingwave.node.WorkerNode;
-import com.risingwave.proto.computenode.HostAddress;
+import com.risingwave.proto.common.HostAddress;
 import com.risingwave.proto.streaming.streamnode.ActorInfo;
 import com.risingwave.proto.streaming.streamnode.BroadcastActorInfoTableRequest;
 import java.util.HashMap;

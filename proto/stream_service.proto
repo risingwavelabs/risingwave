@@ -8,7 +8,6 @@ option optimize_for = SPEED;
 
 import "common.proto";
 import "stream_plan.proto";
-import "task_service.proto";
 
 // Describe the fragments which will be running on this node
 message UpdateFragmentRequest {
@@ -23,7 +22,7 @@ message UpdateFragmentResponse {
 // Encode which host machine an actor resides.
 message ActorInfo {
   uint32 fragment_id = 1;
-  task_service.HostAddress host = 2;
+  common.HostAddress host = 2;
 }
 
 message BroadcastActorInfoTableRequest {

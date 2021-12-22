@@ -6,11 +6,10 @@ import com.risingwave.common.exception.PgException;
 import com.risingwave.node.EndPoint;
 import com.risingwave.node.WorkerNode;
 import com.risingwave.node.WorkerNodeManager;
+import com.risingwave.proto.common.HostAddress;
 import com.risingwave.proto.common.Status;
-import com.risingwave.proto.computenode.HostAddress;
 import com.risingwave.proto.metanode.AddFragmentsToNodeRequest;
 import com.risingwave.proto.metanode.AddFragmentsToNodeResponse;
-import com.risingwave.proto.metanode.Cluster;
 import com.risingwave.proto.metanode.FragmentLocation;
 import com.risingwave.proto.metanode.GetIdRequest;
 import com.risingwave.proto.metanode.GetIdResponse;
@@ -141,7 +140,10 @@ public class RemoteStreamManager implements StreamManager {
       HostAddress.Builder addressBuilder = HostAddress.newBuilder();
       addressBuilder.setHost(node.getRpcEndPoint().getHost());
       addressBuilder.setPort(node.getRpcEndPoint().getPort());
-      locationBuilder.setNode(Cluster.Node.newBuilder().setHost(addressBuilder));
+      com.risingwave.proto.common.WorkerNode.Builder workerNodeBuilder =
+          com.risingwave.proto.common.WorkerNode.newBuilder();
+      workerNodeBuilder.setHost(addressBuilder);
+      locationBuilder.setNode(workerNodeBuilder);
 
       StreamRequest.Builder builder = StreamRequest.newBuilder();
       builder.setWorkerNode(node);
