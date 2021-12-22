@@ -12,11 +12,20 @@ use super::{
 };
 pub struct Compactor;
 impl Compactor {
+    /// Seals current table builder to generate a remote table, then returns a new table builder if
+    /// `is_last_table_builder` == true
+    ///
+    /// # Arguments
+    ///
+    /// * `storage` - To get a unique ID for table to generate
+    /// * `output_ssts` - Vec to which the table generated will be pushed
+    /// * `table_builder` - Contains current elements
+    /// * `is_last_table_builder` - if True, returns a new empty table builder
     async fn seal_table(
         storage: &Arc<HummockStorage>,
         output_ssts: &mut Vec<Table>,
         mut table_builder: TableBuilder,
-        is_last: bool,
+        is_last_table_builder: bool,
     ) -> HummockResult<Option<TableBuilder>> {
         if !table_builder.is_empty() {
             // TODO: avoid repeating code in write_batch()
@@ -34,7 +43,7 @@ impl Compactor {
 
             output_ssts.push(table);
 
-            if is_last {
+            if is_last_table_builder {
                 return Ok(None);
             } else {
                 table_builder = HummockStorage::get_builder(&storage.options);
@@ -69,7 +78,7 @@ impl Compactor {
             .sorted_output_ssts
             .reserve(compact_task.splits.len());
 
-        // TODO: we can speed up by parallelling compaction (each with different kr)
+        // TODO: we can speed up by parallelling compaction (each with different kr) (#2115)
         let mut skip_key = BytesMut::new();
         for kr in &compact_task.splits {
             // TODO: purge tombstone if possible (#2071)
@@ -150,7 +159,7 @@ impl Compactor {
         Ok(())
     }
 
-    pub async fn compact_tasking(storage: &Arc<HummockStorage>) -> HummockResult<()> {
+    pub async fn compact(storage: &Arc<HummockStorage>) -> HummockResult<()> {
         let mut compact_task = match storage.version_manager.get_compact_task().await {
             Ok(task) => task,
             Err(HummockError::OK) => {
@@ -269,7 +278,7 @@ mod tests {
             )
             .await
             .unwrap();
-        Compactor::compact_tasking(&hummock_storage).await?;
+        Compactor::compact(&hummock_storage).await?;
         // Get the value after flushing to remote.
         let value = hummock_storage.get(&anchor).await.unwrap().unwrap();
         assert_eq!(Bytes::from(value), Bytes::from("111111"));
@@ -283,7 +292,7 @@ mod tests {
             )
             .await
             .unwrap();
-        Compactor::compact_tasking(&hummock_storage).await?;
+        Compactor::compact(&hummock_storage).await?;
 
         // Get the value after flushing to remote.
         let value = hummock_storage.get(&anchor).await.unwrap();

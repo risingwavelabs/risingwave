@@ -154,7 +154,7 @@ impl VersionManager {
 
         let vec_handler_having_l0 = vec![
             LevelHandler::Tiering(vec![]),
-            LevelHandler::Leveling(vec![]),
+            LevelHandler::Leveling(vec![], vec![]),
         ];
 
         Self {
@@ -263,8 +263,8 @@ impl VersionManager {
                     compact_task: None,
                 });
             }
-            LevelHandler::Leveling(_) => {
-                unimplemented!();
+            LevelHandler::Leveling(_, _) => {
+                panic!("L0 must be Tiering.");
             }
         }
 
@@ -288,10 +288,10 @@ impl VersionManager {
             .level_handlers
             .split_at_mut(select_level as usize + 1);
         let (prior, posterior) = (prior.last_mut().unwrap(), posterior.first_mut().unwrap());
-        let is_select_level_leveling = matches!(prior, LevelHandler::Leveling(_));
-        let is_select_next_level_leveling = matches!(posterior, LevelHandler::Leveling(_));
+        let is_select_level_leveling = matches!(prior, LevelHandler::Leveling(_, _));
+        let is_select_next_level_leveling = matches!(posterior, LevelHandler::Leveling(_, _));
         match prior {
-            LevelHandler::Tiering(l_n) | LevelHandler::Leveling(l_n) => {
+            LevelHandler::Tiering(l_n) | LevelHandler::Leveling(l_n, _) => {
                 for (
                     sst_idx,
                     TableStat {
@@ -329,65 +329,84 @@ impl VersionManager {
                         }
                         match posterior {
                             LevelHandler::Tiering(_) => unimplemented!(),
-                            LevelHandler::Leveling(l_n_suc) => {
-                                // TODO: use pointer last time to avoid binary search
-                                let overlap_begin = l_n_suc.partition_point(|table_status| {
-                                    user_key(&table_status.key_range.right)
-                                        < user_key(&key_range.left)
-                                });
-                                let mut overlap_end = overlap_begin;
-                                let mut overlap_all_idle = true;
-                                let l_n_suc_len = l_n_suc.len();
-                                while overlap_end < l_n_suc_len
-                                    && user_key(&l_n_suc[overlap_end].key_range.left)
-                                        <= user_key(&key_range.right)
-                                {
-                                    if l_n_suc[overlap_end].compact_task.is_some() {
-                                        overlap_all_idle = false;
+                            LevelHandler::Leveling(l_n_suc, inserting_key_ranges) => {
+                                let insert_point = inserting_key_ranges.partition_point(
+                                    |(ongoing_key_range, _)| {
+                                        user_key(&ongoing_key_range.right)
+                                            < user_key(&key_range.left)
+                                    },
+                                );
+                                let mut overlap_all_idle = insert_point
+                                    >= inserting_key_ranges.len()
+                                    || user_key(&inserting_key_ranges[insert_point].0.left)
+                                        > user_key(&key_range.right);
+                                if overlap_all_idle {
+                                    // TODO: use pointer last time to avoid binary search
+                                    let overlap_begin = l_n_suc.partition_point(|table_status| {
+                                        user_key(&table_status.key_range.right)
+                                            < user_key(&key_range.left)
+                                    });
+                                    let mut overlap_end = overlap_begin;
+                                    let l_n_suc_len = l_n_suc.len();
+                                    while overlap_end < l_n_suc_len
+                                        && user_key(&l_n_suc[overlap_end].key_range.left)
+                                            <= user_key(&key_range.right)
+                                    {
+                                        if l_n_suc[overlap_end].compact_task.is_some() {
+                                            overlap_all_idle = false;
+                                            break;
+                                        }
+                                        overlap_end += 1;
+                                    }
+                                    if overlap_all_idle {
+                                        inserting_key_ranges.insert(
+                                            insert_point,
+                                            (key_range.clone(), next_task_id),
+                                        );
+
+                                        let mut suc_table_ids =
+                                            Vec::with_capacity(overlap_end - overlap_begin);
+
+                                        let mut splits =
+                                            Vec::with_capacity(overlap_end - overlap_begin);
+                                        splits.push(KeyRange::new(Bytes::new(), Bytes::new()));
+                                        let mut key_split_append = |key_before_last: &Bytes| {
+                                            splits.last_mut().unwrap().right =
+                                                key_before_last.clone();
+                                            splits.push(KeyRange::new(
+                                                key_before_last.clone(),
+                                                Bytes::new(),
+                                            ));
+                                        };
+
+                                        let mut overlap_idx = overlap_begin;
+                                        while overlap_idx < overlap_end {
+                                            l_n_suc[overlap_idx].compact_task = Some(next_task_id);
+                                            suc_table_ids.push(l_n_suc[overlap_idx].table_id);
+                                            if overlap_idx > overlap_begin {
+                                                // TODO: We do not need to add splits every time. We
+                                                // can add every K SSTs.
+                                                key_split_append(
+                                                    &FullKey::from_user_key_slice(
+                                                        user_key(
+                                                            &l_n_suc[overlap_idx].key_range.left,
+                                                        ),
+                                                        Timestamp::MAX,
+                                                    )
+                                                    .get_inner()
+                                                    .into(),
+                                                );
+                                            }
+                                            overlap_idx += 1;
+                                        }
+
+                                        found = SearchResult::Found(
+                                            select_level_inputs,
+                                            suc_table_ids,
+                                            splits,
+                                        );
                                         break;
                                     }
-                                    overlap_end += 1;
-                                }
-                                if overlap_all_idle {
-                                    let mut suc_table_ids =
-                                        Vec::with_capacity(overlap_end - overlap_begin);
-
-                                    let mut splits =
-                                        Vec::with_capacity(overlap_end - overlap_begin);
-                                    splits.push(KeyRange::new(Bytes::new(), Bytes::new()));
-                                    let mut key_split_append = |key_before_last: &Bytes| {
-                                        splits.last_mut().unwrap().right = key_before_last.clone();
-                                        splits.push(KeyRange::new(
-                                            key_before_last.clone(),
-                                            Bytes::new(),
-                                        ));
-                                    };
-
-                                    let mut overlap_idx = overlap_begin;
-                                    while overlap_idx < overlap_end {
-                                        l_n_suc[overlap_idx].compact_task = Some(next_task_id);
-                                        suc_table_ids.push(l_n_suc[overlap_idx].table_id);
-                                        if overlap_idx > overlap_begin {
-                                            // TODO: We do not need to add splits every time. We can
-                                            // add every K SSTs.
-                                            key_split_append(
-                                                &FullKey::from_user_key_slice(
-                                                    user_key(&l_n_suc[overlap_idx].key_range.left),
-                                                    Timestamp::MAX,
-                                                )
-                                                .get_inner()
-                                                .into(),
-                                            );
-                                        }
-                                        overlap_idx += 1;
-                                    }
-
-                                    found = SearchResult::Found(
-                                        select_level_inputs,
-                                        suc_table_ids,
-                                        splits,
-                                    );
-                                    break;
                                 }
                             }
                         }
@@ -479,7 +498,7 @@ impl VersionManager {
                     );
                 }
                 match &mut compact_status.level_handlers[compact_task.target_level as usize] {
-                    LevelHandler::Tiering(l_n) | LevelHandler::Leveling(l_n) => {
+                    LevelHandler::Tiering(l_n) | LevelHandler::Leveling(l_n, _) => {
                         let old_ln = std::mem::take(l_n);
                         *l_n = itertools::merge_join_by(
                             old_ln,
@@ -506,7 +525,7 @@ impl VersionManager {
                                         .map(|TableStat { table_id, .. }| *table_id)
                                         .collect(),
                                 ),
-                                LevelHandler::Leveling(l_n) => Level::Leveling(
+                                LevelHandler::Leveling(l_n, _) => Level::Leveling(
                                     l_n.iter()
                                         .map(|TableStat { table_id, .. }| *table_id)
                                         .collect(),

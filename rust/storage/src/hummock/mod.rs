@@ -221,7 +221,7 @@ impl HummockStorage {
         let mut compact_notifier = self.rx.lock().take().unwrap();
         loop {
             select! {
-                Some(_) = compact_notifier.recv() => Compactor::compact_tasking(self).await?,
+                Some(_) = compact_notifier.recv() => Compactor::compact(self).await?,
                 Some(_) = stop.recv() => break
             }
         }
