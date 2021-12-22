@@ -27,11 +27,11 @@ use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use tokio::select;
 use tokio::sync::mpsc;
 
-use self::iterator::{BoxedHummockIterator, SortedIterator, UserKeyIterator};
+use self::iterator::{BoxedHummockIterator, ConcatIterator, SortedIterator, UserKeyIterator};
 use self::key::{key_with_ts, user_key, FullKey};
 pub use self::state_store::*;
 use self::value::*;
-use self::version_manager::VersionManager;
+use self::version_manager::{Level, ScopedUnpinSnapshot, VersionManager};
 use crate::object::ObjectStore;
 
 pub static REMOTE_DIR: &str = "/test/";
@@ -85,12 +85,24 @@ impl HummockStorage {
     /// failed due to other non-EOF errors.
     pub async fn get(&self, key: &[u8]) -> HummockResult<Option<Vec<u8>>> {
         let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
+        let scoped_snapshot =
+            ScopedUnpinSnapshot::from_version_manager(self.version_manager.clone());
+        let snapshot = scoped_snapshot.snapshot();
 
-        for table in &self.version_manager.tables().unwrap() {
-            // bloom filter tells us the key could possibly exist, go get it
-            if !table.surely_not_have_user_key(key) {
-                let iter = Box::new(TableIterator::new(table.clone()));
-                table_iters.push(iter);
+        for level in &snapshot.levels {
+            match level {
+                Level::Tiering(table_ids) => {
+                    let tables = self.bloom_filter_tables(table_ids, key)?;
+                    table_iters.extend(
+                        tables.into_iter().map(|table| {
+                            Box::new(TableIterator::new(table)) as BoxedHummockIterator
+                        }),
+                    )
+                }
+                Level::Leveling(table_ids) => {
+                    let tables = self.bloom_filter_tables(table_ids, key)?;
+                    table_iters.push(Box::new(ConcatIterator::new(tables)))
+                }
             }
         }
 
@@ -136,7 +148,10 @@ impl HummockStorage {
         let end_fk = FullKey::from_slice(end_key_copy.as_slice());
 
         let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
-        for table in self.version_manager.tables()? {
+        let scoped_snapshot =
+            ScopedUnpinSnapshot::from_version_manager(self.version_manager.clone());
+        let snapshot = scoped_snapshot.snapshot();
+        for table in self.version_manager.tables(snapshot)? {
             let tlk = FullKey::from_slice(table.meta.largest_key.as_slice());
             let table_too_left = begin_key.is_some() && tlk < begin_fk;
 
@@ -211,6 +226,18 @@ impl HummockStorage {
             checksum_algo: options.checksum_algo,
         })
     }
+
+    fn bloom_filter_tables(&self, table_ids: &[u64], key: &[u8]) -> HummockResult<Vec<Arc<Table>>> {
+        let bf_tables = self
+            .version_manager
+            .pick_few_tables(table_ids)?
+            .into_iter()
+            .filter(|table| !table.surely_not_have_user_key(key))
+            .collect::<Vec<_>>();
+
+        Ok(bf_tables)
+    }
+
     pub async fn start_compactor(
         self: &Arc<Self>,
         mut stop: mpsc::UnboundedReceiver<()>,

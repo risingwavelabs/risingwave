@@ -25,10 +25,10 @@ pub struct LevelEntry {
 /// We store the full information of a snapshot in one [`Snapshot`] object. In the future, we should
 /// implement a MVCC structure for this.
 #[derive(Clone, Default)]
-struct Snapshot {
+pub struct Snapshot {
     /// Table IDs in this snapshot. We **only store ID** in snapshot, we need to get the actual
     /// objects from version manager later.
-    levels: Vec<Level>,
+    pub levels: Vec<Level>,
 }
 struct CompactStatus {
     level_handlers: Vec<LevelHandler>,
@@ -187,20 +187,32 @@ impl VersionManager {
     }
 
     /// Pin a snapshot of one epoch, so that all files at this epoch won't be deleted.
-    fn pin(&self) -> (u64, Arc<Snapshot>) {
+    pub fn pin(&self) -> (u64, Arc<Snapshot>) {
         let mut inner = self.inner.lock();
         let epoch = inner.epoch;
         *inner.ref_cnt.entry(epoch).or_default() += 1;
         (epoch, inner.status.get(&epoch).unwrap().clone())
     }
 
+    pub fn unpin(&self, epoch: u64) {
+        self.inner.lock().unpin(epoch);
+    }
+
     /// Get the iterators on the underlying tables.
     /// Caller should be expected to pin a snapshot to get a consistent view.
-    pub fn tables(&self) -> HummockResult<Vec<Arc<Table>>> {
+    pub fn tables(&self, snapshot: Arc<Snapshot>) -> HummockResult<Vec<Arc<Table>>> {
         let mut out: Vec<Arc<Table>> = Vec::new();
-        let inner = self.inner.lock();
-        for table in inner.tables.values() {
-            out.push(table.clone());
+        for level in &snapshot.levels {
+            match level {
+                Level::Tiering(table_ids) => {
+                    let mut tables = self.pick_few_tables(table_ids)?;
+                    out.append(&mut tables);
+                }
+                Level::Leveling(table_ids) => {
+                    let mut tables = self.pick_few_tables(table_ids)?;
+                    out.append(&mut tables);
+                }
+            }
         }
 
         Ok(out)
@@ -560,6 +572,33 @@ impl VersionManager {
                 }
             }
         }
+    }
+}
+
+pub struct ScopedUnpinSnapshot {
+    vm: Arc<VersionManager>,
+    epoch: u64,
+    snapshot: Arc<Snapshot>,
+}
+
+impl ScopedUnpinSnapshot {
+    pub fn from_version_manager(vm: Arc<VersionManager>) -> Self {
+        let p = vm.pin();
+        Self {
+            vm,
+            epoch: p.0,
+            snapshot: p.1,
+        }
+    }
+
+    pub fn snapshot(&self) -> Arc<Snapshot> {
+        self.snapshot.clone()
+    }
+}
+
+impl Drop for ScopedUnpinSnapshot {
+    fn drop(&mut self) {
+        self.vm.unpin(self.epoch);
     }
 }
 
