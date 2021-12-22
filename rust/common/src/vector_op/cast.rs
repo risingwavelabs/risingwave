@@ -78,7 +78,21 @@ pub fn str_to_double(elem: &str) -> Result<OrderedF64> {
     elem.parse()
         .map_err(|e| RwError::from(ParseError(Box::new(e))))
 }
-
+#[inline(always)]
+pub fn str_to_i16(elem: &str) -> Result<i16> {
+    elem.parse()
+        .map_err(|e| RwError::from(ParseError(Box::new(e))))
+}
+#[inline(always)]
+pub fn str_to_i32(elem: &str) -> Result<i32> {
+    elem.parse()
+        .map_err(|e| RwError::from(ParseError(Box::new(e))))
+}
+#[inline(always)]
+pub fn str_to_i64(elem: &str) -> Result<i64> {
+    elem.parse()
+        .map_err(|e| RwError::from(ParseError(Box::new(e))))
+}
 #[inline(always)]
 pub fn date_to_timestamp(elem: i32) -> Result<i64> {
     Ok((elem as i64) * 24 * 60 * 60 * 1000 * 1000)
