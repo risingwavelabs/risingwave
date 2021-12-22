@@ -462,7 +462,7 @@ mod tests {
     #[tokio::test]
     async fn test_managed_extreme_state() {
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::fragment_root(store.clone(), 0x2333);
+        let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             keyspace,
             Int64Type::create(false),
@@ -594,7 +594,7 @@ mod tests {
         let row_count = managed_state.total_count;
 
         // test recovery
-        let keyspace = Keyspace::fragment_root(store.clone(), 0x2333);
+        let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             keyspace,
             Int64Type::create(false),
@@ -624,7 +624,7 @@ mod tests {
 
     async fn test_replicated_value<const EXTREME_TYPE: usize>() {
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::fragment_root(store.clone(), 0x2333);
+        let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
 
         let mut managed_state = GenericManagedState::<_, I64Array, EXTREME_TYPE>::new(
             keyspace,
@@ -709,7 +709,7 @@ mod tests {
     #[tokio::test]
     async fn test_same_group_of_value() {
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::fragment_root(store.clone(), 0x2333);
+        let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             keyspace,
             Int64Type::create(false),
@@ -784,7 +784,7 @@ mod tests {
         let mut remaining_values = &values_to_insert[..];
 
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::fragment_root(store.clone(), 0x2333);
+        let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = GenericManagedState::<_, I64Array, EXTREME_TYPE>::new(
             keyspace,
             Int64Type::create(false),
@@ -879,7 +879,7 @@ mod tests {
         // The 6 should be deleted from the state store.
 
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::fragment_root(store.clone(), 0x2333);
+        let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             keyspace,
             Int64Type::create(false),

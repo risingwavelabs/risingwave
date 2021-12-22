@@ -14,7 +14,7 @@ pub enum Segment {
 }
 
 impl Segment {
-    pub fn fragment_id(id: u32) -> Self {
+    pub fn executor_id(id: u32) -> Self {
         Self::u32(id)
     }
 
@@ -61,10 +61,10 @@ impl<S: StateStore> Keyspace<S> {
         }
     }
 
-    /// Create a [`Keyspace`] with a segment for fragment's id.
-    pub fn fragment_root(store: S, id: u32) -> Self {
+    /// Create a [`Keyspace`] with a segment for executor's id.
+    pub fn executor_root(store: S, id: u32) -> Self {
         let mut root = Self::new(store);
-        root.push(Segment::fragment_id(id));
+        root.push(Segment::executor_id(id));
         root
     }
 

@@ -257,7 +257,7 @@ mod tests {
         store: &S,
         row_count: usize,
     ) -> ManagedStringAggState<S> {
-        let keyspace = Keyspace::fragment_root(store.clone(), 0x2333);
+        let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let sort_key_indices = vec![0, 1];
         let value_index = 0;
         let orderings = vec![OrderType::Descending, OrderType::Ascending];
