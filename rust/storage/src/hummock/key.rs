@@ -63,7 +63,7 @@ pub fn user_key(full_key: &[u8]) -> &[u8] {
 pub struct FullKey<T: AsRef<[u8]>>(T);
 
 impl<T: AsRef<[u8]>> FullKey<T> {
-    pub fn get_inner(self) -> T {
+    pub fn into_inner(self) -> T {
         self.0
     }
 }

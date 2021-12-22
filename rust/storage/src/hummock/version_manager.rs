@@ -405,7 +405,7 @@ impl VersionManager {
                                                         ),
                                                         Timestamp::MAX,
                                                     )
-                                                    .get_inner()
+                                                    .into_inner()
                                                     .into(),
                                                 );
                                             }
