@@ -14,10 +14,13 @@ use crate::rpc::service::exchange_service::ExchangeServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::stream::{SimpleTableManager, StreamManager, StreamTaskEnv};
 
-pub fn rpc_serve(addr: SocketAddr) -> (JoinHandle<()>, UnboundedSender<()>) {
+pub fn rpc_serve(
+    addr: SocketAddr,
+    state_store: Option<&str>,
+) -> (JoinHandle<()>, UnboundedSender<()>) {
     let table_mgr = Arc::new(SimpleTableManager::new());
     let task_mgr = Arc::new(TaskManager::new());
-    let stream_mgr = Arc::new(StreamManager::new(addr));
+    let stream_mgr = Arc::new(StreamManager::new(addr, state_store));
     let source_mgr = Arc::new(MemSourceManager::new());
 
     // FIXME: We should trigger barrier from meta service. Currently, we use a timer to
@@ -71,7 +74,7 @@ mod tests {
     #[tokio::test]
     async fn test_server_shutdown() {
         let addr = get_host_port("127.0.0.1:5688").unwrap();
-        let (join_handle, shutdown_send) = rpc_serve(addr);
+        let (join_handle, shutdown_send) = rpc_serve(addr, None);
         shutdown_send.send(()).unwrap();
         join_handle.await.unwrap();
     }

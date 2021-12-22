@@ -11,6 +11,9 @@ struct Opts {
 
     #[clap(long, default_value = "127.0.0.1:5688")]
     host: String,
+
+    #[clap(long, default_value = "in-memory")]
+    state_store: String,
 }
 
 #[cfg(not(tarpaulin_include))]
@@ -21,6 +24,6 @@ async fn main() {
 
     let addr = get_host_port(opts.host.as_str()).unwrap();
     info!("Starting server at {}", addr);
-    let (join_handle, _shutdown_send) = rpc_serve(addr);
+    let (join_handle, _shutdown_send) = rpc_serve(addr, Some(&opts.state_store));
     join_handle.await.unwrap();
 }

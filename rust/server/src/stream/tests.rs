@@ -44,7 +44,7 @@ fn helper_make_local_actor(fragment_id: u32) -> ActorInfo {
 #[tokio::test]
 async fn test_stream_proto() {
     let socket_addr = get_host_port(&format!("127.0.0.1:{}", PORT)).unwrap();
-    let stream_manager = StreamManager::new(socket_addr);
+    let stream_manager = StreamManager::new(socket_addr, None);
     let info = [1, 3, 7, 11, 13, 233]
         .iter()
         .cloned()

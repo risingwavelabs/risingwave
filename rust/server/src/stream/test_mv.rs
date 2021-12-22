@@ -157,7 +157,7 @@ async fn test_stream_mv_proto() {
 
     // Build stream actor.
     let socket_addr = get_host_port(&format!("127.0.0.1:{}", port)).unwrap();
-    let stream_manager = StreamManager::new(socket_addr);
+    let stream_manager = StreamManager::new(socket_addr, None);
     let env = StreamTaskEnv::new(table_manager.clone(), source_manager, socket_addr);
 
     let actor_info_proto = ActorInfo {

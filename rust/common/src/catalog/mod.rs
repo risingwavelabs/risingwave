@@ -41,6 +41,10 @@ impl TableId {
             table_id,
         }
     }
+
+    pub fn table_id(&self) -> i32 {
+        self.table_id
+    }
 }
 
 // TODO: replace boilplate code

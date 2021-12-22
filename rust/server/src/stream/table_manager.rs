@@ -169,21 +169,18 @@ impl StreamTableManager for SimpleTableManager {
         ensure!(column_count > 0, "There must be more than one column in MV");
         let schema = Schema::try_from(columns)?;
         // TODO(MrCroxx): prefix rule, ref #1801 .
-        let prefix: Vec<u8> = format!("mview-{:?}", table_id).into();
-        // TODO(MrCroxx): use HummockStateStore and MViewTable if not test
-        tables.insert(
-            table_id.clone(),
-            TableImpl::TestMViewTable(Arc::new(MViewTable::new(
-                prefix.clone(),
-                schema,
-                pk_columns,
-                orderings,
-                match state_store {
-                    StateStoreImpl::MemoryStateStore(s) => s,
-                    _ => unreachable!(),
-                },
-            ))),
-        );
+        let prefix: Vec<u8> = format!("mview-{:04}", table_id.table_id()).into();
+
+        let table_impl = match state_store {
+            StateStoreImpl::MemoryStateStore(s) => TableImpl::TestMViewTable(Arc::new(
+                MViewTable::new(prefix.clone(), schema, pk_columns, orderings, s),
+            )),
+            StateStoreImpl::HummockStateStore(s) => TableImpl::MViewTable(Arc::new(
+                MViewTable::new(prefix.clone(), schema, pk_columns, orderings, s),
+            )),
+        };
+
+        tables.insert(table_id.clone(), table_impl);
         Ok(prefix)
     }
 }

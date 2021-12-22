@@ -81,7 +81,7 @@ start_n_nodes_cluster() {
 
     cd ../java || exit 1
 
-    TEMP_DIR=$(mktemp -d "risingwave.XXXXXX")
+    TEMP_DIR=$(mktemp -d "risingwave.XXXXXX" -p /tmp)
 
     cp $FRONTEND_CFG_FILE "$TEMP_DIR"
 

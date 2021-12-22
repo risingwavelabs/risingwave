@@ -14,7 +14,7 @@ use risingwave_common::util::sort_util::{fetch_orders, fetch_orders_with_pk};
 use risingwave_pb::{expr, stream_plan, stream_service};
 use risingwave_storage::hummock::HummockStateStore;
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::Keyspace;
+use risingwave_storage::{Keyspace, StateStore};
 use tokio::task::JoinHandle;
 
 use crate::stream::StreamTaskEnv;
@@ -98,9 +98,9 @@ pub struct StreamManager {
 }
 
 impl StreamManager {
-    pub fn new(addr: SocketAddr) -> Self {
+    pub fn new(addr: SocketAddr, state_store: Option<&str>) -> Self {
         StreamManager {
-            core: Mutex::new(StreamManagerCore::new(addr)),
+            core: Mutex::new(StreamManagerCore::new(addr, state_store)),
         }
     }
 
@@ -215,8 +215,31 @@ fn build_agg_call_from_prost(agg_call_proto: &expr::AggCall) -> Result<AggCall> 
 }
 
 impl StreamManagerCore {
-    fn new(addr: SocketAddr) -> Self {
+    fn new(addr: SocketAddr, state_store: Option<&str>) -> Self {
         let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+        let state_store = match state_store {
+            Some("in_memory") | Some("in-memory") | None => {
+                StateStoreImpl::MemoryStateStore(MemoryStateStore::new())
+            }
+            Some("hummock_minio") | Some("hummock-minio") => {
+                use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
+                use risingwave_storage::hummock::{HummockOptions, HummockStorage};
+                use risingwave_storage::object::S3ObjectStore;
+                // TODO: initialize those settings in a yaml file or command line instead of
+                // hard-coding
+                StateStoreImpl::HummockStateStore(HummockStateStore::new(HummockStorage::new(
+                    Arc::new(S3ObjectStore::new_with_test_minio()),
+                    HummockOptions {
+                        table_size: 256 * (1 << 20),
+                        block_size: 64 * (1 << 10),
+                        bloom_false_positive: 0.1,
+                        remote_dir: "hummock_001".to_string(),
+                        checksum_algo: ChecksumAlg::Crc32c,
+                    },
+                )))
+            }
+            Some(other) => unimplemented!("{} state store is not supported", other),
+        };
         Self {
             handles: HashMap::new(),
             channel_pool: HashMap::new(),
@@ -226,7 +249,7 @@ impl StreamManagerCore {
             sender_placeholder: vec![],
             mock_source: (Some(tx), Some(rx)),
             addr,
-            state_store: StateStoreImpl::MemoryStateStore(MemoryStateStore::new()),
+            state_store,
         }
     }
 
@@ -330,12 +353,13 @@ impl StreamManagerCore {
         }
     }
 
-    /// Create a chain(tree) of nodes and return the head executor.
-    fn create_nodes(
+    /// Create a chain(tree) of nodes, with given `store`.
+    fn create_nodes_inner(
         &mut self,
         fragment_id: u32,
         node: &stream_plan::StreamNode,
         env: StreamTaskEnv,
+        store: impl StateStore,
     ) -> Result<Box<dyn Executor>> {
         use stream_plan::stream_node::Node::*;
 
@@ -344,7 +368,7 @@ impl StreamManagerCore {
         let mut input: Vec<Box<dyn Executor>> = node
             .input
             .iter()
-            .map(|input| self.create_nodes(fragment_id, input, env.clone()))
+            .map(|input| self.create_nodes_inner(fragment_id, input, env.clone(), store.clone()))
             .collect::<Result<Vec<_>>>()?;
 
         let table_manager = env.table_manager();
@@ -416,7 +440,7 @@ impl StreamManagerCore {
                 Ok(Box::new(SimpleAggExecutor::new(
                     input.remove(0),
                     agg_calls,
-                    Keyspace::fragment_root(MemoryStateStore::new(), fragment_id),
+                    Keyspace::fragment_root(store.clone(), fragment_id),
                     pk_indices,
                 )))
             }
@@ -437,7 +461,7 @@ impl StreamManagerCore {
                     input.remove(0),
                     agg_calls,
                     keys,
-                    Keyspace::fragment_root(MemoryStateStore::new(), fragment_id),
+                    Keyspace::fragment_root(store.clone(), fragment_id),
                     pk_indices,
                 )))
             }
@@ -458,7 +482,7 @@ impl StreamManagerCore {
                     order_types,
                     (top_n_node.offset as usize, limit),
                     pk_indices,
-                    Keyspace::fragment_root(MemoryStateStore::new(), fragment_id),
+                    Keyspace::fragment_root(store.clone(), fragment_id),
                     cache_size,
                     total_count,
                 )))
@@ -544,6 +568,23 @@ impl StreamManagerCore {
         };
 
         executor
+    }
+
+    /// Create a chain(tree) of nodes and return the head executor.
+    fn create_nodes(
+        &mut self,
+        fragment_id: u32,
+        node: &stream_plan::StreamNode,
+        env: StreamTaskEnv,
+    ) -> Result<Box<dyn Executor>> {
+        match self.state_store.clone() {
+            StateStoreImpl::HummockStateStore(store) => {
+                self.create_nodes_inner(fragment_id, node, env, store)
+            }
+            StateStoreImpl::MemoryStateStore(store) => {
+                self.create_nodes_inner(fragment_id, node, env, store)
+            }
+        }
     }
 
     fn create_merge_node(
@@ -657,7 +698,6 @@ impl StreamManagerCore {
     fn build_fragment(&mut self, fragments: &[u32], env: StreamTaskEnv) -> Result<()> {
         for fragment_id in fragments {
             let fragment = self.fragments.remove(fragment_id).unwrap();
-
             let executor = self.create_nodes(*fragment_id, fragment.get_nodes(), env.clone())?;
             let dispatcher = self.create_dispatcher(
                 executor,

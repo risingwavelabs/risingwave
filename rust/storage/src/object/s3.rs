@@ -222,6 +222,35 @@ impl S3ObjectStore {
             object: Mutex::new(HashMap::new()),
         }
     }
+
+    pub fn new_with_s3_client(client: S3Client, bucket: String) -> Self {
+        Self {
+            connection_info: None,
+            client: Some(client),
+            bucket,
+            object: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn new_with_test_minio() -> Self {
+        // TODO: don't hard-code configurations
+        Self::new_with_s3_client(
+            S3Client::new_with(
+                HttpClient::new().expect("Failed to create HTTP client"),
+                StaticProvider::from(AwsCredentials::new(
+                    "hummock".to_string(),
+                    "12345678".to_string(),
+                    None,
+                    None,
+                )),
+                rusoto_core::Region::Custom {
+                    name: "minio".to_string(),
+                    endpoint: "http://127.0.0.1:9300".to_string(),
+                },
+            ),
+            "hummock".to_string(),
+        )
+    }
 }
 
 /// We cannot leave credentials in our code history.

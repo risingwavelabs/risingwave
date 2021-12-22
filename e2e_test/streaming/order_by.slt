@@ -83,3 +83,9 @@ drop table t3
 
 statement ok
 drop table mv1
+
+statement ok
+drop table mv2
+
+statement ok
+drop table mv3
