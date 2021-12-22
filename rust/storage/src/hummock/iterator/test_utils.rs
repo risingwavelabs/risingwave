@@ -4,11 +4,14 @@ use crate::hummock::cloud::gen_remote_table;
 use crate::hummock::key::{key_with_ts, user_key};
 use crate::hummock::{HummockResult, HummockValue, Table, TableBuilder, TableBuilderOptions};
 use crate::object::{InMemObjectStore, ObjectStore};
-type IndexMapper = Box<dyn Fn(u64, usize) -> Vec<u8> + Send + Sync>;
+
+pub trait IndexMapper: Fn(u64, usize) -> Vec<u8> + Send + Sync + 'static {}
+impl<T> IndexMapper for T where T: Fn(u64, usize) -> Vec<u8> + Send + Sync + 'static {}
+type BoxedIndexMapper = Box<dyn IndexMapper>;
 
 pub struct TestIteratorConfig {
-    key_mapper: IndexMapper,
-    value_mapper: IndexMapper,
+    key_mapper: BoxedIndexMapper,
+    value_mapper: BoxedIndexMapper,
     id: u64,
     total: usize,
     table_builder_opt: TableBuilderOptions,
@@ -26,12 +29,12 @@ impl TestIteratorConfig {
 impl Default for TestIteratorConfig {
     fn default() -> Self {
         Self {
-            key_mapper: Box::new(move |id, index| {
+            key_mapper: Box::new(|id, index| {
                 format!("{:03}_key_test_{:05}", id, index)
                     .as_bytes()
                     .to_vec()
             }),
-            value_mapper: Box::new(move |id, index| {
+            value_mapper: Box::new(|id, index| {
                 format!("{:03}_value_test_{:05}", id, index)
                     .as_bytes()
                     .iter()
@@ -64,28 +67,28 @@ pub struct TestIteratorBuilder {
 }
 
 impl TestIteratorBuilder {
-    pub fn total(&mut self, t: usize) -> &mut Self {
+    pub fn total(mut self, t: usize) -> Self {
         self.cfg.total = t;
         self
     }
 
-    pub fn map_key(&mut self, m: IndexMapper) -> &mut Self {
-        self.cfg.key_mapper = m;
+    pub fn map_key(mut self, m: impl IndexMapper) -> Self {
+        self.cfg.key_mapper = Box::new(m);
         self
     }
 
-    pub fn map_value(&mut self, m: IndexMapper) -> &mut Self {
-        self.cfg.value_mapper = m;
+    pub fn map_value(mut self, m: impl IndexMapper) -> Self {
+        self.cfg.value_mapper = Box::new(m);
         self
     }
 
-    pub fn id(&mut self, id: u64) -> &mut Self {
+    pub fn id(mut self, id: u64) -> Self {
         self.cfg.id = id;
         self
     }
 
-    pub fn finish(&mut self) -> (TestIterator, TestValidator) {
-        TestIterator::new(Arc::new(std::mem::take(&mut self.cfg)))
+    pub fn finish(self) -> (TestIterator, TestValidator) {
+        TestIterator::new(Arc::new(self.cfg))
     }
 }
 
@@ -235,7 +238,7 @@ pub fn test_value_of(table: u64, idx: usize) -> Vec<u8> {
 }
 
 pub async fn gen_test_table(table_idx: u64, opts: TableBuilderOptions) -> Table {
-    gen_test_table_base(table_idx, opts, &|x| x).await
+    gen_test_table_base(table_idx, opts, |x| x).await
 }
 
 /// Generate a test table used in almost all table-related tests. Developers may verify the
@@ -270,7 +273,7 @@ mod metatest {
     async fn test_basic() {
         let (_, val) = TestIteratorBuilder::default()
             .id(0)
-            .map_key(Box::new(move |id, x| iterator_test_key_of(id, x * 3)))
+            .map_key(|id, x| iterator_test_key_of(id, x * 3))
             .finish();
 
         let expected = iterator_test_key_of(0, 9);

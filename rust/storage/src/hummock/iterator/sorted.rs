@@ -134,12 +134,8 @@ mod test {
             .map(|iter_id| {
                 TestIteratorBuilder::default()
                     .id(0)
-                    .map_key(Box::new(move |id, x| {
-                        iterator_test_key_of(id, x * 3 + (iter_id as usize) + 1)
-                    }))
-                    .map_value(Box::new(move |id, x| {
-                        test_value_of(id, x * 3 + (iter_id as usize) + 1)
-                    }))
+                    .map_key(move |id, x| iterator_test_key_of(id, x * 3 + (iter_id as usize) + 1))
+                    .map_value(move |id, x| test_value_of(id, x * 3 + (iter_id as usize) + 1))
                     .finish()
             })
             .unzip();
@@ -174,9 +170,7 @@ mod test {
                 TestIteratorBuilder::default()
                     .id(0)
                     .total(20)
-                    .map_key(Box::new(move |id, x| {
-                        iterator_test_key_of(id, x * 3 + (iter_id as usize))
-                    }))
+                    .map_key(move |id, x| iterator_test_key_of(id, x * 3 + (iter_id as usize)))
                     .finish()
             })
             .unzip();
