@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 
-use num_integer::Integer;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::meta::get_id_request::IdCategory;
 use tokio::sync::RwLock;
@@ -79,7 +78,10 @@ impl IdGenerator for StoredIdGenerator {
         if id + interval > next_allocate_id {
             let mut next = self.next_allocate_id.write().await;
             if id + interval > *next {
-                let weight = (id + interval - *next).div_ceil(&ID_PREALLOCATE_INTERVAL);
+                let weight = num_integer::Integer::div_ceil(
+                    &(id + interval - *next),
+                    &ID_PREALLOCATE_INTERVAL,
+                );
                 let next_allocate_id = *next + ID_PREALLOCATE_INTERVAL * weight;
                 self.meta_store_ref
                     .put(

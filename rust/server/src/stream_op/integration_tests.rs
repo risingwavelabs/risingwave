@@ -145,12 +145,7 @@ async fn test_merger_sum_aggr() {
     handles.push(tokio::spawn(actor.run()));
 
     for j in 0..11 {
-        let op;
-        if j % 2 == 0 {
-            op = Op::Insert;
-        } else {
-            op = Op::Delete;
-        }
+        let op = if j % 2 == 0 { Op::Insert } else { Op::Delete };
         for i in 0..10 {
             let chunk = StreamChunk {
                 ops: vec![op; i],

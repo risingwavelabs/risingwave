@@ -160,7 +160,7 @@ impl HummockManager for DefaultHummockManager {
                 .meta_store_ref
                 .put_cf(
                     self.manager_config.get_hummock_context_cf(),
-                    &new_context.identifier.to_be_bytes().to_vec(),
+                    &new_context.identifier.to_be_bytes(),
                     &new_context.encode_to_vec(),
                     SINGLE_VERSION_EPOCH,
                 )
@@ -188,7 +188,7 @@ impl HummockManager for DefaultHummockManager {
         self.meta_store_ref
             .delete_cf(
                 self.manager_config.get_hummock_context_cf(),
-                &context_id.to_be_bytes().to_vec(),
+                &context_id.to_be_bytes(),
                 SINGLE_VERSION_EPOCH,
             )
             .await
@@ -215,7 +215,6 @@ mod tests {
     use std::sync::Arc;
 
     use assert_matches::assert_matches;
-    use num_integer::Integer;
 
     use super::*;
     use crate::hummock;
@@ -237,13 +236,9 @@ mod tests {
         )
         .await;
         let group = "operator#1";
-        let context = hummock_manager
-            .create_hummock_context(&group.to_owned())
-            .await?;
+        let context = hummock_manager.create_hummock_context(group).await?;
         assert_eq!(context.group, group);
-        let context2 = hummock_manager
-            .create_hummock_context(&group.to_owned())
-            .await;
+        let context2 = hummock_manager.create_hummock_context(group).await;
         assert!(context2.is_err());
         assert_matches!(
             context2.unwrap_err().inner(),
@@ -253,14 +248,13 @@ mod tests {
             .invalidate_hummock_context(context.identifier)
             .await;
         assert!(invalidate.is_ok());
-        let context2 = hummock_manager
-            .create_hummock_context(&group.to_owned())
-            .await?;
+        let context2 = hummock_manager.create_hummock_context(group).await?;
         assert_eq!(context2.group, group);
 
-        tokio::time::sleep(Duration::from_millis(
-            hummock_config.context_ttl.div_ceil(&2),
-        ))
+        tokio::time::sleep(Duration::from_millis(num_integer::Integer::div_ceil(
+            &(hummock_config.context_ttl),
+            &2,
+        )))
         .await;
 
         let context2_refreshed = hummock_manager

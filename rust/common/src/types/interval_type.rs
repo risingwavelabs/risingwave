@@ -43,6 +43,7 @@ impl IntervalUnit {
         self.ms
     }
 
+    #[must_use]
     pub fn negative(&self) -> Self {
         IntervalUnit {
             months: -self.months,
@@ -51,6 +52,7 @@ impl IntervalUnit {
         }
     }
 
+    #[must_use]
     pub fn from_ymd(year: i32, month: i32, days: i32) -> Self {
         let months = year * 12 + month;
         let days = days;
@@ -58,6 +60,7 @@ impl IntervalUnit {
         IntervalUnit { months, days, ms }
     }
 
+    #[must_use]
     pub fn from_month(months: i32) -> Self {
         IntervalUnit {
             months,
@@ -65,6 +68,8 @@ impl IntervalUnit {
             ms: 0,
         }
     }
+
+    #[must_use]
     pub fn from_millis(ms: i64) -> Self {
         IntervalUnit {
             months: 0,

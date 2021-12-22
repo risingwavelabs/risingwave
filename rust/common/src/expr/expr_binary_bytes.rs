@@ -62,14 +62,13 @@ mod tests {
         let text = "quick brown";
         let start_pos = 3;
         let for_pos = 4;
-        let mut res;
 
         let mut substr_start_normal = create_str_i32_binary_expr(
             new_substr_start,
             Some(ScalarImpl::from(String::from(text))),
             Some(ScalarImpl::Int32(start_pos)),
         );
-        res = substr_start_normal.eval(&DataChunk::new_dummy(1)).unwrap();
+        let res = substr_start_normal.eval(&DataChunk::new_dummy(1)).unwrap();
         assert_eq!(
             res.to_datum(),
             Some(ScalarImpl::from(String::from(
@@ -82,7 +81,7 @@ mod tests {
             Some(ScalarImpl::from(String::from(text))),
             None,
         );
-        res = substr_start_i32_none
+        let res = substr_start_i32_none
             .eval(&DataChunk::new_dummy(1))
             .unwrap();
         assert_eq!(res.to_datum(), None);
@@ -92,7 +91,7 @@ mod tests {
             Some(ScalarImpl::from(String::from(text))),
             Some(ScalarImpl::Int32(for_pos)),
         );
-        res = substr_for_normal.eval(&DataChunk::new_dummy(1)).unwrap();
+        let res = substr_for_normal.eval(&DataChunk::new_dummy(1)).unwrap();
         assert_eq!(
             res.to_datum(),
             Some(ScalarImpl::from(String::from(&text[..for_pos as usize])))
@@ -100,7 +99,7 @@ mod tests {
 
         let mut substr_for_str_none =
             create_str_i32_binary_expr(new_substr_for, None, Some(ScalarImpl::Int32(for_pos)));
-        res = substr_for_str_none.eval(&DataChunk::new_dummy(1)).unwrap();
+        let res = substr_for_str_none.eval(&DataChunk::new_dummy(1)).unwrap();
         assert_eq!(res.to_datum(), None);
     }
 }

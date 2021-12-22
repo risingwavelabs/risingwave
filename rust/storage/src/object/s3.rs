@@ -81,7 +81,7 @@ impl ConnectionInfo {
 impl ObjectStore for S3ObjectStore {
     async fn upload(&self, path: &str, obj: Bytes) -> Result<()> {
         ensure!(!obj.is_empty());
-        ensure!(!self.client.is_none());
+        ensure!(self.client.is_some());
 
         // TODO(xiangyhu): what if the blob existed?
         let data = ByteStream::from(obj.as_ref().to_vec());
@@ -104,7 +104,7 @@ impl ObjectStore for S3ObjectStore {
 
     /// Amazon S3 doesn't support retrieving multiple ranges of data per GET request.
     async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> Result<Vec<u8>> {
-        ensure!(!self.client.is_none());
+        ensure!(self.client.is_some());
 
         let response = self
             .client
@@ -155,7 +155,7 @@ impl ObjectStore for S3ObjectStore {
     }
 
     async fn metadata(&self, path: &str) -> Result<ObjectMetadata> {
-        ensure!(!self.client.is_none());
+        ensure!(self.client.is_some());
 
         let response = self
             .client
@@ -187,7 +187,7 @@ impl ObjectStore for S3ObjectStore {
     /// Permanently delete the whole object.
     /// According to Amazon S3, this will simply return Ok if the object does not exist.
     async fn delete(&self, path: &str) -> Result<()> {
-        ensure!(!self.client.is_none());
+        ensure!(self.client.is_some());
 
         self.client
             .as_ref()
@@ -275,12 +275,9 @@ mod tests {
         s3.upload(&path, block).await.unwrap();
 
         // No such object.
-        s3.read(
-            &"/ab".to_string(),
-            Some(BlockLocation { offset: 0, size: 3 }),
-        )
-        .await
-        .unwrap_err();
+        s3.read("/ab", Some(BlockLocation { offset: 0, size: 3 }))
+            .await
+            .unwrap_err();
 
         let bytes = s3
             .read(&path, Some(BlockLocation { offset: 4, size: 2 }))

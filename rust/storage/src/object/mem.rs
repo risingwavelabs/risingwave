@@ -80,42 +80,30 @@ mod tests {
         let block = Bytes::from("123456");
 
         let s3 = InMemObjectStore::new();
-        s3.upload(&"/abc".to_string(), block).await.unwrap();
+        s3.upload("/abc", block).await.unwrap();
 
         // No such object.
-        s3.read(
-            &"/ab".to_string(),
-            Some(BlockLocation { offset: 0, size: 3 }),
-        )
-        .await
-        .unwrap_err();
+        s3.read("/ab", Some(BlockLocation { offset: 0, size: 3 }))
+            .await
+            .unwrap_err();
 
         let bytes = s3
-            .read(
-                &"/abc".to_string(),
-                Some(BlockLocation { offset: 4, size: 2 }),
-            )
+            .read("/abc", Some(BlockLocation { offset: 4, size: 2 }))
             .await
             .unwrap();
         assert_eq!(String::from_utf8(bytes.to_vec()).unwrap(), "56".to_string());
 
         // Overflow.
-        s3.read(
-            &"/abc".to_string(),
-            Some(BlockLocation { offset: 4, size: 4 }),
-        )
-        .await
-        .unwrap_err();
+        s3.read("/abc", Some(BlockLocation { offset: 4, size: 4 }))
+            .await
+            .unwrap_err();
 
-        s3.delete(&"/abc".to_string()).await.unwrap();
+        s3.delete("/abc").await.unwrap();
 
         // No such object.
-        s3.read(
-            &"/abc".to_string(),
-            Some(BlockLocation { offset: 0, size: 3 }),
-        )
-        .await
-        .unwrap_err();
+        s3.read("/abc", Some(BlockLocation { offset: 0, size: 3 }))
+            .await
+            .unwrap_err();
     }
 
     #[tokio::test]
@@ -123,9 +111,9 @@ mod tests {
         let block = Bytes::from("123456");
 
         let obj_store = InMemObjectStore::new();
-        obj_store.upload(&"/abc".to_string(), block).await.unwrap();
+        obj_store.upload("/abc", block).await.unwrap();
 
-        let metadata = obj_store.metadata(&"/abc".to_string()).await.unwrap();
+        let metadata = obj_store.metadata("/abc").await.unwrap();
         assert_eq!(metadata.total_size, 6);
     }
 }

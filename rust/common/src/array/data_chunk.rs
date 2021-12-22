@@ -123,6 +123,7 @@ impl DataChunk {
         &self.visibility
     }
 
+    #[must_use]
     pub fn with_visibility(&self, visibility: Bitmap) -> Self {
         DataChunk::new(self.columns.clone(), Some(visibility))
     }

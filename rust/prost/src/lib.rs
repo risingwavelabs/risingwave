@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 #[rustfmt::skip]
 pub mod common;
 #[rustfmt::skip]

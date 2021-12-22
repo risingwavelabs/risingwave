@@ -115,6 +115,7 @@ impl<'a> ExecutorBuilder<'a> {
         })
     }
 
+    #[must_use]
     pub fn clone_for_plan(&self, plan_node: &'a PlanNode) -> Self {
         ExecutorBuilder::new(plan_node, self.task_id, self.env.clone())
     }

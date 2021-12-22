@@ -252,7 +252,7 @@ impl Source for HighLevelKafkaSource {
 
         let topics: &[&str] = &[&self.config.topic];
 
-        consumer.subscribe(&topics.to_vec()).map_err(|e| {
+        consumer.subscribe(topics).map_err(|e| {
             RwError::from(InternalError(format!(
                 "subscribe to topic {} failed {}",
                 self.config.topic, e
@@ -293,7 +293,7 @@ impl Source for HighLevelKafkaSource {
 
         let topics: &[&str] = &[&self.config.topic];
 
-        consumer.subscribe(&topics.to_vec()).map_err(|e| {
+        consumer.subscribe(topics).map_err(|e| {
             RwError::from(InternalError(format!(
                 "subscribe to topic {} failed {}",
                 self.config.topic, e

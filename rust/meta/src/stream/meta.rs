@@ -130,7 +130,7 @@ impl StreamMetaManager for StoredStreamMetaManager {
             .meta_store_ref
             .get_cf(
                 self.config.get_fragment_cf(),
-                &fragment_id.to_be_bytes().to_vec(),
+                fragment_id.to_be_bytes().as_ref(),
                 SINGLE_VERSION_EPOCH,
             )
             .await?;

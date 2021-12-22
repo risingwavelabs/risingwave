@@ -111,6 +111,7 @@ impl<S: StateStore> Keyspace<S> {
     }
 
     /// Get a sub-keyspace by pushing a [`Segment`].
+    #[must_use]
     pub fn with_segment(&self, segment: Segment) -> Self {
         let mut new_keyspace = self.clone();
         new_keyspace.push(segment);
