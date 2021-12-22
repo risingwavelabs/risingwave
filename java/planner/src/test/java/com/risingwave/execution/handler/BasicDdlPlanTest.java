@@ -18,9 +18,9 @@ public class BasicDdlPlanTest extends DdlPlanTestBase {
   }
 
   @ParameterizedTest(name = "{index} => {0}")
-  @DisplayName("Create table plan tests")
+  @DisplayName("Table DDL plan tests")
   @ArgumentsSource(PlanTestCaseLoader.class)
-  public void testCreateTablePlan(@ToPlannerTestCase PlannerTestCase testCase) {
+  public void testTableDdlPlan(@ToPlannerTestCase PlannerTestCase testCase) {
     runTestCase(testCase);
   }
 }

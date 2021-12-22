@@ -334,7 +334,7 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
   @Override
   public SqlNode visitDropTable(DropTable<?> node, Void context) {
     SqlIdentifier tableName = visitTable(node.table(), context);
-    return SqlDdlNodes.dropTable(SqlParserPos.ZERO, false, tableName);
+    return SqlDdlNodes.dropTable(SqlParserPos.ZERO, node.dropIfExists(), tableName);
   }
 
   @Override

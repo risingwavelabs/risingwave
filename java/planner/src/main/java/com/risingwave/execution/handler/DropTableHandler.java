@@ -34,6 +34,11 @@ public class DropTableHandler implements SqlHandler {
   @Override
   public PgResult handle(SqlNode ast, ExecutionContext context) {
     PlanFragment planFragment = execute(ast, context);
+    if (planFragment == null) {
+      // No plan is generated (i.e. the table does not exist). 
+      // Just return success.
+      return new DdlResult(StatementType.DROP_TABLE, 0);
+    }
     ComputeClientManager clientManager = context.getComputeClientManager();
 
     for (var node : context.getWorkerNodeManager().allNodes()) {
@@ -74,6 +79,12 @@ public class DropTableHandler implements SqlHandler {
     TableCatalog.TableName tableName =
         TableCatalog.TableName.of(context.getDatabase(), context.getSchema(), sql.name.getSimple());
     TableCatalog table = context.getCatalogService().getTable(tableName);
+    if (table == null) {
+      if (!sql.ifExists) {
+        throw new PgException(PgErrorCode.UNDEFINED_TABLE, "Table does not eixst");
+      }
+      return null;
+    }
     context.getCatalogService().dropTable(tableName);
     return serialize(table);
   }

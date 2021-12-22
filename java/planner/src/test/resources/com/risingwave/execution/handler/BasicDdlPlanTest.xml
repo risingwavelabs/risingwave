@@ -2,7 +2,7 @@
     <TestCase name="create table">
         <Resource name="sql">
             <![CDATA[
-create table t(v1 int not null, v2 int not null, v3 float not null)
+CREATE TABLE t(v1 int not null, v2 int not null, v3 float not null)
         ]]>
         </Resource>
     </TestCase>
@@ -10,7 +10,14 @@ create table t(v1 int not null, v2 int not null, v3 float not null)
     <TestCase name="drop table">
         <Resource name="sql">
             <![CDATA[
-drop table t
+DROP TABLE t
+        ]]>
+        </Resource>
+    </TestCase>
+        <TestCase name="drop table">
+        <Resource name="sql">
+            <![CDATA[
+DROP TABLE IF EXISTS t
         ]]>
         </Resource>
     </TestCase>
