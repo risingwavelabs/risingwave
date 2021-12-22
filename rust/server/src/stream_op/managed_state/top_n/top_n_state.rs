@@ -283,7 +283,7 @@ mod tests {
         ManagedTopNState::new(
             Some(2),
             row_count,
-            Keyspace::new(store.clone(), b"test_top_n".to_vec()),
+            Keyspace::fragment_root(store.clone(), 0x2333),
             schema,
         )
     }

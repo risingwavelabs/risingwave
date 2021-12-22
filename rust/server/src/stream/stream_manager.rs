@@ -416,7 +416,7 @@ impl StreamManagerCore {
                 Ok(Box::new(SimpleAggExecutor::new(
                     input.remove(0),
                     agg_calls,
-                    Keyspace::new(MemoryStateStore::new(), b"test_executor_2333".to_vec()),
+                    Keyspace::fragment_root(MemoryStateStore::new(), fragment_id),
                     pk_indices,
                 )))
             }
@@ -437,7 +437,7 @@ impl StreamManagerCore {
                     input.remove(0),
                     agg_calls,
                     keys,
-                    Keyspace::new(MemoryStateStore::new(), b"test_executor_2333".to_vec()),
+                    Keyspace::fragment_root(MemoryStateStore::new(), fragment_id),
                     pk_indices,
                 )))
             }
@@ -458,10 +458,7 @@ impl StreamManagerCore {
                     order_types,
                     (top_n_node.offset as usize, limit),
                     pk_indices,
-                    Keyspace::new(
-                        MemoryStateStore::new(),
-                        b"test_append_only_top_n_executor".to_vec(),
-                    ),
+                    Keyspace::fragment_root(MemoryStateStore::new(), fragment_id),
                     cache_size,
                     total_count,
                 )))

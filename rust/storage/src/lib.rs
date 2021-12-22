@@ -12,6 +12,7 @@
 
 pub mod bummock;
 pub mod hummock;
+pub mod keyspace;
 pub mod memory;
 pub mod object;
 pub mod panic_store;
@@ -19,6 +20,7 @@ pub mod table;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+pub use keyspace::{Keyspace, Segment};
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataTypeRef;
@@ -52,63 +54,6 @@ pub trait StateStoreIter: Send + 'static {
     async fn open(&mut self) -> Result<()>;
 
     async fn next(&mut self) -> Result<Option<Self::Item>>;
-}
-
-/// Provides API to read key-value pairs of a prefix in the storage backend.
-#[derive(Clone)]
-pub struct Keyspace<S: StateStore> {
-    store: S,
-    prefix: Vec<u8>,
-}
-
-impl<S: StateStore> Keyspace<S> {
-    pub fn new(store: S, prefix: Vec<u8>) -> Self {
-        Self { store, prefix }
-    }
-
-    /// Get the key from the keyspace
-    pub async fn get(&self) -> Result<Option<Bytes>> {
-        self.store.get(&self.prefix).await
-    }
-
-    /// Scan `limit` keys from the keyspace. If `limit` is None, all keys of the given prefix will
-    /// be returned.
-    pub async fn scan(&self, limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
-        self.store.scan(&self.prefix, limit).await
-    }
-
-    /// Scan from the keyspace, and then strip the prefix of this keyspace.
-    ///
-    /// See also: [`Keyspace::scan`]
-    pub async fn scan_strip_prefix(&self, limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
-        let mut pairs = self.scan(limit).await?;
-        pairs
-            .iter_mut()
-            .for_each(|(k, _v)| *k = k.slice(self.prefix.len()..));
-        Ok(pairs)
-    }
-
-    pub fn prefix(&self) -> &[u8] {
-        &self.prefix
-    }
-
-    /// Concatenate prefix of this keyspace and the given key to produce a prefixed key.
-    pub fn prefixed_key(&self, key: impl AsRef<[u8]>) -> Vec<u8> {
-        [self.prefix.as_slice(), key.as_ref()].concat()
-    }
-
-    /// Get the underlying state store.
-    pub fn state_store(&self) -> S {
-        self.store.clone()
-    }
-
-    /// Get a sub-keyspace.
-    pub fn keyspace(&self, sub_prefix: &[u8]) -> Self {
-        Self {
-            store: self.store.clone(),
-            prefix: [&self.prefix[..], sub_prefix].concat(),
-        }
-    }
 }
 
 /// `Table` is an abstraction of the collection of columns and rows.

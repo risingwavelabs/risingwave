@@ -204,16 +204,11 @@ mod tests {
     use risingwave_common::column_nonnull;
     use risingwave_common::expr::*;
     use risingwave_common::types::*;
-    use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
     use crate::stream_op::test_utils::*;
     use crate::stream_op::*;
     use crate::*;
-
-    fn create_in_memory_keyspace() -> Keyspace<impl StateStore> {
-        Keyspace::new(MemoryStateStore::new(), b"test_executor_2333".to_vec())
-    }
 
     #[tokio::test]
     async fn test_local_simple_aggregation_in_memory() {

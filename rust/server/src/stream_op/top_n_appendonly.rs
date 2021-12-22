@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use rdkafka::message::ToBytes;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::PkIndicesRef;
@@ -98,8 +98,8 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
                 (order_type, *pk_index)
             })
             .collect::<Vec<_>>();
-        let lower_sub_keyspace = keyspace.keyspace("l/".to_bytes());
-        let higher_sub_keyspace = keyspace.keyspace("h/".to_bytes());
+        let lower_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"l/".to_vec()));
+        let higher_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"h/".to_vec()));
         let ordered_arrays_serializer = OrderedArraysSerializer::new(order_pairs);
         let input_schema = input.schema().clone();
         Self {
@@ -271,10 +271,8 @@ mod tests {
     use risingwave_common::column_nonnull;
     use risingwave_common::types::Int64Type;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::Keyspace;
 
-    use crate::stream_op::test_utils::MockSource;
+    use crate::stream_op::test_utils::{create_in_memory_keyspace, MockSource};
     use crate::stream_op::top_n_appendonly::AppendOnlyTopNExecutor;
     use crate::stream_op::{Barrier, Executor, Message, PkIndices, StreamChunk};
 
@@ -327,8 +325,8 @@ mod tests {
                 Message::Chunk(chunk3),
             ],
         ));
-        let store = MemoryStateStore::new();
-        let keyspace = Keyspace::new(store.clone(), b"top_n_appendonly".to_vec());
+
+        let keyspace = create_in_memory_keyspace();
         let mut top_n_executor = AppendOnlyTopNExecutor::new(
             source as Box<dyn Executor>,
             order_types,

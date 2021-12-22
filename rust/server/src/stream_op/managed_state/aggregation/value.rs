@@ -96,7 +96,7 @@ impl<S: StateStore> ManagedValueState<S> {
         let mut serializer = memcomparable::Serializer::new(vec![]);
         serialize_datum_into(&v, &mut serializer)?;
         write_batch.push((
-            self.keyspace.prefix().to_vec().into(),
+            self.keyspace.key().to_vec().into(),
             Some(serializer.into_inner().into()),
         ));
         self.is_dirty = false;
@@ -108,9 +108,9 @@ impl<S: StateStore> ManagedValueState<S> {
 mod tests {
     use risingwave_common::array::{I64Array, Op};
     use risingwave_common::types::{Int64Type, ScalarImpl};
-    use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
+    use crate::stream_op::test_utils::create_in_memory_keyspace;
     use crate::stream_op::AggArgs;
 
     fn create_test_count_state() -> AggCall {
@@ -123,10 +123,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_managed_value_state() {
-        let store = MemoryStateStore::new();
-        let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
+        let keyspace = create_in_memory_keyspace();
+        let store = keyspace.state_store();
         let mut managed_state =
-            ManagedValueState::new(create_test_count_state(), keyspace, Some(0))
+            ManagedValueState::new(create_test_count_state(), keyspace.clone(), Some(0))
                 .await
                 .unwrap();
         assert!(!managed_state.is_dirty());
@@ -156,7 +156,6 @@ mod tests {
         );
 
         // reload the state and check the output
-        let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
         let mut managed_state = ManagedValueState::new(create_test_count_state(), keyspace, None)
             .await
             .unwrap();

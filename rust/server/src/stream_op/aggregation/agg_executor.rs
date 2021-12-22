@@ -1,10 +1,10 @@
 use async_trait::async_trait;
-use bytes::BufMut;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, ArrayImpl, Op, Row, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
+use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 use static_assertions::const_assert_eq;
 
@@ -262,18 +262,18 @@ pub async fn generate_agg_state<S: StateStore>(
 
     for (idx, agg_call) in agg_calls.iter().enumerate() {
         // TODO: in pure in-memory engine, we should not do this serialization.
-        let mut encoded_group_key = key
-            .map(|k| {
-                let mut key = k.serialize().unwrap();
-                key.push(b'/');
-                key
-            })
-            .unwrap_or_default();
-        encoded_group_key.put_u16(idx as u16);
-        encoded_group_key.push(b'/');
 
         // The prefix of the state is <(group key) / state id />
-        let keyspace = keyspace.keyspace(&encoded_group_key);
+        let keyspace = {
+            let mut ks = keyspace.clone();
+            if let Some(key) = key {
+                let bytes = key.serialize().unwrap();
+                ks.push(Segment::VariantLength(bytes));
+            }
+            ks.push(Segment::u16(idx as u16));
+            ks
+        };
+
         let mut managed_state = ManagedStateImpl::create_managed_state(
             agg_call.clone(),
             keyspace,

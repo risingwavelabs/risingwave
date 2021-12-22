@@ -222,7 +222,7 @@ impl<S: StateStore> ManagedExtremeState<S> for ManagedStringAggState<S> {
         }
 
         for (key, value) in std::mem::take(&mut self.cache) {
-            let key_encoded = [self.keyspace.prefix(), &key[..]].concat();
+            let key_encoded = [self.keyspace.key(), &key[..]].concat();
             let mut serializer = memcomparable::Serializer::new(vec![]);
             let value = value.into_option();
             match value {
@@ -257,7 +257,7 @@ mod tests {
         store: &S,
         row_count: usize,
     ) -> ManagedStringAggState<S> {
-        let keyspace = Keyspace::new(store.clone(), b"233333".to_vec());
+        let keyspace = Keyspace::fragment_root(store.clone(), 0x2333);
         let sort_key_indices = vec![0, 1];
         let value_index = 0;
         let orderings = vec![OrderType::Descending, OrderType::Ascending];

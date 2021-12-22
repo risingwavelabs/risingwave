@@ -1,5 +1,7 @@
 use std::collections::VecDeque;
 
+use risingwave_storage::memory::MemoryStateStore;
+use risingwave_storage::Keyspace;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::stream_op::*;
@@ -138,4 +140,8 @@ impl Executor for MockAsyncSource {
     fn pk_indices(&self) -> PkIndicesRef {
         &self.pk_indices
     }
+}
+
+pub fn create_in_memory_keyspace() -> Keyspace<MemoryStateStore> {
+    Keyspace::fragment_root(MemoryStateStore::new(), 0x2333)
 }

@@ -13,10 +13,9 @@ use risingwave_common::expr::expr_unary::new_unary_expr;
 use risingwave_common::expr::*;
 use risingwave_common::types::*;
 use risingwave_pb::expr::expr_node::Type;
-use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::{Keyspace, StateStore};
 
 use super::{ReceiverExecutor, *};
+use crate::stream_op::test_utils::create_in_memory_keyspace;
 
 pub struct MockConsumer {
     input: Box<dyn Executor>,
@@ -42,10 +41,6 @@ impl StreamConsumer for MockConsumer {
         }
         Ok(true)
     }
-}
-
-fn create_in_memory_keyspace() -> Keyspace<impl StateStore> {
-    Keyspace::new(MemoryStateStore::new(), b"test_executor_2333".to_vec())
 }
 
 /// This test creates a merger-dispatcher pair, and run a sum. Each chunk
