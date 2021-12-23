@@ -201,6 +201,10 @@ impl HummockStorage {
             table_builder.add(k.as_slice(), v);
         }
 
+        if table_builder.is_empty() {
+            return Ok(());
+        }
+
         // Producing only one table regardless of capacity for now.
         // TODO: update kv pairs to multi tables when size of the kv pairs is larger than
         // TODO: the capacity of a single table.
