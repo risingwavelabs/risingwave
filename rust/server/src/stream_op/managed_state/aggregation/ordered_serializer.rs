@@ -1,5 +1,7 @@
 use risingwave_common::array::{ArrayImpl, Row};
-use risingwave_common::types::{serialize_datum_into, serialize_datum_ref_into};
+use risingwave_common::types::{
+    deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataTypeKind,
+};
 use risingwave_common::util::sort_util::OrderType;
 
 type OrderPair = (OrderType, usize);
@@ -58,6 +60,33 @@ impl OrderedRowsSerializer {
             }
             append_to.push(row_bytes);
         }
+    }
+}
+
+/// Deserializer of the `Row`.
+pub struct OrderedRowDeserializer {
+    schema: Vec<DataTypeKind>,
+    order_pairs: Vec<OrderPair>,
+}
+
+impl OrderedRowDeserializer {
+    pub fn new(schema: Vec<DataTypeKind>, order_pairs: Vec<OrderPair>) -> Self {
+        assert_eq!(schema.len(), order_pairs.len());
+        Self {
+            schema,
+            order_pairs,
+        }
+    }
+
+    pub fn deserialize(&self, data: &[u8]) -> Result<Row, memcomparable::Error> {
+        let mut values = vec![None; self.schema.len()];
+        let mut deserializer = memcomparable::Deserializer::new(data);
+        for (data_type, (order_type, index)) in self.schema.iter().zip(self.order_pairs.iter()) {
+            deserializer.set_reverse(*order_type == OrderType::Descending);
+            let datum = deserialize_datum_from(data_type, &mut deserializer)?;
+            values[*index] = datum;
+        }
+        Ok(Row(values))
     }
 }
 
@@ -137,5 +166,21 @@ mod tests {
         );
         assert_eq!(array[1][11..], [1, 1, b'j', b'm', b'z', 0, 0, 0, 0, 0, 3u8]);
         assert_eq!(array[2][11..], [1, 1, b'm', b'j', b'z', 0, 0, 0, 0, 0, 3u8]);
+    }
+
+    #[test]
+    fn test_ordered_row_deserializer() {
+        let orders = vec![(OrderType::Ascending, 1), (OrderType::Descending, 0)];
+        let serializer = OrderedRowsSerializer::new(orders.clone());
+        let schema = vec![DataTypeKind::Int16, DataTypeKind::Varchar];
+        let row1 = Row(vec![Some(Utf8("abc".to_string())), Some(Int16(5))]);
+        let row2 = Row(vec![Some(Utf8("abd".to_string())), Some(Int16(5))]);
+        let row3 = Row(vec![Some(Utf8("abc".to_string())), Some(Int16(6))]);
+        let deserializer = OrderedRowDeserializer::new(schema, orders);
+        let mut array = vec![];
+        serializer.order_based_scehmaed_serialize(&[&row1, &row2, &row3], &mut array);
+        assert_eq!(deserializer.deserialize(&array[0]).unwrap(), row1);
+        assert_eq!(deserializer.deserialize(&array[1]).unwrap(), row2);
+        assert_eq!(deserializer.deserialize(&array[2]).unwrap(), row3);
     }
 }
