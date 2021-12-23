@@ -77,22 +77,32 @@ impl TaskSink {
         let task_id = TaskId::from(self.sink_id.get_task_id());
         self.task_manager.check_if_task_running(&task_id)?;
         loop {
-            let chunk = match self.receiver.recv().await? {
-                None => {
+            match self.receiver.recv().await {
+                // Received some data
+                Ok(Some(chunk)) => {
+                    let pb = chunk.to_protobuf()?;
+                    let resp = GetDataResponse {
+                        record_batch: Some(pb),
+                        ..Default::default()
+                    };
+                    writer.write(resp).await?;
+                }
+                // Reached EOF
+                Ok(None) => {
                     break;
                 }
-                Some(c) => c,
-            };
-            let pb = chunk.to_protobuf()?;
-            let resp = GetDataResponse {
-                record_batch: Some(pb),
-                ..Default::default()
-            };
-            writer.write(resp).await?;
-        }
-        let possible_err = self.task_manager.get_error(&task_id)?;
-        if let Some(err) = possible_err {
-            return Err(err);
+                // Error happened
+                Err(e) => {
+                    let possible_err = self.task_manager.get_error(&task_id)?;
+                    return if let Some(err) = possible_err {
+                        // Task error
+                        Err(err)
+                    } else {
+                        // Channel error
+                        Err(e)
+                    };
+                }
+            }
         }
         Ok(())
     }
@@ -154,7 +164,10 @@ impl TaskExecution {
         let task_id = self.task_id.clone();
         tokio::spawn(async move {
             debug!("Executing plan [{:?}]", task_id);
-            if let Err(e) = TaskExecution::try_execute(exec, sender).await {
+            let mut sender = sender;
+            // We should only pass a reference of sender to execution because we should only close
+            // it after task error has been set.
+            if let Err(e) = TaskExecution::try_execute(exec, &mut sender).await {
                 // Prints the entire backtrace of error.
                 error!("Execution failed [{:?}]: {:?}", &task_id, &e);
                 *failure.lock().unwrap() = Some(e);
@@ -163,7 +176,7 @@ impl TaskExecution {
         Ok(())
     }
 
-    async fn try_execute(mut root: BoxedExecutor, mut sender: BoxChanSender) -> Result<()> {
+    async fn try_execute(mut root: BoxedExecutor, sender: &mut BoxChanSender) -> Result<()> {
         root.open().await?;
         loop {
             match root.next().await? {

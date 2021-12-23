@@ -1,4 +1,4 @@
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{DataChunk, InternalError};
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::plan::exchange_info::BroadcastInfo;
 use risingwave_pb::plan::*;
@@ -33,9 +33,8 @@ impl ChanReceiver for BroadcastReceiver {
     async fn recv(&mut self) -> Result<Option<DataChunk>> {
         match self.receiver.recv().await {
             Some(data_chunk) => Ok(data_chunk),
-            // Here the channel is close, we should not return an error using channel close error,
-            // since true error are stored in TaskExecution.
-            None => Ok(None),
+            // Early close should be treated as an error.
+            None => Err(InternalError("broken broadcast_channel".to_string()).into()),
         }
     }
 }
@@ -144,6 +143,6 @@ mod tests {
         drop(sender);
 
         let receiver = receivers.get_mut(0).unwrap();
-        assert!(receiver.recv().await.is_ok());
+        assert!(receiver.recv().await.is_err());
     }
 }
