@@ -4,38 +4,35 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{deserialize_datum_from, Datum};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::table::TableIter;
-use risingwave_storage::{StateStore, StateStoreIter};
+use risingwave_storage::{Keyspace, StateStore, StateStoreIter};
 
 use super::*;
 
 /// `MViewTable` provides a readable cell-based row table interface,
 /// so that data can be queried by AP engine.
 pub struct MViewTable<S: StateStore> {
-    prefix: Vec<u8>,
+    keyspace: Keyspace<S>,
     schema: Schema,
     pk_columns: Vec<usize>,
     sort_key_serializer: OrderedRowsSerializer,
-    storage: S,
 }
 
 impl<S: StateStore> MViewTable<S> {
     pub fn new(
-        prefix: Vec<u8>,
+        keyspace: Keyspace<S>,
         schema: Schema,
         pk_columns: Vec<usize>,
         orderings: Vec<OrderType>,
-        storage: S,
     ) -> Self {
         let order_pairs = orderings
             .into_iter()
             .zip(pk_columns.clone().into_iter())
             .collect::<Vec<_>>();
         Self {
-            prefix,
+            keyspace,
             schema,
             pk_columns,
             sort_key_serializer: OrderedRowsSerializer::new(order_pairs),
-            storage,
         }
     }
 
@@ -45,14 +42,14 @@ impl<S: StateStore> MViewTable<S> {
 
     // TODO(MrCroxx): remove me after iter is impled.
     pub fn storage(&self) -> S {
-        self.storage.clone()
+        self.keyspace.state_store()
     }
 
     // TODO(MrCroxx): Refactor this after statestore iter is finished.
     pub fn iter(&self) -> MViewTableIter<S> {
         MViewTableIter::new(
-            self.storage.iter(&self.prefix[..]),
-            self.prefix.clone(),
+            self.keyspace.iter(),
+            self.keyspace.key().to_owned(),
             self.schema.clone(),
             self.pk_columns.clone(),
         )
@@ -62,18 +59,19 @@ impl<S: StateStore> MViewTable<S> {
     pub async fn get(&self, pk: Row, cell_idx: usize) -> Result<Option<Datum>> {
         debug_assert!(cell_idx < self.schema.len());
         // TODO(MrCroxx): More efficient encoding is needed.
-        let key = [
-            &self.prefix[..],
-            &serialize_pk(&pk, &self.sort_key_serializer)?[..],
-            &serialize_cell_idx(cell_idx as u32)?[..],
-        ]
-        .concat();
 
         let buf = self
-            .storage
-            .get(&key)
+            .keyspace
+            .get(
+                &[
+                    &serialize_pk(&pk, &self.sort_key_serializer)?[..],
+                    &serialize_cell_idx(cell_idx as u32)?[..],
+                ]
+                .concat(),
+            )
             .await
             .map_err(|err| ErrorCode::InternalError(err.to_string()))?;
+
         match buf {
             Some(buf) => {
                 let mut deserializer = memcomparable::Deserializer::new(buf);
@@ -166,6 +164,7 @@ mod tests {
     use risingwave_common::types::{DataTypeKind, Int32Type, StringType};
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::Keyspace;
 
     use super::*;
 
@@ -179,21 +178,14 @@ mod tests {
         ]);
         let pk_columns = vec![0, 1];
         let orderings = vec![OrderType::Ascending, OrderType::Descending];
-        let prefix = b"test-prefix-42".to_vec();
+        let keyspace = Keyspace::executor_root(state_store, 0x42);
         let mut state = ManagedMViewState::new(
-            prefix.clone(),
+            keyspace.clone(),
             schema.clone(),
             pk_columns.clone(),
             orderings.clone(),
-            state_store.clone(),
         );
-        let table = MViewTable::new(
-            prefix.clone(),
-            schema,
-            pk_columns.clone(),
-            orderings,
-            state_store.clone(),
-        );
+        let table = MViewTable::new(keyspace.clone(), schema, pk_columns.clone(), orderings);
 
         state.put(
             Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
@@ -260,21 +252,15 @@ mod tests {
         ]);
         let pk_columns = vec![0, 1];
         let orderings = vec![OrderType::Ascending, OrderType::Descending];
-        let prefix = b"test-prefix-42".to_vec();
+        let keyspace = Keyspace::executor_root(state_store, 0x42);
+
         let mut state = ManagedMViewState::new(
-            prefix.clone(),
+            keyspace.clone(),
             schema.clone(),
             pk_columns.clone(),
             orderings.clone(),
-            state_store.clone(),
         );
-        let table = MViewTable::new(
-            prefix.clone(),
-            schema,
-            pk_columns.clone(),
-            orderings,
-            state_store.clone(),
-        );
+        let table = MViewTable::new(keyspace.clone(), schema, pk_columns.clone(), orderings);
 
         state.put(
             Row(vec![
@@ -395,21 +381,15 @@ mod tests {
         ]);
         let pk_columns = vec![0, 1];
         let orderings = vec![OrderType::Ascending, OrderType::Descending];
-        let prefix = b"test-prefix-42".to_vec();
+        let keyspace = Keyspace::executor_root(state_store, 0x42);
+
         let mut state = ManagedMViewState::new(
-            prefix.clone(),
+            keyspace.clone(),
             schema.clone(),
             pk_columns.clone(),
             orderings.clone(),
-            state_store.clone(),
         );
-        let table = MViewTable::new(
-            prefix.clone(),
-            schema,
-            pk_columns.clone(),
-            orderings,
-            state_store.clone(),
-        );
+        let table = MViewTable::new(keyspace.clone(), schema, pk_columns.clone(), orderings);
 
         state.put(
             Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
@@ -463,37 +443,34 @@ mod tests {
         ]);
         let pk_columns = vec![0, 1];
         let orderings = vec![OrderType::Ascending, OrderType::Descending];
-        let prefix_1 = b"test-prefix-1".to_vec();
-        let prefix_2 = b"test-prefix-2".to_vec();
+
+        let keyspace_1 = Keyspace::executor_root(state_store.clone(), 0x1111);
+        let keyspace_2 = Keyspace::executor_root(state_store.clone(), 0x2222);
 
         let mut state_1 = ManagedMViewState::new(
-            prefix_1.clone(),
+            keyspace_1.clone(),
             schema_1.clone(),
             pk_columns.clone(),
             orderings.clone(),
-            state_store.clone(),
         );
         let mut state_2 = ManagedMViewState::new(
-            prefix_2.clone(),
+            keyspace_2.clone(),
             schema_2.clone(),
             pk_columns.clone(),
             orderings.clone(),
-            state_store.clone(),
         );
 
         let table_1 = MViewTable::new(
-            prefix_1.clone(),
+            keyspace_1.clone(),
             schema_1.clone(),
             pk_columns.clone(),
             orderings.clone(),
-            state_store.clone(),
         );
         let table_2 = MViewTable::new(
-            prefix_2.clone(),
+            keyspace_2.clone(),
             schema_2.clone(),
             pk_columns.clone(),
             orderings,
-            state_store.clone(),
         );
 
         state_1.put(

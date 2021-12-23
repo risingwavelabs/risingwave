@@ -222,7 +222,7 @@ impl<S: StateStore> ManagedExtremeState<S> for ManagedStringAggState<S> {
         }
 
         for (key, value) in std::mem::take(&mut self.cache) {
-            let key_encoded = [self.keyspace.key(), &key[..]].concat();
+            let key_encoded = self.keyspace.prefixed_key(key);
             let mut serializer = memcomparable::Serializer::new(vec![]);
             let value = value.into_option();
             match value {

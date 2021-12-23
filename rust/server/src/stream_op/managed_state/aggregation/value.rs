@@ -32,7 +32,7 @@ impl<S: StateStore> ManagedValueState<S> {
     ) -> Result<Self> {
         let data = if row_count != Some(0) {
             // View the keyspace as a single-value space, and get the value.
-            let raw_data = keyspace.get().await?;
+            let raw_data = keyspace.value().await?;
 
             // Decode the Datum from the value.
             if let Some(raw_data) = raw_data {

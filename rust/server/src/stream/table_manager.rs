@@ -12,7 +12,7 @@ use risingwave_storage::bummock::{BummockResult, BummockTable};
 use risingwave_storage::hummock::HummockStateStore;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::{ScannableTable, ScannableTableRef, TableIterRef, TableManager};
-use risingwave_storage::TableColumnDesc;
+use risingwave_storage::{Keyspace, TableColumnDesc};
 
 use super::StateStoreImpl;
 use crate::stream_op::MViewTable;
@@ -30,7 +30,7 @@ pub trait StreamTableManager: TableManager {
         pk_columns: Vec<usize>,
         orderings: Vec<OrderType>,
         state_store: StateStoreImpl,
-    ) -> Result<Vec<u8>>;
+    ) -> Result<()>;
 }
 
 /// The enumeration of supported simple tables in `SimpleTableManager`.
@@ -158,7 +158,7 @@ impl StreamTableManager for SimpleTableManager {
         pk_columns: Vec<usize>,
         orderings: Vec<OrderType>,
         state_store: StateStoreImpl,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<()> {
         let mut tables = self.get_tables()?;
         ensure!(
             !tables.contains_key(table_id),
@@ -168,20 +168,28 @@ impl StreamTableManager for SimpleTableManager {
         let column_count = columns.len();
         ensure!(column_count > 0, "There must be more than one column in MV");
         let schema = Schema::try_from(columns)?;
-        // TODO(MrCroxx): prefix rule, ref #1801 .
-        let prefix: Vec<u8> = format!("mview-{:04}", table_id.table_id()).into();
 
         let table_impl = match state_store {
-            StateStoreImpl::MemoryStateStore(s) => TableImpl::TestMViewTable(Arc::new(
-                MViewTable::new(prefix.clone(), schema, pk_columns, orderings, s),
-            )),
-            StateStoreImpl::HummockStateStore(s) => TableImpl::MViewTable(Arc::new(
-                MViewTable::new(prefix.clone(), schema, pk_columns, orderings, s),
-            )),
+            StateStoreImpl::MemoryStateStore(store) => {
+                TableImpl::TestMViewTable(Arc::new(MViewTable::new(
+                    Keyspace::table_root(store, table_id),
+                    schema,
+                    pk_columns,
+                    orderings,
+                )))
+            }
+            StateStoreImpl::HummockStateStore(store) => {
+                TableImpl::MViewTable(Arc::new(MViewTable::new(
+                    Keyspace::table_root(store, table_id),
+                    schema,
+                    pk_columns,
+                    orderings,
+                )))
+            }
         };
 
         tables.insert(table_id.clone(), table_impl);
-        Ok(prefix)
+        Ok(())
     }
 }
 

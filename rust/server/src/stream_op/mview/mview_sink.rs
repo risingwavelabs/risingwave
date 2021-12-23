@@ -3,7 +3,7 @@ use risingwave_common::array::Op::*;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_storage::StateStore;
+use risingwave_storage::{Keyspace, StateStore};
 
 use super::mview_state::ManagedMViewState;
 use crate::stream_op::{
@@ -22,20 +22,18 @@ pub struct MViewSinkExecutor<S: StateStore> {
 impl<S: StateStore> MViewSinkExecutor<S> {
     pub fn new(
         input: Box<dyn Executor>,
-        prefix: Vec<u8>,
+        keyspace: Keyspace<S>,
         schema: Schema,
         pk_columns: Vec<usize>,
-        state_store: S,
         orderings: Vec<OrderType>,
     ) -> Self {
         Self {
             input,
             local_state: ManagedMViewState::new(
-                prefix,
+                keyspace,
                 schema.clone(),
                 pk_columns.clone(),
                 orderings,
-                state_store,
             ),
             schema,
             pk_columns,
@@ -137,6 +135,7 @@ mod tests {
     use risingwave_pb::plan::ColumnDesc;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::TableManager;
+    use risingwave_storage::Keyspace;
 
     use crate::stream::{SimpleTableManager, StateStoreImpl, StreamTableManager, TableImpl};
     use crate::stream_op::test_utils::*;
@@ -177,7 +176,7 @@ mod tests {
         let state_store = MemoryStateStore::new();
         let state_store_impl = StateStoreImpl::MemoryStateStore(state_store.clone());
 
-        let prefix = store_mgr
+        store_mgr
             .create_materialized_view(
                 &table_id,
                 &columns,
@@ -216,12 +215,12 @@ mod tests {
                 Message::Barrier(Barrier::default()),
             ],
         );
+
         let mut sink_executor = Box::new(MViewSinkExecutor::new(
             Box::new(source),
-            prefix,
+            Keyspace::table_root(state_store, &table_id),
             schema,
             pks,
-            state_store.clone(),
             vec![OrderType::Ascending],
         ));
 

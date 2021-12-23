@@ -547,20 +547,20 @@ impl StreamManagerCore {
                     .map(|order| order.order_type)
                     .collect::<Vec<_>>();
 
-                let prefix = table_manager.create_materialized_view(
+                let keyspace = Keyspace::table_root(store, &table_id);
+                table_manager.create_materialized_view(
                     &table_id,
                     columns,
                     pks.clone(),
                     orderings.clone(),
                     self.state_store.clone(),
                 )?;
-                let state_store = self.state_store.as_memory();
+
                 let executor = Box::new(MViewSinkExecutor::new(
                     input.remove(0),
-                    prefix,
+                    keyspace,
                     Schema::try_from(columns)?,
                     pks,
-                    state_store,
                     orderings,
                 ));
                 Ok(executor)

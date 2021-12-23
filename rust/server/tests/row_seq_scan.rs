@@ -11,12 +11,14 @@ use risingwave_common::error::Result;
 use risingwave_common::types::Int32Type;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
+use risingwave_storage::Keyspace;
 
 #[tokio::test]
 async fn test_row_seq_scan() -> Result<()> {
     // In this test we test if the memtable can be correctly scanned for K-V pair insertions.
     let state_store = MemoryStateStore::new();
-    let prefix = b"mview-test-42".to_vec();
+    let keyspace = Keyspace::executor_root(state_store, 0x42);
+
     let schema = Schema::new(vec![
         Field::new(Int32Type::create(false)),
         Field::new(Int32Type::create(false)),
@@ -24,19 +26,17 @@ async fn test_row_seq_scan() -> Result<()> {
     let pk_columns = vec![0];
     let orderings = vec![OrderType::Ascending];
     let mut state = ManagedMViewState::new(
-        prefix.clone(),
+        keyspace.clone(),
         schema.clone(),
         pk_columns.clone(),
         orderings.clone(),
-        state_store.clone(),
     );
 
     let table = Arc::new(MViewTable::new(
-        prefix.clone(),
+        keyspace.clone(),
         schema.clone(),
         pk_columns.clone(),
         orderings,
-        state_store.clone(),
     ));
 
     let mut executor = RowSeqScanExecutor::new(

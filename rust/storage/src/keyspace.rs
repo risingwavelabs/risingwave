@@ -1,4 +1,5 @@
 use bytes::{BufMut, Bytes};
+use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 
 use crate::StateStore;
@@ -14,10 +15,6 @@ pub enum Segment {
 }
 
 impl Segment {
-    pub fn executor_id(id: u32) -> Self {
-        Self::u32(id)
-    }
-
     pub fn u16(id: u16) -> Self {
         Self::FixedLength(id.to_be_bytes().to_vec())
     }
@@ -53,18 +50,25 @@ pub struct Keyspace<S: StateStore> {
 }
 
 impl<S: StateStore> Keyspace<S> {
-    /// Create a [`Keyspace`] with empty segments.
-    pub fn new(store: S) -> Self {
-        Self {
+    /// Create a root [`Keyspace`] for an executor.
+    pub fn executor_root(store: S, id: u32) -> Self {
+        let mut root = Self {
             store,
-            prefix: Vec::with_capacity(2),
-        }
+            prefix: Vec::with_capacity(5),
+        };
+        root.push(Segment::FixedLength(b"e".to_vec()));
+        root.push(Segment::u32(id));
+        root
     }
 
-    /// Create a [`Keyspace`] with a segment for executor's id.
-    pub fn executor_root(store: S, id: u32) -> Self {
-        let mut root = Self::new(store);
-        root.push(Segment::executor_id(id));
+    /// Create a root [`Keyspace`] for a table.
+    pub fn table_root(store: S, id: &TableId) -> Self {
+        let mut root = Self {
+            store,
+            prefix: Vec::new(),
+        };
+        root.push(Segment::FixedLength(b"t".to_vec()));
+        root.push(Segment::VariantLength(format!("{:?}", id).into())); // TODO: this should be replaced with more-reasonable representation
         root
     }
 
@@ -79,13 +83,18 @@ impl<S: StateStore> Keyspace<S> {
     }
 
     /// Treat the keyspace as a single key, and get its value.
-    pub async fn get(&self) -> Result<Option<Bytes>> {
+    pub async fn value(&self) -> Result<Option<Bytes>> {
         self.store.get(&self.prefix).await
     }
 
     /// Concatenate this keyspace and the given key to produce a prefixed key.
     pub fn prefixed_key(&self, key: impl AsRef<[u8]>) -> Vec<u8> {
         [self.prefix.as_slice(), key.as_ref()].concat()
+    }
+
+    /// Get from the keyspace with the `prefixed_key` of given key.
+    pub async fn get(&self, key: impl AsRef<[u8]>) -> Result<Option<Bytes>> {
+        self.store.get(&self.prefixed_key(key)).await
     }
 
     /// Scan `limit` keys from the keyspace and get their values. If `limit` is None, all keys of
@@ -103,6 +112,11 @@ impl<S: StateStore> Keyspace<S> {
             .iter_mut()
             .for_each(|(k, _v)| *k = k.slice(self.prefix.len()..));
         Ok(pairs)
+    }
+
+    /// Get an iterator with the prefix of this keyspace.
+    pub fn iter(&self) -> S::Iter {
+        self.store.iter(self.key())
     }
 
     /// Get the underlying state store.
