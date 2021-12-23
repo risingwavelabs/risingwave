@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use risingwave_common::error::{Result, ToRwResult};
 
+use super::iterator::UserKeyIterator;
 use super::HummockStorage;
 use crate::{StateStore, StateStoreIter};
 
@@ -87,8 +88,8 @@ impl StateStore for HummockStateStore {
             // TODO: remove this condition when range_scan supports exclusion bound
             if iter.key().starts_with(prefix) {
                 result.push((
-                    Bytes::from(iter.key().to_vec()),
-                    Bytes::from(iter.value().to_vec()),
+                    Bytes::copy_from_slice(iter.key()),
+                    Bytes::copy_from_slice(iter.value()),
                 ));
             } else {
                 break;
@@ -120,22 +121,68 @@ impl StateStore for HummockStateStore {
             .to_rw_result()
     }
 
-    fn iter(&self, _prefix: &[u8]) -> Self::Iter {
-        todo!();
+    fn iter(&self, prefix: &[u8]) -> Self::Iter {
+        HummockStateStoreIter {
+            iter: None,
+            prefix: prefix.to_vec(),
+            storage: self.storage.clone(),
+        }
     }
 }
 
-pub struct HummockStateStoreIter {}
+/// TODO: if `.iter()` is async, we can directly forward `UserKeyIterator` to user.
+pub struct HummockStateStoreIter {
+    iter: Option<UserKeyIterator>,
+    prefix: Vec<u8>,
+    storage: HummockStorage,
+}
 
 #[async_trait]
 impl StateStoreIter for HummockStateStoreIter {
     type Item = (Bytes, Bytes);
 
     async fn open(&mut self) -> Result<()> {
-        todo!()
+        assert!(self.iter.is_none());
+        let mut iter = self
+            .storage
+            .range_scan(Some(self.prefix.clone()), Some(next_key(&self.prefix)))
+            .await
+            .map_err(anyhow::Error::new)
+            .to_rw_result()?;
+        iter.rewind()
+            .await
+            .map_err(anyhow::Error::new)
+            .to_rw_result()?;
+        self.iter = Some(iter);
+        Ok(())
     }
 
     async fn next(&mut self) -> Result<Option<Self::Item>> {
-        todo!()
+        let iter = self.iter.as_mut().expect("Hummock iterator not opened!");
+
+        // TODO: directly return `&[u8]` to user instead of `Bytes`.
+
+        let result;
+
+        if iter.is_valid() {
+            // TODO: remove this condition when range_scan supports exclusion bound
+            if iter.key().starts_with(&self.prefix) {
+                result = (
+                    Bytes::copy_from_slice(iter.key()),
+                    Bytes::copy_from_slice(iter.value()),
+                );
+            } else {
+                return Ok(None);
+            }
+
+            iter.next()
+                .await
+                .map_err(anyhow::Error::new)
+                .to_rw_result()?;
+        } else {
+            return Ok(None);
+        }
+
+        Ok(Some(result))
     }
 }
