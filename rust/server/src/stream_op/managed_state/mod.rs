@@ -1,9 +1,11 @@
 pub mod aggregation;
 mod flush_status;
+pub mod join;
 pub mod top_n;
 
 use std::cmp::Reverse;
 
+pub(crate) use flush_status::FlushStatus;
 use risingwave_common::array::{Row, RowRef};
 use risingwave_common::types::Datum;
 use risingwave_common::util::sort_util::OrderType;

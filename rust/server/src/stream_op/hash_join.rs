@@ -2,13 +2,17 @@ use std::collections::hash_map::{Entry, HashMap};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, Op, Row, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataTypeRef, ToOwnedDatum};
+use risingwave_storage::keyspace::Segment;
+use risingwave_storage::{Keyspace, StateStore};
 
 use super::barrier_align::{AlignedMessage, BarrierAligner};
+use super::managed_state::join::{create_hash_join_state, AllOrNoneState};
 use super::{Executor, Message};
 use crate::stream_op::{PkIndices, PkIndicesRef};
 
@@ -134,15 +138,16 @@ mod SideType {
     pub const Right: SideTypePrimitive = 1;
 }
 
-#[inline(always)]
-fn outer_side_keep(join_type: JoinTypePrimitive, side_type: SideTypePrimitive) -> bool {
+const JOIN_LEFT_PATH: &[u8] = b"l";
+const JOIN_RIGHT_PATH: &[u8] = b"r";
+
+const fn outer_side_keep(join_type: JoinTypePrimitive, side_type: SideTypePrimitive) -> bool {
     join_type == JoinType::FullOuter
         || (join_type == JoinType::LeftOuter && side_type == SideType::Left)
         || (join_type == JoinType::RightOuter && side_type == SideType::Right)
 }
 
-#[inline(always)]
-fn outer_side_null(join_type: JoinTypePrimitive, side_type: SideTypePrimitive) -> bool {
+const fn outer_side_null(join_type: JoinTypePrimitive, side_type: SideTypePrimitive) -> bool {
     join_type == JoinType::FullOuter
         || (join_type == JoinType::LeftOuter && side_type == SideType::Right)
         || (join_type == JoinType::RightOuter && side_type == SideType::Left)
@@ -150,7 +155,7 @@ fn outer_side_null(join_type: JoinTypePrimitive, side_type: SideTypePrimitive) -
 
 type HashKeyType = Row;
 type HashValueItemType = Row;
-type HashValueType = Vec<HashValueItemType>;
+type HashValueType<S> = AllOrNoneState<S>;
 
 pub struct JoinParams {
     /// Indices of the join columns
@@ -163,20 +168,24 @@ impl JoinParams {
     }
 }
 
-struct JoinSide {
+struct JoinSide<S: StateStore> {
     /// Store all data from a one side stream
-    ht: HashMap<HashKeyType, HashValueType>,
-    /// Indices of the join columns
+    ht: HashMap<HashKeyType, HashValueType<S>>,
+    /// Indices of the join key columns
     key_indices: Vec<usize>,
+    /// The primary key indices of this side, used for state store
+    pk_indices: Vec<usize>,
     /// The date type of each columns to join on
     col_types: Vec<DataTypeRef>,
     /// The start position for the side in output new columns
     start_pos: usize,
+    /// The join side operates on this keyspace.
+    keyspace: Keyspace<S>,
 }
 
 /// `HashJoinExecutor` takes two input streams and runs equal hash join on them.
 /// The output columns are the concatenation of left and right columns.
-pub struct HashJoinExecutor<const T: JoinTypePrimitive> {
+pub struct HashJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
     /// Barrier aligner that combines two input streams and aligns their barriers
     aligner: BarrierAligner,
     // TODO: maybe remove `new_column_datatypes` and use schema
@@ -187,24 +196,27 @@ pub struct HashJoinExecutor<const T: JoinTypePrimitive> {
     /// The primary key indices of the schema
     pk_indices: PkIndices,
     /// The parameters of the left join executor
-    side_l: JoinSide,
+    side_l: JoinSide<S>,
     /// The parameters of the right join executor
-    side_r: JoinSide,
+    side_r: JoinSide<S>,
 }
 
 #[async_trait]
-impl<const T: JoinTypePrimitive> Executor for HashJoinExecutor<T> {
+impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S, T> {
     async fn next(&mut self) -> Result<Message> {
         match self.aligner.next().await {
             AlignedMessage::Left(message) => match message {
-                Ok(chunk) => self.consume_chunk_left(chunk),
+                Ok(chunk) => self.consume_chunk_left(chunk).await,
                 Err(e) => Err(e),
             },
             AlignedMessage::Right(message) => match message {
-                Ok(chunk) => self.consume_chunk_right(chunk),
+                Ok(chunk) => self.consume_chunk_right(chunk).await,
                 Err(e) => Err(e),
             },
-            AlignedMessage::Barrier(barrier) => Ok(Message::Barrier(barrier)),
+            AlignedMessage::Barrier(barrier) => {
+                self.flush_data().await?;
+                Ok(Message::Barrier(barrier))
+            }
         }
     }
 
@@ -217,13 +229,14 @@ impl<const T: JoinTypePrimitive> Executor for HashJoinExecutor<T> {
     }
 }
 
-impl<const T: JoinTypePrimitive> HashJoinExecutor<T> {
+impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
     pub fn new(
         input_l: Box<dyn Executor>,
         input_r: Box<dyn Executor>,
         params_l: JoinParams,
         params_r: JoinParams,
         pk_indices: PkIndices,
+        keyspace: Keyspace<S>,
     ) -> Self {
         let new_column_n = input_l.schema().len() + input_r.schema().len();
         let side_l_column_n = input_l.schema().len();
@@ -254,7 +267,11 @@ impl<const T: JoinTypePrimitive> HashJoinExecutor<T> {
             .iter()
             .map(|filed| filed.data_type.clone())
             .collect();
+        let pk_indices_l = input_l.pk_indices().to_vec();
+        let pk_indices_r = input_r.pk_indices().to_vec();
 
+        let ks_l = keyspace.with_segment(Segment::FixedLength(JOIN_LEFT_PATH.to_vec()));
+        let ks_r = keyspace.with_segment(Segment::FixedLength(JOIN_RIGHT_PATH.to_vec()));
         Self {
             aligner: BarrierAligner::new(input_l, input_r),
             new_column_datatypes,
@@ -265,52 +282,69 @@ impl<const T: JoinTypePrimitive> HashJoinExecutor<T> {
                 ht: HashMap::new(),
                 key_indices: params_l.key_indices,
                 col_types: col_l_datatypes,
+                pk_indices: pk_indices_l,
                 start_pos: 0,
+                keyspace: ks_l,
             },
             side_r: JoinSide {
                 ht: HashMap::new(),
                 key_indices: params_r.key_indices,
                 col_types: col_r_datatypes,
+                pk_indices: pk_indices_r,
                 start_pos: side_l_column_n,
+                keyspace: ks_r,
             },
             pk_indices,
         }
+    }
+
+    async fn flush_data(&mut self) -> Result<()> {
+        for side in [&mut self.side_l, &mut self.side_r] {
+            let mut write_batch = vec![];
+            for state in side.ht.values_mut() {
+                state.flush(&mut write_batch)?;
+            }
+            side.keyspace
+                .state_store()
+                .ingest_batch(write_batch)
+                .await?;
+        }
+        Ok(())
     }
 
     /// the data the hash table and match the coming
     /// data chunk with the executor state
     fn hash_eq_match<'a>(
         key: &Row,
-        ht: &'a HashMap<HashKeyType, HashValueType>,
-    ) -> Option<&'a HashValueType> {
-        ht.get(key)
+        ht: &'a mut HashMap<HashKeyType, HashValueType<S>>,
+    ) -> Option<&'a mut HashValueType<S>> {
+        ht.get_mut(key)
     }
 
     fn hash_key_from_row_ref(row: &RowRef, key_indices: &[usize]) -> HashKeyType {
-        let mut key = Vec::with_capacity(key_indices.len());
-        for i in key_indices {
-            key.push(row[*i].to_owned_datum());
-        }
+        let key = key_indices
+            .iter()
+            .map(|idx| row[*idx].to_owned_datum())
+            .collect_vec();
         Row(key)
     }
 
     fn hash_value_item_from_row_ref(row: &RowRef) -> HashValueItemType {
-        let mut value = Vec::with_capacity(row.size());
-        for i in 0..row.size() {
-            value.push(row[i].to_owned_datum());
-        }
+        let value = (0..row.size())
+            .map(|idx| row[idx].to_owned_datum())
+            .collect_vec();
         Row(value)
     }
 
-    fn consume_chunk_left(&mut self, chunk: StreamChunk) -> Result<Message> {
-        self.eq_join_oneside::<{ SideType::Left }>(chunk)
+    async fn consume_chunk_left(&mut self, chunk: StreamChunk) -> Result<Message> {
+        self.eq_join_oneside::<{ SideType::Left }>(chunk).await
     }
 
-    fn consume_chunk_right(&mut self, chunk: StreamChunk) -> Result<Message> {
-        self.eq_join_oneside::<{ SideType::Right }>(chunk)
+    async fn consume_chunk_right(&mut self, chunk: StreamChunk) -> Result<Message> {
+        self.eq_join_oneside::<{ SideType::Right }>(chunk).await
     }
 
-    fn eq_join_oneside<const S: SideTypePrimitive>(
+    async fn eq_join_oneside<const SIDE: SideTypePrimitive>(
         &mut self,
         chunk: StreamChunk,
     ) -> Result<Message> {
@@ -330,7 +364,7 @@ impl<const T: JoinTypePrimitive> HashJoinExecutor<T> {
             }
         };
 
-        let (side_update, side_match) = if S == SideType::Left {
+        let (side_update, side_match) = if SIDE == SideType::Left {
             (&mut self.side_l, &mut self.side_r)
         } else {
             (&mut self.side_r, &mut self.side_l)
@@ -350,19 +384,19 @@ impl<const T: JoinTypePrimitive> HashJoinExecutor<T> {
         for (row, op) in data_chunk.rows().zip(ops.iter()) {
             let key = Self::hash_key_from_row_ref(&row, &side_update.key_indices);
             let value = Self::hash_value_item_from_row_ref(&row);
-            let matched_rows = Self::hash_eq_match(&key, &side_match.ht);
+            let matched_rows = Self::hash_eq_match(&key, &mut side_match.ht);
             let mut null_row_updated = false;
             if let Some(matched_rows) = matched_rows {
                 match *op {
                     Op::Insert | Op::UpdateInsert => {
-                        let entry = side_update.ht.entry(key);
-                        let entry = match entry {
+                        let entry = side_update.ht.entry(key.clone());
+                        let entry_value = match entry {
                             Entry::Occupied(entry) => entry.into_mut(),
                             // if outer join and not its the first to insert, meaning there must be
                             // corresponding nulls.
                             Entry::Vacant(entry) => {
-                                if outer_side_null(T, S) {
-                                    for matched_row in matched_rows.iter() {
+                                if outer_side_null(T, SIDE) {
+                                    for matched_row in matched_rows.values().await {
                                         stream_chunk_builder
                                             .append_row_matched(Op::UpdateDelete, matched_row)?;
                                         stream_chunk_builder.append_row(
@@ -373,38 +407,41 @@ impl<const T: JoinTypePrimitive> HashJoinExecutor<T> {
                                     }
                                     null_row_updated = true;
                                 };
-                                entry.insert(Default::default())
+                                entry.insert(create_hash_join_state(
+                                    key,
+                                    &side_update.keyspace.clone(),
+                                    side_update.pk_indices.clone(),
+                                    side_update.col_types.clone(),
+                                ))
                             }
                         };
-                        entry.push(value);
+                        entry_value.insert(value);
                     }
                     Op::Delete | Op::UpdateDelete => {
-                        let mut deleted = false;
                         if let Some(v) = side_update.ht.get_mut(&key) {
-                            if let Some(pos) = v.iter().position(|row| *row == value) {
-                                v.remove(pos);
-                                if outer_side_null(T, S) && v.is_empty() {
-                                    for matched_row in matched_rows.iter() {
-                                        stream_chunk_builder.append_row(
-                                            Op::UpdateDelete,
-                                            &row,
-                                            matched_row,
-                                        )?;
-                                        stream_chunk_builder
-                                            .append_row_matched(Op::UpdateInsert, matched_row)?;
-                                    }
-                                    null_row_updated = true;
+                            let pk = Row(side_update
+                                .pk_indices
+                                .iter()
+                                .map(|idx| row[*idx].to_owned_datum())
+                                .collect_vec());
+                            v.remove(pk);
+                            if outer_side_null(T, SIDE) && v.is_empty() {
+                                for matched_row in matched_rows.values().await {
+                                    stream_chunk_builder.append_row(
+                                        Op::UpdateDelete,
+                                        &row,
+                                        matched_row,
+                                    )?;
+                                    stream_chunk_builder
+                                        .append_row_matched(Op::UpdateInsert, matched_row)?;
                                 }
-                                deleted = true;
+                                null_row_updated = true;
                             }
-                        }
-                        if !deleted {
-                            unreachable!("Deleted value does not exist: {:?}", row);
                         }
                     }
                 };
-                if !outer_side_null(T, S) || !null_row_updated {
-                    for matched_row in matched_rows.iter() {
+                if !outer_side_null(T, SIDE) || !null_row_updated {
+                    for matched_row in matched_rows.values().await {
                         assert_eq!(matched_row.size(), side_match.col_types.len());
                         stream_chunk_builder.append_row(*op, &row, matched_row)?;
                     }
@@ -413,18 +450,32 @@ impl<const T: JoinTypePrimitive> HashJoinExecutor<T> {
                 // if there are no matched rows, just update the hash table
                 match *op {
                     Op::Insert | Op::UpdateInsert => {
-                        side_update.ht.entry(key).or_default().push(value);
+                        side_update
+                            .ht
+                            .entry(key.clone())
+                            .or_insert_with(|| {
+                                create_hash_join_state(
+                                    key,
+                                    &side_update.keyspace.clone(),
+                                    side_update.pk_indices.clone(),
+                                    side_update.col_types.clone(),
+                                )
+                            })
+                            .insert(value);
                     }
                     Op::Delete | Op::UpdateDelete => {
                         if let Some(v) = side_update.ht.get_mut(&key) {
-                            if let Some(pos) = v.iter().position(|row| *row == value) {
-                                v.remove(pos);
-                            }
+                            let pk = Row(side_update
+                                .pk_indices
+                                .iter()
+                                .map(|idx| row[*idx].to_owned_datum())
+                                .collect_vec());
+                            v.remove(pk);
                         }
                     }
                 };
                 // if it's outer join and the side needs maintained.
-                if outer_side_keep(T, S) {
+                if outer_side_keep(T, SIDE) {
                     stream_chunk_builder.append_row_update(*op, &row)?;
                 }
             }
@@ -443,12 +494,17 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::Int64Type;
+    use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::unbounded_channel;
 
-    use super::{HashJoinExecutor, JoinParams, JoinType};
+    use super::{HashJoinExecutor, JoinParams, JoinType, *};
     use crate::stream_op::test_utils::MockAsyncSource;
     use crate::stream_op::{Barrier, Executor, Message};
     use crate::*;
+
+    fn create_in_memory_keyspace() -> Keyspace<MemoryStateStore> {
+        Keyspace::executor_root(MemoryStateStore::new(), 0x2333)
+    }
 
     #[tokio::test]
     async fn test_streaming_hash_inner_join() {
@@ -498,18 +554,21 @@ mod tests {
         let (mut tx_l, rx_l) = unbounded_channel();
         let (mut tx_r, rx_r) = unbounded_channel();
 
-        let source_l = MockAsyncSource::new(schema.clone(), rx_l);
-        let source_r = MockAsyncSource::new(schema.clone(), rx_r);
+        let source_l = MockAsyncSource::with_pk_indices(schema.clone(), rx_l, vec![0, 1]);
+        let source_r = MockAsyncSource::with_pk_indices(schema.clone(), rx_r, vec![0, 1]);
+
+        let keyspace = create_in_memory_keyspace();
 
         let params_l = JoinParams::new(vec![0]);
         let params_r = JoinParams::new(vec![0]);
 
-        let mut hash_join = HashJoinExecutor::<{ JoinType::Inner }>::new(
+        let mut hash_join = HashJoinExecutor::<_, { JoinType::Inner }>::new(
             Box::new(source_l),
             Box::new(source_r),
             params_l,
             params_r,
             vec![],
+            keyspace,
         );
 
         // push the 1st left chunk
@@ -641,18 +700,21 @@ mod tests {
         let (mut tx_l, rx_l) = unbounded_channel();
         let (mut tx_r, rx_r) = unbounded_channel();
 
-        let source_l = MockAsyncSource::new(schema.clone(), rx_l);
-        let source_r = MockAsyncSource::new(schema.clone(), rx_r);
+        let source_l = MockAsyncSource::with_pk_indices(schema.clone(), rx_l, vec![0, 1]);
+        let source_r = MockAsyncSource::with_pk_indices(schema.clone(), rx_r, vec![0, 1]);
+
+        let keyspace = create_in_memory_keyspace();
 
         let params_l = JoinParams::new(vec![0]);
         let params_r = JoinParams::new(vec![0]);
 
-        let mut hash_join = HashJoinExecutor::<{ JoinType::Inner }>::new(
+        let mut hash_join = HashJoinExecutor::<_, { JoinType::Inner }>::new(
             Box::new(source_l),
             Box::new(source_r),
             params_l,
             params_r,
             vec![],
+            keyspace,
         );
 
         // push the 1st left chunk
@@ -811,18 +873,21 @@ mod tests {
         let (mut tx_l, rx_l) = unbounded_channel();
         let (mut tx_r, rx_r) = unbounded_channel();
 
-        let source_l = MockAsyncSource::new(schema.clone(), rx_l);
-        let source_r = MockAsyncSource::new(schema.clone(), rx_r);
+        let source_l = MockAsyncSource::with_pk_indices(schema.clone(), rx_l, vec![0, 1]);
+        let source_r = MockAsyncSource::with_pk_indices(schema.clone(), rx_r, vec![0, 1]);
+
+        let keyspace = create_in_memory_keyspace();
 
         let params_l = JoinParams::new(vec![0]);
         let params_r = JoinParams::new(vec![0]);
 
-        let mut hash_join = HashJoinExecutor::<{ JoinType::LeftOuter }>::new(
+        let mut hash_join = HashJoinExecutor::<_, { JoinType::LeftOuter }>::new(
             Box::new(source_l),
             Box::new(source_r),
             params_l,
             params_r,
             vec![],
+            keyspace,
         );
 
         // push the 1st left chunk
@@ -974,18 +1039,21 @@ mod tests {
         let (mut tx_l, rx_l) = unbounded_channel();
         let (mut tx_r, rx_r) = unbounded_channel();
 
-        let source_l = MockAsyncSource::new(schema.clone(), rx_l);
-        let source_r = MockAsyncSource::new(schema.clone(), rx_r);
+        let source_l = MockAsyncSource::with_pk_indices(schema.clone(), rx_l, vec![0, 1]);
+        let source_r = MockAsyncSource::with_pk_indices(schema.clone(), rx_r, vec![0, 1]);
+
+        let keyspace = create_in_memory_keyspace();
 
         let params_l = JoinParams::new(vec![0]);
         let params_r = JoinParams::new(vec![0]);
 
-        let mut hash_join = HashJoinExecutor::<{ JoinType::RightOuter }>::new(
+        let mut hash_join = HashJoinExecutor::<_, { JoinType::RightOuter }>::new(
             Box::new(source_l),
             Box::new(source_r),
             params_l,
             params_r,
             vec![],
+            keyspace,
         );
 
         // push the 1st left chunk
@@ -1117,18 +1185,21 @@ mod tests {
         let (mut tx_l, rx_l) = unbounded_channel();
         let (mut tx_r, rx_r) = unbounded_channel();
 
-        let source_l = MockAsyncSource::new(schema.clone(), rx_l);
-        let source_r = MockAsyncSource::new(schema.clone(), rx_r);
+        let source_l = MockAsyncSource::with_pk_indices(schema.clone(), rx_l, vec![0, 1]);
+        let source_r = MockAsyncSource::with_pk_indices(schema.clone(), rx_r, vec![0, 1]);
+
+        let keyspace = create_in_memory_keyspace();
 
         let params_l = JoinParams::new(vec![0]);
         let params_r = JoinParams::new(vec![0]);
 
-        let mut hash_join = HashJoinExecutor::<{ JoinType::FullOuter }>::new(
+        let mut hash_join = HashJoinExecutor::<_, { JoinType::FullOuter }>::new(
             Box::new(source_l),
             Box::new(source_r),
             params_l,
             params_r,
             vec![],
+            keyspace,
         );
 
         // push the 1st left chunk

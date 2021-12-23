@@ -526,9 +526,13 @@ impl StreamManagerCore {
                         .map(|key| *key as usize)
                         .collect::<Vec<_>>(),
                 );
-
-                Ok(Box::new(HashJoinExecutor::<{ JoinType::Inner }>::new(
-                    source_l, source_r, params_l, params_r, pk_indices,
+                Ok(Box::new(HashJoinExecutor::<_, { JoinType::Inner }>::new(
+                    source_l,
+                    source_r,
+                    params_l,
+                    params_r,
+                    pk_indices,
+                    Keyspace::executor_root(store.clone(), self.generate_mock_executor_id()),
                 )))
             }
             MviewNode(materialized_view_node) => {

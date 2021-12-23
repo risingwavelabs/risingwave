@@ -105,6 +105,19 @@ impl MockAsyncSource {
         }
     }
 
+    pub fn with_pk_indices(
+        schema: Schema,
+        rx: UnboundedReceiver<Message>,
+        pk_indices: Vec<usize>,
+    ) -> Self {
+        Self {
+            schema,
+            pk_indices,
+            rx,
+            epoch: 0,
+        }
+    }
+
     pub fn push_chunks(
         tx: &mut UnboundedSender<Message>,
         chunks: impl IntoIterator<Item = StreamChunk>,

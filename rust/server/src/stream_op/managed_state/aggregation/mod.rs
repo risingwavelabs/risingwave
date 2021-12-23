@@ -19,7 +19,7 @@ use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::stream_op::{AggCall, PkDataTypeKinds};
+use super::super::{AggCall, PkDataTypeKinds};
 
 /// Verify if the data going through the state is valid by checking if `ops.len() ==
 /// visibility.len() == data[x].len()`.
