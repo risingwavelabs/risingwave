@@ -1,6 +1,6 @@
 use tokio::net::TcpStream;
 
-use crate::pg_protocol::PgProtocol;
+use crate::pgwire::pg_protocol::PgProtocol;
 
 /// Each psql connection belongs to one [`PgServerConn`].
 pub struct PgServerConn {

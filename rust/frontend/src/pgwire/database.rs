@@ -1,4 +1,4 @@
-use crate::pg_result::{PgResult, StatementType};
+use crate::pgwire::pg_result::{PgResult, StatementType};
 
 pub struct Database {}
 

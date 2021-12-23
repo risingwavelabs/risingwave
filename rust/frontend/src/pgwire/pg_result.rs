@@ -2,7 +2,7 @@ use std::fmt::Formatter;
 
 use risingwave_common::array::Row;
 
-use crate::pg_field_descriptor::PgFieldDescriptor;
+use crate::pgwire::pg_field_descriptor::PgFieldDescriptor;
 /// Port from StatementType.java.
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]

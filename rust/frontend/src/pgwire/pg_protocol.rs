@@ -4,10 +4,12 @@ use risingwave_common::error::Result;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use crate::database::Database;
-use crate::pg_field_descriptor::PgFieldDescriptor;
-use crate::pg_message::{PgMessage, QueryMessage, SslMessage, StartupMessage, TerminateMessage};
-use crate::pg_result::{PgResult, StatementType};
+use crate::pgwire::database::Database;
+use crate::pgwire::pg_field_descriptor::PgFieldDescriptor;
+use crate::pgwire::pg_message::{
+    PgMessage, QueryMessage, SslMessage, StartupMessage, TerminateMessage,
+};
+use crate::pgwire::pg_result::{PgResult, StatementType};
 
 /// The state machine for each psql connection.
 /// Read pg messages from tcp stream and write results back.

@@ -1,5 +1,5 @@
 use clap::Parser;
-use pgwire::pg_server::PgServer;
+use frontend::pgwire::pg_server::PgServer;
 #[derive(Parser)]
 struct Opts {
     // The custom log4rs config file.
@@ -21,7 +21,7 @@ async fn main() {
 
 #[cfg(test)]
 mod tests {
-    use pgwire::pg_server::PgServer;
+    use frontend::pgwire::pg_server::PgServer;
     use tokio_postgres::NoTls;
 
     #[tokio::test]

@@ -1,7 +1,7 @@
 use log::info;
 use tokio::net::TcpListener;
 
-use crate::pg_server_conn::PgServerConn;
+use crate::pgwire::pg_server_conn::PgServerConn;
 
 pub struct PgServer {}
 
