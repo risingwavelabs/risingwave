@@ -147,7 +147,7 @@ impl ObjectStore for S3ObjectStore {
             }
             Err(err) => {
                 return Err(RwError::from(InternalError(format!(
-                    "S3 put failure with error: {}",
+                    "S3 read failure with error: {}",
                     err
                 ))))
             }
