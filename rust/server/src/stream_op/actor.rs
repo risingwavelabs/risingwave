@@ -15,9 +15,16 @@ impl Actor {
     pub async fn run(mut self) -> Result<()> {
         // Drive the streaming task with an infinite loop
         loop {
-            let has_next = self.consumer.next().await?;
-            if !has_next {
-                break;
+            match self.consumer.next().await {
+                Ok(has_next) => {
+                    if !has_next {
+                        break;
+                    }
+                }
+                Err(err) => {
+                    warn!("Actor polling failed: {:?}", err);
+                    return Err(err);
+                }
             }
         }
         Ok(())
