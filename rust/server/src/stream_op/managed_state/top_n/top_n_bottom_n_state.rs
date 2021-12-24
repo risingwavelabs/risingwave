@@ -5,12 +5,13 @@ use std::vec::Drain;
 
 use bytes::Bytes;
 use risingwave_common::array::{Row, RowDeserializer};
-use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataTypeKind;
 use risingwave_storage::{Keyspace, StateStore};
 
+use crate::stream_op::managed_state::aggregation::OrderedRowDeserializer;
 use crate::stream_op::managed_state::flush_status::FlushStatus;
+use crate::stream_op::managed_state::OrderedRow;
 use crate::stream_op::serialize_cell_idx;
 
 /// This state is used for `[offset...offset+limit)` part in the `TopNExecutor`.
@@ -21,11 +22,11 @@ use crate::stream_op::serialize_cell_idx;
 /// bottom-n policy.
 pub struct ManagedTopNBottomNState<S: StateStore> {
     /// Top-N Cache.
-    top_n: BTreeMap<Bytes, Row>,
+    top_n: BTreeMap<OrderedRow, Row>,
     /// Bottom-N Cache. We always try to first fill into the bottom-n cache.
-    bottom_n: BTreeMap<Bytes, Row>,
+    bottom_n: BTreeMap<OrderedRow, Row>,
     /// Buffer for updates.
-    flush_buffer: BTreeMap<Bytes, FlushStatus<Row>>,
+    flush_buffer: BTreeMap<OrderedRow, FlushStatus<Row>>,
     /// The number of elements in both cache and storage.
     total_count: usize,
     /// Number of entries to retain in top-n cache after each flush.
@@ -34,10 +35,10 @@ pub struct ManagedTopNBottomNState<S: StateStore> {
     bottom_n_count: Option<usize>,
     /// The keyspace to operate on.
     keyspace: Keyspace<S>,
-    /// Schema for serializing `Option<Row>`.
-    schema: Schema,
     /// `DataTypeKind`s use for deserializing `Row`.
     data_type_kinds: Vec<DataTypeKind>,
+    /// For deserializing `OrderedRow`.
+    ordered_row_deserializer: OrderedRowDeserializer,
 }
 
 impl<S: StateStore> ManagedTopNBottomNState<S> {
@@ -45,13 +46,9 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         cache_size: Option<usize>,
         total_count: usize,
         keyspace: Keyspace<S>,
-        schema: Schema,
+        data_type_kinds: Vec<DataTypeKind>,
+        ordered_row_deserializer: OrderedRowDeserializer,
     ) -> Self {
-        let data_type_kinds = schema
-            .data_types_clone()
-            .into_iter()
-            .map(|data_type| data_type.data_type_kind())
-            .collect::<Vec<_>>();
         Self {
             top_n: BTreeMap::new(),
             bottom_n: BTreeMap::new(),
@@ -60,8 +57,8 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
             top_n_count: cache_size,
             bottom_n_count: cache_size,
             keyspace,
-            schema,
             data_type_kinds,
+            ordered_row_deserializer,
         }
     }
 
@@ -96,7 +93,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         }
     }
 
-    pub async fn pop_top_element(&mut self) -> Result<Option<(Bytes, Row)>> {
+    pub async fn pop_top_element(&mut self) -> Result<Option<(OrderedRow, Row)>> {
         if self.total_count == 0 {
             Ok(None)
         } else {
@@ -111,7 +108,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         }
     }
 
-    pub async fn pop_bottom_element(&mut self) -> Result<Option<(Bytes, Row)>> {
+    pub async fn pop_bottom_element(&mut self) -> Result<Option<(OrderedRow, Row)>> {
         if self.total_count == 0 {
             Ok(None)
         } else {
@@ -126,7 +123,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         }
     }
 
-    pub fn top_element(&mut self) -> Option<(&Bytes, &Row)> {
+    pub fn top_element(&mut self) -> Option<(&OrderedRow, &Row)> {
         if self.total_count == 0 {
             None
         } else if self.top_n.is_empty() {
@@ -136,7 +133,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         }
     }
 
-    pub fn bottom_element(&mut self) -> Option<(&Bytes, &Row)> {
+    pub fn bottom_element(&mut self) -> Option<(&OrderedRow, &Row)> {
         if self.total_count == 0 {
             None
         } else if self.bottom_n.is_empty() {
@@ -146,7 +143,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         }
     }
 
-    pub async fn insert(&mut self, key: Bytes, value: Row) {
+    pub async fn insert(&mut self, key: OrderedRow, value: Row) {
         // We can have different strategy of which cache we should insert the element into.
         // Right now, we keep it simple and insert the element into the cache with smaller size,
         // without violating the constraint that these two caches' current range must NOT overlap.
@@ -169,7 +166,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         self.total_count += 1;
     }
 
-    pub async fn delete(&mut self, key: &Bytes) -> Result<Option<Row>> {
+    pub async fn delete(&mut self, key: &OrderedRow) -> Result<Option<Row>> {
         let prev_top_n_entry = self.top_n.remove(key);
         let prev_bottom_n_entry = self.bottom_n.remove(key);
         debug_assert!(prev_top_n_entry.is_some() || prev_bottom_n_entry.is_some());
@@ -187,7 +184,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         let mut kv_pairs = self.scan_from_storage(None).await?;
         let mut flush_buffer_iter = self.flush_buffer.iter().peekable();
         let mut insert_process =
-            |cache: &mut BTreeMap<Bytes, Row>, part_kv_pairs: Drain<(Bytes, Row)>| {
+            |cache: &mut BTreeMap<OrderedRow, Row>, part_kv_pairs: Drain<(OrderedRow, Row)>| {
                 for (key_from_storage, row_from_storage) in part_kv_pairs {
                     while let Some((key_from_buffer, _)) = flush_buffer_iter.peek() {
                         if **key_from_buffer >= key_from_storage {
@@ -219,6 +216,9 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
                     }
                 }
             };
+        // The reason we can split the `kv_pairs` without caring whether the key to be inserted is
+        // already in the top_n or bottom_n is that we would only trigger `scan_and_merge` when both
+        // caches are empty.
         {
             let part1 = kv_pairs.drain(0..kv_pairs.len() / 2);
             insert_process(&mut self.bottom_n, part1);
@@ -230,13 +230,18 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         Ok(())
     }
 
-    async fn scan_from_storage(&mut self, number_rows: Option<usize>) -> Result<Vec<(Bytes, Row)>> {
+    async fn scan_from_storage(
+        &mut self,
+        number_rows: Option<usize>,
+    ) -> Result<Vec<(OrderedRow, Row)>> {
         let pk_row_bytes = self
             .keyspace
-            .scan_strip_prefix(number_rows.map(|top_n_count| top_n_count * self.schema.len()))
+            .scan_strip_prefix(
+                number_rows.map(|top_n_count| top_n_count * self.data_type_kinds.len()),
+            )
             .await?;
         // We must have enough cells to restore a complete row.
-        debug_assert_eq!(pk_row_bytes.len() % self.schema.len(), 0);
+        debug_assert_eq!(pk_row_bytes.len() % self.data_type_kinds.len(), 0);
         // cell-based storage format, so `self.schema.len()`
         let mut row_bytes = vec![];
         let mut cell_restored = 0;
@@ -244,14 +249,17 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         for (pk, cell_bytes) in pk_row_bytes {
             row_bytes.extend_from_slice(&cell_bytes);
             cell_restored += 1;
-            if cell_restored == self.schema.len() {
+            if cell_restored == self.data_type_kinds.len() {
                 cell_restored = 0;
                 let deserializer = RowDeserializer::new(self.data_type_kinds.clone());
                 let row = deserializer.deserialize(&std::mem::take(&mut row_bytes))?;
                 // format: [pk_buf | cell_idx (4B)]
                 // Take `pk_buf` out.
                 let pk_without_cell_idx = pk.slice(0..pk.len() - 4);
-                res.push((pk_without_cell_idx, row));
+                let ordered_row = self
+                    .ordered_row_deserializer
+                    .deserialize(&pk_without_cell_idx)?;
+                res.push((ordered_row, row));
             }
         }
         Ok(res)
@@ -282,11 +290,16 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         }
 
         let mut write_batches: Vec<(Bytes, Option<Bytes>)> = vec![];
-        for (pk_buf, cells) in std::mem::take(&mut self.flush_buffer) {
+        for (ordered_row, cells) in std::mem::take(&mut self.flush_buffer) {
             let row_option = cells.into_option();
-            for cell_idx in 0..self.schema.len() {
+            for cell_idx in 0..self.data_type_kinds.len() {
                 // format: [pk_buf | cell_idx (4B)]
-                let key_encoded = [&pk_buf[..], &serialize_cell_idx(cell_idx as u32)?[..]].concat();
+                let ordered_row_bytes = ordered_row.serialize()?;
+                let key_encoded = [
+                    &ordered_row_bytes[..],
+                    &serialize_cell_idx(cell_idx as u32)?[..],
+                ]
+                .concat();
                 // format: [keyspace prefix | pk_buf | cell_idx (4B)]
                 let key_encoded = self.keyspace.prefixed_key(&key_encoded).into();
                 match &row_option {
@@ -331,98 +344,104 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
-    use bytes::Bytes;
-    use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::{DataTypeKind, Int64Type, StringType};
+    use risingwave_common::types::{DataType, DataTypeKind, Int64Type, StringType};
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::{Keyspace, StateStore};
 
     use crate::row_nonnull;
+    use crate::stream_op::managed_state::aggregation::OrderedRowDeserializer;
     use crate::stream_op::managed_state::top_n::top_n_bottom_n_state::ManagedTopNBottomNState;
-    use crate::stream_op::OrderedRowsSerializer;
+    use crate::stream_op::managed_state::OrderedRow;
 
     fn create_managed_top_n_bottom_n_state<S: StateStore>(
         store: &S,
         row_count: usize,
+        data_type_kinds: Vec<DataTypeKind>,
+        order_types: Vec<OrderType>,
     ) -> ManagedTopNBottomNState<S> {
-        let schema = Schema::new(vec![
-            Field::new(Arc::new(Int64Type::new(false))),
-            Field::new(StringType::create(false, 5, DataTypeKind::Varchar)),
-        ]);
+        let ordered_row_deserializer =
+            OrderedRowDeserializer::new(data_type_kinds.clone(), order_types);
 
         ManagedTopNBottomNState::new(
             Some(1),
             row_count,
             Keyspace::executor_root(store.clone(), 0x2333),
-            schema,
+            data_type_kinds,
+            ordered_row_deserializer,
         )
     }
 
     #[tokio::test]
     async fn test_managed_top_n_bottom_n_state() {
+        let data_type_kinds = vec![
+            StringType::create(false, 5, DataTypeKind::Varchar).data_type_kind(),
+            Int64Type::new(false).data_type_kind(),
+        ];
+        let order_types = vec![OrderType::Descending, OrderType::Ascending];
         let store = MemoryStateStore::new();
-        let mut managed_state = create_managed_top_n_bottom_n_state(&store, 0);
-        let row1 = row_nonnull![2i64, "abc".to_string()];
-        let row2 = row_nonnull![3i64, "abc".to_string()];
-        let row3 = row_nonnull![3i64, "abd".to_string()];
-        let row4 = row_nonnull![4i64, "ab".to_string()];
-        let rows = vec![&row1, &row2, &row3, &row4];
-        let orderings = vec![OrderType::Descending, OrderType::Ascending];
-        let pk_indices = vec![1, 0];
-        let order_pairs = orderings
+        let mut managed_state = create_managed_top_n_bottom_n_state(
+            &store,
+            0,
+            data_type_kinds.clone(),
+            order_types.clone(),
+        );
+        let row1 = row_nonnull!["abc".to_string(), 2i64];
+        let row2 = row_nonnull!["abc".to_string(), 3i64];
+        let row3 = row_nonnull!["abd".to_string(), 3i64];
+        let row4 = row_nonnull!["ab".to_string(), 4i64];
+        let rows = vec![row1, row2, row3, row4];
+        let ordered_rows = rows
+            .clone()
             .into_iter()
-            .zip(pk_indices.into_iter())
+            .map(|row| OrderedRow::new(row, &order_types))
             .collect::<Vec<_>>();
-        let ordered_row_serializer = OrderedRowsSerializer::new(order_pairs);
-        let mut rows_bytes = vec![];
-        ordered_row_serializer.order_based_scehmaed_serialize(&rows, &mut rows_bytes);
+
         managed_state
-            .insert(rows_bytes[3].clone().into(), row4.clone())
+            .insert(ordered_rows[3].clone(), rows[3].clone())
             .await;
-        // now (4, "ab")
+        // now ("ab", 4)
 
         assert_eq!(
             managed_state.top_element(),
-            Some((&Bytes::from(rows_bytes[3].clone()), &row4))
+            Some((&ordered_rows[3], &rows[3]))
         );
         assert_eq!(
             managed_state.bottom_element(),
-            Some((&Bytes::from(rows_bytes[3].clone()), &row4))
+            Some((&ordered_rows[3], &rows[3]))
         );
         assert!(managed_state.is_dirty());
         assert_eq!(managed_state.get_cache_len(), 1);
 
         managed_state
-            .insert(rows_bytes[2].clone().into(), row3.clone())
+            .insert(ordered_rows[2].clone(), rows[2].clone())
             .await;
-        // now (3, "abd") -> (4, "ab")
+        // now ("abd", 3) -> ("ab", 4)
 
         assert_eq!(
             managed_state.top_element(),
-            Some((&Bytes::from(rows_bytes[3].clone()), &row4))
+            Some((&ordered_rows[3], &rows[3]))
         );
         assert_eq!(
             managed_state.bottom_element(),
-            Some((&Bytes::from(rows_bytes[2].clone()), &row3))
+            Some((&ordered_rows[2], &rows[2]))
         );
         assert!(managed_state.is_dirty());
         assert_eq!(managed_state.get_cache_len(), 2);
 
         managed_state
-            .insert(rows_bytes[1].clone().into(), row2.clone())
+            .insert(ordered_rows[1].clone(), rows[1].clone())
             .await;
-        // now (3, "abd") -> (3, "abc") -> (4, "ab")
+        // now ("abd", 3) -> ("abc", 3) -> ("ab", 4)
 
         assert_eq!(
             managed_state.top_element(),
-            Some((&Bytes::from(rows_bytes[3].clone()), &row4))
+            Some((&ordered_rows[3], &rows[3]))
         );
         assert_eq!(
             managed_state.bottom_element(),
-            Some((&Bytes::from(rows_bytes[2].clone()), &row3))
+            Some((&ordered_rows[2], &rows[2]))
         );
         assert_eq!(managed_state.get_cache_len(), 3);
         managed_state.flush().await.unwrap();
@@ -433,17 +452,22 @@ mod tests {
         assert_eq!(managed_state.get_cache_len(), 3);
 
         drop(managed_state);
-        let mut managed_state = create_managed_top_n_bottom_n_state(&store, row_count);
+        let mut managed_state = create_managed_top_n_bottom_n_state(
+            &store,
+            row_count,
+            data_type_kinds.clone(),
+            order_types.clone(),
+        );
         assert_eq!(managed_state.top_element(), None);
         managed_state.fill_in_cache().await.unwrap();
-        // now (3, "abd") -> (3, "abc") -> (4, "ab")
+        // now ("abd", 3) -> ("abc", 3) -> ("ab", 4)
         assert_eq!(
             managed_state.top_element(),
-            Some((&Bytes::from(rows_bytes[3].clone()), &row4))
+            Some((&ordered_rows[3], &rows[3]))
         );
         assert_eq!(
             managed_state.bottom_element(),
-            Some((&Bytes::from(rows_bytes[2].clone()), &row3))
+            Some((&ordered_rows[2], &rows[2]))
         );
         // Right after recovery.
         assert!(!managed_state.is_dirty());
@@ -451,65 +475,70 @@ mod tests {
 
         assert_eq!(
             managed_state.pop_top_element().await.unwrap(),
-            Some((Bytes::from(rows_bytes[3].clone()), row4))
+            Some((ordered_rows[3].clone(), rows[3].clone()))
         );
-        // now (3, "abd") -> (3, "abc")
+        // now ("abd", 3) -> ("abc", 3)
         assert_eq!(
             managed_state.top_element(),
-            Some((&Bytes::from(rows_bytes[1].clone()), &row2))
+            Some((&ordered_rows[1], &rows[1]))
         );
         assert_eq!(
             managed_state.bottom_element(),
-            Some((&Bytes::from(rows_bytes[2].clone()), &row3))
+            Some((&ordered_rows[2], &rows[2]))
         );
         assert!(managed_state.is_dirty());
         assert_eq!(managed_state.total_count, 2);
         assert_eq!(managed_state.get_cache_len(), 2);
         assert_eq!(
             managed_state.pop_top_element().await.unwrap(),
-            Some((Bytes::from(rows_bytes[1].clone()), row2.clone()))
+            Some((ordered_rows[1].clone(), rows[1].clone()))
         );
-        // now (3, "abd")
+        // now ("abd", 3)
         assert!(managed_state.is_dirty());
         assert_eq!(managed_state.total_count, 1);
         assert_eq!(managed_state.get_cache_len(), 1);
 
         assert_eq!(
             managed_state.top_element(),
-            Some((&Bytes::from(rows_bytes[2].clone()), &row3))
+            Some((&ordered_rows[2], &rows[2]))
         );
         assert_eq!(
             managed_state.bottom_element(),
-            Some((&Bytes::from(rows_bytes[2].clone()), &row3))
+            Some((&ordered_rows[2], &rows[2]))
         );
         managed_state.flush().await.unwrap();
         assert!(!managed_state.is_dirty());
 
         managed_state
-            .insert(rows_bytes[0].clone().into(), row1.clone())
+            .insert(ordered_rows[0].clone(), rows[0].clone())
             .await;
-        // now (3, "abd") -> (2, "abc)
+        // now ("abd", 3) -> ("abc", 2)
         assert_eq!(
             managed_state.top_element(),
-            Some((&Bytes::from(rows_bytes[0].clone()), &row1))
+            Some((&ordered_rows[0], &rows[0]))
         );
         assert_eq!(
             managed_state.bottom_element(),
-            Some((&Bytes::from(rows_bytes[2].clone()), &row3))
+            Some((&ordered_rows[2], &rows[2]))
         );
 
         // Exclude the last `insert` as the state crashes before recovery.
         let row_count = managed_state.total_count - 1;
         drop(managed_state);
-        let mut managed_state = create_managed_top_n_bottom_n_state(&store, row_count);
+        let mut managed_state = create_managed_top_n_bottom_n_state(
+            &store,
+            row_count,
+            data_type_kinds.clone(),
+            order_types.clone(),
+        );
         managed_state.fill_in_cache().await.unwrap();
         assert_eq!(
             managed_state.top_element(),
-            Some((&Bytes::from(rows_bytes[2].clone()), &row3))
+            Some((&ordered_rows[2], &rows[2]))
         );
         assert_eq!(
             managed_state.bottom_element(),
-            Some((&Bytes::from(rows_bytes[2].clone()), &row3))
+            Some((&ordered_rows[2], &rows[2]))
         );
     }
 }
