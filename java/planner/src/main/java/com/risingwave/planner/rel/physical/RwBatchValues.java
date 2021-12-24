@@ -5,6 +5,7 @@ import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 import com.google.common.collect.ImmutableList;
 import com.google.protobuf.Any;
 import com.risingwave.common.datatype.RisingWaveDataType;
+import com.risingwave.planner.rel.common.RwValues;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.logical.RwLogicalValues;
 import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
@@ -16,9 +17,7 @@ import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.convert.ConverterRule;
-import org.apache.calcite.rel.core.Values;
 import org.apache.calcite.rel.type.RelDataType;
-import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
@@ -27,11 +26,11 @@ import org.checkerframework.checker.nullness.qual.Nullable;
  *
  * @see RwLogicalValues
  */
-public class RwBatchValues extends Values implements RisingWaveBatchPhyRel {
+public class RwBatchValues extends RwValues implements RisingWaveBatchPhyRel {
   protected RwBatchValues(
       RelOptCluster cluster,
       RelDataType rowType,
-      ImmutableList<ImmutableList<RexLiteral>> tuples,
+      ImmutableList<ImmutableList<RexNode>> tuples,
       RelTraitSet traits) {
     super(cluster, rowType, tuples, traits);
     checkConvention();
@@ -41,7 +40,7 @@ public class RwBatchValues extends Values implements RisingWaveBatchPhyRel {
   public PlanNode serialize() {
     ValuesNode.Builder valuesNodeBuilder = ValuesNode.newBuilder();
     for (int i = 0; i < tuples.size(); ++i) {
-      ImmutableList<RexLiteral> tuple = tuples.get(i);
+      ImmutableList<RexNode> tuple = tuples.get(i);
       ValuesNode.ExprTuple.Builder exprTupleBuilder = ValuesNode.ExprTuple.newBuilder();
       for (int j = 0; j < tuple.size(); ++j) {
         RexNode value = tuple.get(j);

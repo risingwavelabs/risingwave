@@ -21,7 +21,7 @@ insert into t values(1,4,2), (2,3,3), (3,4,4), (4,3,5)
         <Resource name="physical">
             <![CDATA[
 RwBatchInsert(table=[[test_schema, t]], operation=[INSERT], flattened=[false])
-  RwBatchValues(tuples=[[{ 1, 4, 2 }, { 2, 3, 3 }, { 3, 4, 4 }, { 4, 3, 5 }]])
+  RwBatchValues(tuples=[[{ 1, 4, 2:FLOAT }, { 2, 3, 3:FLOAT }, { 3, 4, 4:FLOAT }, { 4, 3, 5:FLOAT }]])
 ]]>
         </Resource>
         <Resource name="json" path="batch/basic/insert">
@@ -286,7 +286,7 @@ RwBatchNestedLoopJoin(condition=[>($0, $3)], joinType=[inner])
         <Resource name="physical">
             <![CDATA[
 RwBatchInsert(table=[[test_schema, t4]], operation=[INSERT], flattened=[false])
-  RwBatchValues(tuples=[[{ null }]])
+  RwBatchValues(tuples=[[{ null:INTEGER }]])
 ]]>
         </Resource>
         <Resource name="json" path="batch/basic/insert_null">
@@ -413,7 +413,7 @@ RwBatchProject(v1=[$0])
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwBatchValues(tuples=[[{ -1, -2.1 }]])
+RwBatchValues(tuples=[[{ -1:BIGINT, -2.1:DOUBLE }]])
 ]]>
         </Resource>
     </TestCase>

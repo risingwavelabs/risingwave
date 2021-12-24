@@ -25,7 +25,7 @@ insert into f values (1), (null)
         <Resource name="physical">
             <![CDATA[
 RwBatchInsert(table=[[test_schema, f]], operation=[INSERT], flattened=[false])
-  RwBatchValues(tuples=[[{ 1 }, { null }]])
+  RwBatchValues(tuples=[[{ 1:FLOAT }, { null:FLOAT }]])
             ]]>
         </Resource>
         <Resource name="json" path="batch/basic/insert_cast_real">

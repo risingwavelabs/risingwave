@@ -38,6 +38,14 @@ pub fn dec_to_dec(n: Decimal) -> Result<Decimal> {
     Ok(n)
 }
 
+/// Cast between different precision/length.
+/// Eg. Char(5) -> Char(10)
+/// Currently no-op. TODO: implement padding and overflow check (#2137)
+#[inline(always)]
+pub fn str_to_str(n: &str) -> Result<String> {
+    Ok(n.into())
+}
+
 #[inline(always)]
 pub fn str_to_date(elem: &str) -> Result<i32> {
     NaiveDate::parse_from_str(elem, "%Y-%m-%d")

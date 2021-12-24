@@ -8,7 +8,7 @@ insert into customer values (149601, 'Customer#000149601', 'rsARKllazC', 18, '28
         <Resource name="physical">
             <![CDATA[
 RwBatchInsert(table=[[test_schema, customer]], operation=[INSERT], flattened=[false])
-  RwBatchValues(tuples=[[{ 149601, 'Customer#000149601', 'rsARKllazC', 18, '28-585-834-9749', 3932.16, 'BUILDING', 'arefully special deposits. silent deposits haggle. special, final deposits about the carefully unusual packa' }]])
+  RwBatchValues(tuples=[[{ 149601, 'Customer#000149601', 'rsARKllazC', 18, '28-585-834-9749', 3932.16:DECIMAL(28,10), 'BUILDING', 'arefully special deposits. silent deposits haggle. special, final deposits about the carefully unusual packa' }]])
 ]]>
         </Resource>
     </TestCase>

@@ -143,6 +143,22 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
+        (ProstType::Cast, DataTypeKind::Char, DataTypeKind::Char) => {
+            Box::new(UnaryExpression::<Utf8Array, Utf8Array, _> {
+                expr_ia1: child_expr,
+                return_type,
+                func: cast::str_to_str,
+                _phantom: PhantomData,
+            })
+        }
+        (ProstType::Cast, DataTypeKind::Varchar, DataTypeKind::Char) => {
+            Box::new(UnaryExpression::<Utf8Array, Utf8Array, _> {
+                expr_ia1: child_expr,
+                return_type,
+                func: cast::str_to_str,
+                _phantom: PhantomData,
+            })
+        }
         (ProstType::Cast, DataTypeKind::Timestamp, DataTypeKind::Date) => {
             Box::new(UnaryExpression::<I32Array, I64Array, _> {
                 expr_ia1: child_expr,
