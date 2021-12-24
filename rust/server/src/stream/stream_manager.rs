@@ -219,20 +219,21 @@ fn build_agg_call_from_prost(agg_call_proto: &expr::AggCall) -> Result<AggCall> 
 }
 
 impl StreamManagerCore {
-    fn new(addr: SocketAddr, state_store: Option<&str>) -> Self {
-        let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-        let state_store = match state_store {
+    fn get_state_store_impl(state_store: Option<&str>) -> StateStoreImpl {
+        match state_store {
             Some("in_memory") | Some("in-memory") | None => {
                 StateStoreImpl::MemoryStateStore(MemoryStateStore::new())
             }
-            Some("hummock_minio") | Some("hummock-minio") => {
+            Some(minio) if minio.starts_with("hummock+minio://") => {
                 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
                 use risingwave_storage::hummock::{HummockOptions, HummockStorage};
                 use risingwave_storage::object::S3ObjectStore;
                 // TODO: initialize those settings in a yaml file or command line instead of
                 // hard-coding
                 StateStoreImpl::HummockStateStore(HummockStateStore::new(HummockStorage::new(
-                    Arc::new(S3ObjectStore::new_with_test_minio()),
+                    Arc::new(S3ObjectStore::new_with_minio(
+                        minio.strip_prefix("hummock+").unwrap(),
+                    )),
                     HummockOptions {
                         table_size: 256 * (1 << 20),
                         block_size: 64 * (1 << 10),
@@ -243,7 +244,12 @@ impl StreamManagerCore {
                 )))
             }
             Some(other) => unimplemented!("{} state store is not supported", other),
-        };
+        }
+    }
+
+    fn new(addr: SocketAddr, state_store: Option<&str>) -> Self {
+        let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+        let state_store = Self::get_state_store_impl(state_store);
         Self {
             handles: HashMap::new(),
             channel_pool: HashMap::new(),

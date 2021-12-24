@@ -232,23 +232,28 @@ impl S3ObjectStore {
         }
     }
 
-    pub fn new_with_test_minio() -> Self {
+    /// Create a minio client. The server should be like `minio://key:secret@address:port/bucket`.
+    pub fn new_with_minio(server: &str) -> Self {
         // TODO: don't hard-code configurations
+        let server = server.strip_prefix("minio://").unwrap();
+        let (key, rest) = server.split_once(":").unwrap();
+        let (secret, rest) = rest.split_once("@").unwrap();
+        let (address, bucket) = rest.split_once("/").unwrap();
         Self::new_with_s3_client(
             S3Client::new_with(
                 HttpClient::new().expect("Failed to create HTTP client"),
                 StaticProvider::from(AwsCredentials::new(
-                    "hummock".to_string(),
-                    "12345678".to_string(),
+                    key.to_string(),
+                    secret.to_string(),
                     None,
                     None,
                 )),
                 rusoto_core::Region::Custom {
                     name: "minio".to_string(),
-                    endpoint: "http://127.0.0.1:9300".to_string(),
+                    endpoint: format!("http://{}", address),
                 },
             ),
-            "hummock".to_string(),
+            bucket.to_string(),
         )
     }
 }

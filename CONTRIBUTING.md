@@ -32,6 +32,13 @@ To run end-to-end tests with multiple compute-nodes, run the script:
 python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/
 ```
 
+To run end-to-end tests with state store, run the script:
+```shell
+export RISINGWAVE_STATE_STORE="hummock+minio://hummock:12345678@localhost:9300/hummock"
+./scripts/start_cluster.sh 1
+python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/
+```
+
 It will start processes in the background. After testing, you can run the following scriptto clean-up:
 ```shell
 ./scripts/kill_cluster.sh

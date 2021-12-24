@@ -6,6 +6,8 @@ set -e
 SCRIPT_PATH="$(cd "$(dirname "$0")" >/dev/null 2>&1 && pwd)"
 cd "$SCRIPT_PATH/.." || exit 1
 
+STATE_STORE="${RISINGWAVE_STATE_STORE:-in_memory}"
+
 wait_server() {
     # https://stackoverflow.com/a/44484835/5242660
     # Licensed by https://creativecommons.org/licenses/by-sa/3.0/
@@ -24,8 +26,8 @@ wait_server() {
 
 start_compute_node() {
     log_dir="../log/compute-node-$1.out"
-    echo "Starting compute-node 0.0.0.0:$1 ... logging to $log_dir"
-    nohup ./target/debug/compute-node --log4rs-config config/log4rs.yaml --host "0.0.0.0:$1" > "$log_dir" &
+    echo "Starting compute-node 0.0.0.0:$1 with state store $STATE_STORE... logging to $log_dir"
+    nohup ./target/debug/compute-node --log4rs-config config/log4rs.yaml --host "0.0.0.0:$1" --state-store "$STATE_STORE" > "$log_dir" &
     wait_server "$1"
 }
 

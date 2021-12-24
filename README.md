@@ -63,6 +63,8 @@ To start the compute server, create one terminal and then type:
 make rust_build
 cd rust
 ./target/debug/compute-node --log4rs-config config/log4rs.yaml
+# With persistent state store
+./target/debug/compute-node --log4rs-config config/log4rs.yaml --state-store hummock+minio://key:secret@localhost:2333/bucket
 ```
 
 To start the Postgres shell, create one terminal and then type:
