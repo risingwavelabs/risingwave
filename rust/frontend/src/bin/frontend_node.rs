@@ -6,7 +6,7 @@ struct Opts {
     #[clap(long, default_value = "config/log4rs.yaml")]
     log4rs_config: String,
 
-    #[clap(long, default_value = "127.0.0.1:4567")]
+    #[clap(long, default_value = "127.0.0.1:4566")]
     host: String,
 }
 
@@ -21,15 +21,19 @@ async fn main() {
 
 #[cfg(test)]
 mod tests {
+    use clap::Parser;
     use frontend::pgwire::pg_server::PgServer;
     use tokio_postgres::NoTls;
+
+    use crate::Opts;
 
     #[tokio::test]
     /// Test the psql connection establish of PG server.
     async fn test_connection() {
-        tokio::spawn(async move { PgServer::serve("127.0.0.1:4567").await });
+        let opts: Opts = Opts::parse();
+        tokio::spawn(async move { PgServer::serve(&opts.host).await });
         // Connect to the database.
-        let (client, connection) = tokio_postgres::connect("host=localhost port=4567", NoTls)
+        let (client, connection) = tokio_postgres::connect("host=localhost port=4566", NoTls)
             .await
             .unwrap();
 

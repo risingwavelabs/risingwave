@@ -6,7 +6,7 @@ use crate::array::RwError;
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 
-fn total_order_cmp<T1, T2, T3, F>(l: T1, r: T2, cmp: F) -> Result<bool>
+fn general_cmp<T1, T2, T3, F>(l: T1, r: T2, cmp: F) -> Result<bool>
 where
     T1: TryInto<T3> + Debug,
     T2: TryInto<T3> + Debug,
@@ -32,63 +32,63 @@ where
 }
 
 #[inline(always)]
-pub fn total_order_eq<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+pub fn general_eq<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
 where
     T1: TryInto<T3> + Debug,
     T2: TryInto<T3> + Debug,
     T3: Ord,
 {
-    total_order_cmp(l, r, |a, b| a == b)
+    general_cmp(l, r, |a, b| a == b)
 }
 
 #[inline(always)]
-pub fn total_order_ne<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+pub fn general_ne<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
 where
     T1: TryInto<T3> + Debug,
     T2: TryInto<T3> + Debug,
     T3: Ord,
 {
-    total_order_cmp(l, r, |a, b| a != b)
+    general_cmp(l, r, |a, b| a != b)
 }
 
 #[inline(always)]
-pub fn total_order_ge<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+pub fn general_ge<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
 where
     T1: TryInto<T3> + Debug,
     T2: TryInto<T3> + Debug,
     T3: Ord,
 {
-    total_order_cmp(l, r, |a, b| a >= b)
+    general_cmp(l, r, |a, b| a >= b)
 }
 
 #[inline(always)]
-pub fn total_order_gt<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+pub fn general_gt<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
 where
     T1: TryInto<T3> + Debug,
     T2: TryInto<T3> + Debug,
     T3: Ord,
 {
-    total_order_cmp(l, r, |a, b| a > b)
+    general_cmp(l, r, |a, b| a > b)
 }
 
 #[inline(always)]
-pub fn total_order_le<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+pub fn general_le<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
 where
     T1: TryInto<T3> + Debug,
     T2: TryInto<T3> + Debug,
     T3: Ord,
 {
-    total_order_cmp(l, r, |a, b| a <= b)
+    general_cmp(l, r, |a, b| a <= b)
 }
 
 #[inline(always)]
-pub fn total_order_lt<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+pub fn general_lt<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
 where
     T1: TryInto<T3> + Debug,
     T2: TryInto<T3> + Debug,
     T3: Ord,
 {
-    total_order_cmp(l, r, |a, b| a < b)
+    general_cmp(l, r, |a, b| a < b)
 }
 
 #[inline(always)]
@@ -169,6 +169,6 @@ mod tests {
 
     #[test]
     fn test_deci_f() {
-        assert!(total_order_eq::<_, _, Decimal>(Decimal::from_str("1.1").unwrap(), 1.1f32).unwrap())
+        assert!(general_eq::<_, _, Decimal>(Decimal::from_str("1.1").unwrap(), 1.1f32).unwrap())
     }
 }

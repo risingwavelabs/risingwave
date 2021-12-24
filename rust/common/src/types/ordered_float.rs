@@ -40,8 +40,8 @@ use core::str::FromStr;
 
 pub use num_traits::Float;
 use num_traits::{
-    AsPrimitive, Bounded, CheckedAdd, CheckedSub, FromPrimitive, Num, NumCast, One, Signed,
-    ToPrimitive, Zero,
+    AsPrimitive, Bounded, CheckedAdd, CheckedDiv, CheckedMul, CheckedRem, CheckedSub,
+    FromPrimitive, Num, NumCast, One, Signed, ToPrimitive, Zero,
 };
 
 // masks for the parts of the IEEE 754 float
@@ -381,6 +381,33 @@ where
 {
     fn checked_sub(&self, v: &Self) -> Option<Self> {
         Some(self.sub(*v))
+    }
+}
+
+impl<T> CheckedMul for OrderedFloat<T>
+where
+    T: Float,
+{
+    fn checked_mul(&self, v: &Self) -> Option<Self> {
+        Some(self.mul(*v))
+    }
+}
+
+impl<T> CheckedDiv for OrderedFloat<T>
+where
+    T: Float,
+{
+    fn checked_div(&self, v: &Self) -> Option<Self> {
+        Some(self.div(*v))
+    }
+}
+
+impl<T> CheckedRem for OrderedFloat<T>
+where
+    T: Float,
+{
+    fn checked_rem(&self, v: &Self) -> Option<Self> {
+        Some(self.rem(*v))
     }
 }
 
