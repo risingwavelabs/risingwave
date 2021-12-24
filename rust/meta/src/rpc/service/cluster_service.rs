@@ -10,17 +10,16 @@ use risingwave_pb::meta::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::cluster::WorkerNodeMetaManager;
-use crate::manager::MetaManager;
+use crate::cluster::{StoredClusterManager, WorkerNodeMetaManager};
 
 #[derive(Clone)]
 pub struct ClusterServiceImpl {
-    mmc: Arc<MetaManager>,
+    scm: Arc<StoredClusterManager>,
 }
 
 impl ClusterServiceImpl {
-    pub fn new(mmc: Arc<MetaManager>) -> Self {
-        ClusterServiceImpl { mmc }
+    pub fn new(scm: Arc<StoredClusterManager>) -> Self {
+        ClusterServiceImpl { scm }
     }
 }
 
@@ -37,7 +36,7 @@ impl ClusterService for ClusterServiceImpl {
             _ => ClusterType::Unknown,
         };
         if let Some(host) = req.host {
-            let worker_node_res = self.mmc.add_worker_node(host, cluster_type).await;
+            let worker_node_res = self.scm.add_worker_node(host, cluster_type).await;
             match worker_node_res {
                 Ok(worker_node) => Ok(Response::new(AddWorkerNodeResponse {
                     status: None,
@@ -64,7 +63,7 @@ impl ClusterService for ClusterServiceImpl {
             _ => ClusterType::Unknown,
         };
         if let Some(node) = req.node {
-            let delete_res = self.mmc.delete_worker_node(node, cluster_type).await;
+            let delete_res = self.scm.delete_worker_node(node, cluster_type).await;
             match delete_res {
                 Ok(()) => Ok(Response::new(DeleteWorkerNodeResponse { status: None })),
                 Err(_e) => Err(
@@ -87,7 +86,7 @@ impl ClusterService for ClusterServiceImpl {
             1 => ClusterType::Streaming,
             _ => ClusterType::Unknown,
         };
-        let node_list = self.mmc.list_worker_node(cluster_type).await.unwrap();
+        let node_list = self.scm.list_worker_node(cluster_type).await.unwrap();
         Ok(Response::new(ListAllNodesResponse {
             status: None,
             nodes: node_list,

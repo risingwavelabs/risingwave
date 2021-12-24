@@ -3,18 +3,34 @@ use prost::Message;
 use risingwave_common::error::Result;
 use risingwave_pb::common::Cluster;
 
-use crate::manager::{MetaManager, SINGLE_VERSION_EPOCH};
+use crate::manager::{Config, SINGLE_VERSION_EPOCH};
+use crate::storage::MetaStoreRef;
 
 #[async_trait]
-pub trait ClusterMetaManager {
+pub trait ClusterMetaManager: Sync + Send + 'static {
     async fn list_cluster(&self) -> Result<Vec<Cluster>>;
     async fn get_cluster(&self, cluster_id: u32) -> Result<Cluster>;
     async fn put_cluster(&self, cluster: Cluster) -> Result<()>;
     async fn delete_cluster(&self, cluster_id: u32) -> Result<()>;
 }
 
+/// [`StoredClusterManager`] manager cluster/worker meta data in [`MetaStore`].
+pub struct StoredClusterManager {
+    meta_store_ref: MetaStoreRef,
+    config: Config,
+}
+
+impl StoredClusterManager {
+    pub fn new(meta_store_ref: MetaStoreRef, config: Config) -> Self {
+        Self {
+            meta_store_ref,
+            config,
+        }
+    }
+}
+
 #[async_trait]
-impl ClusterMetaManager for MetaManager {
+impl ClusterMetaManager for StoredClusterManager {
     async fn list_cluster(&self) -> Result<Vec<Cluster>> {
         let clusters_pb = self
             .meta_store_ref
@@ -69,25 +85,19 @@ mod tests {
     use risingwave_pb::common::WorkerNode;
 
     use super::*;
-    use crate::manager::{Config, IdGeneratorManager, MemEpochGenerator};
+    use crate::manager::Config;
     use crate::storage::MemStore;
 
     #[tokio::test]
     async fn test_cluster_manager() -> Result<()> {
         let meta_store_ref = Arc::new(MemStore::new());
-        let meta_manager = MetaManager::new(
-            meta_store_ref.clone(),
-            Arc::new(MemEpochGenerator::new()),
-            Arc::new(IdGeneratorManager::new(meta_store_ref).await),
-            Config::default(),
-        )
-        .await;
+        let cluster_manager = StoredClusterManager::new(meta_store_ref.clone(), Config::default());
 
-        assert!(meta_manager.list_cluster().await.is_ok());
-        assert!(meta_manager.get_cluster(0).await.is_err());
+        assert!(cluster_manager.list_cluster().await.is_ok());
+        assert!(cluster_manager.get_cluster(0).await.is_err());
 
         for i in 0..100 {
-            assert!(meta_manager
+            assert!(cluster_manager
                 .put_cluster(Cluster {
                     id: i,
                     nodes: vec![WorkerNode {
@@ -100,10 +110,10 @@ mod tests {
                 .is_ok());
         }
 
-        let cluster = meta_manager.get_cluster(10).await?;
+        let cluster = cluster_manager.get_cluster(10).await?;
         assert_eq!(cluster.id, 10);
         assert_eq!(cluster.nodes[0].id, 20);
-        let clusters = meta_manager.list_cluster().await?;
+        let clusters = cluster_manager.list_cluster().await?;
         assert_eq!(clusters.len(), 100);
 
         Ok(())

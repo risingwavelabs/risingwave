@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -18,7 +19,8 @@ use tokio::sync::RwLock;
 use tonic::transport::{Channel, Endpoint};
 use uuid::Uuid;
 
-use crate::stream::{NodeManagerRef, ScheduleCategory, Scheduler, StreamMetaManagerRef};
+use crate::cluster::StoredClusterManager;
+use crate::stream::{ScheduleCategory, Scheduler, StreamMetaManagerRef};
 
 #[async_trait]
 pub trait StreamManager: Sync + Send + 'static {
@@ -41,11 +43,10 @@ pub struct DefaultStreamManager {
 }
 
 impl DefaultStreamManager {
-    /// FIXME: replace node manager when cluster management ready.
-    pub fn new(smm: StreamMetaManagerRef, node_manager_ref: NodeManagerRef) -> Self {
+    pub fn new(smm: StreamMetaManagerRef, cluster_manager: Arc<StoredClusterManager>) -> Self {
         Self {
             smm,
-            scheduler: Scheduler::new(ScheduleCategory::Simple, node_manager_ref),
+            scheduler: Scheduler::new(ScheduleCategory::Simple, cluster_manager),
             clients: RwLock::new(HashMap::new()),
         }
     }
@@ -214,6 +215,7 @@ mod test {
     use std::thread::sleep;
 
     use risingwave_pb::common::HostAddress;
+    use risingwave_pb::meta::ClusterType;
     use risingwave_pb::stream_service::stream_service_server::{
         StreamService, StreamServiceServer,
     };
@@ -224,24 +226,10 @@ mod test {
     use tonic::{Request, Response, Status};
 
     use super::*;
+    use crate::cluster::WorkerNodeMetaManager;
     use crate::manager::Config;
     use crate::storage::MemStore;
-    use crate::stream::{NodeManager, StoredStreamMetaManager, StreamMetaManager};
-
-    pub struct MockNodeManager {}
-
-    #[async_trait]
-    impl NodeManager for MockNodeManager {
-        async fn list_nodes(&self) -> Result<Vec<WorkerNode>> {
-            Ok(vec![WorkerNode {
-                id: 0,
-                host: Some(HostAddress {
-                    host: "127.0.0.1".to_string(),
-                    port: 12345,
-                }),
-            }])
-        }
-    }
+    use crate::stream::{StoredStreamMetaManager, StreamMetaManager};
 
     struct FakeFragmentState {
         fragment_streams: Mutex<HashMap<u32, StreamFragment>>,
@@ -336,11 +324,21 @@ mod test {
         let meta_store_ref = Arc::new(MemStore::new());
         let meta_manager = Arc::new(StoredStreamMetaManager::new(
             Config::default(),
-            meta_store_ref,
+            meta_store_ref.clone(),
         ));
-        let node_manager_ref = Arc::new(MockNodeManager {});
-        let stream_manager =
-            DefaultStreamManager::new(meta_manager.clone(), node_manager_ref.clone());
+        let cluster_manager =
+            Arc::new(StoredClusterManager::new(meta_store_ref, Config::default()));
+        cluster_manager
+            .add_worker_node(
+                HostAddress {
+                    host: "127.0.0.1".to_string(),
+                    port: 12345,
+                },
+                ClusterType::Streaming,
+            )
+            .await?;
+
+        let stream_manager = DefaultStreamManager::new(meta_manager.clone(), cluster_manager);
 
         let table_ref_id = TableRefId {
             schema_ref_id: None,

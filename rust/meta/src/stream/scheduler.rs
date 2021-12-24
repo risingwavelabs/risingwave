@@ -2,19 +2,12 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_pb::common::WorkerNode;
+use risingwave_pb::meta::ClusterType;
 
-/// FIXME: This is a mock trait, replace it when worker management implementation ready in cluster
-/// mod.
-#[async_trait]
-pub trait NodeManager: Sync + Send + 'static {
-    async fn list_nodes(&self) -> Result<Vec<WorkerNode>>;
-}
-
-pub type NodeManagerRef = Arc<dyn NodeManager>;
+use crate::cluster::{StoredClusterManager, WorkerNodeMetaManager};
 
 /// [`ScheduleCategory`] defines all supported categories.
 pub enum ScheduleCategory {
@@ -28,21 +21,24 @@ pub enum ScheduleCategory {
 
 /// [`Scheduler`] defines schedule logic for mv fragments.
 pub struct Scheduler {
-    node_manager_ref: NodeManagerRef,
+    cluster_manager: Arc<StoredClusterManager>,
     category: ScheduleCategory,
 }
 
 impl Scheduler {
-    pub fn new(category: ScheduleCategory, node_manager_ref: NodeManagerRef) -> Self {
+    pub fn new(category: ScheduleCategory, cluster_manager: Arc<StoredClusterManager>) -> Self {
         Self {
-            node_manager_ref,
+            cluster_manager,
             category,
         }
     }
 
     /// [`schedule`] schedules node for input fragments.
     pub async fn schedule(&self, fragments: &[u32]) -> Result<Vec<WorkerNode>> {
-        let nodes = self.node_manager_ref.list_nodes().await?;
+        let nodes = self
+            .cluster_manager
+            .list_worker_node(ClusterType::Streaming)
+            .await?;
         if nodes.is_empty() {
             return Err(InternalError("no available node exist".to_string()).into());
         }
@@ -72,29 +68,30 @@ mod test {
     use risingwave_pb::common::HostAddress;
 
     use super::*;
-    pub struct MockNodeManager {}
-
-    #[async_trait]
-    impl NodeManager for MockNodeManager {
-        async fn list_nodes(&self) -> Result<Vec<WorkerNode>> {
-            Ok((0..10)
-                .map(|i| WorkerNode {
-                    id: i,
-                    host: Some(HostAddress {
-                        host: "127.0.0.1".to_string(),
-                        port: i as i32,
-                    }),
-                })
-                .collect::<Vec<_>>())
-        }
-    }
+    use crate::manager::Config;
+    use crate::storage::MemStore;
 
     #[tokio::test]
     async fn test_schedule() -> Result<()> {
-        let node_manager_ref = Arc::new(MockNodeManager {});
+        let meta_store_ref = Arc::new(MemStore::new());
+        let cluster_manager = Arc::new(StoredClusterManager::new(
+            meta_store_ref.clone(),
+            Config::default(),
+        ));
         let fragments = (0..15).collect::<Vec<u32>>();
+        for i in 0..10 {
+            cluster_manager
+                .add_worker_node(
+                    HostAddress {
+                        host: "127.0.0.1".to_string(),
+                        port: i as i32,
+                    },
+                    ClusterType::Streaming,
+                )
+                .await?;
+        }
 
-        let simple_schedule = Scheduler::new(ScheduleCategory::Simple, node_manager_ref.clone());
+        let simple_schedule = Scheduler::new(ScheduleCategory::Simple, cluster_manager.clone());
         let nodes = simple_schedule.schedule(&fragments).await?;
         assert_eq!(nodes.len(), 15);
         assert_eq!(
@@ -103,7 +100,7 @@ mod test {
         );
 
         let round_bin_schedule =
-            Scheduler::new(ScheduleCategory::RoundRobin, node_manager_ref.clone());
+            Scheduler::new(ScheduleCategory::RoundRobin, cluster_manager.clone());
         let nodes = round_bin_schedule.schedule(&fragments).await?;
         assert_eq!(nodes.len(), 15);
         assert_eq!(
@@ -111,7 +108,7 @@ mod test {
             vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4]
         );
 
-        let round_bin_schedule = Scheduler::new(ScheduleCategory::Hash, node_manager_ref.clone());
+        let round_bin_schedule = Scheduler::new(ScheduleCategory::Hash, cluster_manager.clone());
         let nodes = round_bin_schedule.schedule(&fragments).await?;
         assert_eq!(nodes.len(), 15);
 
