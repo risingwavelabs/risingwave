@@ -1,5 +1,7 @@
+use std::ops::Bound::{self, *};
+
 use super::{HummockIterator, SortedIterator};
-use crate::hummock::key::{get_ts, key_with_ts, user_key as to_user_key};
+use crate::hummock::key::{get_ts, key_with_ts, user_key as to_user_key, Timestamp};
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 
@@ -13,34 +15,27 @@ pub struct UserKeyIterator {
 
     // Flag for whether the iterator reach over the right end of the range.
     out_of_range: bool,
-    // Closed left end of the given range. None means the left end is negative infinity.
-    begin_key: Option<Vec<u8>>,
-    // Closed right end of the given range. None means the right end is infinity.
-    end_key: Option<Vec<u8>>,
 
-    read_ts: u64,
+    key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+
+    read_ts: Timestamp,
 }
 
 // TODO: decide whether this should also impl `HummockIterator`
 impl UserKeyIterator {
-    pub fn new(
-        iterator: SortedIterator,
-        begin_key: Option<Vec<u8>>,
-        end_key: Option<Vec<u8>>,
-    ) -> Self {
-        UserKeyIterator::new_with_ts(iterator, begin_key, end_key, u64::MAX)
+    pub fn new(iterator: SortedIterator, key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>)) -> Self {
+        Self::new_with_ts(iterator, key_range, Timestamp::MAX)
     }
+
     pub fn new_with_ts(
         iterator: SortedIterator,
-        begin_key: Option<Vec<u8>>,
-        end_key: Option<Vec<u8>>,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_ts: u64,
     ) -> Self {
         Self {
             iterator,
             out_of_range: false,
-            begin_key,
-            end_key,
+            key_range,
             last_key: Vec::new(),
             last_val: Vec::new(),
             read_ts,
@@ -71,10 +66,11 @@ impl UserKeyIterator {
                         self.last_val.extend_from_slice(val);
 
                         // handle range scan
-                        if let Some(end_key) = &self.end_key {
-                            self.out_of_range = key > end_key.as_slice();
-                        }
-
+                        match &self.key_range.1 {
+                            Included(end_key) => self.out_of_range = key > end_key.as_slice(),
+                            Excluded(_) => todo!(),
+                            Unbounded => {}
+                        };
                         return Ok(());
                     }
                     // It means that the key is deleted from the storage.
@@ -113,12 +109,14 @@ impl UserKeyIterator {
     /// Reset the iterating position to the beginning.
     pub async fn rewind(&mut self) -> HummockResult<()> {
         // handle range scan
-        if let Some(begin_key) = &self.begin_key {
-            let full_key = &key_with_ts(begin_key.clone(), self.read_ts);
-            self.iterator.seek(full_key).await?;
-        } else {
-            self.iterator.rewind().await?;
-        }
+        match &self.key_range.0 {
+            Included(begin_key) => {
+                let full_key = &key_with_ts(begin_key.clone(), self.read_ts);
+                self.iterator.seek(full_key).await?;
+            }
+            Excluded(_) => todo!(),
+            Unbounded => self.iterator.rewind().await?,
+        };
 
         // handle multi-version
         self.last_key.clear();
@@ -129,9 +127,16 @@ impl UserKeyIterator {
     /// Reset the iterating position to the first position where the key >= provided key.
     pub async fn seek(&mut self, user_key: &[u8]) -> HummockResult<()> {
         // handle range scan when key < begin_key
-        let user_key = match &self.begin_key {
-            Some(begin_key) if begin_key.as_slice() > user_key => begin_key.clone(),
-            _ => Vec::from(user_key),
+        let user_key = match &self.key_range.0 {
+            Included(begin_key) => {
+                if begin_key.as_slice() > user_key {
+                    begin_key.clone()
+                } else {
+                    Vec::from(user_key)
+                }
+            }
+            Excluded(_) => todo!(),
+            Unbounded => Vec::from(user_key),
         };
 
         let full_key = &key_with_ts(user_key, self.read_ts);
@@ -152,6 +157,7 @@ impl UserKeyIterator {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Bound::*;
     use std::sync::Arc;
 
     use itertools::Itertools;
@@ -187,7 +193,7 @@ mod tests {
             .collect_vec();
 
         let si = SortedIterator::new(iters);
-        let mut uki = UserKeyIterator::new(si, None, None);
+        let mut uki = UserKeyIterator::new(si, (Unbounded, Unbounded));
         uki.rewind().await.unwrap();
 
         let mut i = 0;
@@ -226,7 +232,7 @@ mod tests {
             .collect_vec();
 
         let si = SortedIterator::new(iters);
-        let mut uki = UserKeyIterator::new(si, None, None);
+        let mut uki = UserKeyIterator::new(si, (Unbounded, Unbounded));
         let test_validator = &validators[2];
 
         // right edge case
@@ -283,7 +289,7 @@ mod tests {
             Box::new(TableIterator::new(Arc::new(table1))),
         ];
         let si = SortedIterator::new(iters);
-        let mut uki = UserKeyIterator::new(si, None, None);
+        let mut uki = UserKeyIterator::new(si, (Unbounded, Unbounded));
         uki.rewind().await.unwrap();
 
         // verify
@@ -321,10 +327,10 @@ mod tests {
         let iters: Vec<BoxedHummockIterator> = vec![Box::new(TableIterator::new(Arc::new(table)))];
         let si = SortedIterator::new(iters);
 
-        let begin_key = Some(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
-        let end_key = Some(user_key(key_range_test_key(0, 7, 0).as_slice()).to_vec());
+        let begin_key = Included(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
+        let end_key = Included(user_key(key_range_test_key(0, 7, 0).as_slice()).to_vec());
 
-        let mut uki = UserKeyIterator::new(si, begin_key, end_key);
+        let mut uki = UserKeyIterator::new(si, (begin_key, end_key));
 
         // ----- basic iterate -----
         uki.rewind().await.unwrap();
@@ -396,9 +402,9 @@ mod tests {
         let table = add_kv_pair(kv_pairs).await;
         let iters: Vec<BoxedHummockIterator> = vec![Box::new(TableIterator::new(Arc::new(table)))];
         let si = SortedIterator::new(iters);
-        let end_key = Some(user_key(key_range_test_key(0, 7, 0).as_slice()).to_vec());
+        let end_key = Included(user_key(key_range_test_key(0, 7, 0).as_slice()).to_vec());
 
-        let mut uki = UserKeyIterator::new(si, None, end_key);
+        let mut uki = UserKeyIterator::new(si, (Unbounded, end_key));
 
         // ----- basic iterate -----
         uki.rewind().await.unwrap();
@@ -474,9 +480,9 @@ mod tests {
         let table = add_kv_pair(kv_pairs).await;
         let iters: Vec<BoxedHummockIterator> = vec![Box::new(TableIterator::new(Arc::new(table)))];
         let si = SortedIterator::new(iters);
-        let begin_key = Some(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
+        let begin_key = Included(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
 
-        let mut uki = UserKeyIterator::new(si, begin_key, None);
+        let mut uki = UserKeyIterator::new(si, (begin_key, Unbounded));
 
         // ----- basic iterate -----
         uki.rewind().await.unwrap();

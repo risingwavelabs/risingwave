@@ -17,7 +17,7 @@ pub struct TableIterator {
     cur_idx: usize,
 
     /// Reference to the table
-    table: Arc<Table>,
+    pub table: Arc<Table>,
 }
 
 impl TableIterator {

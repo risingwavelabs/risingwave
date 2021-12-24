@@ -75,7 +75,7 @@ impl StateStore for HummockStateStore {
     async fn scan(&self, prefix: &[u8], limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
         let mut iter = self
             .storage
-            .range_scan(Some(prefix.to_vec()), Some(next_key(prefix)))
+            .range_scan(prefix.to_vec()..next_key(prefix))
             .await
             .map_err(anyhow::Error::new)
             .to_rw_result()?;
@@ -145,7 +145,7 @@ impl StateStoreIter for HummockStateStoreIter {
         assert!(self.iter.is_none());
         let mut iter = self
             .storage
-            .range_scan(Some(self.prefix.clone()), Some(next_key(&self.prefix)))
+            .range_scan(self.prefix.clone()..=next_key(&self.prefix))
             .await
             .map_err(anyhow::Error::new)
             .to_rw_result()?;

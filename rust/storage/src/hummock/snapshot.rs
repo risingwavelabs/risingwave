@@ -1,12 +1,16 @@
+use std::cmp;
+use std::ops::Bound::*;
+use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use super::iterator::{
     BoxedHummockIterator, ConcatIterator, HummockIterator, SortedIterator, UserKeyIterator,
 };
-use super::key::{key_with_ts, user_key, FullKey};
+use super::key::{key_with_ts, user_key};
 use super::utils::bloom_filter_tables;
+use super::version_cmp::VersionedComparator;
 use super::version_manager::{Level, Snapshot, VersionManager};
-use super::{HummockResult, TableIterator};
+use super::{HummockResult, Table, TableIterator};
 
 pub struct HummockSnapshot {
     /// [`ts`] stands for timestamp and indicates when a new log appends to a SST.
@@ -88,47 +92,71 @@ impl HummockSnapshot {
 
     pub async fn range_scan(
         &self,
-        begin_key: Option<Vec<u8>>,
-        end_key: Option<Vec<u8>>,
+        key_range: impl RangeBounds<Vec<u8>>,
     ) -> HummockResult<UserKeyIterator> {
-        if begin_key.is_some() && end_key.is_some() {
-            assert!(begin_key.clone().unwrap() <= end_key.clone().unwrap());
-        }
+        let mut table_not_too_left: Vec<Arc<Table>> = Vec::new();
 
-        let begin_key_copy = match &begin_key {
-            Some(begin_key) => key_with_ts(begin_key.clone(), u64::MAX),
-            None => Vec::new(),
-        };
-        let begin_fk = FullKey::from_slice(begin_key_copy.as_slice());
-
-        let end_key_copy = match &end_key {
-            Some(end_key) => key_with_ts(end_key.clone(), self.ts),
-            None => Vec::new(),
-        };
-        let end_fk = FullKey::from_slice(end_key_copy.as_slice());
-
-        let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
         // TODO: use the latest version once the ts-aware compaction is realized.
         // let scoped_snapshot = ScopedUnpinSnapshot::from_version_manager(self.vm.clone());
         // let snapshot = scoped_snapshot.snapshot();
         let snapshot = self.temp_version.clone();
-        for table in self.vm.tables(snapshot)? {
-            let tlk = FullKey::from_slice(table.meta.largest_key.as_slice());
-            let table_too_left = begin_key.is_some() && tlk < begin_fk;
 
-            let tsk = FullKey::from_slice(table.meta.smallest_key.as_slice());
-            let table_too_right = end_key.is_some() && tsk > end_fk;
-
-            // decide whether the two ranges have common sub-range
-            if !(table_too_left || table_too_right) {
-                let iter = Box::new(TableIterator::new(table.clone()));
-                table_iters.push(iter);
+        let begin_fk = match key_range.start_bound() {
+            Unbounded => {
+                for table in self.vm.tables(snapshot)? {
+                    table_not_too_left.push(table.clone());
+                }
+                Unbounded
             }
-        }
+            Included(begin_uk) => {
+                let begin_fk = key_with_ts(begin_uk.clone(), u64::MAX);
+                for table in self.vm.tables(snapshot)? {
+                    if VersionedComparator::compare_key(
+                        &table.meta.largest_key,
+                        begin_fk.as_slice(),
+                    ) != cmp::Ordering::Less
+                    {
+                        table_not_too_left.push(table.clone());
+                    }
+                }
+                Included(begin_fk)
+            }
+            Excluded(_) => {
+                todo!()
+            }
+        };
+
+        let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
+        let end_fk = match key_range.end_bound() {
+            Unbounded => {
+                for table in table_not_too_left {
+                    table_iters.push(Box::new(TableIterator::new(table.clone())));
+                }
+                Unbounded
+            }
+            Included(end_uk) => {
+                let end_fk = key_with_ts(end_uk.clone(), u64::MIN);
+                for table in table_not_too_left {
+                    if VersionedComparator::compare_key(
+                        table.meta.smallest_key.as_slice(),
+                        end_fk.as_slice(),
+                    ) != cmp::Ordering::Greater
+                    {
+                        table_iters.push(Box::new(TableIterator::new(table.clone())));
+                    }
+                }
+                Included(end_fk)
+            }
+            Excluded(_) => {
+                todo!()
+            }
+        };
 
         let si = SortedIterator::new(table_iters);
         Ok(UserKeyIterator::new_with_ts(
-            si, begin_key, end_key, self.ts,
+            si,
+            (begin_fk, end_fk),
+            self.ts,
         ))
     }
 }

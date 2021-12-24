@@ -1,5 +1,6 @@
 //! Hummock is the state store of the streaming system.
 
+use std::ops::RangeBounds;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -94,11 +95,11 @@ impl HummockStorage {
     /// Return an iterator that scan from the begin key to the end key
     pub async fn range_scan(
         &self,
-        begin_key: Option<Vec<u8>>,
-        end_key: Option<Vec<u8>>,
+        key_range: impl RangeBounds<Vec<u8>>,
     ) -> HummockResult<UserKeyIterator> {
-        self.get_snapshot().range_scan(begin_key, end_key).await
+        self.get_snapshot().range_scan(key_range).await
     }
+
     /// Write batch to storage. The batch should be:
     /// * Ordered. KV pairs will be directly written to the table, so it must be ordered.
     /// * Locally unique. There should not be two or more operations on the same key in one write
@@ -277,10 +278,7 @@ mod tests {
         assert_eq!(value, None);
 
         // write aa bb
-        let mut iter = snapshot1
-            .range_scan(None, Some(Bytes::from("ee").to_vec()))
-            .await
-            .unwrap();
+        let mut iter = snapshot1.range_scan(..=b"ee".to_vec()).await.unwrap();
         iter.rewind().await.unwrap();
         let len = count_iter(&mut iter).await;
         assert_eq!(len, 2);
@@ -296,10 +294,7 @@ mod tests {
         let value = snapshot2.get(&anchor).await.unwrap().unwrap();
         assert_eq!(Bytes::from(value), Bytes::from("111111"));
         // update aa, write cc
-        let mut iter = snapshot2
-            .range_scan(None, Some(Bytes::from("ee").to_vec()))
-            .await
-            .unwrap();
+        let mut iter = snapshot2.range_scan(..=b"ee".to_vec()).await.unwrap();
         iter.rewind().await.unwrap();
         let len = count_iter(&mut iter).await;
         assert_eq!(len, 3);
@@ -308,10 +303,7 @@ mod tests {
         drop(snapshot2);
 
         // delete aa, write dd,ee
-        let mut iter = snapshot3
-            .range_scan(None, Some(Bytes::from("ee").to_vec()))
-            .await
-            .unwrap();
+        let mut iter = snapshot3.range_scan(..=b"ee".to_vec()).await.unwrap();
         iter.rewind().await.unwrap();
         let len = count_iter(&mut iter).await;
         assert_eq!(len, 4);
