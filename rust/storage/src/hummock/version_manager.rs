@@ -60,7 +60,7 @@ struct VersionManagerInner {
     status: HashMap<u64, Arc<Snapshot>>,
 
     /// TableId -> Object mapping
-    tables: HashMap<u64, Arc<Table>>,
+    tables: BTreeMap<u64, Arc<Table>>,
 
     /// Reference count of each epoch.
     ref_cnt: BTreeMap<u64, usize>,
@@ -77,7 +77,7 @@ struct VersionManagerInner {
 
 impl VersionManagerInner {
     /// Unpin a snapshot of one epoch. When reference counter becomes 0, files might be vacuumed.
-    fn unpin(&mut self, epoch: u64) {
+    pub fn unpin(&mut self, epoch: u64) {
         let ref_cnt = self.ref_cnt.get_mut(&epoch).expect("epoch not registered!");
         *ref_cnt -= 1;
         if *ref_cnt == 0 {
@@ -139,7 +139,7 @@ impl VersionManager {
 
         let mut init_epoch_vm = VersionManagerInner {
             status: HashMap::new(),
-            tables: HashMap::new(),
+            tables: BTreeMap::new(),
             ref_cnt: BTreeMap::new(),
             table_deletion_to_apply: BTreeMap::new(),
             epoch: 0,
@@ -170,6 +170,18 @@ impl VersionManager {
             tx,
             rx: PLMutex::new(Some(rx)),
         }
+    }
+    // TODO: This function maybe removed in the future.
+    // Currently we use table id as the timestamp. We may use a dedicated timestamp generator in the
+    // future.
+    pub fn latest_ts(&self) -> u64 {
+        let inner = self.inner.lock();
+        inner
+            .tables
+            .iter()
+            .next_back()
+            .map(|x| *x.0)
+            .unwrap_or_default()
     }
 
     pub fn pick_few_tables(&self, table_ids: &[u64]) -> HummockResult<Vec<Arc<Table>>> {

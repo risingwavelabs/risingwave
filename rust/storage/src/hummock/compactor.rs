@@ -210,10 +210,10 @@ mod tests {
     use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 
     use super::*;
-    use crate::hummock::{
-        key_with_ts, user_key, BoxedHummockIterator, HummockOptions, HummockResult, HummockStorage,
-        ScopedUnpinSnapshot,
-    };
+    use crate::hummock::iterator::BoxedHummockIterator;
+    use crate::hummock::utils::bloom_filter_tables;
+    use crate::hummock::version_manager::ScopedUnpinSnapshot;
+    use crate::hummock::{key_with_ts, user_key, HummockOptions, HummockResult, HummockStorage};
     use crate::object::InMemObjectStore;
 
     #[tokio::test]
@@ -270,11 +270,20 @@ mod tests {
             .unwrap();
 
         // Get the value after flushing to remote.
-        let value = hummock_storage.get(&anchor).await.unwrap().unwrap();
+        let value = hummock_storage
+            .get_snapshot()
+            .get(&anchor)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(Bytes::from(value), Bytes::from("111"));
 
         // Test looking for a nonexistent key. `next()` would return the next key.
-        let value = hummock_storage.get(&Bytes::from("ab")).await.unwrap();
+        let value = hummock_storage
+            .get_snapshot()
+            .get(&Bytes::from("ab"))
+            .await
+            .unwrap();
         assert_eq!(value, None);
 
         // Write second batch.
@@ -288,7 +297,12 @@ mod tests {
             .unwrap();
         Compactor::compact(&hummock_storage).await?;
         // Get the value after flushing to remote.
-        let value = hummock_storage.get(&anchor).await.unwrap().unwrap();
+        let value = hummock_storage
+            .get_snapshot()
+            .get(&anchor)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(Bytes::from(value), Bytes::from("111111"));
 
         let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
@@ -299,7 +313,10 @@ mod tests {
         for level in &snapshot.levels {
             match level {
                 Level::Tiering(table_ids) => {
-                    let tables = hummock_storage.bloom_filter_tables(table_ids, &anchor)?;
+                    let tables = bloom_filter_tables(
+                        hummock_storage.version_manager.pick_few_tables(table_ids)?,
+                        &anchor,
+                    )?;
                     table_iters.extend(
                         tables.into_iter().map(|table| {
                             Box::new(TableIterator::new(table)) as BoxedHummockIterator
@@ -307,7 +324,10 @@ mod tests {
                     )
                 }
                 Level::Leveling(table_ids) => {
-                    let tables = hummock_storage.bloom_filter_tables(table_ids, &anchor)?;
+                    let tables = bloom_filter_tables(
+                        hummock_storage.version_manager.pick_few_tables(table_ids)?,
+                        &anchor,
+                    )?;
                     table_iters.push(Box::new(ConcatIterator::new(tables)))
                 }
             }
@@ -336,11 +356,15 @@ mod tests {
         Compactor::compact(&hummock_storage).await?;
 
         // Get the value after flushing to remote.
-        let value = hummock_storage.get(&anchor).await.unwrap();
+        let value = hummock_storage.get_snapshot().get(&anchor).await.unwrap();
         assert_eq!(value, None);
 
         // Get non-existent maximum key.
-        let value = hummock_storage.get(&Bytes::from("ff")).await.unwrap();
+        let value = hummock_storage
+            .get_snapshot()
+            .get(&Bytes::from("ff"))
+            .await
+            .unwrap();
         assert_eq!(value, None);
 
         Ok(())

@@ -1,5 +1,5 @@
 use super::{HummockIterator, SortedIterator};
-use crate::hummock::key::{key_with_ts, user_key as to_user_key};
+use crate::hummock::key::{get_ts, key_with_ts, user_key as to_user_key};
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 
@@ -17,6 +17,8 @@ pub struct UserKeyIterator {
     begin_key: Option<Vec<u8>>,
     // Closed right end of the given range. None means the right end is infinity.
     end_key: Option<Vec<u8>>,
+
+    read_ts: u64,
 }
 
 // TODO: decide whether this should also impl `HummockIterator`
@@ -26,6 +28,14 @@ impl UserKeyIterator {
         begin_key: Option<Vec<u8>>,
         end_key: Option<Vec<u8>>,
     ) -> Self {
+        UserKeyIterator::new_with_ts(iterator, begin_key, end_key, u64::MAX)
+    }
+    pub fn new_with_ts(
+        iterator: SortedIterator,
+        begin_key: Option<Vec<u8>>,
+        end_key: Option<Vec<u8>>,
+        read_ts: u64,
+    ) -> Self {
         Self {
             iterator,
             out_of_range: false,
@@ -33,6 +43,7 @@ impl UserKeyIterator {
             end_key,
             last_key: Vec::new(),
             last_val: Vec::new(),
+            read_ts,
         }
     }
 
@@ -44,10 +55,12 @@ impl UserKeyIterator {
     /// - if `Err(_) ` is returned, it means that some error happended.
     pub async fn next(&mut self) -> HummockResult<()> {
         while self.iterator.is_valid() {
-            let key = to_user_key(self.iterator.key());
+            let full_key = self.iterator.key();
+            let ts = get_ts(full_key);
+            let key = to_user_key(full_key);
 
             // handle multi-version
-            if self.last_key.as_slice() != key {
+            if self.last_key.as_slice() != key && ts <= self.read_ts {
                 self.last_key.clear();
                 self.last_key.extend_from_slice(key);
 
@@ -101,7 +114,7 @@ impl UserKeyIterator {
     pub async fn rewind(&mut self) -> HummockResult<()> {
         // handle range scan
         if let Some(begin_key) = &self.begin_key {
-            let full_key = &key_with_ts(begin_key.clone(), u64::MAX);
+            let full_key = &key_with_ts(begin_key.clone(), self.read_ts);
             self.iterator.seek(full_key).await?;
         } else {
             self.iterator.rewind().await?;
@@ -121,7 +134,7 @@ impl UserKeyIterator {
             _ => Vec::from(user_key),
         };
 
-        let full_key = &key_with_ts(user_key, u64::MAX);
+        let full_key = &key_with_ts(user_key, self.read_ts);
         self.iterator.seek(full_key).await?;
 
         // handle multi-version

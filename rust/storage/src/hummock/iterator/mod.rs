@@ -8,8 +8,7 @@ mod user_key;
 pub use user_key::*;
 
 #[cfg(test)]
-mod test_utils;
-
+pub(crate) mod test_utils;
 use async_trait::async_trait;
 
 /// `HummockIterator` defines the interface of all iterators, including `TableIterator`,

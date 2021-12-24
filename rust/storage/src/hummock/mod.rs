@@ -3,8 +3,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use crate::hummock::iterator::HummockIterator;
-
 mod table;
 pub use table::*;
 mod cloud;
@@ -14,7 +12,9 @@ mod iterator;
 mod key;
 mod key_range;
 mod level_handler;
+mod snapshot;
 mod state_store;
+mod utils;
 mod value;
 mod version_cmp;
 mod version_manager;
@@ -27,11 +27,12 @@ use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use tokio::select;
 use tokio::sync::mpsc;
 
-use self::iterator::{BoxedHummockIterator, ConcatIterator, SortedIterator, UserKeyIterator};
+use self::iterator::UserKeyIterator;
 use self::key::{key_with_ts, user_key, FullKey};
+use self::snapshot::HummockSnapshot;
 pub use self::state_store::*;
 use self::value::*;
-use self::version_manager::{Level, ScopedUnpinSnapshot, VersionManager};
+use self::version_manager::VersionManager;
 use crate::object::ObjectStore;
 
 pub static REMOTE_DIR: &str = "/test/";
@@ -78,51 +79,16 @@ impl HummockStorage {
         }
     }
 
+    fn get_snapshot(&self) -> HummockSnapshot {
+        HummockSnapshot::new(self.version_manager.clone())
+    }
     /// Get the latest value of a specified `key`.
     ///
     /// If `Ok(Some())` is returned, the key is found. If `Ok(None)` is returned,
     /// the key is not found. If `Err()` is returned, the searching for the key
     /// failed due to other non-EOF errors.
     pub async fn get(&self, key: &[u8]) -> HummockResult<Option<Vec<u8>>> {
-        let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
-        let scoped_snapshot =
-            ScopedUnpinSnapshot::from_version_manager(self.version_manager.clone());
-        let snapshot = scoped_snapshot.snapshot();
-
-        for level in &snapshot.levels {
-            match level {
-                Level::Tiering(table_ids) => {
-                    let tables = self.bloom_filter_tables(table_ids, key)?;
-                    table_iters.extend(
-                        tables.into_iter().map(|table| {
-                            Box::new(TableIterator::new(table)) as BoxedHummockIterator
-                        }),
-                    )
-                }
-                Level::Leveling(table_ids) => {
-                    let tables = self.bloom_filter_tables(table_ids, key)?;
-                    table_iters.push(Box::new(ConcatIterator::new(tables)))
-                }
-            }
-        }
-
-        let mut it = SortedIterator::new(table_iters);
-
-        // Use `SortedIterator` to seek for they key with latest version to
-        // get the latest key.
-        it.seek(&key_with_ts(key.to_vec(), u64::MAX)).await?;
-
-        // Iterator has seeked passed the borders.
-        if !it.is_valid() {
-            return Ok(None);
-        }
-
-        // Iterator gets us the key, we tell if it's the key we want
-        // or key next to it.
-        match user_key(it.key()) == key {
-            true => Ok(it.value().into_put_value().map(|x| x.to_vec())),
-            false => Ok(None),
-        }
+        self.get_snapshot().get(key).await
     }
 
     /// Return an iterator that scan from the begin key to the end key
@@ -131,44 +97,8 @@ impl HummockStorage {
         begin_key: Option<Vec<u8>>,
         end_key: Option<Vec<u8>>,
     ) -> HummockResult<UserKeyIterator> {
-        if begin_key.is_some() && end_key.is_some() {
-            assert!(begin_key.clone().unwrap() <= end_key.clone().unwrap());
-        }
-
-        let begin_key_copy = match &begin_key {
-            Some(begin_key) => key_with_ts(begin_key.clone(), u64::MAX),
-            None => Vec::new(),
-        };
-        let begin_fk = FullKey::from_slice(begin_key_copy.as_slice());
-
-        let end_key_copy = match &end_key {
-            Some(end_key) => key_with_ts(end_key.clone(), u64::MIN),
-            None => Vec::new(),
-        };
-        let end_fk = FullKey::from_slice(end_key_copy.as_slice());
-
-        let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
-        let scoped_snapshot =
-            ScopedUnpinSnapshot::from_version_manager(self.version_manager.clone());
-        let snapshot = scoped_snapshot.snapshot();
-        for table in self.version_manager.tables(snapshot)? {
-            let tlk = FullKey::from_slice(table.meta.largest_key.as_slice());
-            let table_too_left = begin_key.is_some() && tlk < begin_fk;
-
-            let tsk = FullKey::from_slice(table.meta.smallest_key.as_slice());
-            let table_too_right = end_key.is_some() && tsk > end_fk;
-
-            // decide whether the two ranges have common sub-range
-            if !(table_too_left || table_too_right) {
-                let iter = Box::new(TableIterator::new(table.clone()));
-                table_iters.push(iter);
-            }
-        }
-
-        let si = SortedIterator::new(table_iters);
-        Ok(UserKeyIterator::new(si, begin_key, end_key))
+        self.get_snapshot().range_scan(begin_key, end_key).await
     }
-
     /// Write batch to storage. The batch should be:
     /// * Ordered. KV pairs will be directly written to the table, so it must be ordered.
     /// * Locally unique. There should not be two or more operations on the same key in one write
@@ -231,17 +161,6 @@ impl HummockStorage {
         })
     }
 
-    fn bloom_filter_tables(&self, table_ids: &[u64], key: &[u8]) -> HummockResult<Vec<Arc<Table>>> {
-        let bf_tables = self
-            .version_manager
-            .pick_few_tables(table_ids)?
-            .into_iter()
-            .filter(|table| !table.surely_not_have_user_key(key))
-            .collect::<Vec<_>>();
-
-        Ok(bf_tables)
-    }
-
     pub async fn start_compactor(
         self: &Arc<Self>,
         mut stop: mpsc::UnboundedReceiver<()>,
@@ -263,6 +182,7 @@ mod tests {
 
     use bytes::Bytes;
 
+    use super::iterator::UserKeyIterator;
     use super::{HummockOptions, HummockStorage};
     use crate::object::InMemObjectStore;
 
@@ -310,12 +230,14 @@ mod tests {
             .await
             .unwrap();
 
+        let snapshot1 = hummock_storage.get_snapshot();
+
         // Get the value after flushing to remote.
-        let value = hummock_storage.get(&anchor).await.unwrap().unwrap();
+        let value = snapshot1.get(&anchor).await.unwrap().unwrap();
         assert_eq!(Bytes::from(value), Bytes::from("111"));
 
         // Test looking for a nonexistent key. `next()` would return the next key.
-        let value = hummock_storage.get(&Bytes::from("ab")).await.unwrap();
+        let value = snapshot1.get(&Bytes::from("ab")).await.unwrap();
         assert_eq!(value, None);
 
         // Write second batch.
@@ -328,8 +250,10 @@ mod tests {
             .await
             .unwrap();
 
+        let snapshot2 = hummock_storage.get_snapshot();
+
         // Get the value after flushing to remote.
-        let value = hummock_storage.get(&anchor).await.unwrap().unwrap();
+        let value = snapshot2.get(&anchor).await.unwrap().unwrap();
         assert_eq!(Bytes::from(value), Bytes::from("111111"));
 
         // Write second batch.
@@ -342,12 +266,62 @@ mod tests {
             .await
             .unwrap();
 
+        let snapshot3 = hummock_storage.get_snapshot();
+
         // Get the value after flushing to remote.
-        let value = hummock_storage.get(&anchor).await.unwrap();
+        let value = snapshot3.get(&anchor).await.unwrap();
         assert_eq!(value, None);
 
         // Get non-existent maximum key.
-        let value = hummock_storage.get(&Bytes::from("ff")).await.unwrap();
+        let value = snapshot3.get(&Bytes::from("ff")).await.unwrap();
         assert_eq!(value, None);
+
+        // write aa bb
+        let mut iter = snapshot1
+            .range_scan(None, Some(Bytes::from("ee").to_vec()))
+            .await
+            .unwrap();
+        iter.rewind().await.unwrap();
+        let len = count_iter(&mut iter).await;
+        assert_eq!(len, 2);
+
+        // Get the anchor value at the first snapshot
+        let value = snapshot1.get(&anchor).await.unwrap().unwrap();
+        assert_eq!(Bytes::from(value), Bytes::from("111"));
+
+        // drop snapshot 1
+        drop(snapshot1);
+
+        // Get the anchor value at the second snapshot
+        let value = snapshot2.get(&anchor).await.unwrap().unwrap();
+        assert_eq!(Bytes::from(value), Bytes::from("111111"));
+        // update aa, write cc
+        let mut iter = snapshot2
+            .range_scan(None, Some(Bytes::from("ee").to_vec()))
+            .await
+            .unwrap();
+        iter.rewind().await.unwrap();
+        let len = count_iter(&mut iter).await;
+        assert_eq!(len, 3);
+
+        // drop snapshot 2
+        drop(snapshot2);
+
+        // delete aa, write dd,ee
+        let mut iter = snapshot3
+            .range_scan(None, Some(Bytes::from("ee").to_vec()))
+            .await
+            .unwrap();
+        iter.rewind().await.unwrap();
+        let len = count_iter(&mut iter).await;
+        assert_eq!(len, 4);
+    }
+    async fn count_iter(iter: &mut UserKeyIterator) -> usize {
+        let mut c: usize = 0;
+        while iter.is_valid() {
+            c += 1;
+            iter.next().await.unwrap();
+        }
+        c
     }
 }
