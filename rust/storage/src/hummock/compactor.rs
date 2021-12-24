@@ -5,6 +5,7 @@ use bytes::BytesMut;
 
 use super::cloud::gen_remote_table;
 use super::iterator::{ConcatIterator, HummockIterator, SortedIterator};
+use super::key::get_ts;
 use super::version_cmp::VersionedComparator;
 use super::version_manager::{CompactTask, Level, LevelEntry};
 use super::{
@@ -81,9 +82,8 @@ impl Compactor {
         // TODO: we can speed up by parallelling compaction (each with different kr) (#2115)
         let mut skip_key = BytesMut::new();
         for kr in &compact_task.splits {
-            // TODO: purge tombstone if possible (#2071)
             // NOTICE: should be user_key overlap, NOT full_key overlap!
-            let _has_user_key_overlap = true;
+            let has_user_key_overlap = !compact_task.is_target_ultimate_and_leveling;
 
             if !kr.left.is_empty() {
                 iter.seek(&kr.left).await?;
@@ -93,7 +93,6 @@ impl Compactor {
 
             skip_key.clear();
             let mut last_key = BytesMut::new();
-            let mut _num_versions = 0;
 
             let mut table_builder = HummockStorage::get_builder(&storage.options);
 
@@ -131,11 +130,17 @@ impl Compactor {
 
                     last_key.clear();
                     last_key.extend_from_slice(iter_key);
-
-                    _num_versions = 0;
                 }
 
-                // TODO: discard_ts logic (#2071)
+                let ts = get_ts(iter_key);
+
+                if ts < compact_task.watermark {
+                    skip_key = BytesMut::from(iter_key);
+                    if matches!(iter.value(), HummockValue::Delete) && !has_user_key_overlap {
+                        iter.next().await?;
+                        continue;
+                    }
+                }
 
                 table_builder.add(
                     iter_key,
@@ -205,7 +210,10 @@ mod tests {
     use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 
     use super::*;
-    use crate::hummock::{HummockOptions, HummockResult, HummockStorage};
+    use crate::hummock::{
+        key_with_ts, user_key, BoxedHummockIterator, HummockOptions, HummockResult, HummockStorage,
+        ScopedUnpinSnapshot,
+    };
     use crate::object::InMemObjectStore;
 
     #[tokio::test]
@@ -282,6 +290,39 @@ mod tests {
         // Get the value after flushing to remote.
         let value = hummock_storage.get(&anchor).await.unwrap().unwrap();
         assert_eq!(Bytes::from(value), Bytes::from("111111"));
+
+        let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
+        let scoped_snapshot =
+            ScopedUnpinSnapshot::from_version_manager(hummock_storage.version_manager.clone());
+        let snapshot = scoped_snapshot.snapshot();
+
+        for level in &snapshot.levels {
+            match level {
+                Level::Tiering(table_ids) => {
+                    let tables = hummock_storage.bloom_filter_tables(table_ids, &anchor)?;
+                    table_iters.extend(
+                        tables.into_iter().map(|table| {
+                            Box::new(TableIterator::new(table)) as BoxedHummockIterator
+                        }),
+                    )
+                }
+                Level::Leveling(table_ids) => {
+                    let tables = hummock_storage.bloom_filter_tables(table_ids, &anchor)?;
+                    table_iters.push(Box::new(ConcatIterator::new(tables)))
+                }
+            }
+        }
+
+        let mut it = SortedIterator::new(table_iters);
+
+        it.seek(&key_with_ts(anchor.to_vec(), u64::MAX)).await?;
+
+        assert_eq!(user_key(it.key()), anchor);
+        assert_eq!(it.value().into_put_value().unwrap(), Bytes::from("111111"));
+
+        it.next().await?;
+
+        assert!(!it.is_valid() || user_key(it.key()) != anchor);
 
         // Write second batch.
         hummock_storage

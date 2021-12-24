@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use bytes::Bytes;
+use itertools::EitherOrBoth;
 use parking_lot::Mutex as PLMutex;
 use tokio::sync::Mutex;
 
@@ -40,12 +41,15 @@ pub struct CompactTask {
     /// In ideal case, the compaction will generate `splits.len()` tables which have key range
     /// corresponding to that in [`splits`], respectively
     pub splits: Vec<KeyRange>,
+    /// low watermark in 'ts-aware compaction'
+    pub watermark: Timestamp,
     /// compacion output, which will be added to [`target_level`] of LSM after compaction
     pub sorted_output_ssts: Vec<Table>,
     /// task id assigned by hummock storage service
     task_id: u64,
     /// compacion output will be added to [`target_level`] of LSM after compaction
     target_level: u8,
+    pub is_target_ultimate_and_leveling: bool,
     /// indicate whether compaction succeeds, initially Err(HummockError::Ok)
     pub result: HummockResult<()>,
 }
@@ -153,7 +157,7 @@ impl VersionManager {
         );
 
         let vec_handler_having_l0 = vec![
-            LevelHandler::Tiering(vec![]),
+            LevelHandler::Tiering(vec![], vec![]),
             LevelHandler::Leveling(vec![], vec![]),
         ];
 
@@ -268,12 +272,22 @@ impl VersionManager {
         }
 
         match compact_status.level_handlers.first_mut().unwrap() {
-            LevelHandler::Tiering(vec_tier) => {
-                vec_tier.push(TableStat {
-                    key_range: KeyRange::new(smallest_ky, largest_ky),
-                    table_id,
-                    compact_task: None,
-                });
+            LevelHandler::Tiering(vec_tier, _) => {
+                let key_range = KeyRange::new(smallest_ky, largest_ky);
+                let insert_point = vec_tier.partition_point(
+                    |TableStat {
+                         key_range: other_key_range,
+                         ..
+                     }| { other_key_range <= &key_range },
+                );
+                vec_tier.insert(
+                    insert_point,
+                    TableStat {
+                        key_range,
+                        table_id,
+                        compact_task: None,
+                    },
+                );
             }
             LevelHandler::Leveling(_, _) => {
                 panic!("L0 must be Tiering.");
@@ -301,58 +315,74 @@ impl VersionManager {
             .split_at_mut(select_level as usize + 1);
         let (prior, posterior) = (prior.last_mut().unwrap(), posterior.first_mut().unwrap());
         let is_select_level_leveling = matches!(prior, LevelHandler::Leveling(_, _));
-        let is_select_next_level_leveling = matches!(posterior, LevelHandler::Leveling(_, _));
+        let target_level = select_level + 1;
+        let is_target_level_leveling = matches!(posterior, LevelHandler::Leveling(_, _));
         match prior {
-            LevelHandler::Tiering(l_n) | LevelHandler::Leveling(l_n, _) => {
-                for (
-                    sst_idx,
-                    TableStat {
+            LevelHandler::Tiering(l_n, compacting_key_ranges)
+            | LevelHandler::Leveling(l_n, compacting_key_ranges) => {
+                let mut sst_idx = 0;
+                let l_n_len = l_n.len();
+                while sst_idx < l_n_len {
+                    let mut next_sst_idx = sst_idx + 1;
+                    let TableStat {
                         key_range: sst_key_range,
                         table_id,
-                        compact_task,
-                    },
-                ) in l_n.iter().enumerate()
-                {
-                    if compact_task.is_none() {
-                        let mut select_level_inputs = vec![*table_id];
-                        let key_range;
-                        let mut l0_key_range;
-                        if select_level == 0 {
-                            l0_key_range = sst_key_range.clone();
-                            // TODO: we need to improve our select strategy
-                            for TableStat {
+                        ..
+                    } = &l_n[sst_idx];
+                    let mut select_level_inputs = vec![*table_id];
+                    let key_range;
+                    let mut tier_key_range;
+                    if !is_select_level_leveling {
+                        tier_key_range = sst_key_range.clone();
+
+                        next_sst_idx = sst_idx;
+                        for (
+                            delta_idx,
+                            TableStat {
                                 key_range: other_key_range,
                                 table_id: other_table_id,
-                                compact_task: other_compact_task,
-                            } in &l_n[sst_idx + 1..]
-                            {
-                                if other_compact_task.is_none() {
-                                    if l0_key_range.full_key_overlap(other_key_range) {
-                                        select_level_inputs.push(*other_table_id);
-                                        l0_key_range.full_key_extend(other_key_range);
-                                    } else {
-                                        break;
-                                    }
-                                }
+                                ..
+                            },
+                        ) in l_n[sst_idx + 1..].iter().enumerate()
+                        {
+                            if user_key(&other_key_range.left) <= user_key(&tier_key_range.right) {
+                                select_level_inputs.push(*other_table_id);
+                                tier_key_range.full_key_extend(other_key_range);
+                            } else {
+                                next_sst_idx = sst_idx + 1 + delta_idx;
+                                break;
                             }
-                            key_range = &l0_key_range;
-                        } else {
-                            key_range = sst_key_range;
                         }
-                        match posterior {
-                            LevelHandler::Tiering(_) => unimplemented!(),
-                            LevelHandler::Leveling(l_n_suc, inserting_key_ranges) => {
-                                let insert_point = inserting_key_ranges.partition_point(
-                                    |(ongoing_key_range, _)| {
-                                        user_key(&ongoing_key_range.right)
-                                            < user_key(&key_range.left)
-                                    },
-                                );
-                                let mut overlap_all_idle = insert_point
-                                    >= inserting_key_ranges.len()
-                                    || user_key(&inserting_key_ranges[insert_point].0.left)
-                                        > user_key(&key_range.right);
-                                if overlap_all_idle {
+                        if next_sst_idx == sst_idx {
+                            next_sst_idx = l_n_len;
+                        }
+
+                        key_range = &tier_key_range;
+                    } else {
+                        key_range = sst_key_range;
+                    }
+
+                    let mut is_select_idle = true;
+                    for TableStat { compact_task, .. } in &l_n[sst_idx..next_sst_idx] {
+                        if compact_task.is_some() {
+                            is_select_idle = false;
+                            break;
+                        }
+                    }
+
+                    if is_select_idle {
+                        let insert_point =
+                            compacting_key_ranges.partition_point(|(ongoing_key_range, _)| {
+                                user_key(&ongoing_key_range.right) < user_key(&key_range.left)
+                            });
+                        if insert_point >= compacting_key_ranges.len()
+                            || user_key(&compacting_key_ranges[insert_point].0.left)
+                                > user_key(&key_range.right)
+                        {
+                            match posterior {
+                                LevelHandler::Tiering(_, _) => unimplemented!(),
+                                LevelHandler::Leveling(l_n_suc, _) => {
+                                    let mut overlap_all_idle = true;
                                     // TODO: use pointer last time to avoid binary search
                                     let overlap_begin = l_n_suc.partition_point(|table_status| {
                                         user_key(&table_status.key_range.right)
@@ -371,7 +401,7 @@ impl VersionManager {
                                         overlap_end += 1;
                                     }
                                     if overlap_all_idle {
-                                        inserting_key_ranges.insert(
+                                        compacting_key_ranges.insert(
                                             insert_point,
                                             (key_range.clone(), next_task_id),
                                         );
@@ -423,6 +453,7 @@ impl VersionManager {
                             }
                         }
                     }
+                    sst_idx = next_sst_idx;
                 }
                 match &found {
                     SearchResult::Found(select_ln_ids, _, _) => {
@@ -465,8 +496,8 @@ impl VersionManager {
                             },
                         },
                         LevelEntry {
-                            level_idx: select_level + 1,
-                            level: if is_select_next_level_leveling {
+                            level_idx: target_level,
+                            level: if is_target_level_leveling {
                                 Level::Leveling(select_lnsuc_ids)
                             } else {
                                 Level::Tiering(select_lnsuc_ids)
@@ -474,9 +505,13 @@ impl VersionManager {
                         },
                     ],
                     splits,
+                    watermark: Timestamp::MAX,
                     sorted_output_ssts: vec![],
                     task_id: next_task_id,
-                    target_level: select_level + 1,
+                    target_level,
+                    is_target_ultimate_and_leveling: target_level as usize
+                        == compact_status.level_handlers.len() - 1
+                        && is_target_level_leveling,
                     result: Err(HummockError::OK),
                 })
             }
@@ -510,15 +545,17 @@ impl VersionManager {
                     );
                 }
                 match &mut compact_status.level_handlers[compact_task.target_level as usize] {
-                    LevelHandler::Tiering(l_n) | LevelHandler::Leveling(l_n, _) => {
+                    LevelHandler::Tiering(l_n, _) | LevelHandler::Leveling(l_n, _) => {
                         let old_ln = std::mem::take(l_n);
                         *l_n = itertools::merge_join_by(
                             old_ln,
                             output_table_compact_entries,
                             |l, r| l.key_range.cmp(&r.key_range),
                         )
-                        .map(|either_or_both| {
-                            either_or_both.reduce(|_, _| panic!("duplicated table found"))
+                        .flat_map(|either_or_both| match either_or_both {
+                            EitherOrBoth::Both(a, b) => vec![a, b].into_iter(),
+                            EitherOrBoth::Left(a) => vec![a].into_iter(),
+                            EitherOrBoth::Right(b) => vec![b].into_iter(),
                         })
                         .collect();
                     }
@@ -532,7 +569,7 @@ impl VersionManager {
                             .level_handlers
                             .iter()
                             .map(|level_handler| match level_handler {
-                                LevelHandler::Tiering(l_n) => Level::Tiering(
+                                LevelHandler::Tiering(l_n, _) => Level::Tiering(
                                     l_n.iter()
                                         .map(|TableStat { table_id, .. }| *table_id)
                                         .collect(),
