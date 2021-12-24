@@ -1,7 +1,5 @@
-use rust_decimal::prelude::Zero;
-use rust_decimal::Decimal;
-
 use crate::error::Result;
+use crate::types::Decimal;
 
 #[inline(always)]
 pub fn round_digits<D: Into<i32>>(input: Decimal, digits: D) -> Result<Decimal> {
@@ -17,8 +15,7 @@ pub fn round_digits<D: Into<i32>>(input: Decimal, digits: D) -> Result<Decimal> 
 mod tests {
     use std::str::FromStr;
 
-    use rust_decimal::Decimal;
-
+    use crate::types::Decimal;
     use crate::vector_op::round::round_digits;
 
     fn do_test(input: &str, digits: i32, expected_output: &str) {

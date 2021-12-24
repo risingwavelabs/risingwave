@@ -678,10 +678,10 @@ mod tests {
     use risingwave_pb::data::DataType;
     use risingwave_pb::expr::agg_call::Type;
     use risingwave_pb::expr::AggCall;
-    use rust_decimal::Decimal;
 
     use super::*;
     use crate::array::column::Column;
+    use crate::types::Decimal;
 
     fn eval_agg(
         input_type: DataTypeRef,

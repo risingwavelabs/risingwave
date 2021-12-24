@@ -163,9 +163,8 @@ pub fn is_not_unknown(v: Option<bool>) -> Result<Option<bool>> {
 mod tests {
     use std::str::FromStr;
 
-    use rust_decimal::Decimal;
-
     use super::*;
+    use crate::types::Decimal;
 
     #[test]
     fn test_deci_f() {

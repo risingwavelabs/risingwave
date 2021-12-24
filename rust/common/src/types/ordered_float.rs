@@ -939,7 +939,7 @@ mod impl_as_primitive {
     impl_as_primitive_for!(f32);
     impl_as_primitive_for!(f64);
 
-    impl_as_primitive_for!(rust_decimal::Decimal);
+    impl_as_primitive_for!(crate::types::Decimal);
 }
 
 mod impl_from {
@@ -961,7 +961,7 @@ mod impl_from {
         };
     }
 
-    impl_try_from_for!(rust_decimal::Decimal);
+    impl_try_from_for!(crate::types::Decimal);
 
     macro_rules! impl_from_for {
         ($ty:ty) => {
@@ -1024,8 +1024,8 @@ impl From<i64> for OrderedFloat<f64> {
     }
 }
 
-impl From<rust_decimal::Decimal> for OrderedFloat<f64> {
-    fn from(n: rust_decimal::Decimal) -> Self {
+impl From<crate::types::Decimal> for OrderedFloat<f64> {
+    fn from(n: crate::types::Decimal) -> Self {
         n.to_f64().map_or(Self(f64::NAN), Self)
     }
 }
@@ -1060,7 +1060,7 @@ mod tests {
         assert_eq!(ret, OrderedFloat::<f64>::from(5_f64));
 
         // decimal -> f64.
-        let ret: OrderedFloat<f64> = OrderedFloat::<f64>::from(rust_decimal::Decimal::from(5));
+        let ret: OrderedFloat<f64> = OrderedFloat::<f64>::from(crate::types::Decimal::from(5));
         assert_eq!(ret, OrderedFloat::<f64>::from(5_f64));
     }
 }

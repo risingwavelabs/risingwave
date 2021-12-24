@@ -1,16 +1,14 @@
 use std::io::Cursor;
-use std::str::from_utf8;
+use std::str::{from_utf8, FromStr};
 
 use byteorder::{BigEndian, ReadBytesExt};
-use rust_decimal::prelude::FromStr;
-use rust_decimal::Decimal;
 
 use crate::array::{
     Array, ArrayBuilder, DecimalArrayBuilder, PrimitiveArrayItemType, Utf8ArrayBuilder,
 };
 use crate::error::ErrorCode::InternalError;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::types::{OrderedF32, OrderedF64};
+use crate::types::{Decimal, OrderedF32, OrderedF64};
 
 /// Reads an encoded buffer into a value.
 pub trait PrimitiveValueReader<T: PrimitiveArrayItemType> {

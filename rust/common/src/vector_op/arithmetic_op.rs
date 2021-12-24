@@ -174,8 +174,7 @@ where
 mod tests {
     use std::str::FromStr;
 
-    use rust_decimal::Decimal;
-
+    use crate::types::Decimal;
     use crate::vector_op::arithmetic_op::general_add;
 
     #[test]

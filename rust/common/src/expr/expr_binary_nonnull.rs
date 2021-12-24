@@ -365,14 +365,13 @@ pub fn new_position_expr(
 mod tests {
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::expr::expr_node::Type;
-    use rust_decimal::Decimal;
 
     use super::super::*;
     use crate::array::column::Column;
     use crate::array::interval_array::IntervalArray;
     use crate::array::*;
     use crate::expr::test_utils::make_expression;
-    use crate::types::{IntervalUnit, Scalar};
+    use crate::types::{Decimal, IntervalUnit, Scalar};
     use crate::vector_op::arithmetic_op::{date_interval_add, date_interval_sub};
 
     #[test]

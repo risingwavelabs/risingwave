@@ -63,14 +63,13 @@ impl Expression for PgSleepExpression {
 
 #[cfg(test)]
 mod tests {
-    use rust_decimal::prelude::FromStr;
-    use rust_decimal::Decimal;
+    use std::str::FromStr;
 
     use super::*;
     use crate::array::column::Column;
     use crate::array::DecimalArrayBuilder;
     use crate::expr::InputRefExpression;
-    use crate::types::DecimalType;
+    use crate::types::{Decimal, DecimalType};
 
     #[test]
     fn test_pg_sleep() -> Result<()> {

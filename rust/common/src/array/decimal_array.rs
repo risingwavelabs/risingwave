@@ -3,12 +3,12 @@ use std::mem::size_of;
 
 use risingwave_pb::data::buffer::CompressionType;
 use risingwave_pb::data::{Array as ProstArray, ArrayType, Buffer};
-use rust_decimal::Decimal;
 
 use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
+use crate::types::Decimal;
 
 #[derive(Debug)]
 pub struct DecimalArray {
@@ -149,9 +149,10 @@ impl ArrayBuilder for DecimalArrayBuilder {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use itertools::Itertools;
     use num_traits::FromPrimitive;
-    use rust_decimal::prelude::*;
 
     use super::*;
 

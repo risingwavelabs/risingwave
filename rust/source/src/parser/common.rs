@@ -1,5 +1,4 @@
-use risingwave_common::types::{DataTypeKind, ScalarImpl, ScalarRef};
-use rust_decimal::Decimal;
+use risingwave_common::types::{DataTypeKind, Decimal, ScalarImpl, ScalarRef};
 use serde_json::Value;
 
 use crate::SourceColumnDesc;

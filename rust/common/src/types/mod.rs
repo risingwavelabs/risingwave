@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use bytes::{Buf, BufMut};
 use risingwave_pb::data::DataType as ProstDataType;
-use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{ErrorCode, Result, RwError};
@@ -26,6 +25,7 @@ use crate::error::ErrorCode::InternalError;
 
 mod bool_type;
 mod datetime_type;
+mod decimal;
 mod decimal_type;
 pub mod interval_type;
 mod string_type;
@@ -33,6 +33,7 @@ mod string_type;
 mod ordered_float;
 pub use bool_type::*;
 pub use datetime_type::*;
+pub use decimal::Decimal;
 pub use decimal_type::*;
 pub use interval_type::*;
 pub use ordered_float::IntoOrdered;

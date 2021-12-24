@@ -5,9 +5,8 @@ pub use self::prost::*;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 
-pub mod bit_util;
-
 pub mod addr;
+pub mod bit_util;
 pub mod chunk_coalesce;
 pub mod encoding_for_comparison;
 pub mod hash_util;

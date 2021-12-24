@@ -3,11 +3,9 @@ use std::default::Default;
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::io::{Cursor, Read};
 
-use rust_decimal::Decimal;
-
 use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk};
 use crate::error::Result;
-use crate::types::{Datum, IntervalUnit, OrderedF32, OrderedF64, ScalarRef};
+use crate::types::{Datum, Decimal, IntervalUnit, OrderedF32, OrderedF64, ScalarRef};
 use crate::util::hash_util::CRC32FastBuilder;
 
 /// Max element count in [`FixedSizeKeyWithHashCode`]

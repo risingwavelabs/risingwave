@@ -8,14 +8,13 @@ use risingwave_pb::data::data_type::IntervalType::*;
 use risingwave_pb::data::data_type::{IntervalType, TypeName};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
-use rust_decimal::Decimal;
 
 use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk};
 use crate::error::ErrorCode::InternalError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::Expression;
 use crate::types::{
-    build_from_prost as type_build_from_prost, DataType, DataTypeKind, DataTypeRef, Datum,
+    build_from_prost as type_build_from_prost, DataType, DataTypeKind, DataTypeRef, Datum, Decimal,
     IntervalUnit, Scalar, ScalarImpl,
 };
 
@@ -323,7 +322,7 @@ mod tests {
         let v = String::from("NaN");
         let t = TypeName::Decimal;
         let bytes = v.as_bytes().to_vec();
-        assert!(LiteralExpression::try_from(&make_expression(Some(bytes), t)).is_err());
+        assert!(LiteralExpression::try_from(&make_expression(Some(bytes), t)).is_ok());
 
         let v = 32i32;
         let t = TypeName::Interval;
