@@ -46,6 +46,6 @@ mod tests {
         });
 
         // Now we can execute a simple statement that just returns its parameter.
-        client.simple_query("SELECT 1").await.unwrap();
+        client.simple_query("SELECT * from t;").await.unwrap();
     }
 }

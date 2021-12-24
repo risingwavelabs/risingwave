@@ -97,13 +97,13 @@ impl PgProtocol {
         let len = self.stream.read_i32().await?;
 
         let payload_len = len - 4;
-        let mut payload = vec![0; payload_len as usize];
+        let mut payload: Vec<u8> = vec![0; payload_len as usize];
         if payload_len > 0 {
             self.stream.read_exact(&mut payload).await?;
         }
 
         match tag {
-            "Q" => Ok(PgMessage::Query(QueryMessage::new(&payload))),
+            "Q" => Ok(PgMessage::Query(QueryMessage::new(payload))),
 
             "X" => Ok(PgMessage::Terminate(TerminateMessage::new())),
 

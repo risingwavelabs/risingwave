@@ -734,10 +734,12 @@ dependencies = [
 name = "frontend"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "clap",
  "log",
  "log4rs",
  "risingwave_common",
+ "sqlparser",
  "tokio",
  "tokio-postgres",
 ]
@@ -2685,6 +2687,15 @@ checksum = "5dc90fe6c7be1a323296982db1836d1ea9e47b6839496dde9a541bc496df3516"
 dependencies = [
  "libc",
  "winapi",
+]
+
+[[package]]
+name = "sqlparser"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b9907f54bd0f7b6ce72c2be1e570a614819ee08e3deb66d90480df341d8a12a8"
+dependencies = [
+ "log",
 ]
 
 [[package]]

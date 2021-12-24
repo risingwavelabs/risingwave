@@ -1,3 +1,5 @@
+use bytes::Bytes;
+
 /// Message type in psql connection.
 pub enum PgMessage {
     Ssl(SslMessage),
@@ -36,19 +38,22 @@ impl Default for StartupMessage {
 
 /// Query message contains the string sql.
 pub struct QueryMessage {
-    sql: String,
+    sql: Bytes,
 }
 
 impl QueryMessage {
-    pub fn new(buf: &[u8]) -> Self {
-        match std::str::from_utf8(buf) {
-            Ok(v) => Self { sql: v.to_string() },
-            Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
+    pub fn new(buf: Vec<u8>) -> Self {
+        Self {
+            sql: Bytes::from(buf),
         }
     }
 
     pub fn get_sql(&self) -> &str {
-        &self.sql
+        // Why there is a \0..
+        match std::str::from_utf8(&self.sql[..]) {
+            Ok(v) => v.trim_end_matches('\0'),
+            Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
+        }
     }
 }
 
