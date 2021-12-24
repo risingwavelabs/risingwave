@@ -16,6 +16,7 @@ either = "1"
 itertools = "0.10"
 lazy_static = "1.4.0"
 log = "0.4"
+lru = "0.7"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
 paste = "1"

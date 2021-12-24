@@ -1,6 +1,6 @@
 //! Global Streaming Hash Aggregators
 
-use std::collections::{hash_map, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -9,6 +9,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{Row, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::Result;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -44,7 +45,7 @@ pub struct HashAggExecutor<S: StateStore> {
     keyspace: Keyspace<S>,
 
     /// The cached states. `HashKey -> (prev_value, value)`.
-    state_map: HashMap<HashKey, AggState<S>>,
+    state_map: EvictableHashMap<HashKey, AggState<S>>,
 
     /// The input of the current executor
     input: Box<dyn Executor>,
@@ -74,7 +75,7 @@ impl<S: StateStore> HashAggExecutor<S> {
             agg_calls,
             schema,
             key_indices,
-            state_map: HashMap::new(),
+            state_map: EvictableHashMap::new(1 << 16), // TODO: decide the target cap
             pk_indices,
         }
     }
@@ -186,9 +187,8 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
         for (key, vis_map) in unique_keys {
             // 1. Retrieve previous state from the KeyedState. If they didn't exist, the
             // ManagedState will automatically create new ones for them.
-            let states = match self.state_map.entry(key.to_owned()) {
-                hash_map::Entry::Occupied(o) => o.into_mut(),
-                hash_map::Entry::Vacant(v) => {
+            let states = {
+                if !self.state_map.contains(key) {
                     let state = generate_agg_state(
                         Some(key),
                         &self.agg_calls,
@@ -196,8 +196,9 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
                         input_pk_data_type_kinds.clone(),
                     )
                     .await?;
-                    v.insert(state)
+                    self.state_map.put(key.to_owned(), state);
                 }
+                self.state_map.get_mut(key).unwrap()
             };
 
             // 2. Mark the state as dirty by filling prev states
@@ -252,24 +253,17 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
         let mut new_ops = Vec::with_capacity(dirty_cnt);
 
         // --- Retrieve modified states and put the changes into the builders ---
-        let mut keys_to_delete = vec![];
-
-        for (key, states) in &mut self.state_map {
-            let to_delete = states
+        for (key, states) in self.state_map.iter_mut() {
+            let _is_empty = states
                 .build_changes(&mut builders, &mut new_ops, Some(key))
                 .await?;
-            if to_delete {
-                keys_to_delete.push(key.to_owned());
-            }
         }
 
-        // vacuum unused states
-        // TODO: find better way to evict empty states and clean state
+        // evict cache to target capacity
         // In current implementation, we need to fetch the RowCount from the state store once a key
         // is deleted and added again. We should find a way to eliminate this extra fetch.
-        for key_to_delete in keys_to_delete {
-            self.state_map.remove(&key_to_delete);
-        }
+        debug_assert!(self.state_map.values().all(|state| !state.is_dirty()));
+        self.state_map.evict_to_target_cap();
 
         let columns: Vec<Column> = builders
             .into_iter()
