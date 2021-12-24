@@ -40,7 +40,8 @@ use core::str::FromStr;
 
 pub use num_traits::Float;
 use num_traits::{
-    Bounded, CheckedAdd, CheckedSub, FromPrimitive, Num, NumCast, One, Signed, ToPrimitive, Zero,
+    AsPrimitive, Bounded, CheckedAdd, CheckedSub, FromPrimitive, Num, NumCast, One, Signed,
+    ToPrimitive, Zero,
 };
 
 // masks for the parts of the IEEE 754 float
@@ -990,6 +991,18 @@ mod impl_from {
     impl_from!(f32, f64);
 }
 
+impl From<i64> for OrderedFloat<f64> {
+    fn from(n: i64) -> Self {
+        AsPrimitive::<OrderedFloat<f64>>::as_(n)
+    }
+}
+
+impl From<rust_decimal::Decimal> for OrderedFloat<f64> {
+    fn from(n: rust_decimal::Decimal) -> Self {
+        n.to_f64().map_or(Self(f64::NAN), Self)
+    }
+}
+
 mod impl_into_ordered {
     use super::*;
 
@@ -1008,3 +1021,19 @@ mod impl_into_ordered {
 }
 
 pub use impl_into_ordered::IntoOrdered;
+
+#[cfg(test)]
+mod tests {
+    use crate::types::ordered_float::OrderedFloat;
+
+    #[test]
+    fn test_cast_to_f64() {
+        // i64 -> f64.
+        let ret: OrderedFloat<f64> = OrderedFloat::<f64>::from(5_i64);
+        assert_eq!(ret, OrderedFloat::<f64>::from(5_f64));
+
+        // decimal -> f64.
+        let ret: OrderedFloat<f64> = OrderedFloat::<f64>::from(rust_decimal::Decimal::from(5));
+        assert_eq!(ret, OrderedFloat::<f64>::from(5_f64));
+    }
+}
