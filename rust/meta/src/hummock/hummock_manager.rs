@@ -271,7 +271,6 @@ mod tests {
             .refresh_hummock_context(context2.identifier)
             .await;
         assert!(context2_refreshed.is_err());
-
         Ok(())
     }
 }

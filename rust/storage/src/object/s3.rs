@@ -236,9 +236,9 @@ impl S3ObjectStore {
     pub fn new_with_minio(server: &str) -> Self {
         // TODO: don't hard-code configurations
         let server = server.strip_prefix("minio://").unwrap();
-        let (key, rest) = server.split_once(":").unwrap();
-        let (secret, rest) = rest.split_once("@").unwrap();
-        let (address, bucket) = rest.split_once("/").unwrap();
+        let (key, rest) = server.split_once(':').unwrap();
+        let (secret, rest) = rest.split_once('@').unwrap();
+        let (address, bucket) = rest.split_once('/').unwrap();
         Self::new_with_s3_client(
             S3Client::new_with(
                 HttpClient::new().expect("Failed to create HTTP client"),

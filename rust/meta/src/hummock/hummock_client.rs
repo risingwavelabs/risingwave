@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use num_integer::Integer;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
@@ -60,7 +59,9 @@ impl HummockClient {
         let mut ttl = hummock_context.ttl;
         loop {
             let tick = async {
-                let mut interval = tokio::time::interval(Duration::from_millis(ttl.div_ceil(&3)));
+                let mut interval = tokio::time::interval(Duration::from_millis(
+                    num_integer::Integer::div_ceil(&ttl, &3),
+                ));
                 interval.tick().await;
                 interval.tick().await;
             };
