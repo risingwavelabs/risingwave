@@ -37,7 +37,7 @@ pub async fn top_n_executor_next<S: StateStore>(
     let msg = executor.input().next().await?;
     let res = match msg {
         Message::Chunk(chunk) => Ok(Message::Chunk(executor.apply_chunk(chunk).await?)),
-        Message::Barrier(barrier) if barrier.stop => Ok(Message::Barrier(barrier)),
+        Message::Barrier(barrier) if barrier.mutation.is_stop() => Ok(Message::Barrier(barrier)),
         Message::Barrier(barrier) => {
             executor.flush_data().await?;
             Ok(Message::Barrier(barrier))
@@ -311,12 +311,12 @@ mod tests {
                 Message::Chunk(chunk1),
                 Message::Barrier(Barrier {
                     epoch: 0,
-                    stop: false,
+                    ..Barrier::default()
                 }),
                 Message::Chunk(chunk2),
                 Message::Barrier(Barrier {
                     epoch: 1,
-                    stop: false,
+                    ..Barrier::default()
                 }),
                 Message::Chunk(chunk3),
             ],

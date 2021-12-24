@@ -149,7 +149,7 @@ mod tests {
     use risingwave_storage::TableColumnDesc;
 
     use super::*;
-    use crate::stream_op::{Barrier, StreamSourceExecutor};
+    use crate::stream_op::{Barrier, Mutation, StreamSourceExecutor};
 
     #[tokio::test]
     async fn test_table_source() -> Result<()> {
@@ -239,7 +239,7 @@ mod tests {
         barrier_sender
             .unbounded_send(Message::Barrier(Barrier {
                 epoch: 1,
-                stop: false,
+                ..Barrier::default()
             }))
             .unwrap();
 
@@ -366,7 +366,7 @@ mod tests {
         barrier_sender
             .unbounded_send(Message::Barrier(Barrier {
                 epoch: 1,
-                stop: true,
+                mutation: Mutation::Stop,
             }))
             .unwrap();
 

@@ -347,7 +347,10 @@ impl StreamManagerCore {
     fn send_barrier(&self, epoch: u64) {
         for sender in &self.sender_placeholder {
             sender
-                .unbounded_send(Message::Barrier(Barrier { epoch, stop: false }))
+                .unbounded_send(Message::Barrier(Barrier {
+                    epoch,
+                    ..Barrier::default()
+                }))
                 .unwrap();
         }
     }
@@ -358,7 +361,7 @@ impl StreamManagerCore {
             sender
                 .unbounded_send(Message::Barrier(Barrier {
                     epoch: 0,
-                    stop: true,
+                    mutation: Mutation::Stop,
                 }))
                 .unwrap();
         }

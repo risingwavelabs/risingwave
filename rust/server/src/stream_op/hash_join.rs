@@ -499,7 +499,7 @@ mod tests {
 
     use super::{HashJoinExecutor, JoinParams, JoinType, *};
     use crate::stream_op::test_utils::MockAsyncSource;
-    use crate::stream_op::{Barrier, Executor, Message};
+    use crate::stream_op::{Barrier, Executor, Message, Mutation};
     use crate::*;
 
     fn create_in_memory_keyspace() -> Keyspace<MemoryStateStore> {
@@ -771,7 +771,7 @@ mod tests {
             hash_join.next().await.unwrap(),
             Message::Barrier(Barrier {
                 epoch: 0,
-                stop: false
+                mutation: Mutation::Nothing,
             })
         ));
 

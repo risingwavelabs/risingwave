@@ -35,7 +35,7 @@ impl StreamConsumer for MockConsumer {
             Message::Chunk(chunk) => self.data.lock().unwrap().push(chunk),
             Message::Barrier(Barrier {
                 epoch: _,
-                stop: true,
+                mutation: Mutation::Stop,
             }) => return Ok(false),
             _ => {} // do nothing
         }
@@ -161,7 +161,7 @@ async fn test_merger_sum_aggr() {
         input
             .send(Message::Barrier(Barrier {
                 epoch: j,
-                stop: false,
+                ..Barrier::default()
             }))
             .await
             .unwrap();
@@ -169,7 +169,7 @@ async fn test_merger_sum_aggr() {
     input
         .send(Message::Barrier(Barrier {
             epoch: 0,
-            stop: true,
+            mutation: Mutation::Stop,
         }))
         .await
         .unwrap();
@@ -481,7 +481,7 @@ async fn test_tpch_q6() {
             input
                 .send(Message::Barrier(Barrier {
                     epoch: i / 10,
-                    stop: false,
+                    ..Barrier::default()
                 }))
                 .await
                 .unwrap();
@@ -496,14 +496,14 @@ async fn test_tpch_q6() {
     input
         .send(Message::Barrier(Barrier {
             epoch: 100,
-            stop: false,
+            ..Barrier::default()
         }))
         .await
         .unwrap();
     input
         .send(Message::Barrier(Barrier {
             epoch: 200,
-            stop: true,
+            mutation: Mutation::Stop,
         }))
         .await
         .unwrap();

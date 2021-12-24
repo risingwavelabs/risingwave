@@ -16,7 +16,7 @@ use tonic::{Request, Streaming};
 
 use super::{Barrier, Executor, Message, PkIndicesRef, Result};
 use crate::stream::UpDownFragmentIds;
-use crate::stream_op::PkIndices;
+use crate::stream_op::{Mutation, PkIndices};
 
 /// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
 pub struct RemoteInput {
@@ -187,12 +187,15 @@ impl Executor for MergeExecutor {
                     self.active.push(from);
                     return Ok(Message::Chunk(chunk));
                 }
-                Message::Barrier(Barrier { epoch, stop: true }) => {
+                Message::Barrier(Barrier {
+                    epoch,
+                    mutation: Mutation::Stop,
+                }) => {
                     // Drop the terminated channel
                     self.next_epoch = Some(epoch);
                     self.terminated += 1;
                 }
-                Message::Barrier(Barrier { epoch, stop: _ }) => {
+                Message::Barrier(Barrier { epoch, mutation: _ }) => {
                     // Move this channel into the `blocked` list
                     if self.blocked.is_empty() {
                         assert_eq!(self.next_epoch, None);
@@ -208,7 +211,7 @@ impl Executor for MergeExecutor {
             if self.terminated == self.num_inputs {
                 return Ok(Message::Barrier(Barrier {
                     epoch: self.next_epoch.unwrap(),
-                    stop: true,
+                    mutation: Mutation::Stop,
                 }));
             }
             if self.blocked.len() == self.num_inputs {
@@ -216,7 +219,10 @@ impl Executor for MergeExecutor {
                 assert!(self.active.is_empty());
                 self.active = std::mem::take(&mut self.blocked);
                 let epoch = self.next_epoch.take().unwrap();
-                return Ok(Message::Barrier(Barrier { epoch, stop: false }));
+                return Ok(Message::Barrier(Barrier {
+                    epoch,
+                    ..Barrier::default()
+                }));
             }
             assert!(!self.active.is_empty())
         }
@@ -285,14 +291,17 @@ mod tests {
                     tx.send(Message::Chunk(build_test_chunk(epoch)))
                         .await
                         .unwrap();
-                    tx.send(Message::Barrier(Barrier { epoch, stop: false }))
-                        .await
-                        .unwrap();
+                    tx.send(Message::Barrier(Barrier {
+                        epoch,
+                        ..Barrier::default()
+                    }))
+                    .await
+                    .unwrap();
                     tokio::time::sleep(Duration::from_millis(1)).await;
                 }
                 tx.send(Message::Barrier(Barrier {
                     epoch: 1000,
-                    stop: true,
+                    mutation: Mutation::Stop,
                 }))
                 .await
                 .unwrap();
@@ -308,7 +317,7 @@ mod tests {
                 });
             }
             // expect a barrier
-            assert_matches!(merger.next().await.unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,stop:_}) => {
+            assert_matches!(merger.next().await.unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,mutation:_}) => {
               assert_eq!(barrier_epoch, epoch);
             });
         }
@@ -316,7 +325,7 @@ mod tests {
             merger.next().await.unwrap(),
             Message::Barrier(Barrier {
                 epoch: _,
-                stop: true
+                mutation: Mutation::Stop,
             })
         );
 
@@ -359,7 +368,7 @@ mod tests {
             // send barrier
             let barrier = Barrier {
                 epoch: 12345,
-                stop: false,
+                ..Barrier::default()
             };
             tx.send(Ok(StreamMessage {
                 stream_message: Some(risingwave_pb::data::stream_message::StreamMessage::Barrier(
@@ -407,7 +416,7 @@ mod tests {
           assert_eq!(chunk.columns.len() as u64, 0);
           assert_eq!(chunk.visibility, None);
         });
-        assert_matches!(rx.next().await.unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,stop:_}) => {
+        assert_matches!(rx.next().await.unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,mutation:_}) => {
           assert_eq!(barrier_epoch, 12345);
         });
         assert!(rpc_called.load(Ordering::SeqCst));

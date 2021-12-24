@@ -47,21 +47,47 @@ mod test_utils;
 
 pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
 
+#[derive(Debug, Clone, Copy)]
+pub enum Mutation {
+    Nothing,
+    Stop,
+    UpdateOutputs,
+}
+impl Default for Mutation {
+    fn default() -> Self {
+        Mutation::Nothing
+    }
+}
+
 #[derive(Default, Debug, Clone, Copy)]
 pub struct Barrier {
     pub epoch: u64,
-    pub stop: bool,
+    pub mutation: Mutation,
+}
+
+impl Mutation {
+    fn is_stop(&self) -> bool {
+        matches!(self, Mutation::Stop)
+    }
 }
 
 impl Barrier {
     fn to_protobuf(self) -> ProstBarrier {
-        let Barrier { epoch, stop } = self;
+        let Barrier { epoch, mutation }: Barrier = self;
+        let stop = matches!(mutation, Mutation::Nothing);
         ProstBarrier { epoch, stop }
     }
 
     fn from_protobuf(prost: &ProstBarrier) -> Self {
         let ProstBarrier { epoch, stop } = *prost;
-        Barrier { epoch, stop }
+        Barrier {
+            epoch,
+            mutation: if stop {
+                Mutation::Stop
+            } else {
+                Mutation::Nothing
+            },
+        }
     }
 }
 
@@ -79,7 +105,7 @@ impl Message {
             self,
             Message::Barrier(Barrier {
                 epoch: _,
-                stop: true
+                mutation: Mutation::Stop,
             })
         )
     }
@@ -105,7 +131,7 @@ impl Message {
             }
             StreamMessage::Barrier(epoch) => Message::Barrier(Barrier {
                 epoch: epoch.get_epoch(),
-                stop: false,
+                ..Barrier::default()
             }),
         };
         Ok(res)

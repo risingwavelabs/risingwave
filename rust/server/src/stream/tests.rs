@@ -14,7 +14,7 @@ use risingwave_source::MemSourceManager;
 use super::*;
 use crate::stream::env::StreamTaskEnv;
 use crate::stream::SimpleTableManager;
-use crate::stream_op::{Barrier, Message};
+use crate::stream_op::{Barrier, Message, Mutation};
 
 const PORT: i32 = 2333;
 
@@ -212,7 +212,7 @@ async fn test_stream_proto() {
                 sink.next().await.unwrap(),
                 Message::Barrier(Barrier {
                     epoch: _,
-                    stop: false
+                    mutation: Mutation::Nothing
                 })
             ));
         }
@@ -220,7 +220,7 @@ async fn test_stream_proto() {
             sink.next().await.unwrap(),
             Message::Barrier(Barrier {
                 epoch: 0,
-                stop: true
+                mutation: Mutation::Stop
             })
         ));
     });
@@ -230,7 +230,10 @@ async fn test_stream_proto() {
     for epoch in 0..100 {
         tokio::time::timeout(
             timeout,
-            source.send(Message::Barrier(Barrier { epoch, stop: false })),
+            source.send(Message::Barrier(Barrier {
+                epoch,
+                ..Barrier::default()
+            })),
         )
         .await
         .expect("timeout while sending barrier message")
@@ -241,7 +244,7 @@ async fn test_stream_proto() {
         timeout,
         source.send(Message::Barrier(Barrier {
             epoch: 0,
-            stop: true,
+            mutation: Mutation::Stop,
         })),
     )
     .await
