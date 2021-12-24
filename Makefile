@@ -43,7 +43,7 @@ rust_check_all: rust_fmt rust_check rust_cargo_sort_check
 # Note: "--skip-clean" must be used along with "CARGO_TARGET_DIR=..."
 # See also https://github.com/xd009642/tarpaulin/issues/777
 rust_test_with_coverage:
-	cd rust && RUSTFLAGS=-Dwarnings CARGO_TARGET_DIR=target_tarpaulin cargo tarpaulin --workspace --exclude risingwave-pb --exclude-files tests/* --out Xml --skip-clean
+	cd rust && RUSTFLAGS=-Dwarnings CARGO_TARGET_DIR=target_tarpaulin cargo tarpaulin --workspace --exclude risingwave-pb --exclude-files tests/* --out Xml --skip-clean --run-types Doctests Tests
 
 rust_build:
 	cd rust && cargo build
