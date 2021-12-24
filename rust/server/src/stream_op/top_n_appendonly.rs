@@ -1,18 +1,21 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bytes::Bytes;
-use risingwave_common::array::{DataChunk, Op};
+use risingwave_common::array::{DataChunk, Op, Row};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
+use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::PkIndicesRef;
+use crate::stream_op::managed_state::aggregation::OrderedRowDeserializer;
+use crate::stream_op::managed_state::top_n::variants::*;
 use crate::stream_op::managed_state::top_n::ManagedTopNState;
-use crate::stream_op::{Executor, Message, OrderedArraysSerializer, PkIndices, StreamChunk};
+use crate::stream_op::managed_state::OrderedRow;
+use crate::stream_op::{Executor, Message, PkIndices, StreamChunk};
 
 #[async_trait]
 pub trait TopNExecutor: Executor {
@@ -64,12 +67,10 @@ pub struct AppendOnlyTopNExecutor<S: StateStore> {
     ///
     /// We keep two ordered sets. One set stores the elements in the range of `[0, offset)`, and
     /// another set stores the elements in the range of `[offset, offset+limit)`.
-    managed_lower_state: ManagedTopNState<S>,
-    managed_higher_state: ManagedTopNState<S>,
+    managed_lower_state: ManagedTopNState<S, TOP_N_MAX>,
+    managed_higher_state: ManagedTopNState<S, TOP_N_MAX>,
     /// The keyspace to operate on.
     keyspace: Keyspace<S>,
-    /// OrderedRowsSerializer
-    ordered_arrays_serializer: OrderedArraysSerializer,
     /// Marks whether this is first-time execution. If yes, we need to fill in the cache from
     /// storage.
     first_execution: bool,
@@ -87,41 +88,35 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
         cache_size: Option<usize>,
         total_count: (usize, usize),
     ) -> Self {
-        let order_pairs = order_types
+        let data_type_kinds = pk_indices
             .iter()
-            .zip(pk_indices.iter())
-            .map(|(order_type, pk_index)| {
-                let order_type = match order_type {
-                    OrderType::Ascending => OrderType::Descending,
-                    OrderType::Descending => OrderType::Ascending,
-                };
-                (order_type, *pk_index)
-            })
+            .map(|idx| input.schema().fields[*idx].data_type().data_type_kind())
             .collect::<Vec<_>>();
         let lower_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"l/".to_vec()));
         let higher_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"h/".to_vec()));
-        let ordered_arrays_serializer = OrderedArraysSerializer::new(order_pairs);
-        let input_schema = input.schema().clone();
+        let ordered_row_deserializer =
+            OrderedRowDeserializer::new(data_type_kinds.clone(), order_types.clone());
         Self {
             input,
             order_types,
             offset: offset_and_limit.0,
             limit: offset_and_limit.1,
-            managed_lower_state: ManagedTopNState::<S>::new(
+            managed_lower_state: ManagedTopNState::<S, TOP_N_MAX>::new(
                 cache_size,
                 total_count.0,
                 lower_sub_keyspace,
-                input_schema.clone(),
+                data_type_kinds.clone(),
+                ordered_row_deserializer.clone(),
             ),
-            managed_higher_state: ManagedTopNState::<S>::new(
+            managed_higher_state: ManagedTopNState::<S, TOP_N_MAX>::new(
                 cache_size,
                 total_count.1,
                 higher_sub_keyspace,
-                input_schema,
+                data_type_kinds,
+                ordered_row_deserializer,
             ),
             pk_indices,
             keyspace,
-            ordered_arrays_serializer,
             first_execution: true,
             cache_size,
         }
@@ -177,34 +172,31 @@ impl<S: StateStore> TopNExecutor for AppendOnlyTopNExecutor<S> {
         let mut new_ops = vec![];
         let mut new_rows = vec![];
 
-        let arrays_for_pks = self
-            .pk_indices
-            .iter()
-            .map(|pk_index| Ok(data_chunk.columns()[*pk_index].array_ref()))
-            .collect::<Result<Vec<_>>>()?;
-
-        let mut all_rows_pk_bytes = vec![];
-        self.ordered_arrays_serializer
-            .order_based_scehmaed_serialize(&arrays_for_pks, &mut all_rows_pk_bytes);
-        for (row_idx, pk_bytes) in all_rows_pk_bytes.into_iter().enumerate() {
-            let pk_bytes: Bytes = pk_bytes.into();
-            let row = data_chunk.row_at(row_idx)?.0.into();
+        for row_idx in 0..data_chunk.capacity() {
+            let row_ref = data_chunk.row_at(row_idx)?.0;
+            let pk_row = Row(self
+                .pk_indices
+                .iter()
+                .map(|idx| row_ref.0[*idx].to_owned_datum())
+                .collect::<Vec<_>>());
+            let ordered_pk_row = OrderedRow::new(pk_row, &self.order_types);
+            let row = row_ref.into();
             if self.managed_lower_state.total_count() < self.offset {
                 // `elem` is in the range of `[0, offset)`,
                 // we ignored it for now as it is not in the result set.
-                self.managed_lower_state.insert(pk_bytes, row).await;
+                self.managed_lower_state.insert(ordered_pk_row, row).await;
                 continue;
             }
 
-            // We remark that we reverse serialize the pk so that we can `scan` from the larger end.
-            // So if `>` here, it is actually `<`.
             let element_to_compare_with_upper =
-                if pk_bytes > self.managed_lower_state.top_element().unwrap().0 {
+                if &ordered_pk_row < self.managed_lower_state.top_element().unwrap().0 {
                     // If the new element is smaller than the largest element in [0, offset),
                     // the largest element may need to move to [offset, offset+limit).
-                    self.managed_lower_state.pop_top_element().await?.unwrap()
+                    let res = self.managed_lower_state.pop_top_element().await?.unwrap();
+                    self.managed_lower_state.insert(ordered_pk_row, row).await;
+                    res
                 } else {
-                    (pk_bytes, row)
+                    (ordered_pk_row, row)
                 };
 
             if self.managed_higher_state.total_count() < num_need_to_keep {
@@ -217,9 +209,8 @@ impl<S: StateStore> TopNExecutor for AppendOnlyTopNExecutor<S> {
                 new_ops.push(Op::Insert);
                 new_rows.push(element_to_compare_with_upper.1);
             } else if self.managed_higher_state.top_element().unwrap().0
-                < &element_to_compare_with_upper.0
+                > &element_to_compare_with_upper.0
             {
-                // The same as above, `<` means `>`.
                 let element_to_pop = self.managed_higher_state.pop_top_element().await?.unwrap();
                 new_ops.push(Op::Delete);
                 new_rows.push(element_to_pop.1);
@@ -303,9 +294,14 @@ mod tests {
             visibility: None,
         };
         let schema = Schema {
-            fields: vec![Field {
-                data_type: Int64Type::create(false),
-            }],
+            fields: vec![
+                Field {
+                    data_type: Int64Type::create(false),
+                },
+                Field {
+                    data_type: Int64Type::create(false),
+                },
+            ],
         };
         let order_types = vec![OrderType::Ascending, OrderType::Ascending];
         let source = Box::new(MockSource::with_messages(
@@ -351,6 +347,7 @@ mod tests {
             );
             assert_eq!(res.ops, expected_ops);
         }
+        // now (1, 2, 3) -> (8, 9, 10)
         // barrier
         assert_matches!(top_n_executor.next().await.unwrap(), Message::Barrier(_));
         let res = top_n_executor.next().await.unwrap();
@@ -367,13 +364,14 @@ mod tests {
             );
             assert_eq!(res.ops, expected_ops);
         }
+        // now (1, 1, 2) -> (3, 3, 7, 8)
         // barrier
         assert_matches!(top_n_executor.next().await.unwrap(), Message::Barrier(_));
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));
         if let Message::Chunk(res) = res {
-            let expected_values = vec![Some(7), Some(2)];
-            let expected_ops = vec![Op::Delete, Op::Insert];
+            let expected_values = vec![Some(7), Some(2), Some(3), Some(1)];
+            let expected_ops = vec![Op::Delete, Op::Insert, Op::Delete, Op::Insert];
             assert_eq!(
                 res.columns()[0]
                     .array()
@@ -384,5 +382,6 @@ mod tests {
             );
             assert_eq!(res.ops, expected_ops);
         }
+        // now (1, 1, 1) -> (1, 2, 2, 3)
     }
 }

@@ -2,51 +2,49 @@ use std::collections::BTreeMap;
 
 use bytes::Bytes;
 use risingwave_common::array::{Row, RowDeserializer};
-use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataTypeKind;
 use risingwave_storage::{Keyspace, StateStore};
 
+use crate::stream_op::managed_state::aggregation::OrderedRowDeserializer;
 use crate::stream_op::managed_state::flush_status::FlushStatus;
+use crate::stream_op::managed_state::top_n::variants::*;
+use crate::stream_op::managed_state::OrderedRow;
 use crate::stream_op::serialize_cell_idx;
 
-pub struct ManagedTopNState<S: StateStore> {
+pub struct ManagedTopNState<S: StateStore, const TOP_N_TYPE: usize> {
     /// Cache.
-    top_n: BTreeMap<Bytes, Row>,
+    top_n: BTreeMap<OrderedRow, Row>,
     /// Buffer for updates.
-    flush_buffer: BTreeMap<Bytes, FlushStatus<Row>>,
+    flush_buffer: BTreeMap<OrderedRow, FlushStatus<Row>>,
     /// The number of elements in both cache and storage.
     total_count: usize,
     /// Number of entries to retain in memory after each flush.
     top_n_count: Option<usize>,
     /// The keyspace to operate on.
     keyspace: Keyspace<S>,
-    /// Schema for serializing `Option<Row>`.
-    schema: Schema,
     /// `DataTypeKind`s use for deserializing `Row`.
     data_type_kinds: Vec<DataTypeKind>,
+    /// For deserializing `OrderedRow`.
+    ordered_row_deserializer: OrderedRowDeserializer,
 }
 
-impl<S: StateStore> ManagedTopNState<S> {
+impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     pub fn new(
         top_n_count: Option<usize>,
         total_count: usize,
         keyspace: Keyspace<S>,
-        schema: Schema,
+        data_type_kinds: Vec<DataTypeKind>,
+        ordered_row_deserializer: OrderedRowDeserializer,
     ) -> Self {
-        let data_type_kinds = schema
-            .data_types_clone()
-            .into_iter()
-            .map(|data_type| data_type.data_type_kind())
-            .collect::<Vec<_>>();
         Self {
             top_n: BTreeMap::new(),
             flush_buffer: BTreeMap::new(),
             total_count,
             top_n_count,
             keyspace,
-            schema,
             data_type_kinds,
+            ordered_row_deserializer,
         }
     }
 
@@ -61,16 +59,20 @@ impl<S: StateStore> ManagedTopNState<S> {
     pub fn retain_top_n(&mut self) {
         if let Some(count) = self.top_n_count {
             while self.top_n.len() > count {
-                // Although it seems to pop the last element(supposedly with the largest key),
-                // it is actually popping the element with the smallest key.
-                // This is because we reverse serialize the key so that `scan` can fetch from
-                // the larger end.
-                self.top_n.pop_last();
+                match TOP_N_TYPE {
+                    TOP_N_MIN => {
+                        self.top_n.pop_last();
+                    }
+                    TOP_N_MAX => {
+                        self.top_n.pop_first();
+                    }
+                    _ => unreachable!(),
+                }
             }
         }
     }
 
-    pub async fn pop_top_element(&mut self) -> Result<Option<(Bytes, Row)>> {
+    pub async fn pop_top_element(&mut self) -> Result<Option<(OrderedRow, Row)>> {
         if self.total_count == 0 {
             Ok(None)
         } else {
@@ -78,21 +80,29 @@ impl<S: StateStore> ManagedTopNState<S> {
             debug_assert!(!self.top_n.is_empty(), "top_n is empty");
             // Similar as the comments in `retain_top_n`, it is actually popping
             // the element with the largest key.
-            let key = self.top_n.first_key_value().unwrap().0.clone();
+            let key = match TOP_N_TYPE {
+                TOP_N_MIN => self.top_n.first_key_value().unwrap().0.clone(),
+                TOP_N_MAX => self.top_n.last_key_value().unwrap().0.clone(),
+                _ => unreachable!(),
+            };
             let value = self.delete(&key).await?;
             Ok(Some((key, value.unwrap())))
         }
     }
 
-    pub fn top_element(&mut self) -> Option<(&Bytes, &Row)> {
+    pub fn top_element(&mut self) -> Option<(&OrderedRow, &Row)> {
         if self.total_count == 0 {
             None
         } else {
-            self.top_n.first_key_value()
+            match TOP_N_TYPE {
+                TOP_N_MIN => self.top_n.first_key_value(),
+                TOP_N_MAX => self.top_n.last_key_value(),
+                _ => unreachable!(),
+            }
         }
     }
 
-    pub async fn insert(&mut self, key: Bytes, value: Row) {
+    pub async fn insert(&mut self, key: OrderedRow, value: Row) {
         self.top_n.insert(key.clone(), value.clone());
         FlushStatus::do_insert(self.flush_buffer.entry(key), value);
         self.total_count += 1;
@@ -108,42 +118,102 @@ impl<S: StateStore> ManagedTopNState<S> {
         // 1. Not touched by flush buffer. Do nothing.
         // 2. Deleted by flush buffer. Do not go into cache.
         // 3. Overridden by flush buffer. Go into cache with the new value.
+        // We remark that:
+        // 1. if TOP_N_MIN, kv_pairs is sorted in ascending order.
+        // 2. if TOP_N_MAX, kv_pairs is sorted in descending order.
+        // while flush_buffer is always sorted in ascending order.
+        // This `order` is defined by the order between two `OrderedRow`.
+        // We have to scan all because the top n on the storage may have been deleted by the flush
+        // buffer.
         let kv_pairs = self.scan_from_storage(None).await?;
-        let mut flush_buffer_iter = self.flush_buffer.iter().peekable();
-        for (key_from_storage, row_from_storage) in kv_pairs {
-            while let Some((key_from_buffer, _)) = flush_buffer_iter.peek() {
-                if **key_from_buffer >= key_from_storage {
-                    break;
-                } else {
-                    flush_buffer_iter.next();
-                }
-            }
-            if flush_buffer_iter.peek().is_none() {
-                self.top_n.insert(key_from_storage, row_from_storage);
-                continue;
-            }
-            let (key_from_buffer, value_from_buffer) = flush_buffer_iter.peek().unwrap();
-            match key_from_storage.cmp(key_from_buffer) {
-                std::cmp::Ordering::Equal => {
-                    match value_from_buffer {
-                        FlushStatus::Delete => {
-                            // do not put it into cache
-                        }
-                        FlushStatus::Insert(row) | FlushStatus::DeleteInsert(row) => {
-                            self.top_n.insert(key_from_storage, row.clone());
+        let mut inserted = 0;
+        match TOP_N_TYPE {
+            TOP_N_MIN => {
+                let mut flush_buffer_iter = self.flush_buffer.iter().peekable();
+                for (key_from_storage, row_from_storage) in kv_pairs {
+                    // If we inserted enough values, break as we will only retain `top_n_count`
+                    // elements in the cache.
+                    if let Some(top_n_count) = self.top_n_count {
+                        if inserted >= top_n_count {
+                            break;
                         }
                     }
+                    while let Some((key_from_buffer, _)) = flush_buffer_iter.peek() {
+                        if **key_from_buffer >= key_from_storage {
+                            break;
+                        } else {
+                            flush_buffer_iter.next();
+                        }
+                    }
+                    if flush_buffer_iter.peek().is_none() {
+                        self.top_n.insert(key_from_storage, row_from_storage);
+                        inserted += 1;
+                        continue;
+                    }
+                    let (key_from_buffer, value_from_buffer) = flush_buffer_iter.peek().unwrap();
+                    match key_from_storage.cmp(key_from_buffer) {
+                        std::cmp::Ordering::Equal => {
+                            match value_from_buffer {
+                                FlushStatus::Delete => {
+                                    // do not put it into cache
+                                }
+                                FlushStatus::Insert(row) | FlushStatus::DeleteInsert(row) => {
+                                    self.top_n.insert(key_from_storage, row.clone());
+                                    inserted += 1;
+                                }
+                            }
+                        }
+                        std::cmp::Ordering::Greater => {
+                            flush_buffer_iter.next();
+                        }
+                        _ => unreachable!(),
+                    }
                 }
-                std::cmp::Ordering::Greater => {
-                    flush_buffer_iter.next();
-                }
-                _ => unreachable!(),
             }
+            TOP_N_MAX => {
+                let mut flush_buffer_iter = self.flush_buffer.iter().rev().peekable();
+                for (key_from_storage, row_from_storage) in kv_pairs {
+                    if let Some(top_n_count) = self.top_n_count {
+                        if inserted >= top_n_count {
+                            break;
+                        }
+                    }
+                    while let Some((key_from_buffer, _)) = flush_buffer_iter.peek() {
+                        if **key_from_buffer <= key_from_storage {
+                            break;
+                        } else {
+                            flush_buffer_iter.next();
+                        }
+                    }
+                    if flush_buffer_iter.peek().is_none() {
+                        self.top_n.insert(key_from_storage, row_from_storage);
+                        continue;
+                    }
+                    let (key_from_buffer, value_from_buffer) = flush_buffer_iter.peek().unwrap();
+                    match key_from_storage.cmp(key_from_buffer) {
+                        std::cmp::Ordering::Equal => {
+                            match value_from_buffer {
+                                FlushStatus::Delete => {
+                                    // do not put it into cache
+                                }
+                                FlushStatus::Insert(row) | FlushStatus::DeleteInsert(row) => {
+                                    self.top_n.insert(key_from_storage, row.clone());
+                                }
+                            }
+                        }
+                        std::cmp::Ordering::Less => {
+                            flush_buffer_iter.next();
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+            }
+            _ => unreachable!(),
         }
         Ok(())
     }
 
-    async fn delete(&mut self, key: &Bytes) -> Result<Option<Row>> {
+    async fn delete(&mut self, key: &OrderedRow) -> Result<Option<Row>> {
         let prev_entry = self.top_n.remove(key);
         debug_assert!(prev_entry.is_some());
         FlushStatus::do_delete(self.flush_buffer.entry(key.clone()));
@@ -156,34 +226,46 @@ impl<S: StateStore> ManagedTopNState<S> {
         Ok(prev_entry)
     }
 
-    async fn scan_from_storage(&mut self, number_rows: Option<usize>) -> Result<Vec<(Bytes, Row)>> {
+    async fn scan_from_storage(
+        &mut self,
+        number_rows: Option<usize>,
+    ) -> Result<Vec<(OrderedRow, Row)>> {
         let pk_row_bytes = self
             .keyspace
-            .scan_strip_prefix(number_rows.map(|top_n_count| top_n_count * self.schema.len()))
+            .scan_strip_prefix(
+                number_rows.map(|top_n_count| top_n_count * self.data_type_kinds.len()),
+            )
             .await?;
         // We must have enough cells to restore a complete row.
-        debug_assert_eq!(pk_row_bytes.len() % self.schema.len(), 0);
-        // cell-based storage format, so `self.schema.len()`
+        debug_assert_eq!(pk_row_bytes.len() % self.data_type_kinds.len(), 0);
+        // cell-based storage format, so `self.data_type_kinds.len()`
         let mut row_bytes = vec![];
         let mut cell_restored = 0;
-        let schema = self
-            .schema
-            .data_types_clone()
-            .into_iter()
-            .map(|data_type| data_type.data_type_kind())
-            .collect::<Vec<_>>();
         let mut res = vec![];
         for (pk, cell_bytes) in pk_row_bytes {
             row_bytes.extend_from_slice(&cell_bytes);
             cell_restored += 1;
-            if cell_restored == self.schema.len() {
+            if cell_restored == self.data_type_kinds.len() {
                 cell_restored = 0;
-                let deserializer = RowDeserializer::new(schema.clone());
+                let deserializer = RowDeserializer::new(self.data_type_kinds.clone());
                 let row = deserializer.deserialize(&std::mem::take(&mut row_bytes))?;
                 // format: [pk_buf | cell_idx (4B)]
                 // Take `pk_buf` out.
-                let pk_without_cell_idx = pk.slice(0..pk.len() - 4);
-                res.push((pk_without_cell_idx, row));
+                let mut pk_vec = pk.to_vec();
+                let pk_vec_len = pk_vec.len();
+                let pk_without_cell_idx = &mut pk_vec[0..pk_vec_len - 4];
+                match TOP_N_TYPE {
+                    TOP_N_MAX => {
+                        pk_without_cell_idx
+                            .iter_mut()
+                            .for_each(|byte| *byte = !*byte);
+                    }
+                    _ => unreachable!(),
+                };
+                let ordered_row = self
+                    .ordered_row_deserializer
+                    .deserialize(pk_without_cell_idx)?;
+                res.push((ordered_row, row));
             }
         }
         Ok(res)
@@ -220,9 +302,14 @@ impl<S: StateStore> ManagedTopNState<S> {
         }
 
         let mut write_batches: Vec<(Bytes, Option<Bytes>)> = vec![];
-        for (pk_buf, cells) in std::mem::take(&mut self.flush_buffer) {
+        for (ordered_row, cells) in std::mem::take(&mut self.flush_buffer) {
             let row_option = cells.into_option();
-            for cell_idx in 0..self.schema.len() {
+            let pk_buf = match TOP_N_TYPE {
+                TOP_N_MIN => ordered_row.serialize(),
+                TOP_N_MAX => ordered_row.reverse_serialize(),
+                _ => unreachable!(),
+            }?;
+            for cell_idx in 0..self.data_type_kinds.len() {
                 // format: [pk_buf | cell_idx (4B)]
                 let key_encoded = [&pk_buf[..], &serialize_cell_idx(cell_idx as u32)?[..]].concat();
                 // format: [keyspace prefix | pk_buf | cell_idx (4B)]
@@ -249,7 +336,7 @@ impl<S: StateStore> ManagedTopNState<S> {
 }
 
 /// Test-related methods
-impl<S: StateStore> ManagedTopNState<S> {
+impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     #[cfg(test)]
     fn get_cache_len(&self) -> usize {
         self.top_n.len()
@@ -258,86 +345,94 @@ impl<S: StateStore> ManagedTopNState<S> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use bytes::Bytes;
-    use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::{DataTypeKind, Int64Type, StringType};
+    use risingwave_common::types::{DataType, DataTypeKind, Int64Type, StringType};
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::{Keyspace, StateStore};
 
     use crate::row_nonnull;
+    use crate::stream_op::managed_state::aggregation::OrderedRowDeserializer;
     use crate::stream_op::managed_state::top_n::top_n_state::ManagedTopNState;
-    use crate::stream_op::OrderedRowsSerializer;
+    use crate::stream_op::managed_state::top_n::variants::TOP_N_MAX;
+    use crate::stream_op::managed_state::OrderedRow;
 
-    fn create_managed_top_n_state<S: StateStore>(
+    fn create_managed_top_n_state<S: StateStore, const TOP_N_TYPE: usize>(
         store: &S,
         row_count: usize,
-    ) -> ManagedTopNState<S> {
-        let schema = Schema::new(vec![
-            Field::new(Arc::new(Int64Type::new(false))),
-            Field::new(StringType::create(false, 5, DataTypeKind::Varchar)),
-        ]);
+        data_type_kinds: Vec<DataTypeKind>,
+        order_types: Vec<OrderType>,
+    ) -> ManagedTopNState<S, TOP_N_TYPE> {
+        let ordered_row_deserializer =
+            OrderedRowDeserializer::new(data_type_kinds.clone(), order_types);
 
-        ManagedTopNState::new(
+        ManagedTopNState::<S, TOP_N_TYPE>::new(
             Some(2),
             row_count,
             Keyspace::executor_root(store.clone(), 0x2333),
-            schema,
+            data_type_kinds,
+            ordered_row_deserializer,
         )
     }
 
     #[tokio::test]
     async fn test_managed_top_n_state() {
         let store = MemoryStateStore::new();
-        let mut managed_state = create_managed_top_n_state(&store, 0);
-        let row1 = row_nonnull![2i64, "abc".to_string()];
-        let row2 = row_nonnull![3i64, "abc".to_string()];
-        let row3 = row_nonnull![3i64, "abd".to_string()];
-        let row4 = row_nonnull![4i64, "ab".to_string()];
-        let rows = vec![&row1, &row2, &row3, &row4];
-        let orderings = vec![OrderType::Descending, OrderType::Ascending];
-        let pk_indices = vec![1, 0];
-        let order_pairs = orderings
+        let data_type_kinds = vec![
+            StringType::create(false, 5, DataTypeKind::Varchar).data_type_kind(),
+            Int64Type::new(false).data_type_kind(),
+        ];
+        let order_types = vec![OrderType::Descending, OrderType::Ascending];
+
+        let mut managed_state = create_managed_top_n_state::<_, TOP_N_MAX>(
+            &store,
+            0,
+            data_type_kinds.clone(),
+            order_types.clone(),
+        );
+
+        let row1 = row_nonnull!["abc".to_string(), 2i64];
+        let row2 = row_nonnull!["abc".to_string(), 3i64];
+        let row3 = row_nonnull!["abd".to_string(), 3i64];
+        let row4 = row_nonnull!["ab".to_string(), 4i64];
+        let rows = vec![row1, row2, row3, row4];
+        let ordered_rows = rows
+            .clone()
             .into_iter()
-            .zip(pk_indices.into_iter())
+            .map(|row| OrderedRow::new(row, &order_types))
             .collect::<Vec<_>>();
-        let ordered_row_serializer = OrderedRowsSerializer::new(order_pairs);
-        let mut rows_bytes = vec![];
-        ordered_row_serializer.order_based_scehmaed_serialize(&rows, &mut rows_bytes);
+
         managed_state
-            .insert(rows_bytes[3].clone().into(), row4.clone())
+            .insert(ordered_rows[3].clone(), rows[3].clone())
             .await;
-        // now (4, "ab")
+        // now ("ab", 4)
 
         assert_eq!(
             managed_state.top_element(),
-            Some((&Bytes::from(rows_bytes[3].clone()), &row4))
+            Some((&ordered_rows[3], &rows[3]))
         );
         assert!(managed_state.is_dirty());
         assert_eq!(managed_state.get_cache_len(), 1);
 
         managed_state
-            .insert(rows_bytes[2].clone().into(), row3.clone())
+            .insert(ordered_rows[2].clone(), rows[2].clone())
             .await;
-        // now (3, "abd") -> (4, "ab")
+        // now ("abd", 3) -> ("ab", 4)
 
         assert_eq!(
             managed_state.top_element(),
-            Some((&Bytes::from(rows_bytes[2].clone()), &row3))
+            Some((&ordered_rows[3], &rows[3]))
         );
         assert!(managed_state.is_dirty());
         assert_eq!(managed_state.get_cache_len(), 2);
 
         managed_state
-            .insert(rows_bytes[1].clone().into(), row2.clone())
+            .insert(ordered_rows[1].clone(), rows[1].clone())
             .await;
-        // now (3, "abd") -> (3, "abc") -> (4, "ab")
+        // now ("abd", 3) -> ("abc", 3) -> ("ab", 4)
 
         assert_eq!(
             managed_state.top_element(),
-            Some((&Bytes::from(rows_bytes[2].clone()), &row3))
+            Some((&ordered_rows[3], &rows[3]))
         );
         assert_eq!(managed_state.get_cache_len(), 3);
         managed_state.flush().await.unwrap();
@@ -348,13 +443,18 @@ mod tests {
         assert_eq!(managed_state.get_cache_len(), 2);
 
         drop(managed_state);
-        let mut managed_state = create_managed_top_n_state(&store, row_count);
+        let mut managed_state = create_managed_top_n_state::<_, TOP_N_MAX>(
+            &store,
+            row_count,
+            data_type_kinds.clone(),
+            order_types.clone(),
+        );
         assert_eq!(managed_state.top_element(), None);
         managed_state.fill_in_cache().await.unwrap();
-        // now (3, "abd") -> (3, "abc") -> (4, "ab")
+        // now ("abd", 3) on storage -> ("abc", 3) in memory -> ("ab", 4) in memory
         assert_eq!(
             managed_state.top_element(),
-            Some((&Bytes::from(rows_bytes[2].clone()), &row3))
+            Some((&ordered_rows[3], &rows[3]))
         );
         // Right after recovery.
         assert!(!managed_state.is_dirty());
@@ -363,45 +463,52 @@ mod tests {
 
         assert_eq!(
             managed_state.pop_top_element().await.unwrap(),
-            Some((Bytes::from(rows_bytes[2].clone()), row3.clone()))
+            Some((ordered_rows[3].clone(), rows[3].clone()))
         );
-        // now (3, "abd") on storage -> (3, "abc") in memory
+        // now ("abd", 3) on storage -> ("abc", 3) in memory
         assert!(managed_state.is_dirty());
         assert_eq!(managed_state.total_count, 2);
         assert_eq!(managed_state.get_cache_len(), 1);
         assert_eq!(
             managed_state.pop_top_element().await.unwrap(),
-            Some((Bytes::from(rows_bytes[1].clone()), row2.clone()))
+            Some((ordered_rows[1].clone(), rows[1].clone()))
         );
-        // now (3, "abc") on storage
+        // now ("abd", 3) on storage
         // Popping to 0 element but automatically get at most `2` elements from the storage.
         // However, here we only have one element left as the `total_count` indicates.
         // The state is dirty as we didn't flush.
         assert!(managed_state.is_dirty());
         assert_eq!(managed_state.total_count, 1);
         assert_eq!(managed_state.get_cache_len(), 1);
+        // now ("abd", 3) in memory
 
         assert_eq!(
             managed_state.top_element(),
-            Some((&Bytes::from(rows_bytes[3].clone()), &row4))
+            Some((&ordered_rows[2], &rows[2]))
         );
 
         managed_state
-            .insert(rows_bytes[0].clone().into(), row1.clone())
+            .insert(ordered_rows[0].clone(), rows[0].clone())
             .await;
+        // now ("abd", 3) in memory -> ("abc", 2)
         assert_eq!(
             managed_state.top_element(),
-            Some((&Bytes::from(rows_bytes[0].clone()), &row1))
+            Some((&ordered_rows[0], &rows[0]))
         );
 
         // Exclude the last `insert` as the state crashes before recovery.
         let row_count = managed_state.total_count - 1;
         drop(managed_state);
-        let mut managed_state = create_managed_top_n_state(&store, row_count);
+        let mut managed_state = create_managed_top_n_state::<_, TOP_N_MAX>(
+            &store,
+            row_count,
+            data_type_kinds,
+            order_types,
+        );
         managed_state.fill_in_cache().await.unwrap();
         assert_eq!(
             managed_state.top_element(),
-            Some((&Bytes::from(rows_bytes[2].clone()), &row3))
+            Some((&ordered_rows[3], &rows[3]))
         );
     }
 }

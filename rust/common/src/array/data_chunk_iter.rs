@@ -170,21 +170,23 @@ impl Row {
 
 /// Deserializer of the `Row`.
 pub struct RowDeserializer {
-    schema: Vec<DataTypeKind>,
+    data_type_kinds: Vec<DataTypeKind>,
 }
 
 impl RowDeserializer {
     /// Creates a new `RowDeserializer` with row schema.
     pub fn new(schema: Vec<DataTypeKind>) -> Self {
-        RowDeserializer { schema }
+        RowDeserializer {
+            data_type_kinds: schema,
+        }
     }
 
     /// Deserialize the row from a memcomparable bytes.
     pub fn deserialize(&self, data: &[u8]) -> Result<Row, memcomparable::Error> {
         let mut values = vec![];
-        values.reserve(self.schema.len());
+        values.reserve(self.data_type_kinds.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
-        for &ty in &self.schema {
+        for &ty in &self.data_type_kinds {
             values.push(deserialize_datum_from(&ty, &mut deserializer)?);
         }
         Ok(Row(values))
@@ -193,9 +195,9 @@ impl RowDeserializer {
     /// Deserialize the row from a memcomparable bytes. All values are not null.
     pub fn deserialize_not_null(&self, data: &[u8]) -> Result<Row, memcomparable::Error> {
         let mut values = vec![];
-        values.reserve(self.schema.len());
+        values.reserve(self.data_type_kinds.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
-        for &ty in &self.schema {
+        for &ty in &self.data_type_kinds {
             values.push(deserialize_datum_not_null_from(&ty, &mut deserializer)?);
         }
         Ok(Row(values))
@@ -212,7 +214,7 @@ impl RowDeserializer {
         datum_idx: usize,
     ) -> Result<Datum, memcomparable::Error> {
         let mut deserializer = memcomparable::Deserializer::new(data);
-        let datum = deserialize_datum_from(&self.schema[datum_idx], &mut deserializer)?;
+        let datum = deserialize_datum_from(&self.data_type_kinds[datum_idx], &mut deserializer)?;
         Ok(datum)
     }
 }

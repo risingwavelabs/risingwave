@@ -7,7 +7,7 @@ use std::cmp::Reverse;
 
 pub(crate) use flush_status::FlushStatus;
 use risingwave_common::array::{Row, RowRef};
-use risingwave_common::types::Datum;
+use risingwave_common::types::{serialize_datum_into, Datum};
 use risingwave_common::util::sort_util::OrderType;
 
 use crate::stream_op::managed_state::OrderedDatum::{NormalOrder, ReversedOrder};
@@ -62,5 +62,32 @@ impl OrderedRow {
             })
             .collect::<Vec<_>>();
         RowRef(datum_refs)
+    }
+
+    /// Serialize the row into a memcomparable bytes.
+    ///
+    /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
+    pub fn serialize(&self) -> Result<Vec<u8>, memcomparable::Error> {
+        let mut serializer = memcomparable::Serializer::new(vec![]);
+        for v in &self.0 {
+            let datum = match v {
+                NormalOrder(datum) => {
+                    serializer.set_reverse(false);
+                    datum
+                }
+                ReversedOrder(datum) => {
+                    serializer.set_reverse(true);
+                    &datum.0
+                }
+            };
+            serialize_datum_into(datum, &mut serializer)?;
+        }
+        Ok(serializer.into_inner())
+    }
+
+    pub fn reverse_serialize(&self) -> Result<Vec<u8>, memcomparable::Error> {
+        let mut res = self.serialize()?;
+        res.iter_mut().for_each(|byte| *byte = !*byte);
+        Ok(res)
     }
 }

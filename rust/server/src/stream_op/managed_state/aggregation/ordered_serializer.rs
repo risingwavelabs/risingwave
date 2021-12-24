@@ -1,8 +1,13 @@
+use std::cmp::Reverse;
+
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::types::{
     deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataTypeKind,
 };
 use risingwave_common::util::sort_util::OrderType;
+
+use crate::stream_op::managed_state::OrderedDatum::{NormalOrder, ReversedOrder};
+use crate::stream_op::managed_state::OrderedRow;
 
 type OrderPair = (OrderType, usize);
 
@@ -64,29 +69,34 @@ impl OrderedRowsSerializer {
 }
 
 /// Deserializer of the `Row`.
+#[derive(Clone)]
 pub struct OrderedRowDeserializer {
-    schema: Vec<DataTypeKind>,
-    order_pairs: Vec<OrderPair>,
+    data_type_kinds: Vec<DataTypeKind>,
+    order_types: Vec<OrderType>,
 }
 
 impl OrderedRowDeserializer {
-    pub fn new(schema: Vec<DataTypeKind>, order_pairs: Vec<OrderPair>) -> Self {
-        assert_eq!(schema.len(), order_pairs.len());
+    pub fn new(schema: Vec<DataTypeKind>, order_types: Vec<OrderType>) -> Self {
+        assert_eq!(schema.len(), order_types.len());
         Self {
-            schema,
-            order_pairs,
+            data_type_kinds: schema,
+            order_types,
         }
     }
 
-    pub fn deserialize(&self, data: &[u8]) -> Result<Row, memcomparable::Error> {
-        let mut values = vec![None; self.schema.len()];
+    pub fn deserialize(&self, data: &[u8]) -> Result<OrderedRow, memcomparable::Error> {
+        let mut values = Vec::with_capacity(self.data_type_kinds.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
-        for (data_type, (order_type, index)) in self.schema.iter().zip(self.order_pairs.iter()) {
+        for (data_type, order_type) in self.data_type_kinds.iter().zip(self.order_types.iter()) {
             deserializer.set_reverse(*order_type == OrderType::Descending);
             let datum = deserialize_datum_from(data_type, &mut deserializer)?;
-            values[*index] = datum;
+            let datum = match order_type {
+                OrderType::Ascending => NormalOrder(datum),
+                OrderType::Descending => ReversedOrder(Reverse(datum)),
+            };
+            values.push(datum);
         }
-        Ok(Row(values))
+        Ok(OrderedRow(values))
     }
 }
 
@@ -170,17 +180,32 @@ mod tests {
 
     #[test]
     fn test_ordered_row_deserializer() {
-        let orders = vec![(OrderType::Ascending, 1), (OrderType::Descending, 0)];
-        let serializer = OrderedRowsSerializer::new(orders.clone());
-        let schema = vec![DataTypeKind::Int16, DataTypeKind::Varchar];
+        let order_types = vec![OrderType::Descending, OrderType::Ascending];
+        let pk_indices = vec![0, 1];
+        let order_pairs = order_types
+            .clone()
+            .into_iter()
+            .zip(pk_indices.into_iter())
+            .collect::<Vec<_>>();
+        let serializer = OrderedRowsSerializer::new(order_pairs);
+        let schema = vec![DataTypeKind::Varchar, DataTypeKind::Int16];
         let row1 = Row(vec![Some(Utf8("abc".to_string())), Some(Int16(5))]);
         let row2 = Row(vec![Some(Utf8("abd".to_string())), Some(Int16(5))]);
         let row3 = Row(vec![Some(Utf8("abc".to_string())), Some(Int16(6))]);
-        let deserializer = OrderedRowDeserializer::new(schema, orders);
+        let deserializer = OrderedRowDeserializer::new(schema, order_types.clone());
         let mut array = vec![];
         serializer.order_based_scehmaed_serialize(&[&row1, &row2, &row3], &mut array);
-        assert_eq!(deserializer.deserialize(&array[0]).unwrap(), row1);
-        assert_eq!(deserializer.deserialize(&array[1]).unwrap(), row2);
-        assert_eq!(deserializer.deserialize(&array[2]).unwrap(), row3);
+        assert_eq!(
+            deserializer.deserialize(&array[0]).unwrap(),
+            OrderedRow::new(row1, &order_types)
+        );
+        assert_eq!(
+            deserializer.deserialize(&array[1]).unwrap(),
+            OrderedRow::new(row2, &order_types)
+        );
+        assert_eq!(
+            deserializer.deserialize(&array[2]).unwrap(),
+            OrderedRow::new(row3, &order_types)
+        );
     }
 }
