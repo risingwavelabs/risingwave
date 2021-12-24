@@ -1,4 +1,5 @@
 use prost::DecodeError;
+use risingwave_common::error::{ErrorCode, RwError};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -20,6 +21,12 @@ pub enum HummockError {
 impl From<prost::DecodeError> for HummockError {
     fn from(e: DecodeError) -> Self {
         Self::DecodeError(e.to_string())
+    }
+}
+
+impl From<HummockError> for RwError {
+    fn from(h: HummockError) -> Self {
+        ErrorCode::StorageError(Box::new(h)).into()
     }
 }
 

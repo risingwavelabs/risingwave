@@ -32,6 +32,8 @@ pub enum ErrorCode {
     NotImplementedError(String),
     #[error(transparent)]
     IoError(IoError),
+    #[error("Storage error: {0}")]
+    StorageError(BoxedError),
     #[error("Parse string error: {0}")]
     ParseError(BoxedError),
     #[error("Out of range")]
@@ -164,6 +166,7 @@ impl ErrorCode {
             ErrorCode::MemoryError { .. } => 2,
             ErrorCode::NotImplementedError(_) => 4,
             ErrorCode::IoError(_) => 5,
+            ErrorCode::StorageError(_) => 6,
             ErrorCode::ParseError(_) => 7,
             ErrorCode::NumericValueOutOfRange => 8,
             ErrorCode::ProtocolError(_) => 9,

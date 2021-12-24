@@ -5,29 +5,39 @@ use crate::hummock::key::{get_ts, key_with_ts, user_key as to_user_key, Timestam
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 
-/// ``UserKeyIterator`` can be used by user directly.
+/// [`UserKeyIterator`] can be used by user directly.
 pub struct UserKeyIterator {
+    /// Inner table iterator.
     iterator: SortedIterator,
+
     /// Last user key
     last_key: Vec<u8>,
+
     /// Last user value
     last_val: Vec<u8>,
 
-    // Flag for whether the iterator reach over the right end of the range.
+    /// Flag for whether the iterator reach over the right end of the range.
     out_of_range: bool,
 
+    /// Start and end bounds of user key.
     key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
 
+    /// Only read values if `ts <= self.read_ts`.
     read_ts: Timestamp,
 }
 
 // TODO: decide whether this should also impl `HummockIterator`
 impl UserKeyIterator {
-    pub fn new(iterator: SortedIterator, key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>)) -> Self {
+    /// Create [`UserKeyIterator`] with maximum timestamp.
+    pub(crate) fn new(
+        iterator: SortedIterator,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+    ) -> Self {
         Self::new_with_ts(iterator, key_range, Timestamp::MAX)
     }
 
-    pub fn new_with_ts(
+    /// Create [`UserKeyIterator`] with given `read_ts`.
+    pub(crate) fn new_with_ts(
         iterator: SortedIterator,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_ts: u64,
@@ -68,7 +78,7 @@ impl UserKeyIterator {
                         // handle range scan
                         match &self.key_range.1 {
                             Included(end_key) => self.out_of_range = key > end_key.as_slice(),
-                            Excluded(_) => todo!(),
+                            Excluded(end_key) => self.out_of_range = key >= end_key.as_slice(),
                             Unbounded => {}
                         };
                         return Ok(());
@@ -114,7 +124,7 @@ impl UserKeyIterator {
                 let full_key = &key_with_ts(begin_key.clone(), self.read_ts);
                 self.iterator.seek(full_key).await?;
             }
-            Excluded(_) => todo!(),
+            Excluded(_) => unimplemented!("excluded begin key is not supported"),
             Unbounded => self.iterator.rewind().await?,
         };
 
@@ -135,7 +145,7 @@ impl UserKeyIterator {
                     Vec::from(user_key)
                 }
             }
-            Excluded(_) => todo!(),
+            Excluded(_) => unimplemented!("excluded begin key is not supported"),
             Unbounded => Vec::from(user_key),
         };
 
@@ -148,6 +158,7 @@ impl UserKeyIterator {
         self.next().await
     }
 
+    /// Indicate whether the iterator can be used.
     pub fn is_valid(&self) -> bool {
         // handle range scan
         // key >= begin_key is guaranteed by seek/rewind function
@@ -303,9 +314,9 @@ mod tests {
         assert!(!uki.is_valid());
     }
 
-    // [left_end, right_end]
+    // left..=end
     #[tokio::test]
-    async fn test_closed_end_range_scan() {
+    async fn test_range_inclusive() {
         // key=[table, idx, ts], value
         let kv_pairs: Vec<(usize, usize, u64, HummockValue<Vec<u8>>)> = vec![
             (0, 0, 200, HummockValue::Delete),
@@ -379,9 +390,84 @@ mod tests {
         assert!(!uki.is_valid());
     }
 
-    // (left_end, right_end]
+    // left..end
     #[tokio::test]
-    async fn test_left_open_range_scan() {
+    async fn test_range() {
+        // key=[table, idx, ts], value
+        let kv_pairs: Vec<(usize, usize, u64, HummockValue<Vec<u8>>)> = vec![
+            (0, 0, 200, HummockValue::Delete),
+            (0, 0, 100, HummockValue::Put(test_value_of(0, 0))),
+            (0, 1, 200, HummockValue::Put(test_value_of(0, 1))),
+            (0, 1, 100, HummockValue::Delete),
+            (0, 2, 300, HummockValue::Put(test_value_of(0, 2))),
+            (0, 2, 200, HummockValue::Delete),
+            (0, 2, 100, HummockValue::Delete),
+            (0, 3, 100, HummockValue::Put(test_value_of(0, 3))),
+            (0, 5, 200, HummockValue::Delete),
+            (0, 5, 100, HummockValue::Put(test_value_of(0, 5))),
+            (0, 6, 100, HummockValue::Put(test_value_of(0, 6))),
+            (0, 7, 100, HummockValue::Put(test_value_of(0, 7))),
+            (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
+        ];
+        let table = add_kv_pair(kv_pairs).await;
+        let iters: Vec<BoxedHummockIterator> = vec![Box::new(TableIterator::new(Arc::new(table)))];
+        let si = SortedIterator::new(iters);
+
+        let begin_key = Included(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
+        let end_key = Excluded(user_key(key_range_test_key(0, 7, 0).as_slice()).to_vec());
+
+        let mut uki = UserKeyIterator::new(si, (begin_key, end_key));
+
+        // ----- basic iterate -----
+        uki.rewind().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
+        uki.next().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
+        uki.next().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
+        uki.next().await.unwrap();
+        assert!(!uki.is_valid());
+
+        // ----- before-begin-range iterate -----
+        uki.seek(user_key(iterator_test_key_of(0, 1).as_slice()))
+            .await
+            .unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
+        uki.next().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
+        uki.next().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
+        uki.next().await.unwrap();
+        assert!(!uki.is_valid());
+
+        // ----- begin-range iterate -----
+        uki.seek(user_key(iterator_test_key_of(0, 2).as_slice()))
+            .await
+            .unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
+        uki.next().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
+        uki.next().await.unwrap();
+        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
+        uki.next().await.unwrap();
+        assert!(!uki.is_valid());
+
+        // ----- end-range iterate -----
+        uki.seek(user_key(iterator_test_key_of(0, 7).as_slice()))
+            .await
+            .unwrap();
+        assert!(!uki.is_valid());
+
+        // ----- after-end-range iterate -----
+        uki.seek(user_key(iterator_test_key_of(0, 8).as_slice()))
+            .await
+            .unwrap();
+        assert!(!uki.is_valid());
+    }
+
+    // ..=right
+    #[tokio::test]
+    async fn test_range_to_inclusive() {
         // key=[table, idx, ts], value
         let kv_pairs: Vec<(usize, usize, u64, HummockValue<Vec<u8>>)> = vec![
             (0, 0, 200, HummockValue::Delete),
@@ -457,9 +543,9 @@ mod tests {
         assert!(!uki.is_valid());
     }
 
-    // [left_end, right_end)
+    // left..
     #[tokio::test]
-    async fn test_right_open_range_scan() {
+    async fn test_range_from() {
         // key=[table, idx, ts], value
         let kv_pairs: Vec<(usize, usize, u64, HummockValue<Vec<u8>>)> = vec![
             (0, 0, 200, HummockValue::Delete),

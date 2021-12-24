@@ -56,6 +56,42 @@ pub fn user_key(full_key: &[u8]) -> &[u8] {
     split_key_timestamp(full_key).0
 }
 
+// Copyright 2016 TiKV Project Authors. Licensed under Apache-2.0.
+
+/// Computes the next key of the given key.
+///
+/// If the key has no successor key (e.g. the input is "\xff\xff"), the result
+/// would be an empty vector.
+///
+/// # Examples
+///
+/// ```ignore
+/// use risingwave_storage::hummock::key::next_key;
+/// assert_eq!(next_key(b"123"), b"124");
+/// assert_eq!(next_key(b"12\xff"), b"13");
+/// assert_eq!(next_key(b"\xff\xff"), b"");
+/// assert_eq!(next_key(b"\xff\xfe"), b"\xff\xff");
+/// assert_eq!(next_key(b"T"), b"U");
+/// assert_eq!(next_key(b""), b"");
+/// ```
+pub fn next_key(key: &[u8]) -> Vec<u8> {
+    if let Some((s, e)) = next_key_no_alloc(key) {
+        let mut res = Vec::with_capacity(s.len() + 1);
+        res.extend_from_slice(s);
+        res.push(e);
+        res
+    } else {
+        Vec::new()
+    }
+}
+
+fn next_key_no_alloc(key: &[u8]) -> Option<(&[u8], u8)> {
+    let pos = key.iter().rposition(|b| *b != 0xff)?;
+    Some((&key[..pos], key[pos] + 1))
+}
+
+// End Copyright 2016 TiKV Project Authors. Licensed under Apache-2.0.
+
 /// [`FullKey`] can be created on either a `Vec<u8>` or a `&[u8]`.
 ///
 /// Its format is (`user_key`, `u64::MAX - timestamp`).
