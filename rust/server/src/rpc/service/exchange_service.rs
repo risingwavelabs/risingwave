@@ -11,11 +11,10 @@ use risingwave_pb::task_service::exchange_service_server::ExchangeService;
 use risingwave_pb::task_service::{
     GetDataRequest, GetDataResponse, GetStreamRequest, TaskSinkId as ProtoTaskSinkId,
 };
+use risingwave_stream::executor::Message;
+use risingwave_stream::task::StreamManager;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
-
-use crate::stream::StreamManager;
-use crate::stream_op::Message;
 
 #[derive(Clone)]
 pub struct ExchangeServiceImpl {

@@ -18,7 +18,4 @@ extern crate risingwave_common;
 extern crate log;
 extern crate test;
 
-pub mod stream;
-pub mod stream_op;
-
 pub mod rpc;

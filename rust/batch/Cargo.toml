@@ -15,7 +15,6 @@ chrono = "0.4"
 clap = "3.0.0-beta.5"
 clap_derive = "3.0.0-beta.5"
 crc32fast = "1"
-dyn-clone = "1"
 either = "1"
 farmhash = "1.1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -47,7 +46,6 @@ tokio-stream = "0.1.7"
 tokio-test = "0.4.2"
 tonic = "0.6"
 twox-hash = "1.6.1"
-typed-builder = "0.9"
 url = "2.2.2"
 
 [dev-dependencies]

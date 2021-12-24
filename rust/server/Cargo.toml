@@ -34,6 +34,7 @@ risingwave_batch = { path = "../batch" }
 risingwave_common = { path = "../common" }
 risingwave_source = { path = "../source" }
 risingwave_storage = { path = "../storage" }
+risingwave_stream = { path = "../stream" }
 rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }
 serde-value = "0.7.0"
@@ -45,17 +46,14 @@ tempfile = "3.2.0"
 thiserror = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
 tokio-stream = "0.1.7"
-tokio-test = "0.4.2"
 tonic = "0.6"
 twox-hash = "1.6.1"
-typed-builder = "0.9"
 url = "2.2.2"
 
 [dev-dependencies]
-approx = "0.5"
-assert_matches = "1.5"
 rand = "0.8"
 tempfile = "3"
+tokio-test = "0.4.2"
 
 [[bin]]
 name = "compute-node"

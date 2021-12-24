@@ -1999,8 +1999,6 @@ name = "risingwave"
 version = "0.0.1-SNAPSHOT"
 dependencies = [
  "anyhow",
- "approx",
- "assert_matches",
  "async-std",
  "async-stream",
  "async-trait",
@@ -2031,6 +2029,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_source",
  "risingwave_storage",
+ "risingwave_stream",
  "rust_decimal",
  "serde",
  "serde-value",
@@ -2045,7 +2044,6 @@ dependencies = [
  "tokio-test",
  "tonic",
  "twox-hash",
- "typed-builder",
  "url",
 ]
 
@@ -2080,7 +2078,6 @@ dependencies = [
  "clap",
  "clap_derive",
  "crc32fast",
- "dyn-clone",
  "either",
  "farmhash",
  "futures",
@@ -2113,7 +2110,6 @@ dependencies = [
  "tokio-test",
  "tonic",
  "twox-hash",
- "typed-builder",
  "url",
 ]
 
@@ -2157,7 +2153,6 @@ name = "risingwave_meta"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "approx",
  "assert_matches",
  "async-stream",
  "async-trait",
@@ -2188,7 +2183,6 @@ dependencies = [
  "serde_json",
  "serde_with",
  "smallvec",
- "tempfile",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -2268,7 +2262,6 @@ name = "risingwave_storage"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-std",
  "async-stream",
  "async-trait",
  "backtrace",
@@ -2309,6 +2302,53 @@ dependencies = [
 [[package]]
 name = "risingwave_stream"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "approx",
+ "assert_matches",
+ "async-std",
+ "async-stream",
+ "async-trait",
+ "backtrace",
+ "byteorder",
+ "bytes",
+ "chrono",
+ "crc32fast",
+ "dyn-clone",
+ "either",
+ "farmhash",
+ "futures",
+ "itertools",
+ "lazy_static",
+ "log",
+ "log4rs",
+ "memcomparable",
+ "num-traits",
+ "paste",
+ "prost",
+ "prost-types",
+ "rand",
+ "rdkafka",
+ "risingwave-pb",
+ "risingwave_common",
+ "risingwave_source",
+ "risingwave_storage",
+ "rust_decimal",
+ "serde",
+ "serde-value",
+ "serde_json",
+ "serde_with",
+ "smallvec",
+ "static_assertions",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tokio-test",
+ "tonic",
+ "twox-hash",
+ "url",
+]
 
 [[package]]
 name = "rusoto_core"

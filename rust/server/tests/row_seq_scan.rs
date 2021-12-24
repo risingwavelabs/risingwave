@@ -3,7 +3,6 @@ use std::sync::Arc;
 extern crate risingwave;
 extern crate risingwave_batch;
 
-use risingwave::stream_op::{MViewTable, ManagedMViewState};
 use risingwave_batch::executor::{Executor, RowSeqScanExecutor};
 use risingwave_common::array::{Array, Row};
 use risingwave_common::catalog::{Field, Schema};
@@ -12,6 +11,7 @@ use risingwave_common::types::Int32Type;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::Keyspace;
+use risingwave_stream::executor::{MViewTable, ManagedMViewState};
 
 #[tokio::test]
 async fn test_row_seq_scan() -> Result<()> {

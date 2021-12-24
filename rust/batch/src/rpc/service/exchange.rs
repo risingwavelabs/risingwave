@@ -3,6 +3,7 @@ use risingwave_pb::task_service::GetDataResponse;
 use tonic::Status;
 
 type ExchangeDataSender = tokio::sync::mpsc::Sender<std::result::Result<GetDataResponse, Status>>;
+
 #[async_trait::async_trait]
 pub trait ExchangeWriter: Send {
     async fn write(&mut self, resp: GetDataResponse) -> Result<()>;

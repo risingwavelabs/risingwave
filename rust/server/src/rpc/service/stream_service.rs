@@ -6,9 +6,8 @@ use risingwave_pb::stream_service::{
     BuildFragmentResponse, DropFragmentsRequest, DropFragmentsResponse, UpdateFragmentRequest,
     UpdateFragmentResponse,
 };
+use risingwave_stream::task::{StreamManager, StreamTaskEnv};
 use tonic::{Request, Response, Status};
-
-use crate::stream::{StreamManager, StreamTaskEnv};
 
 #[derive(Clone)]
 pub struct StreamServiceImpl {

@@ -7,12 +7,12 @@ use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_source::MemSourceManager;
+use risingwave_stream::task::{SimpleTableManager, StreamManager, StreamTaskEnv};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
-use crate::stream::{SimpleTableManager, StreamManager, StreamTaskEnv};
 
 pub fn rpc_serve(
     addr: SocketAddr,
