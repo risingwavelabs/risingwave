@@ -46,7 +46,6 @@ impl From<ConnectionInfo> for AwsCredentials {
 }
 
 impl ConnectionInfo {
-    #[cfg(test)]
     pub fn new_for_test_account() -> Self {
         Self {
             region: std::env::var("S3_TEST_REGION")

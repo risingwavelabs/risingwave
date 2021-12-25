@@ -17,6 +17,7 @@ use crate::rpc::service::stream_service::StreamServiceImpl;
 pub fn rpc_serve(
     addr: SocketAddr,
     state_store: Option<&str>,
+    prometheus_listener_addr: &str,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     let table_mgr = Arc::new(SimpleTableManager::new());
     let task_mgr = Arc::new(TaskManager::new());
@@ -44,7 +45,7 @@ pub fn rpc_serve(
     let stream_env = StreamTaskEnv::new(table_mgr, source_mgr, addr);
     let task_srv = TaskServiceImpl::new(task_mgr.clone(), batch_env);
     let exchange_srv = ExchangeServiceImpl::new(task_mgr, stream_mgr.clone());
-    let stream_srv = StreamServiceImpl::new(stream_mgr, stream_env);
+    let stream_srv = StreamServiceImpl::new(stream_mgr.clone(), stream_env);
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {
@@ -62,6 +63,10 @@ pub fn rpc_serve(
             .unwrap();
     });
 
+    // Boot state store metrics service.
+    // TODO(xiangyhu): put this in `MetricsManager` (#2198).
+    stream_mgr.boot_metrics_service(prometheus_listener_addr.to_string());
+
     (join_handle, shutdown_send)
 }
 
@@ -74,7 +79,8 @@ mod tests {
     #[tokio::test]
     async fn test_server_shutdown() {
         let addr = get_host_port("127.0.0.1:5688").unwrap();
-        let (join_handle, shutdown_send) = rpc_serve(addr, None);
+        let prometheus_addr = "127.0.0.1:1222";
+        let (join_handle, shutdown_send) = rpc_serve(addr, None, prometheus_addr);
         shutdown_send.send(()).unwrap();
         join_handle.await.unwrap();
     }

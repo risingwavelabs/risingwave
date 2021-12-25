@@ -2,7 +2,7 @@ use clap::Parser;
 use log::info;
 use risingwave::rpc::server::rpc_serve;
 use risingwave_common::util::addr::get_host_port;
-
+/// TODO(xiangyhu): We need to introduce serious `Configuration` framework (#2165).
 #[derive(Parser)]
 struct Opts {
     // The custom log4rs config file.
@@ -14,6 +14,9 @@ struct Opts {
 
     #[clap(long, default_value = "in-memory")]
     state_store: String,
+
+    #[clap(long, default_value = "0.0.0.0:1222")]
+    prometheus_listener_addr: String,
 }
 
 #[cfg(not(tarpaulin_include))]
@@ -24,6 +27,10 @@ async fn main() {
 
     let addr = get_host_port(opts.host.as_str()).unwrap();
     info!("Starting server at {}", addr);
-    let (join_handle, _shutdown_send) = rpc_serve(addr, Some(&opts.state_store));
+    let (join_handle, _shutdown_send) = rpc_serve(
+        addr,
+        Some(&opts.state_store),
+        opts.prometheus_listener_addr.as_str(),
+    );
     join_handle.await.unwrap();
 }

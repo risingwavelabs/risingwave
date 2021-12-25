@@ -1745,6 +1745,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "procfs"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "95e344cafeaeefe487300c361654bcfc85db3ac53619eeccced29f5ea18c4c70"
+dependencies = [
+ "bitflags",
+ "byteorder",
+ "flate2",
+ "hex",
+ "lazy_static",
+ "libc",
+]
+
+[[package]]
+name = "prometheus"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7f64969ffd5dd8f39bd57a68ac53c163a095ed9d0fb707146da1b27025a3504"
+dependencies = [
+ "cfg-if",
+ "fnv",
+ "lazy_static",
+ "libc",
+ "memchr",
+ "parking_lot",
+ "procfs",
+ "protobuf",
+ "thiserror",
+]
+
+[[package]]
 name = "prost"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2015,6 +2046,7 @@ dependencies = [
  "either",
  "farmhash",
  "futures",
+ "hyper",
  "itertools",
  "lazy_static",
  "log",
@@ -2022,6 +2054,7 @@ dependencies = [
  "memcomparable",
  "num-traits",
  "paste",
+ "prometheus",
  "prost",
  "prost-types",
  "rand",
@@ -2274,6 +2307,7 @@ dependencies = [
  "either",
  "farmhash",
  "futures",
+ "hyper",
  "itertools",
  "lazy_static",
  "log",
@@ -2281,6 +2315,7 @@ dependencies = [
  "num-traits",
  "parking_lot",
  "paste",
+ "prometheus",
  "prost",
  "prost-types",
  "rand",

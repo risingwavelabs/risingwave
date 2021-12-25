@@ -226,7 +226,9 @@ mod tests {
                 bloom_false_positive: 0.1,
                 remote_dir: String::from(""),
                 checksum_algo: ChecksumAlg::Crc32c,
+                stats_enabled: false,
             },
+            None,
         ));
 
         let anchor = Bytes::from("qa");

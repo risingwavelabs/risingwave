@@ -14,6 +14,7 @@ pub mod bummock;
 pub mod hummock;
 pub mod keyspace;
 pub mod memory;
+pub mod metrics;
 pub mod object;
 pub mod panic_store;
 pub mod table;

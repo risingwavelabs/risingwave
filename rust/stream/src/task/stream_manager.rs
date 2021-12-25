@@ -14,6 +14,7 @@ use risingwave_common::util::sort_util::{fetch_orders, fetch_orders_with_pk};
 use risingwave_pb::{expr, stream_plan, stream_service};
 use risingwave_storage::hummock::HummockStateStore;
 use risingwave_storage::memory::MemoryStateStore;
+use risingwave_storage::object::ConnectionInfo;
 use risingwave_storage::{Keyspace, StateStore};
 use tokio::task::JoinHandle;
 
@@ -105,6 +106,13 @@ impl StreamManager {
     pub fn new(addr: SocketAddr, state_store: Option<&str>) -> Self {
         StreamManager {
             core: Mutex::new(StreamManagerCore::new(addr, state_store)),
+        }
+    }
+
+    pub fn boot_metrics_service(&self, listen_addr: String) {
+        let core = self.core.lock().unwrap();
+        if let StateStoreImpl::HummockStateStore(ss) = &core.state_store {
+            ss.boot_metrics_listener(listen_addr);
         }
     }
 
@@ -229,7 +237,7 @@ impl StreamManagerCore {
                 use risingwave_storage::hummock::{HummockOptions, HummockStorage};
                 use risingwave_storage::object::S3ObjectStore;
                 // TODO: initialize those settings in a yaml file or command line instead of
-                // hard-coding
+                // hard-coding (#2165).
                 StateStoreImpl::HummockStateStore(HummockStateStore::new(HummockStorage::new(
                     Arc::new(S3ObjectStore::new_with_minio(
                         minio.strip_prefix("hummock+").unwrap(),
@@ -240,7 +248,28 @@ impl StreamManagerCore {
                         bloom_false_positive: 0.1,
                         remote_dir: "hummock_001".to_string(),
                         checksum_algo: ChecksumAlg::Crc32c,
+                        stats_enabled: false,
                     },
+                    None,
+                )))
+            }
+            Some("hummock_s3") | Some("hummock-s3") => {
+                use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
+                use risingwave_storage::hummock::{HummockOptions, HummockStorage};
+                use risingwave_storage::object::S3ObjectStore;
+                let s3_test_conn_info = ConnectionInfo::new_for_test_account();
+                let s3 = S3ObjectStore::new(s3_test_conn_info, "s3-ut".to_string());
+                StateStoreImpl::HummockStateStore(HummockStateStore::new(HummockStorage::new(
+                    Arc::new(s3),
+                    HummockOptions {
+                        table_size: 256 * (1 << 20),
+                        block_size: 64 * (1 << 10),
+                        bloom_false_positive: 0.1,
+                        remote_dir: "hummock_001".to_string(),
+                        checksum_algo: ChecksumAlg::Crc32c,
+                        stats_enabled: true,
+                    },
+                    None,
                 )))
             }
             Some(other) => unimplemented!("{} state store is not supported", other),
