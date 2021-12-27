@@ -133,3 +133,9 @@ impl<'a> TryFrom<&'a ProstDataType> for IntervalType {
         Ok(IntervalType::new(prost.get_is_nullable()))
     }
 }
+
+impl ToString for IntervalUnit {
+    fn to_string(&self) -> String {
+        todo!()
+    }
+}

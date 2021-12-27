@@ -462,6 +462,22 @@ impl std::hash::Hash for ScalarImpl {
     }
 }
 
+impl ToString for ScalarImpl {
+    fn to_string(&self) -> String {
+        macro_rules! impl_to_string {
+      ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+        match self {
+          $( Self::$variant_name(ref inner) => {
+            inner.to_string()
+          }, )*
+        }
+      }
+    }
+
+        for_all_scalar_variants! {impl_to_string}
+    }
+}
+
 impl ScalarRefImpl<'_> {
     /// Serialize the scalar.
     pub fn serialize(
