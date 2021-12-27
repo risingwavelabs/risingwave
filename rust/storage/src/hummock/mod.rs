@@ -140,10 +140,11 @@ impl HummockStorage {
     }
 
     /// Return an iterator that scan from the begin key to the end key
-    pub async fn range_scan(
-        &self,
-        key_range: impl RangeBounds<Vec<u8>>,
-    ) -> HummockResult<UserKeyIterator> {
+    pub async fn range_scan<R, B>(&self, key_range: R) -> HummockResult<UserKeyIterator>
+    where
+        R: RangeBounds<B>,
+        B: AsRef<[u8]>,
+    {
         self.get_snapshot().range_scan(key_range).await
     }
 

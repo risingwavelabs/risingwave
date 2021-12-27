@@ -9,6 +9,7 @@
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(drain_filter)]
+#![feature(bound_map)]
 
 pub mod bummock;
 pub mod hummock;

@@ -1,4 +1,3 @@
-use std::cmp;
 use std::ops::Bound::*;
 use std::ops::RangeBounds;
 use std::sync::Arc;
@@ -8,9 +7,8 @@ use super::iterator::{
 };
 use super::key::{key_with_ts, user_key};
 use super::utils::bloom_filter_tables;
-use super::version_cmp::VersionedComparator;
 use super::version_manager::{Level, Snapshot, VersionManager};
-use super::{HummockResult, Table, TableIterator};
+use super::{HummockResult, TableIterator};
 
 pub struct HummockSnapshot {
     /// [`ts`] stands for timestamp and indicates when a new log appends to a SST.
@@ -90,73 +88,190 @@ impl HummockSnapshot {
         }
     }
 
-    pub async fn range_scan(
-        &self,
-        key_range: impl RangeBounds<Vec<u8>>,
-    ) -> HummockResult<UserKeyIterator> {
-        let mut table_not_too_left: Vec<Arc<Table>> = Vec::new();
-
+    pub async fn range_scan<R, B>(&self, key_range: R) -> HummockResult<UserKeyIterator>
+    where
+        R: RangeBounds<B>,
+        B: AsRef<[u8]>,
+    {
         // TODO: use the latest version once the ts-aware compaction is realized.
         // let scoped_snapshot = ScopedUnpinSnapshot::from_version_manager(self.vm.clone());
         // let snapshot = scoped_snapshot.snapshot();
         let snapshot = self.temp_version.clone();
 
-        let begin_fk = match key_range.start_bound() {
-            Unbounded => {
-                for table in self.vm.tables(snapshot)? {
-                    table_not_too_left.push(table.clone());
-                }
-                Unbounded
-            }
-            Included(begin_uk) => {
-                let begin_fk = key_with_ts(begin_uk.clone(), u64::MAX);
-                for table in self.vm.tables(snapshot)? {
-                    if VersionedComparator::compare_key(
-                        &table.meta.largest_key,
-                        begin_fk.as_slice(),
-                    ) != cmp::Ordering::Less
-                    {
-                        table_not_too_left.push(table.clone());
-                    }
-                }
-                Included(begin_fk)
-            }
-            Excluded(_) => {
-                todo!()
-            }
-        };
+        // Filter out tables that overlap with given `key_range`
+        let overlapped_tables = self.vm.tables(snapshot)?.into_iter().filter(|t| {
+            let table_start = user_key(t.meta.smallest_key.as_slice());
+            let table_end = user_key(t.meta.largest_key.as_slice());
 
-        let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
-        let end_fk = match key_range.end_bound() {
-            Unbounded => {
-                for table in table_not_too_left {
-                    table_iters.push(Box::new(TableIterator::new(table.clone())));
-                }
-                Unbounded
-            }
-            Included(end_uk) => {
-                let end_fk = key_with_ts(end_uk.clone(), u64::MIN);
-                for table in table_not_too_left {
-                    if VersionedComparator::compare_key(
-                        table.meta.smallest_key.as_slice(),
-                        end_fk.as_slice(),
-                    ) != cmp::Ordering::Greater
-                    {
-                        table_iters.push(Box::new(TableIterator::new(table.clone())));
-                    }
-                }
-                Included(end_fk)
-            }
-            Excluded(_) => {
-                todo!()
-            }
-        };
+            //        RANGE
+            // TABLE
+            let too_left = match key_range.start_bound() {
+                Included(range_start) => range_start.as_ref() > table_end,
+                Excluded(_) => unimplemented!("excluded begin key is not supported"),
+                Unbounded => false,
+            };
+            // RANGE
+            //        TABLE
+            let too_right = match key_range.end_bound() {
+                Included(range_end) => range_end.as_ref() < table_start,
+                Excluded(range_end) => range_end.as_ref() <= table_start,
+                Unbounded => false,
+            };
 
+            !too_left && !too_right
+        });
+
+        let table_iters =
+            overlapped_tables.map(|t| Box::new(TableIterator::new(t)) as BoxedHummockIterator);
         let si = SortedIterator::new(table_iters);
+
+        // TODO: avoid this clone
         Ok(UserKeyIterator::new_with_ts(
             si,
-            (begin_fk, end_fk),
+            (
+                key_range.start_bound().map(|b| b.as_ref().to_owned()),
+                key_range.end_bound().map(|b| b.as_ref().to_owned()),
+            ),
             self.ts,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::AtomicU64;
+    use std::sync::atomic::Ordering::SeqCst;
+
+    use super::*;
+    use crate::hummock::cloud::gen_remote_table;
+    use crate::hummock::iterator::test_utils::{
+        default_builder_opt_for_test, iterator_test_key_of, iterator_test_key_of_ts,
+    };
+    use crate::hummock::key::Timestamp;
+    use crate::hummock::value::HummockValue;
+    use crate::hummock::TableBuilder;
+    use crate::object::{InMemObjectStore, ObjectStore};
+
+    const TEST_KEY_TABLE_ID: u64 = 233;
+
+    async fn gen_and_upload_table(
+        obj_client: Arc<dyn ObjectStore>,
+        vm: &VersionManager,
+        table_id: u64,
+        kv_pairs: Vec<(usize, HummockValue<Vec<u8>>)>,
+    ) {
+        // FIXME: currently ts is the same as table_id
+        let ts = table_id as Timestamp;
+
+        let mut b = TableBuilder::new(default_builder_opt_for_test());
+        for kv in kv_pairs {
+            b.add(&iterator_test_key_of_ts(TEST_KEY_TABLE_ID, kv.0, ts), kv.1);
+        }
+        let (data, meta) = b.finish();
+        // get remote table
+        let table = gen_remote_table(obj_client, table_id, data, meta, None)
+            .await
+            .unwrap();
+        vm.add_l0_sst(table).await.unwrap();
+    }
+
+    macro_rules! assert_count {
+        ($snapshot:expr, $range:expr, $expect_count:expr) => {{
+            let mut it = $snapshot.range_scan::<_, Vec<u8>>($range).await.unwrap();
+            it.rewind().await.unwrap();
+            let mut count = 0;
+            while it.is_valid() {
+                count += 1;
+                it.next().await.unwrap();
+            }
+            assert_eq!(count, $expect_count);
+        }};
+    }
+
+    #[tokio::test]
+    async fn test_snapshot() {
+        let vm = Arc::new(VersionManager::new());
+        let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
+        let next_table_id = AtomicU64::new(1001);
+        let gen_table_id = || next_table_id.fetch_add(1, SeqCst);
+
+        gen_and_upload_table(
+            obj_client.clone(),
+            &vm,
+            gen_table_id(),
+            vec![
+                (1, HummockValue::Put(b"test".to_vec())),
+                (2, HummockValue::Put(b"test".to_vec())),
+            ],
+        )
+        .await;
+        let snapshot_1 = HummockSnapshot::new(vm.clone());
+        assert_count!(snapshot_1, .., 2);
+
+        gen_and_upload_table(
+            obj_client.clone(),
+            &vm,
+            gen_table_id(),
+            vec![
+                (1, HummockValue::Delete),
+                (3, HummockValue::Put(b"test".to_vec())),
+                (4, HummockValue::Put(b"test".to_vec())),
+            ],
+        )
+        .await;
+        let snapshot_2 = HummockSnapshot::new(vm.clone());
+        assert_count!(snapshot_2, .., 3);
+        assert_count!(snapshot_1, .., 2);
+
+        gen_and_upload_table(
+            obj_client.clone(),
+            &vm,
+            gen_table_id(),
+            vec![
+                (2, HummockValue::Delete),
+                (3, HummockValue::Delete),
+                (4, HummockValue::Delete),
+            ],
+        )
+        .await;
+        let snapshot_3 = HummockSnapshot::new(vm.clone());
+        assert_count!(snapshot_3, .., 0);
+        assert_count!(snapshot_2, .., 3);
+        assert_count!(snapshot_1, .., 2);
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_range_scan() {
+        let vm = Arc::new(VersionManager::new());
+        let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
+        let next_table_id = AtomicU64::new(1001);
+        let gen_table_id = || next_table_id.fetch_add(1, SeqCst);
+
+        gen_and_upload_table(
+            obj_client.clone(),
+            &vm,
+            gen_table_id(),
+            vec![
+                (1, HummockValue::Put(b"test".to_vec())),
+                (2, HummockValue::Put(b"test".to_vec())),
+                (3, HummockValue::Put(b"test".to_vec())),
+                (4, HummockValue::Put(b"test".to_vec())),
+            ],
+        )
+        .await;
+
+        macro_rules! key {
+            ($idx:expr) => {
+                user_key(&iterator_test_key_of(TEST_KEY_TABLE_ID, $idx)).to_vec()
+            };
+        }
+
+        let snapshot = HummockSnapshot::new(vm.clone());
+        assert_count!(snapshot, key!(2)..=key!(3), 2);
+        assert_count!(snapshot, key!(2)..key!(3), 1);
+        assert_count!(snapshot, key!(2).., 3);
+        assert_count!(snapshot, ..=key!(3), 3);
+        assert_count!(snapshot, ..key!(3), 2);
+        assert_count!(snapshot, .., 4);
     }
 }
