@@ -45,7 +45,7 @@ pub struct BummockTable {
 
 #[async_trait::async_trait]
 impl ScannableTable for BummockTable {
-    fn iter(&self) -> Result<Box<dyn TableIter>> {
+    async fn iter(&self) -> Result<Box<dyn TableIter>> {
         unimplemented!()
     }
 

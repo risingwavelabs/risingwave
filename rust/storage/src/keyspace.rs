@@ -115,8 +115,8 @@ impl<S: StateStore> Keyspace<S> {
     }
 
     /// Get an iterator with the prefix of this keyspace.
-    pub fn iter(&self) -> S::Iter {
-        self.store.iter(self.key())
+    pub async fn iter(&self) -> Result<S::Iter> {
+        self.store.iter(self.key()).await
     }
 
     /// Get the underlying state store.

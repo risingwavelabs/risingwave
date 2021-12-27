@@ -46,13 +46,13 @@ impl<S: StateStore> MViewTable<S> {
     }
 
     // TODO(MrCroxx): Refactor this after statestore iter is finished.
-    pub fn iter(&self) -> MViewTableIter<S> {
-        MViewTableIter::new(
-            self.keyspace.iter(),
+    pub async fn iter(&self) -> Result<MViewTableIter<S>> {
+        Ok(MViewTableIter::new(
+            self.keyspace.iter().await?,
             self.keyspace.key().to_owned(),
             self.schema.clone(),
             self.pk_columns.clone(),
-        )
+        ))
     }
 
     // TODO(MrCroxx): More interfaces are needed besides cell get.
@@ -106,10 +106,6 @@ impl<S: StateStore> MViewTableIter<S> {
 
 #[async_trait::async_trait]
 impl<S: StateStore> TableIter for MViewTableIter<S> {
-    async fn open(&mut self) -> Result<()> {
-        self.inner.open().await
-    }
-
     async fn next(&mut self) -> Result<Option<Row>> {
         let mut pk_buf = vec![];
         let mut restored = 0;
@@ -410,8 +406,7 @@ mod tests {
         state.delete(Row(vec![Some(2_i32.into()), Some(22_i32.into())]));
         state.flush().await.unwrap();
 
-        let mut iter = table.iter();
-        iter.open().await.unwrap();
+        let mut iter = table.iter().await.unwrap();
 
         let res = iter.next().await.unwrap();
         assert!(res.is_some());
@@ -521,10 +516,8 @@ mod tests {
         state_1.flush().await.unwrap();
         state_2.flush().await.unwrap();
 
-        let mut iter_1 = table_1.iter();
-        let mut iter_2 = table_2.iter();
-        iter_1.open().await.unwrap();
-        iter_2.open().await.unwrap();
+        let mut iter_1 = table_1.iter().await.unwrap();
+        let mut iter_2 = table_2.iter().await.unwrap();
 
         let res_1_1 = iter_1.next().await.unwrap();
         assert!(res_1_1.is_some());

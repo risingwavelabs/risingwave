@@ -65,21 +65,6 @@ impl StateStore for HummockStateStore {
         Ok(value)
     }
 
-    async fn scan(&self, prefix: &[u8], limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
-        let mut kvs = Vec::with_capacity(limit.unwrap_or_default());
-        let mut iter = self.iter(prefix);
-        iter.open().await?;
-
-        for _ in 0..limit.unwrap_or(usize::MAX) {
-            match iter.next().await? {
-                Some(kv) => kvs.push(kv),
-                None => break,
-            }
-        }
-
-        Ok(kvs)
-    }
-
     async fn ingest_batch(&self, mut kv_pairs: Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
         // TODO: reduce the redundant vec clone
         kv_pairs.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
@@ -94,40 +79,23 @@ impl StateStore for HummockStateStore {
         Ok(())
     }
 
-    fn iter(&self, prefix: &[u8]) -> Self::Iter {
-        HummockStateStoreIter {
-            iter: None,
-            prefix: prefix.to_vec(),
-            storage: self.storage.clone(),
-        }
+    async fn iter(&self, prefix: &[u8]) -> Result<Self::Iter> {
+        let range = prefix.to_owned()..next_key(prefix);
+        let mut inner = self.storage.range_scan(range).await?;
+        inner.rewind().await?;
+        Ok(HummockStateStoreIter(inner))
     }
 }
 
-/// TODO: if `.iter()` is async, we can directly forward `UserKeyIterator` to user.
-pub struct HummockStateStoreIter {
-    iter: Option<UserKeyIterator>,
-    prefix: Vec<u8>,
-    storage: HummockStorage,
-}
+pub struct HummockStateStoreIter(UserKeyIterator);
 
 #[async_trait]
 impl StateStoreIter for HummockStateStoreIter {
     // TODO: directly return `&[u8]` to user instead of `Bytes`.
     type Item = (Bytes, Bytes);
 
-    async fn open(&mut self) -> Result<()> {
-        assert!(self.iter.is_none());
-
-        let range = self.prefix.clone()..next_key(&self.prefix);
-        let mut iter = self.storage.range_scan(range).await?;
-        iter.rewind().await?;
-        self.iter = Some(iter);
-
-        Ok(())
-    }
-
     async fn next(&mut self) -> Result<Option<Self::Item>> {
-        let iter = self.iter.as_mut().expect("Hummock iterator not opened!");
+        let iter = &mut self.0;
 
         if iter.is_valid() {
             let kv = (

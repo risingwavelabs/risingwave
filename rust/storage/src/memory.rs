@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{btree_map, BTreeMap};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -89,52 +89,36 @@ impl StateStore for MemoryStateStore {
         Ok(inner.get(key).cloned())
     }
 
-    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
-        self.ingest_batch_inner(kv_pairs).await
-    }
-
     async fn scan(&self, prefix: &[u8], limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
         self.scan_inner(prefix, limit).await
     }
 
-    fn iter(&self, prefix: &[u8]) -> Self::Iter {
-        MemoryStateStoreIter::new(self.clone(), prefix.to_owned())
+    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
+        self.ingest_batch_inner(kv_pairs).await
+    }
+
+    async fn iter(&self, prefix: &[u8]) -> Result<Self::Iter> {
+        #[allow(clippy::mutable_key_type)]
+        let snapshot: BTreeMap<_, _> = self
+            .inner
+            .lock()
+            .await
+            .iter()
+            .filter(|(k, _v)| k.starts_with(prefix))
+            .map(|(k, v)| (k.to_owned(), v.to_owned()))
+            .collect();
+
+        Ok(MemoryStateStoreIter(snapshot.into_iter()))
     }
 }
 
-pub struct MemoryStateStoreIter {
-    store: MemoryStateStore,
-    prefix: Vec<u8>,
-    iter: Option<<BTreeMap<Bytes, Bytes> as IntoIterator>::IntoIter>,
-}
-
-impl MemoryStateStoreIter {
-    fn new(store: MemoryStateStore, prefix: Vec<u8>) -> Self {
-        Self {
-            store,
-            prefix,
-            iter: None,
-        }
-    }
-}
+pub struct MemoryStateStoreIter(btree_map::IntoIter<Bytes, Bytes>);
 
 #[async_trait]
 impl StateStoreIter for MemoryStateStoreIter {
     type Item = (Bytes, Bytes);
 
-    async fn open(&mut self) -> Result<()> {
-        debug_assert!(self.iter.is_none());
-        #[allow(clippy::mutable_key_type)]
-        let mut snapshot = {
-            let inner = self.store.inner.lock().await;
-            inner.clone()
-        };
-        snapshot.retain(|key, _| key.starts_with(&self.prefix[..]));
-        self.iter = Some(snapshot.into_iter());
-        Ok(())
-    }
-
     async fn next(&mut self) -> Result<Option<Self::Item>> {
-        Ok(self.iter.as_mut().unwrap().next())
+        Ok(self.0.next())
     }
 }

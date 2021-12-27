@@ -10,14 +10,15 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataTypeRef;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::RowSeqScanNode;
-use risingwave_storage::table::TableIterRef;
+use risingwave_storage::table::{ScannableTable, TableIterRef};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
 /// Executor that scans data from row table
 pub struct RowSeqScanExecutor {
-    /// An iterator to scan MemoryStateStore.
-    iter: TableIterRef,
+    table: Arc<dyn ScannableTable>,
+    /// An iterator to scan StateStore.
+    iter: Option<TableIterRef>,
     data_types: Vec<DataTypeRef>,
     column_ids: Vec<usize>,
     schema: Schema,
@@ -25,13 +26,14 @@ pub struct RowSeqScanExecutor {
 
 impl RowSeqScanExecutor {
     pub fn new(
-        iter: TableIterRef,
+        table: Arc<dyn ScannableTable>,
         data_types: Vec<DataTypeRef>,
         column_ids: Vec<usize>,
         schema: Schema,
     ) -> Self {
         Self {
-            iter,
+            table,
+            iter: None,
             data_types,
             column_ids,
             schema,
@@ -61,28 +63,27 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
             .collect_vec();
         let schema = schema.clone();
 
-        Ok(Box::new(Self {
-            data_types,
-            column_ids: seq_scan_node
-                .get_column_ids()
-                .iter()
-                .map(|i| *i as usize)
-                .collect_vec(),
-            iter: table.iter()?,
-            schema,
-        }))
+        let column_ids = seq_scan_node
+            .get_column_ids()
+            .iter()
+            .map(|i| *i as usize)
+            .collect_vec();
+
+        Ok(Box::new(Self::new(table, data_types, column_ids, schema)))
     }
 }
 
 #[async_trait::async_trait]
 impl Executor for RowSeqScanExecutor {
     async fn open(&mut self) -> Result<()> {
-        self.iter.open().await?;
+        self.iter = Some(self.table.iter().await?);
         Ok(())
     }
 
     async fn next(&mut self) -> Result<Option<DataChunk>> {
-        match self.iter.next().await? {
+        let iter = self.iter.as_mut().expect("executor not open");
+
+        match iter.next().await? {
             Some(value_row) => {
                 // Scan through value pairs.
                 // Make rust analyzer happy.

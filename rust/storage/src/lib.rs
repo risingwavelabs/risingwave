@@ -38,22 +38,34 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     /// Scan `limit` number of keys from the keyspace. If `limit` is `None`, scan all elements.
     ///
-    /// TODO: this interface should be refactored to return an iterator in the future. And in some
-    /// cases, the scan can be optimized into a `multi_get` request.
-    async fn scan(&self, prefix: &[u8], limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>>;
+    /// By default, this simply calls `StateStore::iter` to fetch elements.
+    ///
+    /// TODO: in some cases, the scan can be optimized into a `multi_get` request.
+    async fn scan(&self, prefix: &[u8], limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
+        let mut kvs = Vec::with_capacity(limit.unwrap_or_default());
+        let mut iter = self.iter(prefix).await?;
+
+        for _ in 0..limit.unwrap_or(usize::MAX) {
+            match iter.next().await? {
+                Some(kv) => kvs.push(kv),
+                None => break,
+            }
+        }
+
+        Ok(kvs)
+    }
 
     /// Ingest a batch of data into the state store. One write batch should never contain operation
     /// on the same key. e.g. Put(233, x) then Delete(233).
     async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>) -> Result<()>;
 
-    fn iter(&self, prefix: &[u8]) -> Self::Iter;
+    /// Open and return an iterator for given `prefix`.
+    async fn iter(&self, prefix: &[u8]) -> Result<Self::Iter>;
 }
 
 #[async_trait]
 pub trait StateStoreIter: Send + 'static {
     type Item;
-
-    async fn open(&mut self) -> Result<()>;
 
     async fn next(&mut self) -> Result<Option<Self::Item>>;
 }

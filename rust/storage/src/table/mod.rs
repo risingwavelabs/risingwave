@@ -31,18 +31,21 @@ pub trait TableManager: Sync + Send + AsRef<dyn Any> {
 
 #[async_trait::async_trait]
 pub trait TableIter: Send {
-    async fn open(&mut self) -> Result<()>;
     async fn next(&mut self) -> Result<Option<Row>>;
 }
 
 #[async_trait::async_trait]
 pub trait ScannableTable: Sync + Send + Any {
-    fn iter(&self) -> Result<TableIterRef>;
+    /// Open and return an iterator.
+    async fn iter(&self) -> Result<TableIterRef>;
+
     /// Scan data of specified column ids
     ///
     /// In future, it will accept `predicates` for interested filtering conditions.
     async fn get_data_by_columns(&self, column_ids: &[i32]) -> Result<BummockResult>;
+
     fn into_any(self: Arc<Self>) -> Arc<dyn Any + Sync + Send>;
+
     fn schema(&self) -> Schema;
 }
 

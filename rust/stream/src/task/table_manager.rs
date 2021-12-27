@@ -59,11 +59,11 @@ impl TableImpl {
 
 #[async_trait::async_trait]
 impl ScannableTable for TableImpl {
-    fn iter(&self) -> Result<TableIterRef> {
+    async fn iter(&self) -> Result<TableIterRef> {
         match self {
-            TableImpl::Bummock(t) => t.iter(),
-            TableImpl::MViewTable(t) => Ok(Box::new(t.iter())),
-            TableImpl::TestMViewTable(t) => Ok(Box::new(t.iter())),
+            TableImpl::Bummock(t) => t.iter().await,
+            TableImpl::MViewTable(t) => Ok(Box::new(t.iter().await?)),
+            TableImpl::TestMViewTable(t) => Ok(Box::new(t.iter().await?)),
         }
     }
 

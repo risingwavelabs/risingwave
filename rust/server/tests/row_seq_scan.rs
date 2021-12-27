@@ -12,6 +12,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::Keyspace;
 use risingwave_stream::executor::{MViewTable, ManagedMViewState};
+use risingwave_stream::task::TableImpl;
 
 #[tokio::test]
 async fn test_row_seq_scan() -> Result<()> {
@@ -32,15 +33,15 @@ async fn test_row_seq_scan() -> Result<()> {
         orderings.clone(),
     );
 
-    let table = Arc::new(MViewTable::new(
+    let table = TableImpl::TestMViewTable(Arc::new(MViewTable::new(
         keyspace.clone(),
         schema.clone(),
         pk_columns.clone(),
         orderings,
-    ));
+    )));
 
     let mut executor = RowSeqScanExecutor::new(
-        Box::new(table.iter()),
+        Arc::new(table),
         schema
             .fields
             .iter()
