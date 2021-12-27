@@ -14,9 +14,9 @@ use crate::executor::managed_state::flush_status::FlushStatus;
 use crate::executor::managed_state::OrderedRow;
 use crate::executor::serialize_cell_idx;
 
-/// This state is used for `[offset...offset+limit)` part in the `TopNExecutor`.
+/// This state is used for `[offset, offset+limit)` part in the `TopNExecutor`.
 ///
-/// Since the elements in this range may be moved to `[0..offset)` or `[offset+limit..+inf)`,
+/// Since the elements in this range may be moved to `[0, offset)` or `[offset+limit, +inf)`,
 /// we would like to cache the two ends of the range. Since this would call for a `reverse iterator`
 /// from `Hummock`, we temporarily adopt a all-or-nothing cache policy instead of a top-n and a
 /// bottom-n policy.
@@ -150,7 +150,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         let top_n_size = self.top_n.len();
         let bottom_n_size = self.bottom_n.len();
         let insert_to_cache = if top_n_size > bottom_n_size {
-            // Since `>`, directly `unwrap`
+            // top_n_size must > 0, directly `unwrap`
             if self.top_n.first_key_value().unwrap().0 < &key {
                 &mut self.top_n
             } else {
@@ -169,14 +169,18 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
     pub async fn delete(&mut self, key: &OrderedRow) -> Result<Option<Row>> {
         let prev_top_n_entry = self.top_n.remove(key);
         let prev_bottom_n_entry = self.bottom_n.remove(key);
-        debug_assert!(prev_top_n_entry.is_some() || prev_bottom_n_entry.is_some());
         FlushStatus::do_delete(self.flush_buffer.entry(key.clone()));
         self.total_count -= 1;
         // If we have nothing in both caches, we have to scan from the storage.
         if self.top_n.is_empty() && self.bottom_n.is_empty() && self.total_count > 0 {
             self.scan_and_merge().await?;
         }
-        Ok(prev_top_n_entry)
+        let value = match (prev_top_n_entry, prev_bottom_n_entry) {
+            (None, None) => None,
+            (Some(row), None) | (None, Some(row)) => Some(row),
+            (Some(_), Some(_)) => unreachable!(),
+        };
+        Ok(value)
     }
 
     /// The same as the one in `ManagedTopNState`.
@@ -328,17 +332,6 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
     #[cfg(test)]
     fn get_cache_len(&self) -> usize {
         self.top_n.len() + self.bottom_n.len()
-    }
-
-    #[cfg(test)]
-    fn print_cached_elements(&self) {
-        self.bottom_n
-            .iter()
-            .for_each(|(key, val)| println!("{:?}", (key, val)));
-        println!("bottom_n above\ntop_n below\n");
-        self.top_n
-            .iter()
-            .for_each(|(key, val)| println!("{:?}", (key, val)));
     }
 }
 

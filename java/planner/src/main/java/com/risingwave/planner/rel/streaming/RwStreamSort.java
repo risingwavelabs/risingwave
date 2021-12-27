@@ -12,6 +12,7 @@ import com.risingwave.proto.plan.OrderType;
 import com.risingwave.proto.streaming.plan.StreamNode;
 import com.risingwave.proto.streaming.plan.TopNNode;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptRule;
@@ -48,34 +49,32 @@ public class RwStreamSort extends Sort implements RisingWaveStreamingRel {
     var primaryKeyIndices =
         ((RisingWaveRelMetadataQuery) getCluster().getMetadataQuery()).getPrimaryKeyIndices(this);
 
-    List<ColumnOrder> columnOrders = new ArrayList<ColumnOrder>();
-    List<RelFieldCollation> rfc = collation.getFieldCollations();
-    for (RelFieldCollation relFieldCollation : rfc) {
-      RexInputRef inputRef =
-          getCluster().getRexBuilder().makeInputRef(input, relFieldCollation.getFieldIndex());
-      DataType returnType = ((RisingWaveDataType) inputRef.getType()).getProtobufType();
-      InputRefExpr inputRefExpr =
-          InputRefExpr.newBuilder().setColumnIdx(inputRef.getIndex()).build();
-      RelFieldCollation.Direction dir = relFieldCollation.getDirection();
-      OrderType orderType;
-      if (dir == RelFieldCollation.Direction.ASCENDING) {
-        orderType = OrderType.ASCENDING;
-      } else if (dir == RelFieldCollation.Direction.DESCENDING) {
-        orderType = OrderType.DESCENDING;
+    var orderTypes = new ArrayList<OrderType>();
+    List<RelFieldCollation> relFieldCollations = collation.getFieldCollations();
+    HashMap<Integer, RelFieldCollation> inputIndexToCollation = new HashMap<>();
+    for (var relFieldCollation : relFieldCollations) {
+      inputIndexToCollation.put(relFieldCollation.getFieldIndex(), relFieldCollation);
+    }
+    for (var primaryKeyIndex : primaryKeyIndices) {
+      if (inputIndexToCollation.containsKey(primaryKeyIndex)) {
+        var relFieldCollation = inputIndexToCollation.get(primaryKeyIndex);
+        RelFieldCollation.Direction dir = relFieldCollation.getDirection();
+        OrderType orderType;
+        if (dir == RelFieldCollation.Direction.ASCENDING) {
+          orderType = OrderType.ASCENDING;
+        } else if (dir == RelFieldCollation.Direction.DESCENDING) {
+          orderType = OrderType.DESCENDING;
+        } else {
+          throw new SerializationException(String.format("%s direction not supported", dir));
+        }
+        orderTypes.add(orderType);
       } else {
-        throw new SerializationException(String.format("%s direction not supported", dir));
+        orderTypes.add(OrderType.ASCENDING);
       }
-      ColumnOrder columnOrder =
-          ColumnOrder.newBuilder()
-              .setOrderType(orderType)
-              .setInputRef(inputRefExpr)
-              .setReturnType(returnType)
-              .build();
-      columnOrders.add(columnOrder);
     }
 
     TopNNode.Builder topnBuilder = TopNNode.newBuilder();
-    topnBuilder.addAllColumnOrders(columnOrders);
+    topnBuilder.addAllOrderTypes(orderTypes);
     if (fetch != null) {
       topnBuilder.setLimit(RexLiteral.intValue(fetch));
     }

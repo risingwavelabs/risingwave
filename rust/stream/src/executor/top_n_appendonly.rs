@@ -18,7 +18,7 @@ use crate::executor::managed_state::OrderedRow;
 use crate::executor::{Executor, Message, PkIndices, StreamChunk};
 
 #[async_trait]
-pub trait TopNExecutor: Executor {
+pub trait TopNExecutorBase: Executor {
     /// Apply the chunk to the dirty state and get the diffs.
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<StreamChunk>;
 
@@ -31,9 +31,7 @@ pub trait TopNExecutor: Executor {
 /// We remark that topN executor diffs from aggregate executor as it must output diffs
 /// whenever it applies a batch of input data. Therefore, topN executor flushes data only instead of
 /// computing diffs and flushing when receiving a barrier.
-pub async fn top_n_executor_next<S: StateStore>(
-    executor: &mut AppendOnlyTopNExecutor<S>,
-) -> Result<Message> {
+pub async fn top_n_executor_next(executor: &mut dyn TopNExecutorBase) -> Result<Message> {
     let msg = executor.input().next().await?;
     let res = match msg {
         Message::Chunk(chunk) => Ok(Message::Chunk(executor.apply_chunk(chunk).await?)),
@@ -74,8 +72,6 @@ pub struct AppendOnlyTopNExecutor<S: StateStore> {
     /// Marks whether this is first-time execution. If yes, we need to fill in the cache from
     /// storage.
     first_execution: bool,
-    /// Cache size for the two states.
-    cache_size: Option<usize>,
 }
 
 impl<S: StateStore> AppendOnlyTopNExecutor<S> {
@@ -118,7 +114,6 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
             pk_indices,
             keyspace,
             first_execution: true,
-            cache_size,
         }
     }
 
@@ -144,7 +139,7 @@ impl<S: StateStore> Executor for AppendOnlyTopNExecutor<S> {
 }
 
 #[async_trait]
-impl<S: StateStore> TopNExecutor for AppendOnlyTopNExecutor<S> {
+impl<S: StateStore> TopNExecutorBase for AppendOnlyTopNExecutor<S> {
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<StreamChunk> {
         if self.first_execution {
             self.managed_lower_state.fill_in_cache().await?;

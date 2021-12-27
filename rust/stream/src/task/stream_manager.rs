@@ -10,7 +10,9 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::{build_from_prost as build_expr_from_prost, AggKind};
 use risingwave_common::types::build_from_prost as build_type_from_prost;
 use risingwave_common::util::addr::{get_host_port, is_local_address};
-use risingwave_common::util::sort_util::{fetch_orders, fetch_orders_with_pk};
+use risingwave_common::util::sort_util::{
+    build_from_prost as build_order_type_from_prost, fetch_orders,
+};
 use risingwave_pb::{expr, stream_plan, stream_service};
 use risingwave_storage::hummock::HummockStateStore;
 use risingwave_storage::memory::MemoryStateStore;
@@ -509,16 +511,18 @@ impl StreamManagerCore {
                 )))
             }
             AppendOnlyTopNNode(top_n_node) => {
-                let _column_orders = &top_n_node.column_orders;
-                // FIXME: change when refactor TopNNode together
-                let order_types = vec![];
+                let order_types = top_n_node
+                    .get_order_types()
+                    .iter()
+                    .map(build_order_type_from_prost)
+                    .collect::<Result<Vec<_>>>()?;
+                assert_eq!(order_types.len(), pk_indices.len());
                 let limit = if top_n_node.limit == 0 {
                     None
                 } else {
                     Some(top_n_node.limit as usize)
                 };
                 let cache_size = Some(1024);
-                // FIXME: change when refactor TopNNode together
                 let total_count = (0, 0);
                 Ok(Box::new(AppendOnlyTopNExecutor::new(
                     input.remove(0),
@@ -531,20 +535,27 @@ impl StreamManagerCore {
                 )))
             }
             TopNNode(top_n_node) => {
-                let column_orders = &top_n_node.column_orders;
-                let input = input.remove(0);
-                let order_paris = fetch_orders_with_pk(column_orders, input.schema(), &pk_indices)?;
+                let order_types = top_n_node
+                    .get_order_types()
+                    .iter()
+                    .map(build_order_type_from_prost)
+                    .collect::<Result<Vec<_>>>()?;
+                assert_eq!(order_types.len(), pk_indices.len());
                 let limit = if top_n_node.limit == 0 {
                     None
                 } else {
                     Some(top_n_node.limit as usize)
                 };
+                let cache_size = Some(1024);
+                let total_count = (0, 0, 0);
                 Ok(Box::new(TopNExecutor::new(
-                    input,
-                    Arc::new(order_paris),
-                    limit,
-                    top_n_node.offset as usize,
+                    input.remove(0),
+                    order_types,
+                    (top_n_node.offset as usize, limit),
                     pk_indices,
+                    Keyspace::executor_root(store.clone(), self.generate_mock_executor_id()),
+                    cache_size,
+                    total_count,
                 )))
             }
             HashJoinNode(hash_join_node) => {

@@ -12,6 +12,18 @@ use crate::executor::managed_state::top_n::variants::*;
 use crate::executor::managed_state::OrderedRow;
 use crate::executor::serialize_cell_idx;
 
+/// This state is used for several ranges (e.g `[0, offset)`, `[offset+limit, +inf)` of elements in
+/// the `AppendOnlyTopNExecutor` and `TopNExecutor`. For these ranges, we only care about one of the
+/// ends of the range, either the largest or the smallest, as that end would frequently deal with
+/// elements being removed from or inserted into the range. If interested in both ends, one should
+/// refer to `ManagedTopNBottomNState`.
+///
+/// We remark that `TOP_N_TYPE` indicates which end we are interested in, and how we should
+/// serialize and deserialize the `OrderedRow` and its binary representations. Since `scan` from the
+/// storage always starts with the least key, we need to reversely serialize an `OrderedRow` if we
+/// are interested in the larger end. This can also be solved by a `reverse_scan` api
+/// from the storage. However, `reverse_scan` is typically slower than `forward_scan` when it comes
+/// to LSM tree based storage.
 pub struct ManagedTopNState<S: StateStore, const TOP_N_TYPE: usize> {
     /// Cache.
     top_n: BTreeMap<OrderedRow, Row>,
@@ -213,9 +225,8 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         Ok(())
     }
 
-    async fn delete(&mut self, key: &OrderedRow) -> Result<Option<Row>> {
+    pub async fn delete(&mut self, key: &OrderedRow) -> Result<Option<Row>> {
         let prev_entry = self.top_n.remove(key);
-        debug_assert!(prev_entry.is_some());
         FlushStatus::do_delete(self.flush_buffer.entry(key.clone()));
         self.total_count -= 1;
         // If we have nothing in the cache, we have to scan from the storage.
@@ -254,13 +265,10 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                 let mut pk_vec = pk.to_vec();
                 let pk_vec_len = pk_vec.len();
                 let pk_without_cell_idx = &mut pk_vec[0..pk_vec_len - 4];
-                match TOP_N_TYPE {
-                    TOP_N_MAX => {
-                        pk_without_cell_idx
-                            .iter_mut()
-                            .for_each(|byte| *byte = !*byte);
-                    }
-                    _ => unreachable!(),
+                if TOP_N_TYPE == TOP_N_MAX {
+                    pk_without_cell_idx
+                        .iter_mut()
+                        .for_each(|byte| *byte = !*byte);
                 };
                 let ordered_row = self
                     .ordered_row_deserializer
