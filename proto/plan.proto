@@ -126,7 +126,8 @@ message CreateStreamNode {
   enum RowFormatType {
     JSON = 0;
     PROTOBUF = 1;
-    AVRO = 2;
+    DEBEZIUM_JSON = 2;
+    AVRO = 3;
   }
   TableRefId table_ref_id = 1;
   repeated ColumnDesc column_descs = 2;

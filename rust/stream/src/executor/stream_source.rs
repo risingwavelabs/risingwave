@@ -79,12 +79,16 @@ impl StreamSourceExecutor {
     }
 
     fn refill_row_id_column(&mut self, chunk: &mut StreamChunk) {
-        if let Some(idx) = self
-            .column_ids
-            .iter()
-            .position(|column_id| *column_id == self.source_desc.row_id_column_id)
-        {
-            chunk.columns[idx] = self.gen_row_column(chunk.cardinality());
+        if let Some(row_id_index) = self.source_desc.row_id_index {
+            let row_id_column_id = self.source_desc.columns[row_id_index as usize].column_id;
+
+            if let Some(idx) = self
+                .column_ids
+                .iter()
+                .position(|column_id| *column_id == row_id_column_id)
+            {
+                chunk.columns[idx] = self.gen_row_column(chunk.cardinality());
+            }
         }
     }
 }
@@ -94,7 +98,7 @@ impl Executor for StreamSourceExecutor {
     async fn next(&mut self) -> Result<Message> {
         if self.first_execution {
             self.reader.open().await?;
-            self.first_execution = false;
+            self.first_execution = false
         }
 
         // FIXME: may lose message
@@ -106,6 +110,7 @@ impl Executor for StreamSourceExecutor {
             if !matches!(self.source_desc.source.as_ref(), SourceImpl::Table(_)) {
               self.refill_row_id_column(&mut chunk);
             }
+
             Ok(Message::Chunk(chunk))
           }
           message = self.barrier_receiver.next() => {

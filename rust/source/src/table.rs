@@ -55,6 +55,7 @@ impl TableSource {
                 data_type: c.data_type.clone(),
                 column_id: c.column_id,
                 skip_parse: false,
+                is_primary: false,
             })
             .collect();
 

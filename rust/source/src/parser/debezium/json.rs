@@ -149,24 +149,28 @@ mod test {
                 data_type: Int32Type::create(false),
                 column_id: 0,
                 skip_parse: false,
+                is_primary: false,
             },
             SourceColumnDesc {
                 name: "name".to_string(),
                 data_type: StringType::create(false, 255, DataTypeKind::Varchar),
                 column_id: 1,
                 skip_parse: false,
+                is_primary: false,
             },
             SourceColumnDesc {
                 name: "description".to_string(),
                 data_type: StringType::create(false, 512, DataTypeKind::Varchar),
                 column_id: 2,
                 skip_parse: false,
+                is_primary: false,
             },
             SourceColumnDesc {
                 name: "weight".to_string(),
                 data_type: Float64Type::create(false),
                 column_id: 3,
                 skip_parse: false,
+                is_primary: false,
             },
         ];
 

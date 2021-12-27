@@ -271,30 +271,35 @@ mod tests {
                 data_type: Int32Type::create(false),
                 column_id: 0,
                 skip_parse: false,
+                is_primary: false,
             },
             SourceColumnDesc {
                 name: "address".to_string(),
                 data_type: StringType::create(false, 16, DataTypeKind::Char),
                 column_id: 1,
                 skip_parse: false,
+                is_primary: false,
             },
             SourceColumnDesc {
                 name: "city".to_string(),
                 data_type: StringType::create(false, 8, DataTypeKind::Char),
                 column_id: 2,
                 skip_parse: false,
+                is_primary: false,
             },
             SourceColumnDesc {
                 name: "zipcode".to_string(),
                 data_type: Int64Type::create(false),
                 column_id: 3,
                 skip_parse: false,
+                is_primary: false,
             },
             SourceColumnDesc {
                 name: "rate".to_string(),
                 data_type: Float32Type::create(false),
                 column_id: 4,
                 skip_parse: false,
+                is_primary: false,
             },
         ];
 

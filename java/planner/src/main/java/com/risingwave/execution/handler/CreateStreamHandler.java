@@ -1,6 +1,7 @@
 package com.risingwave.execution.handler;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableList;
 import com.google.protobuf.Any;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.ColumnDesc;
@@ -29,14 +30,18 @@ import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.Messages;
 import com.risingwave.sql.node.SqlCreateStream;
 import com.risingwave.sql.node.SqlTableOption;
+import com.risingwave.sql.tree.ColumnDefinition;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import org.apache.calcite.sql.SqlCharStringLiteral;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlColumnDeclaration;
 import org.apache.calcite.sql.validate.SqlValidator;
 
-/** Handler of <code>CREATE STREAM</code> statement */
+/**
+ * Handler of <code>CREATE STREAM</code> statement
+ */
 public class CreateStreamHandler implements SqlHandler {
   @Override
   public DdlResult handle(SqlNode ast, ExecutionContext context) {
@@ -60,7 +65,16 @@ public class CreateStreamHandler implements SqlHandler {
   private static PlanFragment serialize(TableCatalog table) {
     TableCatalog.TableId tableId = table.getId();
     CreateStreamNode.Builder createStreamNodeBuilder = CreateStreamNode.newBuilder();
-    for (ColumnCatalog columnCatalog : table.getAllColumns(true)) {
+
+    ImmutableList<ColumnCatalog> allColumns = table.getAllColumns(false);
+    createStreamNodeBuilder.setRowIdIndex(-1);
+
+    if (allColumns.stream().noneMatch(column -> column.getDesc().isPrimary())) {
+      allColumns = table.getAllColumns(true);
+      createStreamNodeBuilder.setRowIdIndex(0);
+    }
+
+    for (ColumnCatalog columnCatalog : allColumns) {
       com.risingwave.proto.plan.ColumnDesc.Builder columnDescBuilder =
           com.risingwave.proto.plan.ColumnDesc.newBuilder();
 
@@ -69,12 +83,10 @@ public class CreateStreamHandler implements SqlHandler {
           .setEncoding(com.risingwave.proto.plan.ColumnDesc.ColumnEncodingType.RAW)
           .setColumnType(columnCatalog.getDesc().getDataType().getProtobufType())
           .setColumnId(columnCatalog.getId().getValue())
-          .setIsPrimary(false);
+          .setIsPrimary(columnCatalog.getDesc().isPrimary());
 
       createStreamNodeBuilder.addColumnDescs(columnDescBuilder);
     }
-
-    createStreamNodeBuilder.setRowIdIndex(0);
 
     createStreamNodeBuilder.putAllProperties(table.getProperties());
 
@@ -87,6 +99,9 @@ public class CreateStreamHandler implements SqlHandler {
         break;
       case "protobuf":
         createStreamNodeBuilder.setFormat(CreateStreamNode.RowFormatType.PROTOBUF);
+        break;
+      case "debezium-json":
+        createStreamNodeBuilder.setFormat(CreateStreamNode.RowFormatType.DEBEZIUM_JSON);
         break;
       default:
         throw new PgException(PgErrorCode.PROTOCOL_VIOLATION, "unsupported row format");
@@ -118,6 +133,9 @@ public class CreateStreamHandler implements SqlHandler {
     String tableName = sql.getName().getSimple();
     CreateTableInfo.Builder createStreamInfoBuilder = CreateTableInfo.builder(tableName);
 
+    Set<String> primaryColumns =
+        sql.getPrimaryColumns().stream().map(ColumnDefinition::ident).collect(Collectors.toSet());
+
     if (sql.getColumnList() != null) {
       SqlValidator sqlConverter = SqlConverter.builder(context).build().getValidator();
 
@@ -127,7 +145,7 @@ public class CreateStreamHandler implements SqlHandler {
         ColumnDesc columnDesc =
             new ColumnDesc(
                 (RisingWaveDataType) columnDef.dataType.deriveType(sqlConverter),
-                false,
+                primaryColumns.contains(columnDef.name.getSimple()),
                 ColumnEncoding.RAW);
         createStreamInfoBuilder.addColumn(columnDef.name.getSimple(), columnDesc);
       }

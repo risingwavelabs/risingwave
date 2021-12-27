@@ -23,7 +23,9 @@ import org.apache.calcite.util.Permutation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** This visitor is used to construct the new plan and also the primary key for each operator. */
+/**
+ * This visitor is used to construct the new plan and also the primary key for each operator.
+ */
 public class PrimaryKeyDerivationVisitor
     implements RwStreamingRelVisitor<PrimaryKeyDerivationVisitor.PrimaryKeyIndicesAndPositionMap> {
   private static final Logger LOGGER = LoggerFactory.getLogger(PrimaryKeyDerivationVisitor.class);
@@ -321,7 +323,7 @@ public class PrimaryKeyDerivationVisitor
 
   /**
    * @param exchange Exchange does not alter primary key and input columns, just pass its input's
-   *     primary key and columns up
+   *                 primary key and columns up
    * @return Exchange and its output primary key
    */
   @Override
@@ -349,7 +351,7 @@ public class PrimaryKeyDerivationVisitor
 
   /**
    * @param filter Filter does not alter primary key and input columns, just pass its input's
-   *     primary key and columns up
+   *               primary key and columns up
    * @return Filter and its output primary key
    */
   @Override
@@ -510,13 +512,20 @@ public class PrimaryKeyDerivationVisitor
         return new Result<>(tableSource, info);
       }
     }
+
+    ImmutableList.Builder<ColumnCatalog.ColumnId> builder =
+        ImmutableList.builder();
+
+    builder.addAll(tableSource.getColumnIds());
+
+    if (tableCatalog.getAllColumns(false).stream().noneMatch(c -> c.getDesc().isPrimary())) {
+      builder.add(rowIdColumn);
+    }
+
     // The other one is that we add the row id column to the back, otherwise it will mess up the
     // input ref index in the upstream operator.
-    var columns =
-        ImmutableList.<ColumnCatalog.ColumnId>builder()
-            .addAll(tableSource.getColumnIds())
-            .add(rowIdColumn)
-            .build();
+    var columns = builder.build();
+
     var newTableSource =
         new RwStreamTableSource(
             tableSource.getCluster(),

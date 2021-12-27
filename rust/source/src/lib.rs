@@ -28,6 +28,7 @@ pub enum SourceFormat {
     Invalid,
     Json,
     Protobuf,
+    DebeziumJson,
     Avro,
 }
 

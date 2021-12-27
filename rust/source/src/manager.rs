@@ -22,7 +22,7 @@ pub trait SourceManager: Sync + Send {
         parser: Arc<dyn SourceParser>,
         config: &SourceConfig,
         columns: Vec<SourceColumnDesc>,
-        row_id_index: usize,
+        row_id_index: Option<usize>,
     ) -> Result<()>;
     fn create_table_source(&self, table_id: &TableId, table: Arc<BummockTable>) -> Result<()>;
     fn get_source(&self, source_id: &TableId) -> Result<SourceDesc>;
@@ -37,6 +37,7 @@ pub struct SourceColumnDesc {
     pub data_type: DataTypeRef,
     pub column_id: i32,
     pub skip_parse: bool,
+    pub is_primary: bool,
 }
 
 /// `SourceDesc` is used to describe a `Source`
@@ -45,7 +46,7 @@ pub struct SourceDesc {
     pub source: SourceRef,
     pub format: SourceFormat,
     pub columns: Vec<SourceColumnDesc>,
-    pub row_id_column_id: i32,
+    pub row_id_index: Option<usize>,
 }
 
 pub type SourceManagerRef = Arc<dyn SourceManager>;
@@ -62,7 +63,7 @@ impl SourceManager for MemSourceManager {
         parser: Arc<dyn SourceParser>,
         config: &SourceConfig,
         columns: Vec<SourceColumnDesc>,
-        row_id_index: usize,
+        row_id_index: Option<usize>,
     ) -> Result<()> {
         let mut tables = self.get_sources()?;
 
@@ -71,8 +72,6 @@ impl SourceManager for MemSourceManager {
             "Source id already exists: {:?}",
             source_id
         );
-
-        let row_id_column_id = columns[row_id_index].column_id;
 
         let source = match config {
             SourceConfig::Kafka(config) => SourceImpl::HighLevelKafka(HighLevelKafkaSource::new(
@@ -86,7 +85,7 @@ impl SourceManager for MemSourceManager {
             source: Arc::new(source),
             format,
             columns,
-            row_id_column_id,
+            row_id_index,
         };
 
         tables.insert(source_id.clone(), desc);
@@ -111,6 +110,7 @@ impl SourceManager for MemSourceManager {
                 data_type: c.data_type.clone(),
                 column_id: c.column_id,
                 skip_parse: false,
+                is_primary: false,
             })
             .collect();
 
@@ -121,7 +121,7 @@ impl SourceManager for MemSourceManager {
             source: Arc::new(source),
             columns,
             format: SourceFormat::Invalid,
-            row_id_column_id: 0, // always use the first column as row_id
+            row_id_index: Some(0), // always use the first column as row_id
         };
 
         sources.insert(table_id.clone(), desc);
@@ -227,13 +227,20 @@ mod tests {
                 data_type: c.data_type.clone(),
                 column_id: c.column_id,
                 skip_parse: false,
+                is_primary: false,
             })
             .collect();
 
         // create source
         let mem_source_manager = MemSourceManager::new();
-        let new_source =
-            mem_source_manager.create_source(&table_id, format, parser, &config, source_columns, 0);
+        let new_source = mem_source_manager.create_source(
+            &table_id,
+            format,
+            parser,
+            &config,
+            source_columns,
+            Some(0),
+        );
         assert!(new_source.is_ok());
 
         // get source

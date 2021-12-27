@@ -13,8 +13,8 @@ use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::CreateStreamNode;
 use risingwave_source::parser::JSONParser;
 use risingwave_source::{
-    HighLevelKafkaSourceConfig, ProtobufParser, SourceColumnDesc, SourceConfig, SourceFormat,
-    SourceManagerRef, SourceParser,
+    DebeziumJsonParser, HighLevelKafkaSourceConfig, ProtobufParser, SourceColumnDesc, SourceConfig,
+    SourceFormat, SourceManagerRef, SourceParser,
 };
 use tempfile::Builder;
 use tokio::fs;
@@ -43,7 +43,7 @@ pub(super) struct CreateStreamExecutor {
     properties: HashMap<String, String>,
     schema_location: String,
     schema: Schema,
-    row_id_index: usize,
+    row_id_index: Option<usize>,
 }
 
 macro_rules! get_from_properties {
@@ -76,7 +76,7 @@ impl BoxedExecutorBuilder for CreateStreamExecutor {
 
         let table_id = TableId::from(&node.table_ref_id);
 
-        let row_id_index = node.get_row_id_index() as usize;
+        let row_id_index = node.get_row_id_index();
 
         let columns = node
             .get_column_descs()
@@ -87,7 +87,8 @@ impl BoxedExecutorBuilder for CreateStreamExecutor {
                     name: c.name.clone(),
                     data_type: build_from_prost(c.get_column_type())?,
                     column_id: c.column_id,
-                    skip_parse: idx == row_id_index,
+                    skip_parse: idx as i32 == row_id_index,
+                    is_primary: c.is_primary,
                 })
             })
             .collect::<Result<Vec<SourceColumnDesc>>>()?;
@@ -96,6 +97,7 @@ impl BoxedExecutorBuilder for CreateStreamExecutor {
             RowFormatType::Json => SourceFormat::Json,
             RowFormatType::Protobuf => SourceFormat::Protobuf,
             RowFormatType::Avro => SourceFormat::Avro,
+            RowFormatType::DebeziumJson => SourceFormat::DebeziumJson,
         };
 
         let properties = node.get_properties();
@@ -117,6 +119,12 @@ impl BoxedExecutorBuilder for CreateStreamExecutor {
                 other
             )))),
         }?;
+
+        let row_id_index = if row_id_index >= 0 {
+            Some(row_id_index as usize)
+        } else {
+            None
+        };
 
         Ok(Box::new(Self {
             table_id,
@@ -211,6 +219,10 @@ impl Executor for CreateStreamExecutor {
                         .await?,
                 );
 
+                Ok(parser)
+            }
+            SourceFormat::DebeziumJson => {
+                let parser: Arc<dyn SourceParser> = Arc::new(DebeziumJsonParser {});
                 Ok(parser)
             }
             _ => Err(RwError::from(InternalError(

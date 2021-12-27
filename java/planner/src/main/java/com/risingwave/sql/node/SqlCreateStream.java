@@ -2,6 +2,7 @@ package com.risingwave.sql.node;
 
 import static java.util.Objects.requireNonNull;
 
+import com.risingwave.sql.tree.ColumnDefinition;
 import java.util.List;
 import javax.annotation.Nullable;
 import org.apache.calcite.sql.SqlCharStringLiteral;
@@ -24,6 +25,8 @@ public class SqlCreateStream extends SqlCreate {
   private final SqlNodeList propertyList;
   private final SqlCharStringLiteral rowFormat;
   private final SqlCharStringLiteral rowSchemaLocation;
+  private final List<ColumnDefinition<?>> primaryColumns;
+
 
   public SqlIdentifier getName() {
     return name;
@@ -54,13 +57,15 @@ public class SqlCreateStream extends SqlCreate {
       @Nullable SqlNodeList columnList,
       SqlNodeList propertyList,
       SqlCharStringLiteral rowFormat,
-      SqlCharStringLiteral rowSchemaLocation) {
+      SqlCharStringLiteral rowSchemaLocation,
+      List<ColumnDefinition<?>> primaryColumns) {
     super(OPERATOR, pos, false, true);
     this.name = requireNonNull(name, "name");
     this.columnList = columnList;
     this.propertyList = requireNonNull(propertyList, "propertyList");
     this.rowFormat = requireNonNull(rowFormat, "rowFormat");
     this.rowSchemaLocation = requireNonNull(rowSchemaLocation, "rowSchemaLocation");
+    this.primaryColumns = primaryColumns;
   }
 
   @Override
@@ -92,5 +97,9 @@ public class SqlCreateStream extends SqlCreate {
     writer.endList(frame);
     writer.keyword("ROW FORMAT");
     writer.literal(rowFormat.toValue());
+  }
+
+  public List<ColumnDefinition<?>> getPrimaryColumns() {
+    return primaryColumns;
   }
 }

@@ -1,5 +1,6 @@
 use std::fmt::Debug;
 
+pub use debezium::*;
 pub use json_parser::*;
 pub use protobuf_parser::*;
 use risingwave_common::array::Op;
