@@ -17,8 +17,13 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 /** Implementation of {@link SqlOperatorTable}. */
 public class RisingWaveOperatorTable implements SqlOperatorTable {
   private final SqlStdOperatorTable delegation = SqlStdOperatorTable.instance();
+
   private final RisingWaveOverrideOperatorTable override =
       RisingWaveOverrideOperatorTable.instance();
+
+  public RisingWaveOperatorTable() {
+    GenerateSeriesTableFunction.createAllOverloads().forEach(delegation::register);
+  }
 
   @Override
   public void lookupOperatorOverloads(

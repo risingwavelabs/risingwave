@@ -87,7 +87,7 @@ public class SqlConverter {
 
       initAll();
       SqlToRelConverter sql2RelConverter =
-          new SqlToRelConverter(
+          new RisingWaveSqlToRelConverter(
               catalogReader, validator, catalogReader, cluster, sqlRexConvertletTable, config);
       return new SqlConverter(validator, sql2RelConverter);
     }

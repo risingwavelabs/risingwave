@@ -2,6 +2,7 @@ package com.risingwave.planner.rules.physical;
 
 import com.risingwave.planner.rel.logical.RwLogicalAggregate;
 import com.risingwave.planner.rel.logical.RwLogicalFilter;
+import com.risingwave.planner.rel.logical.RwLogicalGenerateSeries;
 import com.risingwave.planner.rel.logical.RwLogicalInsert;
 import com.risingwave.planner.rel.logical.RwLogicalJoin;
 import com.risingwave.planner.rel.logical.RwLogicalProject;
@@ -10,6 +11,7 @@ import com.risingwave.planner.rel.logical.RwLogicalSort;
 import com.risingwave.planner.rel.logical.RwLogicalValues;
 import com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel;
 import com.risingwave.planner.rel.physical.RwBatchFilter;
+import com.risingwave.planner.rel.physical.RwBatchGenerateSeries;
 import com.risingwave.planner.rel.physical.RwBatchHashAgg;
 import com.risingwave.planner.rel.physical.RwBatchInsert;
 import com.risingwave.planner.rel.physical.RwBatchLimit;
@@ -116,7 +118,8 @@ public class BatchRuleSets {
           RwLogicalValues.RwValuesConverterRule.INSTANCE,
           RwLogicalScan.RwLogicalScanConverterRule.INSTANCE,
           RwLogicalSort.RwLogicalSortConverterRule.INSTANCE,
-          RwLogicalJoin.RwLogicalJoinConverterRule.INSTANCE);
+          RwLogicalJoin.RwLogicalJoinConverterRule.INSTANCE,
+          RwLogicalGenerateSeries.RwGenerateSeriesConverterRule.INSTANCE);
 
   public static final RuleSet LOGICAL_OPTIMIZATION_RULES =
       RuleSets.ofList(
@@ -137,6 +140,7 @@ public class BatchRuleSets {
           RwBatchSortMergeJoin.BatchSortMergeJoinConverterRule.DESC,
           RwBatchHashAgg.BatchHashAggConverterRule.INSTANCE,
           RwBatchSortAgg.BatchSortAggConverterRule.INSTANCE,
+          RwBatchGenerateSeries.BatchGenerateSeriesConverterRule.INSTANCE,
           RwBatchLimit.BatchLimitConverterRule.INSTANCE,
           CoreRules.SORT_REMOVE);
 
@@ -149,7 +153,8 @@ public class BatchRuleSets {
           RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchInsert.class),
           RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchTableScan.class),
           RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchStreamScan.class),
-          RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchMaterializedViewScan.class));
+          RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchMaterializedViewScan.class),
+          RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchGenerateSeries.class));
 
   public static final RuleSet DISTRIBUTION_RULES =
       RuleSets.ofList(

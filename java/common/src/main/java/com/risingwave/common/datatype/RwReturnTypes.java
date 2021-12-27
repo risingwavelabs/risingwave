@@ -11,6 +11,9 @@ import org.apache.calcite.sql.type.SqlTypeName;
 
 /** A collection of return-type inference strategies as supplements to {@link ReturnTypes}. */
 public abstract class RwReturnTypes {
+
+  // DATE + INTERVAL results with a DATE type.
+  // This is postgres behavior.
   public static final SqlReturnTypeInference DATE_PLUS_INTERVAL =
       opBinding -> {
         RelDataTypeFactory typeFactory = opBinding.getTypeFactory();

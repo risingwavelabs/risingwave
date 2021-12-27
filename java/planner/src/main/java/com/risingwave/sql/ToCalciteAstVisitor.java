@@ -72,6 +72,7 @@ import com.risingwave.sql.tree.Statement;
 import com.risingwave.sql.tree.StringLiteral;
 import com.risingwave.sql.tree.SubqueryExpression;
 import com.risingwave.sql.tree.Table;
+import com.risingwave.sql.tree.TableFunction;
 import com.risingwave.sql.tree.TableSubquery;
 import com.risingwave.sql.tree.Values;
 import com.risingwave.sql.tree.ValuesList;
@@ -415,6 +416,11 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
     }
 
     return new SqlInsert(SqlParserPos.ZERO, keywords, table, source, columnList);
+  }
+
+  @Override
+  public SqlNode visitTableFunction(TableFunction node, Void context) {
+    return visitFunctionCall(node.functionCall(), context);
   }
 
   @Override

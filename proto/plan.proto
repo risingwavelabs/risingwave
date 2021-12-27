@@ -192,6 +192,12 @@ message SortMergeJoinNode {
   OrderType direction = 4;
 }
 
+message GenerateInt32SeriesNode {
+  int32 start = 1;
+  int32 stop = 2;
+  int32 step = 3;
+}
+
 message PlanNode {
   enum PlanNodeType {
     INVALID = 0;
@@ -218,6 +224,7 @@ message PlanNode {
     DROP_STREAM = 21;
     MERGE_SORT_EXCHANGE = 22;
     SORT_MERGE_JOIN = 23;
+    GENERATE_SERIES = 24;
   }
   PlanNodeType node_type = 1;
   google.protobuf.Any body = 2;

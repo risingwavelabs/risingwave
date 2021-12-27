@@ -20,6 +20,7 @@ use top_n::*;
 
 use crate::executor::create_stream::CreateStreamExecutor;
 use crate::executor::create_table::CreateTableExecutor;
+use crate::executor::generate_series::GenerateSeriesI32Executor;
 use crate::executor::insert::InsertExecutor;
 use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;
 use crate::executor::join::sort_merge_join::SortMergeJoinExecutor;
@@ -33,6 +34,7 @@ mod create_table;
 mod drop_stream;
 mod drop_table;
 mod filter;
+mod generate_series;
 mod generic_exchange;
 mod hash_agg;
 mod insert;
@@ -142,7 +144,8 @@ impl<'a> ExecutorBuilder<'a> {
           PlanNodeType::SortMergeJoin => SortMergeJoinExecutor,
           PlanNodeType::DropStream => DropStreamExecutor,
           PlanNodeType::HashAgg => HashAggExecutorBuilder,
-          PlanNodeType::MergeSortExchange => MergeSortExchangeExecutor
+          PlanNodeType::MergeSortExchange => MergeSortExchangeExecutor,
+          PlanNodeType::GenerateSeries => GenerateSeriesI32Executor
         }
     }
 

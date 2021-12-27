@@ -166,6 +166,8 @@ public class RisingWaveTypeFactory extends JavaTypeFactoryImpl {
         return canonize(new NullType((RisingWaveDataTypeSystem) typeSystem));
       case SYMBOL:
         return canonize(new SymbolType((RisingWaveDataTypeSystem) typeSystem));
+      case CURSOR:
+        return canonize(new CursorType((RisingWaveDataTypeSystem) typeSystem));
       default:
         throw new PgException(PgErrorCode.INTERNAL_ERROR, "Unrecognized sql type: %s", sqlType);
     }
@@ -215,6 +217,8 @@ public class RisingWaveTypeFactory extends JavaTypeFactoryImpl {
             OptionalInt.of(dataType.getPrecision()),
             OptionalInt.of(dataType.getScale()),
             (RisingWaveDataTypeSystem) typeSystem);
+      case CURSOR:
+        return new CursorType((RisingWaveDataTypeSystem) typeSystem);
       default:
         throw new PgException(PgErrorCode.INTERNAL_ERROR, "Unrecognized data type: %s", dataType);
     }
