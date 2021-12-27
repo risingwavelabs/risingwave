@@ -26,7 +26,7 @@ pub struct S3ObjectStore {
     object: Mutex<HashMap<String, Bytes>>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct ConnectionInfo {
     region: String,
     access_key: String,
@@ -46,7 +46,9 @@ impl From<ConnectionInfo> for AwsCredentials {
 }
 
 impl ConnectionInfo {
-    pub fn new_for_test_account() -> Self {
+    /// Please see [Set up Local S3 Accounts](https://singularity-data.larksuite.com/docs/docuszYRfc00x6Q0QhqidP2AxEg)
+    /// to set up the credentials for test accounts.
+    pub fn new() -> Self {
         Self {
             region: std::env::var("S3_TEST_REGION")
                 .map_err(|err| format!("no s3 access key found: {}", err))
@@ -58,20 +60,6 @@ impl ConnectionInfo {
                 .map_err(|err| format!("no s3 access key found: {}", err))
                 .unwrap(),
             token: None,
-        }
-    }
-
-    pub fn new(
-        region: String,
-        access_key: String,
-        secret_key: String,
-        token: Option<String>,
-    ) -> Self {
-        Self {
-            region,
-            access_key,
-            secret_key,
-            token,
         }
     }
 }
@@ -271,7 +259,7 @@ mod tests {
     #[ignore]
     async fn test_upload() {
         let block = Bytes::from("123456");
-        let conn_info = ConnectionInfo::new_for_test_account();
+        let conn_info = ConnectionInfo::new();
         let bucket = "s3-ut";
         let path = Uuid::new_v4().to_string();
 
@@ -299,7 +287,7 @@ mod tests {
     #[ignore]
     async fn test_delete() {
         let block = Bytes::from("123456");
-        let conn_info = ConnectionInfo::new_for_test_account();
+        let conn_info = ConnectionInfo::new();
         let bucket = "s3-ut";
         let path = Uuid::new_v4().to_string();
 
@@ -334,7 +322,7 @@ mod tests {
     async fn test_metadata() {
         // get S3 client
         let block = Bytes::from("123456");
-        let conn_info = ConnectionInfo::new_for_test_account();
+        let conn_info = ConnectionInfo::new();
         let bucket = "s3-ut";
         let path = Uuid::new_v4().to_string();
         let s3 = S3ObjectStore::new(conn_info, bucket.to_string());

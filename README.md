@@ -62,9 +62,17 @@ To start the compute server, create one terminal and then type:
 ```shell
 make rust_build
 cd rust
+```
+You can choose to use `minio` as the serving remote storage.
+```shell
 ./target/debug/compute-node --log4rs-config config/log4rs.yaml
 # With persistent state store
 ./target/debug/compute-node --log4rs-config config/log4rs.yaml --state-store hummock+minio://key:secret@localhost:2333/bucket
+```
+Alternatively, you can choose to use `Amazon S3` as the serving remote storage.
+```shell
+# With Amazon S3 and test accounts, follow https://singularity-data.larksuite.com/docs/docuszYRfc00x6Q0QhqidP2AxEg to set up the test credentials.
+./target/debug/compute-node --log4rs-config config/log4rs.yaml --state-store hummock+s3://s3-ut
 ```
 
 To start the Postgres shell, create one terminal and then type:

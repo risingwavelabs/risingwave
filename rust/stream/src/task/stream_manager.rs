@@ -255,14 +255,17 @@ impl StreamManagerCore {
                     None,
                 )))
             }
-            Some("hummock_s3") | Some("hummock-s3") => {
+            Some(s3) if s3.starts_with("hummock+s3://") => {
                 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
                 use risingwave_storage::hummock::{HummockOptions, HummockStorage};
                 use risingwave_storage::object::S3ObjectStore;
-                let s3_test_conn_info = ConnectionInfo::new_for_test_account();
-                let s3 = S3ObjectStore::new(s3_test_conn_info, "s3-ut".to_string());
+                let s3_test_conn_info = ConnectionInfo::new();
+                let s3_store = S3ObjectStore::new(
+                    s3_test_conn_info,
+                    s3.strip_prefix("hummock+s3://").unwrap().to_string(),
+                );
                 StateStoreImpl::HummockStateStore(HummockStateStore::new(HummockStorage::new(
-                    Arc::new(s3),
+                    Arc::new(s3_store),
                     HummockOptions {
                         table_size: 256 * (1 << 20),
                         block_size: 64 * (1 << 10),
