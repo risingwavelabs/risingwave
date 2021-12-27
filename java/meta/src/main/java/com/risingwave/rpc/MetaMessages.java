@@ -1,5 +1,6 @@
 package com.risingwave.rpc;
 
+import com.risingwave.proto.metanode.ClusterType;
 import com.risingwave.proto.metanode.CreateRequest;
 import com.risingwave.proto.metanode.Database;
 import com.risingwave.proto.metanode.DropRequest;
@@ -13,7 +14,7 @@ import com.risingwave.proto.plan.TableRefId;
 /** Protobuf static helpers. */
 public class MetaMessages {
   public static HeartbeatRequest buildHeartbeatRequest() {
-    return HeartbeatRequest.newBuilder().setNodeType(HeartbeatRequest.NodeType.FRONTEND).build();
+    return HeartbeatRequest.newBuilder().setClusterType(ClusterType.Frontend).build();
   }
 
   public static CreateRequest buildCreateDatabaseRequest(Database database) {

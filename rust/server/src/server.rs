@@ -74,7 +74,7 @@ pub fn rpc_serve(
 mod tests {
     use risingwave_common::util::addr::get_host_port;
 
-    use crate::rpc::server::rpc_serve;
+    use crate::server::rpc_serve;
 
     #[tokio::test]
     async fn test_server_shutdown() {

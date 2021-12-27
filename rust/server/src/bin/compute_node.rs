@@ -1,6 +1,6 @@
 use clap::Parser;
 use log::info;
-use risingwave::rpc::server::rpc_serve;
+use risingwave::server::rpc_serve;
 use risingwave_common::util::addr::get_host_port;
 /// TODO(xiangyhu): We need to introduce serious `Configuration` framework (#2165).
 #[derive(Parser)]

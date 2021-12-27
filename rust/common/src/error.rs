@@ -54,6 +54,9 @@ pub enum ErrorCode {
     HummockContextNotFound(i32),
     #[error("Hummock context group {0} in use")]
     HummockContextGroupInUse(String),
+
+    #[error("Error while interact with meta service")]
+    MetaError(String),
 }
 
 #[derive(Clone)]
@@ -177,6 +180,7 @@ impl ErrorCode {
             ErrorCode::MemComparableError(_) => 15,
             ErrorCode::HummockContextNotFound(_) => 16,
             ErrorCode::HummockContextGroupInUse(_) => 17,
+            ErrorCode::MetaError(_) => 18,
         }
     }
 }

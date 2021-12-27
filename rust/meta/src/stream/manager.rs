@@ -334,7 +334,7 @@ mod test {
                     host: "127.0.0.1".to_string(),
                     port: 12345,
                 },
-                ClusterType::Streaming,
+                ClusterType::ComputeNode,
             )
             .await?;
 

@@ -19,3 +19,4 @@ extern crate log;
 extern crate test;
 
 pub mod rpc;
+pub mod server;

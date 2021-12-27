@@ -154,14 +154,9 @@ service CatalogService {
 }
 
 // Below for heartbeat.
-
 message HeartbeatRequest {
-  enum NodeType {
-    FRONTEND = 0;
-    BACKEND = 1;
-  }
   uint32 node_id = 1;
-  NodeType node_type = 2;
+  ClusterType cluster_type = 2;
 }
 
 message HeartbeatResponse {
@@ -211,9 +206,9 @@ service StreamManagerService {
 // Potentially we can add FE cluster into the cluster management as well.
 
 enum ClusterType {
-  OLAP = 0;
-  streaming = 1;
-  unknown = 2;
+  Frontend = 0;
+  ComputeNode = 1;
+  Unknown = 2;
 }
 
 message AddWorkerNodeRequest {

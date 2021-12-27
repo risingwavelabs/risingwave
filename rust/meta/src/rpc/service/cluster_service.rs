@@ -30,11 +30,7 @@ impl ClusterService for ClusterServiceImpl {
         request: Request<AddWorkerNodeRequest>,
     ) -> Result<Response<AddWorkerNodeResponse>, Status> {
         let req = request.into_inner();
-        let cluster_type = match req.cluster_type {
-            0 => ClusterType::Olap,
-            1 => ClusterType::Streaming,
-            _ => ClusterType::Unknown,
-        };
+        let cluster_type = ClusterType::from_i32(req.cluster_type).unwrap();
         if let Some(host) = req.host {
             let worker_node_res = self.scm.add_worker_node(host, cluster_type).await;
             match worker_node_res {
@@ -57,11 +53,7 @@ impl ClusterService for ClusterServiceImpl {
         request: Request<DeleteWorkerNodeRequest>,
     ) -> Result<Response<DeleteWorkerNodeResponse>, Status> {
         let req = request.into_inner();
-        let cluster_type = match req.cluster_type {
-            0 => ClusterType::Olap,
-            1 => ClusterType::Streaming,
-            _ => ClusterType::Unknown,
-        };
+        let cluster_type = ClusterType::from_i32(req.cluster_type).unwrap();
         if let Some(node) = req.node {
             let delete_res = self.scm.delete_worker_node(node, cluster_type).await;
             match delete_res {
@@ -81,11 +73,7 @@ impl ClusterService for ClusterServiceImpl {
         request: Request<ListAllNodesRequest>,
     ) -> Result<Response<ListAllNodesResponse>, Status> {
         let req = request.into_inner();
-        let cluster_type = match req.cluster_type {
-            0 => ClusterType::Olap,
-            1 => ClusterType::Streaming,
-            _ => ClusterType::Unknown,
-        };
+        let cluster_type = ClusterType::from_i32(req.cluster_type).unwrap();
         let node_list = self.scm.list_worker_node(cluster_type).await.unwrap();
         Ok(Response::new(ListAllNodesResponse {
             status: None,

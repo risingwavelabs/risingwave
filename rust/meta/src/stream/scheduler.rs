@@ -37,7 +37,7 @@ impl Scheduler {
     pub async fn schedule(&self, fragments: &[u32]) -> Result<Vec<WorkerNode>> {
         let nodes = self
             .cluster_manager
-            .list_worker_node(ClusterType::Streaming)
+            .list_worker_node(ClusterType::ComputeNode)
             .await?;
         if nodes.is_empty() {
             return Err(InternalError("no available node exist".to_string()).into());
@@ -86,7 +86,7 @@ mod test {
                         host: "127.0.0.1".to_string(),
                         port: i as i32,
                     },
-                    ClusterType::Streaming,
+                    ClusterType::ComputeNode,
                 )
                 .await?;
         }

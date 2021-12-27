@@ -24,11 +24,7 @@ impl WorkerNodeMetaManager for StoredClusterManager {
         host_address: HostAddress,
         cluster_type: ClusterType,
     ) -> Result<WorkerNode> {
-        let cluster_id = match cluster_type {
-            ClusterType::Olap => 0,
-            ClusterType::Streaming => 1,
-            _ => 2,
-        };
+        let cluster_id = cluster_type as u32;
         let mut cluster = match self.get_cluster(cluster_id).await {
             Ok(cluster) => cluster,
             Err(err) => {
@@ -67,11 +63,7 @@ impl WorkerNodeMetaManager for StoredClusterManager {
     }
 
     async fn delete_worker_node(&self, node: WorkerNode, cluster_type: ClusterType) -> Result<()> {
-        let cluster_id = match cluster_type {
-            ClusterType::Olap => 0,
-            ClusterType::Streaming => 1,
-            _ => 2,
-        };
+        let cluster_id = cluster_type as u32;
         let cluster = self.get_cluster(cluster_id).await?;
         let mut contained = false;
         let mut new_worker_list = Vec::new();
@@ -99,11 +91,7 @@ impl WorkerNodeMetaManager for StoredClusterManager {
     }
 
     async fn list_worker_node(&self, cluster_type: ClusterType) -> Result<Vec<WorkerNode>> {
-        let cluster_id = match cluster_type {
-            ClusterType::Olap => 0,
-            ClusterType::Streaming => 1,
-            _ => 2,
-        };
+        let cluster_id = cluster_type as u32;
         let cluster = self.get_cluster(cluster_id).await?;
         Ok(cluster.nodes)
     }
@@ -159,7 +147,7 @@ mod tests {
 
         // Test cases.
         let res1 = cluster_manager
-            .add_worker_node(hosts[1].clone(), ClusterType::Olap)
+            .add_worker_node(hosts[1].clone(), ClusterType::ComputeNode)
             .await;
         assert_matches!(res1,Ok(node) => {
           assert_eq!(node.id, 1);
@@ -171,7 +159,7 @@ mod tests {
         });
 
         let res2 = cluster_manager
-            .add_worker_node(hosts[2].clone(), ClusterType::Olap)
+            .add_worker_node(hosts[2].clone(), ClusterType::ComputeNode)
             .await;
         assert_matches!(res2,Ok(node) => {
           assert_eq!(node.id, 2);
@@ -182,12 +170,12 @@ mod tests {
           }
         });
         let res3 = cluster_manager
-            .add_worker_node(hosts[2].clone(), ClusterType::Olap)
+            .add_worker_node(hosts[2].clone(), ClusterType::ComputeNode)
             .await;
         assert!(res3.is_err());
 
         let res4 = cluster_manager
-            .add_worker_node(hosts[3].clone(), ClusterType::Olap)
+            .add_worker_node(hosts[3].clone(), ClusterType::ComputeNode)
             .await;
         assert_matches!(res4,Ok(node) => {
           assert_eq!(node.id, 3);
@@ -199,7 +187,7 @@ mod tests {
         });
 
         let res5 = cluster_manager
-            .add_worker_node(hosts[2].clone(), ClusterType::Streaming)
+            .add_worker_node(hosts[2].clone(), ClusterType::Frontend)
             .await;
         assert_matches!(res5,Ok(node) => {
           assert_eq!(node.id, 1);
@@ -215,14 +203,16 @@ mod tests {
             host: Some(hosts[2].clone()),
         };
         let res6 = cluster_manager
-            .delete_worker_node(delete_node, ClusterType::Olap)
+            .delete_worker_node(delete_node, ClusterType::ComputeNode)
             .await;
         assert!(res6.is_ok());
 
-        let list_olap_nodes = cluster_manager.list_worker_node(ClusterType::Olap).await?;
+        let list_olap_nodes = cluster_manager
+            .list_worker_node(ClusterType::ComputeNode)
+            .await?;
         assert_eq!(list_olap_nodes.len(), 3);
         let list_stream_nodes = cluster_manager
-            .list_worker_node(ClusterType::Streaming)
+            .list_worker_node(ClusterType::Frontend)
             .await?;
         assert_eq!(list_stream_nodes.len(), 2);
 
