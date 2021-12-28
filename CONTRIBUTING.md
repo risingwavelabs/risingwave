@@ -59,6 +59,10 @@ cd rust
 cargo fmt
 cargo clippy --all-targets --all-features
 ```
+If a new dependency is added to `Cargo.toml`, you may also run:
+```shell
+cargo sort -w
+```
 
 For shell code, please run:
 ```shell
