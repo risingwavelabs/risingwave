@@ -6,13 +6,14 @@ members = [
   "meta",
   "prost",
   "prost/helpers",
+  "riselab"
+,
   "server",
   "source",
   "storage",
   "stream",
   "tests/regress",
-  "utils/memcomparable",
-]
+  "utils/memcomparable"]
 
 [profile.dev]
 panic = 'abort'

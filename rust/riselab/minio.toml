@@ -1,0 +1,61 @@
+extend = "common.toml"
+
+[env]
+MINIO_ARCH = "${ARCH}"
+MCLI_DOWNLOAD_BIN = "https://dl.min.io/client/mc/release/${MINIO_ARCH}/mc"
+MINIO_BUCKET_NAME = "hummock001"
+MINIO_DOWNLOAD_BIN = "https://dl.min.io/server/minio/release/${MINIO_ARCH}/minio"
+MINIO_HUMMOCK_PASSWORD = "12345678"
+MINIO_HUMMOCK_USER = "hummock"
+MINIO_ROOT_PASSWORD = "hummockadmin"
+MINIO_ROOT_USER = "hummockadmin"
+
+[tasks.download-minio]
+category = "RiseLAB"
+dependencies = ["prepare"]
+description = "Download and extract MinIO"
+script = '''
+#!@shell
+set -e
+if [ -f "${PREFIX_BIN}/minio" ]; then
+    exit 0
+fi
+echo "MinIO Server not found, downloading"
+wget -O "${PREFIX_TMP}/minio" "${MINIO_DOWNLOAD_BIN}"
+chmod +x "${PREFIX_TMP}/minio"
+mv "${PREFIX_TMP}/minio" "${PREFIX_BIN}/minio"
+'''
+
+[tasks.download-mcli]
+category = "RiseLAB"
+dependencies = ["prepare"]
+description = "Download and extract MinIO Client"
+script = '''
+#!@shell
+set -e
+if [ -f "${PREFIX_BIN}/mcli" ]; then
+    exit 0
+fi
+echo "MinIO Client not found, downloading"
+wget -O "${PREFIX_TMP}/mcli" "${MCLI_DOWNLOAD_BIN}"
+chmod +x "${PREFIX_TMP}/mcli"
+mv "${PREFIX_TMP}/mcli" "${PREFIX_BIN}/mcli"
+'''
+
+[tasks.configure-minio]
+category = "RiseLAB"
+description = "Configure MinIO"
+
+[tasks.run-minio]
+args = [
+  "server",
+  "${HUMMOCK_PATH}",
+  "--address",
+  "${HUMOOCK_MINIO_ADDRESS}",
+  "--console-address",
+  "${HUMOOCK_MINIO_CONSOLE_ADDRESS}",
+]
+category = "RiseLAB"
+command = "${PREFIX_BIN}/minio"
+dependencies = ["download-minio"]
+description = "Run MinIO"

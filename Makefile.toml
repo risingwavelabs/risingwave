@@ -1,0 +1,92 @@
+extend = [
+  {path = "rust/riselab/grafana.toml"},
+  {path = "rust/riselab/prometheus.toml"},
+  {path = "rust/riselab/minio.toml"},
+]
+
+[tasks.clean-full]
+category = "RiseLAB"
+description = "Clean all downloaded binaries by deleting .risingwave folder"
+script = '''
+#!@duckscript
+rm -rf "${PREFIX}"
+'''
+
+[tasks.clean-data]
+category = "RiseLAB"
+description = "Clean all data, config and logs by deleting .risingwave/data folder"
+script = '''
+#!@duckscript
+rm -rf "${PREFIX_DATA}"
+rm -rf "${PREFIX_LOG}"
+rm -rf "${PREFIX_CONFIG}"
+'''
+
+[tasks.post-build-risingwave]
+category = "RiseLAB"
+description = "Copy RisingWave binaries to bin"
+script = '''
+#!@shell
+set -e
+rm -f "${PREFIX_BIN}/compute-node"
+rm -f "${PREFIX_BIN}/meta-node"
+rm -f "${PREFIX_CONFIG}/log4rs.yaml"
+rm -f "${PREFIX_BIN}/run_command.sh"
+ln -s "$(pwd)/rust/target/debug/compute-node" "${PREFIX_BIN}/compute-node"
+ln -s "$(pwd)/rust/target/debug/meta-node" "${PREFIX_BIN}/meta-node"
+ln -s "$(pwd)/rust/config/log4rs.yaml" "${PREFIX_CONFIG}/log4rs.yaml"
+cp "rust/riselab/run_command.sh" "${PREFIX_BIN}/run_command.sh"
+'''
+
+[tasks.build-risingwave]
+category = "RiseLAB"
+description = "Build RisingWave compute-node and meta-node"
+script = '''
+#!@shell
+set -e
+cd rust && cargo build
+'''
+
+[tasks.build-frontend]
+category = "RiseLAB"
+description = "Build RisingWave frontend"
+script = '''
+#!@shell
+set -e
+cd java && ./gradlew build -x test
+'''
+
+[tasks.post-build-frontend]
+category = "RiseLAB"
+description = "Post build RisingWave frontend"
+script = '''
+#!@duckscript
+
+cp "java/pgserver/build/libs/risingwave-fe-runnable.jar" "${PREFIX_BIN}/risingwave-fe-runnable.jar"
+cp "java/pgserver/build/resources/main/logback.xml" "${PREFIX_CONFIG}/logback.xml"
+cp "java/pgserver/src/main/resources/server.properties" "${PREFIX_CONFIG}/server.properties"
+'''
+
+[tasks.playground]
+category = "RiseLAB"
+command = "rust/target/debug/playground"
+dependencies = [
+  "download-minio",
+  "download-mcli",
+  "download-grafana",
+  "download-prometheus",
+  "build-risingwave",
+  "post-build-risingwave",
+  "build-frontend",
+  "post-build-frontend"
+]
+description = "Start a RisingWave playground"
+
+[tasks.kill-playground]
+category = "RiseLAB"
+description = "kill playground"
+script = '''
+#!@shell
+set -e
+tmux kill-session -t riselab
+'''

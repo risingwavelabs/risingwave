@@ -1,0 +1,31 @@
+extend = "common.toml"
+
+[env]
+# Prometheus configurations
+PROMETHEUS_ARCH = "${ARCH}" # or linux-amd64
+PROMETHEUS_DOWNLOAD_PATH = "${PREFIX_TMP}/prometheus.tar.gz" 
+PROMETHEUS_VERSION = "2.32.1" 
+PROMETHEUS_RELEASE = "prometheus-${PROMETHEUS_VERSION}.${PROMETHEUS_ARCH}" 
+PROMETHEUS_DOWNLOAD_TAR_GZ = "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/${PROMETHEUS_RELEASE}.tar.gz" 
+
+[tasks.download-prometheus]
+category = "RiseLAB"
+dependencies = ["prepare"]
+description = "Download and extract Prometheus"
+script = '''
+#!@shell
+set -e
+if [ -d "${PREFIX_BIN}/prometheus" ]; then
+    exit 0
+fi
+echo "Prometheus not found, download ${PROMETHEUS_RELEASE}"
+wget -O "${PROMETHEUS_DOWNLOAD_PATH}" "${PROMETHEUS_DOWNLOAD_TAR_GZ}"
+tar -xf "${PROMETHEUS_DOWNLOAD_PATH}" -C "${PREFIX_TMP}"
+mv "${PREFIX_TMP}/${PROMETHEUS_RELEASE}" "${PREFIX_BIN}/prometheus"
+rm ${PROMETHEUS_DOWNLOAD_PATH}
+'''
+
+[tasks.run-prometheus]
+category = "RiseLAB"
+dependencies = ["download-prometheus"]
+description = "Run Prometheus"

@@ -35,6 +35,29 @@ optimizer, and other components. We use Calcite to serve as our query optimizer.
 engine, storage engine and meta service.
 - The `e2e_test` folder contains the latest end-to-end test cases.
 
+## Development - RiseLAB
+
+RiseLAB is the new tool for developing RisingWave. You'll need to install cargo-make and tmux beforehand.
+
+```
+cargo install cargo-make
+apt install tmux
+```
+
+Then, simply run:
+
+```
+./riselab playground
+```
+
+Everything will be set for you.
+
+To stop the playground,
+
+```
+./riselab kill-playground
+```
+
 ## Deployment
 To run the system, you need to use at least four terminals:
 - The Postgres shell is responsible for sending user command to the frontend server and displaying

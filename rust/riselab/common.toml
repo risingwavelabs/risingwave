@@ -1,0 +1,28 @@
+[env]
+ARCH = "${CARGO_MAKE_RUST_TARGET_OS}-amd64"
+PREFIX = "${PWD}/.risingwave"
+PREFIX_BIN = "${PREFIX}/bin"
+PREFIX_CONFIG = "${PREFIX}/config"
+PREFIX_DATA = "${PREFIX}/data"
+PREFIX_LOG = "${PREFIX}/log"
+PREFIX_TMP = "${PREFIX}/tmp"
+
+HUMMOCK_PATH = "${PREFIX_DATA}/hummock"
+HUMOOCK_MINIO_ADDRESS = "127.0.0.1:9300"
+HUMOOCK_MINIO_CONSOLE_ADDRESS = "127.0.0.1:9400"
+
+[tasks.prepare]
+category = "RiseLAB"
+description = "Create .risingwave folder for storing temporary files and data"
+script = '''
+#!@duckscript
+echo "Using ${PREFIX} as base folder"
+mkdir "${PREFIX}"
+mkdir "${PREFIX_BIN}"
+mkdir "${PREFIX_TMP}"
+mkdir "${PREFIX_DATA}"
+mkdir "${PREFIX_CONFIG}"
+mkdir "${PREFIX_CONFIG}/mcli"
+mkdir "${PREFIX_LOG}"
+mkdir "${HUMMOCK_PATH}"
+'''

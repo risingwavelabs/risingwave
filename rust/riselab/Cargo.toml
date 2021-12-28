@@ -1,0 +1,14 @@
+[package]
+edition = "2021"
+name = "riselab"
+version = "0.1.0"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1"
+bytes = "1"
+ctrlc = "3"
+indicatif = "0.16"
+itertools = "0.10"
+nix = "0.23"
+os_pipe = "1"
