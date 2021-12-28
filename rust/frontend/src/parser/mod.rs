@@ -18,8 +18,8 @@ mod tests {
 
     #[test]
     fn test_basic_ddl() {
-        assert!(!parse("select * from t1;").is_err());
-        assert!(!parse("create materialized view mv1 as select * from t1;").is_err());
+        assert!(parse("select * from t1;").is_ok());
+        assert!(parse("create materialized view mv1 as select * from t1;").is_ok());
         assert!(parse("create stream s (v1 int not null, v2 char(8) not null);").is_err());
     }
 }

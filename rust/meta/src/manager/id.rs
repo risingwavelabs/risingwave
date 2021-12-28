@@ -116,6 +116,7 @@ impl IdGeneratorManager {
             (IdCategory::Table, "table", None),
             (IdCategory::Fragment, "fragment", Some(1)),
             (IdCategory::HummockContext, "hummock_context", Some(1)),
+            (IdCategory::HummockSnapshot, "hummock_snapshot", Some(1)),
         ] {
             inner.insert(
                 category,

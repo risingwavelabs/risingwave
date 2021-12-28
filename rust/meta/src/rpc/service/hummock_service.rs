@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::*;
-use tonic::Response;
+use tonic::{Request, Response, Status};
 
 use crate::hummock::HummockManager;
 
@@ -20,13 +20,9 @@ impl HummockServiceImpl {
 impl HummockManagerService for HummockServiceImpl {
     async fn create_hummock_context(
         &self,
-        request: tonic::Request<CreateHummockContextRequest>,
-    ) -> Result<tonic::Response<CreateHummockContextResponse>, tonic::Status> {
-        let req = request.into_inner();
-        let result = self
-            .hummock_manager
-            .create_hummock_context(req.get_group())
-            .await;
+        _request: Request<CreateHummockContextRequest>,
+    ) -> Result<Response<CreateHummockContextResponse>, tonic::Status> {
+        let result = self.hummock_manager.create_hummock_context().await;
         match result {
             Ok(hummock_context) => Ok(Response::new(CreateHummockContextResponse {
                 status: None,
@@ -38,8 +34,8 @@ impl HummockManagerService for HummockServiceImpl {
 
     async fn invalidate_hummock_context(
         &self,
-        request: tonic::Request<InvalidateHummockContextRequest>,
-    ) -> Result<tonic::Response<InvalidateHummockContextResponse>, tonic::Status> {
+        request: Request<InvalidateHummockContextRequest>,
+    ) -> Result<Response<InvalidateHummockContextResponse>, tonic::Status> {
         let req = request.into_inner();
         let result = self
             .hummock_manager
@@ -53,31 +49,10 @@ impl HummockManagerService for HummockServiceImpl {
         }
     }
 
-    async fn add_sst_watermark(
-        &self,
-        _request: tonic::Request<AddSstWatermarkRequest>,
-    ) -> Result<tonic::Response<AddSstWatermarkResponse>, tonic::Status> {
-        todo!()
-    }
-
-    async fn remove_sst_watermark(
-        &self,
-        _request: tonic::Request<RemoveSstWatermarkRequest>,
-    ) -> Result<tonic::Response<RemoveSstWatermarkResponse>, tonic::Status> {
-        todo!()
-    }
-
-    async fn add_ssts(
-        &self,
-        _request: tonic::Request<AddSstsRequest>,
-    ) -> Result<tonic::Response<AddSstsResponse>, tonic::Status> {
-        todo!()
-    }
-
     async fn refresh_hummock_context(
         &self,
-        request: tonic::Request<RefreshHummockContextRequest>,
-    ) -> Result<tonic::Response<RefreshHummockContextResponse>, tonic::Status> {
+        request: Request<RefreshHummockContextRequest>,
+    ) -> Result<Response<RefreshHummockContextResponse>, tonic::Status> {
         let req = request.into_inner();
         let result = self
             .hummock_manager
@@ -88,6 +63,141 @@ impl HummockManagerService for HummockServiceImpl {
                 status: None,
                 ttl,
             })),
+            Err(e) => Err(e.to_grpc_status()),
+        }
+    }
+
+    async fn pin_version(
+        &self,
+        request: Request<PinVersionRequest>,
+    ) -> Result<Response<PinVersionResponse>, Status> {
+        let req = request.into_inner();
+        let result = self
+            .hummock_manager
+            .pin_version(req.context_identifier)
+            .await;
+        match result {
+            Ok((pinned_version_id, pinned_version)) => Ok(Response::new(PinVersionResponse {
+                status: None,
+                pinned_version_id,
+                pinned_version: Some(pinned_version),
+            })),
+            Err(e) => Err(e.to_grpc_status()),
+        }
+    }
+
+    async fn unpin_version(
+        &self,
+        request: Request<UnpinVersionRequest>,
+    ) -> Result<Response<UnpinVersionResponse>, Status> {
+        let req = request.into_inner();
+        let result = self
+            .hummock_manager
+            .unpin_version(req.context_identifier, req.pinned_version_id)
+            .await;
+        match result {
+            Ok(_) => Ok(Response::new(UnpinVersionResponse { status: None })),
+            Err(e) => Err(e.to_grpc_status()),
+        }
+    }
+
+    async fn add_tables(
+        &self,
+        request: Request<AddTablesRequest>,
+    ) -> Result<Response<AddTablesResponse>, Status> {
+        let req = request.into_inner();
+        let result = self
+            .hummock_manager
+            .add_tables(req.context_identifier, req.tables)
+            .await;
+        match result {
+            Ok(version_id) => Ok(Response::new(AddTablesResponse {
+                status: None,
+                version_id,
+            })),
+            Err(e) => Err(e.to_grpc_status()),
+        }
+    }
+
+    async fn get_tables(
+        &self,
+        request: Request<GetTablesRequest>,
+    ) -> Result<Response<GetTablesResponse>, Status> {
+        let req = request.into_inner();
+        let result = self
+            .hummock_manager
+            .get_tables(
+                req.context_identifier,
+                req.pinned_version
+                    .unwrap_or(HummockVersion { levels: vec![] }),
+            )
+            .await;
+        match result {
+            Ok(tables) => Ok(Response::new(GetTablesResponse {
+                status: None,
+                tables,
+            })),
+            Err(e) => Err(e.to_grpc_status()),
+        }
+    }
+
+    async fn add_table_watermark(
+        &self,
+        _request: Request<AddTableWatermarkRequest>,
+    ) -> Result<Response<AddTableWatermarkResponse>, Status> {
+        todo!()
+    }
+
+    async fn remove_table_watermark(
+        &self,
+        _request: Request<RemoveTableWatermarkRequest>,
+    ) -> Result<Response<RemoveTableWatermarkResponse>, Status> {
+        todo!()
+    }
+
+    async fn get_compaction_tasks(
+        &self,
+        _request: Request<GetCompactionTasksRequest>,
+    ) -> Result<Response<GetCompactionTasksResponse>, Status> {
+        todo!()
+    }
+
+    async fn report_compaction_tasks(
+        &self,
+        _request: Request<ReportCompactionTasksRequest>,
+    ) -> Result<Response<ReportCompactionTasksResponse>, Status> {
+        todo!()
+    }
+
+    async fn pin_snapshot(
+        &self,
+        request: Request<PinSnapshotRequest>,
+    ) -> Result<Response<PinSnapshotResponse>, Status> {
+        let req = request.into_inner();
+        let result = self
+            .hummock_manager
+            .pin_snapshot(req.context_identifier)
+            .await;
+        match result {
+            Ok(hummock_snapshot) => Ok(Response::new(PinSnapshotResponse {
+                status: None,
+                snapshot: Some(hummock_snapshot),
+            })),
+            Err(e) => Err(e.to_grpc_status()),
+        }
+    }
+
+    async fn unpin_snapshot(
+        &self,
+        request: Request<UnpinSnapshotRequest>,
+    ) -> Result<Response<UnpinSnapshotResponse>, Status> {
+        let req = request.into_inner();
+        let result = self
+            .hummock_manager
+            .unpin_snapshot(req.context_identifier, req.snapshot.unwrap())
+            .await;
+        match result {
+            Ok(_) => Ok(Response::new(UnpinSnapshotResponse { status: None })),
             Err(e) => Err(e.to_grpc_status()),
         }
     }

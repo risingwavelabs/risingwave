@@ -35,7 +35,7 @@ serde_with = "1"
 smallvec = "1"
 thiserror = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
-tokio-stream = "0.1.7"
+tokio-stream = { version = "0.1.7", features = ["net"] }
 tonic = "0.6"
 uuid = { version = "0.8", features = ["v4"] }
 

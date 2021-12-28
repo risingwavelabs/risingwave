@@ -8,6 +8,10 @@ option optimize_for = SPEED;
 
 import "common.proto";
 
+message Table {
+  uint64 sst_id = 1;
+}
+
 message BlockMeta {
   bytes smallest_key = 1;
   uint32 offset = 2;
@@ -38,15 +42,29 @@ message Checksum {
   uint64 sum = 2;
 }
 
-message HummockContext {
-  int32 identifier = 1;
-  string group = 2;
-  uint64 ttl = 3; //ms
+message Level {
+  enum LevelType {
+    Nonoverlapping = 0;
+    Overlapping = 1;
+  }
+  LevelType level_type = 1;
+  repeated uint64 table_ids = 2;
 }
 
-message CreateHummockContextRequest {
-  string group = 1;
+message HummockVersion {
+  repeated Level levels = 1;
 }
+
+message HummockSnapshot {
+  uint64 ts = 1; // also as snapshot_id
+}
+
+message HummockContext {
+  int32 identifier = 1;
+  uint64 ttl = 2; //ms
+}
+
+message CreateHummockContextRequest {}
 
 message CreateHummockContextResponse {
   common.Status status = 1;
@@ -61,33 +79,30 @@ message InvalidateHummockContextResponse {
   common.Status status = 1;
 }
 
-message AddSstWatermarkRequest {
+message AddTableWatermarkRequest {
   int32 context_identifier = 1;
 }
 
-message AddSstWatermarkResponse {
+message AddTableWatermarkResponse {
   common.Status status = 1;
 }
 
-message RemoveSstWatermarkRequest {
+message RemoveTableWatermarkRequest {
   int32 context_identifier = 1;
 }
 
-message RemoveSstWatermarkResponse {
+message RemoveTableWatermarkResponse {
   common.Status status = 1;
 }
 
-message AddSstsRequest {
-  message Sst {
-    uint64 id = 1;
-    string path = 2;
-  }
+message AddTablesRequest {
   int32 context_identifier = 1;
-  repeated Sst Ssts = 2;
+  repeated Table tables = 2;
 }
 
-message AddSstsResponse {
+message AddTablesResponse {
   common.Status status = 1;
+  uint64 version_id = 2;
 }
 
 message RefreshHummockContextRequest {
@@ -99,11 +114,89 @@ message RefreshHummockContextResponse {
   uint64 ttl = 2; //ms
 }
 
+message PinVersionRequest {
+  int32 context_identifier = 1;
+}
+
+message PinVersionResponse {
+  common.Status status = 1;
+  uint64 pinned_version_id = 2;
+  HummockVersion pinned_version = 3;
+}
+
+message UnpinVersionRequest {
+  int32 context_identifier = 1;
+  uint64 pinned_version_id = 2;
+}
+
+message UnpinVersionResponse {
+  common.Status status = 1;
+}
+
+message PinSnapshotRequest {
+  int32 context_identifier = 1;
+}
+
+message PinSnapshotResponse {
+  common.Status status = 1;
+  HummockSnapshot snapshot = 2;
+}
+
+message UnpinSnapshotRequest {
+  int32 context_identifier = 1;
+  HummockSnapshot snapshot = 2;
+}
+
+message UnpinSnapshotResponse {
+  common.Status status = 1;
+}
+
+message GetTablesRequest {
+  int32 context_identifier = 1;
+  HummockVersion pinned_version = 2;
+}
+
+message GetTablesResponse {
+  common.Status status = 1;
+  repeated Table tables = 2;
+}
+
+message GetCompactionTasksRequest {
+  int32 context_identifier = 1;
+}
+
+message GetCompactionTasksResponse {
+  common.Status status = 1;
+}
+
+message ReportCompactionTasksRequest {
+  int32 context_identifier = 1;
+}
+
+message ReportCompactionTasksResponse {
+  common.Status status = 1;
+}
+
+message HummockContextPinnedVersion {
+  repeated uint64 version_id = 1;
+}
+
+message HummockContextPinnedSnapshot {
+  repeated uint64 snapshot_id = 1;
+}
+
 service HummockManagerService {
   rpc CreateHummockContext(CreateHummockContextRequest) returns (CreateHummockContextResponse);
   rpc InvalidateHummockContext(InvalidateHummockContextRequest) returns (InvalidateHummockContextResponse);
-  rpc AddSstWatermark(AddSstWatermarkRequest) returns (AddSstWatermarkResponse);
-  rpc RemoveSstWatermark(RemoveSstWatermarkRequest) returns (RemoveSstWatermarkResponse);
-  rpc AddSsts(AddSstsRequest) returns (AddSstsResponse);
   rpc RefreshHummockContext(RefreshHummockContextRequest) returns (RefreshHummockContextResponse);
+  rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
+  rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
+  rpc AddTables(AddTablesRequest) returns (AddTablesResponse);
+  rpc GetTables(GetTablesRequest) returns (GetTablesResponse);
+  rpc AddTableWatermark(AddTableWatermarkRequest) returns (AddTableWatermarkResponse);
+  rpc RemoveTableWatermark(RemoveTableWatermarkRequest) returns (RemoveTableWatermarkResponse);
+  rpc GetCompactionTasks(GetCompactionTasksRequest) returns (GetCompactionTasksResponse);
+  rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
+  rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
+  rpc UnpinSnapshot(UnpinSnapshotRequest) returns (UnpinSnapshotResponse);
 }

@@ -8,6 +8,7 @@ use risingwave_pb::meta::epoch_service_server::EpochServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::id_generator_service_server::IdGeneratorServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
+use tokio::net::TcpListener;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
@@ -25,8 +26,8 @@ use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::storage::MemStore;
 use crate::stream::StoredStreamMetaManager;
 
-pub async fn rpc_serve(
-    addr: SocketAddr,
+pub async fn rpc_serve_with_listener(
+    listener: TcpListener,
     hummock_config: Option<hummock::Config>,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     let meta_store_ref = Arc::new(MemStore::new());
@@ -56,13 +57,14 @@ pub async fn rpc_serve(
         )
         .await,
     );
-    let hummock_manager = hummock::DefaultHummockManager::new(
+    let (hummock_manager, _) = hummock::DefaultHummockManager::new(
         meta_store_ref.clone(),
         id_generator_manager_ref.clone(),
         config.clone(),
         hummock_config.unwrap_or_default(),
     )
-    .await;
+    .await
+    .unwrap();
 
     let epoch_srv = EpochServiceImpl::new(meta_manager.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new(catalog_manager_ref.clone());
@@ -82,17 +84,28 @@ pub async fn rpc_serve(
             .add_service(IdGeneratorServiceServer::new(id_generator_srv))
             .add_service(StreamManagerServiceServer::new(stream_srv))
             .add_service(HummockManagerServiceServer::new(hummock_srv))
-            .serve_with_shutdown(addr, async move {
-                tokio::select! {
-                  _ = tokio::signal::ctrl_c() => {},
-                  _ = shutdown_recv.recv() => {},
-                }
-            })
+            .serve_with_incoming_shutdown(
+                tokio_stream::wrappers::TcpListenerStream::new(listener),
+                async move {
+                    tokio::select! {
+                      _ = tokio::signal::ctrl_c() => {},
+                      _ = shutdown_recv.recv() => {},
+                    }
+                },
+            )
             .await
             .unwrap();
     });
 
     (join_handle, shutdown_send)
+}
+
+pub async fn rpc_serve(
+    addr: SocketAddr,
+    hummock_config: Option<hummock::Config>,
+) -> (JoinHandle<()>, UnboundedSender<()>) {
+    let listener = TcpListener::bind(addr).await.unwrap();
+    rpc_serve_with_listener(listener, hummock_config).await
 }
 
 #[cfg(test)]

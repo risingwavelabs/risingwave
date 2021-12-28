@@ -52,8 +52,10 @@ pub enum ErrorCode {
 
     #[error("Hummock context {0} not found")]
     HummockContextNotFound(i32),
-    #[error("Hummock context group {0} in use")]
-    HummockContextGroupInUse(String),
+    #[error("Hummock version {0} is not pinned by current hummock context {1}")]
+    HummockVersionNotPinned(u64, i32),
+    #[error("Hummock snapshot {0} is not pinned by current hummock context {1}")]
+    HummockSnapshotNotPinned(u64, i32),
 
     #[error("Error while interact with meta service")]
     MetaError(String),
@@ -179,8 +181,9 @@ impl ErrorCode {
             ErrorCode::InvalidInputSyntax(_, _) => 14,
             ErrorCode::MemComparableError(_) => 15,
             ErrorCode::HummockContextNotFound(_) => 16,
-            ErrorCode::HummockContextGroupInUse(_) => 17,
             ErrorCode::MetaError(_) => 18,
+            ErrorCode::HummockVersionNotPinned(..) => 19,
+            ErrorCode::HummockSnapshotNotPinned(..) => 20,
         }
     }
 }
