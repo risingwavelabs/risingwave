@@ -1,3 +1,8 @@
 #!/bin/bash
 
+if [ -z "$(which cargo-make)" ]; then
+    echo "Installing cargo-make..."
+    cargo install cargo-make --version "^0.35"
+fi
+
 cargo make "$*"

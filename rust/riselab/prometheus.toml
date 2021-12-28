@@ -2,11 +2,11 @@ extend = "common.toml"
 
 [env]
 # Prometheus configurations
-PROMETHEUS_ARCH = "${ARCH}" # or linux-amd64
-PROMETHEUS_DOWNLOAD_PATH = "${PREFIX_TMP}/prometheus.tar.gz" 
-PROMETHEUS_VERSION = "2.32.1" 
-PROMETHEUS_RELEASE = "prometheus-${PROMETHEUS_VERSION}.${PROMETHEUS_ARCH}" 
-PROMETHEUS_DOWNLOAD_TAR_GZ = "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/${PROMETHEUS_RELEASE}.tar.gz" 
+PROMETHEUS_SYSTEM = "${SYSTEM}" # or linux-amd64
+PROMETHEUS_DOWNLOAD_PATH = "${PREFIX_TMP}/prometheus.tar.gz"
+PROMETHEUS_VERSION = "2.32.1"
+PROMETHEUS_RELEASE = "prometheus-${PROMETHEUS_VERSION}.${PROMETHEUS_SYSTEM}"
+PROMETHEUS_DOWNLOAD_TAR_GZ = "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/${PROMETHEUS_RELEASE}.tar.gz"
 
 [tasks.download-prometheus]
 category = "RiseLAB"
