@@ -1,0 +1,36 @@
+# tpch q3
+query IRTI
+select
+	l_orderkey,
+	sum(l_extendedprice * (1 - l_discount)) as revenue,
+	o_orderdate,
+	o_shippriority
+from
+	customer,
+	orders,
+	lineitem
+where
+	c_mktsegment = 'FURNITURE'
+	and c_custkey = o_custkey
+	and l_orderkey = o_orderkey
+	and o_orderdate < date '1995-03-29'
+	and l_shipdate > date '1995-03-29'
+group by
+	l_orderkey,
+	o_orderdate,
+	o_shippriority
+order by
+	revenue desc,
+	o_orderdate
+LIMIT 10;
+----
+3588  199498.4104  1995-03-19 00:00:00 +0000 +0000  0
+4327  123939.6659  1995-03-16 00:00:00 +0000 +0000  0
+5347  118914.1310  1995-02-22 00:00:00 +0000 +0000  0
+450   111508.1186  1995-03-05 00:00:00 +0000 +0000  0
+1767  109576.4152  1995-03-14 00:00:00 +0000 +0000  0
+386   86258.3745   1995-01-25 00:00:00 +0000 +0000  0
+897   54854.6063   1995-03-20 00:00:00 +0000 +0000  0
+2982  54150.4719   1995-03-19 00:00:00 +0000 +0000  0
+3526  51178.7043   1995-03-16 00:00:00 +0000 +0000  0
+2277  42401.7338   1995-01-02 00:00:00 +0000 +0000  0

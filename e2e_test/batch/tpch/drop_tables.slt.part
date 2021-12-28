@@ -1,0 +1,23 @@
+statement ok
+DROP TABLE supplier;
+
+statement ok
+DROP TABLE region;
+
+statement ok
+DROP TABLE nation;
+
+statement ok
+DROP TABLE lineitem;
+
+statement ok
+DROP TABLE orders;
+
+statement ok
+DROP TABLE customer;
+
+statement ok
+DROP TABLE partsupp;
+
+statement ok
+DROP TABLE part;

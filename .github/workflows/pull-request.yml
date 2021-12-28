@@ -108,6 +108,9 @@ jobs:
           path: ./rust/target/debug
       - name: Build java frontend
         run: make java_build
+      - name: Prepare tpch e2e test
+        run: |
+          ./scripts/gen_batch_tpch_slt.sh
       - name: Run tests on Postgresql
         run: |
           python3 ./scripts/sqllogictest.py -p ${{ env.PG_PORT }} -f ./e2e_test/batch/
