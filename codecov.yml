@@ -20,3 +20,5 @@ coverage:
 comment:
   # do not comment until 3 builds collected (java & rust & e2e)
   after_n_builds: 3
+ignore:
+  - "rust/riselab"
