@@ -57,7 +57,7 @@ compileTestKotlin.kotlinOptions {
 
 tasks.spotlessJava {
     onlyIf {
-        hasProperty("changedFiles")
+        System.getenv("RISINGWAVE_FE_BUILD_ENV") == null
     }
     dependsOn(tasks.generateGrammarSource)
 }
