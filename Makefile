@@ -70,3 +70,6 @@ docker_frontend:
 
 docker_backend:
 	docker build -f docker/backend/Dockerfile -t ${DOCKER_GROUP_NAME}/${DOCKER_COMPONENT_BACKEND_NAME}:${DOCKER_IMAGE_TAG} .
+
+batch_tpch_slt:
+	./scripts/gen_batch_tpch_slt.sh
