@@ -34,7 +34,7 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 public class RwStreamTableSource extends TableScan implements RisingWaveStreamingRel {
   protected final TableCatalog.TableId tableId;
   protected final ImmutableList<ColumnCatalog.ColumnId> columnIds;
-  private final boolean isStream;
+  private final boolean isSource;
 
   public RwStreamTableSource(
       RelOptCluster cluster,
@@ -43,11 +43,11 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
       RelOptTable table,
       TableCatalog.TableId tableId,
       ImmutableList<ColumnCatalog.ColumnId> columnIds,
-      boolean isStream) {
+      boolean isSource) {
     super(cluster, traitSet, hints, table);
     this.tableId = tableId;
     this.columnIds = columnIds;
-    this.isStream = isStream;
+    this.isSource = isSource;
   }
 
   public TableCatalog.TableId getTableId() {
@@ -67,8 +67,8 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
         TableSourceNode.newBuilder()
             .setTableRefId(tableRefId)
             .setSourceType(
-                this.isStream
-                    ? TableSourceNode.SourceType.STREAM
+                this.isSource
+                    ? TableSourceNode.SourceType.SOURCE
                     : TableSourceNode.SourceType.TABLE);
 
     columnIds.forEach(c -> tableSourceNodeBuilder.addColumnIds(c.getValue()));
@@ -154,7 +154,7 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
               source.getTable(),
               tableCatalog.getId(),
               source.getColumnIds(),
-              tableCatalog.isStream());
+              tableCatalog.isSource());
 
       // TODO: will be removed once single mode removed
       boolean isSingle = isSingleMode(contextOf(source.getCluster()));

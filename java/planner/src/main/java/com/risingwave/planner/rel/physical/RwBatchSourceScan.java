@@ -7,7 +7,7 @@ import com.risingwave.catalog.TableCatalog;
 import com.risingwave.planner.rel.common.RwScan;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.proto.plan.PlanNode;
-import com.risingwave.proto.plan.StreamScanNode;
+import com.risingwave.proto.plan.SourceScanNode;
 import com.risingwave.proto.plan.TableRefId;
 import com.risingwave.rpc.Messages;
 import java.util.Collections;
@@ -19,8 +19,8 @@ import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.hint.RelHint;
 
 /** Executor to scan from a stream source (e.g. Kafka) */
-public class RwBatchStreamScan extends RwScan implements RisingWaveBatchPhyRel {
-  protected RwBatchStreamScan(
+public class RwBatchSourceScan extends RwScan implements RisingWaveBatchPhyRel {
+  protected RwBatchSourceScan(
       RelOptCluster cluster,
       RelTraitSet traitSet,
       List<RelHint> hints,
@@ -31,7 +31,7 @@ public class RwBatchStreamScan extends RwScan implements RisingWaveBatchPhyRel {
     checkConvention();
   }
 
-  public static RwBatchStreamScan create(
+  public static RwBatchSourceScan create(
       RelOptCluster cluster,
       RelTraitSet traitSet,
       RelOptTable table,
@@ -40,12 +40,12 @@ public class RwBatchStreamScan extends RwScan implements RisingWaveBatchPhyRel {
 
     RelTraitSet newTraitSet = traitSet.plus(RisingWaveBatchPhyRel.BATCH_PHYSICAL);
 
-    return new RwBatchStreamScan(
+    return new RwBatchSourceScan(
         cluster, newTraitSet, Collections.emptyList(), table, tableCatalog.getId(), columnIds);
   }
 
-  public RwBatchStreamScan copy(RelTraitSet traitSet) {
-    return new RwBatchStreamScan(
+  public RwBatchSourceScan copy(RelTraitSet traitSet) {
+    return new RwBatchSourceScan(
         getCluster(), traitSet, getHints(), getTable(), getTableId(), getColumnIds());
   }
 
@@ -57,13 +57,13 @@ public class RwBatchStreamScan extends RwScan implements RisingWaveBatchPhyRel {
   @Override
   public PlanNode serialize() {
     TableRefId tableRefId = Messages.getTableRefId(tableId);
-    StreamScanNode.Builder streamScanNodeBuilder =
-        StreamScanNode.newBuilder()
+    SourceScanNode.Builder streamScanNodeBuilder =
+            SourceScanNode.newBuilder()
             .setTableRefId(tableRefId)
             .setTimestampMs(System.currentTimeMillis());
     columnIds.forEach(c -> streamScanNodeBuilder.addColumnIds(c.getValue()));
     return PlanNode.newBuilder()
-        .setNodeType(PlanNode.PlanNodeType.STREAM_SCAN)
+        .setNodeType(PlanNode.PlanNodeType.SOURCE_SCAN)
         .setBody(Any.pack(streamScanNodeBuilder.build()))
         .build();
   }

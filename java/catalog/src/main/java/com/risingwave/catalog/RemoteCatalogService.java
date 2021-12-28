@@ -158,7 +158,7 @@ public class RemoteCatalogService implements CatalogService {
         CreateTableInfo.Builder builder = CreateTableInfo.builder(table.getTableName());
         builder.setMv(table.getIsMaterializedView());
         builder.setProperties(table.getPropertiesMap());
-        builder.setStream(table.getIsStream());
+        builder.setSource(table.getIsSource());
         builder.setRowFormat(table.getRowFormat());
         for (ColumnDesc desc : table.getColumnDescsList()) {
           builder.addColumn(desc.getName(), new com.risingwave.catalog.ColumnDesc(desc));

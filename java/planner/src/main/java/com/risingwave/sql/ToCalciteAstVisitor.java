@@ -15,7 +15,7 @@ import com.risingwave.common.datatype.StringType;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.planner.sql.RisingWaveOperatorTable;
-import com.risingwave.sql.node.SqlCreateStream;
+import com.risingwave.sql.node.SqlCreateSource;
 import com.risingwave.sql.node.SqlShowParameters;
 import com.risingwave.sql.node.SqlTableOption;
 import com.risingwave.sql.tree.AliasedRelation;
@@ -29,7 +29,7 @@ import com.risingwave.sql.tree.Cast;
 import com.risingwave.sql.tree.ColumnDefinition;
 import com.risingwave.sql.tree.ColumnType;
 import com.risingwave.sql.tree.ComparisonExpression;
-import com.risingwave.sql.tree.CreateStream;
+import com.risingwave.sql.tree.CreateSource;
 import com.risingwave.sql.tree.CreateTable;
 import com.risingwave.sql.tree.CreateView;
 import com.risingwave.sql.tree.DoubleLiteral;
@@ -158,7 +158,7 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
   }
 
   @Override
-  public SqlNode visitCreateStream(CreateStream node, Void context) {
+  public SqlNode visitCreateSource(CreateSource node, Void context) {
     var pos = SqlParserPos.ZERO;
 
     SqlIdentifier name = new SqlIdentifier(node.getName(), pos);
@@ -178,7 +178,7 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
     SqlCharStringLiteral rowFormat = SqlLiteral.createCharString(node.getRowFormat(), pos);
     SqlCharStringLiteral rowSchemaLocation =
         SqlLiteral.createCharString(node.getRowSchemaLocation(), pos);
-    return new SqlCreateStream(pos, name, columnList, properties, rowFormat, rowSchemaLocation,
+    return new SqlCreateSource(pos, name, columnList, properties, rowFormat, rowSchemaLocation,
         primaryColumns);
   }
 

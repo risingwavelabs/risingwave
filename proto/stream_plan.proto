@@ -12,7 +12,7 @@ import "plan.proto";
 message TableSourceNode {
   enum SourceType {
     TABLE = 0;
-    STREAM = 1;
+    SOURCE = 1;
   }
   plan.TableRefId table_ref_id = 1;
   repeated int32 column_ids = 2;

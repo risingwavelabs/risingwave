@@ -297,7 +297,7 @@ public abstract class AstVisitor<R, C> {
     return visitStatement(node, context);
   }
 
-  public R visitCreateStream(CreateStream node, C context) {
+  public R visitCreateSource(CreateSource node, C context) {
     return visitStatement(node, context);
   }
 

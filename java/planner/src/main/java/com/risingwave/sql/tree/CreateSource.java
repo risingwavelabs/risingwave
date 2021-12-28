@@ -5,15 +5,15 @@ import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.apache.commons.lang3.builder.ToStringBuilder;
 
-/** CreateStream is a node that represents the CREATE STREAM statement. */
-public final class CreateStream extends Statement {
+/** CreateSource is a node that represents the CREATE SOURCE statement. */
+public final class CreateSource extends Statement {
   private final String name;
   private final List<Node> tableElements;
   private final GenericProperties<Expression> properties;
   private final String rowFormat;
   private final String rowSchemaLocation;
 
-  public CreateStream(
+  public CreateSource(
       String streamName,
       List<Node> tableElements,
       GenericProperties<Expression> props,
@@ -44,7 +44,7 @@ public final class CreateStream extends Statement {
 
   @Override
   public <R, C> R accept(AstVisitor<R, C> visitor, C context) {
-    return visitor.visitCreateStream(this, context);
+    return visitor.visitCreateSource(this, context);
   }
 
   @Override
@@ -65,7 +65,7 @@ public final class CreateStream extends Statement {
     if (o == null || getClass() != o.getClass()) {
       return false;
     }
-    CreateStream rhs = (CreateStream) o;
+    CreateSource rhs = (CreateSource) o;
     return new EqualsBuilder()
         .append(name, rhs.name)
         .append(tableElements, rhs.tableElements)

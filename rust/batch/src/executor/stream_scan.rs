@@ -5,7 +5,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_pb::plan::StreamScanNode;
+use risingwave_pb::plan::SourceScanNode;
 use risingwave_source::{BatchSourceReader, HighLevelKafkaSourceReaderContext, Source, SourceImpl};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
@@ -20,10 +20,10 @@ pub struct StreamScanExecutor {
 impl BoxedExecutorBuilder for StreamScanExecutor {
     /// This function is designed for OLAP to initialize the `StreamScanExecutor`
     /// Things needed for initialization is
-    /// 1. `StreamScanNode` whose definition can be shared by OLAP and Streaming
+    /// 1. `SourceScanNode` whose definition can be shared by OLAP and Streaming
     /// 2. `SourceManager` whose definition can also be shared. But is it physically shared?
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        let stream_scan_node = StreamScanNode::decode(&(source.plan_node()).get_body().value[..])
+        let stream_scan_node = SourceScanNode::decode(&(source.plan_node()).get_body().value[..])
             .map_err(ProstError)?;
 
         let table_id = TableId::from(&stream_scan_node.table_ref_id);

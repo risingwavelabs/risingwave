@@ -54,7 +54,7 @@ message RowSeqScanNode {
   repeated int32 column_ids = 2;
 }
 
-message StreamScanNode {
+message SourceScanNode {
   TableRefId table_ref_id = 1;
   // timestamp_ms is used for offset synchronization of high level consumer groups, this field will be deprecated if a more elegant approach is available in the future
   int64 timestamp_ms = 2;
@@ -122,7 +122,7 @@ message LimitNode {
   uint32 offset = 2;
 }
 
-message CreateStreamNode {
+message CreateSourceNode {
   enum RowFormatType {
     JSON = 0;
     PROTOBUF = 1;
@@ -137,7 +137,7 @@ message CreateStreamNode {
   int32 row_id_index = 6;
 }
 
-message DropStreamNode {
+message DropSourceNode {
   TableRefId table_ref_id = 1;
 }
 
@@ -214,15 +214,15 @@ message PlanNode {
     EXCHANGE = 10;
     ORDER_BY = 11;
     NESTED_LOOP_JOIN = 12;
-    CREATE_STREAM = 13;
-    STREAM_SCAN = 14;
+    CREATE_SOURCE = 13;
+    SOURCE_SCAN = 14;
     TOP_N = 15;
     SORT_AGG = 16;
     ROW_SEQ_SCAN = 17;
     LIMIT = 18;
     VALUE = 19;
     HASH_JOIN = 20;
-    DROP_STREAM = 21;
+    DROP_SOURCE = 21;
     MERGE_SORT_EXCHANGE = 22;
     SORT_MERGE_JOIN = 23;
     GENERATE_SERIES = 24;

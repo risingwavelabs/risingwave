@@ -22,7 +22,7 @@ message Table {
   uint32 column_count = 3;
   repeated plan.ColumnDesc column_descs = 4;
   bool is_materialized_view = 5;
-  bool is_stream = 6;
+  bool is_source = 6;
   bool append_only = 7;
   repeated uint32 pk_columns = 8;
   DistributionType dist_type = 9;

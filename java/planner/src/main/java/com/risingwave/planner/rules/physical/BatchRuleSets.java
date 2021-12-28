@@ -19,7 +19,7 @@ import com.risingwave.planner.rel.physical.RwBatchMaterializedViewScan;
 import com.risingwave.planner.rel.physical.RwBatchProject;
 import com.risingwave.planner.rel.physical.RwBatchSort;
 import com.risingwave.planner.rel.physical.RwBatchSortAgg;
-import com.risingwave.planner.rel.physical.RwBatchStreamScan;
+import com.risingwave.planner.rel.physical.RwBatchSourceScan;
 import com.risingwave.planner.rel.physical.RwBatchTableScan;
 import com.risingwave.planner.rel.physical.RwBatchValues;
 import com.risingwave.planner.rel.physical.join.RwBatchHashJoin;
@@ -152,7 +152,7 @@ public class BatchRuleSets {
           RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchValues.class),
           RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchInsert.class),
           RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchTableScan.class),
-          RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchStreamScan.class),
+          RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchSourceScan.class),
           RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchMaterializedViewScan.class),
           RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchGenerateSeries.class));
 

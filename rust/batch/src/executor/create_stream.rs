@@ -8,9 +8,9 @@ use risingwave_common::ensure;
 use risingwave_common::error::ErrorCode::{InternalError, ProstError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::build_from_prost;
-use risingwave_pb::plan::create_stream_node::RowFormatType;
+use risingwave_pb::plan::create_source_node::RowFormatType;
 use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::CreateStreamNode;
+use risingwave_pb::plan::CreateSourceNode;
 use risingwave_source::parser::JSONParser;
 use risingwave_source::{
     DebeziumJsonParser, HighLevelKafkaSourceConfig, ProtobufParser, SourceColumnDesc, SourceConfig,
@@ -69,9 +69,9 @@ impl CreateStreamExecutor {
 
 impl BoxedExecutorBuilder for CreateStreamExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNodeType::CreateStream);
+        ensure!(source.plan_node().get_node_type() == PlanNodeType::CreateSource);
 
-        let node = CreateStreamNode::decode(&(source.plan_node()).get_body().value[..])
+        let node = CreateSourceNode::decode(&(source.plan_node()).get_body().value[..])
             .map_err(ProstError)?;
 
         let table_id = TableId::from(&node.table_ref_id);

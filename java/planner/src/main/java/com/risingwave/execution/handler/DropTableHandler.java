@@ -26,8 +26,8 @@ import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlDropTable;
 
 /**
- * DropTableHandler is the handler of both DropTable and DropStream. It determines the type by
- * `isStream`.
+ * DropTableHandler is the handler of both DropTable and DropSource. It determines the type by
+ * `isSource`.
  */
 @HandlerSignature(sqlKinds = {SqlKind.DROP_TABLE})
 public class DropTableHandler implements SqlHandler {
@@ -64,8 +64,8 @@ public class DropTableHandler implements SqlHandler {
 
     PlanNode.PlanNodeType planNodeType = PlanNode.PlanNodeType.DROP_TABLE;
 
-    if (table.isStream()) {
-      planNodeType = PlanNode.PlanNodeType.DROP_STREAM;
+    if (table.isSource()) {
+      planNodeType = PlanNode.PlanNodeType.DROP_SOURCE;
     }
     PlanNode rootNode =
         PlanNode.newBuilder().setBody(Any.pack(dropTableNode)).setNodeType(planNodeType).build();

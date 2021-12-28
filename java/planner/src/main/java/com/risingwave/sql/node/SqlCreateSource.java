@@ -17,8 +17,8 @@ import org.apache.calcite.sql.SqlWriter;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.util.ImmutableNullableList;
 
-/** The calcite node for CREATE STREAM statement. */
-public class SqlCreateStream extends SqlCreate {
+/** The calcite node for CREATE SOURCE statement. */
+public class SqlCreateSource extends SqlCreate {
 
   private final SqlIdentifier name;
   private final SqlNodeList columnList;
@@ -49,9 +49,9 @@ public class SqlCreateStream extends SqlCreate {
   }
 
   private static final SqlOperator OPERATOR =
-      new SqlSpecialOperator("CREATE STREAM", SqlKind.OTHER_DDL);
+      new SqlSpecialOperator("CREATE SOURCE", SqlKind.OTHER_DDL);
 
-  public SqlCreateStream(
+  public SqlCreateSource(
       SqlParserPos pos,
       SqlIdentifier name,
       @Nullable SqlNodeList columnList,
@@ -76,7 +76,7 @@ public class SqlCreateStream extends SqlCreate {
   @Override
   public void unparse(SqlWriter writer, int leftPrec, int rightPrec) {
     writer.keyword("CREATE");
-    writer.keyword("STREAM");
+    writer.keyword("SOURCE");
     if (ifNotExists) {
       writer.keyword("IF NOT EXISTS");
     }

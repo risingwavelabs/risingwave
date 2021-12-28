@@ -64,7 +64,7 @@ public class CatalogCast {
     builder.setTableRefId(
         buildTableRefId(databaseCatalog, schemaCatalog, tableCatalog.getEntityName()));
     builder.setIsMaterializedView(tableCatalog.isMaterializedView());
-    builder.setIsStream(tableCatalog.isStream());
+    builder.setIsSource(tableCatalog.isSource());
     builder.setDistType(Table.DistributionType.valueOf(tableCatalog.getDistributionType().name()));
     builder.setRowFormat(tableCatalog.getRowFormat());
     builder.putAllProperties(tableCatalog.getProperties());
@@ -117,7 +117,7 @@ public class CatalogCast {
     }
     builder.setMv(false);
     builder.setProperties(table.getPropertiesMap());
-    builder.setStream(table.getIsStream());
+    builder.setSource(table.getIsSource());
     builder.setAppendOnly(table.getAppendOnly());
     builder.setRowFormat(table.getRowFormat());
     builder.setRowSchemaLocation(table.getRowSchemaLocation());

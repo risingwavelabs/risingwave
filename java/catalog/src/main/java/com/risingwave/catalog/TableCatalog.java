@@ -45,7 +45,7 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
   private final ColumnCatalog rowIdColumn;
   private final ConcurrentMap<ColumnCatalog.ColumnId, ColumnCatalog> columnById;
   private final ConcurrentMap<ColumnCatalog.ColumnName, ColumnCatalog> columnByName;
-  private final boolean stream;
+  private final boolean source;
   private final ImmutableIntList primaryKeyColumnIds;
   private final DataDistributionType distributionType;
   private final ImmutableMap<String, String> properties;
@@ -59,7 +59,7 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
       TableId id,
       TableName name,
       Collection<ColumnCatalog> columns,
-      boolean stream,
+      boolean source,
       ImmutableIntList primaryKeyColumnIds,
       DataDistributionType distributionType,
       ImmutableMap<String, String> properties,
@@ -75,7 +75,7 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
     this.columns = new ArrayList<>(columns);
     this.columnById = EntityBase.groupBy(columns, ColumnCatalog::getId);
     this.columnByName = EntityBase.groupBy(columns, ColumnCatalog::getEntityName);
-    this.stream = stream;
+    this.source = source;
     this.primaryKeyColumnIds = primaryKeyColumnIds;
     this.distributionType = distributionType;
     this.properties = properties;
@@ -235,8 +235,8 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
     return rowSchemaLocation;
   }
 
-  public boolean isStream() {
-    return stream;
+  public boolean isSource() {
+    return source;
   }
 
   private ColumnCatalog buildRowIdColumn() {

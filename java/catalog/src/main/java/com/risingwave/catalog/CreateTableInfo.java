@@ -16,7 +16,7 @@ public class CreateTableInfo {
   private final ImmutableList<Pair<String, ColumnDesc>> columns;
   private final ImmutableMap<String, String> properties;
   private final boolean appendOnly;
-  private final boolean stream;
+  private final boolean source;
   private final String rowFormat;
   private final String rowSchemaLocation;
 
@@ -25,14 +25,14 @@ public class CreateTableInfo {
       ImmutableList<Pair<String, ColumnDesc>> columns,
       ImmutableMap<String, String> properties,
       boolean appendOnly,
-      boolean stream,
+      boolean source,
       String rowFormat,
       String rowSchemaLocation) {
     this.name = tableName;
     this.columns = columns;
     this.properties = properties;
     this.appendOnly = appendOnly;
-    this.stream = stream;
+    this.source = source;
     this.rowFormat = rowFormat;
     this.rowSchemaLocation = rowSchemaLocation;
   }
@@ -57,8 +57,8 @@ public class CreateTableInfo {
     return new Builder(tableName);
   }
 
-  public boolean isStream() {
-    return stream;
+  public boolean isSource() {
+    return source;
   }
 
   public ImmutableMap<String, String> getProperties() {
@@ -80,7 +80,7 @@ public class CreateTableInfo {
     protected Map<String, String> properties = new HashMap<>();
     protected boolean appendOnly = false;
     protected boolean mv = false;
-    protected boolean stream = false;
+    protected boolean source = false;
     protected String rowFormat = "";
     protected String rowSchemaLocation = "";
 
@@ -108,8 +108,8 @@ public class CreateTableInfo {
       return this;
     }
 
-    public void setStream(boolean stream) {
-      this.stream = stream;
+    public void setSource(boolean source) {
+      this.source = source;
     }
 
     public void setProperties(Map<String, String> properties) {
@@ -126,7 +126,7 @@ public class CreateTableInfo {
           ImmutableList.copyOf(columns),
           ImmutableMap.copyOf(properties),
           appendOnly,
-          stream,
+          source,
           rowFormat,
           rowSchemaLocation);
     }

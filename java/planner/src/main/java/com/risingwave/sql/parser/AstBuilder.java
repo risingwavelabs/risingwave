@@ -77,7 +77,7 @@ import com.risingwave.sql.tree.CopyTo;
 import com.risingwave.sql.tree.CreateAnalyzer;
 import com.risingwave.sql.tree.CreateFunction;
 import com.risingwave.sql.tree.CreateSnapshot;
-import com.risingwave.sql.tree.CreateStream;
+import com.risingwave.sql.tree.CreateSource;
 import com.risingwave.sql.tree.CreateTable;
 import com.risingwave.sql.tree.CreateTableAs;
 import com.risingwave.sql.tree.CreateUser;
@@ -352,7 +352,7 @@ class AstBuilder extends SqlBaseBaseVisitor<Node> {
   }
 
   @Override
-  public Node visitCreateStream(SqlBaseParser.CreateStreamContext context) {
+  public Node visitCreateSource(SqlBaseParser.CreateSourceContext context) {
     List<Node> tableElements = Lists2.map(context.tableElement(), this::visit);
 
     String rowSchemaLocation = "";
@@ -361,7 +361,7 @@ class AstBuilder extends SqlBaseBaseVisitor<Node> {
       rowSchemaLocation = getText(context.rowSchemaLocation);
     }
 
-    return new CreateStream(
+    return new CreateSource(
         context.name.getText(),
         tableElements,
         extractGenericProperties(context.withProperties()),

@@ -7,7 +7,7 @@ import com.risingwave.catalog.MaterializedViewCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.planner.rel.logical.RwLogicalScan;
 import com.risingwave.planner.rel.physical.RwBatchMaterializedViewScan;
-import com.risingwave.planner.rel.physical.RwBatchStreamScan;
+import com.risingwave.planner.rel.physical.RwBatchSourceScan;
 import com.risingwave.planner.rel.physical.RwBatchTableScan;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelNode;
@@ -35,8 +35,8 @@ public class BatchScanConverterRule extends ConverterRule {
   public @Nullable RelNode convert(RelNode rel) {
     RwLogicalScan source = (RwLogicalScan) rel;
     TableCatalog table = source.getTable().unwrapOrThrow(TableCatalog.class);
-    if (table.isStream()) {
-      return RwBatchStreamScan.create(
+    if (table.isSource()) {
+      return RwBatchSourceScan.create(
           source.getCluster(), source.getTraitSet(), source.getTable(), source.getColumnIds());
     } else if (table.isMaterializedView()) {
       MaterializedViewCatalog view = (MaterializedViewCatalog) table;

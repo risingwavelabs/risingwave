@@ -21,14 +21,14 @@ import com.risingwave.proto.computenode.CreateTaskRequest;
 import com.risingwave.proto.computenode.CreateTaskResponse;
 import com.risingwave.proto.computenode.GetDataRequest;
 import com.risingwave.proto.computenode.TaskSinkId;
-import com.risingwave.proto.plan.CreateStreamNode;
+import com.risingwave.proto.plan.CreateSourceNode;
 import com.risingwave.proto.plan.ExchangeInfo;
 import com.risingwave.proto.plan.PlanFragment;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.rpc.ComputeClient;
 import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.Messages;
-import com.risingwave.sql.node.SqlCreateStream;
+import com.risingwave.sql.node.SqlCreateSource;
 import com.risingwave.sql.node.SqlTableOption;
 import com.risingwave.sql.tree.ColumnDefinition;
 import java.util.Map;
@@ -39,10 +39,8 @@ import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlColumnDeclaration;
 import org.apache.calcite.sql.validate.SqlValidator;
 
-/**
- * Handler of <code>CREATE STREAM</code> statement
- */
-public class CreateStreamHandler implements SqlHandler {
+/** Handler of <code>CREATE SOURCE</code> statement */
+public class CreateSourceHandler implements SqlHandler {
   @Override
   public DdlResult handle(SqlNode ast, ExecutionContext context) {
     PlanFragment planFragment = execute(ast, context);
@@ -64,14 +62,14 @@ public class CreateStreamHandler implements SqlHandler {
 
   private static PlanFragment serialize(TableCatalog table) {
     TableCatalog.TableId tableId = table.getId();
-    CreateStreamNode.Builder createStreamNodeBuilder = CreateStreamNode.newBuilder();
+    CreateSourceNode.Builder createSourceNodeBuilder = CreateSourceNode.newBuilder();
 
     ImmutableList<ColumnCatalog> allColumns = table.getAllColumns(false);
-    createStreamNodeBuilder.setRowIdIndex(-1);
+      createSourceNodeBuilder.setRowIdIndex(-1);
 
     if (allColumns.stream().noneMatch(column -> column.getDesc().isPrimary())) {
       allColumns = table.getAllColumns(true);
-      createStreamNodeBuilder.setRowIdIndex(0);
+        createSourceNodeBuilder.setRowIdIndex(0);
     }
 
     for (ColumnCatalog columnCatalog : allColumns) {
@@ -85,40 +83,39 @@ public class CreateStreamHandler implements SqlHandler {
           .setColumnId(columnCatalog.getId().getValue())
           .setIsPrimary(columnCatalog.getDesc().isPrimary());
 
-      createStreamNodeBuilder.addColumnDescs(columnDescBuilder);
+      createSourceNodeBuilder.addColumnDescs(columnDescBuilder);
     }
-
-    createStreamNodeBuilder.putAllProperties(table.getProperties());
+      createSourceNodeBuilder.putAllProperties(table.getProperties());
 
     switch (table.getRowFormat().toLowerCase()) {
       case "json":
-        createStreamNodeBuilder.setFormat(CreateStreamNode.RowFormatType.JSON);
+        createSourceNodeBuilder.setFormat(CreateSourceNode.RowFormatType.JSON);
         break;
       case "avro":
-        createStreamNodeBuilder.setFormat(CreateStreamNode.RowFormatType.AVRO);
+        createSourceNodeBuilder.setFormat(CreateSourceNode.RowFormatType.AVRO);
         break;
       case "protobuf":
-        createStreamNodeBuilder.setFormat(CreateStreamNode.RowFormatType.PROTOBUF);
+        createSourceNodeBuilder.setFormat(CreateSourceNode.RowFormatType.PROTOBUF);
         break;
       case "debezium-json":
-        createStreamNodeBuilder.setFormat(CreateStreamNode.RowFormatType.DEBEZIUM_JSON);
+          createSourceNodeBuilder.setFormat(CreateSourceNode.RowFormatType.DEBEZIUM_JSON);
         break;
       default:
         throw new PgException(PgErrorCode.PROTOCOL_VIOLATION, "unsupported row format");
     }
 
-    createStreamNodeBuilder.setSchemaLocation(table.getRowSchemaLocation());
+    createSourceNodeBuilder.setSchemaLocation(table.getRowSchemaLocation());
 
-    CreateStreamNode creatStreamNode =
-        createStreamNodeBuilder.setTableRefId(Messages.getTableRefId(tableId)).build();
+    CreateSourceNode createSourceNode =
+            createSourceNodeBuilder.setTableRefId(Messages.getTableRefId(tableId)).build();
 
     ExchangeInfo exchangeInfo =
         ExchangeInfo.newBuilder().setMode(ExchangeInfo.DistributionMode.SINGLE).build();
 
     PlanNode rootNode =
         PlanNode.newBuilder()
-            .setBody(Any.pack(creatStreamNode))
-            .setNodeType(PlanNode.PlanNodeType.CREATE_STREAM)
+            .setBody(Any.pack(createSourceNode))
+            .setNodeType(PlanNode.PlanNodeType.CREATE_SOURCE)
             .build();
 
     return PlanFragment.newBuilder().setRoot(rootNode).setExchangeInfo(exchangeInfo).build();
@@ -126,12 +123,12 @@ public class CreateStreamHandler implements SqlHandler {
 
   @VisibleForTesting
   protected PlanFragment execute(SqlNode ast, ExecutionContext context) {
-    SqlCreateStream sql = (SqlCreateStream) ast;
+    SqlCreateSource sql = (SqlCreateSource) ast;
 
     SchemaCatalog.SchemaName schemaName = context.getCurrentSchema();
 
     String tableName = sql.getName().getSimple();
-    CreateTableInfo.Builder createStreamInfoBuilder = CreateTableInfo.builder(tableName);
+    CreateTableInfo.Builder createSourceInfoBuilder = CreateTableInfo.builder(tableName);
 
     Set<String> primaryColumns =
         sql.getPrimaryColumns().stream().map(ColumnDefinition::ident).collect(Collectors.toSet());
@@ -147,7 +144,7 @@ public class CreateStreamHandler implements SqlHandler {
                 (RisingWaveDataType) columnDef.dataType.deriveType(sqlConverter),
                 primaryColumns.contains(columnDef.name.getSimple()),
                 ColumnEncoding.RAW);
-        createStreamInfoBuilder.addColumn(columnDef.name.getSimple(), columnDesc);
+        createSourceInfoBuilder.addColumn(columnDef.name.getSimple(), columnDesc);
       }
     }
 
@@ -159,13 +156,13 @@ public class CreateStreamHandler implements SqlHandler {
                     n -> ((SqlCharStringLiteral) n.getKey()).getValueAs(String.class).toLowerCase(),
                     n -> ((SqlCharStringLiteral) n.getValue()).getValueAs(String.class)));
 
-    createStreamInfoBuilder.setProperties(properties);
-    createStreamInfoBuilder.setStream(true);
-    createStreamInfoBuilder.setRowFormat(sql.getRowFormat().getValueAs(String.class));
-    createStreamInfoBuilder.setRowSchemaLocation(
+    createSourceInfoBuilder.setProperties(properties);
+    createSourceInfoBuilder.setSource(true);
+    createSourceInfoBuilder.setRowFormat(sql.getRowFormat().getValueAs(String.class));
+    createSourceInfoBuilder.setRowSchemaLocation(
         sql.getRowSchemaLocation().getValueAs(String.class));
 
-    CreateTableInfo streamInfo = createStreamInfoBuilder.build();
+    CreateTableInfo streamInfo = createSourceInfoBuilder.build();
     // Build a plan distribute to compute node.
     TableCatalog table = context.getCatalogService().createTable(schemaName, streamInfo);
     return serialize(table);

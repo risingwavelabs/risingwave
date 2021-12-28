@@ -1,5 +1,5 @@
 statement ok
-create stream s (v1 int not null, v2 char(8) not null) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'kafka_1_partition_topic', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
+create source s (v1 int not null, v2 char(8) not null) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'kafka_1_partition_topic', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
 
 query IT rowsort
 select * from s
@@ -10,10 +10,10 @@ select * from s
 4 4444
 
 statement ok
-drop stream s
+drop source s
 
 statement ok
-create stream s (v1 int not null, v2 char(8) not null) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'kafka_2_partition_topic', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
+create source s (v1 int not null, v2 char(8) not null) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'kafka_2_partition_topic', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
 
 query IT rowsort
 select * from s
@@ -24,10 +24,10 @@ select * from s
 4 4444
 
 statement ok
-drop stream s
+drop source s
 
 statement ok
-create stream s (v1 int not null, v2 char(8) not null) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'kafka_3_partition_topic', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
+create source s (v1 int not null, v2 char(8) not null) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'kafka_3_partition_topic', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
 
 query IT rowsort
 select * from s
@@ -38,10 +38,10 @@ select * from s
 4 4444
 
 statement ok
-drop stream s
+drop source s
 
 statement ok
-create stream s (v1 int not null, v2 char(8) not null) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'kafka_4_partition_topic', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
+create source s (v1 int not null, v2 char(8) not null) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'kafka_4_partition_topic', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
 
 query IT rowsort
 select * from s
@@ -52,10 +52,10 @@ select * from s
 4 4444
 
 statement ok
-drop stream s
+drop source s
 
 statement ok
-create stream s (v1 int not null, v2 char(8) not null) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'kafka_4_partition_topic_with_100_message', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
+create source s (v1 int not null, v2 char(8) not null) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'kafka_4_partition_topic_with_100_message', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
 
 query I
 select count(*) from s
@@ -63,4 +63,4 @@ select count(*) from s
 100
 
 statement ok
-drop stream s
+drop source s

@@ -86,7 +86,7 @@ statement
     | COPY tableWithPartition FROM path=expr withProperties? (RETURN SUMMARY)?       #copyFrom
     | COPY tableWithPartition columns? where?
         TO DIRECTORY? path=expr withProperties?                                      #copyTo
-    | DROP (TABLE | STREAM) (IF EXISTS)? table                                       #dropTable
+    | DROP (TABLE | SOURCE) (IF EXISTS)? table                                       #dropTable
     | DROP ALIAS qname                                                               #dropAlias
     | DROP SNAPSHOT qname                                                            #dropSnapshot
     | DROP FUNCTION (IF EXISTS)? name=qname
@@ -498,11 +498,11 @@ createStmt
         AS body=parameterOrString                                                    #createFunction
     | CREATE USER name=ident withProperties?                                         #createUser
     | CREATE ( OR REPLACE )? (MATERIALIZED)? VIEW name=qname AS query                #createView
-    | CREATE ( OR REPLACE )? STREAM (IF NOT EXISTS)? name=ident
+    | CREATE ( OR REPLACE )? SOURCE (IF NOT EXISTS)? name=ident
         '(' tableElement (',' tableElement)* ')'
         withProperties?
         ROW FORMAT rowFormat=stringLiteralOrIdentifier
-        (ROW SCHEMA LOCATION rowSchemaLocation=stringLiteral)?                       #createStream
+        (ROW SCHEMA LOCATION rowSchemaLocation=stringLiteral)?                       #createSource
     ;
 
 functionArgument
@@ -692,7 +692,7 @@ nonReserved
     | REPLACE | RETURNING | SWAP | GC | DANGLING | ARTIFACTS | DECOMMISSION | LEADING | TRAILING | BOTH | TRIM
     | CURRENT_SCHEMA | PROMOTE | CHARACTER | VARYING
     | DISCARD | PLANS | SEQUENCES | TEMPORARY | TEMP | METADATA
-    | STREAM | LOCATION | TRUE | FALSE
+    | SOURCE | LOCATION | TRUE | FALSE
     ;
 
 AUTHORIZATION: 'AUTHORIZATION';
@@ -787,7 +787,7 @@ WITHOUT: 'WITHOUT';
 RECURSIVE: 'RECURSIVE';
 CREATE: 'CREATE';
 TABLE: 'TABLE';
-STREAM: 'STREAM';
+SOURCE: 'SOURCE';
 SWAP: 'SWAP';
 GC: 'GC';
 DANGLING: 'DANGLING';

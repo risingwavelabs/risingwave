@@ -15,7 +15,7 @@ import com.risingwave.execution.context.FrontendEnv;
 import com.risingwave.execution.context.SessionConfiguration;
 import com.risingwave.planner.TestPlannerModule;
 import com.risingwave.proto.data.DataType;
-import com.risingwave.proto.plan.CreateStreamNode;
+import com.risingwave.proto.plan.CreateSourceNode;
 import com.risingwave.proto.plan.PlanFragment;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.sql.parser.SqlParser;
@@ -24,7 +24,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
-/** BasicStreamTest tests the most basic CreateStream and DropStream operations */
+/** BasicStreamTest tests the most basic CreateSource and DropSource operations */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class BasicStreamTest {
   private static final String TEST_DB_NAME = "test_db";
@@ -55,17 +55,17 @@ public class BasicStreamTest {
   }
 
   @Test
-  void testCreateStream() throws InvalidProtocolBufferException {
+  void testCreateSource() throws InvalidProtocolBufferException {
     String sql =
-        "create stream s (id int not null, name char(8) not null, age int not null) with ( 'upstream.source' = 'file', 'local.file.path' = '/tmp/data.txt' ) row format json";
+        "create source s (id int not null, name char(8) not null, age int not null) with ( 'upstream.source' = 'file', 'local.file.path' = '/tmp/data.txt' ) row format json";
     SqlNode ast = SqlParser.createCalciteStatement(sql);
     PlanFragment ret =
-        ((CreateStreamHandler) sqlHandlerFactory.create(ast, executionContext))
+        ((CreateSourceHandler) sqlHandlerFactory.create(ast, executionContext))
             .execute(ast, executionContext);
     PlanNode root = ret.getRoot();
-    assertEquals(root.getNodeType(), PlanNode.PlanNodeType.CREATE_STREAM);
+    assertEquals(root.getNodeType(), PlanNode.PlanNodeType.CREATE_SOURCE);
 
-    CreateStreamNode node = root.getBody().unpack(CreateStreamNode.class);
+    CreateSourceNode node = root.getBody().unpack(CreateSourceNode.class);
     assertEquals(node.getColumnDescsCount(), 4);
 
     assertEquals(node.getColumnDescs(1).getName(), "id");
@@ -83,13 +83,13 @@ public class BasicStreamTest {
   }
 
   @Test
-  void testDropStream() {
-    String sql = "drop stream s";
+  void testDropSource() {
+    String sql = "drop source s";
     SqlNode ast = SqlParser.createCalciteStatement(sql);
     PlanFragment ret =
         ((DropTableHandler) sqlHandlerFactory.create(ast, executionContext))
             .execute(ast, executionContext);
     PlanNode root = ret.getRoot();
-    assertEquals(root.getNodeType(), PlanNode.PlanNodeType.DROP_STREAM);
+    assertEquals(root.getNodeType(), PlanNode.PlanNodeType.DROP_SOURCE);
   }
 }
