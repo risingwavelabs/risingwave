@@ -117,6 +117,9 @@ impl Ord for Row {
 }
 
 impl Row {
+    pub fn new(values: Vec<Datum>) -> Self {
+        Self(values)
+    }
     /// Serialize the row into a memcomparable bytes.
     ///
     /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.

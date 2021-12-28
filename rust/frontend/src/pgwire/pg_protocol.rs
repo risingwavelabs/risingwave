@@ -168,24 +168,17 @@ impl PgProtocol {
     async fn write_data_row(&mut self, row: &Row) -> Result<()> {
         self.stream.write_all(b"D").await?;
         let mut total_len = 4 + 2 + row.size() * 4;
-        for _val in row.0.iter().flatten() {
-            // TODO: Replace by to_string of Datum.
-            // https://github.com/singularity-data/risingwave/issues/2047
-            let val_data = "";
-            total_len += val_data.len();
+        for val in &row.0 {
+            total_len += val.as_ref().map_or(0, |v| v.to_string().len());
         }
 
-        self.stream
-            .write_i32((total_len + row.size()) as i32)
-            .await?;
+        self.stream.write_i32(total_len as i32).await?;
         self.stream.write_i16(row.size() as i16).await?;
 
         for val in &row.0 {
             match val {
-                Some(_inner_val) => {
-                    // TODO: Replace by to_string of Datum.
-                    // https://github.com/singularity-data/risingwave/issues/2047
-                    let val_data = "";
+                Some(inner_val) => {
+                    let val_data = inner_val.to_string();
                     self.stream.write_i32(val_data.len() as i32).await?;
                     self.stream.write_all(val_data.as_bytes()).await?;
                 }
@@ -253,7 +246,9 @@ impl PgProtocol {
 
             self.stream.write_i32(pg_field.get_table_oid()).await?;
             self.stream.write_i16(pg_field.get_col_attr_num()).await?;
-            self.stream.write_i32(pg_field.get_type_oid()).await?;
+            self.stream
+                .write_i32(pg_field.get_type_oid().as_number())
+                .await?;
             self.stream.write_i16(pg_field.get_type_len()).await?;
             self.stream.write_i32(pg_field.get_type_modifier()).await?;
             self.stream.write_i16(pg_field.get_format_code()).await?;

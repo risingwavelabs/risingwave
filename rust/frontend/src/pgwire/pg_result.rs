@@ -52,6 +52,8 @@ impl StatementType {
                 | StatementType::UPDATE
                 | StatementType::MOVE
                 | StatementType::COPY
+                | StatementType::FETCH
+                | StatementType::SELECT
         )
     }
 }
