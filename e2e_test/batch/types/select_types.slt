@@ -12,7 +12,10 @@ select 1::INTEGER
 ----
 1
 
-# (int2, int4 and int8 are extensions we don't support yet.)
+query I
+select 1::INT4
+----
+1
 
 query I
 select 1::SMALLINT
@@ -20,7 +23,23 @@ select 1::SMALLINT
 1
 
 query I
+select 1::INT2
+----
+1
+
+query I
 select 1::BIGINT
+----
+1
+
+query I
+select 1::INT8
+----
+1
+
+query I
+SELECT x::int4
+FROM (VALUES (1::int2)) t(x);
 ----
 1
 

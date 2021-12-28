@@ -5,21 +5,97 @@ use risingwave_pb::expr::expr_node::Type as ProstType;
 /// For expression that only accept one value as input (e.g. CAST)
 use super::template::{UnaryBytesExpression, UnaryExpression};
 use crate::array::{
-    BoolArray, DecimalArray, F32Array, F64Array, I16Array, I32Array, I64Array, Utf8Array,
+    BoolArray, DataTypeTrait, F32Array, F64Array, I16Array, I32Array, I64Array, Utf8Array,
 };
 use crate::expr::pg_sleep::PgSleepExpression;
 use crate::expr::template::UnaryNullableExpression;
 use crate::expr::BoxedExpression;
-use crate::types::{DataTypeKind, DataTypeRef};
+use crate::types::{DataTypeKind, DataTypeRef, *};
+use crate::vector_op::cast::*;
 use crate::vector_op::cmp::{
     is_false, is_not_false, is_not_true, is_not_unknown, is_true, is_unknown,
 };
+use crate::vector_op::conjunction;
 use crate::vector_op::length::length_default;
 use crate::vector_op::ltrim::ltrim;
 use crate::vector_op::rtrim::rtrim;
 use crate::vector_op::trim::trim;
 use crate::vector_op::upper::upper;
-use crate::vector_op::{cast, conjunction};
+
+/// This macro helps create cast expression.
+/// It receives all the combinations of `gen_numeric_cast` and generates corresponding match cases
+/// In [], the parameters are for constructing new expression
+/// * $child: child expression
+/// * $ret: return expression
+/// In ()*, the parameters are for generating match cases
+/// * $input: input type
+/// * $cast: The cast type in that the operation will calculate
+/// * $func: The scalar function for expression, it's a generic function and specialized by the type
+///   of `$input, $cast`
+macro_rules! cast_impl {
+  ([$child:expr, $ret:expr], $( { $input:ty, $cast:ty, $func:ident} ),*) => {
+    match ($child.return_type().data_type_kind(), $ret.data_type_kind()) {
+      $(
+          (<$input as DataTypeTrait>::DATA_TYPE_ENUM, <$cast as DataTypeTrait>::DATA_TYPE_ENUM) => {
+            Box::new(UnaryExpression::< <$input as DataTypeTrait>::ArrayType, <$cast as DataTypeTrait>::ArrayType, _> {
+              expr_ia1: $child,
+              return_type: $ret,
+              func: $func,
+              _phantom: PhantomData,
+            })
+          }
+      ),*
+      _ => {
+        unimplemented!("The expression ({:?}, {:?}) using vectorized expression framework is not supported yet!", $child.return_type().data_type_kind(), $ret.data_type_kind())
+      }
+    }
+  };
+}
+
+/// `gen_numeric_cast` list all possible combination of input type and cast type for numeric cast
+macro_rules! gen_cast {
+  ($($x:tt, )* ) => {
+    cast_impl! {
+      [$($x),*],
+      { StringType, DateType, str_to_date},
+      { StringType, TimestampType, str_to_timestamp},
+      { StringType, TimestampWithTimeZoneType, str_to_timestampz},
+      { StringType, Int16Type, str_to_i16},
+      { StringType, Int32Type, str_to_i32},
+      { StringType, Int64Type, str_to_i64},
+      { StringType, Float32Type, str_to_real},
+      { StringType, Float64Type, str_to_double},
+      { StringType, DecimalType, str_to_decimal},
+      { StringType, BoolType, str_to_bool},
+      { Int16Type, Int32Type, general_cast },
+      { Int16Type, Int64Type, general_cast },
+      { Int16Type, Float32Type, general_cast },
+      { Int16Type, Float64Type, general_cast },
+      { Int16Type, DecimalType, general_cast },
+      { Int32Type, Int16Type, general_cast },
+      { Int32Type, Int64Type, general_cast },
+      { Int32Type, Float64Type, general_cast },
+      { Int32Type, DecimalType, general_cast },
+      { Int64Type, Int16Type, general_cast },
+      { Int64Type, Int32Type, general_cast },
+      { Int64Type, DecimalType, general_cast },
+      { Float32Type, Float64Type, general_cast },
+      { Float32Type,  DecimalType, general_cast },
+      { Float32Type, Int16Type, to_i16 },
+      { Float32Type, Int32Type, to_i32 },
+      { Float32Type, Int64Type, to_i64 },
+      { Float64Type, DecimalType, general_cast },
+      { Float64Type, Int16Type, to_i16 },
+      { Float64Type, Int32Type, to_i32 },
+      { Float64Type, Int64Type, to_i64 },
+      { DecimalType,  DecimalType, dec_to_dec },
+      { DecimalType, Int16Type, deci_to_i16 },
+      { DecimalType, Int32Type, deci_to_i32 },
+      { DecimalType, Int64Type, deci_to_i64 },
+      { DateType, TimestampType, date_to_timestamp }
+    }
+  };
+}
 
 pub fn new_unary_expr(
     expr_type: ProstType,
@@ -35,7 +111,7 @@ pub fn new_unary_expr(
             Box::new(UnaryExpression::<Utf8Array, I32Array, _> {
                 expr_ia1: child_expr,
                 return_type,
-                func: cast::str_to_date,
+                func: str_to_date,
                 _phantom: PhantomData,
             })
         }
@@ -43,7 +119,7 @@ pub fn new_unary_expr(
             Box::new(UnaryExpression::<Utf8Array, I64Array, _> {
                 expr_ia1: child_expr,
                 return_type,
-                func: cast::str_to_time,
+                func: str_to_time,
                 _phantom: PhantomData,
             })
         }
@@ -51,7 +127,7 @@ pub fn new_unary_expr(
             Box::new(UnaryExpression::<Utf8Array, I64Array, _> {
                 expr_ia1: child_expr,
                 return_type,
-                func: cast::str_to_timestamp,
+                func: str_to_timestamp,
                 _phantom: PhantomData,
             })
         }
@@ -59,7 +135,7 @@ pub fn new_unary_expr(
             Box::new(UnaryExpression::<Utf8Array, I64Array, _> {
                 expr_ia1: child_expr,
                 return_type,
-                func: cast::str_to_timestampz,
+                func: str_to_timestampz,
                 _phantom: PhantomData,
             })
         }
@@ -67,39 +143,7 @@ pub fn new_unary_expr(
             Box::new(UnaryExpression::<Utf8Array, BoolArray, _> {
                 expr_ia1: child_expr,
                 return_type,
-                func: cast::str_to_bool,
-                _phantom: PhantomData,
-            })
-        }
-        (ProstType::Cast, DataTypeKind::Boolean, DataTypeKind::Varchar) => {
-            Box::new(UnaryExpression::<Utf8Array, BoolArray, _> {
-                expr_ia1: child_expr,
-                return_type,
-                func: cast::str_to_bool,
-                _phantom: PhantomData,
-            })
-        }
-        (ProstType::Cast, DataTypeKind::Decimal, DataTypeKind::Int64) => {
-            Box::new(UnaryExpression::<I64Array, DecimalArray, _> {
-                expr_ia1: child_expr,
-                return_type,
-                func: cast::num_up,
-                _phantom: PhantomData,
-            })
-        }
-        (ProstType::Cast, DataTypeKind::Decimal, DataTypeKind::Decimal) => {
-            Box::new(UnaryExpression::<DecimalArray, DecimalArray, _> {
-                expr_ia1: child_expr,
-                return_type,
-                func: cast::dec_to_dec,
-                _phantom: PhantomData,
-            })
-        }
-        (ProstType::Cast, DataTypeKind::Float64, DataTypeKind::Float32) => {
-            Box::new(UnaryExpression::<F32Array, F64Array, _> {
-                expr_ia1: child_expr,
-                return_type,
-                func: cast::float_up,
+                func: str_to_bool,
                 _phantom: PhantomData,
             })
         }
@@ -107,7 +151,7 @@ pub fn new_unary_expr(
             Box::new(UnaryExpression::<Utf8Array, F32Array, _> {
                 expr_ia1: child_expr,
                 return_type,
-                func: cast::str_to_real,
+                func: str_to_real,
                 _phantom: PhantomData,
             })
         }
@@ -115,7 +159,7 @@ pub fn new_unary_expr(
             Box::new(UnaryExpression::<Utf8Array, F64Array, _> {
                 expr_ia1: child_expr,
                 return_type,
-                func: cast::str_to_double,
+                func: str_to_double,
                 _phantom: PhantomData,
             })
         }
@@ -123,7 +167,7 @@ pub fn new_unary_expr(
             Box::new(UnaryExpression::<Utf8Array, I16Array, _> {
                 expr_ia1: child_expr,
                 return_type,
-                func: cast::str_to_i16,
+                func: str_to_i16,
                 _phantom: PhantomData,
             })
         }
@@ -131,7 +175,7 @@ pub fn new_unary_expr(
             Box::new(UnaryExpression::<Utf8Array, I32Array, _> {
                 expr_ia1: child_expr,
                 return_type,
-                func: cast::str_to_i32,
+                func: str_to_i32,
                 _phantom: PhantomData,
             })
         }
@@ -139,7 +183,7 @@ pub fn new_unary_expr(
             Box::new(UnaryExpression::<Utf8Array, I64Array, _> {
                 expr_ia1: child_expr,
                 return_type,
-                func: cast::str_to_i64,
+                func: str_to_i64,
                 _phantom: PhantomData,
             })
         }
@@ -147,7 +191,7 @@ pub fn new_unary_expr(
             Box::new(UnaryExpression::<Utf8Array, Utf8Array, _> {
                 expr_ia1: child_expr,
                 return_type,
-                func: cast::str_to_str,
+                func: str_to_str,
                 _phantom: PhantomData,
             })
         }
@@ -155,26 +199,11 @@ pub fn new_unary_expr(
             Box::new(UnaryExpression::<Utf8Array, Utf8Array, _> {
                 expr_ia1: child_expr,
                 return_type,
-                func: cast::str_to_str,
+                func: str_to_str,
                 _phantom: PhantomData,
             })
         }
-        (ProstType::Cast, DataTypeKind::Timestamp, DataTypeKind::Date) => {
-            Box::new(UnaryExpression::<I32Array, I64Array, _> {
-                expr_ia1: child_expr,
-                return_type,
-                func: cast::date_to_timestamp,
-                _phantom: PhantomData,
-            })
-        }
-        (ProstType::Cast, DataTypeKind::Int32, DataTypeKind::Int64) => {
-            Box::new(UnaryExpression::<I64Array, I32Array, _> {
-                expr_ia1: child_expr,
-                return_type,
-                func: |x: i64| Ok(x as i32),
-                _phantom: PhantomData,
-            })
-        }
+        (ProstType::Cast, _, _) => gen_cast! {child_expr, return_type, },
         (ProstType::Not, _, _) => Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _> {
             expr_ia1: child_expr,
             return_type,
@@ -297,10 +326,50 @@ mod tests {
     fn test_unary() {
         test_unary_bool::<BoolArray, _>(|x| !x, Type::Not);
         test_unary_date::<I64Array, _>(|x| date_to_timestamp(x).unwrap(), Type::Cast);
-        test_cast_int16::<I16Array, _>(|x| str_to_i16(x).unwrap());
+        test_str_to_int16::<I16Array, _>(|x| str_to_i16(x).unwrap());
     }
 
-    fn test_cast_int16<A, F>(f: F)
+    #[test]
+    fn test_i16_to_i32() {
+        let mut input = Vec::<Option<i16>>::new();
+        let mut target = Vec::<Option<i32>>::new();
+        for i in 0..100i16 {
+            if i % 2 == 0 {
+                target.push(Some(i as i32));
+                input.push(Some(i as i16));
+            } else {
+                input.push(None);
+                target.push(None);
+            }
+        }
+        let col1 = Column::new(
+            I16Array::from_slice(&input)
+                .map(|x| Arc::new(x.into()))
+                .unwrap(),
+        );
+        let data_chunk = DataChunk::builder().columns(vec![col1]).build();
+        let return_type = DataType {
+            type_name: TypeName::Int32 as i32,
+            is_nullable: false,
+            ..Default::default()
+        };
+        let expr = ExprNode {
+            expr_type: Type::Cast as i32,
+            return_type: Some(return_type),
+            rex_node: Some(RexNode::FuncCall(FunctionCall {
+                children: vec![make_input_ref(0, TypeName::Int16)],
+            })),
+        };
+        let mut vec_executor = build_from_prost(&expr).unwrap();
+        let res = vec_executor.eval(&data_chunk).unwrap();
+        let arr: &I32Array = res.as_ref().into();
+        for (idx, item) in arr.iter().enumerate() {
+            let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
+            assert_eq!(x, item);
+        }
+    }
+
+    fn test_str_to_int16<A, F>(f: F)
     where
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,

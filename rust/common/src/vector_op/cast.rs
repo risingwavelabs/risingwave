@@ -1,6 +1,11 @@
-use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
+use core::convert::From;
+use std::any::type_name;
+use std::str::FromStr;
 
-use crate::error::ErrorCode::{InvalidInputSyntax, ParseError};
+use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
+use num_traits::ToPrimitive;
+
+use crate::error::ErrorCode::{InternalError, InvalidInputSyntax, ParseError};
 use crate::error::{Result, RwError};
 use crate::types::{Decimal, OrderedF32, OrderedF64};
 
@@ -53,6 +58,11 @@ pub fn str_to_date(elem: &str) -> Result<i32> {
 }
 
 #[inline(always)]
+pub fn str_to_decimal(elem: &str) -> Result<Decimal> {
+    Decimal::from_str(elem).map_err(|e| RwError::from(ParseError(Box::new(e))))
+}
+
+#[inline(always)]
 pub fn str_to_time(elem: &str) -> Result<i64> {
     NaiveTime::parse_from_str(elem, "%H:%M:%S")
         // FIXME: add support for precision in microseconds.
@@ -100,9 +110,70 @@ pub fn str_to_i64(elem: &str) -> Result<i64> {
     elem.parse()
         .map_err(|e| RwError::from(ParseError(Box::new(e))))
 }
+
 #[inline(always)]
 pub fn date_to_timestamp(elem: i32) -> Result<i64> {
     Ok((elem as i64) * 24 * 60 * 60 * 1000 * 1000)
+}
+
+// Due to the orphan rule, some data can't implement TryFrom trait for basic type.
+// We can only use ToPrimitive Trait
+#[inline(always)]
+pub fn to_i16<T1>(elem: T1) -> Result<i16>
+where
+    T1: ToPrimitive + std::fmt::Debug,
+{
+    elem.to_i16()
+        .ok_or_else(|| RwError::from(InternalError(format!("Can't cast {:?} to i16", elem))))
+}
+
+#[inline(always)]
+pub fn to_i32<T1>(elem: T1) -> Result<i32>
+where
+    T1: ToPrimitive + std::fmt::Debug,
+{
+    elem.to_i32()
+        .ok_or_else(|| RwError::from(InternalError(format!("Can't cast {:?} to i32", elem))))
+}
+
+#[inline(always)]
+pub fn to_i64<T1>(elem: T1) -> Result<i64>
+where
+    T1: ToPrimitive + std::fmt::Debug,
+{
+    elem.to_i64()
+        .ok_or_else(|| RwError::from(InternalError(format!("Can't cast {:?} to i64", elem))))
+}
+
+// In postgresSql, the behavior of casting decimal to integer is rounding.
+// We should write them separately
+#[inline(always)]
+pub fn deci_to_i16(elem: Decimal) -> Result<i16> {
+    to_i16(elem.round_dp(0))
+}
+
+#[inline(always)]
+pub fn deci_to_i32(elem: Decimal) -> Result<i32> {
+    to_i32(elem.round_dp(0))
+}
+
+#[inline(always)]
+pub fn deci_to_i64(elem: Decimal) -> Result<i64> {
+    to_i64(elem.round_dp(0))
+}
+
+#[inline(always)]
+pub fn general_cast<T1, T2>(elem: T1) -> Result<T2>
+where
+    T1: TryInto<T2> + std::fmt::Debug + Copy,
+{
+    elem.try_into().map_err(|_| {
+        RwError::from(InternalError(format!(
+            "Can't cast {:?} to {:?}",
+            &elem,
+            type_name::<T2>()
+        )))
+    })
 }
 
 #[inline(always)]

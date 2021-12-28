@@ -521,6 +521,10 @@ impl DataTypeTrait for TimestampType {
     const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Timestamp;
     type ArrayType = I64Array;
 }
+impl DataTypeTrait for TimestampWithTimeZoneType {
+    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Timestampz;
+    type ArrayType = I64Array;
+}
 impl DataTypeTrait for DateType {
     const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Date;
     type ArrayType = I32Array;
