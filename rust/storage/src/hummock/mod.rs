@@ -1,7 +1,6 @@
 //! Hummock is the state store of the streaming system.
 
 use std::ops::RangeBounds;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use num_traits::ToPrimitive;
@@ -34,8 +33,9 @@ use tokio::sync::mpsc;
 use value::*;
 
 use self::iterator::UserKeyIterator;
-use self::key::{key_with_ts, user_key, FullKey};
+use self::key::{user_key, FullKey};
 use self::mon::HummockStats;
+use self::multi_builder::CapacitySplitTableBuilder;
 use self::snapshot::HummockSnapshot;
 pub use self::state_store::*;
 use self::version_manager::VersionManager;
@@ -60,13 +60,14 @@ pub struct HummockOptions {
 }
 
 impl HummockOptions {
+    #[cfg(test)]
     pub fn default_for_test() -> Self {
         Self {
             table_size: 256 * (1 << 20),
             block_size: 64 * (1 << 10),
             bloom_false_positive: 0.1,
             remote_dir: "hummock_001".to_string(),
-            checksum_algo: ChecksumAlg::Crc32c,
+            checksum_algo: ChecksumAlg::XxHash64,
             stats_enabled: true,
         }
     }
@@ -76,8 +77,9 @@ impl HummockOptions {
 #[derive(Clone)]
 pub struct HummockStorage {
     options: Arc<HummockOptions>,
-    unique_id: Arc<AtomicU64>,
+
     version_manager: Arc<VersionManager>,
+
     obj_client: Arc<dyn ObjectStore>,
 
     /// Notify the compactor to compact after every write_batch().
@@ -109,7 +111,6 @@ impl HummockStorage {
 
         Self {
             options: Arc::new(options),
-            unique_id: Arc::new(AtomicU64::new(0)),
             version_manager: Arc::new(VersionManager::new()),
             obj_client,
             tx,
@@ -161,57 +162,60 @@ impl HummockStorage {
         &self,
         kv_pairs: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
     ) -> HummockResult<()> {
-        let get_builder = |options: &HummockOptions| {
-            TableBuilder::new(TableBuilderOptions {
-                table_capacity: options.table_size,
-                block_size: options.block_size,
-                bloom_false_positive: options.bloom_false_positive,
-                checksum_algo: options.checksum_algo,
-            })
+        let get_id_and_builder = || async {
+            let id = self.version_manager.generate_table_id().await;
+            let builder = Self::get_builder(&self.options);
+            (id, builder)
         };
+        let mut builder = CapacitySplitTableBuilder::new(get_id_and_builder);
 
-        let mut table_builder = get_builder(&self.options);
-        let table_id = self.unique_id.fetch_add(1, Ordering::SeqCst);
+        // TODO: do not generate ts if `kv_pairs` is empty
+        let ts = self.version_manager.generate_ts().await;
         for (k, v) in kv_pairs {
-            // do not allow empty key
-            assert!(!k.is_empty());
-
-            let k = key_with_ts(k, table_id);
-            table_builder.add(k.as_slice(), v);
+            builder.add_user_key(k, v, ts).await;
         }
 
-        if table_builder.is_empty() {
+        let (total_size, tables) = {
+            let mut tables = Vec::with_capacity(builder.len());
+            let mut total_size = 0;
+
+            // TODO: decide upload concurrency
+            for (table_id, blocks, meta) in builder.finish() {
+                let remote_dir = Some(self.options.remote_dir.as_str());
+                total_size += blocks.len();
+                let table =
+                    gen_remote_table(self.obj_client.clone(), table_id, blocks, meta, remote_dir)
+                        .await?;
+                tables.push(table);
+            }
+
+            (total_size, tables)
+        };
+
+        if tables.is_empty() {
             return Ok(());
         }
 
-        // Producing only one table regardless of capacity for now.
-        // TODO: update kv pairs to multi tables when size of the kv pairs is larger than
-        // TODO: the capacity of a single table.
-        let (blocks, meta) = table_builder.finish();
-        let remote_dir = Some(self.options.remote_dir.as_str());
-        let block_len = blocks.len();
-        let table =
-            gen_remote_table(self.obj_client.clone(), table_id, blocks, meta, remote_dir).await?;
-
-        self.version_manager.add_l0_sst(table).await?;
+        // Add all tables at once.
+        self.version_manager.add_l0_ssts(tables).await?;
 
         // Update statistics if needed.
         if self.options.stats_enabled {
             self.stats
-                .clone()
+                .as_ref()
                 .unwrap()
                 .put_bytes
-                .inc_by(block_len.to_u64().unwrap());
+                .inc_by(total_size.to_u64().unwrap());
         }
 
         // TODO: should we use unwrap() ?
+        // Notify the compactor
         self.tx.send(()).unwrap();
 
         Ok(())
     }
 
     fn get_builder(options: &HummockOptions) -> TableBuilder {
-        // TODO: avoid repeating code in write_batch()
         // TODO: use different option values (especially table_size) for compaction
         TableBuilder::new(TableBuilderOptions {
             table_capacity: options.table_size,

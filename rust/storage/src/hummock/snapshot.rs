@@ -139,15 +139,11 @@ impl HummockSnapshot {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::AtomicU64;
-    use std::sync::atomic::Ordering::SeqCst;
-
     use super::*;
     use crate::hummock::cloud::gen_remote_table;
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, iterator_test_key_of, iterator_test_key_of_ts,
     };
-    use crate::hummock::key::Timestamp;
     use crate::hummock::value::HummockValue;
     use crate::hummock::TableBuilder;
     use crate::object::{InMemObjectStore, ObjectStore};
@@ -157,11 +153,13 @@ mod tests {
     async fn gen_and_upload_table(
         obj_client: Arc<dyn ObjectStore>,
         vm: &VersionManager,
-        table_id: u64,
         kv_pairs: Vec<(usize, HummockValue<Vec<u8>>)>,
     ) {
-        // FIXME: currently ts is the same as table_id
-        let ts = table_id as Timestamp;
+        if kv_pairs.is_empty() {
+            return;
+        }
+        let ts = vm.generate_ts().await;
+        let table_id = vm.generate_table_id().await;
 
         let mut b = TableBuilder::new(default_builder_opt_for_test());
         for kv in kv_pairs {
@@ -172,7 +170,7 @@ mod tests {
         let table = gen_remote_table(obj_client, table_id, data, meta, None)
             .await
             .unwrap();
-        vm.add_l0_sst(table).await.unwrap();
+        vm.add_single_l0_sst(table).await.unwrap();
     }
 
     macro_rules! assert_count {
@@ -192,13 +190,10 @@ mod tests {
     async fn test_snapshot() {
         let vm = Arc::new(VersionManager::new());
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        let next_table_id = AtomicU64::new(1001);
-        let gen_table_id = || next_table_id.fetch_add(1, SeqCst);
 
         gen_and_upload_table(
             obj_client.clone(),
             &vm,
-            gen_table_id(),
             vec![
                 (1, HummockValue::Put(b"test".to_vec())),
                 (2, HummockValue::Put(b"test".to_vec())),
@@ -211,7 +206,6 @@ mod tests {
         gen_and_upload_table(
             obj_client.clone(),
             &vm,
-            gen_table_id(),
             vec![
                 (1, HummockValue::Delete),
                 (3, HummockValue::Put(b"test".to_vec())),
@@ -226,7 +220,6 @@ mod tests {
         gen_and_upload_table(
             obj_client.clone(),
             &vm,
-            gen_table_id(),
             vec![
                 (2, HummockValue::Delete),
                 (3, HummockValue::Delete),
@@ -244,13 +237,10 @@ mod tests {
     async fn test_snapshot_range_scan() {
         let vm = Arc::new(VersionManager::new());
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        let next_table_id = AtomicU64::new(1001);
-        let gen_table_id = || next_table_id.fetch_add(1, SeqCst);
 
         gen_and_upload_table(
             obj_client.clone(),
             &vm,
-            gen_table_id(),
             vec![
                 (1, HummockValue::Put(b"test".to_vec())),
                 (2, HummockValue::Put(b"test".to_vec())),

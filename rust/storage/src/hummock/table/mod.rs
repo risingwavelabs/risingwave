@@ -6,6 +6,7 @@ mod block_iterator;
 mod bloom;
 use bloom::Bloom;
 pub mod builder;
+pub mod multi_builder;
 pub use block_iterator::*;
 pub use builder::*;
 mod table_iterator;

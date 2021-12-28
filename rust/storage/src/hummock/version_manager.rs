@@ -1,8 +1,12 @@
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, HashMap};
+use std::iter::once;
+use std::ops::AddAssign;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use bytes::Bytes;
-use itertools::EitherOrBoth;
+use itertools::{EitherOrBoth, Itertools};
 use parking_lot::Mutex as PLMutex;
 use tokio::sync::Mutex;
 
@@ -89,6 +93,15 @@ impl VersionManagerInner {
             }
         }
     }
+
+    /// Add the given `snapshot` and increase the epoch. Return the latest epoch number.
+    pub fn inc_epoch(&mut self, snapshot: Arc<Snapshot>) -> u64 {
+        self.epoch += 1;
+        self.ref_cnt.entry(self.epoch).or_default().add_assign(1);
+        self.status.insert(self.epoch, snapshot);
+
+        self.epoch
+    }
 }
 
 /// Manages the state history of the storage engine and vacuum the stale files in storage.
@@ -131,6 +144,12 @@ pub struct VersionManager {
 
     /// Receiver of the vacuum.
     rx: PLMutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>,
+
+    /// Next timestamp
+    next_ts: AtomicU64,
+
+    /// Next table id
+    next_table_id: AtomicU64,
 }
 
 impl VersionManager {
@@ -169,19 +188,27 @@ impl VersionManager {
             }),
             tx,
             rx: PLMutex::new(Some(rx)),
+            next_ts: 1.into(),
+            next_table_id: 1.into(),
         }
     }
+
+    // Mark it `async` to emulate a remote service
+    pub async fn generate_ts(&self) -> u64 {
+        self.next_ts.fetch_add(1, Ordering::SeqCst)
+    }
+
     // TODO: This function maybe removed in the future.
-    // Currently we use table id as the timestamp. We may use a dedicated timestamp generator in the
-    // future.
     pub fn latest_ts(&self) -> u64 {
-        let inner = self.inner.lock();
-        inner
-            .tables
-            .iter()
-            .next_back()
-            .map(|x| *x.0)
-            .unwrap_or_default()
+        self.next_ts
+            .load(Ordering::Acquire)
+            .checked_sub(1)
+            .expect("ts should not be 0")
+    }
+
+    // Mark it `async` to emulate a remote service
+    pub async fn generate_table_id(&self) -> u64 {
+        self.next_table_id.fetch_add(1, Ordering::SeqCst)
     }
 
     pub fn pick_few_tables(&self, table_ids: &[u64]) -> HummockResult<Vec<Arc<Table>>> {
@@ -234,24 +261,37 @@ impl VersionManager {
         Ok(out)
     }
 
-    /// Add a L0 SST and return a new epoch number
-    pub async fn add_l0_sst(&self, table: Table) -> HummockResult<u64> {
-        let table_id = table.id;
-        let smallest_ky = Bytes::copy_from_slice(&table.meta.smallest_key);
-        let largest_ky = Bytes::copy_from_slice(&table.meta.largest_key);
+    /// Add some L0 SSTs and return the latest epoch number
+    pub async fn add_l0_ssts(&self, tables: impl IntoIterator<Item = Table>) -> HummockResult<u64> {
+        let tables = tables.into_iter().collect_vec();
+
+        let stats = tables
+            .iter()
+            .map(|table| TableStat {
+                key_range: KeyRange::new(
+                    Bytes::copy_from_slice(&table.meta.smallest_key),
+                    Bytes::copy_from_slice(&table.meta.largest_key),
+                ),
+                table_id: table.id,
+                compact_task: None,
+            })
+            .collect_vec();
 
         // Hold the compact status lock so that no one else could add/drop SST or search compaction
         // plan.
         let mut compact_status = self.compact_status.lock().await;
 
-        let epoch;
-
-        {
+        let epoch = {
             // Hold the inner lock, so as to apply the changes to the current status, and add new
             // L0 SST to the LSM. This lock is released before triggering searching for compaction
             // plan.
             let mut inner = self.inner.lock();
             let old_epoch = inner.epoch;
+
+            if tables.is_empty() {
+                // No tables to add, simply return the old_epoch.
+                return Ok(old_epoch);
+            }
 
             // Get snapshot of latest version.
             let mut snapshot = inner
@@ -260,46 +300,47 @@ impl VersionManager {
                 .map(|x| x.as_ref().clone())
                 .unwrap();
 
-            if inner.tables.insert(table_id, Arc::new(table)).is_some() {
-                return Err(HummockError::ObjectIoError(String::from(
-                    "Table ID to be created already exists.",
-                )));
-            }
-            match snapshot.levels.first_mut().unwrap() {
-                Level::Tiering(vec_tier) => {
-                    vec_tier.push(table_id);
-                }
-                Level::Leveling(_) => {
-                    unimplemented!();
-                }
-            }
+            for table in tables {
+                let table_id = table.id;
 
-            // Add epoch number and make the modified snapshot available.
-            inner.epoch += 1;
-            epoch = inner.epoch;
-            *inner.ref_cnt.entry(epoch).or_default() += 1;
-            inner.status.insert(epoch, Arc::new(snapshot));
+                match inner.tables.entry(table_id) {
+                    Entry::Vacant(v) => {
+                        v.insert(Arc::new(table));
+                    }
+                    Entry::Occupied(_) => {
+                        return Err(HummockError::ObjectIoError(
+                            "Table ID to be created already exists.".to_owned(),
+                        ))
+                    }
+                }
+
+                match snapshot.levels.first_mut().unwrap() {
+                    Level::Tiering(vec_tier) => {
+                        vec_tier.push(table_id);
+                    }
+                    Level::Leveling(_) => {
+                        unimplemented!();
+                    }
+                }
+            }
 
             inner.unpin(old_epoch);
-        }
+
+            // Add epoch number and make the modified snapshot available.
+            inner.inc_epoch(Arc::new(snapshot))
+        };
 
         match compact_status.level_handlers.first_mut().unwrap() {
             LevelHandler::Tiering(vec_tier, _) => {
-                let key_range = KeyRange::new(smallest_ky, largest_ky);
-                let insert_point = vec_tier.partition_point(
-                    |TableStat {
-                         key_range: other_key_range,
-                         ..
-                     }| { other_key_range <= &key_range },
-                );
-                vec_tier.insert(
-                    insert_point,
-                    TableStat {
-                        key_range,
-                        table_id,
-                        compact_task: None,
-                    },
-                );
+                for stat in stats {
+                    let insert_point = vec_tier.partition_point(
+                        |TableStat {
+                             key_range: other_key_range,
+                             ..
+                         }| { other_key_range <= &stat.key_range },
+                    );
+                    vec_tier.insert(insert_point, stat);
+                }
             }
             LevelHandler::Leveling(_, _) => {
                 panic!("L0 must be Tiering.");
@@ -307,6 +348,11 @@ impl VersionManager {
         }
 
         Ok(epoch)
+    }
+
+    /// Add a L0 SST and return a new epoch number
+    pub async fn add_single_l0_sst(&self, table: Table) -> HummockResult<u64> {
+        self.add_l0_ssts(once(table)).await
     }
 
     /// We assume that SSTs will only be deleted in compaction, otherwise `get_compact_task` need to
@@ -674,7 +720,7 @@ mod tests {
         }
         let test_table_id = 42;
         let current_epoch_id = version_manager
-            .add_l0_sst(
+            .add_single_l0_sst(
                 Table::load(
                     test_table_id,
                     Arc::new(InMemObjectStore::default()),

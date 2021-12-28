@@ -1,4 +1,3 @@
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use bytes::BytesMut;
@@ -11,7 +10,9 @@ use super::version_manager::{CompactTask, Level, LevelEntry};
 use super::{
     HummockError, HummockResult, HummockStorage, HummockValue, Table, TableBuilder, TableIterator,
 };
+
 pub struct Compactor;
+
 impl Compactor {
     /// Seals current table builder to generate a remote table, then returns a new table builder if
     /// `is_last_table_builder` == true
@@ -31,7 +32,7 @@ impl Compactor {
         if !table_builder.is_empty() {
             // TODO: avoid repeating code in write_batch()
             let (blocks, meta) = table_builder.finish();
-            let table_id = storage.unique_id.fetch_add(1, Ordering::SeqCst);
+            let table_id = storage.version_manager.generate_table_id().await;
             let remote_dir = Some(storage.options.remote_dir.as_str());
             let table = gen_remote_table(
                 storage.obj_client.clone(),
@@ -211,9 +212,10 @@ mod tests {
 
     use super::*;
     use crate::hummock::iterator::BoxedHummockIterator;
+    use crate::hummock::key::key_with_ts;
     use crate::hummock::utils::bloom_filter_tables;
     use crate::hummock::version_manager::ScopedUnpinSnapshot;
-    use crate::hummock::{key_with_ts, user_key, HummockOptions, HummockResult, HummockStorage};
+    use crate::hummock::{user_key, HummockOptions, HummockResult, HummockStorage};
     use crate::object::InMemObjectStore;
 
     #[tokio::test]

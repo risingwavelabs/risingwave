@@ -126,6 +126,10 @@ impl FullKey<Vec<u8>> {
     pub fn to_user_key(&self) -> &[u8] {
         user_key(self.0.as_slice())
     }
+
+    pub fn as_slice(&self) -> FullKey<&[u8]> {
+        FullKey(self.0.as_slice())
+    }
 }
 
 impl<T: Eq + AsRef<[u8]>> Ord for FullKey<T> {
