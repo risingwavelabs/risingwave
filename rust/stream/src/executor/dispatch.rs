@@ -159,6 +159,10 @@ impl DataDispatcher for HashDataDispatcher {
             }
         };
 
+        // FIXME: unnecessary compact.
+        // See https://github.com/singularity-data/risingwave/issues/704
+        let data_chunk = data_chunk.compact()?;
+
         // get hash value of every line by its key
         let hash_builder = CRC32FastBuilder {};
         let hash_values = data_chunk
