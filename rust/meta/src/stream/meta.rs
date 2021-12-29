@@ -37,6 +37,7 @@ pub type StreamMetaManagerRef = Arc<dyn StreamMetaManager>;
 pub struct StoredStreamMetaManager {
     config: Config,
     meta_store_ref: MetaStoreRef,
+    // todo: remove the lock, refactor `node_fragments` storage.
     fragment_lock: RwLock<()>,
 }
 

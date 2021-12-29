@@ -634,6 +634,10 @@ impl StreamManagerCore {
                 let upstreams = merge_node.get_upstream_fragment_id();
                 self.create_merge_node(fragment_id, schema, upstreams, pk_indices)
             }
+            _ => Err(RwError::from(ErrorCode::InternalError(format!(
+                "unsupported node:{:?}",
+                node
+            )))),
         };
 
         executor

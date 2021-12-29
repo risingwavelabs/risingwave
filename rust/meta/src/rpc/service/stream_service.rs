@@ -1,20 +1,40 @@
+use std::sync::Arc;
+
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::{
-    AddFragmentsToNodeRequest, AddFragmentsToNodeResponse, LoadAllFragmentsRequest,
-    LoadAllFragmentsResponse,
+    AddFragmentsToNodeRequest, AddFragmentsToNodeResponse, CreateMaterializedViewRequest,
+    CreateMaterializedViewResponse, DropMaterializedViewRequest, DropMaterializedViewResponse,
+    LoadAllFragmentsRequest, LoadAllFragmentsResponse,
 };
 use tonic::{Request, Response, Status};
 
-use crate::stream::StreamMetaManagerRef;
+use crate::cluster::StoredClusterManager;
+use crate::manager::IdGeneratorManagerRef;
+use crate::stream::{StreamFragmenter, StreamManagerRef, StreamMetaManagerRef};
 
 #[derive(Clone)]
 pub struct StreamServiceImpl {
+    // TODO: merge together.
     smm: StreamMetaManagerRef,
+    sm: StreamManagerRef,
+
+    id_gen_manager_ref: IdGeneratorManagerRef,
+    cluster_manager: Arc<StoredClusterManager>,
 }
 
 impl StreamServiceImpl {
-    pub fn new(smm: StreamMetaManagerRef) -> Self {
-        StreamServiceImpl { smm }
+    pub fn new(
+        smm: StreamMetaManagerRef,
+        sm: StreamManagerRef,
+        id_gen_manager_ref: IdGeneratorManagerRef,
+        cluster_manager: Arc<StoredClusterManager>,
+    ) -> Self {
+        StreamServiceImpl {
+            smm,
+            sm,
+            id_gen_manager_ref,
+            cluster_manager,
+        }
     }
 }
 
@@ -47,5 +67,38 @@ impl StreamManagerService for StreamServiceImpl {
                 .await
                 .map_err(|e| e.to_grpc_status())?,
         }))
+    }
+
+    async fn create_materialized_view(
+        &self,
+        request: Request<CreateMaterializedViewRequest>,
+    ) -> Result<Response<CreateMaterializedViewResponse>, Status> {
+        let req = request.into_inner();
+        let mut fragmenter = StreamFragmenter::new(
+            self.id_gen_manager_ref.clone(),
+            self.cluster_manager.clone(),
+        );
+        let graph = fragmenter
+            .generate_graph(req.get_stream_node())
+            .await
+            .map_err(|e| e.to_grpc_status())?;
+
+        match self
+            .sm
+            .create_materialized_view(req.get_table_ref_id(), &graph)
+            .await
+        {
+            Ok(()) => Ok(Response::new(CreateMaterializedViewResponse {
+                status: None,
+            })),
+            Err(e) => Err(e.to_grpc_status()),
+        }
+    }
+
+    async fn drop_materialized_view(
+        &self,
+        _request: Request<DropMaterializedViewRequest>,
+    ) -> Result<Response<DropMaterializedViewResponse>, Status> {
+        todo!()
     }
 }

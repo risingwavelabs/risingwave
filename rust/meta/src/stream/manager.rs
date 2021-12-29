@@ -35,6 +35,8 @@ pub trait StreamManager: Sync + Send + 'static {
     async fn drop_materialized_view(&self, table_id: &TableRefId, fragments: &[u32]) -> Result<()>;
 }
 
+pub type StreamManagerRef = Arc<dyn StreamManager>;
+
 pub struct DefaultStreamManager {
     smm: StreamMetaManagerRef,
     scheduler: Scheduler,
@@ -209,7 +211,7 @@ impl StreamManager for DefaultStreamManager {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use std::collections::HashSet;
     use std::sync::{Arc, Mutex};
     use std::thread::sleep;

@@ -27,6 +27,7 @@ public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel
    * The upstream fragments of the exchange node should be added in <code>buildFragmentsInStage
    * </code>
    */
+  // TODO: remove upstreamSet, this will be set and send to compute node in meta service.
   private final Set<Integer> upstreamSet = new HashSet<>();
 
   public RwStreamExchange(
@@ -53,6 +54,8 @@ public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel
       mergerBuilder.addInputColumnDescs(columnDescBuilder.build());
     }
     var mergeNode = mergerBuilder.build();
+
+    // TODO: serialize it to ExchangeNode later, used by fragmenter in meta.
     return StreamNode.newBuilder()
         .setMergeNode(mergeNode)
         .addAllPkIndices(primaryKeyIndices)

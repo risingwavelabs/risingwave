@@ -24,7 +24,7 @@ use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::id_service::IdGeneratorServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::storage::MemStore;
-use crate::stream::StoredStreamMetaManager;
+use crate::stream::{DefaultStreamManager, StoredStreamMetaManager};
 
 pub async fn rpc_serve_with_listener(
     listener: TcpListener,
@@ -65,13 +65,22 @@ pub async fn rpc_serve_with_listener(
     )
     .await
     .unwrap();
+    let stream_manager_ref = Arc::new(DefaultStreamManager::new(
+        stream_meta_manager.clone(),
+        cluster_manager.clone(),
+    ));
 
     let epoch_srv = EpochServiceImpl::new(meta_manager.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new(catalog_manager_ref.clone());
     let catalog_srv = CatalogServiceImpl::new(catalog_manager_ref);
-    let cluster_srv = ClusterServiceImpl::new(cluster_manager);
+    let cluster_srv = ClusterServiceImpl::new(cluster_manager.clone());
     let id_generator_srv = IdGeneratorServiceImpl::new(meta_manager);
-    let stream_srv = StreamServiceImpl::new(stream_meta_manager);
+    let stream_srv = StreamServiceImpl::new(
+        stream_meta_manager,
+        stream_manager_ref,
+        id_generator_manager_ref,
+        cluster_manager,
+    );
     let hummock_srv = HummockServiceImpl::new(hummock_manager);
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();

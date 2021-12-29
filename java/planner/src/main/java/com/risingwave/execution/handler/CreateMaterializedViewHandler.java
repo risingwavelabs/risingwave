@@ -62,6 +62,10 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     TableCatalog catalog = convertPlanToCatalog(tableName, plan, context);
     plan.getStreamingPlan().setTableId(catalog.getId());
 
+    // TODO: using StreamingPlanSerializer.serialize(plan.getStreamingPlan()) to serialize plan.
+    //  Passing it to Meta service to achieve fragment split. Operation including schedule/catalog/
+    //  update(build)_fragment etc will be achieved in Meta service.
+
     // Generate a stream graph that represents the dependencies between stream fragments.
     StreamGraph streamGraph = StreamFragmenter.generateGraph(plan, context);
 

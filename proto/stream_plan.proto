@@ -67,6 +67,14 @@ message MergeNode {
   repeated plan.ColumnDesc input_column_descs = 2;
 }
 
+// passed from frontend to meta, used by fragmenter to generate `MergeNode`
+// and maybe `DispatcherNode` later.
+message ExchangeNode {
+  // The schema of input columns.
+  repeated plan.ColumnDesc input_column_descs = 1;
+  Dispatcher dispatcher = 2;
+}
+
 message StreamNode {
   // Some nodes we can reuse plan nodes from plan.proto.
   // TODO: should we enforce strong typed body on nodes?
@@ -81,6 +89,7 @@ message StreamNode {
     HashJoinNode hash_join_node = 11;
     TopNNode top_n_node = 12;
     MergeNode merge_node = 13;
+    ExchangeNode exchange_node = 14;
   }
   // Child node in plan aka. upstream nodes in the streaming DAG
   repeated StreamNode input = 3;

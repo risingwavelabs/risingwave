@@ -197,9 +197,33 @@ message LoadAllFragmentsResponse {
   repeated FragmentLocation locations = 2;
 }
 
+message CreateMaterializedViewRequest {
+  uint32 node_id = 1;
+  // TODO: remove this, do catalog init in Meta and return in response.
+  plan.TableRefId table_ref_id = 2;
+  stream_plan.StreamNode stream_node = 3;
+}
+
+message CreateMaterializedViewResponse {
+  common.Status status = 1;
+}
+
+message DropMaterializedViewRequest {
+  uint32 node_id = 1;
+  plan.TableRefId table_ref_id = 2;
+}
+
+message DropMaterializedViewResponse {
+  common.Status status = 1;
+}
+
 service StreamManagerService {
+  // TODO: remove the following interfaces when create/drop mv ready.
   rpc AddFragmentsToNode(AddFragmentsToNodeRequest) returns (AddFragmentsToNodeResponse);
   rpc LoadAllFragments(LoadAllFragmentsRequest) returns (LoadAllFragmentsResponse);
+  // TODO: migration mv catalog creation/drop in.
+  rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
+  rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
 }
 
 // Below for cluster management.
