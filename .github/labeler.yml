@@ -1,0 +1,14 @@
+version: 1
+labels:
+- label: "feature"
+  title: "^feat*"
+- label: "fix"
+  title: "^fix*"
+- label: "test"
+  title: "^test*"
+- label: "refactor"
+  title: "^refactor*"
+- label: "style"
+  title: "^style*"
+- label: "chore"
+  title: "^chore*"
