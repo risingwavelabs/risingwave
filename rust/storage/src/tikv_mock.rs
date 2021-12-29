@@ -25,7 +25,11 @@ impl StateStore for TikvStateStore {
         unimplemented!()
     }
 
-    async fn ingest_batch(&self, _kv_pairs: Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
+    async fn ingest_batch(
+        &self,
+        _kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        _epoch: u64,
+    ) -> Result<()> {
         unimplemented!()
     }
 

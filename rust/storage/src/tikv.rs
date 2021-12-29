@@ -86,7 +86,7 @@ impl StateStore for TikvStateStore {
         Ok(data)
     }
 
-    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
+    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, _epoch: u64) -> Result<()> {
         let mut txn = self.client().await.begin_optimistic().await.unwrap();
         for (key, value) in kv_pairs {
             match value {
@@ -222,7 +222,7 @@ mod tests {
         // Make sure the batch is sorted.
 
         batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-        let res = tikv_storage.ingest_batch(batch1).await;
+        let res = tikv_storage.ingest_batch(batch1, 0).await;
         assert!(res.is_ok());
 
         // let gc_res = tikv_storage.gc().await;
@@ -247,12 +247,12 @@ mod tests {
         let value = tikv_storage.get(&Bytes::from("ab")).await.unwrap();
         assert_eq!(value, None);
 
-        let res = tikv_storage.ingest_batch(batch2).await;
+        let res = tikv_storage.ingest_batch(batch2, 0).await;
         assert!(res.is_ok());
         let value = tikv_storage.get(&anchor).await.unwrap().unwrap();
         assert_eq!(value, Bytes::from("111111"));
 
-        let res = tikv_storage.ingest_batch(batch3).await;
+        let res = tikv_storage.ingest_batch(batch3, 0).await;
         assert!(res.is_ok());
         let value = tikv_storage.get(&anchor).await.unwrap();
         assert_eq!(value, None);
