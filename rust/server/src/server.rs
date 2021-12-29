@@ -1,6 +1,9 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use hyper::service::{make_service_fn, service_fn};
+use hyper::{Body, Request, Response, Server};
+use prometheus::{Encoder, TextEncoder};
 use risingwave_batch::rpc::service::task_service::TaskServiceImpl;
 use risingwave_batch::task::{BatchTaskEnv, TaskManager};
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
@@ -18,6 +21,7 @@ pub fn rpc_serve(
     addr: SocketAddr,
     state_store: Option<&str>,
     prometheus_listener_addr: &str,
+    metrics_level: u32,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     let table_mgr = Arc::new(SimpleTableManager::new());
     let task_mgr = Arc::new(TaskManager::new());
@@ -45,7 +49,7 @@ pub fn rpc_serve(
     let stream_env = StreamTaskEnv::new(table_mgr, source_mgr, addr);
     let task_srv = TaskServiceImpl::new(task_mgr.clone(), batch_env);
     let exchange_srv = ExchangeServiceImpl::new(task_mgr, stream_mgr.clone());
-    let stream_srv = StreamServiceImpl::new(stream_mgr.clone(), stream_env);
+    let stream_srv = StreamServiceImpl::new(stream_mgr, stream_env);
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {
@@ -63,11 +67,48 @@ pub fn rpc_serve(
             .unwrap();
     });
 
-    // Boot state store metrics service.
-    // TODO(xiangyhu): put this in `MetricsManager` (#2198).
-    stream_mgr.boot_metrics_service(prometheus_listener_addr.to_string());
+    // Boot metrics service.
+    if metrics_level > 0 {
+        MetricsManager::boot_metrics_service(prometheus_listener_addr.to_string());
+    }
 
     (join_handle, shutdown_send)
+}
+
+pub struct MetricsManager {}
+
+impl MetricsManager {
+    pub fn boot_metrics_service(listen_addr: String) {
+        tokio::spawn(async move {
+            println!(
+                "Prometheus listener for Prometheus is set up on http://{}",
+                listen_addr
+            );
+
+            let listen_socket_addr: SocketAddr = listen_addr.parse().unwrap();
+            let serve_future =
+                Server::bind(&listen_socket_addr).serve(make_service_fn(|_| async {
+                    Ok::<_, hyper::Error>(service_fn(MetricsManager::metrics_service))
+                }));
+
+            if let Err(err) = serve_future.await {
+                eprintln!("server error: {}", err);
+            }
+        });
+    }
+
+    async fn metrics_service(_req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
+        let encoder = TextEncoder::new();
+        let mut buffer = vec![];
+        let mf = prometheus::gather();
+        encoder.encode(&mf, &mut buffer).unwrap();
+        let response = Response::builder()
+            .header(hyper::header::CONTENT_TYPE, encoder.format_type())
+            .body(Body::from(buffer))
+            .unwrap();
+
+        Ok(response)
+    }
 }
 
 #[cfg(test)]
@@ -80,7 +121,7 @@ mod tests {
     async fn test_server_shutdown() {
         let addr = get_host_port("127.0.0.1:5688").unwrap();
         let prometheus_addr = "127.0.0.1:1222";
-        let (join_handle, shutdown_send) = rpc_serve(addr, None, prometheus_addr);
+        let (join_handle, shutdown_send) = rpc_serve(addr, None, prometheus_addr, 1);
         shutdown_send.send(()).unwrap();
         join_handle.await.unwrap();
     }

@@ -111,13 +111,6 @@ impl StreamManager {
         }
     }
 
-    pub fn boot_metrics_service(&self, listen_addr: String) {
-        let core = self.core.lock().unwrap();
-        if let StateStoreImpl::HummockStateStore(ss) = &core.state_store {
-            ss.boot_metrics_listener(listen_addr);
-        }
-    }
-
     // TODO: We will refine this method when the meta service is ready.
     pub fn send_barrier(&self, epoch: u64) {
         let core = self.core.lock().unwrap();

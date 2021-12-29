@@ -17,6 +17,9 @@ struct Opts {
 
     #[clap(long, default_value = "0.0.0.0:1222")]
     prometheus_listener_addr: String,
+
+    #[clap(long, default_value = "0")]
+    metrics_level: u32,
 }
 
 #[cfg(not(tarpaulin_include))]
@@ -31,6 +34,7 @@ async fn main() {
         addr,
         Some(&opts.state_store),
         opts.prometheus_listener_addr.as_str(),
+        opts.metrics_level,
     );
     join_handle.await.unwrap();
 }
