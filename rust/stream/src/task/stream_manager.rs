@@ -17,6 +17,7 @@ use risingwave_pb::{expr, stream_plan, stream_service};
 use risingwave_storage::hummock::HummockStateStore;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::object::ConnectionInfo;
+use risingwave_storage::tikv::TikvStateStore;
 use risingwave_storage::{Keyspace, StateStore};
 use tokio::task::JoinHandle;
 
@@ -34,12 +35,19 @@ pub type UpDownFragmentIds = (u32, u32);
 pub enum StateStoreImpl {
     HummockStateStore(HummockStateStore),
     MemoryStateStore(MemoryStateStore),
+    TikvStateStore(TikvStateStore),
 }
 
 impl StateStoreImpl {
     fn as_memory(&self) -> MemoryStateStore {
         match self {
             Self::MemoryStateStore(s) => s.clone(),
+            _ => unreachable!(),
+        }
+    }
+    fn as_tikv(&self) -> TikvStateStore {
+        match self {
+            Self::TikvStateStore(s) => s.clone(),
             _ => unreachable!(),
         }
     }
@@ -227,6 +235,13 @@ impl StreamManagerCore {
             Some("in_memory") | Some("in-memory") | None => {
                 StateStoreImpl::MemoryStateStore(MemoryStateStore::new())
             }
+            Some(tikv) if tikv.starts_with("tikv") => {
+                StateStoreImpl::TikvStateStore(TikvStateStore::new(vec![tikv
+                    .strip_prefix("tikv://")
+                    .unwrap()
+                    .to_string()]))
+            }
+
             Some(minio) if minio.starts_with("hummock+minio://") => {
                 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
                 use risingwave_storage::hummock::{HummockOptions, HummockStorage};
@@ -636,6 +651,9 @@ impl StreamManagerCore {
                 self.create_nodes_inner(fragment_id, node, env, store)
             }
             StateStoreImpl::MemoryStateStore(store) => {
+                self.create_nodes_inner(fragment_id, node, env, store)
+            }
+            StateStoreImpl::TikvStateStore(store) => {
                 self.create_nodes_inner(fragment_id, node, env, store)
             }
         }

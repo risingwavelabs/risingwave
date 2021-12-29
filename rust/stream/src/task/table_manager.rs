@@ -12,6 +12,7 @@ use risingwave_storage::bummock::{BummockResult, BummockTable};
 use risingwave_storage::hummock::HummockStateStore;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::{ScannableTable, ScannableTableRef, TableIterRef, TableManager};
+use risingwave_storage::tikv::TikvStateStore;
 use risingwave_storage::{Keyspace, TableColumnDesc};
 
 use crate::executor::MViewTable;
@@ -39,6 +40,7 @@ pub enum TableImpl {
     Bummock(Arc<BummockTable>),
     MViewTable(Arc<MViewTable<HummockStateStore>>),
     TestMViewTable(Arc<MViewTable<MemoryStateStore>>),
+    TikvMViewTable(Arc<MViewTable<TikvStateStore>>),
 }
 
 impl TableImpl {
@@ -64,6 +66,7 @@ impl ScannableTable for TableImpl {
             TableImpl::Bummock(t) => t.iter().await,
             TableImpl::MViewTable(t) => Ok(Box::new(t.iter().await?)),
             TableImpl::TestMViewTable(t) => Ok(Box::new(t.iter().await?)),
+            TableImpl::TikvMViewTable(t) => Ok(Box::new(t.iter().await?)),
         }
     }
 
@@ -72,6 +75,7 @@ impl ScannableTable for TableImpl {
             TableImpl::Bummock(t) => t.get_data_by_columns(column_ids).await,
             TableImpl::MViewTable(_) => unimplemented!(),
             TableImpl::TestMViewTable(_) => unimplemented!(),
+            TableImpl::TikvMViewTable(_) => unimplemented!(),
         }
     }
 
@@ -84,6 +88,7 @@ impl ScannableTable for TableImpl {
             TableImpl::Bummock(t) => t.schema(),
             TableImpl::MViewTable(t) => t.schema().clone(),
             TableImpl::TestMViewTable(t) => t.schema().clone(),
+            TableImpl::TikvMViewTable(t) => t.schema().clone(),
         }
     }
 }
@@ -180,6 +185,15 @@ impl StreamTableManager for SimpleTableManager {
             }
             StateStoreImpl::HummockStateStore(store) => {
                 TableImpl::MViewTable(Arc::new(MViewTable::new(
+                    Keyspace::table_root(store, table_id),
+                    schema,
+                    pk_columns,
+                    orderings,
+                )))
+            }
+
+            StateStoreImpl::TikvStateStore(store) => {
+                TableImpl::TikvMViewTable(Arc::new(MViewTable::new(
                     Keyspace::table_root(store, table_id),
                     schema,
                     pk_columns,

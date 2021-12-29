@@ -62,3 +62,6 @@ name = "compute-node"
 path = "src/bin/compute_node.rs"
 
 [build-dependencies]
+
+[features]
+tikv = ["risingwave_storage/tikv"]

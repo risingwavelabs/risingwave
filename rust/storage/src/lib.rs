@@ -21,6 +21,12 @@ pub mod panic_store;
 pub mod table;
 pub mod write_batch;
 
+#[cfg(feature = "tikv")]
+pub mod tikv;
+#[cfg(not(feature = "tikv"))]
+#[path = "tikv_mock.rs"]
+pub mod tikv;
+
 use async_trait::async_trait;
 use bytes::Bytes;
 pub use keyspace::{Keyspace, Segment};
