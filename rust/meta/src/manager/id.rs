@@ -15,8 +15,14 @@ type Id = i32;
 
 #[async_trait::async_trait]
 pub trait IdGenerator: Sync + Send {
-    async fn generate(&self) -> Result<Id>;
+    /// Generate a batch of identities.
+    /// The valid id range will be [result_id - interval + 1, result_id]
     async fn generate_interval(&self, interval: i32) -> Result<Id>;
+
+    /// Generate an identity.
+    async fn generate(&self) -> Result<Id> {
+        self.generate_interval(1).await
+    }
 }
 
 pub type IdGeneratorRef = Box<dyn IdGenerator>;
@@ -68,10 +74,6 @@ impl StoredIdGenerator {
 
 #[async_trait::async_trait]
 impl IdGenerator for StoredIdGenerator {
-    async fn generate(&self) -> Result<Id> {
-        self.generate_interval(1).await
-    }
-
     async fn generate_interval(&self, interval: i32) -> Result<Id> {
         let id = self.current_id.fetch_add(interval, Ordering::Relaxed);
         let next_allocate_id = { *self.next_allocate_id.read().await };
