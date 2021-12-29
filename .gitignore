@@ -45,3 +45,6 @@ rust/log/
 log/
 
 .risingwave/
+
+# generated files
+e2e_test/batch/tpch/tpch.slt
