@@ -1,7 +1,18 @@
 #!/bin/bash
 
-"$@"
+# Usage: ./run_command.sh "log path" "status path" command
 
-echo "Program exited with $?"
+echo "${@:3}"
+echo "logging to $1, and status to $2"
 
-read -n 1 -r
+"${@:3}" |& tee "$1"
+
+RET_STATUS="$?"
+
+echo "status ${RET_STATUS}" > "$2"
+
+echo "Program exited with ${RET_STATUS}, press Ctrl+C to continue."
+
+while true; do
+    read -r
+done

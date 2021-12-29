@@ -1,29 +1,51 @@
 use std::env;
 use std::fs::OpenOptions;
 use std::path::Path;
+use std::sync::Arc;
+use std::thread::JoinHandle;
 
 use anyhow::Result;
 use indicatif::{MultiProgress, ProgressBar};
 use riselab::{
-    ComputeNodeService, ConfigureTmuxTask, FrontendService, MetaNodeService, MinioService,
-    RISELAB_SESSION_NAME,
+    ComputeNodeService, ConfigureTmuxTask, ExecuteContext, FrontendService, MetaNodeService,
+    MinioService, PrometheusService, Task, RISELAB_SESSION_NAME,
 };
+use tempfile::tempdir;
 
-fn create_multi_progress(progress: &[ProgressBar]) -> MultiProgress {
-    let multi_progress = MultiProgress::new();
-    for p in progress {
-        multi_progress.add(p.clone());
-    }
-    multi_progress
+#[derive(Default)]
+pub struct ProgressManager {
+    mp: Arc<MultiProgress>,
+    pa: Vec<ProgressBar>,
 }
 
-fn finish_multi_progress(progress: &[ProgressBar]) {
-    for p in progress {
-        p.finish();
+impl ProgressManager {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create a new progress bar from task
+    pub fn new_progress(&mut self) -> ProgressBar {
+        let pb = riselab::util::new_spinner();
+        self.mp.add(pb.clone());
+        self.pa.push(pb.clone());
+        pb.enable_steady_tick(100);
+        pb
+    }
+
+    /// Finish all progress bars.
+    pub fn finish_all(&self) {
+        for p in &self.pa {
+            p.finish();
+        }
+    }
+
+    pub fn spawn(&self) -> JoinHandle<anyhow::Result<()>> {
+        let mp = self.mp.clone();
+        std::thread::spawn(move || mp.join().map_err(|err| err.into()))
     }
 }
 
-fn main() -> Result<()> {
+fn task_main(manager: &mut ProgressManager) -> Result<()> {
     let log_path = env::var("PREFIX_LOG")?;
 
     let mut logger = OpenOptions::new()
@@ -32,71 +54,92 @@ fn main() -> Result<()> {
         .truncate(true)
         .open(Path::new(&log_path).join("riselab.log"))?;
 
-    let pb_tmux = riselab::util::new_spinner();
-    let pb_minio = riselab::util::new_spinner();
-    let pb_compute_node = riselab::util::new_spinner();
-    let pb_meta_node = riselab::util::new_spinner();
-    let pb_frontend = riselab::util::new_spinner();
+    let status_dir = Arc::new(tempdir()?);
 
-    let pbs = vec![
-        pb_tmux.clone(),
-        pb_minio.clone(),
-        pb_compute_node.clone(),
-        pb_meta_node.clone(),
-        pb_frontend.clone(),
-    ];
-    let multi_pb = create_multi_progress(&pbs);
-
-    let join_handler = std::thread::spawn(move || multi_pb.join());
-
+    let mut ctx = ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
     let mut service = ConfigureTmuxTask::new()?;
-    pb_tmux.set_prefix("tmux");
-    service.execute(&mut logger, pb_tmux)?;
+    service.execute(&mut ctx)?;
 
+    let mut ctx = ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
     let mut service = MinioService::new()?;
-    pb_minio.set_prefix(service.id());
-    service.execute(&mut logger, pb_minio.clone())?;
+    service.execute(&mut ctx)?;
 
     let mut task = riselab::ConfigureMinioTask::new()?;
-    task.execute(&mut logger, pb_minio)?;
+    task.execute(&mut ctx)?;
 
+    let mut ctx = ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+    let mut service = PrometheusService::new(9500)?;
+    service.execute(&mut ctx)?;
+    let mut task = riselab::ConfigureGrpcNodeTask::new(9500)?;
+    task.execute(&mut ctx)?;
+
+    let mut ctx = ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
     let mut service = ComputeNodeService::new(5688)?;
-    pb_compute_node.set_prefix(service.id());
-    service.execute(&mut logger, pb_compute_node.clone())?;
+    service.execute(&mut ctx)?;
 
     let mut task = riselab::ConfigureGrpcNodeTask::new(5688)?;
-    task.execute(&mut logger, pb_compute_node)?;
+    task.execute(&mut ctx)?;
 
+    let mut ctx = ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
     let mut service = MetaNodeService::new(5690)?;
-    pb_meta_node.set_prefix(service.id());
-    service.execute(&mut logger, pb_meta_node.clone())?;
+    service.execute(&mut ctx)?;
 
     let mut task = riselab::ConfigureGrpcNodeTask::new(5690)?;
-    task.execute(&mut logger, pb_meta_node)?;
+    task.execute(&mut ctx)?;
 
+    let mut ctx = ExecuteContext::new(&mut logger, manager.new_progress(), status_dir);
     let mut service = FrontendService::new()?;
-    pb_frontend.set_prefix(service.id());
-    service.execute(&mut logger, pb_frontend.clone())?;
+    service.execute(&mut ctx)?;
 
     let postgres_port = 4567;
     let mut task = riselab::ConfigureGrpcNodeTask::new(postgres_port)?;
-    task.execute(&mut logger, pb_frontend)?;
-
-    finish_multi_progress(&pbs);
-    join_handler.join().unwrap()?;
-
-    println!("All services started successfully.");
-
-    println!("\nPRO TIPS:");
-    println!(
-        "Run `tmux a -t {}` to attach to the tmux console.",
-        RISELAB_SESSION_NAME
-    );
-    println!(
-        "Run `psql -h localhost -p {} -d dev` to start Postgres interactive shell.",
-        postgres_port
-    );
-    println!("Run `./riselab kill-playground` to kill cluster.");
-
+    task.execute(&mut ctx)?;
     Ok(())
+}
+
+fn main() -> Result<()> {
+    let mut manager = ProgressManager::new();
+    // Always create a progress before calling `task_main`. Otherwise the progress bar won't be
+    // shown.
+    let p = manager.new_progress();
+    p.set_prefix("playground");
+    p.set_message("starting services...");
+    let join_handle = manager.spawn();
+    let task_result = task_main(&mut manager);
+    p.set_message("done");
+    manager.finish_all();
+    join_handle.join().unwrap()?;
+
+    let log_path = env::var("PREFIX_LOG")?;
+
+    match &task_result {
+        Ok(()) => {
+            println!("All services started successfully.");
+
+            println!("\nPRO TIPS:");
+            println!(
+                "* Run `tmux a -t {}` to attach to the tmux console.",
+                RISELAB_SESSION_NAME
+            );
+            println!("* You may find logs at {}", log_path);
+            println!(
+                "* Run `psql -h localhost -p {} -d dev` to start Postgres interactive shell.",
+                4567
+            );
+            println!("* Run `./riselab kill-playground` to kill cluster.");
+        }
+        Err(err) => {
+            println!("* Failed to start: {}", err.root_cause().to_string().trim(),);
+            println!(
+                "please refer to logs for more information {}",
+                env::var("PREFIX_LOG")?
+            );
+            println!("* Run `./riselab kill-playground` to clean up cluster.");
+            println!("---");
+            println!();
+            println!();
+        }
+    }
+
+    task_result
 }

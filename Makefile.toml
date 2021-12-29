@@ -14,7 +14,7 @@ rm -rf "${PREFIX}"
 
 [tasks.clean-data]
 category = "RiseLAB"
-description = "Clean all data, config and logs by deleting .risingwave/data folder"
+description = "Clean all data, config and logs"
 script = '''
 #!@duckscript
 rm -rf "${PREFIX_DATA}"
@@ -34,7 +34,8 @@ rm -f "${PREFIX_CONFIG}/log4rs.yaml"
 rm -f "${PREFIX_BIN}/run_command.sh"
 ln -s "$(pwd)/rust/target/debug/compute-node" "${PREFIX_BIN}/compute-node"
 ln -s "$(pwd)/rust/target/debug/meta-node" "${PREFIX_BIN}/meta-node"
-ln -s "$(pwd)/rust/config/log4rs.yaml" "${PREFIX_CONFIG}/log4rs.yaml"
+cp "rust/config/log4rs.yaml" "${PREFIX_CONFIG}/log4rs.yaml"
+cp "rust/storage/src/metrics/prometheus.yml" "${PREFIX_CONFIG}/prometheus.yml"
 cp "rust/riselab/run_command.sh" "${PREFIX_BIN}/run_command.sh"
 '''
 
@@ -60,9 +61,11 @@ cd java && ./gradlew build -x test
 category = "RiseLAB"
 description = "Post build RisingWave frontend"
 script = '''
-#!@duckscript
+#!@shell
 
-cp "java/pgserver/build/libs/risingwave-fe-runnable.jar" "${PREFIX_BIN}/risingwave-fe-runnable.jar"
+set -e
+rm -f "${PREFIX_BIN}/risingwave-fe-runnable.jar"
+ln -s "$(pwd)/java/pgserver/build/libs/risingwave-fe-runnable.jar" "${PREFIX_BIN}/risingwave-fe-runnable.jar"
 cp "java/pgserver/build/resources/main/logback.xml" "${PREFIX_CONFIG}/logback.xml"
 cp "java/pgserver/src/main/resources/server.properties" "${PREFIX_CONFIG}/server.properties"
 '''

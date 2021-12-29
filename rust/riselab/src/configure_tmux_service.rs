@@ -3,9 +3,8 @@ use std::path::Path;
 use std::process::Command;
 
 use anyhow::Result;
-use indicatif::ProgressBar;
 
-use crate::util::{pb_success, run_command};
+use crate::{ExecuteContext, Task};
 
 pub struct ConfigureTmuxTask;
 
@@ -19,15 +18,19 @@ impl ConfigureTmuxTask {
     fn tmux(&self) -> Command {
         Command::new("tmux")
     }
+}
 
-    pub fn execute(&mut self, f: &mut impl std::io::Write, pb: ProgressBar) -> Result<()> {
-        pb.set_message("starting tmux...");
+impl Task for ConfigureTmuxTask {
+    fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
+        ctx.service(self);
+
+        ctx.pb.set_message("starting...");
 
         let prefix_path = env::var("PREFIX")?;
 
         let mut cmd = self.tmux();
         cmd.arg("kill-session").arg("-t").arg(RISELAB_SESSION_NAME);
-        run_command(cmd, f).ok();
+        ctx.run_command(cmd).ok();
 
         let mut cmd = self.tmux();
         cmd.arg("new-session")
@@ -36,15 +39,19 @@ impl ConfigureTmuxTask {
             .arg(RISELAB_SESSION_NAME)
             .arg("-c")
             .arg(Path::new(&prefix_path));
-        run_command(cmd, f)?;
+        ctx.run_command(cmd)?;
 
-        pb_success(&pb);
+        ctx.complete_spin();
 
-        pb.set_message(format!(
+        ctx.pb.set_message(format!(
             "session {} started successfully",
             RISELAB_SESSION_NAME
         ));
 
         Ok(())
+    }
+
+    fn id(&self) -> String {
+        "tmux".into()
     }
 }

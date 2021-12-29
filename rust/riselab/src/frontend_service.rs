@@ -3,9 +3,8 @@ use std::path::Path;
 use std::process::Command;
 
 use anyhow::Result;
-use indicatif::ProgressBar;
 
-use crate::util::{run_command, tmux_run};
+use super::{ExecuteContext, Task};
 
 #[derive(Default)]
 pub struct FrontendService;
@@ -35,20 +34,22 @@ impl FrontendService {
             .arg(Path::new(&prefix_config).join("server.properties"));
         Ok(cmd)
     }
+}
 
-    pub fn execute(&mut self, f: &mut impl std::io::Write, pb: ProgressBar) -> Result<()> {
-        pb.enable_steady_tick(100);
-        pb.set_message("starting...");
+impl Task for FrontendService {
+    fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
+        ctx.service(self);
+        ctx.pb.set_message("starting...");
 
         let cmd = self.frontend()?;
-        run_command(tmux_run(cmd)?, f)?;
+        ctx.run_command(ctx.tmux_run(cmd)?)?;
 
-        pb.set_message("started");
+        ctx.pb.set_message("started");
 
         Ok(())
     }
 
-    pub fn id(&self) -> String {
+    fn id(&self) -> String {
         "frontend".into()
     }
 }

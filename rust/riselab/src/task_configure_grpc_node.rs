@@ -1,8 +1,6 @@
 use anyhow::Result;
-use indicatif::ProgressBar;
 
-use crate::util::pb_success;
-use crate::wait_tcp::wait_tcp;
+use super::{ExecuteContext, Task};
 
 pub struct ConfigureGrpcNodeTask {
     port: u16,
@@ -12,15 +10,17 @@ impl ConfigureGrpcNodeTask {
     pub fn new(port: u16) -> Result<Self> {
         Ok(Self { port })
     }
+}
 
-    pub fn execute(&mut self, f: &mut impl std::io::Write, pb: ProgressBar) -> Result<()> {
-        pb.set_message("waiting for online...");
+impl Task for ConfigureGrpcNodeTask {
+    fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
+        ctx.pb.set_message("waiting for online...");
         let compute_node_address = format!("127.0.0.1:{}", self.port);
-        wait_tcp(&compute_node_address, f)?;
+        ctx.wait_tcp(&compute_node_address)?;
 
-        pb_success(&pb);
+        ctx.complete_spin();
 
-        pb.set_message(format!("api {}", compute_node_address));
+        ctx.pb.set_message(format!("api {}", compute_node_address));
 
         Ok(())
     }

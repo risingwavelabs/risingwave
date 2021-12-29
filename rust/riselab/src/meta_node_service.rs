@@ -3,9 +3,8 @@ use std::path::Path;
 use std::process::Command;
 
 use anyhow::Result;
-use indicatif::ProgressBar;
 
-use crate::util::{run_command, tmux_run};
+use super::{ExecuteContext, Task};
 
 pub struct MetaNodeService {
     port: u16,
@@ -20,10 +19,12 @@ impl MetaNodeService {
         let prefix_bin = env::var("PREFIX_BIN")?;
         Ok(Command::new(Path::new(&prefix_bin).join("meta-node")))
     }
+}
 
-    pub fn execute(&mut self, f: &mut impl std::io::Write, pb: ProgressBar) -> Result<()> {
-        pb.enable_steady_tick(100);
-        pb.set_message("starting...");
+impl Task for MetaNodeService {
+    fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
+        ctx.service(self);
+        ctx.pb.set_message("starting...");
 
         let prefix_config = env::var("PREFIX_CONFIG")?;
 
@@ -32,14 +33,14 @@ impl MetaNodeService {
             .arg(Path::new(&prefix_config).join("log4rs.yaml"))
             .arg("--host")
             .arg(format!("127.0.0.1:{}", self.port));
-        run_command(tmux_run(cmd)?, f)?;
+        ctx.run_command(ctx.tmux_run(cmd)?)?;
 
-        pb.set_message("started");
+        ctx.pb.set_message("started");
 
         Ok(())
     }
 
-    pub fn id(&self) -> String {
-        format!("meta-node({})", self.port)
+    fn id(&self) -> String {
+        format!("meta-node-{}", self.port)
     }
 }
