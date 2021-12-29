@@ -166,18 +166,13 @@ impl Compactor {
     }
 
     pub async fn compact(storage: &Arc<HummockStorage>) -> HummockResult<()> {
-        let mut compact_task = match storage.version_manager.get_compact_task().await {
-            Ok(task) => task,
-            Err(HummockError::OK) => {
-                return Ok(());
-            }
-            Err(err) => {
-                return Err(err);
-            }
+        let mut compact_task = match storage.version_manager.get_compact_task().await? {
+            Some(task) => task,
+            None => return Ok(()),
         };
 
-        compact_task.result = Compactor::run_compact(storage, &mut compact_task).await;
-        if compact_task.result.is_err() {
+        let result = Compactor::run_compact(storage, &mut compact_task).await;
+        if result.is_err() {
             for _sst_to_delete in &compact_task.sorted_output_ssts {
                 // TODO: delete these tables in (S3) storage
                 // However, if we request a table_id from hummock storage service every time we
@@ -186,16 +181,17 @@ impl Compactor {
             }
             compact_task.sorted_output_ssts.clear();
         }
-        let is_task_ok = compact_task.result.is_ok();
 
+        let is_task_ok = result.is_ok();
         storage
             .version_manager
-            .report_compact_task(compact_task)
+            .report_compact_task(compact_task, result)
             .await;
 
         if is_task_ok {
             Ok(())
         } else {
+            // FIXME: error message in `result` should not be ignored
             Err(HummockError::ObjectIoError(String::from(
                 "compaction failed.",
             )))

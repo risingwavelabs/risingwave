@@ -53,9 +53,8 @@ pub struct CompactTask {
     task_id: u64,
     /// compacion output will be added to [`target_level`] of LSM after compaction
     target_level: u8,
+
     pub is_target_ultimate_and_leveling: bool,
-    /// indicate whether compaction succeeds, initially Err(HummockError::Ok)
-    pub result: HummockResult<()>,
 }
 
 struct VersionManagerInner {
@@ -357,7 +356,7 @@ impl VersionManager {
 
     /// We assume that SSTs will only be deleted in compaction, otherwise `get_compact_task` need to
     /// `pin`
-    pub async fn get_compact_task(&self) -> HummockResult<CompactTask> {
+    pub async fn get_compact_task(&self) -> HummockResult<Option<CompactTask>> {
         let select_level = 0u8;
 
         enum SearchResult {
@@ -540,10 +539,11 @@ impl VersionManager {
                 }
             }
         }
-        match found {
+
+        let task = match found {
             SearchResult::Found(select_ln_ids, select_lnsuc_ids, splits) => {
                 compact_status.next_compact_task_id += 1;
-                Ok(CompactTask {
+                CompactTask {
                     input_ssts: vec![
                         LevelEntry {
                             level_idx: select_level,
@@ -570,15 +570,17 @@ impl VersionManager {
                     is_target_ultimate_and_leveling: target_level as usize
                         == compact_status.level_handlers.len() - 1
                         && is_target_level_leveling,
-                    result: Err(HummockError::OK),
-                })
+                }
+                .into()
             }
-            SearchResult::NotFound => Err(HummockError::OK),
-        }
+            SearchResult::NotFound => None,
+        };
+
+        Ok(task)
     }
 
     #[allow(clippy::needless_collect)]
-    pub async fn report_compact_task(&self, compact_task: CompactTask) {
+    pub async fn report_compact_task(&self, compact_task: CompactTask, result: HummockResult<()>) {
         let output_table_compact_entries: Vec<_> = compact_task
             .sorted_output_ssts
             .iter()
@@ -592,7 +594,7 @@ impl VersionManager {
             })
             .collect();
         let mut compact_status = self.compact_status.lock().await;
-        match compact_task.result {
+        match result {
             Ok(()) => {
                 let mut delete_table_ids = vec![];
                 for LevelEntry { level_idx, .. } in compact_task.input_ssts {

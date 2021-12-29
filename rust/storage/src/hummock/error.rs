@@ -4,8 +4,6 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum HummockError {
-    #[error("ok")]
-    OK,
     #[error("Checksum Mismatch")]
     ChecksumMismatch,
     #[error("Invalid Block")]
