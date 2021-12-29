@@ -54,6 +54,7 @@ url = "2.2.2"
 
 [dev-dependencies]
 rand = "0.8"
+rusty-hook = "0.11"
 tempfile = "3"
 tokio-test = "0.4.2"
 

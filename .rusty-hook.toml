@@ -1,0 +1,5 @@
+[hooks]
+pre-commit = "cd rust && cargo clippy --all-targets --all-features -- -D warnings && cargo fmt --all"
+
+[logging]
+verbose = true
