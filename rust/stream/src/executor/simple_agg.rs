@@ -128,7 +128,7 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
         Ok(())
     }
 
-    async fn flush_data(&mut self) -> Result<Option<StreamChunk>> {
+    async fn flush_data(&mut self, epoch: u64) -> Result<Option<StreamChunk>> {
         // --- Flush states to the state store ---
         // Some state will have the correct output only after their internal states have been fully
         // flushed.
@@ -142,7 +142,7 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
         for state in &mut states.managed_states {
             state.flush(&mut write_batch)?;
         }
-        write_batch.ingest().await?;
+        write_batch.ingest(epoch).await?;
 
         // --- Create array builders ---
         // As the datatype is retrieved from schema, it contains both group key and aggregation

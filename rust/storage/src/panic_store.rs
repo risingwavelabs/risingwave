@@ -17,7 +17,11 @@ impl StateStore for PanicStateStore {
         panic!("should not read from the state store!");
     }
 
-    async fn ingest_batch(&self, _kv_pairs: Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
+    async fn ingest_batch(
+        &self,
+        _kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        _epoch: u64,
+    ) -> Result<()> {
         panic!("should not write the panic state store!");
     }
 

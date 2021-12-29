@@ -41,7 +41,7 @@ impl<S: StateStore> MViewSinkExecutor<S> {
     }
 
     async fn flush(&mut self, barrier: Barrier) -> Result<Message> {
-        self.local_state.flush().await?;
+        self.local_state.flush(barrier.epoch).await?;
         Ok(Message::Barrier(barrier))
     }
 }

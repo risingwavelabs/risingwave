@@ -302,7 +302,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     ///
     /// TODO: `Flush` should also be called internally when `top_n` and `flush_buffer` exceeds
     /// certain limit.
-    pub async fn flush(&mut self) -> Result<()> {
+    pub async fn flush(&mut self, epoch: u64) -> Result<()> {
         if !self.is_dirty() {
             self.retain_top_n();
             return Ok(());
@@ -334,7 +334,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
             }
         }
 
-        write_batch.ingest().await?;
+        write_batch.ingest(epoch).await?;
 
         self.retain_top_n();
         Ok(())
@@ -435,13 +435,14 @@ mod tests {
             .insert(ordered_rows[1].clone(), rows[1].clone())
             .await;
         // now ("abd", 3) -> ("abc", 3) -> ("ab", 4)
+        let epoch: u64 = 0;
 
         assert_eq!(
             managed_state.top_element(),
             Some((&ordered_rows[3], &rows[3]))
         );
         assert_eq!(managed_state.get_cache_len(), 3);
-        managed_state.flush().await.unwrap();
+        managed_state.flush(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
         let row_count = managed_state.total_count;
         assert_eq!(row_count, 3);

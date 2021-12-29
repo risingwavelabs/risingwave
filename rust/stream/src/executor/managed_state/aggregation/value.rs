@@ -142,9 +142,10 @@ mod tests {
         assert!(managed_state.is_dirty());
 
         // flush to write batch and write to state store
+        let epoch: u64 = 0;
         let mut write_batch = keyspace.state_store().start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
-        write_batch.ingest().await.unwrap();
+        write_batch.ingest(epoch).await.unwrap();
 
         // get output
         assert_eq!(

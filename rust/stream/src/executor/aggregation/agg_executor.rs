@@ -173,7 +173,7 @@ pub trait AggExecutor: Executor {
 
     /// Flush the buffered chunk to the storage backend, and get the edits of the states. If there's
     /// no dirty states to flush, return `Ok(None)`.
-    async fn flush_data(&mut self) -> Result<Option<StreamChunk>>;
+    async fn flush_data(&mut self, epoch: u64) -> Result<Option<StreamChunk>>;
 
     fn input(&mut self) -> &mut dyn Executor;
 }
@@ -209,7 +209,7 @@ pub async fn agg_executor_next<E: AggExecutor>(executor: &mut E) -> Result<Messa
                 return Ok(Message::Barrier(barrier));
             }
             Message::Barrier(barrier) => {
-                if let Some(chunk) = executor.flush_data().await? {
+                if let Some(chunk) = executor.flush_data(barrier.epoch).await? {
                     // Cache the barrier_msg and send it later.
                     *executor.cached_barrier_message_mut() = Some(barrier);
                     return Ok(Message::Chunk(chunk));

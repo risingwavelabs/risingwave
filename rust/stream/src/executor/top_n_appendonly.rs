@@ -23,7 +23,7 @@ pub trait TopNExecutorBase: Executor {
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<StreamChunk>;
 
     /// Flush the buffered chunk to the storage backend.
-    async fn flush_data(&mut self) -> Result<()>;
+    async fn flush_data(&mut self, epoch: u64) -> Result<()>;
 
     fn input(&mut self) -> &mut dyn Executor;
 }
@@ -37,7 +37,7 @@ pub async fn top_n_executor_next(executor: &mut dyn TopNExecutorBase) -> Result<
         Message::Chunk(chunk) => Ok(Message::Chunk(executor.apply_chunk(chunk).await?)),
         Message::Barrier(barrier) if barrier.mutation.is_stop() => Ok(Message::Barrier(barrier)),
         Message::Barrier(barrier) => {
-            executor.flush_data().await?;
+            executor.flush_data(barrier.epoch).await?;
             Ok(Message::Barrier(barrier))
         }
     };
@@ -117,9 +117,9 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
         }
     }
 
-    async fn flush_inner(&mut self) -> Result<()> {
-        self.managed_higher_state.flush().await?;
-        self.managed_lower_state.flush().await
+    async fn flush_inner(&mut self, epoch: u64) -> Result<()> {
+        self.managed_higher_state.flush(epoch).await?;
+        self.managed_lower_state.flush(epoch).await
     }
 }
 
@@ -239,8 +239,8 @@ impl<S: StateStore> TopNExecutorBase for AppendOnlyTopNExecutor<S> {
         }
     }
 
-    async fn flush_data(&mut self) -> Result<()> {
-        self.flush_inner().await
+    async fn flush_data(&mut self, epoch: u64) -> Result<()> {
+        self.flush_inner(epoch).await
     }
 
     fn input(&mut self) -> &mut dyn Executor {

@@ -312,9 +312,10 @@ mod tests {
             Some(ScalarImpl::Utf8("ghi||def||abc".to_string()))
         );
 
+        let mut epoch: u64 = 0;
         let mut write_batch = store.start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
-        write_batch.ingest().await.unwrap();
+        write_batch.ingest(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
 
         // Insert and delete.
@@ -341,9 +342,10 @@ mod tests {
             Some(ScalarImpl::Utf8("ghi||def||def||abc".to_string()))
         );
 
+        epoch += 1;
         let mut write_batch = store.start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
-        write_batch.ingest().await.unwrap();
+        write_batch.ingest(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
 
         // Deletion.
@@ -371,9 +373,10 @@ mod tests {
             Some(ScalarImpl::Utf8("ghi".to_string()))
         );
 
+        epoch += 1;
         let mut write_batch = store.start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
-        write_batch.ingest().await.unwrap();
+        write_batch.ingest(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
 
         // Check output after flush.
@@ -452,9 +455,10 @@ mod tests {
             .await
             .unwrap();
 
+        epoch += 1;
         let mut write_batch = store.start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
-        write_batch.ingest().await.unwrap();
+        write_batch.ingest(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
         let row_count = managed_state.get_row_count();
 
@@ -479,9 +483,10 @@ mod tests {
             Some(ScalarImpl::Utf8("miko||miko".to_string()))
         );
 
+        epoch += 1;
         let mut write_batch = store.start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
-        write_batch.ingest().await.unwrap();
+        write_batch.ingest(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
 
         let row_count = managed_state.get_row_count();

@@ -93,7 +93,8 @@ impl StateStore for MemoryStateStore {
         self.scan_inner(prefix, limit).await
     }
 
-    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
+    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, _epoch: u64) -> Result<()> {
+        // TODO: actually use epoch and support rollback
         self.ingest_batch_inner(kv_pairs).await
     }
 

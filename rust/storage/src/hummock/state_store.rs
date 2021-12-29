@@ -33,7 +33,11 @@ impl StateStore for HummockStateStore {
         Ok(value)
     }
 
-    async fn ingest_batch(&self, mut kv_pairs: Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
+    async fn ingest_batch(
+        &self,
+        mut kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        _epoch: u64,
+    ) -> Result<()> {
         // TODO: reduce the redundant vec clone
         kv_pairs.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
         self.storage

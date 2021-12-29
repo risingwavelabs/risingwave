@@ -94,10 +94,10 @@ impl<S: StateStore> TopNExecutor<S> {
         }
     }
 
-    async fn flush_inner(&mut self) -> Result<()> {
-        self.managed_highest_state.flush().await?;
-        self.managed_middle_state.flush().await?;
-        self.managed_lowest_state.flush().await
+    async fn flush_inner(&mut self, epoch: u64) -> Result<()> {
+        self.managed_highest_state.flush(epoch).await?;
+        self.managed_middle_state.flush(epoch).await?;
+        self.managed_lowest_state.flush(epoch).await
     }
 }
 
@@ -298,8 +298,8 @@ impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
         }
     }
 
-    async fn flush_data(&mut self) -> Result<()> {
-        self.flush_inner().await
+    async fn flush_data(&mut self, epoch: u64) -> Result<()> {
+        self.flush_inner(epoch).await
     }
 
     fn input(&mut self) -> &mut dyn Executor {

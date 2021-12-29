@@ -51,6 +51,7 @@ async fn test_row_seq_scan() -> Result<()> {
         schema,
     );
 
+    let epoch: u64 = 0;
     state.put(
         Row(vec![Some(1_i32.into())]),
         Row(vec![Some(1_i32.into()), Some(4_i32.into())]),
@@ -59,7 +60,7 @@ async fn test_row_seq_scan() -> Result<()> {
         Row(vec![Some(2_i32.into())]),
         Row(vec![Some(2_i32.into()), Some(5_i32.into())]),
     );
-    state.flush().await.unwrap();
+    state.flush(epoch).await.unwrap();
 
     executor.open().await.unwrap();
 

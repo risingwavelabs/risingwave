@@ -286,7 +286,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
 
     /// `Flush` can be called by the executor when it receives a barrier and thus needs to
     /// checkpoint.
-    pub async fn flush(&mut self) -> Result<()> {
+    pub async fn flush(&mut self, epoch: u64) -> Result<()> {
         if !self.is_dirty() {
             // We don't retain `n` elements as we have a all-or-nothing policy for now.
             return Ok(());
@@ -318,7 +318,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
             }
         }
 
-        write_batch.ingest().await?;
+        write_batch.ingest(epoch).await?;
 
         // We don't retain `n` elements as we have a all-or-nothing policy for now.
         Ok(())
@@ -425,6 +425,7 @@ mod tests {
             .insert(ordered_rows[1].clone(), rows[1].clone())
             .await;
         // now ("abd", 3) -> ("abc", 3) -> ("ab", 4)
+        let epoch: u64 = 0;
 
         assert_eq!(
             managed_state.top_element(),
@@ -435,7 +436,7 @@ mod tests {
             Some((&ordered_rows[2], &rows[2]))
         );
         assert_eq!(managed_state.get_cache_len(), 3);
-        managed_state.flush().await.unwrap();
+        managed_state.flush(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
         let row_count = managed_state.total_count;
         assert_eq!(row_count, 3);
@@ -497,7 +498,7 @@ mod tests {
             managed_state.bottom_element(),
             Some((&ordered_rows[2], &rows[2]))
         );
-        managed_state.flush().await.unwrap();
+        managed_state.flush(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
 
         managed_state

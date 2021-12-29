@@ -49,7 +49,7 @@ impl<S: StateStore> ManagedMViewState<S> {
 
     // TODO(MrCroxx): flush can be performed in another coruntine by taking the snapshot of
     // memtable.
-    pub async fn flush(&mut self) -> Result<()> {
+    pub async fn flush(&mut self, epoch: u64) -> Result<()> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         batch.reserve(self.memtable.len() * self.schema.len());
         let mut local = batch.local(&self.keyspace);
@@ -73,7 +73,7 @@ impl<S: StateStore> ManagedMViewState<S> {
             }
         }
 
-        batch.ingest().await?;
+        batch.ingest(epoch).await?;
         Ok(())
     }
 }
@@ -101,7 +101,7 @@ mod tests {
         let keyspace = Keyspace::executor_root(state_store.clone(), 0x42);
 
         let mut state = ManagedMViewState::new(keyspace.clone(), schema, pk_columns, orderings);
-
+        let mut epoch: u64 = 0;
         state.put(
             Row(vec![Some(1_i32.into())]),
             Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
@@ -116,13 +116,14 @@ mod tests {
         );
         state.delete(Row(vec![Some(2_i32.into())]));
 
-        state.flush().await.unwrap();
+        state.flush(epoch).await.unwrap();
         let data = keyspace.scan(None).await.unwrap();
         // cell-based storage has 4 cells
         assert_eq!(data.len(), 4);
 
+        epoch += 1;
         state.delete(Row(vec![Some(3_i32.into())]));
-        state.flush().await.unwrap();
+        state.flush(epoch).await.unwrap();
         let data = keyspace.scan(None).await.unwrap();
         assert_eq!(data.len(), 2);
     }

@@ -65,7 +65,14 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     /// Ingest a batch of data into the state store. One write batch should never contain operation
     /// on the same key. e.g. Put(233, x) then Delete(233).
-    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>) -> Result<()>;
+    /// A epoch should be provided to ingest a write batch. It is served as:
+    /// - A handle to represent an atomic write session. All ingested write batches associated with
+    ///   the same `Epoch` have the all-or-nothing semantics, meaning that partial changes are not
+    ///   queryable and will be rollbacked if instructed.
+    /// - A version of a kv pair. kv pair associated with larger `Epoch` is guaranteed to be newer
+    ///   then kv pair with smaller `Epoch`. Currently this version is only used to derive the
+    ///   per-key modification history (e.g. in compaction), not across different keys.
+    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, epoch: u64) -> Result<()>;
 
     /// Open and return an iterator for given `prefix`.
     async fn iter(&self, prefix: &[u8]) -> Result<Self::Iter>;

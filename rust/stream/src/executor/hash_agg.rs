@@ -213,7 +213,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
         Ok(())
     }
 
-    async fn flush_data(&mut self) -> Result<Option<StreamChunk>> {
+    async fn flush_data(&mut self, epoch: u64) -> Result<Option<StreamChunk>> {
         // --- Flush states to the state store ---
         // Some state will have the correct output only after their internal states have been fully
         // flushed.
@@ -239,7 +239,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
             return Ok(None);
         }
 
-        write_batch.ingest().await?;
+        write_batch.ingest(epoch).await?;
 
         // --- Produce the stream chunk ---
 

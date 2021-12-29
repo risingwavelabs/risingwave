@@ -47,9 +47,9 @@ where
     }
 
     /// Ingest this batch into the associated state store.
-    pub async fn ingest(self) -> Result<()> {
+    pub async fn ingest(self, epoch: u64) -> Result<()> {
         // TODO: is it necessary to check or preprocess these pairs?
-        self.store.ingest_batch(self.batch).await
+        self.store.ingest_batch(self.batch, epoch).await
     }
 
     /// Create a [`LocalWriteBatch`] with the given `keyspace`, which automatically prepends the

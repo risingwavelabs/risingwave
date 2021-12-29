@@ -213,7 +213,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
                 Err(e) => Err(e),
             },
             AlignedMessage::Barrier(barrier) => {
-                self.flush_data().await?;
+                self.flush_data(barrier.epoch).await?;
                 Ok(Message::Barrier(barrier))
             }
         }
@@ -297,13 +297,13 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
         }
     }
 
-    async fn flush_data(&mut self) -> Result<()> {
+    async fn flush_data(&mut self, epoch: u64) -> Result<()> {
         for side in [&mut self.side_l, &mut self.side_r] {
             let mut write_batch = side.keyspace.state_store().start_write_batch();
             for state in side.ht.values_mut() {
                 state.flush(&mut write_batch)?;
             }
-            write_batch.ingest().await?;
+            write_batch.ingest(epoch).await?;
         }
         Ok(())
     }

@@ -182,6 +182,7 @@ mod tests {
             orderings.clone(),
         );
         let table = MViewTable::new(keyspace.clone(), schema, pk_columns.clone(), orderings);
+        let epoch: u64 = 0;
 
         state.put(
             Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
@@ -200,7 +201,7 @@ mod tests {
             ]),
         );
         state.delete(Row(vec![Some(2_i32.into()), Some(22_i32.into())]));
-        state.flush().await.unwrap();
+        state.flush(epoch).await.unwrap();
 
         let cell_1_0 = table
             .get(Row(vec![Some(1_i32.into()), Some(11_i32.into())]), 0)
@@ -257,6 +258,7 @@ mod tests {
             orderings.clone(),
         );
         let table = MViewTable::new(keyspace.clone(), schema, pk_columns.clone(), orderings);
+        let epoch: u64 = 0;
 
         state.put(
             Row(vec![
@@ -284,7 +286,7 @@ mod tests {
             Some("2".to_string().into()),
             Some("22".to_string().into()),
         ]));
-        state.flush().await.unwrap();
+        state.flush(epoch).await.unwrap();
 
         let cell_1_0 = table
             .get(
@@ -386,6 +388,7 @@ mod tests {
             orderings.clone(),
         );
         let table = MViewTable::new(keyspace.clone(), schema, pk_columns.clone(), orderings);
+        let epoch: u64 = 0;
 
         state.put(
             Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
@@ -404,7 +407,7 @@ mod tests {
             ]),
         );
         state.delete(Row(vec![Some(2_i32.into()), Some(22_i32.into())]));
-        state.flush().await.unwrap();
+        state.flush(epoch).await.unwrap();
 
         let mut iter = table.iter().await.unwrap();
 
@@ -441,6 +444,7 @@ mod tests {
 
         let keyspace_1 = Keyspace::executor_root(state_store.clone(), 0x1111);
         let keyspace_2 = Keyspace::executor_root(state_store.clone(), 0x2222);
+        let epoch: u64 = 0;
 
         let mut state_1 = ManagedMViewState::new(
             keyspace_1.clone(),
@@ -513,8 +517,8 @@ mod tests {
             Some("22".to_string().into()),
         ]));
 
-        state_1.flush().await.unwrap();
-        state_2.flush().await.unwrap();
+        state_1.flush(epoch).await.unwrap();
+        state_2.flush(epoch).await.unwrap();
 
         let mut iter_1 = table_1.iter().await.unwrap();
         let mut iter_2 = table_2.iter().await.unwrap();
