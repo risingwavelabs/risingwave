@@ -44,7 +44,7 @@ impl DebeziumJsonParser {
                 if column.skip_parse {
                     None
                 } else {
-                    json_parse_value(column, map.get(&column.name))
+                    json_parse_value(column, map.get(&column.name)).ok()
                 }
             })
             .collect::<Vec<Datum>>()

@@ -24,7 +24,7 @@ impl SourceParser for JSONParser {
                     if column.skip_parse {
                         None
                     } else {
-                        json_parse_value(column, value.get(&column.name))
+                        json_parse_value(column, value.get(&column.name)).ok()
                     }
                 })
                 .collect::<Vec<Datum>>()],
@@ -35,9 +35,10 @@ impl SourceParser for JSONParser {
 #[cfg(test)]
 mod tests {
     use risingwave_common::types::{
-        BoolType, DataTypeKind, Float32Type, Float64Type, Int16Type, Int32Type, Int64Type,
-        ScalarImpl, StringType,
+        BoolType, DataTypeKind, DateType, Float32Type, Float64Type, Int16Type, Int32Type,
+        Int64Type, ScalarImpl, StringType,
     };
+    use risingwave_common::vector_op::cast::str_to_date;
 
     use crate::{JSONParser, SourceColumnDesc, SourceParser};
 
@@ -45,7 +46,7 @@ mod tests {
     fn test_json_parser() {
         let parser = JSONParser {};
 
-        let payload = r#"{"i32":1,"char":"char","bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar"}"#.as_bytes();
+        let payload = r#"{"i32":1,"char":"char","bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01"}"#.as_bytes();
         let descs = vec![
             SourceColumnDesc {
                 name: "i32".to_string(),
@@ -103,6 +104,13 @@ mod tests {
                 skip_parse: false,
                 is_primary: false,
             },
+            SourceColumnDesc {
+                name: "date".to_string(),
+                data_type: DateType::create(false),
+                column_id: 8,
+                skip_parse: false,
+                is_primary: false,
+            },
         ];
 
         let result = parser.parse(payload, &descs);
@@ -118,6 +126,7 @@ mod tests {
         assert!(row[5].eq(&Some(ScalarImpl::Float32(1.23.into()))));
         assert!(row[6].eq(&Some(ScalarImpl::Float64(1.2345.into()))));
         assert!(row[7].eq(&Some(ScalarImpl::Utf8("varchar".to_string()))));
+        assert!(row[8].eq(&Some(ScalarImpl::Int32(str_to_date("2021-01-01").unwrap()))));
 
         let payload = r#"{"i32":1}"#.as_bytes();
         let result = parser.parse(payload, &descs);
