@@ -17,10 +17,10 @@ crc32fast = "1"
 either = "1"
 futures = "0.3"
 itertools = "0.10"
-lazy_static = "1.4.0"
+lazy_static = "1"
 log = "0.4"
 log4rs = "1"
-num-integer = "0.1.44"
+num-integer = "0.1"
 num-traits = "0.2"
 paste = "1"
 prost = "0.9"
@@ -29,18 +29,18 @@ risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
 rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }
-serde-value = "0.7.0"
+serde-value = "0.7"
 serde_json = "1"
 serde_with = "1"
 smallvec = "1"
 thiserror = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
-tokio-stream = { version = "0.1.7", features = ["net"] }
+tokio-stream = { version = "0.1", features = ["net"] }
 tonic = "0.6"
 uuid = { version = "0.8", features = ["v4"] }
 
 [dev-dependencies]
-assert_matches = "1.5"
+assert_matches = "1"
 rand = "0.8"
 
 [[bin]]

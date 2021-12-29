@@ -5,7 +5,7 @@ version = "0.0.1-SNAPSHOT"
 
 [dependencies]
 anyhow = "1"
-async-std = { version = "1" }
+async-std = "1"
 async-stream = "0.3"
 async-trait = "0.1"
 backtrace = "0.3"
@@ -17,11 +17,11 @@ clap_derive = "3.0.0-beta.5"
 crc32fast = "1"
 dyn-clone = "1"
 either = "1"
-farmhash = "1.1"
+farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-hyper = "0.14.16"
+hyper = "0.14"
 itertools = "0.10"
-lazy_static = "1.4.0"
+lazy_static = "1"
 log = "0.4"
 log4rs = "1"
 memcomparable = { path = "../utils/memcomparable" }
@@ -39,24 +39,23 @@ risingwave_storage = { path = "../storage" }
 risingwave_stream = { path = "../stream" }
 rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }
-serde-value = "0.7.0"
+serde-value = "0.7"
 serde_json = "1"
 serde_with = "1"
 smallvec = "1"
-static_assertions = "1.1"
-tempfile = "3.2.0"
+static_assertions = "1"
 thiserror = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
-tokio-stream = "0.1.7"
+tokio-stream = "0.1"
 tonic = "0.6"
-twox-hash = "1.6.1"
-url = "2.2.2"
+twox-hash = "1"
+url = "2"
 
 [dev-dependencies]
 rand = "0.8"
 rusty-hook = "0.11"
 tempfile = "3"
-tokio-test = "0.4.2"
+tokio-test = "0.4"
 
 [[bin]]
 name = "compute-node"

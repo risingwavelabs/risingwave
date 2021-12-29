@@ -15,9 +15,9 @@ crc32fast = "1"
 either = "1"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-hyper = "0.14.16"
+hyper = "0.14"
 itertools = "0.10"
-lazy_static = "1.4.0"
+lazy_static = "1"
 log = "0.4"
 log4rs = "1"
 num-traits = "0.2"
@@ -29,8 +29,8 @@ prost-types = "0.9"
 rand = "0.8"
 risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
-rusoto_core = "0.47.0"
-rusoto_s3 = "0.47.0"
+rusoto_core = "0.47"
+rusoto_s3 = "0.47"
 rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -38,7 +38,7 @@ serde_with = "1"
 smallvec = "1"
 thiserror = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
-tokio-stream = "0.1.7"
+tokio-stream = "0.1"
 tonic = "0.6"
 twox-hash = "1"
 uuid = { version = "0.8", features = ["v4"] }
