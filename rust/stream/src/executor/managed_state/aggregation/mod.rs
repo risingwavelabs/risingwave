@@ -9,7 +9,6 @@ mod extreme_serializer;
 mod ordered_serializer;
 mod string_agg;
 
-use bytes::Bytes;
 pub use extreme::*;
 pub use ordered_serializer::*;
 use risingwave_common::array::stream_chunk::Ops;
@@ -17,6 +16,7 @@ use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
+use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::super::{AggCall, PkDataTypeKinds};
@@ -74,7 +74,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
     }
 
     /// Flush the internal state to a write batch. TODO: add `WriteBatch` to Hummock.
-    pub fn flush(&mut self, write_batch: &mut Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
+    pub fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()> {
         match self {
             Self::Value(state) => state.flush(write_batch),
             Self::Extreme(state) => state.flush(write_batch),

@@ -3,7 +3,6 @@
 use std::collections::BTreeMap;
 use std::vec::Drain;
 
-use bytes::Bytes;
 use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataTypeKind;
@@ -293,7 +292,9 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
             return Ok(());
         }
 
-        let mut write_batches: Vec<(Bytes, Option<Bytes>)> = vec![];
+        let mut write_batch = self.keyspace.state_store().start_write_batch();
+        let mut local = write_batch.local(&self.keyspace);
+
         for (ordered_row, cells) in std::mem::take(&mut self.flush_buffer) {
             let row_option = cells.into_option();
             for cell_idx in 0..self.data_type_kinds.len() {
@@ -304,23 +305,20 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
                     &serialize_cell_idx(cell_idx as u32)?[..],
                 ]
                 .concat();
-                // format: [keyspace prefix | pk_buf | cell_idx (4B)]
-                let key_encoded = self.keyspace.prefixed_key(&key_encoded).into();
+
                 match &row_option {
                     Some(row) => {
                         let row_bytes = row.serialize()?;
-                        write_batches.push((key_encoded, Some(row_bytes.into())));
+                        local.put(key_encoded, row_bytes);
                     }
                     None => {
-                        write_batches.push((key_encoded, None));
+                        local.delete(key_encoded);
                     }
                 };
             }
         }
-        self.keyspace
-            .state_store()
-            .ingest_batch(write_batches)
-            .await?;
+
+        write_batch.ingest().await?;
 
         // We don't retain `n` elements as we have a all-or-nothing policy for now.
         Ok(())

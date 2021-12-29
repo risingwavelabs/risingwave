@@ -219,7 +219,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
         // flushed.
 
         let (write_batch, dirty_cnt) = {
-            let mut write_batch = vec![];
+            let mut write_batch = self.keyspace.state_store().start_write_batch();
             let mut dirty_cnt = 0;
 
             for states in self.state_map.values_mut() {
@@ -239,10 +239,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
             return Ok(None);
         }
 
-        self.keyspace
-            .state_store()
-            .ingest_batch(write_batch)
-            .await?;
+        write_batch.ingest().await?;
 
         // --- Produce the stream chunk ---
 

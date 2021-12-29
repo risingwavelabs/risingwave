@@ -1,11 +1,11 @@
 use std::collections::{btree_map, BTreeMap};
 
-use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::array::data_chunk_iter::RowDeserializer;
 use risingwave_common::array::Row;
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataTypeKind, DataTypeRef};
+use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::{PkType, ValueType};
@@ -107,17 +107,19 @@ impl<S: StateStore> AllOrNoneState<S> {
     }
 
     // Flush data to the state store
-    pub fn flush(&mut self, write_batch: &mut Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
+    pub fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()> {
+        let mut local = write_batch.local(&self.keyspace);
+
         for (pk, v) in std::mem::take(&mut self.flush_buffer) {
             let key_encoded = pk.serialize_not_null()?;
-            let key_encoded = self.keyspace.prefixed_key(key_encoded);
+
             match v.into_option() {
                 Some(v) => {
                     let value = v.serialize()?;
-                    write_batch.push((key_encoded.into(), Some(value.into())));
+                    local.put(key_encoded, value);
                 }
                 None => {
-                    write_batch.push((key_encoded.into(), None));
+                    local.delete(key_encoded);
                 }
             }
         }
@@ -193,9 +195,9 @@ mod tests {
         }
 
         // flush to write batch and write to state store
-        let mut write_batch = vec![];
+        let mut write_batch = store.start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
-        store.ingest_batch(write_batch).await.unwrap();
+        write_batch.ingest().await.unwrap();
 
         assert!(!managed_state.is_dirty());
     }

@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use bytes::Bytes;
 use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataTypeKind;
@@ -309,7 +308,9 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
             return Ok(());
         }
 
-        let mut write_batches: Vec<(Bytes, Option<Bytes>)> = vec![];
+        let mut write_batch = self.keyspace.state_store().start_write_batch();
+        let mut local = write_batch.local(&self.keyspace);
+
         for (ordered_row, cells) in std::mem::take(&mut self.flush_buffer) {
             let row_option = cells.into_option();
             let pk_buf = match TOP_N_TYPE {
@@ -320,23 +321,20 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
             for cell_idx in 0..self.data_type_kinds.len() {
                 // format: [pk_buf | cell_idx (4B)]
                 let key_encoded = [&pk_buf[..], &serialize_cell_idx(cell_idx as u32)?[..]].concat();
-                // format: [keyspace prefix | pk_buf | cell_idx (4B)]
-                let key_encoded = self.keyspace.prefixed_key(&key_encoded).into();
+
                 match &row_option {
                     Some(row) => {
                         let row_bytes = row.serialize()?;
-                        write_batches.push((key_encoded, Some(row_bytes.into())));
+                        local.put(key_encoded, row_bytes);
                     }
                     None => {
-                        write_batches.push((key_encoded, None));
+                        local.delete(key_encoded);
                     }
                 };
             }
         }
-        self.keyspace
-            .state_store()
-            .ingest_batch(write_batches)
-            .await?;
+
+        write_batch.ingest().await?;
 
         self.retain_top_n();
         Ok(())

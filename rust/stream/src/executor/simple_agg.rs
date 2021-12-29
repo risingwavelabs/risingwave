@@ -138,15 +138,11 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
             _ => return Ok(None), // Nothing to flush.
         };
 
-        let mut write_batch = vec![];
+        let mut write_batch = self.keyspace.state_store().start_write_batch();
         for state in &mut states.managed_states {
             state.flush(&mut write_batch)?;
         }
-
-        self.keyspace
-            .state_store()
-            .ingest_batch(write_batch)
-            .await?;
+        write_batch.ingest().await?;
 
         // --- Create array builders ---
         // As the datatype is retrieved from schema, it contains both group key and aggregation

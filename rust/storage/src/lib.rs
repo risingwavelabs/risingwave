@@ -19,6 +19,7 @@ pub mod metrics;
 pub mod object;
 pub mod panic_store;
 pub mod table;
+pub mod write_batch;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -26,6 +27,7 @@ pub use keyspace::{Keyspace, Segment};
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataTypeRef;
+use write_batch::WriteBatch;
 
 use crate::table::ScannableTable;
 
@@ -61,6 +63,11 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     /// Open and return an iterator for given `prefix`.
     async fn iter(&self, prefix: &[u8]) -> Result<Self::Iter>;
+
+    /// Create a `WriteBatch` associated with this state store.
+    fn start_write_batch(&self) -> WriteBatch<Self> {
+        WriteBatch::new(self.clone())
+    }
 }
 
 #[async_trait]

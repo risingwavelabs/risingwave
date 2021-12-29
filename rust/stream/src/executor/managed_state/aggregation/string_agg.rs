@@ -9,6 +9,7 @@ use risingwave_common::error::Result;
 use risingwave_common::types::{
     deserialize_datum_not_null_from, serialize_datum_not_null_into, DataTypeKind, Datum, ScalarImpl,
 };
+use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::managed_state::aggregation::ManagedExtremeState;
@@ -216,23 +217,24 @@ impl<S: StateStore> ManagedExtremeState<S> for ManagedStringAggState<S> {
         self.dirty
     }
 
-    fn flush(&mut self, write_batch: &mut Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
+    fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()> {
         if !self.is_dirty() {
             return Ok(());
         }
 
+        let mut local = write_batch.local(&self.keyspace);
+
         for (key, value) in std::mem::take(&mut self.cache) {
-            let key_encoded = self.keyspace.prefixed_key(key);
             let mut serializer = memcomparable::Serializer::new(vec![]);
             let value = value.into_option();
             match value {
                 Some(val) => {
                     serialize_datum_not_null_into(&Some(val), &mut serializer)?;
-                    let val = serializer.into_inner();
-                    write_batch.push((key_encoded.into(), Some(val.into())));
+                    let value = serializer.into_inner();
+                    local.put(key, value);
                 }
                 None => {
-                    write_batch.push((key_encoded.into(), None));
+                    local.delete(key);
                 }
             }
         }
@@ -246,18 +248,17 @@ mod tests {
     use risingwave_common::array::{I64Array, Op, Utf8Array};
     use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::{Keyspace, StateStore};
 
     use crate::executor::managed_state::aggregation::ordered_serializer::OrderedArraysSerializer;
     use crate::executor::managed_state::aggregation::string_agg::ManagedStringAggState;
     use crate::executor::managed_state::aggregation::ManagedExtremeState;
+    use crate::executor::test_utils::create_in_memory_keyspace;
 
     async fn create_managed_state<S: StateStore>(
-        store: &S,
+        keyspace: &Keyspace<S>,
         row_count: usize,
     ) -> ManagedStringAggState<S> {
-        let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let sort_key_indices = vec![0, 1];
         let value_index = 0;
         let orderings = vec![OrderType::Descending, OrderType::Ascending];
@@ -268,7 +269,7 @@ mod tests {
             .collect::<Vec<_>>();
         let sort_key_serializer = OrderedArraysSerializer::new(order_pairs);
         let managed_state = ManagedStringAggState::new(
-            keyspace,
+            keyspace.clone(),
             row_count,
             sort_key_indices,
             value_index,
@@ -282,8 +283,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_managed_string_agg_state() {
-        let store = MemoryStateStore::new();
-        let mut managed_state = create_managed_state(&store, 0).await;
+        let keyspace = create_in_memory_keyspace();
+        let store = keyspace.state_store();
+        let mut managed_state = create_managed_state(&keyspace, 0).await;
         assert!(!managed_state.is_dirty());
 
         // Insert.
@@ -310,9 +312,9 @@ mod tests {
             Some(ScalarImpl::Utf8("ghi||def||abc".to_string()))
         );
 
-        let mut write_batch = vec![];
+        let mut write_batch = store.start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
-        store.ingest_batch(write_batch).await.unwrap();
+        write_batch.ingest().await.unwrap();
         assert!(!managed_state.is_dirty());
 
         // Insert and delete.
@@ -339,9 +341,9 @@ mod tests {
             Some(ScalarImpl::Utf8("ghi||def||def||abc".to_string()))
         );
 
-        let mut write_batch = vec![];
+        let mut write_batch = store.start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
-        store.ingest_batch(write_batch).await.unwrap();
+        write_batch.ingest().await.unwrap();
         assert!(!managed_state.is_dirty());
 
         // Deletion.
@@ -369,9 +371,9 @@ mod tests {
             Some(ScalarImpl::Utf8("ghi".to_string()))
         );
 
-        let mut write_batch = vec![];
+        let mut write_batch = store.start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
-        store.ingest_batch(write_batch).await.unwrap();
+        write_batch.ingest().await.unwrap();
         assert!(!managed_state.is_dirty());
 
         // Check output after flush.
@@ -385,7 +387,7 @@ mod tests {
         drop(managed_state);
 
         // Recover the state by `row_count`.
-        let mut managed_state = create_managed_state(&store, row_count).await;
+        let mut managed_state = create_managed_state(&keyspace, row_count).await;
         assert!(!managed_state.is_dirty());
         // Get the output after recovery
         assert_eq!(
@@ -449,14 +451,15 @@ mod tests {
             )
             .await
             .unwrap();
-        let mut write_batch = vec![];
+
+        let mut write_batch = store.start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
-        store.ingest_batch(write_batch).await.unwrap();
+        write_batch.ingest().await.unwrap();
         assert!(!managed_state.is_dirty());
         let row_count = managed_state.get_row_count();
 
         drop(managed_state);
-        let mut managed_state = create_managed_state(&store, row_count).await;
+        let mut managed_state = create_managed_state(&keyspace, row_count).await;
         // Delete right after recovery.
         managed_state
             .apply_batch(
@@ -475,15 +478,16 @@ mod tests {
             managed_state.get_output().await.unwrap(),
             Some(ScalarImpl::Utf8("miko||miko".to_string()))
         );
-        let mut write_batch = vec![];
+
+        let mut write_batch = store.start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
-        store.ingest_batch(write_batch).await.unwrap();
+        write_batch.ingest().await.unwrap();
         assert!(!managed_state.is_dirty());
 
         let row_count = managed_state.get_row_count();
 
         drop(managed_state);
-        let mut managed_state = create_managed_state(&store, row_count).await;
+        let mut managed_state = create_managed_state(&keyspace, row_count).await;
         assert_eq!(
             managed_state.get_output().await.unwrap(),
             Some(ScalarImpl::Utf8("miko||miko".to_string()))
@@ -513,7 +517,7 @@ mod tests {
         let row_count = managed_state.get_row_count();
 
         drop(managed_state);
-        let mut managed_state = create_managed_state(&store, row_count).await;
+        let mut managed_state = create_managed_state(&keyspace, row_count).await;
         // As we didn't flush the changes, the result should be the same as the result before last
         // changes.
         assert_eq!(

@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
-use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{Array, ArrayImpl};
@@ -12,6 +11,7 @@ use risingwave_common::types::{
     deserialize_datum_not_null_from, serialize_datum_not_null_into, DataTypeKind, DataTypeRef,
     Datum, ScalarImpl, ScalarRef,
 };
+use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::extreme_serializer::{variants, ExtremePk, ExtremeSerializer};
@@ -91,7 +91,7 @@ pub trait ManagedExtremeState<S: StateStore>: Send + Sync + 'static {
     fn is_dirty(&self) -> bool;
 
     /// Flush the internal state to a write batch. TODO: add `WriteBatch` to Hummock.
-    fn flush(&mut self, write_batch: &mut Vec<(Bytes, Option<Bytes>)>) -> Result<()>;
+    fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()>;
 }
 
 impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> GenericManagedState<S, A, EXTREME_TYPE>
@@ -297,7 +297,7 @@ where
     }
 
     /// Flush the internal state to a write batch. TODO: add `WriteBatch` to Hummock.
-    fn flush_inner(&mut self, write_batch: &mut Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
+    fn flush_inner(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()> {
         // Generally, we require the state the be dirty before flushing. However, it is possible
         // that after a sequence of operations, the flush buffer becomes empty. Then, the
         // state becomes "dirty", but we do not need to flush anything.
@@ -306,21 +306,22 @@ where
             return Ok(());
         }
 
+        let mut local = write_batch.local(&self.keyspace);
+
         // TODO: we can populate the cache while flushing, but that's hard.
 
         for ((key, pks), v) in std::mem::take(&mut self.flush_buffer) {
             let key_encoded = self.serializer.serialize(key, &pks)?;
-            let key_encoded = self.keyspace.prefixed_key(key_encoded);
 
             match v.into_option() {
                 Some(v) => {
                     let mut serializer = memcomparable::Serializer::new(vec![]);
                     serialize_datum_not_null_into(&Some(v), &mut serializer)?;
                     let value = serializer.into_inner();
-                    write_batch.push((key_encoded.into(), Some(value.into())));
+                    local.put(key_encoded, value);
                 }
                 None => {
-                    write_batch.push((key_encoded.into(), None));
+                    local.delete(key_encoded);
                 }
             }
         }
@@ -356,7 +357,7 @@ where
         !self.flush_buffer.is_empty()
     }
 
-    fn flush(&mut self, write_batch: &mut Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
+    fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()> {
         self.flush_inner(write_batch)
     }
 }
@@ -464,7 +465,7 @@ mod tests {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
-            keyspace,
+            keyspace.clone(),
             Int64Type::create(false),
             Some(5),
             0,
@@ -488,9 +489,9 @@ mod tests {
         assert!(managed_state.is_dirty());
 
         // flush to write batch and write to state store
-        let mut write_batch = vec![];
+        let mut write_batch = store.start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
-        store.ingest_batch(write_batch).await.unwrap();
+        write_batch.ingest().await.unwrap();
 
         // The minimum should be 0
         assert_eq!(
@@ -514,9 +515,9 @@ mod tests {
             .unwrap();
 
         // flush to write batch and write to state store
-        let mut write_batch = vec![];
+        let mut write_batch = store.start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
-        store.ingest_batch(write_batch).await.unwrap();
+        write_batch.ingest().await.unwrap();
 
         // The minimum should be 0
         assert_eq!(
@@ -539,9 +540,9 @@ mod tests {
             .unwrap();
 
         // flush to write batch and write to state store
-        let mut write_batch = vec![];
+        let mut write_batch = store.start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
-        store.ingest_batch(write_batch).await.unwrap();
+        write_batch.ingest().await.unwrap();
 
         // The minimum should be 20
         assert_eq!(
@@ -560,9 +561,9 @@ mod tests {
             .unwrap();
 
         // flush to write batch and write to state store
-        let mut write_batch = vec![];
+        let mut write_batch = store.start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
-        store.ingest_batch(write_batch).await.unwrap();
+        write_batch.ingest().await.unwrap();
 
         // The minimum should be 25
         assert_eq!(
@@ -581,9 +582,9 @@ mod tests {
             .unwrap();
 
         // flush to write batch and write to state store
-        let mut write_batch = vec![];
+        let mut write_batch = store.start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
-        store.ingest_batch(write_batch).await.unwrap();
+        write_batch.ingest().await.unwrap();
 
         // The minimum should be 30
         assert_eq!(
@@ -627,7 +628,7 @@ mod tests {
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
 
         let mut managed_state = GenericManagedState::<_, I64Array, EXTREME_TYPE>::new(
-            keyspace,
+            keyspace.clone(),
             Int64Type::create(false),
             Some(3),
             0,
@@ -681,9 +682,9 @@ mod tests {
             .unwrap();
 
         // flush
-        let mut write_batch = vec![];
+        let mut write_batch = store.start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
-        store.ingest_batch(write_batch).await.unwrap();
+        write_batch.ingest().await.unwrap();
 
         // The minimum should be 1, or the maximum should be 5
         assert_eq!(
@@ -698,9 +699,9 @@ mod tests {
             .unwrap();
 
         // flush
-        let mut write_batch = vec![];
+        let mut write_batch = store.start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
-        store.ingest_batch(write_batch).await.unwrap();
+        write_batch.ingest().await.unwrap();
 
         // The minimum should still be 1, or the maximum should still be 5
         assert_eq!(managed_state.get_output().await.unwrap(), Some(extreme));
@@ -711,7 +712,7 @@ mod tests {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
-            keyspace,
+            keyspace.clone(),
             Int64Type::create(false),
             Some(3),
             0,
@@ -744,9 +745,9 @@ mod tests {
             if i % 2 == 0 {
                 // only ingest after insert in some cases
                 // flush to write batch and write to state store
-                let mut write_batch = vec![];
+                let mut write_batch = store.start_write_batch();
                 managed_state.flush(&mut write_batch).unwrap();
-                store.ingest_batch(write_batch).await.unwrap();
+                write_batch.ingest().await.unwrap();
             }
 
             managed_state
@@ -755,9 +756,9 @@ mod tests {
                 .unwrap();
 
             // flush to write batch and write to state store
-            let mut write_batch = vec![];
+            let mut write_batch = store.start_write_batch();
             managed_state.flush(&mut write_batch).unwrap();
-            store.ingest_batch(write_batch).await.unwrap();
+            write_batch.ingest().await.unwrap();
 
             // The minimum should be 6
             assert_eq!(
@@ -786,7 +787,7 @@ mod tests {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = GenericManagedState::<_, I64Array, EXTREME_TYPE>::new(
-            keyspace,
+            keyspace.clone(),
             Int64Type::create(false),
             Some(3),
             0,
@@ -844,9 +845,9 @@ mod tests {
                 .unwrap();
 
             // flush to write batch and write to state store
-            let mut write_batch = vec![];
+            let mut write_batch = store.start_write_batch();
             managed_state.flush(&mut write_batch).unwrap();
-            store.ingest_batch(write_batch).await.unwrap();
+            write_batch.ingest().await.unwrap();
 
             let value = managed_state
                 .get_output()
@@ -864,11 +865,11 @@ mod tests {
 
     async fn helper_flush<S: StateStore>(
         managed_state: &mut impl ManagedExtremeState<S>,
-        store: &S,
+        keyspace: &Keyspace<S>,
     ) {
-        let mut write_batch = vec![];
+        let mut write_batch = keyspace.state_store().start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
-        store.ingest_batch(write_batch).await.unwrap();
+        write_batch.ingest().await.unwrap();
     }
 
     #[tokio::test]
@@ -881,7 +882,7 @@ mod tests {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
-            keyspace,
+            keyspace.clone(),
             Int64Type::create(false),
             Some(3),
             0,
@@ -911,7 +912,7 @@ mod tests {
             .unwrap();
 
         // Now we have 1 to 7 in the state store.
-        helper_flush(&mut managed_state, &store).await;
+        helper_flush(&mut managed_state, &keyspace).await;
 
         // Delete 6, insert 6, delete 6
         managed_state
@@ -926,7 +927,7 @@ mod tests {
             .unwrap();
 
         // 6 should be deleted by now
-        helper_flush(&mut managed_state, &store).await;
+        helper_flush(&mut managed_state, &keyspace).await;
 
         let value_buffer = I64Array::from_slice(&[Some(1), Some(2), Some(3), Some(4), Some(5)])
             .unwrap()
@@ -938,7 +939,7 @@ mod tests {
             .await
             .unwrap();
 
-        helper_flush(&mut managed_state, &store).await;
+        helper_flush(&mut managed_state, &keyspace).await;
 
         assert_eq!(
             managed_state.get_output().await.unwrap(),

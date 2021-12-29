@@ -1,9 +1,8 @@
 use std::collections::HashMap;
 
-use bytes::Bytes;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -51,34 +50,31 @@ impl<S: StateStore> ManagedMViewState<S> {
     // TODO(MrCroxx): flush can be performed in another coruntine by taking the snapshot of
     // memtable.
     pub async fn flush(&mut self) -> Result<()> {
-        let mut batch = Vec::with_capacity(self.memtable.len() * self.schema.len());
+        let mut batch = self.keyspace.state_store().start_write_batch();
+        batch.reserve(self.memtable.len() * self.schema.len());
+        let mut local = batch.local(&self.keyspace);
 
         for (pk, cells) in self.memtable.drain() {
             debug_assert_eq!(self.pk_columns.len(), pk.0.len());
             let pk_buf = serialize_pk(&pk, &self.sort_key_serializer)?;
             for cell_idx in 0..self.schema.len() {
                 // TODO(MrCroxx): More efficient encoding is needed.
-                // format: [ prefix | pk_buf | cell_idx (4B)]
+                // format: [ pk_buf | cell_idx (4B)]
                 let key = [
                     pk_buf.as_slice(),
                     serialize_cell_idx(cell_idx as u32)?.as_slice(),
                 ]
                 .concat();
-                let key = self.keyspace.prefixed_key(key);
 
-                let value = match &cells {
-                    Some(cells) => Some(serialize_cell(&cells[cell_idx])?),
-                    None => None,
+                match &cells {
+                    Some(cells) => local.put(key, serialize_cell(&cells[cell_idx])?),
+                    None => local.delete(key),
                 };
-                batch.push((key.into(), value.map(Bytes::from)));
             }
         }
 
-        self.keyspace
-            .state_store()
-            .ingest_batch(batch)
-            .await
-            .map_err(|err| ErrorCode::InternalError(err.to_string()).into())
+        batch.ingest().await?;
+        Ok(())
     }
 }
 

@@ -1,9 +1,9 @@
-use bytes::Bytes;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::types::{deserialize_datum_from, serialize_datum_into, Datum};
+use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::{create_streaming_agg_state, AggCall, StreamingAggStateImpl};
@@ -87,18 +87,16 @@ impl<S: StateStore> ManagedValueState<S> {
     }
 
     /// Flush the internal state to a write batch. TODO: add `WriteBatch` to Hummock.
-    pub fn flush(&mut self, write_batch: &mut Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
+    pub fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()> {
         // If the managed state is not dirty, the caller should not flush. But forcing a flush won't
         // cause incorrect result: it will only produce more I/O.
         debug_assert!(self.is_dirty());
 
+        let mut local = write_batch.local(&self.keyspace);
         let v = self.state.get_output()?;
         let mut serializer = memcomparable::Serializer::new(vec![]);
         serialize_datum_into(&v, &mut serializer)?;
-        write_batch.push((
-            self.keyspace.key().to_vec().into(),
-            Some(serializer.into_inner().into()),
-        ));
+        local.put_single(serializer.into_inner());
         self.is_dirty = false;
         Ok(())
     }
@@ -124,7 +122,6 @@ mod tests {
     #[tokio::test]
     async fn test_managed_value_state() {
         let keyspace = create_in_memory_keyspace();
-        let store = keyspace.state_store();
         let mut managed_state =
             ManagedValueState::new(create_test_count_state(), keyspace.clone(), Some(0))
                 .await
@@ -145,9 +142,9 @@ mod tests {
         assert!(managed_state.is_dirty());
 
         // flush to write batch and write to state store
-        let mut write_batch = vec![];
+        let mut write_batch = keyspace.state_store().start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
-        store.ingest_batch(write_batch).await.unwrap();
+        write_batch.ingest().await.unwrap();
 
         // get output
         assert_eq!(

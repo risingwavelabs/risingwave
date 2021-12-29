@@ -299,14 +299,11 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
 
     async fn flush_data(&mut self) -> Result<()> {
         for side in [&mut self.side_l, &mut self.side_r] {
-            let mut write_batch = vec![];
+            let mut write_batch = side.keyspace.state_store().start_write_batch();
             for state in side.ht.values_mut() {
                 state.flush(&mut write_batch)?;
             }
-            side.keyspace
-                .state_store()
-                .ingest_batch(write_batch)
-                .await?;
+            write_batch.ingest().await?;
         }
         Ok(())
     }
