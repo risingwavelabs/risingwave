@@ -9,6 +9,18 @@ pub trait IndexMapper: Fn(u64, usize) -> Vec<u8> + Send + Sync + 'static {}
 impl<T> IndexMapper for T where T: Fn(u64, usize) -> Vec<u8> + Send + Sync + 'static {}
 type BoxedIndexMapper = Box<dyn IndexMapper>;
 
+/// `assert_eq` two `Vec<u8>` with human-readable format.
+#[macro_export]
+macro_rules! assert_bytes_eq {
+    ($left:expr, $right:expr) => {{
+        use bytes::Bytes;
+        assert_eq!(
+            Bytes::copy_from_slice(&$left),
+            Bytes::copy_from_slice(&$right)
+        )
+    }};
+}
+
 pub struct TestIteratorConfig {
     key_mapper: BoxedIndexMapper,
     value_mapper: BoxedIndexMapper,

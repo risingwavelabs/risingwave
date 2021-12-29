@@ -3,13 +3,13 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use super::super::{HummockResult, HummockValue};
-use super::{BlockIterator, SeekPos, Table};
 use crate::hummock::iterator::HummockIterator;
+use crate::hummock::value::HummockValue;
 use crate::hummock::version_cmp::VersionedComparator;
+use crate::hummock::{BlockIterator, HummockResult, SeekPos, Table};
 
-/// Iterates on a table.
-pub struct TableIterator {
+/// Reversely iterates on a table.
+pub struct ReverseTableIterator {
     /// The iterator of the current block.
     block_iter: Option<BlockIterator>,
 
@@ -20,29 +20,29 @@ pub struct TableIterator {
     pub table: Arc<Table>,
 }
 
-impl TableIterator {
+impl ReverseTableIterator {
     pub fn new(table: Arc<Table>) -> Self {
         Self {
             block_iter: None,
-            cur_idx: 0,
+            cur_idx: table.meta.block_metas.len() - 1,
             table,
         }
     }
 
     /// Seek to a block, and then seek to the key if `seek_key` is given.
-    async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
-        if idx >= self.table.block_count() {
+    async fn seek_idx(&mut self, idx: isize, seek_key: Option<&[u8]>) -> HummockResult<()> {
+        if idx >= self.table.block_count() as isize || idx < 0 {
             self.block_iter = None;
         } else {
-            let mut block_iter = BlockIterator::new(self.table.block(idx).await?);
+            let mut block_iter = BlockIterator::new(self.table.block(idx as usize).await?);
             if let Some(key) = seek_key {
-                block_iter.seek(key, SeekPos::Origin);
+                block_iter.seek_le(key, SeekPos::Origin);
             } else {
-                block_iter.seek_to_first();
+                block_iter.seek_to_last();
             }
 
             self.block_iter = Some(block_iter);
-            self.cur_idx = idx;
+            self.cur_idx = idx as usize;
         }
 
         Ok(())
@@ -50,16 +50,16 @@ impl TableIterator {
 }
 
 #[async_trait]
-impl HummockIterator for TableIterator {
+impl HummockIterator for ReverseTableIterator {
     async fn next(&mut self) -> HummockResult<()> {
         let block_iter = self.block_iter.as_mut().expect("no block iter");
-        block_iter.next();
+        block_iter.prev();
 
         if block_iter.is_valid() {
             Ok(())
         } else {
-            // seek to next block
-            self.seek_idx(self.cur_idx + 1, None).await
+            // seek to the previous block
+            self.seek_idx(self.cur_idx as isize - 1, None).await
         }
     }
 
@@ -86,8 +86,11 @@ impl HummockIterator for TableIterator {
         self.block_iter.as_ref().map_or(false, |i| i.is_valid())
     }
 
+    /// Instead of setting idx to 0th block, a `ReverseTableIterator` rewinds to the last block in
+    /// the table.
     async fn rewind(&mut self) -> HummockResult<()> {
-        self.seek_idx(0, None).await
+        self.seek_idx(self.table.block_count() as isize - 1, None)
+            .await
     }
 
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
@@ -103,17 +106,19 @@ impl HummockIterator for TableIterator {
                 ord == Less || ord == Equal
             })
             .saturating_sub(1); // considering the boundary of 0
+        let block_idx = block_idx as isize;
 
         self.seek_idx(block_idx, Some(key)).await?;
         if !self.is_valid() {
-            // seek to next block
-            self.seek_idx(block_idx + 1, None).await?;
+            // seek to prev block
+            self.seek_idx(block_idx - 1, None).await?;
         }
 
         Ok(())
     }
 }
 
+/// Mirror the tests used for `TableIterator`
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
@@ -126,37 +131,37 @@ mod tests {
     use crate::hummock::table::builder::tests::gen_test_table;
 
     #[tokio::test]
-    async fn test_table_iterator() {
+    async fn test_reverse_table_iterator() {
         // build remote table
         let table = gen_test_table(default_builder_opt_for_test()).await;
         // We should have at least 10 blocks, so that table iterator test could cover more code
         // path.
         assert!(table.meta.block_metas.len() > 10);
 
-        let mut table_iter = TableIterator::new(Arc::new(table));
-        let mut cnt = 0;
+        let mut table_iter = ReverseTableIterator::new(Arc::new(table));
+        let mut cnt = TEST_KEYS_COUNT;
         table_iter.rewind().await.unwrap();
 
         while table_iter.is_valid() {
+            cnt -= 1;
             let key = table_iter.key();
             let value = table_iter.value();
             assert_bytes_eq!(key, builder_test_key_of(cnt));
             assert_bytes_eq!(value.into_put_value().unwrap(), test_value_of(cnt));
-            cnt += 1;
             table_iter.next().await.unwrap();
         }
 
-        assert_eq!(cnt, TEST_KEYS_COUNT);
+        assert_eq!(cnt, 0);
     }
 
     #[tokio::test]
-    async fn test_table_seek() {
+    async fn test_reverse_table_seek() {
         let table = gen_test_table(default_builder_opt_for_test()).await;
         // We should have at least 10 blocks, so that table iterator test could cover more code
         // path.
         assert!(table.meta.block_metas.len() > 10);
         let table = Arc::new(table);
-        let mut table_iter = TableIterator::new(table.clone());
+        let mut table_iter = ReverseTableIterator::new(table.clone());
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();
         all_key_to_test.shuffle(&mut rng);
@@ -169,29 +174,30 @@ mod tests {
             assert_bytes_eq!(key, builder_test_key_of(i));
         }
 
-        // Seek to key #500 and start iterating.
-        table_iter.seek(&builder_test_key_of(500)).await.unwrap();
-        for i in 500..TEST_KEYS_COUNT {
+        // Seek to key #TEST_KEYS_COUNT-500 and start iterating
+        table_iter
+            .seek(&builder_test_key_of(TEST_KEYS_COUNT - 500))
+            .await
+            .unwrap();
+        for i in (0..TEST_KEYS_COUNT - 500 + 1).rev() {
             let key = table_iter.key();
-            assert_eq!(key, builder_test_key_of(i));
+            assert_eq!(key, builder_test_key_of(i), "key index:{}", i);
             table_iter.next().await.unwrap();
         }
         assert!(!table_iter.is_valid());
 
-        // Seek to < first key
-
-        let smallest_key = key_with_ts(format!("key_aaaa_{:05}", 0).as_bytes().to_vec(), 233);
-        table_iter.seek(smallest_key.as_slice()).await.unwrap();
-        let key = table_iter.key();
-        assert_eq!(key, builder_test_key_of(0));
-
-        // Seek to > last key
         let largest_key = key_with_ts(format!("key_zzzz_{:05}", 0).as_bytes().to_vec(), 233);
         table_iter.seek(largest_key.as_slice()).await.unwrap();
+        let key = table_iter.key();
+        assert_eq!(key, builder_test_key_of(TEST_KEYS_COUNT - 1));
+
+        // Seek to > last key
+        let smallest_key = key_with_ts(format!("key_aaaa_{:05}", 0).as_bytes().to_vec(), 233);
+        table_iter.seek(smallest_key.as_slice()).await.unwrap();
         assert!(!table_iter.is_valid());
 
         // Seek to non-existing key
-        for idx in 1..TEST_KEYS_COUNT {
+        for idx in (1..TEST_KEYS_COUNT).rev() {
             // Seek to the previous key of each existing key. e.g.,
             // Our key space is `key_test_00000`, `key_test_00002`, `key_test_00004`, ...
             // And we seek to `key_test_00001` (will produce `key_test_00002`), `key_test_00003`
@@ -208,7 +214,7 @@ mod tests {
                 .unwrap();
 
             let key = table_iter.key();
-            assert_eq!(key, builder_test_key_of(idx));
+            assert_eq!(key, builder_test_key_of(idx - 1));
             table_iter.next().await.unwrap();
         }
         assert!(!table_iter.is_valid());

@@ -131,6 +131,23 @@ impl BlockIterator {
         self.set_idx(found_entry_idx as isize);
     }
 
+    /// Seek to the first entry that is equal or less than key.
+    pub fn seek_le(&mut self, key: &[u8], whence: SeekPos) {
+        let end_index = match whence {
+            SeekPos::Origin => self.entry_offsets().len(),
+            SeekPos::Current => self.idx as usize + 1,
+        };
+        let found_entry_idx = (0..end_index).collect_vec().partition_point(|idx| {
+            self.set_idx(*idx as isize);
+
+            let ord = VersionedComparator::compare_key(&self.key, key);
+            ord == Less || ord == Equal
+        });
+        let found_entry_idx = found_entry_idx as isize - 1;
+
+        self.set_idx(found_entry_idx);
+    }
+
     pub fn seek_to_first(&mut self) {
         self.set_idx(0);
     }

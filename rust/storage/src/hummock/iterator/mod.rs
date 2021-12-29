@@ -2,6 +2,8 @@ use super::{HummockResult, HummockValue, TableIterator};
 
 mod concat;
 pub use concat::*;
+mod reverse_concat;
+pub use reverse_concat::*;
 mod sorted;
 pub use sorted::*;
 mod user_key;
@@ -70,7 +72,8 @@ pub trait HummockIterator: Send + Sync {
     ///   before starting iteration.
     async fn rewind(&mut self) -> HummockResult<()>;
 
-    /// Reset iterator and seek to the first position where the key >= provided key.
+    /// Reset iterator and seek to the first position where the key >= provided key, or key <=
+    /// provided key if this is a reverse iterator.
     ///
     /// Note:
     /// - Do not decide whether the position is valid or not by checking the returned error of this

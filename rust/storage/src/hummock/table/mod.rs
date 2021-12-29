@@ -11,7 +11,10 @@ pub use block_iterator::*;
 pub use builder::*;
 mod table_iterator;
 pub use table_iterator::*;
+mod reverse_table_iterator;
+pub use reverse_table_iterator::*;
 mod utils;
+
 use std::sync::Arc;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
