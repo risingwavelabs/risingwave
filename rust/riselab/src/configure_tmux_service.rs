@@ -29,6 +29,10 @@ impl Task for ConfigureTmuxTask {
         let prefix_path = env::var("PREFIX")?;
 
         let mut cmd = self.tmux();
+        cmd.arg("-V");
+        ctx.run_command(cmd)?;
+
+        let mut cmd = self.tmux();
         cmd.arg("kill-session").arg("-t").arg(RISELAB_SESSION_NAME);
         ctx.run_command(cmd).ok();
 

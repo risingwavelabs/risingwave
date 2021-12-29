@@ -37,8 +37,8 @@ impl Task for ComputeNodeService {
             .arg("--state-store")
             .arg(format!(
                 "hummock+minio://{}:{}@{}/{}",
-                env::var("MINIO_ROOT_USER")?,
-                env::var("MINIO_ROOT_PASSWORD")?,
+                env::var("MINIO_HUMMOCK_USER")?,
+                env::var("MINIO_HUMMOCK_PASSWORD")?,
                 env::var("HUMOOCK_MINIO_ADDRESS")?,
                 env::var("MINIO_BUCKET_NAME")?
             ));

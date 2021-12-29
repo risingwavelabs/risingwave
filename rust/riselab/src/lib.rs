@@ -12,7 +12,7 @@ pub mod util;
 mod wait_tcp;
 use std::env;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -87,7 +87,7 @@ where
         }
     }
 
-    pub fn run_command(&mut self, mut cmd: Command) -> Result<()> {
+    pub fn run_command(&mut self, mut cmd: Command) -> Result<Output> {
         let program_name = get_program_name(&cmd);
 
         writeln!(self.log, "> {} {}", program_name, get_program_args(&cmd))?;
@@ -110,7 +110,7 @@ where
 
         output.status.exit_ok()?;
 
-        Ok(())
+        Ok(output)
     }
 
     pub fn complete_spin(&mut self) {

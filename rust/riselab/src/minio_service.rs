@@ -27,12 +27,16 @@ impl Task for MinioService {
 
         let mut cmd = self.minio()?;
 
+        let prefix_config = env::var("PREFIX_CONFIG")?;
+
         cmd.arg("server")
             .arg(env::var("HUMMOCK_PATH")?)
             .arg("--address")
             .arg(env::var("HUMOOCK_MINIO_ADDRESS")?)
             .arg("--console-address")
-            .arg(env::var("HUMOOCK_MINIO_CONSOLE_ADDRESS")?);
+            .arg(env::var("HUMOOCK_MINIO_CONSOLE_ADDRESS")?)
+            .arg("--config-dir")
+            .arg(Path::new(&prefix_config).join("minio"));
 
         ctx.run_command(ctx.tmux_run(cmd)?)?;
 

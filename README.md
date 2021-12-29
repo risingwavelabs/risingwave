@@ -37,7 +37,7 @@ engine, storage engine and meta service.
 
 ## Development - RiseLAB
 
-RiseLAB is the new tool for developing RisingWave. You'll need to install tmux beforehand.
+RiseLAB is the new tool for developing RisingWave. You'll need to install tmux (>= 3.2a) beforehand.
 
 ```
 brew install tmux

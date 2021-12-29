@@ -70,6 +70,18 @@ cp "java/pgserver/build/resources/main/logback.xml" "${PREFIX_CONFIG}/logback.xm
 cp "java/pgserver/src/main/resources/server.properties" "${PREFIX_CONFIG}/server.properties"
 '''
 
+[tasks.pre-start-playground]
+category = "RiseLAB"
+description = "Pre start playground"
+script = '''
+#!@shell
+
+set -e
+tmux -V
+echo "Note: please make sure tmux version >= 3.2a"
+'''
+
+
 [tasks.playground]
 category = "RiseLAB"
 command = "rust/target/debug/playground"
@@ -81,7 +93,8 @@ dependencies = [
   "build-risingwave",
   "post-build-risingwave",
   "build-frontend",
-  "post-build-frontend"
+  "post-build-frontend",
+  "pre-start-playground"
 ]
 description = "Start a RisingWave playground"
 
