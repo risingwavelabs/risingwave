@@ -1,10 +1,15 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
-use futures::channel::mpsc::Sender;
+use futures::channel::mpsc::{channel, Sender};
 use futures::SinkExt;
-use risingwave_common::array::{DataChunk, Op};
+use risingwave_common::array::{DataChunk, Op, RwError};
+use risingwave_common::error::ErrorCode;
+use risingwave_common::util::addr::{get_host_port, is_local_address};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 
-use super::{Executor, Message, Result, StreamChunk, StreamConsumer};
+use super::{Barrier, Executor, Message, Mutation, Result, StreamChunk, StreamConsumer};
+use crate::task::{SharedContext, LOCAL_OUTPUT_CHANNEL_SIZE};
 
 /// `Output` provides an interface for `Dispatcher` to send data into downstream fragments.
 #[async_trait]
@@ -58,11 +63,23 @@ impl Output for RemoteOutput {
 pub struct DispatchExecutor<Inner: DataDispatcher> {
     input: Box<dyn Executor>,
     inner: Inner,
+    fragment_id: u32,
+    context: Arc<SharedContext>,
 }
 
 impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
-    pub fn new(input: Box<dyn Executor>, inner: Inner) -> Self {
-        Self { input, inner }
+    pub fn new(
+        input: Box<dyn Executor>,
+        inner: Inner,
+        fragment_id: u32,
+        context: Arc<SharedContext>,
+    ) -> Self {
+        Self {
+            input,
+            inner,
+            fragment_id,
+            context,
+        }
     }
 
     async fn dispatch(&mut self, msg: Message) -> Result<()> {
@@ -71,12 +88,76 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                 self.inner.dispatch_data(chunk).await?;
             }
             Message::Barrier(barrier) => {
-                let outputs = self.inner.get_outputs();
-                for output in outputs {
-                    output.send(Message::Barrier(barrier)).await?;
-                }
+                self.update_outputs(&barrier).await?;
+                self.dispatch_barrier(barrier).await?;
             }
         };
+        Ok(())
+    }
+    async fn update_outputs(&mut self, barrier: &Barrier) -> Result<()> {
+        match &barrier.mutation {
+            Mutation::UpdateOutputs(updates) => {
+                if let Some((_, v)) = updates.get_key_value(&self.fragment_id) {
+                    let mut new_outputs = vec![];
+                    let mut channel_pool_guard = self.context.channel_pool.lock().unwrap();
+                    let mut exchange_pool_guard =
+                        self.context.receivers_for_exchange_service.lock().unwrap();
+
+                    let fragment_id = self.fragment_id;
+
+                    // delete the old local connections in both local and remote pools;
+                    channel_pool_guard.retain(|(x, _), _| *x != fragment_id);
+                    exchange_pool_guard.retain(|(x, _), _| *x != fragment_id);
+
+                    for act in v.iter() {
+                        let down_id = act.get_fragment_id();
+                        let up_down_ids = (fragment_id, down_id);
+                        let host_addr = act.get_host();
+                        let downstream_addr =
+                            format!("{}:{}", host_addr.get_host(), host_addr.get_port());
+
+                        if is_local_address(&get_host_port(&downstream_addr)?, &self.context.addr) {
+                            // insert new connection
+                            let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+                            channel_pool_guard.insert(up_down_ids, (Some(tx), Some(rx)));
+
+                            let tx = channel_pool_guard
+                                .get_mut(&(fragment_id, down_id))
+                                .ok_or_else(|| {
+                                    RwError::from(ErrorCode::InternalError(format!(
+                                        "channel between {} and {} does not exist",
+                                        fragment_id, down_id
+                                    )))
+                                })?
+                                .0
+                                .take()
+                                .ok_or_else(|| {
+                                    RwError::from(ErrorCode::InternalError(format!(
+                                        "sender from {} to {} does no exist",
+                                        fragment_id, down_id
+                                    )))
+                                })?;
+                            new_outputs.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
+                        } else {
+                            let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+                            exchange_pool_guard.insert(up_down_ids, rx);
+
+                            new_outputs.push(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
+                        }
+                    }
+                    self.inner.update_outputs(new_outputs)
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    async fn dispatch_barrier(&mut self, barrier: Barrier) -> Result<()> {
+        let outputs = self.inner.get_outputs();
+        for output in outputs {
+            output.send(Message::Barrier(barrier.clone())).await?;
+        }
         Ok(())
     }
 }
@@ -95,6 +176,7 @@ impl<Inner: DataDispatcher + Send + Sync + 'static> StreamConsumer for DispatchE
 pub trait DataDispatcher {
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()>;
     fn get_outputs(&mut self) -> &mut [Box<dyn Output>];
+    fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>);
 }
 
 pub struct RoundRobinDataDispatcher {
@@ -110,6 +192,9 @@ impl RoundRobinDataDispatcher {
 
 #[async_trait]
 impl DataDispatcher for RoundRobinDataDispatcher {
+    fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
+        self.outputs = outputs
+    }
     fn get_outputs(&mut self) -> &mut [Box<dyn Output>] {
         &mut self.outputs
     }
@@ -135,6 +220,9 @@ impl HashDataDispatcher {
 
 #[async_trait]
 impl DataDispatcher for HashDataDispatcher {
+    fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
+        self.outputs = outputs
+    }
     fn get_outputs(&mut self) -> &mut [Box<dyn Output>] {
         &mut self.outputs
     }
@@ -234,6 +322,9 @@ impl BroadcastDispatcher {
 
 #[async_trait]
 impl DataDispatcher for BroadcastDispatcher {
+    fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
+        self.outputs = outputs
+    }
     fn get_outputs(&mut self) -> &mut [Box<dyn Output>] {
         &mut self.outputs
     }
@@ -259,6 +350,10 @@ impl SimpleDispatcher {
 
 #[async_trait]
 impl DataDispatcher for SimpleDispatcher {
+    fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
+        self.output = outputs.into_iter().next().unwrap();
+    }
+
     fn get_outputs(&mut self) -> &mut [Box<dyn Output>] {
         std::slice::from_mut(&mut self.output)
     }
@@ -293,14 +388,20 @@ impl StreamConsumer for SenderConsumer {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::hash::{BuildHasher, Hasher};
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::sync::{Arc, Mutex};
 
     use itertools::Itertools;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
+    use risingwave_common::catalog::Schema;
+    use risingwave_pb::common::HostAddress;
+    use risingwave_pb::stream_service::ActorInfo;
 
     use super::*;
+    use crate::executor::ReceiverExecutor;
 
     pub struct MockOutput {
         data: Arc<Mutex<Vec<Message>>>,
@@ -317,6 +418,92 @@ mod tests {
         async fn send(&mut self, message: Message) -> Result<()> {
             self.data.lock().unwrap().push(message);
             Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_configuration_change() {
+        let schema = Schema { fields: vec![] };
+        let (mut tx, rx) = channel(16);
+        let input = Box::new(ReceiverExecutor::new(schema.clone(), vec![], rx));
+        let data_sink = Arc::new(Mutex::new(vec![]));
+        let output = Box::new(MockOutput::new(data_sink));
+        let fragment_id = 233;
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 2333);
+        let ctx = Arc::new(SharedContext::new(addr));
+
+        let mut executor = Box::new(DispatchExecutor::new(
+            input,
+            SimpleDispatcher::new(output),
+            fragment_id,
+            ctx.clone(),
+        ));
+        let mut updates1: HashMap<u32, Vec<ActorInfo>> = HashMap::new();
+
+        updates1.insert(
+            fragment_id,
+            vec![
+                ActorInfo {
+                    fragment_id: 234,
+                    host: Some(HostAddress {
+                        host: String::from("127.0.0.1"),
+                        port: 2333,
+                    }),
+                },
+                ActorInfo {
+                    fragment_id: 235,
+                    host: Some(HostAddress {
+                        host: String::from("127.0.0.1"),
+                        port: 2333,
+                    }),
+                },
+                ActorInfo {
+                    fragment_id: 238,
+                    host: Some(HostAddress {
+                        host: String::from("172.1.1.2"),
+                        port: 2334,
+                    }),
+                },
+            ],
+        );
+        let b1 = Barrier {
+            epoch: 0,
+            mutation: Mutation::UpdateOutputs(updates1),
+        };
+        tx.send(Message::Barrier(b1)).await.unwrap();
+        executor.next().await.unwrap();
+        let tctx = ctx.clone();
+        {
+            let cp_guard = tctx.channel_pool.lock().unwrap();
+            let ex_guard = tctx.receivers_for_exchange_service.lock().unwrap();
+            assert_eq!(cp_guard.len(), 2);
+            assert_eq!(ex_guard.len(), 1);
+        }
+
+        let mut updates2: HashMap<u32, Vec<ActorInfo>> = HashMap::new();
+        updates2.insert(
+            fragment_id,
+            vec![ActorInfo {
+                fragment_id: 235,
+                host: Some(HostAddress {
+                    host: String::from("127.0.0.1"),
+                    port: 2333,
+                }),
+            }],
+        );
+        let b2 = Barrier {
+            epoch: 0,
+            mutation: Mutation::UpdateOutputs(updates2),
+        };
+
+        tx.send(Message::Barrier(b2)).await.unwrap();
+        executor.next().await.unwrap();
+        let tctx = ctx.clone();
+        {
+            let cp_guard = tctx.channel_pool.lock().unwrap();
+            let ex_guard = tctx.receivers_for_exchange_service.lock().unwrap();
+            assert_eq!(cp_guard.len(), 1);
+            assert_eq!(ex_guard.len(), 0);
         }
     }
 

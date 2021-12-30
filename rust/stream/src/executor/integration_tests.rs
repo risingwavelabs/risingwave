@@ -1,3 +1,4 @@
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 
 use approx::assert_relative_eq;
@@ -16,6 +17,7 @@ use risingwave_pb::expr::expr_node::Type;
 
 use super::{ReceiverExecutor, *};
 use crate::executor::test_utils::create_in_memory_keyspace;
+use crate::task::SharedContext;
 
 pub struct MockConsumer {
     input: Box<dyn Executor>,
@@ -87,6 +89,11 @@ async fn test_merger_sum_aggr() {
     let mut inputs = vec![];
     let mut outputs = vec![];
 
+    let ctx = Arc::new(SharedContext::new(SocketAddr::new(
+        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+        2333,
+    )));
+
     // create 17 local aggregation actors
     for _ in 0..17 {
         let (tx, rx) = channel(16);
@@ -104,8 +111,12 @@ async fn test_merger_sum_aggr() {
         }],
     };
     let receiver_op = ReceiverExecutor::new(schema.clone(), vec![], rx);
-    let dispatcher =
-        DispatchExecutor::new(Box::new(receiver_op), RoundRobinDataDispatcher::new(inputs));
+    let dispatcher = DispatchExecutor::new(
+        Box::new(receiver_op),
+        RoundRobinDataDispatcher::new(inputs),
+        0,
+        ctx,
+    );
     let actor = Actor::new(Box::new(dispatcher));
     handles.push(tokio::spawn(actor.run()));
 
@@ -361,6 +372,10 @@ async fn test_tpch_q6() {
     // input and output channels of the local aggregation actors
     let mut inputs = vec![];
     let mut outputs = vec![];
+    let ctx = Arc::new(SharedContext::new(SocketAddr::new(
+        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+        2333,
+    )));
 
     // create 10 actors
     for _ in 0..10 {
@@ -374,8 +389,12 @@ async fn test_tpch_q6() {
     // create a round robin dispatcher, which dispatches messages to the actors
     let (mut input, rx) = channel(16);
     let receiver_op = ReceiverExecutor::new(schema.clone(), vec![], rx);
-    let dispatcher =
-        DispatchExecutor::new(Box::new(receiver_op), RoundRobinDataDispatcher::new(inputs));
+    let dispatcher = DispatchExecutor::new(
+        Box::new(receiver_op),
+        RoundRobinDataDispatcher::new(inputs),
+        0,
+        ctx.clone(),
+    );
     let actor = Actor::new(Box::new(dispatcher));
     handles.push(tokio::spawn(actor.run()));
 

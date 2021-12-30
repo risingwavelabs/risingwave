@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 pub use actor::Actor;
 pub use aggregation::*;
 use async_trait::async_trait;
@@ -17,6 +19,7 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataTypeKind;
 use risingwave_pb::data::stream_message::StreamMessage;
 use risingwave_pb::data::{Barrier as ProstBarrier, StreamMessage as ProstStreamMessage};
+use risingwave_pb::stream_service::ActorInfo;
 pub use simple_agg::*;
 use smallvec::SmallVec;
 pub use stream_source::*;
@@ -47,11 +50,11 @@ mod test_utils;
 
 pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum Mutation {
     Nothing,
     Stop,
-    UpdateOutputs,
+    UpdateOutputs(HashMap<u32, Vec<ActorInfo>>),
 }
 impl Default for Mutation {
     fn default() -> Self {
@@ -59,7 +62,7 @@ impl Default for Mutation {
     }
 }
 
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone)]
 pub struct Barrier {
     pub epoch: u64,
     pub mutation: Mutation,
@@ -72,8 +75,8 @@ impl Mutation {
 }
 
 impl Barrier {
-    fn to_protobuf(self) -> ProstBarrier {
-        let Barrier { epoch, mutation }: Barrier = self;
+    fn to_protobuf(&self) -> ProstBarrier {
+        let Barrier { epoch, mutation }: Barrier = self.clone();
         let stop = matches!(mutation, Mutation::Nothing);
         ProstBarrier { epoch, stop }
     }
@@ -116,7 +119,7 @@ impl Message {
                 let prost_stream_chunk = stream_chunk.to_protobuf()?;
                 StreamMessage::StreamChunk(prost_stream_chunk)
             }
-            Self::Barrier(barrier) => StreamMessage::Barrier(barrier.to_protobuf()),
+            Self::Barrier(barrier) => StreamMessage::Barrier(barrier.clone().to_protobuf()),
         };
         let prost_stream_msg = ProstStreamMessage {
             stream_message: Some(prost),

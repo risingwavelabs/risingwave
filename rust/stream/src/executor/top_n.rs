@@ -381,13 +381,13 @@ mod tests {
             PkIndices::new(),
             vec![
                 Message::Chunk(chunk1),
-                Message::Barrier(default_barrier),
+                Message::Barrier(default_barrier.clone()),
                 Message::Chunk(chunk2),
-                Message::Barrier(default_barrier),
+                Message::Barrier(default_barrier.clone()),
                 Message::Chunk(chunk3),
-                Message::Barrier(default_barrier),
+                Message::Barrier(default_barrier.clone()),
                 Message::Chunk(chunk4),
-                Message::Barrier(default_barrier),
+                Message::Barrier(default_barrier.clone()),
             ],
         ));
         let keyspace = create_in_memory_keyspace();
