@@ -75,6 +75,14 @@ message ExchangeNode {
   Dispatcher dispatcher = 2;
 }
 
+message ChainNode {
+  plan.TableRefId table_ref_id = 1;
+}
+
+message BroadcastNode {
+  plan.TableRefId table_ref_id = 1;
+}
+
 message StreamNode {
   // Some nodes we can reuse plan nodes from plan.proto.
   // TODO: should we enforce strong typed body on nodes?
@@ -90,6 +98,8 @@ message StreamNode {
     TopNNode top_n_node = 12;
     MergeNode merge_node = 13;
     ExchangeNode exchange_node = 14;
+    ChainNode chain_node = 15;
+    BroadcastNode broadcast_node = 16;
   }
   // Child node in plan aka. upstream nodes in the streaming DAG
   repeated StreamNode input = 3;

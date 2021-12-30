@@ -23,9 +23,7 @@ import org.apache.calcite.util.Permutation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/**
- * This visitor is used to construct the new plan and also the primary key for each operator.
- */
+/** This visitor is used to construct the new plan and also the primary key for each operator. */
 public class PrimaryKeyDerivationVisitor
     implements RwStreamingRelVisitor<PrimaryKeyDerivationVisitor.PrimaryKeyIndicesAndPositionMap> {
   private static final Logger LOGGER = LoggerFactory.getLogger(PrimaryKeyDerivationVisitor.class);
@@ -323,7 +321,7 @@ public class PrimaryKeyDerivationVisitor
 
   /**
    * @param exchange Exchange does not alter primary key and input columns, just pass its input's
-   *                 primary key and columns up
+   *     primary key and columns up
    * @return Exchange and its output primary key
    */
   @Override
@@ -351,7 +349,7 @@ public class PrimaryKeyDerivationVisitor
 
   /**
    * @param filter Filter does not alter primary key and input columns, just pass its input's
-   *               primary key and columns up
+   *     primary key and columns up
    * @return Filter and its output primary key
    */
   @Override
@@ -513,8 +511,7 @@ public class PrimaryKeyDerivationVisitor
       }
     }
 
-    ImmutableList.Builder<ColumnCatalog.ColumnId> builder =
-        ImmutableList.builder();
+    ImmutableList.Builder<ColumnCatalog.ColumnId> builder = ImmutableList.builder();
 
     builder.addAll(tableSource.getColumnIds());
 
@@ -540,5 +537,69 @@ public class PrimaryKeyDerivationVisitor
             ImmutableList.of(columns.size() - 1), ImmutableMap.of());
     LOGGER.debug("leave RwStreamTableSource");
     return new Result<>(newTableSource, info);
+  }
+
+  @Override
+  public Result<PrimaryKeyIndicesAndPositionMap> visit(
+      RwStreamMaterializedViewSource materializedViewSource) {
+    LOGGER.debug("visit RwStreamMaterializedViewSource");
+    var tableCatalog = materializedViewSource.getTable().unwrapOrThrow(TableCatalog.class);
+    // There are two cases:
+    // 1. We have already read the row id column, thus we don't need to read additionally
+    // 2. We don't have the row id column, then we need to read it and put it as its only primary
+    // key
+    var rowIdColumn = tableCatalog.getRowIdColumn().getId();
+    var columnIds = materializedViewSource.getColumnIds();
+    for (int idx = 0; idx < columnIds.size(); idx++) {
+      var columnId = columnIds.get(idx);
+      if (columnId.equals(rowIdColumn)) {
+        LOGGER.debug("Already has row id column, no need to read again");
+        var info = new PrimaryKeyIndicesAndPositionMap(ImmutableList.of(idx), ImmutableMap.of());
+        LOGGER.debug("leave RwStreamMaterializedViewSource");
+        return new Result<>(materializedViewSource, info);
+      }
+    }
+    // The other one is that we add the row id column to the back, otherwise it will mess up the
+    // input ref index in the upstream operator.
+    var columns =
+        ImmutableList.<ColumnCatalog.ColumnId>builder()
+            .addAll(materializedViewSource.getColumnIds())
+            .add(rowIdColumn)
+            .build();
+    var newMaterializedViewSource =
+        new RwStreamMaterializedViewSource(
+            materializedViewSource.getCluster(),
+            materializedViewSource.getTraitSet(),
+            materializedViewSource.getHints(),
+            materializedViewSource.getTable(),
+            materializedViewSource.getTableId(),
+            columns);
+    var info =
+        new PrimaryKeyIndicesAndPositionMap(
+            ImmutableList.of(columns.size() - 1), ImmutableMap.of());
+    LOGGER.debug("leave RwStreamMaterializedViewSource");
+    return new Result<>(newMaterializedViewSource, info);
+  }
+
+  @Override
+  public Result<PrimaryKeyIndicesAndPositionMap> visit(RwStreamChain chain) {
+    LOGGER.debug("visit RwStreamChain");
+    var input = (RisingWaveStreamingRel) chain.getInput();
+    var p = input.accept(this);
+    var info =
+        new PrimaryKeyIndicesAndPositionMap(p.info.getPrimaryKeyIndices(), ImmutableMap.of());
+    LOGGER.debug("leave RwStreamChain");
+    return new Result<>(chain, info);
+  }
+
+  @Override
+  public Result<PrimaryKeyIndicesAndPositionMap> visit(RwStreamBroadcast broadcast) {
+    LOGGER.debug("visit RwStreamBroadcast");
+    var input = (RisingWaveStreamingRel) broadcast.getInput();
+    var p = input.accept(this);
+    var info =
+        new PrimaryKeyIndicesAndPositionMap(p.info.getPrimaryKeyIndices(), ImmutableMap.of());
+    LOGGER.debug("leave RwStreamBroadcast");
+    return new Result<>(broadcast, info);
   }
 }

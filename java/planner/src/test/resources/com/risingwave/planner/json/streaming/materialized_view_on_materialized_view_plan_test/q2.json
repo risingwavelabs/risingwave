@@ -1,0 +1,173 @@
+{
+  "input": [{
+    "pkIndices": [1, 2],
+    "input": [{
+      "pkIndices": [0, 1],
+      "input": [{
+        "input": [{
+          "input": [{
+            "pkIndices": [0],
+            "tableSourceNode": {
+              "tableRefId": {
+                "schemaRefId": {
+                  "databaseRefId": {
+                  }
+                },
+                "tableId": 1
+              },
+              "columnIds": [0],
+              "sourceType": "SOURCE"
+            }
+          }],
+          "broadcastNode": {
+          }
+        }],
+        "chainNode": {
+          "tableRefId": {
+            "schemaRefId": {
+              "databaseRefId": {
+              }
+            },
+            "tableId": 1
+          }
+        }
+      }],
+      "simpleAggNode": {
+        "aggCalls": [{
+          "type": "COUNT",
+          "returnType": {
+            "typeName": "INT64"
+          }
+        }, {
+          "type": "SUM",
+          "args": [{
+            "input": {
+            },
+            "type": {
+              "typeName": "INT64"
+            }
+          }],
+          "returnType": {
+            "typeName": "DECIMAL",
+            "precision": 28,
+            "isNullable": true
+          }
+        }]
+      }
+    }],
+    "projectNode": {
+      "selectList": [{
+        "exprType": "ADD",
+        "returnType": {
+          "typeName": "DECIMAL",
+          "precision": 28,
+          "isNullable": true
+        },
+        "funcCall": {
+          "children": [{
+            "exprType": "STREAM_NULL_BY_ROW_COUNT",
+            "returnType": {
+              "typeName": "DECIMAL",
+              "precision": 28,
+              "isNullable": true
+            },
+            "funcCall": {
+              "children": [{
+                "exprType": "INPUT_REF",
+                "returnType": {
+                  "typeName": "INT64"
+                },
+                "inputRef": {
+                }
+              }, {
+                "exprType": "INPUT_REF",
+                "returnType": {
+                  "typeName": "DECIMAL",
+                  "precision": 28,
+                  "isNullable": true
+                },
+                "inputRef": {
+                  "columnIdx": 1
+                }
+              }]
+            }
+          }, {
+            "exprType": "CONSTANT_VALUE",
+            "returnType": {
+              "typeName": "INT32"
+            },
+            "constant": {
+              "body": "AAAAAQ=="
+            }
+          }]
+        }
+      }, {
+        "exprType": "INPUT_REF",
+        "returnType": {
+          "typeName": "INT64"
+        },
+        "inputRef": {
+        }
+      }, {
+        "exprType": "INPUT_REF",
+        "returnType": {
+          "typeName": "DECIMAL",
+          "precision": 28,
+          "isNullable": true
+        },
+        "inputRef": {
+          "columnIdx": 1
+        }
+      }]
+    }
+  }],
+  "mviewNode": {
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      },
+      "tableId": 2
+    },
+    "columnDescs": [{
+      "columnType": {
+        "typeName": "DECIMAL",
+        "precision": 28,
+        "isNullable": true
+      },
+      "encoding": "RAW"
+    }, {
+      "columnType": {
+        "typeName": "INT64"
+      },
+      "encoding": "RAW"
+    }, {
+      "columnType": {
+        "typeName": "DECIMAL",
+        "precision": 28,
+        "isNullable": true
+      },
+      "encoding": "RAW"
+    }],
+    "pkIndices": [1, 2],
+    "columnOrders": [{
+      "orderType": "ASCENDING",
+      "inputRef": {
+        "columnIdx": 1
+      },
+      "returnType": {
+        "typeName": "INT64"
+      }
+    }, {
+      "orderType": "ASCENDING",
+      "inputRef": {
+        "columnIdx": 2
+      },
+      "returnType": {
+        "typeName": "DECIMAL",
+        "precision": 28,
+        "isNullable": true
+      }
+    }]
+  }
+}
