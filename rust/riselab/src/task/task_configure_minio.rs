@@ -35,7 +35,6 @@ impl Task for ConfigureMinioTask {
         let minio_address = env::var("HUMOOCK_MINIO_ADDRESS")?;
         let minio_console_address = env::var("HUMOOCK_MINIO_CONSOLE_ADDRESS")?;
         ctx.wait_tcp(&minio_address)?;
-        ctx.wait_tcp(&minio_console_address)?;
 
         ctx.pb.set_message("configure...");
 

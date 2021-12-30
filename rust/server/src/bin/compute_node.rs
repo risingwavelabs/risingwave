@@ -15,7 +15,7 @@ struct Opts {
     #[clap(long, default_value = "in-memory")]
     state_store: String,
 
-    #[clap(long, default_value = "0.0.0.0:1222")]
+    #[clap(long, default_value = "127.0.0.1:1222")]
     prometheus_listener_addr: String,
 
     #[clap(long, default_value = "0")]

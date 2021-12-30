@@ -11,11 +11,13 @@ pub fn wait_tcp(
     f: &mut impl std::io::Write,
     p: impl AsRef<Path>,
     id: &str,
+    timeout: Option<std::time::Duration>,
+    detect_failure: bool,
 ) -> anyhow::Result<()> {
     let server = server.as_ref();
     let p = p.as_ref();
     let addr = server.parse()?;
-    let mut remaining_retries = 30;
+    let start_time = std::time::Instant::now();
 
     writeln!(f, "Waiting for online: {}", server)?;
 
@@ -25,19 +27,17 @@ pub fn wait_tcp(
                 return Ok(());
             }
             Err(err) => {
-                writeln!(
-                    f,
-                    "Retrying connecting to {}, {:?}, {} trials remaining",
-                    server, err, remaining_retries
-                )?;
+                writeln!(f, "Retrying connecting to {}, {:?}", server, err)?;
             }
         }
-        remaining_retries -= 1;
-        if remaining_retries == 0 {
-            return Err(anyhow!("failed to connect"));
+
+        if let Some(ref timeout) = timeout {
+            if std::time::Instant::now() - start_time >= *timeout {
+                return Err(anyhow!("failed to connect"));
+            }
         }
 
-        if p.exists() {
+        if detect_failure && p.exists() {
             let mut buf = String::new();
             std::fs::File::open(p)?.read_to_string(&mut buf)?;
             return Err(anyhow!(

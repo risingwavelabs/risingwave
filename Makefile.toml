@@ -35,7 +35,6 @@ rm -f "${PREFIX_BIN}/run_command.sh"
 ln -s "$(pwd)/rust/target/debug/compute-node" "${PREFIX_BIN}/compute-node"
 ln -s "$(pwd)/rust/target/debug/meta-node" "${PREFIX_BIN}/meta-node"
 cp "rust/config/log4rs.yaml" "${PREFIX_CONFIG}/log4rs.yaml"
-cp "rust/storage/src/metrics/prometheus.yml" "${PREFIX_CONFIG}/prometheus.yml"
 cp "rust/riselab/run_command.sh" "${PREFIX_BIN}/run_command.sh"
 cp "rust/riselab/welcome.sh" "${PREFIX_BIN}/welcome.sh"
 '''
@@ -68,12 +67,21 @@ set -e
 rm -f "${PREFIX_BIN}/risingwave-fe-runnable.jar"
 ln -s "$(pwd)/java/pgserver/build/libs/risingwave-fe-runnable.jar" "${PREFIX_BIN}/risingwave-fe-runnable.jar"
 cp "java/pgserver/build/resources/main/logback.xml" "${PREFIX_CONFIG}/logback.xml"
-cp "java/pgserver/src/main/resources/server.properties" "${PREFIX_CONFIG}/server.properties"
 '''
 
 [tasks.pre-start-playground]
 category = "RiseLAB"
 description = "Pre start playground"
+dependencies = [
+  "download-minio",
+  "download-mcli",
+  "download-grafana",
+  "download-prometheus",
+  "build-risingwave",
+  "post-build-risingwave",
+  "build-frontend",
+  "post-build-frontend"
+]
 script = '''
 #!@shell
 
@@ -85,18 +93,46 @@ echo "Note: please make sure tmux version >= 3.2a"
 
 [tasks.playground]
 category = "RiseLAB"
-command = "rust/target/debug/playground"
 dependencies = [
-  "download-minio",
-  "download-mcli",
-  "download-grafana",
-  "download-prometheus",
-  "build-risingwave",
-  "post-build-risingwave",
-  "build-frontend",
-  "post-build-frontend",
   "pre-start-playground"
 ]
+command = "rust/target/debug/playground"
+description = "Start a RisingWave playground"
+
+[tasks.dev]
+category = "RiseLAB"
+dependencies = [
+  "pre-start-playground"
+]
+command = "rust/target/debug/playground"
+args = ["default"]
+description = "Start a RisingWave playground"
+
+[tasks.ci-3node]
+category = "RiseLAB"
+dependencies = [
+  "pre-start-playground"
+]
+command = "rust/target/debug/playground"
+args = ["ci-3node"]
+description = "Start a RisingWave playground"
+
+[tasks.ci-1node]
+category = "RiseLAB"
+dependencies = [
+  "pre-start-playground"
+]
+command = "rust/target/debug/playground"
+args = ["ci-1node"]
+description = "Start a RisingWave playground"
+
+[tasks.dev-compute-node]
+category = "RiseLAB"
+dependencies = [
+  "pre-start-playground"
+]
+command = "rust/target/debug/playground"
+args = ["dev-compute-node"]
 description = "Start a RisingWave playground"
 
 [tasks.kill-playground]

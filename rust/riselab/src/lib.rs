@@ -2,6 +2,8 @@
 
 mod config;
 pub use config::*;
+mod config_gen;
+pub use config_gen::*;
 
 mod task;
 pub mod util;

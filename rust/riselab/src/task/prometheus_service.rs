@@ -5,14 +5,15 @@ use std::process::Command;
 use anyhow::Result;
 
 use super::{ExecuteContext, Task};
+use crate::{PrometheusConfig, PrometheusGen};
 
 pub struct PrometheusService {
-    port: u16,
+    config: PrometheusConfig,
 }
 
 impl PrometheusService {
-    pub fn new(port: u16) -> Result<Self> {
-        Ok(Self { port })
+    pub fn new(config: PrometheusConfig) -> Result<Self> {
+        Ok(Self { config })
     }
 
     fn prometheus(&self) -> Result<Command> {
@@ -31,19 +32,27 @@ impl Task for PrometheusService {
         let prefix_config = env::var("PREFIX_CONFIG")?;
         let prefix_data = env::var("PREFIX_DATA")?;
 
+        std::fs::write(
+            Path::new(&prefix_config).join("prometheus.yml"),
+            &PrometheusGen.gen_prometheus_yml(&self.config),
+        )?;
+
         let mut cmd = self.prometheus()?;
 
-        cmd.arg(format!("--web.listen-address=127.0.0.1:{}", self.port))
-            .arg(format!(
-                "--config.file={}",
-                Path::new(&prefix_config)
-                    .join("prometheus.yml")
-                    .to_string_lossy()
-            ))
-            .arg(format!(
-                "--storage.tsdb.path={}",
-                Path::new(&prefix_data).join("prometheus").to_string_lossy()
-            ));
+        cmd.arg(format!(
+            "--web.listen-address={}:{}",
+            self.config.address, self.config.port
+        ))
+        .arg(format!(
+            "--config.file={}",
+            Path::new(&prefix_config)
+                .join("prometheus.yml")
+                .to_string_lossy()
+        ))
+        .arg(format!(
+            "--storage.tsdb.path={}",
+            Path::new(&prefix_data).join("prometheus").to_string_lossy()
+        ));
 
         ctx.run_command(ctx.tmux_run(cmd)?)?;
 
@@ -53,6 +62,6 @@ impl Task for PrometheusService {
     }
 
     fn id(&self) -> String {
-        format!("prometheus-{}", self.port)
+        format!("prometheus-{}", self.config.port)
     }
 }

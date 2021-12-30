@@ -1,58 +1,58 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct ComputeNodeConfig {
-    id: String,
-    address: String,
-    port: u16,
-    exporter_address: String,
-    exporter_port: u16,
-    provide_minio: Vec<String>,
-    user_managed: bool,
+    pub id: String,
+    pub address: String,
+    pub port: u16,
+    pub exporter_address: String,
+    pub exporter_port: u16,
+    pub provide_minio: Option<Vec<MinioConfig>>,
+    pub user_managed: bool,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct MetaNodeConfig {
-    id: String,
-    address: String,
-    port: u16,
-    user_managed: bool,
+    pub id: String,
+    pub address: String,
+    pub port: u16,
+    pub user_managed: bool,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct FrontendConfig {
-    id: String,
-    address: String,
-    port: u16,
-    provide_compute_node: Vec<String>,
-    provide_meta_node: Vec<String>,
-    user_managed: bool,
+    pub id: String,
+    pub address: String,
+    pub port: u16,
+    pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
+    pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
+    pub user_managed: bool,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct MinioConfig {
-    id: String,
-    address: String,
-    port: u16,
-    console_address: String,
-    console_port: u16,
+    pub id: String,
+    pub address: String,
+    pub port: u16,
+    pub console_address: String,
+    pub console_port: u16,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct PrometheusConfig {
-    id: String,
-    address: String,
-    port: u16,
-    provide_compute_node: Vec<String>,
+    pub id: String,
+    pub address: String,
+    pub port: u16,
+    pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
 }
 
 /// All service configuration
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ServiceConfig {
     ComputeNode(ComputeNodeConfig),
     MetaNode(MetaNodeConfig),

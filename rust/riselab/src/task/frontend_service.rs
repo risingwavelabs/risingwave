@@ -5,19 +5,25 @@ use std::process::Command;
 use anyhow::Result;
 
 use super::{ExecuteContext, Task};
+use crate::{FrontendConfig, FrontendGen};
 
-#[derive(Default)]
-pub struct FrontendService;
+pub struct FrontendService {
+    config: FrontendConfig,
+}
 
 impl FrontendService {
-    pub fn new() -> Result<Self> {
-        Ok(Self::default())
+    pub fn new(config: FrontendConfig) -> Result<Self> {
+        Ok(Self { config })
     }
 
     fn frontend(&self) -> Result<Command> {
         let prefix_bin = env::var("PREFIX_BIN")?;
-        let prefix_conf = env::var("PREFIX_CONFIG")?;
         let prefix_config = env::var("PREFIX_CONFIG")?;
+
+        std::fs::write(
+            Path::new(&prefix_config).join("server.properties"),
+            &FrontendGen.gen_server_properties(&self.config),
+        )?;
 
         let mut cmd = Command::new("java");
         cmd.arg("-cp")
@@ -25,7 +31,7 @@ impl FrontendService {
             .arg("-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=0.0.0.0:5005")
             .arg(format!(
                 "-Dlogback.configurationFile={}",
-                Path::new(&prefix_conf)
+                Path::new(&prefix_config)
                     .join("logback.xml")
                     .to_string_lossy()
             ))
@@ -42,9 +48,13 @@ impl Task for FrontendService {
         ctx.pb.set_message("starting...");
 
         let cmd = self.frontend()?;
-        ctx.run_command(ctx.tmux_run(cmd)?)?;
 
-        ctx.pb.set_message("started");
+        if !self.config.user_managed {
+            ctx.run_command(ctx.tmux_run(cmd)?)?;
+            ctx.pb.set_message("started");
+        } else {
+            ctx.pb.set_message("user managed");
+        }
 
         Ok(())
     }

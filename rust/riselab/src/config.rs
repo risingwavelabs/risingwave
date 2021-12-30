@@ -13,6 +13,8 @@ mod id_expander;
 pub mod service_config;
 mod use_expander;
 pub use service_config::*;
+mod provide_expander;
+pub use provide_expander::*;
 
 pub struct ConfigExpander;
 
@@ -47,6 +49,8 @@ impl ConfigExpander {
                 let v = dollar_expander.visit(v)?;
                 let mut id_expander = IdExpander::new(&v)?;
                 let v = id_expander.visit(v)?;
+                let mut provide_expander = ProvideExpander::new(&v)?;
+                let v = provide_expander.visit(v)?;
                 Ok::<_, anyhow::Error>((Yaml::String(k.to_string()), v))
             })
             .try_collect()?;

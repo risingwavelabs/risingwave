@@ -39,10 +39,13 @@ riselab:
   ci-3node:
     - use: compute-node
       port: 5687
+      exporter-port: 1222
     - use: compute-node
       port: 5688
+      exporter-port: 1223
     - use: compute-node
       port: 5689
+      exporter-port: 1224
     - use: meta-node
     - use: frontend
 
@@ -58,7 +61,7 @@ riselab:
     - use: prometheus
     - use: frontend
 
-  develop-compute-node:
+  dev-compute-node:
     - use: minio
     - use: compute-node
       # If user-managed is true, developers should start the compute-node, and RiseLAB will wait for its start.

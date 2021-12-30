@@ -46,7 +46,10 @@ brew install tmux
 Then, simply run:
 
 ```
-./riselab playground
+./riselab dev
+./riselab ci-1node
+./riselab ci-3node
+./riselab dev-compute-node # compute node will need to be started by you
 ```
 
 Everything will be set for you.

@@ -5,14 +5,15 @@ use std::process::Command;
 use anyhow::Result;
 
 use super::{ExecuteContext, Task};
+use crate::ComputeNodeConfig;
 
 pub struct ComputeNodeService {
-    port: u16,
+    config: ComputeNodeConfig,
 }
 
 impl ComputeNodeService {
-    pub fn new(port: u16) -> Result<Self> {
-        Ok(Self { port })
+    pub fn new(config: ComputeNodeConfig) -> Result<Self> {
+        Ok(Self { config })
     }
 
     fn compute_node(&self) -> Result<Command> {
@@ -33,7 +34,14 @@ impl Task for ComputeNodeService {
         cmd.arg("--log4rs-config")
             .arg(Path::new(&prefix_config).join("log4rs.yaml"))
             .arg("--host")
-            .arg(format!("127.0.0.1:{}", self.port))
+            .arg(format!("{}:{}", self.config.address, self.config.port))
+            .arg("--prometheus-listener-addr")
+            .arg(format!(
+                "{}:{}",
+                self.config.exporter_address, self.config.exporter_port
+            ))
+            .arg("--metrics-level")
+            .arg("1")
             .arg("--state-store")
             .arg(format!(
                 "hummock+minio://{}:{}@{}/{}",
@@ -43,14 +51,17 @@ impl Task for ComputeNodeService {
                 env::var("MINIO_BUCKET_NAME")?
             ));
 
-        ctx.run_command(ctx.tmux_run(cmd)?)?;
-
-        ctx.pb.set_message("started");
+        if !self.config.user_managed {
+            ctx.run_command(ctx.tmux_run(cmd)?)?;
+            ctx.pb.set_message("started");
+        } else {
+            ctx.pb.set_message("user managed");
+        }
 
         Ok(())
     }
 
     fn id(&self) -> String {
-        format!("compute-node-{}", self.port)
+        format!("compute-node-{}", self.config.port)
     }
 }

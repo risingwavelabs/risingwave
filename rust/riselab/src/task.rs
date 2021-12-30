@@ -11,6 +11,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use indicatif::ProgressBar;
@@ -129,6 +130,20 @@ where
             &mut self.log,
             self.status_file.as_ref().unwrap(),
             self.id.as_ref().unwrap(),
+            Some(Duration::from_secs(30)),
+            true,
+        )?;
+        Ok(())
+    }
+
+    pub fn wait_tcp_user(&mut self, server: impl AsRef<str>) -> anyhow::Result<()> {
+        wait_tcp(
+            server,
+            &mut self.log,
+            self.status_file.as_ref().unwrap(),
+            self.id.as_ref().unwrap(),
+            None,
+            false,
         )?;
         Ok(())
     }

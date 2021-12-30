@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::env;
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::Path;
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -88,40 +88,39 @@ fn task_main(
                 let mut task = riselab::ConfigureMinioTask::new()?;
                 task.execute(&mut ctx)?;
             }
-            ServiceConfig::Prometheus(_c) => {
+            ServiceConfig::Prometheus(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-                let mut service = PrometheusService::new(9500)?;
+                let mut service = PrometheusService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task = riselab::ConfigureGrpcNodeTask::new(9500)?;
+                let mut task = riselab::ConfigureGrpcNodeTask::new(c.port, false)?;
                 task.execute(&mut ctx)?;
             }
-            ServiceConfig::ComputeNode(_c) => {
+            ServiceConfig::ComputeNode(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-                let mut service = ComputeNodeService::new(5688)?;
+                let mut service = ComputeNodeService::new(c.clone())?;
                 service.execute(&mut ctx)?;
 
-                let mut task = riselab::ConfigureGrpcNodeTask::new(5688)?;
+                let mut task = riselab::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
             }
-            ServiceConfig::MetaNode(_c) => {
+            ServiceConfig::MetaNode(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-                let mut service = MetaNodeService::new(5690)?;
+                let mut service = MetaNodeService::new(c.clone())?;
                 service.execute(&mut ctx)?;
 
-                let mut task = riselab::ConfigureGrpcNodeTask::new(5690)?;
+                let mut task = riselab::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
             }
-            ServiceConfig::Frontend(_c) => {
+            ServiceConfig::Frontend(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-                let mut service = FrontendService::new()?;
+                let mut service = FrontendService::new(c.clone())?;
                 service.execute(&mut ctx)?;
 
-                let postgres_port = 4567;
-                let mut task = riselab::ConfigureGrpcNodeTask::new(postgres_port)?;
+                let mut task = riselab::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
             }
         }
@@ -141,15 +140,15 @@ fn main() -> Result<()> {
         let mut out_str = String::new();
         let mut emitter = YamlEmitter::new(&mut out_str);
         emitter.dump(&riselab_config)?;
-        OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .open(Path::new(&env::var("PREFIX_CONFIG")?).join("riselab.yml"))?
-            .write_all(out_str.as_bytes())?;
+        std::fs::write(
+            Path::new(&env::var("PREFIX_CONFIG")?).join("riselab-expanded.yml"),
+            &out_str,
+        )?;
     }
-    let task_name = "default";
-    let (steps, services) = ConfigExpander::select(&riselab_config, task_name)?;
+    let task_name = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "default".to_string());
+    let (steps, services) = ConfigExpander::select(&riselab_config, &task_name)?;
 
     let mut manager = ProgressManager::new();
     // Always create a progress before calling `task_main`. Otherwise the progress bar won't be
