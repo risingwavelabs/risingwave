@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
 use bytes::BytesMut;
+use tokio::sync::mpsc::unbounded_channel;
 
 use super::cloud::gen_remote_table;
 use super::iterator::{ConcatIterator, HummockIterator, SortedIterator};
-use super::key::get_ts;
+use super::key::{get_ts, Timestamp};
+use super::key_range::KeyRange;
 use super::version_cmp::VersionedComparator;
 use super::version_manager::{CompactTask, Level, LevelEntry};
 use super::{
@@ -58,110 +60,167 @@ impl Compactor {
         storage: &Arc<HummockStorage>,
         compact_task: &mut CompactTask,
     ) -> HummockResult<()> {
-        let mut iters = vec![];
+        let mut overlapping_tables = vec![];
+        let mut non_overlapping_table_seqs = vec![];
         for LevelEntry { level, .. } in &compact_task.input_ssts {
             match level {
                 Level::Tiering(input_sst_ids) => {
                     let tables = storage.version_manager.pick_few_tables(input_sst_ids)?;
-                    iters.extend(tables.into_iter().map(|table| -> Box<dyn HummockIterator> {
-                        Box::new(TableIterator::new(table))
-                    }));
+                    overlapping_tables.extend(tables);
                 }
                 Level::Leveling(input_sst_ids) => {
                     let tables = storage.version_manager.pick_few_tables(input_sst_ids)?;
-                    iters.push(Box::new(ConcatIterator::new(tables)));
+                    non_overlapping_table_seqs.push(tables);
                 }
             }
         }
-
-        let mut iter = SortedIterator::new(iters);
 
         compact_task
             .sorted_output_ssts
             .reserve(compact_task.splits.len());
 
-        // TODO: we can speed up by parallelling compaction (each with different kr) (#2115)
-        let mut skip_key = BytesMut::new();
-        for kr in &compact_task.splits {
-            // NOTICE: should be user_key overlap, NOT full_key overlap!
-            let has_user_key_overlap = !compact_task.is_target_ultimate_and_leveling;
+        let (tx, mut rx) = unbounded_channel();
 
-            if !kr.left.is_empty() {
-                iter.seek(&kr.left).await?;
-            } else {
-                iter.rewind().await?;
-            }
+        for (kr_idx, kr) in (&compact_task.splits).iter().enumerate() {
+            let mut output_needing_vacuum = vec![];
 
-            skip_key.clear();
-            let mut last_key = BytesMut::new();
+            let iter = SortedIterator::new(
+                overlapping_tables
+                    .iter()
+                    .map(|table| -> Box<dyn HummockIterator> {
+                        Box::new(TableIterator::new(table.clone()))
+                    })
+                    .chain(non_overlapping_table_seqs.iter().map(
+                        |tableseq| -> Box<dyn HummockIterator> {
+                            Box::new(ConcatIterator::new(tableseq.clone()))
+                        },
+                    )),
+            );
 
-            let mut table_builder = HummockStorage::get_builder(&storage.options);
+            let spawn_tx = tx.clone();
+            let spawn_storage = storage.clone();
+            let spawn_kr = kr.clone();
+            let is_target_ultimate_and_leveling = compact_task.is_target_ultimate_and_leveling;
+            let watermark = compact_task.watermark;
 
-            while iter.is_valid() {
-                let iter_key = iter.key();
-
-                if !skip_key.is_empty() {
-                    if VersionedComparator::same_user_key(iter_key, &skip_key) {
-                        iter.next().await?;
-                        continue;
-                    } else {
-                        skip_key.clear();
-                    }
-                }
-
-                if last_key.is_empty() || !VersionedComparator::same_user_key(iter_key, &last_key) {
-                    if !kr.right.is_empty()
-                        && VersionedComparator::compare_key(iter_key, &kr.right)
-                            != std::cmp::Ordering::Less
-                    {
-                        break;
-                    }
-
-                    if table_builder.reach_capacity() {
-                        table_builder = Compactor::seal_table(
-                            storage,
-                            &mut compact_task.sorted_output_ssts,
-                            table_builder,
-                            false,
-                        )
-                        .await?
-                        .unwrap();
-                        continue;
-                    }
-
-                    last_key.clear();
-                    last_key.extend_from_slice(iter_key);
-                }
-
-                let ts = get_ts(iter_key);
-
-                if ts < compact_task.watermark {
-                    skip_key = BytesMut::from(iter_key);
-                    if matches!(iter.value(), HummockValue::Delete) && !has_user_key_overlap {
-                        iter.next().await?;
-                        continue;
-                    }
-                }
-
-                table_builder.add(
-                    iter_key,
-                    match iter.value() {
-                        HummockValue::Put(slice_val) => HummockValue::Put(Vec::from(slice_val)),
-                        HummockValue::Delete => HummockValue::Delete,
-                    },
-                );
-
-                iter.next().await?;
-            }
-
-            Compactor::seal_table(
-                storage,
-                &mut compact_task.sorted_output_ssts,
-                table_builder,
-                true,
-            )
-            .await?;
+            tokio::spawn(async move {
+                spawn_tx.send((
+                    Compactor::sub_compact(
+                        spawn_storage,
+                        spawn_kr,
+                        iter,
+                        &mut output_needing_vacuum,
+                        is_target_ultimate_and_leveling,
+                        watermark,
+                    )
+                    .await,
+                    kr_idx,
+                    output_needing_vacuum,
+                ))
+            });
         }
+
+        let num_sub = compact_task.splits.len();
+        let mut sub_compact_outputsets = Vec::with_capacity(num_sub);
+        let mut sub_compact_results = Vec::with_capacity(num_sub);
+        for _ in 0..num_sub {
+            let (sub_result, sub_kr_idx, sub_output) = rx.recv().await.unwrap();
+            sub_compact_outputsets.push((sub_kr_idx, sub_output));
+            sub_compact_results.push(sub_result);
+        }
+        sub_compact_outputsets.sort_by_key(|(sub_kr_idx, _)| *sub_kr_idx);
+        for (_, mut sub_output) in sub_compact_outputsets {
+            compact_task.sorted_output_ssts.append(&mut sub_output);
+        }
+
+        for sub_compact_result in sub_compact_results {
+            sub_compact_result?;
+        }
+
+        Ok(())
+    }
+
+    async fn sub_compact(
+        storage: Arc<HummockStorage>,
+        kr: KeyRange,
+        mut iter: SortedIterator,
+        local_sorted_output_ssts: &mut Vec<Table>,
+        is_target_ultimate_and_leveling: bool,
+        watermark: Timestamp,
+    ) -> HummockResult<()> {
+        // NOTICE: should be user_key overlap, NOT full_key overlap!
+        let has_user_key_overlap = !is_target_ultimate_and_leveling;
+
+        if !kr.left.is_empty() {
+            iter.seek(&kr.left).await?;
+        } else {
+            iter.rewind().await?;
+        }
+
+        let mut skip_key = BytesMut::new();
+        let mut last_key = BytesMut::new();
+
+        let mut table_builder = HummockStorage::get_builder(&storage.options);
+
+        while iter.is_valid() {
+            let iter_key = iter.key();
+
+            if !skip_key.is_empty() {
+                if VersionedComparator::same_user_key(iter_key, &skip_key) {
+                    iter.next().await?;
+                    continue;
+                } else {
+                    skip_key.clear();
+                }
+            }
+
+            if last_key.is_empty() || !VersionedComparator::same_user_key(iter_key, &last_key) {
+                if !kr.right.is_empty()
+                    && VersionedComparator::compare_key(iter_key, &kr.right)
+                        != std::cmp::Ordering::Less
+                {
+                    break;
+                }
+
+                if table_builder.reach_capacity() {
+                    table_builder = Compactor::seal_table(
+                        &storage,
+                        local_sorted_output_ssts,
+                        table_builder,
+                        false,
+                    )
+                    .await?
+                    .unwrap();
+                    continue;
+                }
+
+                last_key.clear();
+                last_key.extend_from_slice(iter_key);
+            }
+
+            let ts = get_ts(iter_key);
+
+            if ts < watermark {
+                skip_key = BytesMut::from(iter_key);
+                if matches!(iter.value(), HummockValue::Delete) && !has_user_key_overlap {
+                    iter.next().await?;
+                    continue;
+                }
+            }
+
+            table_builder.add(
+                iter_key,
+                match iter.value() {
+                    HummockValue::Put(slice_val) => HummockValue::Put(Vec::from(slice_val)),
+                    HummockValue::Delete => HummockValue::Delete,
+                },
+            );
+
+            iter.next().await?;
+        }
+
+        Compactor::seal_table(&storage, local_sorted_output_ssts, table_builder, true).await?;
+
         Ok(())
     }
 
