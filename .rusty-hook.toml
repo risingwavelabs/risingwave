@@ -1,5 +1,5 @@
 [hooks]
-pre-commit = "cd rust && cargo fmt --all && git add -u"
+pre-commit = "cd rust && cargo fmt --check"
 
 [logging]
 verbose = true
