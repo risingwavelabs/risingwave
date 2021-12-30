@@ -6,7 +6,6 @@
       "input": [{
         "input": [{
           "input": [{
-            "pkIndices": [0],
             "tableSourceNode": {
               "tableRefId": {
                 "schemaRefId": {

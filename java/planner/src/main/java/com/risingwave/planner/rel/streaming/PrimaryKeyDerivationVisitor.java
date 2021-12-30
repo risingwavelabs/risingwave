@@ -3,6 +3,7 @@ package com.risingwave.planner.rel.streaming;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.risingwave.catalog.ColumnCatalog;
+import com.risingwave.catalog.MaterializedViewCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.planner.rel.common.dist.RwDistributionTrait;
 import com.risingwave.planner.rel.streaming.join.RwStreamHashJoin;
@@ -543,29 +544,40 @@ public class PrimaryKeyDerivationVisitor
   public Result<PrimaryKeyIndicesAndPositionMap> visit(
       RwStreamMaterializedViewSource materializedViewSource) {
     LOGGER.debug("visit RwStreamMaterializedViewSource");
-    var tableCatalog = materializedViewSource.getTable().unwrapOrThrow(TableCatalog.class);
-    // There are two cases:
-    // 1. We have already read the row id column, thus we don't need to read additionally
-    // 2. We don't have the row id column, then we need to read it and put it as its only primary
-    // key
-    var rowIdColumn = tableCatalog.getRowIdColumn().getId();
-    var columnIds = materializedViewSource.getColumnIds();
-    for (int idx = 0; idx < columnIds.size(); idx++) {
-      var columnId = columnIds.get(idx);
-      if (columnId.equals(rowIdColumn)) {
-        LOGGER.debug("Already has row id column, no need to read again");
-        var info = new PrimaryKeyIndicesAndPositionMap(ImmutableList.of(idx), ImmutableMap.of());
-        LOGGER.debug("leave RwStreamMaterializedViewSource");
-        return new Result<>(materializedViewSource, info);
+    var viewCatalog =
+        materializedViewSource.getTable().unwrapOrThrow(MaterializedViewCatalog.class);
+    // Since we are building a new materialize view on top of an existing one and the existing one
+    // has a list of columns
+    // as it primary key, we need to use these primary key columns for the new view if they have not
+    // been added.
+    var primaryKeyColumnIds = viewCatalog.getPrimaryKeyColumnIds();
+    var originalColumnIds = materializedViewSource.getColumnIds();
+    var tableId = originalColumnIds.get(0).getParent();
+    List<Integer> newPrimaryKeyIndices = new ArrayList<Integer>();
+    List<ColumnCatalog.ColumnId> newColumnIds = new ArrayList<ColumnCatalog.ColumnId>();
+    newColumnIds.addAll(materializedViewSource.getColumnIds());
+    for (var primaryKeyColumnId : primaryKeyColumnIds) {
+      boolean exist = false;
+      for (int idx = 0; idx < originalColumnIds.size(); idx++) {
+        var columnId = originalColumnIds.get(idx).getValue();
+        if (columnId.equals(primaryKeyColumnId)) {
+          LOGGER.debug("We have already added a primary key column with columnId:" + columnId);
+          newPrimaryKeyIndices.add(idx);
+          exist = true;
+          break;
+        }
+      }
+      if (!exist) {
+        newColumnIds.add(new ColumnCatalog.ColumnId(primaryKeyColumnId, tableId));
+        var newPrimaryKeyIndex = newColumnIds.size() - 1;
+        newPrimaryKeyIndices.add(newPrimaryKeyIndex);
+        LOGGER.debug(
+            "We additionally add a primary key column with columnId:"
+                + primaryKeyColumnId
+                + " and primary key index:"
+                + newPrimaryKeyIndex);
       }
     }
-    // The other one is that we add the row id column to the back, otherwise it will mess up the
-    // input ref index in the upstream operator.
-    var columns =
-        ImmutableList.<ColumnCatalog.ColumnId>builder()
-            .addAll(materializedViewSource.getColumnIds())
-            .add(rowIdColumn)
-            .build();
     var newMaterializedViewSource =
         new RwStreamMaterializedViewSource(
             materializedViewSource.getCluster(),
@@ -573,10 +585,11 @@ public class PrimaryKeyDerivationVisitor
             materializedViewSource.getHints(),
             materializedViewSource.getTable(),
             materializedViewSource.getTableId(),
-            columns);
+            ImmutableList.<ColumnCatalog.ColumnId>builder().addAll(newColumnIds).build());
+    // Since we put old columns before modification as where they were, the position map is empty.
     var info =
         new PrimaryKeyIndicesAndPositionMap(
-            ImmutableList.of(columns.size() - 1), ImmutableMap.of());
+            ImmutableList.copyOf(newPrimaryKeyIndices), ImmutableMap.of());
     LOGGER.debug("leave RwStreamMaterializedViewSource");
     return new Result<>(newMaterializedViewSource, info);
   }

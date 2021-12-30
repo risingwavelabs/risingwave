@@ -16,6 +16,11 @@ RwStreamMaterializedView(name=[t1])
         </Resource>
         <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q1">
         </Resource>>
+        <Resource name="primaryKey">
+            <![CDATA[
+[1, 2]
+            ]]>
+        </Resource>
     </TestCase>
 
     <TestCase name="query 2">
@@ -36,5 +41,10 @@ RwStreamMaterializedView(name=[t2])
         </Resource>
         <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q2">
         </Resource>>
+        <Resource name="primaryKey">
+            <![CDATA[
+[1, 2]
+            ]]>
+        </Resource>
     </TestCase>
 </Root>
