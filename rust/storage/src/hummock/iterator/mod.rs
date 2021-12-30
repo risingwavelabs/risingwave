@@ -5,8 +5,11 @@ pub use concat::*;
 mod concat_inner;
 mod reverse_concat;
 pub use reverse_concat::*;
+mod reverse_sorted;
+pub use reverse_sorted::*;
 mod sorted;
 pub use sorted::*;
+mod sorted_inner;
 mod user_key;
 pub use user_key::*;
 
