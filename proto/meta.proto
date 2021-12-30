@@ -90,6 +90,7 @@ message GetIdRequest {
     Fragment = 4;
     HummockContext = 5;
     HummockSnapshot = 6;
+    Worker = 7;
   }
   IdCategory category = 1;
   int32 interval = 2;

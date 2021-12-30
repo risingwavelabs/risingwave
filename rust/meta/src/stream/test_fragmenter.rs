@@ -229,8 +229,10 @@ fn make_stream_node() -> StreamNode {
 #[tokio::test]
 async fn test_fragmenter() -> Result<()> {
     let meta_store_ref = Arc::new(MemStore::new());
+    let id_gen_manager_ref = Arc::new(IdGeneratorManager::new(meta_store_ref.clone()).await);
     let cluster_manager = Arc::new(StoredClusterManager::new(
         meta_store_ref.clone(),
+        id_gen_manager_ref.clone(),
         Config::default(),
     ));
     cluster_manager
@@ -244,10 +246,7 @@ async fn test_fragmenter() -> Result<()> {
         .await?;
 
     let stream_node = make_stream_node();
-    let mut fragmenter = StreamFragmenter::new(
-        Arc::new(IdGeneratorManager::new(meta_store_ref).await),
-        cluster_manager,
-    );
+    let mut fragmenter = StreamFragmenter::new(id_gen_manager_ref, cluster_manager);
 
     let graph = fragmenter.generate_graph(&stream_node).await?;
     assert_eq!(graph.len(), 6);

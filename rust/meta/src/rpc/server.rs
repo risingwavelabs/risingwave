@@ -46,6 +46,7 @@ pub async fn rpc_serve_with_listener(
     ));
     let cluster_manager = Arc::new(StoredClusterManager::new(
         meta_store_ref.clone(),
+        id_generator_manager_ref.clone(),
         config.clone(),
     ));
     let meta_manager = Arc::new(

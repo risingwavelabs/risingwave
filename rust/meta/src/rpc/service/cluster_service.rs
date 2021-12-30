@@ -36,7 +36,7 @@ impl ClusterService for ClusterServiceImpl {
             match worker_node_res {
                 Ok(worker_node) => Ok(Response::new(AddWorkerNodeResponse {
                     status: None,
-                    node: Some(worker_node),
+                    node: Some(worker_node.0),
                 })),
                 Err(_e) => Err(RwError::from(InternalError(
                     "worker node already exists".to_string(),

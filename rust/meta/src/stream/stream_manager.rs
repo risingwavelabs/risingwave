@@ -229,7 +229,7 @@ mod tests {
 
     use super::*;
     use crate::cluster::WorkerNodeMetaManager;
-    use crate::manager::Config;
+    use crate::manager::{Config, IdGeneratorManager};
     use crate::storage::MemStore;
     use crate::stream::{StoredStreamMetaManager, StreamMetaManager};
 
@@ -328,8 +328,12 @@ mod tests {
             Config::default(),
             meta_store_ref.clone(),
         ));
-        let cluster_manager =
-            Arc::new(StoredClusterManager::new(meta_store_ref, Config::default()));
+        let id_gen_manager_ref = Arc::new(IdGeneratorManager::new(meta_store_ref.clone()).await);
+        let cluster_manager = Arc::new(StoredClusterManager::new(
+            meta_store_ref,
+            id_gen_manager_ref,
+            Config::default(),
+        ));
         cluster_manager
             .add_worker_node(
                 HostAddress {

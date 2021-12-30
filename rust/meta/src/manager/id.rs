@@ -116,6 +116,7 @@ impl IdGeneratorManager {
             (IdCategory::Database, "database", None),
             (IdCategory::Schema, "schema", None),
             (IdCategory::Table, "table", None),
+            (IdCategory::Worker, "worker", None),
             (IdCategory::Fragment, "fragment", Some(1)),
             (IdCategory::HummockContext, "hummock_context", Some(1)),
             (IdCategory::HummockSnapshot, "hummock_snapshot", Some(1)),

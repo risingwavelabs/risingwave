@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::common::{Cluster, HostAddress, WorkerNode};
+use risingwave_pb::meta::get_id_request::IdCategory;
 use risingwave_pb::meta::ClusterType;
 
 use crate::cluster::{ClusterMetaManager, StoredClusterManager};
@@ -12,7 +13,7 @@ pub trait WorkerNodeMetaManager: Sync + Send + 'static {
         &self,
         host_address: HostAddress,
         cluster_type: ClusterType,
-    ) -> Result<WorkerNode>;
+    ) -> Result<(WorkerNode, bool)>;
     async fn delete_worker_node(&self, node: WorkerNode, cluster_type: ClusterType) -> Result<()>;
     async fn list_worker_node(&self, cluster_type: ClusterType) -> Result<Vec<WorkerNode>>;
 }
@@ -23,8 +24,10 @@ impl WorkerNodeMetaManager for StoredClusterManager {
         &self,
         host_address: HostAddress,
         cluster_type: ClusterType,
-    ) -> Result<WorkerNode> {
+    ) -> Result<(WorkerNode, bool)> {
         let cluster_id = cluster_type as u32;
+        // FIXME: there's is a consistency problem between get/set, fix this after refactor
+        // metastore.
         let mut cluster = match self.get_cluster(cluster_id).await {
             Ok(cluster) => cluster,
             Err(err) => {
@@ -38,26 +41,23 @@ impl WorkerNodeMetaManager for StoredClusterManager {
                 }
             }
         };
-        let next_id = (cluster.nodes.clone().len()) as u32;
-        let mut contained = false;
-        cluster
-            .clone()
+        match cluster
             .nodes
-            .into_iter()
-            .for_each(|node| contained = contained || (node.host.eq(&Some(host_address.clone()))));
-
-        match contained {
-            true => Err(RwError::from(InternalError(
-                "Worker already exists!".to_string(),
-            ))),
-            false => {
+            .iter()
+            .position(|n| n.get_host().eq(&host_address.clone()))
+        {
+            // If exist already, return its info(id) directly. Worker might be added duplicated cuz
+            // reboot is quite normal for workers.
+            Some(idx) => Ok((cluster.nodes.get(idx).unwrap().clone(), false)),
+            None => {
+                let next_id = self.id_gen_manager_ref.generate(IdCategory::Worker).await?;
                 let ret_node = WorkerNode {
-                    id: next_id,
+                    id: next_id as u32,
                     host: Some(host_address.clone()),
                 };
                 cluster.nodes.push(ret_node.clone());
                 let _res = self.put_cluster(cluster).await?;
-                Ok(ret_node)
+                Ok((ret_node, true))
             }
         }
     }
@@ -102,17 +102,21 @@ mod tests {
     use std::sync::Arc;
 
     use assert_matches::assert_matches;
-    use risingwave_pb::common::Cluster;
 
     use super::*;
-    use crate::manager::Config;
+    use crate::manager::{Config, IdGeneratorManager};
     use crate::storage::MemStore;
 
     #[tokio::test]
     async fn test_worker_manager() -> Result<()> {
         // Initialize cluster store manager.
         let meta_store_ref = Arc::new(MemStore::new());
-        let cluster_manager = StoredClusterManager::new(meta_store_ref.clone(), Config::default());
+        let id_gen_manager_ref = Arc::new(IdGeneratorManager::new(meta_store_ref.clone()).await);
+        let cluster_manager = StoredClusterManager::new(
+            meta_store_ref.clone(),
+            id_gen_manager_ref,
+            Config::default(),
+        );
 
         assert!(cluster_manager.list_cluster().await.is_ok());
         assert!(cluster_manager.get_cluster(0).await.is_err());
@@ -125,96 +129,76 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let worker_node = WorkerNode {
-            id: 1_u32,
-            host: Some(hosts[0].clone()),
-        };
-
-        let olap_cluster = Cluster {
-            id: 0,
-            nodes: vec![worker_node.clone()],
-            config: Default::default(),
-        };
-
-        let streaming_cluster = Cluster {
-            id: 1,
-            nodes: vec![worker_node],
-            config: Default::default(),
-        };
-
-        cluster_manager.put_cluster(olap_cluster).await?;
-        cluster_manager.put_cluster(streaming_cluster).await?;
-
         // Test cases.
         let res1 = cluster_manager
-            .add_worker_node(hosts[1].clone(), ClusterType::ComputeNode)
+            .add_worker_node(hosts[0].clone(), ClusterType::ComputeNode)
             .await;
-        assert_matches!(res1,Ok(node) => {
-          assert_eq!(node.id, 1);
+        assert_matches!(res1, Ok((node, added)) => {
+          assert_eq!(node.id, 0);
+          assert!(added);
           if let Some(node_host) = node.host{
-            let expect_host = hosts[1].clone();
+            let expect_host = hosts[0].clone();
             assert_eq!(node_host.host,expect_host.host);
             assert_eq!(node_host.port,expect_host.port);
           }
         });
 
         let res2 = cluster_manager
-            .add_worker_node(hosts[2].clone(), ClusterType::ComputeNode)
+            .add_worker_node(hosts[1].clone(), ClusterType::ComputeNode)
             .await;
-        assert_matches!(res2,Ok(node) => {
-          assert_eq!(node.id, 2);
+        assert_matches!(res2.clone(), Ok((node, added)) => {
+          assert_eq!(node.id, 1);
+          assert!(added);
           if let Some(node_host) = node.host{
-            let expect_host = hosts[2].clone();
+            let expect_host = hosts[1].clone();
             assert_eq!(node_host.host,expect_host.host);
             assert_eq!(node_host.port,expect_host.port);
           }
         });
         let res3 = cluster_manager
-            .add_worker_node(hosts[2].clone(), ClusterType::ComputeNode)
+            .add_worker_node(hosts[1].clone(), ClusterType::ComputeNode)
             .await;
-        assert!(res3.is_err());
+        assert!(res3.is_ok() && !res3.unwrap().1);
 
         let res4 = cluster_manager
-            .add_worker_node(hosts[3].clone(), ClusterType::ComputeNode)
+            .add_worker_node(hosts[2].clone(), ClusterType::ComputeNode)
             .await;
-        assert_matches!(res4,Ok(node) => {
-          assert_eq!(node.id, 3);
+        assert_matches!(res4,Ok((node, added)) => {
+          assert_eq!(node.id, 2);
+          assert!(added);
           if let Some(node_host) = node.host{
-            let expect_host = hosts[3].clone();
+            let expect_host = hosts[2].clone();
             assert_eq!(node_host.host,expect_host.host);
             assert_eq!(node_host.port,expect_host.port);
           }
         });
 
         let res5 = cluster_manager
-            .add_worker_node(hosts[2].clone(), ClusterType::Frontend)
+            .add_worker_node(hosts[0].clone(), ClusterType::Frontend)
             .await;
-        assert_matches!(res5,Ok(node) => {
-          assert_eq!(node.id, 1);
+        assert_matches!(res5,Ok((node, added)) => {
+          assert_eq!(node.id, 3);
+          assert!(added);
           if let Some(node_host) = node.host{
-            let expect_host = hosts[2].clone();
+            let expect_host = hosts[0].clone();
             assert_eq!(node_host.host,expect_host.host);
             assert_eq!(node_host.port,expect_host.port);
           }
         });
 
-        let delete_node = WorkerNode {
-            id: 2,
-            host: Some(hosts[2].clone()),
-        };
         let res6 = cluster_manager
-            .delete_worker_node(delete_node, ClusterType::ComputeNode)
+            .delete_worker_node(res2.unwrap().0, ClusterType::ComputeNode)
             .await;
         assert!(res6.is_ok());
 
         let list_olap_nodes = cluster_manager
             .list_worker_node(ClusterType::ComputeNode)
             .await?;
-        assert_eq!(list_olap_nodes.len(), 3);
+        assert_eq!(list_olap_nodes.len(), 2);
         let list_stream_nodes = cluster_manager
             .list_worker_node(ClusterType::Frontend)
             .await?;
-        assert_eq!(list_stream_nodes.len(), 2);
+        assert_eq!(list_stream_nodes.len(), 1);
 
         Ok(())
     }
