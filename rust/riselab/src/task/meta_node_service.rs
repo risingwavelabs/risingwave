@@ -33,7 +33,12 @@ impl Task for MetaNodeService {
         cmd.arg("--log4rs-config")
             .arg(Path::new(&prefix_config).join("log4rs.yaml"))
             .arg("--host")
-            .arg(format!("{}:{}", self.config.address, self.config.port));
+            .arg(format!("{}:{}", self.config.address, self.config.port))
+            .arg("--dashboard-host")
+            .arg(format!(
+                "{}:{}",
+                self.config.dashboard_address, self.config.dashboard_port
+            ));
 
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;

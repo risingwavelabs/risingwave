@@ -77,7 +77,7 @@ impl Task for ConfigureMinioTask {
         ctx.complete_spin();
 
         ctx.pb.set_message(format!(
-            "api {}, console {}",
+            "api http://{}, console http://{}",
             minio_address, minio_console_address
         ));
 

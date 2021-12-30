@@ -18,6 +18,8 @@ pub struct MetaNodeConfig {
     pub id: String,
     pub address: String,
     pub port: u16,
+    pub dashboard_address: String,
+    pub dashboard_port: u16,
     pub user_managed: bool,
 }
 

@@ -95,6 +95,8 @@ fn task_main(
                 service.execute(&mut ctx)?;
                 let mut task = riselab::ConfigureGrpcNodeTask::new(c.port, false)?;
                 task.execute(&mut ctx)?;
+                ctx.pb
+                    .set_message(format!("api http://{}:{}", c.address, c.port));
             }
             ServiceConfig::ComputeNode(c) => {
                 let mut ctx =
@@ -104,24 +106,30 @@ fn task_main(
 
                 let mut task = riselab::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
+                ctx.pb
+                    .set_message(format!("api grpc://{}:{}", c.address, c.port));
             }
             ServiceConfig::MetaNode(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = MetaNodeService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-
                 let mut task = riselab::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
+                ctx.pb.set_message(format!(
+                    "api grpc://{}:{}, dashboard http://{}:{}",
+                    c.address, c.port, c.dashboard_address, c.dashboard_port
+                ));
             }
             ServiceConfig::Frontend(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = FrontendService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-
                 let mut task = riselab::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
+                ctx.pb
+                    .set_message(format!("api postgres://{}:{}", c.address, c.port));
             }
         }
     }

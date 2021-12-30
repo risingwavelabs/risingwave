@@ -18,6 +18,8 @@ template:
   meta-node:
     address: "127.0.0.1"
     port: 5690
+    dashboard-address: "127.0.0.1"
+    dashboard-port: 5691
     id: meta-node-${port}
     user-managed: false
 

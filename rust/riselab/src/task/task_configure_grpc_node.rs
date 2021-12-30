@@ -28,8 +28,6 @@ impl Task for ConfigureGrpcNodeTask {
 
         ctx.complete_spin();
 
-        ctx.pb.set_message(format!("api {}", address));
-
         Ok(())
     }
 }

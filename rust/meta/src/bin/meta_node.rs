@@ -11,6 +11,9 @@ struct Opts {
 
     #[clap(long, default_value = "127.0.0.1:5690")]
     host: String,
+
+    #[clap(long, default_value = "127.0.0.1:5691")]
+    dashboard_host: String,
 }
 
 #[cfg(not(tarpaulin_include))]
@@ -20,7 +23,8 @@ async fn main() {
     log4rs::init_file(opts.log4rs_config, Default::default()).unwrap();
 
     let addr = get_host_port(opts.host.as_str()).unwrap();
+    let dashboard_addr = get_host_port(opts.dashboard_host.as_str()).unwrap();
     info!("Starting meta server at {}", addr);
-    let (join_handle, _shutdown_send) = rpc_serve(addr, None).await;
+    let (join_handle, _shutdown_send) = rpc_serve(addr, dashboard_addr, None).await;
     join_handle.await.unwrap();
 }

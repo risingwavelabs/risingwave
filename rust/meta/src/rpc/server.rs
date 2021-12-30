@@ -14,6 +14,7 @@ use tokio::task::JoinHandle;
 
 use crate::catalog::StoredCatalogManager;
 use crate::cluster::StoredClusterManager;
+use crate::dashboard::DashboardService;
 use crate::hummock;
 use crate::manager::{Config, MemEpochGenerator, MetaSrvEnv};
 use crate::rpc::service::catalog_service::CatalogServiceImpl;
@@ -88,10 +89,14 @@ pub async fn rpc_serve_with_listener(
 
 pub async fn rpc_serve(
     addr: SocketAddr,
+    dashboard_addr: SocketAddr,
     hummock_config: Option<hummock::Config>,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     let listener = TcpListener::bind(addr).await.unwrap();
-    rpc_serve_with_listener(listener, hummock_config).await
+    let (join_handle, shutdown) = rpc_serve_with_listener(listener, hummock_config).await;
+    let dashboard_service = DashboardService::new(dashboard_addr);
+    tokio::spawn(dashboard_service.serve()); // TODO: join dashboard service back to local thread
+    (join_handle, shutdown)
 }
 
 #[cfg(test)]
@@ -103,7 +108,8 @@ mod tests {
     #[tokio::test]
     async fn test_server_shutdown() {
         let addr = get_host_port("127.0.0.1:9527").unwrap();
-        let (join_handle, shutdown_send) = rpc_serve(addr, None).await;
+        let dashbaord_addr = get_host_port("127.0.0.1:9528").unwrap();
+        let (join_handle, shutdown_send) = rpc_serve(addr, dashbaord_addr, None).await;
         shutdown_send.send(()).unwrap();
         join_handle.await.unwrap();
     }
