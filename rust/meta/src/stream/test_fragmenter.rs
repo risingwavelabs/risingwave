@@ -23,8 +23,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use crate::cluster::{StoredClusterManager, WorkerNodeMetaManager};
-use crate::manager::{Config, IdGeneratorManager};
-use crate::storage::MemStore;
+use crate::manager::MetaSrvEnv;
 use crate::stream::fragmenter::StreamFragmenter;
 
 fn make_table_ref_id(id: i32) -> TableRefId {
@@ -228,13 +227,8 @@ fn make_stream_node() -> StreamNode {
 
 #[tokio::test]
 async fn test_fragmenter() -> Result<()> {
-    let meta_store_ref = Arc::new(MemStore::new());
-    let id_gen_manager_ref = Arc::new(IdGeneratorManager::new(meta_store_ref.clone()).await);
-    let cluster_manager = Arc::new(StoredClusterManager::new(
-        meta_store_ref.clone(),
-        id_gen_manager_ref.clone(),
-        Config::default(),
-    ));
+    let env = MetaSrvEnv::for_test().await;
+    let cluster_manager = Arc::new(StoredClusterManager::new(env.clone()));
     cluster_manager
         .add_worker_node(
             HostAddress {
@@ -246,7 +240,7 @@ async fn test_fragmenter() -> Result<()> {
         .await?;
 
     let stream_node = make_stream_node();
-    let mut fragmenter = StreamFragmenter::new(id_gen_manager_ref, cluster_manager);
+    let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), cluster_manager);
 
     let graph = fragmenter.generate_graph(&stream_node).await?;
     assert_eq!(graph.len(), 6);

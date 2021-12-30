@@ -60,7 +60,7 @@ impl fmt::Display for Epoch {
     }
 }
 
-pub trait EpochGenerator: Sync + Send {
+pub trait EpochGenerator: Sync + Send + 'static {
     fn generate(&self) -> Result<Epoch>;
 }
 

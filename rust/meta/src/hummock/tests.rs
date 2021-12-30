@@ -11,26 +11,14 @@ use tokio::task::JoinHandle;
 
 use super::*;
 use crate::hummock;
-use crate::manager::{Config, IdGeneratorManager, SINGLE_VERSION_EPOCH};
-use crate::storage::{MemStore, MetaStoreRef};
+use crate::manager::{MetaSrvEnv, SINGLE_VERSION_EPOCH};
 
 async fn create_hummock_manager(
+    env: MetaSrvEnv,
     hummock_config: &hummock::Config,
-    manager_config: &Config,
-) -> Result<(
-    Arc<DefaultHummockManager>,
-    MetaStoreRef,
-    JoinHandle<Result<()>>,
-)> {
-    let meta_store_ref = Arc::new(MemStore::new());
-    let (instance, join_handle) = DefaultHummockManager::new(
-        meta_store_ref.clone(),
-        Arc::new(IdGeneratorManager::new(meta_store_ref.clone()).await).clone(),
-        manager_config.clone(),
-        hummock_config.clone(),
-    )
-    .await?;
-    Ok((instance, meta_store_ref, join_handle))
+) -> Result<(Arc<DefaultHummockManager>, JoinHandle<Result<()>>)> {
+    let (instance, join_handle) = DefaultHummockManager::new(env, hummock_config.clone()).await?;
+    Ok((instance, join_handle))
 }
 
 #[tokio::test]
@@ -39,8 +27,8 @@ async fn test_hummock_context_management() -> Result<()> {
         context_ttl: 1000,
         context_check_interval: 300,
     };
-    let manager_config = Config::default();
-    let (hummock_manager, ..) = create_hummock_manager(&hummock_config, &manager_config).await?;
+    let env = MetaSrvEnv::for_test().await;
+    let (hummock_manager, ..) = create_hummock_manager(env, &hummock_config).await?;
     let context = hummock_manager.create_hummock_context().await?;
     let invalidate = hummock_manager
         .invalidate_hummock_context(context.identifier)
@@ -78,12 +66,13 @@ async fn test_hummock_pin_unpin() -> Result<()> {
         context_ttl: 1000,
         context_check_interval: 300,
     };
-    let manager_config = Config::default();
-    let (hummock_manager, meta_store_ref, _) =
-        create_hummock_manager(&hummock_config, &manager_config).await?;
+    let env = MetaSrvEnv::for_test().await;
+    let (hummock_manager, _) = create_hummock_manager(env.clone(), &hummock_config).await?;
     let context = hummock_manager.create_hummock_context().await?;
+    let manager_config = env.config();
 
-    let version_id = meta_store_ref
+    let version_id = env
+        .meta_store()
         .get_cf(
             manager_config.get_hummock_default_cf(),
             manager_config.get_hummock_version_id_key().as_bytes(),
@@ -131,10 +120,10 @@ async fn test_hummock_table() -> Result<()> {
         context_ttl: 1000,
         context_check_interval: 300,
     };
-    let manager_config = Config::default();
-    let (hummock_manager, meta_store_ref, _) =
-        create_hummock_manager(&hummock_config, &manager_config).await?;
+    let env = MetaSrvEnv::for_test().await;
+    let (hummock_manager, _) = create_hummock_manager(env.clone(), &hummock_config).await?;
     let context = hummock_manager.create_hummock_context().await?;
+    let manager_config = env.config();
 
     // Tables to add
     let original_tables: Vec<Table> = vec![Table { sst_id: 0 }, Table { sst_id: 1 }]
@@ -149,7 +138,8 @@ async fn test_hummock_table() -> Result<()> {
     assert_eq!(1, version_id);
 
     // Confirm tables are successfully added
-    let fetched_tables = meta_store_ref
+    let fetched_tables = env
+        .meta_store()
         .list_cf(manager_config.get_hummock_table_cf())
         .await?;
     let fetched_tables: Vec<Table> = fetched_tables
@@ -189,9 +179,8 @@ async fn test_hummock_context_tracker_shutdown() -> Result<()> {
         context_ttl: 1000,
         context_check_interval: 300,
     };
-    let manager_config = Config::default();
-    let (hummock_manager_ref, _, join_handle) =
-        create_hummock_manager(&hummock_config, &manager_config).await?;
+    let env = MetaSrvEnv::for_test().await;
+    let (hummock_manager_ref, join_handle) = create_hummock_manager(env, &hummock_config).await?;
     drop(hummock_manager_ref);
     let result = join_handle.await;
     assert!(result.is_ok());

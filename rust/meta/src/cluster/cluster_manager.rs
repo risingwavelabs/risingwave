@@ -1,9 +1,11 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use prost::Message;
 use risingwave_common::error::Result;
 use risingwave_pb::common::Cluster;
 
-use crate::manager::{Config, IdGeneratorManagerRef, SINGLE_VERSION_EPOCH};
+use crate::manager::{Config, IdGeneratorManagerRef, MetaSrvEnv, SINGLE_VERSION_EPOCH};
 use crate::storage::MetaStoreRef;
 
 #[async_trait]
@@ -18,19 +20,15 @@ pub trait ClusterMetaManager: Sync + Send + 'static {
 pub struct StoredClusterManager {
     meta_store_ref: MetaStoreRef,
     pub id_gen_manager_ref: IdGeneratorManagerRef,
-    config: Config,
+    config: Arc<Config>,
 }
 
 impl StoredClusterManager {
-    pub fn new(
-        meta_store_ref: MetaStoreRef,
-        id_gen_manager_ref: IdGeneratorManagerRef,
-        config: Config,
-    ) -> Self {
+    pub fn new(env: MetaSrvEnv) -> Self {
         Self {
-            meta_store_ref,
-            id_gen_manager_ref,
-            config,
+            meta_store_ref: env.meta_store_ref(),
+            id_gen_manager_ref: env.id_gen_manager_ref(),
+            config: env.config(),
         }
     }
 }
@@ -86,23 +84,14 @@ impl ClusterMetaManager for StoredClusterManager {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use risingwave_pb::common::WorkerNode;
 
     use super::*;
-    use crate::manager::{Config, IdGeneratorManager};
-    use crate::storage::MemStore;
 
     #[tokio::test]
     async fn test_cluster_manager() -> Result<()> {
-        let meta_store_ref = Arc::new(MemStore::new());
-        let id_gen_manager_ref = Arc::new(IdGeneratorManager::new(meta_store_ref.clone()).await);
-        let cluster_manager = StoredClusterManager::new(
-            meta_store_ref.clone(),
-            id_gen_manager_ref,
-            Config::default(),
-        );
+        let cluster_manager = StoredClusterManager::new(MetaSrvEnv::for_test().await);
 
         assert!(cluster_manager.list_cluster().await.is_ok());
         assert!(cluster_manager.get_cluster(0).await.is_err());

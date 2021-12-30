@@ -72,23 +72,16 @@ impl DatabaseMetaManager for StoredCatalogManager {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use futures::future;
     use risingwave_pb::meta::Database;
 
     use super::*;
-    use crate::manager::{Config, MemEpochGenerator};
-    use crate::storage::MemStore;
+    use crate::manager::MetaSrvEnv;
 
     #[tokio::test]
     async fn test_database_manager() -> Result<()> {
-        let meta_store_ref = Arc::new(MemStore::new());
-        let catalog_manager = StoredCatalogManager::new(
-            Config::default(),
-            meta_store_ref.clone(),
-            Arc::new(MemEpochGenerator::new()),
-        );
+        let catalog_manager = StoredCatalogManager::new(MetaSrvEnv::for_test().await);
 
         assert!(catalog_manager.list_databases().await.is_ok());
         assert!(catalog_manager
@@ -97,14 +90,14 @@ mod tests {
             .is_err());
 
         let versions = future::join_all((0..100).map(|i| {
-            let meta_manager = &catalog_manager;
+            let catalog_manager = &catalog_manager;
             async move {
                 let database = Database {
                     database_ref_id: Some(DatabaseRefId { database_id: i }),
                     database_name: format!("database_{}", i),
                     version: 0,
                 };
-                meta_manager.create_database(database).await
+                catalog_manager.create_database(database).await
             }
         }))
         .await

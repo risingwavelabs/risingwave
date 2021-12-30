@@ -229,8 +229,7 @@ mod tests {
 
     use super::*;
     use crate::cluster::WorkerNodeMetaManager;
-    use crate::manager::{Config, IdGeneratorManager};
-    use crate::storage::MemStore;
+    use crate::manager::MetaSrvEnv;
     use crate::stream::{StoredStreamMetaManager, StreamMetaManager};
 
     struct FakeFragmentState {
@@ -323,17 +322,9 @@ mod tests {
         });
         sleep(Duration::from_secs(1));
 
-        let meta_store_ref = Arc::new(MemStore::new());
-        let meta_manager = Arc::new(StoredStreamMetaManager::new(
-            Config::default(),
-            meta_store_ref.clone(),
-        ));
-        let id_gen_manager_ref = Arc::new(IdGeneratorManager::new(meta_store_ref.clone()).await);
-        let cluster_manager = Arc::new(StoredClusterManager::new(
-            meta_store_ref,
-            id_gen_manager_ref,
-            Config::default(),
-        ));
+        let env = MetaSrvEnv::for_test().await;
+        let meta_manager = Arc::new(StoredStreamMetaManager::new(env.clone()));
+        let cluster_manager = Arc::new(StoredClusterManager::new(env));
         cluster_manager
             .add_worker_node(
                 HostAddress {

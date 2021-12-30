@@ -8,7 +8,7 @@ use risingwave_pb::meta::{FragmentLocation, TableFragments};
 use risingwave_pb::plan::TableRefId;
 use tokio::sync::RwLock;
 
-use crate::manager::{Config, Epoch, SINGLE_VERSION_EPOCH};
+use crate::manager::{Config, Epoch, MetaSrvEnv, SINGLE_VERSION_EPOCH};
 use crate::storage::MetaStoreRef;
 
 #[async_trait]
@@ -35,17 +35,17 @@ pub type StreamMetaManagerRef = Arc<dyn StreamMetaManager>;
 
 /// [`StoredStreamMetaManager`] manages stream meta data using `metastore`.
 pub struct StoredStreamMetaManager {
-    config: Config,
+    config: Arc<Config>,
     meta_store_ref: MetaStoreRef,
     // todo: remove the lock, refactor `node_fragments` storage.
     fragment_lock: RwLock<()>,
 }
 
 impl StoredStreamMetaManager {
-    pub fn new(config: Config, meta_store_ref: MetaStoreRef) -> Self {
+    pub fn new(env: MetaSrvEnv) -> Self {
         Self {
-            config,
-            meta_store_ref,
+            config: env.config(),
+            meta_store_ref: env.meta_store_ref(),
             fragment_lock: RwLock::new(()),
         }
     }
@@ -184,14 +184,11 @@ impl StreamMetaManager for StoredStreamMetaManager {
 #[cfg(test)]
 mod test {
     use std::collections::HashSet;
-    use std::sync::Arc;
 
     use risingwave_pb::common::{HostAddress, WorkerNode};
     use risingwave_pb::stream_plan::StreamFragment;
 
     use super::*;
-    use crate::manager::Config;
-    use crate::storage::MemStore;
 
     fn make_location(node: WorkerNode, fragment_ids: Vec<u32>) -> FragmentLocation {
         FragmentLocation {
@@ -210,8 +207,7 @@ mod test {
 
     #[tokio::test]
     async fn test_node_fragment() -> Result<()> {
-        let meta_store_ref = Arc::new(MemStore::new());
-        let meta_manager = StoredStreamMetaManager::new(Config::default(), meta_store_ref);
+        let meta_manager = StoredStreamMetaManager::new(MetaSrvEnv::for_test().await);
 
         // Add fragments to node 1.
         assert_eq!(meta_manager.load_all_fragments().await?.len(), 0);
@@ -306,8 +302,7 @@ mod test {
 
     #[tokio::test]
     async fn test_table_fragment() -> Result<()> {
-        let meta_store_ref = Arc::new(MemStore::new());
-        let meta_manager = StoredStreamMetaManager::new(Config::default(), meta_store_ref);
+        let meta_manager = StoredStreamMetaManager::new(MetaSrvEnv::for_test().await);
 
         let table_ref_id = TableRefId {
             schema_ref_id: None,

@@ -1,19 +1,17 @@
-use std::sync::Arc;
-
 use risingwave_pb::meta::epoch_service_server::EpochService;
 use risingwave_pb::meta::{GetEpochRequest, GetEpochResponse};
 use tonic::{Request, Response, Status};
 
-use crate::manager::MetaManager;
+use crate::manager::MetaSrvEnv;
 
 #[derive(Clone)]
 pub struct EpochServiceImpl {
-    mmc: Arc<MetaManager>,
+    env: MetaSrvEnv,
 }
 
 impl EpochServiceImpl {
-    pub fn new(mmc: Arc<MetaManager>) -> Self {
-        EpochServiceImpl { mmc }
+    pub fn new(env: MetaSrvEnv) -> Self {
+        EpochServiceImpl { env }
     }
 }
 
@@ -28,8 +26,8 @@ impl EpochService for EpochServiceImpl {
         Ok(Response::new(GetEpochResponse {
             status: None,
             epoch: self
-                .mmc
-                .epoch_generator
+                .env
+                .epoch_generator()
                 .generate()
                 .map_err(|e| e.to_grpc_status())?
                 .into_inner(),

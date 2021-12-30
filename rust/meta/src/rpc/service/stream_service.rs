@@ -9,7 +9,7 @@ use risingwave_pb::meta::{
 use tonic::{Request, Response, Status};
 
 use crate::cluster::StoredClusterManager;
-use crate::manager::IdGeneratorManagerRef;
+use crate::manager::{IdGeneratorManagerRef, MetaSrvEnv};
 use crate::stream::{StreamFragmenter, StreamManagerRef, StreamMetaManagerRef};
 
 #[derive(Clone)]
@@ -26,13 +26,13 @@ impl StreamServiceImpl {
     pub fn new(
         smm: StreamMetaManagerRef,
         sm: StreamManagerRef,
-        id_gen_manager_ref: IdGeneratorManagerRef,
         cluster_manager: Arc<StoredClusterManager>,
+        env: MetaSrvEnv,
     ) -> Self {
         StreamServiceImpl {
             smm,
             sm,
-            id_gen_manager_ref,
+            id_gen_manager_ref: env.id_gen_manager_ref(),
             cluster_manager,
         }
     }

@@ -18,7 +18,7 @@ use tokio::task::JoinHandle;
 
 use crate::hummock::{HummockContextId, HummockTTL, HummockVersionId};
 use crate::manager;
-use crate::manager::{Epoch, IdGeneratorManagerRef, SINGLE_VERSION_EPOCH};
+use crate::manager::{Epoch, IdGeneratorManagerRef, MetaSrvEnv, SINGLE_VERSION_EPOCH};
 use crate::storage::MetaStoreRef;
 
 #[derive(Clone)]
@@ -81,7 +81,7 @@ pub struct DefaultHummockManager {
     // lock order: context_expires_at before inner
     context_expires_at: RwLock<HashMap<HummockContextId, Instant>>,
     inner: RwLock<DefaultHummockManagerInner>,
-    manager_config: manager::Config,
+    manager_config: Arc<manager::Config>,
     hummock_config: Config,
 }
 
@@ -119,16 +119,14 @@ impl DefaultHummockManagerInner {
 
 impl DefaultHummockManager {
     pub async fn new(
-        meta_store_ref: MetaStoreRef,
-        id_generator_manager_ref: IdGeneratorManagerRef,
-        manager_config: manager::Config,
+        env: MetaSrvEnv,
         hummock_config: Config,
     ) -> Result<(Arc<Self>, JoinHandle<Result<()>>)> {
         let instance = Arc::new(Self {
-            id_generator_manager_ref,
+            id_generator_manager_ref: env.id_gen_manager_ref(),
             context_expires_at: RwLock::new(HashMap::new()),
-            inner: RwLock::new(DefaultHummockManagerInner::new(meta_store_ref.clone())),
-            manager_config,
+            inner: RwLock::new(DefaultHummockManagerInner::new(env.meta_store_ref())),
+            manager_config: env.config(),
             hummock_config,
         });
 

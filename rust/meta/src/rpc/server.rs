@@ -15,7 +15,7 @@ use tokio::task::JoinHandle;
 use crate::catalog::StoredCatalogManager;
 use crate::cluster::StoredClusterManager;
 use crate::hummock;
-use crate::manager::{Config, IdGeneratorManager, MemEpochGenerator, MetaManager};
+use crate::manager::{Config, MemEpochGenerator, MetaSrvEnv};
 use crate::rpc::service::catalog_service::CatalogServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::epoch_service::EpochServiceImpl;
@@ -30,57 +30,33 @@ pub async fn rpc_serve_with_listener(
     listener: TcpListener,
     hummock_config: Option<hummock::Config>,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
+    let config = Arc::new(Config::default());
     let meta_store_ref = Arc::new(MemStore::new());
-    let config = Config::default();
-
-    let stream_meta_manager = Arc::new(StoredStreamMetaManager::new(
-        config.clone(),
-        meta_store_ref.clone(),
-    ));
-    let id_generator_manager_ref = Arc::new(IdGeneratorManager::new(meta_store_ref.clone()).await);
     let epoch_generator_ref = Arc::new(MemEpochGenerator::new());
-    let catalog_manager_ref = Arc::new(StoredCatalogManager::new(
-        config.clone(),
-        meta_store_ref.clone(),
-        epoch_generator_ref.clone(),
-    ));
-    let cluster_manager = Arc::new(StoredClusterManager::new(
-        meta_store_ref.clone(),
-        id_generator_manager_ref.clone(),
-        config.clone(),
-    ));
-    let meta_manager = Arc::new(
-        MetaManager::new(
-            meta_store_ref.clone(),
-            epoch_generator_ref,
-            id_generator_manager_ref.clone(),
-            config.clone(),
-        )
-        .await,
-    );
-    let (hummock_manager, _) = hummock::DefaultHummockManager::new(
-        meta_store_ref.clone(),
-        id_generator_manager_ref.clone(),
-        config.clone(),
-        hummock_config.unwrap_or_default(),
-    )
-    .await
-    .unwrap();
+    let env = MetaSrvEnv::new(config, meta_store_ref, epoch_generator_ref).await;
+
+    let stream_meta_manager = Arc::new(StoredStreamMetaManager::new(env.clone()));
+    let catalog_manager_ref = Arc::new(StoredCatalogManager::new(env.clone()));
+    let cluster_manager = Arc::new(StoredClusterManager::new(env.clone()));
+    let (hummock_manager, _) =
+        hummock::DefaultHummockManager::new(env.clone(), hummock_config.unwrap_or_default())
+            .await
+            .unwrap();
     let stream_manager_ref = Arc::new(DefaultStreamManager::new(
         stream_meta_manager.clone(),
         cluster_manager.clone(),
     ));
 
-    let epoch_srv = EpochServiceImpl::new(meta_manager.clone());
+    let epoch_srv = EpochServiceImpl::new(env.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new(catalog_manager_ref.clone());
     let catalog_srv = CatalogServiceImpl::new(catalog_manager_ref);
     let cluster_srv = ClusterServiceImpl::new(cluster_manager.clone());
-    let id_generator_srv = IdGeneratorServiceImpl::new(meta_manager);
+    let id_generator_srv = IdGeneratorServiceImpl::new(env.clone());
     let stream_srv = StreamServiceImpl::new(
         stream_meta_manager,
         stream_manager_ref,
-        id_generator_manager_ref,
         cluster_manager,
+        env,
     );
     let hummock_srv = HummockServiceImpl::new(hummock_manager);
 

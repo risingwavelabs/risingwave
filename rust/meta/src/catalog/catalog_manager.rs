@@ -6,7 +6,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::meta::{Catalog, Database, Schema, Table};
 
 use crate::catalog::{DatabaseMetaManager, SchemaMetaManager, TableMetaManager};
-use crate::manager::{Config, EpochGeneratorRef};
+use crate::manager::{Config, EpochGeneratorRef, MetaSrvEnv};
 use crate::storage::MetaStoreRef;
 
 #[async_trait]
@@ -20,21 +20,17 @@ pub type CatalogManagerRef = Arc<dyn CatalogManager>;
 
 /// [`StoredCatalogManager`] implements catalog meta data management in [`MetaStore`].
 pub struct StoredCatalogManager {
-    pub config: Config,
+    pub config: Arc<Config>,
     pub meta_store_ref: MetaStoreRef,
     pub epoch_generator: EpochGeneratorRef,
 }
 
 impl StoredCatalogManager {
-    pub fn new(
-        config: Config,
-        meta_store_ref: MetaStoreRef,
-        epoch_generator: EpochGeneratorRef,
-    ) -> Self {
+    pub fn new(env: MetaSrvEnv) -> Self {
         Self {
-            config,
-            meta_store_ref,
-            epoch_generator,
+            config: env.config(),
+            meta_store_ref: env.meta_store_ref(),
+            epoch_generator: env.epoch_generator_ref(),
         }
     }
 }

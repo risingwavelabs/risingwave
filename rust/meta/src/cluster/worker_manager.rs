@@ -99,24 +99,16 @@ impl WorkerNodeMetaManager for StoredClusterManager {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use assert_matches::assert_matches;
 
     use super::*;
-    use crate::manager::{Config, IdGeneratorManager};
-    use crate::storage::MemStore;
+    use crate::manager::MetaSrvEnv;
 
     #[tokio::test]
     async fn test_worker_manager() -> Result<()> {
         // Initialize cluster store manager.
-        let meta_store_ref = Arc::new(MemStore::new());
-        let id_gen_manager_ref = Arc::new(IdGeneratorManager::new(meta_store_ref.clone()).await);
-        let cluster_manager = StoredClusterManager::new(
-            meta_store_ref.clone(),
-            id_gen_manager_ref,
-            Config::default(),
-        );
+        let cluster_manager = StoredClusterManager::new(MetaSrvEnv::for_test().await);
 
         assert!(cluster_manager.list_cluster().await.is_ok());
         assert!(cluster_manager.get_cluster(0).await.is_err());

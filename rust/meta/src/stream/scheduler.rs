@@ -68,18 +68,12 @@ mod test {
     use risingwave_pb::common::HostAddress;
 
     use super::*;
-    use crate::manager::{Config, IdGeneratorManager};
-    use crate::storage::MemStore;
+    use crate::manager::MetaSrvEnv;
 
     #[tokio::test]
     async fn test_schedule() -> Result<()> {
-        let meta_store_ref = Arc::new(MemStore::new());
-        let id_gen_manager_ref = Arc::new(IdGeneratorManager::new(meta_store_ref.clone()).await);
-        let cluster_manager = Arc::new(StoredClusterManager::new(
-            meta_store_ref.clone(),
-            id_gen_manager_ref,
-            Config::default(),
-        ));
+        let env = MetaSrvEnv::for_test().await;
+        let cluster_manager = Arc::new(StoredClusterManager::new(env.clone()));
         let fragments = (0..15).collect::<Vec<u32>>();
         for i in 0..10 {
             cluster_manager
