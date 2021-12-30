@@ -27,6 +27,7 @@ impl Task for ConfigureTmuxTask {
         ctx.pb.set_message("starting...");
 
         let prefix_path = env::var("PREFIX")?;
+        let prefix_bin = env::var("PREFIX_BIN")?;
 
         let mut cmd = self.tmux();
         cmd.arg("-V");
@@ -42,15 +43,14 @@ impl Task for ConfigureTmuxTask {
             .arg("-s")
             .arg(RISELAB_SESSION_NAME)
             .arg("-c")
-            .arg(Path::new(&prefix_path));
+            .arg(Path::new(&prefix_path))
+            .arg(Path::new(&prefix_bin).join("welcome.sh"));
         ctx.run_command(cmd)?;
 
         ctx.complete_spin();
 
-        ctx.pb.set_message(format!(
-            "session {} started successfully",
-            RISELAB_SESSION_NAME
-        ));
+        ctx.pb
+            .set_message(format!("session {}", RISELAB_SESSION_NAME));
 
         Ok(())
     }

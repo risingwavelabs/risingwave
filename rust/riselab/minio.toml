@@ -41,21 +41,3 @@ wget -O "${PREFIX_TMP}/mcli" "${MCLI_DOWNLOAD_BIN}"
 chmod +x "${PREFIX_TMP}/mcli"
 mv "${PREFIX_TMP}/mcli" "${PREFIX_BIN}/mcli"
 '''
-
-[tasks.configure-minio]
-category = "RiseLAB"
-description = "Configure MinIO"
-
-[tasks.run-minio]
-args = [
-  "server",
-  "${HUMMOCK_PATH}",
-  "--address",
-  "${HUMOOCK_MINIO_ADDRESS}",
-  "--console-address",
-  "${HUMOOCK_MINIO_CONSOLE_ADDRESS}",
-]
-category = "RiseLAB"
-command = "${PREFIX_BIN}/minio"
-dependencies = ["download-minio"]
-description = "Run MinIO"

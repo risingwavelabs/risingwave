@@ -1,0 +1,68 @@
+template:
+  minio:
+    address: "127.0.0.1"
+    port: 9300
+    console-address: "127.0.0.1"
+    console-port: 9400
+    id: minio
+
+  compute-node:
+    address: "127.0.0.1"
+    port: 5688
+    exporter-address: "127.0.0.1"
+    exporter-port: 1222
+    id: compute-node-${port}
+    provide-minio: "minio-*"
+    user-managed: false
+
+  meta-node:
+    address: "127.0.0.1"
+    port: 5690
+    id: meta-node-${port}
+    user-managed: false
+
+  prometheus:
+    address: "127.0.0.1"
+    port: 9500
+    id: prometheus
+    provide-compute-node: "compute-node-*"
+
+  frontend:
+    address: "127.0.0.1"
+    port: 4567
+    id: frontend
+    provide-compute-node: "compute-node-*"
+    provide-meta-node: "meta-node-*"
+    user-managed: false
+
+riselab:
+  ci-3node:
+    - use: compute-node
+      port: 5687
+    - use: compute-node
+      port: 5688
+    - use: compute-node
+      port: 5689
+    - use: meta-node
+    - use: frontend
+
+  ci-1node:
+    - use: compute-node
+    - use: meta-node
+    - use: frontend
+
+  default:
+    - use: minio
+    - use: compute-node
+    - use: meta-node
+    - use: prometheus
+    - use: frontend
+
+  develop-compute-node:
+    - use: minio
+    - use: compute-node
+      # If user-managed is true, developers should start the compute-node, and RiseLAB will wait for its start.
+      user-managed: true
+    - use: meta-node
+    - use: prometheus
+    - use: frontend

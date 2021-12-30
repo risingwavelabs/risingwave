@@ -2513,7 +2513,11 @@ dependencies = [
  "bytes",
  "indicatif",
  "itertools 0.10.3",
+ "regex",
+ "serde",
+ "serde_yaml",
  "tempfile",
+ "yaml-rust",
 ]
 
 [[package]]

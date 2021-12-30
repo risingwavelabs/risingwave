@@ -24,8 +24,3 @@ tar -xf "${PROMETHEUS_DOWNLOAD_PATH}" -C "${PREFIX_TMP}"
 mv "${PREFIX_TMP}/${PROMETHEUS_RELEASE}" "${PREFIX_BIN}/prometheus"
 rm ${PROMETHEUS_DOWNLOAD_PATH}
 '''
-
-[tasks.run-prometheus]
-category = "RiseLAB"
-dependencies = ["download-prometheus"]
-description = "Run Prometheus"

@@ -9,4 +9,8 @@ anyhow = "1"
 bytes = "1"
 indicatif = "0.16"
 itertools = "0.10"
+regex = "1"
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.8"
 tempfile = "3"
+yaml-rust = "0.4"

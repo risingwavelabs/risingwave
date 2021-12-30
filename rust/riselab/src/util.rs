@@ -20,3 +20,7 @@ pub fn new_spinner() -> ProgressBar {
     pb.set_style(ProgressStyle::default_spinner().template("{spinner} {prefix}: {msg}"));
     pb
 }
+
+pub fn complete_spin(pb: &ProgressBar) {
+    pb.set_style(ProgressStyle::default_spinner().template("✅ {prefix}: {msg}"));
+}

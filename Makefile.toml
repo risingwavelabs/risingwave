@@ -37,6 +37,7 @@ ln -s "$(pwd)/rust/target/debug/meta-node" "${PREFIX_BIN}/meta-node"
 cp "rust/config/log4rs.yaml" "${PREFIX_CONFIG}/log4rs.yaml"
 cp "rust/storage/src/metrics/prometheus.yml" "${PREFIX_CONFIG}/prometheus.yml"
 cp "rust/riselab/run_command.sh" "${PREFIX_BIN}/run_command.sh"
+cp "rust/riselab/welcome.sh" "${PREFIX_BIN}/welcome.sh"
 '''
 
 [tasks.build-risingwave]

@@ -23,8 +23,3 @@ tar -xf "${GRAFANA_DOWNLOAD_PATH}" -C "${PREFIX_TMP}"
 mv "${PREFIX_TMP}/${GRAFANA_RELEASE}" "${PREFIX_BIN}/grafana"
 rm "${GRAFANA_DOWNLOAD_PATH}"
 '''
-
-[tasks.run-grafana]
-category = "RiseLAB"
-dependencies = ["download-grafana"]
-description = "Run Grafana"
