@@ -1,6 +1,5 @@
 use risingwave_common::error::Result;
-use tokio::sync::mpsc;
-use tokio::{self, select};
+use tokio::select;
 
 use super::{Barrier, Executor, Message, StreamChunk};
 
@@ -18,39 +17,19 @@ pub enum AlignedMessage {
 }
 
 pub struct BarrierAligner {
-    // /// The input from the left executor
-    // input_l: Box<dyn Executor>,
-    // /// The input from the right executor
-    // input_r: Box<dyn Executor>,
     /// The input from the left executor
-    input_l: mpsc::Receiver<Result<Message>>,
+    input_l: Box<dyn Executor>,
     /// The input from the right executor
-    input_r: mpsc::Receiver<Result<Message>>,
+    input_r: Box<dyn Executor>,
     /// The barrier state
     state: BarrierWaitState,
 }
 
 impl BarrierAligner {
-    pub fn new(mut input_l: Box<dyn Executor>, mut input_r: Box<dyn Executor>) -> Self {
-        let (tx_l, rx_l) = mpsc::channel(32);
-        let (tx_r, rx_r) = mpsc::channel(32);
-
-        tokio::spawn(async move {
-            loop {
-                let message = input_l.next().await;
-                tx_l.send(message).await.unwrap();
-            }
-        });
-
-        tokio::spawn(async move {
-            loop {
-                let message = input_r.next().await;
-                tx_r.send(message).await.unwrap();
-            }
-        });
+    pub fn new(input_l: Box<dyn Executor>, input_r: Box<dyn Executor>) -> Self {
         Self {
-            input_l: rx_l,
-            input_r: rx_r,
+            input_l,
+            input_r,
             state: BarrierWaitState::Either,
         }
     }
@@ -58,7 +37,7 @@ impl BarrierAligner {
     pub async fn next(&mut self) -> AlignedMessage {
         loop {
             select! {
-              Some(message) = self.input_l.recv(), if self.state != BarrierWaitState::Right => {
+              message = self.input_l.next(), if self.state != BarrierWaitState::Right => {
                 match message {
                   Ok(message) => match message {
                     Message::Chunk(chunk) => break AlignedMessage::Left(Ok(chunk)),
@@ -78,7 +57,7 @@ impl BarrierAligner {
                   Err(e) => break AlignedMessage::Left(Err(e)),
                 }
               },
-              Some(message) = self.input_r.recv(), if self.state != BarrierWaitState::Left => {
+              message = self.input_r.next(), if self.state != BarrierWaitState::Left => {
                 match message {
                   Ok(message) => match message {
                     Message::Chunk(chunk) => break AlignedMessage::Right(Ok(chunk)),
@@ -95,9 +74,6 @@ impl BarrierAligner {
                   },
                   Err(e) => break AlignedMessage::Right(Err(e)),
                 }
-              }
-              else => {
-                unreachable!("Both channels closed");
               }
             }
         }
