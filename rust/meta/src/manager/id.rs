@@ -16,7 +16,7 @@ type Id = i32;
 #[async_trait::async_trait]
 pub trait IdGenerator: Sync + Send {
     /// Generate a batch of identities.
-    /// The valid id range will be [result_id - interval + 1, result_id]
+    /// The valid id range will be [result_id, result_id + interval)
     async fn generate_interval(&self, interval: i32) -> Result<Id>;
 
     /// Generate an identity.
