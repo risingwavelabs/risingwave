@@ -38,19 +38,15 @@ pub enum StateStoreImpl {
     TikvStateStore(TikvStateStore),
 }
 
-impl StateStoreImpl {
-    fn as_memory(&self) -> MemoryStateStore {
-        match self {
-            Self::MemoryStateStore(s) => s.clone(),
-            _ => unreachable!(),
+#[macro_export]
+macro_rules! dispatch_state_store {
+    ($impl:expr, $store:ident, $body:tt) => {
+        match $impl {
+            StateStoreImpl::MemoryStateStore($store) => $body,
+            StateStoreImpl::HummockStateStore($store) => $body,
+            StateStoreImpl::TikvStateStore($store) => $body,
         }
-    }
-    fn as_tikv(&self) -> TikvStateStore {
-        match self {
-            Self::TikvStateStore(s) => s.clone(),
-            _ => unreachable!(),
-        }
-    }
+    };
 }
 
 /// Stores the data which may be modified from the data plane.
@@ -687,17 +683,9 @@ impl StreamManagerCore {
         node: &stream_plan::StreamNode,
         env: StreamTaskEnv,
     ) -> Result<Box<dyn Executor>> {
-        match self.state_store.clone() {
-            StateStoreImpl::HummockStateStore(store) => {
-                self.create_nodes_inner(fragment_id, node, env, store)
-            }
-            StateStoreImpl::MemoryStateStore(store) => {
-                self.create_nodes_inner(fragment_id, node, env, store)
-            }
-            StateStoreImpl::TikvStateStore(store) => {
-                self.create_nodes_inner(fragment_id, node, env, store)
-            }
-        }
+        dispatch_state_store!(self.state_store.clone(), store, {
+            self.create_nodes_inner(fragment_id, node, env, store)
+        })
     }
 
     fn create_merge_node(

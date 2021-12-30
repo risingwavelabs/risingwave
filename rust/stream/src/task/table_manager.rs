@@ -8,13 +8,11 @@ use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::{ensure, gen_error};
 use risingwave_pb::plan::ColumnDesc;
-use risingwave_storage::bummock::{BummockResult, BummockTable};
-use risingwave_storage::hummock::HummockStateStore;
-use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::table::{ScannableTable, ScannableTableRef, TableIterRef, TableManager};
-use risingwave_storage::tikv::TikvStateStore;
+use risingwave_storage::bummock::BummockTable;
+use risingwave_storage::table::{ScannableTableRef, TableManager};
 use risingwave_storage::{Keyspace, TableColumnDesc};
 
+use crate::dispatch_state_store;
 use crate::executor::MViewTable;
 use crate::task::StateStoreImpl;
 
@@ -34,71 +32,12 @@ pub trait StreamTableManager: TableManager {
     ) -> Result<()>;
 }
 
-/// The enumeration of supported simple tables in `SimpleTableManager`.
-#[derive(Clone)]
-pub enum TableImpl {
-    Bummock(Arc<BummockTable>),
-    MViewTable(Arc<MViewTable<HummockStateStore>>),
-    TestMViewTable(Arc<MViewTable<MemoryStateStore>>),
-    TikvMViewTable(Arc<MViewTable<TikvStateStore>>),
-}
-
-impl TableImpl {
-    pub fn as_memory(&self) -> Arc<MViewTable<MemoryStateStore>> {
-        match self {
-            Self::TestMViewTable(t) => t.clone(),
-            _ => unreachable!(),
-        }
-    }
-
-    pub fn as_bummock(&self) -> Arc<BummockTable> {
-        match self {
-            Self::Bummock(t) => t.clone(),
-            _ => unreachable!(),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl ScannableTable for TableImpl {
-    async fn iter(&self) -> Result<TableIterRef> {
-        match self {
-            TableImpl::Bummock(t) => t.iter().await,
-            TableImpl::MViewTable(t) => Ok(Box::new(t.iter().await?)),
-            TableImpl::TestMViewTable(t) => Ok(Box::new(t.iter().await?)),
-            TableImpl::TikvMViewTable(t) => Ok(Box::new(t.iter().await?)),
-        }
-    }
-
-    async fn get_data_by_columns(&self, column_ids: &[i32]) -> Result<BummockResult> {
-        match self {
-            TableImpl::Bummock(t) => t.get_data_by_columns(column_ids).await,
-            TableImpl::MViewTable(_) => unimplemented!(),
-            TableImpl::TestMViewTable(_) => unimplemented!(),
-            TableImpl::TikvMViewTable(_) => unimplemented!(),
-        }
-    }
-
-    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Sync + Send> {
-        self
-    }
-
-    fn schema(&self) -> Schema {
-        match self {
-            TableImpl::Bummock(t) => t.schema(),
-            TableImpl::MViewTable(t) => t.schema().clone(),
-            TableImpl::TestMViewTable(t) => t.schema().clone(),
-            TableImpl::TikvMViewTable(t) => t.schema().clone(),
-        }
-    }
-}
-
 /// A simple implementation of in memory table for local tests.
 /// It will be replaced in near future when replaced by locally
 /// on-disk files.
 #[derive(Default)]
 pub struct SimpleTableManager {
-    tables: Mutex<HashMap<TableId, TableImpl>>,
+    tables: Mutex<HashMap<TableId, ScannableTableRef>>,
 }
 
 impl AsRef<dyn Any> for SimpleTableManager {
@@ -129,7 +68,7 @@ impl TableManager for SimpleTableManager {
             column_count
         );
         let table = Arc::new(BummockTable::new(table_id, table_columns));
-        tables.insert(table_id.clone(), TableImpl::Bummock(table.clone()));
+        tables.insert(table_id.clone(), table.clone());
         Ok(table)
     }
 
@@ -138,7 +77,6 @@ impl TableManager for SimpleTableManager {
         tables
             .get(table_id)
             .cloned()
-            .map(|t| Arc::new(t) as ScannableTableRef)
             .ok_or_else(|| InternalError(format!("Table id not exists: {:?}", table_id)).into())
     }
 
@@ -174,35 +112,16 @@ impl StreamTableManager for SimpleTableManager {
         ensure!(column_count > 0, "There must be more than one column in MV");
         let schema = Schema::try_from(columns)?;
 
-        let table_impl = match state_store {
-            StateStoreImpl::MemoryStateStore(store) => {
-                TableImpl::TestMViewTable(Arc::new(MViewTable::new(
-                    Keyspace::table_root(store, table_id),
-                    schema,
-                    pk_columns,
-                    orderings,
-                )))
-            }
-            StateStoreImpl::HummockStateStore(store) => {
-                TableImpl::MViewTable(Arc::new(MViewTable::new(
-                    Keyspace::table_root(store, table_id),
-                    schema,
-                    pk_columns,
-                    orderings,
-                )))
-            }
+        let table: ScannableTableRef = dispatch_state_store!(state_store, store, {
+            Arc::new(MViewTable::new(
+                Keyspace::table_root(store, table_id),
+                schema,
+                pk_columns,
+                orderings,
+            ))
+        });
 
-            StateStoreImpl::TikvStateStore(store) => {
-                TableImpl::TikvMViewTable(Arc::new(MViewTable::new(
-                    Keyspace::table_root(store, table_id),
-                    schema,
-                    pk_columns,
-                    orderings,
-                )))
-            }
-        };
-
-        tables.insert(table_id.clone(), table_impl);
+        tables.insert(table_id.clone(), table);
         Ok(())
     }
 }
@@ -214,7 +133,7 @@ impl SimpleTableManager {
         }
     }
 
-    fn get_tables(&self) -> Result<MutexGuard<HashMap<TableId, TableImpl>>> {
+    fn get_tables(&self) -> Result<MutexGuard<HashMap<TableId, ScannableTableRef>>> {
         Ok(self.tables.lock().unwrap())
     }
 }

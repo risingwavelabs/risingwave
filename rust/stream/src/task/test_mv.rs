@@ -26,10 +26,12 @@ use risingwave_pb::stream_plan::{
 use risingwave_pb::stream_service::{ActorInfo, BroadcastActorInfoTableRequest};
 use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::bummock::BummockTable;
+use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::TableManager;
 use risingwave_storage::{Table, TableColumnDesc};
 
-use crate::task::{SimpleTableManager, StreamManager, StreamTaskEnv, TableImpl};
+use crate::executor::MViewTable;
+use crate::task::{SimpleTableManager, StreamManager, StreamTaskEnv};
 
 fn make_int32_type_pb() -> DataType {
     DataType {
@@ -139,9 +141,8 @@ async fn test_stream_mv_proto() {
         .unwrap();
 
     let table_ref =
-        downcast_arc::<TableImpl>(table_manager.get_table(&table_id).unwrap().into_any())
-            .unwrap()
-            .as_bummock();
+        downcast_arc::<BummockTable>(table_manager.get_table(&table_id).unwrap().into_any())
+            .unwrap();
     // Mock initial data.
     // One row of (1,2)
     let mut array_builder1 = PrimitiveArrayBuilder::<i32>::new(1).unwrap();
@@ -184,10 +185,10 @@ async fn test_stream_mv_proto() {
     // Insert data and check if the materialized view has been updated.
     let _res_app = table_ref.append(append_chunk).await;
     let table_id_mv = TableId::new(SchemaId::default(), 1);
-    let table =
-        downcast_arc::<TableImpl>(table_manager.get_table(&table_id_mv).unwrap().into_any())
-            .unwrap()
-            .as_memory();
+    let table = downcast_arc::<MViewTable<MemoryStateStore>>(
+        table_manager.get_table(&table_id_mv).unwrap().into_any(),
+    )
+    .unwrap();
 
     // FIXME: We have to make sure that `append_chunk` has been processed by the actor first,
     // then we can send the stop barrier.

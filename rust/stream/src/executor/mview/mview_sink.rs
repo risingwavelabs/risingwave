@@ -139,7 +139,7 @@ mod tests {
 
     use crate::executor::test_utils::*;
     use crate::executor::*;
-    use crate::task::{SimpleTableManager, StateStoreImpl, StreamTableManager, TableImpl};
+    use crate::task::{SimpleTableManager, StateStoreImpl, StreamTableManager};
     use crate::*;
 
     #[tokio::test]
@@ -224,9 +224,10 @@ mod tests {
             vec![OrderType::Ascending],
         ));
 
-        let table = downcast_arc::<TableImpl>(store_mgr.get_table(&table_id).unwrap().into_any())
-            .unwrap()
-            .as_memory();
+        let table = downcast_arc::<MViewTable<MemoryStateStore>>(
+            store_mgr.get_table(&table_id).unwrap().into_any(),
+        )
+        .unwrap();
 
         sink_executor.next().await.unwrap();
         // First stream chunk. We check the existence of (3) -> (3,6)

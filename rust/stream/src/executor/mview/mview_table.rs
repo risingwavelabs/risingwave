@@ -1,9 +1,11 @@
+use std::sync::Arc;
+
 use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{deserialize_datum_from, Datum};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_storage::table::TableIter;
+use risingwave_storage::table::{ScannableTable, TableIter};
 use risingwave_storage::{Keyspace, StateStore, StateStoreIter};
 
 use super::*;
@@ -151,6 +153,31 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
         let row_deserializer = RowDeserializer::new(schema);
         let row = row_deserializer.deserialize(&row_bytes)?;
         Ok(Some(row))
+    }
+}
+
+#[async_trait::async_trait]
+impl<S> ScannableTable for MViewTable<S>
+where
+    S: StateStore,
+{
+    async fn iter(&self) -> Result<risingwave_storage::table::TableIterRef> {
+        Ok(Box::new(self.iter().await?))
+    }
+
+    async fn get_data_by_columns(
+        &self,
+        _column_ids: &[i32],
+    ) -> Result<risingwave_storage::bummock::BummockResult> {
+        unimplemented!()
+    }
+
+    fn into_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Sync + Send> {
+        self
+    }
+
+    fn schema(&self) -> Schema {
+        self.schema.clone()
     }
 }
 
