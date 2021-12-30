@@ -137,6 +137,10 @@ impl HummockStorage {
     /// the key is not found. If `Err()` is returned, the searching for the key
     /// failed due to other non-EOF errors.
     pub async fn get(&self, key: &[u8]) -> HummockResult<Option<Vec<u8>>> {
+        if self.options.stats_enabled {
+            self.get_stats_ref().unwrap().point_get_counts.inc();
+        }
+
         self.get_snapshot().get(key).await
     }
 
@@ -146,6 +150,10 @@ impl HummockStorage {
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
+        if self.options.stats_enabled {
+            self.get_stats_ref().unwrap().range_scan_counts.inc();
+        }
+
         self.get_snapshot().range_scan(key_range).await
     }
 
@@ -162,6 +170,10 @@ impl HummockStorage {
         &self,
         kv_pairs: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
     ) -> HummockResult<()> {
+        if self.options.stats_enabled {
+            self.get_stats_ref().unwrap().batched_write_counts.inc();
+        }
+
         let get_id_and_builder = || async {
             let id = self.version_manager.generate_table_id().await;
             let builder = Self::get_builder(&self.options);
@@ -201,8 +213,7 @@ impl HummockStorage {
 
         // Update statistics if needed.
         if self.options.stats_enabled {
-            self.stats
-                .as_ref()
+            self.get_stats_ref()
                 .unwrap()
                 .put_bytes
                 .inc_by(total_size.to_u64().unwrap());
