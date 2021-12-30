@@ -11,9 +11,12 @@ use super::{ScannableTableRef, TableManager};
 use crate::bummock::BummockTable;
 use crate::TableColumnDesc;
 
+/// A simple implementation of in memory table for local tests.
+/// It will be replaced in near future when replaced by locally
+/// on-disk files.
 #[derive(Default)]
 pub struct SimpleTableManager {
-    tables: Mutex<HashMap<TableId, Arc<BummockTable>>>,
+    tables: Mutex<HashMap<TableId, ScannableTableRef>>,
 }
 
 impl AsRef<dyn Any> for SimpleTableManager {
@@ -29,7 +32,7 @@ impl TableManager for SimpleTableManager {
         table_id: &TableId,
         table_columns: Vec<TableColumnDesc>,
     ) -> Result<ScannableTableRef> {
-        let mut tables = self.get_tables()?;
+        let mut tables = self.get_tables();
 
         ensure!(
             !tables.contains_key(table_id),
@@ -49,16 +52,15 @@ impl TableManager for SimpleTableManager {
     }
 
     fn get_table(&self, table_id: &TableId) -> Result<ScannableTableRef> {
-        let tables = self.get_tables()?;
+        let tables = self.get_tables();
         tables
             .get(table_id)
             .cloned()
-            .map(|t| t as ScannableTableRef)
             .ok_or_else(|| InternalError(format!("Table id not exists: {:?}", table_id)).into())
     }
 
     async fn drop_table(&self, table_id: &TableId) -> Result<()> {
-        let mut tables = self.get_tables()?;
+        let mut tables = self.get_tables();
         ensure!(
             tables.contains_key(table_id),
             "Table does not exist: {:?}",
@@ -76,7 +78,7 @@ impl SimpleTableManager {
         }
     }
 
-    fn get_tables(&self) -> Result<MutexGuard<HashMap<TableId, Arc<BummockTable>>>> {
-        Ok(self.tables.lock().unwrap())
+    pub fn get_tables(&self) -> MutexGuard<HashMap<TableId, ScannableTableRef>> {
+        self.tables.lock().unwrap()
     }
 }

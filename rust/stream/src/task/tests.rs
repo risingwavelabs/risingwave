@@ -10,11 +10,11 @@ use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::*;
 use risingwave_pb::stream_service::*;
 use risingwave_source::MemSourceManager;
+use risingwave_storage::table::SimpleTableManager;
 
 use super::*;
 use crate::executor::{Barrier, Message, Mutation};
 use crate::task::env::StreamTaskEnv;
-use crate::task::SimpleTableManager;
 
 const PORT: i32 = 2333;
 

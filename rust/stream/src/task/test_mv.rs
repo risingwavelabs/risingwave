@@ -27,11 +27,11 @@ use risingwave_pb::stream_service::{ActorInfo, BroadcastActorInfoTableRequest};
 use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::bummock::BummockTable;
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::table::TableManager;
+use risingwave_storage::table::{SimpleTableManager, TableManager};
 use risingwave_storage::{Table, TableColumnDesc};
 
 use crate::executor::MViewTable;
-use crate::task::{SimpleTableManager, StreamManager, StreamTaskEnv};
+use crate::task::{StreamManager, StreamTaskEnv};
 
 fn make_int32_type_pb() -> DataType {
     DataType {

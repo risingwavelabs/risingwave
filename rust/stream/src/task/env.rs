@@ -32,8 +32,8 @@ impl StreamTaskEnv {
         use std::sync::Arc;
 
         use risingwave_source::MemSourceManager;
+        use risingwave_storage::table::SimpleTableManager;
 
-        use crate::task::SimpleTableManager;
         StreamTaskEnv {
             table_manager: Arc::new(SimpleTableManager::new()),
             server_addr: SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
