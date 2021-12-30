@@ -333,12 +333,12 @@ mod tests {
     async fn test_local_hash_aggregation_count(keyspace: Keyspace<impl StateStore>) {
         let chunk1 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert, Op::Insert],
-            columns: vec![column_nonnull! { I64Array, Int64Type, [1, 2, 2] }],
+            columns: vec![column_nonnull! { I64Array, [1, 2, 2] }],
             visibility: None,
         };
         let chunk2 = StreamChunk {
             ops: vec![Op::Delete, Op::Delete, Op::Delete],
-            columns: vec![column_nonnull! { I64Array, Int64Type, [1, 2, 2] }],
+            columns: vec![column_nonnull! { I64Array, [1, 2, 2] }],
             visibility: Some((vec![true, false, true]).try_into().unwrap()),
         };
         let schema = Schema {
@@ -424,18 +424,18 @@ mod tests {
         let chunk1 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert, Op::Insert],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [1, 2, 2] },
-                column_nonnull! { I64Array, Int64Type, [1, 2, 2] },
-                column_nonnull! { I64Array, Int64Type, [1, 2, 2] },
+                column_nonnull! { I64Array, [1, 2, 2] },
+                column_nonnull! { I64Array, [1, 2, 2] },
+                column_nonnull! { I64Array, [1, 2, 2] },
             ],
             visibility: None,
         };
         let chunk2 = StreamChunk {
             ops: vec![Op::Delete, Op::Delete, Op::Delete, Op::Insert],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [1, 2, 2, 3] },
-                column_nonnull! { I64Array, Int64Type, [1, 2, 2, 3] },
-                column_nonnull! { I64Array, Int64Type, [1, 2, 2, 3] },
+                column_nonnull! { I64Array, [1, 2, 2, 3] },
+                column_nonnull! { I64Array, [1, 2, 2, 3] },
+                column_nonnull! { I64Array, [1, 2, 2, 3] },
             ],
             visibility: Some((vec![true, false, true, true]).try_into().unwrap()),
         };
@@ -535,11 +535,11 @@ mod tests {
             ops: vec![Op::Insert; 3],
             columns: vec![
                 // group key column
-                column_nonnull! { I64Array, Int64Type, [1, 1, 2] },
+                column_nonnull! { I64Array, [1, 1, 2] },
                 // data column to get minimum
-                column_nonnull! { I64Array, Int64Type, [233, 23333, 2333] },
+                column_nonnull! { I64Array, [233, 23333, 2333] },
                 // primary key column
-                column_nonnull! { I64Array, Int64Type, [1001, 1002, 1003] },
+                column_nonnull! { I64Array, [1001, 1002, 1003] },
             ],
             visibility: None,
         };
@@ -547,11 +547,11 @@ mod tests {
             ops: vec![Op::Delete; 3],
             columns: vec![
                 // group key column
-                column_nonnull! { I64Array, Int64Type, [1, 1, 2] },
+                column_nonnull! { I64Array, [1, 1, 2] },
                 // data column to get minimum
-                column_nonnull! { I64Array, Int64Type, [233, 23333, 2333] },
+                column_nonnull! { I64Array, [233, 23333, 2333] },
                 // primary key column
-                column_nonnull! { I64Array, Int64Type, [1001, 1002, 1003] },
+                column_nonnull! { I64Array, [1001, 1002, 1003] },
             ],
             visibility: Some((vec![true, false, true]).try_into().unwrap()),
         };

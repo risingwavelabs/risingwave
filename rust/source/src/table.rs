@@ -290,11 +290,7 @@ mod tests {
         ));
 
         // Some existing data
-        let chunk0 = StreamChunk::new(
-            vec![Op::Insert],
-            vec![column_nonnull!(I64Array, Int64Type, [0])],
-            None,
-        );
+        let chunk0 = StreamChunk::new(vec![Op::Insert], vec![column_nonnull!(I64Array, [0])], None);
         table.write(&chunk0).unwrap();
 
         let source = TableSource::new(table.clone());
@@ -305,11 +301,7 @@ mod tests {
         reader1.open().await.unwrap();
 
         // insert chunk 1
-        let chunk1 = StreamChunk::new(
-            vec![Op::Insert],
-            vec![column_nonnull!(I64Array, Int64Type, [1])],
-            None,
-        );
+        let chunk1 = StreamChunk::new(vec![Op::Insert], vec![column_nonnull!(I64Array, [1])], None);
 
         let mut writer = source.create_writer().unwrap();
         writer.write(chunk1).await.unwrap();
@@ -330,11 +322,7 @@ mod tests {
         reader2.open().await.unwrap();
 
         // insert chunk 2
-        let chunk2 = StreamChunk::new(
-            vec![Op::Insert],
-            vec![column_nonnull!(I64Array, Int64Type, [2])],
-            None,
-        );
+        let chunk2 = StreamChunk::new(vec![Op::Insert], vec![column_nonnull!(I64Array, [2])], None);
 
         let mut writer = source.create_writer().unwrap();
         writer.write(chunk2).await.unwrap();

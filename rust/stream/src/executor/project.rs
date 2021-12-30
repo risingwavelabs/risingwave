@@ -121,16 +121,16 @@ mod tests {
         let chunk1 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert, Op::Insert],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [1, 2, 3] },
-                column_nonnull! { I64Array, Int64Type, [4, 5, 6] },
+                column_nonnull! { I64Array, [1, 2, 3] },
+                column_nonnull! { I64Array, [4, 5, 6] },
             ],
             visibility: None,
         };
         let chunk2 = StreamChunk {
             ops: vec![Op::Insert, Op::Delete],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [7, 3] },
-                column_nonnull! { I64Array, Int64Type, [8, 6] },
+                column_nonnull! { I64Array, [7, 3] },
+                column_nonnull! { I64Array, [8, 6] },
             ],
             visibility: Some((vec![true, true]).try_into().unwrap()),
         };

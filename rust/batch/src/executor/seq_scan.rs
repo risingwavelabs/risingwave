@@ -116,8 +116,8 @@ mod tests {
         let table = BummockTable::new(&table_id, table_columns);
 
         let fields = table.schema().fields;
-        let col1 = column_nonnull! { I64Array, Int64Type, [1, 3, 5, 7, 9] };
-        let col2 = column_nonnull! { I64Array, Int64Type, [2, 4, 6, 8, 10] };
+        let col1 = column_nonnull! { I64Array, [1, 3, 5, 7, 9] };
+        let col2 = column_nonnull! { I64Array, [2, 4, 6, 8, 10] };
         let data_chunk1 = DataChunk::builder().columns(vec![col1]).build();
         let data_chunk2 = DataChunk::builder().columns(vec![col2]).build();
         table.append(data_chunk1).await?;

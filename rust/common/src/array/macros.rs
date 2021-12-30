@@ -36,7 +36,7 @@ macro_rules! array_nonnull {
 // TODO
 #[macro_export]
 macro_rules! column {
-  ($array:tt, $type:tt, [$( $value:expr ),*]) => {
+  ($array:tt, [$( $value:expr ),*]) => {
     {
       use crate::array::column::Column;
       let arr = array! { $array, [ $( $value ),* ] };
@@ -48,7 +48,7 @@ macro_rules! column {
 /// `column_nonnull` builds a `Column` with concrete values.
 #[macro_export]
 macro_rules! column_nonnull {
-  ($array:tt, $type:tt, [$( $value:expr ),*]) => {
+  ($array:tt, [$( $value:expr ),*]) => {
     {
       use $crate::array::column::Column;
       let arr = $crate::array_nonnull! { $array, [ $( $value ),* ] };
@@ -71,9 +71,9 @@ mod tests {
 
     #[test]
     fn test_build_column() {
-        let c = column! { I16Array, Int16Type, [Some(1i16), None, Some(3)] };
+        let c = column! { I16Array, [Some(1i16), None, Some(3)] };
         assert_eq!(c.array_ref().len(), 3);
-        let c = column_nonnull! { I16Array, Int16Type, [1i16, 2, 3] };
+        let c = column_nonnull! { I16Array, [1i16, 2, 3] };
         assert_eq!(c.array_ref().len(), 3);
     }
 }

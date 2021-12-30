@@ -159,8 +159,8 @@ mod tests {
         let chunk1 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [1, 5, 6, 7] },
-                column_nonnull! { I64Array, Int64Type, [4, 2, 6, 5] },
+                column_nonnull! { I64Array, [1, 5, 6, 7] },
+                column_nonnull! { I64Array, [4, 2, 6, 5] },
             ],
             visibility: None,
         };
@@ -176,8 +176,8 @@ mod tests {
                 Op::UpdateInsert, // expect nothing
             ],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [5, 7, 5, 3, 3, 5, 3, 4] },
-                column_nonnull! { I64Array, Int64Type, [3, 5, 3, 5, 5, 3, 5, 6] },
+                column_nonnull! { I64Array, [5, 7, 5, 3, 3, 5, 3, 4] },
+                column_nonnull! { I64Array, [3, 5, 3, 5, 5, 3, 5, 6] },
             ],
             visibility: None,
         };

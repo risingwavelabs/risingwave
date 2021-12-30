@@ -99,8 +99,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_project_executor() -> Result<()> {
-        let col1 = column_nonnull! {I32Array, Int32Type, [1, 2, 33333, 4, 5]};
-        let col2 = column_nonnull! {I32Array, Int32Type, [7, 8, 66666, 4, 3]};
+        let col1 = column_nonnull! {I32Array, [1, 2, 33333, 4, 5]};
+        let col2 = column_nonnull! {I32Array, [7, 8, 66666, 4, 3]};
         let chunk = DataChunk::builder().columns(vec![col1, col2]).build();
 
         let type1 = Int32Type::create(false);

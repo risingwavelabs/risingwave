@@ -189,16 +189,16 @@ mod tests {
         let chunk1 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert, Op::Insert],
             columns: vec![
-                column_nonnull! { I32Array, Int32Type, [1, 2, 3] },
-                column_nonnull! { I32Array, Int32Type, [4, 5, 6] },
+                column_nonnull! { I32Array, [1, 2, 3] },
+                column_nonnull! { I32Array, [4, 5, 6] },
             ],
             visibility: None,
         };
         let chunk2 = StreamChunk {
             ops: vec![Op::Insert, Op::Delete],
             columns: vec![
-                column_nonnull! { I32Array, Int32Type, [7, 3] },
-                column_nonnull! { I32Array, Int32Type, [8, 6] },
+                column_nonnull! { I32Array, [7, 3] },
+                column_nonnull! { I32Array, [8, 6] },
             ],
             visibility: None,
         };

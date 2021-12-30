@@ -194,8 +194,8 @@ mod tests {
             })
             .collect();
 
-        let col1 = column_nonnull! { I64Array, Int64Type, [1, 3, 5, 7, 9] };
-        let col2 = column_nonnull! { I64Array, Int64Type, [2, 4, 6, 8, 10] };
+        let col1 = column_nonnull! { I64Array, [1, 3, 5, 7, 9] };
+        let col2 = column_nonnull! { I64Array, [2, 4, 6, 8, 10] };
         let data_chunk: DataChunk = DataChunk::builder().columns(vec![col1, col2]).build();
         mock_executor.add(data_chunk.clone());
 

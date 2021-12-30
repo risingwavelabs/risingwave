@@ -211,20 +211,20 @@ mod tests {
         let chunk1 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert, Op::Insert],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [100, 10, 4] },
-                column_nonnull! { I64Array, Int64Type, [200, 14, 300] },
+                column_nonnull! { I64Array, [100, 10, 4] },
+                column_nonnull! { I64Array, [200, 14, 300] },
                 // primary key column
-                column_nonnull! { I64Array, Int64Type, [1001, 1002, 1003] },
+                column_nonnull! { I64Array, [1001, 1002, 1003] },
             ],
             visibility: None,
         };
         let chunk2 = StreamChunk {
             ops: vec![Op::Delete, Op::Delete, Op::Delete, Op::Insert],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [100, 10, 4, 104] },
-                column_nonnull! { I64Array, Int64Type, [200, 14, 300, 500] },
+                column_nonnull! { I64Array, [100, 10, 4, 104] },
+                column_nonnull! { I64Array, [200, 14, 300, 500] },
                 // primary key column
-                column_nonnull! { I64Array, Int64Type, [1001, 1002, 1003, 1004] },
+                column_nonnull! { I64Array, [1001, 1002, 1003, 1004] },
             ],
             visibility: Some((vec![true, false, true, true]).try_into().unwrap()),
         };

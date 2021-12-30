@@ -243,11 +243,11 @@ mod tests {
         // Append a chunk with 2 rows
         let input = {
             let column1 = column! {
-              I32Array, Int32Type, [Some(3), None]
+              I32Array, [Some(3), None]
             };
 
             let column2 = column! {
-              I64Array, Int64Type, [None, Some(7i64)]
+              I64Array, [None, Some(7i64)]
             };
 
             let chunk =
@@ -263,9 +263,9 @@ mod tests {
 
         // Append a chunk with 4 rows
         let input = {
-            let column1 = column! {I32Array, Int32Type, [Some(3), None, Some(4), None]};
+            let column1 = column! {I32Array, [Some(3), None, Some(4), None]};
 
-            let column2 = column! {I64Array, Int64Type, [None, Some(7i64), Some(8i64), Some(9i64)]};
+            let column2 = column! {I64Array, [None, Some(7i64), Some(8i64), Some(9i64)]};
 
             let chunk =
                 DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
@@ -301,8 +301,8 @@ mod tests {
 
         // Append a chunk with 2 rows
         let input = {
-            let column1 = column! {I32Array, Int32Type, [Some(3), None]};
-            let column2 = column! {I64Array, Int64Type, [None, Some(7i64)]};
+            let column1 = column! {I32Array, [Some(3), None]};
+            let column2 = column! {I64Array, [None, Some(7i64)]};
 
             let chunk =
                 DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
@@ -320,10 +320,9 @@ mod tests {
 
         // Append a chunk with 4 rows
         let input = {
-            let column1 = column! { I32Array, Int32Type, [Some(3), None, Some(4), None] };
+            let column1 = column! { I32Array, [Some(3), None, Some(4), None] };
 
-            let column2 =
-                column! { I64Array, Int64Type, [None, Some(7i64), Some(8i64), Some(9i64)]};
+            let column2 = column! { I64Array, [None, Some(7i64), Some(8i64), Some(9i64)]};
 
             let chunk =
                 DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
@@ -365,10 +364,8 @@ mod tests {
 
         // Append a chunk with 2 rows
         let input = {
-            let column1 = column! {I32Array, Int32Type, [Some(3), None]};
-
-            let column2 = column! {I64Array, Int64Type, [None, Some(7i64)] };
-
+            let column1 = column! {I32Array, [Some(3), None]};
+            let column2 = column! {I64Array, [None, Some(7i64)] };
             let chunk =
                 DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
             SlicedDataChunk::new_checked(chunk).expect("Failed to create sliced data chunk")

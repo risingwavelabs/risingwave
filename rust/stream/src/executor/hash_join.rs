@@ -507,32 +507,32 @@ mod tests {
         let chunk_l1 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert, Op::Insert],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [1, 2, 3] },
-                column_nonnull! { I64Array, Int64Type, [4, 5, 6] },
+                column_nonnull! { I64Array, [1, 2, 3] },
+                column_nonnull! { I64Array, [4, 5, 6] },
             ],
             visibility: None,
         };
         let chunk_l2 = StreamChunk {
             ops: vec![Op::Insert, Op::Delete],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [3, 3] },
-                column_nonnull! { I64Array, Int64Type, [8, 8] },
+                column_nonnull! { I64Array, [3, 3] },
+                column_nonnull! { I64Array, [8, 8] },
             ],
             visibility: Some((vec![true, true]).try_into().unwrap()),
         };
         let chunk_r1 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert, Op::Insert],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [2, 4, 6] },
-                column_nonnull! { I64Array, Int64Type, [7, 8, 9] },
+                column_nonnull! { I64Array, [2, 4, 6] },
+                column_nonnull! { I64Array, [7, 8, 9] },
             ],
             visibility: None,
         };
         let chunk_r2 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [3, 6] },
-                column_nonnull! { I64Array, Int64Type, [10, 11] },
+                column_nonnull! { I64Array, [3, 6] },
+                column_nonnull! { I64Array, [10, 11] },
             ],
             visibility: Some((vec![true, true]).try_into().unwrap()),
         };
@@ -653,32 +653,32 @@ mod tests {
         let chunk_l1 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert, Op::Insert],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [1, 2, 3] },
-                column_nonnull! { I64Array, Int64Type, [4, 5, 6] },
+                column_nonnull! { I64Array, [1, 2, 3] },
+                column_nonnull! { I64Array, [4, 5, 6] },
             ],
             visibility: None,
         };
         let chunk_l2 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [6, 3] },
-                column_nonnull! { I64Array, Int64Type, [8, 8] },
+                column_nonnull! { I64Array, [6, 3] },
+                column_nonnull! { I64Array, [8, 8] },
             ],
             visibility: Some((vec![true, true]).try_into().unwrap()),
         };
         let chunk_r1 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert, Op::Insert],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [2, 4, 6] },
-                column_nonnull! { I64Array, Int64Type, [7, 8, 9] },
+                column_nonnull! { I64Array, [2, 4, 6] },
+                column_nonnull! { I64Array, [7, 8, 9] },
             ],
             visibility: None,
         };
         let chunk_r2 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [3, 6] },
-                column_nonnull! { I64Array, Int64Type, [10, 11] },
+                column_nonnull! { I64Array, [3, 6] },
+                column_nonnull! { I64Array, [10, 11] },
             ],
             visibility: Some((vec![true, true]).try_into().unwrap()),
         };
@@ -826,32 +826,32 @@ mod tests {
         let chunk_l1 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert, Op::Insert],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [1, 2, 3] },
-                column_nonnull! { I64Array, Int64Type, [4, 5, 6] },
+                column_nonnull! { I64Array, [1, 2, 3] },
+                column_nonnull! { I64Array, [4, 5, 6] },
             ],
             visibility: None,
         };
         let chunk_l2 = StreamChunk {
             ops: vec![Op::Insert, Op::Delete],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [3, 3] },
-                column_nonnull! { I64Array, Int64Type, [8, 8] },
+                column_nonnull! { I64Array, [3, 3] },
+                column_nonnull! { I64Array, [8, 8] },
             ],
             visibility: Some((vec![true, true]).try_into().unwrap()),
         };
         let chunk_r1 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert, Op::Insert],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [2, 4, 6] },
-                column_nonnull! { I64Array, Int64Type, [7, 8, 9] },
+                column_nonnull! { I64Array, [2, 4, 6] },
+                column_nonnull! { I64Array, [7, 8, 9] },
             ],
             visibility: None,
         };
         let chunk_r2 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [3, 6] },
-                column_nonnull! { I64Array, Int64Type, [10, 11] },
+                column_nonnull! { I64Array, [3, 6] },
+                column_nonnull! { I64Array, [10, 11] },
             ],
             visibility: Some((vec![true, true]).try_into().unwrap()),
         };
@@ -992,32 +992,32 @@ mod tests {
         let chunk_l1 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert, Op::Insert],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [1, 2, 3] },
-                column_nonnull! { I64Array, Int64Type, [4, 5, 6] },
+                column_nonnull! { I64Array, [1, 2, 3] },
+                column_nonnull! { I64Array, [4, 5, 6] },
             ],
             visibility: None,
         };
         let chunk_l2 = StreamChunk {
             ops: vec![Op::Insert, Op::Delete],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [3, 3] },
-                column_nonnull! { I64Array, Int64Type, [8, 8] },
+                column_nonnull! { I64Array, [3, 3] },
+                column_nonnull! { I64Array, [8, 8] },
             ],
             visibility: Some((vec![true, true]).try_into().unwrap()),
         };
         let chunk_r1 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert, Op::Insert],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [2, 4, 6] },
-                column_nonnull! { I64Array, Int64Type, [7, 8, 9] },
+                column_nonnull! { I64Array, [2, 4, 6] },
+                column_nonnull! { I64Array, [7, 8, 9] },
             ],
             visibility: None,
         };
         let chunk_r2 = StreamChunk {
             ops: vec![Op::Insert, Op::Delete],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [5, 5] },
-                column_nonnull! { I64Array, Int64Type, [10, 10] },
+                column_nonnull! { I64Array, [5, 5] },
+                column_nonnull! { I64Array, [10, 10] },
             ],
             visibility: Some((vec![true, true]).try_into().unwrap()),
         };
@@ -1138,32 +1138,32 @@ mod tests {
         let chunk_l1 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert, Op::Insert],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [1, 2, 3] },
-                column_nonnull! { I64Array, Int64Type, [4, 5, 6] },
+                column_nonnull! { I64Array, [1, 2, 3] },
+                column_nonnull! { I64Array, [4, 5, 6] },
             ],
             visibility: None,
         };
         let chunk_l2 = StreamChunk {
             ops: vec![Op::Insert, Op::Delete],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [3, 3] },
-                column_nonnull! { I64Array, Int64Type, [8, 8] },
+                column_nonnull! { I64Array, [3, 3] },
+                column_nonnull! { I64Array, [8, 8] },
             ],
             visibility: Some((vec![true, true]).try_into().unwrap()),
         };
         let chunk_r1 = StreamChunk {
             ops: vec![Op::Insert, Op::Insert, Op::Insert],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [2, 4, 6] },
-                column_nonnull! { I64Array, Int64Type, [7, 8, 9] },
+                column_nonnull! { I64Array, [2, 4, 6] },
+                column_nonnull! { I64Array, [7, 8, 9] },
             ],
             visibility: None,
         };
         let chunk_r2 = StreamChunk {
             ops: vec![Op::Insert, Op::Delete],
             columns: vec![
-                column_nonnull! { I64Array, Int64Type, [5, 5] },
-                column_nonnull! { I64Array, Int64Type, [10, 10] },
+                column_nonnull! { I64Array, [5, 5] },
+                column_nonnull! { I64Array, [10, 10] },
             ],
             visibility: Some((vec![true, true]).try_into().unwrap()),
         };

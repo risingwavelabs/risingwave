@@ -173,8 +173,8 @@ mod tests {
         );
         assert!(!managed_state.is_dirty());
         let columns = vec![
-            column_nonnull! { I64Array, Int64Type, [3, 2, 1] },
-            column_nonnull! { I64Array, Int64Type, [4, 5, 6] },
+            column_nonnull! { I64Array, [3, 2, 1] },
+            column_nonnull! { I64Array, [4, 5, 6] },
         ];
 
         let col1 = [1, 2, 3];

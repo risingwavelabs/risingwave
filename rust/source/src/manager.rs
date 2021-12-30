@@ -212,11 +212,7 @@ mod tests {
             }],
         ));
 
-        let chunk0 = StreamChunk::new(
-            vec![Op::Insert],
-            vec![column_nonnull!(I64Array, Int64Type, [0])],
-            None,
-        );
+        let chunk0 = StreamChunk::new(vec![Op::Insert], vec![column_nonnull!(I64Array, [0])], None);
         table.write(&chunk0).unwrap();
 
         let source_columns = table
