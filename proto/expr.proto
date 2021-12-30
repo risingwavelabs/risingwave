@@ -55,8 +55,8 @@ message ExprNode {
     IS_NOT_TRUE = 216;
     IS_FALSE = 217;
     IS_NOT_FALSE = 218;
-    IS_UNKNOWN = 219;
-    IS_NOT_UNKNOWN = 220;
+    IS_NULL = 219;
+    IS_NOT_NULL = 220;
     STREAM_NULL_BY_ROW_COUNT = 1000;
   }
   Type expr_type = 1;

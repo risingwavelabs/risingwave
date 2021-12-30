@@ -46,6 +46,8 @@ import com.risingwave.sql.tree.InPredicate;
 import com.risingwave.sql.tree.Insert;
 import com.risingwave.sql.tree.IntegerLiteral;
 import com.risingwave.sql.tree.IntervalLiteral;
+import com.risingwave.sql.tree.IsNotNullPredicate;
+import com.risingwave.sql.tree.IsNullPredicate;
 import com.risingwave.sql.tree.Join;
 import com.risingwave.sql.tree.JoinCriteria;
 import com.risingwave.sql.tree.JoinOn;
@@ -115,9 +117,7 @@ import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.util.Pair;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-/**
- * A visitor for transforming sqlNode to calcite node
- */
+/** A visitor for transforming sqlNode to calcite node */
 public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
   private final RisingWaveOperatorTable operatorTable = new RisingWaveOperatorTable();
   final int intervalPrecision = 9;
@@ -169,17 +169,23 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
                 .collect(Collectors.toList()));
 
     // TODO(peng): dirty hack for primary keys
-    List<ColumnDefinition<?>> primaryColumns = node.getTableElements().stream().filter(
-            e -> (e instanceof ColumnDefinition) && ((ColumnDefinition<?>) e).constraints().stream()
-                .anyMatch(c -> c instanceof PrimaryKeyColumnConstraint))
-        .map(e -> ((ColumnDefinition<?>) e)).collect(Collectors.toList());
+    List<ColumnDefinition<?>> primaryColumns =
+        node.getTableElements().stream()
+            .filter(
+                e ->
+                    (e instanceof ColumnDefinition)
+                        && ((ColumnDefinition<?>) e)
+                            .constraints().stream()
+                                .anyMatch(c -> c instanceof PrimaryKeyColumnConstraint))
+            .map(e -> ((ColumnDefinition<?>) e))
+            .collect(Collectors.toList());
 
     SqlNodeList properties = visitGenericProperties(node.getProperties(), context);
     SqlCharStringLiteral rowFormat = SqlLiteral.createCharString(node.getRowFormat(), pos);
     SqlCharStringLiteral rowSchemaLocation =
         SqlLiteral.createCharString(node.getRowSchemaLocation(), pos);
-    return new SqlCreateSource(pos, name, columnList, properties, rowFormat, rowSchemaLocation,
-        primaryColumns);
+    return new SqlCreateSource(
+        pos, name, columnList, properties, rowFormat, rowSchemaLocation, primaryColumns);
   }
 
   @Override
@@ -609,9 +615,9 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
     var operator = lookupOperator(identifierOf("BETWEEN SYMMETRIC"), SqlSyntax.SPECIAL);
     var operands =
         new SqlNode[] {
-            node.getValue().accept(this, context),
-            node.getMin().accept(this, context),
-            node.getMax().accept(this, context)
+          node.getValue().accept(this, context),
+          node.getMin().accept(this, context),
+          node.getMax().accept(this, context)
         };
 
     return new SqlBasicCall(operator, operands, SqlParserPos.ZERO);
@@ -838,6 +844,20 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
     return new SqlBasicCall(sqlOperator, new SqlNode[] {input}, SqlParserPos.ZERO);
   }
 
+  @Override
+  protected SqlNode visitIsNotNullPredicate(IsNotNullPredicate node, Void context) {
+    var operator = lookupOperator("IS NOT NULL", SqlSyntax.POSTFIX);
+    var childExpression = node.getValue().accept(this, context);
+    return new SqlBasicCall(operator, new SqlNode[] {childExpression}, SqlParserPos.ZERO);
+  }
+
+  @Override
+  protected SqlNode visitIsNullPredicate(IsNullPredicate node, Void context) {
+    var operator = lookupOperator("IS NULL", SqlSyntax.POSTFIX);
+    var childExpression = node.getValue().accept(this, context);
+    return new SqlBasicCall(operator, new SqlNode[] {childExpression}, SqlParserPos.ZERO);
+  }
+
   private static SqlBasicTypeNameSpec toBasicTypeNameSpec(ColumnType<?> columnType) {
     String typeName = columnType.name().toUpperCase();
     switch (typeName) {
@@ -868,45 +888,48 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
         return new SqlBasicTypeNameSpec(SqlTypeName.TIME, SqlParserPos.ZERO);
       case "TIMESTAMP":
         return new SqlBasicTypeNameSpec(SqlTypeName.TIMESTAMP, SqlParserPos.ZERO);
-      case "CHAR": {
-        var parameters = columnType.parameters();
-        Verify.verify(parameters.size() <= 1, "The parameter list of CHAR is too long");
-        if (parameters.size() == 0) {
-          // If user do not specify length, the default limit is 1.
-          return new SqlBasicTypeNameSpec(SqlTypeName.CHAR, 1, SqlParserPos.ZERO);
-        } else {
-          return new SqlBasicTypeNameSpec(SqlTypeName.CHAR, parameters.get(0), SqlParserPos.ZERO);
+      case "CHAR":
+        {
+          var parameters = columnType.parameters();
+          Verify.verify(parameters.size() <= 1, "The parameter list of CHAR is too long");
+          if (parameters.size() == 0) {
+            // If user do not specify length, the default limit is 1.
+            return new SqlBasicTypeNameSpec(SqlTypeName.CHAR, 1, SqlParserPos.ZERO);
+          } else {
+            return new SqlBasicTypeNameSpec(SqlTypeName.CHAR, parameters.get(0), SqlParserPos.ZERO);
+          }
         }
-      }
-      case "VARCHAR": {
-        var parameters = columnType.parameters();
-        Verify.verify(parameters.size() <= 1, "The parameter list of VARCHAR is too long");
-        if (parameters.size() == 0) {
-          // If user do not specify length, there is no limit. Use -1 here.
-          return new SqlBasicTypeNameSpec(SqlTypeName.VARCHAR, 1, SqlParserPos.ZERO);
-        } else {
-          return new SqlBasicTypeNameSpec(
-              SqlTypeName.VARCHAR, parameters.get(0), SqlParserPos.ZERO);
+      case "VARCHAR":
+        {
+          var parameters = columnType.parameters();
+          Verify.verify(parameters.size() <= 1, "The parameter list of VARCHAR is too long");
+          if (parameters.size() == 0) {
+            // If user do not specify length, there is no limit. Use -1 here.
+            return new SqlBasicTypeNameSpec(SqlTypeName.VARCHAR, 1, SqlParserPos.ZERO);
+          } else {
+            return new SqlBasicTypeNameSpec(
+                SqlTypeName.VARCHAR, parameters.get(0), SqlParserPos.ZERO);
+          }
         }
-      }
       case "TEXT":
         // According to https://www.postgresql.org/docs/9.5/datatype-character.html
         // TEXT should be varchar without size limit, and by default varchar without size should be
         // size 1
         return new SqlBasicTypeNameSpec(
             SqlTypeName.VARCHAR, StringType.MAX_SIZE, SqlParserPos.ZERO);
-      case "NUMERIC": {
-        var parameters = columnType.parameters();
-        if (parameters.size() == 0) {
-          return new SqlBasicTypeNameSpec(SqlTypeName.DECIMAL, SqlParserPos.ZERO);
-        } else if (parameters.size() == 1) {
-          return new SqlBasicTypeNameSpec(
-              SqlTypeName.DECIMAL, parameters.get(0), SqlParserPos.ZERO);
-        } else {
-          return new SqlBasicTypeNameSpec(
-              SqlTypeName.DECIMAL, parameters.get(0), parameters.get(1), SqlParserPos.ZERO);
+      case "NUMERIC":
+        {
+          var parameters = columnType.parameters();
+          if (parameters.size() == 0) {
+            return new SqlBasicTypeNameSpec(SqlTypeName.DECIMAL, SqlParserPos.ZERO);
+          } else if (parameters.size() == 1) {
+            return new SqlBasicTypeNameSpec(
+                SqlTypeName.DECIMAL, parameters.get(0), SqlParserPos.ZERO);
+          } else {
+            return new SqlBasicTypeNameSpec(
+                SqlTypeName.DECIMAL, parameters.get(0), parameters.get(1), SqlParserPos.ZERO);
+          }
         }
-      }
       case "TIMESTAMPZ":
         return new SqlBasicTypeNameSpec(
             SqlTypeName.TIMESTAMP_WITH_LOCAL_TIME_ZONE, SqlParserPos.ZERO);

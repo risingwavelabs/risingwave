@@ -7,14 +7,13 @@ use super::template::{UnaryBytesExpression, UnaryExpression};
 use crate::array::{
     BoolArray, DataTypeTrait, F32Array, F64Array, I16Array, I32Array, I64Array, Utf8Array,
 };
+use crate::expr::expr_is_null::{IsNotNullExpression, IsNullExpression};
 use crate::expr::pg_sleep::PgSleepExpression;
 use crate::expr::template::UnaryNullableExpression;
 use crate::expr::BoxedExpression;
 use crate::types::{DataTypeKind, DataTypeRef, *};
 use crate::vector_op::cast::*;
-use crate::vector_op::cmp::{
-    is_false, is_not_false, is_not_true, is_not_unknown, is_true, is_unknown,
-};
+use crate::vector_op::cmp::{is_false, is_not_false, is_not_true, is_true};
 use crate::vector_op::conjunction;
 use crate::vector_op::length::length_default;
 use crate::vector_op::ltrim::ltrim;
@@ -240,22 +239,8 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
-        (ProstType::IsUnknown, _, _) => {
-            Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _> {
-                expr_ia1: child_expr,
-                return_type,
-                func: is_unknown,
-                _phantom: PhantomData,
-            })
-        }
-        (ProstType::IsNotUnknown, _, _) => {
-            Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _> {
-                expr_ia1: child_expr,
-                return_type,
-                func: is_not_unknown,
-                _phantom: PhantomData,
-            })
-        }
+        (ProstType::IsNull, _, _) => Box::new(IsNullExpression::new(child_expr)),
+        (ProstType::IsNotNull, _, _) => Box::new(IsNotNullExpression::new(child_expr)),
         (ProstType::Upper, _, _) => Box::new(UnaryBytesExpression::<Utf8Array, _> {
             expr_ia1: child_expr,
             return_type,

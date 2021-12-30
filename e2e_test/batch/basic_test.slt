@@ -175,6 +175,13 @@ true   true   1
 false  false  2
 null   NULL   3
 
+query BBB
+select v1 is null, v2 is not null, v3 is not null from t;
+----
+false true  true
+false true  true
+false false true
+
 statement ok
 drop table t;
 

@@ -5,6 +5,7 @@ pub mod expr_binary_nonnull;
 pub mod expr_binary_nullable;
 mod expr_case;
 mod expr_input_ref;
+mod expr_is_null;
 mod expr_literal;
 mod expr_ternary_bytes;
 pub mod expr_unary;
@@ -46,8 +47,8 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     use risingwave_pb::expr::expr_node::Type::*;
 
     match prost.get_expr_type() {
-        Cast | Upper | Not | PgSleep | IsTrue | IsNotTrue | IsFalse | IsNotFalse | IsUnknown
-        | IsNotUnknown => build_unary_expr_prost(prost),
+        Cast | Upper | Not | PgSleep | IsTrue | IsNotTrue | IsFalse | IsNotFalse | IsNull
+        | IsNotNull => build_unary_expr_prost(prost),
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual => {
             build_binary_expr_prost(prost)
         }
