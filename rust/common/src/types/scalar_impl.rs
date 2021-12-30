@@ -62,6 +62,12 @@ impl<'a> ScalarRef<'a> for &'a str {
     }
 }
 
+impl ScalarPartialOrd for Decimal {
+    fn scalar_cmp(&self, other: Self) -> Option<std::cmp::Ordering> {
+        self.partial_cmp(&other)
+    }
+}
+
 impl ScalarPartialOrd for String {
     fn scalar_cmp(&self, other: &str) -> Option<std::cmp::Ordering> {
         self.as_str().partial_cmp(other)

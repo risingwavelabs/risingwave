@@ -249,6 +249,12 @@ select * from t
 3.03 3
 4.04 4
 
+query R
+select v1 from t order by v1 limit 2
+----
+2.02
+3.03
+
 statement ok
 drop table t
 
