@@ -22,7 +22,7 @@ wait_server() {
     } 2>/dev/null
 }
 
-echo "Starting single node zookeeper and kafka"
+echo "Starting single node zookeeper/kafka/mysql/debezium"
 docker compose -f "$SCRIPT_PATH"/docker-compose.yml up -d
 
 echo "Waiting for zookeeper"
@@ -30,6 +30,12 @@ wait_server 2181
 
 echo "Waiting for kafka broker"
 wait_server 29092
+
+echo "Waiting for mysql source"
+wait_server 23306
+
+echo "Waiting for debezium"
+wait_server 28083
 
 echo "Waiting for cluster"
 sleep 10
@@ -60,3 +66,6 @@ for filename in "$SCRIPT_PATH"/test_data/* ; do
     # Note the -l parameter here, without which -l will treat the entire file as a single message
     docker exec -i kafkacat kafkacat -b broker:9092 -t "$topic" -l -P /streaming/test_data/"$base"
 done
+
+echo "Creating sync job for debezium and mysql"
+curl -i -X POST -H "Accept:application/json" -H  "Content-Type:application/json" http://localhost:28083/connectors/ -d @"$SCRIPT_PATH"/debezium-mysql.json
