@@ -5,57 +5,16 @@ use tokio::sync::mpsc::unbounded_channel;
 
 use super::cloud::gen_remote_table;
 use super::iterator::{ConcatIterator, HummockIterator, SortedIterator};
-use super::key::{get_ts, Timestamp};
+use super::key::{get_ts, FullKey, Timestamp};
 use super::key_range::KeyRange;
+use super::multi_builder::CapacitySplitTableBuilder;
 use super::version_cmp::VersionedComparator;
 use super::version_manager::{CompactTask, Level, LevelEntry};
-use super::{
-    HummockError, HummockResult, HummockStorage, HummockValue, Table, TableBuilder, TableIterator,
-};
+use super::{HummockError, HummockResult, HummockStorage, HummockValue, Table, TableIterator};
 
 pub struct Compactor;
 
 impl Compactor {
-    /// Seals current table builder to generate a remote table, then returns a new table builder if
-    /// `is_last_table_builder` == true
-    ///
-    /// # Arguments
-    ///
-    /// * `storage` - To get a unique ID for table to generate
-    /// * `output_ssts` - Vec to which the table generated will be pushed
-    /// * `table_builder` - Contains current elements
-    /// * `is_last_table_builder` - if True, returns a new empty table builder
-    async fn seal_table(
-        storage: &Arc<HummockStorage>,
-        output_ssts: &mut Vec<Table>,
-        mut table_builder: TableBuilder,
-        is_last_table_builder: bool,
-    ) -> HummockResult<Option<TableBuilder>> {
-        if !table_builder.is_empty() {
-            // TODO: avoid repeating code in write_batch()
-            let (blocks, meta) = table_builder.finish();
-            let table_id = storage.version_manager.generate_table_id().await;
-            let remote_dir = Some(storage.options.remote_dir.as_str());
-            let table = gen_remote_table(
-                storage.obj_client.clone(),
-                table_id,
-                blocks,
-                meta,
-                remote_dir,
-            )
-            .await?;
-
-            output_ssts.push(table);
-
-            if is_last_table_builder {
-                return Ok(None);
-            } else {
-                table_builder = HummockStorage::get_builder(&storage.options);
-            }
-        }
-        Ok(Some(table_builder))
-    }
-
     async fn run_compact(
         storage: &Arc<HummockStorage>,
         compact_task: &mut CompactTask,
@@ -160,7 +119,11 @@ impl Compactor {
         let mut skip_key = BytesMut::new();
         let mut last_key = BytesMut::new();
 
-        let mut table_builder = HummockStorage::get_builder(&storage.options);
+        let mut builder = CapacitySplitTableBuilder::new(|| async {
+            let table_id = storage.version_manager.generate_table_id().await;
+            let builder = HummockStorage::get_builder(&storage.options);
+            (table_id, builder)
+        });
 
         while iter.is_valid() {
             let iter_key = iter.key();
@@ -174,24 +137,15 @@ impl Compactor {
                 }
             }
 
-            if last_key.is_empty() || !VersionedComparator::same_user_key(iter_key, &last_key) {
+            let is_new_user_key =
+                last_key.is_empty() || !VersionedComparator::same_user_key(iter_key, &last_key);
+
+            if is_new_user_key {
                 if !kr.right.is_empty()
                     && VersionedComparator::compare_key(iter_key, &kr.right)
                         != std::cmp::Ordering::Less
                 {
                     break;
-                }
-
-                if table_builder.reach_capacity() {
-                    table_builder = Compactor::seal_table(
-                        &storage,
-                        local_sorted_output_ssts,
-                        table_builder,
-                        false,
-                    )
-                    .await?
-                    .unwrap();
-                    continue;
                 }
 
                 last_key.clear();
@@ -208,18 +162,34 @@ impl Compactor {
                 }
             }
 
-            table_builder.add(
-                iter_key,
-                match iter.value() {
-                    HummockValue::Put(slice_val) => HummockValue::Put(Vec::from(slice_val)),
-                    HummockValue::Delete => HummockValue::Delete,
-                },
-            );
+            builder
+                .add_full_key(
+                    FullKey::from_slice(iter_key),
+                    iter.value().to_owned_value(),
+                    is_new_user_key,
+                )
+                .await;
 
             iter.next().await?;
         }
 
-        Compactor::seal_table(&storage, local_sorted_output_ssts, table_builder, true).await?;
+        // Seal table for each split
+        builder.seal_current();
+
+        local_sorted_output_ssts.reserve(builder.len());
+        // TODO: decide upload concurrency
+        for (table_id, blocks, meta) in builder.finish() {
+            let remote_dir = Some(storage.options.remote_dir.as_str());
+            let table = gen_remote_table(
+                storage.obj_client.clone(),
+                table_id,
+                blocks,
+                meta,
+                remote_dir,
+            )
+            .await?;
+            local_sorted_output_ssts.push(table);
+        }
 
         Ok(())
     }
@@ -260,6 +230,7 @@ impl Compactor {
 
 #[cfg(test)]
 mod tests {
+    use std::iter::once;
     use std::sync::Arc;
 
     use bytes::Bytes;
@@ -267,7 +238,7 @@ mod tests {
 
     use super::*;
     use crate::hummock::iterator::BoxedHummockIterator;
-    use crate::hummock::key::key_with_ts;
+    use crate::hummock::key::{key_with_ts, Timestamp};
     use crate::hummock::utils::bloom_filter_tables;
     use crate::hummock::version_manager::ScopedUnpinSnapshot;
     use crate::hummock::{user_key, HummockOptions, HummockResult, HummockStorage};
@@ -425,6 +396,39 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(value, None);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_same_key_not_splitted() -> HummockResult<()> {
+        let options = HummockOptions::small_for_test();
+        let target_table_size = options.table_size;
+        let storage = Arc::new(HummockStorage::new(
+            Arc::new(InMemObjectStore::new()),
+            options,
+            None,
+        ));
+
+        let kv_count = 8192;
+        for _ in 0..kv_count {
+            storage
+                .write_batch(once((
+                    b"same_key".to_vec(),
+                    HummockValue::Put(b"value".to_vec()),
+                )))
+                .await?;
+        }
+
+        let mut compact_task = storage.version_manager.get_compact_task().await?.unwrap();
+        compact_task.watermark = Timestamp::MIN; // do not gc these records
+        Compactor::run_compact(&storage, &mut compact_task).await?;
+
+        let output_table_count = compact_task.sorted_output_ssts.len();
+        assert_eq!(output_table_count, 1); // should not split into multiple tables
+
+        let table = compact_task.sorted_output_ssts.get(0).unwrap();
+        assert!(table.meta.estimated_size > target_table_size); // even if it reaches the target size
 
         Ok(())
     }

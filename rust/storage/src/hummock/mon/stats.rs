@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::{register_int_counter_with_registry, Registry};
 use risingwave_common::catalog::{Field, Schema};
@@ -14,6 +16,10 @@ pub struct HummockStats {
     pub point_get_counts: GenericCounter<AtomicU64>,
     pub range_scan_counts: GenericCounter<AtomicU64>,
     pub batched_write_counts: GenericCounter<AtomicU64>,
+}
+
+lazy_static::lazy_static! {
+  pub static ref DEFAULT_HUMMOCK_STATS: Arc<HummockStats> = Arc::new(HummockStats::new(prometheus::default_registry()));
 }
 
 impl HummockStats {

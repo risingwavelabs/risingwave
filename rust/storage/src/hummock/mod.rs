@@ -34,7 +34,7 @@ use value::*;
 
 use self::iterator::UserKeyIterator;
 use self::key::{user_key, FullKey};
-use self::mon::HummockStats;
+use self::mon::{HummockStats, DEFAULT_HUMMOCK_STATS};
 use self::multi_builder::CapacitySplitTableBuilder;
 use self::snapshot::HummockSnapshot;
 pub use self::state_store::*;
@@ -67,6 +67,18 @@ impl HummockOptions {
             block_size: 64 * (1 << 10),
             bloom_false_positive: 0.1,
             remote_dir: "hummock_001".to_string(),
+            checksum_algo: ChecksumAlg::XxHash64,
+            stats_enabled: true,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn small_for_test() -> Self {
+        Self {
+            table_size: 4 * (1 << 10),
+            block_size: 1 << 10,
+            bloom_false_positive: 0.1,
+            remote_dir: "hummock_001_small".to_string(),
             checksum_algo: ChecksumAlg::XxHash64,
             stats_enabled: true,
         }
@@ -105,7 +117,7 @@ impl HummockStorage {
             if let Some(registry) = stats_registry {
                 stats = Some(Arc::new(HummockStats::new(&registry)));
             } else {
-                stats = Some(Arc::new(HummockStats::new(prometheus::default_registry())));
+                stats = Some(DEFAULT_HUMMOCK_STATS.clone());
             }
         }
 
@@ -268,7 +280,7 @@ mod tests {
 
     async fn prometheus_service(
         _req: Request<Body>,
-        registry: Arc<Registry>,
+        registry: &Registry,
     ) -> Result<Response<Body>, hyper::Error> {
         let encoder = TextEncoder::new();
         let mut buffer = vec![];
@@ -286,12 +298,9 @@ mod tests {
     async fn test_prometheus_endpoint() {
         let hummock_options = HummockOptions::default_for_test();
         let host_addr = "127.0.0.1:1222";
-        let prom_registry = Some(Arc::new(Registry::new()));
-        let hummock_storage = HummockStorage::new(
-            Arc::new(InMemObjectStore::new()),
-            hummock_options,
-            prom_registry.clone(),
-        );
+
+        let hummock_storage =
+            HummockStorage::new(Arc::new(InMemObjectStore::new()), hummock_options, None);
         let anchor = Bytes::from("aa");
         let mut batch1 = vec![
             (anchor.clone(), Some(Bytes::from("111"))),
@@ -309,14 +318,12 @@ mod tests {
 
         let notifier = Arc::new(tokio::sync::Notify::new());
         let notifiee = notifier.clone();
-        let registry = prom_registry.unwrap();
 
         let make_svc = make_service_fn(move |_| {
-            let registry = registry.clone();
+            let registry = prometheus::default_registry();
             async move {
-                Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
-                    let registry = registry.clone();
-                    async move { prometheus_service(req, registry).await }
+                Ok::<_, Infallible>(service_fn(move |req: Request<Body>| async move {
+                    prometheus_service(req, registry).await
                 }))
             }
         });
@@ -470,6 +477,7 @@ mod tests {
         let len = count_iter(&mut iter).await;
         assert_eq!(len, 4);
     }
+
     async fn count_iter(iter: &mut UserKeyIterator) -> usize {
         let mut c: usize = 0;
         while iter.is_valid() {
