@@ -7,6 +7,7 @@ use risingwave_common::array::Op;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataTypeKind, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
+use risingwave_common::vector_op::cast::str_to_date;
 use serde::de::Deserialize;
 use serde_protobuf::de::Deserializer;
 use serde_protobuf::descriptor::Descriptors;
@@ -127,6 +128,16 @@ impl SourceParser for ProtobufParser {
         DataTypeKind::Char | DataTypeKind::Varchar => {
           protobuf_match_type!(value, ScalarImpl::Utf8, { String }, String)
         }
+        DataTypeKind::Date => {
+          value.and_then(|v| match v {
+            Value::String(b) => str_to_date(&b).ok(),
+            Value::Option(Some(boxed_value)) => match *boxed_value {
+              Value::String(b) => str_to_date(&b).ok(),
+              _ => None,
+            }
+            _ => None,
+          }).map(ScalarImpl::Int32)
+        }
         _ => unimplemented!(),
       }
     }).collect::<Vec<Datum>>();
@@ -144,8 +155,9 @@ mod tests {
 
     use risingwave_common::error::Result;
     use risingwave_common::types::{
-        DataTypeKind, Float32Type, Int32Type, Int64Type, ScalarImpl, StringType,
+        DataTypeKind, DateType, Float32Type, Int32Type, Int64Type, ScalarImpl, StringType,
     };
+    use risingwave_common::vector_op::cast::str_to_date;
     use serde_value::Value;
     use tempfile::Builder;
 
@@ -160,6 +172,7 @@ mod tests {
       string city = 3;
       int64 zipcode = 4;
       float rate = 5;
+      string date = 6;
     }"#;
 
     //        Id:      123,
@@ -167,7 +180,8 @@ mod tests {
     // 		City:    "test city",
     // 		Zipcode: 456,
     // 		Rate:    1.2345,
-    static PRE_GEN_PROTO_DATA: &[u8] = b"\x08\x7b\x12\x0c\x74\x65\x73\x74\x20\x61\x64\x64\x72\x65\x73\x73\x1a\x09\x74\x65\x73\x74\x20\x63\x69\x74\x79\x20\xc8\x03\x2d\x19\x04\x9e\x3f";
+    //    Date:    "2021-01-01"
+    static PRE_GEN_PROTO_DATA: &[u8] = b"\x08\x7b\x12\x0c\x74\x65\x73\x74\x20\x61\x64\x64\x72\x65\x73\x73\x1a\x09\x74\x65\x73\x74\x20\x63\x69\x74\x79\x20\xc8\x03\x2d\x19\x04\x9e\x3f\x32\x0a\x32\x30\x32\x31\x2d\x30\x31\x2d\x30\x31";
 
     fn create_parser() -> Result<ProtobufParser> {
         let temp_file = Builder::new()
@@ -238,7 +252,8 @@ mod tests {
           "address" => Value::Option(Some(Box::new(Value::String("test address".to_string())))),
           "city" => Value::Option(Some(Box::new(Value::String("test city".to_string())))),
           "zipcode" => Value::Option(Some(Box::new(Value::I64(456)))),
-          "rate" => Value::Option(Some(Box::new(Value::F32(1.2345))))
+          "rate" => Value::Option(Some(Box::new(Value::F32(1.2345)))),
+          "date" => Value::Option(Some(Box::new(Value::String("2021-01-01".to_string()))))
         );
 
         let keys = hash
@@ -301,6 +316,13 @@ mod tests {
                 skip_parse: false,
                 is_primary: false,
             },
+            SourceColumnDesc {
+                name: "date".to_string(),
+                data_type: DateType::create(false),
+                column_id: 5,
+                skip_parse: false,
+                is_primary: false,
+            },
         ];
 
         let result = parser.parse(PRE_GEN_PROTO_DATA, &descs);
@@ -313,5 +335,6 @@ mod tests {
         assert!(data[2].eq(&Some(ScalarImpl::Utf8("test city".to_string()))));
         assert!(data[3].eq(&Some(ScalarImpl::Int64(456))));
         assert!(data[4].eq(&Some(ScalarImpl::Float32(1.2345.into()))));
+        assert!(data[5].eq(&Some(ScalarImpl::Int32(str_to_date("2021-01-01").unwrap()))))
     }
 }
