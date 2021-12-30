@@ -135,7 +135,7 @@ pub fn compare_two_row(
         ($lhs: ident, $rhs: ident, [$( $tt: ident), *]) => {
             match ($lhs, $rhs) {
                 $((ArrayImpl::$tt(lhs_inner), ArrayImpl::$tt(rhs_inner)) => Ok(compare_value_in_array(lhs_inner, lhs_idx, rhs_inner, rhs_idx, &order_pair.order_type)),)*
-                _ => Err(InternalError(String::from("Unmatched array types"))),
+                (l_arr, r_arr) => Err(InternalError(format!("Unmatched array types, lhs array is: {}, rhs array is: {}", l_arr.get_ident(), r_arr.get_ident()))),
             }?
         }
     }
