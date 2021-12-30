@@ -1,3 +1,7 @@
+use std::pin::Pin;
+
+use async_stream::try_stream;
+use futures::{Stream, StreamExt};
 use risingwave_common::error::Result;
 use tokio::select;
 
@@ -18,18 +22,31 @@ pub enum AlignedMessage {
 
 pub struct BarrierAligner {
     /// The input from the left executor
-    input_l: Box<dyn Executor>,
+    input_l: Pin<Box<dyn Stream<Item = Result<Message>> + Send>>,
     /// The input from the right executor
-    input_r: Box<dyn Executor>,
+    input_r: Pin<Box<dyn Stream<Item = Result<Message>> + Send>>,
     /// The barrier state
     state: BarrierWaitState,
 }
 
 impl BarrierAligner {
-    pub fn new(input_l: Box<dyn Executor>, input_r: Box<dyn Executor>) -> Self {
+    pub fn new(mut input_l: Box<dyn Executor>, mut input_r: Box<dyn Executor>) -> Self {
+        // Wrap the input executors into streams to ensure cancellation-safety
+        let input_l = try_stream! {
+          loop {
+            let message = input_l.next().await?;
+            yield message;
+          }
+        };
+        let input_r = try_stream! {
+          loop {
+            let message = input_r.next().await?;
+            yield message;
+          }
+        };
         Self {
-            input_l,
-            input_r,
+            input_l: Box::pin(input_l),
+            input_r: Box::pin(input_r),
             state: BarrierWaitState::Either,
         }
     }
@@ -38,7 +55,7 @@ impl BarrierAligner {
         loop {
             select! {
               message = self.input_l.next(), if self.state != BarrierWaitState::Right => {
-                match message {
+                match message.unwrap() {
                   Ok(message) => match message {
                     Message::Chunk(chunk) => break AlignedMessage::Left(Ok(chunk)),
                     Message::Barrier(barrier) => {
@@ -58,7 +75,7 @@ impl BarrierAligner {
                 }
               },
               message = self.input_r.next(), if self.state != BarrierWaitState::Left => {
-                match message {
+                match message.unwrap() {
                   Ok(message) => match message {
                     Message::Chunk(chunk) => break AlignedMessage::Right(Ok(chunk)),
                     Message::Barrier(barrier) => match self.state {
