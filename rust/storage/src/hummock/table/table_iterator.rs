@@ -5,8 +5,18 @@ use async_trait::async_trait;
 
 use super::super::{HummockResult, HummockValue};
 use super::{BlockIterator, SeekPos, Table};
+use crate::hummock::iterator::variants::FORWARD;
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::version_cmp::VersionedComparator;
+
+pub trait TableIteratorBase: HummockIterator {}
+
+pub trait TableIteratorType {
+    type TableIterator: TableIteratorBase;
+    const DIRECTION: usize;
+
+    fn new(table: Arc<Table>) -> Self::TableIterator;
+}
 
 /// Iterates on a table.
 pub struct TableIterator {
@@ -111,6 +121,17 @@ impl HummockIterator for TableIterator {
         }
 
         Ok(())
+    }
+}
+
+impl TableIteratorBase for TableIterator {}
+
+impl TableIteratorType for TableIterator {
+    type TableIterator = TableIterator;
+    const DIRECTION: usize = FORWARD;
+
+    fn new(table: Arc<Table>) -> Self::TableIterator {
+        TableIterator::new(table)
     }
 }
 

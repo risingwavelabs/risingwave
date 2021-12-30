@@ -3,10 +3,13 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
+use crate::hummock::iterator::variants::BACKWARD;
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::value::HummockValue;
 use crate::hummock::version_cmp::VersionedComparator;
-use crate::hummock::{BlockIterator, HummockResult, SeekPos, Table};
+use crate::hummock::{
+    BlockIterator, HummockResult, SeekPos, Table, TableIteratorBase, TableIteratorType,
+};
 
 /// Reversely iterates on a table.
 pub struct ReverseTableIterator {
@@ -115,6 +118,17 @@ impl HummockIterator for ReverseTableIterator {
         }
 
         Ok(())
+    }
+}
+
+impl TableIteratorBase for ReverseTableIterator {}
+
+impl TableIteratorType for ReverseTableIterator {
+    type TableIterator = ReverseTableIterator;
+    const DIRECTION: usize = BACKWARD;
+
+    fn new(table: Arc<Table>) -> Self::TableIterator {
+        ReverseTableIterator::new(table)
     }
 }
 

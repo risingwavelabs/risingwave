@@ -2,6 +2,7 @@ use super::{HummockResult, HummockValue, TableIterator};
 
 mod concat;
 pub use concat::*;
+mod concat_inner;
 mod reverse_concat;
 pub use reverse_concat::*;
 mod sorted;
@@ -11,6 +12,7 @@ pub use user_key::*;
 
 #[cfg(test)]
 pub(crate) mod test_utils;
+
 use async_trait::async_trait;
 
 /// `HummockIterator` defines the interface of all iterators, including `TableIterator`,
@@ -92,3 +94,8 @@ pub enum HummockIteratorImpl {
 }
 
 pub type BoxedHummockIterator = Box<dyn HummockIterator>;
+
+pub mod variants {
+    pub const FORWARD: usize = 0;
+    pub const BACKWARD: usize = 1;
+}
