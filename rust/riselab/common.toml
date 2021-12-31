@@ -11,11 +11,13 @@ PREFIX_LOG = "${PREFIX}/log"
 PREFIX_TMP = "${PREFIX}/tmp"
 
 HUMMOCK_PATH = "${PREFIX_DATA}/hummock"
-HUMOOCK_MINIO_ADDRESS = "127.0.0.1:9300"
-HUMOOCK_MINIO_CONSOLE_ADDRESS = "127.0.0.1:9400"
+WGET_EXTRA_PARAMETER = ""
+
+[env.ci]
+WGET_EXTRA_PARAMETER = "--show-progress=off"
 
 [tasks.prepare]
-category = "RiseLAB"
+category = "Misc"
 description = "Create .risingwave folder for storing temporary files and data"
 script = '''
 #!@duckscript

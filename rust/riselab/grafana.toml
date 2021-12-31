@@ -8,7 +8,7 @@ GRAFANA_RELEASE = "grafana-${GRAFANA_VERSION}"
 GRAFANA_DOWNLOAD_TAR_GZ = "https://dl.grafana.com/oss/release/${GRAFANA_RELEASE}.${GRAFANA_SYSTEM}.tar.gz"
 
 [tasks.download-grafana]
-category = "RiseLAB"
+category = "Grafana"
 dependencies = ["prepare"]
 description = "Download and extract Grafana"
 script = '''
@@ -18,7 +18,7 @@ if [ -d "${PREFIX_BIN}/grafana" ]; then
     exit 0
 fi
 echo "Grafana not found, download ${GRAFANA_RELEASE}"
-wget -O "${GRAFANA_DOWNLOAD_PATH}" "${GRAFANA_DOWNLOAD_TAR_GZ}"
+wget ${WGET_EXTRA_PARAMETER} -O "${GRAFANA_DOWNLOAD_PATH}" "${GRAFANA_DOWNLOAD_TAR_GZ}"
 tar -xf "${GRAFANA_DOWNLOAD_PATH}" -C "${PREFIX_TMP}"
 mv "${PREFIX_TMP}/${GRAFANA_RELEASE}" "${PREFIX_BIN}/grafana"
 rm "${GRAFANA_DOWNLOAD_PATH}"

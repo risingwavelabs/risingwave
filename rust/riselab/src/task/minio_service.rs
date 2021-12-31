@@ -5,13 +5,15 @@ use std::process::Command;
 use anyhow::Result;
 
 use super::{ExecuteContext, Task};
+use crate::MinioConfig;
 
-#[derive(Default)]
-pub struct MinioService;
+pub struct MinioService {
+    config: MinioConfig,
+}
 
 impl MinioService {
-    pub fn new() -> Result<Self> {
-        Ok(Self::default())
+    pub fn new(config: MinioConfig) -> Result<Self> {
+        Ok(Self { config })
     }
 
     fn minio(&self) -> Result<Command> {
@@ -32,9 +34,12 @@ impl Task for MinioService {
         cmd.arg("server")
             .arg(env::var("HUMMOCK_PATH")?)
             .arg("--address")
-            .arg(env::var("HUMOOCK_MINIO_ADDRESS")?)
+            .arg(format!("{}:{}", self.config.address, self.config.port))
             .arg("--console-address")
-            .arg(env::var("HUMOOCK_MINIO_CONSOLE_ADDRESS")?)
+            .arg(format!(
+                "{}:{}",
+                self.config.console_address, self.config.console_port
+            ))
             .arg("--config-dir")
             .arg(Path::new(&prefix_config).join("minio"));
 

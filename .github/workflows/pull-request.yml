@@ -34,18 +34,79 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
-      - name: Run java style check and tests
+      - name: Run java style check, tests, and build
         run: |
-          make java_check java_coverage_report
+          make java_check java_coverage_report java_build
+      - uses: actions/upload-artifact@v2
+        with:
+          name: risingwave-fe-runnable.jar
+          if-no-files-found: error
+          path: |
+            java/pgserver/build/libs/risingwave-fe-runnable.jar
       - uses: codecov/codecov-action@v2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           directory: java
           flags: java
+  end-to-end-riselab:
+    name: e2e-test-riselab
+    needs:
+      - compute-node-build
+      - frontend-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v2
+        with:
+          name: compute-node
+          path: ./.risingwave/bin
+      - uses: actions/download-artifact@v2
+        with:
+          name: meta-node
+          path: ./.risingwave/bin
+      - uses: actions/download-artifact@v2
+        with:
+          name: risingwave-fe-runnable.jar
+          path: ./.risingwave/bin
+      - uses: actions/download-artifact@v2
+        with:
+          name: playground
+          path: ./rust/target/debug
+      - name: Adjust permission
+        run: |
+          chmod +x ./.risingwave/bin/meta-node
+          chmod +x ./.risingwave/bin/compute-node
+          chmod +x ./rust/target/debug/playground
+      - name: Install required components
+        run: |
+          sudo apt-get update -yy
+          sudo apt-get install --upgrade -yy tmux wget postgresql
+      - name: Build sqllogictest
+        run: |
+          make sqllogictest
+      - name: Download cargo-make
+        run: |
+          wget https://github.com/sagiegurari/cargo-make/releases/download/0.35.7/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip -O ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip
+          unzip ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip -d ~
+          mv ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl ~/cargo-make
+      - name: Start cluster
+        run: |
+          ~/cargo-make/makers --profile ci dev
+      - name: e2e test w/ Hummock
+        run: python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/streaming
+      - uses: actions/upload-artifact@v2
+        if: ${{ failure() || success() }}
+        name: Upload RiseLAB logs
+        with:
+          path: .risingwave/log/
+          name: riselab-logs
   end-to-end:
     name: e2e-test
     needs:
-      - start-runner
       - compute-node-build
       - frontend-check
       - compute-node-test
@@ -254,8 +315,16 @@ jobs:
           if-no-files-found: error
           path: |
             rust/target/debug/risingwave_regress_test
+      - uses: actions/upload-artifact@v2
+        with:
+          name: playground
+          if-no-files-found: error
+          path: |
+            rust/target/debug/playground
   compute-node-test:
-    needs: start-runner
+    needs:
+      - start-runner
+      - compute-node-build
     runs-on: ${{ needs.start-runner.outputs.label }}
     env:
       CACHE_KEY_SUFFIX: v20211231

@@ -4,21 +4,24 @@ use std::process::Command;
 use anyhow::Result;
 
 use super::{ExecuteContext, Task};
+use crate::MinioConfig;
 
 const HUMMOCK_REMOTE_NAME: &str = "hummock-minio";
 
 pub struct ConfigureMinioTask {
     mcli_path: String,
     mcli_config_path: String,
+    config: MinioConfig,
 }
 
 impl ConfigureMinioTask {
-    pub fn new() -> Result<Self> {
+    pub fn new(config: MinioConfig) -> Result<Self> {
         let prefix_bin = env::var("PREFIX_BIN")?;
         let prefix_config = env::var("PREFIX_CONFIG")?;
         Ok(Self {
             mcli_path: format!("{}/mcli", prefix_bin),
             mcli_config_path: format!("{}/mcli", prefix_config),
+            config,
         })
     }
 
@@ -32,8 +35,11 @@ impl ConfigureMinioTask {
 impl Task for ConfigureMinioTask {
     fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
         ctx.pb.set_message("waiting for online...");
-        let minio_address = env::var("HUMOOCK_MINIO_ADDRESS")?;
-        let minio_console_address = env::var("HUMOOCK_MINIO_CONSOLE_ADDRESS")?;
+        let minio_address = format!("{}:{}", self.config.address, self.config.port);
+        let minio_console_address = format!(
+            "{}:{}",
+            self.config.console_address, self.config.console_port
+        );
         ctx.wait_tcp(&minio_address)?;
 
         ctx.pb.set_message("configure...");
@@ -42,7 +48,7 @@ impl Task for ConfigureMinioTask {
         cmd.arg("alias")
             .arg("set")
             .arg(HUMMOCK_REMOTE_NAME)
-            .arg(format!("http://{}", env::var("HUMOOCK_MINIO_ADDRESS")?))
+            .arg(format!("http://{}", minio_address))
             .arg(env::var("MINIO_ROOT_USER")?)
             .arg(env::var("MINIO_ROOT_PASSWORD")?);
 
@@ -77,7 +83,7 @@ impl Task for ConfigureMinioTask {
         ctx.complete_spin();
 
         ctx.pb.set_message(format!(
-            "api http://{}, console http://{}",
+            "api http://{}/, console http://{}/",
             minio_address, minio_console_address
         ));
 

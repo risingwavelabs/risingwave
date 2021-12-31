@@ -2,7 +2,7 @@ use std::env;
 use std::path::Path;
 use std::process::Command;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use super::{ExecuteContext, Task};
 use crate::ComputeNodeConfig;
@@ -41,15 +41,29 @@ impl Task for ComputeNodeService {
                 self.config.exporter_address, self.config.exporter_port
             ))
             .arg("--metrics-level")
-            .arg("1")
-            .arg("--state-store")
-            .arg(format!(
-                "hummock+minio://{}:{}@{}/{}",
-                env::var("MINIO_HUMMOCK_USER")?,
-                env::var("MINIO_HUMMOCK_PASSWORD")?,
-                env::var("HUMOOCK_MINIO_ADDRESS")?,
-                env::var("MINIO_BUCKET_NAME")?
-            ));
+            .arg("1");
+
+        let provide_minio = self.config.provide_minio.as_ref().unwrap();
+        match provide_minio.len() {
+            0 => {}
+            1 => {
+                let minio = &provide_minio[0];
+                cmd.arg("--state-store").arg(format!(
+                    "hummock+minio://{}:{}@{minio_addr}:{minio_port}/{}",
+                    env::var("MINIO_HUMMOCK_USER")?,
+                    env::var("MINIO_HUMMOCK_PASSWORD")?,
+                    env::var("MINIO_BUCKET_NAME")?,
+                    minio_addr = minio.address,
+                    minio_port = minio.port,
+                ));
+            }
+            other_size => {
+                return Err(anyhow!(
+                    "{} minio instance found in config, but only 1 is needed",
+                    other_size
+                ))
+            }
+        }
 
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;

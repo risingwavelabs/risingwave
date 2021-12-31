@@ -1,7 +1,7 @@
 template:
   minio:
     address: "127.0.0.1"
-    port: 9300
+    port: 9301
     console-address: "127.0.0.1"
     console-port: 9400
     id: minio
@@ -12,7 +12,7 @@ template:
     exporter-address: "127.0.0.1"
     exporter-port: 1222
     id: compute-node-${port}
-    provide-minio: "minio-*"
+    provide-minio: "minio*"
     user-managed: false
 
   meta-node:
@@ -27,14 +27,14 @@ template:
     address: "127.0.0.1"
     port: 9500
     id: prometheus
-    provide-compute-node: "compute-node-*"
+    provide-compute-node: "compute-node*"
 
   frontend:
     address: "127.0.0.1"
     port: 4567
     id: frontend
-    provide-compute-node: "compute-node-*"
-    provide-meta-node: "meta-node-*"
+    provide-compute-node: "compute-node*"
+    provide-meta-node: "meta-node*"
     user-managed: false
 
 riselab:

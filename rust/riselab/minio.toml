@@ -11,7 +11,7 @@ MINIO_ROOT_PASSWORD = "hummockadmin"
 MINIO_ROOT_USER = "hummockadmin"
 
 [tasks.download-minio]
-category = "RiseLAB"
+category = "MinIO"
 dependencies = ["prepare"]
 description = "Download and extract MinIO"
 script = '''
@@ -21,13 +21,13 @@ if [ -f "${PREFIX_BIN}/minio" ]; then
     exit 0
 fi
 echo "MinIO Server not found, downloading"
-wget -O "${PREFIX_TMP}/minio" "${MINIO_DOWNLOAD_BIN}"
+wget ${WGET_EXTRA_PARAMETER} -O "${PREFIX_TMP}/minio" "${MINIO_DOWNLOAD_BIN}"
 chmod +x "${PREFIX_TMP}/minio"
 mv "${PREFIX_TMP}/minio" "${PREFIX_BIN}/minio"
 '''
 
 [tasks.download-mcli]
-category = "RiseLAB"
+category = "MinIO"
 dependencies = ["prepare"]
 description = "Download and extract MinIO Client"
 script = '''
@@ -37,7 +37,7 @@ if [ -f "${PREFIX_BIN}/mcli" ]; then
     exit 0
 fi
 echo "MinIO Client not found, downloading"
-wget -O "${PREFIX_TMP}/mcli" "${MCLI_DOWNLOAD_BIN}"
+wget ${WGET_EXTRA_PARAMETER} -O "${PREFIX_TMP}/mcli" "${MCLI_DOWNLOAD_BIN}"
 chmod +x "${PREFIX_TMP}/mcli"
 mv "${PREFIX_TMP}/mcli" "${PREFIX_BIN}/mcli"
 '''

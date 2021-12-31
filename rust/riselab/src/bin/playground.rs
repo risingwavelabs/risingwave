@@ -79,13 +79,13 @@ fn task_main(
     for step in steps {
         let service = services.get(step).unwrap();
         match service {
-            ServiceConfig::Minio(_c) => {
+            ServiceConfig::Minio(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-                let mut service = MinioService::new()?;
+                let mut service = MinioService::new(c.clone())?;
                 service.execute(&mut ctx)?;
 
-                let mut task = riselab::ConfigureMinioTask::new()?;
+                let mut task = riselab::ConfigureMinioTask::new(c.clone())?;
                 task.execute(&mut ctx)?;
             }
             ServiceConfig::Prometheus(c) => {
@@ -96,7 +96,7 @@ fn task_main(
                 let mut task = riselab::ConfigureGrpcNodeTask::new(c.port, false)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
-                    .set_message(format!("api http://{}:{}", c.address, c.port));
+                    .set_message(format!("api http://{}:{}/", c.address, c.port));
             }
             ServiceConfig::ComputeNode(c) => {
                 let mut ctx =
@@ -107,7 +107,7 @@ fn task_main(
                 let mut task = riselab::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
-                    .set_message(format!("api grpc://{}:{}", c.address, c.port));
+                    .set_message(format!("api grpc://{}:{}/", c.address, c.port));
             }
             ServiceConfig::MetaNode(c) => {
                 let mut ctx =
@@ -117,7 +117,7 @@ fn task_main(
                 let mut task = riselab::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
                 ctx.pb.set_message(format!(
-                    "api grpc://{}:{}, dashboard http://{}:{}",
+                    "api grpc://{}:{}/, dashboard http://{}:{}/",
                     c.address, c.port, c.dashboard_address, c.dashboard_port
                 ));
             }
@@ -129,7 +129,7 @@ fn task_main(
                 let mut task = riselab::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
-                    .set_message(format!("api postgres://{}:{}", c.address, c.port));
+                    .set_message(format!("api postgres://{}:{}/", c.address, c.port));
             }
         }
     }
@@ -191,7 +191,7 @@ fn main() -> Result<()> {
                 "* Run `psql -h localhost -p {} -d dev` to start Postgres interactive shell.",
                 4567
             );
-            println!("* Run `./riselab kill-playground` to kill cluster.");
+            println!("* Run `./riselab kill` or `./riselab k` to kill cluster.");
         }
         Err(err) => {
             println!("* Failed to start: {}", err.root_cause().to_string().trim(),);
@@ -199,7 +199,7 @@ fn main() -> Result<()> {
                 "please refer to logs for more information {}",
                 env::var("PREFIX_LOG")?
             );
-            println!("* Run `./riselab kill-playground` to clean up cluster.");
+            println!("* Run `./riselab kill` or `./riselab k` to clean up cluster.");
             println!("---");
             println!();
             println!();

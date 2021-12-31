@@ -4,8 +4,11 @@ extend = [
   {path = "rust/riselab/minio.toml"},
 ]
 
+[config]
+skip_core_tasks = true
+
 [tasks.clean-full]
-category = "RiseLAB"
+category = "Misc"
 description = "Clean all downloaded binaries by deleting .risingwave folder"
 script = '''
 #!@duckscript
@@ -13,7 +16,7 @@ rm -rf "${PREFIX}"
 '''
 
 [tasks.clean-data]
-category = "RiseLAB"
+category = "Misc"
 description = "Clean all data, config and logs"
 script = '''
 #!@duckscript
@@ -23,24 +26,19 @@ rm -rf "${PREFIX_CONFIG}"
 '''
 
 [tasks.post-build-risingwave]
-category = "RiseLAB"
+category = "RisingWave"
 description = "Copy RisingWave binaries to bin"
 script = '''
 #!@shell
 set -e
 rm -f "${PREFIX_BIN}/compute-node"
 rm -f "${PREFIX_BIN}/meta-node"
-rm -f "${PREFIX_CONFIG}/log4rs.yaml"
-rm -f "${PREFIX_BIN}/run_command.sh"
 ln -s "$(pwd)/rust/target/debug/compute-node" "${PREFIX_BIN}/compute-node"
 ln -s "$(pwd)/rust/target/debug/meta-node" "${PREFIX_BIN}/meta-node"
-cp "rust/config/log4rs.yaml" "${PREFIX_CONFIG}/log4rs.yaml"
-cp "rust/riselab/run_command.sh" "${PREFIX_BIN}/run_command.sh"
-cp "rust/riselab/welcome.sh" "${PREFIX_BIN}/welcome.sh"
 '''
 
 [tasks.build-risingwave]
-category = "RiseLAB"
+category = "RisingWave"
 description = "Build RisingWave compute-node and meta-node"
 script = '''
 #!@shell
@@ -49,7 +47,7 @@ cd rust && cargo build
 '''
 
 [tasks.build-frontend]
-category = "RiseLAB"
+category = "RisingWave"
 description = "Build RisingWave frontend"
 script = '''
 #!@shell
@@ -58,7 +56,7 @@ cd java && ./gradlew build -x test
 '''
 
 [tasks.post-build-frontend]
-category = "RiseLAB"
+category = "RisingWave"
 description = "Post build RisingWave frontend"
 script = '''
 #!@shell
@@ -66,12 +64,26 @@ script = '''
 set -e
 rm -f "${PREFIX_BIN}/risingwave-fe-runnable.jar"
 ln -s "$(pwd)/java/pgserver/build/libs/risingwave-fe-runnable.jar" "${PREFIX_BIN}/risingwave-fe-runnable.jar"
-cp "java/pgserver/build/resources/main/logback.xml" "${PREFIX_CONFIG}/logback.xml"
 '''
 
-[tasks.pre-start-playground]
-category = "RiseLAB"
-description = "Pre start playground"
+[tasks.prepare-config]
+category = "RiseLAB - Prepare"
+description = "Copy necessary configuration files to RiseLAB"
+script = '''
+#!@shell
+
+set -e
+
+cp "java/pgserver/src/main/resources/logback.xml" "${PREFIX_CONFIG}/logback.xml"
+cp "rust/config/log4rs.yaml" "${PREFIX_CONFIG}/log4rs.yaml"
+cp "rust/riselab/run_command.sh" "${PREFIX_BIN}/run_command.sh"
+cp "rust/riselab/welcome.sh" "${PREFIX_BIN}/welcome.sh"
+'''
+
+[tasks.pre-start-playground-development]
+category = "RiseLAB - Prepare"
+private = true
+description = "Prepare playground by downloading necessary tools and build RisingWave"
 dependencies = [
   "download-minio",
   "download-mcli",
@@ -80,7 +92,8 @@ dependencies = [
   "build-risingwave",
   "post-build-risingwave",
   "build-frontend",
-  "post-build-frontend"
+  "post-build-frontend",
+  "prepare-config"
 ]
 script = '''
 #!@shell
@@ -90,56 +103,79 @@ tmux -V
 echo "Note: please make sure tmux version >= 3.2a"
 '''
 
+[tasks.pre-start-playground-ci]
+category = "RiseLAB - Prepare"
+description = "Prepare playground by downloading necessary tools without building RisingWave"
+private = true
+dependencies = [
+  "download-minio",
+  "download-mcli",
+  "download-grafana",
+  "download-prometheus",
+  "prepare-config"
+]
+
+[tasks.pre-start-playground]
+category = "RiseLAB - Prepare"
+description = "Prepare playground by downloading necessary tools without building RisingWave"
+run_task = [
+  { name = "pre-start-playground-development", condition = { profiles = [ "development" ] } },
+  { name = "pre-start-playground-ci", condition = { profiles = [ "ci" ] } }
+]
 
 [tasks.playground]
-category = "RiseLAB"
-dependencies = [
-  "pre-start-playground"
-]
-command = "rust/target/debug/playground"
-description = "Start a RisingWave playground"
+alias = "dev"
+
+[tasks.d]
+alias = "dev"
 
 [tasks.dev]
-category = "RiseLAB"
+category = "RiseLAB - Start"
 dependencies = [
   "pre-start-playground"
 ]
 command = "rust/target/debug/playground"
 args = ["default"]
-description = "Start a RisingWave playground"
+description = "Start a RisingWave playground with 1 compute node, 1 meta node, 1 frontend, 1 minio, 1 prometheus"
 
 [tasks.ci-3node]
-category = "RiseLAB"
+category = "RiseLAB - Start"
 dependencies = [
   "pre-start-playground"
 ]
 command = "rust/target/debug/playground"
 args = ["ci-3node"]
-description = "Start a RisingWave playground"
+description = "Start a RisingWave playground with 3 compute nodes, 1 meta node, 1 frontend"
 
 [tasks.ci-1node]
-category = "RiseLAB"
+category = "RiseLAB - Start"
 dependencies = [
   "pre-start-playground"
 ]
 command = "rust/target/debug/playground"
 args = ["ci-1node"]
-description = "Start a RisingWave playground"
+description = "Start a RisingWave playground with 1 compute node, 1 meta node, 1 frontend"
 
 [tasks.dev-compute-node]
-category = "RiseLAB"
+category = "RiseLAB - Start"
 dependencies = [
   "pre-start-playground"
 ]
 command = "rust/target/debug/playground"
 args = ["dev-compute-node"]
-description = "Start a RisingWave playground"
+description = "Start a RisingWave playground with 1 user-managed compute node, 1 meta node, 1 frontend, 1 minio, 1 prometheus"
 
 [tasks.kill-playground]
-category = "RiseLAB"
+category = "RiseLAB - Stop"
 description = "kill playground"
 script = '''
 #!@shell
 set -e
 tmux kill-session -t riselab
 '''
+
+[tasks.kill]
+alias = "kill-playground"
+
+[tasks.k]
+alias = "kill-playground"

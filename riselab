@@ -5,4 +5,9 @@ if [ -z "$(which cargo-make)" ]; then
     cargo install cargo-make --version "^0.35"
 fi
 
-cargo make "$*"
+if [ $# -eq 0 ]; then
+    cargo make --list-all-steps
+    exit 0
+fi
+
+cargo make "$@"
