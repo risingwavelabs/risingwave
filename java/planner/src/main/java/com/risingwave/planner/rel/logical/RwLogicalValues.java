@@ -6,8 +6,11 @@ import java.util.List;
 import org.apache.calcite.plan.Convention;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelTraitSet;
+import org.apache.calcite.plan.volcano.RelSubset;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.convert.ConverterRule;
+import org.apache.calcite.rel.logical.LogicalProject;
+import org.apache.calcite.rel.logical.LogicalUnion;
 import org.apache.calcite.rel.logical.LogicalValues;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeField;
@@ -81,6 +84,53 @@ public class RwLogicalValues extends RwValues implements RisingWaveLogicalRel {
         newTuples.add(newTuple.build());
       }
       return newTuples.build();
+    }
+  }
+
+  /** Merge Union+Project+Values to Values. */
+  public static class RwValuesUnionConverterRule extends ConverterRule {
+    public static final RwValuesUnionConverterRule INSTANCE =
+        Config.INSTANCE
+            .withInTrait(Convention.NONE)
+            .withOutTrait(LOGICAL)
+            .withRuleFactory(RwValuesUnionConverterRule::new)
+            .withOperandSupplier(t -> t.operand(LogicalUnion.class).anyInputs())
+            .withDescription("Converting union values")
+            .as(Config.class)
+            .toRule(RwValuesUnionConverterRule.class);
+
+    protected RwValuesUnionConverterRule(Config config) {
+      super(config);
+    }
+
+    @Override
+    public @Nullable RelNode convert(RelNode rel) {
+      LogicalUnion logicalUnion = (LogicalUnion) rel;
+      if (!logicalUnion.all) {
+        return null;
+      }
+      ImmutableList.Builder<ImmutableList<RexNode>> newTuples = ImmutableList.builder();
+      for (RelNode input : logicalUnion.getInputs()) {
+        RelNode child = ((RelSubset) input).getOriginal();
+        if (child instanceof LogicalValues) {
+          var tuples = ((LogicalValues) child).getTuples();
+          newTuples.addAll(tuples.stream().map(ImmutableList::<RexNode>copyOf).iterator());
+        } else if (child instanceof LogicalProject) {
+          var grandchild = ((RelSubset) child.getInput(0)).getOriginal();
+          if (!(grandchild instanceof LogicalValues)) {
+            return null;
+          }
+          var tuple = ((LogicalProject) child).getProjects();
+          newTuples.add(ImmutableList.copyOf(tuple));
+        } else {
+          return null;
+        }
+      }
+      return new RwLogicalValues(
+          rel.getCluster(),
+          rel.getRowType(),
+          newTuples.build(),
+          rel.getTraitSet().replace(LOGICAL));
     }
   }
 }
