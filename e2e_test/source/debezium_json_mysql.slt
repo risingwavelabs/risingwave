@@ -4,7 +4,7 @@ create source debezium_json_mysql_source ( id int primary key, name varchar(255)
 statement ok
 create materialized view debezium_json_mysql_mv as select * from debezium_json_mysql_source;
 
-sleep 1s
+sleep 5s
 
 query I rowsort
 select id from debezium_json_mysql_mv
