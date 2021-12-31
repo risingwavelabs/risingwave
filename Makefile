@@ -27,7 +27,7 @@ rust_fmt:
 	cd rust && cargo fmt --all -- --check
 
 rust_check:
-	cd rust && cargo clippy --all-targets --all-features -- -D warnings
+	cd rust && cargo clippy --all-targets -- -D warnings
 
 rust_cargo_sort_check:
 	cd rust && cargo sort -c -w

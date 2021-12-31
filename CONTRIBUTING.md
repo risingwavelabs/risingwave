@@ -57,7 +57,7 @@ For Rust code, please run:
 ```shell
 cd rust
 cargo fmt
-cargo clippy --all-targets --all-features
+cargo clippy --all-targets
 ```
 If a new dependency is added to `Cargo.toml`, you may also run:
 ```shell
