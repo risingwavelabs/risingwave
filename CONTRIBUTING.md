@@ -44,6 +44,21 @@ It will start processes in the background. After testing, you can run the follow
 ./scripts/kill_cluster.sh
 ```
 
+## Monitoring
+RisingWave internally records performance counters and statistics. Currently they can be enabled and explored with following steps:
+```shell
+./compute-node [--other-startup-options] --metrics-level 1
+```
+After compute node gets started, [Prometheus](https://github.com/prometheus/prometheus) can be used to pull metrics from compute node's endpoint by using:
+```shell
+./prometheus --config.file=rust/storage/src/metrics/prometheus.yml
+```
+By now, you can get the time-seris metrics provided by `Prometheus` through `curl` or visiting the website (`http://localhost:9090`):
+```shell
+curl http://localhost:9090/metrics
+```
+Furthermore, [Grafana](https://prometheus.io/docs/visualization/grafana/) can be used to provide better visualization of the metrics. After following the official instructions by Grafana, you can use browser to visit `http://localhost:3000/` to get the metrics dashboard.
+
 ## Code Formatting
 Before submitting your pull request (PR), you should format the code first.
 
