@@ -179,6 +179,7 @@ mod tests {
         default_builder_opt_for_test, iterator_test_key_of, iterator_test_key_of_ts, test_key,
         test_value_of, TestIteratorBuilder, TEST_KEYS_COUNT,
     };
+    use crate::hummock::iterator::variants::FORWARD;
     use crate::hummock::iterator::BoxedHummockIterator;
     use crate::hummock::key::user_key;
     use crate::hummock::table::{Table, TableIterator};
@@ -190,7 +191,7 @@ mod tests {
     async fn test_basic() {
         let (iters, validators): (Vec<_>, Vec<_>) = (0..3)
             .map(|iter_id| {
-                TestIteratorBuilder::default()
+                TestIteratorBuilder::<FORWARD>::default()
                     .id(0)
                     .map_key(move |id, x| iterator_test_key_of(id, x * 3 + (iter_id as usize)))
                     .map_value(move |id, x| test_value_of(id, x * 3 + (iter_id as usize) + 1))
@@ -228,7 +229,7 @@ mod tests {
     async fn test_seek() {
         let (iters, validators): (Vec<_>, Vec<_>) = (0..3)
             .map(|iter_id| {
-                TestIteratorBuilder::default()
+                TestIteratorBuilder::<FORWARD>::default()
                     .id(0)
                     .total(20)
                     .map_key(move |id, x| iterator_test_key_of(id, x * 3 + (iter_id as usize)))

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use super::variants::*;
 use crate::hummock::cloud::gen_remote_table;
 use crate::hummock::key::{key_with_ts, user_key, Timestamp};
 use crate::hummock::{HummockResult, HummockValue, Table, TableBuilder, TableBuilderOptions};
@@ -63,7 +64,7 @@ impl Default for TestIteratorConfig {
 }
 /// Test iterator stores a buffer of key-value pairs `Vec<(Bytes, Bytes)>` and yields the data
 /// stored in the buffer.
-pub struct TestIterator {
+pub struct TestIteratorInner<const DIRECTION: usize> {
     cfg: Arc<TestIteratorConfig>,
     data: Vec<(Bytes, Bytes)>,
     cur_idx: usize,
@@ -74,11 +75,11 @@ pub struct TestValidator {
     value: Vec<u8>,
 }
 #[derive(Default)]
-pub struct TestIteratorBuilder {
+pub struct TestIteratorBuilder<const DIRECTION: usize> {
     cfg: TestIteratorConfig,
 }
 
-impl TestIteratorBuilder {
+impl<const DIRECTION: usize> TestIteratorBuilder<DIRECTION> {
     pub fn total(mut self, t: usize) -> Self {
         self.cfg.total = t;
         self
@@ -99,8 +100,8 @@ impl TestIteratorBuilder {
         self
     }
 
-    pub fn finish(self) -> (TestIterator, TestValidator) {
-        TestIterator::new(Arc::new(self.cfg))
+    pub fn finish(self) -> (TestIteratorInner<DIRECTION>, TestValidator) {
+        TestIteratorInner::<DIRECTION>::new(Arc::new(self.cfg))
     }
 }
 
@@ -158,13 +159,18 @@ macro_rules! test_key {
 
 pub(crate) use test_key;
 
-impl TestIterator {
+pub type TestIterator = TestIteratorInner<FORWARD>;
+pub type ReverseTestIterator = TestIteratorInner<BACKWARD>;
+
+impl<const DIRECTION: usize> TestIteratorInner<DIRECTION> {
+    /// Caller should make sure that `gen_key`
+    /// would generate keys arranged by the same order as `DIRECTION`.
     fn new(cfg: Arc<TestIteratorConfig>) -> (Self, TestValidator) {
         let data = (0..cfg.total)
             .map(|x| (Bytes::from(cfg.gen_key(x)), Bytes::from(cfg.gen_value(x))))
             .collect_vec();
 
-        let test_iter = TestIterator {
+        let test_iter = TestIteratorInner {
             cfg: cfg.clone(),
             cur_idx: 0,
             data,
@@ -175,7 +181,11 @@ impl TestIterator {
         (test_iter, test_validator)
     }
     fn seek_inner(&mut self, key: &[u8]) -> HummockResult<()> {
-        self.cur_idx = self.data.partition_point(|x| key > x.0);
+        self.cur_idx = match DIRECTION {
+            FORWARD => self.data.partition_point(|x| x.0 < key),
+            BACKWARD => self.data.partition_point(|x| x.0 > key),
+            _ => unreachable!(),
+        };
         Ok(())
     }
     pub fn key(&self) -> &[u8] {
@@ -187,7 +197,7 @@ impl TestIterator {
 }
 
 #[async_trait]
-impl HummockIterator for TestIterator {
+impl<const DIRECTION: usize> HummockIterator for TestIteratorInner<DIRECTION> {
     async fn next(&mut self) -> HummockResult<()> {
         self.cur_idx += 1;
         Ok(())
@@ -294,7 +304,7 @@ mod metatest {
     use super::*;
     #[tokio::test]
     async fn test_basic() {
-        let (_, val) = TestIteratorBuilder::default()
+        let (_, val) = TestIteratorBuilder::<FORWARD>::default()
             .id(0)
             .map_key(|id, x| iterator_test_key_of(id, x * 3))
             .finish();

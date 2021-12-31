@@ -21,7 +21,7 @@ mod test {
     async fn test_sorted_basic() {
         let (iters, validators): (Vec<_>, Vec<_>) = (0..3)
             .map(|iter_id| {
-                TestIteratorBuilder::default()
+                TestIteratorBuilder::<FORWARD>::default()
                     .id(0)
                     .map_key(move |id, x| iterator_test_key_of(id, x * 3 + (iter_id as usize) + 1))
                     .map_value(move |id, x| test_value_of(id, x * 3 + (iter_id as usize) + 1))
@@ -56,7 +56,7 @@ mod test {
     async fn test_sorted_seek() {
         let (iters, validators): (Vec<_>, Vec<_>) = (0..3)
             .map(|iter_id| {
-                TestIteratorBuilder::default()
+                TestIteratorBuilder::<FORWARD>::default()
                     .id(0)
                     .total(20)
                     .map_key(move |id, x| iterator_test_key_of(id, x * 3 + (iter_id as usize)))

@@ -18,6 +18,8 @@ pub(crate) mod test_utils;
 
 use async_trait::async_trait;
 
+use crate::hummock::ReverseTableIterator;
+
 /// `HummockIterator` defines the interface of all iterators, including `TableIterator`,
 /// `SortedIterator`, `UserKeyIterator` and `ConcatIterator`.
 ///
@@ -89,11 +91,15 @@ pub trait HummockIterator: Send + Sync {
 
 pub enum HummockIteratorImpl {
     Table(TableIterator),
+    ReverseTable(ReverseTableIterator),
     Concat(Box<ConcatIterator>),
+    ReverseConcat(ReverseConcatIterator),
     Sorted(SortedIterator),
-
+    ReverseSorted(ReverseSortedIterator),
     #[cfg(test)]
     Test(test_utils::TestIterator),
+    #[cfg(test)]
+    ReverseTest(test_utils::ReverseTestIterator),
 }
 
 pub type BoxedHummockIterator = Box<dyn HummockIterator>;

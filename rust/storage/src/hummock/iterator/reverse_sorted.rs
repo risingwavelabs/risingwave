@@ -18,7 +18,7 @@ mod test {
         let base_key_value = usize::MAX - 10;
         let (iters, validators): (Vec<_>, Vec<_>) = (0..3)
             .map(|iter_id| {
-                TestIteratorBuilder::default()
+                TestIteratorBuilder::<BACKWARD>::default()
                     .id(0)
                     .map_key(move |id, x| {
                         iterator_test_key_of(id, base_key_value - x * 3 + (3 - iter_id as usize))
