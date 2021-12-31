@@ -30,6 +30,7 @@ prost-types = "0.9"
 rand = "0.8"
 risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
+rocksdb = { git = "https://github.com/tikv/rust-rocksdb.git", features = ["encryption", "static_libcpp"], optional = true }
 rusoto_core = "0.47"
 rusoto_s3 = "0.47"
 rust_decimal = "1"
@@ -46,4 +47,5 @@ twox-hash = "1"
 uuid = { version = "0.8", features = ["v4"] }
 
 [features]
+rocksdb-local = ["rocksdb"]
 tikv = ["tikv-client"]

@@ -116,6 +116,12 @@ cargo build --features tikv
 ./target/debug/compute-node --log4rs-config config/log4rs.yaml --state-store "tikv://<pd_address>"
 ```
 
+```shell
+# With rocksdb state store
+cargo build --features rocksdb-local
+./target/debug/compute-node --log4rs-config config/log4rs.yaml --state-store rocksdb_local:///tmp/default
+```
+
 To start the Postgres shell, create one terminal and then type:
 ```shell
 psql -h localhost -p 4567 -d dev

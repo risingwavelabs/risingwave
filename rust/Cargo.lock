@@ -432,6 +432,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4872d67bab6358e59559027aa3b9157c53d9358c51423c17554809a8858e0f8"
 
 [[package]]
+name = "bzip2-sys"
+version = "0.1.11+1.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "736a955f3fa7875102d57c82b8cac37ec45224a07fd32d58f9f7a186b6cd4cdc"
+dependencies = [
+ "cc",
+ "libc",
+ "pkg-config",
+]
+
+[[package]]
 name = "cache-padded"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1451,6 +1462,39 @@ checksum = "afe203d669ec979b7128619bae5a63b7b42e9203c1b29146079ee05e2f604b52"
 dependencies = [
  "cfg-if",
  "winapi",
+]
+
+[[package]]
+name = "librocksdb_sys"
+version = "0.1.0"
+source = "git+https://github.com/tikv/rust-rocksdb.git#fa83ff1947fc5ae11b4862990c112c66d97b938f"
+dependencies = [
+ "bindgen",
+ "bzip2-sys",
+ "cc",
+ "cmake",
+ "libc",
+ "libtitan_sys",
+ "libz-sys",
+ "lz4-sys",
+ "openssl-sys",
+ "snappy-sys",
+ "zstd-sys",
+]
+
+[[package]]
+name = "libtitan_sys"
+version = "0.0.1"
+source = "git+https://github.com/tikv/rust-rocksdb.git#fa83ff1947fc5ae11b4862990c112c66d97b938f"
+dependencies = [
+ "bzip2-sys",
+ "cc",
+ "cmake",
+ "libc",
+ "libz-sys",
+ "lz4-sys",
+ "snappy-sys",
+ "zstd-sys",
 ]
 
 [[package]]
@@ -2887,6 +2931,7 @@ dependencies = [
  "rand 0.8.4",
  "risingwave-pb",
  "risingwave_common",
+ "rocksdb",
  "rusoto_core",
  "rusoto_s3",
  "rust_decimal",
@@ -2952,6 +2997,15 @@ dependencies = [
  "tonic",
  "twox-hash",
  "url",
+]
+
+[[package]]
+name = "rocksdb"
+version = "0.3.0"
+source = "git+https://github.com/tikv/rust-rocksdb.git#fa83ff1947fc5ae11b4862990c112c66d97b938f"
+dependencies = [
+ "libc",
+ "librocksdb_sys",
 ]
 
 [[package]]
@@ -3350,6 +3404,16 @@ name = "snap"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "45456094d1983e2ee2a18fdfebce3189fa451699d0502cb8e3b49dba5ba41451"
+
+[[package]]
+name = "snappy-sys"
+version = "0.1.0"
+source = "git+https://github.com/busyjay/rust-snappy.git?branch=static-link#8c12738bad811397600455d6982aff754ea2ac44"
+dependencies = [
+ "cmake",
+ "libc",
+ "pkg-config",
+]
 
 [[package]]
 name = "socket2"

@@ -17,6 +17,7 @@ use risingwave_pb::{expr, stream_plan, stream_service};
 use risingwave_storage::hummock::HummockStateStore;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::object::ConnectionInfo;
+use risingwave_storage::rocksdb_local::RocksDBStateStore;
 use risingwave_storage::tikv::TikvStateStore;
 use risingwave_storage::{Keyspace, StateStore};
 use tokio::task::JoinHandle;
@@ -35,6 +36,7 @@ pub type UpDownFragmentIds = (u32, u32);
 pub enum StateStoreImpl {
     HummockStateStore(HummockStateStore),
     MemoryStateStore(MemoryStateStore),
+    RocksDBStateStore(RocksDBStateStore),
     TikvStateStore(TikvStateStore),
 }
 
@@ -45,6 +47,7 @@ macro_rules! dispatch_state_store {
             StateStoreImpl::MemoryStateStore($store) => $body,
             StateStoreImpl::HummockStateStore($store) => $body,
             StateStoreImpl::TikvStateStore($store) => $body,
+            StateStoreImpl::RocksDBStateStore($store) => $body,
         }
     };
 }
@@ -265,7 +268,6 @@ impl StreamManagerCore {
                     .unwrap()
                     .to_string()]))
             }
-
             Some(minio) if minio.starts_with("hummock+minio://") => {
                 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
                 use risingwave_storage::hummock::{HummockOptions, HummockStorage};
@@ -308,6 +310,11 @@ impl StreamManagerCore {
                     },
                     None,
                 )))
+            }
+            Some(rocksdb) if rocksdb.starts_with("rocksdb_local://") => {
+                StateStoreImpl::RocksDBStateStore(RocksDBStateStore::new(
+                    rocksdb.strip_prefix("rocksdb_local://").unwrap(),
+                ))
             }
             Some(other) => unimplemented!("{} state store is not supported", other),
         }

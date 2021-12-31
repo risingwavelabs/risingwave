@@ -21,6 +21,12 @@ pub mod panic_store;
 pub mod table;
 pub mod write_batch;
 
+#[cfg(feature = "rocksdb-local")]
+pub mod rocksdb_local;
+#[cfg(not(feature = "rocksdb-local"))]
+#[path = "rocksdb_local_mock.rs"]
+pub mod rocksdb_local;
+
 #[cfg(feature = "tikv")]
 pub mod tikv;
 #[cfg(not(feature = "tikv"))]
