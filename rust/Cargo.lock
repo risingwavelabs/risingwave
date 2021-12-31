@@ -882,7 +882,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bytes",
  "clap",
@@ -2576,7 +2576,7 @@ dependencies = [
 
 [[package]]
 name = "riselab"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2591,7 +2591,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave"
-version = "0.0.1-SNAPSHOT"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-std",
@@ -2661,7 +2661,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_batch"
-version = "0.0.1-SNAPSHOT"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "approx",
@@ -2713,7 +2713,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common"
-version = "0.1.0-SNAPSHOT"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -2748,7 +2748,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta"
-version = "0.0.1"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -2805,7 +2805,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_source"
-version = "0.0.1-SNAPSHOT"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "approx",
@@ -2859,7 +2859,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_storage"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -2905,7 +2905,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_stream"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "approx",

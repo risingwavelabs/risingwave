@@ -1,7 +1,7 @@
 [package]
 edition = "2021"
 name = "risingwave"
-version = "0.0.1-SNAPSHOT"
+version = "0.1.1"
 
 [dependencies]
 anyhow = "1"
