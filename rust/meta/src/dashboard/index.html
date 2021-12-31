@@ -1,0 +1,92 @@
+<!doctype html>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- TODO: directly using tailwindcss CDN is not recommended, should switch to other frameworks -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style type="text/tailwindcss">
+    @layer components {
+      .btn-primary {
+        @apply py-2 px-4 bg-sky-500 text-white font-semibold rounded-lg shadow-md hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-400 focus:ring-opacity-75;
+      }
+      .btn-nav {
+        @apply text-black py-2 px-2 my-1 font-semibold text-left rounded-lg hover:bg-sky-100 focus:outline-none focus:ring-2 focus:ring-sky-400 focus:ring-opacity-75;
+      }
+      .btn-selected {
+        @apply bg-sky-600 text-white hover:bg-sky-600;
+      }
+    }
+  </style>
+  <title>RisingWave Dashboard</title>
+</head>
+
+<body>
+  <div class="flex flex-row h-screen w-screen">
+    <div class="p-3 flex flex-col flex-none bg-slate-50" style="width: 18rem">
+      <div class="flex flex-col px-2">
+        <h2 class="text-sm leading-6 font-semibold">
+          RisingWave
+        </h1>
+        <h1 class="text-3xl font-bold">
+          Dashboard
+        </h1>
+      </div>
+      <div class="my-3 flex flex-col">
+        <button class="btn-nav btn-selected">
+          Cluster
+        </button>
+        <button class="btn-nav">
+          Streaming
+        </button>
+        <button class="btn-nav">
+          About
+        </button>
+      </div>
+      <div class="my-2 px-2">
+        <p class="text-gray-500 text-xs">😇 Note: this navbar is just a demo.</p>
+      </div>
+    </div>
+    <div class="grow py-3 px-5 flex flex-col">
+      <h1 class="mb-2 text-sm leading-6 font-semibold text-sky-500 dark:text-sky-400">
+        Cluster Information
+      </h1>
+      <div id="clusters" class="grid gap-2 md:grid-cols-2 lg:grid-cols-3 w-full">
+      </div>
+      <div class="px-2 py-2">
+        <p class="text-gray-500 text-xs">
+          😇 Note: the cluster information is also a demo -- meta node currently do not
+          store any record about worker node.
+        </p>
+      </div>
+    </div>
+  </div>
+</body>
+
+<script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
+<script>
+  const cluster = (type, cluster) => `
+<div class="p-6 max-w bg-white rounded-xl shadow-md flex flex-col space-y-1">
+  <div class="flex flex-row items-center">
+    <div class="w-3 h-3 flex-none bg-green-600 rounded-full mr-2"></div>
+    <div class="text-xl font-medium text-black">${type}</div>
+  </div>
+  <div class="flex flex-col">
+    <p class="text-gray-500 m-0">Running</p>
+    <p class="text-gray-500 m-0">${cluster.host}:${cluster.port}</p>
+  </div>
+</div>
+  `;
+  fetch('/api/clusters/0')
+    .then(response => response.json())
+    .then(data => data.forEach(
+      data => $("#clusters").append(cluster("Frontend", data))));
+  fetch('/api/clusters/1')
+    .then(response => response.json())
+    .then(data => data.forEach(
+      data => $("#clusters").append(cluster("Compute Node", data))));
+  $("#clusters").append(cluster("Meta Node", { host: "127.0.0.1", port: "2333" }));
+</script>
+
+</html>

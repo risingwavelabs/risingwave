@@ -35,7 +35,8 @@ optimizer, and other components. We use Calcite to serve as our query optimizer.
 engine, storage engine and meta service.
 - The `e2e_test` folder contains the latest end-to-end test cases.
 
-## Development - RiseLAB
+
+### RiseLAB
 
 RiseLAB is the new tool for developing RisingWave. You'll need to install tmux (>= 3.2a) beforehand.
 
@@ -58,6 +59,14 @@ To stop the playground,
 
 ```
 ./riselab kill-playground
+```
+
+### Dashboard
+
+To preview the web page, install Node.js, and
+
+```
+cd rust/meta/src/dashboard && npx reload -b
 ```
 
 ## Deployment

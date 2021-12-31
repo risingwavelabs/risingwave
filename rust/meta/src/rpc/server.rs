@@ -29,6 +29,7 @@ use crate::stream::{DefaultStreamManager, StoredStreamMetaManager};
 
 pub async fn rpc_serve_with_listener(
     listener: TcpListener,
+    dashboard_addr: Option<SocketAddr>,
     hummock_config: Option<hummock::Config>,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     let config = Arc::new(Config::default());
@@ -47,6 +48,16 @@ pub async fn rpc_serve_with_listener(
         stream_meta_manager.clone(),
         cluster_manager.clone(),
     ));
+
+    if let Some(dashboard_addr) = dashboard_addr {
+        let dashboard_service = DashboardService {
+            dashboard_addr,
+            cluster_manager: cluster_manager.clone(),
+            has_test_data: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        };
+        tokio::spawn(dashboard_service.serve()); // TODO: join dashboard service back to local
+                                                 // thread
+    }
 
     let epoch_srv = EpochServiceImpl::new(env.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new(catalog_manager_ref.clone());
@@ -89,13 +100,12 @@ pub async fn rpc_serve_with_listener(
 
 pub async fn rpc_serve(
     addr: SocketAddr,
-    dashboard_addr: SocketAddr,
+    dashboard_addr: Option<SocketAddr>,
     hummock_config: Option<hummock::Config>,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     let listener = TcpListener::bind(addr).await.unwrap();
-    let (join_handle, shutdown) = rpc_serve_with_listener(listener, hummock_config).await;
-    let dashboard_service = DashboardService::new(dashboard_addr);
-    tokio::spawn(dashboard_service.serve()); // TODO: join dashboard service back to local thread
+    let (join_handle, shutdown) =
+        rpc_serve_with_listener(listener, dashboard_addr, hummock_config).await;
     (join_handle, shutdown)
 }
 
@@ -108,8 +118,7 @@ mod tests {
     #[tokio::test]
     async fn test_server_shutdown() {
         let addr = get_host_port("127.0.0.1:9527").unwrap();
-        let dashbaord_addr = get_host_port("127.0.0.1:9528").unwrap();
-        let (join_handle, shutdown_send) = rpc_serve(addr, dashbaord_addr, None).await;
+        let (join_handle, shutdown_send) = rpc_serve(addr, None, None).await;
         shutdown_send.send(()).unwrap();
         join_handle.await.unwrap();
     }

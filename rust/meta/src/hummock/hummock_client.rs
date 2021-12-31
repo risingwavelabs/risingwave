@@ -115,7 +115,7 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let endpoint = format!("http://127.0.0.1:{}", address.port());
         let (join_handle, shutdown_send) =
-            rpc_serve_with_listener(listener, Some(hummock_config.clone())).await;
+            rpc_serve_with_listener(listener, None, Some(hummock_config.clone())).await;
         // Till the server is up
         tokio::time::sleep(Duration::from_millis(300)).await;
         (endpoint, join_handle, shutdown_send)
