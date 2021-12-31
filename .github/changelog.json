@@ -40,6 +40,6 @@
   "pr_template": "- ${{TITLE}} (#${{NUMBER}} by @${{AUTHOR}})",
   "empty_template": "- no changes",
   "max_tags_to_fetch": 200,
-  "max_pull_requests": 500,
+  "max_pull_requests": 2000,
   "max_back_track_time_days": 365
 }
