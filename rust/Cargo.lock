@@ -2756,6 +2756,52 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_bench"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-stream",
+ "async-trait",
+ "backtrace",
+ "byteorder",
+ "bytes",
+ "chrono",
+ "clap",
+ "clap_derive",
+ "crc32fast",
+ "either",
+ "farmhash",
+ "futures 0.3.19",
+ "hyper",
+ "itertools 0.10.3",
+ "lazy_static",
+ "log",
+ "num-traits",
+ "parking_lot",
+ "paste",
+ "prometheus 0.13.0",
+ "prost 0.9.0",
+ "prost-types 0.9.0",
+ "rand 0.8.4",
+ "risingwave-pb",
+ "risingwave_common",
+ "risingwave_storage",
+ "rusoto_core",
+ "rusoto_s3",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "smallvec",
+ "thiserror",
+ "tikv-client",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "twox-hash",
+]
+
+[[package]]
 name = "risingwave_common"
 version = "0.1.1"
 dependencies = [

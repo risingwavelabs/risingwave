@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "batch",
+  "bench",
   "common",
   "frontend",
   "meta",

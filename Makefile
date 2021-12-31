@@ -57,6 +57,8 @@ rust_clean_build:
 rust_doc:
 	cd rust && cargo doc --workspace --no-deps --document-private-items
 
+ss_bench:
+	cd rust/bench && cargo build
 
 export DOCKER_GROUP_NAME ?= risingwave
 export DOCKER_IMAGE_TAG ?= latest
