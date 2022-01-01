@@ -6,7 +6,7 @@ edition = "2021"
 
 [dependencies]
 bytes = "1"
-clap = "3.0.0-beta.5"
+clap = { version = "3", features = ["derive"] }
 log = "0.4"
 log4rs = "1"
 risingwave_common = { path = "../common" }

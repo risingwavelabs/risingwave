@@ -5,8 +5,7 @@ edition = "2021"
 
 [dependencies]
 bytes = "1"
-clap = "3.0.0-beta.5"
-clap_derive = "3.0.0-beta.5"
+clap = { version = "3", features = ["derive"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 rand = "0.8"
 risingwave-pb = { path = "../prost" }
