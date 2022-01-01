@@ -4,49 +4,16 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1"
-async-stream = "0.3"
-async-trait = "0.1" 
-backtrace = "0.3"
-byteorder = "1"
 bytes = "1"
-chrono = "0.4"
 clap = "3.0.0-beta.5"
 clap_derive = "3.0.0-beta.5"
-crc32fast = "1"
-either = "1"
-farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-hyper = "0.14"
-itertools = "0.10"
-lazy_static = "1"
-log = "0.4"
-num-traits = "0.2" 
-parking_lot = "0.11"
-paste = "1"
-prometheus = { version = "0.13", features = ["process"] }
-prost = "0.9"
-prost-types = "0.9"
 rand = "0.8"
 risingwave-pb = { path = "../prost" }
-risingwave_common = { path = "../common" }
 risingwave_storage = { path = "../storage" } 
 rusoto_core = "0.47"
 rusoto_s3 = "0.47"
-rust_decimal = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-serde_with = "1"
-smallvec = "1"
-thiserror = "1"
-tikv-client = { version = "0.1.0", optional = true }
 tokio = { version = "1", features = ["fs", "rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
-tokio-stream = "0.1"
-tonic = "0.6"
-twox-hash = "1"
-
-[features]
-tikv = ["tikv-client"]
 
 [[bin]]
 name = "ss-bench"

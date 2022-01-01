@@ -11,7 +11,6 @@ prost-types = "0.9"
 tonic = "0.6"
 
 [build-dependencies]
-convert_case = "0.4"
 prost = "0.9"
 prost-types = "0.9"
 quote = "1"
