@@ -22,6 +22,7 @@ wait_server() {
             fi
         done
     } 2>/dev/null
+    echo "Successfully start server at $1"
 }
 
 start_compute_node() {
@@ -54,12 +55,18 @@ start_meta_node() {
 start_n_nodes_cluster() {
     mkdir -p ./log/
 
+    cd rust/ || exit 1
+    start_meta_node
+    echo ""
+    echo "meta-node:"
+    list_meta_node_in_cluster
+    echo ""
+
     echo ""
     echo "Checking if there's any zombie compute-node"
     list_nodes_in_cluster
     echo ""
 
-    cd rust/ || exit 1
     addresses=()
     for ((i=0; i<$1; i++)); do
         port=$((5687+i))
@@ -70,13 +77,7 @@ start_n_nodes_cluster() {
     echo ""
     echo "All compute-nodes:"
     list_nodes_in_cluster
-    echo ""
-
-    start_meta_node
-    echo ""
-    echo "meta-node:"
-    list_meta_node_in_cluster
-    echo ""
+    echo ""    
 
     FRONTEND_CFG_FILE=pgserver/src/main/resources/server.properties
     FRONTEND_CFG_FILE_BASENAME=$(basename $FRONTEND_CFG_FILE)

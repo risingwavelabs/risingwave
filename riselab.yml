@@ -39,6 +39,7 @@ template:
 
 riselab:
   ci-3node:
+    - use: meta-node
     - use: compute-node
       port: 5687
       exporter-port: 1222
@@ -48,26 +49,25 @@ riselab:
     - use: compute-node
       port: 5689
       exporter-port: 1224
-    - use: meta-node
     - use: frontend
 
   ci-1node:
-    - use: compute-node
     - use: meta-node
+    - use: compute-node
     - use: frontend
 
   default:
     - use: minio
-    - use: compute-node
     - use: meta-node
+    - use: compute-node
     - use: prometheus
     - use: frontend
 
   dev-compute-node:
     - use: minio
+    - use: meta-node
     - use: compute-node
       # If user-managed is true, developers should start the compute-node, and RiseLAB will wait for its start.
       user-managed: true
-    - use: meta-node
     - use: prometheus
     - use: frontend

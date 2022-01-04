@@ -1,0 +1,9 @@
+[server]
+heartbeat_interval = 100
+
+[streaming]
+chunk_size = 1024
+
+[hummock]
+sst_size = 1024
+block_size = 1024

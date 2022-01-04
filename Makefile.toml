@@ -103,6 +103,7 @@ set -e
 
 cp "java/pgserver/src/main/resources/logback.xml" "${PREFIX_CONFIG}/logback.xml"
 cp "rust/config/log4rs.yaml" "${PREFIX_CONFIG}/log4rs.yaml"
+cp "rust/config/risingwave.toml" "${PREFIX_CONFIG}/risingwave.toml"
 cp "rust/riselab/run_command.sh" "${PREFIX_BIN}/run_command.sh"
 cp "rust/riselab/welcome.sh" "${PREFIX_BIN}/welcome.sh"
 '''

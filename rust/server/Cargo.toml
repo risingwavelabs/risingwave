@@ -33,6 +33,7 @@ rdkafka = { version = "0.27", features = ["cmake-build"] }
 risingwave-pb = { path = "../prost" }
 risingwave_batch = { path = "../batch" }
 risingwave_common = { path = "../common" }
+risingwave_meta = { path = "../meta" }
 risingwave_source = { path = "../source" }
 risingwave_storage = { path = "../storage" }
 risingwave_stream = { path = "../stream" }
@@ -46,6 +47,7 @@ static_assertions = "1"
 thiserror = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
 tokio-stream = "0.1"
+toml = "0.5.8"
 tonic = "0.6"
 twox-hash = "1"
 url = "2"

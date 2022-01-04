@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
 use risingwave_common::error::ErrorCode::MetaError;
-use risingwave_common::error::{Result, RwError, ToRwResult};
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::common::HostAddress;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
@@ -17,11 +17,13 @@ impl MetaClient {
     pub async fn new(endpoint: &str) -> Result<Self> {
         let cluster_client = ClusterServiceClient::connect(endpoint.to_owned())
             .await
-            .to_rw_result()?;
+            .map_err(|_e| RwError::from(MetaError("cluster client init failed.".to_string())))
+            .unwrap();
         let heartbeat_client = HeartbeatServiceClient::connect(endpoint.to_owned())
             .await
-            .to_rw_result()?;
-        // TODO: add some mechanism on connection overtime.
+            .map_err(|_e| RwError::from(MetaError("heartbeat client init failed".to_string())))
+            .unwrap();
+        // TODO: add some mechanism on connection error.
 
         Ok(Self {
             cluster_client,

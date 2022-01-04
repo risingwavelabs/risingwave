@@ -66,6 +66,9 @@ pub enum ErrorCode {
     /// system, currently only used in the [`BatchQueryExecutor`] as an ephemeral solution.
     #[error("End of the stream")]
     EOF,
+
+    #[error("Unknown error")]
+    UnknownError(String),
 }
 
 #[derive(Clone)]
@@ -193,6 +196,7 @@ impl ErrorCode {
             ErrorCode::HummockSnapshotNotPinned(..) => 20,
             ErrorCode::CatalogError(..) => 21,
             ErrorCode::EOF => 22,
+            ErrorCode::UnknownError(_) => 101,
         }
     }
 }
