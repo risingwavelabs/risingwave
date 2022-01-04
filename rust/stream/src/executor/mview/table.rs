@@ -19,6 +19,15 @@ pub struct MViewTable<S: StateStore> {
     sort_key_serializer: OrderedRowsSerializer,
 }
 
+impl<S: StateStore> std::fmt::Debug for MViewTable<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MViewTable")
+            .field("schema", &self.schema)
+            .field("pk_columns", &self.pk_columns)
+            .finish()
+    }
+}
+
 impl<S: StateStore> MViewTable<S> {
     pub fn new(
         keyspace: Keyspace<S>,

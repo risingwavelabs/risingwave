@@ -41,6 +41,18 @@ pub struct TopNExecutor<S: StateStore> {
     first_execution: bool,
 }
 
+impl<S: StateStore> std::fmt::Debug for TopNExecutor<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TopNExecutor")
+            .field("input", &self.input)
+            .field("order_types", &self.order_types)
+            .field("limit", &self.limit)
+            .field("offset", &self.offset)
+            .field("pk_indices", &self.pk_indices)
+            .finish()
+    }
+}
+
 impl<S: StateStore> TopNExecutor<S> {
     pub fn new(
         input: Box<dyn Executor>,

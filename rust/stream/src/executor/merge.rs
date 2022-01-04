@@ -102,6 +102,15 @@ pub struct ReceiverExecutor {
     receiver: Receiver<Message>,
 }
 
+impl std::fmt::Debug for ReceiverExecutor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReceiverExecutor")
+            .field("schema", &self.schema)
+            .field("pk_indices", &self.pk_indices)
+            .finish()
+    }
+}
+
 impl ReceiverExecutor {
     pub fn new(schema: Schema, pk_indices: PkIndices, receiver: Receiver<Message>) -> Self {
         Self {
@@ -152,6 +161,16 @@ pub struct MergeExecutor {
 
     /// Current barrier epoch (for assertion)
     next_epoch: Option<u64>,
+}
+
+impl std::fmt::Debug for MergeExecutor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MergeExecutor")
+            .field("schema", &self.schema)
+            .field("pk_indices", &self.pk_indices)
+            .field("num_inputs", &self.num_inputs)
+            .finish()
+    }
 }
 
 impl MergeExecutor {

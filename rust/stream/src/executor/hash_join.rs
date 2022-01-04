@@ -182,6 +182,17 @@ struct JoinSide<S: StateStore> {
     keyspace: Keyspace<S>,
 }
 
+impl<S: StateStore> std::fmt::Debug for JoinSide<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JoinSide")
+            .field("key_indices", &self.key_indices)
+            .field("pk_indices", &self.pk_indices)
+            .field("col_types", &self.col_types)
+            .field("start_pos", &self.start_pos)
+            .finish()
+    }
+}
+
 /// `HashJoinExecutor` takes two input streams and runs equal hash join on them.
 /// The output columns are the concatenation of left and right columns.
 pub struct HashJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
@@ -198,6 +209,25 @@ pub struct HashJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
     side_l: JoinSide<S>,
     /// The parameters of the right join executor
     side_r: JoinSide<S>,
+    /// Debug info for the left executor
+    debug_l: String,
+    /// Debug info for the right executor
+    debug_r: String,
+}
+
+impl<S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug for HashJoinExecutor<S, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HashJoinExecutor")
+            .field("join_type", &T)
+            .field("input_left", &self.debug_l)
+            .field("input_right", &self.debug_r)
+            .field("side_l", &self.side_l)
+            .field("side_r", &self.side_r)
+            .field("pk_indices", &self.pk_indices)
+            .field("schema", &self.schema)
+            .field("new_column_datatypes", &self.new_column_datatypes)
+            .finish()
+    }
 }
 
 #[async_trait]
@@ -237,6 +267,9 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
         pk_indices: PkIndices,
         keyspace: Keyspace<S>,
     ) -> Self {
+        let debug_l = format!("{:#?}", &input_l);
+        let debug_r = format!("{:#?}", &input_r);
+
         let new_column_n = input_l.schema().len() + input_r.schema().len();
         let side_l_column_n = input_l.schema().len();
 
@@ -292,6 +325,8 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                 keyspace: ks_r,
             },
             pk_indices,
+            debug_l,
+            debug_r,
         }
     }
 

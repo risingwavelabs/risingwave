@@ -68,6 +68,16 @@ impl<S: StateStore> Executor for MViewSinkExecutor<S> {
     }
 }
 
+impl<S: StateStore> std::fmt::Debug for MViewSinkExecutor<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MViewSinkExecutor")
+            .field("input", &self.input)
+            .field("schema", &self.schema)
+            .field("pk_columns", &self.pk_columns)
+            .finish()
+    }
+}
+
 impl<S: StateStore> SimpleExecutor for MViewSinkExecutor<S> {
     fn input(&mut self) -> &mut dyn Executor {
         &mut *self.input

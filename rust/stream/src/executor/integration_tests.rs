@@ -23,6 +23,13 @@ pub struct MockConsumer {
     input: Box<dyn Executor>,
     data: Arc<Mutex<Vec<StreamChunk>>>,
 }
+impl std::fmt::Debug for MockConsumer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MockConsumer")
+            .field("input", &self.input)
+            .finish()
+    }
+}
 
 impl MockConsumer {
     pub fn new(input: Box<dyn Executor>, data: Arc<Mutex<Vec<StreamChunk>>>) -> Self {

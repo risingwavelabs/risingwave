@@ -52,6 +52,17 @@ pub struct SimpleAggExecutor<S: StateStore> {
     agg_calls: Vec<AggCall>,
 }
 
+impl<S: StateStore> std::fmt::Debug for SimpleAggExecutor<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SimpleAggExecutor")
+            .field("schema", &self.schema)
+            .field("pk_indices", &self.pk_indices)
+            .field("input", &self.input)
+            .field("agg_calls", &self.agg_calls)
+            .finish()
+    }
+}
+
 impl<S: StateStore> SimpleAggExecutor<S> {
     pub fn new(
         input: Box<dyn Executor>,

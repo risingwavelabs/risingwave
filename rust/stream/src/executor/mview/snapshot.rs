@@ -25,6 +25,17 @@ pub struct BatchQueryExecutor<S: StateStore> {
     /// Inner iterator that read [`MViewTable`]
     iter: Option<MViewTableIter<S>>,
 }
+
+impl<S: StateStore> std::fmt::Debug for BatchQueryExecutor<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BatchQueryExecutor")
+            .field("table", &self.table)
+            .field("pk_indices", &self.pk_indices)
+            .field("batch_size", &self.batch_size)
+            .finish()
+    }
+}
+
 impl<S: StateStore> BatchQueryExecutor<S> {
     fn new(table: MViewTable<S>, pk_indices: PkIndices) -> Self {
         Self::new_with_batch_size(table, pk_indices, DEFAULT_BATCH_SIZE)

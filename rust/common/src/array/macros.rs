@@ -33,7 +33,6 @@ macro_rules! array_nonnull {
 }
 
 /// `column` builds a `Column` with `Option`.
-// TODO
 #[macro_export]
 macro_rules! column {
   ($array:tt, [$( $value:expr ),*]) => {

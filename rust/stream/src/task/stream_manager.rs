@@ -814,6 +814,8 @@ impl StreamManagerCore {
                 fragment.get_downstream_fragment_id(),
             )?;
 
+            debug!("build fragment: {:#?}", &dispatcher);
+
             let actor = Actor::new(dispatcher);
             self.handles.insert(*fragment_id, tokio::spawn(actor.run()));
         }

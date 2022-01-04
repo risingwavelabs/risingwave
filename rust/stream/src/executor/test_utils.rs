@@ -27,6 +27,15 @@ pub struct MockSource {
     msgs: VecDeque<Message>,
 }
 
+impl std::fmt::Debug for MockSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MockSource")
+            .field("schema", &self.schema)
+            .field("pk_indices", &self.pk_indices)
+            .finish()
+    }
+}
+
 impl MockSource {
     pub fn new(schema: Schema, pk_indices: PkIndices) -> Self {
         Self {
@@ -99,6 +108,15 @@ pub struct MockAsyncSource {
     pk_indices: PkIndices,
     epoch: u64,
     rx: UnboundedReceiver<Message>,
+}
+
+impl std::fmt::Debug for MockAsyncSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MockAsyncSource")
+            .field("schema", &self.schema)
+            .field("pk_indices", &self.pk_indices)
+            .finish()
+    }
 }
 
 impl MockAsyncSource {

@@ -1,3 +1,5 @@
+use std::fmt::{Debug, Formatter};
+
 use async_trait::async_trait;
 use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op};
 use risingwave_common::catalog::Schema;
@@ -21,6 +23,15 @@ pub struct FilterExecutor {
 impl FilterExecutor {
     pub fn new(input: Box<dyn Executor>, expr: BoxedExpression) -> Self {
         Self { input, expr }
+    }
+}
+
+impl Debug for FilterExecutor {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FilterExecutor")
+            .field("input", &self.input)
+            .field("expr", &self.expr)
+            .finish()
     }
 }
 

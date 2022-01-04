@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -13,13 +14,19 @@ use crate::task::{SharedContext, LOCAL_OUTPUT_CHANNEL_SIZE};
 
 /// `Output` provides an interface for `Dispatcher` to send data into downstream fragments.
 #[async_trait]
-pub trait Output: Send + Sync + 'static {
+pub trait Output: Debug + Send + Sync + 'static {
     async fn send(&mut self, message: Message) -> Result<()>;
 }
 
 /// `ChannelOutput` sends data to a local `mpsc::Channel`
 pub struct ChannelOutput {
     ch: Sender<Message>,
+}
+
+impl Debug for ChannelOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChannelOutput").finish()
+    }
 }
 
 impl ChannelOutput {
@@ -40,6 +47,12 @@ impl Output for ChannelOutput {
 /// `RemoteOutput` forwards data to`ExchangeServiceImpl`
 pub struct RemoteOutput {
     ch: Sender<Message>,
+}
+
+impl Debug for RemoteOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RemoteOutput").finish()
+    }
 }
 
 impl RemoteOutput {
@@ -65,6 +78,16 @@ pub struct DispatchExecutor<Inner: DataDispatcher> {
     inner: Inner,
     fragment_id: u32,
     context: Arc<SharedContext>,
+}
+
+impl<Inner: DataDispatcher> std::fmt::Debug for DispatchExecutor<Inner> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DispatchExecutor")
+            .field("input", &self.input)
+            .field("inner", &self.inner)
+            .field("fragment_id", &self.fragment_id)
+            .finish()
+    }
 }
 
 impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
@@ -173,7 +196,7 @@ impl<Inner: DataDispatcher + Send + Sync + 'static> StreamConsumer for DispatchE
 }
 
 #[async_trait]
-pub trait DataDispatcher {
+pub trait DataDispatcher: Debug + 'static {
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()>;
     fn get_outputs(&mut self) -> &mut [Box<dyn Output>];
     fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>);
@@ -182,6 +205,14 @@ pub trait DataDispatcher {
 pub struct RoundRobinDataDispatcher {
     outputs: Vec<Box<dyn Output>>,
     cur: usize,
+}
+
+impl Debug for RoundRobinDataDispatcher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RoundRobinDataDispatcher")
+            .field("outputs", &self.outputs)
+            .finish()
+    }
 }
 
 impl RoundRobinDataDispatcher {
@@ -210,6 +241,15 @@ impl DataDispatcher for RoundRobinDataDispatcher {
 pub struct HashDataDispatcher {
     outputs: Vec<Box<dyn Output>>,
     keys: Vec<usize>,
+}
+
+impl Debug for HashDataDispatcher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HashDataDispatcher")
+            .field("outputs", &self.outputs)
+            .field("keys", &self.keys)
+            .finish()
+    }
 }
 
 impl HashDataDispatcher {
@@ -314,6 +354,14 @@ pub struct BroadcastDispatcher {
     outputs: Vec<Box<dyn Output>>,
 }
 
+impl Debug for BroadcastDispatcher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BroadcastDispatcher")
+            .field("outputs", &self.outputs)
+            .finish()
+    }
+}
+
 impl BroadcastDispatcher {
     pub fn new(outputs: Vec<Box<dyn Output>>) -> Self {
         Self { outputs }
@@ -342,6 +390,14 @@ pub struct SimpleDispatcher {
     output: Box<dyn Output>,
 }
 
+impl Debug for SimpleDispatcher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SimpleDispatcher")
+            .field("output", &self.output)
+            .finish()
+    }
+}
+
 impl SimpleDispatcher {
     pub fn new(output: Box<dyn Output>) -> Self {
         Self { output }
@@ -368,6 +424,15 @@ impl DataDispatcher for SimpleDispatcher {
 pub struct SenderConsumer {
     input: Box<dyn Executor>,
     channel: Box<dyn Output>,
+}
+
+impl Debug for SenderConsumer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SenderConsumer")
+            .field("input", &self.input)
+            .field("channel", &self.channel)
+            .finish()
+    }
 }
 
 impl SenderConsumer {
@@ -405,6 +470,12 @@ mod tests {
 
     pub struct MockOutput {
         data: Arc<Mutex<Vec<Message>>>,
+    }
+
+    impl std::fmt::Debug for MockOutput {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("MockOutput").finish()
+        }
     }
 
     impl MockOutput {

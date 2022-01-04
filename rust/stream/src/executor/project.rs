@@ -22,6 +22,17 @@ pub struct ProjectExecutor {
     exprs: Vec<BoxedExpression>,
 }
 
+impl std::fmt::Debug for ProjectExecutor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProjectExecutor")
+            .field("schema", &self.schema)
+            .field("pk_indices", &self.pk_indices)
+            .field("input", &self.input)
+            .field("exprs", &self.exprs)
+            .finish()
+    }
+}
+
 impl ProjectExecutor {
     pub fn new(
         input: Box<dyn Executor>,

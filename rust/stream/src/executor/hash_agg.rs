@@ -281,6 +281,18 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
     }
 }
 
+impl<S: StateStore> std::fmt::Debug for HashAggExecutor<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AggregateExecutor")
+            .field("input", &self.input)
+            .field("agg_calls", &self.agg_calls)
+            .field("key_indices", &self.key_indices)
+            .field("pk_indices", &self.pk_indices)
+            .field("schema", &self.schema)
+            .finish()
+    }
+}
+
 #[async_trait]
 impl<S: StateStore> Executor for HashAggExecutor<S> {
     fn schema(&self) -> &Schema {
