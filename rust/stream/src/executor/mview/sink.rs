@@ -1,11 +1,12 @@
 use async_trait::async_trait;
+use itertools::Itertools;
 use risingwave_common::array::Op::*;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::mview_state::ManagedMViewState;
+use super::state::ManagedMViewState;
 use crate::executor::{
     Barrier, Executor, Message, PkIndicesRef, Result, SimpleExecutor, StreamChunk,
 };
@@ -91,20 +92,17 @@ impl<S: StateStore> SimpleExecutor for MViewSinkExecutor<S> {
             }
 
             // assemble pk row
-            let mut pk_row = vec![];
-            for column_id in &self.pk_columns {
-                let datum = columns[*column_id].array_ref().datum_at(idx);
-                pk_row.push(datum);
-            }
-            let pk_row = Row(pk_row);
+            let pk_row = Row(self
+                .pk_columns
+                .iter()
+                .map(|c_id| columns[*c_id].array_ref().datum_at(idx))
+                .collect_vec());
 
             // assemble row
-            let mut row = vec![];
-            for column in columns {
-                let datum = column.array_ref().datum_at(idx);
-                row.push(datum);
-            }
-            let row = Row(row);
+            let row = Row(columns
+                .iter()
+                .map(|x| x.array_ref().datum_at(idx))
+                .collect_vec());
 
             match op {
                 Insert | UpdateInsert => {

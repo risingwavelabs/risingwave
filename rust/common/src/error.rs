@@ -61,6 +61,11 @@ pub enum ErrorCode {
 
     #[error("Error while interact with meta service")]
     MetaError(String),
+
+    /// EOF represents an upstream node will not generate new data. This error is rare in our
+    /// system, currently only used in the [`BatchQueryExecutor`] as an ephemeral solution.
+    #[error("End of the stream")]
+    EOF,
 }
 
 #[derive(Clone)]
@@ -187,6 +192,7 @@ impl ErrorCode {
             ErrorCode::HummockVersionNotPinned(..) => 19,
             ErrorCode::HummockSnapshotNotPinned(..) => 20,
             ErrorCode::CatalogError(..) => 21,
+            ErrorCode::EOF => 22,
         }
     }
 }

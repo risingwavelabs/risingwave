@@ -1,6 +1,9 @@
-mod mview_sink;
-mod mview_state;
-mod mview_table;
+mod sink;
+pub mod snapshot;
+mod state;
+mod table;
+
+mod test_utils;
 
 use bytes::BufMut;
 use risingwave_common::array::Row;
@@ -28,6 +31,6 @@ pub fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {
     Ok(serializer.into_inner())
 }
 
-pub use mview_sink::*;
-pub use mview_state::*;
-pub use mview_table::*;
+pub use sink::*;
+pub use state::*;
+pub use table::*;
