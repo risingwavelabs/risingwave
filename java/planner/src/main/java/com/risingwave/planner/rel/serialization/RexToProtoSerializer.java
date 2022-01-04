@@ -185,6 +185,8 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
       case INTERVAL:
         {
           switch (dataType.getIntervalType()) {
+            case YEAR_TO_MONTH:
+            case MONTH:
             case YEAR:
               {
                 bb = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN);
@@ -194,6 +196,15 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
                         "RexLiteral return a null value in byte array serialization!"));
                 break;
               }
+            case DAY_TO_HOUR:
+            case DAY_TO_MINUTE:
+            case DAY_TO_SECOND:
+            case HOUR:
+            case HOUR_TO_MINUTE:
+            case HOUR_TO_SECOND:
+            case MINUTE:
+            case MINUTE_TO_SECOND:
+            case SECOND:
             case DAY:
               {
                 bb = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN);
