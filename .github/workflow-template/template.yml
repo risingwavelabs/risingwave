@@ -63,21 +63,25 @@ jobs:
         with:
           fetch-depth: 0
       - uses: actions/download-artifact@v2
+        name: Download compute-node binary
         with:
           name: compute-node
           path: ./.risingwave/bin
 
       - uses: actions/download-artifact@v2
+        name: Download meta-node binary
         with:
           name: meta-node
           path: ./.risingwave/bin
 
       - uses: actions/download-artifact@v2
+        name: Download frontend binary
         with:
           name: risingwave-fe-runnable.jar
           path: ./.risingwave/bin
 
       - uses: actions/download-artifact@v2
+        name: Download playground binary
         with:
           name: playground
           path: ./rust/target/debug
@@ -103,12 +107,25 @@ jobs:
           unzip ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip -d ~
           mv ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl ~/cargo-make
 
-      - name: Start cluster # Note: RiseLAB cluster cannot be used to run e2e coverage unless we rebuild frontend in this workflow
+      - name: Start MinIO + meta + compute + frontend cluster # Note: RiseLAB cluster cannot be used to run e2e coverage unless we rebuild frontend in this workflow
         run: |
+          ~/cargo-make/makers --profile ci clean-data
           ~/cargo-make/makers --profile ci dev
 
-      - name: e2e test w/ Hummock
-        run: python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/streaming
+      - name: e2e test w/ Hummock and dump logs
+        run: |
+          python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/streaming
+          ~/cargo-make/makers --profile ci logs
+
+      - name: Start meta + 3 compute + frontend cluster
+        run: |
+          ~/cargo-make/makers --profile ci clean-data
+          ~/cargo-make/makers --profile ci ci-3node
+
+      - name: e2e test 3-node and dump logs
+        run: |
+          python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/batch/
+          ~/cargo-make/makers --profile ci logs
 
       - uses: actions/upload-artifact@v2
         if: ${{ failure() || success() }}

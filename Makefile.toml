@@ -25,6 +25,24 @@ rm -rf "${PREFIX_LOG}"
 rm -rf "${PREFIX_CONFIG}"
 '''
 
+[tasks.logs]
+category = "Misc"
+description = "Dump logs in a folder"
+script = '''
+#!@shell
+set -e
+
+for out_file in ${PREFIX_LOG}/*.log
+do
+  echo ""
+  echo "==="
+  echo "=== Dump log file $out_file ==="
+  echo "==="
+  echo ""
+  cat "$out_file"
+done
+'''
+
 [tasks.post-build-risingwave]
 category = "RisingWave"
 description = "Copy RisingWave binaries to bin"
