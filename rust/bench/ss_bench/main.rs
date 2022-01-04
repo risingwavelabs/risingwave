@@ -1,3 +1,4 @@
+mod workload_generator;
 mod writebatch;
 
 use std::sync::Arc;
@@ -8,14 +9,8 @@ use risingwave_storage::hummock::{HummockOptions, HummockStateStore, HummockStor
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::object::{ConnectionInfo, S3ObjectStore};
 
-#[derive(Clone)]
-pub enum StateStoreImpl {
-    HummockStateStore(HummockStateStore),
-    MemoryStateStore(MemoryStateStore),
-}
-
 #[derive(Parser, Debug)]
-struct Opts {
+pub struct Opts {
     // ----- backend type parameters  -----
     #[clap(long, default_value = "in-memory")]
     store: String,
@@ -57,6 +52,12 @@ fn get_checksum_algo(algo: &str) -> ChecksumAlg {
         "xxhash64" => ChecksumAlg::XxHash64,
         other => unimplemented!("checksum algorithm \"{}\" is not supported", other),
     }
+}
+
+#[derive(Clone)]
+pub enum StateStoreImpl {
+    HummockStateStore(HummockStateStore),
+    MemoryStateStore(MemoryStateStore),
 }
 
 fn get_state_store_impl(opts: &Opts) -> StateStoreImpl {
@@ -127,7 +128,7 @@ async fn main() {
     let store = get_state_store_impl(&opts);
 
     match opts.op.as_ref() {
-        "writebatch" => writebatch::exec(store),
+        "writebatch" => writebatch::run(store, &opts).await,
         other => unimplemented!("operation \"{}\" is not supported.", other),
     }
 }
