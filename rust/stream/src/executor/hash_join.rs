@@ -219,8 +219,8 @@ impl<S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug for HashJoinExec
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HashJoinExecutor")
             .field("join_type", &T)
-            .field("input_left", &self.debug_l)
-            .field("input_right", &self.debug_r)
+            .field("input_left", &format_args!("{}", &self.debug_l))
+            .field("input_right", &format_args!("{}", &self.debug_r))
             .field("side_l", &self.side_l)
             .field("side_r", &self.side_r)
             .field("pk_indices", &self.pk_indices)
