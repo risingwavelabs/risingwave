@@ -89,6 +89,9 @@ jobs:
         run: |
           sudo apt-get update -yy
           sudo apt-get install --upgrade -yy tmux wget postgresql
+      - name: Configure RiseLAB
+        run: |
+          cp riselab-components.ci.env riselab-components.user.env
       - name: Build sqllogictest
         run: |
           make sqllogictest

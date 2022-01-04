@@ -11,6 +11,7 @@ PROMETHEUS_DOWNLOAD_TAR_GZ = "https://github.com/prometheus/prometheus/releases/
 [tasks.download-prometheus]
 category = "Prometheus"
 dependencies = ["prepare"]
+condition = { env_set = [ "ENABLE_PROMETHEUS_GRAFANA" ] }
 description = "Download and extract Prometheus"
 script = '''
 #!@shell

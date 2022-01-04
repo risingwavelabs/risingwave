@@ -13,6 +13,7 @@ MINIO_ROOT_USER = "hummockadmin"
 [tasks.download-minio]
 category = "MinIO"
 dependencies = ["prepare"]
+condition = { env_set = [ "ENABLE_MINIO" ] }
 description = "Download and extract MinIO"
 script = '''
 #!@shell
@@ -29,6 +30,7 @@ mv "${PREFIX_TMP}/minio" "${PREFIX_BIN}/minio"
 [tasks.download-mcli]
 category = "MinIO"
 dependencies = ["prepare"]
+condition = { env_set = [ "ENABLE_MINIO" ] }
 description = "Download and extract MinIO Client"
 script = '''
 #!@shell

@@ -16,9 +16,8 @@ WGET_EXTRA_PARAMETER = ""
 [env.ci]
 WGET_EXTRA_PARAMETER = "--show-progress=off"
 
-[tasks.prepare]
-category = "Misc"
-description = "Create .risingwave folder for storing temporary files and data"
+[tasks.prepare-dir]
+private = true
 script = '''
 #!@duckscript
 echo "Using ${PREFIX} as base folder"
@@ -31,3 +30,18 @@ mkdir "${PREFIX_CONFIG}/mcli"
 mkdir "${PREFIX_LOG}"
 mkdir "${HUMMOCK_PATH}"
 '''
+
+[tasks.check-riselab-configured]
+private = true
+condition = { env_not_set = [ "RISELAB_CONFIGURED" ] }
+script = '''
+#!@shell
+set -e
+echo "RiseLAB is not configured, please run ./riselab configure"
+exit 1
+'''
+
+[tasks.prepare]
+category = "Misc"
+description = "Create .risingwave folder for storing temporary files and data"
+dependencies = ["prepare-dir", "check-riselab-configured"]

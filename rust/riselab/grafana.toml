@@ -10,6 +10,7 @@ GRAFANA_DOWNLOAD_TAR_GZ = "https://dl.grafana.com/oss/release/${GRAFANA_RELEASE}
 [tasks.download-grafana]
 category = "Grafana"
 dependencies = ["prepare"]
+condition = { env_set = [ "ENABLE_PROMETHEUS_GRAFANA" ] }
 description = "Download and extract Grafana"
 script = '''
 #!@shell

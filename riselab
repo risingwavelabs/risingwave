@@ -10,4 +10,6 @@ if [ $# -eq 0 ]; then
     exit 0
 fi
 
+touch riselab-components.user.env
+cargo make configure-if-not-configured
 cargo make "$@"

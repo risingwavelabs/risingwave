@@ -2,6 +2,11 @@ extend = [
   {path = "rust/riselab/grafana.toml"},
   {path = "rust/riselab/prometheus.toml"},
   {path = "rust/riselab/minio.toml"},
+  {path = "rust/riselab/riselab-components.toml"},
+]
+
+env_files = [
+  "riselab-components.user.env"
 ]
 
 [config]
@@ -46,6 +51,7 @@ done
 [tasks.post-build-risingwave]
 category = "RisingWave"
 description = "Copy RisingWave binaries to bin"
+condition = { env_set = [ "ENABLE_BUILD_RUST" ] }
 script = '''
 #!@shell
 set -e
@@ -58,6 +64,7 @@ ln -s "$(pwd)/rust/target/debug/meta-node" "${PREFIX_BIN}/meta-node"
 [tasks.build-risingwave]
 category = "RisingWave"
 description = "Build RisingWave compute-node and meta-node"
+condition = { env_set = [ "ENABLE_BUILD_RUST" ] }
 script = '''
 #!@shell
 set -e
@@ -67,6 +74,7 @@ cd rust && cargo build
 [tasks.build-frontend]
 category = "RisingWave"
 description = "Build RisingWave frontend"
+condition = { env_set = [ "ENABLE_BUILD_FRONTEND" ] }
 script = '''
 #!@shell
 set -e
@@ -76,6 +84,7 @@ cd java && ./gradlew build -x test
 [tasks.post-build-frontend]
 category = "RisingWave"
 description = "Post build RisingWave frontend"
+condition = { env_set = [ "ENABLE_BUILD_FRONTEND" ] }
 script = '''
 #!@shell
 

@@ -48,3 +48,5 @@ log/
 
 # generated files
 e2e_test/batch/tpch/tpch.slt
+
+riselab-components.user.env
