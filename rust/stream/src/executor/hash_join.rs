@@ -240,31 +240,29 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
         let new_column_n = input_l.schema().len() + input_r.schema().len();
         let side_l_column_n = input_l.schema().len();
 
-        let schema_fields = input_r
-            .schema()
-            .fields
-            .iter()
-            .cloned()
-            .chain(input_l.schema().fields.iter().cloned())
-            .collect::<Vec<_>>();
+        let schema_fields = [
+            input_l.schema().fields.clone(),
+            input_r.schema().fields.clone(),
+        ]
+        .concat();
 
         assert_eq!(schema_fields.len(), new_column_n);
 
         let new_column_datatypes = schema_fields
             .iter()
-            .map(|filed| filed.data_type.clone())
+            .map(|field| field.data_type.clone())
             .collect();
         let col_l_datatypes = input_l
             .schema()
             .fields
             .iter()
-            .map(|filed| filed.data_type.clone())
+            .map(|field| field.data_type.clone())
             .collect();
         let col_r_datatypes = input_r
             .schema()
             .fields
             .iter()
-            .map(|filed| filed.data_type.clone())
+            .map(|field| field.data_type.clone())
             .collect();
         let pk_indices_l = input_l.pk_indices().to_vec();
         let pk_indices_r = input_r.pk_indices().to_vec();
