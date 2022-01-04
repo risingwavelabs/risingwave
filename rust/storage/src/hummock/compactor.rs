@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use bytes::BytesMut;
-use tokio::sync::mpsc::unbounded_channel;
+use futures::stream::{self, StreamExt};
 
 use super::cloud::gen_remote_table;
 use super::iterator::{ConcatIterator, HummockIterator, SortedIterator};
@@ -34,11 +34,10 @@ impl Compactor {
             }
         }
 
-        compact_task
-            .sorted_output_ssts
-            .reserve(compact_task.splits.len());
+        let num_sub = compact_task.splits.len();
+        compact_task.sorted_output_ssts.reserve(num_sub);
 
-        let (tx, mut rx) = unbounded_channel();
+        let mut vec_futures = Vec::with_capacity(num_sub);
 
         for (kr_idx, kr) in (&compact_task.splits).iter().enumerate() {
             let mut output_needing_vacuum = vec![];
@@ -56,37 +55,43 @@ impl Compactor {
                     )),
             );
 
-            let spawn_tx = tx.clone();
             let spawn_storage = storage.clone();
             let spawn_kr = kr.clone();
             let is_target_ultimate_and_leveling = compact_task.is_target_ultimate_and_leveling;
             let watermark = compact_task.watermark;
 
-            tokio::spawn(async move {
-                spawn_tx.send((
-                    Compactor::sub_compact(
-                        spawn_storage,
-                        spawn_kr,
-                        iter,
-                        &mut output_needing_vacuum,
-                        is_target_ultimate_and_leveling,
-                        watermark,
+            vec_futures.push(async move {
+                tokio::spawn(async move {
+                    (
+                        Compactor::sub_compact(
+                            spawn_storage,
+                            spawn_kr,
+                            iter,
+                            &mut output_needing_vacuum,
+                            is_target_ultimate_and_leveling,
+                            watermark,
+                        )
+                        .await,
+                        kr_idx,
+                        output_needing_vacuum,
                     )
-                    .await,
-                    kr_idx,
-                    output_needing_vacuum,
-                ))
+                })
+                .await
             });
         }
 
-        let num_sub = compact_task.splits.len();
+        let stream_of_futures = stream::iter(vec_futures);
+        let mut buffered = stream_of_futures.buffer_unordered(num_sub);
+
         let mut sub_compact_outputsets = Vec::with_capacity(num_sub);
         let mut sub_compact_results = Vec::with_capacity(num_sub);
-        for _ in 0..num_sub {
-            let (sub_result, sub_kr_idx, sub_output) = rx.recv().await.unwrap();
+
+        while let Some(tokio_result) = buffered.next().await {
+            let (sub_result, sub_kr_idx, sub_output) = tokio_result.unwrap();
             sub_compact_outputsets.push((sub_kr_idx, sub_output));
             sub_compact_results.push(sub_result);
         }
+
         sub_compact_outputsets.sort_by_key(|(sub_kr_idx, _)| *sub_kr_idx);
         for (_, mut sub_output) in sub_compact_outputsets {
             compact_task.sorted_output_ssts.append(&mut sub_output);
