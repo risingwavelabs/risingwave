@@ -256,7 +256,7 @@ RwBatchProject(EXPR$0=[/(100.0:DOUBLE, 8.0:DOUBLE)])
         </Resource>
         <Resource name="physical">
             <![CDATA[
-RwBatchFilter(condition=[>=($0, 1970-01-01)])
+RwBatchFilter(condition=[>=($0, CAST('1970-01-01'):DATE NOT NULL)])
   RwBatchTableScan(table=[[test_schema, t2]], columns=[v1])
             ]]>
         </Resource>
@@ -315,7 +315,7 @@ RwBatchHashJoin(condition=[=($0, $3)], joinType=[inner])
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwBatchProject(EXPR$0=[+(+(2021-10-01, 12288:INTERVAL YEAR(9)), 88473600000:INTERVAL DAY(9))])
+RwBatchProject(EXPR$0=[+(+(CAST('2021-10-1'):DATE NOT NULL, 12288:INTERVAL YEAR(9)), 88473600000:INTERVAL DAY(9))])
   RwBatchValues(tuples=[[{ 0 }]])
 ]]>
         </Resource>
@@ -330,7 +330,7 @@ RwBatchProject(EXPR$0=[+(+(2021-10-01, 12288:INTERVAL YEAR(9)), 88473600000:INTE
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwBatchProject(EXPR$0=[EXTRACT(FLAG(DAY), 1999-01-02)])
+RwBatchProject(EXPR$0=[EXTRACT(FLAG(DAY), CAST('1999-1-2'):DATE NOT NULL)])
   RwBatchValues(tuples=[[{ 0 }]])
 ]]>
         </Resource>

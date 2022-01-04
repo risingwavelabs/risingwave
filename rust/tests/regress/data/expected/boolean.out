@@ -194,7 +194,7 @@ SELECT '    true   '::text::boolean AS true,
 SELECT true::boolean::text AS true, false::boolean::text AS false;
  true | false 
 ------+-------
- TRUE | FALSE
+ true | false
 (1 row)
 
 SELECT '  tru e '::text::boolean AS invalid;    -- error

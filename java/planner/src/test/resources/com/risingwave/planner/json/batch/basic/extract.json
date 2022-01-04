@@ -27,10 +27,10 @@
               "exprType": "CONSTANT_VALUE",
               "returnType": {
                 "typeName": "CHAR",
-                "precision": 10
+                "precision": 8
               },
               "constant": {
-                "body": "MTk5OS0wMS0wMg=="
+                "body": "MTk5OS0xLTI="
               }
             }]
           }

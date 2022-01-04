@@ -5,7 +5,8 @@ use risingwave_pb::expr::expr_node::Type as ProstType;
 /// For expression that only accept one value as input (e.g. CAST)
 use super::template::{UnaryBytesExpression, UnaryExpression};
 use crate::array::{
-    BoolArray, DataTypeTrait, F32Array, F64Array, I16Array, I32Array, I64Array, Utf8Array,
+    BoolArray, DataTypeTrait, DecimalArray, F32Array, F64Array, I16Array, I32Array, I64Array,
+    Utf8Array,
 };
 use crate::expr::expr_is_null::{IsNotNullExpression, IsNullExpression};
 use crate::expr::pg_sleep::PgSleepExpression;
@@ -32,7 +33,7 @@ use crate::vector_op::upper::upper;
 /// * $func: The scalar function for expression, it's a generic function and specialized by the type
 ///   of `$input, $cast`
 macro_rules! cast_impl {
-  ([$child:expr, $ret:expr], $( { $input:ty, $cast:ty, $func:ident} ),*) => {
+  ([$child:expr, $ret:expr], $( { $input:ty, $cast:ty, $func:expr} ),*) => {
     match ($child.return_type().data_type_kind(), $ret.data_type_kind()) {
       $(
           (<$input as DataTypeTrait>::DATA_TYPE_ENUM, <$cast as DataTypeTrait>::DATA_TYPE_ENUM) => {
@@ -66,6 +67,9 @@ macro_rules! gen_cast {
       { StringType, Float64Type, str_to_double},
       { StringType, DecimalType, str_to_decimal},
       { StringType, BoolType, str_to_bool},
+      { BoolType, StringType, bool_to_str},
+      // TODO: decide whether nullability-cast should be allowed (#2350)
+      { BoolType, BoolType, |x| Ok(x)},
       { Int16Type, Int32Type, general_cast },
       { Int16Type, Int64Type, general_cast },
       { Int16Type, Float32Type, general_cast },
@@ -143,6 +147,14 @@ pub fn new_unary_expr(
                 expr_ia1: child_expr,
                 return_type,
                 func: str_to_bool,
+                _phantom: PhantomData,
+            })
+        }
+        (ProstType::Cast, DataTypeKind::Decimal, DataTypeKind::Char) => {
+            Box::new(UnaryExpression::<Utf8Array, DecimalArray, _> {
+                expr_ia1: child_expr,
+                return_type,
+                func: str_to_decimal,
                 _phantom: PhantomData,
             })
         }

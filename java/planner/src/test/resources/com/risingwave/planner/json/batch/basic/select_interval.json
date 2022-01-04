@@ -24,10 +24,10 @@
                   "exprType": "CONSTANT_VALUE",
                   "returnType": {
                     "typeName": "CHAR",
-                    "precision": 10
+                    "precision": 9
                   },
                   "constant": {
-                    "body": "MjAyMS0xMC0wMQ=="
+                    "body": "MjAyMS0xMC0x"
                   }
                 }]
               }

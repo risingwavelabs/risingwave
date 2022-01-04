@@ -77,7 +77,7 @@ RwBatchSort(sort0=[$0], sort1=[$2], sort2=[$1], sort3=[$3], dir0=[DESC], dir1=[A
                       RwBatchTableScan(table=[[test_schema, nation]], columns=[n_nationkey,n_name,n_regionkey])
               RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
                 RwBatchProject(r_regionkey=[$0])
-                  RwBatchFilter(condition=[=($1, 'MIDDLE EAST              ')])
+                  RwBatchFilter(condition=[=($1, CAST('MIDDLE EAST'):CHAR(25) NOT NULL)])
                     RwBatchTableScan(table=[[test_schema, region]], columns=[r_regionkey,r_name])
         RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
           RwBatchHashAgg(group=[{0}], EXPR$0=[MIN($1)])
@@ -100,7 +100,7 @@ RwBatchSort(sort0=[$0], sort1=[$2], sort2=[$1], sort3=[$3], dir0=[DESC], dir1=[A
                             RwBatchTableScan(table=[[test_schema, nation]], columns=[n_nationkey,n_regionkey])
                     RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
                       RwBatchProject(r_regionkey=[$0])
-                        RwBatchFilter(condition=[=($1, 'MIDDLE EAST              ')])
+                        RwBatchFilter(condition=[=($1, CAST('MIDDLE EAST'):CHAR(25) NOT NULL)])
                           RwBatchTableScan(table=[[test_schema, region]], columns=[r_regionkey,r_name])
             ]]>
         </Resource>

@@ -104,6 +104,9 @@ public class SqlConverter {
         planner.addRelTraitDef(ConventionTraitDef.INSTANCE);
         planner.addRelTraitDef(RelCollationTraitDef.INSTANCE);
         planner.addRelTraitDef(RwDistributionTraitDef.getInstance());
+        // Use a no-op executor to disable frontend expression evaluation.
+        planner.setExecutor(
+            (rexBuilder, constExps, reducedValues) -> reducedValues.addAll(constExps));
       }
     }
 

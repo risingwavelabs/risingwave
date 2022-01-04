@@ -8,7 +8,7 @@ insert into t values ('1970-01-01', '04:05:06', '1970-01-01 04:05:06', '1970-01-
         <Resource name="physical">
             <![CDATA[
 RwBatchInsert(table=[[test_schema, t]], operation=[INSERT], flattened=[false])
-  RwBatchProject(v1=[1970-01-01], v2=[04:05:06], v3=[1970-01-01 04:05:06], v4=[CAST('1970-01-01 04:05:06 -08:00'):TIMESTAMP_WITH_LOCAL_TIME_ZONE(0) NOT NULL])
+  RwBatchProject(v1=[CAST('1970-01-01'):DATE NOT NULL], v2=[CAST('04:05:06'):TIME(0) NOT NULL], v3=[CAST('1970-01-01 04:05:06'):TIMESTAMP(0) NOT NULL], v4=[CAST('1970-01-01 04:05:06 -08:00'):TIMESTAMP_WITH_LOCAL_TIME_ZONE(0) NOT NULL])
     RwBatchValues(tuples=[[{ 0 }]])
             ]]>
         </Resource>

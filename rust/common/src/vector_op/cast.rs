@@ -193,3 +193,11 @@ pub fn str_to_bool(input: &str) -> Result<bool> {
         Err(InvalidInputSyntax("boolean".to_string(), input.to_string()).into())
     }
 }
+
+#[inline(always)]
+pub fn bool_to_str(input: bool) -> Result<String> {
+    match input {
+        true => Ok("true".into()),
+        false => Ok("false".into()),
+    }
+}
