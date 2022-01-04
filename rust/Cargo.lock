@@ -869,6 +869,7 @@ dependencies = [
  "log4rs",
  "risingwave_common",
  "sqlparser",
+ "thiserror",
  "tokio",
  "tokio-postgres",
 ]

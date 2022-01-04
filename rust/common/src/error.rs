@@ -36,6 +36,8 @@ pub enum ErrorCode {
     StorageError(BoxedError),
     #[error("Parse string error: {0}")]
     ParseError(BoxedError),
+    #[error("Catalog error: {0}")]
+    CatalogError(BoxedError),
     #[error("Out of range")]
     NumericValueOutOfRange,
     #[error("protocol error: {0}")]
@@ -184,6 +186,7 @@ impl ErrorCode {
             ErrorCode::MetaError(_) => 18,
             ErrorCode::HummockVersionNotPinned(..) => 19,
             ErrorCode::HummockSnapshotNotPinned(..) => 20,
+            ErrorCode::CatalogError(..) => 21,
         }
     }
 }

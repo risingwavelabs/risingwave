@@ -11,6 +11,7 @@ log = "0.4"
 log4rs = "1"
 risingwave_common = { path = "../common" }
 sqlparser = "0.13"
+thiserror = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
 
 [dev-dependencies]
