@@ -183,21 +183,6 @@ message FragmentLocation {
   repeated stream_plan.StreamFragment fragments = 2;
 }
 
-message AddFragmentsToNodeRequest {
-  FragmentLocation location = 1;
-}
-
-message AddFragmentsToNodeResponse {
-  common.Status status = 1;
-}
-
-message LoadAllFragmentsRequest {}
-
-message LoadAllFragmentsResponse {
-  common.Status status = 1;
-  repeated FragmentLocation locations = 2;
-}
-
 message CreateMaterializedViewRequest {
   uint32 node_id = 1;
   // TODO: remove this, do catalog init in Meta and return in response.
@@ -219,9 +204,6 @@ message DropMaterializedViewResponse {
 }
 
 service StreamManagerService {
-  // TODO: remove the following interfaces when create/drop mv ready.
-  rpc AddFragmentsToNode(AddFragmentsToNodeRequest) returns (AddFragmentsToNodeResponse);
-  rpc LoadAllFragments(LoadAllFragmentsRequest) returns (LoadAllFragmentsResponse);
   // TODO: migration mv catalog creation/drop in.
   rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);

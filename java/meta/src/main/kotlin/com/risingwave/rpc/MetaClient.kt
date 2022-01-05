@@ -1,7 +1,5 @@
 package com.risingwave.rpc
 
-import com.risingwave.proto.metanode.AddFragmentsToNodeRequest
-import com.risingwave.proto.metanode.AddFragmentsToNodeResponse
 import com.risingwave.proto.metanode.CreateMaterializedViewRequest
 import com.risingwave.proto.metanode.CreateMaterializedViewResponse
 import com.risingwave.proto.metanode.CreateRequest
@@ -18,8 +16,6 @@ import com.risingwave.proto.metanode.GetIdRequest
 import com.risingwave.proto.metanode.GetIdResponse
 import com.risingwave.proto.metanode.HeartbeatRequest
 import com.risingwave.proto.metanode.HeartbeatResponse
-import com.risingwave.proto.metanode.LoadAllFragmentsRequest
-import com.risingwave.proto.metanode.LoadAllFragmentsResponse
 
 /** A client connecting to meta node. */
 interface MetaClient {
@@ -34,10 +30,6 @@ interface MetaClient {
   fun getEpoch(request: GetEpochRequest): GetEpochResponse
 
   fun getId(request: GetIdRequest): GetIdResponse
-
-  fun loadAllFragments(request: LoadAllFragmentsRequest): LoadAllFragmentsResponse
-
-  fun addFragmentsToNode(request: AddFragmentsToNodeRequest): AddFragmentsToNodeResponse
 
   fun createMaterializedView(request: CreateMaterializedViewRequest): CreateMaterializedViewResponse
 

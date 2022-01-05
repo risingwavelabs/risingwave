@@ -2,8 +2,6 @@ package com.risingwave.rpc
 
 import com.risingwave.common.exception.PgErrorCode
 import com.risingwave.common.exception.PgException
-import com.risingwave.proto.metanode.AddFragmentsToNodeRequest
-import com.risingwave.proto.metanode.AddFragmentsToNodeResponse
 import com.risingwave.proto.metanode.CatalogServiceGrpc
 import com.risingwave.proto.metanode.CreateMaterializedViewRequest
 import com.risingwave.proto.metanode.CreateMaterializedViewResponse
@@ -24,8 +22,6 @@ import com.risingwave.proto.metanode.HeartbeatRequest
 import com.risingwave.proto.metanode.HeartbeatResponse
 import com.risingwave.proto.metanode.HeartbeatServiceGrpc
 import com.risingwave.proto.metanode.IdGeneratorServiceGrpc
-import com.risingwave.proto.metanode.LoadAllFragmentsRequest
-import com.risingwave.proto.metanode.LoadAllFragmentsResponse
 import com.risingwave.proto.metanode.StreamManagerServiceGrpc
 import io.grpc.Channel
 import io.grpc.StatusRuntimeException
@@ -98,26 +94,6 @@ class GrpcMetaClient(private val channel: Channel) : MetaClient {
     } catch (e: StatusRuntimeException) {
       LOGGER.warn("RPC failed: {}", e.status)
       throw rpcException("getId", e)
-    }
-  }
-
-  override fun loadAllFragments(request: LoadAllFragmentsRequest): LoadAllFragmentsResponse {
-    val stub = StreamManagerServiceGrpc.newBlockingStub(channel)
-    try {
-      return stub.loadAllFragments(request)
-    } catch (e: StatusRuntimeException) {
-      LOGGER.warn("RPC failed: {}", e.status)
-      throw rpcException("loadAllFragments", e)
-    }
-  }
-
-  override fun addFragmentsToNode(request: AddFragmentsToNodeRequest): AddFragmentsToNodeResponse {
-    val stub = StreamManagerServiceGrpc.newBlockingStub(channel)
-    try {
-      return stub.addFragmentsToNode(request)
-    } catch (e: StatusRuntimeException) {
-      LOGGER.warn("RPC failed: {}", e.status)
-      throw rpcException("addFragmentsToNode", e)
     }
   }
 

@@ -45,7 +45,7 @@ pub async fn rpc_serve_with_listener(
             .await
             .unwrap();
     let stream_manager_ref = Arc::new(DefaultStreamManager::new(
-        stream_meta_manager.clone(),
+        stream_meta_manager,
         cluster_manager.clone(),
     ));
 
@@ -64,12 +64,7 @@ pub async fn rpc_serve_with_listener(
     let catalog_srv = CatalogServiceImpl::new(catalog_manager_ref);
     let cluster_srv = ClusterServiceImpl::new(cluster_manager.clone());
     let id_generator_srv = IdGeneratorServiceImpl::new(env.clone());
-    let stream_srv = StreamServiceImpl::new(
-        stream_meta_manager,
-        stream_manager_ref,
-        cluster_manager,
-        env,
-    );
+    let stream_srv = StreamServiceImpl::new(stream_manager_ref, cluster_manager, env);
     let hummock_srv = HummockServiceImpl::new(hummock_manager);
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
