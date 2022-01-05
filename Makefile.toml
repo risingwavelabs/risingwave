@@ -108,10 +108,10 @@ cp "rust/riselab/run_command.sh" "${PREFIX_BIN}/run_command.sh"
 cp "rust/riselab/welcome.sh" "${PREFIX_BIN}/welcome.sh"
 '''
 
-[tasks.pre-start-playground-development]
+[tasks.pre-start-playground]
 category = "RiseLAB - Prepare"
 private = true
-description = "Prepare playground by downloading necessary tools and build RisingWave"
+description = "Prepare playground by downloading necessary tools and build required components"
 dependencies = [
   "download-minio",
   "download-mcli",
@@ -130,26 +130,6 @@ set -e
 tmux -V
 echo "Note: please make sure tmux version >= 3.2a"
 '''
-
-[tasks.pre-start-playground-ci]
-category = "RiseLAB - Prepare"
-description = "Prepare playground by downloading necessary tools without building RisingWave"
-private = true
-dependencies = [
-  "download-minio",
-  "download-mcli",
-  "download-grafana",
-  "download-prometheus",
-  "prepare-config"
-]
-
-[tasks.pre-start-playground]
-category = "RiseLAB - Prepare"
-description = "Prepare playground by downloading necessary tools without building RisingWave"
-run_task = [
-  { name = "pre-start-playground-development", condition = { profiles = [ "development" ] } },
-  { name = "pre-start-playground-ci", condition = { profiles = [ "ci" ] } }
-]
 
 [tasks.playground]
 alias = "dev"

@@ -41,13 +41,13 @@ engine, storage engine and meta service.
 RiseLAB is the new tool for developing RisingWave. You'll need to install tmux (>= 3.2a) beforehand.
 
 ```
-brew install tmux
+brew install tmux wget
 ```
 
 Then, simply run:
 
 ```
-./riselab dev
+./riselab d # shortcut for ./riselab dev
 ./riselab ci-1node
 ./riselab ci-3node
 ./riselab dev-compute-node # compute node will need to be started by you
@@ -58,8 +58,10 @@ Everything will be set for you.
 To stop the playground,
 
 ```
-./riselab kill-playground
+./riselab k # shortcut for ./riselab kill
 ```
+
+For more information, refer to `README.md` under `rust/riselab`.
 
 ### Dashboard
 

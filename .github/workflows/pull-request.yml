@@ -102,23 +102,26 @@ jobs:
           mv ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl ~/cargo-make
       - name: Start MinIO + meta + compute + frontend cluster
         run: |
-          ~/cargo-make/makers --profile ci clean-data
-          ~/cargo-make/makers --profile ci dev
+          ~/cargo-make/makers clean-data
+          ~/cargo-make/makers dev
       - name: e2e test w/ Hummock and dump logs
         run: |
           python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/streaming
-          ~/cargo-make/makers --profile ci logs
+          ~/cargo-make/makers logs
       - name: Start meta + 3 compute + frontend cluster
         run: |
-          ~/cargo-make/makers --profile ci clean-data
-          ~/cargo-make/makers --profile ci ci-3node
+          ~/cargo-make/makers clean-data
+          ~/cargo-make/makers ci-3node
       - name: e2e test 3-node and dump logs
         run: |
           python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/batch/
-          ~/cargo-make/makers --profile ci logs
+          ~/cargo-make/makers logs
+      - name: Dump RiseLAB logs on failure
+        if: ${{ failure() }}
+        run: ~/cargo-make/makers logs
       - uses: actions/upload-artifact@v2
         if: ${{ failure() || success() }}
-        name: Upload RiseLAB logs
+        name: Upload RiseLAB logs (You may find it in artifacts)
         with:
           path: .risingwave/log/
           name: riselab-logs
@@ -274,7 +277,7 @@ jobs:
     needs: start-runner
     runs-on: ${{ needs.start-runner.outputs.label }}
     env:
-      CACHE_KEY_SUFFIX: v20211231
+      CACHE_KEY_SUFFIX: v20220105
     container:
       image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
       options: --security-opt seccomp=unconfined
@@ -345,7 +348,7 @@ jobs:
       - compute-node-build
     runs-on: ${{ needs.start-runner.outputs.label }}
     env:
-      CACHE_KEY_SUFFIX: v20211231
+      CACHE_KEY_SUFFIX: v20220105
     container:
       image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
       options: --security-opt seccomp=unconfined

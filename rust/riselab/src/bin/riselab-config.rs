@@ -28,12 +28,28 @@ impl Components {
 
     pub fn description(&self) -> String {
         match self {
-      Self::MinIO => "Required by Hummock state store.",
-      Self::PrometheusAndGrafana => "Required if you want to view metrics.",
-      Self::ComputeNodeAndMetaNode => "Required if you want to build compute-node and meta-node. Otherwise you will need to manually download and copy it to RiseLAB directory.",
-      Self::Frontend => "Required if you want to build frontend. Otherwise you will need to manually download and copy it to RiseLAB directory.",
-    }
-    .into()
+            Self::MinIO => {
+                "
+Required by Hummock state store.
+(Also required by ./riselab dev)"
+            }
+            Self::PrometheusAndGrafana => {
+                "
+Required if you want to view metrics."
+            }
+            Self::ComputeNodeAndMetaNode => {
+                "
+Required if you want to build compute-node and meta-node.
+Otherwise you will need to manually download and copy it
+to RiseLAB directory."
+            }
+            Self::Frontend => {
+                "
+Required if you want to build frontend. Otherwise you will
+need to manually download and copy it to RiseLAB directory."
+            }
+        }
+        .into()
     }
 
     pub fn env(&self) -> String {
@@ -47,16 +63,7 @@ impl Components {
     }
 }
 
-fn main() -> Result<()> {
-    let file_path = std::env::args()
-        .nth(1)
-        .ok_or_else(|| anyhow!("expect argv[1] to be component env file path"))?;
-
-    println!(
-        "RiseLAB component config not found, generating {}",
-        file_path
-    );
-
+fn configure() -> Result<Vec<usize>> {
     println!("=== Configure RiseLAB ===");
     println!();
     println!("RiseLAB includes several components. You can select the ones you need, so as to reduce build time.");
@@ -72,7 +79,16 @@ fn main() -> Result<()> {
     let items = Components::into_enum_iter()
         .map(|c| {
             (
-                format!("{}\n      {}", c.title(), style(c.description()).dim()),
+                format!(
+                    "{}{}",
+                    c.title(),
+                    style(
+                        ("\n".to_string() + c.description().trim())
+                            .split('\n')
+                            .join("\n      ")
+                    )
+                    .dim()
+                ),
                 true,
             )
         })
@@ -82,6 +98,26 @@ fn main() -> Result<()> {
         .items_checked(&items)
         .interact_opt()?
         .ok_or_else(|| anyhow!("no selection made"))?;
+
+    Ok(chosen)
+}
+
+fn main() -> Result<()> {
+    let file_path = std::env::args()
+        .nth(1)
+        .ok_or_else(|| anyhow!("expect argv[1] to be component env file path"))?;
+
+    println!(
+        "RiseLAB component config not found, generating {}",
+        file_path
+    );
+
+    let chosen = if let Some(true) = std::env::args().nth(2).map(|x| x == "--default") {
+        println!("Using default config");
+        (0..Components::into_enum_iter().len()).collect_vec()
+    } else {
+        configure()?
+    };
 
     println!("Writing configuration into {}...", file_path);
 
