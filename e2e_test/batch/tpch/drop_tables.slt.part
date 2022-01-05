@@ -11,7 +11,7 @@ statement ok
 DROP TABLE lineitem;
 
 statement ok
-DROP TABLE  orders;
+DROP TABLE orders;
 
 statement ok
 DROP TABLE customer;
