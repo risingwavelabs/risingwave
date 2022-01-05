@@ -104,3 +104,27 @@ drop table t1;
 
 statement ok
 drop table t2;
+
+statement ok
+create table t3(v1 int, v2 int, v3 float);
+
+statement ok
+create table t4(v1 int, v2 int, v3 float);
+
+statement ok
+insert into t3 values (1, 7, 1.0), (49, 94,  49.0),(52, 25,  52.0), (100, 1000, 100.0);
+
+statement ok
+insert into t4 values (2, 8, 2.0), (94, 49, 49.0), (25, 52,  52.0), (200, 2000, 200.0);
+
+query IIRIIR rowsort
+select * from t3, t4 where t3.v1 = t4.v2 and t3.v2 = t4.v1;
+----
+49  94  49  94  49  49
+52  25  52  25  52  52
+
+statement ok
+drop table t3;
+
+statement ok
+drop table t4;

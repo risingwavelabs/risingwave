@@ -6,7 +6,6 @@ import static org.apache.calcite.rel.RelDistributions.ANY;
 
 import com.google.common.base.Objects;
 import com.google.common.collect.Ordering;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import org.apache.calcite.plan.RelMultipleTrait;
@@ -19,6 +18,7 @@ import org.apache.calcite.util.Util;
 import org.apache.calcite.util.mapping.Mapping;
 import org.apache.calcite.util.mapping.Mappings;
 
+/** Trait definition of distribution. */
 public class RwDistributionTrait implements RelDistribution {
   private static final Ordering<Iterable<Integer>> ORDERING =
       Ordering.<Integer>natural().lexicographical();
@@ -29,13 +29,7 @@ public class RwDistributionTrait implements RelDistribution {
   public RwDistributionTrait(Type type, ImmutableIntList keys) {
     checkArgs(type, keys);
     this.type = type;
-    this.keys = sort(keys);
-  }
-
-  private static ImmutableIntList sort(ImmutableIntList keys) {
-    var array = keys.toIntArray();
-    Arrays.sort(array);
-    return ImmutableIntList.of(array);
+    this.keys = keys;
   }
 
   private static void checkArgs(Type type, ImmutableIntList keys) {
