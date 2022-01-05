@@ -10,9 +10,12 @@ import com.risingwave.scheduler.exchange.SingleDistribution;
 import com.risingwave.scheduler.stage.QueryStage;
 import com.risingwave.scheduler.stage.StageId;
 import org.apache.calcite.rel.RelNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** PlanFragmenter split physical plan into multiple stages according to the Exchange operators */
 public class PlanFragmenter {
+  private static final Logger LOGGER = LoggerFactory.getLogger(PlanFragmenter.class);
   private final QueryId queryId = QueryId.next();
 
   private int nextStageId = 0;
@@ -30,7 +33,11 @@ public class PlanFragmenter {
 
     var rootStage = fragmenter.newQueryStage(plan.getRoot(), new SingleDistribution());
     fragmenter.buildStage(rootStage, plan.getRoot());
-    return new Query(fragmenter.queryId, fragmenter.graphBuilder.build(rootStage.getStageId()));
+    var stageGraph = fragmenter.graphBuilder.build(rootStage.getStageId());
+
+    var query = new Query(fragmenter.queryId, stageGraph);
+    LOGGER.debug("Batch query: {}", query);
+    return query;
   }
 
   // Recursively build the plan DAG.

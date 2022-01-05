@@ -7,8 +7,12 @@ import com.google.common.collect.Sets;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.planner.rel.physical.RwBatchExchange;
+import com.risingwave.planner.rel.serialization.FragmentWriter;
 import com.risingwave.scheduler.stage.QueryStage;
 import com.risingwave.scheduler.stage.StageId;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -88,6 +92,28 @@ class StageGraph {
     Optional<StageId> stage = Optional.ofNullable(exchangeIdToStage.get(node.getUniqueId()));
     return stage.orElseThrow(
         () -> new PgException(PgErrorCode.INTERNAL_ERROR, "Unable to find stage by exchange node"));
+  }
+
+  @Override
+  public String toString() {
+    try (var sw = new StringWriter();
+        var writer = new PrintWriter(sw)) {
+      writer.println("Root stage id: " + rootId);
+      for (var stageEntry : stages.entrySet()) {
+        writer.println(
+            "Children of stage "
+                + stageEntry.getKey()
+                + " is: "
+                + childEdges.get(stageEntry.getKey()));
+        writer.println("Plan of stage " + stageEntry.getKey() + " is: ");
+        var planWriter = new FragmentWriter(writer);
+        stageEntry.getValue().getRoot().explain(planWriter);
+      }
+
+      return sw.toString();
+    } catch (IOException exp) {
+      throw PgException.from(exp);
+    }
   }
 
   static class Builder {

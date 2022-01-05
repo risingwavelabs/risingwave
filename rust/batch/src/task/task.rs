@@ -7,7 +7,8 @@ use risingwave_common::util::{json_to_pretty_string, JsonFormatter};
 use risingwave_pb::plan::PlanFragment;
 use risingwave_pb::task_service::task_info::TaskStatus;
 use risingwave_pb::task_service::{
-    GetDataResponse, TaskId as ProstTaskId, TaskSinkId as ProstSinkId,
+    GetDataResponse, QueryId as ProstQueryId, StageId as ProstStageId, TaskId as ProstTaskId,
+    TaskSinkId as ProstSinkId,
 };
 
 use crate::executor::{BoxedExecutor, ExecutorBuilder};
@@ -15,14 +16,14 @@ use crate::rpc::service::exchange::ExchangeWriter;
 use crate::task::channel::{create_output_channel, BoxChanReceiver, BoxChanSender};
 use crate::task::{BatchTaskEnv, TaskManager};
 
-#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+#[derive(PartialEq, Eq, Hash, Clone, Debug, Default)]
 pub struct TaskId {
     pub task_id: u32,
     pub stage_id: u32,
     pub query_id: String,
 }
 
-#[derive(PartialEq, Eq, Hash, Clone)]
+#[derive(PartialEq, Eq, Hash, Clone, Default)]
 pub struct TaskSinkId {
     pub task_id: TaskId,
     pub sink_id: u32,
@@ -56,6 +57,20 @@ impl From<&ProstTaskId> for TaskId {
     }
 }
 
+impl TaskId {
+    pub fn to_prost(&self) -> ProstTaskId {
+        ProstTaskId {
+            task_id: self.task_id,
+            stage_id: Some(ProstStageId {
+                query_id: Some(ProstQueryId {
+                    trace_id: self.query_id.clone(),
+                }),
+                stage_id: self.stage_id,
+            }),
+        }
+    }
+}
+
 impl From<&ProstSinkId> for TaskSinkId {
     fn from(prost: &ProstSinkId) -> Self {
         TaskSinkId {
@@ -65,21 +80,32 @@ impl From<&ProstSinkId> for TaskSinkId {
     }
 }
 
+impl TaskSinkId {
+    pub fn to_prost(&self) -> ProstSinkId {
+        ProstSinkId {
+            task_id: Some(self.task_id.to_prost()),
+            sink_id: self.sink_id,
+        }
+    }
+}
+
 pub struct TaskSink {
     task_manager: Arc<TaskManager>,
     receiver: BoxChanReceiver,
-    sink_id: ProstSinkId,
+    sink_id: TaskSinkId,
 }
 
 impl TaskSink {
     /// Writes the data in serialized format to `ExchangeWriter`.
     pub async fn take_data(&mut self, writer: &mut dyn ExchangeWriter) -> Result<()> {
-        let task_id = TaskId::from(self.sink_id.get_task_id());
+        let task_id = self.sink_id.task_id.clone();
         self.task_manager.check_if_task_running(&task_id)?;
         loop {
             match self.receiver.recv().await {
                 // Received some data
                 Ok(Some(chunk)) => {
+                    let chunk = chunk.compact()?;
+                    debug!("Task sink: {:?}, data: {:?}", self.sink_id, chunk);
                     let pb = chunk.to_protobuf()?;
                     let resp = GetDataResponse {
                         record_batch: Some(pb),
@@ -109,9 +135,13 @@ impl TaskSink {
 
     /// Directly takes data without serialization.
     pub async fn direct_take_data(&mut self) -> Result<Option<DataChunk>> {
-        let task_id = TaskId::from(self.sink_id.get_task_id());
+        let task_id = self.sink_id.task_id.clone();
         self.task_manager.check_if_task_running(&task_id)?;
         self.receiver.recv().await
+    }
+
+    pub fn id(&self) -> &TaskSinkId {
+        &self.sink_id
     }
 }
 
@@ -210,7 +240,7 @@ impl TaskExecution {
         let task_sink = TaskSink {
             task_manager: self.env.task_manager(),
             receiver,
-            sink_id: sink_id.clone(),
+            sink_id: sink_id.into(),
         };
         Ok(task_sink)
     }

@@ -6,11 +6,11 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
-use risingwave_pb::task_service::{GetDataRequest, GetDataResponse, TaskSinkId};
+use risingwave_pb::task_service::{GetDataRequest, GetDataResponse};
 use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
 
-use crate::task::{BatchTaskEnv, TaskSink};
+use crate::task::{BatchTaskEnv, TaskId, TaskSink, TaskSinkId};
 
 /// Each ExchangeSource maps to one task, it takes the execution result from task chunk by chunk.
 #[async_trait::async_trait]
@@ -26,10 +26,13 @@ pub struct GrpcExchangeSource {
     // Address of the remote endpoint.
     addr: SocketAddr,
     sink_id: TaskSinkId,
+
+    /// Id of task which contains the `ExchangeExecutor` of this source.
+    task_id: TaskId,
 }
 
 impl GrpcExchangeSource {
-    pub async fn create(addr: SocketAddr, sink_id: TaskSinkId) -> Result<Self> {
+    pub async fn create(addr: SocketAddr, task_id: TaskId, sink_id: TaskSinkId) -> Result<Self> {
         let mut client = ExchangeServiceClient::new(
             Endpoint::from_shared(format!("http://{}", addr))
                 .map_err(|e| InternalError(format!("{}", e)))?
@@ -40,13 +43,12 @@ impl GrpcExchangeSource {
         );
         let stream = client
             .get_data(GetDataRequest {
-                sink_id: Some(sink_id.clone()),
+                sink_id: Some(sink_id.to_prost()),
             })
             .await
             .to_rw_result_with(format!(
-                "failed to create stream {} for sink_id={}",
-                addr,
-                sink_id.get_sink_id()
+                "failed to create stream {:?} for sink_id={:?}",
+                addr, sink_id
             ))?
             .into_inner();
         Ok(Self {
@@ -54,6 +56,7 @@ impl GrpcExchangeSource {
             stream,
             addr,
             sink_id,
+            task_id,
         })
     }
 }
@@ -67,28 +70,48 @@ impl ExchangeSource for GrpcExchangeSource {
         };
         let task_data =
             res.to_rw_result_with(format!("failed to take data from stream ({:?})", self.addr))?;
-        Ok(Some(DataChunk::from_protobuf(
-            task_data.get_record_batch(),
-        )?))
+        let data = DataChunk::from_protobuf(task_data.get_record_batch())?.compact()?;
+
+        debug!(
+            "Receiver task: {:?}, source task sink: {:?}, data: {:?}",
+            self.task_id, self.sink_id, data
+        );
+
+        Ok(Some(data))
     }
 }
 
 /// Exchange data from a local task execution.
 pub struct LocalExchangeSource {
     task_sink: TaskSink,
+
+    /// Id of task which contains the `ExchangeExecutor` of this source.
+    task_id: TaskId,
 }
 
 impl LocalExchangeSource {
-    pub fn create(sink_id: TaskSinkId, env: BatchTaskEnv) -> Result<Self> {
-        let task_sink = env.task_manager().take_sink(&sink_id)?;
-        Ok(Self { task_sink })
+    pub fn create(sink_id: TaskSinkId, env: BatchTaskEnv, task_id: TaskId) -> Result<Self> {
+        let task_sink = env.task_manager().take_sink(&sink_id.to_prost())?;
+        Ok(Self { task_sink, task_id })
     }
 }
 
 #[async_trait::async_trait]
 impl ExchangeSource for LocalExchangeSource {
     async fn take_data(&mut self) -> Result<Option<DataChunk>> {
-        self.task_sink.direct_take_data().await
+        let ret = self.task_sink.direct_take_data().await?;
+        if let Some(data) = ret {
+            let data = data.compact()?;
+            debug!(
+                "Receiver task: {:?}, source task sink: {:?}, data: {:?}",
+                self.task_id,
+                self.task_sink.id(),
+                data
+            );
+            Ok(Some(data))
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -104,13 +127,12 @@ mod tests {
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
     };
-    use risingwave_pb::task_service::{
-        GetDataRequest, GetDataResponse, GetStreamRequest, TaskSinkId,
-    };
+    use risingwave_pb::task_service::{GetDataRequest, GetDataResponse, GetStreamRequest};
     use tokio_stream::wrappers::ReceiverStream;
     use tonic::{Request, Response, Status};
 
     use crate::execution::exchange_source::{ExchangeSource, GrpcExchangeSource};
+    use crate::task::{TaskId, TaskSinkId};
 
     struct FakeExchangeService {
         rpc_called: Arc<AtomicBool>,
@@ -172,7 +194,7 @@ mod tests {
         sleep(Duration::from_secs(1));
         assert!(server_run.load(Ordering::SeqCst));
 
-        let mut src = GrpcExchangeSource::create(addr, TaskSinkId::default())
+        let mut src = GrpcExchangeSource::create(addr, TaskId::default(), TaskSinkId::default())
             .await
             .unwrap();
         for _ in [0..3] {
@@ -189,7 +211,7 @@ mod tests {
     #[tokio::test]
     async fn test_unconnectable_node() {
         let addr = get_host_port("127.0.0.1:1001").unwrap();
-        let res = GrpcExchangeSource::create(addr, TaskSinkId::default()).await;
+        let res = GrpcExchangeSource::create(addr, TaskId::default(), TaskSinkId::default()).await;
         assert!(res.is_err());
     }
 }

@@ -5,13 +5,13 @@ statement ok
 DROP TABLE region;
 
 statement ok
-DROP TABLE nation;
+DROP TABLE  nation;
 
 statement ok
 DROP TABLE lineitem;
 
 statement ok
-DROP TABLE orders;
+DROP TABLE  orders;
 
 statement ok
 DROP TABLE customer;

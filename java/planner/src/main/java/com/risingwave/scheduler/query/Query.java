@@ -47,4 +47,9 @@ public class Query {
   public QueryId getQueryId() {
     return queryId;
   }
+
+  @Override
+  public String toString() {
+    return "Query id: " + queryId + "\n" + "Stage graph: \n" + graph;
+  }
 }

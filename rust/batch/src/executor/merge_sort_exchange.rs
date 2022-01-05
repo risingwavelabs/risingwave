@@ -22,7 +22,7 @@ use crate::executor::{
     BoxedExecutor, BoxedExecutorBuilder, CreateSource, DefaultCreateSource, Executor,
     ExecutorBuilder,
 };
-use crate::task::BatchTaskEnv;
+use crate::task::{BatchTaskEnv, TaskId};
 
 pub(super) type MergeSortExchangeExecutor = MergeSortExchangeExecutorImpl<DefaultCreateSource>;
 
@@ -44,6 +44,7 @@ pub(super) struct MergeSortExchangeExecutorImpl<C> {
     source_creator: PhantomData<C>,
     schema: Schema,
     first_execution: bool,
+    task_id: TaskId,
 }
 
 impl<CS: 'static + CreateSource> MergeSortExchangeExecutorImpl<CS> {
@@ -94,8 +95,12 @@ impl<CS: 'static + CreateSource> Executor for MergeSortExchangeExecutorImpl<CS> 
         // and put one row of each chunk into the heap
         if self.first_execution {
             for source_idx in 0..self.proto_sources.len() {
-                let new_source =
-                    CS::create_source(self.env.clone(), &self.proto_sources[source_idx]).await?;
+                let new_source = CS::create_source(
+                    self.env.clone(),
+                    &self.proto_sources[source_idx],
+                    self.task_id.clone(),
+                )
+                .await?;
                 let _ = self.sources.push(new_source);
                 self.get_source_chunk(source_idx).await?;
                 if let Some(chunk) = &self.source_inputs[source_idx] {
@@ -206,6 +211,7 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for MergeSortExchangeExecu
             source_creator: PhantomData,
             schema: Schema { fields },
             first_execution: true,
+            task_id: source.task_id.clone(),
         }))
     }
 }
@@ -245,6 +251,7 @@ mod tests {
             async fn create_source(
                 _: BatchTaskEnv,
                 _: &ProstExchangeSource,
+                _: TaskId,
             ) -> Result<Box<dyn ExchangeSource>> {
                 let chunk = DataChunk::builder()
                     .columns(vec![Column::new(Arc::new(
@@ -281,6 +288,7 @@ mod tests {
                 }],
             },
             first_execution: true,
+            task_id: TaskId::default(),
         };
 
         let res = executor.next().await.unwrap();

@@ -15,7 +15,7 @@ use risingwave_pb::task_service::{ExchangeNode, ExchangeSource as ProstExchangeS
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::execution::exchange_source::{ExchangeSource, GrpcExchangeSource, LocalExchangeSource};
 use crate::executor::{Executor, ExecutorBuilder};
-use crate::task::BatchTaskEnv;
+use crate::task::{BatchTaskEnv, TaskId};
 
 pub(super) type ExchangeExecutor = GenericExchangeExecutor<DefaultCreateSource>;
 
@@ -30,6 +30,7 @@ pub struct GenericExchangeExecutor<C> {
     // Mock-able CreateSource.
     source_creator: PhantomData<C>,
     schema: Schema,
+    task_id: TaskId,
 }
 
 /// `CreateSource` determines the right type of `ExchangeSource` to create.
@@ -38,6 +39,7 @@ pub trait CreateSource: Send {
     async fn create_source(
         env: BatchTaskEnv,
         value: &ProstExchangeSource,
+        task_id: TaskId,
     ) -> Result<Box<dyn ExchangeSource>>;
 }
 
@@ -48,6 +50,7 @@ impl CreateSource for DefaultCreateSource {
     async fn create_source(
         env: BatchTaskEnv,
         value: &ProstExchangeSource,
+        task_id: TaskId,
     ) -> Result<Box<dyn ExchangeSource>> {
         let peer_addr = get_host_port(
             format!(
@@ -60,8 +63,9 @@ impl CreateSource for DefaultCreateSource {
         if is_local_address(env.server_address(), &peer_addr) {
             debug!("Exchange locally [{:?}]", value.get_sink_id());
             return Ok(Box::new(LocalExchangeSource::create(
-                value.get_sink_id().clone(),
+                value.get_sink_id().into(),
                 env,
+                task_id,
             )?));
         }
         debug!(
@@ -70,7 +74,7 @@ impl CreateSource for DefaultCreateSource {
             value.get_sink_id()
         );
         Ok(Box::new(
-            GrpcExchangeSource::create(peer_addr, value.get_sink_id().clone()).await?,
+            GrpcExchangeSource::create(peer_addr, task_id, value.get_sink_id().into()).await?,
         ))
     }
 }
@@ -99,6 +103,7 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for GenericExchangeExecuto
             source_idx: 0,
             current_source: None,
             schema: Schema { fields },
+            task_id: source.task_id.clone(),
         }))
     }
 }
@@ -116,7 +121,8 @@ impl<CS: CreateSource> Executor for GenericExchangeExecutor<CS> {
             }
             if self.current_source.is_none() {
                 let proto_source = &self.sources[self.source_idx];
-                let source = CS::create_source(self.env.clone(), proto_source).await?;
+                let source =
+                    CS::create_source(self.env.clone(), proto_source, self.task_id.clone()).await?;
                 self.current_source = Some(source);
             }
             let mut source = self.current_source.take().unwrap();
@@ -176,6 +182,7 @@ mod tests {
             async fn create_source(
                 _: BatchTaskEnv,
                 _: &ProstExchangeSource,
+                _: TaskId,
             ) -> Result<Box<dyn ExchangeSource>> {
                 let chunk = DataChunk::builder()
                     .columns(vec![Column::new(Arc::new(
@@ -203,6 +210,7 @@ mod tests {
                     data_type: Int32Type::create(false),
                 }],
             },
+            task_id: TaskId::default(),
         };
 
         let mut chunks: usize = 0;
