@@ -1,6 +1,9 @@
+use std::sync::Arc;
+
 use bytes::Bytes;
 use risingwave_common::error::Result;
 
+use crate::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 use crate::{Keyspace, StateStore};
 
 /// [`WriteBatch`] wrap a list of key-value pairs and an associated [`StateStore`].
@@ -8,6 +11,8 @@ pub struct WriteBatch<S: StateStore> {
     store: S,
 
     batch: Vec<(Bytes, Option<Bytes>)>,
+
+    state_store_stats: Arc<StateStoreStats>,
 }
 
 impl<S> WriteBatch<S>
@@ -19,6 +24,7 @@ where
         Self {
             store,
             batch: Vec::new(),
+            state_store_stats: DEFAULT_STATE_STORE_STATS.clone(),
         }
     }
 
@@ -27,6 +33,7 @@ where
         Self {
             store,
             batch: Vec::with_capacity(capacity),
+            state_store_stats: DEFAULT_STATE_STORE_STATS.clone(),
         }
     }
 
@@ -48,6 +55,7 @@ where
 
     /// Ingest this batch into the associated state store.
     pub async fn ingest(self, epoch: u64) -> Result<()> {
+        self.state_store_stats.batched_write_counts.inc();
         // TODO: is it necessary to check or preprocess these pairs?
         self.store.ingest_batch(self.batch, epoch).await
     }

@@ -93,7 +93,7 @@ mod tests {
     async fn test_mview_state() {
         // Only assert pk and columns can be successfully put/delete/flush,
         // and the ammount of rows is expected.
-        let state_store = MemoryStateStore::default();
+        let state_store = MemoryStateStore::new();
         let schema = Schema::new(vec![
             Field::new(Int32Type::create(false)),
             Field::new(Int32Type::create(false)),

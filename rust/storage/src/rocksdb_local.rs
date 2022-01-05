@@ -9,11 +9,13 @@ use tokio::sync::OnceCell;
 use tokio::task;
 
 use super::{StateStore, StateStoreIter};
+use crate::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 
 #[derive(Clone)]
 pub struct RocksDBStateStore {
     storage: Arc<OnceCell<RocksDBStorage>>,
     db_path: String,
+    stats: Arc<StateStoreStats>,
 }
 
 impl RocksDBStateStore {
@@ -21,6 +23,7 @@ impl RocksDBStateStore {
         Self {
             storage: Arc::new(OnceCell::new()),
             db_path: db_path.to_string(),
+            stats: DEFAULT_STATE_STORE_STATS.clone(),
         }
     }
 
@@ -29,6 +32,10 @@ impl RocksDBStateStore {
             .get_or_init(|| async { RocksDBStorage::new(&self.db_path).await })
             .await
     }
+
+    pub fn get_stats_ref(&self) -> Arc<StateStoreStats> {
+        self.stats.clone()
+    }
 }
 
 #[async_trait]
@@ -36,6 +43,7 @@ impl StateStore for RocksDBStateStore {
     type Iter = RocksDBStateStoreIter;
 
     async fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
+        self.get_stats_ref().point_get_counts.inc();
         self.storage().await.get(key).await
     }
 

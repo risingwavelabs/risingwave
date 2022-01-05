@@ -261,7 +261,6 @@ mod tests {
                 checksum_algo: ChecksumAlg::Crc32c,
                 stats_enabled: false,
             },
-            None,
         ));
 
         let anchor = Bytes::from("qa");
@@ -418,7 +417,6 @@ mod tests {
         let storage = Arc::new(HummockStorage::new(
             Arc::new(InMemObjectStore::new()),
             options,
-            None,
         ));
 
         let kv_count = 8192;

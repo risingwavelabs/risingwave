@@ -24,6 +24,7 @@ log = "0.4"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
 paste = "1"
+prometheus = { version = "0.13", features = ["process"] }
 prost = "0.9"
 prost-types = "0.9"
 rdkafka = { version = "0.27", features = ["cmake-build"] }

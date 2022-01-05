@@ -8,7 +8,7 @@ use risingwave_storage::Keyspace;
 use super::{MViewTable, ManagedMViewState};
 
 pub async fn gen_basic_table(row_count: usize) -> MViewTable<MemoryStateStore> {
-    let state_store = MemoryStateStore::default();
+    let state_store = MemoryStateStore::new();
     let schema = Schema::new(vec![
         Field::new(Int32Type::create(false)),
         Field::new(Int32Type::create(false)),

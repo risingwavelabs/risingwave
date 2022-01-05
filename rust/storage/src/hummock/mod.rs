@@ -6,7 +6,6 @@ use std::sync::Arc;
 use num_traits::ToPrimitive;
 
 mod table;
-use prometheus::Registry;
 pub use table::*;
 mod cloud;
 mod compactor;
@@ -15,7 +14,6 @@ mod iterator;
 mod key;
 mod key_range;
 mod level_handler;
-mod mon;
 mod snapshot;
 mod state_store;
 mod utils;
@@ -34,11 +32,11 @@ use value::*;
 
 use self::iterator::UserKeyIterator;
 use self::key::{user_key, FullKey};
-use self::mon::{HummockStats, DEFAULT_HUMMOCK_STATS};
 use self::multi_builder::CapacitySplitTableBuilder;
 use self::snapshot::HummockSnapshot;
 pub use self::state_store::*;
 use self::version_manager::VersionManager;
+use super::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 use crate::object::ObjectStore;
 
 pub static REMOTE_DIR: &str = "/test/";
@@ -101,25 +99,14 @@ pub struct HummockStorage {
     rx: Arc<PLMutex<Option<mpsc::UnboundedReceiver<()>>>>,
 
     /// Statistics.
-    stats: Option<Arc<HummockStats>>,
+    stats: Arc<StateStoreStats>,
 }
 
 impl HummockStorage {
-    pub fn new(
-        obj_client: Arc<dyn ObjectStore>,
-        options: HummockOptions,
-        stats_registry: Option<Arc<Registry>>,
-    ) -> Self {
+    pub fn new(obj_client: Arc<dyn ObjectStore>, options: HummockOptions) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
-        let mut stats = None;
 
-        if options.stats_enabled {
-            if let Some(registry) = stats_registry {
-                stats = Some(Arc::new(HummockStats::new(&registry)));
-            } else {
-                stats = Some(DEFAULT_HUMMOCK_STATS.clone());
-            }
-        }
+        let stats = DEFAULT_STATE_STORE_STATS.clone();
 
         Self {
             options: Arc::new(options),
@@ -135,7 +122,7 @@ impl HummockStorage {
         HummockSnapshot::new(self.version_manager.clone())
     }
 
-    pub fn get_stats_ref(&self) -> Option<Arc<HummockStats>> {
+    pub fn get_stats_ref(&self) -> Arc<StateStoreStats> {
         self.stats.clone()
     }
 
@@ -150,7 +137,7 @@ impl HummockStorage {
     /// failed due to other non-EOF errors.
     pub async fn get(&self, key: &[u8]) -> HummockResult<Option<Vec<u8>>> {
         if self.options.stats_enabled {
-            self.get_stats_ref().unwrap().point_get_counts.inc();
+            self.get_stats_ref().point_get_counts.inc();
         }
 
         self.get_snapshot().get(key).await
@@ -163,7 +150,7 @@ impl HummockStorage {
         B: AsRef<[u8]>,
     {
         if self.options.stats_enabled {
-            self.get_stats_ref().unwrap().range_scan_counts.inc();
+            self.get_stats_ref().range_scan_counts.inc();
         }
 
         self.get_snapshot().range_scan(key_range).await
@@ -183,10 +170,6 @@ impl HummockStorage {
         kv_pairs: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
         epoch: u64,
     ) -> HummockResult<()> {
-        if self.options.stats_enabled {
-            self.get_stats_ref().unwrap().batched_write_counts.inc();
-        }
-
         let get_id_and_builder = || async {
             let id = self.version_manager.generate_table_id().await;
             let builder = Self::get_builder(&self.options);
@@ -226,7 +209,6 @@ impl HummockStorage {
         // Update statistics if needed.
         if self.options.stats_enabled {
             self.get_stats_ref()
-                .unwrap()
                 .put_bytes
                 .inc_by(total_size.to_u64().unwrap());
         }
@@ -295,12 +277,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_prometheus_endpoint() {
+    async fn test_prometheus_endpoint_hummock() {
         let hummock_options = HummockOptions::default_for_test();
         let host_addr = "127.0.0.1:1222";
 
         let hummock_storage =
-            HummockStorage::new(Arc::new(InMemObjectStore::new()), hummock_options, None);
+            HummockStorage::new(Arc::new(InMemObjectStore::new()), hummock_options);
         let anchor = Bytes::from("aa");
         let mut batch1 = vec![
             (anchor.clone(), Some(Bytes::from("111"))),
@@ -318,6 +300,10 @@ mod tests {
             .await
             .unwrap();
 
+        assert_eq!(
+            hummock_storage.get(&anchor).await.unwrap().unwrap(),
+            Bytes::from("111")
+        );
         let notifier = Arc::new(tokio::sync::Notify::new());
         let notifiee = notifier.clone();
 
@@ -351,8 +337,11 @@ mod tests {
         }
 
         let s = String::from_utf8_lossy(&web_page);
-        assert!(s.contains("hummock_put_bytes"));
-        assert!(!s.contains("hummock_pt_byts"));
+        println!("\n---{}---\n", s);
+        assert!(s.contains("state_store_put_bytes"));
+        assert!(!s.contains("state_store_pu_bytes"));
+
+        assert!(s.contains("state_store_get_bytes"));
     }
 
     #[tokio::test]
@@ -360,7 +349,6 @@ mod tests {
         let hummock_storage = HummockStorage::new(
             Arc::new(InMemObjectStore::new()),
             HummockOptions::default_for_test(),
-            None,
         );
         let anchor = Bytes::from("aa");
 

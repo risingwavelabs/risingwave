@@ -4,7 +4,6 @@ mod table_manager;
 pub use env::*;
 pub use stream_manager::*;
 pub use table_manager::*;
-
 #[cfg(test)]
 mod tests;
 

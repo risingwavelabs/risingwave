@@ -195,7 +195,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mview_table() {
-        let state_store = MemoryStateStore::default();
+        let state_store = MemoryStateStore::new();
         let schema = Schema::new(vec![
             Field::new(Int32Type::create(false)),
             Field::new(Int32Type::create(false)),
@@ -270,7 +270,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mview_table_for_string() {
-        let state_store = MemoryStateStore::default();
+        let state_store = MemoryStateStore::new();
         let schema = Schema::new(vec![
             Field::new(StringType::create(true, 0, DataTypeKind::Varchar)),
             Field::new(StringType::create(true, 0, DataTypeKind::Varchar)),
@@ -400,7 +400,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mview_table_iter() {
-        let state_store = MemoryStateStore::default();
+        let state_store = MemoryStateStore::new();
         let schema = Schema::new(vec![
             Field::new(Int32Type::create(false)),
             Field::new(Int32Type::create(false)),
@@ -457,7 +457,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multi_mview_table_iter() {
-        let state_store = MemoryStateStore::default();
+        let state_store = MemoryStateStore::new();
         let schema_1 = Schema::new(vec![
             Field::new(Int32Type::create(false)),
             Field::new(Int32Type::create(false)),

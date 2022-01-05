@@ -10,7 +10,6 @@ use super::state::ManagedMViewState;
 use crate::executor::{
     Barrier, Executor, Message, PkIndicesRef, Result, SimpleExecutor, StreamChunk,
 };
-
 /// `MViewSinkExecutor` writes data to a row-based memtable, so that data could
 /// be queried by the AP engine.
 pub struct MViewSinkExecutor<S: StateStore> {
@@ -183,7 +182,6 @@ mod tests {
 
         let state_store = MemoryStateStore::new();
         let state_store_impl = StateStoreImpl::MemoryStateStore(state_store.clone());
-
         store_mgr
             .create_materialized_view(
                 &table_id,

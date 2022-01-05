@@ -76,7 +76,6 @@ fn get_state_store_impl(opts: &Opts) -> StateStoreImpl {
                     checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
                     stats_enabled: false,
                 },
-                None,
             )))
         }
         s3 if s3.starts_with("hummock+s3://") => {
@@ -95,7 +94,6 @@ fn get_state_store_impl(opts: &Opts) -> StateStoreImpl {
                     checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
                     stats_enabled: true,
                 },
-                None,
             )))
         }
         other => unimplemented!("state store \"{}\" is not supported", other),

@@ -286,7 +286,6 @@ impl StreamManagerCore {
                         checksum_algo: ChecksumAlg::Crc32c,
                         stats_enabled: false,
                     },
-                    None,
                 )))
             }
             Some(s3) if s3.starts_with("hummock+s3://") => {
@@ -308,7 +307,6 @@ impl StreamManagerCore {
                         checksum_algo: ChecksumAlg::Crc32c,
                         stats_enabled: true,
                     },
-                    None,
                 )))
             }
             Some(rocksdb) if rocksdb.starts_with("rocksdb_local://") => {

@@ -7,7 +7,9 @@ use tikv_client::{KvPair, TransactionClient};
 use tokio::sync::OnceCell;
 
 use super::StateStore;
+use crate::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 use crate::StateStoreIter;
+
 const SCAN_LIMIT: usize = 100;
 #[derive(Clone)]
 pub struct TikvStateStore {
@@ -15,6 +17,7 @@ pub struct TikvStateStore {
     // client: Option<Arc<Mutex<tikv_client::transaction::Client>>>,
     client: Arc<OnceCell<tikv_client::transaction::Client>>,
     pd: Vec<String>,
+    stats: Arc<StateStoreStats>,
 }
 
 impl TikvStateStore {
@@ -23,6 +26,7 @@ impl TikvStateStore {
         Self {
             client: Arc::new(OnceCell::new()),
             pd: pd_endpoints,
+            stats: DEFAULT_STATE_STORE_STATS.clone(),
         }
     }
     pub async fn client(&self) -> &tikv_client::transaction::Client {
@@ -33,12 +37,17 @@ impl TikvStateStore {
             })
             .await
     }
+
+    pub fn get_stats_ref(&self) -> Arc<StateStoreStats> {
+        self.stats.clone()
+    }
 }
 #[async_trait]
 impl StateStore for TikvStateStore {
     type Iter = TikvStateStoreIter;
 
     async fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
+        self.get_stats_ref().point_get_counts.inc();
         let mut txn = self.client().await.begin_optimistic().await.unwrap();
         let res = txn
             .get(key.to_owned())
@@ -182,17 +191,14 @@ impl StateStoreIter for TikvStateStoreIter {
 mod tests {
 
     use bytes::Bytes;
-    // use rdkafka::message::ToBytes;
-    use tikv_client::Result;
 
     use super::TikvStateStore;
     use crate::StateStore;
 
     #[tokio::test]
-    async fn test_basic() -> Result<()> {
-        let tikv_storage = TikvStateStore::new(vec![
-            "ec2-68-79-50-236.cn-northwest-1.compute.amazonaws.com.cn:2379".to_string(),
-        ]);
+    #[ignore]
+    async fn test_basic() -> Result<(), hyper::Error> {
+        let tikv_storage = TikvStateStore::new(vec!["127.0.0.1:2379".to_string()]);
 
         let anchor = Bytes::from("aa");
 

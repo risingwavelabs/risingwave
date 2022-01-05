@@ -3013,6 +3013,7 @@ dependencies = [
  "memcomparable",
  "num-traits",
  "paste",
+ "prometheus 0.13.0",
  "prost 0.9.0",
  "prost-types 0.9.0",
  "rand 0.8.4",

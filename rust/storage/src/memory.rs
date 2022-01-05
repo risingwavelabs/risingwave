@@ -6,30 +6,27 @@ use bytes::Bytes;
 use risingwave_common::error::Result;
 use tokio::sync::Mutex;
 
+use crate::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 use crate::{StateStore, StateStoreIter};
 
 /// An in-memory state store
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct MemoryStateStore {
     inner: Arc<Mutex<BTreeMap<Bytes, Bytes>>>,
 
-    /// Panic on deleting non-existing keys
-    sanity_check_phantom_delete: bool,
+    stats: Arc<StateStoreStats>,
 }
 
+impl Default for MemoryStateStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl MemoryStateStore {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(BTreeMap::new())),
-            sanity_check_phantom_delete: true,
-        }
-    }
-
-    /// Create a `MemoryStateStore` without sanity check
-    pub fn new_without_sanity_check() -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(BTreeMap::new())),
-            sanity_check_phantom_delete: false,
+            stats: DEFAULT_STATE_STORE_STATS.clone(),
         }
     }
 
@@ -50,14 +47,14 @@ impl MemoryStateStore {
             if let Some(value) = value {
                 inner.insert(key, value);
             } else {
-                let res = inner.remove(&key);
-
-                if self.sanity_check_phantom_delete {
-                    debug_assert!(res.is_some(), "delete non-existing key {:?}", key);
-                }
+                inner.remove(&key);
             }
         }
         Ok(())
+    }
+
+    pub fn get_stats_ref(&self) -> Arc<StateStoreStats> {
+        self.stats.clone()
     }
 
     async fn scan_inner(&self, prefix: &[u8], limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
@@ -85,6 +82,8 @@ impl StateStore for MemoryStateStore {
     type Iter = MemoryStateStoreIter;
 
     async fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
+        self.get_stats_ref().point_get_counts.inc();
+
         let inner = self.inner.lock().await;
         Ok(inner.get(key).cloned())
     }

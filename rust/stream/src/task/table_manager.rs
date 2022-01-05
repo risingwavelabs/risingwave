@@ -11,7 +11,6 @@ use risingwave_storage::Keyspace;
 use crate::dispatch_state_store;
 use crate::executor::MViewTable;
 use crate::task::StateStoreImpl;
-
 #[async_trait::async_trait]
 /// `TableManager` is an abstraction of managing a collection of tables.
 /// The interface between executors and storage should be table-oriented.
