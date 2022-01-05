@@ -9,6 +9,7 @@ pub struct ComputeNodeConfig {
     pub exporter_address: String,
     pub exporter_port: u16,
     pub provide_minio: Option<Vec<MinioConfig>>,
+    pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub user_managed: bool,
 }
 

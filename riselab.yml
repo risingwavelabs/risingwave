@@ -13,6 +13,7 @@ template:
     exporter-port: 1222
     id: compute-node-${port}
     provide-minio: "minio*"
+    provide-meta-node: "meta-node*"
     user-managed: false
 
   meta-node:

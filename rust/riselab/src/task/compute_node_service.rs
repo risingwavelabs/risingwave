@@ -67,6 +67,26 @@ impl Task for ComputeNodeService {
             }
         }
 
+        let provide_meta_node = self.config.provide_meta_node.as_ref().unwrap();
+        match provide_meta_node.len() {
+            0 => {
+                return Err(anyhow!(
+                    "Cannot start node: no meta node found in this configuration."
+                ));
+            }
+            1 => {
+                let meta_node = &provide_meta_node[0];
+                cmd.arg("--meta-address")
+                    .arg(format!("http://{}:{}", meta_node.address, meta_node.port));
+            }
+            other_size => {
+                return Err(anyhow!(
+          "Cannot start node: {} meta nodes found in this configuration, but only 1 is needed.",
+          other_size
+        ));
+            }
+        };
+
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;
             ctx.pb.set_message("started");

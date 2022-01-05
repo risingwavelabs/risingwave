@@ -170,7 +170,7 @@ fn main() -> Result<()> {
     ));
     let join_handle = manager.spawn();
     let task_result = task_main(&mut manager, &steps, &services);
-    p.set_message(format!("done {}", task_name));
+    p.set_message(format!("done bootstrapping {}", task_name));
     complete_spin(&p);
     manager.finish_all();
     join_handle.join().unwrap()?;
