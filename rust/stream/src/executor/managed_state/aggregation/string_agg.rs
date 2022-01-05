@@ -13,7 +13,7 @@ use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::managed_state::aggregation::ManagedExtremeState;
-use crate::executor::managed_state::flush_status::FlushStatus;
+use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
 use crate::executor::OrderedArraysSerializer;
 
 pub struct ManagedStringAggState<S: StateStore> {

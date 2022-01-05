@@ -6,6 +6,7 @@
 #![warn(clippy::map_flatten)]
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
+#![feature(more_qualified_paths)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(test)]
 #![feature(map_first_last)]

@@ -8,6 +8,7 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::{serialize_cell, serialize_cell_idx, serialize_pk};
 use crate::executor::managed_state::aggregation::OrderedRowsSerializer;
+use crate::executor::managed_state::flush_status::HashMapFlushStatus as FlushStatus;
 
 /// `ManagedMviewState` buffers recent mutations. Data will be written
 /// to backend storage on calling `flush`.
@@ -16,7 +17,7 @@ pub struct ManagedMViewState<S: StateStore> {
     schema: Schema,
     pk_columns: Vec<usize>,
     sort_key_serializer: OrderedRowsSerializer,
-    memtable: HashMap<Row, Option<Row>>,
+    memtable: HashMap<Row, FlushStatus<Row>>,
 }
 
 impl<S: StateStore> ManagedMViewState<S> {
@@ -40,11 +41,11 @@ impl<S: StateStore> ManagedMViewState<S> {
     }
 
     pub fn put(&mut self, pk: Row, value: Row) {
-        self.memtable.insert(pk, Some(value));
+        FlushStatus::do_insert(self.memtable.entry(pk), value);
     }
 
     pub fn delete(&mut self, pk: Row) {
-        self.memtable.insert(pk, None);
+        FlushStatus::do_delete(self.memtable.entry(pk));
     }
 
     // TODO(MrCroxx): flush can be performed in another coruntine by taking the snapshot of
@@ -55,6 +56,7 @@ impl<S: StateStore> ManagedMViewState<S> {
         let mut local = batch.local(&self.keyspace);
 
         for (pk, cells) in self.memtable.drain() {
+            let cells = cells.into_option();
             debug_assert_eq!(self.pk_columns.len(), pk.0.len());
             let pk_buf = serialize_pk(&pk, &self.sort_key_serializer)?;
             for cell_idx in 0..self.schema.len() {

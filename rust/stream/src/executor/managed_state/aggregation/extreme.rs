@@ -15,7 +15,7 @@ use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::extreme_serializer::{variants, ExtremePk, ExtremeSerializer};
-use crate::executor::managed_state::flush_status::FlushStatus;
+use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
 use crate::executor::{AggArgs, AggCall, PkDataTypeKinds};
 pub type ManagedMinState<S, A> = GenericManagedState<S, A, { variants::EXTREME_MIN }>;
 pub type ManagedMaxState<S, A> = GenericManagedState<S, A, { variants::EXTREME_MAX }>;

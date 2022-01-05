@@ -9,7 +9,7 @@ use risingwave_common::types::DataTypeKind;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::managed_state::aggregation::OrderedRowDeserializer;
-use crate::executor::managed_state::flush_status::FlushStatus;
+use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
 use crate::executor::managed_state::OrderedRow;
 use crate::executor::{serialize_cell, serialize_cell_idx};
 

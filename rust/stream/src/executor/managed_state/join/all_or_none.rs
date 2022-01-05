@@ -9,7 +9,7 @@ use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::{PkType, ValueType};
-use crate::executor::managed_state::FlushStatus;
+use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
 
 type AllOrNoneStateIter<'a> = btree_map::Iter<'a, Row, Row>;
 
