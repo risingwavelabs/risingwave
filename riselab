@@ -5,7 +5,7 @@ if [ -z "$(which cargo-make)" ]; then
     cargo install cargo-make --version "^0.35"
 fi
 
-if [ $# -eq 0 ]; then
+if [ $# -eq 0 ] || [ "$1" == "-h" ] || [ "$1" ==  "--help" ]; then
     cargo make --list-all-steps
     exit 0
 fi
