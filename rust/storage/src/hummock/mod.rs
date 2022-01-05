@@ -11,13 +11,13 @@ mod cloud;
 mod compactor;
 mod error;
 mod iterator;
-mod key;
-mod key_range;
+pub mod key;
+pub mod key_range;
 mod level_handler;
 mod snapshot;
 mod state_store;
 mod utils;
-mod value;
+pub mod value;
 mod version_cmp;
 mod version_manager;
 

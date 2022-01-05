@@ -14,6 +14,16 @@ pub enum HummockError {
     MockError(String),
     #[error("Object Store IO Error {0}")]
     ObjectIoError(String),
+    #[error("Invalid Hummock Context {0}")]
+    InvalidHummockContext(String),
+    #[error("Failed to Create RPC Client")]
+    CreateRPCClientError,
+    #[error("No Pin Version Record Matching version_id={0} in context")]
+    NoMatchingPinVersion(String),
+    #[error("No Pin Snapshot Record Matching snapshot_id={0} in context")]
+    NoMatchingPinSnapshot(String),
+    #[error("No compact task")]
+    NoCompactTaskFound,
 }
 
 impl From<prost::DecodeError> for HummockError {

@@ -9,7 +9,8 @@ option optimize_for = SPEED;
 import "common.proto";
 
 message Table {
-  uint64 sst_id = 1;
+  uint64 id = 1;
+  TableMeta meta = 2;
 }
 
 message BlockMeta {
@@ -42,11 +43,12 @@ message Checksum {
   uint64 sum = 2;
 }
 
+enum LevelType {
+  Nonoverlapping = 0;
+  Overlapping = 1;
+}
+
 message Level {
-  enum LevelType {
-    Nonoverlapping = 0;
-    Overlapping = 1;
-  }
   LevelType level_type = 1;
   repeated uint64 table_ids = 2;
 }
@@ -161,12 +163,41 @@ message GetTablesResponse {
   repeated Table tables = 2;
 }
 
+message LevelEntry {
+  uint32 level_idx = 1;
+  Level level = 2;
+}
+
+message KeyRange {
+  bytes left = 1;
+  bytes right = 2;
+  bool inf = 3;
+}
+
+message CompactTask {
+  // SSTs to be compacted, which will be removed from LSM after compaction
+  repeated LevelEntry input_ssts = 1;
+  // In ideal case, the compaction will generate `splits.len()` tables which have key range
+  // corresponding to that in [`splits`], respectively
+  repeated KeyRange splits = 2;
+  // low watermark in 'ts-aware compaction'
+  uint64 watermark = 3;
+  // compacion output, which will be added to [`target_level`] of LSM after compaction
+  repeated Table sorted_output_ssts = 4;
+  // task id assigned by hummock storage service
+  uint64 task_id = 5;
+  // compacion output will be added to [`target_level`] of LSM after compaction
+  uint32 target_level = 6;
+  bool is_target_ultimate_and_leveling = 7;
+}
+
 message GetCompactionTasksRequest {
   int32 context_identifier = 1;
 }
 
 message GetCompactionTasksResponse {
   common.Status status = 1;
+  CompactTask compact_task = 2;
 }
 
 message ReportCompactionTasksRequest {
@@ -183,6 +214,11 @@ message HummockContextPinnedVersion {
 
 message HummockContextPinnedSnapshot {
   repeated uint64 snapshot_id = 1;
+}
+
+message HummockTablesToDelete {
+  // table id
+  repeated uint64 id = 1;
 }
 
 service HummockManagerService {

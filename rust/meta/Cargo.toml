@@ -9,8 +9,9 @@ async-recursion = "0.2"
 async-stream = "0.3"
 async-trait = "0.1"
 backtrace = "0.3"
+bincode = "1.3.3"
 byteorder = "1"
-bytes = "1"
+bytes = { version = "1", features = ["serde"] }
 chrono = "0.4"
 clap = { version = "3", features = ["derive"] }
 crc32fast = "1"
@@ -27,6 +28,7 @@ prost = "0.9"
 prost-types = "0.9"
 risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
+risingwave_storage = { path = "../storage" }
 rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }
 serde-value = "0.7"

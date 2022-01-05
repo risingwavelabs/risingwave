@@ -1,11 +1,12 @@
 use std::cmp;
 
 use bytes::Bytes;
+use serde::{Deserialize, Serialize};
 
 use super::version_cmp::VersionedComparator;
 
 /// TODO: Ord Trait with 'a'+ts>'aa'+ts issue
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct KeyRange {
     pub left: Bytes,
     pub right: Bytes,
@@ -72,6 +73,16 @@ impl Ord for KeyRange {
 impl PartialOrd for KeyRange {
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl From<KeyRange> for risingwave_pb::hummock::KeyRange {
+    fn from(kr: KeyRange) -> Self {
+        risingwave_pb::hummock::KeyRange {
+            left: kr.left.to_vec(),
+            right: kr.right.to_vec(),
+            inf: kr.inf,
+        }
     }
 }
 

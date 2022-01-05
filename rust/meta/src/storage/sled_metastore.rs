@@ -1,14 +1,18 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use itertools::Itertools;
 use risingwave_common::array::RwError;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use sled::transaction::TransactionError;
 use sled::IVec;
 
 use crate::manager::{Epoch, SINGLE_VERSION_EPOCH};
 use crate::storage::transaction::{Operation, Precondition, Transaction};
-use crate::storage::{KeyWithVersion, MetaStore, OperationOption};
+use crate::storage::OperationOption::{WithPrefix, WithVersion};
+use crate::storage::{
+    ColumnFamilyUtils, KeyWithVersion, MetaStore, OperationOption, DEFAULT_COLUMN_FAMILY,
+};
 
 impl From<sled::Error> for crate::storage::Error {
     fn from(e: sled::Error) -> Self {
@@ -35,51 +39,92 @@ impl SledMetaStore {
 #[async_trait]
 impl MetaStore for SledMetaStore {
     async fn list(&self) -> Result<Vec<Vec<u8>>> {
-        unimplemented!()
+        self.list_cf(DEFAULT_COLUMN_FAMILY).await
     }
 
-    async fn put(&self, _key: &[u8], _value: &[u8], _version: Epoch) -> Result<()> {
-        unimplemented!()
+    async fn put(&self, key: &[u8], value: &[u8], version: Epoch) -> Result<()> {
+        self.put_cf(DEFAULT_COLUMN_FAMILY, key, value, version)
+            .await
     }
 
-    async fn put_batch(&self, _tuples: Vec<(Vec<u8>, Vec<u8>, Epoch)>) -> Result<()> {
-        unimplemented!()
+    async fn put_batch(&self, tuples: Vec<(Vec<u8>, Vec<u8>, Epoch)>) -> Result<()> {
+        self.put_batch_cf(
+            tuples
+                .into_iter()
+                .map(|(k, v, e)| (DEFAULT_COLUMN_FAMILY, k, v, e))
+                .collect_vec(),
+        )
+        .await
     }
 
-    async fn get(&self, _key: &[u8], _version: Epoch) -> Result<Vec<u8>> {
-        unimplemented!()
+    async fn get(&self, key: &[u8], version: Epoch) -> Result<Vec<u8>> {
+        self.get_cf(DEFAULT_COLUMN_FAMILY, key, version).await
     }
 
-    async fn delete(&self, _key: &[u8], _version: Epoch) -> Result<()> {
-        unimplemented!()
+    async fn delete(&self, key: &[u8], version: Epoch) -> Result<()> {
+        self.delete_cf(DEFAULT_COLUMN_FAMILY, key, version).await
     }
 
     async fn delete_all(&self, _key: &[u8]) -> Result<()> {
         unimplemented!()
     }
 
-    async fn list_cf(&self, _cf: &str) -> Result<Vec<Vec<u8>>> {
-        unimplemented!()
+    async fn list_cf(&self, cf: &str) -> Result<Vec<Vec<u8>>> {
+        self.get_v2(
+            ColumnFamilyUtils::prefix_key_with_cf("".as_bytes(), cf.as_bytes()),
+            vec![WithPrefix()],
+        )
+        .await
+        .map(|kvs| kvs.into_iter().map(|(_k, v)| v).collect_vec())
     }
 
     async fn list_batch_cf(&self, _cfs: Vec<&str>) -> Result<Vec<Vec<Vec<u8>>>> {
         unimplemented!()
     }
 
-    async fn put_cf(&self, _cf: &str, _key: &[u8], _value: &[u8], _version: Epoch) -> Result<()> {
-        unimplemented!()
+    async fn put_cf(&self, cf: &str, key: &[u8], value: &[u8], version: Epoch) -> Result<()> {
+        self.put_v2(
+            ColumnFamilyUtils::prefix_key_with_cf(key, cf.as_bytes()),
+            // TODO fix unnecessary copy
+            value.to_vec(),
+            vec![WithVersion(version)],
+        )
+        .await
     }
 
-    async fn put_batch_cf(&self, _tuples: Vec<(&str, Vec<u8>, Vec<u8>, Epoch)>) -> Result<()> {
-        unimplemented!()
+    async fn put_batch_cf(&self, tuples: Vec<(&str, Vec<u8>, Vec<u8>, Epoch)>) -> Result<()> {
+        let mut trx = self.get_transaction();
+        let ops = tuples
+            .into_iter()
+            .map(|(cf, k, v, e)| {
+                Operation::Put(
+                    ColumnFamilyUtils::prefix_key_with_cf(k.as_slice(), cf.as_bytes()),
+                    v,
+                    vec![WithVersion(e)],
+                )
+            })
+            .collect_vec();
+        trx.add_operations(ops);
+        trx.commit().map_err(|e| e.into())
     }
 
-    async fn get_cf(&self, _cf: &str, _key: &[u8], _version: Epoch) -> Result<Vec<u8>> {
-        unimplemented!()
+    async fn get_cf(&self, cf: &str, key: &[u8], version: Epoch) -> Result<Vec<u8>> {
+        let result = self
+            .get_v2(
+                ColumnFamilyUtils::prefix_key_with_cf(key, cf.as_bytes()),
+                vec![WithVersion(version)],
+            )
+            .await
+            .map(|kvs| kvs.into_iter().map(|(_k, v)| v).reduce(|_pre, cur| cur))?;
+        result.ok_or_else(|| ErrorCode::ItemNotFound("entry not found".to_string()).into())
     }
 
-    async fn delete_cf(&self, _cf: &str, _key: &[u8], _version: Epoch) -> Result<()> {
-        unimplemented!()
+    async fn delete_cf(&self, cf: &str, key: &[u8], version: Epoch) -> Result<()> {
+        self.delete_v2(
+            ColumnFamilyUtils::prefix_key_with_cf(key, cf.as_bytes()),
+            vec![WithVersion(version)],
+        )
+        .await
     }
 
     async fn delete_all_cf(&self, _cf: &str, _key: &[u8]) -> Result<()> {

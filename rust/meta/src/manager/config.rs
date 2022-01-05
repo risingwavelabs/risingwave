@@ -26,6 +26,8 @@ const HUMMOCK_DEFAULT_CF_NAME: &str = "cf/hummock_default";
 const HUMMOCK_DELETION_CF_NAME: &str = "cf/hummock_deletion";
 /// Hummock version id key.
 const HUMMOCK_VERSION_ID_LEY: &str = "version_id";
+/// Hummock `compact_status` key
+const HUMMOCK_COMPACT_STATUS_KEY: &str = "compact_status";
 /// Column family name for hummock context pinned version
 const HUMMOCK_CONTEXT_PINNED_VERSION_CF_NAME: &str = "cf/hummock_context_pinned_version";
 /// Column family name for hummock context pinned snapshot
@@ -50,6 +52,7 @@ pub struct Config {
     hummock_table_cf: String,
     hummock_deletion_cf: String,
     hummock_version_id_key: String,
+    hummock_compact_status_key: String,
     hummock_context_pinned_version_cf: String,
     hummock_context_pinned_snapshot_cf: String,
 }
@@ -143,6 +146,9 @@ impl Config {
     pub fn get_hummock_context_pinned_snapshot_cf(&self) -> &str {
         &self.hummock_context_pinned_snapshot_cf
     }
+    pub fn get_hummock_compact_status_key(&self) -> &str {
+        &self.hummock_compact_status_key
+    }
 }
 
 impl Default for Config {
@@ -162,6 +168,7 @@ impl Default for Config {
             hummock_default_cf: HUMMOCK_DEFAULT_CF_NAME.to_owned(),
             hummock_deletion_cf: HUMMOCK_DELETION_CF_NAME.to_owned(),
             hummock_version_id_key: HUMMOCK_VERSION_ID_LEY.to_owned(),
+            hummock_compact_status_key: HUMMOCK_COMPACT_STATUS_KEY.to_owned(),
             hummock_context_pinned_version_cf: HUMMOCK_CONTEXT_PINNED_VERSION_CF_NAME.to_owned(),
             hummock_context_pinned_snapshot_cf: HUMMOCK_CONTEXT_PINNED_SNAPSHOT_CF_NAME.to_owned(),
         }

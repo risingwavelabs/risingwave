@@ -52,13 +52,6 @@ pub enum ErrorCode {
     #[error("Can not compare in memory: {0}")]
     MemComparableError(MemComparableError),
 
-    #[error("Hummock context {0} not found")]
-    HummockContextNotFound(i32),
-    #[error("Hummock version {0} is not pinned by current hummock context {1}")]
-    HummockVersionNotPinned(u64, i32),
-    #[error("Hummock snapshot {0} is not pinned by current hummock context {1}")]
-    HummockSnapshotNotPinned(u64, i32),
-
     #[error("Error while interact with meta service: {0}")]
     MetaError(String),
 
@@ -190,10 +183,7 @@ impl ErrorCode {
             ErrorCode::ItemNotFound(_) => 13,
             ErrorCode::InvalidInputSyntax(_, _) => 14,
             ErrorCode::MemComparableError(_) => 15,
-            ErrorCode::HummockContextNotFound(_) => 16,
             ErrorCode::MetaError(_) => 18,
-            ErrorCode::HummockVersionNotPinned(..) => 19,
-            ErrorCode::HummockSnapshotNotPinned(..) => 20,
             ErrorCode::CatalogError(..) => 21,
             ErrorCode::EOF => 22,
             ErrorCode::UnknownError(_) => 101,

@@ -56,6 +56,23 @@ impl MetaSrvEnv {
         }
     }
 
+    // Instance for test using sled as backend
+    #[cfg(test)]
+    pub async fn for_test_with_sled() -> Self {
+        // change to sync after refactor `IdGeneratorManager::new` sync.
+        let tempdir = tempfile::tempdir().unwrap();
+        let meta_store = Arc::new(crate::storage::SledMetaStore::new(tempdir.path()).unwrap());
+        let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
+        let epoch_generator = Arc::new(MemEpochGenerator::new());
+
+        Self {
+            config: Default::default(),
+            id_gen_manager,
+            meta_store,
+            epoch_generator,
+        }
+    }
+
     pub fn config(&self) -> Arc<Config> {
         self.config.clone()
     }

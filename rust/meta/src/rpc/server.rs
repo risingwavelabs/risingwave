@@ -24,16 +24,25 @@ use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::id_service::IdGeneratorServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
-use crate::storage::MemStore;
+use crate::storage::{MemStore, MetaStoreRef, SledMetaStore};
 use crate::stream::{DefaultStreamManager, StoredStreamMetaManager};
+
+pub enum MetaStoreBackend {
+    Mem,
+    Sled(std::path::PathBuf),
+}
 
 pub async fn rpc_serve_with_listener(
     listener: TcpListener,
     dashboard_addr: Option<SocketAddr>,
     hummock_config: Option<hummock::Config>,
+    meta_store_backend: MetaStoreBackend,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     let config = Arc::new(Config::default());
-    let meta_store_ref = Arc::new(MemStore::new());
+    let meta_store_ref: MetaStoreRef = match meta_store_backend {
+        MetaStoreBackend::Mem => Arc::new(MemStore::new()),
+        MetaStoreBackend::Sled(db_path) => Arc::new(SledMetaStore::new(db_path.as_path()).unwrap()),
+    };
     let epoch_generator_ref = Arc::new(MemEpochGenerator::new());
     let env = MetaSrvEnv::new(config, meta_store_ref, epoch_generator_ref).await;
 
@@ -99,10 +108,11 @@ pub async fn rpc_serve(
     addr: SocketAddr,
     dashboard_addr: Option<SocketAddr>,
     hummock_config: Option<hummock::Config>,
+    meta_store_backend: MetaStoreBackend,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     let listener = TcpListener::bind(addr).await.unwrap();
     let (join_handle, shutdown) =
-        rpc_serve_with_listener(listener, dashboard_addr, hummock_config).await;
+        rpc_serve_with_listener(listener, dashboard_addr, hummock_config, meta_store_backend).await;
     (join_handle, shutdown)
 }
 
@@ -110,12 +120,12 @@ pub async fn rpc_serve(
 mod tests {
     use risingwave_common::util::addr::get_host_port;
 
-    use crate::rpc::server::rpc_serve;
+    use crate::rpc::server::{rpc_serve, MetaStoreBackend};
 
     #[tokio::test]
     async fn test_server_shutdown() {
         let addr = get_host_port("127.0.0.1:9527").unwrap();
-        let (join_handle, shutdown_send) = rpc_serve(addr, None, None).await;
+        let (join_handle, shutdown_send) = rpc_serve(addr, None, None, MetaStoreBackend::Mem).await;
         shutdown_send.send(()).unwrap();
         join_handle.await.unwrap();
     }

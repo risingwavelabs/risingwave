@@ -11,6 +11,7 @@ use risingwave_common::error::{ErrorCode, Result};
 
 use crate::manager::Epoch;
 use crate::storage::transaction::Transaction;
+use crate::storage::{Operation, Precondition};
 
 pub const DEFAULT_COLUMN_FAMILY: &str = "default";
 
@@ -88,15 +89,7 @@ pub(crate) struct KeyWithVersion(Vec<u8>);
 
 impl KeyWithVersion {
     pub fn compose(key: &[u8], version: Epoch) -> KeyWithVersion {
-        KeyWithVersion(
-            format!(
-                "{}-{:020}",
-                str::from_utf8(key).unwrap(),
-                !version.into_inner()
-            )
-            .as_bytes()
-            .to_vec(),
-        )
+        KeyWithVersion([key, format!("-{:020}", !version.into_inner()).as_bytes()].concat())
     }
 
     pub fn into_inner(self) -> Vec<u8> {
@@ -281,7 +274,9 @@ impl MetaStore for MemStore {
         _key: Vec<u8>,
         _opts: Vec<OperationOption>,
     ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
-        unimplemented!()
+        // TODO empty implementation to enable meta service startup before meta store refactoring is
+        // done.
+        Ok(vec![])
     }
 
     async fn put_v2(
@@ -290,15 +285,39 @@ impl MetaStore for MemStore {
         _value: Vec<u8>,
         _opts: Vec<OperationOption>,
     ) -> Result<()> {
-        unimplemented!()
+        // TODO empty implementation to enable meta service startup before meta store refactoring is
+        // done.
+        Ok(())
     }
 
     async fn delete_v2(&self, _key: Vec<u8>, _opts: Vec<OperationOption>) -> Result<()> {
-        unimplemented!()
+        // TODO empty implementation to enable meta service startup before meta store refactoring is
+        // done.
+        Ok(())
     }
 
     fn get_transaction(&self) -> Box<dyn Transaction> {
-        unimplemented!()
+        Box::new(MemTransaction {})
+    }
+}
+
+// TODO empty implementation to enable meta service startup before meta store refactoring is done.
+struct MemTransaction {}
+impl Transaction for MemTransaction {
+    fn add_preconditions(&mut self, _preconditions: Vec<Precondition>) {}
+
+    fn add_operations(&mut self, _operations: Vec<Operation>) {}
+
+    fn commit(&self) -> std::result::Result<(), Error> {
+        Ok(())
+    }
+}
+
+// We keep the column family semantic
+pub struct ColumnFamilyUtils {}
+impl ColumnFamilyUtils {
+    pub fn prefix_key_with_cf(key: &[u8], prefix: &[u8]) -> Vec<u8> {
+        [prefix, key].concat()
     }
 }
 

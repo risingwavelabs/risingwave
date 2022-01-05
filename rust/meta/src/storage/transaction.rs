@@ -7,7 +7,7 @@ use crate::storage::OperationOption;
 /// is executed.
 /// 2. Upon `commit` the transaction, the `TransactionAbort` error will be returned if
 /// any precondition was not met in previous step.
-pub trait Transaction: 'static {
+pub trait Transaction: Send + Sync + 'static {
     fn add_preconditions(&mut self, preconditions: Vec<Precondition>);
     fn add_operations(&mut self, operations: Vec<Operation>);
     fn commit(&self) -> Result<(), crate::storage::Error>;

@@ -6,7 +6,10 @@ use assert_matches::assert_matches;
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::hummock::Table;
+use risingwave_pb::hummock::{HummockContext, Table};
+use risingwave_storage::hummock::key::key_with_ts;
+use risingwave_storage::hummock::value::HummockValue;
+use risingwave_storage::hummock::{TableBuilder, TableBuilderOptions};
 use tokio::task::JoinHandle;
 
 use super::*;
@@ -27,7 +30,7 @@ async fn test_hummock_context_management() -> Result<()> {
         context_ttl: 1000,
         context_check_interval: 300,
     };
-    let env = MetaSrvEnv::for_test().await;
+    let env = MetaSrvEnv::for_test_with_sled().await;
     let (hummock_manager, ..) = create_hummock_manager(env, &hummock_config).await?;
     let context = hummock_manager.create_hummock_context().await?;
     let invalidate = hummock_manager
@@ -66,7 +69,7 @@ async fn test_hummock_pin_unpin() -> Result<()> {
         context_ttl: 1000,
         context_check_interval: 300,
     };
-    let env = MetaSrvEnv::for_test().await;
+    let env = MetaSrvEnv::for_test_with_sled().await;
     let (hummock_manager, _) = create_hummock_manager(env.clone(), &hummock_config).await?;
     let context = hummock_manager.create_hummock_context().await?;
     let manager_config = env.config();
@@ -111,7 +114,58 @@ async fn test_hummock_pin_unpin() -> Result<()> {
     let pin_result = hummock_manager.pin_version(context.identifier).await;
     assert!(pin_result.is_ok());
 
+    let pin_result = hummock_manager.pin_snapshot(context.identifier).await;
+    assert!(pin_result.is_ok());
+    assert!(hummock_manager
+        .unpin_snapshot(context.identifier, pin_result?)
+        .await
+        .is_ok());
+
     Ok(())
+}
+
+/// Generate keys like `001_key_test_00002` with timestamp `ts`.
+pub fn iterator_test_key_of_ts(table: u64, idx: usize, ts: HummockSnapshotId) -> Vec<u8> {
+    // key format: {prefix_index}_version
+    key_with_ts(
+        format!("{:03}_key_test_{:05}", table, idx)
+            .as_bytes()
+            .to_vec(),
+        ts,
+    )
+}
+
+async fn generate_test_tables(
+    hummock_manager: Arc<dyn HummockManager>,
+    context: &HummockContext,
+) -> Result<Vec<Table>> {
+    // Tables to add
+    let opt = TableBuilderOptions {
+        bloom_false_positive: 0.1,
+        block_size: 4096,
+        table_capacity: 0,
+        checksum_algo: risingwave_pb::hummock::checksum::Algorithm::XxHash64,
+    };
+
+    let mut tables = vec![];
+    for i in 0..2 {
+        let table_id = i as u64;
+        let mut b = TableBuilder::new(opt.clone());
+        let kv_pairs = vec![
+            (i, HummockValue::Put(b"test".to_vec())),
+            (i * 10, HummockValue::Put(b"test".to_vec())),
+        ];
+        let snapshot = hummock_manager.pin_snapshot(context.identifier).await?;
+        for kv in kv_pairs {
+            b.add(&iterator_test_key_of_ts(table_id, kv.0, snapshot.ts), kv.1);
+        }
+        let (_data, meta) = b.finish();
+        tables.push(Table {
+            id: table_id,
+            meta: Some(meta),
+        })
+    }
+    Ok(tables)
 }
 
 #[tokio::test]
@@ -120,15 +174,15 @@ async fn test_hummock_table() -> Result<()> {
         context_ttl: 1000,
         context_check_interval: 300,
     };
-    let env = MetaSrvEnv::for_test().await;
+    let env = MetaSrvEnv::for_test_with_sled().await;
     let (hummock_manager, _) = create_hummock_manager(env.clone(), &hummock_config).await?;
     let context = hummock_manager.create_hummock_context().await?;
     let manager_config = env.config();
 
-    // Tables to add
-    let original_tables: Vec<Table> = vec![Table { sst_id: 0 }, Table { sst_id: 1 }]
+    let original_tables: Vec<Table> = generate_test_tables(hummock_manager.clone(), &context)
+        .await?
         .into_iter()
-        .sorted_by_key(|t| t.sst_id)
+        .sorted_by_key(|t| t.id)
         .collect();
     let result = hummock_manager
         .add_tables(context.identifier, original_tables.clone())
@@ -145,7 +199,7 @@ async fn test_hummock_table() -> Result<()> {
     let fetched_tables: Vec<Table> = fetched_tables
         .iter()
         .map(|t| -> Table { Table::decode(t.as_slice()).unwrap() })
-        .sorted_by_key(|t| t.sst_id)
+        .sorted_by_key(|t| t.id)
         .collect();
     assert_eq!(original_tables, fetched_tables);
 
@@ -160,15 +214,27 @@ async fn test_hummock_table() -> Result<()> {
             .flat_map(|level| level.table_ids.iter())
             .copied()
             .sorted()
-            .cmp(original_tables.iter().map(|ot| ot.sst_id).sorted())
+            .cmp(original_tables.iter().map(|ot| ot.id).sorted())
     );
 
     // Confirm tables got are equal to original tables
     let got_tables: Vec<Table> = hummock_manager
         .get_tables(context.identifier, pinned_version)
         .await
-        .map(|tv| tv.into_iter().sorted_by_key(|t| t.sst_id).collect())?;
+        .map(|tv| tv.into_iter().sorted_by_key(|t| t.id).collect())?;
     assert_eq!(original_tables, got_tables);
+
+    // TODO should use strong cases after compactor is ready so that real compact_tasks are
+    // reported.
+    let compact_task = hummock_manager.get_compact_task(context.identifier).await?;
+    assert!(hummock_manager
+        .report_compact_task(context.identifier, compact_task.clone(), true)
+        .await
+        .is_ok());
+    assert!(hummock_manager
+        .report_compact_task(context.identifier, compact_task.clone(), false)
+        .await
+        .is_ok());
 
     Ok(())
 }
@@ -179,7 +245,7 @@ async fn test_hummock_context_tracker_shutdown() -> Result<()> {
         context_ttl: 1000,
         context_check_interval: 300,
     };
-    let env = MetaSrvEnv::for_test().await;
+    let env = MetaSrvEnv::for_test_with_sled().await;
     let (hummock_manager_ref, join_handle) = create_hummock_manager(env, &hummock_config).await?;
     drop(hummock_manager_ref);
     let result = join_handle.await;
