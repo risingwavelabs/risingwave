@@ -767,6 +767,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "downcast-rs"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ea835d29036a4087793836fa931b08837ad5e957da9e23886b29586fb9b6650"
+
+[[package]]
 name = "dyn-clone"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -912,9 +918,14 @@ version = "0.1.1"
 dependencies = [
  "bytes",
  "clap",
+ "downcast-rs",
+ "dyn-clone",
+ "itertools 0.10.3",
  "log",
  "log4rs",
+ "paste",
  "risingwave_common",
+ "smallvec",
  "sqlparser",
  "thiserror",
  "tokio",
@@ -3429,6 +3440,9 @@ name = "smallvec"
 version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ecab6c735a6bb4139c0caafd0cc3635748bbb3acf4550e8138122099251f309"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "snap"
