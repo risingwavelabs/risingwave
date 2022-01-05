@@ -7,13 +7,16 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use risingwave_common::array::RwError;
 use risingwave_common::error::ErrorCode::ItemNotFound;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 
 use crate::manager::Epoch;
+use crate::storage::transaction::Transaction;
 
 pub const DEFAULT_COLUMN_FAMILY: &str = "default";
 
 /// `MetaStore` defines the functions used to operate metadata.
+/// `MetaStore` is under refactoring. New interfaces are named *_v2 temporarily and will be renamed
+/// later. These new interfaces mimic the clientv3 go package for etcd to some extent.
 #[async_trait]
 pub trait MetaStore: Sync + Send + 'static {
     async fn list(&self) -> Result<Vec<Vec<u8>>>;
@@ -30,13 +33,58 @@ pub trait MetaStore: Sync + Send + 'static {
     async fn get_cf(&self, cf: &str, key: &[u8], version: Epoch) -> Result<Vec<u8>>;
     async fn delete_cf(&self, cf: &str, key: &[u8], version: Epoch) -> Result<()>;
     async fn delete_all_cf(&self, cf: &str, key: &[u8]) -> Result<()>;
+
+    /// `get` can serve as point get or range get according to the `opts`.
+    /// If WithPrefix is specified, `get` will fetch all kv pairs whose key prefix matches `key`;
+    /// Otherwise `get` will fetch the kv pair whose key matches `key`.
+    /// If WithVersion is specified, `get` will fetch all kv pairs where the version matches;
+    /// Otherwise a default version is selected.
+    /// WithPrefix and WithVersion are compatible.
+    async fn get_v2(
+        &self,
+        key: Vec<u8>,
+        opts: Vec<OperationOption>,
+    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>>;
+    /// `put` insert the kv pair.
+    /// If WithVersion is specified, the given version is attached to the inserted kv pair;
+    /// Otherwise a default version is selected.
+    async fn put_v2(&self, key: Vec<u8>, value: Vec<u8>, opts: Vec<OperationOption>) -> Result<()>;
+    /// `delete` delete the kv pair.
+    /// If WithVersion is specified, the kv pair with the given version is deleted; Otherwise a
+    /// default version is selected.
+    async fn delete_v2(&self, key: Vec<u8>, opts: Vec<OperationOption>) -> Result<()>;
+    /// `get_transaction` return a transaction. See Transaction trait for detail.
+    fn get_transaction(&self) -> Box<dyn Transaction>;
+}
+
+// Error of metastore
+#[derive(Debug)]
+pub enum Error {
+    StorageError(String),
+    TransactionAbort(),
+}
+
+impl From<Error> for RwError {
+    fn from(e: Error) -> Self {
+        match e {
+            Error::StorageError(e) => RwError::from(ErrorCode::InternalError(e)),
+            Error::TransactionAbort() => {
+                RwError::from(ErrorCode::InternalError("transaction aborted".to_owned()))
+            }
+        }
+    }
+}
+
+pub enum OperationOption {
+    WithPrefix(),
+    WithVersion(Epoch),
 }
 
 pub type MetaStoreRef = Arc<dyn MetaStore>;
 
 // TODO: introduce sled/etcd as storage engine here.
 #[derive(Clone)]
-struct KeyWithVersion(Vec<u8>);
+pub(crate) struct KeyWithVersion(Vec<u8>);
 
 impl KeyWithVersion {
     pub fn compose(key: &[u8], version: Epoch) -> KeyWithVersion {
@@ -56,13 +104,23 @@ impl KeyWithVersion {
     }
 
     pub fn key(&self) -> Vec<u8> {
-        let key_str = str::from_utf8(self.0.as_slice()).unwrap();
+        KeyWithVersion::get_key(&self.0)
+    }
+
+    // caller should ensure `vec` is valid
+    pub fn get_key(vec: &[u8]) -> Vec<u8> {
+        let key_str = str::from_utf8(vec).unwrap();
         let idx = key_str.rfind('-').unwrap();
         key_str[..idx].as_bytes().to_vec()
     }
 
     pub fn version(&self) -> Epoch {
-        let key_str = str::from_utf8(self.0.as_slice()).unwrap().to_string();
+        KeyWithVersion::get_version(&self.0)
+    }
+
+    // caller should ensure `vec` is valid
+    pub fn get_version(vec: &[u8]) -> Epoch {
+        let key_str = str::from_utf8(vec).unwrap().to_string();
         let idx = key_str.rfind('-').unwrap();
         Epoch::from(!u64::from_str(&key_str[idx + 1..]).unwrap())
     }
@@ -216,6 +274,31 @@ impl MetaStore for MemStore {
         entities.remove(&(key.to_vec(), String::from(cf)));
 
         Ok(())
+    }
+
+    async fn get_v2(
+        &self,
+        _key: Vec<u8>,
+        _opts: Vec<OperationOption>,
+    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        unimplemented!()
+    }
+
+    async fn put_v2(
+        &self,
+        _key: Vec<u8>,
+        _value: Vec<u8>,
+        _opts: Vec<OperationOption>,
+    ) -> Result<()> {
+        unimplemented!()
+    }
+
+    async fn delete_v2(&self, _key: Vec<u8>, _opts: Vec<OperationOption>) -> Result<()> {
+        unimplemented!()
+    }
+
+    fn get_transaction(&self) -> Box<dyn Transaction> {
+        unimplemented!()
     }
 }
 
