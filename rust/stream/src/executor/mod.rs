@@ -30,6 +30,7 @@ pub use top_n_appendonly::*;
 mod actor;
 mod aggregation;
 mod barrier_align;
+mod chain;
 mod dispatch;
 mod filter;
 mod hash_agg;
