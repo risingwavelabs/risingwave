@@ -8,11 +8,9 @@ use risingwave_common::array::RwError;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_pb::meta::get_id_request::IdCategory;
-use risingwave_pb::meta::ClusterType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{StreamFragment, StreamNode};
 
-use crate::cluster::{StoredClusterManager, WorkerNodeMetaManager};
 use crate::manager::IdGeneratorManagerRef;
 use crate::stream::graph::{
     StreamFragmentBuilder, StreamGraphBuilder, StreamStage, StreamStageGraph,
@@ -31,22 +29,19 @@ pub struct StreamFragmenter {
 
     /// id generator, used to generate fragment id.
     id_gen_manager_ref: IdGeneratorManagerRef,
-    /// cluster manager, used to init actor parallelization.
-    cluster_manager: Arc<StoredClusterManager>,
+    /// worker count, used to init actor parallelization.
+    worker_count: u32,
 }
 
 impl StreamFragmenter {
-    pub fn new(
-        id_gen_manager_ref: IdGeneratorManagerRef,
-        cluster_manager: Arc<StoredClusterManager>,
-    ) -> Self {
+    pub fn new(id_gen_manager_ref: IdGeneratorManagerRef, worker_count: u32) -> Self {
         Self {
             next_stage_id: AtomicU32::new(0),
             stage_graph: StreamStageGraph::new(None),
             stream_graph: StreamGraphBuilder::new(),
 
             id_gen_manager_ref,
-            cluster_manager,
+            worker_count,
         }
     }
 
@@ -129,20 +124,10 @@ impl StreamFragmenter {
                 // Generate one or multiple actors and connect them to the next stage.
                 // Currently, we assume the parallel degree is at least 4, and grows linearly with
                 // more worker nodes added.
-                max(
-                    self.cluster_manager
-                        .list_worker_node(ClusterType::ComputeNode)
-                        .await?
-                        .len() as u32
-                        * 2,
-                    PARALLEL_DEGREE_LOW_BOUND,
-                )
+                max(self.worker_count * 2, PARALLEL_DEGREE_LOW_BOUND)
             } else {
                 // Stage on the source.
-                self.cluster_manager
-                    .list_worker_node(ClusterType::ComputeNode)
-                    .await?
-                    .len() as u32
+                self.worker_count
             };
 
             let node = current_stage.get_node();
@@ -165,12 +150,8 @@ impl StreamFragmenter {
             }
         }
 
-        // Add fragment dependencies.
-        last_stage_fragments.iter().for_each(|&downstream| {
-            current_fragment_ids
-                .iter()
-                .for_each(|&upstream| self.stream_graph.add_dependency(upstream, downstream))
-        });
+        self.stream_graph
+            .add_dependency(&current_fragment_ids, &last_stage_fragments);
 
         // Recursively generating fragments on the downstream level.
         if self.stage_graph.has_downstream(current_stage_id) {

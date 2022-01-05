@@ -27,6 +27,7 @@ import com.risingwave.rpc.MetaClientManager;
 import com.risingwave.rpc.MetaClientManagerImpl;
 import com.risingwave.scheduler.QueryManager;
 import com.risingwave.scheduler.RemoteQueryManager;
+import com.risingwave.scheduler.streaming.LocalStreamManager;
 import com.risingwave.scheduler.streaming.RemoteStreamManager;
 import com.risingwave.scheduler.streaming.StreamManager;
 import com.risingwave.scheduler.task.RemoteTaskManager;
@@ -122,13 +123,18 @@ public class FrontendServerModule extends AbstractModule {
       MetaClientManager metaClientManager,
       WorkerNodeManager workerNodeManager) {
     LOGGER.info("Creating stream manager.");
-
-    String address = config.get(FrontendServerConfigurations.META_SERVICE_ADDRESS);
-    DefaultWorkerNode node = DefaultWorkerNode.from(address);
-    MetaClient client =
-        metaClientManager.getOrCreate(
-            node.getRpcEndPoint().getHost(), node.getRpcEndPoint().getPort());
-    return new RemoteStreamManager(client, workerNodeManager);
+    FrontendServerConfigurations.CatalogMode mode =
+        config.get(FrontendServerConfigurations.CATALOG_MODE);
+    if (mode == FrontendServerConfigurations.CatalogMode.Local) {
+      return new LocalStreamManager(workerNodeManager);
+    } else {
+      String address = config.get(FrontendServerConfigurations.META_SERVICE_ADDRESS);
+      DefaultWorkerNode node = DefaultWorkerNode.from(address);
+      MetaClient client =
+          metaClientManager.getOrCreate(
+              node.getRpcEndPoint().getHost(), node.getRpcEndPoint().getPort());
+      return new RemoteStreamManager(client, workerNodeManager);
+    }
   }
 
   // Required by QueryManager.

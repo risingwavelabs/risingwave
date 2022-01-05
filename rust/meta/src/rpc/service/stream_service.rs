@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::{
-    AddFragmentsToNodeRequest, AddFragmentsToNodeResponse, CreateMaterializedViewRequest,
-    CreateMaterializedViewResponse, DropMaterializedViewRequest, DropMaterializedViewResponse,
-    LoadAllFragmentsRequest, LoadAllFragmentsResponse,
+    AddFragmentsToNodeRequest, AddFragmentsToNodeResponse, ClusterType,
+    CreateMaterializedViewRequest, CreateMaterializedViewResponse, DropMaterializedViewRequest,
+    DropMaterializedViewResponse, LoadAllFragmentsRequest, LoadAllFragmentsResponse,
 };
 use tonic::{Request, Response, Status};
 
-use crate::cluster::StoredClusterManager;
+use crate::cluster::{StoredClusterManager, WorkerNodeMetaManager};
 use crate::manager::{IdGeneratorManagerRef, MetaSrvEnv};
 use crate::stream::{StreamFragmenter, StreamManagerRef, StreamMetaManagerRef};
 
@@ -74,10 +74,15 @@ impl StreamManagerService for StreamServiceImpl {
         request: Request<CreateMaterializedViewRequest>,
     ) -> Result<Response<CreateMaterializedViewResponse>, Status> {
         let req = request.into_inner();
-        let mut fragmenter = StreamFragmenter::new(
-            self.id_gen_manager_ref.clone(),
-            self.cluster_manager.clone(),
-        );
+        let worker_count = self
+            .cluster_manager
+            .list_worker_node(ClusterType::ComputeNode)
+            .await
+            .map_err(|e| e.to_grpc_status())?
+            .len();
+
+        let mut fragmenter =
+            StreamFragmenter::new(self.id_gen_manager_ref.clone(), worker_count as u32);
         let graph = fragmenter
             .generate_graph(req.get_stream_node())
             .await

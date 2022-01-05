@@ -16,8 +16,8 @@ pub struct StreamFragmentBuilder {
     dispatcher: Option<Dispatcher>,
     /// downstream fragment set.
     downstream_fragments: HashSet<u32>,
-    /// upstream fragment set.
-    upstream_fragments: HashSet<u32>,
+    /// upstream fragment array.
+    upstream_fragments: Vec<Vec<u32>>,
 }
 
 impl StreamFragmentBuilder {
@@ -27,7 +27,7 @@ impl StreamFragmentBuilder {
             nodes: node,
             dispatcher: None,
             downstream_fragments: HashSet::new(),
-            upstream_fragments: HashSet::new(),
+            upstream_fragments: vec![],
         }
     }
 
@@ -61,8 +61,8 @@ impl StreamFragmentBuilder {
     }
 
     /// Used by stream graph to inject upstream fields.
-    pub fn get_upstream_fragments(&self) -> Vec<u32> {
-        self.upstream_fragments.iter().copied().collect()
+    pub fn get_upstream_fragments(&self) -> Vec<Vec<u32>> {
+        self.upstream_fragments.clone()
     }
 
     pub fn builder(&self) -> StreamFragment {
@@ -100,18 +100,21 @@ impl StreamGraphBuilder {
     }
 
     /// Add dependency between two connected node in the graph.
-    pub fn add_dependency(&mut self, upstream: u32, downstream: u32) {
-        self.fragment_builders
-            .get_mut(&upstream)
-            .unwrap()
-            .downstream_fragments
-            .insert(downstream);
-
-        self.fragment_builders
-            .get_mut(&downstream)
-            .unwrap()
-            .upstream_fragments
-            .insert(upstream);
+    pub fn add_dependency(&mut self, upstreams: &[u32], downstreams: &[u32]) {
+        downstreams.iter().for_each(|&downstream| {
+            upstreams.iter().for_each(|upstream| {
+                self.fragment_builders
+                    .get_mut(upstream)
+                    .unwrap()
+                    .downstream_fragments
+                    .insert(downstream);
+            });
+            self.fragment_builders
+                .get_mut(&downstream)
+                .unwrap()
+                .upstream_fragments
+                .push(upstreams.to_vec());
+        });
     }
 
     /// Build final stream DAG with dependencies with current fragment builders.
@@ -121,7 +124,8 @@ impl StreamGraphBuilder {
             .map(|builder| {
                 let mut fragment = builder.builder();
                 let upstream_fragments = builder.get_upstream_fragments();
-                fragment.nodes = Some(self.build_inner(fragment.get_nodes(), &upstream_fragments));
+                fragment.nodes =
+                    Some(self.build_inner(fragment.get_nodes(), &upstream_fragments, 0));
                 fragment
             })
             .collect::<Vec<_>>()
@@ -133,24 +137,36 @@ impl StreamGraphBuilder {
     pub fn build_inner(
         &self,
         stream_node: &StreamNode,
-        upstream_fragment_id: &[u32],
+        upstream_fragment_id: &[Vec<u32>],
+        next_idx: usize,
     ) -> StreamNode {
         if let Node::ExchangeNode(_) = stream_node.get_node() {
-            self.build_inner(stream_node.input.get(0).unwrap(), upstream_fragment_id)
+            self.build_inner(
+                stream_node.input.get(0).unwrap(),
+                upstream_fragment_id,
+                next_idx,
+            )
         } else {
             let mut new_stream_node = stream_node.clone();
+            let mut next_idx_new = next_idx;
             for (idx, input) in stream_node.input.iter().enumerate() {
                 if let Node::ExchangeNode(exchange_node) = input.get_node() {
+                    assert!(next_idx_new < upstream_fragment_id.len());
                     new_stream_node.input[idx] = StreamNode {
                         input: vec![],
                         pk_indices: input.pk_indices.clone(),
                         node: Some(Node::MergeNode(MergeNode {
-                            upstream_fragment_id: upstream_fragment_id.to_vec(),
+                            upstream_fragment_id: upstream_fragment_id
+                                .get(next_idx_new)
+                                .cloned()
+                                .unwrap(),
                             input_column_descs: exchange_node.get_input_column_descs().clone(),
                         })),
                     };
+                    next_idx_new += 1;
                 } else {
-                    new_stream_node.input[idx] = self.build_inner(input, upstream_fragment_id);
+                    new_stream_node.input[idx] =
+                        self.build_inner(input, upstream_fragment_id, next_idx_new);
                 }
             }
             new_stream_node

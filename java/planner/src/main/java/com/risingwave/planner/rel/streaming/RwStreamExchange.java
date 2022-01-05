@@ -7,6 +7,8 @@ import com.risingwave.catalog.ColumnEncoding;
 import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.planner.metadata.RisingWaveRelMetadataQuery;
 import com.risingwave.planner.rel.common.dist.RwDistributionTrait;
+import com.risingwave.proto.streaming.plan.Dispatcher;
+import com.risingwave.proto.streaming.plan.ExchangeNode;
 import com.risingwave.proto.streaming.plan.MergeNode;
 import com.risingwave.proto.streaming.plan.StreamNode;
 import java.util.ArrayList;
@@ -27,7 +29,6 @@ public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel
    * The upstream fragments of the exchange node should be added in <code>buildFragmentsInStage
    * </code>
    */
-  // TODO: remove upstreamSet, this will be set and send to compute node in meta service.
   private final Set<Integer> upstreamSet = new HashSet<>();
 
   public RwStreamExchange(
@@ -55,9 +56,42 @@ public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel
     }
     var mergeNode = mergerBuilder.build();
 
-    // TODO: serialize it to ExchangeNode later, used by fragmenter in meta.
     return StreamNode.newBuilder()
         .setMergeNode(mergeNode)
+        .addAllPkIndices(primaryKeyIndices)
+        .build();
+  }
+
+  public StreamNode serializeExchange() {
+    var exchangeBuilder = ExchangeNode.newBuilder();
+    var primaryKeyIndices =
+        ((RisingWaveRelMetadataQuery) getCluster().getMetadataQuery()).getPrimaryKeyIndices(this);
+
+    for (ColumnDesc columnDesc : this.getSchema()) {
+      com.risingwave.proto.plan.ColumnDesc.Builder columnDescBuilder =
+          com.risingwave.proto.plan.ColumnDesc.newBuilder();
+      columnDescBuilder
+          .setEncoding(com.risingwave.proto.plan.ColumnDesc.ColumnEncodingType.RAW)
+          .setColumnType(columnDesc.getDataType().getProtobufType())
+          .setIsPrimary(columnDesc.isPrimary());
+      exchangeBuilder.addInputColumnDescs(columnDescBuilder);
+    }
+
+    // Add dispatcher.
+    RelDistribution distribution = getDistribution();
+    Dispatcher.Builder dispatcherBuilder = Dispatcher.newBuilder();
+    if (distribution.getType() == RelDistribution.Type.BROADCAST_DISTRIBUTED) {
+      dispatcherBuilder.setType(Dispatcher.DispatcherType.BROADCAST);
+    } else if (distribution.getType() == RelDistribution.Type.HASH_DISTRIBUTED) {
+      dispatcherBuilder.setType(Dispatcher.DispatcherType.HASH);
+      dispatcherBuilder.setColumnIdx(distribution.getKeys().get(0));
+    } else if (distribution.getType() == RelDistribution.Type.SINGLETON) {
+      dispatcherBuilder.setType(Dispatcher.DispatcherType.SIMPLE);
+    }
+    exchangeBuilder.setDispatcher(dispatcherBuilder);
+
+    return StreamNode.newBuilder()
+        .setExchangeNode(exchangeBuilder)
         .addAllPkIndices(primaryKeyIndices)
         .build();
   }

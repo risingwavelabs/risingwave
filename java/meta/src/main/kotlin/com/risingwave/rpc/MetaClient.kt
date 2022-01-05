@@ -2,8 +2,12 @@ package com.risingwave.rpc
 
 import com.risingwave.proto.metanode.AddFragmentsToNodeRequest
 import com.risingwave.proto.metanode.AddFragmentsToNodeResponse
+import com.risingwave.proto.metanode.CreateMaterializedViewRequest
+import com.risingwave.proto.metanode.CreateMaterializedViewResponse
 import com.risingwave.proto.metanode.CreateRequest
 import com.risingwave.proto.metanode.CreateResponse
+import com.risingwave.proto.metanode.DropMaterializedViewRequest
+import com.risingwave.proto.metanode.DropMaterializedViewResponse
 import com.risingwave.proto.metanode.DropRequest
 import com.risingwave.proto.metanode.DropResponse
 import com.risingwave.proto.metanode.GetCatalogRequest
@@ -34,4 +38,8 @@ interface MetaClient {
   fun loadAllFragments(request: LoadAllFragmentsRequest): LoadAllFragmentsResponse
 
   fun addFragmentsToNode(request: AddFragmentsToNodeRequest): AddFragmentsToNodeResponse
+
+  fun createMaterializedView(request: CreateMaterializedViewRequest): CreateMaterializedViewResponse
+
+  fun dropMaterializedView(request: DropMaterializedViewRequest): DropMaterializedViewResponse
 }

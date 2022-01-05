@@ -27,7 +27,6 @@ public class StreamingEliminateExchangeRule extends RelRule<StreamingEliminateEx
             downExchangeOperator.getInput(),
             topExchangeOperator.getDistribution());
 
-    // TODO: remove upstreamSet, this will be set and send to compute node in meta service.
     downExchangeOperator.getUpstreamSet().forEach(newTopExchangeOperator::addUpStream);
 
     call.transformTo(newTopExchangeOperator);

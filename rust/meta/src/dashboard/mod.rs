@@ -106,24 +106,16 @@ impl DashboardService {
         use risingwave_pb::common::HostAddress;
         use risingwave_pb::meta::ClusterType;
 
-        let hosts = (0..3)
-            .map(|e| HostAddress {
-                host: "127.0.0.1".to_string(),
-                port: (8888 + e) as i32,
-            })
-            .collect::<Vec<_>>();
-
-        for host in &hosts[..2] {
-            self.cluster_manager
-                .add_worker_node(host.clone(), ClusterType::ComputeNode)
-                .await?;
-        }
-
-        for host in &hosts[2..] {
-            self.cluster_manager
-                .add_worker_node(host.clone(), ClusterType::Frontend)
-                .await?;
-        }
+        // TODO: remove adding frontend register when frontend implement register.
+        self.cluster_manager
+            .add_worker_node(
+                HostAddress {
+                    host: "127.0.0.1".to_string(),
+                    port: 4567,
+                },
+                ClusterType::Frontend,
+            )
+            .await?;
 
         Ok(())
     }

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use risingwave_pb::stream_plan::StreamNode;
@@ -33,7 +33,7 @@ pub struct StreamStageGraph {
     /// stores all the stages in the graph.
     stages: HashMap<u32, StreamStage>,
     /// stores stage relations: parent_stage => set(child_stage).
-    child_edges: HashMap<u32, HashSet<u32>>,
+    child_edges: HashMap<u32, BTreeSet<u32>>,
 }
 
 impl StreamStageGraph {
@@ -62,7 +62,7 @@ impl StreamStageGraph {
     pub fn link_child(&mut self, parent_id: u32, child_id: u32) {
         self.child_edges
             .entry(parent_id)
-            .or_insert_with(HashSet::new)
+            .or_insert_with(BTreeSet::new)
             .insert(child_id);
     }
 
@@ -70,7 +70,7 @@ impl StreamStageGraph {
         self.child_edges.contains_key(&stage_id)
     }
 
-    pub fn get_downstream_stages(&self, stage_id: u32) -> Option<HashSet<u32>> {
+    pub fn get_downstream_stages(&self, stage_id: u32) -> Option<BTreeSet<u32>> {
         self.child_edges.get(&stage_id).cloned()
     }
 

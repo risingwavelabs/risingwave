@@ -5,8 +5,12 @@ import com.risingwave.common.exception.PgException
 import com.risingwave.proto.metanode.AddFragmentsToNodeRequest
 import com.risingwave.proto.metanode.AddFragmentsToNodeResponse
 import com.risingwave.proto.metanode.CatalogServiceGrpc
+import com.risingwave.proto.metanode.CreateMaterializedViewRequest
+import com.risingwave.proto.metanode.CreateMaterializedViewResponse
 import com.risingwave.proto.metanode.CreateRequest
 import com.risingwave.proto.metanode.CreateResponse
+import com.risingwave.proto.metanode.DropMaterializedViewRequest
+import com.risingwave.proto.metanode.DropMaterializedViewResponse
 import com.risingwave.proto.metanode.DropRequest
 import com.risingwave.proto.metanode.DropResponse
 import com.risingwave.proto.metanode.EpochServiceGrpc
@@ -114,6 +118,26 @@ class GrpcMetaClient(private val channel: Channel) : MetaClient {
     } catch (e: StatusRuntimeException) {
       LOGGER.warn("RPC failed: {}", e.status)
       throw rpcException("addFragmentsToNode", e)
+    }
+  }
+
+  override fun createMaterializedView(request: CreateMaterializedViewRequest): CreateMaterializedViewResponse {
+    val stub = StreamManagerServiceGrpc.newBlockingStub(channel)
+    try {
+      return stub.createMaterializedView(request)
+    } catch (e: StatusRuntimeException) {
+      LOGGER.warn("RPC failed: {}", e.status)
+      throw rpcException("createMaterializedView", e)
+    }
+  }
+
+  override fun dropMaterializedView(request: DropMaterializedViewRequest): DropMaterializedViewResponse {
+    val stub = StreamManagerServiceGrpc.newBlockingStub(channel)
+    try {
+      return stub.dropMaterializedView(request)
+    } catch (e: StatusRuntimeException) {
+      LOGGER.warn("RPC failed: {}", e.status)
+      throw rpcException("dropMaterializedView", e)
     }
   }
 }

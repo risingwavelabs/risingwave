@@ -10,11 +10,15 @@ import com.risingwave.proto.common.HostAddress;
 import com.risingwave.proto.common.Status;
 import com.risingwave.proto.metanode.AddFragmentsToNodeRequest;
 import com.risingwave.proto.metanode.AddFragmentsToNodeResponse;
+import com.risingwave.proto.metanode.CreateMaterializedViewRequest;
+import com.risingwave.proto.metanode.CreateMaterializedViewResponse;
 import com.risingwave.proto.metanode.FragmentLocation;
 import com.risingwave.proto.metanode.GetIdRequest;
 import com.risingwave.proto.metanode.GetIdResponse;
 import com.risingwave.proto.metanode.LoadAllFragmentsRequest;
 import com.risingwave.proto.metanode.LoadAllFragmentsResponse;
+import com.risingwave.proto.plan.TableRefId;
+import com.risingwave.proto.streaming.plan.StreamNode;
 import com.risingwave.rpc.MetaClient;
 import com.risingwave.scheduler.streaming.graph.StreamFragment;
 import com.risingwave.scheduler.streaming.graph.StreamGraph;
@@ -201,5 +205,15 @@ public class RemoteStreamManager implements StreamManager {
       builder.addWorkerNode(node, fragmentIdSet);
     }
     return builder.build();
+  }
+
+  public void createMaterializedView(StreamNode streamNode, TableRefId tableRefId) {
+    CreateMaterializedViewRequest.Builder builder = CreateMaterializedViewRequest.newBuilder();
+    builder.setStreamNode(streamNode);
+    builder.setTableRefId(tableRefId);
+    CreateMaterializedViewResponse response = metaClient.createMaterializedView(builder.build());
+    if (response.getStatus().getCode() != Status.Code.OK) {
+      throw new PgException(PgErrorCode.INTERNAL_ERROR, "Create materialized view failed");
+    }
   }
 }

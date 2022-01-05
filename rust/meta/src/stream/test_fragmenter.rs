@@ -1,15 +1,12 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 use risingwave_common::error::Result;
-use risingwave_pb::common::HostAddress;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::expr::agg_call::{Arg, Type};
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan, InputRef};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, InputRefExpr};
-use risingwave_pb::meta::ClusterType;
 use risingwave_pb::plan::column_desc::ColumnEncodingType;
 use risingwave_pb::plan::{
     ColumnDesc, ColumnOrder, DatabaseRefId, OrderType, SchemaRefId, TableRefId,
@@ -22,7 +19,6 @@ use risingwave_pb::stream_plan::{
     TableSourceNode,
 };
 
-use crate::cluster::{StoredClusterManager, WorkerNodeMetaManager};
 use crate::manager::MetaSrvEnv;
 use crate::stream::fragmenter::StreamFragmenter;
 
@@ -228,19 +224,8 @@ fn make_stream_node() -> StreamNode {
 #[tokio::test]
 async fn test_fragmenter() -> Result<()> {
     let env = MetaSrvEnv::for_test().await;
-    let cluster_manager = Arc::new(StoredClusterManager::new(env.clone()));
-    cluster_manager
-        .add_worker_node(
-            HostAddress {
-                host: "127.0.0.1".to_string(),
-                port: 0,
-            },
-            ClusterType::ComputeNode,
-        )
-        .await?;
-
     let stream_node = make_stream_node();
-    let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), cluster_manager);
+    let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), 1);
 
     let graph = fragmenter.generate_graph(&stream_node).await?;
     assert_eq!(graph.len(), 6);

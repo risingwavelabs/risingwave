@@ -12,12 +12,16 @@ import com.risingwave.execution.result.DdlResult;
 import com.risingwave.node.WorkerNodeManager;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.planner.planner.streaming.StreamPlanner;
+import com.risingwave.planner.rel.serialization.StreamingPlanSerializer;
 import com.risingwave.planner.rel.streaming.RwStreamMaterializedView;
 import com.risingwave.planner.rel.streaming.StreamingPlan;
+import com.risingwave.proto.plan.TableRefId;
+import com.risingwave.proto.streaming.plan.StreamNode;
 import com.risingwave.proto.streaming.streamnode.BroadcastActorInfoTableRequest;
 import com.risingwave.proto.streaming.streamnode.BuildFragmentRequest;
 import com.risingwave.proto.streaming.streamnode.UpdateFragmentRequest;
 import com.risingwave.rpc.Messages;
+import com.risingwave.scheduler.streaming.RemoteStreamManager;
 import com.risingwave.scheduler.streaming.StreamFragmenter;
 import com.risingwave.scheduler.streaming.StreamManager;
 import com.risingwave.scheduler.streaming.graph.StreamGraph;
@@ -61,10 +65,16 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     // Bind stream plan with materialized view catalog.
     TableCatalog catalog = convertPlanToCatalog(tableName, plan, context);
     plan.getStreamingPlan().setTableId(catalog.getId());
+    StreamManager streamManager = context.getStreamManager();
+    if (streamManager instanceof RemoteStreamManager) {
+      RemoteStreamManager remoteStreamManager = (RemoteStreamManager) streamManager;
+      StreamNode streamNode = StreamingPlanSerializer.serialize(plan.getStreamingPlan());
+      log.debug("stream node ser:\n" + Messages.jsonFormat(streamNode));
+      TableRefId tableRefId = Messages.getTableRefId(catalog.getId());
 
-    // TODO: using StreamingPlanSerializer.serialize(plan.getStreamingPlan()) to serialize plan.
-    //  Passing it to Meta service to achieve fragment split. Operation including schedule/catalog/
-    //  update(build)_fragment etc will be achieved in Meta service.
+      remoteStreamManager.createMaterializedView(streamNode, tableRefId);
+      return new DdlResult(StatementType.CREATE_MATERIALIZED_VIEW, 0);
+    }
 
     // Generate a stream graph that represents the dependencies between stream fragments.
     StreamGraph streamGraph = StreamFragmenter.generateGraph(plan, context);
@@ -72,7 +82,6 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     // Schedule fragments among workers.
     WorkerNodeManager nodeManager = context.getWorkerNodeManager();
     var clientManager = context.getComputeClientManager();
-    StreamManager streamManager = context.getStreamManager();
     var streamRequests = streamManager.scheduleStreamGraph(streamGraph);
     var actorInfo = streamManager.getActorInfo(streamGraph.getAllFragmentId());
 
