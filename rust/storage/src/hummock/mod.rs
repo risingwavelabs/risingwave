@@ -181,6 +181,7 @@ impl HummockStorage {
     pub async fn write_batch(
         &self,
         kv_pairs: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
+        epoch: u64,
     ) -> HummockResult<()> {
         if self.options.stats_enabled {
             self.get_stats_ref().unwrap().batched_write_counts.inc();
@@ -194,9 +195,8 @@ impl HummockStorage {
         let mut builder = CapacitySplitTableBuilder::new(get_id_and_builder);
 
         // TODO: do not generate ts if `kv_pairs` is empty
-        let ts = self.version_manager.generate_ts().await;
         for (k, v) in kv_pairs {
-            builder.add_user_key(k, v, ts).await;
+            builder.add_user_key(k, v, epoch).await;
         }
 
         let (total_size, tables) = {
@@ -221,7 +221,7 @@ impl HummockStorage {
         }
 
         // Add all tables at once.
-        self.version_manager.add_l0_ssts(tables).await?;
+        self.version_manager.add_l0_ssts(tables, epoch).await?;
 
         // Update statistics if needed.
         if self.options.stats_enabled {
@@ -306,12 +306,14 @@ mod tests {
             (anchor.clone(), Some(Bytes::from("111"))),
             (Bytes::from("bb"), Some(Bytes::from("222"))),
         ];
+        let epoch: u64 = 0;
         batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
         hummock_storage
             .write_batch(
                 batch1
                     .into_iter()
                     .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
+                epoch,
             )
             .await
             .unwrap();
@@ -390,12 +392,15 @@ mod tests {
         // Make sure the batch is sorted.
         batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
 
+        let mut epoch: u64 = 0;
+
         // Write first batch.
         hummock_storage
             .write_batch(
                 batch1
                     .into_iter()
                     .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
+                epoch,
             )
             .await
             .unwrap();
@@ -411,11 +416,13 @@ mod tests {
         assert_eq!(value, None);
 
         // Write second batch.
+        epoch += 1;
         hummock_storage
             .write_batch(
                 batch2
                     .into_iter()
                     .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
+                epoch,
             )
             .await
             .unwrap();
@@ -427,11 +434,13 @@ mod tests {
         assert_eq!(Bytes::from(value), Bytes::from("111111"));
 
         // Write third batch.
+        epoch += 1;
         hummock_storage
             .write_batch(
                 batch3
                     .into_iter()
                     .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
+                epoch,
             )
             .await
             .unwrap();

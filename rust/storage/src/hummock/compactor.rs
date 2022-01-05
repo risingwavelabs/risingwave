@@ -267,6 +267,7 @@ mod tests {
         let anchor = Bytes::from("qa");
 
         // First batch inserts the anchor and others.
+        let mut epoch: u64 = 0;
         let mut batch1 = vec![
             (anchor.clone(), Some(Bytes::from("111"))),
             (Bytes::from("bb"), Some(Bytes::from("222"))),
@@ -300,6 +301,7 @@ mod tests {
                 batch1
                     .into_iter()
                     .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
+                epoch,
             )
             .await
             .unwrap();
@@ -322,11 +324,13 @@ mod tests {
         assert_eq!(value, None);
 
         // Write second batch.
+        epoch += 1;
         hummock_storage
             .write_batch(
                 batch2
                     .into_iter()
                     .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
+                epoch,
             )
             .await
             .unwrap();
@@ -379,12 +383,14 @@ mod tests {
 
         assert!(!it.is_valid() || user_key(it.key()) != anchor);
 
-        // Write second batch.
+        // Write third batch.
+        epoch += 1;
         hummock_storage
             .write_batch(
                 batch3
                     .into_iter()
                     .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
+                epoch,
             )
             .await
             .unwrap();
@@ -416,12 +422,13 @@ mod tests {
         ));
 
         let kv_count = 8192;
+        let epoch: u64 = 1;
         for _ in 0..kv_count {
             storage
-                .write_batch(once((
-                    b"same_key".to_vec(),
-                    HummockValue::Put(b"value".to_vec()),
-                )))
+                .write_batch(
+                    once((b"same_key".to_vec(), HummockValue::Put(b"value".to_vec()))),
+                    epoch,
+                )
                 .await?;
         }
 

@@ -11,19 +11,19 @@ use super::version_manager::{Level, Snapshot, VersionManager};
 use super::{HummockResult, TableIterator};
 
 pub struct HummockSnapshot {
-    /// [`ts`] stands for timestamp and indicates when a new log appends to a SST.
-    /// It is encoded into the full key. Currently we use table id as [`ts`].
-    ts: u64,
-    /// [`epoch`] will increase when we edit the SST file and can be represent a specific version
-    /// of storage. An edition can be adding a SST, removing a SST or compacting some SSTs.
+    /// [`epoch`] is served as timestamp and indicates when a new log appends to a SST.
+    /// It is encoded into the full key.
     epoch: u64,
+    /// [`version`] will increase when we edit the SST file and can be represent a specific version
+    /// of storage. An edition can be adding a SST, removing a SST or compacting some SSTs.
+    version: u64,
     vm: Arc<VersionManager>,
     /// TODO: remove the version once we can pin a ts.
     temp_version: Arc<Snapshot>,
 }
 impl Drop for HummockSnapshot {
     fn drop(&mut self) {
-        self.vm.unpin(self.epoch)
+        self.vm.unpin(self.version)
     }
 }
 
@@ -34,11 +34,11 @@ impl HummockSnapshot {
         // snapshot(a set of table IDs actually) to make sure the old SSTs not be recycled by the
         // compactor. In the future we will be able to perform snapshot read relying on the latest
         // SST files and this line should be modified.
-        let (epoch, snapshot) = vm.pin();
-        let ts = vm.latest_ts();
+        let (version, snapshot) = vm.pin();
+        let epoch = vm.max_epoch();
         Self {
-            ts,
             epoch,
+            version,
             vm,
             temp_version: snapshot,
         }
@@ -73,7 +73,7 @@ impl HummockSnapshot {
 
         // Use `SortedIterator` to seek for they key with latest version to
         // get the latest key.
-        it.seek(&key_with_ts(key.to_vec(), self.ts)).await?;
+        it.seek(&key_with_ts(key.to_vec(), self.epoch)).await?;
 
         // Iterator has seeked passed the borders.
         if !it.is_valid() {
@@ -132,7 +132,7 @@ impl HummockSnapshot {
                 key_range.start_bound().map(|b| b.as_ref().to_owned()),
                 key_range.end_bound().map(|b| b.as_ref().to_owned()),
             ),
-            self.ts,
+            self.epoch,
         ))
     }
 }
@@ -154,23 +154,26 @@ mod tests {
         obj_client: Arc<dyn ObjectStore>,
         vm: &VersionManager,
         kv_pairs: Vec<(usize, HummockValue<Vec<u8>>)>,
+        epoch: u64,
     ) {
         if kv_pairs.is_empty() {
             return;
         }
-        let ts = vm.generate_ts().await;
         let table_id = vm.generate_table_id().await;
 
         let mut b = TableBuilder::new(default_builder_opt_for_test());
         for kv in kv_pairs {
-            b.add(&iterator_test_key_of_ts(TEST_KEY_TABLE_ID, kv.0, ts), kv.1);
+            b.add(
+                &iterator_test_key_of_ts(TEST_KEY_TABLE_ID, kv.0, epoch),
+                kv.1,
+            );
         }
         let (data, meta) = b.finish();
         // get remote table
         let table = gen_remote_table(obj_client, table_id, data, meta, None)
             .await
             .unwrap();
-        vm.add_single_l0_sst(table).await.unwrap();
+        vm.add_single_l0_sst(table, epoch).await.unwrap();
     }
 
     macro_rules! assert_count {
@@ -190,7 +193,7 @@ mod tests {
     async fn test_snapshot() {
         let vm = Arc::new(VersionManager::new());
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-
+        let mut epoch: u64 = 1;
         gen_and_upload_table(
             obj_client.clone(),
             &vm,
@@ -198,11 +201,13 @@ mod tests {
                 (1, HummockValue::Put(b"test".to_vec())),
                 (2, HummockValue::Put(b"test".to_vec())),
             ],
+            epoch,
         )
         .await;
         let snapshot_1 = HummockSnapshot::new(vm.clone());
         assert_count!(snapshot_1, .., 2);
 
+        epoch += 1;
         gen_and_upload_table(
             obj_client.clone(),
             &vm,
@@ -211,12 +216,14 @@ mod tests {
                 (3, HummockValue::Put(b"test".to_vec())),
                 (4, HummockValue::Put(b"test".to_vec())),
             ],
+            epoch,
         )
         .await;
         let snapshot_2 = HummockSnapshot::new(vm.clone());
         assert_count!(snapshot_2, .., 3);
         assert_count!(snapshot_1, .., 2);
 
+        epoch += 1;
         gen_and_upload_table(
             obj_client.clone(),
             &vm,
@@ -225,6 +232,7 @@ mod tests {
                 (3, HummockValue::Delete),
                 (4, HummockValue::Delete),
             ],
+            epoch,
         )
         .await;
         let snapshot_3 = HummockSnapshot::new(vm.clone());
@@ -247,6 +255,7 @@ mod tests {
                 (3, HummockValue::Put(b"test".to_vec())),
                 (4, HummockValue::Put(b"test".to_vec())),
             ],
+            1,
         )
         .await;
 

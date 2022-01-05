@@ -58,48 +58,51 @@ pub struct CompactTask {
 }
 
 struct VersionManagerInner {
-    /// To make things easy, we store the full snapshot of each epoch. In the future, we will use a
-    /// MVCC structure for this, and only record changes compared with last epoch.
+    /// To make things easy, we store the full snapshot of each version. In the future, we will use
+    /// a MVCC structure for this, and only record changes compared with last version.
     status: HashMap<u64, Arc<Snapshot>>,
 
     /// TableId -> Object mapping
     tables: BTreeMap<u64, Arc<Table>>,
 
-    /// Reference count of each epoch.
+    /// Reference count of each version.
     ref_cnt: BTreeMap<u64, usize>,
 
-    /// Deletion to apply in each epoch.
+    /// Deletion to apply in each version.
     table_deletion_to_apply: BTreeMap<u64, Vec<u64>>,
 
-    /// Current epoch number.
-    epoch: u64,
+    /// Current version number.
+    version: u64,
 
-    /// Notify the vacuum of outer struct [`VersionManager`] to apply changes from one epoch.
+    /// Notify the vacuum of outer struct [`VersionManager`] to apply changes from one version.
     tx: tokio::sync::mpsc::UnboundedSender<()>,
 }
 
 impl VersionManagerInner {
-    /// Unpin a snapshot of one epoch. When reference counter becomes 0, files might be vacuumed.
-    pub fn unpin(&mut self, epoch: u64) {
-        let ref_cnt = self.ref_cnt.get_mut(&epoch).expect("epoch not registered!");
+    /// Unpin a snapshot of one version. When reference counter becomes 0, files might be vacuumed.
+    pub fn unpin(&mut self, version: u64) {
+        let ref_cnt = self
+            .ref_cnt
+            .get_mut(&version)
+            .expect("version not registered!");
         *ref_cnt -= 1;
         if *ref_cnt == 0 {
-            self.ref_cnt.remove(&epoch).unwrap();
+            self.ref_cnt.remove(&version).unwrap();
 
-            if epoch != self.epoch {
-                // TODO: precisely pass the epoch number that can be vacuum.
+            if version != self.version {
+                // TODO: precisely pass the version number that can be vacuum.
                 self.tx.send(()).unwrap();
             }
         }
     }
 
-    /// Add the given `snapshot` and increase the epoch. Return the latest epoch number.
-    pub fn inc_epoch(&mut self, snapshot: Arc<Snapshot>) -> u64 {
-        self.epoch += 1;
-        self.ref_cnt.entry(self.epoch).or_default().add_assign(1);
-        self.status.insert(self.epoch, snapshot);
+    /// Add the given `snapshot` and increase the version. Return the latest version number.
+    pub fn inc_version(&mut self, snapshot: Arc<Snapshot>) -> u64 {
+        self.version += 1;
+        self.ref_cnt.entry(self.version).or_default().add_assign(1);
+        self.status.insert(self.version, snapshot);
 
-        self.epoch
+        self.version
     }
 }
 
@@ -111,20 +114,20 @@ impl VersionManagerInner {
 ///
 /// [`VersionManager`] manages all Tables in a multi-version way. Everytime there are some
 /// changes in the storage engine, [`VersionManager`] should be notified about this change,
-/// and handle out a epoch number for that change. For example,
+/// and handle out a version number for that change. For example,
 ///
-/// * (epoch 0) Table 1, 2
+/// * (version 0) Table 1, 2
 /// * (engine) add Table 3, remove Table 1
-/// * (epoch 1) Table 2, 3
+/// * (version 1) Table 2, 3
 ///
-/// Each history state will be associated with an epoch number, which will be used by
-/// snapshots. When a snapshot is taken, it will "pin" an epoch number. Tables logically
-/// deleted after that epoch won't be deleted physically until the snapshot "unpins" the
-/// epoch number.
+/// Each history state will be associated with an version number, which will be used by
+/// snapshots. When a snapshot is taken, it will "pin" an version number. Tables logically
+/// deleted after that version won't be deleted physically until the snapshot "unpins" the
+/// version number.
 ///
 /// Therefore, [`VersionManager`] is the manifest manager of the whole storage system,
 /// which reads and writes manifest, manages all in-storage files and vacuum them when no
-/// snapshot holds the corresponding epoch of the file.
+/// snapshot holds the corresponding version of the file.
 ///
 /// The design choice of separating [`VersionManager`] out of the storage engine is a
 /// preparation for a distributed storage engine. In such distributed engine, there will
@@ -138,14 +141,14 @@ pub struct VersionManager {
     /// Current compaction status.
     compact_status: Mutex<CompactStatus>,
 
-    /// Notify the vacuum to apply changes from one epoch.
+    /// Notify the vacuum to apply changes from one version.
     tx: tokio::sync::mpsc::UnboundedSender<()>,
 
     /// Receiver of the vacuum.
     rx: PLMutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>,
 
-    /// Next timestamp
-    next_ts: AtomicU64,
+    /// Max epoch version manager has seen in SST tables.
+    max_epoch: AtomicU64,
 
     /// Next table id
     next_table_id: AtomicU64,
@@ -155,20 +158,20 @@ impl VersionManager {
     pub fn new() -> Self {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let mut init_epoch_vm = VersionManagerInner {
+        let mut init_version_vm = VersionManagerInner {
             status: HashMap::new(),
             tables: BTreeMap::new(),
             ref_cnt: BTreeMap::new(),
             table_deletion_to_apply: BTreeMap::new(),
-            epoch: 0,
+            version: 0,
             tx: tx.clone(),
         };
-        *init_epoch_vm
+        *init_version_vm
             .ref_cnt
-            .entry(init_epoch_vm.epoch)
+            .entry(init_version_vm.version)
             .or_default() += 1;
-        init_epoch_vm.status.insert(
-            init_epoch_vm.epoch,
+        init_version_vm.status.insert(
+            init_version_vm.version,
             Arc::new(Snapshot {
                 levels: vec![Level::Tiering(vec![]), Level::Leveling(vec![])],
             }),
@@ -180,29 +183,21 @@ impl VersionManager {
         ];
 
         Self {
-            inner: PLMutex::new(init_epoch_vm),
+            inner: PLMutex::new(init_version_vm),
             compact_status: Mutex::new(CompactStatus {
                 level_handlers: vec_handler_having_l0,
                 next_compact_task_id: 1,
             }),
             tx,
             rx: PLMutex::new(Some(rx)),
-            next_ts: 1.into(),
+            max_epoch: 0.into(),
             next_table_id: 1.into(),
         }
     }
 
-    // Mark it `async` to emulate a remote service
-    pub async fn generate_ts(&self) -> u64 {
-        self.next_ts.fetch_add(1, Ordering::SeqCst)
-    }
-
     // TODO: This function maybe removed in the future.
-    pub fn latest_ts(&self) -> u64 {
-        self.next_ts
-            .load(Ordering::Acquire)
-            .checked_sub(1)
-            .expect("ts should not be 0")
+    pub fn max_epoch(&self) -> u64 {
+        self.max_epoch.load(Ordering::Acquire)
     }
 
     // Mark it `async` to emulate a remote service
@@ -228,16 +223,16 @@ impl VersionManager {
         Ok(ret)
     }
 
-    /// Pin a snapshot of one epoch, so that all files at this epoch won't be deleted.
+    /// Pin a snapshot of one version, so that all files at this version won't be deleted.
     pub fn pin(&self) -> (u64, Arc<Snapshot>) {
         let mut inner = self.inner.lock();
-        let epoch = inner.epoch;
-        *inner.ref_cnt.entry(epoch).or_default() += 1;
-        (epoch, inner.status.get(&epoch).unwrap().clone())
+        let version = inner.version;
+        *inner.ref_cnt.entry(version).or_default() += 1;
+        (version, inner.status.get(&version).unwrap().clone())
     }
 
-    pub fn unpin(&self, epoch: u64) {
-        self.inner.lock().unpin(epoch);
+    pub fn unpin(&self, version: u64) {
+        self.inner.lock().unpin(version);
     }
 
     /// Get the iterators on the underlying tables.
@@ -261,7 +256,15 @@ impl VersionManager {
     }
 
     /// Add some L0 SSTs and return the latest epoch number
-    pub async fn add_l0_ssts(&self, tables: impl IntoIterator<Item = Table>) -> HummockResult<u64> {
+    /// `epoch` represents the epoch associated with the kv paris in the
+    /// uploaded tables. Version manager keeps track of the largest epoch
+    /// it has ever seen so that a latest epoch-based snapshot can be
+    /// generated on reads.
+    pub async fn add_l0_ssts(
+        &self,
+        tables: impl IntoIterator<Item = Table>,
+        epoch: u64,
+    ) -> HummockResult<u64> {
         let tables = tables.into_iter().collect_vec();
 
         let stats = tables
@@ -280,22 +283,22 @@ impl VersionManager {
         // plan.
         let mut compact_status = self.compact_status.lock().await;
 
-        let epoch = {
+        let version = {
             // Hold the inner lock, so as to apply the changes to the current status, and add new
             // L0 SST to the LSM. This lock is released before triggering searching for compaction
             // plan.
             let mut inner = self.inner.lock();
-            let old_epoch = inner.epoch;
+            let old_version = inner.version;
 
             if tables.is_empty() {
-                // No tables to add, simply return the old_epoch.
-                return Ok(old_epoch);
+                // No tables to add, simply return the old_version.
+                return Ok(old_version);
             }
 
             // Get snapshot of latest version.
             let mut snapshot = inner
                 .status
-                .get(&old_epoch)
+                .get(&old_version)
                 .map(|x| x.as_ref().clone())
                 .unwrap();
 
@@ -323,11 +326,14 @@ impl VersionManager {
                 }
             }
 
-            inner.unpin(old_epoch);
+            inner.unpin(old_version);
 
-            // Add epoch number and make the modified snapshot available.
-            inner.inc_epoch(Arc::new(snapshot))
+            // Add version number and make the modified snapshot available.
+            inner.inc_version(Arc::new(snapshot))
         };
+
+        // Update max_epoch
+        self.max_epoch.fetch_max(epoch, Ordering::SeqCst);
 
         match compact_status.level_handlers.first_mut().unwrap() {
             LevelHandler::Tiering(vec_tier, _) => {
@@ -346,12 +352,12 @@ impl VersionManager {
             }
         }
 
-        Ok(epoch)
+        Ok(version)
     }
 
     /// Add a L0 SST and return a new epoch number
-    pub async fn add_single_l0_sst(&self, table: Table) -> HummockResult<u64> {
-        self.add_l0_ssts(once(table)).await
+    pub async fn add_single_l0_sst(&self, table: Table, epoch: u64) -> HummockResult<u64> {
+        self.add_l0_ssts(once(table), epoch).await
     }
 
     /// We assume that SSTs will only be deleted in compaction, otherwise `get_compact_task` need to
@@ -622,7 +628,7 @@ impl VersionManager {
                 }
                 {
                     let mut inner = self.inner.lock();
-                    let old_epoch = inner.epoch;
+                    let old_version = inner.version;
 
                     let snapshot = Snapshot {
                         levels: compact_status
@@ -650,16 +656,16 @@ impl VersionManager {
                             .map(|table| (table.id, Arc::new(table))),
                     );
 
-                    // Add epoch number and make the modified snapshot available.
-                    inner.epoch += 1;
-                    let epoch = inner.epoch;
-                    *inner.ref_cnt.entry(epoch).or_default() += 1;
-                    inner.status.insert(epoch, Arc::new(snapshot));
+                    // Add version number and make the modified snapshot available.
+                    inner.version += 1;
+                    let version = inner.version;
+                    *inner.ref_cnt.entry(version).or_default() += 1;
+                    inner.status.insert(version, Arc::new(snapshot));
                     inner
                         .table_deletion_to_apply
-                        .insert(epoch, delete_table_ids);
+                        .insert(version, delete_table_ids);
 
-                    inner.unpin(old_epoch);
+                    inner.unpin(old_version);
                 }
             }
             Err(_) => {
@@ -674,7 +680,7 @@ impl VersionManager {
 
 pub struct ScopedUnpinSnapshot {
     vm: Arc<VersionManager>,
-    epoch: u64,
+    version: u64,
     snapshot: Arc<Snapshot>,
 }
 
@@ -683,7 +689,7 @@ impl ScopedUnpinSnapshot {
         let p = vm.pin();
         Self {
             vm,
-            epoch: p.0,
+            version: p.0,
             snapshot: p.1,
         }
     }
@@ -695,7 +701,7 @@ impl ScopedUnpinSnapshot {
 
 impl Drop for ScopedUnpinSnapshot {
     fn drop(&mut self) {
-        self.vm.unpin(self.epoch);
+        self.vm.unpin(self.version);
     }
 }
 
@@ -709,9 +715,9 @@ mod tests {
     #[tokio::test]
     async fn test_version_manager() -> HummockResult<()> {
         let version_manager = VersionManager::new();
-        let epoch0 = version_manager.pin();
-        assert_eq!(epoch0.0, 0);
-        let e0_l0 = epoch0.1.levels.first().unwrap();
+        let version0 = version_manager.pin();
+        assert_eq!(version0.0, 0);
+        let e0_l0 = version0.1.levels.first().unwrap();
         match e0_l0 {
             Level::Tiering(table_ids) => {
                 assert!(table_ids.is_empty());
@@ -720,8 +726,9 @@ mod tests {
                 panic!();
             }
         }
+        let ts = 1;
         let test_table_id = 42;
-        let current_epoch_id = version_manager
+        let current_version_id = version_manager
             .add_single_l0_sst(
                 Table::load(
                     test_table_id,
@@ -730,12 +737,13 @@ mod tests {
                     TableMeta::default(),
                 )
                 .await?,
+                ts,
             )
             .await?;
-        assert_eq!(current_epoch_id, 1);
-        let epoch1 = version_manager.pin();
-        assert_eq!(epoch1.0, 1);
-        let e1_l0 = epoch1.1.levels.first().unwrap();
+        assert_eq!(current_version_id, 1);
+        let version1 = version_manager.pin();
+        assert_eq!(version1.0, 1);
+        let e1_l0 = version1.1.levels.first().unwrap();
         match e1_l0 {
             Level::Tiering(table_ids) => {
                 assert_eq!(*table_ids, vec![test_table_id]);
