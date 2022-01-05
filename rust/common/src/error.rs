@@ -59,7 +59,7 @@ pub enum ErrorCode {
     #[error("Hummock snapshot {0} is not pinned by current hummock context {1}")]
     HummockSnapshotNotPinned(u64, i32),
 
-    #[error("Error while interact with meta service")]
+    #[error("Error while interact with meta service: {0}")]
     MetaError(String),
 
     /// EOF represents an upstream node will not generate new data. This error is rare in our
@@ -67,7 +67,7 @@ pub enum ErrorCode {
     #[error("End of the stream")]
     EOF,
 
-    #[error("Unknown error")]
+    #[error("Unknown error: {0}")]
     UnknownError(String),
 }
 

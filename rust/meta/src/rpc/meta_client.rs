@@ -17,11 +17,11 @@ impl MetaClient {
     pub async fn new(endpoint: &str) -> Result<Self> {
         let cluster_client = ClusterServiceClient::connect(endpoint.to_owned())
             .await
-            .map_err(|_e| RwError::from(MetaError("cluster client init failed.".to_string())))
+            .map_err(|e| RwError::from(MetaError(format!("cluster client init failed: {:?}", e))))
             .unwrap();
         let heartbeat_client = HeartbeatServiceClient::connect(endpoint.to_owned())
             .await
-            .map_err(|_e| RwError::from(MetaError("heartbeat client init failed".to_string())))
+            .map_err(|e| RwError::from(MetaError(format!("heartbeat client init failed: {:?}", e))))
             .unwrap();
         // TODO: add some mechanism on connection error.
 
