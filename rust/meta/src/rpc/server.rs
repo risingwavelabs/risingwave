@@ -44,20 +44,22 @@ pub async fn rpc_serve_with_listener(
         hummock::DefaultHummockManager::new(env.clone(), hummock_config.unwrap_or_default())
             .await
             .unwrap();
-    let stream_manager_ref = Arc::new(DefaultStreamManager::new(
-        stream_meta_manager,
-        cluster_manager.clone(),
-    ));
 
     if let Some(dashboard_addr) = dashboard_addr {
         let dashboard_service = DashboardService {
             dashboard_addr,
             cluster_manager: cluster_manager.clone(),
+            stream_meta_manager: stream_meta_manager.clone(),
             has_test_data: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
         tokio::spawn(dashboard_service.serve()); // TODO: join dashboard service back to local
                                                  // thread
     }
+
+    let stream_manager_ref = Arc::new(DefaultStreamManager::new(
+        stream_meta_manager,
+        cluster_manager.clone(),
+    ));
 
     let epoch_srv = EpochServiceImpl::new(env.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new(catalog_manager_ref.clone());

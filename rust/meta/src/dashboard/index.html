@@ -28,7 +28,7 @@
       <div class="flex flex-col px-2">
         <h2 class="text-sm leading-6 font-semibold">
           RisingWave
-        </h1>
+        </h2>
         <h1 class="text-3xl font-bold">
           Dashboard
         </h1>
@@ -48,17 +48,17 @@
         <p class="text-gray-500 text-xs">😇 Note: this navbar is just a demo.</p>
       </div>
     </div>
-    <div class="grow py-3 px-5 flex flex-col">
+    <div class="grow py-3 px-5 flex flex-col h-screen overflow-y-scroll">
       <h1 class="mb-2 text-sm leading-6 font-semibold text-sky-500 dark:text-sky-400">
         Cluster Information
       </h1>
       <div id="clusters" class="grid gap-2 md:grid-cols-2 lg:grid-cols-3 w-full">
       </div>
-      <div class="px-2 py-2">
-        <p class="text-gray-500 text-xs">
-          😇 Note: the cluster information is also a demo -- meta node currently do not
-          store any record about worker node.
-        </p>
+
+      <h1 class="mt-5 mb-2 text-sm leading-6 font-semibold text-sky-500 dark:text-sky-400">
+        Stream Fragments
+      </h1>
+      <div id="fragments" class="w-full">
       </div>
     </div>
   </div>
@@ -78,6 +78,31 @@
   </div>
 </div>
   `;
+
+  const fragment_nodes = (nodes) => `
+     ${nodes.input.map(fragment_nodes).join("")} ${nodes.node.desc.split('(')[0]} ➡️
+  `;
+
+  const fragment = (fragment) => `
+<div class="mt-1">
+  <p class="text-gray-500 m-0">#${fragment.fragment_id}</p>
+  <div>${fragment_nodes(fragment.nodes)} ${fragment.dispatcher.dispatcher_type}Dispatcher ${fragment.downstream_fragment_id.join(",")} </div>
+</div>
+  `;
+
+
+  const fragments = (fragments) => `
+<div class="p-6 max-w bg-white rounded-xl shadow-md flex flex-col space-y-1">
+  <div class="flex flex-row items-center">
+    <div class="w-3 h-3 flex-none bg-green-600 rounded-full mr-2"></div>
+    <div class="text-xl font-medium text-black">${fragments.node.host}:${fragments.node.port}</div>
+  </div>
+  <div class="flex flex-col">
+    ${fragments.fragment.map(f => fragment(f)).join("\n")}
+  </div>
+</div>
+  `;
+
   fetch('/api/clusters/0')
     .then(response => response.json())
     .then(data => data.forEach(
@@ -87,6 +112,12 @@
     .then(data => data.forEach(
       data => $("#clusters").append(cluster("Compute Node", data))));
   $("#clusters").append(cluster("Meta Node", { host: "127.0.0.1", port: "2333" }));
+
+  fetch('/api/fragments')
+    .then(response => response.json())
+    .then(data => data.forEach(
+      data => $("#fragments").append(fragments(data))));
+
 </script>
 
 </html>
