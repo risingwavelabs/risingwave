@@ -174,13 +174,6 @@ where
         Ok(Box::new(self.iter().await?))
     }
 
-    async fn get_data_by_columns(
-        &self,
-        _column_ids: &[i32],
-    ) -> Result<risingwave_storage::bummock::BummockResult> {
-        unimplemented!()
-    }
-
     fn into_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Sync + Send> {
         self
     }

@@ -2,7 +2,9 @@ mod simple;
 use std::any::Any;
 use std::sync::Arc;
 
-use risingwave_common::array::Row;
+use itertools::Itertools;
+use risingwave_common::array::column::Column;
+use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::Result;
 pub use simple::*;
@@ -42,7 +44,39 @@ pub trait ScannableTable: Sync + Send + Any {
     /// Scan data of specified column ids
     ///
     /// In future, it will accept `predicates` for interested filtering conditions.
-    async fn get_data_by_columns(&self, column_ids: &[i32]) -> Result<BummockResult>;
+    ///
+    /// This default implementation using iterator is not efficient, which project `column_ids` row
+    /// by row. If the underlying storage is a column store, we may implement this function
+    /// specifically.
+    async fn get_data_by_columns(&self, column_ids: &[i32]) -> Result<BummockResult> {
+        let mut iter = self.iter().await?;
+
+        let schema = self.schema();
+        let mut builders = column_ids
+            .iter()
+            .map(|i| {
+                schema.fields()[*i as usize]
+                    .data_type_ref()
+                    .create_array_builder(0)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        while let Some(row) = iter.next().await? {
+            for i in column_ids {
+                let i = *i as usize;
+                let builder = builders.get_mut(i).unwrap();
+                builder.append_datum(row.0.get(i).unwrap())?;
+            }
+        }
+
+        let columns: Vec<Column> = builders
+            .into_iter()
+            .map(|builder| builder.finish().map(|a| Column::new(Arc::new(a))))
+            .try_collect()?;
+        let chunk = DataChunk::builder().columns(columns).build();
+
+        Ok(BummockResult::Data(vec![Arc::new(chunk)]))
+    }
 
     fn into_any(self: Arc<Self>) -> Arc<dyn Any + Sync + Send>;
 
