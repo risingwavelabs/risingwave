@@ -375,7 +375,8 @@ select false AND NULL, true or NULL;
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwBatchValues(tuples=[[{ false, true }]])
+RwBatchProject(EXPR$0=[AND(false, null)], EXPR$1=[OR(true, null)])
+  RwBatchValues(tuples=[[{ 0 }]])
 ]]>
         </Resource>
         <Resource name="json" path="batch/basic/bool_literal">

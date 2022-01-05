@@ -60,9 +60,9 @@ public class BatchRuleSets {
 
           // Don't put these three reduce rules in cbo, since they prunes matched rel nodes
           // in planner and disable further optimization.
-          CoreRules.FILTER_REDUCE_EXPRESSIONS,
-          CoreRules.PROJECT_REDUCE_EXPRESSIONS,
-          CoreRules.JOIN_REDUCE_EXPRESSIONS,
+          // CoreRules.FILTER_REDUCE_EXPRESSIONS,
+          // CoreRules.PROJECT_REDUCE_EXPRESSIONS,
+          // CoreRules.JOIN_REDUCE_EXPRESSIONS,
           CoreRules.FILTER_MERGE,
           CoreRules.PROJECT_MERGE,
           CoreRules.PROJECT_REMOVE,

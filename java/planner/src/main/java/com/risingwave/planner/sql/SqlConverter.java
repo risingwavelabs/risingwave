@@ -86,6 +86,7 @@ public class SqlConverter {
       RisingWaveConvertletTable sqlRexConvertletTable = new RisingWaveConvertletTable();
 
       initAll();
+      this.config = this.config.addRelBuilderConfigTransform(c -> c.withSimplify(false));
       SqlToRelConverter sql2RelConverter =
           new RisingWaveSqlToRelConverter(
               catalogReader, validator, catalogReader, cluster, sqlRexConvertletTable, config);

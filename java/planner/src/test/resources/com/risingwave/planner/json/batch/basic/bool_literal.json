@@ -1,30 +1,71 @@
 {
-  "nodeType": "VALUE",
+  "nodeType": "PROJECT",
   "body": {
-    "@type": "type.googleapis.com/plan.ValuesNode",
-    "tuples": [{
-      "cells": [{
-        "exprType": "CONSTANT_VALUE",
-        "returnType": {
-          "typeName": "BOOLEAN"
-        },
-        "constant": {
-          "body": "AA=="
-        }
-      }, {
-        "exprType": "CONSTANT_VALUE",
-        "returnType": {
-          "typeName": "BOOLEAN"
-        },
-        "constant": {
-          "body": "AQ=="
-        }
-      }]
-    }],
-    "columnTypes": [{
-      "typeName": "BOOLEAN"
+    "@type": "type.googleapis.com/plan.ProjectNode",
+    "selectList": [{
+      "exprType": "AND",
+      "returnType": {
+        "typeName": "BOOLEAN"
+      },
+      "funcCall": {
+        "children": [{
+          "exprType": "CONSTANT_VALUE",
+          "returnType": {
+            "typeName": "BOOLEAN"
+          },
+          "constant": {
+            "body": "AA=="
+          }
+        }, {
+          "exprType": "CONSTANT_VALUE",
+          "returnType": {
+            "typeName": "BOOLEAN",
+            "isNullable": true
+          }
+        }]
+      }
     }, {
-      "typeName": "BOOLEAN"
+      "exprType": "OR",
+      "returnType": {
+        "typeName": "BOOLEAN"
+      },
+      "funcCall": {
+        "children": [{
+          "exprType": "CONSTANT_VALUE",
+          "returnType": {
+            "typeName": "BOOLEAN"
+          },
+          "constant": {
+            "body": "AQ=="
+          }
+        }, {
+          "exprType": "CONSTANT_VALUE",
+          "returnType": {
+            "typeName": "BOOLEAN",
+            "isNullable": true
+          }
+        }]
+      }
     }]
-  }
+  },
+  "children": [{
+    "nodeType": "VALUE",
+    "body": {
+      "@type": "type.googleapis.com/plan.ValuesNode",
+      "tuples": [{
+        "cells": [{
+          "exprType": "CONSTANT_VALUE",
+          "returnType": {
+            "typeName": "INT32"
+          },
+          "constant": {
+            "body": "AAAAAA=="
+          }
+        }]
+      }],
+      "columnTypes": [{
+        "typeName": "INT32"
+      }]
+    }
+  }]
 }
