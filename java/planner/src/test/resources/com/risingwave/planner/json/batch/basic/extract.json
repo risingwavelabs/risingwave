@@ -5,7 +5,9 @@
     "selectList": [{
       "exprType": "EXTRACT",
       "returnType": {
-        "typeName": "INT64"
+        "typeName": "DECIMAL",
+        "precision": 28,
+        "scale": 10
       },
       "funcCall": {
         "children": [{

@@ -246,20 +246,22 @@ macro_rules! gen_binary_expr_atm {
 
 fn build_extract_expr(ret: DataTypeRef, l: BoxedExpression, r: BoxedExpression) -> BoxedExpression {
     match r.return_type().data_type_kind() {
-        DataTypeKind::Date => Box::new(BinaryExpression::<Utf8Array, I32Array, I64Array, _> {
+        DataTypeKind::Date => Box::new(BinaryExpression::<Utf8Array, I32Array, DecimalArray, _> {
             expr_ia1: l,
             expr_ia2: r,
             return_type: ret,
             func: extract_from_date,
             _phantom: PhantomData,
         }),
-        DataTypeKind::Timestamp => Box::new(BinaryExpression::<Utf8Array, I64Array, I64Array, _> {
-            expr_ia1: l,
-            expr_ia2: r,
-            return_type: ret,
-            func: extract_from_timestamp,
-            _phantom: PhantomData,
-        }),
+        DataTypeKind::Timestamp => {
+            Box::new(BinaryExpression::<Utf8Array, I64Array, DecimalArray, _> {
+                expr_ia1: l,
+                expr_ia2: r,
+                return_type: ret,
+                func: extract_from_timestamp,
+                _phantom: PhantomData,
+            })
+        }
         _ => {
             unimplemented!(
                 "Extract ( {:?} ) is not supported yet!",

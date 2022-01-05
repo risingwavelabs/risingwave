@@ -398,5 +398,10 @@ NULL
 2.234
 NULL
 
+query R
+select extract(year from date '1993-09-01');
+----
+1993
+
 statement ok
 drop table t;

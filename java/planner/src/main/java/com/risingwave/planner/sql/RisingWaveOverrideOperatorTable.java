@@ -1,6 +1,7 @@
 package com.risingwave.planner.sql;
 
 import com.risingwave.common.datatype.RwReturnTypes;
+import com.risingwave.planner.sql.fun.RwSqlExtractFunction;
 import org.apache.calcite.sql.SqlAggFunction;
 import org.apache.calcite.sql.SqlBinaryOperator;
 import org.apache.calcite.sql.SqlFunction;
@@ -120,4 +121,7 @@ public class RisingWaveOverrideOperatorTable extends ReflectiveSqlOperatorTable 
           InferTypes.BOOLEAN,
           OperandTypes.BOOLEAN_BOOLEAN,
           SqlFunctionCategory.SYSTEM);
+
+  /** Pg's extract function */
+  public static final SqlFunction EXTRACT = new RwSqlExtractFunction();
 }
