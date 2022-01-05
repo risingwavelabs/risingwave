@@ -10,7 +10,11 @@ use crate::error::{ErrorCode, Result, RwError};
 use crate::util::prost::unpack_from_any;
 
 /// `Op` represents three operations in `StreamChunk`.
-/// `UpdateDelete` and `UpdateInsert` always appear in pairs.
+///
+/// `UpdateDelete` and `UpdateInsert` are semantically equivalent to `Delete` and `Insert`
+/// but always appear in pairs to represent an update operation.
+/// For example, table source, aggregation and outer join can generate updates by themselves,
+/// while most of the other operators only pass through updates with best effort.
 #[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub enum Op {
     Insert,

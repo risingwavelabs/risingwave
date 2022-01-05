@@ -78,6 +78,7 @@ impl<S: StateStore> TopNExecutor<S> {
             lower_sub_keyspace,
             data_type_kinds.clone(),
             ordered_row_deserializer.clone(),
+            0,
         );
         let managed_middle_state = ManagedTopNBottomNState::new(
             cache_size,
@@ -92,6 +93,7 @@ impl<S: StateStore> TopNExecutor<S> {
             higher_sub_keyspace,
             data_type_kinds,
             ordered_row_deserializer,
+            0,
         );
         Self {
             input,
@@ -165,17 +167,23 @@ impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
                     if self.managed_lowest_state.total_count() < self.offset {
                         // `elem` is in the range of `[0, offset)`,
                         // we ignored it for now as it is not in the result set.
-                        self.managed_lowest_state.insert(ordered_pk_row, row).await;
+                        self.managed_lowest_state
+                            .insert(ordered_pk_row, row)
+                            .await?;
                         continue;
                     }
 
-                    let element_to_compare_with_middle = if &ordered_pk_row
-                        < self.managed_lowest_state.top_element().unwrap().0
+                    // We remark that when offset is 0, every input row has nothing to do with
+                    // `managed_lower_state`.
+                    let element_to_compare_with_middle = if self.offset > 0
+                        && &ordered_pk_row < self.managed_lowest_state.top_element().unwrap().0
                     {
                         // If the new element is smaller than the largest element in [0, offset),
                         // the largest element need to move to [offset, offset+limit).
                         let res = self.managed_lowest_state.pop_top_element().await?.unwrap();
-                        self.managed_lowest_state.insert(ordered_pk_row, row).await;
+                        self.managed_lowest_state
+                            .insert(ordered_pk_row, row)
+                            .await?;
                         res
                     } else {
                         (ordered_pk_row, row)
@@ -219,7 +227,7 @@ impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
                             element_to_compare_with_highest.0,
                             element_to_compare_with_highest.1,
                         )
-                        .await;
+                        .await?;
                 }
                 Op::Delete | Op::UpdateDelete => {
                     // The extra care we need to take for deletion is that when we delete an element
@@ -234,11 +242,12 @@ impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
                         // The current element in in the range of `[offset+limit, +inf)`
                         self.managed_highest_state.delete(&ordered_pk_row).await?;
                     } else if self.managed_lowest_state.total_count() == self.offset
-                        && ordered_pk_row > *self.managed_lowest_state.top_element().unwrap().0
+                        && (self.offset == 0
+                            || ordered_pk_row > *self.managed_lowest_state.top_element().unwrap().0)
                     {
                         // The current element in in the range of `[offset, offset+limit)`
                         self.managed_middle_state.delete(&ordered_pk_row).await?;
-                        new_ops.push(Op::UpdateDelete);
+                        new_ops.push(Op::Delete);
                         new_rows.push(row.clone());
                         // We need to bring one, if any, from highest to lowest.
                         if self.managed_highest_state.total_count() > 0 {
@@ -263,14 +272,14 @@ impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
                                 .pop_bottom_element()
                                 .await?
                                 .unwrap();
-                            new_ops.push(Op::UpdateDelete);
+                            new_ops.push(Op::Delete);
                             new_rows.push(smallest_element_from_middle_state.1.clone());
                             self.managed_lowest_state
                                 .insert(
                                     smallest_element_from_middle_state.0,
                                     smallest_element_from_middle_state.1,
                                 )
-                                .await;
+                                .await?;
                         }
                         // We check whether we need to/can bring one from highest to middle.
                         // We remark that if `self.limit` is Some, it cannot be 0 as this should be
@@ -332,8 +341,7 @@ mod tests {
     use crate::executor::test_utils::{create_in_memory_keyspace, MockSource};
     use crate::executor::Barrier;
 
-    #[tokio::test]
-    async fn test_top_n_executor() {
+    fn create_stream_chunks() -> Vec<StreamChunk> {
         let chunk1 = StreamChunk {
             ops: vec![Op::Insert; 6],
             columns: vec![
@@ -373,7 +381,11 @@ mod tests {
             ],
             visibility: None,
         };
-        let schema = Schema {
+        vec![chunk1, chunk2, chunk3, chunk4]
+    }
+
+    fn create_schema() -> Schema {
+        Schema {
             fields: vec![
                 Field {
                     data_type: Int64Type::create(false),
@@ -382,26 +394,268 @@ mod tests {
                     data_type: Int64Type::create(false),
                 },
             ],
-        };
-        let order_types = vec![OrderType::Ascending, OrderType::Ascending];
+        }
+    }
+
+    fn create_order_types() -> Vec<OrderType> {
+        vec![OrderType::Ascending, OrderType::Ascending]
+    }
+
+    fn create_source() -> Box<MockSource> {
+        let mut chunks = create_stream_chunks();
+        let schema = create_schema();
         let default_barrier = Barrier {
             epoch: 0,
             ..Barrier::default()
         };
-        let source = Box::new(MockSource::with_messages(
+        Box::new(MockSource::with_messages(
             schema,
             PkIndices::new(),
             vec![
-                Message::Chunk(chunk1),
+                Message::Chunk(std::mem::take(&mut chunks[0])),
                 Message::Barrier(default_barrier.clone()),
-                Message::Chunk(chunk2),
+                Message::Chunk(std::mem::take(&mut chunks[1])),
                 Message::Barrier(default_barrier.clone()),
-                Message::Chunk(chunk3),
+                Message::Chunk(std::mem::take(&mut chunks[2])),
                 Message::Barrier(default_barrier.clone()),
-                Message::Chunk(chunk4),
-                Message::Barrier(default_barrier.clone()),
+                Message::Chunk(std::mem::take(&mut chunks[3])),
+                Message::Barrier(default_barrier),
             ],
-        ));
+        ))
+    }
+
+    #[tokio::test]
+    async fn test_top_n_executor_with_offset() {
+        let order_types = create_order_types();
+        let source = create_source();
+        let keyspace = create_in_memory_keyspace();
+        let mut top_n_executor = TopNExecutor::new(
+            source as Box<dyn Executor>,
+            order_types,
+            (3, None),
+            vec![0, 1],
+            keyspace,
+            Some(2),
+            (0, 0, 0),
+        );
+        let res = top_n_executor.next().await.unwrap();
+        assert_matches!(res, Message::Chunk(_));
+        if let Message::Chunk(res) = res {
+            let expected_values = vec![Some(10), Some(9), Some(8)];
+            let expected_ops = vec![Op::Insert, Op::Insert, Op::Insert];
+            assert_eq!(
+                res.columns()[0]
+                    .array()
+                    .as_int64()
+                    .iter()
+                    .collect::<Vec<_>>(),
+                expected_values
+            );
+            assert_eq!(res.ops, expected_ops);
+        }
+        // Now (1, 2, 3) -> (8, 9, 10)
+        // Barrier
+        assert_matches!(top_n_executor.next().await.unwrap(), Message::Barrier(_));
+        let res = top_n_executor.next().await.unwrap();
+        assert_matches!(res, Message::Chunk(_));
+        if let Message::Chunk(res) = res {
+            let expected_values = vec![Some(7), Some(7), Some(8), Some(8), Some(8), Some(11)];
+            let expected_ops = vec![
+                Op::Insert,
+                Op::Delete,
+                Op::Delete,
+                Op::Insert,
+                Op::Delete,
+                Op::Insert,
+            ];
+            assert_eq!(
+                res.columns()[0]
+                    .array()
+                    .as_int64()
+                    .iter()
+                    .collect::<Vec<_>>(),
+                expected_values
+            );
+            assert_eq!(res.ops, expected_ops);
+        }
+        // (5, 7, 8) -> (9, 10, 11)
+        // barrier
+        assert_matches!(top_n_executor.next().await.unwrap(), Message::Barrier(_));
+
+        let res = top_n_executor.next().await.unwrap();
+        assert_matches!(res, Message::Chunk(_));
+        if let Message::Chunk(res) = res {
+            let expected_values = vec![Some(8), Some(12), Some(13), Some(14)];
+            let expected_ops = vec![Op::Insert; 4];
+            assert_eq!(
+                res.columns()[0]
+                    .array()
+                    .as_int64()
+                    .iter()
+                    .collect::<Vec<_>>(),
+                expected_values
+            );
+            assert_eq!(res.ops, expected_ops);
+        }
+        // (5, 6, 7) -> (8, 9, 10, 11, 12, 13, 14)
+        // barrier
+        assert_matches!(top_n_executor.next().await.unwrap(), Message::Barrier(_));
+
+        let res = top_n_executor.next().await.unwrap();
+        assert_matches!(res, Message::Chunk(_));
+        if let Message::Chunk(res) = res {
+            let expected_values = vec![Some(8), Some(9), Some(11)];
+            let expected_ops = vec![Op::Delete, Op::Delete, Op::Delete];
+            assert_eq!(
+                res.columns()[0]
+                    .array()
+                    .as_int64()
+                    .iter()
+                    .collect::<Vec<_>>(),
+                expected_values
+            );
+            assert_eq!(res.ops, expected_ops);
+        }
+        // (7, 8, 9) -> (10, 13, 14, _)
+        // barrier
+        assert_matches!(top_n_executor.next().await.unwrap(), Message::Barrier(_));
+    }
+
+    #[tokio::test]
+    async fn test_top_n_executor_with_limit() {
+        let order_types = create_order_types();
+        let source = create_source();
+        let keyspace = create_in_memory_keyspace();
+        let mut top_n_executor = TopNExecutor::new(
+            source as Box<dyn Executor>,
+            order_types,
+            (0, Some(4)),
+            vec![0, 1],
+            keyspace,
+            Some(2),
+            (0, 0, 0),
+        );
+        let res = top_n_executor.next().await.unwrap();
+        assert_matches!(res, Message::Chunk(_));
+        if let Message::Chunk(res) = res {
+            let expected_values = vec![
+                Some(1),
+                Some(2),
+                Some(3),
+                Some(10),
+                Some(10),
+                Some(9),
+                Some(9),
+                Some(8),
+            ];
+            let expected_ops = vec![
+                Op::Insert,
+                Op::Insert,
+                Op::Insert,
+                Op::Insert,
+                Op::Delete,
+                Op::Insert,
+                Op::Delete,
+                Op::Insert,
+            ];
+            assert_eq!(
+                res.columns()[0]
+                    .array()
+                    .as_int64()
+                    .iter()
+                    .collect::<Vec<_>>(),
+                expected_values
+            );
+            assert_eq!(res.ops, expected_ops);
+        }
+        // now () -> (1, 2, 3, 8) -> (9, 10)
+
+        // barrier
+        assert_matches!(top_n_executor.next().await.unwrap(), Message::Barrier(_));
+        let res = top_n_executor.next().await.unwrap();
+        assert_matches!(res, Message::Chunk(_));
+        if let Message::Chunk(res) = res {
+            let expected_values = vec![
+                Some(8),
+                Some(7),
+                Some(3),
+                Some(8),
+                Some(1),
+                Some(9),
+                Some(9),
+                Some(5),
+                Some(2),
+                Some(9),
+            ];
+            let expected_ops = vec![
+                Op::Delete,
+                Op::Insert,
+                Op::Delete,
+                Op::Insert,
+                Op::Delete,
+                Op::Insert,
+                Op::Delete,
+                Op::Insert,
+                Op::Delete,
+                Op::Insert,
+            ];
+            assert_eq!(
+                res.columns()[0]
+                    .array()
+                    .as_int64()
+                    .iter()
+                    .collect::<Vec<_>>(),
+                expected_values
+            );
+            assert_eq!(res.ops, expected_ops);
+        }
+        // () -> (5, 7, 8, 9) -> (10, 11)
+        // barrier
+        assert_matches!(top_n_executor.next().await.unwrap(), Message::Barrier(_));
+
+        let res = top_n_executor.next().await.unwrap();
+        assert_matches!(res, Message::Chunk(_));
+        if let Message::Chunk(res) = res {
+            let expected_values = vec![Some(9), Some(6)];
+            let expected_ops = vec![Op::Delete, Op::Insert];
+            assert_eq!(
+                res.columns()[0]
+                    .array()
+                    .as_int64()
+                    .iter()
+                    .collect::<Vec<_>>(),
+                expected_values
+            );
+            assert_eq!(res.ops, expected_ops);
+        }
+        // () -> (5, 6, 7, 8) -> (9, 10, 11, 12, 13, 14)
+        // barrier
+        assert_matches!(top_n_executor.next().await.unwrap(), Message::Barrier(_));
+
+        let res = top_n_executor.next().await.unwrap();
+        assert_matches!(res, Message::Chunk(_));
+        if let Message::Chunk(res) = res {
+            let expected_values = vec![Some(5), Some(9), Some(6), Some(10)];
+            let expected_ops = vec![Op::Delete, Op::Insert, Op::Delete, Op::Insert];
+            assert_eq!(
+                res.columns()[0]
+                    .array()
+                    .as_int64()
+                    .iter()
+                    .collect::<Vec<_>>(),
+                expected_values
+            );
+            assert_eq!(res.ops, expected_ops);
+        }
+        // () -> (7, 8, 9, 10) -> (13, 14)
+        // barrier
+        assert_matches!(top_n_executor.next().await.unwrap(), Message::Barrier(_));
+    }
+
+    #[tokio::test]
+    async fn test_top_n_executor_with_offset_and_limit() {
+        let order_types = create_order_types();
+        let source = create_source();
         let keyspace = create_in_memory_keyspace();
         let mut top_n_executor = TopNExecutor::new(
             source as Box<dyn Executor>,
@@ -412,7 +666,6 @@ mod tests {
             Some(2),
             (0, 0, 0),
         );
-
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));
         if let Message::Chunk(res) = res {
@@ -438,10 +691,10 @@ mod tests {
             let expected_values = vec![Some(7), Some(7), Some(8), Some(8), Some(8), Some(11)];
             let expected_ops = vec![
                 Op::Insert,
-                Op::UpdateDelete,
-                Op::UpdateDelete,
+                Op::Delete,
+                Op::Delete,
                 Op::Insert,
-                Op::UpdateDelete,
+                Op::Delete,
                 Op::Insert,
             ];
             assert_eq!(
@@ -482,11 +735,11 @@ mod tests {
         if let Message::Chunk(res) = res {
             let expected_values = vec![Some(8), Some(12), Some(9), Some(13), Some(11), Some(14)];
             let expected_ops = vec![
-                Op::UpdateDelete,
+                Op::Delete,
                 Op::Insert,
-                Op::UpdateDelete,
+                Op::Delete,
                 Op::Insert,
-                Op::UpdateDelete,
+                Op::Delete,
                 Op::Insert,
             ];
             assert_eq!(

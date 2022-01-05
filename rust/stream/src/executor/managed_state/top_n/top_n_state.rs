@@ -9,7 +9,7 @@ use crate::executor::managed_state::aggregation::OrderedRowDeserializer;
 use crate::executor::managed_state::flush_status::FlushStatus;
 use crate::executor::managed_state::top_n::variants::*;
 use crate::executor::managed_state::OrderedRow;
-use crate::executor::serialize_cell_idx;
+use crate::executor::{serialize_cell, serialize_cell_idx};
 
 /// This state is used for several ranges (e.g `[0, offset)`, `[offset+limit, +inf)` of elements in
 /// the `AppendOnlyTopNExecutor` and `TopNExecutor`. For these ranges, we only care about one of the
@@ -38,6 +38,8 @@ pub struct ManagedTopNState<S: StateStore, const TOP_N_TYPE: usize> {
     data_type_kinds: Vec<DataTypeKind>,
     /// For deserializing `OrderedRow`.
     ordered_row_deserializer: OrderedRowDeserializer,
+    /// epoch
+    epoch: u64,
 }
 
 impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
@@ -47,6 +49,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         keyspace: Keyspace<S>,
         data_type_kinds: Vec<DataTypeKind>,
         ordered_row_deserializer: OrderedRowDeserializer,
+        epoch: u64,
     ) -> Self {
         Self {
             top_n: BTreeMap::new(),
@@ -56,6 +59,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
             keyspace,
             data_type_kinds,
             ordered_row_deserializer,
+            epoch,
         }
     }
 
@@ -113,10 +117,45 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         }
     }
 
-    pub async fn insert(&mut self, key: OrderedRow, value: Row) {
-        self.top_n.insert(key.clone(), value.clone());
-        FlushStatus::do_insert(self.flush_buffer.entry(key), value);
+    fn bottom_element(&mut self) -> Option<(&OrderedRow, &Row)> {
+        if self.total_count == 0 {
+            None
+        } else {
+            match TOP_N_TYPE {
+                TOP_N_MIN => self.top_n.last_key_value(),
+                TOP_N_MAX => self.top_n.first_key_value(),
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    pub async fn insert(&mut self, key: OrderedRow, value: Row) -> Result<()> {
+        let have_key_on_storage = self.total_count > self.top_n.len();
+        let need_to_flush = if have_key_on_storage {
+            // It is impossible that the cache is empty.
+            let bottom_key = self.bottom_element().unwrap().0;
+            match TOP_N_TYPE {
+                TOP_N_MIN => key > *bottom_key,
+                TOP_N_MAX => key < *bottom_key,
+                _ => unreachable!(),
+            }
+        } else {
+            false
+        };
+        // If there may be other keys between `key` and `bottom_key` in the storage,
+        // we cannot insert `key` into cache. Instead, we have to flush it onto the storage.
+        // This is because other keys may be more qualified to stay in cache.
+        // TODO: This needs to be changed when transaction on Hummock is implemented.
+        if need_to_flush {
+            let flush_status = FlushStatus::Insert(value);
+            let iter = vec![(key, flush_status)].into_iter();
+            self.flush_inner(iter).await?;
+        } else {
+            self.top_n.insert(key.clone(), value.clone());
+            FlushStatus::do_insert(self.flush_buffer.entry(key), value);
+        }
         self.total_count += 1;
+        Ok(())
     }
 
     /// This function is a temporary implementation to bypass the about-to-be-implemented
@@ -297,21 +336,14 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         Ok(())
     }
 
-    /// `Flush` can be called by the executor when it receives a barrier and thus needs to
-    /// checkpoint.
-    ///
-    /// TODO: `Flush` should also be called internally when `top_n` and `flush_buffer` exceeds
-    /// certain limit.
-    pub async fn flush(&mut self, epoch: u64) -> Result<()> {
-        if !self.is_dirty() {
-            self.retain_top_n();
-            return Ok(());
-        }
-
+    async fn flush_inner(
+        &mut self,
+        iterator: impl Iterator<Item = (OrderedRow, FlushStatus<Row>)>,
+    ) -> Result<()> {
         let mut write_batch = self.keyspace.state_store().start_write_batch();
         let mut local = write_batch.local(&self.keyspace);
 
-        for (ordered_row, cells) in std::mem::take(&mut self.flush_buffer) {
+        for (ordered_row, cells) in iterator {
             let row_option = cells.into_option();
             let pk_buf = match TOP_N_TYPE {
                 TOP_N_MIN => ordered_row.serialize(),
@@ -324,8 +356,8 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
 
                 match &row_option {
                     Some(row) => {
-                        let row_bytes = row.serialize()?;
-                        local.put(key_encoded, row_bytes);
+                        let cell_encoded = serialize_cell(&row[cell_idx])?;
+                        local.put(key_encoded, cell_encoded);
                     }
                     None => {
                         local.delete(key_encoded);
@@ -334,7 +366,24 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
             }
         }
 
-        write_batch.ingest(epoch).await?;
+        write_batch.ingest(self.epoch).await?;
+        Ok(())
+    }
+
+    /// `Flush` can be called by the executor when it receives a barrier and thus needs to
+    /// checkpoint.
+    ///
+    /// TODO: `Flush` should also be called internally when `top_n` and `flush_buffer` exceeds
+    /// certain limit.
+    pub async fn flush(&mut self, epoch: u64) -> Result<()> {
+        self.epoch = std::cmp::max(self.epoch, epoch);
+        if !self.is_dirty() {
+            self.retain_top_n();
+            return Ok(());
+        }
+
+        let iterator = std::mem::take(&mut self.flush_buffer).into_iter();
+        self.flush_inner(iterator).await?;
 
         self.retain_top_n();
         Ok(())
@@ -377,6 +426,7 @@ mod tests {
             Keyspace::executor_root(store.clone(), 0x2333),
             data_type_kinds,
             ordered_row_deserializer,
+            0,
         )
     }
 
@@ -409,7 +459,8 @@ mod tests {
 
         managed_state
             .insert(ordered_rows[3].clone(), rows[3].clone())
-            .await;
+            .await
+            .unwrap();
         // now ("ab", 4)
 
         assert_eq!(
@@ -421,7 +472,8 @@ mod tests {
 
         managed_state
             .insert(ordered_rows[2].clone(), rows[2].clone())
-            .await;
+            .await
+            .unwrap();
         // now ("abd", 3) -> ("ab", 4)
 
         assert_eq!(
@@ -433,7 +485,8 @@ mod tests {
 
         managed_state
             .insert(ordered_rows[1].clone(), rows[1].clone())
-            .await;
+            .await
+            .unwrap();
         // now ("abd", 3) -> ("abc", 3) -> ("ab", 4)
         let epoch: u64 = 0;
 
@@ -496,7 +549,8 @@ mod tests {
 
         managed_state
             .insert(ordered_rows[0].clone(), rows[0].clone())
-            .await;
+            .await
+            .unwrap();
         // now ("abd", 3) in memory -> ("abc", 2)
         assert_eq!(
             managed_state.top_element(),

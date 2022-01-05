@@ -22,6 +22,12 @@ create materialized view mv2 as select * from t1 order by t1.v2 DESC, t1.v3 ASC;
 statement ok
 create materialized view mv3 as select * from t1 order by t1.v2 DESC, t1.v3 ASC limit 2 offset 1;
 
+statement ok
+create materialized view mv4 as select * from t1 order by t1.v2 DESC, t1.v3 ASC limit 2;
+
+statement ok
+create materialized view mv5 as select * from t1 order by t1.v2 DESC, t1.v3 ASC offset 1;
+
 sleep 1s
 
 query IIIIIIII
@@ -57,6 +63,19 @@ select * from mv3;
 3 4 4 2
 2 3 3 1
 
+query IIII
+select * from mv4;
+----
+1 4 2 0
+3 4 4 2
+
+query IIII
+select * from mv5;
+----
+3 4 4 2
+2 3 3 1
+4 3 5 3
+
 statement ok
 insert into t1 values (3,4,4), (4,3,5);
 
@@ -89,3 +108,9 @@ drop table mv2
 
 statement ok
 drop table mv3
+
+statement ok
+drop table mv4
+
+statement ok
+drop table mv5

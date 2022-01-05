@@ -11,7 +11,7 @@ use risingwave_storage::{Keyspace, StateStore};
 use crate::executor::managed_state::aggregation::OrderedRowDeserializer;
 use crate::executor::managed_state::flush_status::FlushStatus;
 use crate::executor::managed_state::OrderedRow;
-use crate::executor::serialize_cell_idx;
+use crate::executor::{serialize_cell, serialize_cell_idx};
 
 /// This state is used for `[offset, offset+limit)` part in the `TopNExecutor`.
 ///
@@ -308,8 +308,8 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
 
                 match &row_option {
                     Some(row) => {
-                        let row_bytes = row.serialize()?;
-                        local.put(key_encoded, row_bytes);
+                        let cell_encoded = serialize_cell(&row[cell_idx])?;
+                        local.put(key_encoded, cell_encoded);
                     }
                     None => {
                         local.delete(key_encoded);
