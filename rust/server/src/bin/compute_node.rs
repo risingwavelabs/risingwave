@@ -3,7 +3,6 @@ use log::info;
 use risingwave::server::rpc_serve;
 use risingwave::server_context::ServerContext;
 use risingwave_common::util::addr::get_host_port;
-/// TODO(xiangyhu): We need to introduce serious `Configuration` framework (#2165).
 #[derive(Parser)]
 struct Opts {
     // The custom log4rs config file.

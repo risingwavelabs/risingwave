@@ -7,7 +7,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::addr::get_host_port;
 use risingwave_meta::rpc::meta_client::MetaClient;
 
-use crate::server_config::ServerConfig;
+use crate::server_config::ComputeNodeConfig;
 
 const DEFAULT_WORKER_ID: u32 = 1;
 const DEFAULT_LOG4RS_CONFIG: &str = "config/log4rs.yaml";
@@ -91,7 +91,7 @@ impl ServerContextCore {
 pub struct ServerContext {
     // Immutable part.
     meta_client: MetaClient,
-    config: ServerConfig,
+    config: ComputeNodeConfig,
     // Mutable part.
     core: Mutex<ServerContextCore>,
 }
@@ -103,7 +103,7 @@ impl ServerContext {
             Ok(meta_client) => {
                 let config_path = PathBuf::from(config_path.to_owned());
                 debug!("config path, {:?}", fs::canonicalize(&config_path));
-                let config = ServerConfig::init(config_path).unwrap();
+                let config = ComputeNodeConfig::init(config_path).unwrap();
                 let context = ServerContext {
                     meta_client,
                     config,
@@ -134,7 +134,7 @@ impl ServerContext {
         }
     }
 
-    pub fn get_config(&self) -> ServerConfig {
+    pub fn get_config(&self) -> ComputeNodeConfig {
         self.config.clone()
     }
 

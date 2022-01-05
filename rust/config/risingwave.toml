@@ -1,6 +1,9 @@
 [server]
 heartbeat_interval = 100
 
+[olap]
+chunk_size = 1024
+
 [streaming]
 chunk_size = 1024
 
