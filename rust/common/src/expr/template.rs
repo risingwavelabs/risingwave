@@ -34,6 +34,7 @@ macro_rules! gen_expr_normal {
       > fmt::Debug for $ty_name<$($arg, )* OA, F> {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
           f.debug_struct(stringify!($ty_name))
+          .field("func", &std::any::type_name::<F>())
           $(.field(stringify!([<expr_ $arg:lower>]), &self.[<expr_ $arg:lower>]))*
           .field("return_type", &self.return_type)
           .finish()
@@ -139,6 +140,7 @@ macro_rules! gen_expr_bytes {
       > fmt::Debug for $ty_name<$($arg, )* F> {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
           f.debug_struct(stringify!($ty_name))
+          .field("func", &std::any::type_name::<F>())
           $(.field(stringify!([<expr_ $arg:lower>]), &self.[<expr_ $arg:lower>]))*
           .field("return_type", &self.return_type)
           .finish()
@@ -242,6 +244,7 @@ macro_rules! gen_expr_nullable {
       > fmt::Debug for $ty_name<$($arg, )* OA, F> {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
           f.debug_struct(stringify!($ty_name))
+          .field("func", &std::any::type_name::<F>())
           $(.field(stringify!([<expr_ $arg:lower>]), &self.[<expr_ $arg:lower>]))*
           .field("return_type", &self.return_type)
           .finish()
