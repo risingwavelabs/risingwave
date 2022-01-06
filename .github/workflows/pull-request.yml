@@ -100,28 +100,27 @@ jobs:
           wget https://github.com/sagiegurari/cargo-make/releases/download/0.35.7/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip -O ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip
           unzip ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip -d ~
           mv ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl ~/cargo-make
-      - name: Start MinIO + meta + compute + frontend cluster
+      - name: e2e test w/ Hummock
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers dev
-      - name: e2e test w/ Hummock and dump logs
-        run: |
           python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/streaming
+      - name: Dump logs for e2e test w/ Hummock
+        run: |
           ~/cargo-make/makers logs
-      - name: Start meta + 3 compute + frontend cluster
+      - name: e2e test 3-node
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
-      - name: e2e test 3-node and dump logs
+      - name: Dump logs for e2e test 3-node
         run: |
-          python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/batch/
           ~/cargo-make/makers logs
       - name: Dump RiseLAB logs on failure
         if: ${{ failure() }}
         run: ~/cargo-make/makers logs
       - uses: actions/upload-artifact@v2
-        if: ${{ failure() || success() }}
-        name: Upload RiseLAB logs (You may find it in artifacts)
+        if: ${{ failure() }}
+        name: Upload RiseLAB logs on failure (You may find it in artifacts)
         with:
           path: .risingwave/log/
           name: riselab-logs

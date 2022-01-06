@@ -1,10 +1,10 @@
 use std::alloc::Layout;
+use std::backtrace::Backtrace;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Error as IoError;
 use std::sync::Arc;
 
-use backtrace::Backtrace;
 use memcomparable::Error as MemComparableError;
 use prost::Message;
 use risingwave_pb::common::Status;
@@ -33,7 +33,11 @@ pub enum ErrorCode {
     #[error(transparent)]
     IoError(IoError),
     #[error("Storage error: {0}")]
-    StorageError(BoxedError),
+    StorageError(
+        #[backtrace]
+        #[source]
+        BoxedError,
+    ),
     #[error("Parse string error: {0}")]
     ParseError(BoxedError),
     #[error("Catalog error: {0}")]
@@ -110,7 +114,7 @@ impl From<ErrorCode> for RwError {
     fn from(code: ErrorCode) -> Self {
         Self {
             inner: Arc::new(code),
-            backtrace: Arc::new(Backtrace::new()),
+            backtrace: Arc::new(Backtrace::capture()),
         }
     }
 }
@@ -119,7 +123,7 @@ impl From<JoinError> for RwError {
     fn from(join_error: JoinError) -> Self {
         Self {
             inner: Arc::new(ErrorCode::InternalError(join_error.to_string())),
-            backtrace: Arc::new(Backtrace::new()),
+            backtrace: Arc::new(Backtrace::capture()),
         }
     }
 }
@@ -144,7 +148,13 @@ impl From<std::io::Error> for RwError {
 
 impl Debug for RwError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}, backtrace: {:?}", self.inner, self.backtrace)
+        write!(
+            f,
+            "{}\n{}",
+            self.inner,
+            // Use inner error's backtrace by default, otherwise use the generated one in `From`.
+            self.inner.backtrace().unwrap_or_else(|| &*self.backtrace)
+        )
     }
 }
 

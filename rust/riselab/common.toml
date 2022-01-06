@@ -11,10 +11,6 @@ PREFIX_LOG = "${PREFIX}/log"
 PREFIX_TMP = "${PREFIX}/tmp"
 
 HUMMOCK_PATH = "${PREFIX_DATA}/hummock"
-WGET_EXTRA_PARAMETER = ""
-
-[env.ci]
-WGET_EXTRA_PARAMETER = "--show-progress=off"
 
 [tasks.prepare-dir]
 private = true

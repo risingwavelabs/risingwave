@@ -214,9 +214,7 @@ impl VersionManager {
                     ret.push(table.clone());
                 }
                 None => {
-                    return Err(HummockError::ObjectIoError(String::from(
-                        "Table Not Exist.",
-                    )));
+                    return Err(HummockError::object_io_error("Table Not Exist."));
                 }
             }
         }
@@ -310,8 +308,8 @@ impl VersionManager {
                         v.insert(Arc::new(table));
                     }
                     Entry::Occupied(_) => {
-                        return Err(HummockError::ObjectIoError(
-                            "Table ID to be created already exists.".to_owned(),
+                        return Err(HummockError::object_io_error(
+                            "Table ID to be created already exists.",
                         ))
                     }
                 }

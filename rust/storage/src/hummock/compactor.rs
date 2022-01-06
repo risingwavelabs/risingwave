@@ -226,9 +226,7 @@ impl Compactor {
             Ok(())
         } else {
             // FIXME: error message in `result` should not be ignored
-            Err(HummockError::ObjectIoError(String::from(
-                "compaction failed.",
-            )))
+            Err(HummockError::object_io_error("compaction failed."))
         }
     }
 }

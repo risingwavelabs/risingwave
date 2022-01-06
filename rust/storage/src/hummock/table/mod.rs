@@ -69,7 +69,7 @@ impl Block {
         let checksum_len = (&data[read_pos..read_pos + 4]).get_u32() as usize;
 
         if checksum_len > data.len() {
-            return Err(HummockError::InvalidBlock);
+            return Err(HummockError::invalid_block());
         }
 
         // read checksum

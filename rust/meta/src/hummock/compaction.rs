@@ -1,6 +1,5 @@
 use bytes::Bytes;
 use itertools::{EitherOrBoth, Itertools};
-use risingwave_common::array::RwError;
 use risingwave_common::error::Result;
 use risingwave_pb::hummock::{CompactTask, Level, LevelEntry, LevelType, Table};
 use risingwave_storage::hummock::key::{user_key, FullKey};
@@ -294,7 +293,7 @@ impl CompactionInner {
                 };
                 Ok((compact_status, compact_task))
             }
-            SearchResult::NotFound => Err(RwError::from(HummockError::NoCompactTaskFound)),
+            SearchResult::NotFound => Err(HummockError::no_compact_task_found().into()),
         }
     }
 

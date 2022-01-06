@@ -28,7 +28,7 @@ pub async fn gen_remote_table(
     obj_client
         .upload(&meta_path, meta_bytes)
         .await
-        .map_err(|e| HummockError::ObjectIoError(e.to_string()))?;
+        .map_err(HummockError::object_io_error)?;
 
     // upload table data
     let data_path = format!("{}{}.data", remote_dir, table_id);
@@ -36,7 +36,7 @@ pub async fn gen_remote_table(
     obj_client
         .upload(&data_path, data)
         .await
-        .map_err(|e| HummockError::ObjectIoError(e.to_string()))?;
+        .map_err(HummockError::object_io_error)?;
 
     // load table
     Table::load(table_id, obj_client, data_path, meta).await

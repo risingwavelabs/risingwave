@@ -225,9 +225,7 @@ impl DefaultHummockManagerInner {
                 context_pinned_version.version_id.remove(pos);
                 Ok(())
             }
-            None => Err(RwError::from(HummockError::NoMatchingPinVersion(
-                pinned_version_id.to_string(),
-            ))),
+            None => Err(HummockError::no_matching_pin_version(pinned_version_id).into()),
         }
     }
 
@@ -299,9 +297,7 @@ impl DefaultHummockManagerInner {
                 context_pinned_snapshot.snapshot_id.remove(pos);
                 Ok(())
             }
-            None => Err(RwError::from(HummockError::NoMatchingPinSnapshot(
-                pinned_snapshot_id.to_string(),
-            ))),
+            None => Err(HummockError::no_matching_pin_snapshot(pinned_snapshot_id).into()),
         }
     }
 
@@ -640,8 +636,8 @@ impl HummockManager for DefaultHummockManager {
         {
             let mut guard = self.context_expires_at.write().await;
             if guard.remove(&context_id) == None {
-                return Err(RwError::from(HummockError::InvalidHummockContext(
-                    context_id.to_string(),
+                return Err(RwError::from(HummockError::invalid_hummock_context(
+                    context_id,
                 )));
             }
         }
@@ -662,9 +658,7 @@ impl HummockManager for DefaultHummockManager {
                 );
                 Ok(new_ttl)
             }
-            None => Err(RwError::from(HummockError::InvalidHummockContext(
-                context_id.to_string(),
-            ))),
+            None => Err(HummockError::invalid_hummock_context(context_id).into()),
         }
     }
 

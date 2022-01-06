@@ -10,6 +10,7 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(drain_filter)]
 #![feature(bound_map)]
+#![feature(backtrace)]
 
 pub mod bummock;
 pub mod hummock;

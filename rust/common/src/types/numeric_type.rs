@@ -14,9 +14,19 @@ use crate::types::{DataSize, DataType, DataTypeKind, DataTypeRef, PrimitiveDataT
 
 macro_rules! make_numeric_type {
     ($name:ident, $native_ty:ty, $data_ty:expr, $proto_ty:expr) => {
-        #[derive(Debug, Eq, PartialEq)]
+        #[derive(Eq, PartialEq)]
         pub struct $name {
             nullable: bool,
+        }
+
+        impl std::fmt::Debug for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, stringify!($native_ty))?;
+                if self.nullable {
+                    write!(f, "(nullable)")?;
+                }
+                Ok(())
+            }
         }
 
         impl $name {

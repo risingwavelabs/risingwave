@@ -9,6 +9,9 @@ env_files = [
   "riselab-components.user.env"
 ]
 
+[env]
+RUST_BACKTRACE = 1
+
 [config]
 skip_core_tasks = true
 

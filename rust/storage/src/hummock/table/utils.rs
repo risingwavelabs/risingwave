@@ -69,17 +69,16 @@ pub fn checksum(algo: ChecksumAlg, data: &[u8]) -> Checksum {
 
 /// Verify the checksum of the data equals the given checksum.
 pub fn verify_checksum(chksum: &Checksum, data: &[u8]) -> HummockResult<()> {
-    match chksum.algo() {
-        ChecksumAlg::Crc32c => {
-            if crc32_checksum(data) != chksum.get_sum() {
-                return Err(HummockError::ChecksumMismatch);
-            }
-        }
-        ChecksumAlg::XxHash64 => {
-            if xxhash64_checksum(data) != chksum.get_sum() {
-                return Err(HummockError::ChecksumMismatch);
-            }
-        }
+    let data_chksum = match chksum.algo() {
+        ChecksumAlg::Crc32c => crc32_checksum(data),
+        ChecksumAlg::XxHash64 => xxhash64_checksum(data),
+    };
+    let expected_result = chksum.get_sum();
+    if expected_result != data_chksum {
+        return Err(HummockError::checksum_mismatch(
+            expected_result,
+            data_chksum,
+        ));
     }
     Ok(())
 }

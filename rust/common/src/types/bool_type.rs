@@ -10,9 +10,19 @@ use crate::error::{Result, RwError};
 use crate::types::{DataSize, DataType, DataTypeKind, DataTypeRef};
 
 /// `BoolType` is not a primitive type because we use a bit for each bool value, not a [`bool`].
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Eq, PartialEq)]
 pub struct BoolType {
     nullable: bool,
+}
+
+impl std::fmt::Debug for BoolType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "bool")?;
+        if self.nullable {
+            write!(f, "(nullable)")?;
+        }
+        Ok(())
+    }
 }
 
 impl DataType for BoolType {

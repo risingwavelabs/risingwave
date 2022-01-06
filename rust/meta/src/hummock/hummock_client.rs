@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_common::array::RwError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
@@ -49,7 +48,7 @@ impl HummockClient {
                 }
             }
         }
-        Err(RwError::from(HummockError::CreateRPCClientError))
+        Err(HummockError::create_rpc_client_error().into())
     }
 
     pub async fn new(endpoint: &str) -> Result<Self> {
