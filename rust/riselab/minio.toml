@@ -3,12 +3,7 @@ extend = "common.toml"
 [env]
 MINIO_SYSTEM = "${SYSTEM}"
 MCLI_DOWNLOAD_BIN = "https://dl.min.io/client/mc/release/${MINIO_SYSTEM}/mc"
-MINIO_BUCKET_NAME = "hummock001"
 MINIO_DOWNLOAD_BIN = "https://dl.min.io/server/minio/release/${MINIO_SYSTEM}/minio"
-MINIO_HUMMOCK_PASSWORD = "12345678"
-MINIO_HUMMOCK_USER = "hummock"
-MINIO_ROOT_PASSWORD = "hummockadmin"
-MINIO_ROOT_USER = "hummockadmin"
 
 [tasks.download-minio]
 category = "MinIO"

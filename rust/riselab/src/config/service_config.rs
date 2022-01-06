@@ -43,6 +43,11 @@ pub struct MinioConfig {
     pub port: u16,
     pub console_address: String,
     pub console_port: u16,
+    pub root_user: String,
+    pub root_password: String,
+    pub hummock_user: String,
+    pub hummock_password: String,
+    pub hummock_bucket: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -51,13 +51,13 @@ impl Task for ComputeNodeService {
             1 => {
                 let minio = &provide_minio[0];
                 cmd.arg("--state-store").arg(format!(
-                    "hummock+minio://{}:{}@{minio_addr}:{minio_port}/{}",
-                    env::var("MINIO_HUMMOCK_USER")?,
-                    env::var("MINIO_HUMMOCK_PASSWORD")?,
-                    env::var("MINIO_BUCKET_NAME")?,
-                    minio_addr = minio.address,
-                    minio_port = minio.port,
-                ));
+          "hummock+minio://{hummock_user}:{hummock_password}@{minio_addr}:{minio_port}/{hummock_bucket}",
+          hummock_user = minio.hummock_user,
+          hummock_password = minio.hummock_password,
+          hummock_bucket = minio.hummock_bucket,
+          minio_addr = minio.address,
+          minio_port = minio.port,
+        ));
             }
             other_size => {
                 return Err(anyhow!(

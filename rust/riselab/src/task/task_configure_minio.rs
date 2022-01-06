@@ -49,8 +49,8 @@ impl Task for ConfigureMinioTask {
             .arg("set")
             .arg(HUMMOCK_REMOTE_NAME)
             .arg(format!("http://{}", minio_address))
-            .arg(env::var("MINIO_ROOT_USER")?)
-            .arg(env::var("MINIO_ROOT_PASSWORD")?);
+            .arg(&self.config.root_user)
+            .arg(&self.config.root_password);
 
         ctx.run_command(cmd)?;
 
@@ -59,8 +59,8 @@ impl Task for ConfigureMinioTask {
             .arg("user")
             .arg("add")
             .arg(format!("{}/", HUMMOCK_REMOTE_NAME))
-            .arg(env::var("MINIO_HUMMOCK_USER")?)
-            .arg(env::var("MINIO_HUMMOCK_PASSWORD")?);
+            .arg(&self.config.hummock_user)
+            .arg(&self.config.hummock_password);
         ctx.run_command(cmd)?;
 
         let mut cmd = self.mcli();
@@ -69,14 +69,13 @@ impl Task for ConfigureMinioTask {
             .arg("set")
             .arg(format!("{}/", HUMMOCK_REMOTE_NAME))
             .arg("readwrite")
-            .arg(format!("user={}", env::var("MINIO_HUMMOCK_USER")?));
+            .arg(format!("user={}", self.config.hummock_user));
         ctx.run_command(cmd)?;
 
         let mut cmd = self.mcli();
         cmd.arg("mb").arg(format!(
             "{}/{}",
-            HUMMOCK_REMOTE_NAME,
-            env::var("MINIO_BUCKET_NAME")?
+            HUMMOCK_REMOTE_NAME, self.config.hummock_bucket
         ));
         ctx.run_command(cmd).ok();
 

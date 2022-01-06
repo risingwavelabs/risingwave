@@ -41,7 +41,9 @@ impl Task for MinioService {
                 self.config.console_address, self.config.console_port
             ))
             .arg("--config-dir")
-            .arg(Path::new(&prefix_config).join("minio"));
+            .arg(Path::new(&prefix_config).join("minio"))
+            .env("MINIO_ROOT_USER", &self.config.root_user)
+            .env("MINIO_ROOT_PASSWORD", &self.config.root_password);
 
         ctx.run_command(ctx.tmux_run(cmd)?)?;
 

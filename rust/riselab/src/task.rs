@@ -160,6 +160,14 @@ where
             // Set session name for this window
             .arg("-n")
             .arg(self.id.as_ref().unwrap());
+        for (k, v) in user_cmd.get_envs() {
+            cmd.arg("-e");
+            if let Some(v) = v {
+                cmd.arg(format!("{}={}", k.to_string_lossy(), v.to_string_lossy()));
+            } else {
+                cmd.arg(k);
+            }
+        }
         cmd.arg(Path::new(&prefix_path).join("run_command.sh"));
         cmd.arg(self.log_path()?);
         cmd.arg(self.status_path());

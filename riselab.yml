@@ -1,44 +1,5 @@
-template:
-  minio:
-    address: "127.0.0.1"
-    port: 9301
-    console-address: "127.0.0.1"
-    console-port: 9400
-    id: minio
-
-  compute-node:
-    address: "127.0.0.1"
-    port: 5688
-    exporter-address: "127.0.0.1"
-    exporter-port: 1222
-    id: compute-node-${port}
-    provide-minio: "minio*"
-    provide-meta-node: "meta-node*"
-    user-managed: false
-
-  meta-node:
-    address: "127.0.0.1"
-    port: 5690
-    dashboard-address: "127.0.0.1"
-    dashboard-port: 5691
-    id: meta-node-${port}
-    user-managed: false
-
-  prometheus:
-    address: "127.0.0.1"
-    port: 9500
-    id: prometheus
-    provide-compute-node: "compute-node*"
-
-  frontend:
-    address: "127.0.0.1"
-    port: 4567
-    id: frontend
-    provide-compute-node: "compute-node*"
-    provide-meta-node: "meta-node*"
-    user-managed: false
-
 riselab:
+  # The CI-3node configuration will start 3 compute nodes, 1 meta node, 1 frontend.
   ci-3node:
     - use: meta-node
     - use: compute-node
@@ -52,18 +13,21 @@ riselab:
       exporter-port: 1224
     - use: frontend
 
+  # The CI-1node configuration will start 1 compute node, 1 meta node, 1 frontend.
   ci-1node:
     - use: meta-node
     - use: compute-node
     - use: frontend
 
+  # The default configuration will start 1 MinIO, 1 compute node, 1 meta node, 1 prometheus and 1 frontend.
   default:
     - use: minio
     - use: meta-node
     - use: compute-node
-    - use: prometheus
     - use: frontend
+    - use: prometheus
 
+  # `dev-compute-node` have the same settings as default except the the compute node will be started by user.
   dev-compute-node:
     - use: minio
     - use: meta-node
@@ -72,3 +36,112 @@ riselab:
       user-managed: true
     - use: prometheus
     - use: frontend
+
+# The `use` field specified in the above `riselab` section will refer to the templates below.
+template:
+  minio:
+    # Listen address of MinIO s3 endpoint
+    address: "127.0.0.1"
+
+    # Listen port of MinIO s3 endpoint
+    port: 9301
+
+    # Console address of MinIO s3 endpoint
+    console-address: "127.0.0.1"
+
+    # Console port of MinIO s3 endpoint
+    console-port: 9400
+
+    # Root username (can be used to login to MinIO console)
+    root-user: hummockadmin
+
+    # Root password (can be used to login to MinIO console)
+    root-password: hummockadmin
+
+    # Hummock username
+    hummock-user: hummock
+
+    # Hummock user password
+    hummock-password: "12345678"
+
+    # Bucket name to store hummock information
+    hummock-bucket: hummock001
+
+    # Id of this instance
+    id: minio
+
+  compute-node:
+    # Compute-node listen address
+    address: "127.0.0.1"
+
+    # Compute-node listen port
+    port: 5688
+
+    # Prometheus exporter listen address
+    exporter-address: "127.0.0.1"
+
+    # Prometheus exporter listen port
+    exporter-port: 1222
+
+    # Id of this instance
+    id: compute-node-${port}
+
+    # Minio instances used by this compute node
+    provide-minio: "minio*"
+
+    # Meta-nodes used by this compute node
+    provide-meta-node: "meta-node*"
+
+    # If `user-managed` is true, this service will be started by user with the above config
+    user-managed: false
+
+  meta-node:
+    # Meta-node listen address
+    address: "127.0.0.1"
+
+    # Meta-node listen port
+    port: 5690
+
+    # Dashboard listen address
+    dashboard-address: "127.0.0.1"
+
+    # Dashboard listen port
+    dashboard-port: 5691
+
+    # Id of this instance
+    id: meta-node-${port}
+
+    # If `user-managed` is true, this service will be started by user with the above config
+    user-managed: false
+
+  prometheus:
+    # Listen address of Prometheus
+    address: "127.0.0.1"
+
+    # Listen port of Prometheus
+    port: 9500
+
+    # Id of this instance
+    id: prometheus
+
+    # Compute-nodes used by this Prometheus instance
+    provide-compute-node: "compute-node*"
+
+  frontend:
+    # Listen address of frontend
+    address: "127.0.0.1"
+
+    # Listen port of frontend
+    port: 4567
+
+    # Id of this instance
+    id: frontend
+
+    # Compute-nodes used by this frontend instance
+    provide-compute-node: "compute-node*"
+
+    # Meta-nodes used by this frontend instance
+    provide-meta-node: "meta-node*"
+
+    # If `user-managed` is true, this service will be started by user with the above config
+    user-managed: false

@@ -119,15 +119,22 @@ jobs:
 
       - name: Dump logs for e2e test w/ Hummock
         run: |
+          ~/cargo-make/makers k
           ~/cargo-make/makers logs
+
+      - name: Prepare tpch e2e test
+        run: |
+          ./scripts/gen_batch_tpch_slt.sh
 
       - name: e2e test 3-node
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
+          python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/batch
 
       - name: Dump logs for e2e test 3-node
         run: |
+          ~/cargo-make/makers k
           ~/cargo-make/makers logs
 
       - name: Dump RiseLAB logs on failure
