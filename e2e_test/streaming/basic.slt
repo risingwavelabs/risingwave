@@ -85,6 +85,9 @@ statement ok
 drop table t3
 
 statement ok
+drop table t4
+
+statement ok
 drop table mv1
 
 statement ok
