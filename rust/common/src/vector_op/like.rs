@@ -1,7 +1,7 @@
 use crate::error::Result;
 
 #[inline(always)]
-pub fn like_default(p: &str, s: &str) -> Result<bool> {
+pub fn like_default(s: &str, p: &str) -> Result<bool> {
     let (mut px, mut sx) = (0, 0);
     let (mut next_px, mut next_sx) = (0, 0);
     let (pbytes, sbytes) = (p.as_bytes(), s.as_bytes());
@@ -65,7 +65,7 @@ mod tests {
     #[test]
     fn test_like() {
         for (target, pattern, expected) in CASES {
-            let output = like_default(pattern, target).unwrap();
+            let output = like_default(target, pattern).unwrap();
             assert_eq!(
                 output,
                 expected.unwrap(),

@@ -381,6 +381,11 @@ NULL
 bar
 NULL
 
+query TB
+select *, 'a b c' like '%b%' from t where v1 like '%o%';
+----
+foo true
+
 statement ok
 drop table t;
 

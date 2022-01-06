@@ -61,6 +61,7 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
           .put(SqlKind.IS_NOT_FALSE, ExprNode.Type.IS_NOT_FALSE)
           .put(SqlKind.IS_NULL, ExprNode.Type.IS_NULL)
           .put(SqlKind.IS_NOT_NULL, ExprNode.Type.IS_NOT_NULL)
+          .put(SqlKind.LIKE, ExprNode.Type.LIKE)
           .build();
   private static final ImmutableMap<String, ExprNode.Type> STRING_TO_FUNC_MAPPING =
       ImmutableMap.<String, ExprNode.Type>builder()
