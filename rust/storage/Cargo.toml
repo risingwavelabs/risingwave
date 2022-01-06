@@ -19,6 +19,7 @@ hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
+memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
 parking_lot = "0.11"
 paste = "1"

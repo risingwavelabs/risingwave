@@ -1,10 +1,12 @@
 mod sink;
 pub mod snapshot;
 mod state;
-mod table;
 
+#[cfg(test)]
+mod table_state_tests;
+#[cfg(test)]
 mod test_utils;
 
+pub use risingwave_storage::table::mview::*;
 pub use sink::*;
 pub use state::*;
-pub use table::*;

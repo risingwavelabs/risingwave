@@ -2976,6 +2976,7 @@ dependencies = [
  "itertools 0.10.3",
  "lazy_static",
  "log",
+ "memcomparable",
  "num-traits",
  "parking_lot",
  "paste",

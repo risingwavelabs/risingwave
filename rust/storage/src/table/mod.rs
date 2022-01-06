@@ -1,4 +1,5 @@
-mod simple;
+pub mod mview;
+mod simple_manager;
 use std::any::Any;
 use std::sync::Arc;
 
@@ -7,7 +8,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::Result;
-pub use simple::*;
+pub use simple_manager::*;
 
 use crate::bummock::BummockResult;
 use crate::TableColumnDesc;
