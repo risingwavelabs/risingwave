@@ -13,6 +13,7 @@ val scalaBinaryVersion = "2.13"
 val mockitoVersion = "3.11.2"
 var hamcrestVersion = "1.3"
 var quickcheckVersion = "1.0"
+val logbackVersion = "1.2.10"
 
 javaPlatform {
     allowDependencies()
@@ -45,7 +46,7 @@ dependencies {
         api("org.hamcrest:hamcrest-all:$hamcrestVersion")
         api("org.apache.commons:commons-lang3:3.0")
         api("io.grpc:grpc-kotlin-stub:1.1.0")
-        runtime("ch.qos.logback:logback-classic:1.2.3")
+        runtime("ch.qos.logback:logback-classic:${logbackVersion}")
         runtime("org.junit.jupiter:junit-jupiter-engine:$junit5Version")
         runtime("org.junit.jupiter:junit-jupiter-params:$junit5Version")
     }
