@@ -183,7 +183,7 @@ mod handlers {
     impl From<&stream_node::Node> for JsonNode {
         fn from(that: &stream_node::Node) -> Self {
             JsonNode {
-                desc: format!("{:?}", that),
+                desc: format!("{:#?}", that),
             }
         }
     }

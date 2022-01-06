@@ -9,13 +9,13 @@
   <style type="text/tailwindcss">
     @layer components {
       .btn-primary {
-        @apply py-2 px-4 bg-sky-500 text-white font-semibold rounded-lg shadow-md hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-400 focus:ring-opacity-75;
+        @apply py-2 px-4 bg-sky-500 text-white font-semibold rounded-lg shadow-md hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-400 focus:ring-opacity-75
       }
       .btn-nav {
-        @apply text-black py-2 px-2 my-1 font-semibold text-left rounded-lg hover:bg-sky-100 focus:outline-none focus:ring-2 focus:ring-sky-400 focus:ring-opacity-75;
+        @apply text-black py-2 px-2 my-1 font-semibold text-left rounded-lg hover:bg-sky-100 focus:outline-none focus:ring-2 focus:ring-sky-400 focus:ring-opacity-75
       }
       .btn-selected {
-        @apply bg-sky-600 text-white hover:bg-sky-600;
+        @apply bg-sky-600 text-white hover:bg-sky-600
       }
     }
   </style>
@@ -65,6 +65,11 @@
 </body>
 
 <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.2.1/d3.min.js"
+  integrity="sha512-wkduu4oQG74ySorPiSRStC0Zl8rQfjr/Ty6dMvYTmjZw6RS5bferdx8TR7ynxeh79ySEp/benIFFisKofMjPbg=="
+  crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+<script src="https://unpkg.com/d3-dag@0.9.0"></script>
 <script>
   const cluster = (type, cluster) => `
 <div class="p-6 max-w bg-white rounded-xl shadow-md flex flex-col space-y-1">
@@ -76,19 +81,7 @@
     <p class="text-gray-500 m-0">Running</p>
     <p class="text-gray-500 m-0">${cluster.host}:${cluster.port}</p>
   </div>
-</div>
-  `;
-
-  const fragment_nodes = (nodes) => `
-     ${nodes.input.map(fragment_nodes).join("")} ${nodes.node.desc.split('(')[0]} ➡️
-  `;
-
-  const fragment = (fragment) => `
-<div class="mt-1">
-  <p class="text-gray-500 m-0">#${fragment.fragment_id}</p>
-  <div>${fragment_nodes(fragment.nodes)} ${fragment.dispatcher.dispatcher_type}Dispatcher ${fragment.downstream_fragment_id.join(",")} </div>
-</div>
-  `;
+</div>`
 
 
   const fragments = (fragments) => `
@@ -97,26 +90,243 @@
     <div class="w-3 h-3 flex-none bg-green-600 rounded-full mr-2"></div>
     <div class="text-xl font-medium text-black">${fragments.node.host}:${fragments.node.port}</div>
   </div>
-  <div class="flex flex-col">
-    ${fragments.fragment.map(f => fragment(f)).join("\n")}
+  <div style="height: 40rem" class="border border-gray-200 overflow-x-scroll">
+    <svg id="fragment-${fragments.node.id}" class="h-full"></svg>
   </div>
-</div>
-  `;
+</div>`
+  const createStreamFragment = (fragments) => {
+    const nodeRadius = 20
+    const edgeYRadius = 15
+    const edgeXRadius = 100
+    const titleMap = new Map
+    const descMap = new Map
+
+    const createStreamFragmentNodes = (fragment_id, node_id, node, edges) => {
+      if (node.input.length == 1) {
+        const nodeId = `${fragment_id}:${node_id}`
+        titleMap.set(nodeId, node.node.desc.split('(')[0])
+        descMap.set(nodeId, node.node.desc)
+        const [inNode, outNode] = createStreamFragmentNodes(fragment_id, node_id + 1, node.input[0], edges)
+        edges.push([outNode, nodeId])
+        return [inNode, nodeId]
+      } else {
+        const nodeId = `${fragment_id}:merger`
+        titleMap.set(nodeId, node.node.desc.split('(')[0])
+        descMap.set(nodeId, node.node.desc)
+        return [nodeId, nodeId]
+      }
+    }
+
+    gridCompact = (layout) => (dag) => {
+      // Tweak to render compact grid, first shrink x width by edge radius, then expand the width to account for the loss
+      // This could alos be accomplished by just changing the coordinates of the svg viewbox.
+      const nodeWidth = nodeRadius + edgeXRadius
+      const baseLayout = layout.nodeSize([
+        nodeWidth,
+        (nodeRadius + edgeYRadius) * 2
+      ]);
+      const { width, height } = baseLayout(dag);
+      for (const node of dag) {
+        node.x += nodeWidth;
+      }
+      for (const { points } of dag.ilinks()) {
+        for (const point of points) {
+          point.x += nodeWidth;
+        }
+      }
+      const columnCount = 5
+      // Width = 20 columns or the computed with if there are more then 20 columns
+      return { width: Math.max(nodeWidth * columnCount, width + nodeRadius * 2) + nodeWidth, height: height + nodeWidth };
+    }
+
+    let graphData = []
+    const fragmentOf = id => parseInt(id.split(":")[0])
+    const titleOf = id => titleMap.get(id)
+
+    fragments.fragment.forEach(fragment => {
+      const edges = []
+      const fragmentId = fragment.fragment_id
+      const [inNode, outNode] = createStreamFragmentNodes(fragmentId, 0, fragment.nodes, edges)
+      const dispatcherNodeId = `${fragmentId}:dispatcher`
+      let dispatcherType = ""
+      if (fragment.downstream_fragment_id.length == 0) {
+        dispatcherType = "BlackHole"
+      } else {
+        dispatcherType = `${fragment.dispatcher.dispatcher_type}Dispatcher -> ${fragment.downstream_fragment_id.join(",")}`
+      }
+      titleMap.set(dispatcherNodeId, dispatcherType)
+      graphData = graphData.concat(edges)
+      graphData.push([outNode, dispatcherNodeId])
+      fragment.downstream_fragment_id.forEach(v => {
+        graphData.push([dispatcherNodeId, `${v}:merger`])
+      })
+    })
+
+    graphData.reverse()
+
+    const layout =
+      gridCompact(d3.grid().lane(d3.laneGreedy().compressed(true)));
+    const dag = d3.dagConnect()(graphData)
+
+    const horizontal = (baseLayout, dag) => {
+      const { width, height } = baseLayout(dag);
+      for (const node of dag) {
+        [node.x, node.y] = [node.y, node.x];
+      }
+      for (const { points } of dag.ilinks()) {
+        for (const point of points) {
+          [point.x, point.y] = [point.y, point.x];
+        }
+      }
+      return { width: height, height: width };
+    };
+
+    const { width, height } = horizontal(layout, dag)
+
+    const svgSelection = d3.select(`#fragment-${fragments.node.id}`)
+    svgSelection.attr("viewBox", [0, 0, width, height].join(" "))
+    const defs = svgSelection.append("defs") // For gradients
+
+    const interp = d3.interpolateRainbow
+    const fragmentSet = new Set()
+
+    for (const node of dag.idescendants()) {
+      let fragmentId = fragmentOf(node.data.id)
+      if (!fragmentSet.has(fragmentId)) {
+        fragmentSet.add(fragmentId)
+      }
+    }
+
+    let i = 0
+    const colorMap = new Map()
+    fragmentSet.forEach(k => {
+      colorMap.set(k, interp(i / fragmentSet.size))
+      i += 1
+    })
+
+    // How to draw edges
+    const line = d3
+      .line()
+      .curve(d3.curveBasis)
+      .x((d) => d.x)
+      .y((d) => d.y)
+
+    // Plot edges
+    svgSelection
+      .append("g")
+      .selectAll("path")
+      .data(dag.links())
+      .enter()
+      .append("path")
+      .attr("d", ({ points }) => line(points))
+      .attr("fill", "none")
+      .attr("stroke-width", ({ source }) => source.data.id.endsWith("dispatcher") ? 4 : 2)
+      .attr("stroke", ({ source }) => colorMap.get(fragmentOf(source.data.id)))
+
+    // Plot edge arrows
+    const arrowSize = (nodeRadius * nodeRadius) / 8.0;
+    const arrowLen = Math.sqrt((4 * arrowSize) / Math.sqrt(3));
+    const arrow = d3.symbol().type(d3.symbolTriangle).size(arrowSize);
+
+    svgSelection
+      .append("g")
+      .selectAll("path")
+      .data(dag.links())
+      .enter()
+      .append("path")
+      .attr("d", arrow)
+      .attr("transform", ({ source, target, points }) => {
+        const [end, start] = points.slice().reverse();
+        // This sets the arrows the node radius (20) + a little bit (3) away from the node center, on the last line segment of the edge. This means that edges that only span ine level will work perfectly, but if the edge bends, this will be a little off.
+        const dx = start.x - end.x;
+        const dy = start.y - end.y;
+        const scale = (nodeRadius * 1.15) / Math.sqrt(dx * dx + dy * dy);
+        // This is the angle of the last line segment
+        const angle = (Math.atan2(-dy, -dx) * 180) / Math.PI + 90;
+        return `translate(${end.x + dx * scale}, ${end.y + dy * scale
+          }) rotate(${angle})`;
+      })
+      .attr("fill", ({ source }) => colorMap.get(fragmentOf(source.data.id)))
+
+    // Select nodes
+    const nodes = svgSelection
+      .append("g")
+      .selectAll("g")
+      .data(dag.descendants())
+      .enter()
+      .append("g")
+      .attr("transform", ({ x, y }) => `translate(${x}, ${y})`)
+
+    const tooltip = d3.select("body").append("div")
+      .attr("id", "div-tooltip")
+      .attr("class", "absolute whitespace-pre text-xs bg-white p-1")
+      .style("opacity", 0);
+
+    const mouseOver = (e, d) => {
+      tooltip
+        .style("opacity", 1)
+    }
+
+    const mouseMove = (e, d) => {
+      tooltip
+        .html(descMap.get(d.data.id) || "No Data Available")
+        .style("left", (d3.pointer(e, this)[0] + 50) + "px")
+        .style("top", (d3.pointer(e, this)[1] + 20) + "px")
+    }
+
+    const mouseLeave = (e, d) => {
+      tooltip
+        .style("opacity", 0)
+    }
+
+    // Plot node circles
+    nodes
+      .append("circle")
+      .attr("r", nodeRadius)
+      .attr("fill", (n) => colorMap.get(fragmentOf(n.data.id)))
+    // .on("mouseenter", mouseOver)
+    // .on("mousemove", mouseMove)
+    // .on("mouseleave", mouseLeave)
+
+    // Add text to nodes
+    nodes
+      .append("text")
+      .text((d) => titleOf(d.data.id))
+      .attr("font-family", "sans-serif")
+      .attr("text-anchor", "start")
+      .attr("alignment-baseline", "text-bottom")
+      .attr("y", -nodeRadius)
+      .attr("fill", "black")
+      .attr("transform", "rotate(-15)")
+
+    // Add text to nodes
+    nodes
+      .append("text")
+      .text((d) => `${fragmentOf(d.data.id)}`)
+      .attr("font-family", "sans-serif")
+      .attr("text-anchor", "middle")
+      .attr("alignment-baseline", "middle")
+      .attr("fill", "white")
+      .attr("pointer-events", "none")
+  }
 
   fetch('/api/clusters/0')
     .then(response => response.json())
     .then(data => data.forEach(
-      data => $("#clusters").append(cluster("Frontend", data))));
+      data => $("#clusters").append(cluster("Frontend", data))))
   fetch('/api/clusters/1')
     .then(response => response.json())
     .then(data => data.forEach(
-      data => $("#clusters").append(cluster("Compute Node", data))));
-  $("#clusters").append(cluster("Meta Node", { host: "127.0.0.1", port: "2333" }));
+      data => $("#clusters").append(cluster("Compute Node", data))))
+  $("#clusters").append(cluster("Meta Node", { host: "127.0.0.1", port: "2333" }))
 
   fetch('/api/fragments')
     .then(response => response.json())
     .then(data => data.forEach(
-      data => $("#fragments").append(fragments(data))));
+      data => {
+        $("#fragments").append(fragments(data))
+        createStreamFragment(data)
+      }))
 
 </script>
 
