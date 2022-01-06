@@ -6,15 +6,14 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::PkIndicesRef;
-use crate::executor::managed_state::aggregation::OrderedRowDeserializer;
 use crate::executor::managed_state::top_n::variants::*;
 use crate::executor::managed_state::top_n::ManagedTopNState;
-use crate::executor::managed_state::OrderedRow;
 use crate::executor::{Executor, Message, PkIndices, StreamChunk};
 
 #[async_trait]

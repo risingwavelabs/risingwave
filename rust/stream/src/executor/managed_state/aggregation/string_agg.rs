@@ -9,12 +9,12 @@ use risingwave_common::error::Result;
 use risingwave_common::types::{
     deserialize_datum_not_null_from, serialize_datum_not_null_into, DataTypeKind, Datum, ScalarImpl,
 };
+use risingwave_common::util::ordered::OrderedArraysSerializer;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::managed_state::aggregation::ManagedExtremeState;
 use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
-use crate::executor::OrderedArraysSerializer;
 
 pub struct ManagedStringAggState<S: StateStore> {
     cache: BTreeMap<Bytes, FlushStatus<ScalarImpl>>,
@@ -250,7 +250,7 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::{Keyspace, StateStore};
 
-    use crate::executor::managed_state::aggregation::ordered_serializer::OrderedArraysSerializer;
+    use super::*;
     use crate::executor::managed_state::aggregation::string_agg::ManagedStringAggState;
     use crate::executor::managed_state::aggregation::ManagedExtremeState;
     use crate::executor::test_utils::create_in_memory_keyspace;

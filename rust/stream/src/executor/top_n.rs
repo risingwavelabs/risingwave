@@ -4,13 +4,12 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::{Keyspace, Segment, StateStore};
 
-use crate::executor::managed_state::aggregation::OrderedRowDeserializer;
 use crate::executor::managed_state::top_n::variants::*;
 use crate::executor::managed_state::top_n::{ManagedTopNBottomNState, ManagedTopNState};
-use crate::executor::managed_state::OrderedRow;
 use crate::executor::{
     top_n_executor_next, Executor, Message, PkIndices, PkIndicesRef, TopNExecutorBase,
 };

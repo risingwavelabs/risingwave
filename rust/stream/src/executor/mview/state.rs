@@ -3,11 +3,10 @@ use std::collections::HashMap;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
+use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::{serialize_cell, serialize_cell_idx, serialize_pk};
-use crate::executor::managed_state::aggregation::OrderedRowsSerializer;
 use crate::executor::managed_state::flush_status::HashMapFlushStatus as FlushStatus;
 
 /// `ManagedMviewState` buffers recent mutations. Data will be written

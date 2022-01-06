@@ -6,11 +6,9 @@ use risingwave_common::expr::AggKind;
 pub use value::*;
 mod extreme;
 mod extreme_serializer;
-mod ordered_serializer;
 mod string_agg;
 
 pub use extreme::*;
-pub use ordered_serializer::*;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;

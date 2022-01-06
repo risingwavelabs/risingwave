@@ -10,6 +10,7 @@ pub mod bit_util;
 pub mod chunk_coalesce;
 pub mod encoding_for_comparison;
 pub mod hash_util;
+pub mod ordered;
 pub mod prost;
 pub mod sort_util;
 #[macro_use]

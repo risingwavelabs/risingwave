@@ -1,13 +1,15 @@
 use std::cmp::Reverse;
 
-use risingwave_common::array::{ArrayImpl, Row};
-use risingwave_common::types::{
-    deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataTypeKind,
-};
-use risingwave_common::util::sort_util::OrderType;
+use bytes::BufMut;
 
-use crate::executor::managed_state::OrderedDatum::{NormalOrder, ReversedOrder};
-use crate::executor::managed_state::OrderedRow;
+use super::OrderedDatum::{NormalOrder, ReversedOrder};
+use super::OrderedRow;
+use crate::array::{ArrayImpl, Row};
+use crate::error::Result;
+use crate::types::{
+    deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataTypeKind, Datum,
+};
+use crate::util::sort_util::OrderType;
 
 type OrderPair = (OrderType, usize);
 
@@ -84,7 +86,7 @@ impl OrderedRowDeserializer {
         }
     }
 
-    pub fn deserialize(&self, data: &[u8]) -> Result<OrderedRow, memcomparable::Error> {
+    pub fn deserialize(&self, data: &[u8]) -> Result<OrderedRow> {
         let mut values = Vec::with_capacity(self.data_type_kinds.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
         for (data_type, order_type) in self.data_type_kinds.iter().zip(self.order_types.iter()) {
@@ -100,12 +102,31 @@ impl OrderedRowDeserializer {
     }
 }
 
+pub fn serialize_pk(pk: &Row, serializer: &OrderedRowsSerializer) -> Result<Vec<u8>> {
+    let mut result = vec![];
+    serializer.order_based_scehmaed_serialize(&[pk], &mut result);
+    Ok(std::mem::take(&mut result[0]))
+}
+
+pub fn serialize_cell_idx(cell_idx: u32) -> Result<Vec<u8>> {
+    let mut buf = Vec::with_capacity(4);
+    buf.put_u32_le(cell_idx);
+    debug_assert_eq!(buf.len(), 4);
+    Ok(buf)
+}
+
+pub fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {
+    let mut serializer = memcomparable::Serializer::new(vec![]);
+    serialize_datum_into(cell, &mut serializer)?;
+    Ok(serializer.into_inner())
+}
+
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{I16Array, Utf8Array};
-    use risingwave_common::types::ScalarImpl::{Int16, Utf8};
-
     use super::*;
+    use crate::array::{I16Array, Utf8Array};
+    use crate::array_nonnull;
+    use crate::types::ScalarImpl::{Int16, Utf8};
 
     #[test]
     fn test_ordered_row_serializer() {

@@ -4,11 +4,10 @@ use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{deserialize_datum_from, Datum};
+use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::table::{ScannableTable, TableIter};
 use risingwave_storage::{Keyspace, StateStore, StateStoreIter};
-
-use super::*;
 
 /// `MViewTable` provides a readable cell-based row table interface,
 /// so that data can be queried by AP engine.
@@ -192,6 +191,7 @@ mod tests {
     use risingwave_storage::Keyspace;
 
     use super::*;
+    use crate::executor::ManagedMViewState;
 
     #[tokio::test]
     async fn test_mview_table() {

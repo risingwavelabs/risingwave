@@ -8,7 +8,6 @@ pub use dispatch::*;
 pub use filter::*;
 pub use hash_agg::*;
 pub use hash_join::*;
-pub use managed_state::aggregation::{OrderedArraysSerializer, OrderedRowsSerializer};
 pub use merge::*;
 pub use mview::*;
 pub use project::*;

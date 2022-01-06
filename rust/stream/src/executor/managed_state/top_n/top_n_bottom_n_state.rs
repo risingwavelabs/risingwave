@@ -6,12 +6,10 @@ use std::vec::Drain;
 use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataTypeKind;
+use risingwave_common::util::ordered::*;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::managed_state::aggregation::OrderedRowDeserializer;
 use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
-use crate::executor::managed_state::OrderedRow;
-use crate::executor::{serialize_cell, serialize_cell_idx};
 
 /// This state is used for `[offset, offset+limit)` part in the `TopNExecutor`.
 ///
@@ -341,9 +339,8 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::{Keyspace, StateStore};
 
-    use crate::executor::managed_state::aggregation::OrderedRowDeserializer;
+    use super::*;
     use crate::executor::managed_state::top_n::top_n_bottom_n_state::ManagedTopNBottomNState;
-    use crate::executor::managed_state::OrderedRow;
     use crate::row_nonnull;
 
     fn create_managed_top_n_bottom_n_state<S: StateStore>(
