@@ -2,7 +2,7 @@ use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedRem, CheckedSub};
 pub use rust_decimal::prelude::{FromPrimitive, FromStr, ToPrimitive};
-use rust_decimal::{Decimal as RustDecimal, Error};
+use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
 
 #[derive(Debug, Copy, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
 pub enum Decimal {
@@ -355,9 +355,12 @@ impl Decimal {
     pub fn zero() -> Self {
         Self::from(0)
     }
+
     pub fn round_dp(&self, dp: u32) -> Self {
         match self {
-            Self::Normalized(d) => Self::Normalized(d.round_dp(dp)),
+            Self::Normalized(d) => Self::Normalized(
+                d.round_dp_with_strategy(dp, RoundingStrategy::MidpointAwayFromZero),
+            ),
             d => *d,
         }
     }
