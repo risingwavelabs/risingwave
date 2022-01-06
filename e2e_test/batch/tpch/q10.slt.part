@@ -1,0 +1,58 @@
+query ITRRTTTT
+select
+	c_custkey,
+	c_name,
+	round(sum(l_extendedprice * (1 - l_discount)), 2) as revenue,
+	round(c_acctbal, 1) as c_acctbal,
+	n_name,
+	c_address,
+	c_phone,
+	c_comment
+from
+	customer,
+	orders,
+	lineitem,
+	nation
+where
+	c_custkey = o_custkey
+	and l_orderkey = o_orderkey
+	and o_orderdate >= date '1994-01-01'
+	and o_orderdate < date '1994-01-01' + interval '3' month
+	and l_returnflag = 'R'
+	and c_nationkey = n_nationkey
+group by
+	c_custkey,
+	c_name,
+	c_acctbal,
+	c_phone,
+	n_name,
+	c_address,
+	c_comment
+order by
+	revenue desc
+LIMIT 20;
+----
+136  Customer#000000136  359159.49  -842.4  GERMANY     QoLsJ0v5C1IQbh,DS1                       17-501-210-4726  ackages sleep ironic, final courts. even requests above the blithely bold requests g
+70   Customer#000000070  152637.10  4867.5  RUSSIA      mFowIuhnHjp2GjCiYYavkW kUwOjIaTCQ        32-828-107-2832  fter the special asymptotes. ideas after the unusual frets cajole quickly regular pinto be
+127  Customer#000000127  139410.76  9280.7  VIETNAM     Xyge4DX2rXKxXyye1Z47LeLVEYMLf4Bfcj       31-101-672-2951  ic, unusual theodolites nod silently after the final, ironic instructions: pending r
+142  Customer#000000142  129732.17  2209.8  INDONESIA   AnJ5lxtLjioClr2khl9pb8NLxG2,             19-407-425-2584  . even, express theodolites upo
+94   Customer#000000094  109328.44  5500.1  INDONESIA   IfVNIN9KtkScJ9dUjK3Pg5gY1aFeaXewwf       19-953-499-8833  latelets across the bold, final requests sleep according to the fluffily bold accounts. unusual deposits amon
+118  Customer#000000118  108519.06  3582.4  CHINA       OVnFuHygK9wx3xpg8                        28-639-943-7051  uick packages alongside of the furiously final deposits haggle above the fluffily even foxes. blithely dogged dep
+139  Customer#000000139  102799.68  7897.8  INDONESIA   3ElvBwudHKL02732YexGVFVt                 19-140-352-1403  nstructions. quickly ironic ideas are carefully. bold,
+25   Customer#000000025  80561.69   7133.7  JAPAN       Hp8GyFQgGHFYSilH5tBfe                    22-603-468-3533  y. accounts sleep ruthlessly according to the regular theodolites. unusual instructions sleep. ironic, final
+128  Customer#000000128  74326.77   -987.0  EGYPT       AmKUMlJf2NRHcKGmKjLS                     14-280-874-8044  ing packages integrate across the slyly unusual dugouts. blithely silent ideas sublate carefully. blithely expr
+4    Customer#000000004  68199.22   2866.8  EGYPT       XxVSJsLAGtn                              14-128-190-5944   requests. final, regular ideas sleep final accou
+14   Customer#000000014  63310.39   5266.3  ARGENTINA   KXkletMlL2JQEA                           11-845-129-3851  , ironic packages across the unus
+55   Customer#000000055  54376.85   4572.1  IRAN        zIRBR4KNEl HzaiV3a i9n6elrxzDEh8r8pDom   20-180-440-8525  ully unusual packages wake bravely bold packages. unusual requests boost deposits! blithely ironic packages ab
+46   Customer#000000046  46956.60   5744.6  FRANCE      eaTXWWm10L9                              16-357-681-2007  ctions. accounts sleep furiously even requests. regular, regular accounts cajole blithely around the final pa
+23   Customer#000000023  46655.33   3332.0  CANADA      OdY W13N7Be3OC5MpgfmcYss0Wn6TKT          13-312-472-8245  deposits. special deposits cajole slyly. fluffily special deposits about the furiously
+61   Customer#000000061  45467.89   1536.2  PERU        9kndve4EAJxhg3veF BfXr7AqOsT39o gtqjaYE  27-626-559-8599  egular packages shall have to impress along the
+40   Customer#000000040  44161.95   1335.3  CANADA      gOnGWAyhSV1ofv                           13-652-915-8939  rges impress after the slyly ironic courts. foxes are. blithely
+19   Customer#000000019  35730.09   8914.7  CHINA       uc,3bHIx84H,wdrmLOjVsiqXCq2tr            28-396-526-5053   nag. furiously careful packages are slyly at the accounts. furiously regular in
+130  Customer#000000130  31499.41   5073.6  INDONESIA   RKPx2OfZy0Vn 8wGWZ7F2EAvmMORl1k8iH       19-190-993-9281  ix slowly. express packages along the furiously ironic requests integrate daringly deposits. fur
+88   Customer#000000088  29032.13   8031.4  MOZAMBIQUE  wtkjBN9eyrFuENSMmMFlJ3e7jE5KXcg          26-516-273-2566  s are quickly above the quickly ironic instructions; even requests about the carefully final deposi
+85   Customer#000000085  27823.56   3386.6  ETHIOPIA    siRerlDwiolhYR 8FgksoezycLj              15-745-585-8219  ronic ideas use above the slowly pendin
+
+
+
+
