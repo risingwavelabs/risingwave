@@ -21,19 +21,21 @@ pub fn wait_tcp(
 
     writeln!(f, "Waiting for online: {}", server)?;
 
+    let mut last_error;
+
     loop {
         match TcpStream::connect_timeout(&addr, Duration::from_secs(1)) {
             Ok(_) => {
                 return Ok(());
             }
             Err(err) => {
-                writeln!(f, "Retrying connecting to {}, {:?}", server, err)?;
+                last_error = Some(err);
             }
         }
 
         if let Some(ref timeout) = timeout {
             if std::time::Instant::now() - start_time >= *timeout {
-                return Err(anyhow!("failed to connect"));
+                return Err(anyhow!("failed to connect, last error: {:?}", last_error));
             }
         }
 
@@ -47,6 +49,6 @@ pub fn wait_tcp(
             ));
         }
 
-        sleep(Duration::from_secs(1));
+        sleep(Duration::from_millis(50));
     }
 }
