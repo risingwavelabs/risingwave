@@ -526,9 +526,9 @@ impl ScalarImpl {
                 let (mantissa, scale) = de.deserialize_decimal()?;
                 Decimal::from_i128_with_scale(mantissa, scale as u32)
             }),
-            Ty::Interval | Ty::Date | Ty::Time | Ty::Timestamp | Ty::Timestampz => {
-                Self::Interval(IntervalUnit::deserialize(de)?)
-            }
+            Ty::Interval => Self::Interval(IntervalUnit::deserialize(de)?),
+            Ty::Time | Ty::Timestamp | Ty::Timestampz => Self::Int64(i64::deserialize(de)?),
+            Ty::Date => Self::Int32(i32::deserialize(de)?),
         })
     }
 }
