@@ -18,6 +18,7 @@ all_files=(
 "q6"
 "q7"
 "q8"
+"q9"
 "drop_tables"
 )
 

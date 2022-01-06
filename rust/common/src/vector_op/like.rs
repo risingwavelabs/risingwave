@@ -60,6 +60,11 @@ mod tests {
         (r#"abctest"#, r#"__test"#, Some(false)),
         (r#"abctest"#, r#"%_test"#, Some(true)),
         (r#"aaaaabbb"#, r#"a%a%a%a%a%a%b"#, Some(false)),
+        (
+            r#"blush thistle blue yellow saddle"#,
+            r#"%yellow%"#,
+            Some(true),
+        ),
     ];
 
     #[test]
