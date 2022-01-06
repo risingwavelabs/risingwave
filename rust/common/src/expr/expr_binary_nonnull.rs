@@ -2,7 +2,6 @@ use std::marker::PhantomData;
 
 use risingwave_pb::expr::expr_node::Type;
 
-/// For expression that only accept two non null arguments as input.
 use crate::array::{Array, BoolArray, DataTypeTrait, DecimalArray, I32Array, I64Array, Utf8Array};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
@@ -59,17 +58,7 @@ macro_rules! gen_atm_impl {
 }
 
 /// This macro helps create comparison expression. Its output array is a bool array
-/// It receive all the combinations of `gen_binary_expr` and generate corresponding match cases
-/// In [], the parameters are for constructing new expression
-/// * $l: left expression
-/// * $r: right expression
-/// * ret: return array type
-/// In ()*, the parameters are for generating match cases
-/// * $i1: left array type
-/// * $i2: right array type
-/// * $cast: The cast type in that the operation will calculate
-/// * $func: The scalar function for expression, it's a generic function and specialized by the type
-///   of `$i1, $i2, $cast`
+/// Similar to `gen_atm_impl`.
 macro_rules! gen_cmp_impl {
   ([$l:expr, $r:expr, $ret:expr], $( { $i1:ty, $i2:ty, $cast:ty, $func: ident} ),*) => {
     match ($l.return_type().data_type_kind(), $r.return_type().data_type_kind()) {
@@ -91,18 +80,14 @@ macro_rules! gen_cmp_impl {
   };
 }
 
-/// `gen_binary_expr_cmp` list all possible combination of input type and out put type
-/// Specifically, the first type is left input, the second type is right input and the third is the
-/// cast type For different data type, the scalar function may be different. Therefore we need to
-/// pass all possible scalar function
+/// Based on the data type of `$l`, `$r`, `$ret`, return corresponding expression struct with scalar
+/// function inside.
+/// * `$l`: left expression
+/// * `$r`: right expression
+/// * `$ret`: returned expression
 /// * `macro`: a macro helps create expression
-/// * `int_f`: the scalar function of integer
-/// * `float_f`: the scalar function of float
-/// * `deci_f`: the scalar function for decimal with integer. In this scalar function, all inputs
-///   will be cast to decimal
-/// * `deci_f_f`: the scalar function for decimal with float. In this scalar function, all inputs
-///   will be cast to float
-/// * `str_f`: compare function with &str.
+/// * `general_f`: generic cmp function (require a common ``TryInto`` type for two input).
+/// * `str_f`: cmp function between str
 macro_rules! gen_binary_expr_cmp {
     ($macro:tt, $general_f:ident, $str_f:ident, $l:expr, $r:expr, $ret:expr) => {
         match (
@@ -188,6 +173,9 @@ macro_rules! gen_binary_expr_cmp {
 ///  `atm` means arithmetic here.
 /// They are differentiate cuz one type may not support atm and cmp at the same time. For example,
 /// Varchar can support compare but not arithmetic.
+/// * `general_f`: generic atm function (require a common ``TryInto`` type for two input)
+/// * `interval_date_f`: atm function between interval and date
+/// * `interval_date_f`: atm function between date and interval
 macro_rules! gen_binary_expr_atm {
     (
         $macro:tt,

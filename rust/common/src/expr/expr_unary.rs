@@ -23,7 +23,7 @@ use crate::vector_op::trim::trim;
 use crate::vector_op::upper::upper;
 
 /// This macro helps create cast expression.
-/// It receives all the combinations of `gen_numeric_cast` and generates corresponding match cases
+/// It receives all the combinations of `gen_cast` and generates corresponding match cases
 /// In [], the parameters are for constructing new expression
 /// * $child: child expression
 /// * $ret: return expression
@@ -32,7 +32,7 @@ use crate::vector_op::upper::upper;
 /// * $cast: The cast type in that the operation will calculate
 /// * $func: The scalar function for expression, it's a generic function and specialized by the type
 ///   of `$input, $cast`
-macro_rules! cast_impl {
+macro_rules! gen_cast_impl {
   ([$child:expr, $ret:expr], $( { $input:ty, $cast:ty, $func:expr} ),*) => {
     match ($child.return_type().data_type_kind(), $ret.data_type_kind()) {
       $(
@@ -52,10 +52,9 @@ macro_rules! cast_impl {
   };
 }
 
-/// `gen_numeric_cast` list all possible combination of input type and cast type for numeric cast
 macro_rules! gen_cast {
   ($($x:tt, )* ) => {
-    cast_impl! {
+    gen_cast_impl! {
       [$($x),*],
       { StringType, DateType, str_to_date},
       { StringType, TimestampType, str_to_timestamp},
@@ -110,6 +109,8 @@ pub fn new_unary_expr(
         return_type.data_type_kind(),
         child_expr.return_type().data_type_kind(),
     ) {
+        // FIXME: We can not unify char and varchar because they are different in PG while share the
+        // same logical type (String type) in our system (#2414).
         (ProstType::Cast, DataTypeKind::Date, DataTypeKind::Char) => {
             Box::new(UnaryExpression::<Utf8Array, I32Array, _> {
                 expr_ia1: child_expr,
