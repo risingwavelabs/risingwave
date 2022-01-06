@@ -1,7 +1,7 @@
 use smallvec::SmallVec;
 
 use super::PlanRef;
-use crate::planner::property::{Distribution, Order};
+use crate::optimizer::property::{Distribution, Order};
 
 /// the trait [`PlanNode`](super::PlanNode) really need about tree structure and used by optimizer
 /// framework. every plan node should impl it.
@@ -99,32 +99,32 @@ pub trait PlanTreeNodeBinary {
 
 macro_rules! impl_plan_tree_node_for_leaf {
     ($leaf_node_type:ident) => {
-        impl crate::planner::plan_node::PlanTreeNode for $leaf_node_type {
-            fn children(&self) -> smallvec::SmallVec<[crate::planner::PlanRef; 2]> {
+        impl crate::optimizer::plan_node::PlanTreeNode for $leaf_node_type {
+            fn children(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
                 smallvec::smallvec![]
             }
 
             /// Clone the node with a list of new children.
             fn clone_with_children(
                 &self,
-                children: &[crate::planner::PlanRef],
-            ) -> crate::planner::PlanRef {
+                children: &[crate::optimizer::PlanRef],
+            ) -> crate::optimizer::PlanRef {
                 assert_eq!(children.len(), 0);
                 std::rc::Rc::new(self.clone())
             }
 
             fn children_distribution_required(
                 &self,
-            ) -> Vec<crate::planner::property::Distribution> {
+            ) -> Vec<crate::optimizer::property::Distribution> {
                 vec![]
             }
-            fn children_order_required(&self) -> Vec<crate::planner::property::Order> {
+            fn children_order_required(&self) -> Vec<crate::optimizer::property::Order> {
                 vec![]
             }
             fn dist_pass_through(
                 &self,
-                _required: &crate::planner::property::Distribution,
-            ) -> Vec<crate::planner::property::Distribution> {
+                _required: &crate::optimizer::property::Distribution,
+            ) -> Vec<crate::optimizer::property::Distribution> {
                 vec![]
             }
         }
@@ -133,32 +133,32 @@ macro_rules! impl_plan_tree_node_for_leaf {
 
 macro_rules! impl_plan_tree_node_for_unary {
     ($unary_node_type:ident) => {
-        impl crate::planner::plan_node::PlanTreeNode for $unary_node_type {
-            fn children(&self) -> smallvec::SmallVec<[crate::planner::PlanRef; 2]> {
+        impl crate::optimizer::plan_node::PlanTreeNode for $unary_node_type {
+            fn children(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
                 smallvec::smallvec![self.child()]
             }
 
             /// Clone the node with a list of new children.
             fn clone_with_children(
                 &self,
-                children: &[crate::planner::PlanRef],
-            ) -> crate::planner::PlanRef {
+                children: &[crate::optimizer::PlanRef],
+            ) -> crate::optimizer::PlanRef {
                 assert_eq!(children.len(), 1);
                 std::rc::Rc::new(self.clone_with_child(children[0].clone()))
             }
 
             fn children_distribution_required(
                 &self,
-            ) -> Vec<crate::planner::property::Distribution> {
+            ) -> Vec<crate::optimizer::property::Distribution> {
                 vec![self.child_dist_required()]
             }
-            fn children_order_required(&self) -> Vec<crate::planner::property::Order> {
+            fn children_order_required(&self) -> Vec<crate::optimizer::property::Order> {
                 vec![self.child_order_required()]
             }
             fn dist_pass_through(
                 &self,
-                required: &crate::planner::property::Distribution,
-            ) -> Vec<crate::planner::property::Distribution> {
+                required: &crate::optimizer::property::Distribution,
+            ) -> Vec<crate::optimizer::property::Distribution> {
                 vec![self.dist_pass_through_child(required)]
             }
         }
@@ -167,14 +167,14 @@ macro_rules! impl_plan_tree_node_for_unary {
 
 macro_rules! impl_plan_tree_node_for_binary {
     ($binary_node_type:ident) => {
-        impl crate::planner::plan_node::PlanTreeNode for $binary_node_type {
-            fn children(&self) -> smallvec::SmallVec<[crate::planner::PlanRef; 2]> {
+        impl crate::optimizer::plan_node::PlanTreeNode for $binary_node_type {
+            fn children(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
                 smallvec::smallvec![self.left(), self.right()]
             }
             fn clone_with_children(
                 &self,
-                children: &[crate::planner::PlanRef],
-            ) -> crate::planner::PlanRef {
+                children: &[crate::optimizer::PlanRef],
+            ) -> crate::optimizer::PlanRef {
                 assert_eq!(children.len(), 2);
                 std::rc::Rc::new(
                     self.clone_with_left_right(children[0].clone(), children[1].clone()),
@@ -182,16 +182,16 @@ macro_rules! impl_plan_tree_node_for_binary {
             }
             fn children_distribution_required(
                 &self,
-            ) -> Vec<crate::planner::property::Distribution> {
+            ) -> Vec<crate::optimizer::property::Distribution> {
                 vec![self.left_dist_required()]
             }
-            fn children_order_required(&self) -> Vec<crate::planner::property::Order> {
+            fn children_order_required(&self) -> Vec<crate::optimizer::property::Order> {
                 vec![self.right_order_required()]
             }
             fn dist_pass_through(
                 &self,
-                required: &crate::planner::property::Distribution,
-            ) -> Vec<crate::planner::property::Distribution> {
+                required: &crate::optimizer::property::Distribution,
+            ) -> Vec<crate::optimizer::property::Distribution> {
                 let (left_dist, right_dist) = self.dist_pass_through_left_right(required);
                 vec![left_dist, right_dist]
             }

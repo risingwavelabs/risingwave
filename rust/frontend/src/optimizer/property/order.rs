@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use super::super::plan_node::*;
 use super::Convention;
-use crate::planner::PlanRef;
+use crate::optimizer::PlanRef;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]

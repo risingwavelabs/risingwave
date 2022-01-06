@@ -3,7 +3,7 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 
 use super::{LogicalProject, PlanRef, PlanTreeNodeUnary};
-use crate::planner::property::{WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
 pub struct BatchProject {

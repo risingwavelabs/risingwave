@@ -3,52 +3,46 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 
 use super::{PlanRef, PlanTreeNodeUnary};
-use crate::planner::property::{Distribution, Order, WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
-pub struct BatchSort {
-  order: Order,
+pub struct StreamExchange {
   child: PlanRef,
   schema: Schema,
   dist: Distribution,
 }
-impl BatchSort {
-  pub fn new(child: PlanRef, order: Order) -> Self {
+impl StreamExchange {
+  pub fn new(child: PlanRef, dist: Distribution) -> Self {
     let schema = child.schema().clone();
-    let dist = child.distribution();
-    BatchSort {
+    StreamExchange {
       child,
-      order,
       schema,
       dist,
     }
   }
 }
-impl fmt::Display for BatchSort {
+impl fmt::Display for StreamExchange {
   fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
     todo!()
   }
 }
-impl PlanTreeNodeUnary for BatchSort {
+impl PlanTreeNodeUnary for StreamExchange {
   fn child(&self) -> PlanRef {
     self.child.clone()
   }
   fn clone_with_child(&self, child: PlanRef) -> Self {
-    Self::new(child, self.order.clone())
+    Self::new(child, self.distribution())
   }
 }
-impl_plan_tree_node_for_unary! {BatchSort}
-impl WithOrder for BatchSort {
-  fn order(&self) -> Order {
-    self.order.clone()
-  }
-}
-impl WithDistribution for BatchSort {
+impl_plan_tree_node_for_unary! {StreamExchange}
+impl WithDistribution for StreamExchange {
   fn distribution(&self) -> Distribution {
     self.dist.clone()
   }
 }
-impl WithSchema for BatchSort {
+impl WithOrder for StreamExchange {}
+
+impl WithSchema for StreamExchange {
   fn schema(&self) -> &Schema {
     &self.schema
   }

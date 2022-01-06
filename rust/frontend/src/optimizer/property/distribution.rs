@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
 use super::super::plan_node::*;
-use crate::planner::property::{Convention, Order};
-use crate::planner::PlanRef;
+use crate::optimizer::property::{Convention, Order};
+use crate::optimizer::PlanRef;
 #[derive(Debug, Clone)]
 pub enum Distribution {
     Any,

@@ -5,8 +5,8 @@ use paste::paste;
 use super::super::plan_node::*;
 use super::PlanPass;
 use crate::for_logical_plan_nodes;
-use crate::planner::property::{Distribution, Order};
-use crate::planner::PlanRef;
+use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::PlanRef;
 
 // TODO: use passThrough get a better plan
 

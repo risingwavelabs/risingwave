@@ -2,7 +2,7 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use crate::planner::property::{WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
 pub struct StreamTableSource {

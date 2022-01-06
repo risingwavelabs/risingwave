@@ -5,7 +5,7 @@ use paste::paste;
 use super::super::plan_node::*;
 use super::PlanPass;
 use crate::for_batch_plan_nodes;
-use crate::planner::property::{Distribution, Order};
+use crate::optimizer::property::{Distribution, Order};
 
 macro_rules! def_batch_to_distributed_visit_func {
   ([], $({ $convention:ident, $name:ident }),*) => {

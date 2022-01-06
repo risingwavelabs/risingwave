@@ -1,9 +1,9 @@
 use itertools::Itertools;
 
 use super::PlanPass;
-use crate::planner::property::{Distribution, Order};
-use crate::planner::rule::BoxedRule;
-use crate::planner::PlanRef;
+use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::rule::BoxedRule;
+use crate::optimizer::PlanRef;
 #[allow(dead_code)]
 /// Traverse order of [`HeuristicOptimizer`]
 pub enum ApplyOrder {

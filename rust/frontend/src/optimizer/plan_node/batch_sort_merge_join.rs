@@ -3,7 +3,7 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 
 use super::{JoinPredicate, LogicalJoin, PlanRef, PlanTreeNodeBinary};
-use crate::planner::property::{
+use crate::optimizer::property::{
   Direction, FieldOrder, Order, WithDistribution, WithOrder, WithSchema,
 };
 #[derive(Debug, Clone)]
