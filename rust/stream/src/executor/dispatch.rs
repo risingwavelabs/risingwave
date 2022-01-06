@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::channel::mpsc::{channel, Sender};
 use futures::SinkExt;
-use risingwave_common::array::{DataChunk, Op, RwError};
+use risingwave_common::array::{Op, RwError};
 use risingwave_common::error::ErrorCode;
 use risingwave_common::util::addr::{get_host_port, is_local_address};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
@@ -268,37 +268,26 @@ impl DataDispatcher for HashDataDispatcher {
     }
 
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()> {
+        // FIXME: unnecessary compact.
+        // See https://github.com/singularity-data/risingwave/issues/704
+        let chunk = chunk.compact()?;
+
         // A chunk can be shuffled into multiple output chunks that to be sent to downstreams.
         // In these output chunks, the only difference are visibility map, which is calculated
         // by the hash value of each line in the input chunk.
         let num_outputs = self.outputs.len();
 
-        let (ops, columns, visibility) = chunk.into_inner();
-
-        // Due to some functions only exist in data chunk but not in stream chunk,
-        // a new data chunk is temporally built.
-        let data_chunk = {
-            let data_chunk_builder = DataChunk::builder().columns(columns.clone());
-            // if visibility is set, build the chunk by the visibility, else build chunk directly
-            if let Some(visibility) = visibility {
-                data_chunk_builder.visibility(visibility).build()
-            } else {
-                data_chunk_builder.build()
-            }
-        };
-
-        // FIXME: unnecessary compact.
-        // See https://github.com/singularity-data/risingwave/issues/704
-        let data_chunk = data_chunk.compact()?;
-
         // get hash value of every line by its key
         let hash_builder = CRC32FastBuilder {};
-        let hash_values = data_chunk
+        let hash_values = chunk
             .get_hash_values(&self.keys, hash_builder)
             .unwrap()
             .iter()
             .map(|hash| *hash as usize % num_outputs)
             .collect::<Vec<_>>();
+
+        let (ops, columns, visibility) = chunk.into_inner();
+        assert!(visibility.is_none(), "must be compacted");
 
         // get visibility map for every output chunk
         let mut vis_maps = vec![vec![]; num_outputs];
@@ -336,7 +325,7 @@ impl DataDispatcher for HashDataDispatcher {
 
         // individually output StreamChunk integrated with vis_map
         for (vis_map, output) in vis_maps.into_iter().zip(self.outputs.iter_mut()) {
-            let vis_map = (vis_map).try_into().unwrap();
+            let vis_map = vis_map.try_into().unwrap();
             let new_stream_chunk = StreamChunk {
                 // columns is not changed in this function
                 ops: ops.clone(),

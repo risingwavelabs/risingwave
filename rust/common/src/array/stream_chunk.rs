@@ -1,4 +1,5 @@
 use std::fmt;
+use std::hash::BuildHasher;
 use std::sync::Arc;
 
 use prost::DecodeError;
@@ -9,6 +10,7 @@ use crate::array::stream_chunk_iter::{RowRef, StreamChunkRefIter};
 use crate::array::DataChunk;
 use crate::buffer::Bitmap;
 use crate::error::{ErrorCode, Result, RwError};
+use crate::util::hash_util::finalize_hashers;
 use crate::util::prost::unpack_from_any;
 
 /// `Op` represents three operations in `StreamChunk`.
@@ -191,6 +193,20 @@ impl StreamChunk {
 
     pub fn visibility(&self) -> &Option<Bitmap> {
         &self.visibility
+    }
+
+    pub fn get_hash_values<H: BuildHasher>(
+        &self,
+        keys: &[usize],
+        hasher_builder: H,
+    ) -> Result<Vec<u64>> {
+        let mut states = Vec::with_capacity(self.cardinality());
+        states.resize_with(self.cardinality(), || hasher_builder.build_hasher());
+        for key in keys {
+            let array = self.columns[*key].array();
+            array.hash_vec(&mut states);
+        }
+        Ok(finalize_hashers(&mut states))
     }
 
     /// Random access a tuple in a stream chunk. Return in a row format.

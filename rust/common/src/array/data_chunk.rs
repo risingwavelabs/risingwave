@@ -290,6 +290,7 @@ impl DataChunk {
 
         Ok(new_chunks)
     }
+
     pub fn get_hash_values<H: BuildHasher>(
         &self,
         keys: &[usize],
