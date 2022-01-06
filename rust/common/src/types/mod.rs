@@ -474,7 +474,23 @@ impl ToString for ScalarImpl {
       }
     }
 
-        for_all_scalar_variants! {impl_to_string}
+        for_all_scalar_variants! { impl_to_string }
+    }
+}
+
+impl ToString for ScalarRefImpl<'_> {
+    fn to_string(&self) -> String {
+        macro_rules! impl_to_string {
+      ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+        match self {
+          $( Self::$variant_name(inner) => {
+            inner.to_string()
+          }, )*
+        }
+      }
+    }
+
+        for_all_scalar_variants! { impl_to_string }
     }
 }
 

@@ -1,9 +1,11 @@
+use std::fmt;
 use std::sync::Arc;
 
 use prost::DecodeError;
 use risingwave_pb::data::{Column as ProstColumn, Op as ProstOp, StreamChunk as ProstStreamChunk};
 
 use crate::array::column::Column;
+use crate::array::stream_chunk_iter::{RowRef, StreamChunkRefIter};
 use crate::array::DataChunk;
 use crate::buffer::Bitmap;
 use crate::error::{ErrorCode, Result, RwError};
@@ -189,5 +191,102 @@ impl StreamChunk {
 
     pub fn visibility(&self) -> &Option<Bitmap> {
         &self.visibility
+    }
+
+    /// Random access a tuple in a stream chunk. Return in a row format.
+    ///
+    /// # Arguments
+    /// * `pos` - Index of look up tuple
+    /// * `RowRef` - Reference of data tuple
+    /// * bool - whether this tuple is visible
+    pub fn row_at(&self, pos: usize) -> Result<(RowRef<'_>, bool)> {
+        let row = self.row_at_unchecked_vis(pos);
+        let vis = match self.visibility.as_ref() {
+            Some(bitmap) => bitmap.is_set(pos)?,
+            None => true,
+        };
+        Ok((row, vis))
+    }
+
+    /// Random access a tuple in a data chunk. Return in a row format.
+    /// Note that this function do not return whether the row is visible.
+    /// # Arguments
+    /// * `pos` - Index of look up tuple
+    pub fn row_at_unchecked_vis(&self, pos: usize) -> RowRef<'_> {
+        let mut row = Vec::with_capacity(self.columns.len());
+        for column in &self.columns {
+            row.push(column.array_ref().value_at(pos));
+        }
+        RowRef::new(self.ops[pos], row)
+    }
+
+    /// Get an iterator for visible rows.
+    pub fn rows(&self) -> StreamChunkRefIter<'_> {
+        StreamChunkRefIter::new(self)
+    }
+
+    /// `to_pretty_string` returns a table-like text representation of the `StreamChunk`.
+    pub fn to_pretty_string(&self) -> String {
+        use prettytable::format::Alignment;
+        use prettytable::{format, Cell, Row, Table};
+
+        let mut table = Table::new();
+        table.set_format(*format::consts::FORMAT_NO_LINESEP_WITH_TITLE);
+        for row in self.rows() {
+            let mut cells = Vec::with_capacity(row.size() + 1);
+            cells.push(Cell::new_align(
+                match row.op() {
+                    Op::Insert => "+",
+                    Op::Delete => "-",
+                    Op::UpdateDelete => "U-",
+                    Op::UpdateInsert => "U+",
+                },
+                Alignment::RIGHT,
+            ));
+            for datum in &row.values {
+                let str = match datum {
+                    None => "".to_owned(), // NULL
+                    Some(scalar) => scalar.to_string(),
+                };
+                cells.push(Cell::new(&str));
+            }
+            table.add_row(Row::new(cells));
+        }
+        table.to_string()
+    }
+}
+
+impl fmt::Display for StreamChunk {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_pretty_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::array::I64Array;
+    use crate::{column, column_nonnull};
+
+    #[test]
+    fn test_to_pretty_string() {
+        let chunk = StreamChunk::new(
+            vec![Op::Insert, Op::Delete, Op::UpdateDelete, Op::UpdateInsert],
+            vec![
+                column_nonnull!(I64Array, [1, 2, 3, 4]),
+                column!(I64Array, [Some(6), None, Some(7), None]),
+            ],
+            None,
+        );
+        assert_eq!(
+            chunk.to_pretty_string(),
+            "+----+---+---+
+|  + | 1 | 6 |
+|  - | 2 |   |
+| U- | 3 | 7 |
+| U+ | 4 |   |
++----+---+---+
+"
+        );
     }
 }

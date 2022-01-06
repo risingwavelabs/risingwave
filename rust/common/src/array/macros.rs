@@ -38,7 +38,7 @@ macro_rules! column {
   ($array:tt, [$( $value:expr ),*]) => {
     {
       use crate::array::column::Column;
-      let arr = array! { $array, [ $( $value ),* ] };
+      let arr = $crate::array! { $array, [ $( $value ),* ] };
       Column::new(std::sync::Arc::new(arr.into()))
     }
   };

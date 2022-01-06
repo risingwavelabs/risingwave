@@ -226,9 +226,9 @@ mod tests {
 
     use crate::array::{DataChunk, I32Array, I64Array};
     use crate::buffer::Bitmap;
+    use crate::column;
     use crate::types::{Int32Type, Int64Type};
     use crate::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
-    use crate::{array, column};
 
     #[test]
     fn test_append_chunk() {

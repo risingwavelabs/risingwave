@@ -11,8 +11,10 @@ mod iterator;
 mod macros;
 mod primitive_array;
 pub mod stream_chunk;
+mod stream_chunk_iter;
 mod utf8_array;
 mod value_reader;
+
 use std::convert::From;
 use std::hash::Hasher;
 use std::sync::Arc;

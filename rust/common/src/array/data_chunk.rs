@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::fmt;
 use std::hash::BuildHasher;
 use std::sync::Arc;
 
@@ -333,6 +334,33 @@ impl DataChunk {
         }
         RowRef::new(row)
     }
+
+    /// `to_pretty_string` returns a table-like text representation of the `DataChunk`.
+    pub fn to_pretty_string(&self) -> String {
+        use prettytable::{format, Table};
+        let mut table = Table::new();
+        table.set_format(*format::consts::FORMAT_NO_LINESEP_WITH_TITLE);
+        for row in self.rows() {
+            let cells = row
+                .0
+                .iter()
+                .map(|v| {
+                    match v {
+                        None => "".to_owned(), // null
+                        Some(scalar) => scalar.to_string(),
+                    }
+                })
+                .collect();
+            table.add_row(cells);
+        }
+        table.to_string()
+    }
+}
+
+impl fmt::Display for DataChunk {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_pretty_string())
+    }
 }
 
 impl TryFrom<Vec<Column>> for DataChunk {
@@ -359,6 +387,7 @@ pub type DataChunkRef = Arc<DataChunk>;
 mod tests {
     use crate::array::column::Column;
     use crate::array::*;
+    use crate::{column, column_nonnull};
 
     #[test]
     fn test_rechunk() {
@@ -443,5 +472,26 @@ mod tests {
                 assert_eq!(val.into_int32(), i as i32);
             }
         }
+    }
+
+    #[test]
+    fn test_to_pretty_string() {
+        let chunk = DataChunk::new(
+            vec![
+                column_nonnull!(I64Array, [1, 2, 3, 4]),
+                column!(I64Array, [Some(6), None, Some(7), None]),
+            ],
+            None,
+        );
+        assert_eq!(
+            chunk.to_pretty_string(),
+            "+---+---+
+| 1 | 6 |
+| 2 |   |
+| 3 | 7 |
+| 4 |   |
++---+---+
+"
+        );
     }
 }
