@@ -22,24 +22,8 @@ pub enum Operation {
 
 /// Preconditions are checked in the beginning of a transaction
 pub enum Precondition {
-    KeyExists(KeyExists),
-}
-
-/// Verify the target key exists
-pub struct KeyExists {
-    key: Vec<u8>,
-    version: Option<Epoch>,
-}
-
-impl KeyExists {
-    pub fn new(key: Vec<u8>, version: Option<Epoch>) -> KeyExists {
-        KeyExists { key, version }
-    }
-
-    pub fn key(&self) -> &Vec<u8> {
-        &self.key
-    }
-    pub fn version(&self) -> Option<Epoch> {
-        self.version
-    }
+    KeyExists {
+        key: Vec<u8>,
+        version: Option<Epoch>,
+    },
 }

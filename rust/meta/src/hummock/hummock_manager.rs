@@ -23,7 +23,7 @@ use crate::hummock::compaction::{CompactStatus, CompactionInner};
 use crate::hummock::level_handler::{LevelHandler, TableStat};
 use crate::hummock::{HummockContextId, HummockSnapshotId, HummockTTL, HummockVersionId};
 use crate::manager::{MetaSrvEnv, SINGLE_VERSION_EPOCH};
-use crate::storage::{ColumnFamilyUtils, KeyExists, Operation, Precondition, Transaction};
+use crate::storage::{ColumnFamilyUtils, Operation, Precondition, Transaction};
 
 #[derive(Clone)]
 pub struct Config {
@@ -333,6 +333,23 @@ impl DefaultHummockManagerInner {
         }
     }
 
+    async fn get_snapshot_low_watermark(&self) -> Result<HummockSnapshotId> {
+        let result = self
+            .env
+            .meta_store_ref()
+            .list_cf(self.env.config().get_hummock_context_pinned_snapshot_cf())
+            .await?;
+        let low_watermark = result
+            .iter()
+            .flat_map(|v| {
+                HummockContextPinnedSnapshot::decode(v.as_slice())
+                    .unwrap()
+                    .snapshot_id
+            })
+            .fold(HummockSnapshotId::MAX, std::cmp::min);
+        Ok(low_watermark)
+    }
+
     fn update_version_id_in_trx(
         &self,
         trx: &mut Box<dyn Transaction>,
@@ -591,13 +608,13 @@ impl DefaultHummockManager {
     ) -> Result<()> {
         if context_id != RESERVED_HUMMOCK_CONTEXT_ID {
             // check context validity
-            trx.add_preconditions(vec![Precondition::KeyExists(KeyExists::new(
-                ColumnFamilyUtils::prefix_key_with_cf(
+            trx.add_preconditions(vec![Precondition::KeyExists {
+                key: ColumnFamilyUtils::prefix_key_with_cf(
                     context_id.to_be_bytes().as_slice(),
                     self.env.config().get_hummock_context_cf().as_bytes(),
                 ),
-                None,
-            ))]);
+                version: None,
+            }]);
         }
         trx.commit().map_err(|e| e.into())
     }
@@ -871,11 +888,13 @@ impl HummockManager for DefaultHummockManager {
     }
 
     async fn get_compact_task(&self, context_id: HummockContextId) -> Result<CompactTask> {
+        let watermark = self.inner.read().await.get_snapshot_low_watermark().await?;
         let compaction_guard = self.compaction.lock().await;
         let old_compact_status = compaction_guard.load_compact_status().await?;
-        let (compact_status, compact_task) = compaction_guard
+        let (compact_status, mut compact_task) = compaction_guard
             .get_compact_task(old_compact_status)
             .await?;
+        compact_task.watermark = watermark;
         let mut transaction = self.env.meta_store_ref().get_transaction();
         compaction_guard.save_compact_status_in_transaction(&mut transaction, &compact_status);
         self.commit_trx(&mut transaction, context_id).await?;

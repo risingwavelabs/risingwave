@@ -272,10 +272,10 @@ impl SledTransaction {
         tx_db: &sled::transaction::TransactionalTree,
     ) -> std::result::Result<bool, sled::transaction::UnabortableTransactionError> {
         match precondition {
-            Precondition::KeyExists(key_exists) => {
+            Precondition::KeyExists { key, version } => {
                 let composed_key = SledMetaStore::get_key_with_version(
-                    key_exists.key(),
-                    key_exists.version().unwrap_or(SINGLE_VERSION_EPOCH),
+                    key,
+                    version.unwrap_or(SINGLE_VERSION_EPOCH),
                 );
                 match tx_db.get(composed_key.into_inner())? {
                     None => Ok(false),
@@ -330,7 +330,6 @@ mod tests {
     use assert_matches::assert_matches;
 
     use super::*;
-    use crate::storage::transaction::KeyExists;
 
     #[tokio::test]
     async fn test_sled_metastore_basic() -> Result<()> {
@@ -513,10 +512,10 @@ mod tests {
         );
 
         let mut trx = meta_store.get_transaction();
-        trx.add_preconditions(vec![Precondition::KeyExists(KeyExists::new(
-            "key111".as_bytes().to_vec(),
-            None,
-        ))]);
+        trx.add_preconditions(vec![Precondition::KeyExists {
+            key: "key111".as_bytes().to_vec(),
+            version: None,
+        }]);
         trx.add_operations(vec![Operation::Put(
             "key1111".as_bytes().to_vec(),
             "value1111".as_bytes().to_vec(),
