@@ -2,6 +2,7 @@ mod compute_node_service;
 mod configure_tmux_service;
 mod ensure_stop_service;
 mod frontend_service;
+mod grafana_service;
 mod meta_node_service;
 mod minio_service;
 mod prometheus_service;
@@ -22,6 +23,7 @@ pub use self::compute_node_service::*;
 pub use self::configure_tmux_service::*;
 pub use self::ensure_stop_service::*;
 pub use self::frontend_service::*;
+pub use self::grafana_service::*;
 pub use self::meta_node_service::*;
 pub use self::minio_service::*;
 pub use self::prometheus_service::*;
@@ -167,6 +169,9 @@ where
             // Set session name for this window
             .arg("-n")
             .arg(self.id.as_ref().unwrap());
+        if let Some(dir) = user_cmd.get_current_dir() {
+            cmd.arg("-c").arg(dir);
+        }
         for (k, v) in user_cmd.get_envs() {
             cmd.arg("-e");
             if let Some(v) = v {

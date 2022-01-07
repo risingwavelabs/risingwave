@@ -182,6 +182,7 @@ description = "kill playground"
 script = '''
 #!@shell
 set -e
+tmux list-windows -t riselab -F "-#{pane_pid}" | xargs -n 1 kill -SIGINT
 tmux kill-session -t riselab
 '''
 

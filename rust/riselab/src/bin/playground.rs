@@ -11,8 +11,8 @@ use indicatif::{MultiProgress, ProgressBar};
 use riselab::util::complete_spin;
 use riselab::{
     ComputeNodeService, ConfigExpander, ConfigureTmuxTask, EnsureStopService, ExecuteContext,
-    FrontendService, MetaNodeService, MinioService, PrometheusService, ServiceConfig, Task,
-    RISELAB_SESSION_NAME,
+    FrontendService, GrafanaService, MetaNodeService, MinioService, PrometheusService,
+    ServiceConfig, Task, RISELAB_SESSION_NAME,
 };
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
@@ -72,7 +72,7 @@ fn task_main(
 
     let status_dir = Arc::new(tempdir()?);
 
-    // Start Tmux
+    // Start Tmux and kill previous services
     {
         let mut ctx = ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
         let mut service = ConfigureTmuxTask::new()?;
@@ -85,11 +85,12 @@ fn task_main(
     for step in steps {
         let service = services.get(step).unwrap();
         ports.push(match service {
-            ServiceConfig::Minio(c) => c.port,
-            ServiceConfig::Prometheus(c) => c.port,
-            ServiceConfig::ComputeNode(c) => c.port,
-            ServiceConfig::MetaNode(c) => c.port,
-            ServiceConfig::Frontend(c) => c.port,
+            ServiceConfig::Minio(c) => (c.port, c.id.clone()),
+            ServiceConfig::Prometheus(c) => (c.port, c.id.clone()),
+            ServiceConfig::ComputeNode(c) => (c.port, c.id.clone()),
+            ServiceConfig::MetaNode(c) => (c.port, c.id.clone()),
+            ServiceConfig::Frontend(c) => (c.port, c.id.clone()),
+            ServiceConfig::Grafana(c) => (c.port, c.id.clone()),
         });
     }
 
@@ -154,6 +155,16 @@ fn task_main(
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("api postgres://{}:{}/", c.address, c.port));
+            }
+            ServiceConfig::Grafana(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+                let mut service = GrafanaService::new(c.clone())?;
+                service.execute(&mut ctx)?;
+                let mut task = riselab::ConfigureGrpcNodeTask::new(c.port, false)?;
+                task.execute(&mut ctx)?;
+                ctx.pb
+                    .set_message(format!("dashboard http://{}:{}/", c.address, c.port));
             }
         }
     }

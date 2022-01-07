@@ -59,6 +59,15 @@ pub struct PrometheusConfig {
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct GrafanaConfig {
+    pub id: String,
+    pub address: String,
+    pub port: u16,
+    pub provide_prometheus: Option<Vec<PrometheusConfig>>,
+}
+
 /// All service configuration
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServiceConfig {
@@ -67,6 +76,7 @@ pub enum ServiceConfig {
     Frontend(FrontendConfig),
     Minio(MinioConfig),
     Prometheus(PrometheusConfig),
+    Grafana(GrafanaConfig),
 }
 
 impl ServiceConfig {
@@ -77,6 +87,7 @@ impl ServiceConfig {
             Self::Frontend(c) => &c.id,
             Self::Minio(c) => &c.id,
             Self::Prometheus(c) => &c.id,
+            Self::Grafana(c) => &c.id,
         }
     }
 }

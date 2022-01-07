@@ -2,7 +2,7 @@ use std::env;
 use std::path::Path;
 use std::process::Command;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use crate::{ExecuteContext, Task};
 
@@ -33,9 +33,34 @@ impl Task for ConfigureTmuxTask {
         cmd.arg("-V");
         ctx.run_command(cmd)?;
 
+        // List previous windows and kill them
+        let mut cmd = self.tmux();
+        cmd.arg("list-windows")
+            .arg("-t")
+            .arg(RISELAB_SESSION_NAME)
+            .arg("-F")
+            .arg("#{pane_pid} #{window_name}");
+        if let Ok(output) = ctx.run_command(cmd) {
+            for line in String::from_utf8(output.stdout)?.split('\n') {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                let (pid, name) = line
+                    .split_once(' ')
+                    .ok_or_else(|| anyhow!("failed to parse tmux list-windows output"))?;
+                let mut cmd = Command::new("kill");
+                ctx.pb.set_message(format!("killing {} {}...", pid, name));
+                cmd.arg("-SIGINT");
+                cmd.arg(format!("-{}", pid));
+                ctx.run_command(cmd)?;
+            }
+        }
+
         let mut cmd = self.tmux();
         cmd.arg("kill-session").arg("-t").arg(RISELAB_SESSION_NAME);
         ctx.run_command(cmd).ok();
+
+        ctx.pb.set_message("creating new session...");
 
         let mut cmd = self.tmux();
         cmd.arg("new-session")
@@ -45,6 +70,7 @@ impl Task for ConfigureTmuxTask {
             .arg("-c")
             .arg(Path::new(&prefix_path))
             .arg(Path::new(&prefix_bin).join("welcome.sh"));
+
         ctx.run_command(cmd)?;
 
         ctx.complete_spin();
