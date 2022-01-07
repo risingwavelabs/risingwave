@@ -87,7 +87,7 @@ message GetIdRequest {
     Database = 1;
     Schema = 2;
     Table = 3;
-    Fragment = 4;
+    Actor = 4;
     HummockContext = 5;
     HummockSnapshot = 6;
     Worker = 7;

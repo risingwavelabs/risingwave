@@ -117,7 +117,7 @@ impl IdGeneratorManager {
             (IdCategory::Schema, "schema", None),
             (IdCategory::Table, "table", None),
             (IdCategory::Worker, "worker", None),
-            (IdCategory::Fragment, "fragment", Some(1)),
+            (IdCategory::Actor, "fragment", Some(1)),
             (IdCategory::HummockContext, "hummock_context", Some(1)),
             (IdCategory::HummockSnapshot, "hummock_snapshot", Some(1)),
         ] {
@@ -244,7 +244,7 @@ mod tests {
 
         let ids = future::join_all((0..100).map(|_i| {
             let manager = &manager;
-            async move { manager.generate_interval(IdCategory::Fragment, 9999).await }
+            async move { manager.generate_interval(IdCategory::Actor, 9999).await }
         }))
         .await
         .into_iter()
@@ -253,7 +253,7 @@ mod tests {
         assert_eq!(ids, vec_expect);
 
         let manager = IdGeneratorManager::new(meta_store_ref).await;
-        let id = manager.generate_interval(IdCategory::Fragment, 10).await?;
+        let id = manager.generate_interval(IdCategory::Actor, 10).await?;
         assert_eq!(id, 1000001);
 
         Ok(())
