@@ -1,5 +1,6 @@
 mod compute_node_service;
 mod configure_tmux_service;
+mod ensure_stop_service;
 mod frontend_service;
 mod meta_node_service;
 mod minio_service;
@@ -19,6 +20,7 @@ use tempfile::TempDir;
 
 pub use self::compute_node_service::*;
 pub use self::configure_tmux_service::*;
+pub use self::ensure_stop_service::*;
 pub use self::frontend_service::*;
 pub use self::meta_node_service::*;
 pub use self::minio_service::*;
@@ -26,7 +28,7 @@ pub use self::prometheus_service::*;
 pub use self::task_configure_grpc_node::*;
 pub use self::task_configure_minio::*;
 use crate::util::{complete_spin, get_program_args, get_program_name};
-use crate::wait_tcp::wait_tcp;
+use crate::wait_tcp::{wait_tcp, wait_tcp_available};
 
 pub trait Task: 'static + Send {
     /// Execute the task
@@ -133,6 +135,11 @@ where
             Some(Duration::from_secs(30)),
             true,
         )?;
+        Ok(())
+    }
+
+    pub fn wait_tcp_close(&mut self, server: impl AsRef<str>) -> anyhow::Result<()> {
+        wait_tcp_available(server, Some(Duration::from_secs(30)))?;
         Ok(())
     }
 

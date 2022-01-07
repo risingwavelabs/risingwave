@@ -10,8 +10,9 @@ use anyhow::Result;
 use indicatif::{MultiProgress, ProgressBar};
 use riselab::util::complete_spin;
 use riselab::{
-    ComputeNodeService, ConfigExpander, ConfigureTmuxTask, ExecuteContext, FrontendService,
-    MetaNodeService, MinioService, PrometheusService, ServiceConfig, Task, RISELAB_SESSION_NAME,
+    ComputeNodeService, ConfigExpander, ConfigureTmuxTask, EnsureStopService, ExecuteContext,
+    FrontendService, MetaNodeService, MinioService, PrometheusService, ServiceConfig, Task,
+    RISELAB_SESSION_NAME,
 };
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
@@ -71,11 +72,34 @@ fn task_main(
 
     let status_dir = Arc::new(tempdir()?);
 
-    // Always start tmux first
-    let mut ctx = ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-    let mut service = ConfigureTmuxTask::new()?;
-    service.execute(&mut ctx)?;
+    // Start Tmux
+    {
+        let mut ctx = ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+        let mut service = ConfigureTmuxTask::new()?;
+        service.execute(&mut ctx)?;
+    }
 
+    // Firstly, ensure that all ports needed is not occupied by previous runs.
+    let mut ports = vec![];
+
+    for step in steps {
+        let service = services.get(step).unwrap();
+        ports.push(match service {
+            ServiceConfig::Minio(c) => c.port,
+            ServiceConfig::Prometheus(c) => c.port,
+            ServiceConfig::ComputeNode(c) => c.port,
+            ServiceConfig::MetaNode(c) => c.port,
+            ServiceConfig::Frontend(c) => c.port,
+        });
+    }
+
+    {
+        let mut ctx = ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+        let mut service = EnsureStopService::new(ports)?;
+        service.execute(&mut ctx)?;
+    }
+
+    // Then, start services one by one
     for step in steps {
         let service = services.get(step).unwrap();
         match service {

@@ -52,3 +52,29 @@ pub fn wait_tcp(
         sleep(Duration::from_millis(50));
     }
 }
+
+pub fn wait_tcp_available(
+    server: impl AsRef<str>,
+    timeout: Option<std::time::Duration>,
+) -> anyhow::Result<()> {
+    let server = server.as_ref();
+    let addr = server.parse()?;
+    let start_time = std::time::Instant::now();
+
+    loop {
+        match TcpStream::connect_timeout(&addr, Duration::from_secs(1)) {
+            Ok(_) => {}
+            Err(_) => {
+                return Ok(());
+            }
+        }
+
+        if let Some(ref timeout) = timeout {
+            if std::time::Instant::now() - start_time >= *timeout {
+                return Err(anyhow!("failed to wait for closing"));
+            }
+        }
+
+        sleep(Duration::from_millis(50));
+    }
+}
