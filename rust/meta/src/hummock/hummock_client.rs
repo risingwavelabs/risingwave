@@ -126,7 +126,7 @@ mod tests {
     use risingwave_common::error::{Result, ToRwResult};
     use risingwave_pb::hummock::{
         AddTablesRequest, GetTablesRequest, InvalidateHummockContextRequest, PinSnapshotRequest,
-        PinVersionRequest, RefreshHummockContextRequest, Table, UnpinVersionRequest,
+        PinVersionRequest, Table, UnpinVersionRequest,
     };
     use risingwave_storage::hummock::value::HummockValue;
     use risingwave_storage::hummock::{TableBuilder, TableBuilderOptions};
@@ -329,50 +329,6 @@ mod tests {
         shutdown_send.send(()).unwrap();
         join_handle.await.unwrap();
 
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_retry_connect() -> Result<()> {
-        let hummock_config = hummock::Config {
-            context_ttl: 100000,
-            context_check_interval: 300,
-        };
-
-        // pick a port
-        let port = {
-            let listener = TcpListener::bind(format!("127.0.0.1:{}", 0)).await.unwrap();
-            let address = listener.local_addr().unwrap();
-            address.port() as u32
-        };
-        let server_join_handle = tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(2)).await;
-            // There is still a chance the port was already used and then failed this test. But I
-            // think it is acceptable.
-            let (_, join_handle, shutdown_send) = start_server(&hummock_config, Some(port)).await;
-            tokio::time::sleep(Duration::from_secs(2)).await;
-            shutdown_send.send(()).unwrap();
-            join_handle.await.unwrap();
-        });
-
-        let result = tokio::time::timeout(Duration::from_secs(5), async move {
-            HummockClient::new(&format!("http://127.0.0.1:{}", port)).await
-        })
-        .await;
-        // not timeout
-        assert!(result.is_ok());
-
-        let hummock_client = result.unwrap()?;
-        let result = hummock_client
-            .rpc_client()
-            .refresh_hummock_context(RefreshHummockContextRequest {
-                context_identifier: hummock_client.hummock_context().identifier,
-            })
-            .await;
-        assert!(result.is_ok());
-
-        let result = server_join_handle.await;
-        assert!(result.is_ok());
         Ok(())
     }
 }

@@ -1,0 +1,15 @@
+[package]
+name = "sqlparser_bench"
+version = "0.1.0"
+authors = ["Dandandan <danielheres@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+risingwave_sqlparser = { path = "../" }
+
+[dev-dependencies]
+criterion = "0.3"
+
+[[bench]]
+name = "sqlparser_bench"
+harness = false

@@ -1,10 +1,16 @@
 use risingwave_common::array::Row;
 use risingwave_common::types::ScalarImpl;
+use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::parser::{Parser, ParserError};
 
-use crate::parser::parse;
 use crate::pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pgwire::pg_result::{PgResult, StatementType};
 pub struct Database {}
+
+/// Parse the SQL string into a list of ASTs.
+pub fn parse(sql: &str) -> Result<Vec<Statement>, ParserError> {
+    Parser::parse_sql(sql)
+}
 
 impl Database {
     pub fn run_statement(&self, sql_stmt: &str) -> PgResult {

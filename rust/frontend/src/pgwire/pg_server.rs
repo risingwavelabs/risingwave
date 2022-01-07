@@ -35,7 +35,7 @@ impl PgServer {
 mod tests {
     use tokio_postgres::{NoTls, SimpleQueryMessage};
 
-    use crate::parser::parse;
+    use crate::pgwire::database::parse;
     use crate::pgwire::pg_server::PgServer;
 
     #[tokio::test]

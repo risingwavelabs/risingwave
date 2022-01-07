@@ -10,6 +10,7 @@ members = [
   "riselab",
   "server",
   "source",
+  "sqlparser",
   "storage",
   "stream",
   "tests/regress",
