@@ -39,18 +39,20 @@ impl StreamSourceExecutor {
         barrier_receiver: UnboundedReceiver<Message>,
     ) -> Result<Self> {
         let source = source_desc.clone().source;
-        let reader = match source.as_ref() {
-            SourceImpl::HighLevelKafka(_) => source.stream_reader(
-                SourceReaderContext::HighLevelKafka(HighLevelKafkaSourceReaderContext {
+        let reader: Box<dyn StreamSourceReader> = match source.as_ref() {
+            SourceImpl::HighLevelKafka(s) => Box::new(s.stream_reader(
+                HighLevelKafkaSourceReaderContext {
                     query_id: None,
                     bound_timestamp_ms: None,
-                }),
+                },
                 column_ids.clone(),
-            )?,
-            SourceImpl::Table(_) => source.stream_reader(
-                SourceReaderContext::Table(TableReaderContext {}),
-                column_ids.clone(),
-            )?,
+            )?),
+            SourceImpl::Table(s) => {
+                Box::new(s.stream_reader(TableReaderContext {}, column_ids.clone())?)
+            }
+            SourceImpl::TableV2(s) => {
+                Box::new(s.stream_reader(TableV2ReaderContext, column_ids.clone())?)
+            }
         };
 
         Ok(Self {
@@ -105,9 +107,13 @@ impl Executor for StreamSourceExecutor {
         tokio::select! {
           chunk = self.reader.next() => {
             let mut chunk = chunk?;
+
+            // Refill row id only if not a table source.
             // Note(eric): Currently, rows from external sources are filled with row_ids here,
             // but rows from tables (by insert statements) are filled in InsertExecutor.
-            if !matches!(self.source_desc.source.as_ref(), SourceImpl::Table(_)) {
+            //
+            // TODO: in the future, we may add row_id column here for TableV2 as well
+            if !matches!(self.source_desc.source.as_ref(), SourceImpl::Table(_) | SourceImpl::TableV2(_)) {
               self.refill_row_id_column(&mut chunk);
             }
 

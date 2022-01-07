@@ -7,7 +7,10 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataTypeRef;
 use risingwave_common::{ensure, gen_error};
 use risingwave_storage::bummock::BummockTable;
+use risingwave_storage::table::{ScannableTable, ScannableTableRef};
+use risingwave_storage::TableColumnDesc;
 
+use crate::table_v2::TableSourceV2;
 use crate::{
     HighLevelKafkaSource, SourceConfig, SourceFormat, SourceImpl, SourceParser, TableSource,
 };
@@ -25,6 +28,7 @@ pub trait SourceManager: Sync + Send {
         row_id_index: Option<usize>,
     ) -> Result<()>;
     fn create_table_source(&self, table_id: &TableId, table: Arc<BummockTable>) -> Result<()>;
+    fn create_table_source_v2(&self, table_id: &TableId, table: ScannableTableRef) -> Result<()>;
     fn get_source(&self, source_id: &TableId) -> Result<SourceDesc>;
     fn drop_source(&self, source_id: &TableId) -> Result<()>;
 }
@@ -38,6 +42,18 @@ pub struct SourceColumnDesc {
     pub column_id: i32,
     pub skip_parse: bool,
     pub is_primary: bool,
+}
+
+impl From<&TableColumnDesc> for SourceColumnDesc {
+    fn from(c: &TableColumnDesc) -> Self {
+        Self {
+            name: "".to_owned(),
+            data_type: c.data_type.clone(),
+            column_id: c.column_id,
+            skip_parse: false,
+            is_primary: false,
+        }
+    }
 }
 
 /// `SourceDesc` is used to describe a `Source`
@@ -103,18 +119,41 @@ impl SourceManager for MemSourceManager {
         );
 
         let columns = table
-            .columns()
+            .column_descs()
             .iter()
-            .map(|c| SourceColumnDesc {
-                name: "".to_string(),
-                data_type: c.data_type.clone(),
-                column_id: c.column_id,
-                skip_parse: false,
-                is_primary: false,
-            })
+            .map(SourceColumnDesc::from)
             .collect();
 
         let source = SourceImpl::Table(TableSource::new(table));
+
+        // Table sources do not need columns and format
+        let desc = SourceDesc {
+            source: Arc::new(source),
+            columns,
+            format: SourceFormat::Invalid,
+            row_id_index: Some(0), // always use the first column as row_id
+        };
+
+        sources.insert(table_id.clone(), desc);
+        Ok(())
+    }
+
+    fn create_table_source_v2(&self, table_id: &TableId, table: ScannableTableRef) -> Result<()> {
+        let mut sources = self.get_sources()?;
+
+        ensure!(
+            !sources.contains_key(table_id),
+            "Source id already exists: {:?}",
+            table_id
+        );
+
+        let columns = table
+            .column_descs()
+            .iter()
+            .map(SourceColumnDesc::from)
+            .collect();
+
+        let source = SourceImpl::TableV2(TableSourceV2::new(table));
 
         // Table sources do not need columns and format
         let desc = SourceDesc {
@@ -181,7 +220,9 @@ mod tests {
     use risingwave_common::error::Result;
     use risingwave_common::types::{DecimalType, Int64Type};
     use risingwave_storage::bummock::BummockTable;
-    use risingwave_storage::{Table, TableColumnDesc};
+    use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::table::mview::MViewTable;
+    use risingwave_storage::{Keyspace, Table, TableColumnDesc};
 
     use crate::*;
 
@@ -281,6 +322,51 @@ mod tests {
         let bummock_table = Arc::new(BummockTable::new(&table_id, table_columns));
         let mem_source_manager = MemSourceManager::new();
         let res = mem_source_manager.create_table_source(&table_id, bummock_table);
+        assert!(res.is_ok());
+
+        // get source
+        let get_source_res = mem_source_manager.get_source(&table_id);
+        assert!(get_source_res.is_ok());
+
+        // drop source
+        let drop_source_res = mem_source_manager.drop_source(&table_id);
+        assert!(drop_source_res.is_ok());
+        let get_source_res = mem_source_manager.get_source(&table_id);
+        assert!(get_source_res.is_err());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_table_source_v2() -> Result<()> {
+        let table_id = TableId::default();
+
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
+                },
+                Field {
+                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
+                },
+            ],
+        };
+
+        let table_columns = schema
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(i, f)| TableColumnDesc {
+                data_type: f.data_type.clone(),
+                column_id: i as i32, // use column index as column id
+            })
+            .collect();
+
+        let keyspace = Keyspace::table_root(MemoryStateStore::new(), &table_id);
+
+        let table_v2 = Arc::new(MViewTable::new_batch(keyspace, table_columns));
+        let mem_source_manager = MemSourceManager::new();
+        let res = mem_source_manager.create_table_source_v2(&table_id, table_v2);
         assert!(res.is_ok());
 
         // get source

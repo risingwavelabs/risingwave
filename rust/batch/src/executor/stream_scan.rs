@@ -62,7 +62,9 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
                 },
                 column_ids.clone(),
             )?),
-            SourceImpl::Table(_) => panic!("use table_scan to scan a table"),
+            SourceImpl::Table(_) | SourceImpl::TableV2(_) => {
+                panic!("use table_scan to scan a table")
+            }
         };
 
         Ok(Box::new(Self {

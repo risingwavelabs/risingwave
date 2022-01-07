@@ -98,6 +98,26 @@ pub trait StateStoreIter: Send + 'static {
     async fn next(&mut self) -> Result<Option<Self::Item>>;
 }
 
+#[derive(Clone)]
+pub enum StateStoreImpl {
+    HummockStateStore(hummock::HummockStateStore),
+    MemoryStateStore(memory::MemoryStateStore),
+    RocksDBStateStore(rocksdb_local::RocksDBStateStore),
+    TikvStateStore(tikv::TikvStateStore),
+}
+
+#[macro_export]
+macro_rules! dispatch_state_store {
+    ($impl:expr, $store:ident, $body:tt) => {
+        match $impl {
+            StateStoreImpl::MemoryStateStore($store) => $body,
+            StateStoreImpl::HummockStateStore($store) => $body,
+            StateStoreImpl::TikvStateStore($store) => $body,
+            StateStoreImpl::RocksDBStateStore($store) => $body,
+        }
+    };
+}
+
 /// `Table` is an abstraction of the collection of columns and rows.
 /// Each `Table` can be viewed as a flat sheet of a user created table.
 #[async_trait::async_trait]

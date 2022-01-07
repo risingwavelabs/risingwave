@@ -5,9 +5,9 @@ pub use high_level_kafka::*;
 pub use manager::*;
 pub use parser::*;
 use risingwave_common::array::{DataChunk, StreamChunk};
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::Result;
 pub use table::*;
+pub use table_v2::*;
 
 pub mod parser;
 
@@ -17,6 +17,7 @@ mod manager;
 mod common;
 mod pulsar;
 mod table;
+mod table_v2;
 
 #[derive(Clone, Debug)]
 pub enum SourceConfig {
@@ -36,56 +37,21 @@ pub enum SourceFormat {
 pub enum SourceImpl {
     HighLevelKafka(HighLevelKafkaSource),
     Table(TableSource),
-}
-
-pub enum SourceReaderContext {
-    HighLevelKafka(HighLevelKafkaSourceReaderContext),
-    Table(TableReaderContext),
+    TableV2(TableSourceV2),
 }
 
 impl SourceImpl {
-    /// Create a stream reader
-    pub fn stream_reader(
-        &self,
-        ctx: SourceReaderContext,
-        column_ids: Vec<i32>,
-    ) -> Result<Box<dyn StreamSourceReader>> {
-        match (self, ctx) {
-            (SourceImpl::HighLevelKafka(source), SourceReaderContext::HighLevelKafka(ctx)) => {
-                Ok(Box::new(source.stream_reader(ctx, column_ids)?))
-            }
-            (SourceImpl::Table(source), SourceReaderContext::Table(ctx)) => {
-                Ok(Box::new(source.stream_reader(ctx, column_ids)?))
-            }
-            _ => Err(RwError::from(ProtocolError(
-                "context type illegal".to_string(),
-            ))),
-        }
-    }
-
-    /// Create a batch reader
-    pub fn batch_reader(
-        &self,
-        ctx: SourceReaderContext,
-        column_ids: Vec<i32>,
-    ) -> Result<Box<dyn BatchSourceReader>> {
-        match (self, ctx) {
-            (SourceImpl::HighLevelKafka(source), SourceReaderContext::HighLevelKafka(ctx)) => {
-                Ok(Box::new(source.batch_reader(ctx, column_ids)?))
-            }
-            (SourceImpl::Table(source), SourceReaderContext::Table(ctx)) => {
-                Ok(Box::new(source.batch_reader(ctx, column_ids)?))
-            }
-            _ => Err(RwError::from(ProtocolError(
-                "context type illegal".to_string(),
-            ))),
-        }
-    }
-
     pub fn as_table(&self) -> &TableSource {
         match self {
             SourceImpl::Table(table) => table,
             _ => panic!("not a table source"),
+        }
+    }
+
+    pub fn as_table_v2(&self) -> &TableSourceV2 {
+        match self {
+            SourceImpl::TableV2(table) => table,
+            _ => panic!("not a table source v2"),
         }
     }
 }

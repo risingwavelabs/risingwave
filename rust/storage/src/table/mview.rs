@@ -1,7 +1,8 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use risingwave_common::array::{Row, RowDeserializer};
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{deserialize_datum_from, Datum};
 use risingwave_common::util::ordered::*;
@@ -9,14 +10,20 @@ use risingwave_common::util::sort_util::OrderType;
 
 use super::TableIterRef;
 use crate::table::{ScannableTable, TableIter};
-use crate::{Keyspace, StateStore, StateStoreIter};
+use crate::{Keyspace, StateStore, StateStoreIter, TableColumnDesc};
 
 /// `MViewTable` provides a readable cell-based row table interface,
 /// so that data can be queried by AP engine.
 pub struct MViewTable<S: StateStore> {
     keyspace: Keyspace<S>,
+
     schema: Schema,
+
+    /// This field is `Some` only if the table is created for batch table.
+    column_descs: Option<Vec<TableColumnDesc>>,
+
     pk_columns: Vec<usize>,
+
     sort_key_serializer: OrderedRowsSerializer,
 }
 
@@ -30,6 +37,7 @@ impl<S: StateStore> std::fmt::Debug for MViewTable<S> {
 }
 
 impl<S: StateStore> MViewTable<S> {
+    /// Create a [`MViewTable`] for materialized view.
     pub fn new(
         keyspace: Keyspace<S>,
         schema: Schema,
@@ -40,9 +48,35 @@ impl<S: StateStore> MViewTable<S> {
             .into_iter()
             .zip(pk_columns.clone().into_iter())
             .collect::<Vec<_>>();
+
         Self {
             keyspace,
             schema,
+            column_descs: None,
+            pk_columns,
+            sort_key_serializer: OrderedRowsSerializer::new(order_pairs),
+        }
+    }
+
+    /// Create a [`MViewTable`] for batch table.
+    pub fn new_batch(keyspace: Keyspace<S>, column_descs: Vec<TableColumnDesc>) -> Self {
+        let schema = {
+            let fields = column_descs
+                .iter()
+                .map(|c| Field::new(c.data_type.clone()))
+                .collect();
+            Schema::new(fields)
+        };
+
+        // row id will be inserted at first column in `InsertExecutor`
+        // FIXME: should we check `is_primary` in pb `ColumnDesc` after we support pk?
+        let pk_columns = vec![0];
+        let order_pairs = vec![(OrderType::Ascending, 0)];
+
+        Self {
+            keyspace,
+            schema,
+            column_descs: Some(column_descs),
             pk_columns,
             sort_key_serializer: OrderedRowsSerializer::new(order_pairs),
         }
@@ -184,7 +218,15 @@ where
         self
     }
 
-    fn schema(&self) -> Schema {
-        self.schema.clone()
+    fn schema(&self) -> Cow<Schema> {
+        Cow::Borrowed(&self.schema)
+    }
+
+    fn column_descs(&self) -> Cow<[TableColumnDesc]> {
+        Cow::Borrowed(
+            self.column_descs
+                .as_ref()
+                .expect("table is created for materialized view"),
+        )
     }
 }

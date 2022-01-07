@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use lazy_static::lazy_static;
 use risingwave_common::error::Result;
 use tokio::sync::Mutex;
 
@@ -22,12 +23,20 @@ impl Default for MemoryStateStore {
         Self::new()
     }
 }
+
 impl MemoryStateStore {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(BTreeMap::new())),
             stats: DEFAULT_STATE_STORE_STATS.clone(),
         }
+    }
+
+    pub fn shared() -> Self {
+        lazy_static! {
+            static ref STORE: MemoryStateStore = MemoryStateStore::new();
+        }
+        STORE.clone()
     }
 
     /// Verify if the ingested batch does not have duplicated key.

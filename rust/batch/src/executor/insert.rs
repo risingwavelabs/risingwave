@@ -1,3 +1,4 @@
+use std::iter::once;
 use std::sync::Arc;
 
 use prost::Message;
@@ -41,42 +42,70 @@ impl Executor for InsertExecutor {
         }
 
         let source = self.source_manager.get_source(&self.table_id)?;
-        let table_source = if let SourceImpl::Table(ref t) = *source.source {
-            t
-        } else {
-            panic!("InsertExecutor: table source expected");
+
+        let do_insert = |chunk: StreamChunk| async {
+            match source.source.as_ref() {
+                SourceImpl::Table(t) => {
+                    // All writers share a single `TableSourceCore` so it's okay to create it every
+                    // time.
+                    let mut writer = t.create_writer()?;
+                    writer.write(chunk).await?;
+                }
+                SourceImpl::TableV2(t) => {
+                    // All writers share a single `TableSourceV2Core` so it's okay to create it
+                    // every time.
+                    let mut writer = t.create_writer()?;
+                    writer.write(chunk).await?;
+                }
+                _ => unreachable!(),
+            };
+            Ok::<_, RwError>(())
         };
-        let mut writer = table_source.create_writer()?;
+
+        let do_flush = || async {
+            match source.source.as_ref() {
+                SourceImpl::Table(t) => {
+                    let mut writer = t.create_writer()?;
+                    writer.flush().await?;
+                }
+                SourceImpl::TableV2(t) => {
+                    let mut writer = t.create_writer()?;
+                    writer.flush().await?; // this is currently no op
+                }
+                _ => unreachable!(),
+            };
+            Ok::<_, RwError>(())
+        };
+
+        let next_row_id = || match source.source.as_ref() {
+            SourceImpl::Table(t) => t.next_row_id(),
+            SourceImpl::TableV2(t) => t.next_row_id(),
+            _ => unreachable!(),
+        };
 
         let mut rows_inserted = 0;
         while let Some(child_chunk) = self.child.next().await? {
             let len = child_chunk.capacity();
             assert!(child_chunk.visibility().is_none());
 
-            let mut columns = Vec::with_capacity(child_chunk.columns().len() + 1);
-
             // add row-id column as first column
             let mut builder = I64ArrayBuilder::new(len).unwrap();
             for _ in 0..len {
-                builder
-                    .append(Some(table_source.next_row_id() as i64))
-                    .unwrap();
+                builder.append(Some(next_row_id() as i64)).unwrap();
             }
             let rowid_column = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
-            columns.insert(0, rowid_column);
 
-            for col in child_chunk.columns().iter() {
-                columns.push(col.clone());
-            }
-
+            let columns = once(rowid_column)
+                .chain(child_chunk.columns().iter().map(|c| c.to_owned()))
+                .collect();
             let chunk = StreamChunk::new(vec![Op::Insert; len], columns, None);
-            writer.write(chunk).await?;
 
+            do_insert(chunk).await?;
             rows_inserted += len;
         }
 
         // FIXME: should do flush on checkpoint in the future
-        writer.flush().await?;
+        do_flush().await?;
 
         // create ret value
         {
@@ -142,8 +171,11 @@ mod tests {
     use risingwave_common::column_nonnull;
     use risingwave_common::types::{DataTypeKind, DecimalType, Int64Type};
     use risingwave_common::util::downcast_arc;
-    use risingwave_source::{MemSourceManager, SourceManager};
+    use risingwave_source::{
+        MemSourceManager, SourceManager, StreamSourceReader, TableV2ReaderContext,
+    };
     use risingwave_storage::bummock::{BummockResult, BummockTable};
+    use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::{ScannableTable, SimpleTableManager, TableManager};
     use risingwave_storage::*;
 
@@ -416,6 +448,137 @@ mod tests {
             }
         }
         // Third insertion test ends.
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_insert_executor_for_table_v2() -> Result<()> {
+        let table_manager = Arc::new(SimpleTableManager::new());
+        let source_manager = Arc::new(MemSourceManager::new());
+        let store = MemoryStateStore::new();
+
+        // Schema for mock executor.
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    data_type: Int64Type::create(false),
+                },
+                Field {
+                    data_type: Int64Type::create(false),
+                },
+            ],
+        };
+        let mut mock_executor = MockExecutor::new(schema.clone());
+
+        // Schema of first table
+        let schema = Schema {
+            fields: vec![
+                Field {
+                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
+                },
+                Field {
+                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
+                },
+                Field {
+                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
+                },
+            ],
+        };
+
+        let table_columns: Vec<_> = schema
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(i, f)| TableColumnDesc {
+                data_type: f.data_type.clone(),
+                column_id: i as i32, // use column index as column id
+            })
+            .collect();
+
+        let col1 = column_nonnull! { I64Array, [1, 3, 5, 7, 9] };
+        let col2 = column_nonnull! { I64Array, [2, 4, 6, 8, 10] };
+        let data_chunk: DataChunk = DataChunk::builder().columns(vec![col1, col2]).build();
+        mock_executor.add(data_chunk.clone());
+
+        // Create the first table.
+        let table_id = TableId::new(SchemaId::default(), 0);
+        let table = table_manager
+            .create_table_v2(
+                &table_id,
+                table_columns.to_vec(),
+                StateStoreImpl::MemoryStateStore(store.clone()),
+            )
+            .await?;
+        source_manager.create_table_source_v2(&table_id, table)?;
+
+        let mut insert_executor = InsertExecutor {
+            table_id: table_id.clone(),
+            source_manager: source_manager.clone(),
+            child: Box::new(mock_executor),
+            executed: false,
+            schema: Schema {
+                fields: vec![Field {
+                    data_type: Int64Type::create(false),
+                }],
+            },
+        };
+        insert_executor.open().await.unwrap();
+        let fields = &insert_executor.schema().fields;
+        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int64);
+        let result = insert_executor.next().await?.unwrap();
+        insert_executor.close().await.unwrap();
+        assert_eq!(
+            result
+                .column_at(0)?
+                .array()
+                .as_int64()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![Some(5)]
+        );
+
+        // Check the reader.
+        let source_desc = source_manager.get_source(&table_id)?;
+        let source = source_desc.source.as_table_v2();
+        let mut reader = source.stream_reader(TableV2ReaderContext, vec![0, 1, 2])?;
+
+        reader.open().await?;
+        let chunk = reader.next().await?;
+
+        assert_eq!(
+            chunk.columns()[0]
+                .array()
+                .as_int64()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![Some(0), Some(1), Some(2), Some(3), Some(4)]
+        );
+
+        assert_eq!(
+            chunk.columns()[1]
+                .array()
+                .as_int64()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
+        );
+
+        assert_eq!(
+            chunk.columns()[2]
+                .array()
+                .as_int64()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
+        );
+
+        // There's nothing in store since `TableSourceV2` has no side effect.
+        // Data will be materialized in associated streaming task.
+        let store_content = store.scan(&[], None).await?;
+        assert!(store_content.is_empty());
+
+        // First insertion test ends.
 
         Ok(())
     }

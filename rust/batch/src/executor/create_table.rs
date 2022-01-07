@@ -8,9 +8,9 @@ use risingwave_common::util::downcast_arc;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::CreateTableNode;
 use risingwave_source::SourceManagerRef;
-use risingwave_storage::bummock::BummockTable;
+use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::TableManagerRef;
-use risingwave_storage::TableColumnDesc;
+use risingwave_storage::{StateStoreImpl, TableColumnDesc};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
@@ -20,6 +20,8 @@ pub(super) struct CreateTableExecutor {
     table_manager: TableManagerRef,
     source_manager: SourceManagerRef,
     table_columns: Vec<TableColumnDesc>,
+
+    v2: bool,
 }
 
 impl BoxedExecutorBuilder for CreateTableExecutor {
@@ -47,6 +49,7 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
             table_manager: source.global_task_env().table_manager_ref(),
             source_manager: source.global_task_env().source_manager_ref(),
             table_columns,
+            v2: false,
         }))
     }
 }
@@ -56,14 +59,30 @@ impl Executor for CreateTableExecutor {
     async fn open(&mut self) -> Result<()> {
         info!("create table executor initing!");
         let table_columns = std::mem::take(&mut self.table_columns);
-        let table = self
-            .table_manager
-            .create_table(&self.table_id, table_columns)
-            .await?;
-        self.source_manager.create_table_source(
+
+        match self.v2 {
+            true => {
+                let table = self
+          .table_manager
+          .create_table_v2(
             &self.table_id,
-            downcast_arc::<BummockTable>(table.into_any())?,
-        )?;
+            table_columns,
+            StateStoreImpl::MemoryStateStore(MemoryStateStore::shared()), // FIXME: specify store
+          )
+          .await?;
+                self.source_manager
+                    .create_table_source_v2(&self.table_id, table)?;
+            }
+            false => {
+                let table = self
+                    .table_manager
+                    .create_table(&self.table_id, table_columns)
+                    .await?;
+                self.source_manager
+                    .create_table_source(&self.table_id, downcast_arc(table.into_any())?)?;
+            }
+        }
+
         Ok(())
     }
 

@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::borrow::Cow;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
@@ -94,13 +95,19 @@ impl ScannableTable for BummockTable {
         }
     }
 
-    fn schema(&self) -> Schema {
-        Schema::new(
+    fn schema(&self) -> Cow<Schema> {
+        let schema = Schema::new(
             self.table_columns
                 .iter()
                 .map(|c| Field::new(c.data_type.clone()))
                 .collect(),
-        )
+        );
+
+        Cow::Owned(schema)
+    }
+
+    fn column_descs(&self) -> Cow<[TableColumnDesc]> {
+        Cow::Borrowed(self.table_columns.as_slice())
     }
 }
 

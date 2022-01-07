@@ -1,6 +1,7 @@
 pub mod mview;
 mod simple_manager;
 use std::any::Any;
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -11,7 +12,7 @@ use risingwave_common::error::Result;
 pub use simple_manager::*;
 
 use crate::bummock::BummockResult;
-use crate::TableColumnDesc;
+use crate::{StateStoreImpl, TableColumnDesc};
 
 #[async_trait::async_trait]
 /// `TableManager` is an abstraction of managing a collection of tables.
@@ -23,6 +24,13 @@ pub trait TableManager: Sync + Send + AsRef<dyn Any> {
         &self,
         table_id: &TableId,
         table_columns: Vec<TableColumnDesc>,
+    ) -> Result<ScannableTableRef>;
+
+    async fn create_table_v2(
+        &self,
+        table_id: &TableId,
+        table_columns: Vec<TableColumnDesc>,
+        store: StateStoreImpl,
     ) -> Result<ScannableTableRef>;
 
     /// Get a specific table.
@@ -38,7 +46,7 @@ pub trait TableIter: Send {
 }
 
 #[async_trait::async_trait]
-pub trait ScannableTable: Sync + Send + Any {
+pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
     /// Open and return an iterator.
     async fn iter(&self) -> Result<TableIterRef>;
 
@@ -50,23 +58,28 @@ pub trait ScannableTable: Sync + Send + Any {
     /// by row. If the underlying storage is a column store, we may implement this function
     /// specifically.
     async fn get_data_by_columns(&self, column_ids: &[i32]) -> Result<BummockResult> {
+        let indices = column_ids
+            .iter()
+            .map(|id| {
+                self.column_descs()
+                    .iter()
+                    .position(|c| c.column_id == *id)
+                    .expect("column id not exists")
+            })
+            .collect_vec();
+
         let mut iter = self.iter().await?;
 
         let schema = self.schema();
-        let mut builders = column_ids
+        let mut builders = indices
             .iter()
-            .map(|i| {
-                schema.fields()[*i as usize]
-                    .data_type_ref()
-                    .create_array_builder(0)
-            })
+            .map(|i| schema.fields()[*i].data_type_ref().create_array_builder(0))
             .collect::<Result<Vec<_>>>()?;
 
         while let Some(row) = iter.next().await? {
-            for i in column_ids {
-                let i = *i as usize;
-                let builder = builders.get_mut(i).unwrap();
-                builder.append_datum(row.0.get(i).unwrap())?;
+            for i in &indices {
+                let builder = builders.get_mut(*i).unwrap();
+                builder.append_datum(row.0.get(*i).unwrap())?;
             }
         }
 
@@ -81,7 +94,9 @@ pub trait ScannableTable: Sync + Send + Any {
 
     fn into_any(self: Arc<Self>) -> Arc<dyn Any + Sync + Send>;
 
-    fn schema(&self) -> Schema;
+    fn schema(&self) -> Cow<Schema>;
+
+    fn column_descs(&self) -> Cow<[TableColumnDesc]>;
 }
 
 /// Reference of a `TableManager`.

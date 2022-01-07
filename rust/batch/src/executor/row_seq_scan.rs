@@ -61,7 +61,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
             .iter()
             .map(|f| f.data_type.clone())
             .collect_vec();
-        let schema = schema.clone();
+        let schema = schema.into_owned();
 
         let column_ids = seq_scan_node
             .get_column_ids()

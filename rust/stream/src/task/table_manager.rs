@@ -6,11 +6,10 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::{ensure, gen_error};
 use risingwave_pb::plan::ColumnDesc;
 use risingwave_storage::table::{ScannableTableRef, SimpleTableManager, TableManager};
-use risingwave_storage::Keyspace;
+use risingwave_storage::{dispatch_state_store, Keyspace, StateStoreImpl};
 
-use crate::dispatch_state_store;
 use crate::executor::MViewTable;
-use crate::task::StateStoreImpl;
+
 #[async_trait::async_trait]
 /// `TableManager` is an abstraction of managing a collection of tables.
 /// The interface between executors and storage should be table-oriented.

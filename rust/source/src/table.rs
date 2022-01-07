@@ -47,17 +47,8 @@ impl TableSource {
     const CHANNEL_CAPACITY: usize = 1000;
 
     pub fn new(table: Arc<BummockTable>) -> Self {
-        let source_columns = table
-            .columns()
-            .iter()
-            .map(|c| SourceColumnDesc {
-                name: "".to_string(),
-                data_type: c.data_type.clone(),
-                column_id: c.column_id,
-                skip_parse: false,
-                is_primary: false,
-            })
-            .collect();
+        // TODO: this snippet is redundant
+        let source_columns = table.columns().iter().map(SourceColumnDesc::from).collect();
 
         let (tx, _rx) = broadcast::channel(TableSource::CHANNEL_CAPACITY);
         let core = TableSourceCore {

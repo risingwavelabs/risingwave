@@ -9,7 +9,8 @@ use risingwave_common::{ensure, gen_error};
 
 use super::{ScannableTableRef, TableManager};
 use crate::bummock::BummockTable;
-use crate::TableColumnDesc;
+use crate::table::mview::MViewTable;
+use crate::{dispatch_state_store, Keyspace, StateStoreImpl, TableColumnDesc};
 
 /// A simple implementation of in memory table for local tests.
 /// It will be replaced in near future when replaced by locally
@@ -49,6 +50,29 @@ impl TableManager for SimpleTableManager {
         let table = Arc::new(BummockTable::new(table_id, table_columns));
         tables.insert(table_id.clone(), table.clone());
         Ok(table as ScannableTableRef)
+    }
+
+    async fn create_table_v2(
+        &self,
+        table_id: &TableId,
+        table_columns: Vec<TableColumnDesc>,
+        store: StateStoreImpl,
+    ) -> Result<ScannableTableRef> {
+        let mut tables = self.get_tables();
+
+        ensure!(
+            !tables.contains_key(table_id),
+            "Table id already exists: {:?}",
+            table_id
+        );
+
+        let table = dispatch_state_store!(store, store, {
+            let keyspace = Keyspace::table_root(store, table_id);
+            Arc::new(MViewTable::new_batch(keyspace, table_columns)) as ScannableTableRef
+        });
+        tables.insert(table_id.clone(), table.clone());
+
+        Ok(table)
     }
 
     fn get_table(&self, table_id: &TableId) -> Result<ScannableTableRef> {

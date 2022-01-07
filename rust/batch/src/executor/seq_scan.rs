@@ -115,7 +115,7 @@ mod tests {
             .collect();
         let table = BummockTable::new(&table_id, table_columns);
 
-        let fields = table.schema().fields;
+        let schema = table.schema().into_owned();
         let col1 = column_nonnull! { I64Array, [1, 3, 5, 7, 9] };
         let col2 = column_nonnull! { I64Array, [2, 4, 6, 8, 10] };
         let data_chunk1 = DataChunk::builder().columns(vec![col1]).build();
@@ -126,7 +126,7 @@ mod tests {
         let mut seq_scan_executor = SeqScanExecutor {
             table: Arc::new(table),
             column_ids: vec![0],
-            schema: Schema { fields },
+            schema,
             snapshot: VecDeque::new(),
         };
         seq_scan_executor.open().await.unwrap();

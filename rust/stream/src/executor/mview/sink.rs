@@ -144,11 +144,11 @@ mod tests {
     use risingwave_pb::plan::ColumnDesc;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::{SimpleTableManager, TableManager};
-    use risingwave_storage::Keyspace;
+    use risingwave_storage::{Keyspace, StateStoreImpl};
 
     use crate::executor::test_utils::*;
     use crate::executor::*;
-    use crate::task::{StateStoreImpl, StreamTableManager};
+    use crate::task::StreamTableManager;
     use crate::*;
 
     #[tokio::test]

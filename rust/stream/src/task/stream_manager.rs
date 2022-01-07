@@ -19,7 +19,7 @@ use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::object::ConnectionInfo;
 use risingwave_storage::rocksdb_local::RocksDBStateStore;
 use risingwave_storage::tikv::TikvStateStore;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 use tokio::task::JoinHandle;
 
 use crate::executor::*;
@@ -31,26 +31,6 @@ pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
 pub type ConsumableChannelPair = (Option<Sender<Message>>, Option<Receiver<Message>>);
 pub type ConsumableChannelVecPair = (Vec<Sender<Message>>, Vec<Receiver<Message>>);
 pub type UpDownFragmentIds = (u32, u32);
-
-#[derive(Clone)]
-pub enum StateStoreImpl {
-    HummockStateStore(HummockStateStore),
-    MemoryStateStore(MemoryStateStore),
-    RocksDBStateStore(RocksDBStateStore),
-    TikvStateStore(TikvStateStore),
-}
-
-#[macro_export]
-macro_rules! dispatch_state_store {
-    ($impl:expr, $store:ident, $body:tt) => {
-        match $impl {
-            StateStoreImpl::MemoryStateStore($store) => $body,
-            StateStoreImpl::HummockStateStore($store) => $body,
-            StateStoreImpl::TikvStateStore($store) => $body,
-            StateStoreImpl::RocksDBStateStore($store) => $body,
-        }
-    };
-}
 
 /// Stores the data which may be modified from the data plane.
 pub struct SharedContext {
@@ -260,7 +240,7 @@ impl StreamManagerCore {
     fn get_state_store_impl(state_store: Option<&str>) -> StateStoreImpl {
         match state_store {
             Some("in_memory") | Some("in-memory") | None => {
-                StateStoreImpl::MemoryStateStore(MemoryStateStore::new())
+                StateStoreImpl::MemoryStateStore(MemoryStateStore::shared())
             }
             Some(tikv) if tikv.starts_with("tikv") => {
                 StateStoreImpl::TikvStateStore(TikvStateStore::new(vec![tikv
