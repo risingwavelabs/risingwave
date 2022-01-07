@@ -9,8 +9,6 @@ import com.risingwave.proto.metanode.CreateMaterializedViewResponse;
 import com.risingwave.proto.plan.TableRefId;
 import com.risingwave.proto.streaming.plan.StreamNode;
 import com.risingwave.rpc.MetaClient;
-import com.risingwave.scheduler.streaming.graph.StreamGraph;
-import java.util.List;
 
 /** The implementation of a stream manager synchronized with meta service. */
 public class RemoteStreamManager implements StreamManager {
@@ -22,25 +20,6 @@ public class RemoteStreamManager implements StreamManager {
   }
 
   @Override
-  public int createFragment() {
-    throw new UnsupportedOperationException("not supported, use createMaterializedView instead.");
-  }
-
-  @Override
-  public List<StreamRequest> scheduleStreamGraph(StreamGraph graph) {
-    throw new UnsupportedOperationException("not supported, use createMaterializedView instead.");
-  }
-
-  @Override
-  public String nextScheduleId() {
-    throw new UnsupportedOperationException("not supported, use createMaterializedView instead.");
-  }
-
-  @Override
-  public ActorInfoTable getActorInfo(List<Integer> actorIdList) {
-    throw new UnsupportedOperationException("not supported, use createMaterializedView instead.");
-  }
-
   public void createMaterializedView(StreamNode streamNode, TableRefId tableRefId) {
     CreateMaterializedViewRequest.Builder builder = CreateMaterializedViewRequest.newBuilder();
     builder.setStreamNode(streamNode);

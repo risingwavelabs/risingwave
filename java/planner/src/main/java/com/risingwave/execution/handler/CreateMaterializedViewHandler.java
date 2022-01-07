@@ -9,7 +9,6 @@ import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.execution.result.DdlResult;
-import com.risingwave.node.WorkerNodeManager;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.planner.planner.streaming.StreamPlanner;
 import com.risingwave.planner.rel.serialization.StreamingPlanSerializer;
@@ -17,14 +16,8 @@ import com.risingwave.planner.rel.streaming.RwStreamMaterializedView;
 import com.risingwave.planner.rel.streaming.StreamingPlan;
 import com.risingwave.proto.plan.TableRefId;
 import com.risingwave.proto.streaming.plan.StreamNode;
-import com.risingwave.proto.streaming.streamnode.BroadcastActorInfoTableRequest;
-import com.risingwave.proto.streaming.streamnode.BuildFragmentRequest;
-import com.risingwave.proto.streaming.streamnode.UpdateFragmentRequest;
 import com.risingwave.rpc.Messages;
-import com.risingwave.scheduler.streaming.RemoteStreamManager;
-import com.risingwave.scheduler.streaming.StreamFragmenter;
 import com.risingwave.scheduler.streaming.StreamManager;
-import com.risingwave.scheduler.streaming.graph.StreamGraph;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlCreateMaterializedView;
@@ -66,44 +59,11 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     TableCatalog catalog = convertPlanToCatalog(tableName, plan, context);
     plan.getStreamingPlan().setTableId(catalog.getId());
     StreamManager streamManager = context.getStreamManager();
-    if (streamManager instanceof RemoteStreamManager) {
-      RemoteStreamManager remoteStreamManager = (RemoteStreamManager) streamManager;
-      StreamNode streamNode = StreamingPlanSerializer.serialize(plan.getStreamingPlan());
-      log.debug("stream node ser:\n" + Messages.jsonFormat(streamNode));
-      TableRefId tableRefId = Messages.getTableRefId(catalog.getId());
+    StreamNode streamNode = StreamingPlanSerializer.serialize(plan.getStreamingPlan());
+    log.debug("stream node ser:\n" + Messages.jsonFormat(streamNode));
+    TableRefId tableRefId = Messages.getTableRefId(catalog.getId());
 
-      remoteStreamManager.createMaterializedView(streamNode, tableRefId);
-      return new DdlResult(StatementType.CREATE_MATERIALIZED_VIEW, 0);
-    }
-
-    // Generate a stream graph that represents the dependencies between stream fragments.
-    StreamGraph streamGraph = StreamFragmenter.generateGraph(plan, context);
-
-    // Schedule fragments among workers.
-    WorkerNodeManager nodeManager = context.getWorkerNodeManager();
-    var clientManager = context.getComputeClientManager();
-    var streamRequests = streamManager.scheduleStreamGraph(streamGraph);
-    var actorInfo = streamManager.getActorInfo(streamGraph.getAllActorIds());
-
-    for (var streamRequest : streamRequests) {
-      var node = streamRequest.getWorkerNode();
-      var client = clientManager.getOrCreate(node);
-
-      BroadcastActorInfoTableRequest actorInfoTableRequest = actorInfo.serialize();
-      log.debug("ActorInfoTable:\n" + Messages.jsonFormat(actorInfoTableRequest));
-      client.broadcastActorInfoTable(actorInfoTableRequest);
-
-      String updateRequestId = streamManager.nextScheduleId();
-      UpdateFragmentRequest updateFragmentRequest = streamRequest.serialize(updateRequestId);
-      log.debug("UpdateFragmentRequest:\n" + Messages.jsonFormat(updateFragmentRequest));
-      client.updateFragment(updateFragmentRequest);
-
-      String buildRequestId = streamManager.nextScheduleId();
-      BuildFragmentRequest buildFragmentRequest = streamRequest.buildRequest(buildRequestId);
-      log.debug("BuildFragmentRequest:\n" + Messages.jsonFormat(buildFragmentRequest));
-      client.buildFragment(buildFragmentRequest);
-    }
-
+    streamManager.createMaterializedView(streamNode, tableRefId);
     return new DdlResult(StatementType.CREATE_MATERIALIZED_VIEW, 0);
   }
 

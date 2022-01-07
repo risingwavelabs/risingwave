@@ -12,7 +12,6 @@ import com.risingwave.planner.util.PlannerTestCase;
 import com.risingwave.planner.util.PlannerTestDdlLoader;
 import com.risingwave.proto.streaming.plan.StreamNode;
 import com.risingwave.rpc.Messages;
-import com.risingwave.scheduler.streaming.StreamFragmenter;
 import java.util.List;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlCreateMaterializedView;
@@ -20,7 +19,6 @@ import org.apache.calcite.sql.ddl.SqlCreateMaterializedView;
 /** Test base for stream plan. */
 public abstract class StreamPlanTestBase extends SqlTestBase {
   protected StreamPlanner streamPlanner;
-  protected StreamFragmenter streamFragmenter;
 
   protected void init() {
     super.initEnv();
@@ -31,7 +29,6 @@ public abstract class StreamPlanTestBase extends SqlTestBase {
             LeaderServerConfigurations.ClusterMode.Distributed);
     initTables();
     streamPlanner = new StreamPlanner(true);
-    streamFragmenter = new StreamFragmenter();
   }
 
   private void initTables() {
