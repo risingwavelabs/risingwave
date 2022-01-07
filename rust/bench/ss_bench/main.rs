@@ -1,13 +1,16 @@
-mod workload_generator;
-mod writebatch;
-
 use std::sync::Arc;
+
+mod operation;
+mod workload_generator;
 
 use clap::Parser;
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_storage::hummock::{HummockOptions, HummockStateStore, HummockStorage};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::object::{ConnectionInfo, S3ObjectStore};
+use risingwave_storage::StateStore;
+
+use crate::operation::{getrandom, writebatch};
 
 #[derive(Parser, Debug)]
 pub struct Opts {
@@ -43,7 +46,7 @@ pub struct Opts {
     kvs_per_batch: u32,
 
     #[clap(long, default_value_t = 10)]
-    duration: u32,
+    iterations: u32,
 }
 
 fn get_checksum_algo(algo: &str) -> ChecksumAlg {
@@ -100,6 +103,14 @@ fn get_state_store_impl(opts: &Opts) -> StateStoreImpl {
     }
 }
 
+async fn run_op(store: impl StateStore, opts: &Opts) {
+    match opts.op.as_ref() {
+        "writebatch" => writebatch::run(store, opts).await,
+        "getrandom" => getrandom::run(store, opts).await,
+        other => unimplemented!("operation \"{}\" is not supported.", other),
+    }
+}
+
 /// This is used to bench the state store performance.
 ///
 /// USAGE:
@@ -117,16 +128,14 @@ fn get_state_store_impl(opts: &Opts) -> StateStoreImpl {
 ///         --store <STORE>                                  [default: in-memory]
 ///         --table-size-mb <TABLE_SIZE_MB>                  [default: 256]
 ///         --value-size <VALUE_SIZE>                        [default: 10]
-#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() {
     let opts = Opts::parse();
 
-    println!("input options: {:?}", &opts);
+    println!("Input configurations: {:?}", &opts);
 
-    let store = get_state_store_impl(&opts);
-
-    match opts.op.as_ref() {
-        "writebatch" => writebatch::run(store, &opts).await,
-        other => unimplemented!("operation \"{}\" is not supported.", other),
-    }
+    match get_state_store_impl(&opts) {
+        StateStoreImpl::HummockStateStore(store) => run_op(store, &opts).await,
+        StateStoreImpl::MemoryStateStore(store) => run_op(store, &opts).await,
+    };
 }
