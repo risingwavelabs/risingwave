@@ -7,6 +7,8 @@ mod reverse_concat;
 pub use reverse_concat::*;
 mod reverse_sorted;
 pub use reverse_sorted::*;
+mod reverse_user_key;
+pub use reverse_user_key::*;
 mod sorted;
 pub use sorted::*;
 mod sorted_inner;

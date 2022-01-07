@@ -116,7 +116,7 @@ impl TestValidator {
     #[inline]
     pub fn assert_key(&self, idx: usize, key: &[u8]) {
         let expected = self.cfg.gen_key(idx);
-        assert!(key == expected.as_slice());
+        assert_eq!(key, expected.as_slice());
     }
 
     #[inline]
@@ -124,7 +124,7 @@ impl TestValidator {
         let expected = self.cfg.gen_key(idx);
 
         let expected = user_key(&expected);
-        assert!(key == expected);
+        assert_eq!(key, expected);
     }
 
     #[inline]
@@ -137,7 +137,7 @@ impl TestValidator {
     pub fn assert_value(&self, idx: usize, value: &[u8]) {
         let expected = self.cfg.gen_value(idx);
         let real = value;
-        assert!(real == expected.as_slice());
+        assert_eq!(real, expected.as_slice());
     }
 
     #[inline]
