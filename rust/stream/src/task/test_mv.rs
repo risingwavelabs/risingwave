@@ -106,13 +106,13 @@ async fn test_stream_mv_proto() {
         pk_indices: vec![],
     };
     let fragment_proto = StreamFragment {
-        fragment_id: 1,
+        actor_id: 1,
         nodes: Some(mview_proto),
         dispatcher: Some(Dispatcher {
             r#type: DispatcherType::Simple as i32,
             column_idx: 0,
         }),
-        downstream_fragment_id: vec![233],
+        downstream_actor_id: vec![233],
     };
 
     // Initialize storage.
@@ -162,14 +162,14 @@ async fn test_stream_mv_proto() {
     let env = StreamTaskEnv::new(table_manager.clone(), source_manager, socket_addr);
 
     let actor_info_proto = ActorInfo {
-        fragment_id: 1,
+        actor_id: 1,
         host: Some(HostAddress {
             host: "127.0.0.1".into(),
             port,
         }),
     };
     let actor_info_proto2 = ActorInfo {
-        fragment_id: 233,
+        actor_id: 233,
         host: Some(HostAddress {
             host: "127.0.0.1".into(),
             port,

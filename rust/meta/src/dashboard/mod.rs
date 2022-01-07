@@ -126,19 +126,19 @@ mod handlers {
 
     #[derive(Serialize)]
     pub struct JsonStreamFragment {
-        fragment_id: u32,
+        actor_id: u32,
         nodes: JsonStreamNode,
         dispatcher: JsonDispatcher,
-        downstream_fragment_id: Vec<u32>,
+        downstream_actor_id: Vec<u32>,
     }
 
     impl From<&StreamFragment> for JsonStreamFragment {
         fn from(that: &StreamFragment) -> Self {
             JsonStreamFragment {
-                fragment_id: that.get_fragment_id(),
+                actor_id: that.get_actor_id(),
                 nodes: that.get_nodes().into(),
                 dispatcher: that.get_dispatcher().into(),
-                downstream_fragment_id: that.get_downstream_fragment_id().clone(),
+                downstream_actor_id: that.get_downstream_actor_id().clone(),
             }
         }
     }

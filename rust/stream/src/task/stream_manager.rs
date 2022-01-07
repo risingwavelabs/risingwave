@@ -122,7 +122,7 @@ pub struct StreamManagerCore {
 
     sender_placeholder: Vec<UnboundedSender<Message>>,
 
-    /// Mock source, `fragment_id = 0`.
+    /// Mock source, `actor_id = 0`.
     /// TODO: remove this
     mock_source: ConsumableChannelPair,
 
@@ -338,7 +338,7 @@ impl StreamManagerCore {
         &mut self,
         input: Box<dyn Executor>,
         dispatcher: &stream_plan::Dispatcher,
-        fragment_id: u32,
+        actor_id: u32,
         downstreams: &[u32],
     ) -> Result<Box<dyn StreamConsumer>> {
         // create downstream receivers
@@ -351,14 +351,14 @@ impl StreamManagerCore {
         let outputs = downstreams
             .iter()
             .map(|down_id| {
-                let up_down_ids = (fragment_id, *down_id);
+                let up_down_ids = (actor_id, *down_id);
                 let host_addr = self
                     .actors
                     .get(down_id)
                     .ok_or_else(|| {
                         RwError::from(ErrorCode::InternalError(format!(
                             "channel between {} and {} does not exist",
-                            fragment_id, down_id
+                            actor_id, down_id
                         )))
                     })?
                     .get_host();
@@ -367,11 +367,11 @@ impl StreamManagerCore {
                     // if this is a local downstream fragment
                     let mut guard = self.context.lock_channel_pool();
                     let tx = guard
-                        .get_mut(&(fragment_id, *down_id))
+                        .get_mut(&(actor_id, *down_id))
                         .ok_or_else(|| {
                             RwError::from(ErrorCode::InternalError(format!(
                                 "channel between {} and {} does not exist",
-                                fragment_id, down_id
+                                actor_id, down_id
                             )))
                         })?
                         .0
@@ -379,7 +379,7 @@ impl StreamManagerCore {
                         .ok_or_else(|| {
                             RwError::from(ErrorCode::InternalError(format!(
                                 "sender from {} to {} does no exist",
-                                fragment_id, down_id
+                                actor_id, down_id
                             )))
                         })?;
                     Ok(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
@@ -404,14 +404,14 @@ impl StreamManagerCore {
                 Box::new(DispatchExecutor::new(
                     input,
                     HashDataDispatcher::new(outputs, vec![dispatcher.get_column_idx() as usize]),
-                    fragment_id,
+                    actor_id,
                     self.context.clone(),
                 ))
             }
             Broadcast => Box::new(DispatchExecutor::new(
                 input,
                 BroadcastDispatcher::new(outputs),
-                fragment_id,
+                actor_id,
                 self.context.clone(),
             )),
             Simple => {
@@ -420,7 +420,7 @@ impl StreamManagerCore {
                 Box::new(DispatchExecutor::new(
                     input,
                     SimpleDispatcher::new(output),
-                    fragment_id,
+                    actor_id,
                     self.context.clone(),
                 ))
             }
@@ -456,7 +456,7 @@ impl StreamManagerCore {
     /// Create a chain(tree) of nodes, with given `store`.
     fn create_nodes_inner(
         &mut self,
-        fragment_id: u32,
+        actor_id: u32,
         node: &stream_plan::StreamNode,
         env: StreamTaskEnv,
         store: impl StateStore,
@@ -468,7 +468,7 @@ impl StreamManagerCore {
         let mut input: Vec<Box<dyn Executor>> = node
             .input
             .iter()
-            .map(|input| self.create_nodes_inner(fragment_id, input, env.clone(), store.clone()))
+            .map(|input| self.create_nodes_inner(actor_id, input, env.clone(), store.clone()))
             .collect::<Result<Vec<_>>>()?;
 
         let table_manager = env.table_manager();
@@ -675,8 +675,8 @@ impl StreamManagerCore {
             }
             MergeNode(merge_node) => {
                 let schema = Schema::try_from(merge_node.get_input_column_descs())?;
-                let upstreams = merge_node.get_upstream_fragment_id();
-                self.create_merge_node(fragment_id, schema, upstreams, pk_indices)
+                let upstreams = merge_node.get_upstream_actor_id();
+                self.create_merge_node(actor_id, schema, upstreams, pk_indices)
             }
             _ => Err(RwError::from(ErrorCode::InternalError(format!(
                 "unsupported node:{:?}",
@@ -690,18 +690,18 @@ impl StreamManagerCore {
     /// Create a chain(tree) of nodes and return the head executor.
     fn create_nodes(
         &mut self,
-        fragment_id: u32,
+        actor_id: u32,
         node: &stream_plan::StreamNode,
         env: StreamTaskEnv,
     ) -> Result<Box<dyn Executor>> {
         dispatch_state_store!(self.state_store.clone(), store, {
-            self.create_nodes_inner(fragment_id, node, env, store)
+            self.create_nodes_inner(actor_id, node, env, store)
         })
     }
 
     fn create_merge_node(
         &mut self,
-        fragment_id: u32,
+        actor_id: u32,
         schema: Schema,
         upstreams: &[u32],
         pk_indices: PkIndices,
@@ -732,11 +732,11 @@ impl StreamManagerCore {
                         // `MergerExecutor`.
                         let mut guard = self.context.lock_channel_pool();
                         let sender = guard
-                            .get_mut(&(*up_id, fragment_id))
+                            .get_mut(&(*up_id, actor_id))
                             .ok_or_else(|| {
                                 RwError::from(ErrorCode::InternalError(format!(
                                     "channel between {} and {} does not exist",
-                                    up_id, fragment_id
+                                    up_id, actor_id
                                 )))
                             })?
                             .0
@@ -744,7 +744,7 @@ impl StreamManagerCore {
                             .ok_or_else(|| {
                                 RwError::from(ErrorCode::InternalError(format!(
                                     "sender from {} to {} does no exist",
-                                    up_id, fragment_id
+                                    up_id, actor_id
                                 )))
                             })?;
                         // spawn the `RemoteInput`
@@ -752,7 +752,7 @@ impl StreamManagerCore {
                         tokio::spawn(async move {
                             let remote_input_res = RemoteInput::create(
                                 upstream_socket_addr,
-                                (up_id, fragment_id),
+                                (up_id, actor_id),
                                 sender,
                             )
                             .await;
@@ -766,11 +766,11 @@ impl StreamManagerCore {
                     }
                     let mut guard = self.context.lock_channel_pool();
                     Ok(guard
-                        .get_mut(&(*up_id, fragment_id))
+                        .get_mut(&(*up_id, actor_id))
                         .ok_or_else(|| {
                             RwError::from(ErrorCode::InternalError(format!(
                                 "channel between {} and {} does not exist",
-                                up_id, fragment_id
+                                up_id, actor_id
                             )))
                         })?
                         .1
@@ -778,7 +778,7 @@ impl StreamManagerCore {
                         .ok_or_else(|| {
                             RwError::from(ErrorCode::InternalError(format!(
                                 "receiver from {} to {} does no exist",
-                                up_id, fragment_id
+                                up_id, actor_id
                             )))
                         })?)
                 }
@@ -788,10 +788,10 @@ impl StreamManagerCore {
         assert_eq!(
             rxs.len(),
             upstreams.len(),
-            "upstreams are not fully available: {} registered while {} required, fragment_id={}",
+            "upstreams are not fully available: {} registered while {} required, actor_id={}",
             rxs.len(),
             upstreams.len(),
-            fragment_id
+            actor_id
         );
 
         if upstreams.len() == 1 {
@@ -808,20 +808,20 @@ impl StreamManagerCore {
     }
 
     fn build_fragment(&mut self, fragments: &[u32], env: StreamTaskEnv) -> Result<()> {
-        for fragment_id in fragments {
-            let fragment = self.fragments.remove(fragment_id).unwrap();
-            let executor = self.create_nodes(*fragment_id, fragment.get_nodes(), env.clone())?;
+        for actor_id in fragments {
+            let fragment = self.fragments.remove(actor_id).unwrap();
+            let executor = self.create_nodes(*actor_id, fragment.get_nodes(), env.clone())?;
             let dispatcher = self.create_dispatcher(
                 executor,
                 fragment.get_dispatcher(),
-                *fragment_id,
-                fragment.get_downstream_fragment_id(),
+                *actor_id,
+                fragment.get_downstream_actor_id(),
             )?;
 
             debug!("build fragment: {:#?}", &dispatcher);
 
             let actor = Actor::new(dispatcher);
-            self.handles.insert(*fragment_id, tokio::spawn(actor.run()));
+            self.handles.insert(*actor_id, tokio::spawn(actor.run()));
         }
 
         Ok(())
@@ -856,11 +856,11 @@ impl StreamManagerCore {
         req: stream_service::BroadcastActorInfoTableRequest,
     ) -> Result<()> {
         for actor in req.get_info() {
-            let ret = self.actors.insert(actor.get_fragment_id(), actor.clone());
+            let ret = self.actors.insert(actor.get_actor_id(), actor.clone());
             if ret.is_some() {
                 return Err(ErrorCode::InternalError(format!(
                     "duplicated actor {}",
-                    actor.get_fragment_id()
+                    actor.get_actor_id()
                 ))
                 .into());
             }
@@ -870,15 +870,15 @@ impl StreamManagerCore {
 
     /// `drop_fragment` is invoked by the leader node via RPC once the stop barrier arrives at the
     ///  sink. All the actors in the fragments should stop themselves before this method is invoked.
-    fn drop_fragment(&mut self, fragment_id: u32) {
-        let handle = self.handles.remove(&fragment_id).unwrap();
+    fn drop_fragment(&mut self, actor_id: u32) {
+        let handle = self.handles.remove(&actor_id).unwrap();
         let mut channel_pool_guard = self.context.lock_channel_pool();
         let mut exhange_guard = self.context.lock_receivers_for_exchange_service();
-        channel_pool_guard.retain(|(x, _), _| *x != fragment_id);
-        exhange_guard.retain(|(x, _), _| *x != fragment_id);
+        channel_pool_guard.retain(|(x, _), _| *x != actor_id);
+        exhange_guard.retain(|(x, _), _| *x != actor_id);
 
-        self.actors.remove(&fragment_id);
-        self.fragments.remove(&fragment_id);
+        self.actors.remove(&actor_id);
+        self.fragments.remove(&actor_id);
         // Task should have already stopped when this method is invoked.
         handle.abort();
     }
@@ -887,18 +887,18 @@ impl StreamManagerCore {
         for fragment in fragments {
             let ret = self
                 .fragments
-                .insert(fragment.get_fragment_id(), fragment.clone());
+                .insert(fragment.get_actor_id(), fragment.clone());
             if ret.is_some() {
                 return Err(ErrorCode::InternalError(format!(
-                    "duplicated fragment {}",
-                    fragment.get_fragment_id()
+                    "duplicated actor {}",
+                    fragment.get_actor_id()
                 ))
                 .into());
             }
         }
 
         for (current_id, fragment) in &self.fragments {
-            for downstream_id in fragment.get_downstream_fragment_id() {
+            for downstream_id in fragment.get_downstream_actor_id() {
                 // At this time, the graph might not be complete, so we do not check if downstream
                 // has `current_id` as upstream.
                 let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);

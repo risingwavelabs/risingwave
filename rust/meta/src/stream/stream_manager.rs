@@ -103,15 +103,15 @@ impl StreamManager for DefaultStreamManager {
         table_id: &TableRefId,
         fragments: &[StreamFragment],
     ) -> Result<()> {
-        let fragment_ids = fragments
+        let actor_ids = fragments
             .iter()
-            .map(|f| f.get_fragment_id())
+            .map(|f| f.get_actor_id())
             .collect::<Vec<_>>();
 
-        let nodes = self.scheduler.schedule(&fragment_ids).await?;
+        let nodes = self.scheduler.schedule(&actor_ids).await?;
 
         let mut node_fragments_map = HashMap::new();
-        for (node, fragment) in nodes.iter().zip(fragment_ids.clone()) {
+        for (node, fragment) in nodes.iter().zip(actor_ids.clone()) {
             node_fragments_map
                 .entry(node.get_id())
                 .or_insert_with(Vec::new)
@@ -125,14 +125,14 @@ impl StreamManager for DefaultStreamManager {
 
         let fragment_map = fragments
             .iter()
-            .map(|f| (f.fragment_id, f.clone()))
+            .map(|f| (f.actor_id, f.clone()))
             .collect::<HashMap<u32, StreamFragment>>();
 
         let actor_info = nodes
             .iter()
-            .zip(fragment_ids.clone())
+            .zip(actor_ids.clone())
             .map(|(n, f)| ActorInfo {
-                fragment_id: f,
+                actor_id: f,
                 host: n.host.clone(),
             })
             .collect::<Vec<_>>();
@@ -171,7 +171,7 @@ impl StreamManager for DefaultStreamManager {
                 .to_owned()
                 .build_fragment(BuildFragmentRequest {
                     request_id,
-                    fragment_id: fragments,
+                    actor_id: fragments,
                 })
                 .await
                 .to_rw_result_with(format!("failed to connect to {}", node_id))?;
@@ -189,7 +189,7 @@ impl StreamManager for DefaultStreamManager {
                 &table_id.clone(),
                 &TableFragments {
                     table_ref_id: Some(table_id.clone()),
-                    fragment_ids,
+                    actor_ids,
                 },
             )
             .await?;
@@ -234,7 +234,7 @@ mod tests {
 
     struct FakeFragmentState {
         fragment_streams: Mutex<HashMap<u32, StreamFragment>>,
-        fragment_ids: Mutex<HashSet<u32>>,
+        actor_ids: Mutex<HashSet<u32>>,
         actor_infos: Mutex<HashMap<u32, HostAddress>>,
     }
 
@@ -251,7 +251,7 @@ mod tests {
             let req = request.into_inner();
             let mut guard = self.inner.fragment_streams.lock().unwrap();
             for fragment in req.get_fragment() {
-                guard.insert(fragment.get_fragment_id(), fragment.clone());
+                guard.insert(fragment.get_actor_id(), fragment.clone());
             }
 
             Ok(Response::new(UpdateFragmentResponse { status: None }))
@@ -262,14 +262,14 @@ mod tests {
             request: Request<BuildFragmentRequest>,
         ) -> std::result::Result<Response<BuildFragmentResponse>, Status> {
             let req = request.into_inner();
-            let mut guard = self.inner.fragment_ids.lock().unwrap();
-            for id in req.get_fragment_id() {
+            let mut guard = self.inner.actor_ids.lock().unwrap();
+            for id in req.get_actor_id() {
                 guard.insert(*id);
             }
 
             Ok(Response::new(BuildFragmentResponse {
                 request_id: "".to_string(),
-                fragment_id: vec![],
+                actor_id: vec![],
             }))
         }
 
@@ -280,7 +280,7 @@ mod tests {
             let req = request.into_inner();
             let mut guard = self.inner.actor_infos.lock().unwrap();
             for info in req.get_info() {
-                guard.insert(info.get_fragment_id(), info.get_host().clone());
+                guard.insert(info.get_actor_id(), info.get_host().clone());
             }
 
             Ok(Response::new(BroadcastActorInfoTableResponse {
@@ -302,7 +302,7 @@ mod tests {
         let addr = get_host_port("127.0.0.1:12345").unwrap();
         let state = Arc::new(FakeFragmentState {
             fragment_streams: Mutex::new(HashMap::new()),
-            fragment_ids: Mutex::new(HashSet::new()),
+            actor_ids: Mutex::new(HashSet::new()),
             actor_infos: Mutex::new(HashMap::new()),
         });
         let fake_service = FakeStreamService {
@@ -343,10 +343,10 @@ mod tests {
         };
         let fragments = (0..5)
             .map(|i| StreamFragment {
-                fragment_id: i,
+                actor_id: i,
                 nodes: None,
                 dispatcher: None,
-                downstream_fragment_id: vec![],
+                downstream_actor_id: vec![],
             })
             .collect::<Vec<_>>();
 
@@ -360,22 +360,18 @@ mod tests {
                     .fragment_streams
                     .lock()
                     .unwrap()
-                    .get(&f.get_fragment_id())
+                    .get(&f.get_actor_id())
                     .cloned()
                     .unwrap(),
                 f
             );
-            assert!(state
-                .fragment_ids
-                .lock()
-                .unwrap()
-                .contains(&f.get_fragment_id()));
+            assert!(state.actor_ids.lock().unwrap().contains(&f.get_actor_id()));
             assert_eq!(
                 state
                     .actor_infos
                     .lock()
                     .unwrap()
-                    .get(&f.get_fragment_id())
+                    .get(&f.get_actor_id())
                     .cloned()
                     .unwrap(),
                 HostAddress {
@@ -390,7 +386,7 @@ mod tests {
         assert_eq!(locations.get(0).unwrap().get_node().get_id(), 0);
         assert_eq!(locations.get(0).unwrap().fragments, fragments);
         let table_fragments = meta_manager.get_table_fragments(&table_ref_id).await?;
-        assert_eq!(table_fragments.fragment_ids, (0..5).collect::<Vec<u32>>());
+        assert_eq!(table_fragments.actor_ids, (0..5).collect::<Vec<u32>>());
 
         // Gracefully terminate the server.
         shutdown_send.send(()).unwrap();

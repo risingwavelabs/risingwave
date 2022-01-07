@@ -1,12 +1,12 @@
 {
-  "fragmentId": 3,
+  "actorId": 3,
   "nodes": {
     "pkIndices": [0, 1],
     "input": [{
       "input": [{
         "pkIndices": [2],
         "mergeNode": {
-          "upstreamFragmentId": [6],
+          "upstreamActorId": [6],
           "inputColumnDescs": [{
             "columnType": {
               "typeName": "INT32"
@@ -75,5 +75,5 @@
   },
   "dispatcher": {
   },
-  "downstreamFragmentId": [1]
+  "downstreamActorId": [1]
 }

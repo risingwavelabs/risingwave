@@ -27,7 +27,7 @@ pub struct StreamFragmenter {
     /// stream graph builder, to build streaming DAG.
     stream_graph: StreamGraphBuilder,
 
-    /// id generator, used to generate fragment id.
+    /// id generator, used to generate actor id.
     id_gen_manager_ref: IdGeneratorManagerRef,
     /// worker count, used to init actor parallelization.
     worker_count: u32,
@@ -87,8 +87,8 @@ impl StreamFragmenter {
         StreamStage::new(self.next_stage_id.fetch_add(1, Ordering::Relaxed), node)
     }
 
-    /// Generate fragment id from id generator.
-    async fn gen_fragment_id(&self, interval: i32) -> Result<u32> {
+    /// Generate actor id from id generator.
+    async fn gen_actor_id(&self, interval: i32) -> Result<u32> {
         Ok(self
             .id_gen_manager_ref
             .generate_interval(IdCategory::Fragment, interval)
@@ -104,20 +104,20 @@ impl StreamFragmenter {
         last_stage_fragments: Vec<u32>,
     ) -> Result<()> {
         let root_stage = self.stage_graph.get_root_stage();
-        let mut current_fragment_ids = vec![];
+        let mut current_actor_ids = vec![];
         let current_stage_id = current_stage.get_stage_id();
         if current_stage_id == root_stage.get_stage_id() {
             // Stage on the root, generate an actor without dispatcher.
-            let fragment_id = self.gen_fragment_id(1).await?;
+            let actor_id = self.gen_actor_id(1).await?;
             let mut fragment_builder =
-                StreamFragmentBuilder::new(fragment_id, current_stage.get_node());
+                StreamFragmentBuilder::new(actor_id, current_stage.get_node());
             // Set `Broadcast` dispatcher for root stage (means no dispatcher).
             fragment_builder.set_broadcast_dispatcher();
 
             // Add fragment. No dependency needed.
-            current_fragment_ids.push(fragment_id);
+            current_actor_ids.push(actor_id);
             self.stream_graph.add_fragment(fragment_builder);
-            self.stream_graph.set_root_fragment(fragment_id);
+            self.stream_graph.set_root_fragment(actor_id);
         } else {
             let parallel_degree = if self.stage_graph.has_downstream(current_stage_id) {
                 // Stage in the middle.
@@ -131,7 +131,7 @@ impl StreamFragmenter {
             };
 
             let node = current_stage.get_node();
-            let fragment_ids = self.gen_fragment_id(parallel_degree as i32).await?;
+            let actor_ids = self.gen_actor_id(parallel_degree as i32).await?;
             let dispatcher = match node.get_node() {
                 Node::ExchangeNode(exchange_node) => exchange_node.get_dispatcher(),
                 _ => {
@@ -141,17 +141,17 @@ impl StreamFragmenter {
                     ))));
                 }
             };
-            for id in fragment_ids..fragment_ids + parallel_degree {
+            for id in actor_ids..actor_ids + parallel_degree {
                 let stream_node = node.deref().clone();
                 let mut fragment_builder = StreamFragmentBuilder::new(id, Arc::new(stream_node));
                 fragment_builder.set_dispatcher(dispatcher.clone());
                 self.stream_graph.add_fragment(fragment_builder);
-                current_fragment_ids.push(id);
+                current_actor_ids.push(id);
             }
         }
 
         self.stream_graph
-            .add_dependency(&current_fragment_ids, &last_stage_fragments);
+            .add_dependency(&current_actor_ids, &last_stage_fragments);
 
         // Recursively generating fragments on the downstream level.
         if self.stage_graph.has_downstream(current_stage_id) {
@@ -162,7 +162,7 @@ impl StreamFragmenter {
             {
                 self.build_graph_from_stage(
                     self.stage_graph.get_stage_by_id(stage_id).unwrap(),
-                    current_fragment_ids.clone(),
+                    current_actor_ids.clone(),
                 )
                 .await?;
             }

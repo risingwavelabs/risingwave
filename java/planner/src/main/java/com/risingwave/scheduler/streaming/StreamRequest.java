@@ -14,24 +14,24 @@ import java.util.List;
  */
 public class StreamRequest {
   private final WorkerNode workerNode;
-  private final ImmutableList<StreamFragment> fragmentList;
+  private final ImmutableList<StreamFragment> actorList;
 
   public StreamRequest(WorkerNode workerNode, List<StreamFragment> fragmentList) {
     this.workerNode = workerNode;
-    this.fragmentList = ImmutableList.copyOf(fragmentList);
+    this.actorList = ImmutableList.copyOf(fragmentList);
   }
 
   public WorkerNode getWorkerNode() {
     return workerNode;
   }
 
-  public List<StreamFragment> getFragmentList() {
-    return fragmentList;
+  public List<StreamFragment> getActorList() {
+    return actorList;
   }
 
-  public List<Integer> getFragmentIdList() {
+  public List<Integer> getActorIdList() {
     List<Integer> idList = new ArrayList<>();
-    for (var fragment : fragmentList) {
+    for (var fragment : actorList) {
       idList.add(fragment.getId());
     }
     return idList;
@@ -40,8 +40,8 @@ public class StreamRequest {
   public UpdateFragmentRequest serialize(String requestId) {
     UpdateFragmentRequest.Builder builder = UpdateFragmentRequest.newBuilder();
     builder.setRequestId(requestId);
-    for (var fragment : fragmentList) {
-      builder.addFragment(fragment.serialize());
+    for (var actor : actorList) {
+      builder.addFragment(actor.serialize());
     }
     return builder.build();
   }
@@ -49,8 +49,8 @@ public class StreamRequest {
   public BuildFragmentRequest buildRequest(String requestId) {
     BuildFragmentRequest.Builder builder = BuildFragmentRequest.newBuilder();
     builder.setRequestId(requestId);
-    for (int fragmentId : getFragmentIdList()) {
-      builder.addFragmentId(fragmentId);
+    for (int actorId : getActorIdList()) {
+      builder.addActorId(actorId);
     }
     return builder.build();
   }

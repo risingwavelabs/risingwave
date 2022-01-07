@@ -18,9 +18,9 @@ use crate::task::env::StreamTaskEnv;
 
 const PORT: i32 = 2333;
 
-fn helper_make_local_actor(fragment_id: u32) -> ActorInfo {
+fn helper_make_local_actor(actor_id: u32) -> ActorInfo {
     ActorInfo {
-        fragment_id,
+        actor_id,
         host: Some(HostAddress {
             host: "127.0.0.1".into(),
             port: PORT,
@@ -58,12 +58,12 @@ async fn test_stream_proto() {
         .update_fragment(&[
             // create 0 -> (1) -> 3
             StreamFragment {
-                fragment_id: 1,
+                actor_id: 1,
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
                     input: vec![StreamNode {
                         node: Some(Node::MergeNode(MergeNode {
-                            upstream_fragment_id: vec![0],
+                            upstream_actor_id: vec![0],
                             input_column_descs: vec![ColumnDesc {
                                 column_type: Some(DataType {
                                     type_name: TypeName::Int32 as i32,
@@ -81,16 +81,16 @@ async fn test_stream_proto() {
                     r#type: dispatcher::DispatcherType::Hash as i32,
                     column_idx: 0,
                 }),
-                downstream_fragment_id: vec![3],
+                downstream_actor_id: vec![3],
             },
             // create 1 -> (3) -> 7, 11
             StreamFragment {
-                fragment_id: 3,
+                actor_id: 3,
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
                     input: vec![StreamNode {
                         node: Some(Node::MergeNode(MergeNode {
-                            upstream_fragment_id: vec![1],
+                            upstream_actor_id: vec![1],
                             input_column_descs: vec![ColumnDesc {
                                 column_type: Some(DataType {
                                     type_name: TypeName::Int32 as i32,
@@ -108,16 +108,16 @@ async fn test_stream_proto() {
                     r#type: dispatcher::DispatcherType::Hash as i32,
                     column_idx: 0,
                 }),
-                downstream_fragment_id: vec![7, 11],
+                downstream_actor_id: vec![7, 11],
             },
             // create 3 -> (7) -> 13
             StreamFragment {
-                fragment_id: 7,
+                actor_id: 7,
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
                     input: vec![StreamNode {
                         node: Some(Node::MergeNode(MergeNode {
-                            upstream_fragment_id: vec![3],
+                            upstream_actor_id: vec![3],
                             input_column_descs: vec![ColumnDesc {
                                 column_type: Some(DataType {
                                     type_name: TypeName::Int32 as i32,
@@ -135,16 +135,16 @@ async fn test_stream_proto() {
                     r#type: dispatcher::DispatcherType::Hash as i32,
                     column_idx: 0,
                 }),
-                downstream_fragment_id: vec![13],
+                downstream_actor_id: vec![13],
             },
             // create 3 -> (11) -> 13
             StreamFragment {
-                fragment_id: 11,
+                actor_id: 11,
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
                     input: vec![StreamNode {
                         node: Some(Node::MergeNode(MergeNode {
-                            upstream_fragment_id: vec![3],
+                            upstream_actor_id: vec![3],
                             input_column_descs: vec![ColumnDesc {
                                 column_type: Some(DataType {
                                     type_name: TypeName::Int32 as i32,
@@ -162,16 +162,16 @@ async fn test_stream_proto() {
                     r#type: dispatcher::DispatcherType::Simple as i32,
                     column_idx: 0,
                 }),
-                downstream_fragment_id: vec![13],
+                downstream_actor_id: vec![13],
             },
             // create 7, 11 -> (13) -> 233
             StreamFragment {
-                fragment_id: 13,
+                actor_id: 13,
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
                     input: vec![StreamNode {
                         node: Some(Node::MergeNode(MergeNode {
-                            upstream_fragment_id: vec![7, 11],
+                            upstream_actor_id: vec![7, 11],
                             input_column_descs: vec![ColumnDesc {
                                 column_type: Some(DataType {
                                     type_name: TypeName::Int32 as i32,
@@ -189,7 +189,7 @@ async fn test_stream_proto() {
                     r#type: dispatcher::DispatcherType::Simple as i32,
                     column_idx: 0,
                 }),
-                downstream_fragment_id: vec![233],
+                downstream_actor_id: vec![233],
             },
         ])
         .unwrap();

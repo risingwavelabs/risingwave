@@ -76,7 +76,7 @@ impl Output for RemoteOutput {
 pub struct DispatchExecutor<Inner: DataDispatcher> {
     input: Box<dyn Executor>,
     inner: Inner,
-    fragment_id: u32,
+    actor_id: u32,
     context: Arc<SharedContext>,
 }
 
@@ -85,7 +85,7 @@ impl<Inner: DataDispatcher> std::fmt::Debug for DispatchExecutor<Inner> {
         f.debug_struct("DispatchExecutor")
             .field("input", &self.input)
             .field("inner", &self.inner)
-            .field("fragment_id", &self.fragment_id)
+            .field("actor_id", &self.actor_id)
             .finish()
     }
 }
@@ -94,13 +94,13 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
     pub fn new(
         input: Box<dyn Executor>,
         inner: Inner,
-        fragment_id: u32,
+        actor_id: u32,
         context: Arc<SharedContext>,
     ) -> Self {
         Self {
             input,
             inner,
-            fragment_id,
+            actor_id,
             context,
         }
     }
@@ -120,21 +120,21 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
     async fn update_outputs(&mut self, barrier: &Barrier) -> Result<()> {
         match &barrier.mutation {
             Mutation::UpdateOutputs(updates) => {
-                if let Some((_, v)) = updates.get_key_value(&self.fragment_id) {
+                if let Some((_, v)) = updates.get_key_value(&self.actor_id) {
                     let mut new_outputs = vec![];
                     let mut channel_pool_guard = self.context.channel_pool.lock().unwrap();
                     let mut exchange_pool_guard =
                         self.context.receivers_for_exchange_service.lock().unwrap();
 
-                    let fragment_id = self.fragment_id;
+                    let actor_id = self.actor_id;
 
                     // delete the old local connections in both local and remote pools;
-                    channel_pool_guard.retain(|(x, _), _| *x != fragment_id);
-                    exchange_pool_guard.retain(|(x, _), _| *x != fragment_id);
+                    channel_pool_guard.retain(|(x, _), _| *x != actor_id);
+                    exchange_pool_guard.retain(|(x, _), _| *x != actor_id);
 
                     for act in v.iter() {
-                        let down_id = act.get_fragment_id();
-                        let up_down_ids = (fragment_id, down_id);
+                        let down_id = act.get_actor_id();
+                        let up_down_ids = (actor_id, down_id);
                         let host_addr = act.get_host();
                         let downstream_addr =
                             format!("{}:{}", host_addr.get_host(), host_addr.get_port());
@@ -145,11 +145,11 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                             channel_pool_guard.insert(up_down_ids, (Some(tx), Some(rx)));
 
                             let tx = channel_pool_guard
-                                .get_mut(&(fragment_id, down_id))
+                                .get_mut(&(actor_id, down_id))
                                 .ok_or_else(|| {
                                     RwError::from(ErrorCode::InternalError(format!(
                                         "channel between {} and {} does not exist",
-                                        fragment_id, down_id
+                                        actor_id, down_id
                                     )))
                                 })?
                                 .0
@@ -157,7 +157,7 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                                 .ok_or_else(|| {
                                     RwError::from(ErrorCode::InternalError(format!(
                                         "sender from {} to {} does no exist",
-                                        fragment_id, down_id
+                                        actor_id, down_id
                                     )))
                                 })?;
                             new_outputs.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
@@ -488,37 +488,37 @@ mod tests {
         let input = Box::new(ReceiverExecutor::new(schema.clone(), vec![], rx));
         let data_sink = Arc::new(Mutex::new(vec![]));
         let output = Box::new(MockOutput::new(data_sink));
-        let fragment_id = 233;
+        let actor_id = 233;
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 2333);
         let ctx = Arc::new(SharedContext::new(addr));
 
         let mut executor = Box::new(DispatchExecutor::new(
             input,
             SimpleDispatcher::new(output),
-            fragment_id,
+            actor_id,
             ctx.clone(),
         ));
         let mut updates1: HashMap<u32, Vec<ActorInfo>> = HashMap::new();
 
         updates1.insert(
-            fragment_id,
+            actor_id,
             vec![
                 ActorInfo {
-                    fragment_id: 234,
+                    actor_id: 234,
                     host: Some(HostAddress {
                         host: String::from("127.0.0.1"),
                         port: 2333,
                     }),
                 },
                 ActorInfo {
-                    fragment_id: 235,
+                    actor_id: 235,
                     host: Some(HostAddress {
                         host: String::from("127.0.0.1"),
                         port: 2333,
                     }),
                 },
                 ActorInfo {
-                    fragment_id: 238,
+                    actor_id: 238,
                     host: Some(HostAddress {
                         host: String::from("172.1.1.2"),
                         port: 2334,
@@ -542,9 +542,9 @@ mod tests {
 
         let mut updates2: HashMap<u32, Vec<ActorInfo>> = HashMap::new();
         updates2.insert(
-            fragment_id,
+            actor_id,
             vec![ActorInfo {
-                fragment_id: 235,
+                actor_id: 235,
                 host: Some(HostAddress {
                     host: String::from("127.0.0.1"),
                     port: 2333,

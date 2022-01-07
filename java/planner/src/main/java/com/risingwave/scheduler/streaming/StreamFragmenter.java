@@ -134,11 +134,11 @@ public class StreamFragmenter {
         if (currentStageRoot instanceof RwStreamExchange) {
           RwStreamExchange exchange = (RwStreamExchange) currentStage.getRoot();
           StreamFragment fragment = newStreamFragment(exchange, context.getStreamManager());
-          int fragmentId = fragment.getId();
+          int actorId = fragment.getId();
           StreamFragment.FragmentBuilder builder = fragment.toBuilder();
 
           // Add the upstream fragment id to the exchange node.
-          ((RwStreamExchange) currentStageRoot).addUpStream(fragmentId);
+          ((RwStreamExchange) currentStageRoot).addUpStream(actorId);
 
           // Add dispatcher.
           RelDistribution distribution = exchange.getDistribution();
@@ -151,11 +151,11 @@ public class StreamFragmenter {
           }
 
           // Add fragment and dependencies.
-          graphBuilder.addFragment(fragmentId, builder.build());
+          graphBuilder.addFragment(actorId, builder.build());
           for (int lastId : lastStageFragmentList) {
-            graphBuilder.addDependency(currentStage.getStageId(), fragmentId, lastId);
+            graphBuilder.addDependency(currentStage.getStageId(), actorId, lastId);
           }
-          currentStageFragmentList.add(fragmentId);
+          currentStageFragmentList.add(actorId);
         } else {
           throw new PgException(PgErrorCode.INTERNAL_ERROR, "Should not reach this block");
         }
@@ -167,11 +167,11 @@ public class StreamFragmenter {
       for (int i = 0; i < parallelDegree; i++) {
         RwStreamExchange exchange = (RwStreamExchange) currentStage.getRoot();
         StreamFragment fragment = newStreamFragment(exchange, context.getStreamManager());
-        int fragmentId = fragment.getId();
+        int actorId = fragment.getId();
         StreamFragment.FragmentBuilder builder = fragment.toBuilder();
 
-        // Add the upstream fragment id to the exchange node.
-        ((RwStreamExchange) currentStageRoot).addUpStream(fragmentId);
+        // Add the upstream actor id to the exchange node.
+        ((RwStreamExchange) currentStageRoot).addUpStream(actorId);
 
         // Add dispatcher.
         RelDistribution distribution = exchange.getDistribution();
@@ -181,11 +181,11 @@ public class StreamFragmenter {
           builder.addHashDispatcher(distribution.getKeys());
         }
         // Add fragment and dependencies.
-        graphBuilder.addFragment(fragmentId, builder.build());
+        graphBuilder.addFragment(actorId, builder.build());
         for (int lastId : lastStageFragmentList) {
-          graphBuilder.addDependency(currentStage.getStageId(), fragmentId, lastId);
+          graphBuilder.addDependency(currentStage.getStageId(), actorId, lastId);
         }
-        currentStageFragmentList.add(fragmentId);
+        currentStageFragmentList.add(actorId);
       }
     }
 

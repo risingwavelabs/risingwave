@@ -192,10 +192,10 @@ mod tests {
         .collect::<Result<Vec<_>>>()?;
         assert_eq!(ids, (0..10000).collect::<Vec<_>>());
 
-        let fragment_id_generator =
+        let actor_id_generator =
             StoredIdGenerator::new(meta_store_ref.clone(), "fragment", Some(1)).await;
         let ids = future::join_all((0..100).map(|_i| {
-            let id_generator = &fragment_id_generator;
+            let id_generator = &actor_id_generator;
             async move { id_generator.generate_interval(100).await }
         }))
         .await
@@ -205,10 +205,9 @@ mod tests {
         let vec_expect = (0..100).map(|e| e * 100 + 1).collect::<Vec<_>>();
         assert_eq!(ids, vec_expect);
 
-        let fragment_id_generator_two =
-            StoredIdGenerator::new(meta_store_ref, "fragment", None).await;
+        let actor_id_generator_two = StoredIdGenerator::new(meta_store_ref, "fragment", None).await;
         let ids = future::join_all((0..100).map(|_i| {
-            let id_generator = &fragment_id_generator_two;
+            let id_generator = &actor_id_generator_two;
             async move { id_generator.generate_interval(10).await }
         }))
         .await

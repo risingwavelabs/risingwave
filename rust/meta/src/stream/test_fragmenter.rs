@@ -248,12 +248,12 @@ async fn test_fragmenter() -> Result<()> {
     for fragment in graph {
         assert_eq!(
             expected_downstream
-                .get(&fragment.get_fragment_id())
+                .get(&fragment.get_actor_id())
                 .unwrap()
                 .iter()
                 .collect::<HashSet<_>>(),
             fragment
-                .get_downstream_fragment_id()
+                .get_downstream_actor_id()
                 .iter()
                 .collect::<HashSet<_>>(),
         );
@@ -266,12 +266,12 @@ async fn test_fragmenter() -> Result<()> {
             Node::MergeNode(merge_node) => {
                 assert_eq!(
                     expected_upstream
-                        .get(&fragment.get_fragment_id())
+                        .get(&fragment.get_actor_id())
                         .unwrap()
                         .iter()
                         .collect::<HashSet<_>>(),
                     merge_node
-                        .get_upstream_fragment_id()
+                        .get_upstream_actor_id()
                         .iter()
                         .collect::<HashSet<_>>(),
                 );

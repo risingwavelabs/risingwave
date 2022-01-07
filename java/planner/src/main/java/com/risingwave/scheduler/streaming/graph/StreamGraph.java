@@ -38,10 +38,10 @@ public class StreamGraph {
     return list;
   }
 
-  public List<Integer> getAllFragmentId() {
+  public List<Integer> getAllActorIds() {
     List<Integer> list = new ArrayList<>();
-    for (var fragment : fragments.values()) {
-      list.add(fragment.getId());
+    for (var actor : fragments.values()) {
+      list.add(actor.getId());
     }
     return list;
   }

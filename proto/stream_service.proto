@@ -21,7 +21,7 @@ message UpdateFragmentResponse {
 
 // Encode which host machine an actor resides.
 message ActorInfo {
-  uint32 fragment_id = 1;
+  uint32 actor_id = 1;
   common.HostAddress host = 2;
 }
 
@@ -32,22 +32,22 @@ message BroadcastActorInfoTableRequest {
 // Create channels and gRPC connections for a fragment
 message BuildFragmentRequest {
   string request_id = 1;
-  repeated uint32 fragment_id = 2;
+  repeated uint32 actor_id = 2;
 }
 
 message BuildFragmentResponse {
   string request_id = 1;
-  repeated uint32 fragment_id = 2;
+  repeated uint32 actor_id = 2;
 }
 
 message DropFragmentsRequest {
   string request_id = 1;
-  repeated uint32 fragment_ids = 2;
+  repeated uint32 actor_ids = 2;
 }
 
 message DropFragmentsResponse {
   string request_id = 1;
-  repeated uint32 fragment_ids = 2;
+  repeated uint32 actor_ids = 2;
 }
 
 // Before starting streaming, the leader node broadcast the actor-host table to needed workers.

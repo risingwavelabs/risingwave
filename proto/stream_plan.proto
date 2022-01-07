@@ -62,7 +62,7 @@ message HashJoinNode {
 }
 
 message MergeNode {
-  repeated uint32 upstream_fragment_id = 1;
+  repeated uint32 upstream_actor_id = 1;
   // The schema of input columns.
   repeated plan.ColumnDesc input_column_descs = 2;
 }
@@ -124,9 +124,9 @@ message Dispatcher {
 // We define the head node in the proto, and the upstream fragments in id
 // as multiple fragments may share the same upstream fragment.
 message StreamFragment {
-  uint32 fragment_id = 1;
+  uint32 actor_id = 1;
   StreamNode nodes = 2;
   Dispatcher dispatcher = 3;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
-  repeated uint32 downstream_fragment_id = 4;
+  repeated uint32 downstream_actor_id = 4;
 }

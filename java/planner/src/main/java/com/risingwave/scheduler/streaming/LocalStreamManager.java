@@ -22,7 +22,7 @@ import org.slf4j.LoggerFactory;
 @Singleton
 public class LocalStreamManager implements StreamManager {
   private static final Logger LOGGER = LoggerFactory.getLogger(LocalStreamManager.class);
-  private int fragmentId = 1;
+  private int actorId = 1;
   private final WorkerNodeManager workerNodeManager;
   private final Map<WorkerNode, Set<StreamFragment>> fragmentAllocation = new HashMap<>();
 
@@ -33,7 +33,7 @@ public class LocalStreamManager implements StreamManager {
 
   @Override
   public int createFragment() {
-    return fragmentId++;
+    return actorId++;
   }
 
   @Override
@@ -53,8 +53,7 @@ public class LocalStreamManager implements StreamManager {
 
     // Build returning list.
     List<StreamRequest> requestList = new ArrayList<>();
-    HashSet<Integer> relevantIdSet = new HashSet<>();
-    relevantIdSet.addAll(graph.getAllFragmentId());
+    HashSet<Integer> relevantIdSet = new HashSet<>(graph.getAllActorIds());
     for (WorkerNode node : fragmentAllocation.keySet()) {
       StreamRequest.Builder builder = StreamRequest.newBuilder();
       builder.setWorkerNode(node);
@@ -87,18 +86,17 @@ public class LocalStreamManager implements StreamManager {
 
   @Override
   public ActorInfoTable getActorInfo(List<Integer> actorIdList) {
-    HashSet<Integer> relevantIdSet = new HashSet<>();
-    relevantIdSet.addAll(actorIdList);
+    HashSet<Integer> relevantIdSet = new HashSet<>(actorIdList);
 
     ActorInfoTable.Builder builder = ActorInfoTable.newBuilder();
     for (var node : fragmentAllocation.keySet()) {
-      Set<Integer> fragmentIdSet = new HashSet<Integer>();
+      Set<Integer> actorIdSet = new HashSet<>();
       for (var fragment : fragmentAllocation.get(node)) {
         if (relevantIdSet.contains(fragment.getId())) {
-          fragmentIdSet.add(fragment.getId());
+          actorIdSet.add(fragment.getId());
         }
       }
-      builder.addWorkerNode(node, fragmentIdSet);
+      builder.addWorkerNode(node, actorIdSet);
     }
     return builder.build();
   }

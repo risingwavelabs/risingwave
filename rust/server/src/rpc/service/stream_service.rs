@@ -46,10 +46,10 @@ impl StreamService for StreamServiceImpl {
     ) -> std::result::Result<Response<BuildFragmentResponse>, Status> {
         let req = request.into_inner();
 
-        let fragment_id = req.fragment_id;
+        let actor_id = req.actor_id;
         let res = self
             .mgr
-            .build_fragment(fragment_id.as_slice(), self.env.clone());
+            .build_fragment(actor_id.as_slice(), self.env.clone());
         match res {
             Err(e) => {
                 error!("failed to build fragments {}", e);
@@ -57,7 +57,7 @@ impl StreamService for StreamServiceImpl {
             }
             Ok(()) => Ok(Response::new(BuildFragmentResponse {
                 request_id: "".to_string(),
-                fragment_id: Vec::new(),
+                actor_id: Vec::new(),
             })),
         }
     }
@@ -86,7 +86,7 @@ impl StreamService for StreamServiceImpl {
         &self,
         request: Request<DropFragmentsRequest>,
     ) -> std::result::Result<Response<DropFragmentsResponse>, Status> {
-        let fragments = request.into_inner().fragment_ids;
+        let fragments = request.into_inner().actor_ids;
         self.mgr
             .drop_fragment(fragments.as_slice())
             .map_err(|e| e.to_grpc_status())?;

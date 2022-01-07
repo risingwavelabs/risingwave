@@ -28,14 +28,14 @@ public class ActorInfoTable {
   public BroadcastActorInfoTableRequest serialize() {
     BroadcastActorInfoTableRequest.Builder builder = BroadcastActorInfoTableRequest.newBuilder();
     for (WorkerNode node : actorInfoTable.keySet()) {
-      var fragmentIds = actorInfoTable.get(node);
+      var actorIds = actorInfoTable.get(node);
       HostAddress.Builder addressBuilder = HostAddress.newBuilder();
       addressBuilder.setHost(node.getRpcEndPoint().getHost());
       addressBuilder.setPort(node.getRpcEndPoint().getPort());
       var hostAddress = addressBuilder.build();
-      for (Integer fragmentId : fragmentIds) {
+      for (Integer actorId : actorIds) {
         ActorInfo.Builder actorBuilder = ActorInfo.newBuilder();
-        actorBuilder.setFragmentId(fragmentId);
+        actorBuilder.setActorId(actorId);
         actorBuilder.setHost(hostAddress);
         builder.addInfo(actorBuilder.build());
       }
@@ -53,8 +53,8 @@ public class ActorInfoTable {
 
     public Builder() {}
 
-    public void addWorkerNode(WorkerNode node, Set<Integer> fragmentIds) {
-      actorInfoTable.put(node, fragmentIds);
+    public void addWorkerNode(WorkerNode node, Set<Integer> actorIds) {
+      actorInfoTable.put(node, actorIds);
     }
 
     public ActorInfoTable build() {

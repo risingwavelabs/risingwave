@@ -44,7 +44,7 @@ public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel
     var primaryKeyIndices =
         ((RisingWaveRelMetadataQuery) getCluster().getMetadataQuery()).getPrimaryKeyIndices(this);
     var mergerBuilder = MergeNode.newBuilder();
-    this.upstreamSet.forEach(mergerBuilder::addUpstreamFragmentId);
+    this.upstreamSet.forEach(mergerBuilder::addUpstreamActorId);
     for (ColumnDesc columnDesc : this.getSchema()) {
       com.risingwave.proto.plan.ColumnDesc.Builder columnDescBuilder =
           com.risingwave.proto.plan.ColumnDesc.newBuilder();
@@ -111,8 +111,8 @@ public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel
     return writer;
   }
 
-  public void addUpStream(int upstreamFragmentId) {
-    upstreamSet.add(upstreamFragmentId);
+  public void addUpStream(int upstreamActorId) {
+    upstreamSet.add(upstreamActorId);
   }
 
   public Set<Integer> getUpstreamSet() {

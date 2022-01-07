@@ -102,16 +102,16 @@
     const titleMap = new Map
     const descMap = new Map
 
-    const createStreamFragmentNodes = (fragment_id, node_id, node, edges) => {
+    const createStreamFragmentNodes = (actor_id, node_id, node, edges) => {
       if (node.input.length == 1) {
-        const nodeId = `${fragment_id}:${node_id}`
+        const nodeId = `${actor_id}:${node_id}`
         titleMap.set(nodeId, node.node.desc.split('(')[0])
         descMap.set(nodeId, node.node.desc)
-        const [inNode, outNode] = createStreamFragmentNodes(fragment_id, node_id + 1, node.input[0], edges)
+        const [inNode, outNode] = createStreamFragmentNodes(actor_id, node_id + 1, node.input[0], edges)
         edges.push([outNode, nodeId])
         return [inNode, nodeId]
       } else {
-        const nodeId = `${fragment_id}:merger`
+        const nodeId = `${actor_id}:merger`
         titleMap.set(nodeId, node.node.desc.split('(')[0])
         descMap.set(nodeId, node.node.desc)
         return [nodeId, nodeId]
@@ -146,20 +146,20 @@
 
     fragments.fragment.forEach(fragment => {
       const edges = []
-      const fragmentId = fragment.fragment_id
+      const fragmentId = fragment.actor_id
       const [inNode, outNode] = createStreamFragmentNodes(fragmentId, 0, fragment.nodes, edges)
       const dispatcherNodeId = `${fragmentId}:dispatcher`
       let dispatcherType = ""
-      if (fragment.downstream_fragment_id.length == 0) {
+      if (fragment.downstream_actor_id.length == 0) {
         dispatcherType = "BlackHole"
       } else {
-        dispatcherType = `${fragment.dispatcher.dispatcher_type}Dispatcher -> ${fragment.downstream_fragment_id.join(",")}`
+        dispatcherType = `${fragment.dispatcher.dispatcher_type}Dispatcher -> ${fragment.downstream_actor_id.join(",")}`
       }
       titleMap.set(dispatcherNodeId, dispatcherType)
       descMap.set(dispatcherNodeId, JSON.stringify(fragment.dispatcher, null, 2))
       graphData = graphData.concat(edges)
       graphData.push([outNode, dispatcherNodeId])
-      fragment.downstream_fragment_id.forEach(v => {
+      fragment.downstream_actor_id.forEach(v => {
         graphData.push([dispatcherNodeId, `${v}:merger`])
       })
     })

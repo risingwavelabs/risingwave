@@ -18,7 +18,7 @@ pub trait StreamMetaManager: Sync + Send + 'static {
     /// [`load_all_fragments`] loads all fragments for all nodes.
     async fn load_all_fragments(&self) -> Result<Vec<FragmentLocation>>;
     /// [`get_fragment_node`] returns which node the fragment belongs to.
-    async fn get_fragment_node(&self, fragment_id: u32) -> Result<WorkerNode>;
+    async fn get_fragment_node(&self, actor_id: u32) -> Result<WorkerNode>;
     /// [`add_table_fragments`] stores table related fragments.
     async fn add_table_fragments(
         &self,
@@ -58,7 +58,7 @@ impl StreamMetaManager for StoredStreamMetaManager {
     ///
     /// cf(node_fragment): `node` -> `FragmentLocation`, defines all included fragments in the node.
     ///
-    /// cf(fragment): `fragment_id` -> `Node`, defines which node the fragment belongs.
+    /// cf(fragment): `actor_id` -> `Node`, defines which node the fragment belongs.
     ///
     /// cf(table_fragment): `table_ref_id` -> `TableFragments`, defines table included fragments.
     async fn add_fragments_to_node(&self, location: &FragmentLocation) -> Result<()> {
@@ -69,7 +69,7 @@ impl StreamMetaManager for StoredStreamMetaManager {
         for f in fragments {
             write_batch.push((
                 self.config.get_fragment_cf(),
-                f.get_fragment_id().to_be_bytes().to_vec(),
+                f.get_actor_id().to_be_bytes().to_vec(),
                 node.clone(),
                 SINGLE_VERSION_EPOCH,
             ));
@@ -125,13 +125,13 @@ impl StreamMetaManager for StoredStreamMetaManager {
             .collect::<Vec<_>>())
     }
 
-    async fn get_fragment_node(&self, fragment_id: u32) -> Result<WorkerNode> {
+    async fn get_fragment_node(&self, actor_id: u32) -> Result<WorkerNode> {
         self.fragment_lock.read().await;
         let node_pb = self
             .meta_store_ref
             .get_cf(
                 self.config.get_fragment_cf(),
-                fragment_id.to_be_bytes().as_ref(),
+                actor_id.to_be_bytes().as_ref(),
                 SINGLE_VERSION_EPOCH,
             )
             .await?;
@@ -190,16 +190,16 @@ mod test {
 
     use super::*;
 
-    fn make_location(node: WorkerNode, fragment_ids: Vec<u32>) -> FragmentLocation {
+    fn make_location(node: WorkerNode, actor_ids: Vec<u32>) -> FragmentLocation {
         FragmentLocation {
             node: Some(node),
-            fragments: fragment_ids
+            fragments: actor_ids
                 .iter()
                 .map(|&i| StreamFragment {
-                    fragment_id: i,
+                    actor_id: i,
                     nodes: None,
                     dispatcher: None,
-                    downstream_fragment_id: vec![],
+                    downstream_actor_id: vec![],
                 })
                 .collect::<Vec<_>>(),
         }
@@ -232,7 +232,7 @@ mod test {
             location
                 .fragments
                 .iter()
-                .map(|f| f.fragment_id)
+                .map(|f| f.actor_id)
                 .collect::<Vec<_>>(),
             (0..5).collect::<Vec<_>>()
         );
@@ -260,7 +260,7 @@ mod test {
             location
                 .fragments
                 .iter()
-                .map(|f| f.fragment_id)
+                .map(|f| f.actor_id)
                 .collect::<Vec<_>>(),
             (0..10).collect::<Vec<_>>()
         );
@@ -287,7 +287,7 @@ mod test {
                 .fragments
                 .iter()
                 .chain(location1.fragments.iter())
-                .map(|f| f.fragment_id)
+                .map(|f| f.actor_id)
                 .collect::<HashSet<_>>(),
             HashSet::from_iter(0..15)
         );
@@ -308,20 +308,20 @@ mod test {
             schema_ref_id: None,
             table_id: 0,
         };
-        let fragment_ids = (0..5).collect::<Vec<u32>>();
+        let actor_ids = (0..5).collect::<Vec<u32>>();
 
         meta_manager
             .add_table_fragments(
                 &table_ref_id,
                 &TableFragments {
                     table_ref_id: Some(table_ref_id.clone()),
-                    fragment_ids: fragment_ids.clone(),
+                    actor_ids: actor_ids.clone(),
                 },
             )
             .await?;
 
         let fragments = meta_manager.get_table_fragments(&table_ref_id).await?;
-        assert_eq!(*fragments.get_fragment_ids(), fragment_ids);
+        assert_eq!(*fragments.get_actor_ids(), actor_ids);
 
         meta_manager.drop_table_fragments(&table_ref_id).await?;
         let res = meta_manager.get_table_fragments(&table_ref_id).await;

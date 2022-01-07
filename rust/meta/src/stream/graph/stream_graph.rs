@@ -8,8 +8,8 @@ use risingwave_pb::stream_plan::{Dispatcher, MergeNode, StreamFragment, StreamNo
 
 /// [`StreamFragmentBuilder`] build a stream fragment in a stream DAG.
 pub struct StreamFragmentBuilder {
-    /// fragment id field.
-    fragment_id: u32,
+    /// actor id field.
+    actor_id: u32,
     /// associated stream node.
     nodes: Arc<StreamNode>,
     /// dispatcher category.
@@ -21,9 +21,9 @@ pub struct StreamFragmentBuilder {
 }
 
 impl StreamFragmentBuilder {
-    pub fn new(fragment_id: u32, node: Arc<StreamNode>) -> Self {
+    pub fn new(actor_id: u32, node: Arc<StreamNode>) -> Self {
         Self {
-            fragment_id,
+            actor_id,
             nodes: node,
             dispatcher: None,
             downstream_fragments: HashSet::new(),
@@ -32,7 +32,7 @@ impl StreamFragmentBuilder {
     }
 
     pub fn get_id(&self) -> u32 {
-        self.fragment_id
+        self.actor_id
     }
 
     pub fn set_simple_dispatcher(&mut self) {
@@ -67,10 +67,10 @@ impl StreamFragmentBuilder {
 
     pub fn builder(&self) -> StreamFragment {
         StreamFragment {
-            fragment_id: self.fragment_id,
+            actor_id: self.actor_id,
             nodes: Some(self.nodes.deref().clone()),
             dispatcher: self.dispatcher.clone(),
-            downstream_fragment_id: self.downstream_fragments.iter().copied().collect(),
+            downstream_actor_id: self.downstream_fragments.iter().copied().collect(),
         }
     }
 }
@@ -137,13 +137,13 @@ impl StreamGraphBuilder {
     pub fn build_inner(
         &self,
         stream_node: &StreamNode,
-        upstream_fragment_id: &[Vec<u32>],
+        upstream_actor_id: &[Vec<u32>],
         next_idx: usize,
     ) -> StreamNode {
         if let Node::ExchangeNode(_) = stream_node.get_node() {
             self.build_inner(
                 stream_node.input.get(0).unwrap(),
-                upstream_fragment_id,
+                upstream_actor_id,
                 next_idx,
             )
         } else {
@@ -151,12 +151,12 @@ impl StreamGraphBuilder {
             let mut next_idx_new = next_idx;
             for (idx, input) in stream_node.input.iter().enumerate() {
                 if let Node::ExchangeNode(exchange_node) = input.get_node() {
-                    assert!(next_idx_new < upstream_fragment_id.len());
+                    assert!(next_idx_new < upstream_actor_id.len());
                     new_stream_node.input[idx] = StreamNode {
                         input: vec![],
                         pk_indices: input.pk_indices.clone(),
                         node: Some(Node::MergeNode(MergeNode {
-                            upstream_fragment_id: upstream_fragment_id
+                            upstream_actor_id: upstream_actor_id
                                 .get(next_idx_new)
                                 .cloned()
                                 .unwrap(),
@@ -166,7 +166,7 @@ impl StreamGraphBuilder {
                     next_idx_new += 1;
                 } else {
                     new_stream_node.input[idx] =
-                        self.build_inner(input, upstream_fragment_id, next_idx_new);
+                        self.build_inner(input, upstream_actor_id, next_idx_new);
                 }
             }
             new_stream_node

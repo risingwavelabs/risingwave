@@ -15,7 +15,7 @@ pub enum ScheduleCategory {
     Simple = 1,
     /// `RoundRobin` schedules node in cluster with round robin.
     RoundRobin = 2,
-    /// `Hash` schedules node using hash(fragment_id) as its index.
+    /// `Hash` schedules node using hash(actor_id) as its index.
     Hash = 3,
 }
 

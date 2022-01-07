@@ -1,5 +1,5 @@
 {
-  "fragmentId": 1,
+  "actorId": 1,
   "nodes": {
     "input": [{
       "pkIndices": [1, 2],
@@ -8,7 +8,7 @@
         "input": [{
           "pkIndices": [0, 1],
           "mergeNode": {
-            "upstreamFragmentId": [2, 3, 4, 5],
+            "upstreamActorId": [2, 3, 4, 5],
             "inputColumnDescs": [{
               "columnType": {
                 "typeName": "INT64"

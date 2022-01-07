@@ -64,8 +64,8 @@ public class StreamFragment {
         com.risingwave.proto.streaming.plan.StreamFragment.newBuilder();
     builder.setDispatcher(dispatcher.serialize());
     builder.setNodes(node);
-    builder.setFragmentId(id);
-    builder.addAllDownstreamFragmentId(downstreamSet);
+    builder.setActorId(id);
+    builder.addAllDownstreamActorId(downstreamSet);
     return builder.build();
   }
 
@@ -94,8 +94,8 @@ public class StreamFragment {
     // Add upstream and downstream.
     for (var merger : this.upstreamSets) {
       var upstreamStageId = merger.left;
-      for (var upstreamFragmentId : merger.right) {
-        builder.addUpstream(upstreamStageId, upstreamFragmentId);
+      for (var upstreamActorId : merger.right) {
+        builder.addUpstream(upstreamStageId, upstreamActorId);
       }
     }
     for (int id : this.downstreamSet) {
@@ -129,16 +129,16 @@ public class StreamFragment {
       dispatcher = StreamDispatcher.createBroadcastDispatcher();
     }
 
-    public void addUpstream(int upstreamStageId, int upstreamFragmentId) {
+    public void addUpstream(int upstreamStageId, int upstreamActorId) {
       for (int idx = 0; idx < upstreamSets.size(); idx++) {
         var stageId = upstreamSets.get(idx).left;
         if (upstreamStageId == stageId) {
-          upstreamSets.get(idx).right.add(upstreamFragmentId);
+          upstreamSets.get(idx).right.add(upstreamActorId);
           return;
         }
       }
       upstreamSets.add(new Pair<>(upstreamStageId, new HashSet<>()));
-      upstreamSets.get(upstreamSets.size() - 1).right.add(upstreamFragmentId);
+      upstreamSets.get(upstreamSets.size() - 1).right.add(upstreamActorId);
     }
 
     public void addDownstream(int id) {

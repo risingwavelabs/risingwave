@@ -1,5 +1,5 @@
 {
-  "fragmentId": 6,
+  "actorId": 6,
   "nodes": {
     "pkIndices": [2],
     "tableSourceNode": {
@@ -15,5 +15,5 @@
   "dispatcher": {
     "type": "HASH"
   },
-  "downstreamFragmentId": [2, 3, 4, 5]
+  "downstreamActorId": [2, 3, 4, 5]
 }
