@@ -64,6 +64,10 @@ impl RemoteOutput {
 #[async_trait]
 impl Output for RemoteOutput {
     async fn send(&mut self, message: Message) -> Result<()> {
+        let message = match message {
+            Message::Chunk(chk) => Message::Chunk(chk.compact()?),
+            _ => message,
+        };
         // local channel should never fail
         self.ch.send(message).await.unwrap();
         Ok(())
@@ -268,10 +272,6 @@ impl DataDispatcher for HashDataDispatcher {
     }
 
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()> {
-        // FIXME: unnecessary compact.
-        // See https://github.com/singularity-data/risingwave/issues/704
-        let chunk = chunk.compact()?;
-
         // A chunk can be shuffled into multiple output chunks that to be sent to downstreams.
         // In these output chunks, the only difference are visibility map, which is calculated
         // by the hash value of each line in the input chunk.
@@ -287,40 +287,63 @@ impl DataDispatcher for HashDataDispatcher {
             .collect::<Vec<_>>();
 
         let (ops, columns, visibility) = chunk.into_inner();
-        assert!(visibility.is_none(), "must be compacted");
 
-        // get visibility map for every output chunk
         let mut vis_maps = vec![vec![]; num_outputs];
-        hash_values.iter().for_each(|hash| {
-            for (output_idx, vis_map) in vis_maps.iter_mut().enumerate() {
-                if *hash == output_idx {
-                    vis_map.push(true);
-                } else {
-                    vis_map.push(false);
-                }
-            }
-        });
-
-        // The 'update' message, noted by an UpdateDelete and a successive UpdateInsert,
-        // need to be rewritten to common Delete and Insert if they were dispatched to different
-        // fragments.
         let mut last_hash_value_when_update_delete: usize = 0;
-        let mut new_ops: Vec<Op> = Vec::new();
-        for (hash_value, &op) in hash_values.into_iter().zip(ops.iter()) {
-            if op == Op::UpdateDelete {
-                last_hash_value_when_update_delete = hash_value;
-            } else if op == Op::UpdateInsert {
-                if hash_value != last_hash_value_when_update_delete {
-                    new_ops.push(Op::Delete);
-                    new_ops.push(Op::Insert);
-                } else {
-                    new_ops.push(Op::UpdateDelete);
-                    new_ops.push(Op::UpdateInsert);
-                }
-            } else {
-                new_ops.push(op);
+        let mut new_ops: Vec<Op> = Vec::with_capacity(ops.len());
+        match visibility {
+            None => {
+                hash_values.iter().zip(ops).for_each(|(hash, op)| {
+                    // get visibility map for every output chunk
+                    for (output_idx, vis_map) in vis_maps.iter_mut().enumerate() {
+                        vis_map.push(*hash == output_idx);
+                    }
+                    // The 'update' message, noted by an UpdateDelete and a successive UpdateInsert,
+                    // need to be rewritten to common Delete and Insert if they were dispatched to
+                    // different fragments.
+                    if op == Op::UpdateDelete {
+                        last_hash_value_when_update_delete = *hash;
+                    } else if op == Op::UpdateInsert {
+                        if *hash != last_hash_value_when_update_delete {
+                            new_ops.push(Op::Delete);
+                            new_ops.push(Op::Insert);
+                        } else {
+                            new_ops.push(Op::UpdateDelete);
+                            new_ops.push(Op::UpdateInsert);
+                        }
+                    } else {
+                        new_ops.push(op);
+                    }
+                });
+            }
+            Some(visibility) => {
+                hash_values.iter().zip(visibility.iter()).zip(ops).for_each(
+                    |((hash, visible), op)| {
+                        for (output_idx, vis_map) in vis_maps.iter_mut().enumerate() {
+                            vis_map.push(visible && *hash == output_idx);
+                        }
+                        if !visible {
+                            new_ops.push(op);
+                            return;
+                        }
+                        if op == Op::UpdateDelete {
+                            last_hash_value_when_update_delete = *hash;
+                        } else if op == Op::UpdateInsert {
+                            if *hash != last_hash_value_when_update_delete {
+                                new_ops.push(Op::Delete);
+                                new_ops.push(Op::Insert);
+                            } else {
+                                new_ops.push(Op::UpdateDelete);
+                                new_ops.push(Op::UpdateInsert);
+                            }
+                        } else {
+                            new_ops.push(op);
+                        }
+                    },
+                );
             }
         }
+
         let ops = new_ops;
 
         // individually output StreamChunk integrated with vis_map
@@ -410,18 +433,10 @@ impl DataDispatcher for SimpleDispatcher {
 }
 
 /// `SenderConsumer` consumes data from input executor and send it into a channel.
+#[derive(Debug)]
 pub struct SenderConsumer {
     input: Box<dyn Executor>,
     channel: Box<dyn Output>,
-}
-
-impl Debug for SenderConsumer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SenderConsumer")
-            .field("input", &self.input)
-            .field("channel", &self.channel)
-            .finish()
-    }
 }
 
 impl SenderConsumer {
@@ -449,7 +464,8 @@ mod tests {
 
     use itertools::Itertools;
     use risingwave_common::array::column::Column;
-    use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
+    use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, I64Array, Op};
+    use risingwave_common::buffer::Bitmap;
     use risingwave_common::catalog::Schema;
     use risingwave_pb::common::HostAddress;
     use risingwave_pb::stream_service::ActorInfo;
@@ -457,14 +473,9 @@ mod tests {
     use super::*;
     use crate::executor::ReceiverExecutor;
 
+    #[derive(Debug)]
     pub struct MockOutput {
         data: Arc<Mutex<Vec<Message>>>,
-    }
-
-    impl std::fmt::Debug for MockOutput {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.debug_struct("MockOutput").finish()
-        }
     }
 
     impl MockOutput {
@@ -478,6 +489,92 @@ mod tests {
         async fn send(&mut self, message: Message) -> Result<()> {
             self.data.lock().unwrap().push(message);
             Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_hash_dispatcher_complex() {
+        test_hash_dispatcher_complex_inner().await
+    }
+
+    async fn test_hash_dispatcher_complex_inner() {
+        let num_outputs = 2;
+        let key_indices = &[0, 2];
+        let output_data_vecs = (0..num_outputs)
+            .map(|_| Arc::new(Mutex::new(Vec::new())))
+            .collect::<Vec<_>>();
+        let outputs = output_data_vecs
+            .iter()
+            .map(|data| Box::new(MockOutput::new(data.clone())) as Box<dyn Output>)
+            .collect::<Vec<_>>();
+        let mut hash_dispatcher = HashDataDispatcher::new(outputs, key_indices.to_vec());
+
+        let chunk = StreamChunk::new(
+            vec![
+                Op::Insert,
+                Op::Delete,
+                Op::UpdateDelete,
+                Op::UpdateInsert,
+                Op::UpdateDelete,
+                Op::UpdateInsert,
+            ],
+            vec![
+                column_nonnull! { I64Array, [0, 1, 2, 2, 3, 3] },
+                column_nonnull! { I64Array, [0, 1, 0, 0, 3, 3] },
+                column_nonnull! { I64Array, [0, 1, 2, 2, 2, 4] },
+            ],
+            Some(Bitmap::try_from(vec![true, false, true, true, true, true]).unwrap()),
+        );
+
+        hash_dispatcher.dispatch_data(chunk).await.unwrap();
+
+        {
+            let guard = output_data_vecs[0].lock().unwrap();
+            match guard[0] {
+                Message::Chunk(ref chunk1) => {
+                    assert_eq!(chunk1.capacity(), 6, "Should keep capacity");
+                    assert_eq!(chunk1.cardinality(), 1);
+                    assert!(chunk1.visibility().as_ref().unwrap().is_set(4).unwrap());
+                    assert_eq!(
+                        chunk1.ops()[4],
+                        Op::Delete,
+                        "Should rewrite UpdateDelete to Delete"
+                    );
+                }
+                _ => unreachable!(),
+            }
+        }
+        {
+            let guard = output_data_vecs[1].lock().unwrap();
+            match guard[0] {
+                Message::Chunk(ref chunk1) => {
+                    assert_eq!(chunk1.capacity(), 6, "Should keep capacity");
+                    assert_eq!(chunk1.cardinality(), 4);
+                    assert!(
+                        !chunk1.visibility().as_ref().unwrap().is_set(1).unwrap(),
+                        "Should keep original invisible mark"
+                    );
+                    assert!(!chunk1.visibility().as_ref().unwrap().is_set(4).unwrap());
+
+                    assert_eq!(
+                        chunk1.ops()[2],
+                        Op::UpdateDelete,
+                        "Should keep UpdateDelete"
+                    );
+                    assert_eq!(
+                        chunk1.ops()[3],
+                        Op::UpdateInsert,
+                        "Should keep UpdateInsert"
+                    );
+
+                    assert_eq!(
+                        chunk1.ops()[5],
+                        Op::Insert,
+                        "Should rewrite UpdateInsert to Insert"
+                    );
+                }
+                _ => unreachable!(),
+            }
         }
     }
 
