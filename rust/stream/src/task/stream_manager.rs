@@ -342,6 +342,8 @@ impl StreamManagerCore {
         downstreams: &[u32],
     ) -> Result<Box<dyn StreamConsumer>> {
         // create downstream receivers
+        let mut downstreams = downstreams.to_vec();
+        downstreams.sort_unstable();
         let outputs = downstreams
             .iter()
             .map(|down_id| {
