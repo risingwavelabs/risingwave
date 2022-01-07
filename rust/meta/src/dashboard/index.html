@@ -93,6 +93,7 @@
   <div style="height: 40rem" class="border border-gray-200 overflow-x-scroll">
     <svg id="fragment-${fragments.node.id}" class="h-full"></svg>
   </div>
+  <div id="message-${fragments.node.id}"></div>
 </div>`
   const createStreamFragment = (fragments) => {
     const nodeRadius = 20
@@ -155,6 +156,7 @@
         dispatcherType = `${fragment.dispatcher.dispatcher_type}Dispatcher -> ${fragment.downstream_fragment_id.join(",")}`
       }
       titleMap.set(dispatcherNodeId, dispatcherType)
+      descMap.set(dispatcherNodeId, JSON.stringify(fragment.dispatcher, null, 2))
       graphData = graphData.concat(edges)
       graphData.push([outNode, dispatcherNodeId])
       fragment.downstream_fragment_id.forEach(v => {
@@ -257,26 +259,18 @@
       .append("g")
       .attr("transform", ({ x, y }) => `translate(${x}, ${y})`)
 
-    const tooltip = d3.select("body").append("div")
+    const tooltip = d3.select(`#message-${fragments.node.id}`).append("div")
       .attr("id", "div-tooltip")
-      .attr("class", "absolute whitespace-pre text-xs bg-white p-1")
-      .style("opacity", 0);
+      .attr("class", "my-3 whitespace-pre text-xs bg-white p-1");
 
-    const mouseOver = (e, d) => {
+    const mouseEnter = (e, d) => {
       tooltip
-        .style("opacity", 1)
+        .html(descMap.get(d.data.id) || "No Data Available")
     }
 
     const mouseMove = (e, d) => {
       tooltip
         .html(descMap.get(d.data.id) || "No Data Available")
-        .style("left", (d3.pointer(e, this)[0] + 50) + "px")
-        .style("top", (d3.pointer(e, this)[1] + 20) + "px")
-    }
-
-    const mouseLeave = (e, d) => {
-      tooltip
-        .style("opacity", 0)
     }
 
     // Plot node circles
@@ -284,9 +278,8 @@
       .append("circle")
       .attr("r", nodeRadius)
       .attr("fill", (n) => colorMap.get(fragmentOf(n.data.id)))
-    // .on("mouseenter", mouseOver)
-    // .on("mousemove", mouseMove)
-    // .on("mouseleave", mouseLeave)
+      .on("mouseenter", mouseEnter)
+      .on("mousemove", mouseMove)
 
     // Add text to nodes
     nodes
