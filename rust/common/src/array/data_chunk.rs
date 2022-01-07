@@ -48,7 +48,7 @@ impl DataChunkBuilder {
 }
 
 /// `DataChunk` is a collection of arrays with visibility mask.
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default)]
 pub struct DataChunk {
     columns: Vec<Column>,
     visibility: Option<Bitmap>,
@@ -358,9 +358,15 @@ impl DataChunk {
     }
 }
 
-impl fmt::Display for DataChunk {
+impl fmt::Debug for DataChunk {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.to_pretty_string())
+        write!(
+            f,
+            "DataChunk {{ cardinality = {}, capacity = {}, data = \n{} }}",
+            self.cardinality(),
+            self.capacity(),
+            self.to_pretty_string()
+        )
     }
 }
 
@@ -486,7 +492,8 @@ mod tests {
         );
         assert_eq!(
             chunk.to_pretty_string(),
-            "+---+---+
+            "\
++---+---+
 | 1 | 6 |
 | 2 |   |
 | 3 | 7 |

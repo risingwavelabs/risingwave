@@ -83,6 +83,8 @@ impl<S: StateStore> SimpleExecutor for MViewSinkExecutor<S> {
     }
 
     fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
+        trace!("consume_chunk {:?}", &chunk);
+
         let StreamChunk {
             ops,
             columns,

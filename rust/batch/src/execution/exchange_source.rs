@@ -72,9 +72,11 @@ impl ExchangeSource for GrpcExchangeSource {
             res.to_rw_result_with(format!("failed to take data from stream ({:?})", self.addr))?;
         let data = DataChunk::from_protobuf(task_data.get_record_batch())?.compact()?;
 
-        debug!(
-            "Receiver task: {:?}, source task sink: {:?}, data: {:?}",
-            self.task_id, self.sink_id, data
+        trace!(
+            "Receiver task: {:?}, sink = {:?}, data = {:?}",
+            self.task_id,
+            self.sink_id,
+            data
         );
 
         Ok(Some(data))

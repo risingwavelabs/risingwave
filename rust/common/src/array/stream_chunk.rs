@@ -56,7 +56,7 @@ impl Op {
 pub type Ops<'a> = &'a [Op];
 
 /// `StreamChunk` is used to pass data over the streaming pathway.
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Clone)]
 pub struct StreamChunk {
     // TODO: Optimize using bitmap
     pub ops: Vec<Op>,
@@ -272,9 +272,15 @@ impl StreamChunk {
     }
 }
 
-impl fmt::Display for StreamChunk {
+impl fmt::Debug for StreamChunk {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.to_pretty_string())
+        write!(
+            f,
+            "StreamChunk {{ cardinality = {}, capacity = {}, data = \n{} }}",
+            self.cardinality(),
+            self.capacity(),
+            self.to_pretty_string()
+        )
     }
 }
 
@@ -296,7 +302,8 @@ mod tests {
         );
         assert_eq!(
             chunk.to_pretty_string(),
-            "+----+---+---+
+            "\
++----+---+---+
 |  + | 1 | 6 |
 |  - | 2 |   |
 | U- | 3 | 7 |

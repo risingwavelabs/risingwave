@@ -31,7 +31,7 @@ appenders:
       # deserializer, and will vary based on the kind of policy.
       trigger:
         kind: size
-        limit: 10 mb
+        limit: 200 mb
 
       roller:
         kind: delete
@@ -40,6 +40,7 @@ root:
   level: debug
   appenders:
     - stdout # change to 'rolling' if want rolling files appender
+    - rolling
 
 loggers:
   "rusoto_core":
@@ -48,3 +49,6 @@ loggers:
     level: warn
   "h2":
     level: warn
+  # For debug: enable trace logging as examples below
+  # risingwave_stream::executor::hash_join:
+  #   level: trace

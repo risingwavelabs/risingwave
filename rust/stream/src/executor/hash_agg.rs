@@ -142,6 +142,8 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
     }
 
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
+        trace!("apply_chunk {:?}", &chunk);
+
         let StreamChunk {
             ops,
             columns,
@@ -273,6 +275,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
             visibility: None,
         };
 
+        trace!("output_chunk: {:?}", &chunk);
         Ok(Some(chunk))
     }
 

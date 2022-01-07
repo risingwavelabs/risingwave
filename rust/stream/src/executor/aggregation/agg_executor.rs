@@ -87,6 +87,12 @@ impl<S: StateStore> AggState<S> {
         // First several columns are used for group keys in HashAgg.
         let agg_call_offset = key.map(|k| k.0.len()).unwrap_or_default();
 
+        trace!(
+            "prev_row_count = {}, row_count = {}",
+            prev_row_count,
+            row_count
+        );
+
         match (prev_row_count, row_count) {
             (0, 0) => {
                 // previous state is empty, current state is also empty.
@@ -108,7 +114,9 @@ impl<S: StateStore> AggState<S> {
                     .iter_mut()
                     .zip(self.managed_states.iter_mut())
                 {
-                    builder.append_datum(&state.get_output().await?)?;
+                    let data = state.get_output().await?;
+                    trace!("append_datum (0 -> N): {:?}", &data);
+                    builder.append_datum(&data)?;
                 }
             }
 
@@ -126,6 +134,7 @@ impl<S: StateStore> AggState<S> {
                     .iter_mut()
                     .zip(self.prev_states.as_ref().unwrap().iter())
                 {
+                    trace!("append_datum (N -> 0): {:?}", &state);
                     builder.append_datum(state)?;
                 }
             }
@@ -147,8 +156,15 @@ impl<S: StateStore> AggState<S> {
                     self.prev_states.as_ref().unwrap().iter(),
                     self.managed_states.iter_mut(),
                 )) {
+                    let cur_state = cur_state.get_output().await?;
+                    trace!(
+                        "append_datum (N -> N): prev = {:?}, cur = {:?}",
+                        prev_state,
+                        &cur_state
+                    );
+
                     builder.append_datum(prev_state)?;
-                    builder.append_datum(&cur_state.get_output().await?)?;
+                    builder.append_datum(&cur_state)?;
                 }
             }
         }

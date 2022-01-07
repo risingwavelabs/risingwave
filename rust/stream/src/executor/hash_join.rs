@@ -366,11 +366,17 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
     }
 
     async fn consume_chunk_left(&mut self, chunk: StreamChunk) -> Result<Message> {
-        self.eq_join_oneside::<{ SideType::Left }>(chunk).await
+        trace!("consume_chunk_left: {:?}", &chunk);
+        let result = self.eq_join_oneside::<{ SideType::Left }>(chunk).await?;
+        trace!("consume_chunk_left outputs: {:?}", &result);
+        Ok(result)
     }
 
     async fn consume_chunk_right(&mut self, chunk: StreamChunk) -> Result<Message> {
-        self.eq_join_oneside::<{ SideType::Right }>(chunk).await
+        trace!("consume_chunk_right: {:?}", &chunk);
+        let result = self.eq_join_oneside::<{ SideType::Right }>(chunk).await?;
+        trace!("consume_chunk_right outputs: {:?}", &result);
+        Ok(result)
     }
 
     async fn eq_join_oneside<const SIDE: SideTypePrimitive>(

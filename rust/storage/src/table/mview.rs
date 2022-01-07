@@ -125,8 +125,13 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
         loop {
             match self.inner.next().await? {
                 Some((key, value)) => {
-                    // there is no need to deserialize pk in mview
+                    log::trace!(
+                        "scanned key = {:?}, value = {:?}",
+                        bytes::Bytes::copy_from_slice(&key),
+                        bytes::Bytes::copy_from_slice(&value)
+                    );
 
+                    // there is no need to deserialize pk in mview
                     if key.len() < self.prefix.len() + 4 {
                         return Err(ErrorCode::InternalError("corrupted key".to_owned()).into());
                     }
