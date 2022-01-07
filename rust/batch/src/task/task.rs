@@ -195,12 +195,23 @@ impl TaskExecution {
         tokio::spawn(async move {
             debug!("Executing plan [{:?}]", task_id);
             let mut sender = sender;
-            // We should only pass a reference of sender to execution because we should only close
-            // it after task error has been set.
-            if let Err(e) = TaskExecution::try_execute(exec, &mut sender).await {
-                // Prints the entire backtrace of error.
-                error!("Execution failed [{:?}]: {:?}", &task_id, &e);
-                *failure.lock().unwrap() = Some(e);
+
+            let task_id_cloned = task_id.clone();
+
+            let join_handle = tokio::spawn(async move {
+                // We should only pass a reference of sender to execution because we should only
+                // close it after task error has been set.
+                if let Err(e) = TaskExecution::try_execute(exec, &mut sender).await {
+                    // Prints the entire backtrace of error.
+                    error!("Execution failed [{:?}]: {:?}", &task_id, &e);
+                    *failure.lock().unwrap() = Some(e);
+                }
+            });
+
+            if let Err(join_error) = join_handle.await {
+                if join_error.is_panic() {
+                    error!("Batch task {:?} panic!", task_id_cloned);
+                }
             }
         });
         Ok(())
