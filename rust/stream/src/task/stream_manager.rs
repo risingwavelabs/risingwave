@@ -13,6 +13,7 @@ use risingwave_common::util::addr::{get_host_port, is_local_address};
 use risingwave_common::util::sort_util::{
     build_from_prost as build_order_type_from_prost, fetch_orders,
 };
+use risingwave_pb::plan::JoinType as JoinTypeProto;
 use risingwave_pb::{expr, stream_plan, stream_service};
 use risingwave_storage::hummock::HummockStateStore;
 use risingwave_storage::memory::MemoryStateStore;
@@ -610,14 +611,39 @@ impl StreamManagerCore {
                         .map(|key| *key as usize)
                         .collect::<Vec<_>>(),
                 );
-                Ok(Box::new(HashJoinExecutor::<_, { JoinType::Inner }>::new(
-                    source_l,
-                    source_r,
-                    params_l,
-                    params_r,
-                    pk_indices,
-                    Keyspace::executor_root(store.clone(), self.generate_mock_executor_id()),
-                )))
+
+                macro_rules! impl_create_hash_join_executor {
+          ($( { $join_type_proto:ident, $join_type:ident } ),*) => {
+            |typ| match typ {
+              $( JoinTypeProto::$join_type_proto => Box::new(HashJoinExecutor::<_, { JoinType::$join_type }>::new(
+                source_l,
+                source_r,
+                params_l,
+                params_r,
+                pk_indices,
+                Keyspace::executor_root(store.clone(), self.generate_mock_executor_id()),
+              )) as Box<dyn Executor>, )*
+              _ => todo!("Join type {:?} not inplemented", typ),
+            }
+          }
+        }
+
+                macro_rules! for_all_join_types {
+                    ($macro:tt) => {
+                        $macro! {
+                          { Inner, Inner },
+                          { LeftOuter, LeftOuter },
+                          { RightOuter, RightOuter },
+                          { FullOuter, FullOuter }
+                        }
+                    };
+                }
+
+                let create_hash_join_executor =
+                    for_all_join_types! { impl_create_hash_join_executor };
+                let join_type_proto = hash_join_node.get_join_type();
+                let executor = create_hash_join_executor(join_type_proto);
+                Ok(executor)
             }
             MviewNode(materialized_view_node) => {
                 let table_id = TableId::from(&materialized_view_node.table_ref_id);
