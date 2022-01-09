@@ -5,15 +5,26 @@ edition = "2021"
 
 [dependencies]
 bytes = "1"
+bytesize = { version = "1", features = ["serde"] }
 clap = { version = "3", features = ["derive"] }
+env_logger = "0.9"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+itertools = "0.10"
+log = "0.4"
 rand = "0.8"
 risingwave-pb = { path = "../prost" }
 risingwave_storage = { path = "../storage" } 
 rusoto_core = "0.47"
+rusoto_credential = "0.47"
 rusoto_s3 = "0.47"
+serde = "1"
 tokio = { version = "1", features = ["fs", "rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
+toml = "0.5"
 
 [[bin]]
 name = "ss-bench"
 path = "ss_bench/main.rs"
+
+[[bin]]
+name = "s3-bench"
+path = "s3_bench/main.rs"

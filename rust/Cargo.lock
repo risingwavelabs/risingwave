@@ -485,6 +485,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bytesize"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c58ec36aac5066d5ca17df51b3e70279f5670a72102f5752cb7e7c856adfc70"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "bzip2-sys"
 version = "0.1.11+1.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -926,6 +935,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "env_logger"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b2cf0344971ee6c64c31be0d530793fba457d322dfec2810c453d0ef228f9c3"
+dependencies = [
+ "atty",
+ "humantime",
+ "log",
+ "regex",
+ "termcolor",
 ]
 
 [[package]]
@@ -2946,14 +2968,21 @@ name = "risingwave_bench"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "bytesize",
  "clap",
+ "env_logger",
  "futures 0.3.19",
+ "itertools 0.10.3",
+ "log",
  "rand 0.8.4",
  "risingwave-pb",
  "risingwave_storage",
  "rusoto_core",
+ "rusoto_credential",
  "rusoto_s3",
+ "serde",
  "tokio",
+ "toml",
 ]
 
 [[package]]
