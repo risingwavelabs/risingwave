@@ -14,11 +14,22 @@ use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
 
 /// Sequential scan executor on column-oriented tables
-pub(super) struct SeqScanExecutor {
+pub struct SeqScanExecutor {
     table: ScannableTableRef,
     column_ids: Vec<i32>,
     schema: Schema,
     snapshot: VecDeque<DataChunkRef>,
+}
+
+impl SeqScanExecutor {
+    pub fn new(table: ScannableTableRef, column_ids: Vec<i32>, schema: Schema) -> Self {
+        Self {
+            table,
+            column_ids,
+            schema,
+            snapshot: Default::default(),
+        }
+    }
 }
 
 impl BoxedExecutorBuilder for SeqScanExecutor {
@@ -45,12 +56,7 @@ impl BoxedExecutorBuilder for SeqScanExecutor {
                 .collect::<Result<Vec<Field>>>()?,
         );
 
-        Ok(Box::new(Self {
-            table: table_ref,
-            column_ids: column_ids.to_vec(),
-            schema,
-            snapshot: VecDeque::new(),
-        }))
+        Ok(Box::new(Self::new(table_ref, column_ids.to_vec(), schema)))
     }
 }
 

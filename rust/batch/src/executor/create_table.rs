@@ -14,13 +14,30 @@ use risingwave_storage::TableColumnDesc;
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
 
-pub(super) struct CreateTableExecutor {
+pub struct CreateTableExecutor {
     table_id: TableId,
     table_manager: TableManagerRef,
     source_manager: SourceManagerRef,
     table_columns: Vec<TableColumnDesc>,
 
     v2: bool,
+}
+
+impl CreateTableExecutor {
+    pub fn new_v2(
+        table_id: TableId,
+        table_manager: TableManagerRef,
+        source_manager: SourceManagerRef,
+        table_columns: Vec<TableColumnDesc>,
+    ) -> Self {
+        Self {
+            table_id,
+            table_manager,
+            source_manager,
+            table_columns,
+            v2: true,
+        }
+    }
 }
 
 impl BoxedExecutorBuilder for CreateTableExecutor {

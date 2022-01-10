@@ -18,7 +18,7 @@ use super::BoxedExecutor;
 use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
 
 /// `InsertExecutor` implements table insertion with values from its child executor.
-pub(super) struct InsertExecutor {
+pub struct InsertExecutor {
     /// target table id
     table_id: TableId,
     source_manager: SourceManagerRef,
@@ -26,6 +26,22 @@ pub(super) struct InsertExecutor {
     child: BoxedExecutor,
     executed: bool,
     schema: Schema,
+}
+
+impl InsertExecutor {
+    pub fn new(table_id: TableId, source_manager: SourceManagerRef, child: BoxedExecutor) -> Self {
+        Self {
+            table_id,
+            source_manager,
+            child,
+            executed: false,
+            schema: Schema {
+                fields: vec![Field {
+                    data_type: Int64Type::create(false),
+                }],
+            },
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -148,17 +164,11 @@ impl BoxedExecutorBuilder for InsertExecutor {
         })?;
         let child = source.clone_for_plan(proto_child).build()?;
 
-        Ok(Box::new(Self {
+        Ok(Box::new(Self::new(
             table_id,
-            source_manager: source.global_task_env().source_manager_ref(),
+            source.global_task_env().source_manager_ref(),
             child,
-            executed: false,
-            schema: Schema {
-                fields: vec![Field {
-                    data_type: Int64Type::create(false),
-                }],
-            },
-        }))
+        )))
     }
 }
 

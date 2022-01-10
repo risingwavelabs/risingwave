@@ -14,14 +14,14 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::PlanNode;
 pub use row_seq_scan::*;
-use seq_scan::*;
+pub use seq_scan::*;
 use sort_agg::*;
 use top_n::*;
 
 use crate::executor::create_stream::CreateStreamExecutor;
-use crate::executor::create_table::CreateTableExecutor;
+pub use crate::executor::create_table::CreateTableExecutor;
 use crate::executor::generate_series::GenerateSeriesI32Executor;
-use crate::executor::insert::InsertExecutor;
+pub use crate::executor::insert::InsertExecutor;
 use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;
 use crate::executor::join::sort_merge_join::SortMergeJoinExecutor;
 use crate::executor::join::HashJoinExecutorBuilder;
