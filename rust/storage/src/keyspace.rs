@@ -68,7 +68,7 @@ impl<S: StateStore> Keyspace<S> {
             prefix: Vec::new(),
         };
         root.push(Segment::FixedLength(b"t".to_vec()));
-        root.push(Segment::VariantLength(format!("{:?}", id).into())); // TODO: this should be replaced with more-reasonable representation
+        root.push(Segment::u32(id.table_id() as u32));
         root
     }
 
