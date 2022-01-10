@@ -102,7 +102,6 @@ mod tests {
                         schema_ref_id: None,
                         table_id: i as i32,
                     }),
-                    column_count: (i + 1) as u32,
                     table_name: format!("table_{}", i),
                     ..Default::default()
                 };
@@ -124,7 +123,6 @@ mod tests {
                 .await?;
             assert_eq!(table.table_ref_id.unwrap().table_id, i as i32);
             assert_eq!(table.table_name, format!("table_{}", i));
-            assert_eq!(table.column_count, (i + 1) as u32);
             assert_eq!(table.version, version.into_inner());
         }
 
@@ -136,7 +134,6 @@ mod tests {
                 schema_ref_id: None,
                 table_id: 0,
             }),
-            column_count: 10,
             table_name: "table_0".to_string(),
             ..Default::default()
         };
