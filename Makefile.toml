@@ -176,6 +176,15 @@ command = "rust/target/debug/playground"
 args = ["dev-compute-node"]
 description = "Start a RisingWave playground with 1 user-managed compute node, 1 meta node, 1 frontend, 1 minio, 1 prometheus"
 
+[tasks.dev-frontend]
+category = "RiseLAB - Start"
+dependencies = [
+  "pre-start-playground"
+]
+command = "rust/target/debug/playground"
+args = ["dev-frontend"]
+description = "Start a RisingWave playground with 1 compute node, 1 meta node, 1 user managed frontend"
+
 [tasks.kill-playground]
 category = "RiseLAB - Stop"
 description = "kill playground"

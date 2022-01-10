@@ -39,6 +39,14 @@ riselab:
     - use: prometheus
     - use: frontend
 
+  # `dev-frontend` have the same settings as default except the the frontend node will be started by user.
+  dev-frontend:
+    - use: meta-node
+    - use: compute-node
+    - use: frontend
+      # If user-managed is true, developers should start the frontend, and RiseLAB will wait for its start.
+      user-managed: true
+
 # The `use` field specified in the above `riselab` section will refer to the templates below.
 template:
   minio:
