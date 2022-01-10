@@ -97,19 +97,3 @@ impl ComputeNodeConfig {
         Ok(config)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn read_from_file() -> Result<()> {
-        let path = PathBuf::from("./../config/risingwave.toml");
-        println!("first, {:?}", fs::canonicalize(&path));
-        let config_str = std::fs::read_to_string(path).map_err(|e| RwError::from(IoError(e)))?;
-        let config: ComputeNodeConfig = toml::from_str(config_str.as_str())
-            .map_err(|e| RwError::from(InternalError(format!("parse error {}", e))))?;
-        assert_eq!(config.hummock_block_size(), 1024);
-        Ok(())
-    }
-}
