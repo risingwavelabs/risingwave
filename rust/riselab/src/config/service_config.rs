@@ -48,6 +48,7 @@ pub struct MinioConfig {
     pub hummock_user: String,
     pub hummock_password: String,
     pub hummock_bucket: String,
+    pub provide_prometheus: Option<Vec<PrometheusConfig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -57,6 +58,7 @@ pub struct PrometheusConfig {
     pub address: String,
     pub port: u16,
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
+    pub provide_minio: Option<Vec<MinioConfig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

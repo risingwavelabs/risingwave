@@ -2,7 +2,7 @@ use std::env;
 use std::path::Path;
 use std::process::Command;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use super::{ExecuteContext, Task};
 use crate::MinioConfig;
@@ -43,7 +43,21 @@ impl Task for MinioService {
             .arg("--config-dir")
             .arg(Path::new(&prefix_config).join("minio"))
             .env("MINIO_ROOT_USER", &self.config.root_user)
-            .env("MINIO_ROOT_PASSWORD", &self.config.root_password);
+            .env("MINIO_ROOT_PASSWORD", &self.config.root_password)
+            .env("MINIO_PROMETHEUS_AUTH_TYPE", "public");
+
+        let provide_prometheus = self.config.provide_prometheus.as_ref().unwrap();
+        match provide_prometheus.len() {
+            0 => {}
+            1 => {
+                let prometheus = &provide_prometheus[0];
+                cmd.env(
+                    "MINIO_PROMETHEUS_URL",
+                    format!("http://{}:{}", prometheus.address, prometheus.port),
+                );
+            }
+            other_length => return Err(anyhow!("expected 0 or 1 promethus, get {}", other_length)),
+        }
 
         ctx.run_command(ctx.tmux_run(cmd)?)?;
 

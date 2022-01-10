@@ -72,6 +72,9 @@ template:
     # Id of this instance
     id: minio
 
+    # Prometheus nodes used by this MinIO
+    provide-prometheus: "prometheus*"
+
   compute-node:
     # Compute-node listen address
     address: "127.0.0.1"
@@ -128,6 +131,9 @@ template:
 
     # Compute-nodes used by this Prometheus instance
     provide-compute-node: "compute-node*"
+
+    # Minio instances used by this Prometheus instance
+    provide-minio: "minio*"
 
   frontend:
     # Listen address of frontend

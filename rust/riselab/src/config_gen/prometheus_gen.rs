@@ -19,16 +19,28 @@ scrape_configs:
 
   - job_name: "hummock_monitor"
     static_configs:
-      - targets: [{targets}]
+      - targets: [{compute_node_targets}]
+
+  - job_name: minio-job
+    metrics_path: /minio/v2/metrics/cluster
+    static_configs:
+    - targets: [{minio_targets}]
 "#,
             prometheus_host = config.address,
             prometheus_port = config.port,
-            targets = config
+            compute_node_targets = config
                 .provide_compute_node
                 .as_ref()
                 .unwrap()
                 .iter()
                 .map(|node| format!("\"{}:{}\"", node.exporter_address, node.exporter_port))
+                .join(","),
+            minio_targets = config
+                .provide_minio
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|node| format!("\"{}:{}\"", node.address, node.port))
                 .join(",")
         )
     }
