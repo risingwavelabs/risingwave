@@ -12,6 +12,11 @@
 #![feature(bound_map)]
 #![feature(backtrace)]
 
+use risingwave_common::array::{DataChunk, StreamChunk};
+use risingwave_common::error::Result;
+use risingwave_common::types::DataTypeRef;
+use table::ScannableTable;
+
 pub mod bummock;
 pub mod hummock;
 pub mod keyspace;
@@ -20,6 +25,7 @@ pub mod metrics;
 pub mod monitor;
 pub mod object;
 pub mod panic_store;
+mod store;
 pub mod table;
 pub mod write_batch;
 
@@ -35,111 +41,8 @@ pub mod tikv;
 #[path = "tikv_mock.rs"]
 pub mod tikv;
 
-use async_trait::async_trait;
-use bytes::Bytes;
 pub use keyspace::{Keyspace, Segment};
-use risingwave_common::array::{DataChunk, StreamChunk};
-use risingwave_common::error::Result;
-use risingwave_common::types::DataTypeRef;
-use write_batch::WriteBatch;
-
-use crate::table::ScannableTable;
-
-#[async_trait]
-pub trait StateStore: Send + Sync + 'static + Clone {
-    type Iter: StateStoreIter<Item = (Bytes, Bytes)>;
-
-    /// Point get a value from the state store.
-    async fn get(&self, key: &[u8]) -> Result<Option<Bytes>>;
-
-    /// Scan `limit` number of keys from the keyspace. If `limit` is `None`, scan all elements.
-    ///
-    /// By default, this simply calls `StateStore::iter` to fetch elements.
-    ///
-    /// TODO: in some cases, the scan can be optimized into a `multi_get` request.
-    async fn scan(&self, prefix: &[u8], limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
-        let mut kvs = Vec::with_capacity(limit.unwrap_or_default());
-        let mut iter = self.iter(prefix).await?;
-
-        for _ in 0..limit.unwrap_or(usize::MAX) {
-            match iter.next().await? {
-                Some(kv) => kvs.push(kv),
-                None => break,
-            }
-        }
-
-        Ok(kvs)
-    }
-
-    async fn reverse_scan(
-        &self,
-        prefix: &[u8],
-        limit: Option<usize>,
-    ) -> Result<Vec<(Bytes, Bytes)>> {
-        let mut kvs = Vec::with_capacity(limit.unwrap_or_default());
-        let mut reverse_iter = self.reverse_iter(prefix).await?;
-
-        for _ in 0..limit.unwrap_or(usize::MAX) {
-            match reverse_iter.next().await? {
-                Some(kv) => kvs.push(kv),
-                None => break,
-            }
-        }
-
-        Ok(kvs)
-    }
-
-    /// Ingest a batch of data into the state store. One write batch should never contain operation
-    /// on the same key. e.g. Put(233, x) then Delete(233).
-    /// A epoch should be provided to ingest a write batch. It is served as:
-    /// - A handle to represent an atomic write session. All ingested write batches associated with
-    ///   the same `Epoch` have the all-or-nothing semantics, meaning that partial changes are not
-    ///   queryable and will be rollbacked if instructed.
-    /// - A version of a kv pair. kv pair associated with larger `Epoch` is guaranteed to be newer
-    ///   then kv pair with smaller `Epoch`. Currently this version is only used to derive the
-    ///   per-key modification history (e.g. in compaction), not across different keys.
-    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, epoch: u64) -> Result<()>;
-
-    /// Open and return an iterator for given `prefix`.
-    async fn iter(&self, prefix: &[u8]) -> Result<Self::Iter>;
-
-    /// Open and return a reversed iterator for given `prefix`.
-    async fn reverse_iter(&self, _prefix: &[u8]) -> Result<Self::Iter> {
-        unimplemented!()
-    }
-
-    /// Create a `WriteBatch` associated with this state store.
-    fn start_write_batch(&self) -> WriteBatch<Self> {
-        WriteBatch::new(self.clone())
-    }
-}
-
-#[async_trait]
-pub trait StateStoreIter: Send + 'static {
-    type Item;
-
-    async fn next(&mut self) -> Result<Option<Self::Item>>;
-}
-
-#[derive(Clone)]
-pub enum StateStoreImpl {
-    HummockStateStore(hummock::HummockStateStore),
-    MemoryStateStore(memory::MemoryStateStore),
-    RocksDBStateStore(rocksdb_local::RocksDBStateStore),
-    TikvStateStore(tikv::TikvStateStore),
-}
-
-#[macro_export]
-macro_rules! dispatch_state_store {
-    ($impl:expr, $store:ident, $body:tt) => {
-        match $impl {
-            StateStoreImpl::MemoryStateStore($store) => $body,
-            StateStoreImpl::HummockStateStore($store) => $body,
-            StateStoreImpl::TikvStateStore($store) => $body,
-            StateStoreImpl::RocksDBStateStore($store) => $body,
-        }
-    };
-}
+pub use store::{StateStore, StateStoreImpl, StateStoreIter};
 
 /// `Table` is an abstraction of the collection of columns and rows.
 /// Each `Table` can be viewed as a flat sheet of a user created table.

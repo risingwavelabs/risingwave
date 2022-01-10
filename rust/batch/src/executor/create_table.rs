@@ -8,9 +8,8 @@ use risingwave_common::util::downcast_arc;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::CreateTableNode;
 use risingwave_source::SourceManagerRef;
-use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::TableManagerRef;
-use risingwave_storage::{StateStoreImpl, TableColumnDesc};
+use risingwave_storage::TableColumnDesc;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
@@ -63,13 +62,9 @@ impl Executor for CreateTableExecutor {
         match self.v2 {
             true => {
                 let table = self
-          .table_manager
-          .create_table_v2(
-            &self.table_id,
-            table_columns,
-            StateStoreImpl::MemoryStateStore(MemoryStateStore::shared()), // FIXME: specify store
-          )
-          .await?;
+                    .table_manager
+                    .create_table_v2(&self.table_id, table_columns)
+                    .await?;
                 self.source_manager
                     .create_table_source_v2(&self.table_id, table)?;
             }

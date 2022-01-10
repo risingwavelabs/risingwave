@@ -185,7 +185,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_executor() -> Result<()> {
-        let table_manager = Arc::new(SimpleTableManager::new());
+        let table_manager = Arc::new(SimpleTableManager::with_in_memory_store());
         let source_manager = Arc::new(MemSourceManager::new());
 
         // Schema for mock executor.
@@ -454,7 +454,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_executor_for_table_v2() -> Result<()> {
-        let table_manager = Arc::new(SimpleTableManager::new());
+        let table_manager = Arc::new(SimpleTableManager::with_in_memory_store());
         let source_manager = Arc::new(MemSourceManager::new());
         let store = MemoryStateStore::new();
 
@@ -504,11 +504,7 @@ mod tests {
         // Create the first table.
         let table_id = TableId::new(SchemaId::default(), 0);
         let table = table_manager
-            .create_table_v2(
-                &table_id,
-                table_columns.to_vec(),
-                StateStoreImpl::MemoryStateStore(store.clone()),
-            )
+            .create_table_v2(&table_id, table_columns.to_vec())
             .await?;
         source_manager.create_table_source_v2(&table_id, table)?;
 

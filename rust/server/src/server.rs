@@ -11,6 +11,7 @@ use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_source::MemSourceManager;
 use risingwave_storage::table::SimpleTableManager;
+use risingwave_storage::StateStoreImpl;
 use risingwave_stream::task::{StreamManager, StreamTaskEnv};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
@@ -20,11 +21,11 @@ use crate::rpc::service::stream_service::StreamServiceImpl;
 
 pub fn rpc_serve(
     addr: SocketAddr,
-    state_store: Option<&str>,
+    state_store: StateStoreImpl,
     prometheus_listener_addr: &str,
     metrics_level: u32,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
-    let table_mgr = Arc::new(SimpleTableManager::new());
+    let table_mgr = Arc::new(SimpleTableManager::new(state_store.clone()));
     let task_mgr = Arc::new(TaskManager::new());
     let stream_mgr = Arc::new(StreamManager::new(addr, state_store));
     let source_mgr = Arc::new(MemSourceManager::new());
@@ -115,6 +116,8 @@ impl MetricsManager {
 #[cfg(test)]
 mod tests {
     use risingwave_common::util::addr::get_host_port;
+    use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::StateStoreImpl;
 
     use crate::server::rpc_serve;
 
@@ -122,7 +125,8 @@ mod tests {
     async fn test_server_shutdown() {
         let addr = get_host_port("127.0.0.1:5688").unwrap();
         let prometheus_addr = "127.0.0.1:1222";
-        let (join_handle, shutdown_send) = rpc_serve(addr, None, prometheus_addr, 1);
+        let store = StateStoreImpl::MemoryStateStore(MemoryStateStore::new());
+        let (join_handle, shutdown_send) = rpc_serve(addr, store, prometheus_addr, 1);
         shutdown_send.send(()).unwrap();
         join_handle.await.unwrap();
     }

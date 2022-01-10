@@ -3,6 +3,7 @@ use log::info;
 use risingwave::server::rpc_serve;
 use risingwave::server_context::ServerContext;
 use risingwave_common::util::addr::get_host_port;
+
 #[derive(Parser)]
 struct Opts {
     // The custom log4rs config file.
@@ -44,11 +45,13 @@ async fn main() {
 
     let _res = server_context.register_to_meta().await;
 
+    let state_store = opts.state_store.parse().unwrap();
+
     let addr = get_host_port(opts.host.as_str()).unwrap();
     info!("Starting server at {}", addr);
     let (join_handle, _shutdown_send) = rpc_serve(
         addr,
-        Some(&opts.state_store),
+        state_store,
         opts.prometheus_listener_addr.as_str(),
         opts.metrics_level,
     );

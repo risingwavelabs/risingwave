@@ -15,9 +15,11 @@ use crate::{dispatch_state_store, Keyspace, StateStoreImpl, TableColumnDesc};
 /// A simple implementation of in memory table for local tests.
 /// It will be replaced in near future when replaced by locally
 /// on-disk files.
-#[derive(Default)]
 pub struct SimpleTableManager {
     tables: Mutex<HashMap<TableId, ScannableTableRef>>,
+
+    /// Used for `TableV2`.
+    state_store: StateStoreImpl,
 }
 
 impl AsRef<dyn Any> for SimpleTableManager {
@@ -56,7 +58,6 @@ impl TableManager for SimpleTableManager {
         &self,
         table_id: &TableId,
         table_columns: Vec<TableColumnDesc>,
-        store: StateStoreImpl,
     ) -> Result<ScannableTableRef> {
         let mut tables = self.get_tables();
 
@@ -66,7 +67,7 @@ impl TableManager for SimpleTableManager {
             table_id
         );
 
-        let table = dispatch_state_store!(store, store, {
+        let table = dispatch_state_store!(self.state_store.clone(), store, {
             let keyspace = Keyspace::table_root(store, table_id);
             Arc::new(MViewTable::new_batch(keyspace, table_columns)) as ScannableTableRef
         });
@@ -96,10 +97,15 @@ impl TableManager for SimpleTableManager {
 }
 
 impl SimpleTableManager {
-    pub fn new() -> Self {
-        SimpleTableManager {
+    pub fn new(state_store: StateStoreImpl) -> Self {
+        Self {
             tables: Mutex::new(HashMap::new()),
+            state_store,
         }
+    }
+
+    pub fn with_in_memory_store() -> Self {
+        Self::new(StateStoreImpl::shared_in_memory_store())
     }
 
     pub fn get_tables(&self) -> MutexGuard<HashMap<TableId, ScannableTableRef>> {

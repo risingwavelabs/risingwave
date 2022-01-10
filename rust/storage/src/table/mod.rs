@@ -12,7 +12,7 @@ use risingwave_common::error::Result;
 pub use simple_manager::*;
 
 use crate::bummock::BummockResult;
-use crate::{StateStoreImpl, TableColumnDesc};
+use crate::TableColumnDesc;
 
 #[async_trait::async_trait]
 /// `TableManager` is an abstraction of managing a collection of tables.
@@ -30,7 +30,6 @@ pub trait TableManager: Sync + Send + AsRef<dyn Any> {
         &self,
         table_id: &TableId,
         table_columns: Vec<TableColumnDesc>,
-        store: StateStoreImpl,
     ) -> Result<ScannableTableRef>;
 
     /// Get a specific table.

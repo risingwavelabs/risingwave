@@ -116,7 +116,7 @@ async fn test_stream_mv_proto() {
     };
 
     // Initialize storage.
-    let table_manager = Arc::new(SimpleTableManager::new());
+    let table_manager = Arc::new(SimpleTableManager::with_in_memory_store());
     let source_manager = Arc::new(MemSourceManager::new());
     let table_id = TableId::default();
     let table_columns = vec![
@@ -158,7 +158,7 @@ async fn test_stream_mv_proto() {
 
     // Build stream actor.
     let socket_addr = get_host_port(&format!("127.0.0.1:{}", port)).unwrap();
-    let stream_manager = StreamManager::new(socket_addr, None);
+    let stream_manager = StreamManager::with_in_memory_store(socket_addr);
     let env = StreamTaskEnv::new(table_manager.clone(), source_manager, socket_addr);
 
     let actor_info_proto = ActorInfo {

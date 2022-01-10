@@ -154,7 +154,7 @@ mod tests {
     #[tokio::test]
     async fn test_sink() {
         // Prepare storage and memtable.
-        let store_mgr = Arc::new(SimpleTableManager::new());
+        let store_mgr = Arc::new(SimpleTableManager::with_in_memory_store());
         let table_id = TableId::new(SchemaId::default(), 1);
         // Two columns of int32 type, the first column is PK.
         let columns = vec![

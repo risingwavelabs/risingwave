@@ -44,7 +44,7 @@ fn helper_make_local_actor(actor_id: u32) -> ActorInfo {
 #[tokio::test]
 async fn test_stream_proto() {
     let socket_addr = get_host_port(&format!("127.0.0.1:{}", PORT)).unwrap();
-    let stream_manager = StreamManager::new(socket_addr, None);
+    let stream_manager = StreamManager::with_in_memory_store(socket_addr);
     let info = [1, 3, 7, 11, 13, 233]
         .iter()
         .cloned()
@@ -195,7 +195,7 @@ async fn test_stream_proto() {
         .unwrap();
 
     let env = StreamTaskEnv::new(
-        Arc::new(SimpleTableManager::new()),
+        Arc::new(SimpleTableManager::with_in_memory_store()),
         Arc::new(MemSourceManager::new()),
         std::net::SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
     );

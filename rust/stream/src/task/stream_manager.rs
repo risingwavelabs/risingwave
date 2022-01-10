@@ -15,11 +15,6 @@ use risingwave_common::util::sort_util::{
 };
 use risingwave_pb::plan::JoinType as JoinTypeProto;
 use risingwave_pb::{expr, stream_plan, stream_service};
-use risingwave_storage::hummock::HummockStateStore;
-use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::object::ConnectionInfo;
-use risingwave_storage::rocksdb_local::RocksDBStateStore;
-use risingwave_storage::tikv::TikvStateStore;
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 use tokio::task::JoinHandle;
 
@@ -121,10 +116,15 @@ pub struct StreamManager {
 }
 
 impl StreamManager {
-    pub fn new(addr: SocketAddr, state_store: Option<&str>) -> Self {
+    pub fn new(addr: SocketAddr, state_store: StateStoreImpl) -> Self {
         StreamManager {
             core: Mutex::new(StreamManagerCore::new(addr, state_store)),
         }
+    }
+
+    #[cfg(test)]
+    pub fn with_in_memory_store(addr: SocketAddr) -> Self {
+        Self::new(addr, StateStoreImpl::shared_in_memory_store())
     }
 
     // TODO: We will refine this method when the meta service is ready.
@@ -238,70 +238,9 @@ fn build_agg_call_from_prost(agg_call_proto: &expr::AggCall) -> Result<AggCall> 
 }
 
 impl StreamManagerCore {
-    fn get_state_store_impl(state_store: Option<&str>) -> StateStoreImpl {
-        match state_store {
-            Some("in_memory") | Some("in-memory") | None => {
-                StateStoreImpl::MemoryStateStore(MemoryStateStore::shared())
-            }
-            Some(tikv) if tikv.starts_with("tikv") => {
-                StateStoreImpl::TikvStateStore(TikvStateStore::new(vec![tikv
-                    .strip_prefix("tikv://")
-                    .unwrap()
-                    .to_string()]))
-            }
-            Some(minio) if minio.starts_with("hummock+minio://") => {
-                use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
-                use risingwave_storage::hummock::{HummockOptions, HummockStorage};
-                use risingwave_storage::object::S3ObjectStore;
-                // TODO: initialize those settings in a yaml file or command line instead of
-                // hard-coding (#2165).
-                StateStoreImpl::HummockStateStore(HummockStateStore::new(HummockStorage::new(
-                    Arc::new(S3ObjectStore::new_with_minio(
-                        minio.strip_prefix("hummock+").unwrap(),
-                    )),
-                    HummockOptions {
-                        table_size: 256 * (1 << 20),
-                        block_size: 64 * (1 << 10),
-                        bloom_false_positive: 0.1,
-                        remote_dir: "hummock_001".to_string(),
-                        checksum_algo: ChecksumAlg::Crc32c,
-                        stats_enabled: false,
-                    },
-                )))
-            }
-            Some(s3) if s3.starts_with("hummock+s3://") => {
-                use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
-                use risingwave_storage::hummock::{HummockOptions, HummockStorage};
-                use risingwave_storage::object::S3ObjectStore;
-                let s3_test_conn_info = ConnectionInfo::new();
-                let s3_store = S3ObjectStore::new(
-                    s3_test_conn_info,
-                    s3.strip_prefix("hummock+s3://").unwrap().to_string(),
-                );
-                StateStoreImpl::HummockStateStore(HummockStateStore::new(HummockStorage::new(
-                    Arc::new(s3_store),
-                    HummockOptions {
-                        table_size: 256 * (1 << 20),
-                        block_size: 64 * (1 << 10),
-                        bloom_false_positive: 0.1,
-                        remote_dir: "hummock_001".to_string(),
-                        checksum_algo: ChecksumAlg::Crc32c,
-                        stats_enabled: true,
-                    },
-                )))
-            }
-            Some(rocksdb) if rocksdb.starts_with("rocksdb_local://") => {
-                StateStoreImpl::RocksDBStateStore(RocksDBStateStore::new(
-                    rocksdb.strip_prefix("rocksdb_local://").unwrap(),
-                ))
-            }
-            Some(other) => unimplemented!("{} state store is not supported", other),
-        }
-    }
-
-    fn new(addr: SocketAddr, state_store: Option<&str>) -> Self {
+    fn new(addr: SocketAddr, state_store: StateStoreImpl) -> Self {
         let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-        let state_store = Self::get_state_store_impl(state_store);
+
         Self {
             handles: HashMap::new(),
             context: Arc::new(SharedContext::new(addr)),

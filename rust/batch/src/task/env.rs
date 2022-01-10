@@ -36,8 +36,9 @@ impl BatchTaskEnv {
     pub fn for_test() -> Self {
         use risingwave_source::MemSourceManager;
         use risingwave_storage::table::SimpleTableManager;
+
         BatchTaskEnv {
-            table_manager: Arc::new(SimpleTableManager::new()),
+            table_manager: Arc::new(SimpleTableManager::with_in_memory_store()),
             task_manager: Arc::new(TaskManager::new()),
             server_addr: SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
             source_manager: std::sync::Arc::new(MemSourceManager::new()),
