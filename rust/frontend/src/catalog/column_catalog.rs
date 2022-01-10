@@ -5,14 +5,14 @@ use crate::catalog::ColumnId;
 /// A descriptor of a column.
 #[derive(Debug, Clone)]
 pub struct ColumnDesc {
-    datatype: DataTypeRef,
+    data_type: DataTypeRef,
     is_primary: bool,
 }
 
 impl ColumnDesc {
-    pub fn new(datatype: DataTypeRef, is_primary: bool) -> Self {
+    pub fn new(data_type: DataTypeRef, is_primary: bool) -> Self {
         ColumnDesc {
-            datatype,
+            data_type,
             is_primary,
         }
     }
@@ -22,7 +22,11 @@ impl ColumnDesc {
     }
 
     pub fn is_nullable(&self) -> bool {
-        self.datatype.is_nullable()
+        self.data_type.is_nullable()
+    }
+
+    pub fn data_type_ref(&self) -> &DataTypeRef {
+        &self.data_type
     }
 }
 
@@ -47,8 +51,8 @@ impl ColumnCatalog {
         &self.name
     }
 
-    pub fn datatype_clone(&self) -> DataTypeRef {
-        self.desc.datatype.clone()
+    pub fn data_type_clone(&self) -> DataTypeRef {
+        self.desc.data_type.clone()
     }
 
     pub fn is_primary(&self) -> bool {
@@ -57,5 +61,9 @@ impl ColumnCatalog {
 
     pub fn is_nullable(&self) -> bool {
         self.desc.is_nullable()
+    }
+
+    pub fn col_desc_ref(&self) -> &ColumnDesc {
+        &self.desc
     }
 }

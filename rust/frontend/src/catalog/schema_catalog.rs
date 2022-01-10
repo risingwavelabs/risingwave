@@ -1,11 +1,11 @@
 use std::collections::HashMap;
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use risingwave_common::error::Result;
 
 use crate::catalog::create_table_info::CreateTableInfo;
 use crate::catalog::table_catalog::TableCatalog;
-use crate::catalog::{CatalogError, SchemaId};
+use crate::catalog::{CatalogError, SchemaId, TableId};
 
 pub struct SchemaCatalog {
     schema_id: SchemaId,
@@ -21,11 +21,19 @@ impl SchemaCatalog {
             table_by_name: HashMap::new(),
         }
     }
-    pub fn create_table(&mut self, info: CreateTableInfo) -> Result<()> {
+    pub fn create_table_local(&mut self, info: &CreateTableInfo) -> Result<()> {
+        self.create_table_with_id(info, self.next_table_id.fetch_add(1, Ordering::Relaxed))
+    }
+
+    pub fn create_table_with_id(
+        &mut self,
+        info: &CreateTableInfo,
+        table_id: TableId,
+    ) -> Result<()> {
         let table_name = info.get_name().to_string();
 
         // Wrap info into table catalog.
-        let mut table_catalog = TableCatalog::new();
+        let mut table_catalog = TableCatalog::new(table_id);
         let columns = info.get_columns();
         for (col_name, col_desc) in columns {
             table_catalog

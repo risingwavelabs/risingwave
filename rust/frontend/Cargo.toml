@@ -13,11 +13,14 @@ itertools = "0.10"
 log = "0.4"
 log4rs = "1"
 paste = "1"
+risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
+risingwave_meta = { path = "../meta" }
 risingwave_sqlparser = { path = "../sqlparser" }
 smallvec = { version = "1.6.1", features = ["serde"] }
 thiserror = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
+tonic = "0.6"
 
 [dev-dependencies]
 tokio-postgres = "0.7"
