@@ -82,7 +82,7 @@ internal class StateMachine(private val out: ByteWriteChannel, private val dbMan
 
   @Throws(PgException::class)
   private suspend fun processQuery(msg: Query) {
-    log.info("receive query: {}", msg.sql)
+    log.debug("receive query: {}", msg.sql)
     if (db == null) {
       throw PgException(
         PgErrorCode.PROTOCOL_VIOLATION,

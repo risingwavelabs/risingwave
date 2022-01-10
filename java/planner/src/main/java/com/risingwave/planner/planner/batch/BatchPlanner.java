@@ -77,14 +77,14 @@ public class BatchPlanner implements Planner<BatchPlan> {
   public BatchPlan planPhysical(SqlNode ast, ExecutionContext context) {
     RelNode result = plan(ast, context, PHYSICAL);
     RisingWaveBatchPhyRel root = (RisingWaveBatchPhyRel) result;
-    log.info("Create physical plan:\n {}", ExplainWriter.explainPlan(root));
+    log.debug("Create physical plan:\n {}", ExplainWriter.explainPlan(root));
     return new BatchPlan(root);
   }
 
   public BatchPlan planDistributed(SqlNode ast, ExecutionContext context) {
     RelNode result = plan(ast, context, DISTRIBUTED);
     RisingWaveBatchPhyRel root = (RisingWaveBatchPhyRel) result;
-    log.info("Create distributed plan:\n {}", ExplainWriter.explainPlan(root));
+    log.debug("Create distributed plan:\n {}", ExplainWriter.explainPlan(root));
     return new BatchPlan(root);
   }
 
