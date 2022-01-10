@@ -5,22 +5,26 @@ import com.google.common.collect.ImmutableMap;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.MaterializedViewCatalog;
 import com.risingwave.catalog.TableCatalog;
-import com.risingwave.planner.rel.common.dist.RwDistributionTrait;
 import com.risingwave.planner.rel.streaming.join.RwStreamHashJoin;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.IntStream;
 import org.apache.calcite.rel.RelCollations;
+import org.apache.calcite.rel.RelDistribution;
 import org.apache.calcite.rel.RelFieldCollation;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rel.type.RelDataTypeFieldImpl;
 import org.apache.calcite.rex.RexInputRef;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexShuttle;
-import org.apache.calcite.util.Permutation;
+import org.apache.calcite.util.mapping.IntPair;
+import org.apache.calcite.util.mapping.Mapping;
+import org.apache.calcite.util.mapping.MappingType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -60,6 +64,90 @@ public class PrimaryKeyDerivationVisitor
 
     public ImmutableMap<Integer, Integer> getPositionMap() {
       return positionMap;
+    }
+  }
+
+  /**
+   * This ExchangeMapping should only be used when deriving the new indices of keys used in
+   * Exchange. Existing mappings are not suitable for exchange.
+   */
+  class ExchangeMapping implements Mapping {
+
+    private HashMap<Integer, Integer> sourceToTarget;
+    private HashMap<Integer, Integer> targetToSource;
+
+    public ExchangeMapping(Map<Integer, Integer> sourceToTarget) {
+      this.sourceToTarget = new HashMap<>();
+      this.targetToSource = new HashMap<>();
+      for (var e : sourceToTarget.entrySet()) {
+        this.sourceToTarget.put(e.getKey(), e.getValue());
+        this.targetToSource.put(e.getValue(), e.getKey());
+      }
+    }
+
+    @Override
+    public boolean isIdentity() {
+      return !sourceToTarget.isEmpty();
+    }
+
+    @Override
+    public void clear() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public int getSource(int target) {
+      return targetToSource.get(target);
+    }
+
+    @Override
+    public int getSourceCount() {
+      return sourceToTarget.size();
+    }
+
+    @Override
+    public int getSourceOpt(int target) {
+      return targetToSource.get(target);
+    }
+
+    @Override
+    public int getTargetCount() {
+      return targetToSource.size();
+    }
+
+    @Override
+    public int getTarget(int source) {
+      return sourceToTarget.get(source);
+    }
+
+    @Override
+    public int getTargetOpt(int source) {
+      return sourceToTarget.get(source);
+    }
+
+    @Override
+    public void set(int source, int target) {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Mapping inverse() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public MappingType getMappingType() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public int size() {
+      return sourceToTarget.size();
+    }
+
+    @Override
+    public Iterator<IntPair> iterator() {
+      throw new UnsupportedOperationException();
     }
   }
 
@@ -330,20 +418,33 @@ public class PrimaryKeyDerivationVisitor
       RwStreamExchange exchange) {
     LOGGER.debug("visit RwStreamExchange");
     var input = (RisingWaveStreamingRel) exchange.getInput(0);
+    int originalFieldCount = input.getRowType().getFieldCount();
     var p = input.accept(this);
+    var mapping = new HashMap<Integer, Integer>();
+    // ExchangeMapping needs a full mapping while PositionMap only cares about those indices
+    // remapped.
+    for (int i = 0; i < originalFieldCount; i++) {
+      mapping.put(i, i);
+    }
+    for (var e : p.info.getPositionMap().entrySet()) {
+      mapping.put(e.getKey(), e.getValue());
+    }
 
-    int[] target = new int[p.node.getRowType().getFieldCount()];
-    for (int i = 0; i < target.length; i++) {
-      target[i] = i;
-    }
-    for (var originalToNew : p.info.getPositionMap().entrySet()) {
-      target[originalToNew.getKey()] = originalToNew.getValue();
-    }
-    Permutation permutation = new Permutation(target);
-    var newDistribution = (RwDistributionTrait) exchange.getDistribution().apply(permutation);
-    var newExchange = RwStreamExchange.create(p.node, newDistribution);
+    var exchangeMapping = new ExchangeMapping(mapping);
+    var newDistribution =
+        (RelDistribution)
+            exchange
+                .getDistribution()
+                .getTraitDef()
+                .canonize(exchange.getDistribution().apply(exchangeMapping));
+    var oldTraitSet = exchange.getTraitSet();
+    LOGGER.debug("exchange oldTraitSet:" + oldTraitSet);
+    var newTraitSet = oldTraitSet.replace(newDistribution).plus(newDistribution);
+    LOGGER.debug("exchange newTraitSet:" + newTraitSet);
+    var newExchange = (RwStreamExchange) exchange.copy(newTraitSet, p.node, newDistribution);
     var info =
-        new PrimaryKeyIndicesAndPositionMap(p.info.getPrimaryKeyIndices(), ImmutableMap.of());
+        new PrimaryKeyIndicesAndPositionMap(
+            p.info.getPrimaryKeyIndices(), ImmutableMap.copyOf(p.info.getPositionMap()));
     LOGGER.debug("leave RwStreamExchange");
     return new Result<>(newExchange, info);
   }
