@@ -262,12 +262,6 @@ impl StreamManagerCore {
         downstreams: &[u32],
     ) -> Result<Box<dyn StreamConsumer>> {
         // create downstream receivers
-
-        // TODO: We should not sort downstreams here. Instead, this is better to be fixed by the
-        // frontend. https://github.com/singularity-data/risingwave/issues/2452
-        let mut downstreams = downstreams.to_vec();
-        downstreams.sort_unstable();
-
         let outputs = downstreams
             .iter()
             .map(|down_id| {

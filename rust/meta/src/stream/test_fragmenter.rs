@@ -247,15 +247,8 @@ async fn test_fragmenter() -> Result<()> {
     expected_upstream.insert(6, vec![]);
     for fragment in graph {
         assert_eq!(
-            expected_downstream
-                .get(&fragment.get_actor_id())
-                .unwrap()
-                .iter()
-                .collect::<HashSet<_>>(),
-            fragment
-                .get_downstream_actor_id()
-                .iter()
-                .collect::<HashSet<_>>(),
+            expected_downstream.get(&fragment.get_actor_id()).unwrap(),
+            fragment.get_downstream_actor_id(),
         );
         let mut node = fragment.get_nodes();
         while !node.get_input().is_empty() {

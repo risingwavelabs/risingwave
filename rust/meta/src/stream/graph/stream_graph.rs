@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -15,7 +15,7 @@ pub struct StreamFragmentBuilder {
     /// dispatcher category.
     dispatcher: Option<Dispatcher>,
     /// downstream fragment set.
-    downstream_fragments: HashSet<u32>,
+    downstream_fragments: BTreeSet<u32>,
     /// upstream fragment array.
     upstream_fragments: Vec<Vec<u32>>,
 }
@@ -26,7 +26,7 @@ impl StreamFragmentBuilder {
             actor_id,
             nodes: node,
             dispatcher: None,
-            downstream_fragments: HashSet::new(),
+            downstream_fragments: BTreeSet::new(),
             upstream_fragments: vec![],
         }
     }
