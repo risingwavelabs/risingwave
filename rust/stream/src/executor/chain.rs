@@ -70,6 +70,10 @@ impl Executor for Chain {
     fn pk_indices(&self) -> PkIndicesRef {
         self.mview.pk_indices()
     }
+
+    fn identity(&self) -> &'static str {
+        "Chain"
+    }
 }
 
 #[cfg(test)]
@@ -129,6 +133,10 @@ mod test {
 
         fn pk_indices(&self) -> PkIndicesRef {
             self.0.pk_indices()
+        }
+
+        fn identity(&self) -> &'static str {
+            "MockSnapshot"
         }
     }
 

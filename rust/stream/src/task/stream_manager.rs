@@ -623,7 +623,12 @@ impl StreamManagerCore {
             )))),
         };
 
-        executor
+        let executor = executor?;
+        let identity = executor.identity().to_string();
+
+        let executor = Box::new(TraceExecutor::new(executor, identity));
+
+        Ok(executor)
     }
 
     /// Create a chain(tree) of nodes and return the head executor.
@@ -748,19 +753,20 @@ impl StreamManagerCore {
 
     fn build_fragment(&mut self, fragments: &[u32], env: StreamTaskEnv) -> Result<()> {
         for actor_id in fragments {
-            let fragment = self.fragments.remove(actor_id).unwrap();
-            let executor = self.create_nodes(*actor_id, fragment.get_nodes(), env.clone())?;
+            let actor_id = *actor_id;
+            let fragment = self.fragments.remove(&actor_id).unwrap();
+            let executor = self.create_nodes(actor_id, fragment.get_nodes(), env.clone())?;
             let dispatcher = self.create_dispatcher(
                 executor,
                 fragment.get_dispatcher(),
-                *actor_id,
+                actor_id,
                 fragment.get_downstream_actor_id(),
             )?;
 
-            debug!("build fragment: {:#?}", &dispatcher);
+            trace!("build fragment: {:#?}", &dispatcher);
 
-            let actor = Actor::new(dispatcher);
-            self.handles.insert(*actor_id, tokio::spawn(actor.run()));
+            let actor = Actor::new(dispatcher, actor_id);
+            self.handles.insert(actor_id, tokio::spawn(actor.run()));
         }
 
         Ok(())

@@ -3,6 +3,8 @@ use log::info;
 use risingwave::server::rpc_serve;
 use risingwave::server_context::ServerContext;
 use risingwave_common::util::addr::get_host_port;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::prelude::*;
 
 #[derive(Parser)]
 struct Opts {
@@ -27,13 +29,46 @@ struct Opts {
 
     #[clap(long, default_value = "./config/risingwave.toml")]
     config_path: String,
+
+    /// Use `tokio-tracing` instead of `log4rs` for observability.
+    #[clap(long)]
+    enable_tracing: bool,
 }
 
 #[cfg(not(tarpaulin_include))]
-#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
+#[tokio::main]
 async fn main() {
     let opts: Opts = Opts::parse();
-    log4rs::init_file(opts.log4rs_config.clone(), Default::default()).unwrap();
+    if opts.enable_tracing {
+        let fmt_layer = tracing_subscriber::fmt::layer().compact().with_ansi(false);
+        let filter_layer = tracing_subscriber::filter::filter_fn(|metadata| {
+            let target = metadata.target();
+            // For external crates, only log warnings
+            if target.starts_with("rusoto_core")
+                || target.starts_with("hyper")
+                || target.starts_with("h2")
+                || target.starts_with("tower")
+            {
+                return metadata.level() <= &tracing::Level::WARN;
+            }
+            // For our own crates, log all debug message
+            if metadata.level() <= &tracing::Level::DEBUG {
+                return true;
+            }
+            // For risingwave_stream, log all message
+            if target.starts_with("risingwave_") {
+                return true;
+            }
+            false
+        })
+        .with_max_level_hint(tracing::Level::TRACE);
+        tracing_subscriber::registry()
+            .with(fmt_layer.with_filter(filter_layer))
+            .init();
+    } else {
+        log4rs::init_file(opts.log4rs_config.clone(), Default::default()).unwrap();
+    }
+
     info!("meta address: {}", opts.meta_address.clone());
 
     let server_context =

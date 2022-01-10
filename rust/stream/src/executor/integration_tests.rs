@@ -85,7 +85,7 @@ async fn test_merger_sum_aggr() {
         );
         let (tx, rx) = channel(16);
         let consumer = SenderConsumer::new(Box::new(aggregator), Box::new(ChannelOutput::new(tx)));
-        let actor = Actor::new(Box::new(consumer));
+        let actor = Actor::new(Box::new(consumer), 0);
         (actor, rx)
     };
 
@@ -124,7 +124,7 @@ async fn test_merger_sum_aggr() {
         0,
         ctx,
     );
-    let actor = Actor::new(Box::new(dispatcher));
+    let actor = Actor::new(Box::new(dispatcher), 0);
     handles.push(tokio::spawn(actor.run()));
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
@@ -159,7 +159,7 @@ async fn test_merger_sum_aggr() {
     );
     let items = Arc::new(Mutex::new(vec![]));
     let consumer = MockConsumer::new(Box::new(projection), items.clone());
-    let actor = Actor::new(Box::new(consumer));
+    let actor = Actor::new(Box::new(consumer), 0);
     handles.push(tokio::spawn(actor.run()));
 
     for j in 0..11 {
@@ -369,7 +369,7 @@ async fn test_tpch_q6() {
         );
         let (tx, rx) = channel(16);
         let consumer = SenderConsumer::new(Box::new(aggregator), Box::new(ChannelOutput::new(tx)));
-        let actor = Actor::new(Box::new(consumer));
+        let actor = Actor::new(Box::new(consumer), 0);
         (actor, rx)
     };
 
@@ -402,7 +402,7 @@ async fn test_tpch_q6() {
         0,
         ctx.clone(),
     );
-    let actor = Actor::new(Box::new(dispatcher));
+    let actor = Actor::new(Box::new(dispatcher), 0);
     handles.push(tokio::spawn(actor.run()));
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
@@ -437,7 +437,7 @@ async fn test_tpch_q6() {
 
     let items = Arc::new(Mutex::new(vec![]));
     let consumer = MockConsumer::new(Box::new(projection), items.clone());
-    let actor = Actor::new(Box::new(consumer));
+    let actor = Actor::new(Box::new(consumer), 0);
 
     // start merger thread
     handles.push(tokio::spawn(actor.run()));

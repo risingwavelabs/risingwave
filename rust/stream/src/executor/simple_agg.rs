@@ -198,6 +198,10 @@ impl<S: StateStore> Executor for SimpleAggExecutor<S> {
     fn pk_indices(&self) -> PkIndicesRef {
         &self.pk_indices
     }
+
+    fn identity(&self) -> &'static str {
+        "SimpleAggExecutor"
+    }
 }
 
 #[cfg(test)]

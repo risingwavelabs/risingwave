@@ -82,7 +82,7 @@ pub struct MetricsManager {}
 impl MetricsManager {
     pub fn boot_metrics_service(listen_addr: String) {
         tokio::spawn(async move {
-            println!(
+            info!(
                 "Prometheus listener for Prometheus is set up on http://{}",
                 listen_addr
             );

@@ -7,12 +7,13 @@ use dialoguer::MultiSelect;
 use enum_iterator::IntoEnumIterator;
 use itertools::Itertools;
 
-#[derive(Clone, Debug, IntoEnumIterator)]
+#[derive(Clone, Debug, IntoEnumIterator, PartialEq)]
 pub enum Components {
     MinIO,
     PrometheusAndGrafana,
     ComputeNodeAndMetaNode,
     Frontend,
+    Tracing,
 }
 
 impl Components {
@@ -22,6 +23,7 @@ impl Components {
             Self::PrometheusAndGrafana => "Prometheus / Grafana",
             Self::ComputeNodeAndMetaNode => "Build compute-node / meta-node",
             Self::Frontend => "Build frontend",
+            Self::Tracing => "Enable tracing",
         }
         .into()
     }
@@ -48,6 +50,10 @@ to RiseLAB directory."
 Required if you want to build frontend. Otherwise you will
 need to manually download and copy it to RiseLAB directory."
             }
+            Self::Tracing => {
+                "
+Enable tracing for compute-node"
+            }
         }
         .into()
     }
@@ -58,6 +64,7 @@ need to manually download and copy it to RiseLAB directory."
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
             Self::ComputeNodeAndMetaNode => "ENABLE_BUILD_RUST",
             Self::Frontend => "ENABLE_BUILD_FRONTEND",
+            Self::Tracing => "ENABLE_COMPUTE_TRACING",
         }
         .into()
     }
@@ -76,6 +83,13 @@ fn configure() -> Result<Vec<usize>> {
     );
     println!();
 
+    let default_enabled = vec![
+        Components::MinIO,
+        Components::PrometheusAndGrafana,
+        Components::ComputeNodeAndMetaNode,
+        Components::Frontend,
+    ];
+
     let items = Components::into_enum_iter()
         .map(|c| {
             (
@@ -89,7 +103,7 @@ fn configure() -> Result<Vec<usize>> {
                     )
                     .dim()
                 ),
-                true,
+                default_enabled.contains(&c),
             )
         })
         .collect_vec();

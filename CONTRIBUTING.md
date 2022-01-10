@@ -59,6 +59,10 @@ curl http://localhost:9090/metrics
 ```
 Furthermore, [Grafana](https://prometheus.io/docs/visualization/grafana/) can be used to provide better visualization of the metrics. After following the official instructions by Grafana, you can use browser to visit `http://localhost:3000/` to get the metrics dashboard.
 
+## Tracing
+
+Compute node supports streaming tracing. To enable this, either enable `tracing` functionality in `RiseLAB` by `./riselab configure`, or pass `--enable-tracing` to the `compute-node` binary.
+
 ## Code Formatting
 Before submitting your pull request (PR), you should format the code first.
 

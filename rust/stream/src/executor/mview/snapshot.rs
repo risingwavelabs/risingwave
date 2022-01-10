@@ -100,6 +100,10 @@ impl<S: StateStore> Executor for BatchQueryExecutor<S> {
     fn pk_indices(&self) -> PkIndicesRef {
         &self.pk_indices
     }
+
+    fn identity(&self) -> &'static str {
+        "BatchQueryExecutor"
+    }
 }
 
 #[cfg(test)]

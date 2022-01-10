@@ -40,7 +40,7 @@ root:
   level: debug
   appenders:
     - stdout # change to 'rolling' if want rolling files appender
-    - rolling
+    # - rolling
 
 loggers:
   "rusoto_core":
@@ -48,6 +48,8 @@ loggers:
   "hyper":
     level: warn
   "h2":
+    level: warn
+  "tower":
     level: warn
   # For debug: enable trace logging as examples below
   # risingwave_stream::executor::hash_join:

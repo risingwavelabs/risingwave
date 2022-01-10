@@ -132,6 +132,10 @@ impl Executor for StreamSourceExecutor {
     fn pk_indices(&self) -> PkIndicesRef {
         &self.pk_indices
     }
+
+    fn identity(&self) -> &'static str {
+        "StreamSourceExecutor"
+    }
 }
 
 impl Debug for StreamSourceExecutor {

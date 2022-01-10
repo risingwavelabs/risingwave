@@ -25,6 +25,7 @@ use smallvec::SmallVec;
 pub use stream_source::*;
 pub use top_n::*;
 pub use top_n_appendonly::*;
+pub use trace::*;
 
 mod actor;
 mod aggregation;
@@ -42,6 +43,7 @@ mod simple_agg;
 mod stream_source;
 mod top_n;
 mod top_n_appendonly;
+mod trace;
 
 #[cfg(test)]
 mod integration_tests;
@@ -162,6 +164,9 @@ pub trait Executor: Send + Debug + 'static {
             .map(|idx| schema.fields[*idx].data_type.data_type_kind())
             .collect()
     }
+
+    /// Identity string of the executor
+    fn identity(&self) -> &'static str;
 }
 
 pub type PkIndices = Vec<usize>;

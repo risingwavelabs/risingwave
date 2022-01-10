@@ -100,6 +100,10 @@ impl Executor for MockSource {
     fn pk_indices(&self) -> PkIndicesRef {
         &self.pk_indices
     }
+
+    fn identity(&self) -> &'static str {
+        "MockSource"
+    }
 }
 
 /// This source takes message from users asynchronously
@@ -183,6 +187,10 @@ impl Executor for MockAsyncSource {
 
     fn pk_indices(&self) -> PkIndicesRef {
         &self.pk_indices
+    }
+
+    fn identity(&self) -> &'static str {
+        "MockAsyncSource"
     }
 }
 

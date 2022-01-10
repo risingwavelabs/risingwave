@@ -61,6 +61,12 @@ To stop the playground,
 ./riselab k # shortcut for ./riselab kill
 ```
 
+And you can configure components for RiseLAB.
+
+```
+./riselab configure
+```
+
 For more information, refer to `README.md` under `rust/riselab`.
 
 ### Dashboard

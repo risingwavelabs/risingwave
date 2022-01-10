@@ -48,6 +48,10 @@ impl Executor for FilterExecutor {
     fn pk_indices(&self) -> PkIndicesRef {
         self.input.pk_indices()
     }
+
+    fn identity(&self) -> &'static str {
+        "FilterExecutor"
+    }
 }
 
 impl SimpleExecutor for FilterExecutor {

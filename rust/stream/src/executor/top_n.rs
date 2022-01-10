@@ -127,6 +127,10 @@ impl<S: StateStore> Executor for TopNExecutor<S> {
     fn pk_indices(&self) -> PkIndicesRef {
         &self.pk_indices
     }
+
+    fn identity(&self) -> &'static str {
+        "TopNExecutor"
+    }
 }
 
 #[async_trait]

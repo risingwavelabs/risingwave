@@ -256,6 +256,10 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
     fn pk_indices(&self) -> PkIndicesRef {
         &self.pk_indices
     }
+
+    fn identity(&self) -> &'static str {
+        "HashJoinExecutor"
+    }
 }
 
 impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
@@ -366,16 +370,14 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
     }
 
     async fn consume_chunk_left(&mut self, chunk: StreamChunk) -> Result<Message> {
-        trace!("consume_chunk_left: {:?}", &chunk);
         let result = self.eq_join_oneside::<{ SideType::Left }>(chunk).await?;
-        trace!("consume_chunk_left outputs: {:?}", &result);
+        trace!("consume_chunk_left outputs: {:#?}", &result);
         Ok(result)
     }
 
     async fn consume_chunk_right(&mut self, chunk: StreamChunk) -> Result<Message> {
-        trace!("consume_chunk_right: {:?}", &chunk);
         let result = self.eq_join_oneside::<{ SideType::Right }>(chunk).await?;
-        trace!("consume_chunk_right outputs: {:?}", &result);
+        trace!("consume_chunk_right outputs: {:#?}", &result);
         Ok(result)
     }
 

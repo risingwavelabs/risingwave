@@ -45,6 +45,12 @@ impl Task for ComputeNodeService {
             .arg("--metrics-level")
             .arg("1");
 
+        if let Ok(data) = env::var("ENABLE_COMPUTE_TRACING") {
+            if data == "true" {
+                cmd.arg("--enable-tracing");
+            }
+        }
+
         let provide_minio = self.config.provide_minio.as_ref().unwrap();
         match provide_minio.len() {
             0 => {}

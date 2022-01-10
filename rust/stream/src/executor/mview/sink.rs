@@ -65,6 +65,10 @@ impl<S: StateStore> Executor for MViewSinkExecutor<S> {
     fn pk_indices(&self) -> PkIndicesRef {
         &self.pk_columns
     }
+
+    fn identity(&self) -> &'static str {
+        "MViewSinkExecutor"
+    }
 }
 
 impl<S: StateStore> std::fmt::Debug for MViewSinkExecutor<S> {
@@ -83,8 +87,6 @@ impl<S: StateStore> SimpleExecutor for MViewSinkExecutor<S> {
     }
 
     fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
-        trace!("consume_chunk {:?}", &chunk);
-
         let StreamChunk {
             ops,
             columns,

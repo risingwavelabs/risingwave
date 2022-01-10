@@ -142,8 +142,6 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
     }
 
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
-        trace!("apply_chunk {:?}", &chunk);
-
         let StreamChunk {
             ops,
             columns,
@@ -308,6 +306,10 @@ impl<S: StateStore> Executor for HashAggExecutor<S> {
 
     async fn next(&mut self) -> Result<Message> {
         agg_executor_next(self).await
+    }
+
+    fn identity(&self) -> &'static str {
+        "HashAggExecutor"
     }
 }
 

@@ -135,6 +135,10 @@ impl Executor for ReceiverExecutor {
     fn pk_indices(&self) -> PkIndicesRef {
         &self.pk_indices
     }
+
+    fn identity(&self) -> &'static str {
+        "ReceiverExecutor"
+    }
 }
 
 /// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
@@ -253,6 +257,10 @@ impl Executor for MergeExecutor {
 
     fn pk_indices(&self) -> PkIndicesRef {
         &self.pk_indices
+    }
+
+    fn identity(&self) -> &'static str {
+        "MergeExecutor"
     }
 }
 

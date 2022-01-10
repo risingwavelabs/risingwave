@@ -69,6 +69,10 @@ impl Executor for ProjectExecutor {
     fn pk_indices(&self) -> PkIndicesRef {
         &self.pk_indices
     }
+
+    fn identity(&self) -> &'static str {
+        "ProjectExecutor"
+    }
 }
 
 impl SimpleExecutor for ProjectExecutor {

@@ -104,7 +104,7 @@ impl ExchangeSource for LocalExchangeSource {
         let ret = self.task_sink.direct_take_data().await?;
         if let Some(data) = ret {
             let data = data.compact()?;
-            debug!(
+            trace!(
                 "Receiver task: {:?}, source task sink: {:?}, data: {:?}",
                 self.task_id,
                 self.task_sink.id(),
