@@ -84,6 +84,29 @@ impl MemoryStateStore {
         }
         Ok(data)
     }
+
+    async fn reverse_scan_inner(
+        &self,
+        prefix: &[u8],
+        limit: Option<usize>,
+    ) -> Result<Vec<(Bytes, Bytes)>> {
+        let mut data = vec![];
+        if limit == Some(0) {
+            return Ok(vec![]);
+        }
+        let inner = self.inner.lock().await;
+        for (key, value) in inner.iter().rev() {
+            if key.starts_with(prefix) {
+                data.push((key.clone(), value.clone()));
+                if let Some(limit) = limit {
+                    if data.len() >= limit {
+                        break;
+                    }
+                }
+            }
+        }
+        Ok(data)
+    }
 }
 
 #[async_trait]
@@ -99,6 +122,14 @@ impl StateStore for MemoryStateStore {
 
     async fn scan(&self, prefix: &[u8], limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
         self.scan_inner(prefix, limit).await
+    }
+
+    async fn reverse_scan(
+        &self,
+        prefix: &[u8],
+        limit: Option<usize>,
+    ) -> Result<Vec<(Bytes, Bytes)>> {
+        self.reverse_scan_inner(prefix, limit).await
     }
 
     async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, _epoch: u64) -> Result<()> {

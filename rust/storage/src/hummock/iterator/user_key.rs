@@ -1,9 +1,59 @@
 use std::ops::Bound::{self, *};
 
 use super::{HummockIterator, SortedIterator};
+use crate::hummock::iterator::ReverseUserKeyIterator;
 use crate::hummock::key::{get_ts, key_with_ts, user_key as to_user_key, Timestamp};
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
+
+pub enum DirectedUserKeyIterator {
+    Forward(UserKeyIterator),
+    Backward(ReverseUserKeyIterator),
+}
+
+impl DirectedUserKeyIterator {
+    pub async fn next(&mut self) -> HummockResult<()> {
+        match self {
+            Self::Forward(ref mut iter) => iter.next().await,
+            Self::Backward(ref mut iter) => iter.next().await,
+        }
+    }
+
+    pub fn key(&self) -> &[u8] {
+        match self {
+            Self::Forward(iter) => iter.key(),
+            Self::Backward(iter) => iter.key(),
+        }
+    }
+
+    pub fn value(&self) -> &[u8] {
+        match self {
+            Self::Forward(iter) => iter.value(),
+            Self::Backward(iter) => iter.value(),
+        }
+    }
+
+    pub async fn rewind(&mut self) -> HummockResult<()> {
+        match self {
+            Self::Forward(ref mut iter) => iter.rewind().await,
+            Self::Backward(ref mut iter) => iter.rewind().await,
+        }
+    }
+
+    pub async fn seek(&mut self, user_key: &[u8]) -> HummockResult<()> {
+        match self {
+            Self::Forward(ref mut iter) => iter.seek(user_key).await,
+            Self::Backward(ref mut iter) => iter.seek(user_key).await,
+        }
+    }
+
+    pub fn is_valid(&self) -> bool {
+        match self {
+            Self::Forward(iter) => iter.is_valid(),
+            Self::Backward(iter) => iter.is_valid(),
+        }
+    }
+}
 
 /// [`UserKeyIterator`] can be used by user directly.
 pub struct UserKeyIterator {

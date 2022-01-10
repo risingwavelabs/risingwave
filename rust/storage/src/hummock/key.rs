@@ -65,7 +65,7 @@ pub fn user_key(full_key: &[u8]) -> &[u8] {
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```rust
 /// use risingwave_storage::hummock::key::next_key;
 /// assert_eq!(next_key(b"123"), b"124");
 /// assert_eq!(next_key(b"12\xff"), b"13");
@@ -82,6 +82,40 @@ pub fn next_key(key: &[u8]) -> Vec<u8> {
         res
     } else {
         Vec::new()
+    }
+}
+
+/// Computes the previous key of the given key.
+///
+/// If the key has no predecessor key (e.g. the input is "\x00\x00"), the result
+/// would be a "\xff\xff" vector.
+///
+/// # Examples
+///
+/// ```rust
+/// use risingwave_storage::hummock::key::prev_key;
+/// assert_eq!(prev_key(b"123"), b"122");
+/// assert_eq!(prev_key(b"12\x00"), b"11\xff");
+/// assert_eq!(prev_key(b"\x00\x00"), b"\xff\xff");
+/// assert_eq!(prev_key(b"\x00\x01"), b"\x00\x00");
+/// assert_eq!(prev_key(b"T"), b"S");
+/// assert_eq!(prev_key(b""), b"");
+/// ```
+pub fn prev_key(key: &[u8]) -> Vec<u8> {
+    let pos = key.iter().rposition(|b| *b != 0x00);
+    match pos {
+        Some(pos) => {
+            let mut res = Vec::with_capacity(key.len());
+            res.extend_from_slice(&key[0..pos]);
+            res.push(key[pos] - 1);
+            if pos + 1 < key.len() {
+                res.push(b"\xff".to_owned()[0]);
+            }
+            res
+        }
+        None => {
+            vec![0xff; key.len()]
+        }
     }
 }
 
@@ -153,5 +187,15 @@ mod tests {
         let full_key = key_with_ts(b"aaa".to_vec(), 233);
         assert_eq!(get_ts(&full_key), 233);
         assert_eq!(user_key(&full_key), b"aaa");
+    }
+
+    #[test]
+    fn test_prev_key() {
+        assert_eq!(prev_key(b"123"), b"122");
+        assert_eq!(prev_key(b"12\x00"), b"11\xff");
+        assert_eq!(prev_key(b"\x00\x00"), b"\xff\xff");
+        assert_eq!(prev_key(b"\x00\x01"), b"\x00\x00");
+        assert_eq!(prev_key(b"T"), b"S");
+        assert_eq!(prev_key(b""), b"");
     }
 }

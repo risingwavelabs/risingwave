@@ -71,6 +71,24 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         Ok(kvs)
     }
 
+    async fn reverse_scan(
+        &self,
+        prefix: &[u8],
+        limit: Option<usize>,
+    ) -> Result<Vec<(Bytes, Bytes)>> {
+        let mut kvs = Vec::with_capacity(limit.unwrap_or_default());
+        let mut reverse_iter = self.reverse_iter(prefix).await?;
+
+        for _ in 0..limit.unwrap_or(usize::MAX) {
+            match reverse_iter.next().await? {
+                Some(kv) => kvs.push(kv),
+                None => break,
+            }
+        }
+
+        Ok(kvs)
+    }
+
     /// Ingest a batch of data into the state store. One write batch should never contain operation
     /// on the same key. e.g. Put(233, x) then Delete(233).
     /// A epoch should be provided to ingest a write batch. It is served as:
@@ -84,6 +102,11 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     /// Open and return an iterator for given `prefix`.
     async fn iter(&self, prefix: &[u8]) -> Result<Self::Iter>;
+
+    /// Open and return a reversed iterator for given `prefix`.
+    async fn reverse_iter(&self, _prefix: &[u8]) -> Result<Self::Iter> {
+        unimplemented!()
+    }
 
     /// Create a `WriteBatch` associated with this state store.
     fn start_write_batch(&self) -> WriteBatch<Self> {

@@ -9,6 +9,8 @@ use super::key::{key_with_ts, user_key};
 use super::utils::bloom_filter_tables;
 use super::version_manager::{Level, Snapshot, VersionManager};
 use super::{HummockResult, TableIterator};
+use crate::hummock::iterator::{ReverseSortedIterator, ReverseUserKeyIterator};
+use crate::hummock::ReverseTableIterator;
 
 pub struct HummockSnapshot {
     /// [`epoch`] is served as timestamp and indicates when a new log appends to a SST.
@@ -135,6 +137,60 @@ impl HummockSnapshot {
             self.epoch,
         ))
     }
+
+    /// Since `Range` always includes `start`, so if we want to scan from `end_key`(inclusive) to
+    /// `begin_key`(either inclusive or exclusive), we construct a range that is [``end_key``,
+    /// ``start_key``]
+    pub async fn reverse_range_scan<R, B>(
+        &self,
+        key_range: R,
+    ) -> HummockResult<ReverseUserKeyIterator>
+    where
+        R: RangeBounds<B>,
+        B: AsRef<[u8]>,
+    {
+        // TODO: use the latest version once the ts-aware compaction is realized.
+        // let scoped_snapshot = ScopedUnpinSnapshot::from_version_manager(self.vm.clone());
+        // let snapshot = scoped_snapshot.snapshot();
+        let snapshot = self.temp_version.clone();
+
+        // Filter out tables that overlap with given `key_range`
+        let overlapped_tables = self.vm.tables(snapshot)?.into_iter().filter(|t| {
+            let table_start = user_key(t.meta.smallest_key.as_slice());
+            let table_end = user_key(t.meta.largest_key.as_slice());
+
+            //        RANGE
+            // TABLE
+            let too_left = match key_range.end_bound() {
+                Included(range_start) => range_start.as_ref() > table_end,
+                Excluded(range_start) => range_start.as_ref() >= table_end,
+                Unbounded => false,
+            };
+            // RANGE
+            //        TABLE
+            let too_right = match key_range.start_bound() {
+                Included(range_end) => range_end.as_ref() < table_start,
+                Excluded(_) => unimplemented!("excluded end key is not supported"),
+                Unbounded => false,
+            };
+
+            !too_left && !too_right
+        });
+
+        let reverse_table_iters = overlapped_tables
+            .map(|t| Box::new(ReverseTableIterator::new(t)) as BoxedHummockIterator);
+        let reverse_sorted_iterator = ReverseSortedIterator::new(reverse_table_iters);
+
+        // TODO: avoid this clone
+        Ok(ReverseUserKeyIterator::new_with_ts(
+            reverse_sorted_iterator,
+            (
+                key_range.end_bound().map(|b| b.as_ref().to_owned()),
+                key_range.start_bound().map(|b| b.as_ref().to_owned()),
+            ),
+            self.epoch,
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -176,9 +232,25 @@ mod tests {
         vm.add_single_l0_sst(table, epoch).await.unwrap();
     }
 
-    macro_rules! assert_count {
+    macro_rules! assert_count_range_scan {
         ($snapshot:expr, $range:expr, $expect_count:expr) => {{
             let mut it = $snapshot.range_scan::<_, Vec<u8>>($range).await.unwrap();
+            it.rewind().await.unwrap();
+            let mut count = 0;
+            while it.is_valid() {
+                count += 1;
+                it.next().await.unwrap();
+            }
+            assert_eq!(count, $expect_count);
+        }};
+    }
+
+    macro_rules! assert_count_reverse_range_scan {
+        ($snapshot:expr, $range:expr, $expect_count:expr) => {{
+            let mut it = $snapshot
+                .reverse_range_scan::<_, Vec<u8>>($range)
+                .await
+                .unwrap();
             it.rewind().await.unwrap();
             let mut count = 0;
             while it.is_valid() {
@@ -205,7 +277,7 @@ mod tests {
         )
         .await;
         let snapshot_1 = HummockSnapshot::new(vm.clone());
-        assert_count!(snapshot_1, .., 2);
+        assert_count_range_scan!(snapshot_1, .., 2);
 
         epoch += 1;
         gen_and_upload_table(
@@ -220,8 +292,8 @@ mod tests {
         )
         .await;
         let snapshot_2 = HummockSnapshot::new(vm.clone());
-        assert_count!(snapshot_2, .., 3);
-        assert_count!(snapshot_1, .., 2);
+        assert_count_range_scan!(snapshot_2, .., 3);
+        assert_count_range_scan!(snapshot_1, .., 2);
 
         epoch += 1;
         gen_and_upload_table(
@@ -236,9 +308,9 @@ mod tests {
         )
         .await;
         let snapshot_3 = HummockSnapshot::new(vm.clone());
-        assert_count!(snapshot_3, .., 0);
-        assert_count!(snapshot_2, .., 3);
-        assert_count!(snapshot_1, .., 2);
+        assert_count_range_scan!(snapshot_3, .., 0);
+        assert_count_range_scan!(snapshot_2, .., 3);
+        assert_count_range_scan!(snapshot_1, .., 2);
     }
 
     #[tokio::test]
@@ -266,11 +338,44 @@ mod tests {
         }
 
         let snapshot = HummockSnapshot::new(vm.clone());
-        assert_count!(snapshot, key!(2)..=key!(3), 2);
-        assert_count!(snapshot, key!(2)..key!(3), 1);
-        assert_count!(snapshot, key!(2).., 3);
-        assert_count!(snapshot, ..=key!(3), 3);
-        assert_count!(snapshot, ..key!(3), 2);
-        assert_count!(snapshot, .., 4);
+        assert_count_range_scan!(snapshot, key!(2)..=key!(3), 2);
+        assert_count_range_scan!(snapshot, key!(2)..key!(3), 1);
+        assert_count_range_scan!(snapshot, key!(2).., 3);
+        assert_count_range_scan!(snapshot, ..=key!(3), 3);
+        assert_count_range_scan!(snapshot, ..key!(3), 2);
+        assert_count_range_scan!(snapshot, .., 4);
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_reverse_range_scan() {
+        let vm = Arc::new(VersionManager::new());
+        let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
+
+        gen_and_upload_table(
+            obj_client.clone(),
+            &vm,
+            vec![
+                (1, HummockValue::Put(b"test".to_vec())),
+                (2, HummockValue::Put(b"test".to_vec())),
+                (3, HummockValue::Put(b"test".to_vec())),
+                (4, HummockValue::Put(b"test".to_vec())),
+            ],
+            1,
+        )
+        .await;
+
+        macro_rules! key {
+            ($idx:expr) => {
+                user_key(&iterator_test_key_of(TEST_KEY_TABLE_ID, $idx)).to_vec()
+            };
+        }
+
+        let snapshot = HummockSnapshot::new(vm.clone());
+        assert_count_reverse_range_scan!(snapshot, key!(3)..=key!(2), 2);
+        assert_count_reverse_range_scan!(snapshot, key!(3)..key!(2), 1);
+        assert_count_reverse_range_scan!(snapshot, key!(3)..key!(1), 2);
+        assert_count_reverse_range_scan!(snapshot, key!(3)..=key!(1), 3);
+        assert_count_reverse_range_scan!(snapshot, key!(3)..key!(0), 3);
+        assert_count_reverse_range_scan!(snapshot, .., 4);
     }
 }

@@ -15,6 +15,7 @@ pub struct StateStoreStats {
     pub put_bytes: GenericCounter<AtomicU64>,
     pub point_get_counts: GenericCounter<AtomicU64>,
     pub range_scan_counts: GenericCounter<AtomicU64>,
+    pub reverse_range_scan_counts: GenericCounter<AtomicU64>,
     pub batched_write_counts: GenericCounter<AtomicU64>,
 }
 
@@ -53,6 +54,13 @@ impl StateStoreStats {
         )
         .unwrap();
 
+        let reverse_range_scan_counts = register_int_counter_with_registry!(
+            "state_store_reverse_range_scan_counts",
+            "Total number of reverse range scan requests that have been issued to Hummock Storage",
+            registry
+        )
+        .unwrap();
+
         let batched_write_counts = register_int_counter_with_registry!(
             "state_store_batched_write_counts",
             "Total number of batched write requests that have been issued to state store",
@@ -65,6 +73,7 @@ impl StateStoreStats {
             put_bytes,
             point_get_counts,
             range_scan_counts,
+            reverse_range_scan_counts,
             batched_write_counts,
         }
     }

@@ -37,6 +37,7 @@ use self::snapshot::HummockSnapshot;
 pub use self::state_store::*;
 use self::version_manager::VersionManager;
 use super::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
+use crate::hummock::iterator::ReverseUserKeyIterator;
 use crate::object::ObjectStore;
 
 pub static REMOTE_DIR: &str = "/test/";
@@ -154,6 +155,22 @@ impl HummockStorage {
         }
 
         self.get_snapshot().range_scan(key_range).await
+    }
+
+    /// Return a reversed iterator that scans from the end key to the begin key
+    pub async fn reverse_range_scan<R, B>(
+        &self,
+        key_range: R,
+    ) -> HummockResult<ReverseUserKeyIterator>
+    where
+        R: RangeBounds<B>,
+        B: AsRef<[u8]>,
+    {
+        if self.options.stats_enabled {
+            self.get_stats_ref().reverse_range_scan_counts.inc();
+        }
+
+        self.get_snapshot().reverse_range_scan(key_range).await
     }
 
     /// Write batch to storage. The batch should be:
