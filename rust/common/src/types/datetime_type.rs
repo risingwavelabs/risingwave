@@ -29,7 +29,6 @@ pub fn get_mouth_days(year: i32, month: usize) -> i32 {
 /// FIXME: This code is adapted from numeric type. Maybe we should unify them
 macro_rules! make_datetime_type {
     ($name:ident, $native_ty:ty, $data_ty:expr, $proto_ty:expr) => {
-        #[derive(Debug)]
         pub struct $name {
             nullable: bool,
             precision: u32,
@@ -54,6 +53,18 @@ macro_rules! make_datetime_type {
                     nullable: false,
                     precision: 0,
                 }
+            }
+        }
+
+        impl std::fmt::Debug for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(
+                    f,
+                    "{} {{ nullable: {}, precision: {} }}",
+                    &stringify!($native_ty),
+                    self.nullable,
+                    self.precision
+                )
             }
         }
 

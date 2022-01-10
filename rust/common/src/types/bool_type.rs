@@ -17,11 +17,7 @@ pub struct BoolType {
 
 impl std::fmt::Debug for BoolType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "bool")?;
-        if self.nullable {
-            write!(f, "(nullable)")?;
-        }
-        Ok(())
+        write!(f, "BoolType {{ nullable: {} }}", self.nullable)
     }
 }
 

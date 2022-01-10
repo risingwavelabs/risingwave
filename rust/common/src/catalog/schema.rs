@@ -15,7 +15,8 @@ pub struct Field {
 
 impl std::fmt::Debug for Field {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "f#{:?}", self.data_type)
+        // force it to display in single-line style
+        write!(f, "Field {{ {:?} }}", self.data_type)
     }
 }
 

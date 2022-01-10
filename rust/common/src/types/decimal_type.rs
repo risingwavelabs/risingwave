@@ -11,11 +11,21 @@ use crate::types::{DataSize, DataType, DataTypeKind, DataTypeRef};
 
 pub const MAX_PRECISION: u32 = 28;
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Eq, PartialEq)]
 pub struct DecimalType {
     nullable: bool,
     precision: u32,
     scale: u32,
+}
+
+impl std::fmt::Debug for DecimalType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "DecimalType {{ nullable: {}, precision: {}, scale: {} }}",
+            self.nullable, self.precision, self.scale
+        )
+    }
 }
 
 impl DecimalType {

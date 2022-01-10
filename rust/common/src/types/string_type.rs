@@ -1,6 +1,5 @@
 use std::any::Any;
 use std::convert::TryFrom;
-use std::fmt::Debug;
 use std::sync::Arc;
 
 use risingwave_pb::data::data_type::TypeName;
@@ -11,11 +10,21 @@ use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 use crate::types::{DataSize, DataType, DataTypeKind, DataTypeRef};
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Eq, PartialEq)]
 pub struct StringType {
     nullable: bool,
     width: usize,
     kind: DataTypeKind,
+}
+
+impl std::fmt::Debug for StringType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "StringType {{ nullable: {}, width: {}, kind: {:?} }}",
+            self.nullable, self.width, self.kind
+        )
+    }
 }
 
 impl DataType for StringType {

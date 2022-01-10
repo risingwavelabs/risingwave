@@ -79,9 +79,15 @@ impl IntervalUnit {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Eq, PartialEq)]
 pub struct IntervalType {
     nullable: bool,
+}
+
+impl std::fmt::Debug for IntervalType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "IntervalType {{ nullable: {} }}", self.nullable)
+    }
 }
 
 impl DataType for IntervalType {
