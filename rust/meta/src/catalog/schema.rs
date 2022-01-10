@@ -104,7 +104,6 @@ mod tests {
                         schema_id: i,
                     }),
                     schema_name: format!("schema_{}", i),
-                    fields: vec![],
                     version: 0,
                 };
                 catalog_manager.create_schema(schema).await
@@ -138,7 +137,6 @@ mod tests {
                     schema_id: 0,
                 }),
                 schema_name: "schema_0".to_string(),
-                fields: vec![],
                 version: 0,
             })
             .await?;

@@ -7,7 +7,6 @@ option java_package = "com.risingwave.proto.metanode";
 option optimize_for = SPEED;
 
 import "common.proto";
-import "data.proto";
 import "plan.proto";
 import "stream_plan.proto";
 
@@ -42,8 +41,7 @@ message Database {
 message Schema {
   plan.SchemaRefId schema_ref_id = 1;
   string schema_name = 2;
-  repeated data.DataType fields = 3;
-  uint64 version = 4;
+  uint64 version = 3;
 }
 
 message EpochState {

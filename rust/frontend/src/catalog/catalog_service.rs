@@ -201,7 +201,6 @@ impl RemoteCatalogManager {
                     }),
                     schema_id,
                 }),
-                fields: vec![],
             })),
         };
         self.catalog_client.create(ddl_request).await.unwrap();
