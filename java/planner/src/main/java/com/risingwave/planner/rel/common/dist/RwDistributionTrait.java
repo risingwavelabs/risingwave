@@ -63,8 +63,7 @@ public class RwDistributionTrait implements RelDistribution {
       }
     }
     List<Integer> mappedKeys0 = Mappings.apply2((Mapping) mapping, keys);
-    ImmutableIntList mappedKeys = normalizeKeys(mappedKeys0);
-    return new RwDistributionTrait(type, mappedKeys);
+    return new RwDistributionTrait(type, ImmutableIntList.copyOf(mappedKeys0));
   }
 
   @Override

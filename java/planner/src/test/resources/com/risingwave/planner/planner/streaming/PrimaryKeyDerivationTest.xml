@@ -195,7 +195,7 @@ RwStreamMaterializedView(name=[t_two_condition_inner_join])
   RwStreamHashJoin(condition=[AND(=($0, $5), =($1, $4))], joinType=[inner])
     RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
       RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
-    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1, 0]}], collation=[[]])
       RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
 ]]>
         </Resource>
@@ -290,7 +290,7 @@ RwStreamMaterializedView(name=[t_changed_collation], collation=[[0 DESC, 6, 5]])
   RwStreamHashJoin(condition=[AND(=($0, $5), =($1, $4))], joinType=[inner])
     RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
       RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
-    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
+    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1, 0]}], collation=[[]])
       RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
 ]]>
         </Resource>
