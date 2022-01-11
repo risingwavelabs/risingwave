@@ -20,7 +20,7 @@ if [ -d "${PREFIX_BIN}/prometheus" ]; then
     exit 0
 fi
 echo "Prometheus not found, download ${PROMETHEUS_RELEASE}"
-wget ${WGET_EXTRA_PARAMETER} -O "${PROMETHEUS_DOWNLOAD_PATH}" "${PROMETHEUS_DOWNLOAD_TAR_GZ}"
+curl -fL -o "${PROMETHEUS_DOWNLOAD_PATH}" "${PROMETHEUS_DOWNLOAD_TAR_GZ}"
 tar -xf "${PROMETHEUS_DOWNLOAD_PATH}" -C "${PREFIX_TMP}"
 mv "${PREFIX_TMP}/${PROMETHEUS_RELEASE}" "${PREFIX_BIN}/prometheus"
 rm ${PROMETHEUS_DOWNLOAD_PATH}
