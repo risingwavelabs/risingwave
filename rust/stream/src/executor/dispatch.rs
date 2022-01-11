@@ -349,12 +349,8 @@ impl DataDispatcher for HashDataDispatcher {
         // individually output StreamChunk integrated with vis_map
         for (vis_map, output) in vis_maps.into_iter().zip(self.outputs.iter_mut()) {
             let vis_map = vis_map.try_into().unwrap();
-            let new_stream_chunk = StreamChunk {
-                // columns is not changed in this function
-                ops: ops.clone(),
-                columns: columns.clone(),
-                visibility: Some(vis_map),
-            };
+            // columns is not changed in this function
+            let new_stream_chunk = StreamChunk::new(ops.clone(), columns.clone(), Some(vis_map));
             output.send(Message::Chunk(new_stream_chunk)).await?;
         }
         Ok(())
@@ -722,11 +718,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let chunk = StreamChunk {
-            ops,
-            columns,
-            visibility: None,
-        };
+        let chunk = StreamChunk::new(ops, columns, None);
         hash_dispatcher.dispatch_data(chunk).await.unwrap();
 
         for (output_idx, output) in output_data_vecs.into_iter().enumerate() {
@@ -738,12 +730,12 @@ mod tests {
                 _ => panic!(),
             };
             real_chunk
-                .columns
+                .columns()
                 .iter()
                 .zip(output_cols[output_idx].iter())
                 .for_each(|(real_col, expect_col)| {
                     let real_vals = real_chunk
-                        .visibility
+                        .visibility()
                         .as_ref()
                         .unwrap()
                         .iter()

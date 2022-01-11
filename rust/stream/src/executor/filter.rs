@@ -60,14 +60,10 @@ impl SimpleExecutor for FilterExecutor {
     }
 
     fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
-        let StreamChunk {
-            ops,
-            columns: arrays,
-            visibility,
-        } = chunk;
+        let (ops, columns, visibility) = chunk.into_inner();
 
         let data_chunk = {
-            let data_chunk_builder = DataChunk::builder().columns(arrays);
+            let data_chunk_builder = DataChunk::builder().columns(columns);
             if let Some(visibility) = visibility {
                 data_chunk_builder.visibility(visibility).build()
             } else {
@@ -81,7 +77,7 @@ impl SimpleExecutor for FilterExecutor {
 
         let pred_output = self.expr.eval(&data_chunk)?;
 
-        let (arrays, visibility) = data_chunk.into_parts();
+        let (columns, visibility) = data_chunk.into_parts();
 
         let n = ops.len();
 
@@ -144,12 +140,8 @@ impl SimpleExecutor for FilterExecutor {
             panic!("unmatched type: filter expr returns a non-null array");
         }
 
-        let new_chunk = StreamChunk {
-            columns: arrays,
-            visibility: Some((new_visibility).try_into()?),
-            ops: new_ops,
-        };
-
+        let visibility = (new_visibility).try_into()?;
+        let new_chunk = StreamChunk::new(new_ops, columns, Some(visibility));
         Ok(Message::Chunk(new_chunk))
     }
 }
@@ -171,16 +163,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_filter() {
-        let chunk1 = StreamChunk {
-            ops: vec![Op::Insert, Op::Insert, Op::Insert, Op::Delete],
-            columns: vec![
+        let chunk1 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert, Op::Insert, Op::Delete],
+            vec![
                 column_nonnull! { I64Array, [1, 5, 6, 7] },
                 column_nonnull! { I64Array, [4, 2, 6, 5] },
             ],
-            visibility: None,
-        };
-        let chunk2 = StreamChunk {
-            ops: vec![
+            None,
+        );
+        let chunk2 = StreamChunk::new(
+            vec![
                 Op::UpdateDelete, // true -> true
                 Op::UpdateInsert, // expect UpdateDelete, UpdateInsert
                 Op::UpdateDelete, // true -> false
@@ -190,12 +182,12 @@ mod tests {
                 Op::UpdateDelete, // false -> false
                 Op::UpdateInsert, // expect nothing
             ],
-            columns: vec![
+            vec![
                 column_nonnull! { I64Array, [5, 7, 5, 3, 3, 5, 3, 4] },
                 column_nonnull! { I64Array, [3, 5, 3, 5, 5, 3, 5, 6] },
             ],
-            visibility: None,
-        };
+            None,
+        );
         let schema = Schema {
             fields: vec![
                 Field {
@@ -222,12 +214,12 @@ mod tests {
 
         if let Message::Chunk(chunk) = filter.next().await.unwrap() {
             assert_eq!(
-                chunk.ops,
+                chunk.ops(),
                 vec![Op::Insert, Op::Insert, Op::Insert, Op::Delete]
             );
-            assert_eq!(chunk.columns.len(), 2);
+            assert_eq!(chunk.columns().len(), 2);
             assert_eq!(
-                chunk.visibility.unwrap().iter().collect_vec(),
+                chunk.visibility().as_ref().unwrap().iter().collect_vec(),
                 vec![false, true, false, true]
             );
         } else {
@@ -235,13 +227,13 @@ mod tests {
         }
 
         if let Message::Chunk(chunk) = filter.next().await.unwrap() {
-            assert_eq!(chunk.columns.len(), 2);
+            assert_eq!(chunk.columns().len(), 2);
             assert_eq!(
-                chunk.visibility.unwrap().iter().collect_vec(),
+                chunk.visibility().as_ref().unwrap().iter().collect_vec(),
                 vec![true, true, true, false, false, true, false, false]
             );
             assert_eq!(
-                chunk.ops,
+                chunk.ops(),
                 vec![
                     Op::UpdateDelete,
                     Op::UpdateInsert,

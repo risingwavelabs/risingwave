@@ -287,12 +287,9 @@ mod tests {
     use super::*;
 
     fn build_test_chunk(epoch: u64) -> StreamChunk {
-        let mut chunk = StreamChunk::default();
         // The number of items in `ops` is the epoch count.
-        for _i in 0..epoch {
-            chunk.ops.push(Op::Insert);
-        }
-        chunk
+        let ops = vec![Op::Insert; epoch as usize];
+        StreamChunk::new(ops, vec![], None)
     }
 
     #[tokio::test]
@@ -340,7 +337,7 @@ mod tests {
             // expect n chunks
             for _ in 0..CHANNEL_NUMBER {
                 assert_matches!(merger.next().await.unwrap(), Message::Chunk(chunk) => {
-                  assert_eq!(chunk.ops.len() as u64, epoch);
+                  assert_eq!(chunk.ops().len() as u64, epoch);
                 });
             }
             // expect a barrier
@@ -439,9 +436,10 @@ mod tests {
             remote_input.run().await
         });
         assert_matches!(rx.next().await.unwrap(), Message::Chunk(chunk) => {
-          assert_eq!(chunk.ops.len() as u64, 0);
-          assert_eq!(chunk.columns.len() as u64, 0);
-          assert_eq!(chunk.visibility, None);
+          let (ops, columns, visibility) = chunk.into_inner();
+          assert_eq!(ops.len() as u64, 0);
+          assert_eq!(columns.len() as u64, 0);
+          assert_eq!(visibility, None);
         });
         assert_matches!(rx.next().await.unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,mutation:_}) => {
           assert_eq!(barrier_epoch, 12345);

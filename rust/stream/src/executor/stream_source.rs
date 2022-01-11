@@ -80,7 +80,7 @@ impl StreamSourceExecutor {
         Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())))
     }
 
-    fn refill_row_id_column(&mut self, chunk: &mut StreamChunk) {
+    fn refill_row_id_column(&mut self, chunk: StreamChunk) -> StreamChunk {
         if let Some(row_id_index) = self.source_desc.row_id_index {
             let row_id_column_id = self.source_desc.columns[row_id_index as usize].column_id;
 
@@ -89,9 +89,12 @@ impl StreamSourceExecutor {
                 .iter()
                 .position(|column_id| *column_id == row_id_column_id)
             {
-                chunk.columns[idx] = self.gen_row_column(chunk.cardinality());
+                let (ops, mut columns, bitmap) = chunk.into_inner();
+                columns[idx] = self.gen_row_column(columns[idx].array().len());
+                return StreamChunk::new(ops, columns, bitmap);
             }
         }
+        chunk
     }
 }
 
@@ -114,7 +117,7 @@ impl Executor for StreamSourceExecutor {
             //
             // TODO: in the future, we may add row_id column here for TableV2 as well
             if !matches!(self.source_desc.source.as_ref(), SourceImpl::Table(_) | SourceImpl::TableV2(_)) {
-              self.refill_row_id_column(&mut chunk);
+              chunk = self.refill_row_id_column(chunk);
             }
 
             Ok(Message::Chunk(chunk))
@@ -265,16 +268,16 @@ mod tests {
         for _ in 0..2 {
             match source.next().await.unwrap() {
                 Message::Chunk(chunk) => {
-                    assert_eq!(3, chunk.columns.len());
+                    assert_eq!(3, chunk.columns().len());
                     assert_eq!(
                         col1_arr1.iter().collect_vec(),
-                        chunk.columns[1].array_ref().iter().collect_vec(),
+                        chunk.column(1).array_ref().iter().collect_vec(),
                     );
                     assert_eq!(
                         col2_arr1.iter().collect_vec(),
-                        chunk.columns[2].array_ref().iter().collect_vec()
+                        chunk.column(2).array_ref().iter().collect_vec()
                     );
-                    assert_eq!(vec![Op::Insert; 3], chunk.ops);
+                    assert_eq!(vec![Op::Insert; 3], chunk.ops());
                 }
                 Message::Barrier(barrier) => {
                     assert_eq!(barrier.epoch, 1)
@@ -286,16 +289,16 @@ mod tests {
         writer.write(chunk2).await?;
 
         if let Message::Chunk(chunk) = source.next().await.unwrap() {
-            assert_eq!(3, chunk.columns.len());
+            assert_eq!(3, chunk.columns().len());
             assert_eq!(
                 col1_arr2.iter().collect_vec(),
-                chunk.columns[1].array_ref().iter().collect_vec()
+                chunk.column(1).array_ref().iter().collect_vec()
             );
             assert_eq!(
                 col2_arr2.iter().collect_vec(),
-                chunk.columns[2].array_ref().iter().collect_vec()
+                chunk.column(2).array_ref().iter().collect_vec()
             );
-            assert_eq!(vec![Op::Insert; 3], chunk.ops);
+            assert_eq!(vec![Op::Insert; 3], chunk.ops());
         } else {
             unreachable!();
         }

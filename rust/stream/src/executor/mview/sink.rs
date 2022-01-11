@@ -87,16 +87,10 @@ impl<S: StateStore> SimpleExecutor for MViewSinkExecutor<S> {
     }
 
     fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
-        let StreamChunk {
-            ops,
-            columns,
-            visibility,
-            ..
-        } = &chunk;
-
-        for (idx, op) in ops.iter().enumerate() {
+        for (idx, op) in chunk.ops().iter().enumerate() {
             // check visibility
-            let visible = visibility
+            let visible = chunk
+                .visibility()
                 .as_ref()
                 .map(|x| x.is_set(idx).unwrap())
                 .unwrap_or(true);
@@ -108,11 +102,12 @@ impl<S: StateStore> SimpleExecutor for MViewSinkExecutor<S> {
             let pk_row = Row(self
                 .pk_columns
                 .iter()
-                .map(|c_id| columns[*c_id].array_ref().datum_at(idx))
+                .map(|c_id| chunk.column(*c_id).array_ref().datum_at(idx))
                 .collect_vec());
 
             // assemble row
-            let row = Row(columns
+            let row = Row(chunk
+                .columns()
                 .iter()
                 .map(|x| x.array_ref().datum_at(idx))
                 .collect_vec());
@@ -196,22 +191,22 @@ mod tests {
             )
             .unwrap();
         // Prepare source chunks.
-        let chunk1 = StreamChunk {
-            ops: vec![Op::Insert, Op::Insert, Op::Insert],
-            columns: vec![
+        let chunk1 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert, Op::Insert],
+            vec![
                 column_nonnull! { I32Array, [1, 2, 3] },
                 column_nonnull! { I32Array, [4, 5, 6] },
             ],
-            visibility: None,
-        };
-        let chunk2 = StreamChunk {
-            ops: vec![Op::Insert, Op::Delete],
-            columns: vec![
+            None,
+        );
+        let chunk2 = StreamChunk::new(
+            vec![Op::Insert, Op::Delete],
+            vec![
                 column_nonnull! { I32Array, [7, 3] },
                 column_nonnull! { I32Array, [8, 6] },
             ],
-            visibility: None,
-        };
+            None,
+        );
 
         // Prepare stream executors.
         let schema = Schema::try_from(&columns).unwrap();

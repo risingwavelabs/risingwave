@@ -59,9 +59,9 @@ pub type Ops<'a> = &'a [Op];
 #[derive(Default, Clone)]
 pub struct StreamChunk {
     // TODO: Optimize using bitmap
-    pub ops: Vec<Op>,
-    pub columns: Vec<Column>,
-    pub visibility: Option<Bitmap>,
+    ops: Vec<Op>,
+    columns: Vec<Column>,
+    visibility: Option<Bitmap>,
 }
 
 impl StreamChunk {
@@ -76,7 +76,7 @@ impl StreamChunk {
         }
     }
 
-    /// return the number of visible tuples
+    /// `cardinality` return the number of visible tuples
     pub fn cardinality(&self) -> usize {
         if let Some(bitmap) = &self.visibility {
             bitmap.iter().map(|visible| visible as usize).sum()
@@ -85,16 +85,17 @@ impl StreamChunk {
         }
     }
 
-    /// return physical length of any chunk column
+    /// `capacity` return physical length of internals ops & columns
     pub fn capacity(&self) -> usize {
-        self.columns
-            .first()
-            .map(|col| col.array_ref().len())
-            .unwrap_or(0)
+        self.ops.len()
     }
 
     pub fn columns(&self) -> &[Column] {
         &self.columns
+    }
+
+    pub fn column(&self, index: usize) -> &Column {
+        &self.columns[index]
     }
 
     /// compact the `StreamChunk` with its visibility map

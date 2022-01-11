@@ -165,15 +165,15 @@ async fn test_merger_sum_aggr() {
     for j in 0..11 {
         let op = if j % 2 == 0 { Op::Insert } else { Op::Delete };
         for i in 0..10 {
-            let chunk = StreamChunk {
-                ops: vec![op; i],
-                columns: vec![Column::new(Arc::new(
+            let chunk = StreamChunk::new(
+                vec![op; i],
+                vec![Column::new(Arc::new(
                     I64Array::from_slice(vec![Some(1); i].as_slice())
                         .unwrap()
                         .into(),
                 ))],
-                visibility: None,
-            };
+                None,
+            );
             input.send(Message::Chunk(chunk)).await.unwrap();
         }
         input
@@ -198,7 +198,7 @@ async fn test_merger_sum_aggr() {
     }
 
     let data = items.lock().unwrap();
-    let array = data.last().unwrap().columns[0].array_ref().as_int64();
+    let array = data.last().unwrap().column(0).array_ref().as_int64();
     assert_eq!(array.value_at(array.len() - 1), Some((0..10).sum()));
 }
 
@@ -476,25 +476,27 @@ async fn test_tpch_q6() {
         .map(|f| Some(f.into()))
         .collect::<Vec<_>>();
 
-    let make_chunk = |op: Op| StreamChunk {
-        ops: vec![op; 10],
-        visibility: None,
-        columns: vec![
-            Column::new(Arc::new(
-                I64Array::from_slice(d_shipdate.as_slice()).unwrap().into(),
-            )),
-            Column::new(Arc::new(
-                F64Array::from_slice(d_discount.as_slice()).unwrap().into(),
-            )),
-            Column::new(Arc::new(
-                F64Array::from_slice(d_quantity.as_slice()).unwrap().into(),
-            )),
-            Column::new(Arc::new(
-                F64Array::from_slice(d_extended_price.as_slice())
-                    .unwrap()
-                    .into(),
-            )),
-        ],
+    let make_chunk = |op: Op| {
+        StreamChunk::new(
+            vec![op; 10],
+            vec![
+                Column::new(Arc::new(
+                    I64Array::from_slice(d_shipdate.as_slice()).unwrap().into(),
+                )),
+                Column::new(Arc::new(
+                    F64Array::from_slice(d_discount.as_slice()).unwrap().into(),
+                )),
+                Column::new(Arc::new(
+                    F64Array::from_slice(d_quantity.as_slice()).unwrap().into(),
+                )),
+                Column::new(Arc::new(
+                    F64Array::from_slice(d_extended_price.as_slice())
+                        .unwrap()
+                        .into(),
+                )),
+            ],
+            None,
+        )
     };
 
     for i in 0..100 {
@@ -545,18 +547,19 @@ async fn test_tpch_q6() {
         let result = data.iter().collect::<Vec<_>>();
 
         let chunk = result.first().unwrap();
-        assert_eq!(chunk.ops, vec![Insert]);
-        assert_eq!(chunk.columns.len(), 1);
+        assert_eq!(chunk.ops(), vec![Insert]);
+        assert_eq!(chunk.columns().len(), 1);
         assert_eq!(
-            chunk.columns[0].array_ref().as_float64().value_at(0),
+            chunk.column(0).array_ref().as_float64().value_at(0),
             Some(1.1.into())
         );
 
         let chunk = result.last().unwrap();
-        assert_eq!(chunk.ops, vec![UpdateDelete, UpdateInsert]);
-        assert_eq!(chunk.columns.len(), 1);
+        assert_eq!(chunk.ops(), vec![UpdateDelete, UpdateInsert]);
+        assert_eq!(chunk.columns().len(), 1);
         assert_relative_eq!(
-            chunk.columns[0]
+            chunk
+                .column(0)
                 .array_ref()
                 .as_float64()
                 .value_at(1)

@@ -142,11 +142,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
     }
 
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
-        let StreamChunk {
-            ops,
-            columns,
-            visibility,
-        } = chunk;
+        let (ops, columns, visibility) = chunk.into_inner();
 
         // --- Retrieve grouped keys into Row format ---
         let keys = {
@@ -267,11 +263,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
             .map(|builder| -> Result<_> { Ok(Column::new(Arc::new(builder.finish()?))) })
             .try_collect()?;
 
-        let chunk = StreamChunk {
-            columns,
-            ops: new_ops,
-            visibility: None,
-        };
+        let chunk = StreamChunk::new(new_ops, columns, None);
 
         trace!("output_chunk: {:?}", &chunk);
         Ok(Some(chunk))
@@ -348,16 +340,16 @@ mod tests {
     }
 
     async fn test_local_hash_aggregation_count(keyspace: Keyspace<impl StateStore>) {
-        let chunk1 = StreamChunk {
-            ops: vec![Op::Insert, Op::Insert, Op::Insert],
-            columns: vec![column_nonnull! { I64Array, [1, 2, 2] }],
-            visibility: None,
-        };
-        let chunk2 = StreamChunk {
-            ops: vec![Op::Delete, Op::Delete, Op::Delete],
-            columns: vec![column_nonnull! { I64Array, [1, 2, 2] }],
-            visibility: Some((vec![true, false, true]).try_into().unwrap()),
-        };
+        let chunk1 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert, Op::Insert],
+            vec![column_nonnull! { I64Array, [1, 2, 2] }],
+            None,
+        );
+        let chunk2 = StreamChunk::new(
+            vec![Op::Delete, Op::Delete, Op::Delete],
+            vec![column_nonnull! { I64Array, [1, 2, 2] }],
+            Some((vec![true, false, true]).try_into().unwrap()),
+        );
         let schema = Schema {
             fields: vec![Field {
                 data_type: Int64Type::create(false),
@@ -438,24 +430,24 @@ mod tests {
     }
 
     async fn test_global_hash_aggregation_count(keyspace: Keyspace<impl StateStore>) {
-        let chunk1 = StreamChunk {
-            ops: vec![Op::Insert, Op::Insert, Op::Insert],
-            columns: vec![
+        let chunk1 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert, Op::Insert],
+            vec![
                 column_nonnull! { I64Array, [1, 2, 2] },
                 column_nonnull! { I64Array, [1, 2, 2] },
                 column_nonnull! { I64Array, [1, 2, 2] },
             ],
-            visibility: None,
-        };
-        let chunk2 = StreamChunk {
-            ops: vec![Op::Delete, Op::Delete, Op::Delete, Op::Insert],
-            columns: vec![
+            None,
+        );
+        let chunk2 = StreamChunk::new(
+            vec![Op::Delete, Op::Delete, Op::Delete, Op::Insert],
+            vec![
                 column_nonnull! { I64Array, [1, 2, 2, 3] },
                 column_nonnull! { I64Array, [1, 2, 2, 3] },
                 column_nonnull! { I64Array, [1, 2, 2, 3] },
             ],
-            visibility: Some((vec![true, false, true, true]).try_into().unwrap()),
-        };
+            Some((vec![true, false, true, true]).try_into().unwrap()),
+        );
         let schema = Schema {
             fields: vec![
                 Field {
@@ -548,9 +540,9 @@ mod tests {
     }
 
     async fn test_local_hash_aggregation_max(keyspace: Keyspace<impl StateStore>) {
-        let chunk1 = StreamChunk {
-            ops: vec![Op::Insert; 3],
-            columns: vec![
+        let chunk1 = StreamChunk::new(
+            vec![Op::Insert; 3],
+            vec![
                 // group key column
                 column_nonnull! { I64Array, [1, 1, 2] },
                 // data column to get minimum
@@ -558,11 +550,11 @@ mod tests {
                 // primary key column
                 column_nonnull! { I64Array, [1001, 1002, 1003] },
             ],
-            visibility: None,
-        };
-        let chunk2 = StreamChunk {
-            ops: vec![Op::Delete; 3],
-            columns: vec![
+            None,
+        );
+        let chunk2 = StreamChunk::new(
+            vec![Op::Delete; 3],
+            vec![
                 // group key column
                 column_nonnull! { I64Array, [1, 1, 2] },
                 // data column to get minimum
@@ -570,8 +562,8 @@ mod tests {
                 // primary key column
                 column_nonnull! { I64Array, [1001, 1002, 1003] },
             ],
-            visibility: Some((vec![true, false, true]).try_into().unwrap()),
-        };
+            Some((vec![true, false, true]).try_into().unwrap()),
+        );
         let schema = Schema {
             fields: vec![
                 Field {

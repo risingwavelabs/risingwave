@@ -120,12 +120,7 @@ impl StreamChunkBuilder {
             .map(|array_impl| Column::new(Arc::new(array_impl)))
             .collect::<Vec<_>>();
 
-        let new_chunk = StreamChunk {
-            columns: new_columns,
-            visibility: None,
-            ops: self.ops,
-        };
-        Ok(new_chunk)
+        Ok(StreamChunk::new(self.ops, new_columns, None))
     }
 }
 
@@ -386,11 +381,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
         chunk: StreamChunk,
     ) -> Result<Message> {
         let chunk = chunk.compact()?;
-        let StreamChunk {
-            ops,
-            columns,
-            visibility,
-        } = chunk;
+        let (ops, columns, visibility) = chunk.into_inner();
 
         let data_chunk = {
             let data_chunk_builder = DataChunk::builder().columns(columns);
@@ -545,38 +536,38 @@ mod tests {
 
     #[tokio::test]
     async fn test_streaming_hash_inner_join() {
-        let chunk_l1 = StreamChunk {
-            ops: vec![Op::Insert, Op::Insert, Op::Insert],
-            columns: vec![
+        let chunk_l1 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert, Op::Insert],
+            vec![
                 column_nonnull! { I64Array, [1, 2, 3] },
                 column_nonnull! { I64Array, [4, 5, 6] },
             ],
-            visibility: None,
-        };
-        let chunk_l2 = StreamChunk {
-            ops: vec![Op::Insert, Op::Delete],
-            columns: vec![
+            None,
+        );
+        let chunk_l2 = StreamChunk::new(
+            vec![Op::Insert, Op::Delete],
+            vec![
                 column_nonnull! { I64Array, [3, 3] },
                 column_nonnull! { I64Array, [8, 8] },
             ],
-            visibility: Some((vec![true, true]).try_into().unwrap()),
-        };
-        let chunk_r1 = StreamChunk {
-            ops: vec![Op::Insert, Op::Insert, Op::Insert],
-            columns: vec![
+            Some((vec![true, true]).try_into().unwrap()),
+        );
+        let chunk_r1 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert, Op::Insert],
+            vec![
                 column_nonnull! { I64Array, [2, 4, 6] },
                 column_nonnull! { I64Array, [7, 8, 9] },
             ],
-            visibility: None,
-        };
-        let chunk_r2 = StreamChunk {
-            ops: vec![Op::Insert, Op::Insert],
-            columns: vec![
+            None,
+        );
+        let chunk_r2 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert],
+            vec![
                 column_nonnull! { I64Array, [3, 6] },
                 column_nonnull! { I64Array, [10, 11] },
             ],
-            visibility: Some((vec![true, true]).try_into().unwrap()),
-        };
+            Some((vec![true, true]).try_into().unwrap()),
+        );
         let schema = Schema {
             fields: vec![
                 Field {
@@ -611,11 +602,11 @@ mod tests {
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
-            assert_eq!(chunk.ops.len(), 0);
-            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(chunk.ops().len(), 0);
+            assert_eq!(chunk.columns().len(), 4);
             for i in 0..4 {
                 assert_eq!(
-                    chunk.columns[i].array_ref().as_int64().iter().collect_vec(),
+                    chunk.column(i).array_ref().as_int64().iter().collect_vec(),
                     vec![]
                 );
             }
@@ -626,11 +617,11 @@ mod tests {
         // push the 2nd left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
-            assert_eq!(chunk.ops.len(), 0);
-            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(chunk.ops().len(), 0);
+            assert_eq!(chunk.columns().len(), 4);
             for i in 0..4 {
                 assert_eq!(
-                    chunk.columns[i].array_ref().as_int64().iter().collect_vec(),
+                    chunk.column(i).array_ref().as_int64().iter().collect_vec(),
                     vec![]
                 );
             }
@@ -641,22 +632,22 @@ mod tests {
         // push the 1st right chunk
         MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
-            assert_eq!(chunk.ops, vec![Op::Insert]);
-            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(chunk.ops(), vec![Op::Insert]);
+            assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(2)]
             );
             assert_eq!(
-                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(5)]
             );
             assert_eq!(
-                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(2)]
             );
             assert_eq!(
-                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(7)]
             );
         } else {
@@ -666,22 +657,22 @@ mod tests {
         // push the 2nd right chunk
         MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r2]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
-            assert_eq!(chunk.ops, vec![Op::Insert]);
-            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(chunk.ops(), vec![Op::Insert]);
+            assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(3)]
             );
             assert_eq!(
-                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(6)]
             );
             assert_eq!(
-                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(3)]
             );
             assert_eq!(
-                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(10)]
             );
         } else {
@@ -691,38 +682,38 @@ mod tests {
 
     #[tokio::test]
     async fn test_streaming_hash_inner_join_with_barrier() {
-        let chunk_l1 = StreamChunk {
-            ops: vec![Op::Insert, Op::Insert, Op::Insert],
-            columns: vec![
+        let chunk_l1 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert, Op::Insert],
+            vec![
                 column_nonnull! { I64Array, [1, 2, 3] },
                 column_nonnull! { I64Array, [4, 5, 6] },
             ],
-            visibility: None,
-        };
-        let chunk_l2 = StreamChunk {
-            ops: vec![Op::Insert, Op::Insert],
-            columns: vec![
+            None,
+        );
+        let chunk_l2 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert],
+            vec![
                 column_nonnull! { I64Array, [6, 3] },
                 column_nonnull! { I64Array, [8, 8] },
             ],
-            visibility: Some((vec![true, true]).try_into().unwrap()),
-        };
-        let chunk_r1 = StreamChunk {
-            ops: vec![Op::Insert, Op::Insert, Op::Insert],
-            columns: vec![
+            Some((vec![true, true]).try_into().unwrap()),
+        );
+        let chunk_r1 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert, Op::Insert],
+            vec![
                 column_nonnull! { I64Array, [2, 4, 6] },
                 column_nonnull! { I64Array, [7, 8, 9] },
             ],
-            visibility: None,
-        };
-        let chunk_r2 = StreamChunk {
-            ops: vec![Op::Insert, Op::Insert],
-            columns: vec![
+            None,
+        );
+        let chunk_r2 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert],
+            vec![
                 column_nonnull! { I64Array, [3, 6] },
                 column_nonnull! { I64Array, [10, 11] },
             ],
-            visibility: Some((vec![true, true]).try_into().unwrap()),
-        };
+            Some((vec![true, true]).try_into().unwrap()),
+        );
         let schema = Schema {
             fields: vec![
                 Field {
@@ -757,11 +748,11 @@ mod tests {
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
-            assert_eq!(chunk.ops.len(), 0);
-            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(chunk.ops().len(), 0);
+            assert_eq!(chunk.columns().len(), 4);
             for i in 0..4 {
                 assert_eq!(
-                    chunk.columns[i].array_ref().as_int64().iter().collect_vec(),
+                    chunk.column(i).array_ref().as_int64().iter().collect_vec(),
                     vec![]
                 );
             }
@@ -778,22 +769,22 @@ mod tests {
         // join the first right chunk
         MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
-            assert_eq!(chunk.ops, vec![Op::Insert]);
-            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(chunk.ops(), vec![Op::Insert]);
+            assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(2)]
             );
             assert_eq!(
-                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(5)]
             );
             assert_eq!(
-                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(2)]
             );
             assert_eq!(
-                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(7)]
             );
         } else {
@@ -814,22 +805,22 @@ mod tests {
 
         // join the 2nd left chunk
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
-            assert_eq!(chunk.ops, vec![Op::Insert]);
-            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(chunk.ops(), vec![Op::Insert]);
+            assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(6)]
             );
             assert_eq!(
-                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(8)]
             );
             assert_eq!(
-                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(6)]
             );
             assert_eq!(
-                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(9)]
             );
         } else {
@@ -839,22 +830,22 @@ mod tests {
         // push the 2nd right chunk
         MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r2]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
-            assert_eq!(chunk.ops, vec![Op::Insert, Op::Insert, Op::Insert]);
-            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(chunk.ops(), vec![Op::Insert, Op::Insert, Op::Insert]);
+            assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(3), Some(3), Some(6)]
             );
             assert_eq!(
-                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(6), Some(8), Some(8)]
             );
             assert_eq!(
-                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(3), Some(3), Some(6)]
             );
             assert_eq!(
-                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(10), Some(10), Some(11)]
             );
         } else {
@@ -864,38 +855,38 @@ mod tests {
 
     #[tokio::test]
     async fn test_streaming_hash_left_join() {
-        let chunk_l1 = StreamChunk {
-            ops: vec![Op::Insert, Op::Insert, Op::Insert],
-            columns: vec![
+        let chunk_l1 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert, Op::Insert],
+            vec![
                 column_nonnull! { I64Array, [1, 2, 3] },
                 column_nonnull! { I64Array, [4, 5, 6] },
             ],
-            visibility: None,
-        };
-        let chunk_l2 = StreamChunk {
-            ops: vec![Op::Insert, Op::Delete],
-            columns: vec![
+            None,
+        );
+        let chunk_l2 = StreamChunk::new(
+            vec![Op::Insert, Op::Delete],
+            vec![
                 column_nonnull! { I64Array, [3, 3] },
                 column_nonnull! { I64Array, [8, 8] },
             ],
-            visibility: Some((vec![true, true]).try_into().unwrap()),
-        };
-        let chunk_r1 = StreamChunk {
-            ops: vec![Op::Insert, Op::Insert, Op::Insert],
-            columns: vec![
+            Some((vec![true, true]).try_into().unwrap()),
+        );
+        let chunk_r1 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert, Op::Insert],
+            vec![
                 column_nonnull! { I64Array, [2, 4, 6] },
                 column_nonnull! { I64Array, [7, 8, 9] },
             ],
-            visibility: None,
-        };
-        let chunk_r2 = StreamChunk {
-            ops: vec![Op::Insert, Op::Insert],
-            columns: vec![
+            None,
+        );
+        let chunk_r2 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert],
+            vec![
                 column_nonnull! { I64Array, [3, 6] },
                 column_nonnull! { I64Array, [10, 11] },
             ],
-            visibility: Some((vec![true, true]).try_into().unwrap()),
-        };
+            Some((vec![true, true]).try_into().unwrap()),
+        );
         let schema = Schema {
             fields: vec![
                 Field {
@@ -930,22 +921,22 @@ mod tests {
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
-            assert_eq!(chunk.ops, vec![Op::Insert, Op::Insert, Op::Insert]);
-            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(chunk.ops(), vec![Op::Insert, Op::Insert, Op::Insert]);
+            assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(1), Some(2), Some(3)]
             );
             assert_eq!(
-                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(4), Some(5), Some(6)]
             );
             assert_eq!(
-                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
                 vec![None, None, None]
             );
             assert_eq!(
-                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
                 vec![None, None, None]
             );
         } else {
@@ -955,22 +946,22 @@ mod tests {
         // push the 2nd left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
-            assert_eq!(chunk.ops, vec![Op::Insert, Op::Delete]);
-            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(chunk.ops(), vec![Op::Insert, Op::Delete]);
+            assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(3), Some(3)]
             );
             assert_eq!(
-                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(8), Some(8)]
             );
             assert_eq!(
-                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
                 vec![None, None]
             );
             assert_eq!(
-                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
                 vec![None, None]
             );
         } else {
@@ -980,22 +971,22 @@ mod tests {
         // push the 1st right chunk
         MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
-            assert_eq!(chunk.ops, vec![Op::UpdateDelete, Op::UpdateInsert]);
-            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(chunk.ops(), vec![Op::UpdateDelete, Op::UpdateInsert]);
+            assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(2), Some(2)]
             );
             assert_eq!(
-                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(5), Some(5)]
             );
             assert_eq!(
-                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
                 vec![None, Some(2)]
             );
             assert_eq!(
-                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
                 vec![None, Some(7)]
             );
         } else {
@@ -1005,22 +996,22 @@ mod tests {
         // push the 2nd right chunk
         MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r2]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
-            assert_eq!(chunk.ops, vec![Op::UpdateDelete, Op::UpdateInsert]);
-            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(chunk.ops(), vec![Op::UpdateDelete, Op::UpdateInsert]);
+            assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(3), Some(3)]
             );
             assert_eq!(
-                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(6), Some(6)]
             );
             assert_eq!(
-                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
                 vec![None, Some(3)]
             );
             assert_eq!(
-                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
                 vec![None, Some(10)]
             );
         } else {
@@ -1030,38 +1021,38 @@ mod tests {
 
     #[tokio::test]
     async fn test_streaming_hash_right_join() {
-        let chunk_l1 = StreamChunk {
-            ops: vec![Op::Insert, Op::Insert, Op::Insert],
-            columns: vec![
+        let chunk_l1 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert, Op::Insert],
+            vec![
                 column_nonnull! { I64Array, [1, 2, 3] },
                 column_nonnull! { I64Array, [4, 5, 6] },
             ],
-            visibility: None,
-        };
-        let chunk_l2 = StreamChunk {
-            ops: vec![Op::Insert, Op::Delete],
-            columns: vec![
+            None,
+        );
+        let chunk_l2 = StreamChunk::new(
+            vec![Op::Insert, Op::Delete],
+            vec![
                 column_nonnull! { I64Array, [3, 3] },
                 column_nonnull! { I64Array, [8, 8] },
             ],
-            visibility: Some((vec![true, true]).try_into().unwrap()),
-        };
-        let chunk_r1 = StreamChunk {
-            ops: vec![Op::Insert, Op::Insert, Op::Insert],
-            columns: vec![
+            Some((vec![true, true]).try_into().unwrap()),
+        );
+        let chunk_r1 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert, Op::Insert],
+            vec![
                 column_nonnull! { I64Array, [2, 4, 6] },
                 column_nonnull! { I64Array, [7, 8, 9] },
             ],
-            visibility: None,
-        };
-        let chunk_r2 = StreamChunk {
-            ops: vec![Op::Insert, Op::Delete],
-            columns: vec![
+            None,
+        );
+        let chunk_r2 = StreamChunk::new(
+            vec![Op::Insert, Op::Delete],
+            vec![
                 column_nonnull! { I64Array, [5, 5] },
                 column_nonnull! { I64Array, [10, 10] },
             ],
-            visibility: Some((vec![true, true]).try_into().unwrap()),
-        };
+            Some((vec![true, true]).try_into().unwrap()),
+        );
         let schema = Schema {
             fields: vec![
                 Field {
@@ -1096,11 +1087,11 @@ mod tests {
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
-            assert_eq!(chunk.ops.len(), 0);
-            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(chunk.ops().len(), 0);
+            assert_eq!(chunk.columns().len(), 4);
             for i in 0..4 {
                 assert_eq!(
-                    chunk.columns[i].array_ref().as_int64().iter().collect_vec(),
+                    chunk.column(i).array_ref().as_int64().iter().collect_vec(),
                     vec![]
                 );
             }
@@ -1111,11 +1102,11 @@ mod tests {
         // push the 2nd left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
-            assert_eq!(chunk.ops.len(), 0);
-            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(chunk.ops().len(), 0);
+            assert_eq!(chunk.columns().len(), 4);
             for i in 0..4 {
                 assert_eq!(
-                    chunk.columns[i].array_ref().as_int64().iter().collect_vec(),
+                    chunk.column(i).array_ref().as_int64().iter().collect_vec(),
                     vec![]
                 );
             }
@@ -1126,22 +1117,22 @@ mod tests {
         // push the 1st right chunk
         MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
-            assert_eq!(chunk.ops, vec![Op::Insert, Op::Insert, Op::Insert]);
-            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(chunk.ops(), vec![Op::Insert, Op::Insert, Op::Insert]);
+            assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(2), None, None]
             );
             assert_eq!(
-                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(5), None, None]
             );
             assert_eq!(
-                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(2), Some(4), Some(6)]
             );
             assert_eq!(
-                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(7), Some(8), Some(9)]
             );
         } else {
@@ -1151,22 +1142,22 @@ mod tests {
         // push the 2nd right chunk
         MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r2]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
-            assert_eq!(chunk.ops, vec![Op::Insert, Op::Delete]);
-            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(chunk.ops(), vec![Op::Insert, Op::Delete]);
+            assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
                 vec![None, None]
             );
             assert_eq!(
-                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
                 vec![None, None]
             );
             assert_eq!(
-                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(5), Some(5)]
             );
             assert_eq!(
-                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(10), Some(10)]
             );
         } else {
@@ -1176,38 +1167,38 @@ mod tests {
 
     #[tokio::test]
     async fn test_streaming_hash_full_outer_join() {
-        let chunk_l1 = StreamChunk {
-            ops: vec![Op::Insert, Op::Insert, Op::Insert],
-            columns: vec![
+        let chunk_l1 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert, Op::Insert],
+            vec![
                 column_nonnull! { I64Array, [1, 2, 3] },
                 column_nonnull! { I64Array, [4, 5, 6] },
             ],
-            visibility: None,
-        };
-        let chunk_l2 = StreamChunk {
-            ops: vec![Op::Insert, Op::Delete],
-            columns: vec![
+            None,
+        );
+        let chunk_l2 = StreamChunk::new(
+            vec![Op::Insert, Op::Delete],
+            vec![
                 column_nonnull! { I64Array, [3, 3] },
                 column_nonnull! { I64Array, [8, 8] },
             ],
-            visibility: Some((vec![true, true]).try_into().unwrap()),
-        };
-        let chunk_r1 = StreamChunk {
-            ops: vec![Op::Insert, Op::Insert, Op::Insert],
-            columns: vec![
+            Some((vec![true, true]).try_into().unwrap()),
+        );
+        let chunk_r1 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert, Op::Insert],
+            vec![
                 column_nonnull! { I64Array, [2, 4, 6] },
                 column_nonnull! { I64Array, [7, 8, 9] },
             ],
-            visibility: None,
-        };
-        let chunk_r2 = StreamChunk {
-            ops: vec![Op::Insert, Op::Delete],
-            columns: vec![
+            None,
+        );
+        let chunk_r2 = StreamChunk::new(
+            vec![Op::Insert, Op::Delete],
+            vec![
                 column_nonnull! { I64Array, [5, 5] },
                 column_nonnull! { I64Array, [10, 10] },
             ],
-            visibility: Some((vec![true, true]).try_into().unwrap()),
-        };
+            Some((vec![true, true]).try_into().unwrap()),
+        );
         let schema = Schema {
             fields: vec![
                 Field {
@@ -1242,22 +1233,22 @@ mod tests {
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
-            assert_eq!(chunk.ops, vec![Op::Insert, Op::Insert, Op::Insert]);
-            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(chunk.ops(), vec![Op::Insert, Op::Insert, Op::Insert]);
+            assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(1), Some(2), Some(3)]
             );
             assert_eq!(
-                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(4), Some(5), Some(6)]
             );
             assert_eq!(
-                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
                 vec![None, None, None]
             );
             assert_eq!(
-                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
                 vec![None, None, None]
             );
         } else {
@@ -1267,22 +1258,22 @@ mod tests {
         // push the 2nd left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
-            assert_eq!(chunk.ops, vec![Op::Insert, Op::Delete]);
-            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(chunk.ops(), vec![Op::Insert, Op::Delete]);
+            assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(3), Some(3)]
             );
             assert_eq!(
-                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(8), Some(8)]
             );
             assert_eq!(
-                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
                 vec![None, None]
             );
             assert_eq!(
-                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
                 vec![None, None]
             );
         } else {
@@ -1293,24 +1284,24 @@ mod tests {
         MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
             assert_eq!(
-                chunk.ops,
+                chunk.ops(),
                 vec![Op::UpdateDelete, Op::UpdateInsert, Op::Insert, Op::Insert]
             );
-            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(2), Some(2), None, None]
             );
             assert_eq!(
-                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(5), Some(5), None, None]
             );
             assert_eq!(
-                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
                 vec![None, Some(2), Some(4), Some(6)]
             );
             assert_eq!(
-                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
                 vec![None, Some(7), Some(8), Some(9)]
             );
         } else {
@@ -1320,22 +1311,22 @@ mod tests {
         // push the 2nd right chunk
         MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r2]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
-            assert_eq!(chunk.ops, vec![Op::Insert, Op::Delete]);
-            assert_eq!(chunk.columns.len(), 4);
+            assert_eq!(chunk.ops(), vec![Op::Insert, Op::Delete]);
+            assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
                 vec![None, None]
             );
             assert_eq!(
-                chunk.columns[1].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
                 vec![None, None]
             );
             assert_eq!(
-                chunk.columns[2].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(5), Some(5)]
             );
             assert_eq!(
-                chunk.columns[3].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(10), Some(10)]
             );
         } else {

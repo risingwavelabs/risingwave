@@ -145,11 +145,7 @@ impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
 
         let chunk = chunk.compact()?;
 
-        let StreamChunk {
-            ops,
-            columns,
-            visibility: _,
-        } = chunk;
+        let (ops, columns, _visibility) = chunk.into_inner();
 
         let data_chunk = DataChunk::builder().columns(columns).build();
         let num_limit = self.limit.unwrap_or(usize::MAX);
@@ -334,6 +330,7 @@ impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
+    use itertools::Itertools;
     use risingwave_common::array::{Array, I64Array};
     use risingwave_common::catalog::Field;
     use risingwave_common::column_nonnull;
@@ -345,16 +342,16 @@ mod tests {
     use crate::executor::Barrier;
 
     fn create_stream_chunks() -> Vec<StreamChunk> {
-        let chunk1 = StreamChunk {
-            ops: vec![Op::Insert; 6],
-            columns: vec![
+        let chunk1 = StreamChunk::new(
+            vec![Op::Insert; 6],
+            vec![
                 column_nonnull! { I64Array, [1, 2, 3, 10, 9, 8] },
                 column_nonnull! { I64Array, [0, 1, 2, 3, 4, 5] },
             ],
-            visibility: None,
-        };
-        let chunk2 = StreamChunk {
-            ops: vec![
+            None,
+        );
+        let chunk2 = StreamChunk::new(
+            vec![
                 Op::Insert,
                 Op::Delete,
                 Op::Delete,
@@ -362,28 +359,28 @@ mod tests {
                 Op::Delete,
                 Op::Insert,
             ],
-            columns: vec![
+            vec![
                 column_nonnull! { I64Array, [7, 3, 1, 5, 2, 11] },
                 column_nonnull! { I64Array, [6, 2, 0, 7, 1, 8] },
             ],
-            visibility: None,
-        };
-        let chunk3 = StreamChunk {
-            ops: vec![Op::Insert; 4],
-            columns: vec![
+            None,
+        );
+        let chunk3 = StreamChunk::new(
+            vec![Op::Insert; 4],
+            vec![
                 column_nonnull! { I64Array, [6, 12, 13, 14] },
                 column_nonnull! { I64Array, [9, 10, 11, 12] },
             ],
-            visibility: None,
-        };
-        let chunk4 = StreamChunk {
-            ops: vec![Op::Delete; 3],
-            columns: vec![
+            None,
+        );
+        let chunk4 = StreamChunk::new(
+            vec![Op::Delete; 3],
+            vec![
                 column_nonnull! { I64Array, [5, 6, 11]},
                 column_nonnull! { I64Array, [7, 9, 8]},
             ],
-            visibility: None,
-        };
+            None,
+        );
         vec![chunk1, chunk2, chunk3, chunk4]
     }
 
@@ -454,7 +451,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 expected_values
             );
-            assert_eq!(res.ops, expected_ops);
+            assert_eq!(res.ops(), expected_ops);
         }
         // Now (1, 2, 3) -> (8, 9, 10)
         // Barrier
@@ -472,14 +469,10 @@ mod tests {
                 Op::Insert,
             ];
             assert_eq!(
-                res.columns()[0]
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
+                res.column(0).array_ref().as_int64().iter().collect_vec(),
                 expected_values
             );
-            assert_eq!(res.ops, expected_ops);
+            assert_eq!(res.ops(), expected_ops);
         }
         // (5, 7, 8) -> (9, 10, 11)
         // barrier
@@ -498,7 +491,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 expected_values
             );
-            assert_eq!(res.ops, expected_ops);
+            assert_eq!(res.ops(), expected_ops);
         }
         // (5, 6, 7) -> (8, 9, 10, 11, 12, 13, 14)
         // barrier
@@ -517,7 +510,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 expected_values
             );
-            assert_eq!(res.ops, expected_ops);
+            assert_eq!(res.ops(), expected_ops);
         }
         // (7, 8, 9) -> (10, 13, 14, _)
         // barrier
@@ -569,7 +562,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 expected_values
             );
-            assert_eq!(res.ops, expected_ops);
+            assert_eq!(res.ops(), expected_ops);
         }
         // now () -> (1, 2, 3, 8) -> (9, 10)
 
@@ -610,7 +603,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 expected_values
             );
-            assert_eq!(res.ops, expected_ops);
+            assert_eq!(res.ops(), expected_ops);
         }
         // () -> (5, 7, 8, 9) -> (10, 11)
         // barrier
@@ -629,7 +622,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 expected_values
             );
-            assert_eq!(res.ops, expected_ops);
+            assert_eq!(res.ops(), expected_ops);
         }
         // () -> (5, 6, 7, 8) -> (9, 10, 11, 12, 13, 14)
         // barrier
@@ -648,7 +641,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 expected_values
             );
-            assert_eq!(res.ops, expected_ops);
+            assert_eq!(res.ops(), expected_ops);
         }
         // () -> (7, 8, 9, 10) -> (13, 14)
         // barrier
@@ -682,7 +675,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 expected_values
             );
-            assert_eq!(res.ops, expected_ops);
+            assert_eq!(res.ops(), expected_ops);
         }
         // now (1, 2, 3) -> (8, 9, 10, _) -> ()
 
@@ -708,7 +701,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 expected_values
             );
-            assert_eq!(res.ops, expected_ops);
+            assert_eq!(res.ops(), expected_ops);
         }
         // (5, 7, 8) -> (9, 10, 11, _) -> ()
         // barrier
@@ -727,7 +720,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 expected_values
             );
-            assert_eq!(res.ops, expected_ops);
+            assert_eq!(res.ops(), expected_ops);
         }
         // (5, 6, 7) -> (8, 9, 10, 11) -> (12, 13, 14)
         // barrier
@@ -753,7 +746,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 expected_values
             );
-            assert_eq!(res.ops, expected_ops);
+            assert_eq!(res.ops(), expected_ops);
         }
         // (7, 8, 9) -> (10, 13, 14, _)
         // barrier

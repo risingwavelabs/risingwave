@@ -117,16 +117,15 @@ impl StreamSourceReader for TableV2StreamReader {
             None => panic!("TableSourceV2 dropped before associated streaming task terminated"),
         };
 
+        let (ops, columns, bitmap) = chunk.into_inner();
+
         let selected_columns = self
             .column_indices
             .iter()
-            .map(|i| chunk.columns()[*i].clone())
+            .map(|i| columns[*i].clone())
             .collect();
 
-        Ok(StreamChunk {
-            columns: selected_columns,
-            ..chunk
-        })
+        Ok(StreamChunk::new(ops, selected_columns, bitmap))
     }
 }
 

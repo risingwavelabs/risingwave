@@ -83,11 +83,7 @@ impl SimpleExecutor for ProjectExecutor {
     fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
         let chunk = chunk.compact()?;
 
-        let StreamChunk {
-            ops,
-            columns,
-            visibility,
-        } = chunk;
+        let (ops, columns, visibility) = chunk.into_inner();
 
         let data_chunk = {
             let data_chunk_builder = DataChunk::builder().columns(columns);
@@ -106,12 +102,7 @@ impl SimpleExecutor for ProjectExecutor {
 
         drop(data_chunk);
 
-        let new_chunk = StreamChunk {
-            ops,
-            columns: projected_columns,
-            visibility: None,
-        };
-
+        let new_chunk = StreamChunk::new(ops, projected_columns, None);
         Ok(Message::Chunk(new_chunk))
     }
 }
@@ -133,22 +124,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_projection() {
-        let chunk1 = StreamChunk {
-            ops: vec![Op::Insert, Op::Insert, Op::Insert],
-            columns: vec![
+        let chunk1 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert, Op::Insert],
+            vec![
                 column_nonnull! { I64Array, [1, 2, 3] },
                 column_nonnull! { I64Array, [4, 5, 6] },
             ],
-            visibility: None,
-        };
-        let chunk2 = StreamChunk {
-            ops: vec![Op::Insert, Op::Delete],
-            columns: vec![
+            None,
+        );
+        let chunk2 = StreamChunk::new(
+            vec![Op::Insert, Op::Delete],
+            vec![
                 column_nonnull! { I64Array, [7, 3] },
                 column_nonnull! { I64Array, [8, 6] },
             ],
-            visibility: Some((vec![true, true]).try_into().unwrap()),
-        };
+            Some((vec![true, true]).try_into().unwrap()),
+        );
         let schema = Schema {
             fields: vec![
                 Field {
@@ -175,10 +166,10 @@ mod tests {
         let mut project = ProjectExecutor::new(Box::new(source), vec![], vec![test_expr]);
 
         if let Message::Chunk(chunk) = project.next().await.unwrap() {
-            assert_eq!(chunk.ops, vec![Op::Insert, Op::Insert, Op::Insert]);
-            assert_eq!(chunk.columns.len(), 1);
+            assert_eq!(chunk.ops(), vec![Op::Insert, Op::Insert, Op::Insert]);
+            assert_eq!(chunk.columns().len(), 1);
             assert_eq!(
-                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(5), Some(7), Some(9)]
             );
         } else {
@@ -186,10 +177,10 @@ mod tests {
         }
 
         if let Message::Chunk(chunk) = project.next().await.unwrap() {
-            assert_eq!(chunk.ops, vec![Op::Insert, Op::Delete]);
-            assert_eq!(chunk.columns.len(), 1);
+            assert_eq!(chunk.ops(), vec![Op::Insert, Op::Delete]);
+            assert_eq!(chunk.columns().len(), 1);
             assert_eq!(
-                chunk.columns[0].array_ref().as_int64().iter().collect_vec(),
+                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(15), Some(9)]
             );
         } else {

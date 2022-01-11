@@ -92,11 +92,7 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
     }
 
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
-        let StreamChunk {
-            ops,
-            columns,
-            visibility,
-        } = chunk;
+        let (ops, columns, visibility) = chunk.into_inner();
 
         // --- Retrieve all aggregation inputs in advance ---
         let all_agg_input_arrays = agg_input_arrays(&self.agg_calls, &columns);
@@ -171,11 +167,7 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
             .map(|builder| -> Result<_> { Ok(Column::new(Arc::new(builder.finish()?))) })
             .try_collect()?;
 
-        let chunk = StreamChunk {
-            ops: new_ops,
-            columns,
-            visibility: None,
-        };
+        let chunk = StreamChunk::new(new_ops, columns, None);
 
         Ok(Some(chunk))
     }
@@ -223,26 +215,26 @@ mod tests {
     }
 
     async fn test_local_simple_aggregation(keyspace: Keyspace<impl StateStore>) {
-        let chunk1 = StreamChunk {
-            ops: vec![Op::Insert, Op::Insert, Op::Insert],
-            columns: vec![
+        let chunk1 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert, Op::Insert],
+            vec![
                 column_nonnull! { I64Array, [100, 10, 4] },
                 column_nonnull! { I64Array, [200, 14, 300] },
                 // primary key column
                 column_nonnull! { I64Array, [1001, 1002, 1003] },
             ],
-            visibility: None,
-        };
-        let chunk2 = StreamChunk {
-            ops: vec![Op::Delete, Op::Delete, Op::Delete, Op::Insert],
-            columns: vec![
+            None,
+        );
+        let chunk2 = StreamChunk::new(
+            vec![Op::Delete, Op::Delete, Op::Delete, Op::Insert],
+            vec![
                 column_nonnull! { I64Array, [100, 10, 4, 104] },
                 column_nonnull! { I64Array, [200, 14, 300, 500] },
                 // primary key column
                 column_nonnull! { I64Array, [1001, 1002, 1003, 1004] },
             ],
-            visibility: Some((vec![true, false, true, true]).try_into().unwrap()),
-        };
+            Some((vec![true, false, true, true]).try_into().unwrap()),
+        );
         let schema = Schema {
             fields: vec![
                 Field {

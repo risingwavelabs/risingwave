@@ -157,32 +157,32 @@ mod test {
             schema.clone(),
             PkIndices::new(),
             vec![
-                StreamChunk {
-                    ops: vec![Op::Insert],
-                    columns: vec![column_nonnull! { I32Array, [1] }],
-                    visibility: None,
-                },
-                StreamChunk {
-                    ops: vec![Op::Insert],
-                    columns: vec![column_nonnull! { I32Array, [2] }],
-                    visibility: None,
-                },
+                StreamChunk::new(
+                    vec![Op::Insert],
+                    vec![column_nonnull! { I32Array, [1] }],
+                    None,
+                ),
+                StreamChunk::new(
+                    vec![Op::Insert],
+                    vec![column_nonnull! { I32Array, [2] }],
+                    None,
+                ),
             ],
         ));
         let second = Box::new(MockSource::with_chunks(
             schema.clone(),
             PkIndices::new(),
             vec![
-                StreamChunk {
-                    ops: vec![Op::Insert],
-                    columns: vec![column_nonnull! { I32Array, [3] }],
-                    visibility: None,
-                },
-                StreamChunk {
-                    ops: vec![Op::Insert],
-                    columns: vec![column_nonnull! { I32Array, [4] }],
-                    visibility: None,
-                },
+                StreamChunk::new(
+                    vec![Op::Insert],
+                    vec![column_nonnull! { I32Array, [3] }],
+                    None,
+                ),
+                StreamChunk::new(
+                    vec![Op::Insert],
+                    vec![column_nonnull! { I32Array, [4] }],
+                    None,
+                ),
             ],
         ));
 
@@ -192,14 +192,7 @@ mod test {
             let k = &chain.next().await.unwrap();
             count += 1;
             if let Message::Chunk(ck) = k {
-                let target = ck
-                    .columns
-                    .get(0)
-                    .unwrap()
-                    .array()
-                    .as_int32()
-                    .value_at(0)
-                    .unwrap();
+                let target = ck.column(0).array_ref().as_int32().value_at(0).unwrap();
                 assert_eq!(target, count);
             } else {
                 assert!(matches!(k, Message::Barrier(_)));

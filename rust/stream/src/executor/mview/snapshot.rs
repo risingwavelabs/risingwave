@@ -78,11 +78,11 @@ impl<S: StateStore> BatchQueryExecutor<S> {
                 .map(|builder| -> Result<_> { Ok(Column::new(Arc::new(builder.finish()?))) })
                 .try_collect()?;
 
-            Ok(Message::Chunk(StreamChunk {
-                ops: vec![Op::Insert; count],
+            Ok(Message::Chunk(StreamChunk::new(
+                vec![Op::Insert; count],
                 columns,
-                visibility: None,
-            }))
+                None,
+            )))
         }
     }
 }
@@ -122,14 +122,7 @@ mod test {
         let mut node = BatchQueryExecutor::new_with_batch_size(table, vec![0, 1], test_batch_size);
         let mut batch_cnt = 0;
         while let Ok(Message::Chunk(sc)) = node.next().await {
-            let data = *sc
-                .columns
-                .get(0)
-                .unwrap()
-                .array()
-                .datum_at(0)
-                .unwrap()
-                .as_int32();
+            let data = *sc.column(0).array_ref().datum_at(0).unwrap().as_int32();
             assert_eq!(data, (batch_cnt * test_batch_size) as i32);
             batch_cnt += 1;
         }

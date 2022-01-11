@@ -164,12 +164,8 @@ impl<S: StateStore> TopNExecutorBase for AppendOnlyTopNExecutor<S> {
             self.first_execution = false;
         }
 
-        let StreamChunk {
-            // Ops is useless as we have assumed the input is append-only.
-            ops: _ops,
-            columns,
-            visibility,
-        } = chunk;
+        // Ops is useless as we have assumed the input is append-only.
+        let (_ops, columns, visibility) = chunk.into_inner();
 
         let mut data_chunk: DataChunk = DataChunk::builder().columns(columns.to_vec()).build();
         if let Some(vis_map) = &visibility {
@@ -283,30 +279,30 @@ mod tests {
     use crate::executor::{Barrier, Executor, Message, PkIndices, StreamChunk};
 
     fn create_stream_chunks() -> Vec<StreamChunk> {
-        let chunk1 = StreamChunk {
-            ops: vec![Op::Insert; 6],
-            columns: vec![
+        let chunk1 = StreamChunk::new(
+            vec![Op::Insert; 6],
+            vec![
                 column_nonnull! { I64Array, [1, 2, 3, 10, 9, 8] },
                 column_nonnull! { I64Array, [0, 1, 2, 3, 4, 5] },
             ],
-            visibility: None,
-        };
-        let chunk2 = StreamChunk {
-            ops: vec![Op::Insert; 4],
-            columns: vec![
+            None,
+        );
+        let chunk2 = StreamChunk::new(
+            vec![Op::Insert; 4],
+            vec![
                 column_nonnull! { I64Array, [7, 3, 1, 9] },
-                column_nonnull! { I64Array, [6, 7, 8, 9, 10, 11] },
+                column_nonnull! { I64Array, [6, 7, 8, 9] },
             ],
-            visibility: None,
-        };
-        let chunk3 = StreamChunk {
-            ops: vec![Op::Insert; 4],
-            columns: vec![
+            None,
+        );
+        let chunk3 = StreamChunk::new(
+            vec![Op::Insert; 4],
+            vec![
                 column_nonnull! { I64Array, [1, 1, 2, 3] },
                 column_nonnull! { I64Array, [12, 13, 14, 15] },
             ],
-            visibility: None,
-        };
+            None,
+        );
         vec![chunk1, chunk2, chunk3]
     }
 
@@ -377,7 +373,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 expected_values
             );
-            assert_eq!(res.ops, expected_ops);
+            assert_eq!(res.ops(), expected_ops);
         }
         // We added (1, 2, 3, 10, 9, 8).
         // Now (1, 2, 3) -> (8, 9, 10)
@@ -395,7 +391,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 expected_values
             );
-            assert_eq!(res.ops, expected_ops);
+            assert_eq!(res.ops(), expected_ops);
         }
         // We added (7, 3, 1, 9).
         // Now (1, 1, 2) -> (3, 3, 7, 8, 9, 10)
@@ -414,7 +410,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 expected_values
             );
-            assert_eq!(res.ops, expected_ops);
+            assert_eq!(res.ops(), expected_ops);
         }
         // We added (1, 1, 2, 3).
         // Now (1, 1, 1) -> (1, 2, 2, 3, 3, 3, 7, 8, 9, 10)
@@ -464,7 +460,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 expected_values
             );
-            assert_eq!(res.ops, expected_ops);
+            assert_eq!(res.ops(), expected_ops);
         }
         // We added (1, 2, 3, 10, 9, 8).
         // Now (1, 2, 3, 8, 9)
@@ -489,7 +485,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 expected_values
             );
-            assert_eq!(res.ops, expected_ops);
+            assert_eq!(res.ops(), expected_ops);
         }
         // We added (7, 3, 1, 9).
         // Now (1, 1, 2, 3, 3)
@@ -508,7 +504,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 expected_values
             );
-            assert_eq!(res.ops, expected_ops);
+            assert_eq!(res.ops(), expected_ops);
         }
         // We added (1, 1, 2, 3).
         // Now (1, 1, 1, 1, 2)
@@ -542,7 +538,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 expected_values
             );
-            assert_eq!(res.ops, expected_ops);
+            assert_eq!(res.ops(), expected_ops);
         }
         // We added (1, 2, 3, 10, 9, 8).
         // Now (1, 2, 3) -> (8, 9, 10)
@@ -560,7 +556,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 expected_values
             );
-            assert_eq!(res.ops, expected_ops);
+            assert_eq!(res.ops(), expected_ops);
         }
         // We added (7, 3, 1, 9).
         // Now (1, 1, 2) -> (3, 3, 7, 8)
@@ -586,7 +582,7 @@ mod tests {
                     .collect::<Vec<_>>(),
                 expected_values
             );
-            assert_eq!(res.ops, expected_ops);
+            assert_eq!(res.ops(), expected_ops);
         }
         // We added (1, 1, 2, 3).
         // Now (1, 1, 1) -> (1, 2, 2, 3)
