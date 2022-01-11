@@ -1,5 +1,6 @@
 package com.risingwave.catalog;
 
+import com.google.common.base.MoreObjects;
 import com.risingwave.common.entity.EntityBase;
 import com.risingwave.common.entity.NonRootLikeBase;
 
@@ -18,6 +19,15 @@ public class ColumnCatalog extends EntityBase<ColumnCatalog.ColumnId, ColumnCata
 
   public String getName() {
     return getEntityName().getValue();
+  }
+
+  @Override
+  public String toString() {
+    return MoreObjects.toStringHelper(this)
+        .add("name", getName())
+        .add("id", getId().getValue())
+        .add("desc", desc)
+        .toString();
   }
 
   /** Column Id Definition */

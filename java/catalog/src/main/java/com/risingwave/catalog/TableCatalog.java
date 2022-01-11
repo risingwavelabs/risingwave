@@ -3,6 +3,7 @@ package com.risingwave.catalog;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static java.util.Objects.requireNonNull;
 
+import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.risingwave.common.datatype.RisingWaveDataType;
@@ -249,6 +250,18 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
 
   public ColumnCatalog getRowIdColumn() {
     return rowIdColumn;
+  }
+
+  @Override
+  public String toString() {
+    return MoreObjects.toStringHelper(this)
+        .add("id", getId())
+        .add("entityName", getEntityName())
+        .add("columns", columns)
+        .add("primaryKeyColumnIds", primaryKeyColumnIds)
+        .add("distributionType", distributionType)
+        .add("rowIdColumn", rowIdColumn)
+        .toString();
   }
 
   /** Table id definition. */

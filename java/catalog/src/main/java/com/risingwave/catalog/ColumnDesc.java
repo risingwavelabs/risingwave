@@ -1,5 +1,6 @@
 package com.risingwave.catalog;
 
+import com.google.common.base.MoreObjects;
 import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.common.datatype.RisingWaveTypeFactory;
 
@@ -36,5 +37,13 @@ public class ColumnDesc {
 
   public ColumnEncoding getEncoding() {
     return encoding;
+  }
+
+  @Override
+  public String toString() {
+    return MoreObjects.toStringHelper(this)
+        .add("dataType", dataType.getSqlTypeName().name())
+        .add("primary", primary)
+        .toString();
   }
 }

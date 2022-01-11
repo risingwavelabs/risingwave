@@ -20,10 +20,15 @@ import org.apache.calcite.schema.SchemaVersion;
 import org.apache.calcite.schema.Table;
 import org.apache.calcite.util.ImmutableIntList;
 import org.checkerframework.checker.nullness.qual.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Schema Catalog Definition */
 public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCatalog.SchemaName>
     implements Schema {
+
+  private static final Logger logger = LoggerFactory.getLogger(SchemaCatalog.class);
+
   private final AtomicInteger nextTableId = new AtomicInteger(0);
   private final ConcurrentMap<TableCatalog.TableId, TableCatalog> tableById;
   private final ConcurrentMap<TableCatalog.TableName, TableCatalog> tableByName;
@@ -121,6 +126,8 @@ public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCata
             createTableInfo.getRowSchemaLocation());
 
     createTableInfo.getColumns().forEach(pair -> table.addColumn(pair.getKey(), pair.getValue()));
+
+    logger.info("Created table {}", table);
 
     registerTable(table);
     return table;
