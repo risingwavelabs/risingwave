@@ -3252,6 +3252,7 @@ dependencies = [
  "lazy_static",
  "log",
  "memcomparable",
+ "num-integer",
  "num-traits",
  "parking_lot",
  "paste",

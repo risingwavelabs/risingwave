@@ -10,6 +10,7 @@ pub use table::*;
 mod cloud;
 mod compactor;
 mod error;
+pub mod hummock_client;
 mod iterator;
 pub mod key;
 pub mod key_range;

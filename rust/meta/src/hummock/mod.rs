@@ -1,12 +1,13 @@
 mod compaction;
-mod hummock_client;
-mod hummock_manager;
-mod level_handler;
 #[cfg(test)]
-mod tests;
+mod hummock_client_tests;
+mod hummock_manager;
+#[cfg(test)]
+mod hummock_manager_tests;
+mod level_handler;
 
-pub use hummock_client::*;
 pub use hummock_manager::*;
+pub use risingwave_storage::hummock::hummock_client::*;
 
 pub type HummockTTL = u64;
 pub type HummockSSTableId = u64;
