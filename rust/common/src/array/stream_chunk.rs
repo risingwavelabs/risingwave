@@ -62,6 +62,7 @@ pub struct StreamChunk {
     ops: Vec<Op>,
     columns: Vec<Column>,
     visibility: Option<Bitmap>,
+    cardinality: usize,
 }
 
 impl StreamChunk {
@@ -69,20 +70,22 @@ impl StreamChunk {
         for col in &columns {
             assert_eq!(col.array_ref().len(), ops.len());
         }
+        let cardinality = if let Some(bitmap) = &visibility {
+            bitmap.iter().map(|visible| visible as usize).sum()
+        } else {
+            ops.len()
+        };
         StreamChunk {
             ops,
             columns,
             visibility,
+            cardinality,
         }
     }
 
     /// `cardinality` return the number of visible tuples
     pub fn cardinality(&self) -> usize {
-        if let Some(bitmap) = &self.visibility {
-            bitmap.iter().map(|visible| visible as usize).sum()
-        } else {
-            self.capacity()
-        }
+        self.cardinality
     }
 
     /// `capacity` return physical length of internals ops & columns
@@ -122,21 +125,14 @@ impl StreamChunk {
                         ops.push(op);
                     }
                 }
-                Ok(StreamChunk {
-                    ops,
-                    columns,
-                    visibility: None,
-                })
+                Ok(StreamChunk::new(ops, columns, None))
             }
         }
     }
 
     pub fn into_parts(self) -> (DataChunk, Vec<Op>) {
-        let StreamChunk {
-            ops,
-            columns,
-            visibility,
-        } = self;
+        let (ops, columns, visibility) = self.into_inner();
+
         let builder = DataChunk::builder().columns(columns);
         let data_chunk = if let Some(vis) = visibility {
             builder.visibility(vis).build()
@@ -151,6 +147,7 @@ impl StreamChunk {
             ops,
             columns,
             visibility,
+            cardinality: _,
         } = self;
 
         (ops, columns, visibility)
@@ -170,22 +167,15 @@ impl StreamChunk {
 
     pub fn from_protobuf(prost: &ProstStreamChunk) -> Result<Self> {
         let cardinality = prost.get_cardinality() as usize;
-        let mut stream_chunk = StreamChunk {
-            ops: vec![],
-            columns: vec![],
-            visibility: None,
-        };
+        let mut ops = Vec::with_capacity(cardinality);
         for op in prost.get_ops() {
-            stream_chunk.ops.push(Op::from_protobuf(op)?);
+            ops.push(Op::from_protobuf(op)?);
         }
-
+        let mut columns = vec![];
         for column in prost.get_columns() {
-            stream_chunk
-                .columns
-                .push(Column::from_protobuf(column, cardinality)?);
+            columns.push(Column::from_protobuf(column, cardinality)?);
         }
-
-        Ok(stream_chunk)
+        Ok(StreamChunk::new(ops, columns, None))
     }
 
     pub fn ops(&self) -> &[Op] {

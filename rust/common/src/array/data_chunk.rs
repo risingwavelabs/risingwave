@@ -58,11 +58,22 @@ pub struct DataChunk {
 impl DataChunk {
     fn new(columns: Vec<Column>, visibility: Option<Bitmap>) -> Self {
         let cardinality = if let Some(bitmap) = &visibility {
-            bitmap.iter().map(|visible| visible as usize).sum()
-        } else if columns.is_empty() {
-            0
+            // with visibility bitmap
+            let card = bitmap.iter().map(|visible| visible as usize).sum();
+            for column in &columns {
+                assert_eq!(bitmap.len(), column.array_ref().len())
+            }
+            card
+        } else if !columns.is_empty() {
+            // without visibility bitmap
+            let card = columns.first().unwrap().array_ref().len();
+            for column in columns.iter().skip(1) {
+                assert_eq!(card, column.array_ref().len())
+            }
+            card
         } else {
-            columns.first().unwrap().array_ref().len()
+            // no data (dummy)
+            0
         };
 
         DataChunk {
@@ -107,17 +118,18 @@ impl DataChunk {
         self.columns.len()
     }
 
-    /// return the number of visible tuples
+    /// `cardinality` returns the number of visible tuples
     pub fn cardinality(&self) -> usize {
         self.cardinality
     }
 
-    /// return physical length of any chunk column
+    /// `capacity` returns physical length of any chunk column
     pub fn capacity(&self) -> usize {
-        self.columns
-            .first()
-            .map(|col| col.array_ref().len())
-            .unwrap_or(0)
+        if let Some(bitmap) = &self.visibility {
+            bitmap.len()
+        } else {
+            self.cardinality
+        }
     }
 
     pub fn visibility(&self) -> &Option<Bitmap> {
