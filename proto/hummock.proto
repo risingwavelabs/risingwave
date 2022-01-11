@@ -53,12 +53,19 @@ message Level {
   repeated uint64 table_ids = 2;
 }
 
+message UncommittedEpoch {
+  uint64 epoch = 1;
+  repeated uint64 table_ids = 2;
+}
+
 message HummockVersion {
   repeated Level levels = 1;
+  repeated UncommittedEpoch uncommitted_epochs = 2;
+  uint64 max_committed_epoch = 3;
 }
 
 message HummockSnapshot {
-  uint64 ts = 1; // also as snapshot_id
+  uint64 epoch = 1;
 }
 
 message HummockContext {
@@ -100,6 +107,7 @@ message RemoveTableWatermarkResponse {
 message AddTablesRequest {
   int32 context_identifier = 1;
   repeated Table tables = 2;
+  uint64 epoch = 3;
 }
 
 message AddTablesResponse {
@@ -221,6 +229,24 @@ message HummockTablesToDelete {
   repeated uint64 id = 1;
 }
 
+message CommitEpochRequest {
+  int32 context_identifier = 1;
+  uint64 epoch = 2;
+}
+
+message CommitEpochResponse {
+  common.Status status = 1;
+}
+
+message AbortEpochRequest {
+  int32 context_identifier = 1;
+  uint64 epoch = 2;
+}
+
+message AbortEpochResponse {
+  common.Status status = 1;
+}
+
 service HummockManagerService {
   rpc CreateHummockContext(CreateHummockContextRequest) returns (CreateHummockContextResponse);
   rpc InvalidateHummockContext(InvalidateHummockContextRequest) returns (InvalidateHummockContextResponse);
@@ -235,4 +261,6 @@ service HummockManagerService {
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
   rpc UnpinSnapshot(UnpinSnapshotRequest) returns (UnpinSnapshotResponse);
+  rpc CommitEpoch(CommitEpochRequest) returns (CommitEpochResponse);
+  rpc AbortEpoch(AbortEpochRequest) returns (AbortEpochResponse);
 }

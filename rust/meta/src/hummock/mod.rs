@@ -14,3 +14,4 @@ pub type HummockRefCount = u64;
 pub type HummockVersionId = u64;
 pub type HummockSnapshotId = u64;
 pub type HummockContextId = i32;
+pub type HummockEpoch = u64;

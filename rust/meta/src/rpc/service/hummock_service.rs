@@ -4,7 +4,7 @@ use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServic
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
 
-use crate::hummock::HummockManager;
+use crate::hummock::{HummockManager, INVALID_EPOCH};
 
 pub struct HummockServiceImpl {
     hummock_manager: Arc<dyn HummockManager>,
@@ -108,7 +108,7 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let result = self
             .hummock_manager
-            .add_tables(req.context_identifier, req.tables)
+            .add_tables(req.context_identifier, req.tables, req.epoch)
             .await;
         match result {
             Ok(version_id) => Ok(Response::new(AddTablesResponse {
@@ -128,8 +128,11 @@ impl HummockManagerService for HummockServiceImpl {
             .hummock_manager
             .get_tables(
                 req.context_identifier,
-                req.pinned_version
-                    .unwrap_or(HummockVersion { levels: vec![] }),
+                req.pinned_version.unwrap_or(HummockVersion {
+                    levels: vec![],
+                    uncommitted_epochs: vec![],
+                    max_committed_epoch: INVALID_EPOCH,
+                }),
             )
             .await;
         match result {
@@ -198,6 +201,36 @@ impl HummockManagerService for HummockServiceImpl {
             .await;
         match result {
             Ok(_) => Ok(Response::new(UnpinSnapshotResponse { status: None })),
+            Err(e) => Err(e.to_grpc_status()),
+        }
+    }
+
+    async fn commit_epoch(
+        &self,
+        request: Request<CommitEpochRequest>,
+    ) -> Result<Response<CommitEpochResponse>, Status> {
+        let req = request.into_inner();
+        let result = self
+            .hummock_manager
+            .commit_epoch(req.context_identifier, req.epoch)
+            .await;
+        match result {
+            Ok(_) => Ok(Response::new(CommitEpochResponse { status: None })),
+            Err(e) => Err(e.to_grpc_status()),
+        }
+    }
+
+    async fn abort_epoch(
+        &self,
+        request: Request<AbortEpochRequest>,
+    ) -> Result<Response<AbortEpochResponse>, Status> {
+        let req = request.into_inner();
+        let result = self
+            .hummock_manager
+            .abort_epoch(req.context_identifier, req.epoch)
+            .await;
+        match result {
+            Ok(_) => Ok(Response::new(AbortEpochResponse { status: None })),
             Err(e) => Err(e.to_grpc_status()),
         }
     }

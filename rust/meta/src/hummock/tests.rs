@@ -6,7 +6,7 @@ use assert_matches::assert_matches;
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::hummock::{HummockContext, Table};
+use risingwave_pb::hummock::Table;
 use risingwave_storage::hummock::key::key_with_ts;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{TableBuilder, TableBuilderOptions};
@@ -135,10 +135,7 @@ pub fn iterator_test_key_of_ts(table: u64, idx: usize, ts: HummockSnapshotId) ->
     )
 }
 
-async fn generate_test_tables(
-    hummock_manager: Arc<dyn HummockManager>,
-    context: &HummockContext,
-) -> Result<Vec<Table>> {
+fn generate_test_tables(epoch: u64, table_id: &mut u64) -> Vec<Table> {
     // Tables to add
     let opt = TableBuilderOptions {
         bloom_false_positive: 0.1,
@@ -149,23 +146,22 @@ async fn generate_test_tables(
 
     let mut tables = vec![];
     for i in 0..2 {
-        let table_id = i as u64;
         let mut b = TableBuilder::new(opt.clone());
         let kv_pairs = vec![
             (i, HummockValue::Put(b"test".to_vec())),
             (i * 10, HummockValue::Put(b"test".to_vec())),
         ];
-        let snapshot = hummock_manager.pin_snapshot(context.identifier).await?;
         for kv in kv_pairs {
-            b.add(&iterator_test_key_of_ts(table_id, kv.0, snapshot.ts), kv.1);
+            b.add(&iterator_test_key_of_ts(*table_id, kv.0, epoch), kv.1);
         }
         let (_data, meta) = b.finish();
         tables.push(Table {
-            id: table_id,
+            id: *table_id,
             meta: Some(meta),
-        })
+        });
+        (*table_id) += 1;
     }
-    Ok(tables)
+    tables
 }
 
 #[tokio::test]
@@ -179,17 +175,19 @@ async fn test_hummock_table() -> Result<()> {
     let context = hummock_manager.create_hummock_context().await?;
     let manager_config = env.config();
 
-    let original_tables: Vec<Table> = generate_test_tables(hummock_manager.clone(), &context)
-        .await?
-        .into_iter()
-        .sorted_by_key(|t| t.id)
-        .collect();
+    let epoch: u64 = 1;
+    let mut table_id = 1;
+    let original_tables: Vec<Table> = generate_test_tables(epoch, &mut table_id);
     let result = hummock_manager
-        .add_tables(context.identifier, original_tables.clone())
+        .add_tables(context.identifier, original_tables.clone(), epoch)
         .await;
     assert!(result.is_ok());
     let version_id = result.unwrap();
     assert_eq!(1, version_id);
+    let result = hummock_manager
+        .commit_epoch(context.identifier, epoch)
+        .await;
+    assert!(result.is_ok());
 
     // Confirm tables are successfully added
     let fetched_tables = env
@@ -205,7 +203,7 @@ async fn test_hummock_table() -> Result<()> {
 
     let (pinned_version_id, pinned_version) =
         hummock_manager.pin_version(context.identifier).await?;
-    assert_eq!(version_id, pinned_version_id);
+    assert_eq!(version_id + 1, pinned_version_id);
     assert_eq!(
         Ordering::Equal,
         pinned_version
@@ -236,6 +234,232 @@ async fn test_hummock_table() -> Result<()> {
         .await
         .is_ok());
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_hummock_transaction() -> Result<()> {
+    let hummock_config = hummock::Config {
+        context_ttl: 1000,
+        context_check_interval: 300,
+    };
+    let env = MetaSrvEnv::for_test_with_sled().await;
+    let (hummock_manager, _) = create_hummock_manager(env.clone(), &hummock_config).await?;
+    let context = hummock_manager.create_hummock_context().await?;
+    let mut table_id = 1;
+    let mut committed_tables = vec![];
+
+    // Add and commit tables in epoch1.
+    // BEFORE:  umcommitted_epochs = [], committed_epochs = []
+    // RUNNING: umcommitted_epochs = [epoch1], committed_epochs = []
+    // AFTER:   umcommitted_epochs = [], committed_epochs = [epoch1]
+    let epoch1: u64 = 1;
+    {
+        // Add tables in epoch1
+        let tables_in_epoch1: Vec<Table> = generate_test_tables(epoch1, &mut table_id);
+        let result = hummock_manager
+            .add_tables(context.identifier, tables_in_epoch1.clone(), epoch1)
+            .await;
+        assert!(result.is_ok());
+
+        // Get tables before committing epoch1. No tables should be returned.
+        let (pinned_version_id, mut pinned_version) =
+            hummock_manager.pin_version(context.identifier).await?;
+        let uncommitted_epoch = pinned_version.uncommitted_epochs.first_mut().unwrap();
+        assert_eq!(epoch1, uncommitted_epoch.epoch);
+        assert_eq!(pinned_version.max_committed_epoch, INVALID_EPOCH);
+        uncommitted_epoch.table_ids.sort_unstable();
+        let table_ids_in_epoch1: Vec<u64> = tables_in_epoch1.iter().map(|t| t.id).collect();
+        assert_eq!(table_ids_in_epoch1, uncommitted_epoch.table_ids);
+        let got_tables: Vec<Table> = hummock_manager
+            .get_tables(context.identifier, pinned_version)
+            .await
+            .map(|tv| tv.into_iter().sorted_by_key(|t| t.id).collect())?;
+        assert!(got_tables.is_empty());
+
+        hummock_manager
+            .unpin_version(context.identifier, pinned_version_id)
+            .await?;
+
+        // Commit epoch1
+        let result = hummock_manager
+            .commit_epoch(context.identifier, epoch1)
+            .await;
+        assert!(result.is_ok());
+        committed_tables.extend(tables_in_epoch1.clone());
+
+        // Get tables after committing epoch1. All tables committed in epoch1 should be returned
+        let (pinned_version_id, pinned_version) =
+            hummock_manager.pin_version(context.identifier).await?;
+        assert!(pinned_version.uncommitted_epochs.is_empty());
+        assert_eq!(pinned_version.max_committed_epoch, epoch1);
+        let got_tables: Vec<Table> = hummock_manager
+            .get_tables(context.identifier, pinned_version.clone())
+            .await
+            .map(|tv| tv.into_iter().sorted_by_key(|t| t.id).collect())?;
+        assert_eq!(committed_tables, got_tables);
+        hummock_manager
+            .unpin_version(context.identifier, pinned_version_id)
+            .await?;
+    }
+
+    // Add and commit tables in epoch2.
+    // BEFORE:  umcommitted_epochs = [], committed_epochs = [epoch1]
+    // RUNNING: umcommitted_epochs = [epoch2], committed_epochs = [epoch1]
+    // AFTER:   umcommitted_epochs = [], committed_epochs = [epoch1, epoch2]
+    let epoch2 = epoch1 + 1;
+    {
+        // Add tables in epoch2
+        let tables_in_epoch2: Vec<Table> = generate_test_tables(epoch2, &mut table_id);
+        let result = hummock_manager
+            .add_tables(context.identifier, tables_in_epoch2.clone(), epoch2)
+            .await;
+        assert!(result.is_ok());
+
+        // Get tables before committing epoch2. tables_in_epoch1 should be returned and
+        // tables_in_epoch2 should be invisible.
+        let (pinned_version_id, mut pinned_version) =
+            hummock_manager.pin_version(context.identifier).await?;
+        let uncommitted_epoch = pinned_version.uncommitted_epochs.first_mut().unwrap();
+        assert_eq!(epoch2, uncommitted_epoch.epoch);
+        uncommitted_epoch.table_ids.sort_unstable();
+        let table_ids_in_epoch2: Vec<u64> = tables_in_epoch2.iter().map(|t| t.id).collect();
+        assert_eq!(table_ids_in_epoch2, uncommitted_epoch.table_ids);
+        assert_eq!(pinned_version.max_committed_epoch, epoch1);
+        let got_tables: Vec<Table> = hummock_manager
+            .get_tables(context.identifier, pinned_version)
+            .await
+            .map(|tv| tv.into_iter().sorted_by_key(|t| t.id).collect())?;
+        assert_eq!(committed_tables, got_tables);
+        hummock_manager
+            .unpin_version(context.identifier, pinned_version_id)
+            .await?;
+
+        // Commit epoch2
+        let result = hummock_manager
+            .commit_epoch(context.identifier, epoch2)
+            .await;
+        assert!(result.is_ok());
+        committed_tables.extend(tables_in_epoch2);
+
+        // Get tables after committing epoch2. tables_in_epoch1 and tables_in_epoch2 should be
+        // returned
+        let (pinned_version_id, pinned_version) =
+            hummock_manager.pin_version(context.identifier).await?;
+        assert!(pinned_version.uncommitted_epochs.is_empty());
+        assert_eq!(pinned_version.max_committed_epoch, epoch2);
+        let got_tables: Vec<Table> = hummock_manager
+            .get_tables(context.identifier, pinned_version)
+            .await
+            .map(|tv| tv.into_iter().sorted_by_key(|t| t.id).collect())?;
+        assert_eq!(committed_tables, got_tables);
+        hummock_manager
+            .unpin_version(context.identifier, pinned_version_id)
+            .await?;
+    }
+
+    // Add tables in epoch3 and epoch4. Abort epoch3, commit epoch4.
+    // BEFORE:  umcommitted_epochs = [], committed_epochs = [epoch1, epoch2]
+    // RUNNING: umcommitted_epochs = [epoch3, epoch4], committed_epochs = [epoch1, epoch2]
+    // AFTER:   umcommitted_epochs = [], committed_epochs = [epoch1, epoch2, epoch4]
+    let epoch3 = epoch2 + 1;
+    let epoch4 = epoch3 + 1;
+    {
+        // Add tables in epoch3 and epoch4
+        let tables_in_epoch3: Vec<Table> = generate_test_tables(epoch3, &mut table_id);
+        let result = hummock_manager
+            .add_tables(context.identifier, tables_in_epoch3.clone(), epoch3)
+            .await;
+        assert!(result.is_ok());
+        let tables_in_epoch4: Vec<Table> = generate_test_tables(epoch4, &mut table_id);
+        let result = hummock_manager
+            .add_tables(context.identifier, tables_in_epoch4.clone(), epoch4)
+            .await;
+        assert!(result.is_ok());
+
+        // Get tables before committing epoch3 and epoch4. tables_in_epoch1 and tables_in_epoch2
+        // should be returned
+        let (pinned_version_id, mut pinned_version) =
+            hummock_manager.pin_version(context.identifier).await?;
+        let uncommitted_epoch3 = pinned_version
+            .uncommitted_epochs
+            .iter_mut()
+            .find(|e| e.epoch == epoch3)
+            .unwrap();
+        uncommitted_epoch3.table_ids.sort_unstable();
+        let table_ids_in_epoch3: Vec<u64> = tables_in_epoch3.iter().map(|t| t.id).collect();
+        assert_eq!(table_ids_in_epoch3, uncommitted_epoch3.table_ids);
+        let uncommitted_epoch4 = pinned_version
+            .uncommitted_epochs
+            .iter_mut()
+            .find(|e| e.epoch == epoch4)
+            .unwrap();
+        uncommitted_epoch4.table_ids.sort_unstable();
+        let table_ids_in_epoch4: Vec<u64> = tables_in_epoch4.iter().map(|t| t.id).collect();
+        assert_eq!(table_ids_in_epoch4, uncommitted_epoch4.table_ids);
+        assert_eq!(pinned_version.max_committed_epoch, epoch2);
+        let got_tables: Vec<Table> = hummock_manager
+            .get_tables(context.identifier, pinned_version)
+            .await
+            .map(|tv| tv.into_iter().sorted_by_key(|t| t.id).collect())?;
+        assert_eq!(committed_tables, got_tables);
+        hummock_manager
+            .unpin_version(context.identifier, pinned_version_id)
+            .await?;
+
+        // Abort epoch3
+        let result = hummock_manager
+            .abort_epoch(context.identifier, epoch3)
+            .await;
+        assert!(result.is_ok());
+
+        // Get tables after aborting epoch3. tables_in_epoch1 and tables_in_epoch2 should be
+        // returned
+        let (pinned_version_id, mut pinned_version) =
+            hummock_manager.pin_version(context.identifier).await?;
+        assert!(pinned_version
+            .uncommitted_epochs
+            .iter_mut()
+            .all(|e| e.epoch != epoch3));
+        let uncommitted_epoch4 = pinned_version
+            .uncommitted_epochs
+            .iter_mut()
+            .find(|e| e.epoch == epoch4)
+            .unwrap();
+        uncommitted_epoch4.table_ids.sort_unstable();
+        assert_eq!(table_ids_in_epoch4, uncommitted_epoch4.table_ids);
+        assert_eq!(pinned_version.max_committed_epoch, epoch2);
+        let got_tables: Vec<Table> = hummock_manager
+            .get_tables(context.identifier, pinned_version)
+            .await
+            .map(|tv| tv.into_iter().sorted_by_key(|t| t.id).collect())?;
+        assert_eq!(committed_tables, got_tables);
+        hummock_manager
+            .unpin_version(context.identifier, pinned_version_id)
+            .await?;
+
+        // Commit epoch4
+        let result = hummock_manager
+            .commit_epoch(context.identifier, epoch4)
+            .await;
+        assert!(result.is_ok());
+        committed_tables.extend(tables_in_epoch4);
+
+        // Get tables after committing epoch4. tables_in_epoch1, tables_in_epoch2, tables_in_epoch4
+        // should be returned.
+        let (pinned_version_id, pinned_version) =
+            hummock_manager.pin_version(context.identifier).await?;
+        assert!(pinned_version.uncommitted_epochs.is_empty());
+        assert_eq!(pinned_version.max_committed_epoch, epoch4);
+        let got_tables: Vec<Table> = hummock_manager
+            .get_tables(context.identifier, pinned_version)
+            .await
+            .map(|tv| tv.into_iter().sorted_by_key(|t| t.id).collect())?;
+        assert_eq!(committed_tables, got_tables);
+        hummock_manager
+            .unpin_version(context.identifier, pinned_version_id)
+            .await?;
+    }
     Ok(())
 }
 
