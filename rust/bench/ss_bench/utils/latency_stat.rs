@@ -24,7 +24,7 @@ impl LatencyStat {
 
         LatencyStat {
             mean: time_to_str(latencies.iter().sum::<u128>() / latencies.len() as u128),
-            p50: time_to_str(latencies[(latencies.len() as f64 * 0.50) as usize]),
+            p50: time_to_str(latencies[(latencies.len() as f64 * 0.5) as usize]),
             p90: time_to_str(latencies[(latencies.len() as f64 * 0.9) as usize]),
             p99: time_to_str(latencies[(latencies.len() as f64 * 0.99) as usize]),
             std_dev: LatencyStat::std_deviation(&latencies),

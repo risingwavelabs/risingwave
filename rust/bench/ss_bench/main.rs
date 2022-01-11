@@ -1,19 +1,18 @@
 use std::sync::Arc;
 
 mod operation;
-mod workload_generator;
+mod utils;
 
 use clap::Parser;
+use operation::{get_random, prefix_scan_random, write_batch};
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_storage::hummock::{HummockOptions, HummockStateStore, HummockStorage};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::object::{ConnectionInfo, S3ObjectStore};
 use risingwave_storage::StateStore;
 
-use crate::operation::{getrandom, writebatch};
-
 #[derive(Parser, Debug)]
-pub struct Opts {
+pub(crate) struct Opts {
     // ----- backend type parameters  -----
     #[clap(long, default_value = "in-memory")]
     store: String,
@@ -39,6 +38,12 @@ pub struct Opts {
     #[clap(long, default_value_t = 10)]
     key_size: u32,
 
+    #[clap(long, default_value_t = 5)]
+    key_prefix_size: u32,
+
+    #[clap(long, default_value_t = 10)]
+    key_prefix_frequency: u32,
+
     #[clap(long, default_value_t = 10)]
     value_size: u32,
 
@@ -58,7 +63,7 @@ fn get_checksum_algo(algo: &str) -> ChecksumAlg {
 }
 
 #[derive(Clone)]
-pub enum StateStoreImpl {
+pub(crate) enum StateStoreImpl {
     HummockStateStore(HummockStateStore),
     MemoryStateStore(MemoryStateStore),
 }
@@ -105,8 +110,9 @@ fn get_state_store_impl(opts: &Opts) -> StateStoreImpl {
 
 async fn run_op(store: impl StateStore, opts: &Opts) {
     match opts.op.as_ref() {
-        "writebatch" => writebatch::run(store, opts).await,
-        "getrandom" => getrandom::run(store, opts).await,
+        "writebatch" => write_batch::run(store, opts).await,
+        "getrandom" => get_random::run(store, opts).await,
+        "prefixscanrandom" => prefix_scan_random::run(store, opts).await,
         other => unimplemented!("operation \"{}\" is not supported.", other),
     }
 }

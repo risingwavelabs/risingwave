@@ -1,34 +1,31 @@
 use std::time::Instant;
 
-use bytes::Bytes;
 use risingwave_storage::StateStore;
 
-use crate::operation::utils::LatencyStat;
-use crate::workload_generator::gen_workload;
+use crate::utils::latency_stat::LatencyStat;
+use crate::utils::workload::{get_epoch, Workload};
 use crate::Opts;
 
-pub async fn run(store: impl StateStore, opts: &Opts) {
+pub(crate) async fn run(store: impl StateStore, opts: &Opts) {
     let batches: Vec<_> = (0..opts.iterations)
         .into_iter()
-        .map(|_| gen_workload(opts))
+        .map(|i| Workload::new_sorted_workload(opts, Some(i as u64)).batch)
         .collect();
 
     let mut latencies = Vec::with_capacity(opts.iterations as usize);
 
     // bench for multi iterations
-    let epoch: u64 = 0;
     for batch in batches {
-        let del_batch: Vec<(Bytes, Option<Bytes>)> =
-            batch.iter().map(|(k, _)| (k.clone(), None)).collect();
+        let batch_clone = batch.clone();
 
         // count time
         let start = Instant::now();
-        store.ingest_batch(batch, epoch).await.unwrap();
+        store.ingest_batch(batch, get_epoch()).await.unwrap();
         let time_nano = start.elapsed().as_nanos();
         latencies.push(time_nano);
 
         // clear content
-        store.ingest_batch(del_batch, epoch).await.unwrap();
+        Workload::del_batch(&store, batch_clone).await;
     }
 
     // calculate operation per second
