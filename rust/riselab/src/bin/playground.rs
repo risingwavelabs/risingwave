@@ -11,8 +11,8 @@ use indicatif::{MultiProgress, ProgressBar};
 use riselab::util::complete_spin;
 use riselab::{
     ComputeNodeService, ConfigExpander, ConfigureTmuxTask, EnsureStopService, ExecuteContext,
-    FrontendService, GrafanaService, MetaNodeService, MinioService, PrometheusService,
-    ServiceConfig, Task, RISELAB_SESSION_NAME,
+    FrontendService, GrafanaService, JaegerService, MetaNodeService, MinioService,
+    PrometheusService, ServiceConfig, Task, RISELAB_SESSION_NAME,
 };
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
@@ -91,6 +91,7 @@ fn task_main(
             ServiceConfig::MetaNode(c) => (c.port, c.id.clone()),
             ServiceConfig::Frontend(c) => (c.port, c.id.clone()),
             ServiceConfig::Grafana(c) => (c.port, c.id.clone()),
+            ServiceConfig::Jaeger(c) => (c.dashboard_port, c.id.clone()),
         });
     }
 
@@ -165,6 +166,18 @@ fn task_main(
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("dashboard http://{}:{}/", c.address, c.port));
+            }
+            ServiceConfig::Jaeger(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+                let mut service = JaegerService::new(c.clone())?;
+                service.execute(&mut ctx)?;
+                let mut task = riselab::ConfigureGrpcNodeTask::new(c.dashboard_port, false)?;
+                task.execute(&mut ctx)?;
+                ctx.pb.set_message(format!(
+                    "dashboard http://{}:{}/",
+                    c.dashboard_address, c.dashboard_port
+                ));
             }
         }
     }

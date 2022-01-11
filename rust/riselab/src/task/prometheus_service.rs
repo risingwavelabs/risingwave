@@ -62,6 +62,6 @@ impl Task for PrometheusService {
     }
 
     fn id(&self) -> String {
-        format!("prometheus-{}", self.config.port)
+        self.config.id.clone()
     }
 }

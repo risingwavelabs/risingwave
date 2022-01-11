@@ -1,0 +1,26 @@
+extend = "common.toml"
+
+[env]
+JAEGER_SYSTEM = "${SYSTEM_AMD64}"
+JAEGER_DOWNLOAD_PATH = "${PREFIX_TMP}/jaeger.tar.gz"
+JAEGER_VERSION = "1.29.0"
+JAEGER_RELEASE = "jaeger-${JAEGER_VERSION}-${JAEGER_SYSTEM}"
+JAEGER_DOWNLOAD_TAR_GZ = "https://github.com/jaegertracing/jaeger/releases/download/v${JAEGER_VERSION}/${JAEGER_RELEASE}.tar.gz"
+
+[tasks.download-jaeger]
+category = "Jaeger"
+dependencies = ["prepare"]
+condition = { env_set = [ "ENABLE_COMPUTE_TRACING" ] }
+description = "Download and extract Jaeger"
+script = '''
+#!@shell
+set -e
+if [ -d "${PREFIX_BIN}/jaeger" ]; then
+    exit 0
+fi
+echo "Jaeger not found, download ${JAEGER_RELEASE}"
+curl -fL -o "${JAEGER_DOWNLOAD_PATH}" "${JAEGER_DOWNLOAD_TAR_GZ}"
+tar -xf "${JAEGER_DOWNLOAD_PATH}" -C "${PREFIX_TMP}"
+mv "${PREFIX_TMP}/${JAEGER_RELEASE}" "${PREFIX_BIN}/jaeger"
+rm "${JAEGER_DOWNLOAD_PATH}"
+'''

@@ -104,7 +104,7 @@ jobs:
       - name: e2e test w/ Hummock
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers dev
+          ~/cargo-make/makers ci-streaming
           python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/streaming
       - name: Kill cluster
         run: |

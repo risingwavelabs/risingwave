@@ -67,6 +67,6 @@ impl Task for MinioService {
     }
 
     fn id(&self) -> String {
-        "minio".to_string()
+        self.config.id.clone()
     }
 }

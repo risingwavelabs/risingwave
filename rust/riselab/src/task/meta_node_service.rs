@@ -51,6 +51,6 @@ impl Task for MetaNodeService {
     }
 
     fn id(&self) -> String {
-        format!("meta-node-{}", self.config.port)
+        self.config.id.clone()
     }
 }

@@ -263,14 +263,16 @@
       .attr("id", "div-tooltip")
       .attr("class", "my-3 whitespace-pre text-xs bg-white p-1");
 
+    const actorJump = (n) =>
+      `<a target="_blank" rel="noopener noreferrer" class="text-sky-600" href="http://localhost:16680/search?service=compute&tags=%7B%22actor_id%22%3A%22${actorOf(n.data.id)}%22%2C%22epoch%22%3A%22-1%22%7D">Trace Actor #${actorOf(n.data.id)}</a><br>`
     const mouseEnter = (e, d) => {
       tooltip
-        .html(descMap.get(d.data.id) || "No Data Available")
+        .html(actorJump(d) + (descMap.get(d.data.id) || "No Data Available"))
     }
 
     const mouseMove = (e, d) => {
       tooltip
-        .html(descMap.get(d.data.id) || "No Data Available")
+        .html(actorJump(d) + (descMap.get(d.data.id) || "No Data Available"))
     }
 
     // Plot node circles

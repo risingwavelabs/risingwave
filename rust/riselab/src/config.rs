@@ -95,6 +95,7 @@ impl ConfigExpander {
                     "meta-node" => ServiceConfig::MetaNode(serde_yaml::from_str(&out_str)?),
                     "prometheus" => ServiceConfig::Prometheus(serde_yaml::from_str(&out_str)?),
                     "grafana" => ServiceConfig::Grafana(serde_yaml::from_str(&out_str)?),
+                    "jaeger" => ServiceConfig::Jaeger(serde_yaml::from_str(&out_str)?),
                     other => return Err(anyhow!("unsupported use type: {}", other)),
                 };
                 Ok(result)

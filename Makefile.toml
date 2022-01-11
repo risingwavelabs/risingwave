@@ -2,6 +2,7 @@ extend = [
   {path = "rust/riselab/grafana.toml"},
   {path = "rust/riselab/prometheus.toml"},
   {path = "rust/riselab/minio.toml"},
+  {path = "rust/riselab/jaeger.toml"},
   {path = "rust/riselab/riselab-components.toml"},
 ]
 
@@ -120,6 +121,7 @@ dependencies = [
   "download-mcli",
   "download-grafana",
   "download-prometheus",
+  "download-jaeger",
   "build-risingwave",
   "post-build-risingwave",
   "build-frontend",
@@ -158,14 +160,14 @@ command = "rust/target/debug/playground"
 args = ["ci-3node"]
 description = "Start a RisingWave playground with 3 compute nodes, 1 meta node, 1 frontend"
 
-[tasks.ci-1node]
+[tasks.ci-streaming]
 category = "RiseLAB - Start"
 dependencies = [
   "pre-start-playground"
 ]
 command = "rust/target/debug/playground"
-args = ["ci-1node"]
-description = "Start a RisingWave playground with 1 compute node, 1 meta node, 1 frontend"
+args = ["ci-streaming"]
+description = "Start a RisingWave playground with 1 compute node, 1 meta node, 1 frontend and 1 MinIO"
 
 [tasks.dev-compute-node]
 category = "RiseLAB - Start"

@@ -10,6 +10,7 @@ pub struct ComputeNodeConfig {
     pub exporter_port: u16,
     pub provide_minio: Option<Vec<MinioConfig>>,
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
+    pub provide_jaeger: Option<Vec<JaegerConfig>>,
     pub user_managed: bool,
 }
 
@@ -70,6 +71,14 @@ pub struct GrafanaConfig {
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct JaegerConfig {
+    pub id: String,
+    pub dashboard_address: String,
+    pub dashboard_port: u16,
+}
+
 /// All service configuration
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServiceConfig {
@@ -79,6 +88,7 @@ pub enum ServiceConfig {
     Minio(MinioConfig),
     Prometheus(PrometheusConfig),
     Grafana(GrafanaConfig),
+    Jaeger(JaegerConfig),
 }
 
 impl ServiceConfig {
@@ -90,6 +100,7 @@ impl ServiceConfig {
             Self::Minio(c) => &c.id,
             Self::Prometheus(c) => &c.id,
             Self::Grafana(c) => &c.id,
+            Self::Jaeger(c) => &c.id,
         }
     }
 }

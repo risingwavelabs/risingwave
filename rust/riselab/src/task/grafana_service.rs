@@ -62,6 +62,6 @@ impl Task for GrafanaService {
     }
 
     fn id(&self) -> String {
-        "grafana".to_string()
+        self.config.id.clone()
     }
 }

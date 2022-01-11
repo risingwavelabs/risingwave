@@ -30,7 +30,7 @@ struct Opts {
     #[clap(long, default_value = "./config/risingwave.toml")]
     config_path: String,
 
-    /// Use `tokio-tracing` instead of `log4rs` for observability.
+    /// Use `tokio-tracing` instead of `log4rs` for observability, and enable Jaeger tracing.
     #[clap(long)]
     enable_tracing: bool,
 }
@@ -39,8 +39,21 @@ struct Opts {
 #[tokio::main]
 async fn main() {
     let opts: Opts = Opts::parse();
+
     if opts.enable_tracing {
+        let tracer = opentelemetry_jaeger::new_pipeline()
+            // TODO: We should use this function in future release of `opentelemetry_jaeger`
+            // .with_auto_split_batch(true)
+            .with_max_packet_size(65000)
+            .with_service_name("compute")
+            // TODO: Enable this in release mode
+            // .install_batch(opentelemetry::runtime::Tokio)
+            .install_simple()
+            .unwrap();
+        let opentelemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+
         let fmt_layer = tracing_subscriber::fmt::layer().compact().with_ansi(false);
+
         let filter_layer = tracing_subscriber::filter::filter_fn(|metadata| {
             let target = metadata.target();
             // For external crates, only log warnings
@@ -62,8 +75,11 @@ async fn main() {
             false
         })
         .with_max_level_hint(tracing::Level::TRACE);
+
         tracing_subscriber::registry()
-            .with(fmt_layer.with_filter(filter_layer))
+            .with(filter_layer)
+            .with(opentelemetry)
+            .with(fmt_layer)
             .init();
     } else {
         log4rs::init_file(opts.log4rs_config.clone(), Default::default()).unwrap();

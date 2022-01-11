@@ -60,6 +60,6 @@ impl Task for FrontendService {
     }
 
     fn id(&self) -> String {
-        "frontend".into()
+        self.config.id.clone()
     }
 }

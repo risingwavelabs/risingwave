@@ -45,9 +45,25 @@ impl Task for ComputeNodeService {
             .arg("--metrics-level")
             .arg("1");
 
-        if let Ok(data) = env::var("ENABLE_COMPUTE_TRACING") {
-            if data == "true" {
-                cmd.arg("--enable-tracing");
+        let provide_jaeger = self.config.provide_jaeger.as_ref().unwrap();
+        match provide_jaeger.len() {
+            0 => {}
+            1 => {
+                if let Ok(data) = env::var("ENABLE_COMPUTE_TRACING") {
+                    if data == "true" {
+                        cmd.arg("--enable-tracing");
+                    }
+                } else {
+                    return Err(anyhow!(
+                        "Jaeger requires tracing to be enabled in ./riselab configure"
+                    ));
+                }
+            }
+            other_size => {
+                return Err(anyhow!(
+                    "{} Jaeger instance found in config, but only 1 is needed",
+                    other_size
+                ))
             }
         }
 
@@ -104,6 +120,6 @@ impl Task for ComputeNodeService {
     }
 
     fn id(&self) -> String {
-        format!("compute-node-{}", self.config.port)
+        self.config.id.clone()
     }
 }
