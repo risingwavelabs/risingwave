@@ -199,7 +199,7 @@ async fn simple_executor_next<E: SimpleExecutor>(executor: &mut E) -> Result<Mes
     }
 }
 
-/// `StreamConsumer` is the last step in a fragment
+/// `StreamConsumer` is the last step in an actor
 #[async_trait]
 pub trait StreamConsumer: Send + Debug + 'static {
     /// Run next stream chunk. returns whether the stream is terminated

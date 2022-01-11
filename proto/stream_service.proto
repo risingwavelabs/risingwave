@@ -10,12 +10,12 @@ import "common.proto";
 import "stream_plan.proto";
 
 // Describe the fragments which will be running on this node
-message UpdateFragmentRequest {
+message UpdateActorsRequest {
   string request_id = 1;
-  repeated stream_plan.StreamFragment fragment = 2;
+  repeated stream_plan.StreamActor actors = 2;
 }
 
-message UpdateFragmentResponse {
+message UpdateActorsResponse {
   common.Status status = 1;
 }
 
@@ -30,22 +30,22 @@ message BroadcastActorInfoTableRequest {
 }
 
 // Create channels and gRPC connections for a fragment
-message BuildFragmentRequest {
+message BuildActorsRequest {
   string request_id = 1;
   repeated uint32 actor_id = 2;
 }
 
-message BuildFragmentResponse {
+message BuildActorsResponse {
   string request_id = 1;
   repeated uint32 actor_id = 2;
 }
 
-message DropFragmentsRequest {
+message DropActorsRequest {
   string request_id = 1;
   repeated uint32 actor_ids = 2;
 }
 
-message DropFragmentsResponse {
+message DropActorsResponse {
   string request_id = 1;
   repeated uint32 actor_ids = 2;
 }
@@ -56,10 +56,10 @@ message BroadcastActorInfoTableResponse {
 }
 
 service StreamService {
-  rpc UpdateFragment(UpdateFragmentRequest) returns (UpdateFragmentResponse);
-  rpc BuildFragment(BuildFragmentRequest) returns (BuildFragmentResponse);
+  rpc UpdateActors(UpdateActorsRequest) returns (UpdateActorsResponse);
+  rpc BuildActors(BuildActorsRequest) returns (BuildActorsResponse);
   rpc BroadcastActorInfoTable(BroadcastActorInfoTableRequest) returns (BroadcastActorInfoTableResponse);
-  rpc DropFragment(DropFragmentsRequest) returns (DropFragmentsResponse);
+  rpc DropActors(DropActorsRequest) returns (DropActorsResponse);
 }
 
 // TODO: Lifecycle management for actors.

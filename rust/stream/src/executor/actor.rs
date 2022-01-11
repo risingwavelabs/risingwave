@@ -6,16 +6,12 @@ use super::StreamConsumer;
 /// `Actor` is the basic execution unit in the streaming framework.
 pub struct Actor {
     consumer: Box<dyn StreamConsumer>,
-    /// Fragment Id
-    fragment_id: u32,
+    id: u32,
 }
 
 impl Actor {
-    pub fn new(consumer: Box<dyn StreamConsumer>, fragment_id: u32) -> Self {
-        Self {
-            consumer,
-            fragment_id,
-        }
+    pub fn new(consumer: Box<dyn StreamConsumer>, id: u32) -> Self {
+        Self { consumer, id }
     }
 
     pub async fn run(mut self) -> Result<()> {
@@ -28,7 +24,7 @@ impl Actor {
                     "actor_poll",
                     next = "Dispatcher",
                     // For the upstream trace pipe, its output is our input.
-                    fragment_id = self.fragment_id,
+                    actor_id = self.id,
                 ))
                 .await;
             match message {

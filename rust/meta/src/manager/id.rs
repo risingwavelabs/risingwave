@@ -117,7 +117,7 @@ impl IdGeneratorManager {
             (IdCategory::Schema, "schema", None),
             (IdCategory::Table, "table", None),
             (IdCategory::Worker, "worker", None),
-            (IdCategory::Actor, "fragment", Some(1)),
+            (IdCategory::Actor, "actor", Some(1)),
             (IdCategory::HummockContext, "hummock_context", Some(1)),
             (IdCategory::HummockSnapshot, "hummock_snapshot", Some(1)),
         ] {
@@ -193,7 +193,7 @@ mod tests {
         assert_eq!(ids, (0..10000).collect::<Vec<_>>());
 
         let actor_id_generator =
-            StoredIdGenerator::new(meta_store_ref.clone(), "fragment", Some(1)).await;
+            StoredIdGenerator::new(meta_store_ref.clone(), "actor", Some(1)).await;
         let ids = future::join_all((0..100).map(|_i| {
             let id_generator = &actor_id_generator;
             async move { id_generator.generate_interval(100).await }
@@ -205,7 +205,7 @@ mod tests {
         let vec_expect = (0..100).map(|e| e * 100 + 1).collect::<Vec<_>>();
         assert_eq!(ids, vec_expect);
 
-        let actor_id_generator_two = StoredIdGenerator::new(meta_store_ref, "fragment", None).await;
+        let actor_id_generator_two = StoredIdGenerator::new(meta_store_ref, "actor", None).await;
         let ids = future::join_all((0..100).map(|_i| {
             let id_generator = &actor_id_generator_two;
             async move { id_generator.generate_interval(10).await }

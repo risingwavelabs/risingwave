@@ -12,7 +12,7 @@ use risingwave_common::util::hash_util::CRC32FastBuilder;
 use super::{Barrier, Executor, Message, Mutation, Result, StreamChunk, StreamConsumer};
 use crate::task::{SharedContext, LOCAL_OUTPUT_CHANNEL_SIZE};
 
-/// `Output` provides an interface for `Dispatcher` to send data into downstream fragments.
+/// `Output` provides an interface for `Dispatcher` to send data into downstream actors.
 #[async_trait]
 pub trait Output: Debug + Send + Sync + 'static {
     async fn send(&mut self, message: Message) -> Result<()>;
@@ -300,7 +300,7 @@ impl DataDispatcher for HashDataDispatcher {
                     }
                     // The 'update' message, noted by an UpdateDelete and a successive UpdateInsert,
                     // need to be rewritten to common Delete and Insert if they were dispatched to
-                    // different fragments.
+                    // different actors.
                     if op == Op::UpdateDelete {
                         last_hash_value_when_update_delete = *hash;
                     } else if op == Op::UpdateInsert {

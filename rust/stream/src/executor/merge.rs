@@ -16,7 +16,7 @@ use tonic::{Request, Streaming};
 
 use super::{Barrier, Executor, Message, PkIndicesRef, Result};
 use crate::executor::{Mutation, PkIndices};
-use crate::task::UpDownFragmentIds;
+use crate::task::UpDownActorIds;
 
 /// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
 pub struct RemoteInput {
@@ -26,13 +26,13 @@ pub struct RemoteInput {
 
     /// Address of the remote endpoint.
     addr: SocketAddr,
-    up_down_ids: UpDownFragmentIds,
+    up_down_ids: UpDownActorIds,
 }
 
 impl RemoteInput {
     pub async fn create(
         addr: SocketAddr,
-        up_down_ids: UpDownFragmentIds,
+        up_down_ids: UpDownActorIds,
         sender: Sender<Message>,
     ) -> Result<Self> {
         let mut client = ExchangeServiceClient::new(

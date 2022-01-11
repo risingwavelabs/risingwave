@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BroadcastActorInfoTableResponse, BuildFragmentRequest,
-    BuildFragmentResponse, DropFragmentsRequest, DropFragmentsResponse, UpdateFragmentRequest,
-    UpdateFragmentResponse,
+    BroadcastActorInfoTableRequest, BroadcastActorInfoTableResponse, BuildActorsRequest,
+    BuildActorsResponse, DropActorsRequest, DropActorsResponse, UpdateActorsRequest,
+    UpdateActorsResponse,
 };
 use risingwave_stream::task::{StreamManager, StreamTaskEnv};
 use tonic::{Request, Response, Status};
@@ -24,38 +24,36 @@ impl StreamServiceImpl {
 #[async_trait::async_trait]
 impl StreamService for StreamServiceImpl {
     #[cfg(not(tarpaulin_include))]
-    async fn update_fragment(
+    async fn update_actors(
         &self,
-        request: Request<UpdateFragmentRequest>,
-    ) -> std::result::Result<Response<UpdateFragmentResponse>, Status> {
+        request: Request<UpdateActorsRequest>,
+    ) -> std::result::Result<Response<UpdateActorsResponse>, Status> {
         let req = request.into_inner();
-        let res = self.mgr.update_fragment(&req.fragment);
+        let res = self.mgr.update_actors(&req.actors);
         match res {
             Err(e) => {
                 error!("failed to update stream actor {}", e);
                 Err(e.to_grpc_status())
             }
-            Ok(()) => Ok(Response::new(UpdateFragmentResponse { status: None })),
+            Ok(()) => Ok(Response::new(UpdateActorsResponse { status: None })),
         }
     }
 
     #[cfg(not(tarpaulin_include))]
-    async fn build_fragment(
+    async fn build_actors(
         &self,
-        request: Request<BuildFragmentRequest>,
-    ) -> std::result::Result<Response<BuildFragmentResponse>, Status> {
+        request: Request<BuildActorsRequest>,
+    ) -> std::result::Result<Response<BuildActorsResponse>, Status> {
         let req = request.into_inner();
 
         let actor_id = req.actor_id;
-        let res = self
-            .mgr
-            .build_fragment(actor_id.as_slice(), self.env.clone());
+        let res = self.mgr.build_actors(actor_id.as_slice(), self.env.clone());
         match res {
             Err(e) => {
-                error!("failed to build fragments {}", e);
+                error!("failed to build actors {}", e);
                 Err(e.to_grpc_status())
             }
-            Ok(()) => Ok(Response::new(BuildFragmentResponse {
+            Ok(()) => Ok(Response::new(BuildActorsResponse {
                 request_id: "".to_string(),
                 actor_id: Vec::new(),
             })),
@@ -82,14 +80,14 @@ impl StreamService for StreamServiceImpl {
     }
 
     #[cfg(not(tarpaulin_include))]
-    async fn drop_fragment(
+    async fn drop_actors(
         &self,
-        request: Request<DropFragmentsRequest>,
-    ) -> std::result::Result<Response<DropFragmentsResponse>, Status> {
-        let fragments = request.into_inner().actor_ids;
+        request: Request<DropActorsRequest>,
+    ) -> std::result::Result<Response<DropActorsResponse>, Status> {
+        let actors = request.into_inner().actor_ids;
         self.mgr
-            .drop_fragment(fragments.as_slice())
+            .drop_actor(&actors)
             .map_err(|e| e.to_grpc_status())?;
-        Ok(Response::new(DropFragmentsResponse::default()))
+        Ok(Response::new(DropActorsResponse::default()))
     }
 }

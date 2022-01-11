@@ -11,13 +11,13 @@ import com.risingwave.proto.computenode.TaskServiceGrpc
 import com.risingwave.proto.computenode.TaskServiceGrpcKt
 import com.risingwave.proto.streaming.streamnode.BroadcastActorInfoTableRequest
 import com.risingwave.proto.streaming.streamnode.BroadcastActorInfoTableResponse
-import com.risingwave.proto.streaming.streamnode.BuildFragmentRequest
-import com.risingwave.proto.streaming.streamnode.BuildFragmentResponse
-import com.risingwave.proto.streaming.streamnode.DropFragmentsRequest
-import com.risingwave.proto.streaming.streamnode.DropFragmentsResponse
+import com.risingwave.proto.streaming.streamnode.BuildActorsRequest
+import com.risingwave.proto.streaming.streamnode.BuildActorsResponse
+import com.risingwave.proto.streaming.streamnode.DropActorsRequest
+import com.risingwave.proto.streaming.streamnode.DropActorsResponse
 import com.risingwave.proto.streaming.streamnode.StreamServiceGrpc
-import com.risingwave.proto.streaming.streamnode.UpdateFragmentRequest
-import com.risingwave.proto.streaming.streamnode.UpdateFragmentResponse
+import com.risingwave.proto.streaming.streamnode.UpdateActorsRequest
+import com.risingwave.proto.streaming.streamnode.UpdateActorsResponse
 import io.grpc.Channel
 import io.grpc.StatusRuntimeException
 import org.slf4j.LoggerFactory
@@ -73,30 +73,30 @@ class GrpcComputeClient(private val channel: Channel) : ComputeClient {
     }
   }
 
-  override fun updateFragment(request: UpdateFragmentRequest): UpdateFragmentResponse {
+  override fun UpdateActors(request: UpdateActorsRequest): UpdateActorsResponse {
     val stub = StreamServiceGrpc.newBlockingStub(channel)
     try {
-      return stub.updateFragment(request)
+      return stub.updateActors(request)
     } catch (e: StatusRuntimeException) {
       LOGGER.warn("RPC failed: {}", e.status)
       throw rpcException("createTaskKt", e)
     }
   }
 
-  override fun buildFragment(request: BuildFragmentRequest): BuildFragmentResponse {
+  override fun BuildActors(request: BuildActorsRequest): BuildActorsResponse {
     val stub = StreamServiceGrpc.newBlockingStub(channel)
     try {
-      return stub.buildFragment(request)
+      return stub.buildActors(request)
     } catch (e: StatusRuntimeException) {
       LOGGER.warn("RPC failed: {}", e.status)
       throw rpcException("createTaskKt", e)
     }
   }
 
-  override fun dropFragment(request: DropFragmentsRequest): DropFragmentsResponse {
+  override fun dropFragment(request: DropActorsRequest): DropActorsResponse {
     val stub = StreamServiceGrpc.newBlockingStub(channel)
     try {
-      return stub.dropFragment(request)
+      return stub.dropActors(request)
     } catch (e: StatusRuntimeException) {
       LOGGER.warn("RPC failed: {}", e.status)
       throw rpcException("createTaskKt", e)

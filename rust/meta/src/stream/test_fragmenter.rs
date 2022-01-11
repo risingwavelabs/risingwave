@@ -245,12 +245,12 @@ async fn test_fragmenter() -> Result<()> {
     expected_upstream.insert(4, vec![6]);
     expected_upstream.insert(5, vec![6]);
     expected_upstream.insert(6, vec![]);
-    for fragment in graph {
+    for actor in graph {
         assert_eq!(
-            expected_downstream.get(&fragment.get_actor_id()).unwrap(),
-            fragment.get_downstream_actor_id(),
+            expected_downstream.get(&actor.get_actor_id()).unwrap(),
+            actor.get_downstream_actor_id(),
         );
-        let mut node = fragment.get_nodes();
+        let mut node = actor.get_nodes();
         while !node.get_input().is_empty() {
             node = node.get_input().get(0).unwrap();
         }
@@ -259,7 +259,7 @@ async fn test_fragmenter() -> Result<()> {
             Node::MergeNode(merge_node) => {
                 assert_eq!(
                     expected_upstream
-                        .get(&fragment.get_actor_id())
+                        .get(&actor.get_actor_id())
                         .unwrap()
                         .iter()
                         .collect::<HashSet<_>>(),

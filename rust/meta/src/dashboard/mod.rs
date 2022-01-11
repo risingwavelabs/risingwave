@@ -27,7 +27,7 @@ mod handlers {
     use risingwave_common::error::ToRwResult;
     use risingwave_pb::common::WorkerNode;
     use risingwave_pb::meta::FragmentLocation;
-    use risingwave_pb::stream_plan::{stream_node, Dispatcher, StreamFragment, StreamNode};
+    use risingwave_pb::stream_plan::{stream_node, Dispatcher, StreamActor, StreamNode};
     use serde::{Serialize, Serializer};
     use warp::reject::Reject;
 
@@ -108,33 +108,33 @@ mod handlers {
     #[derive(Serialize)]
     pub struct JsonFragmentLocation {
         node: JsonWorkerNode,
-        fragment: Vec<JsonStreamFragment>,
+        actor: Vec<JsonStreamActor>,
     }
 
     impl From<&FragmentLocation> for JsonFragmentLocation {
         fn from(that: &FragmentLocation) -> Self {
             JsonFragmentLocation {
                 node: that.get_node().into(),
-                fragment: that
-                    .get_fragments()
+                actor: that
+                    .get_actors()
                     .iter()
-                    .map(JsonStreamFragment::from)
+                    .map(JsonStreamActor::from)
                     .collect(),
             }
         }
     }
 
     #[derive(Serialize)]
-    pub struct JsonStreamFragment {
+    pub struct JsonStreamActor {
         actor_id: u32,
         nodes: JsonStreamNode,
         dispatcher: JsonDispatcher,
         downstream_actor_id: Vec<u32>,
     }
 
-    impl From<&StreamFragment> for JsonStreamFragment {
-        fn from(that: &StreamFragment) -> Self {
-            JsonStreamFragment {
+    impl From<&StreamActor> for JsonStreamActor {
+        fn from(that: &StreamActor) -> Self {
+            JsonStreamActor {
                 actor_id: that.get_actor_id(),
                 nodes: that.get_nodes().into(),
                 dispatcher: that.get_dispatcher().into(),
@@ -188,10 +188,10 @@ mod handlers {
         }
     }
 
-    pub async fn list_fragments_inner(srv: Service) -> MetaResult<Vec<JsonFragmentLocation>> {
+    pub async fn list_actors_inner(srv: Service) -> MetaResult<Vec<JsonFragmentLocation>> {
         let result = srv
             .stream_meta_manager
-            .load_all_fragments()
+            .load_all_actors()
             .await?
             .iter()
             .map(JsonFragmentLocation::from)
@@ -199,8 +199,8 @@ mod handlers {
         Ok(result)
     }
 
-    pub async fn list_fragments(srv: Service) -> impl warp::Reply {
-        match list_fragments_inner(srv).await {
+    pub async fn list_actors(srv: Service) -> impl warp::Reply {
+        match list_actors_inner(srv).await {
             Ok(reply) => {
                 warp::reply::with_status(warp::reply::json(&reply), warp::http::StatusCode::OK)
             }
@@ -236,19 +236,19 @@ mod filters {
         clusters_list(srv)
     }
 
-    pub fn fragments_list(
+    pub fn actors_list(
         srv: Service,
     ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-        warp::path!("api" / "fragments")
+        warp::path!("api" / "actors")
             .and(warp::get())
             .and(with_service(srv))
-            .then(handlers::list_fragments)
+            .then(handlers::list_actors)
     }
 
-    pub fn fragments(
+    pub fn actors(
         srv: Service,
     ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-        fragments_list(srv)
+        actors_list(srv)
     }
 }
 
@@ -257,7 +257,7 @@ impl DashboardService {
         let srv = Arc::new(self);
 
         info!("starting dashboard service at {:?}", srv.dashboard_addr);
-        let api = filters::clusters(srv.clone()).or(filters::fragments(srv.clone()));
+        let api = filters::clusters(srv.clone()).or(filters::actors(srv.clone()));
 
         let index = warp::get().and(warp::path::end()).map(|| {
             warp::http::Response::builder()

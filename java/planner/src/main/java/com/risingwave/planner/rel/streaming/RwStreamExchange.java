@@ -26,7 +26,7 @@ import org.apache.calcite.rel.core.Exchange;
 public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel {
 
   /**
-   * The upstream fragments of the exchange node should be added in <code>buildFragmentsInStage
+   * The upstream fragments of the exchange node should be added in <code>BuildActorssInStage
    * </code>
    */
   private final Set<Integer> upstreamSet = new HashSet<>();

@@ -6,12 +6,12 @@ const SCHEMA_CF_NAME: &str = "cf/schema";
 const DATABASE_CF_NAME: &str = "cf/database";
 /// Column family name for cluster.
 const CLUSTER_CF_NAME: &str = "cf/cluster";
-/// Column family name for node fragment.
-const NODE_FRAGMENT_CF_NAME: &str = "cf/node_fragment";
-/// Column family name for node fragment.
-const TABLE_FRAGMENT_CF_NAME: &str = "cf/table_fragment";
-/// Column family name for fragment node location.
-const FRAGMENT_CF_NAME: &str = "cf/fragment";
+/// Column family name for node actor.
+const NODE_FRAGMENT_CF_NAME: &str = "cf/node_actor";
+/// Column family name for node actor.
+const TABLE_FRAGMENT_CF_NAME: &str = "cf/table_actor";
+/// Column family name for actor node location.
+const FRAGMENT_CF_NAME: &str = "cf/actor";
 /// Epoch state key, we store epoch state in default column family.
 const EPOCH_STATE_KEY: &str = "epoch_state";
 /// Column family name for hummock context.
@@ -39,9 +39,9 @@ pub struct Config {
     schema_cf: String,
     table_cf: String,
 
-    node_fragment_cf: String,
-    table_fragment_cf: String,
-    fragment_cf: String,
+    node_actor_cf: String,
+    table_actor_cf: String,
+    actor_cf: String,
 
     cluster_state_cf: String,
     epoch_state_key: String,
@@ -82,28 +82,28 @@ impl Config {
         self.database_cf.as_str()
     }
 
-    pub fn set_node_fragment_cf(&mut self, cf: &str) {
-        self.node_fragment_cf = cf.to_owned();
+    pub fn set_node_actor_cf(&mut self, cf: &str) {
+        self.node_actor_cf = cf.to_owned();
     }
 
-    pub fn get_node_fragment_cf(&self) -> &str {
-        self.node_fragment_cf.as_str()
+    pub fn get_node_actor_cf(&self) -> &str {
+        self.node_actor_cf.as_str()
     }
 
-    pub fn set_fragment_cf(&mut self, cf: &str) {
-        self.fragment_cf = cf.to_owned();
+    pub fn set_actor_cf(&mut self, cf: &str) {
+        self.actor_cf = cf.to_owned();
     }
 
-    pub fn get_fragment_cf(&self) -> &str {
-        self.fragment_cf.as_str()
+    pub fn get_actor_cf(&self) -> &str {
+        self.actor_cf.as_str()
     }
 
-    pub fn set_table_fragment_cf(&mut self, cf: &str) {
-        self.table_fragment_cf = cf.to_owned();
+    pub fn set_table_actor_cf(&mut self, cf: &str) {
+        self.table_actor_cf = cf.to_owned();
     }
 
-    pub fn get_table_fragment_cf(&self) -> &str {
-        self.table_fragment_cf.as_str()
+    pub fn get_table_actor_cf(&self) -> &str {
+        self.table_actor_cf.as_str()
     }
 
     pub fn set_cluster_cf(&mut self, cf: &str) {
@@ -157,11 +157,11 @@ impl Default for Config {
             database_cf: DATABASE_CF_NAME.to_owned(),
             schema_cf: SCHEMA_CF_NAME.to_owned(),
             table_cf: TABLE_CF_NAME.to_owned(),
-            node_fragment_cf: NODE_FRAGMENT_CF_NAME.to_string(),
-            table_fragment_cf: TABLE_FRAGMENT_CF_NAME.to_string(),
+            node_actor_cf: NODE_FRAGMENT_CF_NAME.to_string(),
+            table_actor_cf: TABLE_FRAGMENT_CF_NAME.to_string(),
             epoch_state_key: EPOCH_STATE_KEY.to_owned(),
             cluster_state_cf: CLUSTER_CF_NAME.to_owned(),
-            fragment_cf: FRAGMENT_CF_NAME.to_string(),
+            actor_cf: FRAGMENT_CF_NAME.to_string(),
             hummock_context_cf: HUMMOCK_CONTEXT_CF_NAME.to_owned(),
             hummock_version_cf: HUMMOCK_VERSION_CF_NAME.to_owned(),
             hummock_table_cf: HUMMOCK_TABLE_CF_NAME.to_owned(),

@@ -55,9 +55,9 @@ async fn test_stream_proto() {
         .unwrap();
 
     stream_manager
-        .update_fragment(&[
+        .update_actors(&[
             // create 0 -> (1) -> 3
-            StreamFragment {
+            StreamActor {
                 actor_id: 1,
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
@@ -84,7 +84,7 @@ async fn test_stream_proto() {
                 downstream_actor_id: vec![3],
             },
             // create 1 -> (3) -> 7, 11
-            StreamFragment {
+            StreamActor {
                 actor_id: 3,
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
@@ -111,7 +111,7 @@ async fn test_stream_proto() {
                 downstream_actor_id: vec![7, 11],
             },
             // create 3 -> (7) -> 13
-            StreamFragment {
+            StreamActor {
                 actor_id: 7,
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
@@ -138,7 +138,7 @@ async fn test_stream_proto() {
                 downstream_actor_id: vec![13],
             },
             // create 3 -> (11) -> 13
-            StreamFragment {
+            StreamActor {
                 actor_id: 11,
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
@@ -165,7 +165,7 @@ async fn test_stream_proto() {
                 downstream_actor_id: vec![13],
             },
             // create 7, 11 -> (13) -> 233
-            StreamFragment {
+            StreamActor {
                 actor_id: 13,
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
@@ -200,7 +200,7 @@ async fn test_stream_proto() {
         std::net::SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
     );
     stream_manager
-        .build_fragment(&[1, 3, 7, 11, 13], env)
+        .build_actors(&[1, 3, 7, 11, 13], env)
         .unwrap();
 
     let mut source = stream_manager.take_source();

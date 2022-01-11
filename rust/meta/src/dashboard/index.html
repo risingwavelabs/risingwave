@@ -58,7 +58,7 @@
       <h1 class="mt-5 mb-2 text-sm leading-6 font-semibold text-sky-500 dark:text-sky-400">
         Stream Fragments
       </h1>
-      <div id="fragments" class="w-full">
+      <div id="actors" class="w-full">
       </div>
     </div>
   </div>
@@ -84,18 +84,18 @@
 </div>`
 
 
-  const fragments = (fragments) => `
+  const actors = (actors) => `
 <div class="p-6 max-w bg-white rounded-xl shadow-md flex flex-col space-y-1">
   <div class="flex flex-row items-center">
     <div class="w-3 h-3 flex-none bg-green-600 rounded-full mr-2"></div>
-    <div class="text-xl font-medium text-black">${fragments.node.host}:${fragments.node.port}</div>
+    <div class="text-xl font-medium text-black">${actors.node.host}:${actors.node.port}</div>
   </div>
   <div style="height: 40rem" class="border border-gray-200 overflow-x-scroll">
-    <svg id="fragment-${fragments.node.id}" class="h-full"></svg>
+    <svg id="actor-${actors.node.id}" class="h-full"></svg>
   </div>
-  <div id="message-${fragments.node.id}"></div>
+  <div id="message-${actors.node.id}"></div>
 </div>`
-  const createStreamFragment = (fragments) => {
+  const createStreamFragment = (actors) => {
     const nodeRadius = 20
     const edgeYRadius = 15
     const edgeXRadius = 100
@@ -141,25 +141,25 @@
     }
 
     let graphData = []
-    const fragmentOf = id => parseInt(id.split(":")[0])
+    const actorOf = id => parseInt(id.split(":")[0])
     const titleOf = id => titleMap.get(id)
 
-    fragments.fragment.forEach(fragment => {
+    actors.actor.forEach(actor => {
       const edges = []
-      const fragmentId = fragment.actor_id
-      const [inNode, outNode] = createStreamFragmentNodes(fragmentId, 0, fragment.nodes, edges)
-      const dispatcherNodeId = `${fragmentId}:dispatcher`
+      const actorId = actor.actor_id
+      const [inNode, outNode] = createStreamFragmentNodes(actorId, 0, actor.nodes, edges)
+      const dispatcherNodeId = `${actorId}:dispatcher`
       let dispatcherType = ""
-      if (fragment.downstream_actor_id.length == 0) {
+      if (actor.downstream_actor_id.length == 0) {
         dispatcherType = "BlackHole"
       } else {
-        dispatcherType = `${fragment.dispatcher.dispatcher_type}Dispatcher -> ${fragment.downstream_actor_id.join(",")}`
+        dispatcherType = `${actor.dispatcher.dispatcher_type}Dispatcher -> ${actor.downstream_actor_id.join(",")}`
       }
       titleMap.set(dispatcherNodeId, dispatcherType)
-      descMap.set(dispatcherNodeId, JSON.stringify(fragment.dispatcher, null, 2))
+      descMap.set(dispatcherNodeId, JSON.stringify(actor.dispatcher, null, 2))
       graphData = graphData.concat(edges)
       graphData.push([outNode, dispatcherNodeId])
-      fragment.downstream_actor_id.forEach(v => {
+      actor.downstream_actor_id.forEach(v => {
         graphData.push([dispatcherNodeId, `${v}:merger`])
       })
     })
@@ -185,24 +185,24 @@
 
     const { width, height } = horizontal(layout, dag)
 
-    const svgSelection = d3.select(`#fragment-${fragments.node.id}`)
+    const svgSelection = d3.select(`#actor-${actors.node.id}`)
     svgSelection.attr("viewBox", [0, 0, width, height].join(" "))
     const defs = svgSelection.append("defs") // For gradients
 
     const interp = d3.interpolateRainbow
-    const fragmentSet = new Set()
+    const actorSet = new Set()
 
     for (const node of dag.idescendants()) {
-      let fragmentId = fragmentOf(node.data.id)
-      if (!fragmentSet.has(fragmentId)) {
-        fragmentSet.add(fragmentId)
+      let actorId = actorOf(node.data.id)
+      if (!actorSet.has(actorId)) {
+        actorSet.add(actorId)
       }
     }
 
     let i = 0
     const colorMap = new Map()
-    fragmentSet.forEach(k => {
-      colorMap.set(k, interp(i / fragmentSet.size))
+    actorSet.forEach(k => {
+      colorMap.set(k, interp(i / actorSet.size))
       i += 1
     })
 
@@ -223,7 +223,7 @@
       .attr("d", ({ points }) => line(points))
       .attr("fill", "none")
       .attr("stroke-width", ({ source }) => source.data.id.endsWith("dispatcher") ? 4 : 2)
-      .attr("stroke", ({ source }) => colorMap.get(fragmentOf(source.data.id)))
+      .attr("stroke", ({ source }) => colorMap.get(actorOf(source.data.id)))
 
     // Plot edge arrows
     const arrowSize = (nodeRadius * nodeRadius) / 8.0;
@@ -248,7 +248,7 @@
         return `translate(${end.x + dx * scale}, ${end.y + dy * scale
           }) rotate(${angle})`;
       })
-      .attr("fill", ({ source }) => colorMap.get(fragmentOf(source.data.id)))
+      .attr("fill", ({ source }) => colorMap.get(actorOf(source.data.id)))
 
     // Select nodes
     const nodes = svgSelection
@@ -259,7 +259,7 @@
       .append("g")
       .attr("transform", ({ x, y }) => `translate(${x}, ${y})`)
 
-    const tooltip = d3.select(`#message-${fragments.node.id}`).append("div")
+    const tooltip = d3.select(`#message-${actors.node.id}`).append("div")
       .attr("id", "div-tooltip")
       .attr("class", "my-3 whitespace-pre text-xs bg-white p-1");
 
@@ -277,7 +277,7 @@
     nodes
       .append("circle")
       .attr("r", nodeRadius)
-      .attr("fill", (n) => colorMap.get(fragmentOf(n.data.id)))
+      .attr("fill", (n) => colorMap.get(actorOf(n.data.id)))
       .on("mouseenter", mouseEnter)
       .on("mousemove", mouseMove)
 
@@ -295,7 +295,7 @@
     // Add text to nodes
     nodes
       .append("text")
-      .text((d) => `${fragmentOf(d.data.id)}`)
+      .text((d) => `${actorOf(d.data.id)}`)
       .attr("font-family", "sans-serif")
       .attr("text-anchor", "middle")
       .attr("alignment-baseline", "middle")
@@ -313,11 +313,11 @@
       data => $("#clusters").append(cluster("Compute Node", data))))
   $("#clusters").append(cluster("Meta Node", { host: "127.0.0.1", port: "2333" }))
 
-  fetch('/api/fragments')
+  fetch('/api/actors')
     .then(response => response.json())
     .then(data => data.forEach(
       data => {
-        $("#fragments").append(fragments(data))
+        $("#actors").append(actors(data))
         createStreamFragment(data)
       }))
 

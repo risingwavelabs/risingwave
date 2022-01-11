@@ -21,41 +21,41 @@ use tokio::task::JoinHandle;
 use crate::executor::*;
 use crate::task::StreamTaskEnv;
 
-/// Default capacity of channel if two fragments are on the same node
+/// Default capacity of channel if two actors are on the same node
 pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
 
 pub type ConsumableChannelPair = (Option<Sender<Message>>, Option<Receiver<Message>>);
 pub type ConsumableChannelVecPair = (Vec<Sender<Message>>, Vec<Receiver<Message>>);
-pub type UpDownFragmentIds = (u32, u32);
+pub type UpDownActorIds = (u32, u32);
 
 /// Stores the data which may be modified from the data plane.
 pub struct SharedContext {
     /// Stores the senders and receivers for later `Processor`'s use.
     ///
     /// Each actor has several senders and several receivers. Senders and receivers are created
-    /// during `update_fragment`. Upon `build_fragment`, all these channels will be taken out and
+    /// during `update_actors`. Upon `build_actorss`, all these channels will be taken out and
     /// built into the executors and outputs.
-    /// One sender or one receiver can be uniquely determined by the upstream and downstream
-    /// fragment id.
+    /// One sender or one receiver can be uniquely determined by the upstream and downstream actor
+    /// id.
     ///
     /// There are three cases that we need local channels to pass around messages:
-    /// 1. pass `Message` between two local fragments
-    /// 2. The RPC client at the downstream fragment forwards received `Message` to one channel in
+    /// 1. pass `Message` between two local actors
+    /// 2. The RPC client at the downstream actor forwards received `Message` to one channel in
     /// `ReceiverExecutor` or `MergerExecutor`.
-    /// 3. The RPC `Output` at the upstream fragment forwards received `Message` to
+    /// 3. The RPC `Output` at the upstream actor forwards received `Message` to
     /// `ExchangeServiceImpl`.    The channel servers as a buffer because `ExchangeServiceImpl` is
     /// on the server-side and we will    also introduce backpressure.
-    pub(crate) channel_pool: Mutex<HashMap<UpDownFragmentIds, ConsumableChannelPair>>,
+    pub(crate) channel_pool: Mutex<HashMap<UpDownActorIds, ConsumableChannelPair>>,
 
     /// The receiver is on the other side of rpc `Output`. The `ExchangeServiceImpl` take it
     /// when it receives request for streaming data from downstream clients.
-    pub(crate) receivers_for_exchange_service: Mutex<HashMap<UpDownFragmentIds, Receiver<Message>>>,
+    pub(crate) receivers_for_exchange_service: Mutex<HashMap<UpDownActorIds, Receiver<Message>>>,
 
     /// Stores the local address
     ///
     /// It is used to test whether an actor is local or not,
     /// thus determining whether we should setup channel or rpc connection between
-    /// two actors/fragments.
+    /// two actors/actors.
     pub(crate) addr: SocketAddr,
 }
 
@@ -68,16 +68,14 @@ impl SharedContext {
         }
     }
     #[inline]
-    pub fn lock_channel_pool(
-        &self,
-    ) -> MutexGuard<HashMap<UpDownFragmentIds, ConsumableChannelPair>> {
+    pub fn lock_channel_pool(&self) -> MutexGuard<HashMap<UpDownActorIds, ConsumableChannelPair>> {
         self.channel_pool.lock().unwrap()
     }
 
     #[inline]
     pub fn lock_receivers_for_exchange_service(
         &self,
-    ) -> MutexGuard<HashMap<UpDownFragmentIds, Receiver<Message>>> {
+    ) -> MutexGuard<HashMap<UpDownActorIds, Receiver<Message>>> {
         self.receivers_for_exchange_service.lock().unwrap()
     }
 }
@@ -91,10 +89,10 @@ pub struct StreamManagerCore {
     context: Arc<SharedContext>,
 
     /// Stores all actor information.
-    actors: HashMap<u32, stream_service::ActorInfo>,
+    actor_infos: HashMap<u32, stream_service::ActorInfo>,
 
-    /// Stores all fragment information.
-    fragments: HashMap<u32, stream_plan::StreamFragment>,
+    /// Stores all actor information.
+    actors: HashMap<u32, stream_plan::StreamActor>,
 
     sender_placeholder: Vec<UnboundedSender<Message>>,
 
@@ -139,15 +137,15 @@ impl StreamManager {
         core.send_stop_barrier()
     }
 
-    pub fn drop_fragment(&self, fragments: &[u32]) -> Result<()> {
+    pub fn drop_actor(&self, actors: &[u32]) -> Result<()> {
         let mut core = self.core.lock().unwrap();
-        for id in fragments {
-            core.drop_fragment(*id);
+        for id in actors {
+            core.drop_actor(*id);
         }
         Ok(())
     }
 
-    pub fn take_receiver(&self, ids: UpDownFragmentIds) -> Result<Receiver<Message>> {
+    pub fn take_receiver(&self, ids: UpDownActorIds) -> Result<Receiver<Message>> {
         let core = self.core.lock().unwrap();
         let mut guard = core.context.lock_receivers_for_exchange_service();
         guard.remove(&ids).ok_or_else(|| {
@@ -158,9 +156,9 @@ impl StreamManager {
         })
     }
 
-    pub fn update_fragment(&self, fragments: &[stream_plan::StreamFragment]) -> Result<()> {
+    pub fn update_actors(&self, actors: &[stream_plan::StreamActor]) -> Result<()> {
         let mut core = self.core.lock().unwrap();
-        core.update_fragment(fragments)
+        core.update_actors(actors)
     }
 
     /// This function was called while [`StreamManager`] exited.
@@ -195,9 +193,9 @@ impl StreamManager {
     }
 
     /// This function could only be called once during the lifecycle of `StreamManager` for now.
-    pub fn build_fragment(&self, fragments: &[u32], env: StreamTaskEnv) -> Result<()> {
+    pub fn build_actors(&self, actors: &[u32], env: StreamTaskEnv) -> Result<()> {
         let mut core = self.core.lock().unwrap();
-        core.build_fragment(fragments, env)
+        core.build_actors(actors, env)
     }
 
     #[cfg(test)]
@@ -207,7 +205,7 @@ impl StreamManager {
     }
 
     #[cfg(test)]
-    pub fn take_sink(&self, ids: UpDownFragmentIds) -> Receiver<Message> {
+    pub fn take_sink(&self, ids: UpDownActorIds) -> Receiver<Message> {
         let core = self.core.lock().unwrap();
         let mut guard = core.context.lock_channel_pool();
         guard.get_mut(&ids).unwrap().1.take().unwrap()
@@ -244,8 +242,8 @@ impl StreamManagerCore {
         Self {
             handles: HashMap::new(),
             context: Arc::new(SharedContext::new(addr)),
+            actor_infos: HashMap::new(),
             actors: HashMap::new(),
-            fragments: HashMap::new(),
             sender_placeholder: vec![],
             mock_source: (Some(tx), Some(rx)),
             state_store,
@@ -267,7 +265,7 @@ impl StreamManagerCore {
             .map(|down_id| {
                 let up_down_ids = (actor_id, *down_id);
                 let host_addr = self
-                    .actors
+                    .actor_infos
                     .get(down_id)
                     .ok_or_else(|| {
                         RwError::from(ErrorCode::InternalError(format!(
@@ -278,7 +276,7 @@ impl StreamManagerCore {
                     .get_host();
                 let downstream_addr = format!("{}:{}", host_addr.get_host(), host_addr.get_port());
                 if is_local_address(&get_host_port(&downstream_addr)?, &self.context.addr) {
-                    // if this is a local downstream fragment
+                    // if this is a local downstream actor
                     let mut guard = self.context.lock_channel_pool();
                     let tx = guard
                         .get_mut(&(actor_id, *down_id))
@@ -659,7 +657,7 @@ impl StreamManagerCore {
                     Ok(self.mock_source.1.take().unwrap())
                 } else {
                     let host_addr = self
-                        .actors
+                        .actor_infos
                         .get(up_id)
                         .ok_or_else(|| {
                             RwError::from(ErrorCode::InternalError(
@@ -751,19 +749,19 @@ impl StreamManagerCore {
         }
     }
 
-    fn build_fragment(&mut self, fragments: &[u32], env: StreamTaskEnv) -> Result<()> {
-        for actor_id in fragments {
+    fn build_actors(&mut self, actors: &[u32], env: StreamTaskEnv) -> Result<()> {
+        for actor_id in actors {
             let actor_id = *actor_id;
-            let fragment = self.fragments.remove(&actor_id).unwrap();
-            let executor = self.create_nodes(actor_id, fragment.get_nodes(), env.clone())?;
+            let actor = self.actors.remove(&actor_id).unwrap();
+            let executor = self.create_nodes(actor_id, actor.get_nodes(), env.clone())?;
             let dispatcher = self.create_dispatcher(
                 executor,
-                fragment.get_dispatcher(),
+                actor.get_dispatcher(),
                 actor_id,
-                fragment.get_downstream_actor_id(),
+                actor.get_downstream_actor_id(),
             )?;
 
-            trace!("build fragment: {:#?}", &dispatcher);
+            trace!("build actor: {:#?}", &dispatcher);
 
             let actor = Actor::new(dispatcher, actor_id);
             self.handles.insert(actor_id, tokio::spawn(actor.run()));
@@ -801,7 +799,7 @@ impl StreamManagerCore {
         req: stream_service::BroadcastActorInfoTableRequest,
     ) -> Result<()> {
         for actor in req.get_info() {
-            let ret = self.actors.insert(actor.get_actor_id(), actor.clone());
+            let ret = self.actor_infos.insert(actor.get_actor_id(), actor.clone());
             if ret.is_some() {
                 return Err(ErrorCode::InternalError(format!(
                     "duplicated actor {}",
@@ -813,9 +811,9 @@ impl StreamManagerCore {
         Ok(())
     }
 
-    /// `drop_fragment` is invoked by the leader node via RPC once the stop barrier arrives at the
-    ///  sink. All the actors in the fragments should stop themselves before this method is invoked.
-    fn drop_fragment(&mut self, actor_id: u32) {
+    /// `drop_actor` is invoked by the leader node via RPC once the stop barrier arrives at the
+    ///  sink. All the actors in the actors should stop themselves before this method is invoked.
+    fn drop_actor(&mut self, actor_id: u32) {
         let handle = self.handles.remove(&actor_id).unwrap();
         let mut channel_pool_guard = self.context.lock_channel_pool();
         let mut exhange_guard = self.context.lock_receivers_for_exchange_service();
@@ -823,27 +821,25 @@ impl StreamManagerCore {
         exhange_guard.retain(|(x, _), _| *x != actor_id);
 
         self.actors.remove(&actor_id);
-        self.fragments.remove(&actor_id);
+        self.actors.remove(&actor_id);
         // Task should have already stopped when this method is invoked.
         handle.abort();
     }
 
-    fn update_fragment(&mut self, fragments: &[stream_plan::StreamFragment]) -> Result<()> {
-        for fragment in fragments {
-            let ret = self
-                .fragments
-                .insert(fragment.get_actor_id(), fragment.clone());
+    fn update_actors(&mut self, actors: &[stream_plan::StreamActor]) -> Result<()> {
+        for actor in actors {
+            let ret = self.actors.insert(actor.get_actor_id(), actor.clone());
             if ret.is_some() {
                 return Err(ErrorCode::InternalError(format!(
                     "duplicated actor {}",
-                    fragment.get_actor_id()
+                    actor.get_actor_id()
                 ))
                 .into());
             }
         }
 
-        for (current_id, fragment) in &self.fragments {
-            for downstream_id in fragment.get_downstream_actor_id() {
+        for (current_id, actor) in &self.actors {
+            for downstream_id in actor.get_downstream_actor_id() {
                 // At this time, the graph might not be complete, so we do not check if downstream
                 // has `current_id` as upstream.
                 let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);

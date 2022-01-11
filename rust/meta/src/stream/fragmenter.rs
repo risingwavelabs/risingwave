@@ -9,12 +9,10 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_pb::meta::get_id_request::IdCategory;
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::stream_plan::{StreamFragment, StreamNode};
+use risingwave_pb::stream_plan::{StreamActor, StreamNode};
 
 use crate::manager::IdGeneratorManagerRef;
-use crate::stream::graph::{
-    StreamFragmentBuilder, StreamGraphBuilder, StreamStage, StreamStageGraph,
-};
+use crate::stream::graph::{StreamActorBuilder, StreamGraphBuilder, StreamStage, StreamStageGraph};
 
 const PARALLEL_DEGREE_LOW_BOUND: u32 = 4;
 
@@ -47,11 +45,8 @@ impl StreamFragmenter {
 
     /// Build a stream graph in two steps:
     /// (1) Break the streaming plan into stages with their dependency.
-    /// (2) Duplicate each stage as parallel fragments.
-    pub async fn generate_graph(
-        &mut self,
-        stream_node: &StreamNode,
-    ) -> Result<Vec<StreamFragment>> {
+    /// (2) Duplicate each stage as parallel actors.
+    pub async fn generate_graph(&mut self, stream_node: &StreamNode) -> Result<Vec<StreamActor>> {
         self.generate_stage_graph(stream_node);
         self.build_graph_from_stage(self.stage_graph.get_root_stage(), vec![])
             .await?;
@@ -95,13 +90,13 @@ impl StreamFragmenter {
             .await? as u32)
     }
 
-    /// Build stream graph from stage graph recursively. Setup dispatcher in fragment and generate
+    /// Build stream graph from stage graph recursively. Setup dispatcher in actor and generate
     /// actors by their parallelism.
     #[async_recursion]
     async fn build_graph_from_stage(
         &mut self,
         current_stage: StreamStage,
-        last_stage_fragments: Vec<u32>,
+        last_stage_actors: Vec<u32>,
     ) -> Result<()> {
         let root_stage = self.stage_graph.get_root_stage();
         let mut current_actor_ids = vec![];
@@ -109,15 +104,14 @@ impl StreamFragmenter {
         if current_stage_id == root_stage.get_stage_id() {
             // Stage on the root, generate an actor without dispatcher.
             let actor_id = self.gen_actor_id(1).await?;
-            let mut fragment_builder =
-                StreamFragmentBuilder::new(actor_id, current_stage.get_node());
+            let mut actor_builder = StreamActorBuilder::new(actor_id, current_stage.get_node());
             // Set `Broadcast` dispatcher for root stage (means no dispatcher).
-            fragment_builder.set_broadcast_dispatcher();
+            actor_builder.set_broadcast_dispatcher();
 
-            // Add fragment. No dependency needed.
+            // Add actor. No dependency needed.
             current_actor_ids.push(actor_id);
-            self.stream_graph.add_fragment(fragment_builder);
-            self.stream_graph.set_root_fragment(actor_id);
+            self.stream_graph.add_actor(actor_builder);
+            self.stream_graph.set_root_actor(actor_id);
         } else {
             let parallel_degree = if self.stage_graph.has_downstream(current_stage_id) {
                 // Stage in the middle.
@@ -143,17 +137,17 @@ impl StreamFragmenter {
             };
             for id in actor_ids..actor_ids + parallel_degree {
                 let stream_node = node.deref().clone();
-                let mut fragment_builder = StreamFragmentBuilder::new(id, Arc::new(stream_node));
-                fragment_builder.set_dispatcher(dispatcher.clone());
-                self.stream_graph.add_fragment(fragment_builder);
+                let mut actor_builder = StreamActorBuilder::new(id, Arc::new(stream_node));
+                actor_builder.set_dispatcher(dispatcher.clone());
+                self.stream_graph.add_actor(actor_builder);
                 current_actor_ids.push(id);
             }
         }
 
         self.stream_graph
-            .add_dependency(&current_actor_ids, &last_stage_fragments);
+            .add_dependency(&current_actor_ids, &last_stage_actors);
 
-        // Recursively generating fragments on the downstream level.
+        // Recursively generating actors on the downstream level.
         if self.stage_graph.has_downstream(current_stage_id) {
             for stage_id in self
                 .stage_graph

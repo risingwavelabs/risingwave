@@ -10,10 +10,10 @@ use risingwave_common::util::addr::get_host_port;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::{FragmentLocation, TableFragments};
 use risingwave_pb::plan::TableRefId;
-use risingwave_pb::stream_plan::StreamFragment;
+use risingwave_pb::stream_plan::StreamActor;
 use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
 use risingwave_pb::stream_service::{
-    ActorInfo, BroadcastActorInfoTableRequest, BuildFragmentRequest, UpdateFragmentRequest,
+    ActorInfo, BroadcastActorInfoTableRequest, BuildActorsRequest, UpdateActorsRequest,
 };
 use tokio::sync::RwLock;
 use tonic::transport::{Channel, Endpoint};
@@ -24,15 +24,15 @@ use crate::stream::{ScheduleCategory, Scheduler, StreamMetaManagerRef};
 
 #[async_trait]
 pub trait StreamManager: Sync + Send + 'static {
-    /// [`create_materialized_view`] creates materialized view using its stream fragments. Stream
+    /// [`create_materialized_view`] creates materialized view using its stream actors. Stream
     /// graph is generated in frontend, we only handle schedule and persistence here.
     async fn create_materialized_view(
         &self,
         table_id: &TableRefId,
-        fragments: &[StreamFragment],
+        actors: &[StreamActor],
     ) -> Result<()>;
     /// [`drop_materialized_view`] drops materialized view.
-    async fn drop_materialized_view(&self, table_id: &TableRefId, fragments: &[u32]) -> Result<()>;
+    async fn drop_materialized_view(&self, table_id: &TableRefId, actors: &[u32]) -> Result<()>;
 }
 
 pub type StreamManagerRef = Arc<dyn StreamManager>;
@@ -94,28 +94,25 @@ impl DefaultStreamManager {
 #[async_trait]
 impl StreamManager for DefaultStreamManager {
     /// Create materialized view, it works as follows:
-    /// 1. schedule the fragments to nodes in the cluster.
+    /// 1. schedule the actors to nodes in the cluster.
     /// 2. broadcast the actor info table.
-    /// 3. notify related nodes to update and build the fragments.
+    /// 3. notify related nodes to update and build the actors.
     /// 4. store related meta data.
     async fn create_materialized_view(
         &self,
         table_id: &TableRefId,
-        fragments: &[StreamFragment],
+        actors: &[StreamActor],
     ) -> Result<()> {
-        let actor_ids = fragments
-            .iter()
-            .map(|f| f.get_actor_id())
-            .collect::<Vec<_>>();
+        let actor_ids = actors.iter().map(|f| f.get_actor_id()).collect::<Vec<_>>();
 
         let nodes = self.scheduler.schedule(&actor_ids).await?;
 
-        let mut node_fragments_map = HashMap::new();
-        for (node, fragment) in nodes.iter().zip(actor_ids.clone()) {
-            node_fragments_map
+        let mut node_actors_map = HashMap::new();
+        for (node, actor) in nodes.iter().zip(actor_ids.clone()) {
+            node_actors_map
                 .entry(node.get_id())
                 .or_insert_with(Vec::new)
-                .push(fragment);
+                .push(actor);
         }
 
         let node_map = nodes
@@ -123,10 +120,10 @@ impl StreamManager for DefaultStreamManager {
             .map(|n| (n.get_id(), n.clone()))
             .collect::<HashMap<u32, WorkerNode>>();
 
-        let fragment_map = fragments
+        let actor_map = actors
             .iter()
             .map(|f| (f.actor_id, f.clone()))
-            .collect::<HashMap<u32, StreamFragment>>();
+            .collect::<HashMap<u32, StreamActor>>();
 
         let actor_info = nodes
             .iter()
@@ -137,7 +134,7 @@ impl StreamManager for DefaultStreamManager {
             })
             .collect::<Vec<_>>();
 
-        for (node_id, fragments) in node_fragments_map {
+        for (node_id, actors) in node_actors_map {
             let node = node_map.get(&node_id).cloned().unwrap();
 
             let client = self.get_client(node.clone()).await?;
@@ -149,43 +146,43 @@ impl StreamManager for DefaultStreamManager {
                 .await
                 .to_rw_result_with(format!("failed to connect to {}", node_id))?;
 
-            let steam_fragments = fragments
+            let stream_actors = actors
                 .iter()
-                .map(|f| fragment_map.get(f).cloned().unwrap())
+                .map(|f| actor_map.get(f).cloned().unwrap())
                 .collect::<Vec<_>>();
 
             let request_id = Uuid::new_v4().to_string();
-            debug!("[{}]update fragments: {:?}", request_id, fragments);
+            debug!("[{}]update actors: {:?}", request_id, actors);
             client
                 .to_owned()
-                .update_fragment(UpdateFragmentRequest {
+                .update_actors(UpdateActorsRequest {
                     request_id,
-                    fragment: steam_fragments.clone(),
+                    actors: stream_actors.clone(),
                 })
                 .await
                 .to_rw_result_with(format!("failed to connect to {}", node_id))?;
 
             let request_id = Uuid::new_v4().to_string();
-            debug!("[{}]build fragments: {:?}", request_id, fragments);
+            debug!("[{}]build actors: {:?}", request_id, actors);
             client
                 .to_owned()
-                .build_fragment(BuildFragmentRequest {
+                .build_actors(BuildActorsRequest {
                     request_id,
-                    actor_id: fragments,
+                    actor_id: actors,
                 })
                 .await
                 .to_rw_result_with(format!("failed to connect to {}", node_id))?;
 
             self.smm
-                .add_fragments_to_node(&FragmentLocation {
+                .add_actors_to_node(&FragmentLocation {
                     node: Some(node),
-                    fragments: steam_fragments,
+                    actors: stream_actors,
                 })
                 .await?;
         }
 
         self.smm
-            .add_table_fragments(
+            .add_table_actors(
                 &table_id.clone(),
                 &TableFragments {
                     table_ref_id: Some(table_id.clone()),
@@ -198,14 +195,10 @@ impl StreamManager for DefaultStreamManager {
     }
 
     /// Drop materialized view, it works as follows:
-    /// 1. notify related node local stream manger to drop fragment by inject barrier.
+    /// 1. notify related node local stream manger to drop actor by inject barrier.
     /// 2. wait and collect drop state from local stream manager.
-    /// 3. delete fragment location and node/table fragments info.
-    async fn drop_materialized_view(
-        &self,
-        _table_id: &TableRefId,
-        _fragments: &[u32],
-    ) -> Result<()> {
+    /// 3. delete actor location and node/table actors info.
+    async fn drop_materialized_view(&self, _table_id: &TableRefId, _actors: &[u32]) -> Result<()> {
         todo!()
     }
 }
@@ -222,8 +215,8 @@ mod tests {
         StreamService, StreamServiceServer,
     };
     use risingwave_pb::stream_service::{
-        BroadcastActorInfoTableResponse, BuildFragmentResponse, DropFragmentsRequest,
-        DropFragmentsResponse, UpdateFragmentResponse,
+        BroadcastActorInfoTableResponse, BuildActorsResponse, DropActorsRequest,
+        DropActorsResponse, UpdateActorsResponse,
     };
     use tonic::{Request, Response, Status};
 
@@ -233,7 +226,7 @@ mod tests {
     use crate::stream::{StoredStreamMetaManager, StreamMetaManager};
 
     struct FakeFragmentState {
-        fragment_streams: Mutex<HashMap<u32, StreamFragment>>,
+        actor_streams: Mutex<HashMap<u32, StreamActor>>,
         actor_ids: Mutex<HashSet<u32>>,
         actor_infos: Mutex<HashMap<u32, HostAddress>>,
     }
@@ -244,30 +237,30 @@ mod tests {
 
     #[async_trait::async_trait]
     impl StreamService for FakeStreamService {
-        async fn update_fragment(
+        async fn update_actors(
             &self,
-            request: Request<UpdateFragmentRequest>,
-        ) -> std::result::Result<Response<UpdateFragmentResponse>, Status> {
+            request: Request<UpdateActorsRequest>,
+        ) -> std::result::Result<Response<UpdateActorsResponse>, Status> {
             let req = request.into_inner();
-            let mut guard = self.inner.fragment_streams.lock().unwrap();
-            for fragment in req.get_fragment() {
-                guard.insert(fragment.get_actor_id(), fragment.clone());
+            let mut guard = self.inner.actor_streams.lock().unwrap();
+            for actor in req.get_actors() {
+                guard.insert(actor.get_actor_id(), actor.clone());
             }
 
-            Ok(Response::new(UpdateFragmentResponse { status: None }))
+            Ok(Response::new(UpdateActorsResponse { status: None }))
         }
 
-        async fn build_fragment(
+        async fn build_actors(
             &self,
-            request: Request<BuildFragmentRequest>,
-        ) -> std::result::Result<Response<BuildFragmentResponse>, Status> {
+            request: Request<BuildActorsRequest>,
+        ) -> std::result::Result<Response<BuildActorsResponse>, Status> {
             let req = request.into_inner();
             let mut guard = self.inner.actor_ids.lock().unwrap();
             for id in req.get_actor_id() {
                 guard.insert(*id);
             }
 
-            Ok(Response::new(BuildFragmentResponse {
+            Ok(Response::new(BuildActorsResponse {
                 request_id: "".to_string(),
                 actor_id: vec![],
             }))
@@ -288,10 +281,10 @@ mod tests {
             }))
         }
 
-        async fn drop_fragment(
+        async fn drop_actors(
             &self,
-            _request: Request<DropFragmentsRequest>,
-        ) -> std::result::Result<Response<DropFragmentsResponse>, Status> {
+            _request: Request<DropActorsRequest>,
+        ) -> std::result::Result<Response<DropActorsResponse>, Status> {
             panic!("not implemented")
         }
     }
@@ -301,7 +294,7 @@ mod tests {
         // Start fake stream service.
         let addr = get_host_port("127.0.0.1:12345").unwrap();
         let state = Arc::new(FakeFragmentState {
-            fragment_streams: Mutex::new(HashMap::new()),
+            actor_streams: Mutex::new(HashMap::new()),
             actor_ids: Mutex::new(HashSet::new()),
             actor_infos: Mutex::new(HashMap::new()),
         });
@@ -341,8 +334,8 @@ mod tests {
             schema_ref_id: None,
             table_id: 0,
         };
-        let fragments = (0..5)
-            .map(|i| StreamFragment {
+        let actors = (0..5)
+            .map(|i| StreamActor {
                 actor_id: i,
                 nodes: None,
                 dispatcher: None,
@@ -351,27 +344,31 @@ mod tests {
             .collect::<Vec<_>>();
 
         stream_manager
-            .create_materialized_view(&table_ref_id, &fragments)
+            .create_materialized_view(&table_ref_id, &actors)
             .await?;
 
-        for f in fragments.clone() {
+        for actor in actors.clone() {
             assert_eq!(
                 state
-                    .fragment_streams
+                    .actor_streams
                     .lock()
                     .unwrap()
-                    .get(&f.get_actor_id())
+                    .get(&actor.get_actor_id())
                     .cloned()
                     .unwrap(),
-                f
+                actor
             );
-            assert!(state.actor_ids.lock().unwrap().contains(&f.get_actor_id()));
+            assert!(state
+                .actor_ids
+                .lock()
+                .unwrap()
+                .contains(&actor.get_actor_id()));
             assert_eq!(
                 state
                     .actor_infos
                     .lock()
                     .unwrap()
-                    .get(&f.get_actor_id())
+                    .get(&actor.get_actor_id())
                     .cloned()
                     .unwrap(),
                 HostAddress {
@@ -381,12 +378,12 @@ mod tests {
             );
         }
 
-        let locations = meta_manager.load_all_fragments().await?;
+        let locations = meta_manager.load_all_actors().await?;
         assert_eq!(locations.len(), 1);
         assert_eq!(locations.get(0).unwrap().get_node().get_id(), 0);
-        assert_eq!(locations.get(0).unwrap().fragments, fragments);
-        let table_fragments = meta_manager.get_table_fragments(&table_ref_id).await?;
-        assert_eq!(table_fragments.actor_ids, (0..5).collect::<Vec<u32>>());
+        assert_eq!(locations.get(0).unwrap().actors, actors);
+        let table_actors = meta_manager.get_table_actors(&table_ref_id).await?;
+        assert_eq!(table_actors.actor_ids, (0..5).collect::<Vec<u32>>());
 
         // Gracefully terminate the server.
         shutdown_send.send(()).unwrap();

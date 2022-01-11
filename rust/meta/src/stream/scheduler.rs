@@ -19,7 +19,7 @@ pub enum ScheduleCategory {
     Hash = 3,
 }
 
-/// [`Scheduler`] defines schedule logic for mv fragments.
+/// [`Scheduler`] defines schedule logic for mv actors.
 pub struct Scheduler {
     cluster_manager: Arc<StoredClusterManager>,
     category: ScheduleCategory,
@@ -33,8 +33,8 @@ impl Scheduler {
         }
     }
 
-    /// [`schedule`] schedules node for input fragments.
-    pub async fn schedule(&self, fragments: &[u32]) -> Result<Vec<WorkerNode>> {
+    /// [`schedule`] schedules node for input actors.
+    pub async fn schedule(&self, actors: &[u32]) -> Result<Vec<WorkerNode>> {
         let nodes = self
             .cluster_manager
             .list_worker_node(ClusterType::ComputeNode)
@@ -44,11 +44,11 @@ impl Scheduler {
         }
 
         match self.category {
-            ScheduleCategory::Simple => Ok(vec![nodes.get(0).unwrap().clone(); fragments.len()]),
-            ScheduleCategory::RoundRobin => Ok((0..fragments.len())
+            ScheduleCategory::Simple => Ok(vec![nodes.get(0).unwrap().clone(); actors.len()]),
+            ScheduleCategory::RoundRobin => Ok((0..actors.len())
                 .map(|i| nodes.get(i % nodes.len()).unwrap().clone())
                 .collect::<Vec<_>>()),
-            ScheduleCategory::Hash => Ok(fragments
+            ScheduleCategory::Hash => Ok(actors
                 .iter()
                 .map(|f| {
                     let mut hasher = DefaultHasher::new();
@@ -74,7 +74,7 @@ mod test {
     async fn test_schedule() -> Result<()> {
         let env = MetaSrvEnv::for_test().await;
         let cluster_manager = Arc::new(StoredClusterManager::new(env.clone()));
-        let fragments = (0..15).collect::<Vec<u32>>();
+        let actors = (0..15).collect::<Vec<u32>>();
         for i in 0..10 {
             cluster_manager
                 .add_worker_node(
@@ -88,7 +88,7 @@ mod test {
         }
 
         let simple_schedule = Scheduler::new(ScheduleCategory::Simple, cluster_manager.clone());
-        let nodes = simple_schedule.schedule(&fragments).await?;
+        let nodes = simple_schedule.schedule(&actors).await?;
         assert_eq!(nodes.len(), 15);
         assert_eq!(
             nodes.iter().map(|n| n.get_id()).collect::<Vec<u32>>(),
@@ -97,7 +97,7 @@ mod test {
 
         let round_bin_schedule =
             Scheduler::new(ScheduleCategory::RoundRobin, cluster_manager.clone());
-        let nodes = round_bin_schedule.schedule(&fragments).await?;
+        let nodes = round_bin_schedule.schedule(&actors).await?;
         assert_eq!(nodes.len(), 15);
         assert_eq!(
             nodes.iter().map(|n| n.get_id()).collect::<Vec<u32>>(),
@@ -105,7 +105,7 @@ mod test {
         );
 
         let round_bin_schedule = Scheduler::new(ScheduleCategory::Hash, cluster_manager.clone());
-        let nodes = round_bin_schedule.schedule(&fragments).await?;
+        let nodes = round_bin_schedule.schedule(&actors).await?;
         assert_eq!(nodes.len(), 15);
 
         Ok(())

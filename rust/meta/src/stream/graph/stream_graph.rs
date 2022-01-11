@@ -4,30 +4,30 @@ use std::sync::Arc;
 
 use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::stream_plan::{Dispatcher, MergeNode, StreamFragment, StreamNode};
+use risingwave_pb::stream_plan::{Dispatcher, MergeNode, StreamActor, StreamNode};
 
-/// [`StreamFragmentBuilder`] build a stream fragment in a stream DAG.
-pub struct StreamFragmentBuilder {
+/// [`StreamActorBuilder`] build a stream actor in a stream DAG.
+pub struct StreamActorBuilder {
     /// actor id field.
     actor_id: u32,
     /// associated stream node.
     nodes: Arc<StreamNode>,
     /// dispatcher category.
     dispatcher: Option<Dispatcher>,
-    /// downstream fragment set.
-    downstream_fragments: BTreeSet<u32>,
-    /// upstream fragment array.
-    upstream_fragments: Vec<Vec<u32>>,
+    /// downstream actor set.
+    downstream_actors: BTreeSet<u32>,
+    /// upstream actor array.
+    upstream_actors: Vec<Vec<u32>>,
 }
 
-impl StreamFragmentBuilder {
+impl StreamActorBuilder {
     pub fn new(actor_id: u32, node: Arc<StreamNode>) -> Self {
         Self {
             actor_id,
             nodes: node,
             dispatcher: None,
-            downstream_fragments: BTreeSet::new(),
-            upstream_fragments: vec![],
+            downstream_actors: BTreeSet::new(),
+            upstream_actors: vec![],
         }
     }
 
@@ -61,77 +61,76 @@ impl StreamFragmentBuilder {
     }
 
     /// Used by stream graph to inject upstream fields.
-    pub fn get_upstream_fragments(&self) -> Vec<Vec<u32>> {
-        self.upstream_fragments.clone()
+    pub fn get_upstream_actors(&self) -> Vec<Vec<u32>> {
+        self.upstream_actors.clone()
     }
 
-    pub fn builder(&self) -> StreamFragment {
-        StreamFragment {
+    pub fn builder(&self) -> StreamActor {
+        StreamActor {
             actor_id: self.actor_id,
             nodes: Some(self.nodes.deref().clone()),
             dispatcher: self.dispatcher.clone(),
-            downstream_actor_id: self.downstream_fragments.iter().copied().collect(),
+            downstream_actor_id: self.downstream_actors.iter().copied().collect(),
         }
     }
 }
 
-/// [`StreamGraphBuilder`] build a stream graph with root with id `root_fragment`. It will do some
+/// [`StreamGraphBuilder`] build a stream graph with root with id `root_actor`. It will do some
 /// injection here to achieve dependencies. See `build_inner` for more details.
 pub struct StreamGraphBuilder {
-    root_fragment: u32,
-    fragment_builders: HashMap<u32, StreamFragmentBuilder>,
+    root_actor: u32,
+    actor_builders: HashMap<u32, StreamActorBuilder>,
 }
 
 impl StreamGraphBuilder {
     pub fn new() -> Self {
         Self {
-            root_fragment: 0,
-            fragment_builders: HashMap::new(),
+            root_actor: 0,
+            actor_builders: HashMap::new(),
         }
     }
 
-    pub fn set_root_fragment(&mut self, id: u32) {
-        self.root_fragment = id;
+    pub fn set_root_actor(&mut self, id: u32) {
+        self.root_actor = id;
     }
 
-    /// Insert new generated fragment.
-    pub fn add_fragment(&mut self, fragment: StreamFragmentBuilder) {
-        self.fragment_builders.insert(fragment.get_id(), fragment);
+    /// Insert new generated actor.
+    pub fn add_actor(&mut self, actor: StreamActorBuilder) {
+        self.actor_builders.insert(actor.get_id(), actor);
     }
 
     /// Add dependency between two connected node in the graph.
     pub fn add_dependency(&mut self, upstreams: &[u32], downstreams: &[u32]) {
         downstreams.iter().for_each(|&downstream| {
             upstreams.iter().for_each(|upstream| {
-                self.fragment_builders
+                self.actor_builders
                     .get_mut(upstream)
                     .unwrap()
-                    .downstream_fragments
+                    .downstream_actors
                     .insert(downstream);
             });
-            self.fragment_builders
+            self.actor_builders
                 .get_mut(&downstream)
                 .unwrap()
-                .upstream_fragments
+                .upstream_actors
                 .push(upstreams.to_vec());
         });
     }
 
-    /// Build final stream DAG with dependencies with current fragment builders.
-    pub fn build(&self) -> Vec<StreamFragment> {
-        self.fragment_builders
+    /// Build final stream DAG with dependencies with current actor builders.
+    pub fn build(&self) -> Vec<StreamActor> {
+        self.actor_builders
             .values()
             .map(|builder| {
-                let mut fragment = builder.builder();
-                let upstream_fragments = builder.get_upstream_fragments();
-                fragment.nodes =
-                    Some(self.build_inner(fragment.get_nodes(), &upstream_fragments, 0));
-                fragment
+                let mut actor = builder.builder();
+                let upstream_actors = builder.get_upstream_actors();
+                actor.nodes = Some(self.build_inner(actor.get_nodes(), &upstream_actors, 0));
+                actor
             })
             .collect::<Vec<_>>()
     }
 
-    /// Build stream fragment inside, two works will be done:
+    /// Build stream actor inside, two works will be done:
     /// 1. replace node's input with [`MergeNode`] if it is [`ExchangeNode`], and swallow
     /// mergeNode's input. 2. ignore root node when it's [`ExchangeNode`].
     pub fn build_inner(

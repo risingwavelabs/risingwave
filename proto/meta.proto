@@ -177,7 +177,7 @@ message TableFragments {
 
 message FragmentLocation {
   common.WorkerNode node = 1;
-  repeated stream_plan.StreamFragment fragments = 2;
+  repeated stream_plan.StreamActor Actors = 2;
 }
 
 message CreateMaterializedViewRequest {

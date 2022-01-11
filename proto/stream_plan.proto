@@ -118,12 +118,8 @@ message Dispatcher {
   int32 column_idx = 2;
 }
 
-// A StreamFragment is a subgraph of the overall stream graph,
-// we assume a fragment is always a chain for simplicity.
-// That is, a fragment has exactly one head node and one sink node.
-// We define the head node in the proto, and the upstream fragments in id
-// as multiple fragments may share the same upstream fragment.
-message StreamFragment {
+// A StreamActor is a running fragment of the overall stream graph,
+message StreamActor {
   uint32 actor_id = 1;
   StreamNode nodes = 2;
   Dispatcher dispatcher = 3;
