@@ -170,12 +170,12 @@ service HeartbeatService {
 }
 
 // Below for stream manager.
-message TableFragments {
+message TableActors {
   plan.TableRefId table_ref_id = 1;
   repeated uint32 actor_ids = 2;
 }
 
-message FragmentLocation {
+message ActorLocation {
   common.WorkerNode node = 1;
   repeated stream_plan.StreamActor Actors = 2;
 }

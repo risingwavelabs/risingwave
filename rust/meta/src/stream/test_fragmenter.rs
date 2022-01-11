@@ -229,7 +229,6 @@ async fn test_fragmenter() -> Result<()> {
 
     let graph = fragmenter.generate_graph(&stream_node).await?;
     assert_eq!(graph.len(), 6);
-    // assert_eq!(graph, vec![]);
     let mut expected_downstream = HashMap::new();
     expected_downstream.insert(1, vec![]);
     expected_downstream.insert(2, vec![1]);

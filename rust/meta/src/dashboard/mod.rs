@@ -26,7 +26,7 @@ mod handlers {
     use risingwave_common::array::RwError;
     use risingwave_common::error::ToRwResult;
     use risingwave_pb::common::WorkerNode;
-    use risingwave_pb::meta::FragmentLocation;
+    use risingwave_pb::meta::ActorLocation;
     use risingwave_pb::stream_plan::{stream_node, Dispatcher, StreamActor, StreamNode};
     use serde::{Serialize, Serializer};
     use warp::reject::Reject;
@@ -106,14 +106,14 @@ mod handlers {
     }
 
     #[derive(Serialize)]
-    pub struct JsonFragmentLocation {
+    pub struct JsonActorLocation {
         node: JsonWorkerNode,
         actor: Vec<JsonStreamActor>,
     }
 
-    impl From<&FragmentLocation> for JsonFragmentLocation {
-        fn from(that: &FragmentLocation) -> Self {
-            JsonFragmentLocation {
+    impl From<&ActorLocation> for JsonActorLocation {
+        fn from(that: &ActorLocation) -> Self {
+            JsonActorLocation {
                 node: that.get_node().into(),
                 actor: that
                     .get_actors()
@@ -188,13 +188,13 @@ mod handlers {
         }
     }
 
-    pub async fn list_actors_inner(srv: Service) -> MetaResult<Vec<JsonFragmentLocation>> {
+    pub async fn list_actors_inner(srv: Service) -> MetaResult<Vec<JsonActorLocation>> {
         let result = srv
             .stream_meta_manager
             .load_all_actors()
             .await?
             .iter()
-            .map(JsonFragmentLocation::from)
+            .map(JsonActorLocation::from)
             .collect_vec();
         Ok(result)
     }

@@ -8,7 +8,7 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::util::addr::get_host_port;
 use risingwave_pb::common::WorkerNode;
-use risingwave_pb::meta::{FragmentLocation, TableFragments};
+use risingwave_pb::meta::{ActorLocation, TableActors};
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::StreamActor;
 use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
@@ -174,7 +174,7 @@ impl StreamManager for DefaultStreamManager {
                 .to_rw_result_with(format!("failed to connect to {}", node_id))?;
 
             self.smm
-                .add_actors_to_node(&FragmentLocation {
+                .add_actors_to_node(&ActorLocation {
                     node: Some(node),
                     actors: stream_actors,
                 })
@@ -184,7 +184,7 @@ impl StreamManager for DefaultStreamManager {
         self.smm
             .add_table_actors(
                 &table_id.clone(),
-                &TableFragments {
+                &TableActors {
                     table_ref_id: Some(table_id.clone()),
                     actor_ids,
                 },

@@ -56,7 +56,7 @@
       </div>
 
       <h1 class="mt-5 mb-2 text-sm leading-6 font-semibold text-sky-500 dark:text-sky-400">
-        Stream Fragments
+        Stream Actors
       </h1>
       <div id="actors" class="w-full">
       </div>
@@ -95,19 +95,19 @@
   </div>
   <div id="message-${actors.node.id}"></div>
 </div>`
-  const createStreamFragment = (actors) => {
+  const createStreamActor = (actors) => {
     const nodeRadius = 20
     const edgeYRadius = 15
     const edgeXRadius = 100
     const titleMap = new Map
     const descMap = new Map
 
-    const createStreamFragmentNodes = (actor_id, node_id, node, edges) => {
+    const createStreamActorNodes = (actor_id, node_id, node, edges) => {
       if (node.input.length == 1) {
         const nodeId = `${actor_id}:${node_id}`
         titleMap.set(nodeId, node.node.desc.split('(')[0])
         descMap.set(nodeId, node.node.desc)
-        const [inNode, outNode] = createStreamFragmentNodes(actor_id, node_id + 1, node.input[0], edges)
+        const [inNode, outNode] = createStreamActorNodes(actor_id, node_id + 1, node.input[0], edges)
         edges.push([outNode, nodeId])
         return [inNode, nodeId]
       } else {
@@ -147,7 +147,7 @@
     actors.actor.forEach(actor => {
       const edges = []
       const actorId = actor.actor_id
-      const [inNode, outNode] = createStreamFragmentNodes(actorId, 0, actor.nodes, edges)
+      const [inNode, outNode] = createStreamActorNodes(actorId, 0, actor.nodes, edges)
       const dispatcherNodeId = `${actorId}:dispatcher`
       let dispatcherType = ""
       if (actor.downstream_actor_id.length == 0) {
@@ -320,7 +320,7 @@
     .then(data => data.forEach(
       data => {
         $("#actors").append(actors(data))
-        createStreamFragment(data)
+        createStreamActor(data)
       }))
 
 </script>

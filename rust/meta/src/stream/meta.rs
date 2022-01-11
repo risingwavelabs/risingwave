@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::common::WorkerNode;
-use risingwave_pb::meta::{FragmentLocation, TableFragments};
+use risingwave_pb::meta::{ActorLocation, TableActors};
 use risingwave_pb::plan::TableRefId;
 use tokio::sync::RwLock;
 
@@ -14,15 +14,15 @@ use crate::storage::MetaStoreRef;
 #[async_trait]
 pub trait StreamMetaManager: Sync + Send + 'static {
     /// [`add_actors_to_node`] adds actors to its belonging node.
-    async fn add_actors_to_node(&self, location: &FragmentLocation) -> Result<()>;
+    async fn add_actors_to_node(&self, location: &ActorLocation) -> Result<()>;
     /// [`load_all_actors`] loads all actors for all nodes.
-    async fn load_all_actors(&self) -> Result<Vec<FragmentLocation>>;
+    async fn load_all_actors(&self) -> Result<Vec<ActorLocation>>;
     /// [`get_actor_node`] returns which node the actor belongs to.
     async fn get_actor_node(&self, actor_id: u32) -> Result<WorkerNode>;
     /// [`add_table_actors`] stores table related actors.
-    async fn add_table_actors(&self, table_id: &TableRefId, actors: &TableFragments) -> Result<()>;
+    async fn add_table_actors(&self, table_id: &TableRefId, actors: &TableActors) -> Result<()>;
     /// [`get_table_actors`] returns table related actors.
-    async fn get_table_actors(&self, table_id: &TableRefId) -> Result<TableFragments>;
+    async fn get_table_actors(&self, table_id: &TableRefId) -> Result<TableActors>;
     /// [`drop_table_actors`] drops table actors info, used when `Drop MV`.
     async fn drop_table_actors(&self, table_id: &TableRefId) -> Result<()>;
 }
@@ -52,12 +52,12 @@ impl StreamMetaManager for StoredStreamMetaManager {
     /// [`MetaManager`] manages streaming related meta data. actors stored as follow category
     /// in meta store:
     ///
-    /// cf(node_actor): `node` -> `FragmentLocation`, defines all included actors in the node.
+    /// cf(node_actor): `node` -> `ActorLocation`, defines all included actors in the node.
     ///
     /// cf(actor): `actor_id` -> `Node`, defines which node the actor belongs.
     ///
-    /// cf(table_actor): `table_ref_id` -> `TableFragments`, defines table included actors.
-    async fn add_actors_to_node(&self, location: &FragmentLocation) -> Result<()> {
+    /// cf(table_actor): `table_ref_id` -> `TableActors`, defines table included actors.
+    async fn add_actors_to_node(&self, location: &ActorLocation) -> Result<()> {
         self.fragment_lock.write().await;
         let node = location.get_node().encode_to_vec();
         let actors = location.get_actors();
@@ -81,7 +81,7 @@ impl StreamMetaManager for StoredStreamMetaManager {
             .await;
         match node_pb {
             Ok(value) => {
-                let mut old_location = FragmentLocation::decode(value.as_slice())?;
+                let mut old_location = ActorLocation::decode(value.as_slice())?;
                 old_location.actors.extend(location.clone().actors);
                 write_batch.push((
                     self.config.get_node_actor_cf(),
@@ -108,7 +108,7 @@ impl StreamMetaManager for StoredStreamMetaManager {
         Ok(())
     }
 
-    async fn load_all_actors(&self) -> Result<Vec<FragmentLocation>> {
+    async fn load_all_actors(&self) -> Result<Vec<ActorLocation>> {
         self.fragment_lock.read().await;
         let locations_pb = self
             .meta_store_ref
@@ -117,7 +117,7 @@ impl StreamMetaManager for StoredStreamMetaManager {
 
         Ok(locations_pb
             .iter()
-            .map(|l| FragmentLocation::decode(l.as_slice()).unwrap())
+            .map(|l| ActorLocation::decode(l.as_slice()).unwrap())
             .collect::<Vec<_>>())
     }
 
@@ -135,7 +135,7 @@ impl StreamMetaManager for StoredStreamMetaManager {
         Ok(WorkerNode::decode(node_pb.as_slice())?)
     }
 
-    async fn add_table_actors(&self, table_id: &TableRefId, actors: &TableFragments) -> Result<()> {
+    async fn add_table_actors(&self, table_id: &TableRefId, actors: &TableActors) -> Result<()> {
         self.fragment_lock.write().await;
         self.meta_store_ref
             .put_cf(
@@ -147,7 +147,7 @@ impl StreamMetaManager for StoredStreamMetaManager {
             .await
     }
 
-    async fn get_table_actors(&self, table_id: &TableRefId) -> Result<TableFragments> {
+    async fn get_table_actors(&self, table_id: &TableRefId) -> Result<TableActors> {
         self.fragment_lock.read().await;
         let actors_pb = self
             .meta_store_ref
@@ -158,7 +158,7 @@ impl StreamMetaManager for StoredStreamMetaManager {
             )
             .await?;
 
-        Ok(TableFragments::decode(actors_pb.as_slice())?)
+        Ok(TableActors::decode(actors_pb.as_slice())?)
     }
 
     async fn drop_table_actors(&self, table_id: &TableRefId) -> Result<()> {
@@ -182,8 +182,8 @@ mod test {
 
     use super::*;
 
-    fn make_location(node: WorkerNode, actor_ids: Vec<u32>) -> FragmentLocation {
-        FragmentLocation {
+    fn make_location(node: WorkerNode, actor_ids: Vec<u32>) -> ActorLocation {
+        ActorLocation {
             node: Some(node),
             actors: actor_ids
                 .iter()
@@ -198,7 +198,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_node_fragment() -> Result<()> {
+    async fn test_node_actors() -> Result<()> {
         let meta_manager = StoredStreamMetaManager::new(MetaSrvEnv::for_test().await);
 
         // Add actors to node 1.
@@ -305,7 +305,7 @@ mod test {
         meta_manager
             .add_table_actors(
                 &table_ref_id,
-                &TableFragments {
+                &TableActors {
                     table_ref_id: Some(table_ref_id.clone()),
                     actor_ids: actor_ids.clone(),
                 },
