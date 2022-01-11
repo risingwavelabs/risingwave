@@ -13,6 +13,7 @@ use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::GetStreamRequest;
 use tonic::transport::{Channel, Endpoint};
 use tonic::{Request, Streaming};
+use tracing_futures::Instrument;
 
 use super::{Barrier, Executor, Message, PkIndicesRef, Result};
 use crate::executor::{Mutation, PkIndices};
@@ -124,7 +125,12 @@ impl ReceiverExecutor {
 #[async_trait]
 impl Executor for ReceiverExecutor {
     async fn next(&mut self) -> Result<Message> {
-        let msg = self.receiver.next().await.unwrap(); // TODO: remove unwrap
+        let msg = self
+            .receiver
+            .next()
+            .instrument(tracing::trace_span!("idle"))
+            .await
+            .unwrap(); // TODO: remove unwrap
         Ok(msg)
     }
 
@@ -200,7 +206,9 @@ impl Executor for MergeExecutor {
             for ch in self.active.drain(..) {
                 futures.push(ch.into_future());
             }
-            let ((message, from), _id, remains) = select_all(futures).await;
+            let ((message, from), _id, remains) = select_all(futures)
+                .instrument(tracing::trace_span!("idle"))
+                .await;
             for fut in remains {
                 self.active.push(fut.into_inner().unwrap());
             }

@@ -23,6 +23,7 @@ lazy_static = "1"
 log = "0.4"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
+opentelemetry = { version = "*", features = ["trace"] }
 paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = "0.9"

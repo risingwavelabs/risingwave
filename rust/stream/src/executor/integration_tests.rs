@@ -39,16 +39,12 @@ impl MockConsumer {
 
 #[async_trait]
 impl StreamConsumer for MockConsumer {
-    async fn next(&mut self) -> Result<bool> {
+    async fn next(&mut self) -> Result<Option<Barrier>> {
         match self.input.next().await? {
             Message::Chunk(chunk) => self.data.lock().unwrap().push(chunk),
-            Message::Barrier(Barrier {
-                epoch: _,
-                mutation: Mutation::Stop,
-            }) => return Ok(false),
-            _ => {} // do nothing
+            Message::Barrier(barrier) => return Ok(Some(barrier)),
         }
-        Ok(true)
+        Ok(None)
     }
 }
 

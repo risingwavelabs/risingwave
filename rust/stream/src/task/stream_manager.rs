@@ -315,7 +315,11 @@ impl StreamManagerCore {
                 assert!(!outputs.is_empty());
                 Box::new(DispatchExecutor::new(
                     input,
-                    HashDataDispatcher::new(outputs, vec![dispatcher.get_column_idx() as usize]),
+                    HashDataDispatcher::new(
+                        downstreams.to_vec(),
+                        outputs,
+                        vec![dispatcher.get_column_idx() as usize],
+                    ),
                     actor_id,
                     self.context.clone(),
                 ))
@@ -377,11 +381,18 @@ impl StreamManagerCore {
 
         // Create the input executor before creating itself
         // The node with no input must be a `MergeNode`
-        let mut input: Vec<Box<dyn Executor>> = node
-            .input
-            .iter()
-            .map(|input| self.create_nodes_inner(actor_id, input, env.clone(), store.clone()))
-            .collect::<Result<Vec<_>>>()?;
+        let mut input: Vec<Box<dyn Executor>> =
+            node.input
+                .iter()
+                .map(|input| self.create_nodes_inner(actor_id, input, env.clone(), store.clone()))
+                .enumerate()
+                .map(|(input_pos, input)| {
+                    let input = input?;
+                    let identity = input.identity().to_string();
+                    Ok::<_, RwError>(Box::new(TraceExecutor::new(input, identity, input_pos))
+                        as Box<dyn Executor>)
+                })
+                .try_collect()?;
 
         let table_manager = env.table_manager();
         let source_manager = env.source_manager();
@@ -622,10 +633,6 @@ impl StreamManagerCore {
         };
 
         let executor = executor?;
-        let identity = executor.identity().to_string();
-
-        let executor = Box::new(TraceExecutor::new(executor, identity));
-
         Ok(executor)
     }
 
@@ -754,6 +761,8 @@ impl StreamManagerCore {
             let actor_id = *actor_id;
             let actor = self.actors.remove(&actor_id).unwrap();
             let executor = self.create_nodes(actor_id, actor.get_nodes(), env.clone())?;
+            let identity = executor.identity().to_string();
+            let executor = Box::new(TraceExecutor::new(executor, identity, 0));
             let dispatcher = self.create_dispatcher(
                 executor,
                 actor.get_dispatcher(),

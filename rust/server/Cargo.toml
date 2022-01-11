@@ -25,6 +25,9 @@ log = "0.4"
 log4rs = "1"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
+
+opentelemetry = { version = "*", features = ["rt-tokio", "trace"] }
+opentelemetry-jaeger = { version = "*", features = ["rt-tokio"] }
 paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = "0.9"
@@ -50,7 +53,8 @@ tokio-stream = "0.1"
 toml = "0.5.8"
 tonic = "0.6"
 tracing = "0.1"
-tracing-subscriber = "0.2"
+tracing-opentelemetry = "0.16"
+tracing-subscriber = "0.3"
 twox-hash = "1"
 url = "2"
 

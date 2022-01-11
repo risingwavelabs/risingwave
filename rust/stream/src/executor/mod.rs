@@ -203,5 +203,5 @@ async fn simple_executor_next<E: SimpleExecutor>(executor: &mut E) -> Result<Mes
 #[async_trait]
 pub trait StreamConsumer: Send + Debug + 'static {
     /// Run next stream chunk. returns whether the stream is terminated
-    async fn next(&mut self) -> Result<bool>;
+    async fn next(&mut self) -> Result<Option<Barrier>>;
 }

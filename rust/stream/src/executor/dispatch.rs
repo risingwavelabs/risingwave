@@ -8,6 +8,7 @@ use risingwave_common::array::{Op, RwError};
 use risingwave_common::error::ErrorCode;
 use risingwave_common::util::addr::{get_host_port, is_local_address};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
+use tracing::event;
 
 use super::{Barrier, Executor, Message, Mutation, Result, StreamChunk, StreamConsumer};
 use crate::task::{SharedContext, LOCAL_OUTPUT_CHANNEL_SIZE};
@@ -191,11 +192,16 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
 
 #[async_trait]
 impl<Inner: DataDispatcher + Send + Sync + 'static> StreamConsumer for DispatchExecutor<Inner> {
-    async fn next(&mut self) -> Result<bool> {
+    async fn next(&mut self) -> Result<Option<Barrier>> {
         let msg = self.input.next().await?;
-        let terminated = msg.is_terminate();
+        let barrier = if let Message::Barrier(ref barrier) = msg {
+            Some(barrier.clone())
+        } else {
+            None
+        };
         self.dispatch(msg).await?;
-        Ok(!terminated)
+
+        Ok(barrier)
     }
 }
 
@@ -243,6 +249,7 @@ impl DataDispatcher for RoundRobinDataDispatcher {
 }
 
 pub struct HashDataDispatcher {
+    fragment_ids: Vec<u32>,
     outputs: Vec<Box<dyn Output>>,
     keys: Vec<usize>,
 }
@@ -257,8 +264,12 @@ impl Debug for HashDataDispatcher {
 }
 
 impl HashDataDispatcher {
-    pub fn new(outputs: Vec<Box<dyn Output>>, keys: Vec<usize>) -> Self {
-        Self { outputs, keys }
+    pub fn new(fragment_ids: Vec<u32>, outputs: Vec<Box<dyn Output>>, keys: Vec<usize>) -> Self {
+        Self {
+            fragment_ids,
+            outputs,
+            keys,
+        }
     }
 }
 
@@ -347,11 +358,24 @@ impl DataDispatcher for HashDataDispatcher {
         let ops = new_ops;
 
         // individually output StreamChunk integrated with vis_map
-        for (vis_map, output) in vis_maps.into_iter().zip(self.outputs.iter_mut()) {
+        for ((vis_map, output), downstream) in vis_maps
+            .into_iter()
+            .zip(self.outputs.iter_mut())
+            .zip(self.fragment_ids.iter())
+        {
             let vis_map = vis_map.try_into().unwrap();
             // columns is not changed in this function
             let new_stream_chunk = StreamChunk::new(ops.clone(), columns.clone(), Some(vis_map));
-            output.send(Message::Chunk(new_stream_chunk)).await?;
+            if new_stream_chunk.cardinality() > 0 {
+                event!(
+                    tracing::Level::TRACE,
+                    msg = "chunk",
+                    downstream = downstream,
+                    "send = \n{:#?}",
+                    new_stream_chunk
+                );
+                output.send(Message::Chunk(new_stream_chunk)).await?;
+            }
         }
         Ok(())
     }
@@ -443,11 +467,15 @@ impl SenderConsumer {
 
 #[async_trait]
 impl StreamConsumer for SenderConsumer {
-    async fn next(&mut self) -> Result<bool> {
+    async fn next(&mut self) -> Result<Option<Barrier>> {
         let message = self.input.next().await?;
-        let terminated = message.is_terminate();
+        let barrier = if let Message::Barrier(ref barrier) = message {
+            Some(barrier.clone())
+        } else {
+            None
+        };
         self.channel.send(message).await?;
-        Ok(!terminated)
+        Ok(barrier)
     }
 }
 
@@ -503,7 +531,11 @@ mod tests {
             .iter()
             .map(|data| Box::new(MockOutput::new(data.clone())) as Box<dyn Output>)
             .collect::<Vec<_>>();
-        let mut hash_dispatcher = HashDataDispatcher::new(outputs, key_indices.to_vec());
+        let mut hash_dispatcher = HashDataDispatcher::new(
+            (0..outputs.len() as u32).collect(),
+            outputs,
+            key_indices.to_vec(),
+        );
 
         let chunk = StreamChunk::new(
             vec![
@@ -673,7 +705,11 @@ mod tests {
             .iter()
             .map(|data| Box::new(MockOutput::new(data.clone())) as Box<dyn Output>)
             .collect::<Vec<_>>();
-        let mut hash_dispatcher = HashDataDispatcher::new(outputs, key_indices.to_vec());
+        let mut hash_dispatcher = HashDataDispatcher::new(
+            (0..outputs.len() as u32).collect(),
+            outputs,
+            key_indices.to_vec(),
+        );
 
         let mut ops = Vec::new();
         for idx in 0..cardinality {
@@ -723,31 +759,36 @@ mod tests {
 
         for (output_idx, output) in output_data_vecs.into_iter().enumerate() {
             let guard = output.lock().unwrap();
-            assert_eq!(guard.len(), 1);
-            let message = guard.get(0).unwrap();
-            let real_chunk = match message {
-                Message::Chunk(chunk) => chunk,
-                _ => panic!(),
-            };
-            real_chunk
-                .columns()
-                .iter()
-                .zip(output_cols[output_idx].iter())
-                .for_each(|(real_col, expect_col)| {
-                    let real_vals = real_chunk
-                        .visibility()
-                        .as_ref()
-                        .unwrap()
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, vis)| *vis)
-                        .map(|(row_idx, _)| {
-                            real_col.array_ref().as_int32().value_at(row_idx).unwrap()
-                        })
-                        .collect::<Vec<_>>();
-                    assert_eq!(real_vals.len(), expect_col.len());
-                    assert_eq!(real_vals, *expect_col);
-                });
+            // It is possible that there is no chunks, as a key doesn't belong to any hash bucket.
+            assert!(guard.len() <= 1);
+            if guard.is_empty() {
+                assert!(output_cols[output_idx].iter().all(|x| x.is_empty()));
+            } else {
+                let message = guard.get(0).unwrap();
+                let real_chunk = match message {
+                    Message::Chunk(chunk) => chunk,
+                    _ => panic!(),
+                };
+                real_chunk
+                    .columns()
+                    .iter()
+                    .zip(output_cols[output_idx].iter())
+                    .for_each(|(real_col, expect_col)| {
+                        let real_vals = real_chunk
+                            .visibility()
+                            .as_ref()
+                            .unwrap()
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, vis)| *vis)
+                            .map(|(row_idx, _)| {
+                                real_col.array_ref().as_int32().value_at(row_idx).unwrap()
+                            })
+                            .collect::<Vec<_>>();
+                        assert_eq!(real_vals.len(), expect_col.len());
+                        assert_eq!(real_vals, *expect_col);
+                    });
+            }
         }
     }
 }
