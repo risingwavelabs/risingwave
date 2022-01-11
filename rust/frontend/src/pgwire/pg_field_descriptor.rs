@@ -1,5 +1,5 @@
 /// Port from PgFieldDescriptor.java
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct PgFieldDescriptor {
     name: String,
     table_oid: i32,
@@ -72,7 +72,7 @@ impl PgFieldDescriptor {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum TypeOid {
     Boolean,
     BigInt,
