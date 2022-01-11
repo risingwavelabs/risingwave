@@ -173,7 +173,6 @@ async fn test_hummock_table() -> Result<()> {
     let env = MetaSrvEnv::for_test_with_sled().await;
     let (hummock_manager, _) = create_hummock_manager(env.clone(), &hummock_config).await?;
     let context = hummock_manager.create_hummock_context().await?;
-    let manager_config = env.config();
 
     let epoch: u64 = 1;
     let mut table_id = 1;
@@ -192,11 +191,11 @@ async fn test_hummock_table() -> Result<()> {
     // Confirm tables are successfully added
     let fetched_tables = env
         .meta_store()
-        .list_cf(manager_config.get_hummock_table_cf())
+        .list_cf(env.config().get_hummock_table_cf())
         .await?;
     let fetched_tables: Vec<Table> = fetched_tables
         .iter()
-        .map(|t| -> Table { Table::decode(t.as_slice()).unwrap() })
+        .map(|v| -> Table { Table::decode(v.as_slice()).unwrap() })
         .sorted_by_key(|t| t.id)
         .collect();
     assert_eq!(original_tables, fetched_tables);

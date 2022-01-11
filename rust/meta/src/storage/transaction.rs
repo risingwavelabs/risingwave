@@ -1,5 +1,4 @@
-use crate::manager::Epoch;
-use crate::storage::OperationOption;
+use crate::storage::{Key, KeyValueVersion, OperationOption, Value};
 
 /// A `Transaction` executes several writes(aka. operations) to meta store atomically with optional
 /// preconditions checked. It executes as follow:
@@ -14,16 +13,20 @@ pub trait Transaction: Send + Sync + 'static {
 }
 
 pub enum Operation {
-    // key, value, options
-    Put(Vec<u8>, Vec<u8>, Vec<OperationOption>),
-    // key, options
-    Delete(Vec<u8>, Vec<OperationOption>),
+    /// `put` key value pairs.
+    /// If `WithVersion` is not specified, a default global version is used.
+    Put(Key, Value, Vec<OperationOption>),
+    /// `delete` key value pairs based on `OperationOption`s.
+    /// If `WithVersion` is not specified, all versions of this `Key` are matched and deleted.
+    /// Otherwise, only specific version of this `Key` is deleted.
+    Delete(Key, Vec<OperationOption>),
 }
 
 /// Preconditions are checked in the beginning of a transaction
 pub enum Precondition {
     KeyExists {
-        key: Vec<u8>,
-        version: Option<Epoch>,
+        key: Key,
+        /// If version is None, a default global version is used.
+        version: Option<KeyValueVersion>,
     },
 }

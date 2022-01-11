@@ -391,7 +391,7 @@ impl DefaultHummockManagerInner {
             .await?;
         Ok(table_list
             .iter()
-            .map(|t| Table::decode(t.as_slice()).unwrap())
+            .map(|v| Table::decode(v.as_slice()).unwrap())
             .collect())
     }
 
@@ -509,20 +509,18 @@ impl DefaultHummockManager {
 
     /// Restore the hummock context related data in meta store to a consistent state.
     async fn restore_context_meta(&self) -> Result<()> {
-        let hummock_context_list;
-        {
-            let inner_guard = self.inner.read().await;
-            hummock_context_list = inner_guard
-                .env
-                .meta_store_ref()
-                .list_cf(self.env.config().get_hummock_context_cf())
-                .await?;
-        }
-
-        let mut guard = self.context_expires_at.write().await;
+        let hummock_context_list = self
+            .inner
+            .read()
+            .await
+            .env
+            .meta_store_ref()
+            .list_cf(self.env.config().get_hummock_context_cf())
+            .await?;
+        let mut context_guard = self.context_expires_at.write().await;
         hummock_context_list.iter().for_each(|v| {
             let hummock_context: HummockContext = HummockContext::decode(v.as_slice()).unwrap();
-            guard.insert(
+            context_guard.insert(
                 hummock_context.identifier,
                 Instant::now().add(Duration::from_millis(self.hummock_config.context_ttl)),
             );
@@ -541,6 +539,7 @@ impl DefaultHummockManager {
                 if !matches!(err.inner(), ErrorCode::ItemNotFound(_)) {
                     return Err(err);
                 }
+                // Use the absence of current_version_id to indicate a uninitialized meta store.
                 // reset the meta data
                 let mut transaction = self.env.meta_store_ref().get_transaction();
                 let init_version_id: HummockVersionId = 0;

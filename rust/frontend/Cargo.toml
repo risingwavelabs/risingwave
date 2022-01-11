@@ -24,4 +24,5 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", 
 tonic = "0.6"
 
 [dev-dependencies]
+tempfile = "3"
 tokio-postgres = "0.7"

@@ -24,7 +24,7 @@ use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::id_service::IdGeneratorServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
-use crate::storage::{MemStore, MetaStoreRef, SledMetaStore};
+use crate::storage::{MetaStoreRef, SledMetaStore};
 use crate::stream::{DefaultStreamManager, StoredStreamMetaManager};
 
 pub enum MetaStoreBackend {
@@ -40,7 +40,7 @@ pub async fn rpc_serve_with_listener(
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     let config = Arc::new(Config::default());
     let meta_store_ref: MetaStoreRef = match meta_store_backend {
-        MetaStoreBackend::Mem => Arc::new(MemStore::new()),
+        MetaStoreBackend::Mem => panic!("Use SledMetaStore instead"),
         MetaStoreBackend::Sled(db_path) => Arc::new(SledMetaStore::new(db_path.as_path()).unwrap()),
     };
     let epoch_generator_ref = Arc::new(MemEpochGenerator::new());
@@ -125,7 +125,13 @@ mod tests {
     #[tokio::test]
     async fn test_server_shutdown() {
         let addr = get_host_port("127.0.0.1:9527").unwrap();
-        let (join_handle, shutdown_send) = rpc_serve(addr, None, None, MetaStoreBackend::Mem).await;
+        let (join_handle, shutdown_send) = rpc_serve(
+            addr,
+            None,
+            None,
+            MetaStoreBackend::Sled(tempfile::tempdir().unwrap().into_path()),
+        )
+        .await;
         shutdown_send.send(()).unwrap();
         join_handle.await.unwrap();
     }

@@ -13,11 +13,15 @@ use tokio::sync::broadcast::{Receiver, Sender};
 use tokio::task::JoinHandle;
 use tonic::transport::Channel;
 
+// TODO move this file to storage crate
+
 // TODO make configurable
 /// maximum number for `HummockClient` to retry connection creation.
 const CONNECT_RETRY_MAX: isize = isize::MAX;
 /// time interval for `HummockClient` to retry connection creation, at milliseconds.
 const CONNECT_RETRY_INTERVAL: u64 = 300;
+/// connect timeout, at milliseconds
+const CONNECT_TIMEOUT: u64 = 1000;
 
 pub struct HummockClient {
     hummock_context: Arc<HummockContext>,
@@ -39,9 +43,14 @@ impl HummockClient {
 
     async fn new_rpc_client(endpoint: &str) -> Result<HummockManagerServiceClient<Channel>> {
         for _ in 0..CONNECT_RETRY_MAX {
-            match HummockManagerServiceClient::connect(endpoint.to_owned()).await {
-                Ok(client) => {
-                    return Ok(client);
+            match tonic::transport::Endpoint::new(endpoint.to_owned())
+                .unwrap()
+                .connect_timeout(Duration::from_millis(CONNECT_TIMEOUT))
+                .connect()
+                .await
+            {
+                Ok(channel) => {
+                    return Ok(HummockManagerServiceClient::new(channel));
                 }
                 Err(_) => {
                     tokio::time::sleep(Duration::from_millis(CONNECT_RETRY_INTERVAL)).await;
@@ -126,8 +135,8 @@ mod tests {
     use risingwave_common::error::Result;
     use risingwave_pb::hummock::{
         AbortEpochRequest, AddTablesRequest, CommitEpochRequest, GetTablesRequest, HummockVersion,
-        InvalidateHummockContextRequest, PinVersionRequest, PinVersionResponse, Table,
-        UnpinVersionRequest,
+        InvalidateHummockContextRequest, PinVersionRequest, PinVersionResponse,
+        RefreshHummockContextRequest, Table, UnpinVersionRequest,
     };
     use risingwave_storage::hummock::value::HummockValue;
     use risingwave_storage::hummock::{TableBuilder, TableBuilderOptions};
@@ -533,6 +542,50 @@ mod tests {
         shutdown_send.send(()).unwrap();
         join_handle.await.unwrap();
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_retry_connect() -> Result<()> {
+        let hummock_config = hummock::Config {
+            context_ttl: 100000,
+            context_check_interval: 300,
+        };
+
+        // pick a port
+        let port = {
+            let listener = TcpListener::bind(format!("127.0.0.1:{}", 0)).await.unwrap();
+            let address = listener.local_addr().unwrap();
+            address.port() as u32
+        };
+        let server_join_handle = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            // There is still a chance the port was already used and then failed this test. But I
+            // think it is acceptable.
+            let (_, join_handle, shutdown_send) = start_server(&hummock_config, Some(port)).await;
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            shutdown_send.send(()).unwrap();
+            join_handle.await.unwrap();
+        });
+
+        let result = tokio::time::timeout(Duration::from_secs(10), async move {
+            HummockClient::new(&format!("http://127.0.0.1:{}", port)).await
+        })
+        .await;
+        // shouldn't timeout
+        assert!(result.is_ok());
+
+        let hummock_client = result.unwrap()?;
+        let result = hummock_client
+            .rpc_client()
+            .refresh_hummock_context(RefreshHummockContextRequest {
+                context_identifier: hummock_client.hummock_context().identifier,
+            })
+            .await;
+        assert!(result.is_ok());
+
+        let result = server_join_handle.await;
+        assert!(result.is_ok());
         Ok(())
     }
 }

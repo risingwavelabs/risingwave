@@ -367,7 +367,13 @@ mod tests {
     async fn test_create_table_remote() {
         let addr = get_host_port("127.0.0.1:9526").unwrap();
         // Run a meta node server.
-        let (_join_handle, _shutdown) = rpc_serve(addr, None, None, MetaStoreBackend::Mem).await;
+        let (_join_handle, _shutdown) = rpc_serve(
+            addr,
+            None,
+            None,
+            MetaStoreBackend::Sled(tempfile::tempdir().unwrap().into_path()),
+        )
+        .await;
         let endpoint = Endpoint::from_shared(format!("http://{}", addr));
         let mut catalog_client = CatalogServiceClient::new(
             endpoint

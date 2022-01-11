@@ -1080,6 +1080,7 @@ dependencies = [
  "risingwave_meta",
  "risingwave_sqlparser",
  "smallvec",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-postgres",
