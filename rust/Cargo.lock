@@ -1061,6 +1061,7 @@ dependencies = [
  "downcast-rs",
  "dyn-clone",
  "itertools 0.10.3",
+ "lazy_static",
  "log",
  "log4rs",
  "paste",

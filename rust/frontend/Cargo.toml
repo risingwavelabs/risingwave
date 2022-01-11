@@ -10,6 +10,7 @@ clap = { version = "3", features = ["derive"] }
 downcast-rs = "1.2"
 dyn-clone = "1.0.4"
 itertools = "0.10"
+lazy_static = "1"
 log = "0.4"
 log4rs = "1"
 paste = "1"
