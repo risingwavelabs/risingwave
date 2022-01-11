@@ -1,12 +1,14 @@
 use std::net::SocketAddr;
+use std::time::Duration;
 
-use risingwave_common::error::ErrorCode::MetaError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{Result, ToRwResult};
+use risingwave_common::try_match_expand;
 use risingwave_pb::common::HostAddress;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::{AddWorkerNodeRequest, ClusterType, HeartbeatRequest};
-use tonic::transport::Channel;
+use tonic::transport::{Channel, Endpoint};
 
 pub struct MetaClient {
     pub cluster_client: ClusterServiceClient<Channel>,
@@ -14,24 +16,23 @@ pub struct MetaClient {
 }
 
 impl MetaClient {
-    pub async fn new(endpoint: &str) -> Result<Self> {
-        let cluster_client = ClusterServiceClient::connect(endpoint.to_owned())
+    /// Connect to the meta server `addr`.
+    pub async fn new(addr: &str) -> Result<Self> {
+        let channel = Endpoint::from_shared(addr.to_string())
+            .map_err(|e| InternalError(format!("{}", e)))?
+            .connect_timeout(Duration::from_secs(5))
+            .connect()
             .await
-            .map_err(|e| RwError::from(MetaError(format!("cluster client init failed: {:?}", e))))
-            .unwrap();
-        let heartbeat_client = HeartbeatServiceClient::connect(endpoint.to_owned())
-            .await
-            .map_err(|e| RwError::from(MetaError(format!("heartbeat client init failed: {:?}", e))))
-            .unwrap();
-        // TODO: add some mechanism on connection error.
-
+            .to_rw_result_with(format!("failed to connect to {}", addr))?;
+        let cluster_client = ClusterServiceClient::new(channel.clone());
+        let heartbeat_client = HeartbeatServiceClient::new(channel);
         Ok(Self {
             cluster_client,
             heartbeat_client,
         })
     }
 
-    /// Register this cluster and return the corresponding worker id.
+    /// Register the current node to the cluster and return the corresponding worker id.
     pub async fn register(&self, addr: SocketAddr) -> Result<u32> {
         let host_address = HostAddress {
             host: addr.ip().to_string(),
@@ -41,20 +42,16 @@ impl MetaClient {
             cluster_type: ClusterType::ComputeNode as i32,
             host: Some(host_address),
         };
-        let res = self
+        let resp = self
             .cluster_client
             .to_owned()
             .add_worker_node(request)
-            .await;
-        match res {
-            Ok(res_inner) => match res_inner.into_inner().node {
-                Some(worker_node) => Ok(worker_node.id),
-                _ => Err(RwError::from(MetaError("".to_string()))),
-            },
-            _ => Err(RwError::from(MetaError(
-                "worker node already registered".to_string(),
-            ))),
-        }
+            .await
+            .to_rw_result()?
+            .into_inner();
+        let worker_node =
+            try_match_expand!(resp.node, Some, "AddWorkerNodeResponse::node is empty")?;
+        Ok(worker_node.id)
     }
 
     /// Send heartbeat signal to meta service.
@@ -63,10 +60,12 @@ impl MetaClient {
             node_id,
             cluster_type: ClusterType::ComputeNode as i32,
         };
-        let res = self.heartbeat_client.to_owned().heartbeat(request).await;
-        match res {
-            Ok(_res_inner) => Ok(()),
-            _ => Err(RwError::from(MetaError("".to_string()))),
-        }
+        let _resp = self
+            .heartbeat_client
+            .to_owned()
+            .heartbeat(request)
+            .await
+            .to_rw_result()?;
+        Ok(())
     }
 }
