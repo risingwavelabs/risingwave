@@ -62,6 +62,7 @@ jobs:
         uses: actions/checkout@v2
         with:
           fetch-depth: 0
+
       - uses: actions/download-artifact@v2
         name: Download compute-node binary
         with:
@@ -95,9 +96,9 @@ jobs:
       - name: Install required components
         run: |
           sudo apt-get update -yy
-          sudo apt-get install --upgrade -yy tmux wget postgresql
+          sudo apt-get install --upgrade -yy tmux postgresql
 
-      - name: Configure RiseLAB
+      - name: Generate RiseLAB CI config
         run: |
           cp riselab-components.ci.env riselab-components.user.env
 
@@ -107,9 +108,12 @@ jobs:
 
       - name: Download cargo-make
         run: |
-          wget https://github.com/sagiegurari/cargo-make/releases/download/0.35.7/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip -O ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip
+          curl -fL https://github.com/sagiegurari/cargo-make/releases/download/0.35.7/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip -o ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip
           unzip ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip -d ~
           mv ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl ~/cargo-make
+
+      - name: Prepare RiseLAB playground
+        run: ~/cargo-make/makers pre-start-playground
 
       - name: e2e test w/ Hummock # Note: RiseLAB cluster cannot be used to run e2e coverage unless we rebuild frontend in this workflow
         run: |
