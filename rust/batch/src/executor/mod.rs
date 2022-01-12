@@ -18,7 +18,7 @@ pub use seq_scan::*;
 use sort_agg::*;
 use top_n::*;
 
-use crate::executor::create_stream::CreateStreamExecutor;
+use crate::executor::create_source::CreateSourceExecutor;
 pub use crate::executor::create_table::CreateTableExecutor;
 use crate::executor::generate_series::GenerateSeriesI32Executor;
 pub use crate::executor::insert::InsertExecutor;
@@ -29,7 +29,7 @@ pub use crate::executor::stream_scan::StreamScanExecutor;
 use crate::executor::values::ValuesExecutor;
 use crate::task::{BatchTaskEnv, TaskId};
 
-mod create_stream;
+mod create_source;
 mod create_table;
 mod drop_stream;
 mod drop_table;
@@ -134,7 +134,7 @@ impl<'a> ExecutorBuilder<'a> {
           PlanNodeType::Project => ProjectionExecutor,
           PlanNodeType::SortAgg => SortAggExecutor,
           PlanNodeType::OrderBy => OrderByExecutor,
-          PlanNodeType::CreateSource => CreateStreamExecutor,
+          PlanNodeType::CreateSource => CreateSourceExecutor,
           PlanNodeType::SourceScan => StreamScanExecutor,
           PlanNodeType::TopN => TopNExecutor,
           PlanNodeType::Limit => LimitExecutor,

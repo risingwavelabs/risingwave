@@ -19,6 +19,8 @@ mod pulsar;
 mod table;
 mod table_v2;
 
+extern crate maplit;
+
 #[derive(Clone, Debug)]
 pub enum SourceConfig {
     Kafka(HighLevelKafkaSourceConfig),

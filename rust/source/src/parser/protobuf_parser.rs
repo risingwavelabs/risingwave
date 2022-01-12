@@ -1,17 +1,23 @@
 use std::path::Path;
 
-use itertools::Itertools;
 use protobuf::descriptor::FileDescriptorSet;
 use protobuf::RepeatedField;
 use risingwave_common::array::Op;
-use risingwave_common::error::ErrorCode::ProtocolError;
+use risingwave_common::error::ErrorCode::{
+    InternalError, ItemNotFound, NotImplementedError, ProtocolError,
+};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataTypeKind, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
+use risingwave_common::types::{
+    BoolType, DataTypeKind, DataTypeRef, Datum, Decimal, Float32Type, Float64Type, Int32Type,
+    Int64Type, OrderedF32, OrderedF64, ScalarImpl, StringType,
+};
 use risingwave_common::vector_op::cast::str_to_date;
+use risingwave_pb::plan::ColumnDesc;
 use serde::de::Deserialize;
 use serde_protobuf::de::Deserializer;
-use serde_protobuf::descriptor::Descriptors;
+use serde_protobuf::descriptor::{Descriptors, FieldType};
 use serde_value::Value;
+use url::Url;
 
 use crate::{Event, SourceColumnDesc, SourceParser};
 
@@ -54,14 +60,15 @@ impl ProtobufParser {
         Ok(deserialized_message)
     }
 
-    /// Generate a `ProtobufParser`
+    /// Create from local path of protobuf files.
     /// * `inputs`, `includes`: protobuf files path and include dir
     /// * `message_name`: a message name that needs to correspond
-    pub fn new(includes: &[String], inputs: &[String], message_name: &str) -> Result<Self> {
-        let includes = includes.iter().map(Path::new).collect_vec();
-        let inputs = inputs.iter().map(Path::new).collect_vec();
-
-        let parsed_result = protobuf_codegen_pure::parse_and_typecheck(&includes, &inputs)
+    pub fn new_from_local(
+        includes: &[&Path],
+        inputs: &[&Path],
+        message_name: &str,
+    ) -> Result<Self> {
+        let parsed_result = protobuf_codegen_pure::parse_and_typecheck(includes, inputs)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
         let mut file_descriptor_set = FileDescriptorSet::new();
@@ -71,6 +78,58 @@ impl ProtobufParser {
             descriptors: Descriptors::from_proto(&file_descriptor_set),
             message_name: Self::normalize_message_name(message_name),
         })
+    }
+
+    /// Create a protobuf parser from a URL.
+    pub fn new(location: &str, message_name: &str) -> Result<Self> {
+        let url = Url::parse(location)
+            .map_err(|e| InternalError(format!("failed to parse url ({}): {}", location, e)))?;
+
+        match url.scheme() {
+            "file" => {
+                let path = url.to_file_path().map_err(|_| {
+                    RwError::from(InternalError(format!("illegal path: {}", location)))
+                })?;
+
+                if path.is_dir() {
+                    // TODO(TaoWu): Allow user to specify a directory of protos.
+                    return Err(RwError::from(ProtocolError(
+                        "schema file location must not be a directory".to_string(),
+                    )));
+                }
+                Self::new_from_local(&[path.parent().unwrap()], &[path.as_path()], message_name)
+            }
+            scheme => Err(RwError::from(ProtocolError(format!(
+                "path scheme {} is not supported",
+                scheme
+            )))),
+        }
+    }
+
+    /// Maps the protobuf schema to relational schema.
+    pub fn map_to_columns(&self) -> Result<Vec<ColumnDesc>> {
+        let msg = match self.descriptors.message_by_name(self.message_name.as_str()) {
+            Some(msg) => msg,
+            None => {
+                return Err(
+                    ItemNotFound(format!("{} is not found in proto", self.message_name)).into(),
+                )
+            }
+        };
+        msg.fields()
+            .iter()
+            .map(|f| {
+                let field_type = f.field_type(&self.descriptors);
+                let column_type =
+                    protobuf_type_mapping(&field_type, f.is_repeated())?.to_protobuf()?;
+                Ok(ColumnDesc {
+                    column_type: Some(column_type),
+                    is_primary: false,
+                    name: f.name().to_string(),
+                    ..Default::default()
+                })
+            })
+            .collect::<Result<Vec<ColumnDesc>>>()
     }
 }
 
@@ -85,6 +144,27 @@ macro_rules! protobuf_match_type {
       _ => None,
     }).map($target_scalar_type)
   };
+}
+
+/// Maps a protobuf field type to a DB column type.
+fn protobuf_type_mapping(field_type: &FieldType, is_repeated: bool) -> Result<DataTypeRef> {
+    if is_repeated {
+        return Err(NotImplementedError("repeated field is not supported".to_string()).into());
+    }
+    let t = match field_type {
+        FieldType::Double => Float64Type::create(true),
+        FieldType::Float => Float32Type::create(true),
+        FieldType::Int64 | FieldType::SFixed64 | FieldType::SInt64 => Int64Type::create(true),
+        FieldType::Int32 | FieldType::SFixed32 | FieldType::SInt32 => Int32Type::create(true),
+        FieldType::Bool => BoolType::create(true),
+        FieldType::String => StringType::create(true, 0, DataTypeKind::Varchar),
+        actual_type => {
+            return Err(
+                NotImplementedError(format!("unsupported field type: {:?}", actual_type)).into(),
+            );
+        }
+    };
+    Ok(t)
 }
 
 impl SourceParser for ProtobufParser {
@@ -153,11 +233,13 @@ impl SourceParser for ProtobufParser {
 mod tests {
     use std::io::Write;
 
+    use maplit::hashmap;
     use risingwave_common::error::Result;
     use risingwave_common::types::{
         DataTypeKind, DateType, Float32Type, Int32Type, Int64Type, ScalarImpl, StringType,
     };
     use risingwave_common::vector_op::cast::str_to_date;
+    use risingwave_pb::plan::ColumnDesc;
     use serde_value::Value;
     use tempfile::Builder;
 
@@ -191,28 +273,13 @@ mod tests {
             .tempfile()
             .unwrap();
 
-        let dir = temp_file.path().parent().unwrap().to_str().unwrap();
         let path = temp_file.path().to_str().unwrap();
-
         let mut file = temp_file.as_file();
-
         file.write_all(PROTO_FILE_DATA.as_ref())
             .expect("writing binary to test file");
 
-        ProtobufParser::new(&[dir.to_string()], &[path.to_string()], ".test.TestRecord")
+        ProtobufParser::new(format!("file://{}", path).as_str(), ".test.TestRecord")
     }
-
-    macro_rules! map(
-    { $($key:expr => $value:expr),+ } => {
-        {
-            let mut m = ::std::collections::HashMap::new();
-            $(
-                m.insert($key, $value);
-            )+
-            m
-        }
-     };
-);
 
     #[test]
     fn test_proto_message_name() {
@@ -233,7 +300,7 @@ mod tests {
 
     #[test]
     fn test_create_parser() {
-        assert!(create_parser().is_ok())
+        create_parser().unwrap();
     }
 
     #[test]
@@ -247,7 +314,7 @@ mod tests {
             _ => panic!("value should be map"),
         };
 
-        let hash = map!(
+        let hash = hashmap!(
           "id" => Value::Option(Some(Box::new(Value::I32(123)))),
           "address" => Value::Option(Some(Box::new(Value::String("test address".to_string())))),
           "city" => Value::Option(Some(Box::new(Value::String("test city".to_string())))),
@@ -336,5 +403,66 @@ mod tests {
         assert!(data[3].eq(&Some(ScalarImpl::Int64(456))));
         assert!(data[4].eq(&Some(ScalarImpl::Float32(1.2345.into()))));
         assert!(data[5].eq(&Some(ScalarImpl::Int32(str_to_date("2021-01-01").unwrap()))))
+    }
+
+    #[test]
+    fn test_map_to_columns() {
+        use risingwave_common::types::*;
+
+        let parser = create_parser().unwrap();
+        let columns = parser.map_to_columns().unwrap();
+        assert_eq!(
+            columns,
+            vec![
+                ColumnDesc {
+                    column_type: Some(Int32Type::create(true).to_protobuf().unwrap()),
+                    is_primary: false,
+                    name: "id".to_string(),
+                    ..Default::default()
+                },
+                ColumnDesc {
+                    column_type: Some(
+                        StringType::create(true, 0, DataTypeKind::Varchar)
+                            .to_protobuf()
+                            .unwrap()
+                    ),
+                    is_primary: false,
+                    name: "address".to_string(),
+                    ..Default::default()
+                },
+                ColumnDesc {
+                    column_type: Some(
+                        StringType::create(true, 0, DataTypeKind::Varchar)
+                            .to_protobuf()
+                            .unwrap()
+                    ),
+                    is_primary: false,
+                    name: "city".to_string(),
+                    ..Default::default()
+                },
+                ColumnDesc {
+                    column_type: Some(Int64Type::create(true).to_protobuf().unwrap()),
+                    is_primary: false,
+                    name: "zipcode".to_string(),
+                    ..Default::default()
+                },
+                ColumnDesc {
+                    column_type: Some(Float32Type::create(true).to_protobuf().unwrap()),
+                    is_primary: false,
+                    name: "rate".to_string(),
+                    ..Default::default()
+                },
+                ColumnDesc {
+                    column_type: Some(
+                        StringType::create(true, 0, DataTypeKind::Varchar)
+                            .to_protobuf()
+                            .unwrap()
+                    ),
+                    is_primary: false,
+                    name: "date".to_string(),
+                    ..Default::default()
+                },
+            ]
+        );
     }
 }
