@@ -8,16 +8,16 @@ use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrde
 #[derive(Debug, Clone)]
 pub struct BatchSort {
   order: Order,
-  child: PlanRef,
+  input: PlanRef,
   schema: Schema,
   dist: Distribution,
 }
 impl BatchSort {
-  pub fn new(child: PlanRef, order: Order) -> Self {
-    let schema = child.schema().clone();
-    let dist = child.distribution();
+  pub fn new(input: PlanRef, order: Order) -> Self {
+    let schema = input.schema().clone();
+    let dist = input.distribution();
     BatchSort {
-      child,
+      input,
       order,
       schema,
       dist,
@@ -30,11 +30,11 @@ impl fmt::Display for BatchSort {
   }
 }
 impl PlanTreeNodeUnary for BatchSort {
-  fn child(&self) -> PlanRef {
-    self.child.clone()
+  fn input(&self) -> PlanRef {
+    self.input.clone()
   }
-  fn clone_with_child(&self, child: PlanRef) -> Self {
-    Self::new(child, self.order.clone())
+  fn clone_with_input(&self, input: PlanRef) -> Self {
+    Self::new(input, self.order.clone())
   }
 }
 impl_plan_tree_node_for_unary! {BatchSort}

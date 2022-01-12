@@ -8,15 +8,15 @@ use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrde
 #[derive(Debug, Clone)]
 pub struct BatchExchange {
   order: Order,
-  child: PlanRef,
+  input: PlanRef,
   schema: Schema,
   dist: Distribution,
 }
 impl BatchExchange {
-  pub fn new(child: PlanRef, order: Order, dist: Distribution) -> Self {
-    let schema = child.schema().clone();
+  pub fn new(input: PlanRef, order: Order, dist: Distribution) -> Self {
+    let schema = input.schema().clone();
     BatchExchange {
-      child,
+      input,
       order,
       schema,
       dist,
@@ -29,11 +29,11 @@ impl fmt::Display for BatchExchange {
   }
 }
 impl PlanTreeNodeUnary for BatchExchange {
-  fn child(&self) -> PlanRef {
-    self.child.clone()
+  fn input(&self) -> PlanRef {
+    self.input.clone()
   }
-  fn clone_with_child(&self, child: PlanRef) -> Self {
-    Self::new(child, self.order.clone(), self.distribution())
+  fn clone_with_input(&self, input: PlanRef) -> Self {
+    Self::new(input, self.order.clone(), self.distribution())
   }
 }
 impl_plan_tree_node_for_unary! {BatchExchange}

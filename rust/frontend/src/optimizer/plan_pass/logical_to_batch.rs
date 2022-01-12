@@ -53,8 +53,8 @@ impl LogicalToBatchPass {
     for_logical_plan_nodes! {def_to_batch_visit_func}
 
     fn visit_logical_project(&mut self, plan: &LogicalProject) -> PlanRef {
-        let new_child = self.visit(plan.child(), Order::any());
-        let new_logical = plan.clone_with_child(new_child);
+        let new_input = self.visit(plan.input(), Order::any());
+        let new_logical = plan.clone_with_input(new_input);
         Rc::new(BatchProject::new(new_logical))
     }
 

@@ -31,18 +31,18 @@ impl HeuristicOptimizer {
         plan
     }
 
-    fn optimize_children(&mut self, plan: PlanRef) -> PlanRef {
-        let order_required = plan.children_order_required();
-        let dists_required = plan.children_distribution_required();
+    fn optimize_inputs(&mut self, plan: PlanRef) -> PlanRef {
+        let order_required = plan.inputs_order_required();
+        let dists_required = plan.inputs_distribution_required();
 
-        let children = plan
-            .children()
+        let inputs = plan
+            .inputs()
             .into_iter()
             .zip_eq(order_required.into_iter())
             .zip_eq(dists_required.into_iter())
             .map(|((sub_tree, order), dist)| self.pass_with_require(sub_tree, order, dist))
             .collect_vec();
-        plan.clone_with_children(&children)
+        plan.clone_with_inputs(&inputs)
     }
 }
 
@@ -56,10 +56,10 @@ impl PlanPass for HeuristicOptimizer {
         plan = match self.apply_order {
             ApplyOrder::TopDown => {
                 plan = self.optimize_self_node(plan);
-                self.optimize_children(plan)
+                self.optimize_inputs(plan)
             }
             ApplyOrder::BottomUp => {
-                plan = self.optimize_children(plan);
+                plan = self.optimize_inputs(plan);
                 self.optimize_self_node(plan)
             }
         };

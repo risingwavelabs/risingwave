@@ -55,8 +55,8 @@ impl LogicalToStreamPass {
     for_logical_plan_nodes! {def_to_stream_visit_func}
 
     fn visit_logical_project(&mut self, proj: &LogicalProject) -> PlanRef {
-        let new_child = self.visit(proj.child(), Distribution::any());
-        let new_logical = proj.clone_with_child(new_child);
+        let new_input = self.visit(proj.input(), Distribution::any());
+        let new_logical = proj.clone_with_input(new_input);
         Rc::new(StreamProject::new(new_logical))
     }
 

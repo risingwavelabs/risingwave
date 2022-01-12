@@ -8,25 +8,25 @@ use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 #[derive(Debug, Clone)]
 pub struct LogicalProject {
   // TODO(expr)
-  child: PlanRef,
+  input: PlanRef,
   schema: Schema,
 }
 impl LogicalProject {
-  pub fn new(child: PlanRef) -> Self {
-    let schema = Self::derive_schema(child.schema());
-    LogicalProject { child, schema }
+  pub fn new(input: PlanRef) -> Self {
+    let schema = Self::derive_schema(input.schema());
+    LogicalProject { input, schema }
   }
   // TODO: give project expressions
-  fn derive_schema(_child: &Schema) -> Schema {
+  fn derive_schema(_input: &Schema) -> Schema {
     todo!()
   }
 }
 impl PlanTreeNodeUnary for LogicalProject {
-  fn child(&self) -> PlanRef {
-    self.child.clone()
+  fn input(&self) -> PlanRef {
+    self.input.clone()
   }
-  fn clone_with_child(&self, child: PlanRef) -> Self {
-    Self::new(child)
+  fn clone_with_input(&self, input: PlanRef) -> Self {
+    Self::new(input)
   }
 }
 impl_plan_tree_node_for_unary! {LogicalProject}

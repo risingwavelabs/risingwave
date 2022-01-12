@@ -3,8 +3,8 @@
 //!
 //! We use a immutable style tree structure, every Node are immutable and cannot be modified after
 //! it has been created. If you want to modify the node, such as rewriting the expression in a
-//! ProjectNode or changing a node's child node, you need to create a new node. We use Rc as the
-//! node's reference, and a node just storage its children's reference, so change a node just need
+//! ProjectNode or changing a node's input node, you need to create a new node. We use Rc as the
+//! node's reference, and a node just storage its inputs' reference, so change a node just need
 //! create one new node but not the entire sub-tree.
 //!
 //! So when you want to add a new node, make sure:
@@ -47,8 +47,8 @@ impl dyn PlanNode {
     /// Write explain the whole plan tree.
     pub fn explain(&self, level: usize, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
         write!(f, "{}{}", " ".repeat(level * 2), self)?;
-        for child in self.children() {
-            child.explain(level + 1, f)?;
+        for input in self.inputs() {
+            input.explain(level + 1, f)?;
         }
         Ok(())
     }

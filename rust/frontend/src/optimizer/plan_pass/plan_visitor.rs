@@ -7,7 +7,7 @@ use crate::for_all_plan_nodes;
 /// Define `PlanVisitor` trait.
 macro_rules! def_visitor {
   ([], $({ $convention:ident, $name:ident }),*) => {
-  /// The visitor for plan nodes. visit all children and return the ret value of the left most child,
+  /// The visitor for plan nodes. visit all inputs and return the ret value of the left most input,
   /// and leaf node returns R::default()
   pub trait PlanVisitor<R:Default> {
     fn check_convention(&self, _convention: Convention) -> bool {
@@ -23,15 +23,15 @@ macro_rules! def_visitor {
       }
 
       $(
-        #[doc = "Visit [`" [<$convention $name>] "`] , the function should visit the children."]
+        #[doc = "Visit [`" [<$convention $name>] "`] , the function should visit the inputs."]
         fn [<visit_ $convention:snake _ $name:snake>](&mut self, plan: &[<$convention $name>]) -> R {
-          let children = plan.children();
-          if children.is_empty() {
+          let inputs = plan.inputs();
+          if inputs.is_empty() {
               return R::default();
           }
-          let mut iter = plan.children().into_iter();
+          let mut iter = plan.inputs().into_iter();
           let ret = self.visit(iter.next().unwrap());
-          iter.for_each(|child| {self.visit(child);});
+          iter.for_each(|input| {self.visit(input);});
           ret
         }
       )*

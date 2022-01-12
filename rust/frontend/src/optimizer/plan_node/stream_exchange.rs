@@ -7,15 +7,15 @@ use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, With
 
 #[derive(Debug, Clone)]
 pub struct StreamExchange {
-  child: PlanRef,
+  input: PlanRef,
   schema: Schema,
   dist: Distribution,
 }
 impl StreamExchange {
-  pub fn new(child: PlanRef, dist: Distribution) -> Self {
-    let schema = child.schema().clone();
+  pub fn new(input: PlanRef, dist: Distribution) -> Self {
+    let schema = input.schema().clone();
     StreamExchange {
-      child,
+      input,
       schema,
       dist,
     }
@@ -27,11 +27,11 @@ impl fmt::Display for StreamExchange {
   }
 }
 impl PlanTreeNodeUnary for StreamExchange {
-  fn child(&self) -> PlanRef {
-    self.child.clone()
+  fn input(&self) -> PlanRef {
+    self.input.clone()
   }
-  fn clone_with_child(&self, child: PlanRef) -> Self {
-    Self::new(child, self.distribution())
+  fn clone_with_input(&self, input: PlanRef) -> Self {
+    Self::new(input, self.distribution())
   }
 }
 impl_plan_tree_node_for_unary! {StreamExchange}

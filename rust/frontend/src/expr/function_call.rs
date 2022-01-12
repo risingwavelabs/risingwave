@@ -7,32 +7,32 @@ use super::{infer_type, BoundExpr, BoundExprImpl};
 pub struct BoundFunctionCall {
     func_type: expr_node::Type,
     return_type: DataType,
-    children: Vec<BoundExprImpl>,
+    inputs: Vec<BoundExprImpl>,
 }
 impl BoundFunctionCall {
-    pub fn new(func_type: expr_node::Type, children: Vec<BoundExprImpl>) -> Option<Self> {
+    pub fn new(func_type: expr_node::Type, inputs: Vec<BoundExprImpl>) -> Option<Self> {
         let return_type = infer_type(
             func_type,
-            children.iter().map(|expr| expr.return_type()).collect(),
-        )?; // should be derived from children
-        Some(Self::new_with_return_type(func_type, children, return_type))
+            inputs.iter().map(|expr| expr.return_type()).collect(),
+        )?; // should be derived from inputs
+        Some(Self::new_with_return_type(func_type, inputs, return_type))
     }
 
     /// used for expressions like cast
     pub fn new_with_return_type(
         func_type: expr_node::Type,
-        children: Vec<BoundExprImpl>,
+        inputs: Vec<BoundExprImpl>,
         return_type: DataType,
     ) -> Self {
         BoundFunctionCall {
             func_type,
             return_type,
-            children,
+            inputs,
         }
     }
 
     pub fn decompose(self) -> (expr_node::Type, Vec<BoundExprImpl>) {
-        (self.func_type, self.children)
+        (self.func_type, self.inputs)
     }
     pub fn get_expr_type(&self) -> expr_node::Type {
         self.func_type

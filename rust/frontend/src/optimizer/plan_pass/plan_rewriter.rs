@@ -23,14 +23,14 @@ macro_rules! def_rewriter {
       }
 
       $(
-        #[doc = "Visit [`" [<$convention $name>] "`] , the function should rewrite the children."]
+        #[doc = "Visit [`" [<$convention $name>] "`] , the function should rewrite the inputs."]
         fn [<rewrite_ $convention:snake _ $name:snake>](&mut self, plan: &[<$convention $name>]) -> PlanRef {
-          let new_children = plan
-          .children()
+          let new_inputs = plan
+          .inputs()
           .into_iter()
-          .map(|child| self.rewrite(child.clone()))
+          .map(|input| self.rewrite(input.clone()))
           .collect_vec();
-          plan.clone_with_children(&new_children)
+          plan.clone_with_inputs(&new_inputs)
         }
       )*
       }
