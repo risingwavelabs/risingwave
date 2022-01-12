@@ -235,10 +235,13 @@ impl ReverseUserKeyIterator {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::ops::Bound::*;
     use std::sync::Arc;
 
     use itertools::Itertools;
+    use rand::distributions::Alphanumeric;
+    use rand::{thread_rng, Rng};
 
     use super::*;
     use crate::hummock::cloud::gen_remote_table;
@@ -248,7 +251,7 @@ mod tests {
     };
     use crate::hummock::iterator::variants::BACKWARD;
     use crate::hummock::iterator::BoxedHummockIterator;
-    use crate::hummock::key::user_key;
+    use crate::hummock::key::{prev_key, user_key};
     use crate::hummock::table::{Table, TableIterator};
     use crate::hummock::value::HummockValue;
     use crate::hummock::{ReverseTableIterator, TableBuilder};
@@ -712,6 +715,185 @@ mod tests {
         assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
         uki.next().await.unwrap();
         assert!(!uki.is_valid());
+    }
+
+    fn clone_table(table: &Table) -> Table {
+        Table {
+            id: table.id,
+            meta: table.meta.clone(),
+            obj_client: table.obj_client.clone(),
+            data_path: table.data_path.clone(),
+        }
+    }
+
+    fn key_from_num(num: usize) -> Vec<u8> {
+        let width = 20;
+        format!("{:0width$}", num, width = width)
+            .as_bytes()
+            .to_vec()
+    }
+
+    async fn chaos_test_case(
+        table: Table,
+        start_bound: Bound<Vec<u8>>,
+        end_bound: Bound<Vec<u8>>,
+        truth: &BTreeMap<Vec<u8>, BTreeMap<Timestamp, HummockValue<Vec<u8>>>>,
+    ) {
+        let start_key = match &start_bound {
+            Bound::Included(b) => prev_key(&b.clone()),
+            Bound::Excluded(b) => b.clone(),
+            Unbounded => key_from_num(0),
+        };
+        let end_key = match &end_bound {
+            Bound::Included(b) => b.clone(),
+            Unbounded => key_from_num(999999999999),
+            _ => unimplemented!(),
+        };
+        let iters: Vec<BoxedHummockIterator> = vec![Box::new(ReverseTableIterator::new(Arc::new(
+            clone_table(&table),
+        )))];
+        let rsi = ReverseSortedIterator::new(iters);
+        let mut ruki = ReverseUserKeyIterator::new(rsi, (start_bound, end_bound));
+        let num_puts: usize = truth
+            .iter()
+            .map(|(key, inserts)| {
+                if *key > end_key || *key <= start_key {
+                    return 0;
+                }
+                match inserts.first_key_value().unwrap().1 {
+                    HummockValue::Put(_) => 1,
+                    HummockValue::Delete => 0,
+                }
+            })
+            .reduce(|accum, item| accum + item)
+            .unwrap();
+        println!("The total number of valid puts:{}", num_puts);
+        let mut num_kvs = 0;
+        ruki.rewind().await.unwrap();
+        for (key, value) in truth.iter().rev() {
+            if *key > end_key || *key <= start_key {
+                continue;
+            }
+            let (time, value) = value.first_key_value().unwrap();
+            if let HummockValue::Delete = value {
+                continue;
+            }
+            assert!(ruki.is_valid(), "num_kvs:{}", num_kvs);
+            let full_key = key_with_ts(key.clone(), *time);
+            assert_eq!(ruki.key(), user_key(&full_key), "num_kvs:{}", num_kvs);
+            if let HummockValue::Put(bytes) = &value {
+                assert_eq!(ruki.value(), &bytes[..], "num_kvs:{}", num_kvs);
+            }
+            ruki.next().await.unwrap();
+            num_kvs += 1;
+        }
+        assert!(!ruki.is_valid());
+        assert_eq!(num_kvs, num_puts);
+    }
+
+    #[tokio::test]
+    async fn test_reverse_user_key_chaos() {
+        // We first generate the key value pairs.
+        let mut rng = thread_rng();
+        let mut truth: BTreeMap<Vec<u8>, BTreeMap<Timestamp, HummockValue<Vec<u8>>>> =
+            BTreeMap::new();
+        let mut prev_key_number: usize = 1;
+        let number_of_keys = 5000;
+        for _ in 0..number_of_keys {
+            let key: usize = rng.gen_range(prev_key_number..=(prev_key_number + 10));
+            prev_key_number = key + 1;
+            let key_bytes = key_from_num(key);
+            let mut prev_time = 500;
+            let num_updates = rng.gen_range(1..10usize);
+            for _ in 0..num_updates {
+                let time: Timestamp = rng.gen_range(prev_time..=(prev_time + 1000));
+                let is_delete = rng.gen_range(0..=1usize) < 1usize;
+                match is_delete {
+                    true => {
+                        truth
+                            .entry(key_bytes.clone())
+                            .or_default()
+                            .insert(time, HummockValue::Delete);
+                    }
+                    false => {
+                        let value_size = rng.gen_range(100..=200);
+                        let value: String = thread_rng()
+                            .sample_iter(&Alphanumeric)
+                            .take(value_size)
+                            .map(char::from)
+                            .collect();
+                        truth
+                            .entry(key_bytes.clone())
+                            .or_default()
+                            .insert(time, HummockValue::Put(value.into_bytes()));
+                    }
+                }
+                prev_time = time + 1;
+            }
+        }
+        // We inject the key value pairs into the table.
+        let mut b = TableBuilder::new(default_builder_opt_for_test());
+        for (key, inserts) in &truth {
+            for (time, value) in inserts {
+                let full_key = key_with_ts(key.clone(), *time);
+                b.add(&full_key, value.clone());
+            }
+        }
+        let (data, meta) = b.finish();
+        // get remote table
+        let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
+        let table = gen_remote_table(obj_client, 0, data, meta, None)
+            .await
+            .unwrap();
+
+        let repeat = 20;
+        for _ in 0..repeat {
+            let mut rng = thread_rng();
+            let end_key: usize = rng.gen_range(2..=prev_key_number);
+            let end_key_bytes = key_from_num(end_key);
+            let begin_key: usize = rng.gen_range(1..=end_key);
+            let begin_key_bytes = key_from_num(begin_key);
+            println!(
+                "begin_key:{:?},end_key:{:?}",
+                begin_key_bytes, end_key_bytes
+            );
+            chaos_test_case(clone_table(&table), Unbounded, Unbounded, &truth).await;
+            chaos_test_case(
+                clone_table(&table),
+                Unbounded,
+                Included(end_key_bytes.clone()),
+                &truth,
+            )
+            .await;
+            chaos_test_case(
+                clone_table(&table),
+                Included(begin_key_bytes.clone()),
+                Unbounded,
+                &truth,
+            )
+            .await;
+            chaos_test_case(
+                clone_table(&table),
+                Excluded(begin_key_bytes.clone()),
+                Unbounded,
+                &truth,
+            )
+            .await;
+            chaos_test_case(
+                clone_table(&table),
+                Included(begin_key_bytes.clone()),
+                Included(end_key_bytes.clone()),
+                &truth,
+            )
+            .await;
+            chaos_test_case(
+                clone_table(&table),
+                Excluded(begin_key_bytes),
+                Included(end_key_bytes),
+                &truth,
+            )
+            .await;
+        }
     }
 
     // key=[table, idx, ts], value

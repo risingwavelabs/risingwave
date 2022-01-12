@@ -11,6 +11,7 @@
 #![feature(drain_filter)]
 #![feature(bound_map)]
 #![feature(backtrace)]
+#![feature(map_first_last)]
 
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::error::Result;
