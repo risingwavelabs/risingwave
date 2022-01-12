@@ -6,6 +6,7 @@ use bytes::Bytes;
 use risingwave_common::array::RwError;
 use risingwave_common::error::Result;
 
+use crate::hummock::version_manager::VersionManager;
 use crate::hummock::HummockStateStore;
 use crate::memory::MemoryStateStore;
 use crate::rocksdb_local::RocksDBStateStore;
@@ -141,6 +142,7 @@ impl FromStr for StateStoreImpl {
                         checksum_algo: ChecksumAlg::Crc32c,
                         stats_enabled: false,
                     },
+                    Arc::new(VersionManager::new()),
                 )))
             }
             s3 if s3.starts_with("hummock+s3://") => {
@@ -163,6 +165,7 @@ impl FromStr for StateStoreImpl {
                         checksum_algo: ChecksumAlg::Crc32c,
                         stats_enabled: true,
                     },
+                    Arc::new(VersionManager::new()),
                 )))
             }
             rocksdb if rocksdb.starts_with("rocksdb_local://") => {

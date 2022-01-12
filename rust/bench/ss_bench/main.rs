@@ -6,6 +6,7 @@ mod utils;
 use clap::Parser;
 use operation::{get_random, prefix_scan_random, write_batch};
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
+use risingwave_storage::hummock::version_manager::VersionManager;
 use risingwave_storage::hummock::{HummockOptions, HummockStateStore, HummockStorage};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::object::{ConnectionInfo, S3ObjectStore};
@@ -84,6 +85,7 @@ fn get_state_store_impl(opts: &Opts) -> StateStoreImpl {
                     checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
                     stats_enabled: false,
                 },
+                Arc::new(VersionManager::new()),
             )))
         }
         s3 if s3.starts_with("hummock+s3://") => {
@@ -102,6 +104,7 @@ fn get_state_store_impl(opts: &Opts) -> StateStoreImpl {
                     checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
                     stats_enabled: true,
                 },
+                Arc::new(VersionManager::new()),
             )))
         }
         other => unimplemented!("state store \"{}\" is not supported", other),

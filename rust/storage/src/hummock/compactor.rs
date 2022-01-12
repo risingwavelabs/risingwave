@@ -257,7 +257,7 @@ mod tests {
     use crate::hummock::iterator::BoxedHummockIterator;
     use crate::hummock::key::{key_with_ts, Timestamp};
     use crate::hummock::utils::bloom_filter_tables;
-    use crate::hummock::version_manager::ScopedUnpinSnapshot;
+    use crate::hummock::version_manager::{ScopedUnpinSnapshot, VersionManager};
     use crate::hummock::{user_key, HummockOptions, HummockResult, HummockStorage};
     use crate::object::InMemObjectStore;
 
@@ -273,6 +273,7 @@ mod tests {
                 checksum_algo: ChecksumAlg::Crc32c,
                 stats_enabled: false,
             },
+            Arc::new(VersionManager::new()),
         ));
         let sub_compact_context = SubCompactContext {
             options: hummock_storage.options.clone(),
@@ -430,8 +431,10 @@ mod tests {
     #[tokio::test]
     async fn test_same_key_not_splitted() -> HummockResult<()> {
         let options = HummockOptions::small_for_test();
+        let version_manager = Arc::new(VersionManager::new());
         let target_table_size = options.table_size;
-        let mut storage = HummockStorage::new(Arc::new(InMemObjectStore::new()), options);
+        let mut storage =
+            HummockStorage::new(Arc::new(InMemObjectStore::new()), options, version_manager);
         storage.shutdown_compactor().await.unwrap();
         let sub_compact_context = SubCompactContext {
             options: storage.options.clone(),
