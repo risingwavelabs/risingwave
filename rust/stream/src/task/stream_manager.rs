@@ -381,18 +381,23 @@ impl StreamManagerCore {
 
         // Create the input executor before creating itself
         // The node with no input must be a `MergeNode`
-        let mut input: Vec<Box<dyn Executor>> =
-            node.input
-                .iter()
-                .map(|input| self.create_nodes_inner(actor_id, input, env.clone(), store.clone()))
-                .enumerate()
-                .map(|(input_pos, input)| {
+        let mut input: Vec<Box<dyn Executor>> = node
+            .input
+            .iter()
+            .map(|input| self.create_nodes_inner(actor_id, input, env.clone(), store.clone()))
+            .enumerate()
+            .map(|(input_pos, input)| {
+                if cfg!(debug_assertions) {
                     let input = input?;
                     let identity = input.identity().to_string();
-                    Ok::<_, RwError>(Box::new(TraceExecutor::new(input, identity, input_pos))
-                        as Box<dyn Executor>)
-                })
-                .try_collect()?;
+                    let traced = Box::new(TraceExecutor::new(input, identity, input_pos));
+                    let checked = Box::new(SchemaCheckExecutor::new(traced));
+                    Ok(checked as Box<dyn Executor>)
+                } else {
+                    input
+                }
+            })
+            .try_collect()?;
 
         let table_manager = env.table_manager();
         let source_manager = env.source_manager();

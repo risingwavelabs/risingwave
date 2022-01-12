@@ -4,7 +4,7 @@ use std::time::Duration;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder, Row};
 use risingwave_common::catalog::{SchemaId, TableId};
-use risingwave_common::types::DecimalType;
+use risingwave_common::types::Int32Type;
 use risingwave_common::util::addr::get_host_port;
 use risingwave_common::util::downcast_arc;
 use risingwave_pb::common::HostAddress;
@@ -122,11 +122,11 @@ async fn test_stream_mv_proto() {
     let table_columns = vec![
         TableColumnDesc {
             column_id: 0,
-            data_type: Arc::new(DecimalType::new(false, 10, 5).unwrap()),
+            data_type: Arc::new(Int32Type::new(false)),
         },
         TableColumnDesc {
             column_id: 1,
-            data_type: Arc::new(DecimalType::new(false, 10, 5).unwrap()),
+            data_type: Arc::new(Int32Type::new(false)),
         },
     ];
     let table = table_manager
