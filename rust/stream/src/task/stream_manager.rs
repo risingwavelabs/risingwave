@@ -829,7 +829,7 @@ impl StreamManagerCore {
         channel_pool_guard.retain(|(x, _), _| *x != actor_id);
         exhange_guard.retain(|(x, _), _| *x != actor_id);
 
-        self.actors.remove(&actor_id);
+        self.actor_infos.remove(&actor_id);
         self.actors.remove(&actor_id);
         // Task should have already stopped when this method is invoked.
         handle.abort();
