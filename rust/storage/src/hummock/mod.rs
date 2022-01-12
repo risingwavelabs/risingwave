@@ -23,12 +23,13 @@ mod version_cmp;
 mod version_manager;
 
 use cloud::gen_remote_table;
-use compactor::Compactor;
+use compactor::{Compactor, SubCompactContext};
 pub use error::*;
 use parking_lot::Mutex as PLMutex;
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use tokio::select;
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 use value::*;
 
 use self::iterator::UserKeyIterator;
@@ -100,22 +101,48 @@ pub struct HummockStorage {
     /// Receiver of the compactor.
     rx: Arc<PLMutex<Option<mpsc::UnboundedReceiver<()>>>>,
 
+    stop_compact_tx: mpsc::UnboundedSender<()>,
+
+    compactor_joinhandle: Arc<PLMutex<Option<JoinHandle<HummockResult<()>>>>>,
+
     /// Statistics.
     stats: Arc<StateStoreStats>,
 }
 
 impl HummockStorage {
     pub fn new(obj_client: Arc<dyn ObjectStore>, options: HummockOptions) -> Self {
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (trigger_compact_tx, trigger_compact_rx) = mpsc::unbounded_channel();
+        let (stop_compact_tx, stop_compact_rx) = mpsc::unbounded_channel();
 
         let stats = DEFAULT_STATE_STORE_STATS.clone();
 
+        let arc_options = Arc::new(options);
+        let options_for_compact = arc_options.clone();
+        let version_manager = Arc::new(VersionManager::new());
+        let version_manager_for_compact = version_manager.clone();
+        let obj_client_for_compact = obj_client.clone();
+        let rx = Arc::new(PLMutex::new(Some(trigger_compact_rx)));
+        let rx_for_compact = rx.clone();
+
         Self {
-            options: Arc::new(options),
-            version_manager: Arc::new(VersionManager::new()),
+            options: arc_options,
+            version_manager,
             obj_client,
-            tx,
-            rx: Arc::new(PLMutex::new(Some(rx))),
+            tx: trigger_compact_tx,
+            rx,
+            stop_compact_tx,
+            compactor_joinhandle: Arc::new(PLMutex::new(Some(tokio::spawn(async move {
+                Self::start_compactor(
+                    SubCompactContext {
+                        options: options_for_compact,
+                        version_manager: version_manager_for_compact,
+                        obj_client: obj_client_for_compact,
+                    },
+                    rx_for_compact,
+                    stop_compact_rx,
+                )
+                .await
+            })))),
             stats,
         }
     }
@@ -233,7 +260,7 @@ impl HummockStorage {
 
         // TODO: should we use unwrap() ?
         // Notify the compactor
-        self.tx.send(()).unwrap();
+        self.tx.send(()).ok();
 
         Ok(())
     }
@@ -249,17 +276,28 @@ impl HummockStorage {
     }
 
     pub async fn start_compactor(
-        self: &Arc<Self>,
+        context: SubCompactContext,
+        compact_signal: Arc<PLMutex<Option<mpsc::UnboundedReceiver<()>>>>,
         mut stop: mpsc::UnboundedReceiver<()>,
     ) -> HummockResult<()> {
-        let mut compact_notifier = self.rx.lock().take().unwrap();
+        let mut compact_notifier = compact_signal.lock().take().unwrap();
         loop {
             select! {
-                Some(_) = compact_notifier.recv() => Compactor::compact(self).await?,
+                Some(_) = compact_notifier.recv() => Compactor::compact(&context).await?,
                 Some(_) = stop.recv() => break
             }
         }
         Ok(())
+    }
+
+    pub async fn shutdown_compactor(&mut self) -> HummockResult<()> {
+        self.stop_compact_tx.send(()).ok();
+        self.compactor_joinhandle
+            .lock()
+            .take()
+            .unwrap()
+            .await
+            .unwrap()
     }
 }
 

@@ -10,13 +10,23 @@ use super::key_range::KeyRange;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::version_cmp::VersionedComparator;
 use super::version_manager::{CompactTask, Level, LevelEntry};
-use super::{HummockError, HummockResult, HummockStorage, HummockValue, Table, TableIterator};
+use super::{
+    HummockError, HummockOptions, HummockResult, HummockStorage, HummockValue, Table,
+    TableIterator, VersionManager,
+};
+use crate::object::ObjectStore;
+
+pub struct SubCompactContext {
+    pub options: Arc<HummockOptions>,
+    pub version_manager: Arc<VersionManager>,
+    pub obj_client: Arc<dyn ObjectStore>,
+}
 
 pub struct Compactor;
 
 impl Compactor {
     async fn run_compact(
-        storage: &Arc<HummockStorage>,
+        context: &SubCompactContext,
         compact_task: &mut CompactTask,
     ) -> HummockResult<()> {
         let mut overlapping_tables = vec![];
@@ -24,11 +34,11 @@ impl Compactor {
         for LevelEntry { level, .. } in &compact_task.input_ssts {
             match level {
                 Level::Tiering(input_sst_ids) => {
-                    let tables = storage.version_manager.pick_few_tables(input_sst_ids)?;
+                    let tables = context.version_manager.pick_few_tables(input_sst_ids)?;
                     overlapping_tables.extend(tables);
                 }
                 Level::Leveling(input_sst_ids) => {
-                    let tables = storage.version_manager.pick_few_tables(input_sst_ids)?;
+                    let tables = context.version_manager.pick_few_tables(input_sst_ids)?;
                     non_overlapping_table_seqs.push(tables);
                 }
             }
@@ -55,7 +65,11 @@ impl Compactor {
                     )),
             );
 
-            let spawn_storage = storage.clone();
+            let spawn_context = SubCompactContext {
+                options: context.options.clone(),
+                version_manager: context.version_manager.clone(),
+                obj_client: context.obj_client.clone(),
+            };
             let spawn_kr = kr.clone();
             let is_target_ultimate_and_leveling = compact_task.is_target_ultimate_and_leveling;
             let watermark = compact_task.watermark;
@@ -64,7 +78,7 @@ impl Compactor {
                 tokio::spawn(async move {
                     (
                         Compactor::sub_compact(
-                            spawn_storage,
+                            spawn_context,
                             spawn_kr,
                             iter,
                             &mut output_needing_vacuum,
@@ -105,7 +119,7 @@ impl Compactor {
     }
 
     async fn sub_compact(
-        storage: Arc<HummockStorage>,
+        context: SubCompactContext,
         kr: KeyRange,
         mut iter: SortedIterator,
         local_sorted_output_ssts: &mut Vec<Table>,
@@ -125,8 +139,8 @@ impl Compactor {
         let mut last_key = BytesMut::new();
 
         let mut builder = CapacitySplitTableBuilder::new(|| async {
-            let table_id = storage.version_manager.generate_table_id().await;
-            let builder = HummockStorage::get_builder(&storage.options);
+            let table_id = context.version_manager.generate_table_id().await;
+            let builder = HummockStorage::get_builder(&context.options);
             (table_id, builder)
         });
 
@@ -184,9 +198,9 @@ impl Compactor {
         local_sorted_output_ssts.reserve(builder.len());
         // TODO: decide upload concurrency
         for (table_id, blocks, meta) in builder.finish() {
-            let remote_dir = Some(storage.options.remote_dir.as_str());
+            let remote_dir = Some(context.options.remote_dir.as_str());
             let table = gen_remote_table(
-                storage.obj_client.clone(),
+                context.obj_client.clone(),
                 table_id,
                 blocks,
                 meta,
@@ -199,13 +213,13 @@ impl Compactor {
         Ok(())
     }
 
-    pub async fn compact(storage: &Arc<HummockStorage>) -> HummockResult<()> {
-        let mut compact_task = match storage.version_manager.get_compact_task().await? {
+    pub async fn compact(context: &SubCompactContext) -> HummockResult<()> {
+        let mut compact_task = match context.version_manager.get_compact_task().await? {
             Some(task) => task,
             None => return Ok(()),
         };
 
-        let result = Compactor::run_compact(storage, &mut compact_task).await;
+        let result = Compactor::run_compact(context, &mut compact_task).await;
         if result.is_err() {
             for _sst_to_delete in &compact_task.sorted_output_ssts {
                 // TODO: delete these tables in (S3) storage
@@ -217,7 +231,7 @@ impl Compactor {
         }
 
         let is_task_ok = result.is_ok();
-        storage
+        context
             .version_manager
             .report_compact_task(compact_task, result)
             .await;
@@ -260,6 +274,11 @@ mod tests {
                 stats_enabled: false,
             },
         ));
+        let sub_compact_context = SubCompactContext {
+            options: hummock_storage.options.clone(),
+            version_manager: hummock_storage.version_manager.clone(),
+            obj_client: hummock_storage.obj_client.clone(),
+        };
 
         let anchor = Bytes::from("qa");
 
@@ -331,7 +350,7 @@ mod tests {
             )
             .await
             .unwrap();
-        Compactor::compact(&hummock_storage).await?;
+        Compactor::compact(&sub_compact_context).await?;
         // Get the value after flushing to remote.
         let value = hummock_storage
             .get_snapshot()
@@ -391,7 +410,7 @@ mod tests {
             )
             .await
             .unwrap();
-        Compactor::compact(&hummock_storage).await?;
+        Compactor::compact(&sub_compact_context).await?;
 
         // Get the value after flushing to remote.
         let value = hummock_storage.get_snapshot().get(&anchor).await.unwrap();
@@ -412,10 +431,13 @@ mod tests {
     async fn test_same_key_not_splitted() -> HummockResult<()> {
         let options = HummockOptions::small_for_test();
         let target_table_size = options.table_size;
-        let storage = Arc::new(HummockStorage::new(
-            Arc::new(InMemObjectStore::new()),
-            options,
-        ));
+        let mut storage = HummockStorage::new(Arc::new(InMemObjectStore::new()), options);
+        storage.shutdown_compactor().await.unwrap();
+        let sub_compact_context = SubCompactContext {
+            options: storage.options.clone(),
+            version_manager: storage.version_manager.clone(),
+            obj_client: storage.obj_client.clone(),
+        };
 
         let kv_count = 8192;
         let epoch: u64 = 1;
@@ -430,7 +452,7 @@ mod tests {
 
         let mut compact_task = storage.version_manager.get_compact_task().await?.unwrap();
         compact_task.watermark = Timestamp::MIN; // do not gc these records
-        Compactor::run_compact(&storage, &mut compact_task).await?;
+        Compactor::run_compact(&sub_compact_context, &mut compact_task).await?;
 
         let output_table_count = compact_task.sorted_output_ssts.len();
         assert_eq!(output_table_count, 1); // should not split into multiple tables

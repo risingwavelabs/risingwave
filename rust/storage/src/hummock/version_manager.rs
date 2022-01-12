@@ -676,6 +676,12 @@ impl VersionManager {
     }
 }
 
+impl Default for VersionManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct ScopedUnpinSnapshot {
     vm: Arc<VersionManager>,
     version: u64,
