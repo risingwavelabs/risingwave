@@ -1,5 +1,5 @@
-use prost_types::Any as ProstAny;
 use risingwave_pb::data::{ArrayType, Column as ProstColumn};
+use risingwave_pb::google::protobuf::Any as ProstAny;
 
 use crate::array::column_proto_readers::{read_bool_array, read_numeric_array, read_string_array};
 use crate::array::value_reader::{

@@ -2,7 +2,6 @@ use core::default::Default as CoreDefault;
 
 use itertools::Itertools;
 use prost::Message;
-use prost_types::Any;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_common::util::downcast_arc;
@@ -10,6 +9,7 @@ use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::{Column, DataType};
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::ConstantValue;
+use risingwave_pb::google::protobuf::Any;
 use risingwave_pb::plan::exchange_info::{Distribution, DistributionMode};
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::values_node::ExprTuple;

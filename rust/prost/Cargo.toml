@@ -5,12 +5,16 @@ version = "0.1.0"
 
 [dependencies]
 bytes = "1"
+pbjson = { git = "https://github.com/influxdata/pbjson", rev = "fd1f126" }
+pbjson-types = { git = "https://github.com/influxdata/pbjson", rev = "fd1f126" }
 prost = "0.9"
 prost-helpers = { path = "helpers" }
 prost-types = "0.9"
+serde = { version = "1", features = ["derive"] }
 tonic = "0.6"
 
 [build-dependencies]
+pbjson-build = { git = "https://github.com/influxdata/pbjson", rev = "fd1f126" }
 prost = "0.9"
 prost-types = "0.9"
 quote = "1"

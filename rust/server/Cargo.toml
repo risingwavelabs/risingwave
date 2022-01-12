@@ -31,7 +31,6 @@ opentelemetry-jaeger = { version = "*", features = ["rt-tokio"] }
 paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = "0.9"
-prost-types = "0.9"
 rdkafka = { version = "0.27", features = ["cmake-build"] }
 risingwave-pb = { path = "../prost" }
 risingwave_batch = { path = "../batch" }

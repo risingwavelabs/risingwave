@@ -2230,6 +2230,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "pbjson"
+version = "0.2.1"
+source = "git+https://github.com/influxdata/pbjson?rev=fd1f126#fd1f1265807f155a6f77d460db2bd5881a0a53b1"
+dependencies = [
+ "base64",
+ "serde",
+]
+
+[[package]]
+name = "pbjson-build"
+version = "0.2.1"
+source = "git+https://github.com/influxdata/pbjson?rev=fd1f126#fd1f1265807f155a6f77d460db2bd5881a0a53b1"
+dependencies = [
+ "heck 0.3.3",
+ "itertools 0.10.3",
+ "prost 0.9.0",
+ "prost-types 0.9.0",
+]
+
+[[package]]
+name = "pbjson-types"
+version = "0.2.1"
+source = "git+https://github.com/influxdata/pbjson?rev=fd1f126#fd1f1265807f155a6f77d460db2bd5881a0a53b1"
+dependencies = [
+ "bytes",
+ "chrono",
+ "pbjson",
+ "pbjson-build",
+ "prost 0.9.0",
+ "prost-build 0.9.0",
+ "serde",
+]
+
+[[package]]
 name = "peeking_take_while"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2960,7 +2994,6 @@ dependencies = [
  "paste",
  "prometheus 0.13.0",
  "prost 0.9.0",
- "prost-types 0.9.0",
  "rand 0.8.4",
  "rdkafka",
  "risingwave-pb",
@@ -2994,10 +3027,14 @@ name = "risingwave-pb"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "pbjson",
+ "pbjson-build",
+ "pbjson-types",
  "prost 0.9.0",
  "prost-helpers",
  "prost-types 0.9.0",
  "quote",
+ "serde",
  "tonic",
  "tonic-build",
 ]
@@ -3025,7 +3062,6 @@ dependencies = [
  "num-traits",
  "paste",
  "prost 0.9.0",
- "prost-types 0.9.0",
  "rand 0.8.4",
  "rdkafka",
  "risingwave-pb",
@@ -3093,7 +3129,6 @@ dependencies = [
  "paste",
  "prettytable-rs",
  "prost 0.9.0",
- "prost-types 0.9.0",
  "rand 0.8.4",
  "risingwave-pb",
  "rust_decimal",
@@ -3134,7 +3169,6 @@ dependencies = [
  "num-traits",
  "paste",
  "prost 0.9.0",
- "prost-types 0.9.0",
  "rand 0.8.4",
  "risingwave-pb",
  "risingwave_common",
@@ -3191,7 +3225,6 @@ dependencies = [
  "num-traits",
  "paste",
  "prost 0.9.0",
- "prost-types 0.9.0",
  "protobuf",
  "protobuf-codegen-pure",
  "pulsar",
@@ -3258,7 +3291,6 @@ dependencies = [
  "paste",
  "prometheus 0.13.0",
  "prost 0.9.0",
- "prost-types 0.9.0",
  "rand 0.8.4",
  "risingwave-pb",
  "risingwave_common",
@@ -3307,7 +3339,6 @@ dependencies = [
  "paste",
  "prometheus 0.13.0",
  "prost 0.9.0",
- "prost-types 0.9.0",
  "rand 0.8.4",
  "rdkafka",
  "risingwave-pb",

@@ -17,7 +17,7 @@ risingwave_storage = { path = "../storage" }
 rusoto_core = "0.47"
 rusoto_credential = "0.47"
 rusoto_s3 = "0.47"
-serde = "1"
+serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["fs", "rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 toml = "0.5"
 

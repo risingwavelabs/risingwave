@@ -1,6 +1,21 @@
 #![allow(clippy::all)]
 
 #[rustfmt::skip]
+#[cfg(not(doctest))]
+#[path = "google.protobuf.rs"]
+mod google_protobuf;
+
+pub mod google {
+    pub mod protobuf {
+        #[cfg(doctest)]
+        pub use prost_types::Any;
+
+        #[cfg(not(doctest))]
+        pub use super::super::google_protobuf::*;
+    }
+}
+
+#[rustfmt::skip]
 pub mod common;
 #[rustfmt::skip]
 pub mod data;
@@ -18,6 +33,39 @@ pub mod stream_plan;
 pub mod stream_service;
 #[rustfmt::skip]
 pub mod hummock;
+
+#[rustfmt::skip]
+#[path = "common.serde.rs"]
+pub mod common_serde;
+#[rustfmt::skip]
+#[path = "data.serde.rs"]
+pub mod data_serde;
+#[rustfmt::skip]
+#[path = "expr.serde.rs"]
+pub mod expr_serde;
+#[rustfmt::skip]
+#[path = "meta.serde.rs"]
+pub mod meta_serde;
+#[rustfmt::skip]
+#[path = "plan.serde.rs"]
+pub mod plan_serde;
+#[rustfmt::skip]
+#[path = "task_service.serde.rs"]
+pub mod task_service_serde;
+#[rustfmt::skip]
+#[path = "stream_plan.serde.rs"]
+pub mod stream_plan_serde;
+#[rustfmt::skip]
+#[path = "stream_service.serde.rs"]
+pub mod stream_service_serde;
+#[rustfmt::skip]
+#[path = "hummock.serde.rs"]
+pub mod hummock_serde;
+
+#[rustfmt::skip]
+#[cfg(not(doctest))]
+#[path = "google.protobuf.serde.rs"]
+pub mod google_protobuf_serde;
 
 #[cfg(test)]
 mod tests {
