@@ -10,6 +10,8 @@ use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::{AddWorkerNodeRequest, ClusterType, HeartbeatRequest};
 use tonic::transport::{Channel, Endpoint};
 
+/// Client to meta server. Cloning the instance is lightweight.
+#[derive(Clone)]
 pub struct MetaClient {
     pub cluster_client: ClusterServiceClient<Channel>,
     pub heartbeat_client: HeartbeatServiceClient<Channel>,

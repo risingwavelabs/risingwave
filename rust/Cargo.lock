@@ -2981,7 +2981,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
- "toml",
  "tonic",
  "tracing",
  "tracing-opentelemetry",
@@ -3104,6 +3103,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
+ "toml",
  "tonic",
  "twox-hash",
 ]

@@ -11,6 +11,7 @@ pub struct StreamTaskEnv {
     table_manager: StreamTableManagerRef,
     server_addr: SocketAddr,
     source_manager: SourceManagerRef,
+    worker_id: u32,
 }
 
 impl StreamTaskEnv {
@@ -18,11 +19,13 @@ impl StreamTaskEnv {
         table_manager: StreamTableManagerRef,
         source_manager: SourceManagerRef,
         server_addr: SocketAddr,
+        worker_id: u32,
     ) -> Self {
         StreamTaskEnv {
             table_manager,
             server_addr,
             source_manager,
+            worker_id,
         }
     }
 
@@ -38,6 +41,7 @@ impl StreamTaskEnv {
             table_manager: Arc::new(SimpleTableManager::with_in_memory_store()),
             server_addr: SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
             source_manager: std::sync::Arc::new(MemSourceManager::new()),
+            worker_id: 0,
         }
     }
 
@@ -59,5 +63,9 @@ impl StreamTaskEnv {
 
     pub fn source_manager_ref(&self) -> SourceManagerRef {
         self.source_manager.clone()
+    }
+
+    pub fn worker_id(&self) -> u32 {
+        self.worker_id
     }
 }

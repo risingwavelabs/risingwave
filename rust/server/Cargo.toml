@@ -50,7 +50,6 @@ static_assertions = "1"
 thiserror = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
 tokio-stream = "0.1"
-toml = "0.5.8"
 tonic = "0.6"
 tracing = "0.1"
 tracing-opentelemetry = "0.16"

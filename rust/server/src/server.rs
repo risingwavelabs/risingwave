@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use hyper::service::{make_service_fn, service_fn};
@@ -6,6 +7,8 @@ use hyper::{Body, Request, Response, Server};
 use prometheus::{Encoder, TextEncoder};
 use risingwave_batch::rpc::service::task_service::TaskServiceImpl;
 use risingwave_batch::task::{BatchTaskEnv, TaskManager};
+use risingwave_common::config::ComputeNodeConfig;
+use risingwave_meta::rpc::meta_client::MetaClient;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
@@ -18,13 +21,26 @@ use tokio::task::JoinHandle;
 
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
+use crate::ComputeNodeOpts;
 
-pub fn rpc_serve(
+fn load_config(opts: &ComputeNodeOpts) -> ComputeNodeConfig {
+    if opts.config_path.is_empty() {
+        return ComputeNodeConfig::default();
+    }
+    let config_path = PathBuf::from(opts.config_path.to_owned());
+    ComputeNodeConfig::init(config_path).unwrap()
+}
+
+/// Bootstraps the compute-node.
+pub async fn compute_node_serve(
     addr: SocketAddr,
-    state_store: StateStoreImpl,
-    prometheus_listener_addr: &str,
-    metrics_level: u32,
+    opts: ComputeNodeOpts,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
+    let meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
+    let worker_id = meta_client.register(addr).await.unwrap();
+    let _config = load_config(&opts); // TODO: _config will be used by streaming env & batch env.
+
+    let state_store: StateStoreImpl = opts.state_store.parse().unwrap();
     let table_mgr = Arc::new(SimpleTableManager::new(state_store.clone()));
     let task_mgr = Arc::new(TaskManager::new());
     let stream_mgr = Arc::new(StreamManager::new(addr, state_store));
@@ -48,7 +64,7 @@ pub fn rpc_serve(
         task_mgr.clone(),
         addr,
     );
-    let stream_env = StreamTaskEnv::new(table_mgr, source_mgr, addr);
+    let stream_env = StreamTaskEnv::new(table_mgr, source_mgr, addr, worker_id);
     let task_srv = TaskServiceImpl::new(task_mgr.clone(), batch_env);
     let exchange_srv = ExchangeServiceImpl::new(task_mgr, stream_mgr.clone());
     let stream_srv = StreamServiceImpl::new(stream_mgr, stream_env);
@@ -70,8 +86,8 @@ pub fn rpc_serve(
     });
 
     // Boot metrics service.
-    if metrics_level > 0 {
-        MetricsManager::boot_metrics_service(prometheus_listener_addr.to_string());
+    if opts.metrics_level > 0 {
+        MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
     }
 
     (join_handle, shutdown_send)
@@ -115,19 +131,43 @@ impl MetricsManager {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::util::addr::get_host_port;
-    use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::StateStoreImpl;
+    use std::ffi::OsString;
 
-    use crate::server::rpc_serve;
+    use clap::StructOpt;
+    use risingwave_common::util::addr::get_host_port;
+    use risingwave_meta::rpc::server::MetaStoreBackend;
+    use tokio::sync::mpsc::UnboundedSender;
+    use tokio::task::JoinHandle;
+
+    use crate::server::compute_node_serve;
+    use crate::ComputeNodeOpts;
+
+    async fn start_meta_node() -> (JoinHandle<()>, UnboundedSender<()>) {
+        let dashboard_addr = get_host_port("127.0.0.1:5691").unwrap();
+        let addr = get_host_port("127.0.0.1:5690").unwrap();
+        risingwave_meta::rpc::server::rpc_serve(
+            addr,
+            Some(dashboard_addr),
+            None,
+            MetaStoreBackend::Sled(tempfile::tempdir().unwrap().into_path()),
+        )
+        .await
+    }
+
+    async fn start_compute_node() -> (JoinHandle<()>, UnboundedSender<()>) {
+        let args: [OsString; 0] = []; // No argument.
+        let opts = ComputeNodeOpts::parse_from(args);
+        let addr = get_host_port(opts.host.as_str()).unwrap();
+        compute_node_serve(addr, opts).await
+    }
 
     #[tokio::test]
     async fn test_server_shutdown() {
-        let addr = get_host_port("127.0.0.1:5688").unwrap();
-        let prometheus_addr = "127.0.0.1:1222";
-        let store = StateStoreImpl::MemoryStateStore(MemoryStateStore::new());
-        let (join_handle, shutdown_send) = rpc_serve(addr, store, prometheus_addr, 1);
-        shutdown_send.send(()).unwrap();
-        join_handle.await.unwrap();
+        let (meta_join, meta_shutdown) = start_meta_node().await;
+        let (join, shutdown) = start_compute_node().await;
+        shutdown.send(()).unwrap();
+        join.await.unwrap();
+        meta_shutdown.send(()).unwrap();
+        meta_join.await.unwrap();
     }
 }

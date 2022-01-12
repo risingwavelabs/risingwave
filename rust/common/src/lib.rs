@@ -21,6 +21,7 @@ mod alloc;
 pub mod buffer;
 pub mod catalog;
 pub mod collection;
+pub mod config;
 pub mod expr;
 #[cfg(test)]
 pub mod test_utils;

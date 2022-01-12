@@ -20,5 +20,36 @@ extern crate test;
 
 pub mod rpc;
 pub mod server;
-pub mod server_config;
-pub mod server_context;
+
+use clap::Parser;
+
+/// Command-line arguments for compute-node.
+#[derive(Parser, Debug)]
+pub struct ComputeNodeOpts {
+    // The custom log4rs config file.
+    #[clap(long, default_value = "config/log4rs.yaml")]
+    pub log4rs_config: String,
+
+    #[clap(long, default_value = "127.0.0.1:5688")]
+    pub host: String,
+
+    #[clap(long, default_value = "in-memory")]
+    pub state_store: String,
+
+    #[clap(long, default_value = "127.0.0.1:1222")]
+    pub prometheus_listener_addr: String,
+
+    #[clap(long, default_value = "0")]
+    pub metrics_level: u32,
+
+    #[clap(long, default_value = "http://127.0.0.1:5690")]
+    pub meta_address: String,
+
+    /// No given `config_path` means to use default config.
+    #[clap(long, default_value = "")]
+    pub config_path: String,
+
+    /// Use `tokio-tracing` instead of `log4rs` for observability.
+    #[clap(long)]
+    pub enable_tracing: bool,
+}

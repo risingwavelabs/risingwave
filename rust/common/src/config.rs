@@ -1,72 +1,91 @@
 use std::fs;
 use std::path::PathBuf;
 
-use risingwave_common::array::{InternalError, RwError};
-use risingwave_common::error::ErrorCode::IoError;
-use risingwave_common::error::Result;
 use serde::{Deserialize, Serialize};
+
+use crate::error::ErrorCode::InternalError;
+use crate::error::{Result, RwError};
 
 const DEFAULT_HEARTBEAT_INTERVAL: u32 = 100;
 const DEFAULT_CHUNK_SIZE: u32 = 1024;
 const DEFAULT_SST_SIZE: u32 = 1024;
 const DEFAULT_BLOCK_SIZE: u32 = 1024;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// TODO(TaoWu): The configs here may be preferable to be managed under corresponding module
+/// separately.
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct ComputeNodeConfig {
     // For connection
+    #[serde(default)]
     server: ServerConfig,
 
     // Below for OLAP.
+    #[serde(default)]
     olap: OlapConfig,
 
     // Below for streaming.
+    #[serde(default)]
     streaming: StreamingConfig,
 
     // Below for Hummock.
+    #[serde(default)]
     hummock: HummockConfig,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct ServerConfig {
-    #[serde(default = "default_heartbeat_interval")]
     heartbeat_interval: u32,
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            heartbeat_interval: DEFAULT_HEARTBEAT_INTERVAL,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct OlapConfig {
-    #[serde(default = "default_chunk_size")]
     chunk_size: u32,
+}
+
+impl Default for OlapConfig {
+    fn default() -> Self {
+        Self {
+            chunk_size: DEFAULT_CHUNK_SIZE,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct StreamingConfig {
-    #[serde(default = "default_chunk_size")]
     chunk_size: u32,
+}
+
+impl Default for StreamingConfig {
+    fn default() -> Self {
+        Self {
+            chunk_size: DEFAULT_CHUNK_SIZE,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct HummockConfig {
-    #[serde(default = "default_sst_size")]
     sst_size: u32,
 
-    #[serde(default = "default_block_size")]
     block_size: u32,
 }
 
-fn default_heartbeat_interval() -> u32 {
-    DEFAULT_HEARTBEAT_INTERVAL
-}
-
-fn default_chunk_size() -> u32 {
-    DEFAULT_CHUNK_SIZE
-}
-
-fn default_sst_size() -> u32 {
-    DEFAULT_SST_SIZE
-}
-
-fn default_block_size() -> u32 {
-    DEFAULT_BLOCK_SIZE
+impl Default for HummockConfig {
+    fn default() -> Self {
+        Self {
+            sst_size: DEFAULT_SST_SIZE,
+            block_size: DEFAULT_BLOCK_SIZE,
+        }
+    }
 }
 
 impl ComputeNodeConfig {
@@ -91,9 +110,29 @@ impl ComputeNodeConfig {
     }
 
     pub fn init(path: PathBuf) -> Result<ComputeNodeConfig> {
-        let config_str = fs::read_to_string(path).map_err(|e| RwError::from(IoError(e)))?;
+        let config_str = fs::read_to_string(path.clone()).map_err(|e| {
+            RwError::from(InternalError(format!(
+                "failed to open config file '{}': {}",
+                path.to_string_lossy(),
+                e
+            )))
+        })?;
         let config: ComputeNodeConfig = toml::from_str(config_str.as_str())
             .map_err(|e| RwError::from(InternalError(format!("parse error {}", e))))?;
         Ok(config)
+    }
+}
+
+mod tests {
+
+    #[test]
+    fn test_default() {
+        use super::*;
+
+        let cfg = ComputeNodeConfig::default();
+        assert_eq!(cfg.heartbeat_interval(), DEFAULT_HEARTBEAT_INTERVAL);
+
+        let cfg: ComputeNodeConfig = toml::from_str("").unwrap();
+        assert_eq!(cfg.hummock_block_size(), DEFAULT_BLOCK_SIZE);
     }
 }
