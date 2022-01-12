@@ -93,3 +93,21 @@ impl PgResult {
         self.values.iter()
     }
 }
+
+/// Helper to return a 1-row-1-col string at early stage of developement.
+impl From<String> for PgResult {
+    fn from(s: String) -> Self {
+        use risingwave_common::types::ScalarImpl;
+
+        use crate::pgwire::pg_field_descriptor::TypeOid;
+        PgResult::new(
+            StatementType::SELECT,
+            1,
+            vec![Row::new(vec![Some(ScalarImpl::Utf8(s))])],
+            vec![PgFieldDescriptor::new(
+                "varchar".to_owned(),
+                TypeOid::Varchar,
+            )],
+        )
+    }
+}

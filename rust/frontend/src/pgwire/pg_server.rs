@@ -64,7 +64,7 @@ mod tests {
                 if let SimpleQueryMessage::Row(row_inner) = row {
                     assert_eq!(
                         row_inner.get(0),
-                        Some(&format!("{:?}", parse(query).unwrap())[..])
+                        Some(&format!("Unhandled ast: {:?}", parse(query).unwrap()[0])[..])
                     );
                 } else {
                     panic!("The first message should be row values")
