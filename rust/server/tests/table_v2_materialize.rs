@@ -16,7 +16,7 @@ use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::{SimpleTableManager, TableManager};
 use risingwave_storage::{Keyspace, StateStoreImpl, TableColumnDesc};
 use risingwave_stream::executor::{
-    Barrier, Executor as StreamExecutor, MViewSinkExecutor, Message, Mutation, PkIndices,
+    Barrier, Executor as StreamExecutor, MaterializeExecutor, Message, Mutation, PkIndices,
     StreamSourceExecutor,
 };
 
@@ -115,9 +115,9 @@ async fn test_table_v2_materialize() -> Result<()> {
         barrier_rx,
     )?;
 
-    // Create a `Materialize` (`MViewSink`) to write the changes to storage
+    // Create a `Materialize` (`Materialize`) to write the changes to storage
     let keyspace = Keyspace::table_root(memory_state_store, &table_id);
-    let mut materialize = MViewSinkExecutor::new(
+    let mut materialize = MaterializeExecutor::new(
         Box::new(stream_source),
         keyspace.clone(),
         all_schema.clone(),

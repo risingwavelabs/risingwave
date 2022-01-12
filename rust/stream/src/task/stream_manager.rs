@@ -612,7 +612,7 @@ impl StreamManagerCore {
                     self.state_store.clone(),
                 )?;
 
-                let executor = Box::new(MViewSinkExecutor::new(
+                let executor = Box::new(MaterializeExecutor::new(
                     input.remove(0),
                     keyspace,
                     Schema::try_from(columns)?,

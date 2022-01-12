@@ -10,16 +10,16 @@ use super::state::ManagedMViewState;
 use crate::executor::{
     Barrier, Executor, Message, PkIndicesRef, Result, SimpleExecutor, StreamChunk,
 };
-/// `MViewSinkExecutor` writes data to a row-based memtable, so that data could
+/// `MaterializeExecutor` writes data to a row-based memtable, so that data could
 /// be queried by the AP engine.
-pub struct MViewSinkExecutor<S: StateStore> {
+pub struct MaterializeExecutor<S: StateStore> {
     input: Box<dyn Executor>,
     schema: Schema,
     local_state: ManagedMViewState<S>,
     pk_columns: Vec<usize>,
 }
 
-impl<S: StateStore> MViewSinkExecutor<S> {
+impl<S: StateStore> MaterializeExecutor<S> {
     pub fn new(
         input: Box<dyn Executor>,
         keyspace: Keyspace<S>,
@@ -47,7 +47,7 @@ impl<S: StateStore> MViewSinkExecutor<S> {
 }
 
 #[async_trait]
-impl<S: StateStore> Executor for MViewSinkExecutor<S> {
+impl<S: StateStore> Executor for MaterializeExecutor<S> {
     async fn next(&mut self) -> Result<Message> {
         match self.input().next().await {
             Ok(message) => match message {
@@ -67,13 +67,13 @@ impl<S: StateStore> Executor for MViewSinkExecutor<S> {
     }
 
     fn identity(&self) -> &'static str {
-        "MViewSinkExecutor"
+        "MaterializeExecutor"
     }
 }
 
-impl<S: StateStore> std::fmt::Debug for MViewSinkExecutor<S> {
+impl<S: StateStore> std::fmt::Debug for MaterializeExecutor<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MViewSinkExecutor")
+        f.debug_struct("MaterializeExecutor")
             .field("input", &self.input)
             .field("schema", &self.schema)
             .field("pk_columns", &self.pk_columns)
@@ -81,7 +81,7 @@ impl<S: StateStore> std::fmt::Debug for MViewSinkExecutor<S> {
     }
 }
 
-impl<S: StateStore> SimpleExecutor for MViewSinkExecutor<S> {
+impl<S: StateStore> SimpleExecutor for MaterializeExecutor<S> {
     fn input(&mut self) -> &mut dyn Executor {
         &mut *self.input
     }
@@ -221,7 +221,7 @@ mod tests {
             ],
         );
 
-        let mut sink_executor = Box::new(MViewSinkExecutor::new(
+        let mut sink_executor = Box::new(MaterializeExecutor::new(
             Box::new(source),
             Keyspace::table_root(state_store, &table_id),
             schema,
