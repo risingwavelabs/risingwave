@@ -140,7 +140,6 @@ impl FromStr for StateStoreImpl {
                         bloom_false_positive: 0.1,
                         remote_dir: "hummock_001".to_string(),
                         checksum_algo: ChecksumAlg::Crc32c,
-                        stats_enabled: false,
                     },
                     Arc::new(VersionManager::new()),
                 )))
@@ -163,7 +162,6 @@ impl FromStr for StateStoreImpl {
                         bloom_false_positive: 0.1,
                         remote_dir: "hummock_001".to_string(),
                         checksum_algo: ChecksumAlg::Crc32c,
-                        stats_enabled: true,
                     },
                     Arc::new(VersionManager::new()),
                 )))

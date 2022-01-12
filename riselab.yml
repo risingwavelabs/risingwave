@@ -115,6 +115,7 @@ template:
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
 
+
   meta-node:
     # Meta-node listen address
     address: "127.0.0.1"

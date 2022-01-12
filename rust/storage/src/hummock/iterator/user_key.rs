@@ -1,10 +1,12 @@
 use std::ops::Bound::{self, *};
+use std::sync::Arc;
 
 use super::{HummockIterator, SortedIterator};
 use crate::hummock::iterator::ReverseUserKeyIterator;
 use crate::hummock::key::{get_ts, key_with_ts, user_key as to_user_key, Timestamp};
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
+use crate::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 
 pub enum DirectedUserKeyIterator {
     Forward(UserKeyIterator),
@@ -74,6 +76,8 @@ pub struct UserKeyIterator {
 
     /// Only read values if `ts <= self.read_ts`.
     read_ts: Timestamp,
+
+    stats: Arc<StateStoreStats>,
 }
 
 // TODO: decide whether this should also impl `HummockIterator`
@@ -99,6 +103,7 @@ impl UserKeyIterator {
             last_key: Vec::new(),
             last_val: Vec::new(),
             read_ts,
+            stats: DEFAULT_STATE_STORE_STATS.clone(),
         }
     }
 
@@ -186,6 +191,7 @@ impl UserKeyIterator {
 
     /// Reset the iterating position to the first position where the key >= provided key.
     pub async fn seek(&mut self, user_key: &[u8]) -> HummockResult<()> {
+        let timer = self.stats.iter_seek_latency.start_timer();
         // handle range scan when key < begin_key
         let user_key = match &self.key_range.0 {
             Included(begin_key) => {
@@ -205,7 +211,9 @@ impl UserKeyIterator {
         // handle multi-version
         self.last_key.clear();
         // handle range scan when key > end_key
-        self.next().await
+        let res = self.next().await;
+        timer.observe_duration();
+        res
     }
 
     /// Indicate whether the iterator can be used.

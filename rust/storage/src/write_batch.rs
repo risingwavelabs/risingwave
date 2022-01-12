@@ -1,3 +1,4 @@
+use std::mem::size_of_val;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -55,9 +56,31 @@ where
 
     /// Ingest this batch into the associated state store.
     pub async fn ingest(self, epoch: u64) -> Result<()> {
+        let kv_pair_num = self.batch.len() as u64;
+        if kv_pair_num == 0 {
+            return Ok(());
+        }
         self.state_store_stats.batched_write_counts.inc();
+        self.state_store_stats
+            .batch_write_tuple_counts
+            .inc_by(kv_pair_num);
         // TODO: is it necessary to check or preprocess these pairs?
-        self.store.ingest_batch(self.batch, epoch).await
+
+        // self.state_store_stats.batch_write_size.reset();
+        let mut write_batch_size = 0_usize;
+        for (key, value) in self.batch.clone() {
+            write_batch_size += size_of_val(key.as_ref());
+            if value.is_some() {
+                write_batch_size += size_of_val(value.as_ref().unwrap());
+            }
+        }
+        self.state_store_stats
+            .batch_write_size
+            .observe(write_batch_size as f64);
+        let timer = self.state_store_stats.batch_write_latency.start_timer();
+        self.store.ingest_batch(self.batch, epoch).await.unwrap();
+        timer.observe_duration();
+        Ok(())
     }
 
     /// Create a [`LocalWriteBatch`] with the given `keyspace`, which automatically prepends the

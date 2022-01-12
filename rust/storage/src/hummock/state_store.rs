@@ -53,12 +53,14 @@ impl StateStore for HummockStateStore {
     }
 
     async fn iter(&self, prefix: &[u8]) -> Result<Self::Iter> {
+        let timer = self.storage.get_stats_ref().iter_seek_latency.start_timer();
         let range = prefix.to_owned()..next_key(prefix);
         let mut inner = self.storage.range_scan(range).await?;
         inner.rewind().await?;
-        Ok(HummockStateStoreIter(DirectedUserKeyIterator::Forward(
-            inner,
-        )))
+        self.storage.get_stats_ref().iter_counts.inc();
+        let res = HummockStateStoreIter(DirectedUserKeyIterator::Forward(inner));
+        timer.observe_duration();
+        Ok(res)
     }
 
     async fn reverse_iter(&self, prefix: &[u8]) -> Result<Self::Iter> {

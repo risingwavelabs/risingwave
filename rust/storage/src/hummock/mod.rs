@@ -58,8 +58,6 @@ pub struct HummockOptions {
     pub remote_dir: String,
     /// checksum algorithm
     pub checksum_algo: ChecksumAlg,
-    /// statistics enabled
-    pub stats_enabled: bool,
 }
 
 impl HummockOptions {
@@ -71,7 +69,6 @@ impl HummockOptions {
             bloom_false_positive: 0.1,
             remote_dir: "hummock_001".to_string(),
             checksum_algo: ChecksumAlg::XxHash64,
-            stats_enabled: true,
         }
     }
 
@@ -83,7 +80,6 @@ impl HummockOptions {
             bloom_false_positive: 0.1,
             remote_dir: "hummock_001_small".to_string(),
             checksum_algo: ChecksumAlg::XxHash64,
-            stats_enabled: true,
         }
     }
 }
@@ -153,11 +149,14 @@ impl HummockStorage {
     }
 
     fn get_snapshot(&self) -> HummockSnapshot {
-        HummockSnapshot::new(self.version_manager.clone())
+        let timer = self.get_stats_ref().get_snapshot_latency.start_timer();
+        let res = HummockSnapshot::new(self.version_manager.clone());
+        timer.observe_duration();
+        res
     }
 
-    pub fn get_stats_ref(&self) -> Arc<StateStoreStats> {
-        self.stats.clone()
+    pub fn get_stats_ref(&self) -> &StateStoreStats {
+        self.stats.as_ref()
     }
 
     pub fn get_options(&self) -> Arc<HummockOptions> {
@@ -170,11 +169,15 @@ impl HummockStorage {
     /// the key is not found. If `Err()` is returned, the searching for the key
     /// failed due to other non-EOF errors.
     pub async fn get(&self, key: &[u8]) -> HummockResult<Option<Vec<u8>>> {
-        if self.options.stats_enabled {
-            self.get_stats_ref().point_get_counts.inc();
-        }
+        self.get_stats_ref().get_counts.inc();
+        self.get_stats_ref().get_key_size.observe(key.len() as f64);
 
-        self.get_snapshot().get(key).await
+        let value = self.get_snapshot().get(key).await?;
+        self.get_stats_ref()
+            .get_value_size
+            .observe((value.as_ref().map(|x| x.len()).unwrap_or(0) + 1) as f64);
+
+        Ok(value)
     }
 
     /// Return an iterator that scan from the begin key to the end key
@@ -183,9 +186,7 @@ impl HummockStorage {
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
-        if self.options.stats_enabled {
-            self.get_stats_ref().range_scan_counts.inc();
-        }
+        self.get_stats_ref().range_scan_counts.inc();
 
         self.get_snapshot().range_scan(key_range).await
     }
@@ -199,9 +200,7 @@ impl HummockStorage {
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
-        if self.options.stats_enabled {
-            self.get_stats_ref().reverse_range_scan_counts.inc();
-        }
+        self.get_stats_ref().range_scan_counts.inc();
 
         self.get_snapshot().reverse_range_scan(key_range).await
     }
@@ -222,7 +221,12 @@ impl HummockStorage {
     ) -> HummockResult<()> {
         let get_id_and_builder = || async {
             let id = self.version_manager.generate_table_id().await;
+            let timer = self
+                .get_stats_ref()
+                .batch_write_build_table_latency
+                .start_timer();
             let builder = Self::get_builder(&self.options);
+            timer.observe_duration();
             (id, builder)
         };
         let mut builder = CapacitySplitTableBuilder::new(get_id_and_builder);
@@ -254,14 +258,16 @@ impl HummockStorage {
         }
 
         // Add all tables at once.
+        let timer = self
+            .get_stats_ref()
+            .batch_write_add_l0_latency
+            .start_timer();
         self.version_manager.add_l0_ssts(tables, epoch).await?;
-
+        timer.observe_duration();
         // Update statistics if needed.
-        if self.options.stats_enabled {
-            self.get_stats_ref()
-                .put_bytes
-                .inc_by(total_size.to_u64().unwrap());
-        }
+        self.get_stats_ref()
+            .put_bytes
+            .inc_by(total_size.to_u64().unwrap());
 
         // TODO: should we use unwrap() ?
         // Notify the compactor

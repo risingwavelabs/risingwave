@@ -1,4 +1,5 @@
 use std::collections::{btree_map, BTreeMap};
+use std::mem::size_of_val;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -62,8 +63,8 @@ impl MemoryStateStore {
         Ok(())
     }
 
-    pub fn get_stats_ref(&self) -> Arc<StateStoreStats> {
-        self.stats.clone()
+    pub fn get_stats_ref(&self) -> &StateStoreStats {
+        self.stats.as_ref()
     }
 
     async fn scan_inner(&self, prefix: &[u8], limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
@@ -114,10 +115,20 @@ impl StateStore for MemoryStateStore {
     type Iter = MemoryStateStoreIter;
 
     async fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
-        self.get_stats_ref().point_get_counts.inc();
-
+        self.get_stats_ref().get_counts.inc();
+        let timer = self.get_stats_ref().get_latency.start_timer();
         let inner = self.inner.lock().await;
-        Ok(inner.get(key).cloned())
+        let res = inner.get(key).cloned();
+        timer.observe_duration();
+
+        self.get_stats_ref().get_key_size.observe(key.len() as f64);
+        if res.is_some() {
+            self.get_stats_ref()
+                .get_value_size
+                .observe(size_of_val(res.as_ref().unwrap()) as f64);
+        }
+
+        Ok(res)
     }
 
     async fn scan(&self, prefix: &[u8], limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {

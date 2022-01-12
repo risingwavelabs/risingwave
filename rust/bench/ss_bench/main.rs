@@ -83,7 +83,6 @@ fn get_state_store_impl(opts: &Opts) -> StateStoreImpl {
                     bloom_false_positive: opts.bloom_false_positive,
                     remote_dir: "hummock_001".to_string(),
                     checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
-                    stats_enabled: false,
                 },
                 Arc::new(VersionManager::new()),
             )))
@@ -102,7 +101,6 @@ fn get_state_store_impl(opts: &Opts) -> StateStoreImpl {
                     bloom_false_positive: opts.bloom_false_positive,
                     remote_dir: "hummock_001".to_string(),
                     checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
-                    stats_enabled: true,
                 },
                 Arc::new(VersionManager::new()),
             )))

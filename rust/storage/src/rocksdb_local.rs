@@ -33,8 +33,8 @@ impl RocksDBStateStore {
             .await
     }
 
-    pub fn get_stats_ref(&self) -> Arc<StateStoreStats> {
-        self.stats.clone()
+    pub fn get_stats_ref(&self) -> &StateStoreStats {
+        self.stats.as_ref()
     }
 }
 
@@ -43,7 +43,7 @@ impl StateStore for RocksDBStateStore {
     type Iter = RocksDBStateStoreIter;
 
     async fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
-        self.get_stats_ref().point_get_counts.inc();
+        self.get_stats_ref().get_counts.inc();
         self.storage().await.get(key).await
     }
 
