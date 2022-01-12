@@ -5,11 +5,12 @@ if [ -z "$(which cargo-make)" ]; then
     cargo install cargo-make --version "^0.35"
 fi
 
+touch riselab-components.user.env
+
 if [ $# -eq 0 ] || [ "$1" == "-h" ] || [ "$1" ==  "--help" ]; then
     cargo make --list-all-steps
     exit 0
 fi
 
-touch riselab-components.user.env
 cargo make configure-if-not-configured
 cargo make "$@"
