@@ -46,7 +46,7 @@ FROM (VALUES (1::int2)) t(x);
 query B
 select true::BOOLEAN
 ----
-true
+t
 
 subtest FloatingPointTypes
 
@@ -81,17 +81,17 @@ subtest DateTimeTypes
 query T
 select '2008-01-01 00:00:01'::TIMESTAMP;
 ----
-2008-01-01 00:00:01 +0000 +0000
+2008-01-01 00:00:01
 
 query T
 select '2008-01-01'::DATE;
 ----
-2008-01-01 00:00:00 +0000 +0000
+2008-01-01
 
 query T
 select date '1997-07-01' + interval '3' month;
 ----
-1997-10-01 00:00:00 +0000 +0000
+1997-10-01 00:00:00
 
 subtest StringTypes
 

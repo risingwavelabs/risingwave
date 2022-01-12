@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
+use tracing::event;
 
 use super::{Executor, Message, PkIndicesRef};
 
@@ -35,6 +36,17 @@ impl Executor for SchemaCheckExecutor {
         let message = self.input.next().await?;
 
         if let Message::Chunk(chunk) = &message {
+            event!(
+                tracing::Level::TRACE,
+                "input schema = \n{:#?}\nexpected schema = \n{:#?}",
+                chunk
+                    .columns()
+                    .iter()
+                    .map(|col| col.array_ref().get_ident())
+                    .collect_vec(),
+                self.schema().fields()
+            );
+
             for (i, (column, field)) in chunk
                 .columns()
                 .iter()

@@ -17,9 +17,7 @@ java_coverage_report:
 	cd java && ./gradlew jacocoRootReport
 
 sqllogictest:
-	cd go/sqllogictest && make
-	mkdir -p go/bin
-	cp go/sqllogictest/bin/sqllogictest go/bin/sqllogictest
+	cargo install sqllogictest --version 0.2.0 --features bin
 
 rust: rust_fmt rust_check rust_test
 

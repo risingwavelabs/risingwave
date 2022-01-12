@@ -102,9 +102,10 @@ jobs:
         run: |
           cp riselab-components.ci.env riselab-components.user.env
 
-      - name: Build sqllogictest
+      - name: Download sqllogictest
         run: |
-          make sqllogictest
+          curl -fL -o ~/.cargo/bin/sqllogictest https://github.com/singularity-data/sqllogictest-rs/releases/download/v0.2.0/sqllogictest-linux-amd64
+          chmod +x ~/.cargo/bin/sqllogictest
 
       - name: Download cargo-make
         run: |
@@ -119,21 +120,17 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-streaming
-          python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/streaming
+          sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
 
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
 
-      - name: Prepare tpch e2e test
-        run: |
-          ./scripts/gen_batch_tpch_slt.sh
-
       - name: e2e test 3-node
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
-          python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/batch
+          sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -202,9 +199,10 @@ jobs:
           sudo apt-get update -yy
           sudo apt-get install --upgrade -yy postgresql
 
-      - name: Build sqllogictest
+      - name: Download sqllogictest
         run: |
-          make sqllogictest
+          curl -fL -o ~/.cargo/bin/sqllogictest https://github.com/singularity-data/sqllogictest-rs/releases/download/v0.2.0/sqllogictest-linux-amd64
+          chmod +x ~/.cargo/bin/sqllogictest
 
       - uses: actions/download-artifact@v2
         with:
@@ -224,13 +222,9 @@ jobs:
       - name: Build java frontend
         run: make java_build
 
-      - name: Prepare tpch e2e test
-        run: |
-          ./scripts/gen_batch_tpch_slt.sh
-
       - name: Run tests on Postgresql
         run: |
-          python3 ./scripts/sqllogictest.py -p ${{ env.PG_PORT }} -f ./e2e_test/batch/
+          sqllogictest -p ${{ env.PG_PORT }} './e2e_test/batch/**/*.slt'
 
       - name: Run 3-node end-to-end tests (batch)
         run: |
@@ -238,7 +232,7 @@ jobs:
           chmod +x ./rust/target/debug/compute-node
           chmod +x ./rust/target/debug/meta-node
           ./scripts/start_cluster.sh 3
-          python3 ./scripts/sqllogictest.py -p ${{ env.RW_PORT }} -db dev -f ./e2e_test/batch/
+          sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/batch/**/*.slt'
 
       - name: Run 3-node regress tests (batch)
         run: |
@@ -260,7 +254,7 @@ jobs:
           chmod +x ./rust/target/debug/compute-node
           chmod +x ./rust/target/debug/meta-node
           ./scripts/start_cluster.sh 1
-          python3 ./scripts/sqllogictest.py -p ${{ env.RW_PORT }} -db dev -f ./e2e_test/streaming/
+          sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/streaming/**/*.slt'
 
       # - name: Run 3-node end-to-end tests (streaming)
       #   run: |
@@ -268,14 +262,14 @@ jobs:
       #     chmod +x ./rust/target/debug/compute-node
       #     chmod +x ./rust/target/debug/meta-node
       #     ./scripts/start_cluster.sh 3
-      #     python3 ./scripts/sqllogictest.py -p ${{ env.RW_PORT }} -db dev -f ./e2e_test/streaming/
+      #     sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/streaming/**/*.slt'
 
       - name: Run single-node end-to-end tests (source)
         run: |
           chmod +x ./rust/target/debug/compute-node
           chmod +x ./rust/target/debug/meta-node
           ./scripts/start_cluster.sh 1
-          python3 ./scripts/sqllogictest.py -p ${{ env.RW_PORT }} -db dev -f ./e2e_test/source/
+          sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source/**/*.slt'
           ./scripts/kill_cluster.sh
 
       - name: Run 3-node end-to-end tests (source)
@@ -283,7 +277,7 @@ jobs:
           sleep 5
           chmod +x ./rust/target/debug/compute-node
           ./scripts/start_cluster.sh 3
-          python3 ./scripts/sqllogictest.py -p ${{ env.RW_PORT }} -db dev -f ./e2e_test/source_distributed/
+          sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source_distributed/**/*.slt'
 
       - name: Show compute-nodes logs on failure
         if: ${{ failure() }}

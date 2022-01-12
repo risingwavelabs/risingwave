@@ -1,63 +1,63 @@
 query B
 SELECT true AS true;
 ----
-true
+t
 
 query B
 SELECT bool 't' AS true;
 ----
-true
+t
 
 query B
 SELECT bool '   f           ' AS false;
 ----
-false
+f
 
 query B
 SELECT not bool 'f' AS true;
 ----
-true
+t
 
 query B
 SELECT bool 't' = bool 'f' AS false;
 ----
-false
+f
 
 query B
 SELECT bool 't' <> bool 'f' AS true;
 ----
-true
+t
 
 query B
 SELECT bool 't' > bool 'f' AS true;
 ----
-true
+t
 
 query B
 SELECT bool 't' >= bool 'f' AS true;
 ----
-true
+t
 
 query B
 SELECT bool 'f' < bool 't' AS true;
 ----
-true
+t
 
 query B
 SELECT bool 'f' <= bool 't' AS true;
 ----
-true
+t
 
 query BB
 SELECT 'TrUe'::text::boolean AS true, 'fAlse'::text::boolean AS false;
 ----
-true false
+t f
 
 query BB
 SELECT '    true   '::text::boolean AS true,
        '     FALSE'::text::boolean AS false;
 ----
-true false
+t f
 
 statement ok
 CREATE TABLE TB1(v1 bool);
@@ -77,9 +77,9 @@ SELECT v1 is true,
        boolne(v1, null)
 FROM TB1;
 ----
-true false false true false true false false NULL
-false true true false false true true true NULL
-false true false true true false NULL NULL NULL
+t f f t f t f f NULL
+f t t f f t t t NULL
+f t f t t f NULL NULL NULL
 
 
 
@@ -94,7 +94,7 @@ NULL NULL
 query BB
 select false AND NULL, true OR NULL;
 ----
-false true
+f t
 
 query BB
 select NULL AND NULL, NULL OR NULL;
@@ -104,7 +104,7 @@ NULL NULL
 query BB
 select not TRUE, not NULL;
 ----
-false NULL
+f NULL
 
 query BBBBBBBB
 select 'true'::bool is true,
@@ -116,4 +116,4 @@ select 'true'::bool is true,
        boolne('true'::bool, false),
        booleq('true'::bool, null);
 ----
-true false false true false true true NULL
+t f f t f t t NULL

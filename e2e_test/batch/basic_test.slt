@@ -165,22 +165,22 @@ query TBI
 select * from t order by v3 desc;
 ----
 null   NULL   3
-false  false  2
-true   true   1
+false  f      2
+true   t      1
 
 query TBI
 select * from t order by v3 asc;
 ----
-true   true   1
-false  false  2
+true   t      1
+false  f      2
 null   NULL   3
 
 query BBB rowsort
 select v1 is null, v2 is not null, v3 is not null from t;
 ----
-false true  true
-false true  true
-false false true
+f t t
+f t t
+f f t
 
 statement ok
 drop table t;
@@ -199,9 +199,9 @@ insert into t values
 query TTT
 select * from t
 ----
-1970-01-01 00:00:00 +0000 +0000 0000-01-01 04:05:06 +0000 UTC 1970-01-01 04:05:06 +0000 +0000
-1989-01-01 00:00:00 +0000 +0000 0000-01-01 23:48:17 +0000 UTC 1989-01-01 23:48:17 +0000 +0000
-2019-05-12 00:00:00 +0000 +0000 0000-01-01 10:20:48 +0000 UTC 2019-05-12 10:20:48 +0000 +0000
+1970-01-01  04:05:06    1970-01-01 04:05:06
+1989-01-01  23:48:17    1989-01-01 23:48:17
+2019-05-12  10:20:48    2019-05-12 10:20:48
 
 statement ok
 drop table t
@@ -318,9 +318,9 @@ insert into t values (true), (false), (true)
 query B
 select * from t
 ----
-true
-false
-true
+t
+f
+t
 
 statement ok
 drop table t
@@ -363,7 +363,7 @@ select cast(1 as smallint) + cast(2 as int)
 query T
 select date '1998-12-01' - interval '71' day;
 ----
-1998-09-21 00:00:00 +0000 +0000
+1998-09-21 00:00:00
 
 # Test NULL for array with offset buffer
 
@@ -384,7 +384,7 @@ NULL
 query TB
 select *, 'a b c' like '%b%' from t where v1 like '%o%';
 ----
-foo true
+foo t
 
 statement ok
 drop table t;

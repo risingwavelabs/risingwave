@@ -78,7 +78,8 @@ public class Values {
 
       @Override
       public String encodeInText() {
-        return String.valueOf(v);
+        // remove trailing '.0'
+        return String.valueOf(v).replaceAll("\\.0$", "");
       }
     };
   }
@@ -92,7 +93,8 @@ public class Values {
 
       @Override
       public String encodeInText() {
-        return String.valueOf(v);
+        // remove trailing '.0'
+        return String.valueOf(v).replaceAll("\\.0$", "");
       }
     };
   }

@@ -19,12 +19,12 @@ insert into t values ('-NaN');
 query RI
 select v1, count(*) from t group by v1 order by v1;
 ----
--Inf  1
--1    1
-0     2
-1     1
-+Inf  1
-NaN   2
+-Infinity   1
+-1          1
+0           2
+1           1
+Infinity    1
+NaN         2
 
 statement ok
 drop table t;

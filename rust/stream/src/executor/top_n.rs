@@ -1,4 +1,8 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
+use itertools::Itertools;
+use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Op, Row, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
@@ -314,7 +318,14 @@ impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
                 StreamChunk::new(new_ops, new_data_chunk.columns().to_vec(), None);
             Ok(new_stream_chunk)
         } else {
-            Ok(StreamChunk::new(vec![], vec![], None))
+            let columns = self
+                .schema()
+                .create_array_builders(0)
+                .unwrap()
+                .into_iter()
+                .map(|x| Column::new(Arc::new(x.finish().unwrap())))
+                .collect_vec();
+            Ok(StreamChunk::new(vec![], columns, None))
         }
     }
 
