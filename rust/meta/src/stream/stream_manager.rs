@@ -29,7 +29,7 @@ pub trait StreamManager: Sync + Send + 'static {
     async fn create_materialized_view(
         &self,
         table_id: &TableRefId,
-        actors: &[StreamActor],
+        actors: &mut [StreamActor],
     ) -> Result<()>;
     /// [`drop_materialized_view`] drops materialized view.
     async fn drop_materialized_view(&self, table_id: &TableRefId, actors: &[u32]) -> Result<()>;
@@ -101,9 +101,26 @@ impl StreamManager for DefaultStreamManager {
     async fn create_materialized_view(
         &self,
         table_id: &TableRefId,
-        actors: &[StreamActor],
+        actors: &mut [StreamActor],
     ) -> Result<()> {
-        let actor_ids = actors.iter().map(|f| f.get_actor_id()).collect::<Vec<_>>();
+        // Fill `upstream_actor_id` of [`ChainNode`].
+        for actor in actors.iter_mut() {
+            if let risingwave_pb::stream_plan::stream_node::Node::ChainNode(chain) =
+                actor.nodes.as_mut().unwrap().node.as_mut().unwrap()
+            {
+                // TODO(MrCroxx): A create materialized view plan will be splited into multiple
+                // stages. Currently, we simply assume that MView lays on the first
+                // actor. We need an interface in [`StreamMetaManager`] to query the
+                // actor id of the MView node.
+                let table_fragments = self
+                    .smm
+                    .get_table_actors(&chain.table_ref_id.clone().unwrap())
+                    .await?;
+                chain.upstream_actor_id = table_fragments.actor_ids[0];
+            }
+        }
+
+        let actor_ids = actors.iter().map(|a| a.get_actor_id()).collect::<Vec<_>>();
 
         let nodes = self.scheduler.schedule(&actor_ids).await?;
 
@@ -334,17 +351,29 @@ mod tests {
             schema_ref_id: None,
             table_id: 0,
         };
-        let actors = (0..5)
+        let mut actors = (0..5)
             .map(|i| StreamActor {
                 actor_id: i,
-                nodes: None,
+                // A dummy node to avoid panic.
+                nodes: Some(risingwave_pb::stream_plan::StreamNode {
+                    input: vec![],
+                    pk_indices: vec![],
+                    node: Some(risingwave_pb::stream_plan::stream_node::Node::MviewNode(
+                        risingwave_pb::stream_plan::MViewNode {
+                            table_ref_id: Some(table_ref_id.clone()),
+                            column_descs: vec![],
+                            pk_indices: vec![],
+                            column_orders: vec![],
+                        },
+                    )),
+                }),
                 dispatcher: None,
                 downstream_actor_id: vec![],
             })
             .collect::<Vec<_>>();
 
         stream_manager
-            .create_materialized_view(&table_ref_id, &actors)
+            .create_materialized_view(&table_ref_id, &mut actors)
             .await?;
 
         for actor in actors.clone() {

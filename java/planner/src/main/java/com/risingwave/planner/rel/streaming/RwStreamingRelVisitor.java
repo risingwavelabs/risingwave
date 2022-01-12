@@ -20,11 +20,7 @@ public interface RwStreamingRelVisitor<T> {
 
   Result<T> visit(RwStreamTableSource tableSource);
 
-  Result<T> visit(RwStreamMaterializedViewSource materializedViewSource);
-
   Result<T> visit(RwStreamChain chain);
-
-  Result<T> visit(RwStreamBroadcast broadcast);
 
   /** Result to return one node and other info */
   class Result<T> {

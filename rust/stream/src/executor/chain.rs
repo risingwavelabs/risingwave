@@ -10,18 +10,18 @@ enum ChainState {
     ReadingMView,
 }
 
-/// [`Chain`] is an operator that enables synchronization between the existing stream and newly
-/// appended executors. Currently, [`Chain`] is mainly used to implement MV on MV feature. It pipes
-/// new data of existing MVs to newly created MV only all of the old data in the existing MVs are
-/// dispatched.
+/// [`ChainExecutor`] is an executor that enables synchronization between the existing stream and
+/// newly appended executors. Currently, [`ChainExecutor`] is mainly used to implement MV on MV
+/// feature. It pipes new data of existing MVs to newly created MV only all of the old data in the
+/// existing MVs are dispatched.
 #[derive(Debug)]
-pub struct Chain {
+pub struct ChainExecutor {
     snapshot: Box<dyn Executor>,
     mview: Box<dyn Executor>,
     state: ChainState,
 }
 
-impl Chain {
+impl ChainExecutor {
     pub fn new(snapshot: Box<dyn Executor>, mview: Box<dyn Executor>) -> Self {
         Self {
             snapshot,
@@ -58,7 +58,7 @@ impl Chain {
 }
 
 #[async_trait]
-impl Executor for Chain {
+impl Executor for ChainExecutor {
     async fn next(&mut self) -> Result<Message> {
         self.next_inner().await
     }
@@ -88,7 +88,7 @@ mod test {
     use risingwave_pb::plan::column_desc::ColumnEncodingType;
     use risingwave_pb::plan::ColumnDesc;
 
-    use super::Chain;
+    use super::ChainExecutor;
     use crate::executor::test_utils::MockSource;
     use crate::executor::{Executor, Message, PkIndices, PkIndicesRef};
     use crate::risingwave_common::error::Result;
@@ -186,7 +186,7 @@ mod test {
             ],
         ));
 
-        let mut chain = Chain::new(first, second);
+        let mut chain = ChainExecutor::new(first, second);
         let mut count = 0;
         loop {
             let k = &chain.next().await.unwrap();

@@ -1,0 +1,84 @@
+{
+  "input": [{
+    "input": [{
+      "input": [{
+        "mergeNode": {
+          "inputColumnDescs": [{
+            "columnType": {
+              "typeName": "INT32"
+            },
+            "encoding": "RAW"
+          }]
+        }
+      }, {
+        "mergeNode": {
+          "inputColumnDescs": [{
+            "columnType": {
+              "typeName": "INT32"
+            },
+            "encoding": "RAW"
+          }]
+        }
+      }],
+      "hashJoinNode": {
+        "leftKey": [0],
+        "rightKey": [0]
+      }
+    }],
+    "projectNode": {
+      "selectList": [{
+        "exprType": "INPUT_REF",
+        "returnType": {
+          "typeName": "INT32"
+        },
+        "inputRef": {
+        }
+      }, {
+        "exprType": "INPUT_REF",
+        "returnType": {
+          "typeName": "INT32"
+        },
+        "inputRef": {
+          "columnIdx": 1
+        }
+      }]
+    }
+  }],
+  "mviewNode": {
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      },
+      "tableId": 4
+    },
+    "columnDescs": [{
+      "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW"
+    }, {
+      "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW"
+    }],
+    "pkIndices": [0, 1],
+    "columnOrders": [{
+      "orderType": "ASCENDING",
+      "inputRef": {
+      },
+      "returnType": {
+        "typeName": "INT32"
+      }
+    }, {
+      "orderType": "ASCENDING",
+      "inputRef": {
+        "columnIdx": 1
+      },
+      "returnType": {
+        "typeName": "INT32"
+      }
+    }]
+  }
+}

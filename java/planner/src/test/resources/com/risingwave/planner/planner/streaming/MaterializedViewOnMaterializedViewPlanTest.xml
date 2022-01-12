@@ -2,19 +2,64 @@
     <TestCase name="query 1">
         <Resource name="sql">
             <![CDATA[
-create materialized view T1 as select sum(v2) as V from t where v1>1
+create materialized view M1 as select v1 as V from t where v1>v2
             ]]>
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[t1])
-  RwStreamProject(v=[$STREAM_NULL_BY_ROW_COUNT($0, $1)], $f0=[$0], v_copy=[$1])
-    RwStreamAgg(group=[{}], agg#0=[COUNT()], v=[SUM($1)])
-      RwStreamFilter(condition=[>($0, 1)])
-        RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,_row_id])
+RwStreamMaterializedView(name=[m1])
+  RwStreamProject(v=[$0], _row_id=[$2])
+    RwStreamFilter(condition=[>($0, $1)])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,_row_id])
 ]]>
         </Resource>
         <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q1">
+        </Resource>>
+        <Resource name="primaryKey">
+            <![CDATA[
+[1]
+            ]]>
+        </Resource>
+    </TestCase>
+
+    <TestCase name="query 2">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view M2 as select v2 as V from t where v2>v1
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[m2])
+  RwStreamProject(v=[$1], _row_id=[$2])
+    RwStreamFilter(condition=[>($1, $0)])
+      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,_row_id])
+]]>
+        </Resource>
+        <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q2">
+        </Resource>>
+        <Resource name="primaryKey">
+            <![CDATA[
+[1]
+            ]]>
+        </Resource>
+    </TestCase>
+
+    <TestCase name="query 3">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view M3 as select sum(M1.V)+1 as VoV from M1
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[m3])
+  RwStreamProject(vov=[+($STREAM_NULL_BY_ROW_COUNT($0, $1), 1)], $f0=[$0], $f1=[$1])
+    RwStreamAgg(group=[{}], agg#0=[COUNT()], agg#1=[SUM($0)])
+      RwStreamChain(table=[[test_schema, m1]], tableId=[0.0.1])
+]]>
+        </Resource>
+        <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q3">
         </Resource>>
         <Resource name="primaryKey">
             <![CDATA[
@@ -23,27 +68,28 @@ RwStreamMaterializedView(name=[t1])
         </Resource>
     </TestCase>
 
-    <TestCase name="query 2">
+    <TestCase name="query 4">
         <Resource name="sql">
             <![CDATA[
-create materialized view T2 as select sum(T1.V)+1 as VoV from T1
+create materialized view M4 as select M1.V as VoV from M1 join M2 on M1.V = M2.V
             ]]>
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[t2])
-  RwStreamProject(vov=[+($STREAM_NULL_BY_ROW_COUNT($0, $1), 1)], $f0=[$0], $f1=[$1])
-    RwStreamAgg(group=[{}], agg#0=[COUNT()], agg#1=[SUM($0)])
-      RwStreamChain(firstTableRefId=[0.0.1])
-        RwStreamBroadcast
-          RwStreamMaterializedViewSource(table=[[test_schema, t1]], columns=[v])
+RwStreamMaterializedView(name=[m4])
+  RwStreamProject(vov=[$0], v0=[$1])
+    RwStreamHashJoin(condition=[=($0, $1)], joinType=[inner])
+      RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+        RwStreamChain(table=[[test_schema, m1]], tableId=[0.0.1])
+      RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+        RwStreamChain(table=[[test_schema, m2]], tableId=[0.0.2])
 ]]>
         </Resource>
-        <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q2">
+        <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q4">
         </Resource>>
         <Resource name="primaryKey">
             <![CDATA[
-[1, 2]
+[0, 1]
             ]]>
         </Resource>
     </TestCase>

@@ -6,27 +6,28 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{Op, RwError, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_storage::table::TableIter;
-use risingwave_storage::StateStore;
+use risingwave_storage::table::{ScannableTableRef, TableIterRef};
 
-use super::{MViewTable, MViewTableIter};
 use crate::executor::{Executor, Message, PkIndices, PkIndicesRef};
+
 const DEFAULT_BATCH_SIZE: usize = 100;
 
 /// [`BatchQueryExecutor`] pushes m-view data batch to the downstream executor. Currently, this
 /// executor is used as input of the [`ChainExecutor`] to support MV-on-MV.
-pub struct BatchQueryExecutor<S: StateStore> {
+pub struct BatchQueryExecutor {
     /// The primary key indices of the schema
     pk_indices: PkIndices,
     /// The [`MViewTable`] that needs to be queried
-    table: MViewTable<S>,
+    table: ScannableTableRef,
     /// The number of tuples in one [`StreamChunk`]
     batch_size: usize,
     /// Inner iterator that read [`MViewTable`]
-    iter: Option<MViewTableIter<S>>,
+    iter: Option<TableIterRef>,
+    /// Schema
+    schema: Schema,
 }
 
-impl<S: StateStore> std::fmt::Debug for BatchQueryExecutor<S> {
+impl std::fmt::Debug for BatchQueryExecutor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BatchQueryExecutor")
             .field("table", &self.table)
@@ -36,21 +37,27 @@ impl<S: StateStore> std::fmt::Debug for BatchQueryExecutor<S> {
     }
 }
 
-impl<S: StateStore> BatchQueryExecutor<S> {
-    fn new(table: MViewTable<S>, pk_indices: PkIndices) -> Self {
+impl BatchQueryExecutor {
+    pub fn new(table: ScannableTableRef, pk_indices: PkIndices) -> Self {
         Self::new_with_batch_size(table, pk_indices, DEFAULT_BATCH_SIZE)
     }
 
-    fn new_with_batch_size(table: MViewTable<S>, pk_indices: PkIndices, batch_size: usize) -> Self {
+    pub fn new_with_batch_size(
+        table: ScannableTableRef,
+        pk_indices: PkIndices,
+        batch_size: usize,
+    ) -> Self {
+        let schema = table.schema().into_owned();
         Self {
             pk_indices,
             table,
             batch_size,
             iter: None,
+            schema,
         }
     }
 }
-impl<S: StateStore> BatchQueryExecutor<S> {
+impl BatchQueryExecutor {
     async fn next_inner(&mut self) -> Result<Message> {
         if self.iter.is_none() {
             self.iter = Some(self.table.iter().await.unwrap());
@@ -88,13 +95,13 @@ impl<S: StateStore> BatchQueryExecutor<S> {
 }
 
 #[async_trait]
-impl<S: StateStore> Executor for BatchQueryExecutor<S> {
+impl Executor for BatchQueryExecutor {
     async fn next(&mut self) -> Result<Message> {
         self.next_inner().await
     }
 
     fn schema(&self) -> &Schema {
-        self.table.schema()
+        &self.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef {
@@ -109,16 +116,18 @@ impl<S: StateStore> Executor for BatchQueryExecutor<S> {
 #[cfg(test)]
 mod test {
 
+    use std::sync::Arc;
     use std::vec;
 
-    use super::BatchQueryExecutor;
+    use super::*;
     use crate::executor::mview::test_utils::gen_basic_table;
-    use crate::executor::{Executor, Message};
+
     #[tokio::test]
     async fn test_basic() {
         let test_batch_size = 50;
         let test_batch_count = 5;
-        let table = gen_basic_table(test_batch_count * test_batch_size).await;
+        let table = Arc::new(gen_basic_table(test_batch_count * test_batch_size).await)
+            as ScannableTableRef;
         let mut node = BatchQueryExecutor::new_with_batch_size(table, vec![0, 1], test_batch_size);
         let mut batch_cnt = 0;
         while let Ok(Message::Chunk(sc)) = node.next().await {

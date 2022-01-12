@@ -18,6 +18,7 @@ use risingwave_pb::{expr, stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 use tokio::task::JoinHandle;
 
+use crate::executor::snapshot::BatchQueryExecutor;
 use crate::executor::*;
 use crate::task::StreamTaskEnv;
 
@@ -631,6 +632,36 @@ impl StreamManagerCore {
                 let upstreams = merge_node.get_upstream_actor_id();
                 self.create_merge_node(actor_id, schema, upstreams, pk_indices)
             }
+            ChainNode(chain_node) => {
+                let table_id = TableId::from(&chain_node.table_ref_id);
+                let table = table_manager.get_table(&table_id)?;
+                let snapshot = Box::new(BatchQueryExecutor::new(table.clone(), pk_indices.clone()));
+                // TODO(MrCroxx): replace with real mview.
+                // let mview = Box::new(BatchQueryExecutor::new(table, pk_indices));
+                let schema = table.schema();
+                let up_id = chain_node.upstream_actor_id;
+                let rx = {
+                    let mut guard = self.context.lock_channel_pool();
+                    guard
+                        .get_mut(&(up_id, actor_id))
+                        .ok_or_else(|| {
+                            RwError::from(ErrorCode::InternalError(format!(
+                                "chain node: channel between {} and {} does not exist",
+                                up_id, actor_id
+                            )))
+                        })?
+                        .1
+                        .take()
+                        .ok_or_else(|| {
+                            RwError::from(ErrorCode::InternalError(format!(
+                                "chain node: receiver from {} to {} does no exist",
+                                up_id, actor_id
+                            )))
+                        })?
+                };
+                let mview = Box::new(ReceiverExecutor::new(schema.into_owned(), pk_indices, rx));
+                Ok(Box::new(ChainExecutor::new(snapshot, mview)))
+            }
             _ => Err(RwError::from(ErrorCode::InternalError(format!(
                 "unsupported node:{:?}",
                 node
@@ -853,6 +884,25 @@ impl StreamManagerCore {
         }
 
         for (current_id, actor) in &self.actors {
+            if let stream_plan::stream_node::Node::ChainNode(chain) =
+                actor.nodes.as_ref().unwrap().node.as_ref().unwrap()
+            {
+                // Create channel based on upstream actor id for [`ChainNode`], check if upstream
+                // exists.
+                if !self.actor_infos.contains_key(&chain.upstream_actor_id) {
+                    return Err(ErrorCode::InternalError(format!(
+                        "chain upstream actor {} not exists",
+                        chain.upstream_actor_id
+                    ))
+                    .into());
+                }
+                let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+                let up_down_ids = (chain.upstream_actor_id, *current_id);
+                let mut guard = self.context.lock_channel_pool();
+                guard.insert(up_down_ids, (Some(tx), Some(rx)));
+                debug!("create channel from {} to {}", up_down_ids.0, up_down_ids.1);
+            }
+
             for downstream_id in actor.get_downstream_actor_id() {
                 // At this time, the graph might not be complete, so we do not check if downstream
                 // has `current_id` as upstream.
@@ -860,6 +910,7 @@ impl StreamManagerCore {
                 let up_down_ids = (*current_id, *downstream_id);
                 let mut guard = self.context.lock_channel_pool();
                 guard.insert(up_down_ids, (Some(tx), Some(rx)));
+                debug!("create channel from {} to {}", up_down_ids.0, up_down_ids.1);
             }
         }
         Ok(())

@@ -1,104 +1,54 @@
 {
   "input": [{
-    "pkIndices": [1, 2],
+    "pkIndices": [1],
     "input": [{
-      "pkIndices": [0, 1],
       "input": [{
-        "input": [{
-          "input": [{
-            "tableSourceNode": {
-              "tableRefId": {
-                "schemaRefId": {
-                  "databaseRefId": {
-                  }
-                },
-                "tableId": 1
-              },
-              "columnIds": [0],
-              "sourceType": "SOURCE"
-            }
-          }],
-          "broadcastNode": {
-          }
-        }],
-        "chainNode": {
+        "pkIndices": [2],
+        "tableSourceNode": {
           "tableRefId": {
             "schemaRefId": {
               "databaseRefId": {
               }
-            },
-            "tableId": 1
-          }
+            }
+          },
+          "columnIds": [1, 2, 0]
         }
       }],
-      "simpleAggNode": {
-        "aggCalls": [{
-          "type": "COUNT",
+      "filterNode": {
+        "searchCondition": {
+          "exprType": "GREATER_THAN",
           "returnType": {
-            "typeName": "INT64"
+            "typeName": "BOOLEAN"
+          },
+          "funcCall": {
+            "children": [{
+              "exprType": "INPUT_REF",
+              "returnType": {
+                "typeName": "INT32"
+              },
+              "inputRef": {
+                "columnIdx": 1
+              }
+            }, {
+              "exprType": "INPUT_REF",
+              "returnType": {
+                "typeName": "INT32"
+              },
+              "inputRef": {
+              }
+            }]
           }
-        }, {
-          "type": "SUM",
-          "args": [{
-            "input": {
-            },
-            "type": {
-              "typeName": "INT64"
-            }
-          }],
-          "returnType": {
-            "typeName": "DECIMAL",
-            "precision": 28,
-            "isNullable": true
-          }
-        }]
+        }
       }
     }],
     "projectNode": {
       "selectList": [{
-        "exprType": "ADD",
+        "exprType": "INPUT_REF",
         "returnType": {
-          "typeName": "DECIMAL",
-          "precision": 28,
-          "isNullable": true
+          "typeName": "INT32"
         },
-        "funcCall": {
-          "children": [{
-            "exprType": "STREAM_NULL_BY_ROW_COUNT",
-            "returnType": {
-              "typeName": "DECIMAL",
-              "precision": 28,
-              "isNullable": true
-            },
-            "funcCall": {
-              "children": [{
-                "exprType": "INPUT_REF",
-                "returnType": {
-                  "typeName": "INT64"
-                },
-                "inputRef": {
-                }
-              }, {
-                "exprType": "INPUT_REF",
-                "returnType": {
-                  "typeName": "DECIMAL",
-                  "precision": 28,
-                  "isNullable": true
-                },
-                "inputRef": {
-                  "columnIdx": 1
-                }
-              }]
-            }
-          }, {
-            "exprType": "CONSTANT_VALUE",
-            "returnType": {
-              "typeName": "INT32"
-            },
-            "constant": {
-              "body": "AAAAAQ=="
-            }
-          }]
+        "inputRef": {
+          "columnIdx": 1
         }
       }, {
         "exprType": "INPUT_REF",
@@ -106,16 +56,7 @@
           "typeName": "INT64"
         },
         "inputRef": {
-        }
-      }, {
-        "exprType": "INPUT_REF",
-        "returnType": {
-          "typeName": "DECIMAL",
-          "precision": 28,
-          "isNullable": true
-        },
-        "inputRef": {
-          "columnIdx": 1
+          "columnIdx": 2
         }
       }]
     }
@@ -130,9 +71,7 @@
     },
     "columnDescs": [{
       "columnType": {
-        "typeName": "DECIMAL",
-        "precision": 28,
-        "isNullable": true
+        "typeName": "INT32"
       },
       "encoding": "RAW"
     }, {
@@ -140,15 +79,8 @@
         "typeName": "INT64"
       },
       "encoding": "RAW"
-    }, {
-      "columnType": {
-        "typeName": "DECIMAL",
-        "precision": 28,
-        "isNullable": true
-      },
-      "encoding": "RAW"
     }],
-    "pkIndices": [1, 2],
+    "pkIndices": [1],
     "columnOrders": [{
       "orderType": "ASCENDING",
       "inputRef": {
@@ -156,16 +88,6 @@
       },
       "returnType": {
         "typeName": "INT64"
-      }
-    }, {
-      "orderType": "ASCENDING",
-      "inputRef": {
-        "columnIdx": 2
-      },
-      "returnType": {
-        "typeName": "DECIMAL",
-        "precision": 28,
-        "isNullable": true
       }
     }]
   }

@@ -642,78 +642,14 @@ public class PrimaryKeyDerivationVisitor
   }
 
   @Override
-  public Result<PrimaryKeyIndicesAndPositionMap> visit(
-      RwStreamMaterializedViewSource materializedViewSource) {
-    LOGGER.debug("visit RwStreamMaterializedViewSource");
-    var viewCatalog =
-        materializedViewSource.getTable().unwrapOrThrow(MaterializedViewCatalog.class);
-    // Since we are building a new materialize view on top of an existing one and the existing one
-    // has a list of columns
-    // as it primary key, we need to use these primary key columns for the new view if they have not
-    // been added.
-    var primaryKeyColumnIds = viewCatalog.getPrimaryKeyColumnIds();
-    var originalColumnIds = materializedViewSource.getColumnIds();
-    var tableId = originalColumnIds.get(0).getParent();
-    List<Integer> newPrimaryKeyIndices = new ArrayList<Integer>();
-    List<ColumnCatalog.ColumnId> newColumnIds = new ArrayList<ColumnCatalog.ColumnId>();
-    newColumnIds.addAll(materializedViewSource.getColumnIds());
-    for (var primaryKeyColumnId : primaryKeyColumnIds) {
-      boolean exist = false;
-      for (int idx = 0; idx < originalColumnIds.size(); idx++) {
-        var columnId = originalColumnIds.get(idx).getValue();
-        if (columnId.equals(primaryKeyColumnId)) {
-          LOGGER.debug("We have already added a primary key column with columnId:" + columnId);
-          newPrimaryKeyIndices.add(idx);
-          exist = true;
-          break;
-        }
-      }
-      if (!exist) {
-        newColumnIds.add(new ColumnCatalog.ColumnId(primaryKeyColumnId, tableId));
-        var newPrimaryKeyIndex = newColumnIds.size() - 1;
-        newPrimaryKeyIndices.add(newPrimaryKeyIndex);
-        LOGGER.debug(
-            "We additionally add a primary key column with columnId:"
-                + primaryKeyColumnId
-                + " and primary key index:"
-                + newPrimaryKeyIndex);
-      }
-    }
-    var newMaterializedViewSource =
-        new RwStreamMaterializedViewSource(
-            materializedViewSource.getCluster(),
-            materializedViewSource.getTraitSet(),
-            materializedViewSource.getHints(),
-            materializedViewSource.getTable(),
-            materializedViewSource.getTableId(),
-            ImmutableList.<ColumnCatalog.ColumnId>builder().addAll(newColumnIds).build());
-    // Since we put old columns before modification as where they were, the position map is empty.
-    var info =
-        new PrimaryKeyIndicesAndPositionMap(
-            ImmutableList.copyOf(newPrimaryKeyIndices), ImmutableMap.of());
-    LOGGER.debug("leave RwStreamMaterializedViewSource");
-    return new Result<>(newMaterializedViewSource, info);
-  }
-
-  @Override
   public Result<PrimaryKeyIndicesAndPositionMap> visit(RwStreamChain chain) {
     LOGGER.debug("visit RwStreamChain");
-    var input = (RisingWaveStreamingRel) chain.getInput();
-    var p = input.accept(this);
+    var viewCatalog = chain.getTable().unwrapOrThrow(MaterializedViewCatalog.class);
+    var primaryKeyColumnIds = viewCatalog.getPrimaryKeyColumnIds();
     var info =
-        new PrimaryKeyIndicesAndPositionMap(p.info.getPrimaryKeyIndices(), ImmutableMap.of());
+        new PrimaryKeyIndicesAndPositionMap(
+            ImmutableList.copyOf(primaryKeyColumnIds), ImmutableMap.of());
     LOGGER.debug("leave RwStreamChain");
     return new Result<>(chain, info);
-  }
-
-  @Override
-  public Result<PrimaryKeyIndicesAndPositionMap> visit(RwStreamBroadcast broadcast) {
-    LOGGER.debug("visit RwStreamBroadcast");
-    var input = (RisingWaveStreamingRel) broadcast.getInput();
-    var p = input.accept(this);
-    var info =
-        new PrimaryKeyIndicesAndPositionMap(p.info.getPrimaryKeyIndices(), ImmutableMap.of());
-    LOGGER.debug("leave RwStreamBroadcast");
-    return new Result<>(broadcast, info);
   }
 }

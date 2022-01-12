@@ -22,10 +22,8 @@ import com.risingwave.planner.program.VolcanoOptimizerProgram;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
 import com.risingwave.planner.rel.streaming.PrimaryKeyDerivationVisitor;
 import com.risingwave.planner.rel.streaming.RisingWaveStreamingRel;
-import com.risingwave.planner.rel.streaming.RwStreamBroadcast;
 import com.risingwave.planner.rel.streaming.RwStreamChain;
 import com.risingwave.planner.rel.streaming.RwStreamMaterializedView;
-import com.risingwave.planner.rel.streaming.RwStreamMaterializedViewSource;
 import com.risingwave.planner.rel.streaming.RwStreamSort;
 import com.risingwave.planner.rel.streaming.RwStreamTableSource;
 import com.risingwave.planner.rel.streaming.StreamingPlan;
@@ -85,14 +83,14 @@ public class StreamPlanner implements Planner<StreamingPlan> {
         (RisingWaveStreamingRel) program.optimize(logicalPlan, context);
     log.debug("Before adding Materialized View, the plan:\n" + ExplainWriter.explainPlan(rawPlan));
     RwStreamMaterializedView materializedViewPlan = addMaterializedViewNode(rawPlan, name);
-    replaceMaterializedViewSource(materializedViewPlan, null, -1, context);
+    resolveMaterializedViewOnMaterializedView(materializedViewPlan, null, -1, context);
     log.debug("Create streaming plan:\n" + ExplainWriter.explainPlan(materializedViewPlan));
     log.debug(
         "Primary key of Materialized View is:\n" + materializedViewPlan.getPrimaryKeyIndices());
     return materializedViewPlan;
   }
 
-  private void replaceMaterializedViewSource(
+  private void resolveMaterializedViewOnMaterializedView(
       RisingWaveStreamingRel node,
       RisingWaveStreamingRel parent,
       int indexInParent,
@@ -115,25 +113,20 @@ public class StreamPlanner implements Planner<StreamingPlan> {
         // source is a materialized view source
         assert parent != null;
         assert indexInParent >= 0;
-        RwStreamMaterializedViewSource materializedViewSource =
-            new RwStreamMaterializedViewSource(
+        RwStreamChain chain =
+            new RwStreamChain(
                 node.getCluster(),
                 node.getTraitSet(),
                 ((RwStreamTableSource) node).getHints(),
                 node.getTable(),
-                ((RwStreamTableSource) node).getTableId(),
-                ((RwStreamTableSource) node).getColumnIds());
-        RwStreamBroadcast broadcast =
-            new RwStreamBroadcast(node.getCluster(), node.getTraitSet(), materializedViewSource);
-        RwStreamChain chain =
-            new RwStreamChain(node.getCluster(), node.getTraitSet(), source.getId(), broadcast);
+                ((RwStreamTableSource) node).getTableId());
         parent.replaceInput(indexInParent, chain);
       }
     }
 
     for (int i = 0; i < node.getInputs().size(); i++) {
       RisingWaveStreamingRel child = (RisingWaveStreamingRel) node.getInput(i);
-      replaceMaterializedViewSource(child, node, i, context);
+      resolveMaterializedViewOnMaterializedView(child, node, i, context);
     }
   }
 

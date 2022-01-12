@@ -4,6 +4,7 @@ use std::fmt::Debug;
 pub use actor::Actor;
 pub use aggregation::*;
 use async_trait::async_trait;
+pub use chain::*;
 pub use dispatch::*;
 pub use filter::*;
 pub use hash_agg::*;

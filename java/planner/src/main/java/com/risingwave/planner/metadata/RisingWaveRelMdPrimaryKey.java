@@ -2,11 +2,9 @@ package com.risingwave.planner.metadata;
 
 import com.risingwave.planner.rel.streaming.PrimaryKeyDerivationVisitor;
 import com.risingwave.planner.rel.streaming.RwStreamAgg;
-import com.risingwave.planner.rel.streaming.RwStreamBroadcast;
 import com.risingwave.planner.rel.streaming.RwStreamChain;
 import com.risingwave.planner.rel.streaming.RwStreamExchange;
 import com.risingwave.planner.rel.streaming.RwStreamFilter;
-import com.risingwave.planner.rel.streaming.RwStreamMaterializedViewSource;
 import com.risingwave.planner.rel.streaming.RwStreamProject;
 import com.risingwave.planner.rel.streaming.RwStreamSort;
 import com.risingwave.planner.rel.streaming.RwStreamTableSource;
@@ -72,16 +70,7 @@ public class RisingWaveRelMdPrimaryKey implements MetadataHandler<RisingWaveMeta
     return visitor.visit(rel).info.getPrimaryKeyIndices();
   }
 
-  public @Nullable List<Integer> getPrimaryKeyIndices(
-      RwStreamMaterializedViewSource rel, RelMetadataQuery mq) {
-    return visitor.visit(rel).info.getPrimaryKeyIndices();
-  }
-
   public @Nullable List<Integer> getPrimaryKeyIndices(RwStreamChain rel, RelMetadataQuery mq) {
-    return visitor.visit(rel).info.getPrimaryKeyIndices();
-  }
-
-  public @Nullable List<Integer> getPrimaryKeyIndices(RwStreamBroadcast rel, RelMetadataQuery mq) {
     return visitor.visit(rel).info.getPrimaryKeyIndices();
   }
 }

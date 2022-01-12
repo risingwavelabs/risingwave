@@ -65,7 +65,7 @@ impl StreamActorBuilder {
         self.upstream_actors.clone()
     }
 
-    pub fn builder(&self) -> StreamActor {
+    pub fn build(&self) -> StreamActor {
         StreamActor {
             actor_id: self.actor_id,
             nodes: Some(self.nodes.deref().clone()),
@@ -122,7 +122,7 @@ impl StreamGraphBuilder {
         self.actor_builders
             .values()
             .map(|builder| {
-                let mut actor = builder.builder();
+                let mut actor = builder.build();
                 let upstream_actors = builder.get_upstream_actors();
                 actor.nodes = Some(self.build_inner(actor.get_nodes(), &upstream_actors, 0));
                 actor
@@ -132,7 +132,8 @@ impl StreamGraphBuilder {
 
     /// Build stream actor inside, two works will be done:
     /// 1. replace node's input with [`MergeNode`] if it is [`ExchangeNode`], and swallow
-    /// mergeNode's input. 2. ignore root node when it's [`ExchangeNode`].
+    /// mergeNode's input.
+    /// 2. ignore root node when it's [`ExchangeNode`].
     pub fn build_inner(
         &self,
         stream_node: &StreamNode,
