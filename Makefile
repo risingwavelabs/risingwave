@@ -63,7 +63,7 @@ export DOCKER_IMAGE_TAG ?= latest
 export DOCKER_COMPONENT_BACKEND_NAME ?= backend
 export DOCKER_COMPONENT_FRONTEND_NAME ?= frontend
 
-docker: docker_frontend docker_backend 
+docker: docker_frontend docker_backend
 
 docker_frontend:
 	docker build -f docker/frontend/Dockerfile -t ${DOCKER_GROUP_NAME}/${DOCKER_COMPONENT_FRONTEND_NAME}:${DOCKER_IMAGE_TAG} .

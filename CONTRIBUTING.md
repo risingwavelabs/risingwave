@@ -5,55 +5,77 @@ If you have questions, please [create a Github issue](https://github.com/singula
 There are some tips for you.
 
 ## Testing
+
 We support both unit tests and end-to-end tests.
 
 ### Unit Testing
+
 To run unit tests for Rust, run the following commands under the root directory:
+
 ```shell
 make rust_test
 ```
 
 To run unit tests for Java, run the following commands under the root directory:
+
 ```shell
 make java_test
 ```
 
 ### End-to-End Testing
-To run end-to-end tests with single compute-node:
+
+Currently, we use [sqllogictest-rs](https://github.com/singularity-data/sqllogictest-rs) to run our e2e tests.
+
+To install sqllogictest:
+
 ```shell
 make sqllogictest
+```
+
+To run end-to-end tests with single compute-node:
+
+```shell
 ./scripts/start_cluster.sh 1
-python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/
+sqllogictest -p 4567 -d dev './e2e_test/**/*.slt'
 ```
 
 To run end-to-end tests with multiple compute-nodes, run the script:
+
 ```shell
 ./scripts/start_cluster.sh 3
-python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/
+sqllogictest -p 4567 -d dev './e2e_test/**/*.slt'
 ```
 
 To run end-to-end tests with state store, run the script:
+
 ```shell
 export RISINGWAVE_STATE_STORE="hummock+minio://hummock:12345678@localhost:9300/hummock"
 ./scripts/start_cluster.sh 1
-python3 ./scripts/sqllogictest.py -p 4567 -db dev -f ./e2e_test/
+sqllogictest -p 4567 -d dev './e2e_test/**/*.slt'
 ```
 
 It will start processes in the background. After testing, you can run the following scriptto clean-up:
+
 ```shell
 ./scripts/kill_cluster.sh
 ```
 
 ## Monitoring
+
 RisingWave internally records performance counters and statistics. Currently they can be enabled and explored with following steps:
+
 ```shell
 ./compute-node [--other-startup-options] --metrics-level 1
 ```
+
 After compute node gets started, [Prometheus](https://github.com/prometheus/prometheus) can be used to pull metrics from compute node's endpoint by using:
+
 ```shell
 ./prometheus --config.file=rust/storage/src/metrics/prometheus.yml
 ```
+
 By now, you can get the time-seris metrics provided by `Prometheus` through `curl` or visiting the website (`http://localhost:9090`):
+
 ```shell
 curl http://localhost:9090/metrics
 ```
@@ -64,39 +86,48 @@ Furthermore, [Grafana](https://prometheus.io/docs/visualization/grafana/) can be
 Compute node supports streaming tracing. To enable this, either enable `tracing` functionality in `RiseLAB` by `./riselab configure`, or pass `--enable-tracing` to the `compute-node` binary.
 
 ## Code Formatting
+
 Before submitting your pull request (PR), you should format the code first.
 
 For Java code, please run:
+
 ```shell
 cd java
 ./gradlew spotlessApply
 ```
 
 For Rust code, please run:
+
 ```shell
 cd rust
 cargo fmt
 cargo clippy --all-targets
 ```
+
 If a new dependency is added to `Cargo.toml`, you may also run:
+
 ```shell
 cargo sort -w
 ```
 
 For shell code, please run:
+
 ```shell
 brew install shellcheck
 shellcheck <new file>
 ```
 
 For Protobufs, we rely on [prototool](https://github.com/uber/prototool#prototool-format) and [buf](https://docs.buf.build/installation) for code formatting and linting. Please check out their documents for installation. To check if you violate the rule, please run the commands:
+
 ```shell
 prototool format -d
 buf lint
 ```
 
 ## Pull Request Title
+
 As described in [here](https://github.com/commitizen/conventional-commit-types/blob/master/index.json), a valid PR title should begin with one of the following prefixes:
+
 - `feat`: A new feature
 - `fix`: A bug fix
 - `docs`: Documentation only changes
@@ -110,12 +141,14 @@ As described in [here](https://github.com/commitizen/conventional-commit-types/b
 - `revert`: Reverts a previous commit
 
 For example, a PR title could be:
+
 - `refactor: modify executor protobuf package path`
 - `feat(execution): enable comparison between nullable data arrays`, where `(execution)` means that this PR mainly focuses on the execution component.
 
 You may also check out our previous PRs in the [PR list](https://github.com/singularity-data/risingwave/pulls).
 
 ## Pull Request Description
+
 - If your PR is small (such as a typo fix), you can go brief.
 - If it is large and you have changed a lot, it's better to write more details.
 
