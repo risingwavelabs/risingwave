@@ -177,7 +177,7 @@ message TableActors {
 
 message ActorLocation {
   common.WorkerNode node = 1;
-  repeated stream_plan.StreamActor Actors = 2;
+  repeated stream_plan.StreamActor actors = 2;
 }
 
 message CreateMaterializedViewRequest {

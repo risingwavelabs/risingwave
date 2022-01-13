@@ -68,7 +68,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.2.1/d3.min.js"
   integrity="sha512-wkduu4oQG74ySorPiSRStC0Zl8rQfjr/Ty6dMvYTmjZw6RS5bferdx8TR7ynxeh79ySEp/benIFFisKofMjPbg=="
   crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js"
+  integrity="sha512-WFN04846sdKMIP5LKNphMaWzU7YpMyCU245etK3g/2ARYbPK9Ub18eG+ljU96qKRCWh+quCY7yefSmlkQw1ANQ=="
+  crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script src="https://unpkg.com/d3-dag@0.9.0"></script>
 <script>
   const cluster = (type, cluster) => `
@@ -79,7 +81,7 @@
   </div>
   <div class="flex flex-col">
     <p class="text-gray-500 m-0">Running</p>
-    <p class="text-gray-500 m-0">${cluster.host}:${cluster.port}</p>
+    <p class="text-gray-500 m-0">${cluster.host.host}:${cluster.host.port}</p>
   </div>
 </div>`
 
@@ -88,13 +90,20 @@
 <div class="p-6 max-w bg-white rounded-xl shadow-md flex flex-col space-y-1">
   <div class="flex flex-row items-center">
     <div class="w-3 h-3 flex-none bg-green-600 rounded-full mr-2"></div>
-    <div class="text-xl font-medium text-black">${actors.node.host}:${actors.node.port}</div>
+    <div class="text-xl font-medium text-black">${actors.node.host.host}:${actors.node.host.port}</div>
   </div>
   <div style="height: 40rem" class="border border-gray-200 overflow-x-scroll">
     <svg id="actor-${actors.node.id}" class="h-full"></svg>
   </div>
   <div id="message-${actors.node.id}"></div>
 </div>`
+
+  // Find a key ends with `Node`
+  const findTitle = (actorNode) => Object.keys(actorNode).find(x => x.endsWith("Node"))
+
+  // Remove `input` from node object
+  const exprNode = (actorNode) => (({ input, ...o }) => o)(actorNode)
+
   const createStreamActor = (actors) => {
     const nodeRadius = 20
     const edgeYRadius = 15
@@ -103,17 +112,17 @@
     const descMap = new Map
 
     const createStreamActorNodes = (actor_id, node_id, node, edges) => {
-      if (node.input.length == 1) {
+      if (node.input && node.input.length == 1) {
         const nodeId = `${actor_id}:${node_id}`
-        titleMap.set(nodeId, node.node.desc.split('(')[0])
-        descMap.set(nodeId, node.node.desc)
+        titleMap.set(nodeId, findTitle(node))
+        descMap.set(nodeId, exprNode(node))
         const [inNode, outNode] = createStreamActorNodes(actor_id, node_id + 1, node.input[0], edges)
         edges.push([outNode, nodeId])
         return [inNode, nodeId]
       } else {
         const nodeId = `${actor_id}:merger`
-        titleMap.set(nodeId, node.node.desc.split('(')[0])
-        descMap.set(nodeId, node.node.desc)
+        titleMap.set(nodeId, findTitle(node))
+        descMap.set(nodeId, exprNode(node))
         return [nodeId, nodeId]
       }
     }
@@ -144,24 +153,24 @@
     const actorOf = id => parseInt(id.split(":")[0])
     const titleOf = id => titleMap.get(id)
 
-    actors.actor.forEach(actor => {
+    actors.actors.forEach(actor => {
       const edges = []
-      const actorId = actor.actor_id
+      const actorId = actor.actorId
       const [inNode, outNode] = createStreamActorNodes(actorId, 0, actor.nodes, edges)
       const dispatcherNodeId = `${actorId}:dispatcher`
       let dispatcherType = ""
-      if (actor.downstream_actor_id.length == 0) {
+      if (!actor.downstreamActorId || actor.downstreamActorId.length == 0) {
         dispatcherType = "BlackHole"
       } else {
-        dispatcherType = `${actor.dispatcher.dispatcher_type}Dispatcher -> ${actor.downstream_actor_id.join(",")}`
+        dispatcherType = `${_.toLower(actor.dispatcher.type)}Dispatcher -> ${actor.downstreamActorId.join(",")}`
+        actor.downstreamActorId.forEach(v => {
+          graphData.push([dispatcherNodeId, `${v}:merger`])
+        })
       }
       titleMap.set(dispatcherNodeId, dispatcherType)
-      descMap.set(dispatcherNodeId, JSON.stringify(actor.dispatcher, null, 2))
+      descMap.set(dispatcherNodeId, actor.dispatcher)
       graphData = graphData.concat(edges)
       graphData.push([outNode, dispatcherNodeId])
-      actor.downstream_actor_id.forEach(v => {
-        graphData.push([dispatcherNodeId, `${v}:merger`])
-      })
     })
 
     graphData.reverse()
@@ -265,14 +274,10 @@
 
     const actorJump = (n) =>
       `<a target="_blank" rel="noopener noreferrer" class="text-sky-600" href="http://localhost:16680/search?service=compute&tags=%7B%22actor_id%22%3A%22${actorOf(n.data.id)}%22%2C%22epoch%22%3A%22-1%22%7D">Trace Actor #${actorOf(n.data.id)}</a><br>`
-    const mouseEnter = (e, d) => {
-      tooltip
-        .html(actorJump(d) + (descMap.get(d.data.id) || "No Data Available"))
-    }
 
-    const mouseMove = (e, d) => {
+    const activate = (e, d) => {
       tooltip
-        .html(actorJump(d) + (descMap.get(d.data.id) || "No Data Available"))
+        .html(actorJump(d) + (JSON.stringify(descMap.get(d.data.id), null, 2) || "No Data Available"))
     }
 
     // Plot node circles
@@ -280,8 +285,8 @@
       .append("circle")
       .attr("r", nodeRadius)
       .attr("fill", (n) => colorMap.get(actorOf(n.data.id)))
-      .on("mouseenter", mouseEnter)
-      .on("mousemove", mouseMove)
+      .on("mouseenter", activate)
+      .on("mousemove", activate)
 
     // Add text to nodes
     nodes
