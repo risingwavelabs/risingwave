@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use risingwave_common::array::RwError;
 use risingwave_common::error::Result;
 
 use crate::catalog::schema_catalog::SchemaCatalog;
@@ -32,6 +33,13 @@ impl DatabaseCatalog {
             .try_insert(schema_name.to_string(), SchemaCatalog::new(schema_id))
             .map(|_val| ())
             .map_err(|_| CatalogError::Duplicated("table", schema_name.to_string()).into())
+    }
+
+    pub fn drop_schema(&mut self, schema_name: &str) -> Result<()> {
+        self.schema_by_name.remove(schema_name).ok_or_else(|| {
+            RwError::from(CatalogError::NotFound("schema", schema_name.to_string()))
+        })?;
+        Ok(())
     }
 
     pub fn get_schema(&self, schema: &str) -> Option<&SchemaCatalog> {

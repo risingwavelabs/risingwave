@@ -5,9 +5,12 @@ use risingwave_common::array::RwError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::meta::catalog_service_client::CatalogServiceClient;
 use risingwave_pb::meta::create_request::CatalogBody;
+use risingwave_pb::meta::drop_request::CatalogId;
 use risingwave_pb::meta::get_id_request::IdCategory;
 use risingwave_pb::meta::id_generator_service_client::IdGeneratorServiceClient;
-use risingwave_pb::meta::{CreateRequest, Database, GetIdRequest, GetIdResponse, Schema, Table};
+use risingwave_pb::meta::{
+    CreateRequest, Database, DropRequest, GetIdRequest, GetIdResponse, Schema, Table,
+};
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 use tonic::transport::Channel;
 use tonic::Response;
@@ -129,6 +132,32 @@ impl LocalCatalogManager {
         self.get_schema(db_name, schema_name)
             .and_then(|schema| schema.get_table(table_name))
     }
+
+    fn drop_table_local(
+        &mut self,
+        db_name: &str,
+        schema_name: &str,
+        table_name: &str,
+    ) -> Result<()> {
+        self.get_schema_mut(db_name, schema_name).map_or(
+            Err(CatalogError::NotFound("schema", schema_name.to_string()).into()),
+            |schema| schema.drop_table(table_name),
+        )
+    }
+
+    fn drop_schema_local(&mut self, db_name: &str, schema_name: &str) -> Result<()> {
+        self.get_database_mut(db_name).map_or(
+            Err(CatalogError::NotFound("database", db_name.to_string()).into()),
+            |db| db.drop_schema(schema_name),
+        )
+    }
+
+    fn drop_database_local(&mut self, db_name: &str) -> Result<()> {
+        self.database_by_name.remove(db_name).ok_or_else(|| {
+            RwError::from(CatalogError::NotFound("database", db_name.to_string()))
+        })?;
+        Ok(())
+    }
 }
 
 /// NOTE: This is just a simple version remote catalog manager (can not handle complex case of
@@ -203,7 +232,10 @@ impl RemoteCatalogManager {
                 }),
             })),
         };
-        self.catalog_client.create(ddl_request).await.unwrap();
+        self.catalog_client
+            .create(ddl_request)
+            .await
+            .to_rw_result_with("create schema from meta failed")?;
         self.local_catalog_manager.create_schema_with_id(
             db_name,
             schema_name,
@@ -259,10 +291,111 @@ impl RemoteCatalogManager {
                 version: 0,
             })),
         };
+        self.catalog_client
+            .create(ddl_request)
+            .await
+            .to_rw_result_with("create table from meta failed")?;
         // Create table locally.
-        self.catalog_client.create(ddl_request).await.unwrap();
         self.local_catalog_manager
             .create_table_with_id(db_name, schema_name, table_info, table_id as TableId)
+            .unwrap();
+        Ok(())
+    }
+
+    pub async fn drop_table(
+        &mut self,
+        db_name: &str,
+        schema_name: &str,
+        table_name: &str,
+    ) -> Result<()> {
+        let database_id = self
+            .local_catalog_manager
+            .get_database(db_name)
+            .ok_or_else(|| RwError::from(CatalogError::NotFound("database", db_name.to_string())))?
+            .id() as i32;
+        let schema_id = self
+            .local_catalog_manager
+            .get_schema(db_name, schema_name)
+            .ok_or_else(|| {
+                RwError::from(CatalogError::NotFound("schema", schema_name.to_string()))
+            })?
+            .id() as i32;
+        let table_id = self
+            .local_catalog_manager
+            .get_table(db_name, schema_name, table_name)
+            .ok_or_else(|| RwError::from(CatalogError::NotFound("table", table_name.to_string())))?
+            .id() as i32;
+
+        let ddl_request = DropRequest {
+            node_id: 0,
+            catalog_id: Some(CatalogId::TableId(TableRefId {
+                schema_ref_id: Some(SchemaRefId {
+                    database_ref_id: Some(DatabaseRefId { database_id }),
+                    schema_id,
+                }),
+                table_id,
+            })),
+        };
+        self.catalog_client
+            .drop(ddl_request)
+            .await
+            .to_rw_result_with("drop table from meta failed")?;
+        // Drop table locally.
+        self.local_catalog_manager
+            .drop_table_local(db_name, schema_name, table_name)
+            .unwrap();
+        Ok(())
+    }
+
+    pub async fn drop_schema(&mut self, db_name: &str, schema_name: &str) -> Result<()> {
+        let database_id = self
+            .local_catalog_manager
+            .get_database(db_name)
+            .ok_or_else(|| RwError::from(CatalogError::NotFound("database", db_name.to_string())))?
+            .id() as i32;
+        let schema_id = self
+            .local_catalog_manager
+            .get_schema(db_name, schema_name)
+            .ok_or_else(|| {
+                RwError::from(CatalogError::NotFound("schema", schema_name.to_string()))
+            })?
+            .id() as i32;
+
+        let ddl_request = DropRequest {
+            node_id: 0,
+            catalog_id: Some(CatalogId::SchemaId(SchemaRefId {
+                database_ref_id: Some(DatabaseRefId { database_id }),
+                schema_id,
+            })),
+        };
+        self.catalog_client
+            .drop(ddl_request)
+            .await
+            .to_rw_result_with("drop schema from meta failed")?;
+        // Drop schema locally.
+        self.local_catalog_manager
+            .drop_schema_local(db_name, schema_name)
+            .unwrap();
+        Ok(())
+    }
+
+    pub async fn drop_database(&mut self, db_name: &str) -> Result<()> {
+        let database_id = self
+            .local_catalog_manager
+            .get_database(db_name)
+            .ok_or_else(|| RwError::from(CatalogError::NotFound("database", db_name.to_string())))?
+            .id() as i32;
+        let ddl_request = DropRequest {
+            node_id: 0,
+            catalog_id: Some(CatalogId::DatabaseId(DatabaseRefId { database_id })),
+        };
+        self.catalog_client
+            .drop(ddl_request)
+            .await
+            .to_rw_result_with("drop database from meta failed")?;
+        // Drop database locally.
+        self.local_catalog_manager
+            .drop_database_local(db_name)
             .unwrap();
         Ok(())
     }
@@ -310,7 +443,7 @@ mod tests {
     use crate::catalog::create_table_info::CreateTableInfo;
 
     #[test]
-    fn test_create_table() {
+    fn test_create_and_drop_table() {
         let mut catalog_manager = LocalCatalogManager::new();
         catalog_manager
             .create_database_local(DEFAULT_DATABASE_NAME)
@@ -324,6 +457,9 @@ mod tests {
             .get_schema(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME)
             .unwrap();
         assert_eq!(schema.id(), 0);
+
+        let test_table_name = "t";
+
         let columns = vec![
             (
                 "v1".to_string(),
@@ -338,11 +474,11 @@ mod tests {
             .create_table_local(
                 DEFAULT_DATABASE_NAME,
                 DEFAULT_SCHEMA_NAME,
-                &CreateTableInfo::new("t", columns),
+                &CreateTableInfo::new(test_table_name, columns),
             )
             .unwrap();
         let table = catalog_manager
-            .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
+            .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
             .unwrap();
         let col2 = table.get_column_by_id(1).unwrap();
         let col1 = table.get_column_by_id(0).unwrap();
@@ -351,6 +487,29 @@ mod tests {
         assert_eq!(col1.data_type_clone().data_type_kind(), DataTypeKind::Int32);
         assert_eq!(col2.name(), "v2");
         assert_eq!(col2.id(), 1);
+
+        // -----  test drop table, schema and database  -----
+
+        catalog_manager
+            .drop_table_local(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
+            .unwrap();
+        assert!(catalog_manager
+            .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
+            .is_none());
+
+        catalog_manager
+            .drop_schema_local(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME)
+            .unwrap();
+        assert!(catalog_manager
+            .get_schema(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME)
+            .is_none());
+
+        catalog_manager
+            .drop_database_local(DEFAULT_DATABASE_NAME)
+            .unwrap();
+        assert!(catalog_manager
+            .get_database(DEFAULT_DATABASE_NAME)
+            .is_none());
     }
 
     use std::time::Duration;
@@ -364,7 +523,7 @@ mod tests {
     use tonic::transport::Endpoint;
 
     #[tokio::test]
-    async fn test_create_table_remote() {
+    async fn test_create_and_drop_table_remote() {
         let addr = get_host_port("127.0.0.1:9526").unwrap();
         // Run a meta node server.
         let (_join_handle, _shutdown) = rpc_serve(
@@ -416,22 +575,87 @@ mod tests {
             .create_schema(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME)
             .await
             .unwrap();
-        let table_info = CreateTableInfo::new("t", columns);
+
+        let test_table_name = "t";
+
+        let table_info = CreateTableInfo::new(test_table_name, columns);
         remote_catalog_manager
             .create_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, &table_info)
             .await
             .unwrap();
         let req = GetCatalogRequest { node_id: 0 };
-        let response = catalog_client.get_catalog(req).await.unwrap();
+        let response = catalog_client.get_catalog(req.clone()).await.unwrap();
         let catalog = response.get_ref().catalog.as_ref();
         catalog
             .map(|catalog| {
                 assert_eq!(catalog.tables.len(), 1);
-                assert_eq!(catalog.tables[0].table_name, "t");
+                assert_eq!(catalog.tables[0].table_name, test_table_name);
                 assert_eq!(
                     catalog.tables[0].column_descs,
                     table_info.get_col_desc_prost().unwrap()
                 );
+            })
+            .unwrap();
+
+        // -----  test drop table, schema and database  -----
+
+        remote_catalog_manager
+            .drop_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
+            .await
+            .unwrap();
+        assert!(remote_catalog_manager
+            .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
+            .await
+            .is_none());
+        catalog_client
+            .get_catalog(req.clone())
+            .await
+            .unwrap()
+            .get_ref()
+            .catalog
+            .as_ref()
+            .map(|catalog| {
+                assert_eq!(catalog.tables.len(), 0);
+            })
+            .unwrap();
+
+        remote_catalog_manager
+            .drop_schema(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME)
+            .await
+            .unwrap();
+        assert!(remote_catalog_manager
+            .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
+            .await
+            .is_none());
+        catalog_client
+            .get_catalog(req.clone())
+            .await
+            .unwrap()
+            .get_ref()
+            .catalog
+            .as_ref()
+            .map(|catalog| {
+                assert_eq!(catalog.schemas.len(), 0);
+            })
+            .unwrap();
+
+        remote_catalog_manager
+            .drop_database(DEFAULT_DATABASE_NAME)
+            .await
+            .unwrap();
+        assert!(remote_catalog_manager
+            .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
+            .await
+            .is_none());
+        catalog_client
+            .get_catalog(req.clone())
+            .await
+            .unwrap()
+            .get_ref()
+            .catalog
+            .as_ref()
+            .map(|catalog| {
+                assert_eq!(catalog.databases.len(), 0);
             })
             .unwrap();
     }
