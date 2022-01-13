@@ -51,7 +51,6 @@ Then, simply run:
 
 ```
 ./riselab d # shortcut for ./riselab dev
-./riselab ci-1node
 ./riselab ci-3node
 ./riselab dev-compute-node # compute node will need to be started by you
 ```
