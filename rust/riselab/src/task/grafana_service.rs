@@ -52,6 +52,15 @@ impl Task for GrafanaService {
             &GrafanaGen.gen_datasource_yml(&self.config)?,
         )?;
 
+        std::fs::write(
+            self.grafana_root
+                .join("conf")
+                .join("provisioning")
+                .join("dashboards")
+                .join("dashboards.yaml"),
+            &GrafanaGen.gen_dashboard_yml(&self.config)?,
+        )?;
+
         let cmd = self.grafana()?;
 
         ctx.run_command(ctx.tmux_run(cmd)?)?;
