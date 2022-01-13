@@ -20,7 +20,7 @@ pub(crate) struct Opts {
 
     // ----- operation type parameters  -----
     #[clap(long)]
-    op: String,
+    operations: String,
 
     // ----- Hummock parameters  -----
     #[clap(long, default_value_t = 64)]
@@ -110,11 +110,13 @@ fn get_state_store_impl(opts: &Opts) -> StateStoreImpl {
 }
 
 async fn run_op(store: impl StateStore, opts: &Opts) {
-    match opts.op.as_ref() {
-        "writebatch" => write_batch::run(store, opts).await,
-        "getrandom" => get_random::run(store, opts).await,
-        "prefixscanrandom" => prefix_scan_random::run(store, opts).await,
-        other => unimplemented!("operation \"{}\" is not supported.", other),
+    for op in opts.operations.split(';') {
+        match op {
+            "writebatch" => write_batch::run(&store, opts).await,
+            "getrandom" => get_random::run(&store, opts).await,
+            "prefixscanrandom" => prefix_scan_random::run(&store, opts).await,
+            other => unimplemented!("operation \"{}\" is not supported.", other),
+        }
     }
 }
 

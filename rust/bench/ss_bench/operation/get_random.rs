@@ -9,7 +9,7 @@ use crate::utils::latency_stat::LatencyStat;
 use crate::utils::workload::{get_epoch, Workload};
 use crate::Opts;
 
-pub(crate) async fn run(store: impl StateStore, opts: &Opts) {
+pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
     // ----- calculate QPS -----
     let batch = Workload::new_sorted_workload(opts, Some(0)).batch;
     let mut rng = StdRng::seed_from_u64(233);
@@ -34,7 +34,7 @@ pub(crate) async fn run(store: impl StateStore, opts: &Opts) {
     let qps = opts.kvs_per_batch as u128 * 1_000_000_000 / time_nano as u128;
 
     // delete all the data
-    Workload::del_batch(&store, batch).await;
+    Workload::del_batch(store, batch).await;
 
     // ----- calculate latencies -----
     // To avoid overheads of frequent time measurements in QPS calculation, we calculte latencies

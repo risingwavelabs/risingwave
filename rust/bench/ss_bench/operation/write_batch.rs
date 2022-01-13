@@ -6,7 +6,7 @@ use crate::utils::latency_stat::LatencyStat;
 use crate::utils::workload::{get_epoch, Workload};
 use crate::Opts;
 
-pub(crate) async fn run(store: impl StateStore, opts: &Opts) {
+pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
     let batches: Vec<_> = (0..opts.iterations)
         .into_iter()
         .map(|i| Workload::new_sorted_workload(opts, Some(i as u64)).batch)
@@ -25,7 +25,7 @@ pub(crate) async fn run(store: impl StateStore, opts: &Opts) {
         latencies.push(time_nano);
 
         // clear content
-        Workload::del_batch(&store, batch_clone).await;
+        Workload::del_batch(store, batch_clone).await;
     }
 
     // calculate operation per second

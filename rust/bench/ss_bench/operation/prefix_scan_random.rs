@@ -9,7 +9,7 @@ use crate::utils::latency_stat::LatencyStat;
 use crate::utils::workload::{get_epoch, Workload};
 use crate::Opts;
 
-pub(crate) async fn run(store: impl StateStore, opts: &Opts) {
+pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
     let workload = Workload::new_sorted_workload(opts, Some(0));
     store
         .ingest_batch(workload.batch.clone(), get_epoch())
@@ -30,7 +30,7 @@ pub(crate) async fn run(store: impl StateStore, opts: &Opts) {
     let ops = workload.prefixes.len() as u128 * 1_000_000_000 / time_nano as u128;
 
     // delete data
-    Workload::del_batch(&store, workload.batch).await;
+    Workload::del_batch(store, workload.batch).await;
 
     // ----- calculate latencies -----
     // To avoid overheads of frequent time measurements in QPS calculation, we calculte latencies
