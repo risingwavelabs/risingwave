@@ -263,7 +263,7 @@ jobs:
           aws-region: us-east-2
       - name: Start EC2 runner
         id: start-ec2-runner
-        uses: machulav/ec2-github-runner@v2
+        uses: skyzh/ec2-github-runner@ba2298a67875dfdd29a88fafbc1ba27f4f94af39
         with:
           mode: start
           github-token: ${{ secrets.WUTAO_PAT }}
@@ -436,7 +436,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-2
       - name: Stop EC2 runner
-        uses: machulav/ec2-github-runner@v2
+        uses: skyzh/ec2-github-runner@ba2298a67875dfdd29a88fafbc1ba27f4f94af39
         with:
           mode: stop
           github-token: ${{ secrets.WUTAO_PAT }}
