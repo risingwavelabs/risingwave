@@ -1,22 +1,17 @@
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::types::{DataTypeKind, Int32Type, StringType};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::mview::MViewTable;
 use risingwave_storage::table::TableIter;
 use risingwave_storage::Keyspace;
 
+use crate::executor::test_utils::schemas;
 use crate::executor::ManagedMViewState;
 
 #[tokio::test]
 async fn test_mview_table() {
     let state_store = MemoryStateStore::new();
-    let schema = Schema::new(vec![
-        Field::new(Int32Type::create(false)),
-        Field::new(Int32Type::create(false)),
-        Field::new(Int32Type::create(false)),
-    ]);
+    let schema = schemas::iii();
     let pk_columns = vec![0, 1];
     let orderings = vec![OrderType::Ascending, OrderType::Descending];
     let keyspace = Keyspace::executor_root(state_store, 0x42);
@@ -87,11 +82,7 @@ async fn test_mview_table() {
 #[tokio::test]
 async fn test_mview_table_for_string() {
     let state_store = MemoryStateStore::new();
-    let schema = Schema::new(vec![
-        Field::new(StringType::create(true, 0, DataTypeKind::Varchar)),
-        Field::new(StringType::create(true, 0, DataTypeKind::Varchar)),
-        Field::new(StringType::create(true, 0, DataTypeKind::Varchar)),
-    ]);
+    let schema = schemas::sss();
     let pk_columns = vec![0, 1];
     let orderings = vec![OrderType::Ascending, OrderType::Descending];
     let keyspace = Keyspace::executor_root(state_store, 0x42);
@@ -217,11 +208,7 @@ async fn test_mview_table_for_string() {
 #[tokio::test]
 async fn test_mview_table_iter() {
     let state_store = MemoryStateStore::new();
-    let schema = Schema::new(vec![
-        Field::new(Int32Type::create(false)),
-        Field::new(Int32Type::create(false)),
-        Field::new(Int32Type::create(false)),
-    ]);
+    let schema = schemas::iii();
     let pk_columns = vec![0, 1];
     let orderings = vec![OrderType::Ascending, OrderType::Descending];
     let keyspace = Keyspace::executor_root(state_store, 0x42);
@@ -274,16 +261,8 @@ async fn test_mview_table_iter() {
 #[tokio::test]
 async fn test_multi_mview_table_iter() {
     let state_store = MemoryStateStore::new();
-    let schema_1 = Schema::new(vec![
-        Field::new(Int32Type::create(false)),
-        Field::new(Int32Type::create(false)),
-        Field::new(Int32Type::create(false)),
-    ]);
-    let schema_2 = Schema::new(vec![
-        Field::new(StringType::create(true, 0, DataTypeKind::Varchar)),
-        Field::new(StringType::create(true, 0, DataTypeKind::Varchar)),
-        Field::new(StringType::create(true, 0, DataTypeKind::Varchar)),
-    ]);
+    let schema_1 = schemas::iii();
+    let schema_2 = schemas::sss();
     let pk_columns = vec![0, 1];
     let orderings = vec![OrderType::Ascending, OrderType::Descending];
 

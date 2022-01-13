@@ -1,19 +1,14 @@
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::types::Int32Type;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::Keyspace;
 
+use super::super::test_utils::schemas;
 use super::{MViewTable, ManagedMViewState};
 
 pub async fn gen_basic_table(row_count: usize) -> MViewTable<MemoryStateStore> {
     let state_store = MemoryStateStore::new();
-    let schema = Schema::new(vec![
-        Field::new(Int32Type::create(false)),
-        Field::new(Int32Type::create(false)),
-        Field::new(Int32Type::create(false)),
-    ]);
+    let schema = schemas::iii();
     let pk_columns = vec![0, 1];
     let orderings = vec![OrderType::Ascending, OrderType::Descending];
     let keyspace = Keyspace::executor_root(state_store, 0x42);

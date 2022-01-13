@@ -197,3 +197,35 @@ impl Executor for MockAsyncSource {
 pub fn create_in_memory_keyspace() -> Keyspace<MemoryStateStore> {
     Keyspace::executor_root(MemoryStateStore::new(), 0x2333)
 }
+
+pub mod schemas {
+    use risingwave_common::catalog::*;
+    use risingwave_common::types::{DataTypeKind, DataTypeRef, Int32Type, StringType};
+
+    fn field_n<const N: usize>(data_type: DataTypeRef) -> Schema {
+        Schema::new(vec![Field::new(data_type); N])
+    }
+
+    fn int32_n<const N: usize>() -> Schema {
+        field_n::<N>(Int32Type::create(false))
+    }
+
+    /// Create a util schema **for test only** with two int32 fields.
+    pub fn ii() -> Schema {
+        int32_n::<2>()
+    }
+
+    /// Create a util schema **for test only** with three int32 fields.
+    pub fn iii() -> Schema {
+        int32_n::<3>()
+    }
+
+    fn varchar_n<const N: usize>() -> Schema {
+        field_n::<N>(StringType::create(true, 0, DataTypeKind::Varchar))
+    }
+
+    /// Create a util schema **for test only** with three varchar fields.
+    pub fn sss() -> Schema {
+        varchar_n::<3>()
+    }
+}

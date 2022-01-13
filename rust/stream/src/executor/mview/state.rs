@@ -81,22 +81,18 @@ impl<S: StateStore> ManagedMViewState<S> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::catalog::Field;
-    use risingwave_common::types::Int32Type;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
+    use crate::executor::test_utils::schemas;
 
     #[tokio::test]
     async fn test_mview_state() {
         // Only assert pk and columns can be successfully put/delete/flush,
         // and the ammount of rows is expected.
         let state_store = MemoryStateStore::new();
-        let schema = Schema::new(vec![
-            Field::new(Int32Type::create(false)),
-            Field::new(Int32Type::create(false)),
-        ]);
+        let schema = schemas::ii();
         let pk_columns = vec![0];
         let orderings = vec![OrderType::Ascending];
         let keyspace = Keyspace::executor_root(state_store.clone(), 0x42);
