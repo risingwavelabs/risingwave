@@ -83,7 +83,8 @@ public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCata
             createMaterializedViewInfo.getProperties(),
             createMaterializedViewInfo.getRowFormat(),
             createMaterializedViewInfo.getRowSchemaLocation(),
-            createMaterializedViewInfo.getCollation());
+            createMaterializedViewInfo.getCollation(),
+            createMaterializedViewInfo.isAssociated());
 
     createMaterializedViewInfo
         .getColumns()

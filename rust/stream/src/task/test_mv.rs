@@ -91,6 +91,7 @@ async fn test_stream_mv_proto() {
     let mview_proto = StreamNode {
         node: Some(Node::MviewNode(MViewNode {
             table_ref_id: Some(make_table_ref_id(1)),
+            associated_table_ref_id: None,
             column_descs: vec![column_desc],
             pk_indices: vec![0],
             column_orders: vec![ColumnOrder {

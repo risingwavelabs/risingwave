@@ -209,6 +209,7 @@ impl<'a> TableBuilder<'a> {
                     ..CoreDefault::default()
                 })
                 .collect_vec(),
+            v2: false,
         };
 
         PlanFragment {

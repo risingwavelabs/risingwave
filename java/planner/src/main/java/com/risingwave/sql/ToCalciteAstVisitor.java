@@ -16,6 +16,7 @@ import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.planner.sql.RisingWaveOperatorTable;
 import com.risingwave.sql.node.SqlCreateSource;
+import com.risingwave.sql.node.SqlCreateTableV2;
 import com.risingwave.sql.node.SqlShowParameters;
 import com.risingwave.sql.node.SqlTableOption;
 import com.risingwave.sql.tree.AliasedRelation;
@@ -31,6 +32,7 @@ import com.risingwave.sql.tree.ColumnType;
 import com.risingwave.sql.tree.ComparisonExpression;
 import com.risingwave.sql.tree.CreateSource;
 import com.risingwave.sql.tree.CreateTable;
+import com.risingwave.sql.tree.CreateTableV2;
 import com.risingwave.sql.tree.CreateView;
 import com.risingwave.sql.tree.DoubleLiteral;
 import com.risingwave.sql.tree.DropTable;
@@ -130,6 +132,16 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
         sqlNodeListOf(Lists2.map(node.tableElements(), column -> column.accept(this, context)));
 
     return SqlDdlNodes.createTable(SqlParserPos.ZERO, false, ifNotExists, name, columnList, null);
+  }
+
+  @Override
+  public SqlNode visitCreateTableV2(CreateTableV2<?> node, Void context) {
+    boolean ifNotExists = node.ifNotExists();
+    SqlIdentifier name = visitTable(node.name(), context);
+    SqlNodeList columnList =
+        sqlNodeListOf(Lists2.map(node.tableElements(), column -> column.accept(this, context)));
+
+    return new SqlCreateTableV2(SqlParserPos.ZERO, false, ifNotExists, name, columnList, null);
   }
 
   @Override

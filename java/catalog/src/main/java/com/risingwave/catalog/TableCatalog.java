@@ -32,6 +32,7 @@ import org.apache.calcite.schema.Statistic;
 import org.apache.calcite.schema.Statistics;
 import org.apache.calcite.schema.Table;
 import org.apache.calcite.sql.SqlCall;
+import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.util.ImmutableIntList;
@@ -41,6 +42,7 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
     implements Table {
   private static final int ROWID_COLUMN_ID = 0;
   private static final String ROWID_COLUMN = "_row_id";
+  private static final String TABLE_SOURCE_PREFIX = "_rw_source_";
   private final AtomicInteger nextColumnId = new AtomicInteger(ROWID_COLUMN_ID);
   private final List<ColumnCatalog> columns;
   private final ColumnCatalog rowIdColumn;
@@ -102,6 +104,10 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
     return false;
   }
 
+  public boolean isAssociatedMaterializedView() {
+    return false;
+  }
+
   public ImmutableIntList getPrimaryKeyColumnIds() {
     return primaryKeyColumnIds;
   }
@@ -124,6 +130,11 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
     } else {
       return ImmutableList.<ColumnCatalog>builder().add(getRowIdColumn()).addAll(columns).build();
     }
+  }
+
+  public ImmutableList<ColumnCatalog> getAllColumnsV2() {
+    // put row id column to the last to match the behavior of mview
+    return ImmutableList.<ColumnCatalog>builder().addAll(columns).add(getRowIdColumn()).build();
   }
 
   public Optional<ColumnCatalog> getColumn(ColumnCatalog.ColumnId columnId) {
@@ -262,6 +273,15 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
         .add("distributionType", distributionType)
         .add("rowIdColumn", rowIdColumn)
         .toString();
+  }
+
+  public static String getTableSourceName(String name) {
+    return String.format("%s%s", TABLE_SOURCE_PREFIX, name);
+  }
+
+  public static SqlIdentifier getTableSourceName(SqlIdentifier identifier) {
+    var tableName = getTableSourceName(identifier.getSimple());
+    return new SqlIdentifier(tableName, identifier.getCollation(), identifier.getParserPosition());
   }
 
   /** Table id definition. */

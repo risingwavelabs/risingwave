@@ -609,14 +609,28 @@ impl StreamManagerCore {
                     .map(|order| order.order_type)
                     .collect::<Vec<_>>();
 
-                let keyspace = Keyspace::table_root(store, &table_id);
-                table_manager.create_materialized_view(
-                    &table_id,
-                    columns,
-                    pks.clone(),
-                    orderings.clone(),
-                    self.state_store.clone(),
-                )?;
+                let keyspace = if materialized_view_node.associated_table_ref_id.is_some() {
+                    // create associated materialized view
+                    let associated_table_id =
+                        TableId::from(&materialized_view_node.associated_table_ref_id);
+
+                    let table = table_manager
+                        .create_associated_materialized_view(&associated_table_id, &table_id)?;
+                    source_manager.create_table_source_v2(&table_id, table)?;
+
+                    // share the keyspace between mview and table v2
+                    Keyspace::table_root(store, &associated_table_id)
+                } else {
+                    // create normal materialized view
+                    table_manager.create_materialized_view(
+                        &table_id,
+                        columns,
+                        pks.clone(),
+                        orderings.clone(),
+                    )?;
+
+                    Keyspace::table_root(store, &table_id)
+                };
 
                 let executor = Box::new(MaterializeExecutor::new(
                     input.remove(0),

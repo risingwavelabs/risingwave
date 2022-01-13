@@ -210,6 +210,7 @@ fn make_stream_node() -> StreamNode {
         pk_indices: vec![],
         node: Some(Node::MviewNode(MViewNode {
             table_ref_id: Some(make_table_ref_id(1)),
+            associated_table_ref_id: None,
             // ignore STREAM_NULL_BY_ROW_COUNT here. It's not important.
             column_descs: vec![
                 make_column_desc(0, TypeName::Int64),

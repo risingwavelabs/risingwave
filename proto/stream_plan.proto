@@ -32,6 +32,7 @@ message FilterNode {
 // In addition, we also specify primary key to MV for efficient point lookup during update and deletion.
 message MViewNode {
   plan.TableRefId table_ref_id = 1;
+  plan.TableRefId associated_table_ref_id = 5;
   repeated plan.ColumnDesc column_descs = 2;
   repeated int32 pk_indices = 3;
   repeated plan.ColumnOrder column_orders = 4;

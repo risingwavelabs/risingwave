@@ -64,14 +64,14 @@ async fn test_table_v2_materialize() -> Result<()> {
     let table_id = TableId::default();
     let column_descs = vec![
         TableColumnDesc {
-            // row id column
-            data_type: Arc::new(Int64Type::new(false)),
-            column_id: 0,
-        },
-        TableColumnDesc {
             // data column
             data_type: Arc::new(Float64Type::new(false)),
             column_id: 233,
+        },
+        TableColumnDesc {
+            // row id column
+            data_type: Arc::new(Int64Type::new(false)),
+            column_id: 0,
         },
     ];
 
@@ -103,7 +103,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     };
 
     // Create a `StreamSourceExecutor` to read the changes
-    let all_column_ids = vec![0, 233];
+    let all_column_ids = vec![233, 0];
     let all_schema = get_schema(&all_column_ids);
     let (barrier_tx, barrier_rx) = unbounded();
     let stream_source = StreamSourceExecutor::new(
@@ -156,13 +156,13 @@ async fn test_table_v2_materialize() -> Result<()> {
     let message = materialize.next().await?;
     match message {
         Message::Chunk(c) => {
-            let col_row_id = c.columns()[0].array_ref().as_int64();
-            assert_eq!(col_row_id.value_at(0).unwrap(), 0);
-            assert_eq!(col_row_id.value_at(1).unwrap(), 1);
-
-            let col_data = c.columns()[1].array_ref().as_float64();
+            let col_data = c.columns()[0].array_ref().as_float64();
             assert_eq!(col_data.value_at(0).unwrap(), 1.14.into_ordered());
             assert_eq!(col_data.value_at(1).unwrap(), 5.14.into_ordered());
+
+            let col_row_id = c.columns()[1].array_ref().as_int64();
+            assert_eq!(col_row_id.value_at(0).unwrap(), 0);
+            assert_eq!(col_row_id.value_at(1).unwrap(), 1);
         }
         Message::Barrier(_) => panic!(),
     }

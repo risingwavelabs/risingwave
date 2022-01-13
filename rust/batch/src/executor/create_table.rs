@@ -19,7 +19,6 @@ pub struct CreateTableExecutor {
     table_manager: TableManagerRef,
     source_manager: SourceManagerRef,
     table_columns: Vec<TableColumnDesc>,
-
     v2: bool,
 }
 
@@ -65,7 +64,7 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
             table_manager: source.global_task_env().table_manager_ref(),
             source_manager: source.global_task_env().source_manager_ref(),
             table_columns,
-            v2: false,
+            v2: node.v2,
         }))
     }
 }

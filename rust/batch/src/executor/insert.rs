@@ -109,11 +109,21 @@ impl Executor for InsertExecutor {
             for _ in 0..len {
                 builder.append(Some(next_row_id() as i64)).unwrap();
             }
-            let rowid_column = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
 
-            let columns = once(rowid_column)
-                .chain(child_chunk.columns().iter().map(|c| c.to_owned()))
-                .collect();
+            let rowid_column = once(Column::new(Arc::new(ArrayImpl::from(
+                builder.finish().unwrap(),
+            ))));
+            let child_columns = child_chunk.columns().iter().map(|c| c.to_owned());
+
+            let columns = match source.source.as_ref() {
+                SourceImpl::Table(_) => rowid_column.chain(child_columns).collect(),
+                SourceImpl::TableV2(_) => {
+                    // put row id column to the last to match the behavior of mview
+                    child_columns.chain(rowid_column).collect()
+                }
+                _ => unreachable!(),
+            };
+
             let chunk = StreamChunk::new(vec![Op::Insert; len], columns, None);
 
             do_insert(chunk).await?;
@@ -518,17 +528,11 @@ mod tests {
             .await?;
         source_manager.create_table_source_v2(&table_id, table)?;
 
-        let mut insert_executor = InsertExecutor {
-            table_id: table_id.clone(),
-            source_manager: source_manager.clone(),
-            child: Box::new(mock_executor),
-            executed: false,
-            schema: Schema {
-                fields: vec![Field {
-                    data_type: Int64Type::create(false),
-                }],
-            },
-        };
+        let mut insert_executor = InsertExecutor::new(
+            table_id.clone(),
+            source_manager.clone(),
+            Box::new(mock_executor),
+        );
         insert_executor.open().await.unwrap();
         let fields = &insert_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int64);
@@ -541,7 +545,7 @@ mod tests {
                 .as_int64()
                 .iter()
                 .collect::<Vec<_>>(),
-            vec![Some(5)]
+            vec![Some(5)] // inserted rows
         );
 
         // Check the reader.
@@ -558,7 +562,7 @@ mod tests {
                 .as_int64()
                 .iter()
                 .collect::<Vec<_>>(),
-            vec![Some(0), Some(1), Some(2), Some(3), Some(4)]
+            vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
         );
 
         assert_eq!(
@@ -567,7 +571,7 @@ mod tests {
                 .as_int64()
                 .iter()
                 .collect::<Vec<_>>(),
-            vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
+            vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
         );
 
         assert_eq!(
@@ -576,7 +580,7 @@ mod tests {
                 .as_int64()
                 .iter()
                 .collect::<Vec<_>>(),
-            vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
+            vec![Some(0), Some(1), Some(2), Some(3), Some(4)]
         );
 
         // There's nothing in store since `TableSourceV2` has no side effect.

@@ -68,7 +68,7 @@ public class DdlPlanTestBase {
     } else if (ast.getKind() == SqlKind.DROP_TABLE) {
       ret =
           ((DropTableHandler) sqlHandlerFactory.create(ast, executionContext))
-              .execute(ast, executionContext);
+              .execute(ast, executionContext).stream().findFirst().orElse(null);
     } else {
       throw new UnsupportedOperationException("unsupported ddl in test");
     }

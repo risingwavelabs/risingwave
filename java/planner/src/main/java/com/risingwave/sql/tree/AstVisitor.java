@@ -289,6 +289,10 @@ public abstract class AstVisitor<R, C> {
     return visitStatement(node, context);
   }
 
+  public R visitCreateTableV2(CreateTableV2<?> node, C context) {
+    return visitStatement(node, context);
+  }
+
   public R visitCreateTableAs(CreateTableAs node, C context) {
     return visitStatement(node, context);
   }

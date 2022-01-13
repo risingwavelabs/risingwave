@@ -487,6 +487,9 @@ createStmt
     : CREATE TABLE (IF NOT EXISTS)? table
         '(' tableElement (',' tableElement)* ')'
          partitionedByOrClusteredInto withProperties?                                #createTable
+    | CREATE TABLE_V2 (IF NOT EXISTS)? table
+        '(' tableElement (',' tableElement)* ')'
+         partitionedByOrClusteredInto withProperties?                                #createTableV2
     | CREATE TABLE table AS insertSource                                             #createTableAs
     | CREATE SNAPSHOT qname (ALL | TABLE tableWithPartitions) withProperties?        #createSnapshot
     | CREATE ANALYZER name=ident (EXTENDS extendedName=ident)?
@@ -657,6 +660,7 @@ on
 clazz
     : SCHEMA
     | TABLE
+    | TABLE_V2
     | VIEW
     ;
 
@@ -693,6 +697,7 @@ nonReserved
     | CURRENT_SCHEMA | PROMOTE | CHARACTER | VARYING
     | DISCARD | PLANS | SEQUENCES | TEMPORARY | TEMP | METADATA
     | SOURCE | LOCATION | TRUE | FALSE
+    | TABLE_V2
     ;
 
 AUTHORIZATION: 'AUTHORIZATION';
@@ -963,6 +968,8 @@ SUMMARY: 'SUMMARY';
 METADATA: 'METADATA';
 
 LOCATION: 'LOCATION';
+
+TABLE_V2: 'TABLE_V2';
 
 EQ  : '=';
 NEQ : '<>' | '!=';

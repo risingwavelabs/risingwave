@@ -38,6 +38,8 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
   // TODO: define more attributes corresponding to TableCatalog.
   private TableCatalog.TableId tableId;
 
+  private TableCatalog.TableId associatedTableId;
+
   private final SqlIdentifier name;
 
   private final ImmutableList<Integer> primaryKeyIndices;
@@ -100,6 +102,10 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
     materializedViewNodeBuilder.addAllPkIndices(this.getPrimaryKeyIndices());
     // Set table ref id.
     materializedViewNodeBuilder.setTableRefId(Messages.getTableRefId(tableId));
+    if (associatedTableId != null) {
+      materializedViewNodeBuilder.setAssociatedTableRefId(
+          Messages.getTableRefId(associatedTableId));
+    }
     // Set column orders.
     // Sort key serialization starts. The column that is in primary key but not sort key should be
     // ordered by `Ascending`
@@ -160,6 +166,10 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
   public void setTableId(TableCatalog.TableId tableId) {
     // An ugly implementation to receive TableId from TableCatalog.
     this.tableId = tableId;
+  }
+
+  public void setAssociatedTableId(TableCatalog.TableId tableId) {
+    this.associatedTableId = tableId;
   }
 
   /** Explain */

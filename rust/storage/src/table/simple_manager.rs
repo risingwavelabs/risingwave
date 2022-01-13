@@ -67,7 +67,7 @@ impl TableManager for SimpleTableManager {
             table_id
         );
 
-        let table = dispatch_state_store!(self.state_store.clone(), store, {
+        let table = dispatch_state_store!(self.state_store(), store, {
             let keyspace = Keyspace::table_root(store, table_id);
             Arc::new(MViewTable::new_batch(keyspace, table_columns)) as ScannableTableRef
         });
@@ -110,5 +110,9 @@ impl SimpleTableManager {
 
     pub fn get_tables(&self) -> MutexGuard<HashMap<TableId, ScannableTableRef>> {
         self.tables.lock().unwrap()
+    }
+
+    pub fn state_store(&self) -> StateStoreImpl {
+        self.state_store.clone()
     }
 }

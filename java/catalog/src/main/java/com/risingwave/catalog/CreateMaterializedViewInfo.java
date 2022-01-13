@@ -23,6 +23,8 @@ import org.apache.calcite.util.Pair;
 public class CreateMaterializedViewInfo extends CreateTableInfo {
   private final RelCollation collation;
 
+  private final boolean associated;
+
   private CreateMaterializedViewInfo(
       String tableName,
       ImmutableList<Pair<String, ColumnDesc>> columns,
@@ -31,7 +33,8 @@ public class CreateMaterializedViewInfo extends CreateTableInfo {
       boolean appendOnly,
       String rowFormat,
       String rowSchemaLocation,
-      @Nullable RelCollation collation) {
+      @Nullable RelCollation collation,
+      boolean associated) {
     super(
         tableName,
         columns,
@@ -42,10 +45,15 @@ public class CreateMaterializedViewInfo extends CreateTableInfo {
         rowFormat,
         rowSchemaLocation);
     this.collation = collation;
+    this.associated = associated;
   }
 
   public RelCollation getCollation() {
     return collation;
+  }
+
+  public boolean isAssociated() {
+    return associated;
   }
 
   @Override
@@ -61,12 +69,18 @@ public class CreateMaterializedViewInfo extends CreateTableInfo {
   public static class Builder extends CreateTableInfo.Builder {
     private RelCollation collation = null;
 
+    private boolean associated = false;
+
     private Builder(String tableName) {
       super(tableName);
     }
 
     public void setCollation(RelCollation collation) {
       this.collation = collation;
+    }
+
+    public void setAssociated(boolean associated) {
+      this.associated = associated;
     }
 
     public CreateMaterializedViewInfo build() {
@@ -78,7 +92,8 @@ public class CreateMaterializedViewInfo extends CreateTableInfo {
           appendOnly,
           rowFormat,
           rowSchemaLocation,
-          collation);
+          collation,
+          associated);
     }
   }
 }

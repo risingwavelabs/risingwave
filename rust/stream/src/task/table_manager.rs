@@ -22,8 +22,14 @@ pub trait StreamTableManager: TableManager {
         columns: &[ColumnDesc],
         pk_columns: Vec<usize>,
         orderings: Vec<OrderType>,
-        state_store: StateStoreImpl,
     ) -> Result<()>;
+
+    /// Create materialized view associated to table v2
+    fn create_associated_materialized_view(
+        &self,
+        associated_table_id: &TableId,
+        mview_id: &TableId,
+    ) -> Result<ScannableTableRef>;
 }
 
 #[async_trait::async_trait]
@@ -34,7 +40,6 @@ impl StreamTableManager for SimpleTableManager {
         columns: &[ColumnDesc],
         pk_columns: Vec<usize>,
         orderings: Vec<OrderType>,
-        state_store: StateStoreImpl,
     ) -> Result<()> {
         let mut tables = self.get_tables();
         ensure!(
@@ -46,7 +51,7 @@ impl StreamTableManager for SimpleTableManager {
         ensure!(column_count > 0, "There must be more than one column in MV");
         let schema = Schema::try_from(columns)?;
 
-        let table: ScannableTableRef = dispatch_state_store!(state_store, store, {
+        let table: ScannableTableRef = dispatch_state_store!(self.state_store(), store, {
             Arc::new(MViewTable::new(
                 Keyspace::table_root(store, table_id),
                 schema,
@@ -57,6 +62,22 @@ impl StreamTableManager for SimpleTableManager {
 
         tables.insert(table_id.clone(), table);
         Ok(())
+    }
+
+    fn create_associated_materialized_view(
+        &self,
+        associated_table_id: &TableId,
+        mview_id: &TableId,
+    ) -> Result<ScannableTableRef> {
+        let mut tables = self.get_tables();
+        let table = tables
+            .get(associated_table_id)
+            .expect("no associated table")
+            .clone();
+
+        // Simply associate the mview id to the table
+        tables.insert(mview_id.clone(), table.clone());
+        Ok(table)
     }
 }
 

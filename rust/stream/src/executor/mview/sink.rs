@@ -151,7 +151,10 @@ mod tests {
     #[tokio::test]
     async fn test_sink() {
         // Prepare storage and memtable.
-        let store_mgr = Arc::new(SimpleTableManager::with_in_memory_store());
+        let store = MemoryStateStore::new();
+        let store_mgr = Arc::new(SimpleTableManager::new(StateStoreImpl::MemoryStateStore(
+            store.clone(),
+        )));
         let table_id = TableId::new(SchemaId::default(), 1);
         // Two columns of int32 type, the first column is PK.
         let columns = vec![
@@ -179,16 +182,8 @@ mod tests {
         let pks = vec![0_usize];
         let orderings = vec![OrderType::Ascending];
 
-        let state_store = MemoryStateStore::new();
-        let state_store_impl = StateStoreImpl::MemoryStateStore(state_store.clone());
         store_mgr
-            .create_materialized_view(
-                &table_id,
-                &columns,
-                pks.clone(),
-                orderings,
-                state_store_impl,
-            )
+            .create_materialized_view(&table_id, &columns, pks.clone(), orderings)
             .unwrap();
         // Prepare source chunks.
         let chunk1 = StreamChunk::new(
@@ -223,7 +218,7 @@ mod tests {
 
         let mut sink_executor = Box::new(MaterializeExecutor::new(
             Box::new(source),
-            Keyspace::table_root(state_store, &table_id),
+            Keyspace::table_root(store, &table_id),
             schema,
             pks,
             vec![OrderType::Ascending],

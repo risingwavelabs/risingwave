@@ -68,8 +68,9 @@ public class CreateTableHandler implements SqlHandler {
               .build();
       createTableNodeBuilder.addColumnDescs(columnDesc);
     }
-    CreateTableNode creatTableNode =
-        createTableNodeBuilder.setTableRefId(Messages.getTableRefId(tableId)).build();
+    createTableNodeBuilder.setV2(false);
+    createTableNodeBuilder.setTableRefId(Messages.getTableRefId(tableId));
+    CreateTableNode creatTableNode = createTableNodeBuilder.build();
 
     ExchangeInfo exchangeInfo =
         ExchangeInfo.newBuilder().setMode(ExchangeInfo.DistributionMode.SINGLE).build();

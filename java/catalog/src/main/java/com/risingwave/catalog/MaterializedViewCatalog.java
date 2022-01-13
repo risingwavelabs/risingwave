@@ -11,6 +11,8 @@ public class MaterializedViewCatalog extends TableCatalog {
 
   private final RelCollation collation;
 
+  private boolean associated;
+
   public MaterializedViewCatalog(
       TableId id,
       TableName name,
@@ -21,7 +23,8 @@ public class MaterializedViewCatalog extends TableCatalog {
       ImmutableMap<String, String> properties,
       String rowFormat,
       String rowSchemaLocation,
-      RelCollation collation) {
+      RelCollation collation,
+      boolean associated) {
     super(
         id,
         name,
@@ -33,6 +36,7 @@ public class MaterializedViewCatalog extends TableCatalog {
         rowFormat,
         rowSchemaLocation);
     this.collation = collation;
+    this.associated = associated;
   }
 
   public RelCollation getCollation() {
@@ -42,6 +46,11 @@ public class MaterializedViewCatalog extends TableCatalog {
   @Override
   public boolean isMaterializedView() {
     return true;
+  }
+
+  @Override
+  public boolean isAssociatedMaterializedView() {
+    return associated;
   }
 
   @Override

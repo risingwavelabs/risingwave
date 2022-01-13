@@ -80,6 +80,7 @@ import com.risingwave.sql.tree.CreateSnapshot;
 import com.risingwave.sql.tree.CreateSource;
 import com.risingwave.sql.tree.CreateTable;
 import com.risingwave.sql.tree.CreateTableAs;
+import com.risingwave.sql.tree.CreateTableV2;
 import com.risingwave.sql.tree.CreateUser;
 import com.risingwave.sql.tree.CreateView;
 import com.risingwave.sql.tree.CurrentTime;
@@ -343,6 +344,26 @@ class AstBuilder extends SqlBaseBaseVisitor<Node> {
     List tableElements =
         Lists2.map(context.tableElement(), x -> (TableElement<Expression>) visit(x));
     return new CreateTable(
+        (Table) visit(context.table()),
+        tableElements,
+        partitionedBy,
+        clusteredBy,
+        extractGenericProperties(context.withProperties()),
+        notExists);
+  }
+
+  @Override
+  public Node visitCreateTableV2(SqlBaseParser.CreateTableV2Context context) {
+    boolean notExists = context.EXISTS() != null;
+    SqlBaseParser.PartitionedByOrClusteredIntoContext tableOptsCtx =
+        context.partitionedByOrClusteredInto();
+    Optional<ClusteredBy> clusteredBy =
+        visitIfPresent(tableOptsCtx.clusteredBy(), ClusteredBy.class);
+    Optional<PartitionedBy> partitionedBy =
+        visitIfPresent(tableOptsCtx.partitionedBy(), PartitionedBy.class);
+    List tableElements =
+        Lists2.map(context.tableElement(), x -> (TableElement<Expression>) visit(x));
+    return new CreateTableV2(
         (Table) visit(context.table()),
         tableElements,
         partitionedBy,

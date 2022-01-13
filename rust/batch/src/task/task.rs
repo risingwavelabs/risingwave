@@ -185,6 +185,7 @@ impl TaskExecution {
             self.env.clone(),
         )
         .build()?;
+
         let (sender, receivers) = create_output_channel(self.plan.get_exchange_info())?;
         self.receivers
             .lock()
@@ -219,20 +220,12 @@ impl TaskExecution {
 
     async fn try_execute(mut root: BoxedExecutor, sender: &mut BoxChanSender) -> Result<()> {
         root.open().await?;
-        loop {
-            match root.next().await? {
-                Option::None => {
-                    sender.send(None).await?;
-                    break;
-                }
-                Option::Some(chunk) => {
-                    // It is wasteful to send a chunk with cardinality == 0.
-                    if chunk.cardinality() > 0 {
-                        sender.send(Some(chunk)).await?;
-                    }
-                }
-            };
+        while let Some(chunk) = root.next().await? {
+            if chunk.cardinality() > 0 {
+                sender.send(Some(chunk)).await?;
+            }
         }
+        sender.send(None).await?;
         root.close().await?;
         Ok(())
     }

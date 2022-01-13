@@ -1,0 +1,22 @@
+statement ok
+create table_v2 t1v2 (v1 real not null, v2 int not null, v3 real not null);
+
+statement ok
+insert into _rw_source_t1v2 values (1,1,4), (5,1,4);
+
+sleep 1s
+
+query RIR
+select v1, v2, v3 from _rw_source_t1v2;
+----
+1 1 4
+5 1 4
+
+query RIR
+select v1, v2, v3 from t1v2;
+----
+1 1 4
+5 1 4
+
+statement ok
+drop table t1v2;

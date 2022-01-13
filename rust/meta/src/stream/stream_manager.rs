@@ -361,6 +361,7 @@ mod tests {
                     node: Some(risingwave_pb::stream_plan::stream_node::Node::MviewNode(
                         risingwave_pb::stream_plan::MViewNode {
                             table_ref_id: Some(table_ref_id.clone()),
+                            associated_table_ref_id: None,
                             column_descs: vec![],
                             pk_indices: vec![],
                             column_orders: vec![],
