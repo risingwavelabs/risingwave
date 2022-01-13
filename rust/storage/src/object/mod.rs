@@ -20,7 +20,11 @@ pub struct ObjectMetadata {
 impl BlockLocation {
     /// Generate the http bytes range specifer.
     pub fn byte_range_specifier(&self) -> Option<String> {
-        Some(format!("bytes={}-{}", self.offset, self.offset + self.size))
+        Some(format!(
+            "bytes={}-{}",
+            self.offset,
+            self.offset + self.size - 1
+        ))
     }
 }
 

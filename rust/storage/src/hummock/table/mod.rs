@@ -197,6 +197,9 @@ impl Table {
             .read(self.data_path.as_str(), Some(block_loc))
             .await
             .map_err(|e| HummockError::ObjectIoError(e.to_string()))?;
+
+        tracing::trace!(table_id = self.id, block_id = idx, block_loc = ?block_loc, "table read block");
+
         let block_data = Bytes::from(block_data);
 
         Block::decode(block_data, offset)

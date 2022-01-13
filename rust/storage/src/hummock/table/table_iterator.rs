@@ -41,6 +41,11 @@ impl TableIterator {
 
     /// Seek to a block, and then seek to the key if `seek_key` is given.
     async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
+        tracing::trace!(
+            table_id = self.table.id,
+            block_id = idx,
+            "table iterator seek"
+        );
         if idx >= self.table.block_count() {
             self.block_iter = None;
         } else {

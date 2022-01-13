@@ -92,6 +92,7 @@ impl ObjectStore for S3ObjectStore {
     /// Amazon S3 doesn't support retrieving multiple ranges of data per GET request.
     async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> Result<Vec<u8>> {
         ensure!(self.client.is_some());
+        let block_loc = block_loc.as_ref().unwrap();
 
         let response = self
             .client
@@ -100,7 +101,7 @@ impl ObjectStore for S3ObjectStore {
             .get_object(GetObjectRequest {
                 bucket: self.bucket.clone(),
                 key: path.to_string(),
-                range: block_loc.unwrap().byte_range_specifier(),
+                range: block_loc.byte_range_specifier(),
                 ..Default::default()
             })
             .await;
@@ -124,6 +125,15 @@ impl ObjectStore for S3ObjectStore {
                             path, err
                         )))
                     })?;
+                assert_eq!(
+                    block_loc.size,
+                    val.len(),
+                    "mismatched size: expected {}, found {} when reading {} at {:?}",
+                    block_loc.size,
+                    val.len(),
+                    path,
+                    block_loc
+                );
                 Ok(val)
             }
             Err(RusotoError::Service(GetObjectError::NoSuchKey(_))) => {
