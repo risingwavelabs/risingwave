@@ -38,7 +38,7 @@ impl<S: StateStore> ManagedValueState<S> {
             if let Some(raw_data) = raw_data {
                 let mut deserializer = memcomparable::Deserializer::new(&raw_data[..]);
                 Some(deserialize_datum_from(
-                    &agg_call.return_type.data_type_kind(),
+                    &agg_call.return_type,
                     &mut deserializer,
                 )?)
             } else {
@@ -105,7 +105,7 @@ impl<S: StateStore> ManagedValueState<S> {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{I64Array, Op};
-    use risingwave_common::types::{Int64Type, ScalarImpl};
+    use risingwave_common::types::{DataTypeKind, ScalarImpl};
 
     use super::*;
     use crate::executor::test_utils::create_in_memory_keyspace;
@@ -114,8 +114,8 @@ mod tests {
     fn create_test_count_state() -> AggCall {
         AggCall {
             kind: risingwave_common::expr::AggKind::Count,
-            args: AggArgs::Unary(Int64Type::create(true), 0),
-            return_type: Int64Type::create(true),
+            args: AggArgs::Unary(DataTypeKind::Int64, 0),
+            return_type: DataTypeKind::Int64,
         }
     }
 

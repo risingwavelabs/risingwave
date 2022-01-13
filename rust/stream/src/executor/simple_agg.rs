@@ -261,22 +261,22 @@ mod tests {
             AggCall {
                 kind: AggKind::RowCount,
                 args: AggArgs::None,
-                return_type: Int64Type::create(false),
+                return_type: DataTypeKind::Int64,
             },
             AggCall {
                 kind: AggKind::Sum,
-                args: AggArgs::Unary(Int64Type::create(false), 0),
-                return_type: Int64Type::create(false),
+                args: AggArgs::Unary(DataTypeKind::Int64, 0),
+                return_type: DataTypeKind::Int64,
             },
             AggCall {
                 kind: AggKind::Sum,
-                args: AggArgs::Unary(Int64Type::create(false), 1),
-                return_type: Int64Type::create(false),
+                args: AggArgs::Unary(DataTypeKind::Int64, 1),
+                return_type: DataTypeKind::Int64,
             },
             AggCall {
                 kind: AggKind::Min,
-                args: AggArgs::Unary(Int64Type::create(false), 0),
-                return_type: Int64Type::create(false),
+                args: AggArgs::Unary(DataTypeKind::Int64, 0),
+                return_type: DataTypeKind::Int64,
             },
         ];
 

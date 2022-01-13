@@ -19,7 +19,7 @@ use risingwave_common::array::{
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::expr::AggKind;
-use risingwave_common::types::{DataTypeKind, DataTypeRef, Datum};
+use risingwave_common::types::{DataTypeKind, Datum};
 pub use row_count::*;
 
 /// `StreamingSumAgg` sums data of the same type.
@@ -86,9 +86,9 @@ dyn_clone::clone_trait_object!(StreamingAggStateImpl);
 /// semantics of `count(*)` 2. `count("any")` computes the number of input rows in which the input
 /// value is not null.
 pub fn create_streaming_agg_state(
-    input_types: &[DataTypeRef],
+    input_types: &[DataTypeKind],
     agg_type: &AggKind,
-    return_type: &DataTypeRef,
+    return_type: &DataTypeKind,
     datum: Option<Datum>,
 ) -> Result<Box<dyn StreamingAggStateImpl>> {
     macro_rules! gen_unary_agg_state_match {
@@ -119,8 +119,8 @@ pub fn create_streaming_agg_state(
         [input_type] => {
             gen_unary_agg_state_match!(
                 agg_type,
-                input_type.data_type_kind(),
-                return_type.data_type_kind(),
+                input_type,
+                return_type,
                 datum,
                 [
                     // Count
@@ -172,7 +172,7 @@ pub fn create_streaming_agg_state(
             )
         }
         [] => {
-            match (agg_type, return_type.data_type_kind(), datum) {
+            match (agg_type, return_type, datum) {
                 // `AggKind::Count` for partial/local Count(*) == RowCount while `AggKind::Sum` for
                 // final/global Count(*)
                 (AggKind::RowCount, DataTypeKind::Int64, Some(datum)) => {

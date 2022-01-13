@@ -246,7 +246,7 @@ pub fn generate_agg_schema(
     group_key_indices: Option<&[usize]>,
 ) -> Schema {
     let aggs = agg_calls.iter().map(|agg| Field {
-        data_type: agg.return_type.clone(),
+        data_type: agg.return_type.to_data_type(),
     });
 
     let fields = if let Some(key_indices) = group_key_indices {

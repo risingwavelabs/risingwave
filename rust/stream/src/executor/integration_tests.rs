@@ -68,12 +68,12 @@ async fn test_merger_sum_aggr() {
                 AggCall {
                     kind: AggKind::RowCount,
                     args: AggArgs::None,
-                    return_type: Int64Type::create(false),
+                    return_type: DataTypeKind::Int64,
                 },
                 AggCall {
                     kind: AggKind::Sum,
-                    args: AggArgs::Unary(Int64Type::create(false), 0),
-                    return_type: Int64Type::create(false),
+                    args: AggArgs::Unary(DataTypeKind::Int64, 0),
+                    return_type: DataTypeKind::Int64,
                 },
             ],
             create_in_memory_keyspace(),
@@ -132,13 +132,13 @@ async fn test_merger_sum_aggr() {
         vec![
             AggCall {
                 kind: AggKind::Sum,
-                args: AggArgs::Unary(Int64Type::create(false), 0),
-                return_type: Int64Type::create(false),
+                args: AggArgs::Unary(DataTypeKind::Int64, 0),
+                return_type: DataTypeKind::Int64,
             },
             AggCall {
                 kind: AggKind::Sum,
-                args: AggArgs::Unary(Int64Type::create(false), 1),
-                return_type: Int64Type::create(false),
+                args: AggArgs::Unary(DataTypeKind::Int64, 1),
+                return_type: DataTypeKind::Int64,
             },
         ],
         create_in_memory_keyspace(),
@@ -352,12 +352,12 @@ async fn test_tpch_q6() {
                 AggCall {
                     kind: AggKind::RowCount,
                     args: AggArgs::None,
-                    return_type: Int64Type::create(false),
+                    return_type: DataTypeKind::Int64,
                 },
                 AggCall {
                     kind: AggKind::Sum,
-                    args: AggArgs::Unary(Float64Type::create(false), 0),
-                    return_type: Float64Type::create(false),
+                    args: AggArgs::Unary(DataTypeKind::Float64, 0),
+                    return_type: DataTypeKind::Float64,
                 },
             ],
             create_in_memory_keyspace(),
@@ -410,13 +410,13 @@ async fn test_tpch_q6() {
         vec![
             AggCall {
                 kind: AggKind::Sum,
-                args: AggArgs::Unary(Int64Type::create(false), 0),
-                return_type: Int64Type::create(false),
+                args: AggArgs::Unary(DataTypeKind::Int64, 0),
+                return_type: DataTypeKind::Int64,
             },
             AggCall {
                 kind: AggKind::Sum,
-                args: AggArgs::Unary(Float64Type::create(false), 1),
-                return_type: Float64Type::create(false),
+                args: AggArgs::Unary(DataTypeKind::Float64, 1),
+                return_type: DataTypeKind::Float64,
             },
         ],
         create_in_memory_keyspace(),

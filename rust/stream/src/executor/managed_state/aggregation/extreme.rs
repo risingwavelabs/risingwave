@@ -8,8 +8,8 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::{
-    deserialize_datum_not_null_from, serialize_datum_not_null_into, DataTypeKind, DataTypeRef,
-    Datum, ScalarImpl, ScalarRef,
+    deserialize_datum_not_null_from, serialize_datum_not_null_into, DataType, DataTypeKind,
+    DataTypeRef, Datum, ScalarImpl, ScalarRef,
 };
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
@@ -400,14 +400,11 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
 ) -> Result<Box<dyn ManagedExtremeState<S>>> {
     match &agg_call.args {
         AggArgs::Unary(x, _) => {
-            if agg_call.return_type.data_type_kind() != x.data_type_kind() {
+            if agg_call.return_type != *x {
                 panic!(
                     "extreme state input doesn't match return value: {:?}",
                     agg_call
                 );
-            }
-            if x.is_nullable() {
-                panic!("extreme state input should not be nullable: {:?}", agg_call);
             }
         }
         _ => panic!("extreme state should only have one arg: {:?}", agg_call),
@@ -418,7 +415,7 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
       use DataTypeKind::*;
       use risingwave_common::array::*;
 
-      let data_type = agg_call.return_type.clone();
+      let data_type = agg_call.return_type.to_data_type();
       match (agg_call.kind, agg_call.return_type.data_type_kind()) {
         $(
           (AggKind::Max, $( $kind )|+) => Ok(Box::new(
