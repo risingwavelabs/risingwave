@@ -117,6 +117,7 @@ public class CatalogCast {
     }
     builder.setMv(false);
     builder.setProperties(table.getPropertiesMap());
+    table.getPkColumnsList().forEach(builder::addPrimaryKey);
     builder.setSource(table.getIsSource());
     builder.setAppendOnly(table.getAppendOnly());
     builder.setRowFormat(table.getRowFormat());

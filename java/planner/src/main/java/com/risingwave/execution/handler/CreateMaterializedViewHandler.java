@@ -80,6 +80,7 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     }
     builder.setCollation(rootNode.getCollation());
     builder.setMv(true);
+    rootNode.getPrimaryKeyIndices().forEach(builder::addPrimaryKey);
     CreateMaterializedViewInfo mvInfo = builder.build();
     MaterializedViewCatalog viewCatalog =
         context.getCatalogService().createMaterializedView(schemaName, mvInfo);

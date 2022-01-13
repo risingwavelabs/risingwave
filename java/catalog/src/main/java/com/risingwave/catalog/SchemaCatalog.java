@@ -18,7 +18,6 @@ import org.apache.calcite.schema.Schema;
 import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.schema.SchemaVersion;
 import org.apache.calcite.schema.Table;
-import org.apache.calcite.util.ImmutableIntList;
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -79,7 +78,7 @@ public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCata
             tableName,
             Collections.emptyList(),
             createMaterializedViewInfo.isSource(),
-            ImmutableIntList.of(),
+            createMaterializedViewInfo.getPrimaryKeyIndices(),
             DataDistributionType.ALL,
             createMaterializedViewInfo.getProperties(),
             createMaterializedViewInfo.getRowFormat(),
@@ -119,7 +118,7 @@ public class SchemaCatalog extends EntityBase<SchemaCatalog.SchemaId, SchemaCata
             tableName,
             Collections.emptyList(),
             createTableInfo.isSource(),
-            ImmutableIntList.of(),
+            createTableInfo.getPrimaryKeyIndices(),
             DataDistributionType.ALL,
             createTableInfo.getProperties(),
             createTableInfo.getRowFormat(),

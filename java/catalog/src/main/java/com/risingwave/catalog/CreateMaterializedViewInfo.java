@@ -4,6 +4,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import javax.annotation.Nullable;
 import org.apache.calcite.rel.RelCollation;
+import org.apache.calcite.util.ImmutableIntList;
 import org.apache.calcite.util.Pair;
 
 /**
@@ -25,12 +26,21 @@ public class CreateMaterializedViewInfo extends CreateTableInfo {
   private CreateMaterializedViewInfo(
       String tableName,
       ImmutableList<Pair<String, ColumnDesc>> columns,
+      ImmutableIntList primaryKeyIndices,
       ImmutableMap<String, String> properties,
       boolean appendOnly,
       String rowFormat,
       String rowSchemaLocation,
       @Nullable RelCollation collation) {
-    super(tableName, columns, properties, appendOnly, false, rowFormat, rowSchemaLocation);
+    super(
+        tableName,
+        columns,
+        primaryKeyIndices,
+        properties,
+        appendOnly,
+        false,
+        rowFormat,
+        rowSchemaLocation);
     this.collation = collation;
   }
 
@@ -63,6 +73,7 @@ public class CreateMaterializedViewInfo extends CreateTableInfo {
       return new CreateMaterializedViewInfo(
           tableName,
           ImmutableList.copyOf(columns),
+          ImmutableIntList.copyOf(primaryKeyIndices),
           ImmutableMap.copyOf(properties),
           appendOnly,
           rowFormat,

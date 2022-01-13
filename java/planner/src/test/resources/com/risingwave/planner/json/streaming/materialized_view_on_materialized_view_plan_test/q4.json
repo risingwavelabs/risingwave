@@ -1,7 +1,10 @@
 {
   "input": [{
+    "pkIndices": [2, 3],
     "input": [{
+      "pkIndices": [1, 3],
       "input": [{
+        "pkIndices": [1],
         "mergeNode": {
           "inputColumnDescs": [{
             "columnType": {
@@ -11,6 +14,7 @@
           }]
         }
       }, {
+        "pkIndices": [1],
         "mergeNode": {
           "inputColumnDescs": [{
             "columnType": {

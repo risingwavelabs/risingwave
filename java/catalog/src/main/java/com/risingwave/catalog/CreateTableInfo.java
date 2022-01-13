@@ -8,12 +8,14 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import org.apache.calcite.util.ImmutableIntList;
 import org.apache.calcite.util.Pair;
 
 /** CreateTableInfo is a class that contains information about the table to be */
 public class CreateTableInfo {
   private final String name;
   private final ImmutableList<Pair<String, ColumnDesc>> columns;
+  private final ImmutableIntList primaryKeyIndices;
   private final ImmutableMap<String, String> properties;
   private final boolean appendOnly;
   private final boolean source;
@@ -23,6 +25,7 @@ public class CreateTableInfo {
   protected CreateTableInfo(
       String tableName,
       ImmutableList<Pair<String, ColumnDesc>> columns,
+      ImmutableIntList primaryKeyIndices,
       ImmutableMap<String, String> properties,
       boolean appendOnly,
       boolean source,
@@ -30,6 +33,7 @@ public class CreateTableInfo {
       String rowSchemaLocation) {
     this.name = tableName;
     this.columns = columns;
+    this.primaryKeyIndices = primaryKeyIndices;
     this.properties = properties;
     this.appendOnly = appendOnly;
     this.source = source;
@@ -43,6 +47,10 @@ public class CreateTableInfo {
 
   public ImmutableList<Pair<String, ColumnDesc>> getColumns() {
     return columns;
+  }
+
+  public ImmutableIntList getPrimaryKeyIndices() {
+    return primaryKeyIndices;
   }
 
   public boolean isAppendOnly() {
@@ -77,6 +85,7 @@ public class CreateTableInfo {
   public static class Builder {
     protected final String tableName;
     protected final List<Pair<String, ColumnDesc>> columns = new ArrayList<>();
+    protected List<Integer> primaryKeyIndices = new ArrayList<>();
     protected Map<String, String> properties = new HashMap<>();
     protected boolean appendOnly = false;
     protected boolean mv = false;
@@ -90,6 +99,11 @@ public class CreateTableInfo {
 
     public Builder addColumn(String name, ColumnDesc columnDesc) {
       columns.add(Pair.of(name, columnDesc));
+      return this;
+    }
+
+    public Builder addPrimaryKey(Integer primaryKey) {
+      this.primaryKeyIndices.add(primaryKey);
       return this;
     }
 
@@ -124,6 +138,7 @@ public class CreateTableInfo {
       return new CreateTableInfo(
           tableName,
           ImmutableList.copyOf(columns),
+          ImmutableIntList.copyOf(primaryKeyIndices),
           ImmutableMap.copyOf(properties),
           appendOnly,
           source,

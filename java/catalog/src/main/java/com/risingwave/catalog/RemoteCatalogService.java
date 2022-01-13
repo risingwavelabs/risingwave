@@ -158,6 +158,7 @@ public class RemoteCatalogService implements CatalogService {
         CreateTableInfo.Builder builder = CreateTableInfo.builder(table.getTableName());
         builder.setMv(table.getIsMaterializedView());
         builder.setProperties(table.getPropertiesMap());
+        table.getPkColumnsList().forEach(builder::addPrimaryKey);
         builder.setSource(table.getIsSource());
         builder.setRowFormat(table.getRowFormat());
         for (ColumnDesc desc : table.getColumnDescsList()) {
