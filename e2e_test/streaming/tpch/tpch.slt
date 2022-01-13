@@ -16,7 +16,9 @@ sleep 3s
 
 
 include ./q1.slt.part
+include ./q3.slt.part
 include ./q6.slt.part
+include ./q9.slt.part
 
 
 include ./drop_views.slt.part
