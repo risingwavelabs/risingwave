@@ -1,0 +1,4 @@
+query RIR
+select * from tpch_q6;
+----
+90927.6243 107 90927.6243

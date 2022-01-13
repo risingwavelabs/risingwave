@@ -1,0 +1,5 @@
+statement ok
+drop table tpch_q1;
+
+statement ok
+drop table tpch_q6;
