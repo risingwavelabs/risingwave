@@ -1,0 +1,71 @@
+statement ok
+create source supplier (s_suppkey INTEGER NOT NULL,s_name CHAR(25) NOT NULL,s_address VARCHAR(40) NOT NULL,s_nationkey INTEGER NOT NULL,s_phone CHAR(15) NOT NULL,s_acctbal NUMERIC NOT NULL,s_comment VARCHAR(101) NOT NULL) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'supplier', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
+
+
+statement ok
+create source part (p_partkey INTEGER NOT NULL,p_name VARCHAR(55) NOT NULL,p_mfgr CHAR(25) NOT NULL,p_brand CHAR(10) NOT NULL,p_type VARCHAR(25) NOT NULL,p_size INTEGER NOT NULL,p_container CHAR(10) NOT NULL,p_retailprice NUMERIC NOT NULL,p_comment VARCHAR(23) NOT NULL) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'part', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
+
+
+statement ok
+create source partsupp (ps_partkey INTEGER NOT NULL,ps_suppkey INTEGER NOT NULL,ps_availqty INTEGER NOT NULL,ps_supplycost NUMERIC NOT NULL,ps_comment VARCHAR(199) NOT NULL) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'partsupp', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
+
+
+statement ok
+create source customer (c_custkey INTEGER NOT NULL,c_name VARCHAR(25) NOT NULL,c_address VARCHAR(40) NOT NULL,c_nationkey INTEGER NOT NULL,c_phone CHAR(15) NOT NULL,c_acctbal NUMERIC NOT NULL,c_mktsegment CHAR(10) NOT NULL,c_comment VARCHAR(117) NOT NULL) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'customer', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
+
+
+statement ok
+create source orders (o_orderkey BIGINT NOT NULL,o_custkey INTEGER NOT NULL,o_orderstatus CHAR(1) NOT NULL,o_totalprice NUMERIC NOT NULL,o_orderdate DATE NOT NULL,o_orderpriority CHAR(15) NOT NULL,o_clerk CHAR(15) NOT NULL,o_shippriority INTEGER NOT NULL,o_comment VARCHAR(79) NOT NULL) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'orders', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
+
+
+statement ok
+create source lineitem (l_orderkey BIGINT NOT NULL,l_partkey INTEGER NOT NULL,l_suppkey INTEGER NOT NULL,l_linenumber INTEGER NOT NULL,l_quantity NUMERIC NOT NULL,l_extendedprice NUMERIC NOT NULL,l_discount NUMERIC NOT NULL,l_tax NUMERIC NOT NULL,l_returnflag CHAR(1) NOT NULL,l_linestatus CHAR(1) NOT NULL,l_shipdate DATE NOT NULL,l_commitdate DATE NOT NULL,l_receiptdate DATE NOT NULL,l_shipinstruct CHAR(25) NOT NULL,l_shipmode CHAR(10) NOT NULL,l_comment VARCHAR(44) NOT NULL) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'lineitem', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
+
+
+statement ok
+create source nation (n_nationkey INTEGER NOT NULL,n_name CHAR(25) NOT NULL,n_regionkey INTEGER NOT NULL,n_comment VARCHAR(152) NOT NULL) with ( 'upstream.source' = 'kafka', 'kafka.topic' = 'nation', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
+
+
+statement ok
+create source region (r_regionkey INTEGER NOT NULL,r_name CHAR(25) NOT NULL,r_comment VARCHAR(152) NOT NULL) with( 'upstream.source' = 'kafka', 'kafka.topic' = 'region', 'kafka.bootstrap.servers' = 'localhost:29092' ) row format 'json'
+
+query TTRRRRRRRI
+select
+  l_returnflag,
+  l_linestatus,
+  sum(l_quantity) as sum_qty,
+  sum(l_extendedprice) as sum_base_price,
+  sum(l_extendedprice * (1 - l_discount)) as sum_disc_price,
+  sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge,
+  round(avg(l_quantity), 4) as avg_qty,
+  round(avg(l_extendedprice), 4) as avg_price,
+  round(avg(l_discount), 4) as avg_disc,
+  count(*) as count_order
+from
+  lineitem
+where
+  l_shipdate <= date '1998-12-01' - interval '71' day
+group by
+  l_returnflag,
+  l_linestatus
+order by
+  l_returnflag,
+  l_linestatus;
+----
+A  F  37474  37569624.64  35676192.0970  37101416.222424  25.3545  25419.2318  0.0509  1478
+N  F  1041   1041301.07   999060.8980    1036450.802280   27.3947  27402.6597  0.0429  38
+N  O  75823  76040604.76  72270477.1588  75140545.284463  25.5641  25637.4257  0.0498  2966
+R  F  36511  36570841.24  34738472.8758  36169060.112193  25.0590  25100.0969  0.0500  1457
+
+query R
+select
+  sum(l_extendedprice * l_discount) as revenue
+from
+  lineitem
+where
+  l_shipdate >= date '1994-01-01'
+  and l_shipdate < date '1994-01-01' + interval '1' year
+  and l_discount between 0.08 - 0.01 and 0.08 + 0.01
+  and l_quantity < 24;
+----
+90927.6243

@@ -1,3 +1,4 @@
+use num_traits::FromPrimitive;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataTypeKind, Decimal, ScalarImpl, ScalarRef};
@@ -51,11 +52,15 @@ pub(crate) fn json_parse_value(
                 |v: f64| ScalarImpl::Float64(v.into())
             )
         }
-        DataTypeKind::Decimal => {
-            make_ScalarImpl!(value.and_then(|v| v.as_u64()), |v| ScalarImpl::Decimal(
-                Decimal::from(v)
-            ))
-        }
+        DataTypeKind::Decimal => match value.and_then(|v| v.as_f64()) {
+            Some(v) => match Decimal::from_f64(v) {
+                Some(v) => Ok(ScalarImpl::Decimal(v)),
+                None => Err(RwError::from(InternalError(
+                    "decimal parse error".to_string(),
+                ))),
+            },
+            None => Err(RwError::from(InternalError("json parse error".to_string()))),
+        },
         DataTypeKind::Char | DataTypeKind::Varchar => make_ScalarImpl!(
             value.and_then(|v| v.as_str()),
             |v: &str| ScalarImpl::Utf8(v.to_owned_scalar())

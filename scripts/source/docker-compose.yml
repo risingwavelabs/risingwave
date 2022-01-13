@@ -66,3 +66,12 @@ services:
      - CONFIG_STORAGE_TOPIC=my_connect_configs
      - OFFSET_STORAGE_TOPIC=my_connect_offsets
      - STATUS_STORAGE_TOPIC=my_connect_statuses
+
+  dbgen:
+    image: tabbbb/tpch-dbgen:ubuntu
+    hostname: dbgen
+    container_name: dbgen
+    entrypoint: /bin/sh
+    volumes:
+      - ./:/streaming
+    tty: true

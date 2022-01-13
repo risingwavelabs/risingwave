@@ -40,6 +40,8 @@ wait_server 28083
 echo "Waiting for cluster"
 sleep 10
 
+docker exec dbgen sh -c "cd src/tpch-dbgen && ./dbgen -s 0.001 && mkdir -p /streaming/tpch-testcase && mv *.tbl /streaming/tpch-testcase"
+
 echo "Create topics"
 for filename in "$SCRIPT_PATH"/test_data/* ; do
     [ -e "$filename" ] || continue
@@ -55,6 +57,17 @@ for filename in "$SCRIPT_PATH"/test_data/* ; do
     docker exec -i broker /usr/bin/kafka-topics --bootstrap-server broker:9092 --topic "$topic" --create --partitions "$partition"
 done
 
+for filename in "$SCRIPT_PATH"/tpch-testcase/*.tbl ; do
+    [ -e "$filename" ] || continue
+    base=$(basename "$filename")
+    topic="${base%%.*}"
+    partition=1 # always 1 partition to keep order
+
+    echo "Drop topic $topic"
+    docker exec -i broker /usr/bin/kafka-topics --bootstrap-server broker:9092 --topic "$topic" --delete || true
+    echo "Recreate topic $topic with partition $partition (tpch)"
+    docker exec -i broker /usr/bin/kafka-topics --bootstrap-server broker:9092 --topic "$topic" --create --partitions "$partition"
+done
 
 echo "Fulfill kafka topics"
 for filename in "$SCRIPT_PATH"/test_data/* ; do
@@ -65,6 +78,17 @@ for filename in "$SCRIPT_PATH"/test_data/* ; do
     echo "Fulfill kafka topic $topic with data from $base"
     # Note the -l parameter here, without which -l will treat the entire file as a single message
     docker exec -i kafkacat kafkacat -b broker:9092 -t "$topic" -l -P /streaming/test_data/"$base"
+done
+
+echo "Fulfill kafka topics - tpch"
+for filename in "$SCRIPT_PATH"/tpch-testcase/*.tbl ; do
+    [ -e "$filename" ] || continue
+    base=$(basename "$filename")
+    topic="${base%%.*}"
+
+    echo "Fulfill kafka topic $topic with data from $base (tpch)"
+    # Note the -l parameter here, without which -l will treat the entire file as a single message
+    docker exec dbgen sh -c "cd /streaming/tpch-testcase && python tbl_to_json.py -f $base" | docker exec -i kafkacat kafkacat -b broker:9092 -t "$topic" -l -P
 done
 
 echo "Creating sync job for debezium and mysql"
