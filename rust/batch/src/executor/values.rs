@@ -16,7 +16,6 @@ use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBui
 /// `ValuesExecutor` implements Values executor.
 pub(super) struct ValuesExecutor {
     rows: Vec<Vec<BoxedExpression>>,
-    executed: bool,
     schema: Schema,
 }
 
@@ -28,7 +27,7 @@ impl Executor for ValuesExecutor {
     }
 
     async fn next(&mut self) -> Result<Option<DataChunk>> {
-        if self.executed || self.rows.is_empty() {
+        if self.rows.is_empty() {
             return Ok(None);
         }
 
@@ -58,15 +57,14 @@ impl Executor for ValuesExecutor {
             .columns(vec![Column::new(Arc::new(one_row_array.into()))])
             .build();
 
-        for row in &mut self.rows {
-            row.iter_mut()
-                .zip(&mut array_builders)
-                .map(|(expr, builder)| {
-                    expr.eval(&one_row_chunk)
-                        .and_then(|out| builder.append_array(&out))
-                        .map(|_| 1)
-                })
-                .collect::<Result<Vec<usize>>>()?;
+        // TODO: pass chunk_size from context
+        let chunk_size = 1000;
+        let end = std::cmp::min(chunk_size, self.rows.len());
+        for row in self.rows.drain(0..end) {
+            for (mut expr, builder) in row.into_iter().zip(&mut array_builders) {
+                let out = expr.eval(&one_row_chunk)?;
+                builder.append_array(&out)?;
+            }
         }
 
         let columns = array_builders
@@ -76,7 +74,6 @@ impl Executor for ValuesExecutor {
 
         let chunk = DataChunk::builder().columns(columns).build();
 
-        self.executed = true;
         Ok(Some(chunk))
     }
 
@@ -119,7 +116,6 @@ impl BoxedExecutorBuilder for ValuesExecutor {
 
         Ok(Box::new(Self {
             rows,
-            executed: false,
             schema: Schema { fields },
         }))
     }
@@ -160,7 +156,6 @@ mod tests {
             .collect::<Vec<Field>>();
         let mut values_executor = ValuesExecutor {
             rows: exprs,
-            executed: false,
             schema: Schema { fields },
         };
         values_executor.open().await.unwrap();
