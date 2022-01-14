@@ -5,8 +5,10 @@ use std::io::Read;
 use std::path::Path;
 use std::sync::Arc;
 use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
+use console::style;
 use indicatif::{MultiProgress, ProgressBar};
 use riselab::util::complete_spin;
 use riselab::{
@@ -61,7 +63,7 @@ fn task_main(
     manager: &mut ProgressManager,
     steps: &[String],
     services: &HashMap<String, ServiceConfig>,
-) -> Result<()> {
+) -> Result<Vec<(String, Duration)>> {
     let log_path = env::var("PREFIX_LOG")?;
 
     let mut logger = OpenOptions::new()
@@ -102,8 +104,13 @@ fn task_main(
     }
 
     // Then, start services one by one
+
+    let mut stat = vec![];
+
     for step in steps {
         let service = services.get(step).unwrap();
+        let start_time = Instant::now();
+
         match service {
             ServiceConfig::Minio(c) => {
                 let mut ctx =
@@ -180,9 +187,13 @@ fn task_main(
                 ));
             }
         }
+
+        let service_id = service.id().to_string();
+        let duration = Instant::now() - start_time;
+        stat.push((service_id, duration));
     }
 
-    Ok(())
+    Ok(stat)
 }
 
 fn main() -> Result<()> {
@@ -225,21 +236,40 @@ fn main() -> Result<()> {
 
     let log_path = env::var("PREFIX_LOG")?;
 
-    match &task_result {
-        Ok(()) => {
+    match task_result {
+        Ok(stat) => {
+            if let Ok(ci) = env::var("CARGO_MAKE_CI") {
+                if ci == "true" {
+                    println!("--- summary of startup time ---");
+                    for (task_name, duration) in stat {
+                        println!("{}: {:.2}s", task_name, duration.as_secs_f64());
+                    }
+                }
+            }
+
             println!("All services started successfully.");
 
             println!("\nPRO TIPS:");
             println!(
-                "* Run `tmux a -t {}` to attach to the tmux console.",
-                RISELAB_SESSION_NAME
+                "* Run {} to attach to the tmux console.",
+                style(format!("tmux a -t {}", RISELAB_SESSION_NAME))
+                    .blue()
+                    .bold()
             );
-            println!("* You may find logs at {}", log_path);
+            println!("* You may find logs at {}", style(log_path).blue().bold());
             println!(
-                "* Run `psql -h localhost -p {} -d dev` to start Postgres interactive shell.",
-                4567
+                "* Run {} to start Postgres interactive shell.",
+                style(format!("psql -h localhost -p {} -d dev", 4567))
+                    .blue()
+                    .bold()
             );
-            println!("* Run `./riselab kill` or `./riselab k` to kill cluster.");
+            println!(
+                "* Run {} or {} to kill cluster.",
+                style("./riselab kill").blue().bold(),
+                style("./riselab k").blue().bold()
+            );
+
+            Ok(())
         }
         Err(err) => {
             println!("* Failed to start: {}", err.root_cause().to_string().trim(),);
@@ -251,8 +281,8 @@ fn main() -> Result<()> {
             println!("---");
             println!();
             println!();
+
+            Err(err)
         }
     }
-
-    task_result
 }

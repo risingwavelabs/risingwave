@@ -32,32 +32,24 @@ To install sqllogictest:
 make sqllogictest
 ```
 
-To run end-to-end tests with single compute-node:
-
-```shell
-./scripts/start_cluster.sh 1
-sqllogictest -p 4567 -d dev './e2e_test/**/*.slt'
-```
-
 To run end-to-end tests with multiple compute-nodes, run the script:
 
 ```shell
-./scripts/start_cluster.sh 3
+./riselab ci-3node
 sqllogictest -p 4567 -d dev './e2e_test/**/*.slt'
 ```
 
 To run end-to-end tests with state store, run the script:
 
 ```shell
-export RISINGWAVE_STATE_STORE="hummock+minio://hummock:12345678@localhost:9300/hummock"
-./scripts/start_cluster.sh 1
+./riselab ci-streaming
 sqllogictest -p 4567 -d dev './e2e_test/**/*.slt'
 ```
 
 It will start processes in the background. After testing, you can run the following scriptto clean-up:
 
 ```shell
-./scripts/kill_cluster.sh
+./riselab k
 ```
 
 ## Monitoring
