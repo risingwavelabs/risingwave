@@ -7,6 +7,7 @@ import static com.risingwave.planner.rules.aggspliter.LogicalAggSplitUtils.getAg
 import static com.risingwave.planner.rules.aggspliter.LogicalAggSplitUtils.getGlobalAggCalls;
 import static com.risingwave.planner.rules.aggspliter.LogicalAggSplitUtils.getLocalAggCalls;
 
+import com.google.common.collect.ImmutableList;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.logical.RwLogicalAggregate;
 import com.risingwave.planner.rel.streaming.RwStreamAgg;
@@ -15,6 +16,7 @@ import java.util.stream.Collectors;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.plan.RelRule;
+import org.apache.calcite.util.ImmutableBitSet;
 
 /** Rule for converting logical aggregation to two phase stream aggregation */
 public class StreamingTwoPhaseAggRule extends RelRule<StreamingTwoPhaseAggRule.Config> {
@@ -81,14 +83,19 @@ public class StreamingTwoPhaseAggRule extends RelRule<StreamingTwoPhaseAggRule.C
             .flatMap(List::stream)
             .collect(Collectors.toList());
 
+    // The global aggregation's group set should be normalized as it refers to the position
+    // in local aggregation instead of the input to the original aggregation.
+    ImmutableBitSet newGlobalAggGroupSet = ImmutableBitSet.range(localStreamAgg.getGroupCount());
+    ImmutableList<ImmutableBitSet> newGlobalAggGroupSets = ImmutableList.of(newGlobalAggGroupSet);
+
     var newGlobalStreamAgg =
         new RwStreamAgg(
             globalAggInput.getCluster(),
             localAggTraits,
             localStreamAgg.getHints(),
             globalAggInput,
-            logicalAgg.getGroupSet(),
-            logicalAgg.getGroupSets(),
+            newGlobalAggGroupSet,
+            newGlobalAggGroupSets,
             globalAggCalls);
 
     call.transformTo(newGlobalStreamAgg);

@@ -7,6 +7,7 @@ import static com.risingwave.planner.rules.distributed.agg.SplitUtils.getGlobalA
 import static com.risingwave.planner.rules.distributed.agg.SplitUtils.getLocalAggCalls;
 import static java.util.Collections.emptyList;
 
+import com.google.common.collect.ImmutableList;
 import com.risingwave.planner.rel.common.dist.RwDistributionTrait;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.physical.RwAggregate;
@@ -19,6 +20,7 @@ import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.convert.ConverterRule;
 import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.util.ImmutableBitSet;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 /** Rule converting a RwAggregate to 2-phase distributed version */
@@ -68,13 +70,18 @@ public class TwoPhaseAggRule extends ConverterRule {
 
     var globalAggCalls = getGlobalAggCalls(agg, localAgg, splitters);
 
+    // The global aggregation's group set should be normalized as it refers to the position
+    // in local aggregation instead of the input to the original aggregation.
+    ImmutableBitSet newGlobalAggGroupSet = ImmutableBitSet.range(localAgg.getGroupCount());
+    ImmutableList<ImmutableBitSet> newGlobalAggGroupSets = ImmutableList.of(newGlobalAggGroupSet);
+
     var globalAgg =
         (RwAggregate)
             agg.copy(
                 agg.getTraitSet().replace(BATCH_DISTRIBUTED).plus(globalDistribution),
                 globalInput,
-                agg.getGroupSet(),
-                agg.getGroupSets(),
+                newGlobalAggGroupSet,
+                newGlobalAggGroupSets,
                 globalAggCalls.stream().flatMap(List::stream).collect(Collectors.toList()));
 
     var allLastCalcAreTrivial = splitters.stream().allMatch(AggSplitter::isLastCalcTrivial);
