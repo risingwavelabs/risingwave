@@ -4,16 +4,16 @@ use bytes::BufMut;
 
 use super::version_cmp::VersionedComparator;
 
-pub type Timestamp = u64;
-const TS_LEN: usize = std::mem::size_of::<Timestamp>();
+pub type Epoch = u64;
+const EPOCH_LEN: usize = std::mem::size_of::<Epoch>();
 
-/// Convert user key to full key by appending `u64::MAX - timestamp` to the user key.
+/// Convert user key to full key by appending `u64::MAX - epoch` to the user key.
 ///
-/// In this way, the keys can be comparable even with the timestamp, and a key with a larger
-/// timestamp will be smaller and thus be sorted to a upper position.
-pub fn key_with_ts(mut user_key: Vec<u8>, ts: Timestamp) -> Vec<u8> {
-    let res = (Timestamp::MAX - ts).to_be();
-    user_key.reserve(TS_LEN);
+/// In this way, the keys can be comparable even with the epoch, and a key with a larger
+/// epoch will be smaller and thus be sorted to a upper position.
+pub fn key_with_epoch(mut user_key: Vec<u8>, epoch: Epoch) -> Vec<u8> {
+    let res = (Epoch::MAX - epoch).to_be();
+    user_key.reserve(EPOCH_LEN);
     let buf = user_key.chunk_mut();
 
     // todo: check whether this hack improves performance
@@ -21,39 +21,39 @@ pub fn key_with_ts(mut user_key: Vec<u8>, ts: Timestamp) -> Vec<u8> {
         ptr::copy_nonoverlapping(
             &res as *const _ as *const u8,
             buf.as_mut_ptr() as *mut _,
-            TS_LEN,
+            EPOCH_LEN,
         );
-        user_key.advance_mut(TS_LEN);
+        user_key.advance_mut(EPOCH_LEN);
     }
 
     user_key
 }
 
-/// Split a full key into its user key part and timestamp part.
+/// Split a full key into its user key part and epoch part.
 #[inline]
-pub fn split_key_timestamp(full_key: &[u8]) -> (&[u8], &[u8]) {
+pub fn split_key_epoch(full_key: &[u8]) -> (&[u8], &[u8]) {
     let pos = full_key
         .len()
-        .checked_sub(TS_LEN)
+        .checked_sub(EPOCH_LEN)
         .expect("bad full key format");
     full_key.split_at(pos)
 }
 
-/// Extract timestamp part from key
-pub fn get_ts(full_key: &[u8]) -> Timestamp {
-    let mut ts: Timestamp = 0;
+/// Extract epoch part from key
+pub fn get_epoch(full_key: &[u8]) -> Epoch {
+    let mut epoch: Epoch = 0;
 
     // todo: check whether this hack improves performance
     unsafe {
-        let src = &full_key[full_key.len() - TS_LEN..];
-        ptr::copy_nonoverlapping(src.as_ptr(), &mut ts as *mut _ as *mut u8, TS_LEN);
+        let src = &full_key[full_key.len() - EPOCH_LEN..];
+        ptr::copy_nonoverlapping(src.as_ptr(), &mut epoch as *mut _ as *mut u8, EPOCH_LEN);
     }
-    Timestamp::MAX - Timestamp::from_be(ts)
+    Epoch::MAX - Epoch::from_be(epoch)
 }
 
-/// Extract user key without timestamp part
+/// Extract user key without epoch part
 pub fn user_key(full_key: &[u8]) -> &[u8] {
-    split_key_timestamp(full_key).0
+    split_key_epoch(full_key).0
 }
 
 // Copyright 2016 TiKV Project Authors. Licensed under Apache-2.0.
@@ -128,7 +128,7 @@ fn next_key_no_alloc(key: &[u8]) -> Option<(&[u8], u8)> {
 
 /// [`FullKey`] can be created on either a `Vec<u8>` or a `&[u8]`.
 ///
-/// Its format is (`user_key`, `u64::MAX - timestamp`).
+/// Its format is (`user_key`, `u64::MAX - epoch`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FullKey<T: AsRef<[u8]>>(T);
 
@@ -149,12 +149,12 @@ impl FullKey<Vec<u8>> {
         Self(full_key)
     }
 
-    pub fn from_user_key(user_key: Vec<u8>, timestamp: u64) -> Self {
-        Self(key_with_ts(user_key, timestamp))
+    pub fn from_user_key(user_key: Vec<u8>, epoch: u64) -> Self {
+        Self(key_with_epoch(user_key, epoch))
     }
 
-    pub fn from_user_key_slice(user_key: &[u8], timestamp: u64) -> Self {
-        Self(key_with_ts(user_key.to_vec(), timestamp))
+    pub fn from_user_key_slice(user_key: &[u8], epoch: u64) -> Self {
+        Self(key_with_epoch(user_key.to_vec(), epoch))
     }
 
     pub fn to_user_key(&self) -> &[u8] {
@@ -183,9 +183,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_key_ts() {
-        let full_key = key_with_ts(b"aaa".to_vec(), 233);
-        assert_eq!(get_ts(&full_key), 233);
+    fn test_key_epoch() {
+        let full_key = key_with_epoch(b"aaa".to_vec(), 233);
+        assert_eq!(get_epoch(&full_key), 233);
         assert_eq!(user_key(&full_key), b"aaa");
     }
 

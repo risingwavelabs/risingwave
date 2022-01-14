@@ -5,7 +5,7 @@ use futures::stream::{self, StreamExt};
 
 use super::cloud::gen_remote_table;
 use super::iterator::{ConcatIterator, HummockIterator, SortedIterator};
-use super::key::{get_ts, FullKey, Timestamp};
+use super::key::{get_epoch, Epoch, FullKey};
 use super::key_range::KeyRange;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::version_cmp::VersionedComparator;
@@ -124,7 +124,7 @@ impl Compactor {
         mut iter: SortedIterator,
         local_sorted_output_ssts: &mut Vec<Table>,
         is_target_ultimate_and_leveling: bool,
-        watermark: Timestamp,
+        watermark: Epoch,
     ) -> HummockResult<()> {
         // NOTICE: should be user_key overlap, NOT full_key overlap!
         let has_user_key_overlap = !is_target_ultimate_and_leveling;
@@ -171,9 +171,9 @@ impl Compactor {
                 last_key.extend_from_slice(iter_key);
             }
 
-            let ts = get_ts(iter_key);
+            let epoch = get_epoch(iter_key);
 
-            if ts < watermark {
+            if epoch < watermark {
                 skip_key = BytesMut::from(iter_key);
                 if matches!(iter.value(), HummockValue::Delete) && !has_user_key_overlap {
                     iter.next().await?;
@@ -255,7 +255,7 @@ mod tests {
 
     use super::*;
     use crate::hummock::iterator::BoxedHummockIterator;
-    use crate::hummock::key::{key_with_ts, Timestamp};
+    use crate::hummock::key::{key_with_epoch, Epoch};
     use crate::hummock::utils::bloom_filter_tables;
     use crate::hummock::version_manager::{ScopedUnpinSnapshot, VersionManager};
     use crate::hummock::{user_key, HummockOptions, HummockResult, HummockStorage};
@@ -390,7 +390,7 @@ mod tests {
 
         let mut it = SortedIterator::new(table_iters);
 
-        it.seek(&key_with_ts(anchor.to_vec(), u64::MAX)).await?;
+        it.seek(&key_with_epoch(anchor.to_vec(), u64::MAX)).await?;
 
         assert_eq!(user_key(it.key()), anchor);
         assert_eq!(it.value().into_put_value().unwrap(), Bytes::from("111111"));
@@ -453,7 +453,7 @@ mod tests {
         }
 
         let mut compact_task = storage.version_manager.get_compact_task().await?.unwrap();
-        compact_task.watermark = Timestamp::MIN; // do not gc these records
+        compact_task.watermark = Epoch::MIN; // do not gc these records
         Compactor::run_compact(&sub_compact_context, &mut compact_task).await?;
 
         let output_table_count = compact_task.sorted_output_ssts.len();

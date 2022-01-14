@@ -1,7 +1,7 @@
 use std::ops::Bound::{self, *};
 
 use crate::hummock::iterator::{HummockIterator, ReverseSortedIterator};
-use crate::hummock::key::{get_ts, key_with_ts, user_key as to_user_key, Timestamp};
+use crate::hummock::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 
@@ -28,24 +28,24 @@ pub struct ReverseUserKeyIterator {
     /// Start and end bounds of user key.
     key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
 
-    /// Only read values if `ts <= self.read_ts`.
-    read_ts: Timestamp,
+    /// Only read values if `epoch <= self.read_epoch`.
+    read_epoch: Epoch,
 }
 
 impl ReverseUserKeyIterator {
-    /// Create [`UserKeyIterator`] with maximum timestamp.
+    /// Create [`UserKeyIterator`] with maximum epoch.
     pub(crate) fn new(
         iterator: ReverseSortedIterator,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
-        Self::new_with_ts(iterator, key_range, Timestamp::MAX)
+        Self::new_with_epoch(iterator, key_range, Epoch::MAX)
     }
 
-    /// Create [`UserKeyIterator`] with given `read_ts`.
-    pub(crate) fn new_with_ts(
+    /// Create [`UserKeyIterator`] with given `read_epoch`.
+    pub(crate) fn new_with_epoch(
         iterator: ReverseSortedIterator,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        read_ts: u64,
+        read_epoch: u64,
     ) -> Self {
         Self {
             iterator,
@@ -55,7 +55,7 @@ impl ReverseUserKeyIterator {
             last_key: Vec::new(),
             last_val: Vec::new(),
             last_delete: true,
-            read_ts,
+            read_epoch,
         }
     }
 
@@ -83,7 +83,7 @@ impl ReverseUserKeyIterator {
     pub async fn next(&mut self) -> HummockResult<()> {
         // We need to deal with three cases:
         // 1. current key == last key.
-        //    Since current key must have a timestamp newer than the one of the last key,
+        //    Since current key must have an epoch newer than the one of the last key,
         //    we assign current kv as the new last kv and also inherit its status of deletion, and
         // continue.
         //
@@ -110,10 +110,10 @@ impl ReverseUserKeyIterator {
 
         while self.iterator.is_valid() {
             let full_key = self.iterator.key();
-            let ts = get_ts(full_key);
+            let epoch = get_epoch(full_key);
             let key = to_user_key(full_key);
 
-            if ts <= self.read_ts {
+            if epoch <= self.read_epoch {
                 if self.just_met_new_key {
                     self.last_key.clear();
                     self.last_key.extend_from_slice(key);
@@ -186,7 +186,7 @@ impl ReverseUserKeyIterator {
         // handle range scan
         match &self.key_range.1 {
             Included(end_key) => {
-                let full_key = &key_with_ts(end_key.clone(), 0);
+                let full_key = &key_with_epoch(end_key.clone(), 0);
                 self.iterator.seek(full_key).await?;
             }
             Excluded(_) => unimplemented!("excluded begin key is not supported"),
@@ -213,7 +213,7 @@ impl ReverseUserKeyIterator {
             Excluded(_) => unimplemented!("excluded begin key is not supported"),
             Unbounded => Vec::from(user_key),
         };
-        let full_key = &key_with_ts(user_key, 0);
+        let full_key = &key_with_epoch(user_key, 0);
         self.iterator.seek(full_key).await?;
 
         // handle multi-version
@@ -246,7 +246,7 @@ mod tests {
     use super::*;
     use crate::hummock::cloud::gen_remote_table;
     use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, iterator_test_key_of, iterator_test_key_of_ts, test_key,
+        default_builder_opt_for_test, iterator_test_key_of, iterator_test_key_of_epoch, test_key,
         test_value_of, TestIteratorBuilder, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::variants::BACKWARD;
@@ -368,7 +368,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_reverse_user_key_delete() {
-        // key=[table, idx, ts], value
+        // key=[table, idx, epoch], value
         let kv_pairs = vec![
             (0, 2, 300, HummockValue::Delete),
             (0, 1, 100, HummockValue::Put(test_value_of(0, 1))),
@@ -403,7 +403,7 @@ mod tests {
     // left..=end
     #[tokio::test]
     async fn test_reverse_user_key_range_inclusive() {
-        // key=[table, idx, ts], value
+        // key=[table, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
             (0, 0, 100, HummockValue::Put(test_value_of(0, 0))),
@@ -482,7 +482,7 @@ mod tests {
     // left..end
     #[tokio::test]
     async fn test_reverse_user_key_range() {
-        // key=[table, idx, ts], value
+        // key=[table, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
             (0, 0, 100, HummockValue::Put(test_value_of(0, 0))),
@@ -558,7 +558,7 @@ mod tests {
     // ..=right
     #[tokio::test]
     async fn test_reverse_user_key_range_to_inclusive() {
-        // key=[table, idx, ts], value
+        // key=[table, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
             (0, 0, 100, HummockValue::Put(test_value_of(0, 0))),
@@ -633,7 +633,7 @@ mod tests {
     // left..
     #[tokio::test]
     async fn test_reverse_user_key_range_from() {
-        // key=[table, idx, ts], value
+        // key=[table, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
             (0, 0, 100, HummockValue::Put(test_value_of(0, 0))),
@@ -737,7 +737,7 @@ mod tests {
         table: Table,
         start_bound: Bound<Vec<u8>>,
         end_bound: Bound<Vec<u8>>,
-        truth: &BTreeMap<Vec<u8>, BTreeMap<Timestamp, HummockValue<Vec<u8>>>>,
+        truth: &BTreeMap<Vec<u8>, BTreeMap<Epoch, HummockValue<Vec<u8>>>>,
     ) {
         let start_key = match &start_bound {
             Bound::Included(b) => prev_key(&b.clone()),
@@ -779,7 +779,7 @@ mod tests {
                 continue;
             }
             assert!(ruki.is_valid(), "num_kvs:{}", num_kvs);
-            let full_key = key_with_ts(key.clone(), *time);
+            let full_key = key_with_epoch(key.clone(), *time);
             assert_eq!(ruki.key(), user_key(&full_key), "num_kvs:{}", num_kvs);
             if let HummockValue::Put(bytes) = &value {
                 assert_eq!(ruki.value(), &bytes[..], "num_kvs:{}", num_kvs);
@@ -795,8 +795,7 @@ mod tests {
     async fn test_reverse_user_key_chaos() {
         // We first generate the key value pairs.
         let mut rng = thread_rng();
-        let mut truth: BTreeMap<Vec<u8>, BTreeMap<Timestamp, HummockValue<Vec<u8>>>> =
-            BTreeMap::new();
+        let mut truth: BTreeMap<Vec<u8>, BTreeMap<Epoch, HummockValue<Vec<u8>>>> = BTreeMap::new();
         let mut prev_key_number: usize = 1;
         let number_of_keys = 5000;
         for _ in 0..number_of_keys {
@@ -806,7 +805,7 @@ mod tests {
             let mut prev_time = 500;
             let num_updates = rng.gen_range(1..10usize);
             for _ in 0..num_updates {
-                let time: Timestamp = rng.gen_range(prev_time..=(prev_time + 1000));
+                let time: Epoch = rng.gen_range(prev_time..=(prev_time + 1000));
                 let is_delete = rng.gen_range(0..=1usize) < 1usize;
                 match is_delete {
                     true => {
@@ -835,7 +834,7 @@ mod tests {
         let mut b = TableBuilder::new(default_builder_opt_for_test());
         for (key, inserts) in &truth {
             for (time, value) in inserts {
-                let full_key = key_with_ts(key.clone(), *time);
+                let full_key = key_with_epoch(key.clone(), *time);
                 b.add(&full_key, value.clone());
             }
         }
@@ -896,7 +895,7 @@ mod tests {
         }
     }
 
-    // key=[table, idx, ts], value
+    // key=[table, idx, epoch], value
     async fn add_kv_pair(kv_pairs: Vec<(u64, usize, u64, HummockValue<Vec<u8>>)>) -> Table {
         let mut b = TableBuilder::new(default_builder_opt_for_test());
         for kv in kv_pairs {
@@ -910,7 +909,7 @@ mod tests {
             .unwrap()
     }
 
-    fn key_range_test_key(table: u64, idx: usize, ts: u64) -> Vec<u8> {
-        iterator_test_key_of_ts(table, idx, ts)
+    fn key_range_test_key(table: u64, idx: usize, epoch: u64) -> Vec<u8> {
+        iterator_test_key_of_epoch(table, idx, epoch)
     }
 }

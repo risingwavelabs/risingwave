@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use super::version_cmp::VersionedComparator;
 
-/// TODO: Ord Trait with 'a'+ts>'aa'+ts issue
+/// TODO: Ord Trait with 'a'+epoch>'aa'+epoch issue
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct KeyRange {
     pub left: Bytes,
@@ -89,13 +89,13 @@ impl From<KeyRange> for risingwave_pb::hummock::KeyRange {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hummock::key::key_with_ts;
+    use crate::hummock::key::key_with_epoch;
 
     #[test]
     fn test_key_range_compare() {
-        let a1_slice = &key_with_ts(Vec::from("a"), 1);
-        let a2_slice = &key_with_ts(Vec::from("a"), 2);
-        let b1_slice = &key_with_ts(Vec::from("b"), 1);
+        let a1_slice = &key_with_epoch(Vec::from("a"), 1);
+        let a2_slice = &key_with_epoch(Vec::from("a"), 2);
+        let b1_slice = &key_with_epoch(Vec::from("b"), 1);
         let a1 = Bytes::copy_from_slice(a1_slice);
         let a2 = Bytes::copy_from_slice(a2_slice);
         let b1 = Bytes::copy_from_slice(b1_slice);

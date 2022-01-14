@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::variants::*;
 use crate::hummock::cloud::gen_remote_table;
-use crate::hummock::key::{key_with_ts, user_key, Timestamp};
+use crate::hummock::key::{key_with_epoch, user_key, Epoch};
 use crate::hummock::{HummockResult, HummockValue, Table, TableBuilder, TableBuilderOptions};
 use crate::object::{InMemObjectStore, ObjectStore};
 
@@ -241,10 +241,10 @@ pub fn default_builder_opt_for_test() -> TableBuilderOptions {
     }
 }
 
-/// Generate keys like `001_key_test_00002` with timestamp 233.
+/// Generate keys like `001_key_test_00002` with epoch 233.
 pub fn iterator_test_key_of(table: u64, idx: usize) -> Vec<u8> {
     // key format: {prefix_index}_version
-    key_with_ts(
+    key_with_epoch(
         format!("{:03}_key_test_{:05}", table, idx)
             .as_bytes()
             .to_vec(),
@@ -252,14 +252,14 @@ pub fn iterator_test_key_of(table: u64, idx: usize) -> Vec<u8> {
     )
 }
 
-/// Generate keys like `001_key_test_00002` with timestamp `ts`.
-pub fn iterator_test_key_of_ts(table: u64, idx: usize, ts: Timestamp) -> Vec<u8> {
+/// Generate keys like `001_key_test_00002` with epoch `epoch`.
+pub fn iterator_test_key_of_epoch(table: u64, idx: usize, epoch: Epoch) -> Vec<u8> {
     // key format: {prefix_index}_version
-    key_with_ts(
+    key_with_epoch(
         format!("{:03}_key_test_{:05}", table, idx)
             .as_bytes()
             .to_vec(),
-        ts,
+        epoch,
     )
 }
 

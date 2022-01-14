@@ -5,7 +5,7 @@ use std::sync::Arc;
 use super::iterator::{
     BoxedHummockIterator, ConcatIterator, HummockIterator, SortedIterator, UserKeyIterator,
 };
-use super::key::{key_with_ts, user_key};
+use super::key::{key_with_epoch, user_key};
 use super::utils::bloom_filter_tables;
 use super::version_manager::{Level, Snapshot, VersionManager};
 use super::{HummockResult, TableIterator};
@@ -13,14 +13,14 @@ use crate::hummock::iterator::{ReverseSortedIterator, ReverseUserKeyIterator};
 use crate::hummock::ReverseTableIterator;
 
 pub struct HummockSnapshot {
-    /// [`epoch`] is served as timestamp and indicates when a new log appends to a SST.
+    /// [`epoch`] is served as epoch and indicates when a new log appends to a SST.
     /// It is encoded into the full key.
     epoch: u64,
     /// [`version`] will increase when we edit the SST file and can be represent a specific version
     /// of storage. An edition can be adding a SST, removing a SST or compacting some SSTs.
     version: u64,
     vm: Arc<VersionManager>,
-    /// TODO: remove the version once we can pin a ts.
+    /// TODO: remove the version once we can pin an epoch.
     temp_version: Arc<Snapshot>,
 }
 impl Drop for HummockSnapshot {
@@ -31,8 +31,8 @@ impl Drop for HummockSnapshot {
 
 impl HummockSnapshot {
     pub fn new(vm: Arc<VersionManager>) -> Self {
-        // TODO: Modify this line once we support ts-aware compaction and `ts` pinning.
-        // Currently the compactor cannot perform ts-aware compaction so we need to pin a
+        // TODO: Modify this line once we support epoch-aware compaction and `epoch` pinning.
+        // Currently the compactor cannot perform epoch-aware compaction so we need to pin a
         // snapshot(a set of table IDs actually) to make sure the old SSTs not be recycled by the
         // compactor. In the future we will be able to perform snapshot read relying on the latest
         // SST files and this line should be modified.
@@ -49,7 +49,7 @@ impl HummockSnapshot {
     pub async fn get(&self, key: &[u8]) -> HummockResult<Option<Vec<u8>>> {
         let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
 
-        // TODO: use the latest version once the ts-aware compaction is realized.
+        // TODO: use the latest version once the epoch-aware compaction is realized.
         // let scoped_snapshot = ScopedUnpinSnapshot::from_version_manager(self.vm.clone());
         // let snapshot = scoped_snapshot.snapshot();
         let snapshot = self.temp_version.clone();
@@ -75,7 +75,7 @@ impl HummockSnapshot {
 
         // Use `SortedIterator` to seek for they key with latest version to
         // get the latest key.
-        it.seek(&key_with_ts(key.to_vec(), self.epoch)).await?;
+        it.seek(&key_with_epoch(key.to_vec(), self.epoch)).await?;
 
         // Iterator has seeked passed the borders.
         if !it.is_valid() {
@@ -95,7 +95,7 @@ impl HummockSnapshot {
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
-        // TODO: use the latest version once the ts-aware compaction is realized.
+        // TODO: use the latest version once the epoch-aware compaction is realized.
         // let scoped_snapshot = ScopedUnpinSnapshot::from_version_manager(self.vm.clone());
         // let snapshot = scoped_snapshot.snapshot();
         let snapshot = self.temp_version.clone();
@@ -128,7 +128,7 @@ impl HummockSnapshot {
         let si = SortedIterator::new(table_iters);
 
         // TODO: avoid this clone
-        Ok(UserKeyIterator::new_with_ts(
+        Ok(UserKeyIterator::new_with_epoch(
             si,
             (
                 key_range.start_bound().map(|b| b.as_ref().to_owned()),
@@ -149,7 +149,7 @@ impl HummockSnapshot {
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
-        // TODO: use the latest version once the ts-aware compaction is realized.
+        // TODO: use the latest version once the epoch-aware compaction is realized.
         // let scoped_snapshot = ScopedUnpinSnapshot::from_version_manager(self.vm.clone());
         // let snapshot = scoped_snapshot.snapshot();
         let snapshot = self.temp_version.clone();
@@ -182,7 +182,7 @@ impl HummockSnapshot {
         let reverse_sorted_iterator = ReverseSortedIterator::new(reverse_table_iters);
 
         // TODO: avoid this clone
-        Ok(ReverseUserKeyIterator::new_with_ts(
+        Ok(ReverseUserKeyIterator::new_with_epoch(
             reverse_sorted_iterator,
             (
                 key_range.end_bound().map(|b| b.as_ref().to_owned()),
@@ -198,7 +198,7 @@ mod tests {
     use super::*;
     use crate::hummock::cloud::gen_remote_table;
     use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, iterator_test_key_of, iterator_test_key_of_ts,
+        default_builder_opt_for_test, iterator_test_key_of, iterator_test_key_of_epoch,
     };
     use crate::hummock::value::HummockValue;
     use crate::hummock::TableBuilder;
@@ -220,7 +220,7 @@ mod tests {
         let mut b = TableBuilder::new(default_builder_opt_for_test());
         for kv in kv_pairs {
             b.add(
-                &iterator_test_key_of_ts(TEST_KEY_TABLE_ID, kv.0, epoch),
+                &iterator_test_key_of_epoch(TEST_KEY_TABLE_ID, kv.0, epoch),
                 kv.1,
             );
         }

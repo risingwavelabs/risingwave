@@ -231,7 +231,7 @@ impl HummockStorage {
         };
         let mut builder = CapacitySplitTableBuilder::new(get_id_and_builder);
 
-        // TODO: do not generate ts if `kv_pairs` is empty
+        // TODO: do not generate epoch if `kv_pairs` is empty
         for (k, v) in kv_pairs {
             builder.add_user_key(k, v, epoch).await;
         }

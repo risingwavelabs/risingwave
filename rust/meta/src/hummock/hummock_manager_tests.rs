@@ -7,7 +7,7 @@ use itertools::Itertools;
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::hummock::Table;
-use risingwave_storage::hummock::key::key_with_ts;
+use risingwave_storage::hummock::key::key_with_epoch;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{TableBuilder, TableBuilderOptions};
 use tokio::task::JoinHandle;
@@ -127,7 +127,7 @@ async fn test_hummock_pin_unpin() -> Result<()> {
 /// Generate keys like `001_key_test_00002` with timestamp `ts`.
 pub fn iterator_test_key_of_ts(table: u64, idx: usize, ts: HummockSnapshotId) -> Vec<u8> {
     // key format: {prefix_index}_version
-    key_with_ts(
+    key_with_epoch(
         format!("{:03}_key_test_{:05}", table, idx)
             .as_bytes()
             .to_vec(),

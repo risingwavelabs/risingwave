@@ -188,7 +188,7 @@ impl TableBuilder {
         self.meta.largest_key.clear();
         self.meta.largest_key.extend_from_slice(key);
 
-        // remove timestamp before calculate hash
+        // remove epoch before calculate hash
         let user_key = user_key(key);
         self.key_hashes.push(farmhash::fingerprint32(user_key));
 
@@ -264,7 +264,7 @@ pub(super) mod tests {
 
     use super::*;
     use crate::hummock::cloud::gen_remote_table;
-    use crate::hummock::key::key_with_ts;
+    use crate::hummock::key::key_with_epoch;
     use crate::hummock::table::Table;
     use crate::object::{InMemObjectStore, ObjectStore};
 
@@ -313,10 +313,10 @@ pub(super) mod tests {
         assert_eq!(header.diff, 23334);
     }
 
-    /// The key (with timestamp 0) of an index in the test table
+    /// The key (with epoch 0) of an index in the test table
     pub fn builder_test_key_of(idx: usize) -> Vec<u8> {
         let user_key = format!("key_test_{:05}", idx * 2).as_bytes().to_vec();
-        key_with_ts(user_key, 233)
+        key_with_epoch(user_key, 233)
     }
 
     /// The value of an index in the test table

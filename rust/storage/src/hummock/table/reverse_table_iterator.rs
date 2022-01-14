@@ -141,7 +141,7 @@ mod tests {
     use super::super::builder::tests::*;
     use super::*;
     use crate::assert_bytes_eq;
-    use crate::hummock::key::key_with_ts;
+    use crate::hummock::key::key_with_epoch;
     use crate::hummock::table::builder::tests::gen_test_table;
 
     #[tokio::test]
@@ -200,13 +200,13 @@ mod tests {
         }
         assert!(!table_iter.is_valid());
 
-        let largest_key = key_with_ts(format!("key_zzzz_{:05}", 0).as_bytes().to_vec(), 233);
+        let largest_key = key_with_epoch(format!("key_zzzz_{:05}", 0).as_bytes().to_vec(), 233);
         table_iter.seek(largest_key.as_slice()).await.unwrap();
         let key = table_iter.key();
         assert_eq!(key, builder_test_key_of(TEST_KEYS_COUNT - 1));
 
         // Seek to > last key
-        let smallest_key = key_with_ts(format!("key_aaaa_{:05}", 0).as_bytes().to_vec(), 233);
+        let smallest_key = key_with_epoch(format!("key_aaaa_{:05}", 0).as_bytes().to_vec(), 233);
         table_iter.seek(smallest_key.as_slice()).await.unwrap();
         assert!(!table_iter.is_valid());
 
@@ -218,7 +218,7 @@ mod tests {
             // (will produce `key_test_00004`).
             table_iter
                 .seek(
-                    key_with_ts(
+                    key_with_epoch(
                         format!("key_test_{:05}", idx * 2 - 1).as_bytes().to_vec(),
                         0,
                     )

@@ -13,7 +13,7 @@ use tokio::sync::Mutex;
 use super::key_range::KeyRange;
 use super::level_handler::{LevelHandler, TableStat};
 use super::{HummockError, HummockResult, Table};
-use crate::hummock::key::Timestamp;
+use crate::hummock::key::Epoch;
 use crate::hummock::{user_key, FullKey};
 
 #[derive(Clone)]
@@ -45,8 +45,8 @@ pub struct CompactTask {
     /// In ideal case, the compaction will generate `splits.len()` tables which have key range
     /// corresponding to that in [`splits`], respectively
     pub splits: Vec<KeyRange>,
-    /// low watermark in 'ts-aware compaction'
-    pub watermark: Timestamp,
+    /// low watermark in 'epoch-aware compaction'
+    pub watermark: Epoch,
     /// compacion output, which will be added to [`target_level`] of LSM after compaction
     pub sorted_output_ssts: Vec<Table>,
     /// task id assigned by hummock storage service
@@ -106,7 +106,7 @@ impl VersionManagerInner {
     }
 }
 
-/// Manages the state history of the storage engine and vacuum the stale files in storage.
+/// Manages the state history of the storage engine and vacuums the stale files in storage.
 ///
 /// Generally, when a query starts, it will take a snapshot and store the state of the
 /// LSM at the time of starting. As the query is running, new Tables are added and old Tables
@@ -120,19 +120,19 @@ impl VersionManagerInner {
 /// * (engine) add Table 3, remove Table 1
 /// * (version 1) Table 2, 3
 ///
-/// Each history state will be associated with an version number, which will be used by
-/// snapshots. When a snapshot is taken, it will "pin" an version number. Tables logically
+/// Each history state will be associated with a version number, which will be used by
+/// snapshots. When a snapshot is taken, it will "pin" a version number. Tables logically
 /// deleted after that version won't be deleted physically until the snapshot "unpins" the
 /// version number.
 ///
 /// Therefore, [`VersionManager`] is the manifest manager of the whole storage system,
-/// which reads and writes manifest, manages all in-storage files and vacuum them when no
+/// which reads and writes manifest, manages all in-storage files and vacuums them when no
 /// snapshot holds the corresponding version of the file.
 ///
 /// The design choice of separating [`VersionManager`] out of the storage engine is a
 /// preparation for a distributed storage engine. In such distributed engine, there will
 /// generally be some kind of "`MetadataManager`" which does all of the things that our
-/// [`VersionManager`] do.
+/// [`VersionManager`] does.
 pub struct VersionManager {
     /// Inner structure of [`VersionManager`]. This structure is protected by a parking lot Mutex,
     /// so as to support quick lock and unlock.
@@ -494,7 +494,7 @@ impl VersionManager {
                                                         user_key(
                                                             &l_n_suc[overlap_idx].key_range.left,
                                                         ),
-                                                        Timestamp::MAX,
+                                                        Epoch::MAX,
                                                     )
                                                     .into_inner()
                                                     .into(),
@@ -567,7 +567,7 @@ impl VersionManager {
                         },
                     ],
                     splits,
-                    watermark: Timestamp::MAX,
+                    watermark: Epoch::MAX,
                     sorted_output_ssts: vec![],
                     task_id: next_task_id,
                     target_level,
@@ -730,7 +730,7 @@ mod tests {
                 panic!();
             }
         }
-        let ts = 1;
+        let epoch = 1;
         let test_table_id = 42;
         let current_version_id = version_manager
             .add_single_l0_sst(
@@ -741,7 +741,7 @@ mod tests {
                     TableMeta::default(),
                 )
                 .await?,
-                ts,
+                epoch,
             )
             .await?;
         assert_eq!(current_version_id, 1);

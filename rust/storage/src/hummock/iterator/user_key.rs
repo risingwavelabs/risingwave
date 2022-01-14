@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use super::{HummockIterator, SortedIterator};
 use crate::hummock::iterator::ReverseUserKeyIterator;
-use crate::hummock::key::{get_ts, key_with_ts, user_key as to_user_key, Timestamp};
+use crate::hummock::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 use crate::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
@@ -74,27 +74,27 @@ pub struct UserKeyIterator {
     /// Start and end bounds of user key.
     key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
 
-    /// Only read values if `ts <= self.read_ts`.
-    read_ts: Timestamp,
+    /// Only read values if `ts <= self.read_epoch`.
+    read_epoch: Epoch,
 
     stats: Arc<StateStoreStats>,
 }
 
 // TODO: decide whether this should also impl `HummockIterator`
 impl UserKeyIterator {
-    /// Create [`UserKeyIterator`] with maximum timestamp.
+    /// Create [`UserKeyIterator`] with maximum epoch.
     pub(crate) fn new(
         iterator: SortedIterator,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
-        Self::new_with_ts(iterator, key_range, Timestamp::MAX)
+        Self::new_with_epoch(iterator, key_range, Epoch::MAX)
     }
 
-    /// Create [`UserKeyIterator`] with given `read_ts`.
-    pub(crate) fn new_with_ts(
+    /// Create [`UserKeyIterator`] with given `read_epoch`.
+    pub(crate) fn new_with_epoch(
         iterator: SortedIterator,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        read_ts: u64,
+        read_epoch: u64,
     ) -> Self {
         Self {
             iterator,
@@ -102,7 +102,7 @@ impl UserKeyIterator {
             key_range,
             last_key: Vec::new(),
             last_val: Vec::new(),
-            read_ts,
+            read_epoch,
             stats: DEFAULT_STATE_STORE_STATS.clone(),
         }
     }
@@ -116,11 +116,11 @@ impl UserKeyIterator {
     pub async fn next(&mut self) -> HummockResult<()> {
         while self.iterator.is_valid() {
             let full_key = self.iterator.key();
-            let ts = get_ts(full_key);
+            let epoch = get_epoch(full_key);
             let key = to_user_key(full_key);
 
             // handle multi-version
-            if self.last_key.as_slice() != key && ts <= self.read_ts {
+            if self.last_key.as_slice() != key && epoch <= self.read_epoch {
                 self.last_key.clear();
                 self.last_key.extend_from_slice(key);
 
@@ -176,7 +176,7 @@ impl UserKeyIterator {
         // handle range scan
         match &self.key_range.0 {
             Included(begin_key) => {
-                let full_key = &key_with_ts(begin_key.clone(), self.read_ts);
+                let full_key = &key_with_epoch(begin_key.clone(), self.read_epoch);
                 self.iterator.seek(full_key).await?;
             }
             Excluded(_) => unimplemented!("excluded begin key is not supported"),
@@ -205,7 +205,7 @@ impl UserKeyIterator {
             Unbounded => Vec::from(user_key),
         };
 
-        let full_key = &key_with_ts(user_key, self.read_ts);
+        let full_key = &key_with_epoch(user_key, self.read_epoch);
         self.iterator.seek(full_key).await?;
 
         // handle multi-version
@@ -234,7 +234,7 @@ mod tests {
     use super::*;
     use crate::hummock::cloud::gen_remote_table;
     use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, iterator_test_key_of, iterator_test_key_of_ts, test_key,
+        default_builder_opt_for_test, iterator_test_key_of, iterator_test_key_of_epoch, test_key,
         test_value_of, TestIteratorBuilder, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::variants::FORWARD;
@@ -341,7 +341,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete() {
-        // key=[table, idx, ts], value
+        // key=[table, idx, epoch], value
         let kv_pairs = vec![
             (0, 1, 100, HummockValue::Put(test_value_of(0, 1))),
             (0, 2, 300, HummockValue::Delete),
@@ -376,7 +376,7 @@ mod tests {
     // left..=end
     #[tokio::test]
     async fn test_range_inclusive() {
-        // key=[table, idx, ts], value
+        // key=[table, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
             (0, 0, 100, HummockValue::Put(test_value_of(0, 0))),
@@ -452,7 +452,7 @@ mod tests {
     // left..end
     #[tokio::test]
     async fn test_range() {
-        // key=[table, idx, ts], value
+        // key=[table, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
             (0, 0, 100, HummockValue::Put(test_value_of(0, 0))),
@@ -527,7 +527,7 @@ mod tests {
     // ..=right
     #[tokio::test]
     async fn test_range_to_inclusive() {
-        // key=[table, idx, ts], value
+        // key=[table, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
             (0, 0, 100, HummockValue::Put(test_value_of(0, 0))),
@@ -605,7 +605,7 @@ mod tests {
     // left..
     #[tokio::test]
     async fn test_range_from() {
-        // key=[table, idx, ts], value
+        // key=[table, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
             (0, 0, 100, HummockValue::Put(test_value_of(0, 0))),
@@ -684,7 +684,7 @@ mod tests {
         assert!(!uki.is_valid());
     }
 
-    // key=[table, idx, ts], value
+    // key=[table, idx, epoch], value
     async fn add_kv_pair(kv_pairs: Vec<(u64, usize, u64, HummockValue<Vec<u8>>)>) -> Table {
         let mut b = TableBuilder::new(default_builder_opt_for_test());
         for kv in kv_pairs {
@@ -698,7 +698,7 @@ mod tests {
             .unwrap()
     }
 
-    fn key_range_test_key(table: u64, idx: usize, ts: u64) -> Vec<u8> {
-        iterator_test_key_of_ts(table, idx, ts)
+    fn key_range_test_key(table: u64, idx: usize, epoch: u64) -> Vec<u8> {
+        iterator_test_key_of_epoch(table, idx, epoch)
     }
 }
