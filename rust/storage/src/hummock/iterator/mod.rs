@@ -5,15 +5,15 @@ pub use concat::*;
 mod concat_inner;
 mod reverse_concat;
 pub use reverse_concat::*;
-mod reverse_sorted;
-pub use reverse_sorted::*;
-mod reverse_user_key;
-pub use reverse_user_key::*;
-mod sorted;
-pub use sorted::*;
-mod sorted_inner;
-mod user_key;
-pub use user_key::*;
+mod reverse_merge;
+pub use reverse_merge::*;
+mod reverse_user;
+pub use reverse_user::*;
+mod merge;
+pub use merge::*;
+mod merge_inner;
+mod user;
+pub use user::*;
 
 #[cfg(test)]
 pub(crate) mod test_utils;
@@ -23,7 +23,7 @@ use async_trait::async_trait;
 use crate::hummock::ReverseTableIterator;
 
 /// `HummockIterator` defines the interface of all iterators, including `TableIterator`,
-/// `SortedIterator`, `UserKeyIterator` and `ConcatIterator`.
+/// `MergeIterator`, `UserIterator` and `ConcatIterator`.
 ///
 /// After create the iterator instance,
 /// - if you want to iterate from the beginning, you need to then call its `rewind` method.
@@ -96,8 +96,8 @@ pub enum HummockIteratorImpl {
     ReverseTable(ReverseTableIterator),
     Concat(Box<ConcatIterator>),
     ReverseConcat(ReverseConcatIterator),
-    Sorted(SortedIterator),
-    ReverseSorted(ReverseSortedIterator),
+    Merge(MergeIterator),
+    ReverseMerge(ReverseMergeIterator),
     #[cfg(test)]
     Test(test_utils::TestIterator),
     #[cfg(test)]

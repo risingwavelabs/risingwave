@@ -36,7 +36,7 @@ impl<const DIRECTION: usize> Ord for Node<DIRECTION> {
 }
 
 /// Iterates on multiple iterators, a.k.a. `MergeIterator`.
-pub struct SortedIteratorInner<const DIRECTION: usize> {
+pub struct MergeIteratorInner<const DIRECTION: usize> {
     /// Invalid or non-initialized iterators.
     unused_iters: LinkedList<BoxedHummockIterator>,
 
@@ -44,7 +44,7 @@ pub struct SortedIteratorInner<const DIRECTION: usize> {
     heap: BinaryHeap<Node<DIRECTION>>,
 }
 
-impl<const DIRECTION: usize> SortedIteratorInner<DIRECTION> {
+impl<const DIRECTION: usize> MergeIteratorInner<DIRECTION> {
     /// Caller should make sure that `iterators`'s direction is the same as `DIRECTION`.
     pub fn new(iterators: impl IntoIterator<Item = BoxedHummockIterator>) -> Self {
         Self {
@@ -72,7 +72,7 @@ impl<const DIRECTION: usize> SortedIteratorInner<DIRECTION> {
 }
 
 #[async_trait]
-impl<const DIRECTION: usize> HummockIterator for SortedIteratorInner<DIRECTION> {
+impl<const DIRECTION: usize> HummockIterator for MergeIteratorInner<DIRECTION> {
     async fn next(&mut self) -> HummockResult<()> {
         let mut node = self.heap.peek_mut().expect("no inner iter");
 

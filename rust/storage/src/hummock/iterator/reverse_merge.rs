@@ -1,7 +1,7 @@
-use super::variants::FORWARD;
-use crate::hummock::iterator::sorted_inner::SortedIteratorInner;
+use super::variants::BACKWARD;
+use crate::hummock::iterator::merge_inner::MergeIteratorInner;
 
-pub type SortedIterator = SortedIteratorInner<FORWARD>;
+pub type ReverseMergeIterator = MergeIteratorInner<BACKWARD>;
 
 #[cfg(test)]
 mod test {
@@ -15,16 +15,21 @@ mod test {
         test_value_of, TestIteratorBuilder, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::{BoxedHummockIterator, HummockIterator};
-    use crate::hummock::table::TableIterator;
+    use crate::hummock::ReverseTableIterator;
 
     #[tokio::test]
-    async fn test_sorted_basic() {
+    async fn test_reverse_merge_basic() {
+        let base_key_value = usize::MAX - 10;
         let (iters, validators): (Vec<_>, Vec<_>) = (0..3)
             .map(|iter_id| {
-                TestIteratorBuilder::<FORWARD>::default()
+                TestIteratorBuilder::<BACKWARD>::default()
                     .id(0)
-                    .map_key(move |id, x| iterator_test_key_of(id, x * 3 + (iter_id as usize) + 1))
-                    .map_value(move |id, x| test_value_of(id, x * 3 + (iter_id as usize) + 1))
+                    .map_key(move |id, x| {
+                        iterator_test_key_of(id, base_key_value - x * 3 + (3 - iter_id as usize))
+                    })
+                    .map_value(move |id, x| {
+                        test_value_of(id, base_key_value - x * 3 + (3 - iter_id as usize))
+                    })
                     .finish()
             })
             .unzip();
@@ -34,7 +39,7 @@ mod test {
             .map(|x| Box::new(x) as BoxedHummockIterator)
             .collect_vec();
 
-        let mut mi = SortedIterator::new(iters);
+        let mut mi = ReverseMergeIterator::new(iters);
         let mut i = 0;
         mi.rewind().await.unwrap();
         while mi.is_valid() {
@@ -53,13 +58,16 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_sorted_seek() {
+    async fn test_reverse_merge_seek() {
+        let base_key = usize::MAX - 100;
         let (iters, validators): (Vec<_>, Vec<_>) = (0..3)
             .map(|iter_id| {
-                TestIteratorBuilder::<FORWARD>::default()
+                TestIteratorBuilder::<BACKWARD>::default()
                     .id(0)
                     .total(20)
-                    .map_key(move |id, x| iterator_test_key_of(id, x * 3 + (iter_id as usize)))
+                    .map_key(move |id, x| {
+                        iterator_test_key_of(id, base_key - x * 3 + (3 - iter_id as usize))
+                    })
                     .finish()
             })
             .unzip();
@@ -68,7 +76,7 @@ mod test {
             .map(|x| Box::new(x) as BoxedHummockIterator)
             .collect_vec();
 
-        let mut mi = SortedIterator::new(iters);
+        let mut mi = ReverseMergeIterator::new(iters);
         let test_validator = &validators[2];
 
         // right edge case
@@ -99,29 +107,29 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_sorted_invalidate_reset() {
+    async fn test_reverse_merge_invalidate_reset() {
         let table0 = gen_test_table(0, default_builder_opt_for_test()).await;
         let table1 = gen_test_table(1, default_builder_opt_for_test()).await;
         let iters: Vec<BoxedHummockIterator> = vec![
-            Box::new(TableIterator::new(Arc::new(table0))),
-            Box::new(TableIterator::new(Arc::new(table1))),
+            Box::new(ReverseTableIterator::new(Arc::new(table1))),
+            Box::new(ReverseTableIterator::new(Arc::new(table0))),
         ];
 
-        let mut si = SortedIterator::new(iters);
+        let mut mi = ReverseMergeIterator::new(iters);
 
-        si.rewind().await.unwrap();
+        mi.rewind().await.unwrap();
         let mut count = 0;
-        while si.is_valid() {
+        while mi.is_valid() {
             count += 1;
-            si.next().await.unwrap();
+            mi.next().await.unwrap();
         }
         assert_eq!(count, TEST_KEYS_COUNT * 2);
 
-        si.rewind().await.unwrap();
+        mi.rewind().await.unwrap();
         let mut count = 0;
-        while si.is_valid() {
+        while mi.is_valid() {
             count += 1;
-            si.next().await.unwrap();
+            mi.next().await.unwrap();
         }
         assert_eq!(count, TEST_KEYS_COUNT * 2);
     }

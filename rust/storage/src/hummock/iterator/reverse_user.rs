@@ -1,14 +1,14 @@
 use std::ops::Bound::{self, *};
 
-use crate::hummock::iterator::{HummockIterator, ReverseSortedIterator};
+use crate::hummock::iterator::{HummockIterator, ReverseMergeIterator};
 use crate::hummock::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 
-/// [`ReverseUserKeyIterator`] can be used by user directly.
-pub struct ReverseUserKeyIterator {
+/// [`ReverseUserIterator`] can be used by user directly.
+pub struct ReverseUserIterator {
     /// Inner table iterator.
-    iterator: ReverseSortedIterator,
+    iterator: ReverseMergeIterator,
 
     /// We just met a new key
     just_met_new_key: bool,
@@ -32,18 +32,18 @@ pub struct ReverseUserKeyIterator {
     read_epoch: Epoch,
 }
 
-impl ReverseUserKeyIterator {
-    /// Create [`UserKeyIterator`] with maximum epoch.
+impl ReverseUserIterator {
+    /// Create [`UserIterator`] with maximum epoch.
     pub(crate) fn new(
-        iterator: ReverseSortedIterator,
+        iterator: ReverseMergeIterator,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
         Self::new_with_epoch(iterator, key_range, Epoch::MAX)
     }
 
-    /// Create [`UserKeyIterator`] with given `read_epoch`.
+    /// Create [`UserIterator`] with given `read_epoch`.
     pub(crate) fn new_with_epoch(
-        iterator: ReverseSortedIterator,
+        iterator: ReverseMergeIterator,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
     ) -> Self {
@@ -93,13 +93,12 @@ impl ReverseUserKeyIterator {
         //    b. Otherwise, we continue to find the next new key.
         //
         // 3. `self.iterator` invalid. The case is the same as 2. However, option b is invalid now.
-        // We just stop. Without further `next`, `ReverseUserKeyIterator` is still valid.
+        // We just stop. Without further `next`, `ReverseUserIterator` is still valid.
 
-        // We remark that whether `self.iterator` is valid and `ReverseUserKeyIterator` is valid can
-        // be different even if we leave `out_of_range` out of consideration. This diffs
-        // from `UserKeyIterator` because we always make a decision about the past key only
-        // when we enter a new state, such as encountering a new key, or `self.iterator`
-        // turning invalid.
+        // We remark that whether `self.iterator` is valid and `ReverseUserIterator` is valid can be
+        // different even if we leave `out_of_range` out of consideration. This diffs from
+        // `UserIterator` because we always make a decision about the past key only when we enter
+        // a new state, such as encountering a new key, or `self.iterator` turning invalid.
 
         if !self.iterator.is_valid() {
             // We abuse `last_delete` to indicate that we are indeed invalid now, i.e. run out of kv
@@ -258,7 +257,7 @@ mod tests {
     use crate::object::{InMemObjectStore, ObjectStore};
 
     #[tokio::test]
-    async fn test_reverse_user_key_basic() {
+    async fn test_reverse_user_basic() {
         let base_key_value = usize::MAX - 100;
         let (iters, validators): (Vec<_>, Vec<_>) = (0..3)
             .map(|iter_id| {
@@ -279,21 +278,21 @@ mod tests {
             .map(|x| Box::new(x) as BoxedHummockIterator)
             .collect_vec();
 
-        let si = ReverseSortedIterator::new(iters);
-        let mut uki = ReverseUserKeyIterator::new(si, (Unbounded, Unbounded));
-        uki.rewind().await.unwrap();
+        let mi = ReverseMergeIterator::new(iters);
+        let mut ui = ReverseUserIterator::new(mi, (Unbounded, Unbounded));
+        ui.rewind().await.unwrap();
 
         let mut i = 0;
-        while uki.is_valid() {
-            let k = uki.key();
-            let v = uki.value();
+        while ui.is_valid() {
+            let k = ui.key();
+            let v = ui.value();
             validators[i % 3].assert_value(i / 3, v);
             validators[i % 3].assert_user_key(i / 3, k);
             i += 1;
 
-            uki.next().await.unwrap();
+            ui.next().await.unwrap();
             if i == TEST_KEYS_COUNT * 3 {
-                assert!(!uki.is_valid());
+                assert!(!ui.is_valid());
                 break;
             }
         }
@@ -306,7 +305,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_reverse_user_key_seek() {
+    async fn test_reverse_user_seek() {
         let base_key_value = usize::MAX - 100;
         let (iters, validators): (Vec<_>, Vec<_>) = (0..3)
             .map(|iter_id| {
@@ -328,46 +327,46 @@ mod tests {
             .map(|x| Box::new(x) as BoxedHummockIterator)
             .collect_vec();
 
-        let si = ReverseSortedIterator::new(iters);
-        let mut uki = ReverseUserKeyIterator::new(si, (Unbounded, Unbounded));
+        let mi = ReverseMergeIterator::new(iters);
+        let mut ui = ReverseUserIterator::new(mi, (Unbounded, Unbounded));
         let test_validator = &validators[2];
 
         // right edge case
-        uki.seek(user_key(test_key!(test_validator, 3 * TEST_KEYS_COUNT)))
+        ui.seek(user_key(test_key!(test_validator, 3 * TEST_KEYS_COUNT)))
             .await
             .unwrap();
-        assert!(!uki.is_valid());
+        assert!(!ui.is_valid());
 
         // normal case
-        uki.seek(user_key(test_key!(test_validator, 4)))
+        ui.seek(user_key(test_key!(test_validator, 4)))
             .await
             .unwrap();
-        let k = uki.key();
-        let v = uki.value();
+        let k = ui.key();
+        let v = ui.value();
         test_validator.assert_value(4, v);
         test_validator.assert_user_key(4, k);
 
-        uki.seek(user_key(test_key!(test_validator, 17)))
+        ui.seek(user_key(test_key!(test_validator, 17)))
             .await
             .unwrap();
-        let k = uki.key();
-        let v = uki.value();
+        let k = ui.key();
+        let v = ui.value();
         test_validator.assert_value(17, v);
         test_validator.assert_user_key(17, k);
 
         // left edge case
-        uki.seek(user_key(test_key!(test_validator, 0)))
+        ui.seek(user_key(test_key!(test_validator, 0)))
             .await
             .unwrap();
-        let k = uki.key();
-        let v = uki.value();
+        let k = ui.key();
+        let v = ui.value();
 
         test_validator.assert_user_key(0, k);
         test_validator.assert_value(0, v);
     }
 
     #[tokio::test]
-    async fn test_reverse_user_key_delete() {
+    async fn test_reverse_user_delete() {
         // key=[table, idx, epoch], value
         let kv_pairs = vec![
             (0, 2, 300, HummockValue::Delete),
@@ -385,24 +384,24 @@ mod tests {
             Box::new(TableIterator::new(Arc::new(table0))),
             Box::new(TableIterator::new(Arc::new(table1))),
         ];
-        let si = ReverseSortedIterator::new(iters);
-        let mut uki = ReverseUserKeyIterator::new(si, (Unbounded, Unbounded));
-        uki.rewind().await.unwrap();
+        let mi = ReverseMergeIterator::new(iters);
+        let mut ui = ReverseUserIterator::new(mi, (Unbounded, Unbounded));
+        ui.rewind().await.unwrap();
 
         // verify
-        let k = uki.key();
-        let v = uki.value();
+        let k = ui.key();
+        let v = ui.value();
         assert_eq!(k, user_key(iterator_test_key_of(0, 2).as_slice()));
         assert_eq!(v, test_value_of(0, 2));
 
         // only one valid kv pair
-        uki.next().await.unwrap();
-        assert!(!uki.is_valid());
+        ui.next().await.unwrap();
+        assert!(!ui.is_valid());
     }
 
     // left..=end
     #[tokio::test]
-    async fn test_reverse_user_key_range_inclusive() {
+    async fn test_reverse_user_range_inclusive() {
         // key=[table, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
@@ -425,63 +424,63 @@ mod tests {
         let table = add_kv_pair(kv_pairs).await;
         let iters: Vec<BoxedHummockIterator> =
             vec![Box::new(ReverseTableIterator::new(Arc::new(table)))];
-        let si = ReverseSortedIterator::new(iters);
+        let mi = ReverseMergeIterator::new(iters);
 
         let begin_key = Included(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
         let end_key = Included(user_key(key_range_test_key(0, 7, 0).as_slice()).to_vec());
 
-        let mut uki = ReverseUserKeyIterator::new(si, (begin_key, end_key));
+        let mut ui = ReverseUserIterator::new(mi, (begin_key, end_key));
 
         // ----- basic iterate -----
-        uki.rewind().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 7).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
-        uki.next().await.unwrap();
-        assert!(!uki.is_valid());
+        ui.rewind().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 7).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
+        ui.next().await.unwrap();
+        assert!(!ui.is_valid());
 
         // ----- after-end-range iterate -----
-        uki.seek(user_key(iterator_test_key_of(0, 8).as_slice()))
+        ui.seek(user_key(iterator_test_key_of(0, 8).as_slice()))
             .await
             .unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 7).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
-        uki.next().await.unwrap();
-        assert!(!uki.is_valid());
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 7).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
+        ui.next().await.unwrap();
+        assert!(!ui.is_valid());
 
         // ----- end-range iterate -----
-        uki.seek(user_key(iterator_test_key_of(0, 7).as_slice()))
+        ui.seek(user_key(iterator_test_key_of(0, 7).as_slice()))
             .await
             .unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 7).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
-        uki.next().await.unwrap();
-        assert!(!uki.is_valid());
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 7).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
+        ui.next().await.unwrap();
+        assert!(!ui.is_valid());
 
         // ----- begin-range iterate -----
-        uki.seek(user_key(iterator_test_key_of(0, 2).as_slice()))
+        ui.seek(user_key(iterator_test_key_of(0, 2).as_slice()))
             .await
             .unwrap();
-        assert!(!uki.is_valid());
+        assert!(!ui.is_valid());
 
         // ----- before-begin-range iterate -----
-        uki.seek(user_key(iterator_test_key_of(0, 1).as_slice()))
+        ui.seek(user_key(iterator_test_key_of(0, 1).as_slice()))
             .await
             .unwrap();
-        assert!(!uki.is_valid());
+        assert!(!ui.is_valid());
     }
 
     // left..end
     #[tokio::test]
-    async fn test_reverse_user_key_range() {
+    async fn test_reverse_user_range() {
         // key=[table, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
@@ -501,63 +500,63 @@ mod tests {
         let table = add_kv_pair(kv_pairs).await;
         let iters: Vec<BoxedHummockIterator> =
             vec![Box::new(ReverseTableIterator::new(Arc::new(table)))];
-        let si = ReverseSortedIterator::new(iters);
+        let mi = ReverseMergeIterator::new(iters);
 
         let begin_key = Excluded(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
         let end_key = Included(user_key(key_range_test_key(0, 7, 0).as_slice()).to_vec());
 
-        let mut uki = ReverseUserKeyIterator::new(si, (begin_key, end_key));
+        let mut ui = ReverseUserIterator::new(mi, (begin_key, end_key));
 
         // ----- basic iterate -----
-        uki.rewind().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 7).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
-        uki.next().await.unwrap();
-        assert!(!uki.is_valid());
+        ui.rewind().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 7).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
+        ui.next().await.unwrap();
+        assert!(!ui.is_valid());
 
         // ----- after-bend-range iterate -----
-        uki.seek(user_key(iterator_test_key_of(0, 8).as_slice()))
+        ui.seek(user_key(iterator_test_key_of(0, 8).as_slice()))
             .await
             .unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 7).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
-        uki.next().await.unwrap();
-        assert!(!uki.is_valid());
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 7).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
+        ui.next().await.unwrap();
+        assert!(!ui.is_valid());
 
         // ----- end-range iterate -----
-        uki.seek(user_key(iterator_test_key_of(0, 7).as_slice()))
+        ui.seek(user_key(iterator_test_key_of(0, 7).as_slice()))
             .await
             .unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 7).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
-        uki.next().await.unwrap();
-        assert!(!uki.is_valid());
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 7).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
+        ui.next().await.unwrap();
+        assert!(!ui.is_valid());
 
         // ----- begin-range iterate -----
-        uki.seek(user_key(iterator_test_key_of(0, 2).as_slice()))
+        ui.seek(user_key(iterator_test_key_of(0, 2).as_slice()))
             .await
             .unwrap();
-        assert!(!uki.is_valid());
+        assert!(!ui.is_valid());
 
         // ----- begin-begin-range iterate -----
-        uki.seek(user_key(iterator_test_key_of(0, 1).as_slice()))
+        ui.seek(user_key(iterator_test_key_of(0, 1).as_slice()))
             .await
             .unwrap();
-        assert!(!uki.is_valid());
+        assert!(!ui.is_valid());
     }
 
     // ..=right
     #[tokio::test]
-    async fn test_reverse_user_key_range_to_inclusive() {
+    async fn test_reverse_user_range_to_inclusive() {
         // key=[table, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
@@ -578,61 +577,61 @@ mod tests {
         let table = add_kv_pair(kv_pairs).await;
         let iters: Vec<BoxedHummockIterator> =
             vec![Box::new(ReverseTableIterator::new(Arc::new(table)))];
-        let si = ReverseSortedIterator::new(iters);
+        let mi = ReverseMergeIterator::new(iters);
         let end_key = Included(user_key(key_range_test_key(0, 7, 0).as_slice()).to_vec());
 
-        let mut uki = ReverseUserKeyIterator::new(si, (Unbounded, end_key));
+        let mut ui = ReverseUserIterator::new(mi, (Unbounded, end_key));
 
         // ----- basic iterate -----
-        uki.rewind().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 1).as_slice()));
-        uki.next().await.unwrap();
-        assert!(!uki.is_valid());
+        ui.rewind().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 1).as_slice()));
+        ui.next().await.unwrap();
+        assert!(!ui.is_valid());
 
         // ----- end-range iterate -----
-        uki.seek(user_key(iterator_test_key_of(0, 7).as_slice()))
+        ui.seek(user_key(iterator_test_key_of(0, 7).as_slice()))
             .await
             .unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 1).as_slice()));
-        uki.next().await.unwrap();
-        assert!(!uki.is_valid());
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 1).as_slice()));
+        ui.next().await.unwrap();
+        assert!(!ui.is_valid());
 
         // ----- in-range iterate -----
-        uki.seek(user_key(iterator_test_key_of(0, 6).as_slice()))
+        ui.seek(user_key(iterator_test_key_of(0, 6).as_slice()))
             .await
             .unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 1).as_slice()));
-        uki.next().await.unwrap();
-        assert!(!uki.is_valid());
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 1).as_slice()));
+        ui.next().await.unwrap();
+        assert!(!ui.is_valid());
 
         // ----- begin-range iterate -----
-        uki.seek(user_key(iterator_test_key_of(0, 0).as_slice()))
+        ui.seek(user_key(iterator_test_key_of(0, 0).as_slice()))
             .await
             .unwrap();
-        assert!(!uki.is_valid());
+        assert!(!ui.is_valid());
     }
 
     // left..
     #[tokio::test]
-    async fn test_reverse_user_key_range_from() {
+    async fn test_reverse_user_range_from() {
         // key=[table, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
@@ -653,68 +652,68 @@ mod tests {
         let table = add_kv_pair(kv_pairs).await;
         let iters: Vec<BoxedHummockIterator> =
             vec![Box::new(ReverseTableIterator::new(Arc::new(table)))];
-        let si = ReverseSortedIterator::new(iters);
+        let mi = ReverseMergeIterator::new(iters);
         let begin_key = Included(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
 
-        let mut uki = ReverseUserKeyIterator::new(si, (begin_key, Unbounded));
+        let mut ui = ReverseUserIterator::new(mi, (begin_key, Unbounded));
 
         // ----- basic iterate -----
-        uki.rewind().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 8).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
-        uki.next().await.unwrap();
-        assert!(!uki.is_valid());
+        ui.rewind().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 8).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
+        ui.next().await.unwrap();
+        assert!(!ui.is_valid());
 
         // ----- begin-range iterate -----
-        uki.seek(user_key(iterator_test_key_of(0, 2).as_slice()))
+        ui.seek(user_key(iterator_test_key_of(0, 2).as_slice()))
             .await
             .unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
-        uki.next().await.unwrap();
-        assert!(!uki.is_valid());
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
+        ui.next().await.unwrap();
+        assert!(!ui.is_valid());
 
         // ----- in-range iterate -----
-        uki.seek(user_key(iterator_test_key_of(0, 5).as_slice()))
+        ui.seek(user_key(iterator_test_key_of(0, 5).as_slice()))
             .await
             .unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
-        uki.next().await.unwrap();
-        assert!(!uki.is_valid());
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
+        ui.next().await.unwrap();
+        assert!(!ui.is_valid());
 
         // ----- end-range iterate -----
-        uki.seek(user_key(iterator_test_key_of(0, 8).as_slice()))
+        ui.seek(user_key(iterator_test_key_of(0, 8).as_slice()))
             .await
             .unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 8).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
-        uki.next().await.unwrap();
-        assert!(!uki.is_valid());
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 8).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
+        ui.next().await.unwrap();
+        assert!(!ui.is_valid());
 
         // ----- after-end-range iterate -----
-        uki.seek(user_key(iterator_test_key_of(0, 9).as_slice()))
+        ui.seek(user_key(iterator_test_key_of(0, 9).as_slice()))
             .await
             .unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 8).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
-        uki.next().await.unwrap();
-        assert_eq!(uki.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
-        uki.next().await.unwrap();
-        assert!(!uki.is_valid());
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 8).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 6).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 3).as_slice()));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key(), user_key(iterator_test_key_of(0, 2).as_slice()));
+        ui.next().await.unwrap();
+        assert!(!ui.is_valid());
     }
 
     fn clone_table(table: &Table) -> Table {
@@ -752,8 +751,8 @@ mod tests {
         let iters: Vec<BoxedHummockIterator> = vec![Box::new(ReverseTableIterator::new(Arc::new(
             clone_table(&table),
         )))];
-        let rsi = ReverseSortedIterator::new(iters);
-        let mut ruki = ReverseUserKeyIterator::new(rsi, (start_bound, end_bound));
+        let rsi = ReverseMergeIterator::new(iters);
+        let mut ruki = ReverseUserIterator::new(rsi, (start_bound, end_bound));
         let num_puts: usize = truth
             .iter()
             .map(|(key, inserts)| {
@@ -792,7 +791,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_reverse_user_key_chaos() {
+    async fn test_reverse_user_chaos() {
         // We first generate the key value pairs.
         let mut rng = thread_rng();
         let mut truth: BTreeMap<Vec<u8>, BTreeMap<Epoch, HummockValue<Vec<u8>>>> = BTreeMap::new();

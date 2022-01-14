@@ -34,14 +34,14 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use value::*;
 
-use self::iterator::UserKeyIterator;
+use self::iterator::UserIterator;
 use self::key::{user_key, FullKey};
 use self::multi_builder::CapacitySplitTableBuilder;
 use self::snapshot::HummockSnapshot;
 pub use self::state_store::*;
 use self::version_manager::VersionManager;
 use super::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
-use crate::hummock::iterator::ReverseUserKeyIterator;
+use crate::hummock::iterator::ReverseUserIterator;
 use crate::object::ObjectStore;
 
 pub static REMOTE_DIR: &str = "/test/";
@@ -181,7 +181,7 @@ impl HummockStorage {
     }
 
     /// Return an iterator that scan from the begin key to the end key
-    pub async fn range_scan<R, B>(&self, key_range: R) -> HummockResult<UserKeyIterator>
+    pub async fn range_scan<R, B>(&self, key_range: R) -> HummockResult<UserIterator>
     where
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
@@ -192,10 +192,7 @@ impl HummockStorage {
     }
 
     /// Return a reversed iterator that scans from the end key to the begin key
-    pub async fn reverse_range_scan<R, B>(
-        &self,
-        key_range: R,
-    ) -> HummockResult<ReverseUserKeyIterator>
+    pub async fn reverse_range_scan<R, B>(&self, key_range: R) -> HummockResult<ReverseUserIterator>
     where
         R: RangeBounds<B>,
         B: AsRef<[u8]>,

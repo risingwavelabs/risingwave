@@ -4,7 +4,7 @@ use bytes::BytesMut;
 use futures::stream::{self, StreamExt};
 
 use super::cloud::gen_remote_table;
-use super::iterator::{ConcatIterator, HummockIterator, SortedIterator};
+use super::iterator::{ConcatIterator, HummockIterator, MergeIterator};
 use super::key::{get_epoch, Epoch, FullKey};
 use super::key_range::KeyRange;
 use super::multi_builder::CapacitySplitTableBuilder;
@@ -52,7 +52,7 @@ impl Compactor {
         for (kr_idx, kr) in (&compact_task.splits).iter().enumerate() {
             let mut output_needing_vacuum = vec![];
 
-            let iter = SortedIterator::new(
+            let iter = MergeIterator::new(
                 overlapping_tables
                     .iter()
                     .map(|table| -> Box<dyn HummockIterator> {
@@ -121,7 +121,7 @@ impl Compactor {
     async fn sub_compact(
         context: SubCompactContext,
         kr: KeyRange,
-        mut iter: SortedIterator,
+        mut iter: MergeIterator,
         local_sorted_output_ssts: &mut Vec<Table>,
         is_target_ultimate_and_leveling: bool,
         watermark: Epoch,
@@ -388,7 +388,7 @@ mod tests {
             }
         }
 
-        let mut it = SortedIterator::new(table_iters);
+        let mut it = MergeIterator::new(table_iters);
 
         it.seek(&key_with_epoch(anchor.to_vec(), u64::MAX)).await?;
 

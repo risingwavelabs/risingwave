@@ -3,13 +3,13 @@ use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use super::iterator::{
-    BoxedHummockIterator, ConcatIterator, HummockIterator, SortedIterator, UserKeyIterator,
+    BoxedHummockIterator, ConcatIterator, HummockIterator, MergeIterator, UserIterator,
 };
 use super::key::{key_with_epoch, user_key};
 use super::utils::bloom_filter_tables;
 use super::version_manager::{Level, Snapshot, VersionManager};
 use super::{HummockResult, TableIterator};
-use crate::hummock::iterator::{ReverseSortedIterator, ReverseUserKeyIterator};
+use crate::hummock::iterator::{ReverseMergeIterator, ReverseUserIterator};
 use crate::hummock::ReverseTableIterator;
 
 pub struct HummockSnapshot {
@@ -71,9 +71,9 @@ impl HummockSnapshot {
             }
         }
 
-        let mut it = SortedIterator::new(table_iters);
+        let mut it = MergeIterator::new(table_iters);
 
-        // Use `SortedIterator` to seek for they key with latest version to
+        // Use `MergeIterator` to seek for they key with latest version to
         // get the latest key.
         it.seek(&key_with_epoch(key.to_vec(), self.epoch)).await?;
 
@@ -90,7 +90,7 @@ impl HummockSnapshot {
         }
     }
 
-    pub async fn range_scan<R, B>(&self, key_range: R) -> HummockResult<UserKeyIterator>
+    pub async fn range_scan<R, B>(&self, key_range: R) -> HummockResult<UserIterator>
     where
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
@@ -125,11 +125,11 @@ impl HummockSnapshot {
 
         let table_iters =
             overlapped_tables.map(|t| Box::new(TableIterator::new(t)) as BoxedHummockIterator);
-        let si = SortedIterator::new(table_iters);
+        let mi = MergeIterator::new(table_iters);
 
         // TODO: avoid this clone
-        Ok(UserKeyIterator::new_with_epoch(
-            si,
+        Ok(UserIterator::new_with_epoch(
+            mi,
             (
                 key_range.start_bound().map(|b| b.as_ref().to_owned()),
                 key_range.end_bound().map(|b| b.as_ref().to_owned()),
@@ -141,10 +141,7 @@ impl HummockSnapshot {
     /// Since `Range` always includes `start`, so if we want to scan from `end_key`(inclusive) to
     /// `begin_key`(either inclusive or exclusive), we construct a range that is [``end_key``,
     /// ``start_key``]
-    pub async fn reverse_range_scan<R, B>(
-        &self,
-        key_range: R,
-    ) -> HummockResult<ReverseUserKeyIterator>
+    pub async fn reverse_range_scan<R, B>(&self, key_range: R) -> HummockResult<ReverseUserIterator>
     where
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
@@ -179,11 +176,11 @@ impl HummockSnapshot {
 
         let reverse_table_iters = overlapped_tables
             .map(|t| Box::new(ReverseTableIterator::new(t)) as BoxedHummockIterator);
-        let reverse_sorted_iterator = ReverseSortedIterator::new(reverse_table_iters);
+        let reverse_merge_iterator = ReverseMergeIterator::new(reverse_table_iters);
 
         // TODO: avoid this clone
-        Ok(ReverseUserKeyIterator::new_with_epoch(
-            reverse_sorted_iterator,
+        Ok(ReverseUserIterator::new_with_epoch(
+            reverse_merge_iterator,
             (
                 key_range.end_bound().map(|b| b.as_ref().to_owned()),
                 key_range.start_bound().map(|b| b.as_ref().to_owned()),

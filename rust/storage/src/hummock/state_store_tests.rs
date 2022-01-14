@@ -7,7 +7,7 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Client, Request, Response, Server};
 use prometheus::{Encoder, Registry, TextEncoder};
 
-use super::iterator::UserKeyIterator;
+use super::iterator::UserIterator;
 use super::{HummockOptions, HummockStorage};
 use crate::hummock::version_manager::VersionManager;
 use crate::object::InMemObjectStore;
@@ -231,7 +231,7 @@ async fn test_basic() {
     assert_eq!(len, 4);
 }
 
-async fn count_iter(iter: &mut UserKeyIterator) -> usize {
+async fn count_iter(iter: &mut UserIterator) -> usize {
     let mut c: usize = 0;
     while iter.is_valid() {
         c += 1;

@@ -3,7 +3,7 @@ use bytes::Bytes;
 use risingwave_common::error::Result;
 
 use super::HummockStorage;
-use crate::hummock::iterator::DirectedUserKeyIterator;
+use crate::hummock::iterator::DirectedUserIterator;
 use crate::hummock::key::{next_key, prev_key};
 use crate::{StateStore, StateStoreIter};
 
@@ -58,7 +58,7 @@ impl StateStore for HummockStateStore {
         let mut inner = self.storage.range_scan(range).await?;
         inner.rewind().await?;
         self.storage.get_stats_ref().iter_counts.inc();
-        let res = HummockStateStoreIter(DirectedUserKeyIterator::Forward(inner));
+        let res = HummockStateStoreIter(DirectedUserIterator::Forward(inner));
         timer.observe_duration();
         Ok(res)
     }
@@ -67,13 +67,11 @@ impl StateStore for HummockStateStore {
         let range = prefix.to_owned()..prev_key(prefix);
         let mut inner = self.storage.reverse_range_scan(range).await?;
         inner.rewind().await?;
-        Ok(HummockStateStoreIter(DirectedUserKeyIterator::Backward(
-            inner,
-        )))
+        Ok(HummockStateStoreIter(DirectedUserIterator::Backward(inner)))
     }
 }
 
-pub struct HummockStateStoreIter(DirectedUserKeyIterator);
+pub struct HummockStateStoreIter(DirectedUserIterator);
 
 #[async_trait]
 impl StateStoreIter for HummockStateStoreIter {
