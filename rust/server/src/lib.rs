@@ -20,6 +20,7 @@ extern crate test;
 
 pub mod rpc;
 pub mod server;
+pub mod trace_runtime;
 
 use clap::Parser;
 

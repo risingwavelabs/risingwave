@@ -92,7 +92,7 @@
     <div class="w-3 h-3 flex-none bg-green-600 rounded-full mr-2"></div>
     <div class="text-xl font-medium text-black">${actors.node.host.host}:${actors.node.host.port}</div>
   </div>
-  <div style="height: 40rem" class="border border-gray-200 overflow-x-scroll">
+  <div id="actor-wrapper-${actors.node.id}" class="border border-gray-200 overflow-x-scroll">
     <svg id="actor-${actors.node.id}" class="h-full"></svg>
   </div>
   <div id="message-${actors.node.id}"></div>
@@ -196,6 +196,9 @@
 
     const svgSelection = d3.select(`#actor-${actors.node.id}`)
     svgSelection.attr("viewBox", [0, 0, width, height].join(" "))
+    // Resize the wrapper of svg to make all nodes visible and large enough. `/ 32` is by experience.
+    $(`#actor-wrapper-${actors.node.id}`).css("height", `${height / 32}rem`)
+
     const defs = svgSelection.append("defs") // For gradients
 
     const interp = d3.interpolateRainbow
@@ -318,7 +321,7 @@
     .then(response => response.json())
     .then(data => data.forEach(
       data => $("#clusters").append(cluster("Compute Node", data))))
-  $("#clusters").append(cluster("Meta Node", { host: "127.0.0.1", port: "2333" }))
+  $("#clusters").append(cluster("Meta Node", { host: { host: "127.0.0.1", port: "2333" } }))
 
   fetch('/api/actors')
     .then(response => response.json())

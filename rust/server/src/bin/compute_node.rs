@@ -9,17 +9,22 @@ use tracing_subscriber::prelude::*;
 #[cfg(not(tarpaulin_include))]
 #[tokio::main]
 async fn main() {
+    use isahc::config::Configurable;
+
     let opts = ComputeNodeOpts::parse();
     if opts.enable_tracing {
+        opentelemetry::global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
+
         let tracer = opentelemetry_jaeger::new_pipeline()
-            // TODO: We should use this function in future release of `opentelemetry_jaeger`
-            // .with_auto_split_batch(true)
-            .with_max_packet_size(65000)
+            // TODO: use UDP tracing in production environment
+            .with_collector_endpoint("http://127.0.0.1:14268/api/traces")
+            // TODO: change service name to compute-{port}
             .with_service_name("compute")
-            // TODO: Enable this in release mode
-            // .install_batch(opentelemetry::runtime::Tokio)
-            .install_simple()
+            // disable proxy
+            .with_http_client(isahc::HttpClient::builder().proxy(None).build().unwrap())
+            .install_batch(risingwave::trace_runtime::RwTokio)
             .unwrap();
+
         let opentelemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
         let fmt_layer = tracing_subscriber::fmt::layer().compact().with_ansi(false);
@@ -31,6 +36,7 @@ async fn main() {
                 || target.starts_with("hyper")
                 || target.starts_with("h2")
                 || target.starts_with("tower")
+                || target.starts_with("isahc")
             {
                 return metadata.level() <= &tracing::Level::WARN;
             }
