@@ -11,13 +11,11 @@ pub(super) fn handle_explain(stmt: Statement, _verbose: bool) -> PgResult {
 mod tests {
     use risingwave_sqlparser::parser::Parser;
 
-    use crate::handler;
-
     #[test]
-    fn handle_explain() {
+    fn test_handle_explain() {
         let sql = "explain values (11, 22), (33, 44);";
         let stmt = Parser::parse_sql(sql).unwrap().into_iter().next().unwrap();
-        let result = handler::handle(stmt);
+        let result = super::handle_explain(stmt, false);
         let row = result.iter().next().unwrap();
         let s = row[0].as_ref().unwrap().as_utf8();
         assert!(s.contains("11"));

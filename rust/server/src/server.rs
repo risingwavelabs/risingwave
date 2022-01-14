@@ -135,24 +135,12 @@ mod tests {
 
     use clap::StructOpt;
     use risingwave_common::util::addr::get_host_port;
-    use risingwave_meta::rpc::server::MetaStoreBackend;
+    use risingwave_meta::test_utils::LocalMeta;
     use tokio::sync::mpsc::UnboundedSender;
     use tokio::task::JoinHandle;
 
     use crate::server::compute_node_serve;
     use crate::ComputeNodeOpts;
-
-    async fn start_meta_node() -> (JoinHandle<()>, UnboundedSender<()>) {
-        let dashboard_addr = get_host_port("127.0.0.1:5691").unwrap();
-        let addr = get_host_port("127.0.0.1:5690").unwrap();
-        risingwave_meta::rpc::server::rpc_serve(
-            addr,
-            Some(dashboard_addr),
-            None,
-            MetaStoreBackend::Sled(tempfile::tempdir().unwrap().into_path()),
-        )
-        .await
-    }
 
     async fn start_compute_node() -> (JoinHandle<()>, UnboundedSender<()>) {
         let args: [OsString; 0] = []; // No argument.
@@ -163,11 +151,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_server_shutdown() {
-        let (meta_join, meta_shutdown) = start_meta_node().await;
+        let meta = LocalMeta::start().await;
         let (join, shutdown) = start_compute_node().await;
         shutdown.send(()).unwrap();
         join.await.unwrap();
-        meta_shutdown.send(()).unwrap();
-        meta_join.await.unwrap();
+        meta.stop().await;
     }
 }

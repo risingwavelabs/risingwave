@@ -16,3 +16,4 @@ mod manager;
 pub mod rpc;
 mod storage;
 mod stream;
+pub mod test_utils;

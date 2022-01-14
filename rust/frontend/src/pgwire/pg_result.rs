@@ -18,7 +18,7 @@ pub enum StatementType {
     EXPLAIN,
     CREATE_TABLE,
     CREATE_MATERIALIZED_VIEW,
-    CREATE_STREAM,
+    CREATE_SOURCE,
     DROP_TABLE,
     DROP_STREAM,
     // Introduce ORDER_BY statement type cuz Calcite unvalidated AST has SqlKind.ORDER_BY. Note

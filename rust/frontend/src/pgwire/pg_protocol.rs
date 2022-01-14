@@ -1,9 +1,11 @@
+use std::sync::Arc;
+
 use log::info;
 use risingwave_common::error::Result;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 
-use crate::pgwire::database::Database;
+use super::pg_server::{Session, SessionManager};
 use crate::pgwire::pg_message::{
     BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeMessage, FeQueryMessage,
     FeStartupMessage,
@@ -19,7 +21,9 @@ pub struct PgProtocol {
     state: PgProtocolState,
     /// Whether the connection is terminated.
     is_terminate: bool,
-    database: Database,
+
+    session_mgr: Arc<dyn SessionManager>,
+    session: Option<Box<dyn Session>>,
 }
 
 /// States flow happened from top to down.
@@ -29,12 +33,13 @@ enum PgProtocolState {
 }
 
 impl PgProtocol {
-    pub fn new(stream: TcpStream) -> Self {
+    pub fn new(stream: TcpStream, session_mgr: Arc<dyn SessionManager>) -> Self {
         Self {
             stream,
             is_terminate: false,
             state: PgProtocolState::Startup,
-            database: Database {},
+            session_mgr,
+            session: None,
         }
     }
 
@@ -76,6 +81,8 @@ impl PgProtocol {
     }
 
     async fn process_startup_msg(&mut self, _msg: FeStartupMessage) -> Result<()> {
+        self.session = Some(self.session_mgr.connect());
+
         self.write_message_no_flush(&BeMessage::AuthenticationOk)
             .await?;
         self.write_message_no_flush(&BeMessage::ParameterStatus(
@@ -97,8 +104,10 @@ impl PgProtocol {
 
     async fn process_query_msg(&mut self, query: FeQueryMessage) -> Result<()> {
         info!("receive query: {}", query.get_sql());
+        let session = self.session.as_ref().unwrap();
+
         // execute query
-        let res = self.database.run_statement(query.get_sql());
+        let res = session.run_statement(query.get_sql()).await;
         if res.is_query() {
             self.process_query_with_results(res).await?;
         } else {

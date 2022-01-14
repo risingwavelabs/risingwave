@@ -1138,6 +1138,7 @@ dependencies = [
 name = "frontend"
 version = "0.1.1"
 dependencies = [
+ "async-trait",
  "bytes",
  "clap",
  "downcast-rs",

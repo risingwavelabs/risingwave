@@ -1,49 +1,103 @@
-use log::info;
-use tokio::net::TcpListener;
+use std::sync::Arc;
 
-use crate::pgwire::pg_server_conn::PgServerConn;
+use log::{error, info};
+use risingwave_common::error::Result;
+use tokio::net::{TcpListener, TcpStream};
 
-pub struct PgServer {}
+use super::pg_protocol::PgProtocol;
+use super::pg_result::PgResult;
 
-impl PgServer {
-    /// Binds a Tcp listener at [`addr`]. Spawn a thread to serve every new connection.
-    pub async fn serve(addr: &str) {
-        let listener = TcpListener::bind(addr).await.unwrap();
-        // accept connections and process them, spawning a new thread for each one
-        info!("Starting server at {}", addr);
-        loop {
-            let conn_ret = listener.accept().await;
-            match conn_ret {
-                Ok((stream, _)) => {
-                    info!("New connection: {}", stream.peer_addr().unwrap());
-                    let mut pg_conn = PgServerConn::new(stream);
-                    tokio::spawn(async move {
-                        // connection succeeded
-                        pg_conn.serve().await
-                    });
-                }
+/// The interface for a database system behind pgwire protocol.
+/// We can mock it for testing purpose.
+pub trait SessionManager: Send + Sync {
+    fn connect(&self) -> Box<dyn Session>;
+}
 
-                Err(e) => {
-                    info!("Error: {}", e);
-                }
+/// A psql connection.
+#[async_trait::async_trait]
+pub trait Session: Send + Sync {
+    async fn run_statement(&self, sql: &str) -> PgResult;
+}
+
+/// Binds a Tcp listener at [`addr`]. Spawn a coroutine to serve every new connection.
+pub async fn pg_serve(addr: &str, session_mgr: Arc<dyn SessionManager>) -> Result<()> {
+    let listener = TcpListener::bind(addr).await.unwrap();
+    // accept connections and process them, spawning a new thread for each one
+    info!("Starting server at {}", addr);
+    loop {
+        let session_mgr = session_mgr.clone();
+        let conn_ret = listener.accept().await;
+        match conn_ret {
+            Ok((stream, peer_addr)) => {
+                info!("New connection: {}", peer_addr);
+                tokio::spawn(async move {
+                    // connection succeeded
+                    pg_serve_conn(stream, session_mgr).await;
+                });
             }
+
+            Err(e) => {
+                error!("Connection failure: {}", e);
+            }
+        }
+    }
+}
+
+async fn pg_serve_conn(socket: TcpStream, session_mgr: Arc<dyn SessionManager>) {
+    let mut pg_proto = PgProtocol::new(socket, session_mgr);
+    loop {
+        let terminate = pg_proto.process().await.unwrap();
+        if terminate {
+            println!("Connection closed!");
+            break;
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use risingwave_common::array::Row;
+    use risingwave_common::types::ScalarImpl;
     use tokio_postgres::{NoTls, SimpleQueryMessage};
 
-    use crate::pgwire::database::parse;
-    use crate::pgwire::pg_server::PgServer;
+    use super::{Session, SessionManager};
+    use crate::pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
+    use crate::pgwire::pg_result::{PgResult, StatementType};
+    use crate::pgwire::pg_server::pg_serve;
+
+    struct TestSessionManager {}
+
+    impl SessionManager for TestSessionManager {
+        fn connect(&self) -> Box<dyn super::Session> {
+            Box::new(TestSession {})
+        }
+    }
+
+    struct TestSession {}
+
+    #[async_trait::async_trait]
+    impl Session for TestSession {
+        async fn run_statement(&self, sql: &str) -> PgResult {
+            // Returns a single-column single-row result, containing the sql string.
+            PgResult::new(
+                StatementType::SELECT,
+                1,
+                vec![Row::new(vec![Some(ScalarImpl::Utf8(sql.to_string()))])],
+                vec![PgFieldDescriptor::new("sql".to_string(), TypeOid::Varchar)],
+            )
+        }
+    }
 
     #[tokio::test]
     /// Test the psql connection establish of PG server.
     async fn test_connection() {
-        tokio::spawn(async move { PgServer::serve("127.0.0.1:4566").await });
+        tokio::spawn(
+            async move { pg_serve("127.0.0.1:45661", Arc::new(TestSessionManager {})).await },
+        );
         // Connect to the database.
-        let (client, connection) = tokio_postgres::connect("host=localhost port=4566", NoTls)
+        let (client, connection) = tokio_postgres::connect("host=localhost port=45661", NoTls)
             .await
             .unwrap();
 
@@ -62,10 +116,7 @@ mod tests {
         for (idx, row) in ret.iter().enumerate() {
             if idx == 0 {
                 if let SimpleQueryMessage::Row(row_inner) = row {
-                    assert_eq!(
-                        row_inner.get(0),
-                        Some(&format!("Unhandled ast: {:?}", parse(query).unwrap()[0])[..])
-                    );
+                    assert_eq!(row_inner.get(0), Some("SELECT * from t;"));
                 } else {
                     panic!("The first message should be row values")
                 }

@@ -5,6 +5,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+async-trait = "0.1"
 bytes = "1"
 clap = { version = "3", features = ["derive"] }
 downcast-rs = "1.2"
