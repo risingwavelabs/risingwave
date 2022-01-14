@@ -1,8 +1,8 @@
 use crate::hummock::iterator::concat_inner::ConcatIteratorInner;
-use crate::hummock::TableIterator;
+use crate::hummock::SSTableIterator;
 
 /// Iterates on multiple non-overlapping tables.
-pub type ConcatIterator = ConcatIteratorInner<TableIterator>;
+pub type ConcatIterator = ConcatIteratorInner<SSTableIterator>;
 
 #[cfg(test)]
 mod tests {
@@ -10,16 +10,16 @@ mod tests {
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, gen_test_table, gen_test_table_base, iterator_test_key_of,
-        test_value_of, TEST_KEYS_COUNT,
+        default_builder_opt_for_test, gen_test_sstable, gen_test_sstable_base,
+        iterator_test_key_of, test_value_of, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::HummockIterator;
 
     #[tokio::test]
     async fn test_concat_iterator() {
-        let table0 = gen_test_table(0, default_builder_opt_for_test()).await;
-        let table1 = gen_test_table(1, default_builder_opt_for_test()).await;
-        let table2 = gen_test_table(2, default_builder_opt_for_test()).await;
+        let table0 = gen_test_sstable(0, default_builder_opt_for_test()).await;
+        let table1 = gen_test_sstable(1, default_builder_opt_for_test()).await;
+        let table2 = gen_test_sstable(2, default_builder_opt_for_test()).await;
 
         let mut iter =
             ConcatIterator::new(vec![Arc::new(table0), Arc::new(table1), Arc::new(table2)]);
@@ -59,9 +59,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_concat_seek() {
-        let table0 = gen_test_table(0, default_builder_opt_for_test()).await;
-        let table1 = gen_test_table(1, default_builder_opt_for_test()).await;
-        let table2 = gen_test_table(2, default_builder_opt_for_test()).await;
+        let table0 = gen_test_sstable(0, default_builder_opt_for_test()).await;
+        let table1 = gen_test_sstable(1, default_builder_opt_for_test()).await;
+        let table2 = gen_test_sstable(2, default_builder_opt_for_test()).await;
         let mut iter =
             ConcatIterator::new(vec![Arc::new(table0), Arc::new(table1), Arc::new(table2)]);
 
@@ -111,9 +111,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_concat_seek_not_exists() {
-        let table0 = gen_test_table_base(0, default_builder_opt_for_test(), |x| x * 2).await;
-        let table1 = gen_test_table_base(1, default_builder_opt_for_test(), |x| x * 2).await;
-        let table2 = gen_test_table_base(2, default_builder_opt_for_test(), |x| x * 2).await;
+        let table0 = gen_test_sstable_base(0, default_builder_opt_for_test(), |x| x * 2).await;
+        let table1 = gen_test_sstable_base(1, default_builder_opt_for_test(), |x| x * 2).await;
+        let table2 = gen_test_sstable_base(2, default_builder_opt_for_test(), |x| x * 2).await;
         let mut iter =
             ConcatIterator::new(vec![Arc::new(table0), Arc::new(table1), Arc::new(table2)]);
 

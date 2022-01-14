@@ -1,9 +1,9 @@
 use risingwave_storage::hummock::key_range::KeyRange;
 use serde::{Deserialize, Serialize};
 
-// TODO: should store Arc<Table> instead of table_id in TableStat
+// TODO: should store Arc<Table> instead of table_id in SSTableStat
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct TableStat {
+pub struct SSTableStat {
     pub key_range: KeyRange,
     pub table_id: u64,
     pub compact_task: Option<u64>,
@@ -11,12 +11,12 @@ pub struct TableStat {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum LevelHandler {
-    /// * `Vec<TableStat>` - existing SSTs in this level, arranged in order no matter Tiering or
+    /// * `Vec<SSTableStat>` - existing SSTs in this level, arranged in order no matter Tiering or
     ///   Leveling
     /// * `Vec<(KeyRange, u64)>` - key ranges (and corresponding compaction task id) to be merged
     ///   to bottom level in order
-    Nonoverlapping(Vec<TableStat>, Vec<(KeyRange, u64)>),
-    Overlapping(Vec<TableStat>, Vec<(KeyRange, u64)>),
+    Nonoverlapping(Vec<SSTableStat>, Vec<(KeyRange, u64)>),
+    Overlapping(Vec<SSTableStat>, Vec<(KeyRange, u64)>),
 }
 
 impl LevelHandler {
@@ -34,7 +34,7 @@ impl LevelHandler {
 
         match self {
             LevelHandler::Overlapping(l_n, _) | LevelHandler::Nonoverlapping(l_n, _) => {
-                for TableStat { compact_task, .. } in l_n {
+                for SSTableStat { compact_task, .. } in l_n {
                     if *compact_task == Some(unassign_task_id) {
                         *compact_task = None;
                     }
@@ -51,7 +51,7 @@ impl LevelHandler {
         match self {
             LevelHandler::Overlapping(l_n, _) | LevelHandler::Nonoverlapping(l_n, _) => {
                 l_n.retain(
-                    |TableStat {
+                    |SSTableStat {
                          table_id,
                          compact_task,
                          ..

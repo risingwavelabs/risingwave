@@ -1,34 +1,34 @@
 use bytes::Bytes;
 use futures::Future;
-use risingwave_pb::hummock::TableMeta;
+use risingwave_pb::hummock::SstableMeta;
 
 use crate::hummock::key::{Epoch, FullKey};
 use crate::hummock::value::HummockValue;
-use crate::hummock::TableBuilder;
+use crate::hummock::SSTableBuilder;
 
-struct TableBuilderWrapper {
+struct SSTableBuilderWrapper {
     id: u64,
-    builder: TableBuilder,
+    builder: SSTableBuilder,
     sealed: bool,
 }
 
-/// A wrapper for [`TableBuilder`] which automatically split key-value pairs into multiple tables,
+/// A wrapper for [`SSTableBuilder`] which automatically split key-value pairs into multiple tables,
 /// based on their target capacity set in options.
 ///
 /// When building is finished, one may call `finish` to get the results of zero, one or more tables.
 pub struct CapacitySplitTableBuilder<B> {
-    /// When creating a new [`TableBuilder`], caller use this closure to specify the id and
+    /// When creating a new [`SSTableBuilder`], caller use this closure to specify the id and
     /// options.
     get_id_and_builder: B,
 
-    /// Wrapped [`TableBuilder`]s. The last one is what we are operating on.
-    builders: Vec<TableBuilderWrapper>,
+    /// Wrapped [`SSTableBuilder`]s. The last one is what we are operating on.
+    builders: Vec<SSTableBuilderWrapper>,
 }
 
 impl<B, F> CapacitySplitTableBuilder<B>
 where
     B: FnMut() -> F,
-    F: Future<Output = (u64, TableBuilder)>,
+    F: Future<Output = (u64, SSTableBuilder)>,
 {
     /// Create a new [`CapacitySplitTableBuilder`] using given configuration generator.
     pub fn new(get_id_and_builder: B) -> Self {
@@ -38,7 +38,7 @@ where
         }
     }
 
-    /// Returns the number of [`TableBuilder`]s.
+    /// Returns the number of [`SSTableBuilder`]s.
     pub fn len(&self) -> usize {
         self.builders.len()
     }
@@ -85,7 +85,7 @@ where
 
         if new_builder_required {
             let (id, builder) = (self.get_id_and_builder)().await;
-            self.builders.push(TableBuilderWrapper {
+            self.builders.push(SSTableBuilderWrapper {
                 id,
                 builder,
                 sealed: false,
@@ -107,7 +107,7 @@ where
     }
 
     /// Finalize all the tables to be ids, blocks and metadata.
-    pub fn finish(self) -> Vec<(u64, Bytes, TableMeta)> {
+    pub fn finish(self) -> Vec<(u64, Bytes, SstableMeta)> {
         self.builders
             .into_iter()
             .map(|b| {
@@ -129,7 +129,7 @@ mod tests {
 
     use super::*;
     use crate::hummock::builder::tests::default_builder_opt_for_test;
-    use crate::hummock::TableBuilderOptions;
+    use crate::hummock::SSTableBuilderOptions;
 
     #[tokio::test]
     async fn test_lots_of_tables() {
@@ -140,7 +140,7 @@ mod tests {
         let get_id_and_builder = || async {
             (
                 next_id.fetch_add(1, SeqCst),
-                TableBuilder::new(TableBuilderOptions {
+                SSTableBuilder::new(SSTableBuilderOptions {
                     table_capacity,
                     block_size,
                     bloom_false_positive: 0.1,
@@ -167,7 +167,7 @@ mod tests {
         let mut builder = CapacitySplitTableBuilder::new(|| async {
             (
                 next_id.fetch_add(1, SeqCst),
-                TableBuilder::new(default_builder_opt_for_test()),
+                SSTableBuilder::new(default_builder_opt_for_test()),
             )
         });
 

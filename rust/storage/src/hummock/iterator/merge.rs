@@ -11,11 +11,11 @@ mod test {
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, gen_test_table, iterator_test_key_of, test_key,
+        default_builder_opt_for_test, gen_test_sstable, iterator_test_key_of, test_key,
         test_value_of, TestIteratorBuilder, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::{BoxedHummockIterator, HummockIterator};
-    use crate::hummock::table::TableIterator;
+    use crate::hummock::sstable::SSTableIterator;
 
     #[tokio::test]
     async fn test_merge_basic() {
@@ -100,11 +100,11 @@ mod test {
 
     #[tokio::test]
     async fn test_merge_invalidate_reset() {
-        let table0 = gen_test_table(0, default_builder_opt_for_test()).await;
-        let table1 = gen_test_table(1, default_builder_opt_for_test()).await;
+        let table0 = gen_test_sstable(0, default_builder_opt_for_test()).await;
+        let table1 = gen_test_sstable(1, default_builder_opt_for_test()).await;
         let iters: Vec<BoxedHummockIterator> = vec![
-            Box::new(TableIterator::new(Arc::new(table0))),
-            Box::new(TableIterator::new(Arc::new(table1))),
+            Box::new(SSTableIterator::new(Arc::new(table0))),
+            Box::new(SSTableIterator::new(Arc::new(table1))),
         ];
 
         let mut mi = MergeIterator::new(iters);

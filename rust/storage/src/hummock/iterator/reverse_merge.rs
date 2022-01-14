@@ -11,11 +11,11 @@ mod test {
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, gen_test_table, iterator_test_key_of, test_key,
+        default_builder_opt_for_test, gen_test_sstable, iterator_test_key_of, test_key,
         test_value_of, TestIteratorBuilder, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::{BoxedHummockIterator, HummockIterator};
-    use crate::hummock::ReverseTableIterator;
+    use crate::hummock::ReverseSSTableIterator;
 
     #[tokio::test]
     async fn test_reverse_merge_basic() {
@@ -108,11 +108,11 @@ mod test {
 
     #[tokio::test]
     async fn test_reverse_merge_invalidate_reset() {
-        let table0 = gen_test_table(0, default_builder_opt_for_test()).await;
-        let table1 = gen_test_table(1, default_builder_opt_for_test()).await;
+        let table0 = gen_test_sstable(0, default_builder_opt_for_test()).await;
+        let table1 = gen_test_sstable(1, default_builder_opt_for_test()).await;
         let iters: Vec<BoxedHummockIterator> = vec![
-            Box::new(ReverseTableIterator::new(Arc::new(table1))),
-            Box::new(ReverseTableIterator::new(Arc::new(table0))),
+            Box::new(ReverseSSTableIterator::new(Arc::new(table1))),
+            Box::new(ReverseSSTableIterator::new(Arc::new(table0))),
         ];
 
         let mut mi = ReverseMergeIterator::new(iters);

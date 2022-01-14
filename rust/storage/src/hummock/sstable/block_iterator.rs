@@ -203,22 +203,22 @@ mod tests {
     use bytes::{Bytes, BytesMut};
     use itertools::Itertools;
 
-    use super::super::{TableBuilder, TableBuilderOptions};
+    use super::super::{SSTableBuilder, SSTableBuilderOptions};
     use super::*;
-    use crate::hummock::cloud::gen_remote_table;
+    use crate::hummock::cloud::gen_remote_sstable;
     use crate::hummock::HummockValue;
     use crate::object::{InMemObjectStore, ObjectStore};
 
     #[tokio::test]
     async fn basic_test() {
-        let opt = TableBuilderOptions {
+        let opt = SSTableBuilderOptions {
             bloom_false_positive: 0.0,
             block_size: 16384,
             table_capacity: 0,
             checksum_algo: risingwave_pb::hummock::checksum::Algorithm::XxHash64,
         };
 
-        let mut b = TableBuilder::new(opt);
+        let mut b = SSTableBuilder::new(opt);
         for i in 0..10 {
             b.add(
                 format!("key_test_{}", i).as_bytes(),
@@ -235,7 +235,7 @@ mod tests {
         let (blocks, meta) = b.finish();
 
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        let table = gen_remote_table(obj_client, 0, blocks, meta, None)
+        let table = gen_remote_sstable(obj_client, 0, blocks, meta, None)
             .await
             .unwrap();
 

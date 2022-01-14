@@ -7,27 +7,27 @@ use super::variants::*;
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::value::HummockValue;
 use crate::hummock::version_cmp::VersionedComparator;
-use crate::hummock::{HummockResult, Table, TableIteratorType};
+use crate::hummock::{HummockResult, SSTable, SSTableIteratorType};
 
 /// Serves as the concrete implementation of `ConcatIterator` and `ReverseConcatIterator`.
-pub struct ConcatIteratorInner<TI: TableIteratorType> {
+pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
     /// The iterator of the current table.
-    table_iter: Option<TI::TableIterator>,
+    sstable_iter: Option<TI::SSTableIterator>,
 
     /// Current table index.
     cur_idx: usize,
 
     /// All non-overlapping tables.
-    tables: Vec<Arc<Table>>,
+    tables: Vec<Arc<SSTable>>,
 }
 
-impl<TI: TableIteratorType> ConcatIteratorInner<TI> {
+impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
     /// Caller should make sure that `tables` are non-overlapping,
     /// arranged in ascending order when it serves as a forward iterator,
     /// and arranged in descending order when it serves as a reverse iterator.
-    pub fn new(tables: Vec<Arc<Table>>) -> Self {
+    pub fn new(tables: Vec<Arc<SSTable>>) -> Self {
         Self {
-            table_iter: None,
+            sstable_iter: None,
             cur_idx: 0,
             tables,
         }
@@ -36,16 +36,16 @@ impl<TI: TableIteratorType> ConcatIteratorInner<TI> {
     /// Seek to a table, and then seek to the key if `seek_key` is given.
     async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
         if idx >= self.tables.len() {
-            self.table_iter = None;
+            self.sstable_iter = None;
         } else {
-            let mut table_iter = TI::new(self.tables[idx].clone());
+            let mut sstable_iter = TI::new(self.tables[idx].clone());
             if let Some(key) = seek_key {
-                table_iter.seek(key).await?;
+                sstable_iter.seek(key).await?;
             } else {
-                table_iter.rewind().await?;
+                sstable_iter.rewind().await?;
             }
 
-            self.table_iter = Some(table_iter);
+            self.sstable_iter = Some(sstable_iter);
             self.cur_idx = idx;
         }
         Ok(())
@@ -53,12 +53,12 @@ impl<TI: TableIteratorType> ConcatIteratorInner<TI> {
 }
 
 #[async_trait]
-impl<TI: TableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
+impl<TI: SSTableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
     async fn next(&mut self) -> HummockResult<()> {
-        let table_iter = self.table_iter.as_mut().expect("no table iter");
-        table_iter.next().await?;
+        let sstable_iter = self.sstable_iter.as_mut().expect("no table iter");
+        sstable_iter.next().await?;
 
-        if table_iter.is_valid() {
+        if sstable_iter.is_valid() {
             Ok(())
         } else {
             // seek to next table
@@ -67,15 +67,15 @@ impl<TI: TableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
     }
 
     fn key(&self) -> &[u8] {
-        self.table_iter.as_ref().expect("no table iter").key()
+        self.sstable_iter.as_ref().expect("no table iter").key()
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
-        self.table_iter.as_ref().expect("no table iter").value()
+        self.sstable_iter.as_ref().expect("no table iter").value()
     }
 
     fn is_valid(&self) -> bool {
-        self.table_iter.as_ref().map_or(false, |i| i.is_valid())
+        self.sstable_iter.as_ref().map_or(false, |i| i.is_valid())
     }
 
     async fn rewind(&mut self) -> HummockResult<()> {

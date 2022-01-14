@@ -7,7 +7,7 @@ use risingwave_storage::hummock::key_range::KeyRange;
 use risingwave_storage::hummock::HummockError;
 use serde::{Deserialize, Serialize};
 
-use crate::hummock::level_handler::{LevelHandler, TableStat};
+use crate::hummock::level_handler::{LevelHandler, SSTableStat};
 use crate::hummock::{HummockSSTableId, HummockSnapshotId};
 use crate::manager::{MetaSrvEnv, SINGLE_VERSION_EPOCH};
 use crate::storage::{ColumnFamilyUtils, Operation, Transaction};
@@ -90,7 +90,7 @@ impl CompactionInner {
                 let l_n_len = l_n.len();
                 while sst_idx < l_n_len {
                     let mut next_sst_idx = sst_idx + 1;
-                    let TableStat {
+                    let SSTableStat {
                         key_range: sst_key_range,
                         table_id,
                         ..
@@ -104,7 +104,7 @@ impl CompactionInner {
                         next_sst_idx = sst_idx;
                         for (
                             delta_idx,
-                            TableStat {
+                            SSTableStat {
                                 key_range: other_key_range,
                                 table_id: other_table_id,
                                 ..
@@ -129,7 +129,7 @@ impl CompactionInner {
                     }
 
                     let mut is_select_idle = true;
-                    for TableStat { compact_task, .. } in &l_n[sst_idx..next_sst_idx] {
+                    for SSTableStat { compact_task, .. } in &l_n[sst_idx..next_sst_idx] {
                         if compact_task.is_some() {
                             is_select_idle = false;
                             break;
@@ -226,7 +226,7 @@ impl CompactionInner {
                         let mut select_ln_iter = select_ln_ids.iter();
                         if let Some(first_id) = select_ln_iter.next() {
                             let mut current_id = first_id;
-                            for TableStat {
+                            for SSTableStat {
                                 table_id,
                                 compact_task,
                                 ..
@@ -301,7 +301,7 @@ impl CompactionInner {
     pub fn report_compact_task(
         &self,
         mut compact_status: CompactStatus,
-        output_table_compact_entries: Vec<TableStat>,
+        output_table_compact_entries: Vec<SSTableStat>,
         compact_task: CompactTask,
         task_result: bool,
     ) -> (CompactStatus, Vec<Table>, Vec<HummockSSTableId>) {

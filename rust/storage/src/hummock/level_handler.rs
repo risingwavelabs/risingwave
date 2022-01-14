@@ -1,21 +1,21 @@
 use super::key_range::KeyRange;
 
-// TODO: should store Arc<Table> instead of table_id in TableStat
+// TODO: should store Arc<SSTable> instead of table_id in SSTableStat
 #[derive(Clone)]
-pub struct TableStat {
+pub struct SSTableStat {
     pub key_range: KeyRange,
-    pub table_id: u64,
+    pub sstable_id: u64,
     pub compact_task: Option<u64>,
 }
 
 #[derive(Clone)]
 pub enum LevelHandler {
-    /// * `Vec<TableStat>` - existing SSTs in this level, arranged in order no matter Tiering or
+    /// * `Vec<SSTableStat>` - existing SSTs in this level, arranged in order no matter Tiering or
     ///   Leveling
     /// * `Vec<(KeyRange, u64)>` - key ranges (and corresponding compaction task id) to be merged
     ///   to bottom level in order
-    Leveling(Vec<TableStat>, Vec<(KeyRange, u64)>),
-    Tiering(Vec<TableStat>, Vec<(KeyRange, u64)>),
+    Leveling(Vec<SSTableStat>, Vec<(KeyRange, u64)>),
+    Tiering(Vec<SSTableStat>, Vec<(KeyRange, u64)>),
 }
 
 impl LevelHandler {
@@ -33,7 +33,7 @@ impl LevelHandler {
 
         match self {
             LevelHandler::Tiering(l_n, _) | LevelHandler::Leveling(l_n, _) => {
-                for TableStat { compact_task, .. } in l_n {
+                for SSTableStat { compact_task, .. } in l_n {
                     if *compact_task == Some(unassign_task_id) {
                         *compact_task = None;
                     }
@@ -50,8 +50,8 @@ impl LevelHandler {
         match self {
             LevelHandler::Tiering(l_n, _) | LevelHandler::Leveling(l_n, _) => {
                 l_n.retain(
-                    |TableStat {
-                         table_id,
+                    |SSTableStat {
+                         sstable_id: table_id,
                          compact_task,
                          ..
                      }| {

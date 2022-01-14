@@ -243,7 +243,7 @@ mod tests {
     use rand::{thread_rng, Rng};
 
     use super::*;
-    use crate::hummock::cloud::gen_remote_table;
+    use crate::hummock::cloud::gen_remote_sstable;
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, iterator_test_key_of, iterator_test_key_of_epoch, test_key,
         test_value_of, TestIteratorBuilder, TEST_KEYS_COUNT,
@@ -251,9 +251,9 @@ mod tests {
     use crate::hummock::iterator::variants::BACKWARD;
     use crate::hummock::iterator::BoxedHummockIterator;
     use crate::hummock::key::{prev_key, user_key};
-    use crate::hummock::table::{Table, TableIterator};
+    use crate::hummock::sstable::{SSTable, SSTableIterator};
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{ReverseTableIterator, TableBuilder};
+    use crate::hummock::{ReverseSSTableIterator, SSTableBuilder};
     use crate::object::{InMemObjectStore, ObjectStore};
 
     #[tokio::test]
@@ -381,8 +381,8 @@ mod tests {
         let table1 = add_kv_pair(kv_pairs).await;
 
         let iters: Vec<BoxedHummockIterator> = vec![
-            Box::new(TableIterator::new(Arc::new(table0))),
-            Box::new(TableIterator::new(Arc::new(table1))),
+            Box::new(SSTableIterator::new(Arc::new(table0))),
+            Box::new(SSTableIterator::new(Arc::new(table1))),
         ];
         let mi = ReverseMergeIterator::new(iters);
         let mut ui = ReverseUserIterator::new(mi, (Unbounded, Unbounded));
@@ -423,7 +423,7 @@ mod tests {
         ];
         let table = add_kv_pair(kv_pairs).await;
         let iters: Vec<BoxedHummockIterator> =
-            vec![Box::new(ReverseTableIterator::new(Arc::new(table)))];
+            vec![Box::new(ReverseSSTableIterator::new(Arc::new(table)))];
         let mi = ReverseMergeIterator::new(iters);
 
         let begin_key = Included(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
@@ -499,7 +499,7 @@ mod tests {
         ];
         let table = add_kv_pair(kv_pairs).await;
         let iters: Vec<BoxedHummockIterator> =
-            vec![Box::new(ReverseTableIterator::new(Arc::new(table)))];
+            vec![Box::new(ReverseSSTableIterator::new(Arc::new(table)))];
         let mi = ReverseMergeIterator::new(iters);
 
         let begin_key = Excluded(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
@@ -576,7 +576,7 @@ mod tests {
         ];
         let table = add_kv_pair(kv_pairs).await;
         let iters: Vec<BoxedHummockIterator> =
-            vec![Box::new(ReverseTableIterator::new(Arc::new(table)))];
+            vec![Box::new(ReverseSSTableIterator::new(Arc::new(table)))];
         let mi = ReverseMergeIterator::new(iters);
         let end_key = Included(user_key(key_range_test_key(0, 7, 0).as_slice()).to_vec());
 
@@ -651,7 +651,7 @@ mod tests {
         ];
         let table = add_kv_pair(kv_pairs).await;
         let iters: Vec<BoxedHummockIterator> =
-            vec![Box::new(ReverseTableIterator::new(Arc::new(table)))];
+            vec![Box::new(ReverseSSTableIterator::new(Arc::new(table)))];
         let mi = ReverseMergeIterator::new(iters);
         let begin_key = Included(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
 
@@ -716,8 +716,8 @@ mod tests {
         assert!(!ui.is_valid());
     }
 
-    fn clone_table(table: &Table) -> Table {
-        Table {
+    fn clone_sstable(table: &SSTable) -> SSTable {
+        SSTable {
             id: table.id,
             meta: table.meta.clone(),
             obj_client: table.obj_client.clone(),
@@ -733,7 +733,7 @@ mod tests {
     }
 
     async fn chaos_test_case(
-        table: Table,
+        table: SSTable,
         start_bound: Bound<Vec<u8>>,
         end_bound: Bound<Vec<u8>>,
         truth: &BTreeMap<Vec<u8>, BTreeMap<Epoch, HummockValue<Vec<u8>>>>,
@@ -748,9 +748,9 @@ mod tests {
             Unbounded => key_from_num(999999999999),
             _ => unimplemented!(),
         };
-        let iters: Vec<BoxedHummockIterator> = vec![Box::new(ReverseTableIterator::new(Arc::new(
-            clone_table(&table),
-        )))];
+        let iters: Vec<BoxedHummockIterator> = vec![Box::new(ReverseSSTableIterator::new(
+            Arc::new(clone_sstable(&table)),
+        ))];
         let rsi = ReverseMergeIterator::new(iters);
         let mut ruki = ReverseUserIterator::new(rsi, (start_bound, end_bound));
         let num_puts: usize = truth
@@ -830,7 +830,7 @@ mod tests {
             }
         }
         // We inject the key value pairs into the table.
-        let mut b = TableBuilder::new(default_builder_opt_for_test());
+        let mut b = SSTableBuilder::new(default_builder_opt_for_test());
         for (key, inserts) in &truth {
             for (time, value) in inserts {
                 let full_key = key_with_epoch(key.clone(), *time);
@@ -840,7 +840,7 @@ mod tests {
         let (data, meta) = b.finish();
         // get remote table
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        let table = gen_remote_table(obj_client, 0, data, meta, None)
+        let table = gen_remote_sstable(obj_client, 0, data, meta, None)
             .await
             .unwrap();
 
@@ -855,37 +855,37 @@ mod tests {
                 "begin_key:{:?},end_key:{:?}",
                 begin_key_bytes, end_key_bytes
             );
-            chaos_test_case(clone_table(&table), Unbounded, Unbounded, &truth).await;
+            chaos_test_case(clone_sstable(&table), Unbounded, Unbounded, &truth).await;
             chaos_test_case(
-                clone_table(&table),
+                clone_sstable(&table),
                 Unbounded,
                 Included(end_key_bytes.clone()),
                 &truth,
             )
             .await;
             chaos_test_case(
-                clone_table(&table),
+                clone_sstable(&table),
                 Included(begin_key_bytes.clone()),
                 Unbounded,
                 &truth,
             )
             .await;
             chaos_test_case(
-                clone_table(&table),
+                clone_sstable(&table),
                 Excluded(begin_key_bytes.clone()),
                 Unbounded,
                 &truth,
             )
             .await;
             chaos_test_case(
-                clone_table(&table),
+                clone_sstable(&table),
                 Included(begin_key_bytes.clone()),
                 Included(end_key_bytes.clone()),
                 &truth,
             )
             .await;
             chaos_test_case(
-                clone_table(&table),
+                clone_sstable(&table),
                 Excluded(begin_key_bytes),
                 Included(end_key_bytes),
                 &truth,
@@ -895,15 +895,15 @@ mod tests {
     }
 
     // key=[table, idx, epoch], value
-    async fn add_kv_pair(kv_pairs: Vec<(u64, usize, u64, HummockValue<Vec<u8>>)>) -> Table {
-        let mut b = TableBuilder::new(default_builder_opt_for_test());
+    async fn add_kv_pair(kv_pairs: Vec<(u64, usize, u64, HummockValue<Vec<u8>>)>) -> SSTable {
+        let mut b = SSTableBuilder::new(default_builder_opt_for_test());
         for kv in kv_pairs {
             b.add(key_range_test_key(kv.0, kv.1, kv.2).as_slice(), kv.3);
         }
         let (data, meta) = b.finish();
         // get remote table
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        gen_remote_table(obj_client, 0, data, meta, None)
+        gen_remote_sstable(obj_client, 0, data, meta, None)
             .await
             .unwrap()
     }

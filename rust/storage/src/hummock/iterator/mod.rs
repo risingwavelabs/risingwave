@@ -1,4 +1,4 @@
-use super::{HummockResult, HummockValue, TableIterator};
+use super::{HummockResult, HummockValue, SSTableIterator};
 
 mod concat;
 pub use concat::*;
@@ -20,9 +20,9 @@ pub(crate) mod test_utils;
 
 use async_trait::async_trait;
 
-use crate::hummock::ReverseTableIterator;
+use crate::hummock::ReverseSSTableIterator;
 
-/// `HummockIterator` defines the interface of all iterators, including `TableIterator`,
+/// `HummockIterator` defines the interface of all iterators, including `SSTableIterator`,
 /// `MergeIterator`, `UserIterator` and `ConcatIterator`.
 ///
 /// After create the iterator instance,
@@ -92,8 +92,8 @@ pub trait HummockIterator: Send + Sync {
 }
 
 pub enum HummockIteratorImpl {
-    Table(TableIterator),
-    ReverseTable(ReverseTableIterator),
+    SSTable(SSTableIterator),
+    ReverseTable(ReverseSSTableIterator),
     Concat(Box<ConcatIterator>),
     ReverseConcat(ReverseConcatIterator),
     Merge(MergeIterator),

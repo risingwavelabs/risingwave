@@ -10,7 +10,7 @@ import "common.proto";
 
 message Table {
   uint64 id = 1;
-  TableMeta meta = 2;
+  SstableMeta meta = 2;
 }
 
 message BlockMeta {
@@ -19,7 +19,7 @@ message BlockMeta {
   uint32 len = 3;
 }
 
-message TableMeta {
+message SstableMeta {
   // Offsets of different blocks
   repeated BlockMeta block_metas = 1;
   bytes bloom_filter = 2;

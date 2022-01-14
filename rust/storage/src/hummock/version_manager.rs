@@ -11,8 +11,8 @@ use parking_lot::Mutex as PLMutex;
 use tokio::sync::Mutex;
 
 use super::key_range::KeyRange;
-use super::level_handler::{LevelHandler, TableStat};
-use super::{HummockError, HummockResult, Table};
+use super::level_handler::{LevelHandler, SSTableStat};
+use super::{HummockError, HummockResult, SSTable};
 use crate::hummock::key::Epoch;
 use crate::hummock::{user_key, FullKey};
 
@@ -48,7 +48,7 @@ pub struct CompactTask {
     /// low watermark in 'epoch-aware compaction'
     pub watermark: Epoch,
     /// compacion output, which will be added to [`target_level`] of LSM after compaction
-    pub sorted_output_ssts: Vec<Table>,
+    pub sorted_output_ssts: Vec<SSTable>,
     /// task id assigned by hummock storage service
     task_id: u64,
     /// compacion output will be added to [`target_level`] of LSM after compaction
@@ -63,7 +63,7 @@ struct VersionManagerInner {
     status: HashMap<u64, Arc<Snapshot>>,
 
     /// TableId -> Object mapping
-    tables: BTreeMap<u64, Arc<Table>>,
+    tables: BTreeMap<u64, Arc<SSTable>>,
 
     /// Reference count of each version.
     ref_cnt: BTreeMap<u64, usize>,
@@ -205,7 +205,7 @@ impl VersionManager {
         self.next_table_id.fetch_add(1, Ordering::SeqCst)
     }
 
-    pub fn pick_few_tables(&self, table_ids: &[u64]) -> HummockResult<Vec<Arc<Table>>> {
+    pub fn pick_few_tables(&self, table_ids: &[u64]) -> HummockResult<Vec<Arc<SSTable>>> {
         let mut ret = Vec::with_capacity(table_ids.len());
         let inner = self.inner.lock();
         for table_id in table_ids {
@@ -235,8 +235,8 @@ impl VersionManager {
 
     /// Get the iterators on the underlying tables.
     /// Caller should be expected to pin a snapshot to get a consistent view.
-    pub fn tables(&self, snapshot: Arc<Snapshot>) -> HummockResult<Vec<Arc<Table>>> {
-        let mut out: Vec<Arc<Table>> = Vec::new();
+    pub fn tables(&self, snapshot: Arc<Snapshot>) -> HummockResult<Vec<Arc<SSTable>>> {
+        let mut out: Vec<Arc<SSTable>> = Vec::new();
         for level in &snapshot.levels {
             match level {
                 Level::Tiering(table_ids) => {
@@ -260,19 +260,19 @@ impl VersionManager {
     /// generated on reads.
     pub async fn add_l0_ssts(
         &self,
-        tables: impl IntoIterator<Item = Table>,
+        tables: impl IntoIterator<Item = SSTable>,
         epoch: u64,
     ) -> HummockResult<u64> {
         let tables = tables.into_iter().collect_vec();
 
         let stats = tables
             .iter()
-            .map(|table| TableStat {
+            .map(|table| SSTableStat {
                 key_range: KeyRange::new(
                     Bytes::copy_from_slice(&table.meta.smallest_key),
                     Bytes::copy_from_slice(&table.meta.largest_key),
                 ),
-                table_id: table.id,
+                sstable_id: table.id,
                 compact_task: None,
             })
             .collect_vec();
@@ -337,7 +337,7 @@ impl VersionManager {
             LevelHandler::Tiering(vec_tier, _) => {
                 for stat in stats {
                     let insert_point = vec_tier.partition_point(
-                        |TableStat {
+                        |SSTableStat {
                              key_range: other_key_range,
                              ..
                          }| { other_key_range <= &stat.key_range },
@@ -354,7 +354,7 @@ impl VersionManager {
     }
 
     /// Add a L0 SST and return a new epoch number
-    pub async fn add_single_l0_sst(&self, table: Table, epoch: u64) -> HummockResult<u64> {
+    pub async fn add_single_l0_sst(&self, table: SSTable, epoch: u64) -> HummockResult<u64> {
         self.add_l0_ssts(once(table), epoch).await
     }
 
@@ -385,9 +385,9 @@ impl VersionManager {
                 let l_n_len = l_n.len();
                 while sst_idx < l_n_len {
                     let mut next_sst_idx = sst_idx + 1;
-                    let TableStat {
+                    let SSTableStat {
                         key_range: sst_key_range,
-                        table_id,
+                        sstable_id: table_id,
                         ..
                     } = &l_n[sst_idx];
                     let mut select_level_inputs = vec![*table_id];
@@ -399,9 +399,9 @@ impl VersionManager {
                         next_sst_idx = sst_idx;
                         for (
                             delta_idx,
-                            TableStat {
+                            SSTableStat {
                                 key_range: other_key_range,
-                                table_id: other_table_id,
+                                sstable_id: other_table_id,
                                 ..
                             },
                         ) in l_n[sst_idx + 1..].iter().enumerate()
@@ -424,7 +424,7 @@ impl VersionManager {
                     }
 
                     let mut is_select_idle = true;
-                    for TableStat { compact_task, .. } in &l_n[sst_idx..next_sst_idx] {
+                    for SSTableStat { compact_task, .. } in &l_n[sst_idx..next_sst_idx] {
                         if compact_task.is_some() {
                             is_select_idle = false;
                             break;
@@ -485,7 +485,7 @@ impl VersionManager {
                                         let mut overlap_idx = overlap_begin;
                                         while overlap_idx < overlap_end {
                                             l_n_suc[overlap_idx].compact_task = Some(next_task_id);
-                                            suc_table_ids.push(l_n_suc[overlap_idx].table_id);
+                                            suc_table_ids.push(l_n_suc[overlap_idx].sstable_id);
                                             if overlap_idx > overlap_begin {
                                                 // TODO: We do not need to add splits every time. We
                                                 // can add every K SSTs.
@@ -521,8 +521,8 @@ impl VersionManager {
                         let mut select_ln_iter = select_ln_ids.iter();
                         if let Some(first_id) = select_ln_iter.next() {
                             let mut current_id = first_id;
-                            for TableStat {
-                                table_id,
+                            for SSTableStat {
+                                sstable_id: table_id,
                                 compact_task,
                                 ..
                             } in l_n
@@ -588,12 +588,12 @@ impl VersionManager {
         let output_table_compact_entries: Vec<_> = compact_task
             .sorted_output_ssts
             .iter()
-            .map(|table| TableStat {
+            .map(|table| SSTableStat {
                 key_range: KeyRange::new(
                     Bytes::copy_from_slice(&table.meta.smallest_key),
                     Bytes::copy_from_slice(&table.meta.largest_key),
                 ),
-                table_id: table.id,
+                sstable_id: table.id,
                 compact_task: None,
             })
             .collect();
@@ -635,12 +635,26 @@ impl VersionManager {
                             .map(|level_handler| match level_handler {
                                 LevelHandler::Tiering(l_n, _) => Level::Tiering(
                                     l_n.iter()
-                                        .map(|TableStat { table_id, .. }| *table_id)
+                                        .map(
+                                            |SSTableStat {
+                                                 sstable_id: table_id,
+                                                 ..
+                                             }| {
+                                                *table_id
+                                            },
+                                        )
                                         .collect(),
                                 ),
                                 LevelHandler::Leveling(l_n, _) => Level::Leveling(
                                     l_n.iter()
-                                        .map(|TableStat { table_id, .. }| *table_id)
+                                        .map(
+                                            |SSTableStat {
+                                                 sstable_id: table_id,
+                                                 ..
+                                             }| {
+                                                *table_id
+                                            },
+                                        )
                                         .collect(),
                                 ),
                             })
@@ -711,7 +725,7 @@ impl Drop for ScopedUnpinSnapshot {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_pb::hummock::TableMeta;
+    use risingwave_pb::hummock::SstableMeta;
 
     use super::*;
     use crate::object::InMemObjectStore;
@@ -734,11 +748,11 @@ mod tests {
         let test_table_id = 42;
         let current_version_id = version_manager
             .add_single_l0_sst(
-                Table::load(
+                SSTable::load(
                     test_table_id,
                     Arc::new(InMemObjectStore::default()),
                     String::from(""),
-                    TableMeta::default(),
+                    SstableMeta::default(),
                 )
                 .await?,
                 epoch,

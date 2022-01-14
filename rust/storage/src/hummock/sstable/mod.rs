@@ -9,10 +9,10 @@ pub mod builder;
 pub mod multi_builder;
 pub use block_iterator::*;
 pub use builder::*;
-mod table_iterator;
-pub use table_iterator::*;
-mod reverse_table_iterator;
-pub use reverse_table_iterator::*;
+mod sstable_iterator;
+pub use sstable_iterator::*;
+mod reverse_sstable_iterator;
+pub use reverse_sstable_iterator::*;
 mod utils;
 
 use std::sync::Arc;
@@ -20,11 +20,11 @@ use std::sync::Arc;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use prost::Message;
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
-use risingwave_pb::hummock::{Checksum, TableMeta};
+use risingwave_pb::hummock::{Checksum, SstableMeta};
 use utils::verify_checksum;
 
 use super::{HummockError, HummockResult};
-use crate::hummock::table::utils::checksum;
+use crate::hummock::sstable::utils::checksum;
 use crate::object::{BlockLocation, ObjectStore};
 
 /// Block contains several entries. It can be obtained from an SST.
@@ -108,12 +108,12 @@ impl Block {
 }
 
 /// [`Table`] represents a loaded SST file with the info we have about it.
-pub struct Table {
+pub struct SSTable {
     /// SST id
     pub id: u64,
 
     /// Prost-encoded Metadata of SST
-    pub meta: TableMeta,
+    pub meta: SstableMeta,
 
     /// Client of object store
     pub obj_client: Arc<dyn ObjectStore>,
@@ -122,15 +122,15 @@ pub struct Table {
     pub data_path: String,
 }
 
-impl Table {
+impl SSTable {
     /// Open an existing SST from a pre-loaded [`Bytes`].
     pub async fn load(
         id: u64,
         obj_client: Arc<dyn ObjectStore>,
         data_path: String,
-        meta: TableMeta,
+        meta: SstableMeta,
     ) -> HummockResult<Self> {
-        Ok(Table {
+        Ok(SSTable {
             id,
             meta,
             obj_client,
@@ -145,7 +145,7 @@ impl Table {
     /// |       variable      | variable |       4B        |
     /// |  Prost-encoded Meta | Checksum | Checksum Length |
     /// ```
-    pub fn decode_meta(content: &[u8]) -> HummockResult<TableMeta> {
+    pub fn decode_meta(content: &[u8]) -> HummockResult<SstableMeta> {
         let mut read_pos = content.len();
 
         // read checksum length from last 4 bytes
@@ -162,10 +162,10 @@ impl Table {
         let data = &content[0..read_pos];
         verify_checksum(&checksum, data)?;
 
-        Ok(TableMeta::decode(data)?)
+        Ok(SstableMeta::decode(data)?)
     }
 
-    pub fn encode_meta(meta: &TableMeta, buf: &mut BytesMut) {
+    pub fn encode_meta(meta: &SstableMeta, buf: &mut BytesMut) {
         // encode index
         let mut raw_meta = BytesMut::new();
         meta.encode(&mut raw_meta).unwrap();
@@ -237,9 +237,9 @@ mod tests {
     use super::builder::tests::*;
 
     #[tokio::test]
-    async fn test_table_load() {
+    async fn test_sstable_load() {
         // build remote table
-        let table = gen_test_table(default_builder_opt_for_test()).await;
+        let table = gen_test_sstable(default_builder_opt_for_test()).await;
 
         for i in 0..10 {
             table.block(i).await.unwrap();

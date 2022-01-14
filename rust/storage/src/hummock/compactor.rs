@@ -3,7 +3,7 @@ use std::sync::Arc;
 use bytes::BytesMut;
 use futures::stream::{self, StreamExt};
 
-use super::cloud::gen_remote_table;
+use super::cloud::gen_remote_sstable;
 use super::iterator::{ConcatIterator, HummockIterator, MergeIterator};
 use super::key::{get_epoch, Epoch, FullKey};
 use super::key_range::KeyRange;
@@ -11,8 +11,8 @@ use super::multi_builder::CapacitySplitTableBuilder;
 use super::version_cmp::VersionedComparator;
 use super::version_manager::{CompactTask, Level, LevelEntry};
 use super::{
-    HummockError, HummockOptions, HummockResult, HummockStorage, HummockValue, Table,
-    TableIterator, VersionManager,
+    HummockError, HummockOptions, HummockResult, HummockStorage, HummockValue, SSTable,
+    SSTableIterator, VersionManager,
 };
 use crate::object::ObjectStore;
 
@@ -56,7 +56,7 @@ impl Compactor {
                 overlapping_tables
                     .iter()
                     .map(|table| -> Box<dyn HummockIterator> {
-                        Box::new(TableIterator::new(table.clone()))
+                        Box::new(SSTableIterator::new(table.clone()))
                     })
                     .chain(non_overlapping_table_seqs.iter().map(
                         |tableseq| -> Box<dyn HummockIterator> {
@@ -122,7 +122,7 @@ impl Compactor {
         context: SubCompactContext,
         kr: KeyRange,
         mut iter: MergeIterator,
-        local_sorted_output_ssts: &mut Vec<Table>,
+        local_sorted_output_ssts: &mut Vec<SSTable>,
         is_target_ultimate_and_leveling: bool,
         watermark: Epoch,
     ) -> HummockResult<()> {
@@ -199,7 +199,7 @@ impl Compactor {
         // TODO: decide upload concurrency
         for (table_id, blocks, meta) in builder.finish() {
             let remote_dir = Some(context.options.remote_dir.as_str());
-            let table = gen_remote_table(
+            let table = gen_remote_sstable(
                 context.obj_client.clone(),
                 table_id,
                 blocks,
@@ -256,7 +256,7 @@ mod tests {
     use super::*;
     use crate::hummock::iterator::BoxedHummockIterator;
     use crate::hummock::key::{key_with_epoch, Epoch};
-    use crate::hummock::utils::bloom_filter_tables;
+    use crate::hummock::utils::bloom_filter_sstables;
     use crate::hummock::version_manager::{ScopedUnpinSnapshot, VersionManager};
     use crate::hummock::{user_key, HummockOptions, HummockResult, HummockStorage};
     use crate::object::InMemObjectStore;
@@ -266,7 +266,7 @@ mod tests {
         let hummock_storage = Arc::new(HummockStorage::new(
             Arc::new(InMemObjectStore::new()),
             HummockOptions {
-                table_size: 1048576,
+                sstable_size: 1048576,
                 block_size: 1024,
                 bloom_false_positive: 0.1,
                 remote_dir: String::from(""),
@@ -368,18 +368,18 @@ mod tests {
         for level in &snapshot.levels {
             match level {
                 Level::Tiering(table_ids) => {
-                    let tables = bloom_filter_tables(
+                    let tables = bloom_filter_sstables(
                         hummock_storage.version_manager.pick_few_tables(table_ids)?,
                         &anchor,
                     )?;
                     table_iters.extend(
                         tables.into_iter().map(|table| {
-                            Box::new(TableIterator::new(table)) as BoxedHummockIterator
+                            Box::new(SSTableIterator::new(table)) as BoxedHummockIterator
                         }),
                     )
                 }
                 Level::Leveling(table_ids) => {
-                    let tables = bloom_filter_tables(
+                    let tables = bloom_filter_sstables(
                         hummock_storage.version_manager.pick_few_tables(table_ids)?,
                         &anchor,
                     )?;
@@ -431,7 +431,7 @@ mod tests {
     async fn test_same_key_not_splitted() -> HummockResult<()> {
         let options = HummockOptions::small_for_test();
         let version_manager = Arc::new(VersionManager::new());
-        let target_table_size = options.table_size;
+        let target_table_size = options.sstable_size;
         let mut storage =
             HummockStorage::new(Arc::new(InMemObjectStore::new()), options, version_manager);
         storage.shutdown_compactor().await.unwrap();

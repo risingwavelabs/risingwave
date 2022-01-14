@@ -7,7 +7,7 @@ use risingwave_pb::hummock::{
     RefreshHummockContextRequest, Table, UnpinVersionRequest,
 };
 use risingwave_storage::hummock::value::HummockValue;
-use risingwave_storage::hummock::{TableBuilder, TableBuilderOptions};
+use risingwave_storage::hummock::{SSTableBuilder, SSTableBuilderOptions};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
@@ -99,7 +99,7 @@ async fn test_create_hummock_client() -> Result<()> {
 
 fn generate_test_tables(epoch: u64, table_id: &mut u64) -> Vec<Table> {
     // Tables to add
-    let opt = TableBuilderOptions {
+    let opt = SSTableBuilderOptions {
         bloom_false_positive: 0.1,
         block_size: 4096,
         table_capacity: 0,
@@ -108,7 +108,7 @@ fn generate_test_tables(epoch: u64, table_id: &mut u64) -> Vec<Table> {
 
     let mut tables = vec![];
     for i in 0..2 {
-        let mut b = TableBuilder::new(opt.clone());
+        let mut b = SSTableBuilder::new(opt.clone());
         let kv_pairs = vec![
             (i, HummockValue::Put(b"test".to_vec())),
             (i * 10, HummockValue::Put(b"test".to_vec())),

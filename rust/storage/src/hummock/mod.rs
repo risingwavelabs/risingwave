@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use num_traits::ToPrimitive;
 
-mod table;
-pub use table::*;
+mod sstable;
+pub use sstable::*;
 mod cloud;
 mod compactor;
 mod error;
@@ -24,7 +24,7 @@ pub mod value;
 mod version_cmp;
 pub mod version_manager;
 
-use cloud::gen_remote_table;
+use cloud::gen_remote_sstable;
 use compactor::{Compactor, SubCompactContext};
 pub use error::*;
 use parking_lot::Mutex as PLMutex;
@@ -48,8 +48,8 @@ pub static REMOTE_DIR: &str = "/test/";
 
 #[derive(Default, Debug, Clone)]
 pub struct HummockOptions {
-    /// target size of the table
-    pub table_size: u32,
+    /// target size of the SSTable
+    pub sstable_size: u32,
     /// size of each block in bytes in SST
     pub block_size: u32,
     /// false positive probability of Bloom filter
@@ -64,7 +64,7 @@ impl HummockOptions {
     #[cfg(test)]
     pub fn default_for_test() -> Self {
         Self {
-            table_size: 256 * (1 << 20),
+            sstable_size: 256 * (1 << 20),
             block_size: 64 * (1 << 10),
             bloom_false_positive: 0.1,
             remote_dir: "hummock_001".to_string(),
@@ -75,7 +75,7 @@ impl HummockOptions {
     #[cfg(test)]
     pub fn small_for_test() -> Self {
         Self {
-            table_size: 4 * (1 << 10),
+            sstable_size: 4 * (1 << 10),
             block_size: 1 << 10,
             bloom_false_positive: 0.1,
             remote_dir: "hummock_001_small".to_string(),
@@ -242,7 +242,7 @@ impl HummockStorage {
                 let remote_dir = Some(self.options.remote_dir.as_str());
                 total_size += blocks.len();
                 let table =
-                    gen_remote_table(self.obj_client.clone(), table_id, blocks, meta, remote_dir)
+                    gen_remote_sstable(self.obj_client.clone(), table_id, blocks, meta, remote_dir)
                         .await?;
                 tables.push(table);
             }
@@ -273,10 +273,10 @@ impl HummockStorage {
         Ok(())
     }
 
-    fn get_builder(options: &HummockOptions) -> TableBuilder {
+    fn get_builder(options: &HummockOptions) -> SSTableBuilder {
         // TODO: use different option values (especially table_size) for compaction
-        TableBuilder::new(TableBuilderOptions {
-            table_capacity: options.table_size,
+        SSTableBuilder::new(SSTableBuilderOptions {
+            table_capacity: options.sstable_size,
             block_size: options.block_size,
             bloom_false_positive: options.bloom_false_positive,
             checksum_algo: options.checksum_algo,

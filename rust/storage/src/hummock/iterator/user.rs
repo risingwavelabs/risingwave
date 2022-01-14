@@ -232,7 +232,7 @@ mod tests {
     use itertools::Itertools;
 
     use super::*;
-    use crate::hummock::cloud::gen_remote_table;
+    use crate::hummock::cloud::gen_remote_sstable;
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, iterator_test_key_of, iterator_test_key_of_epoch, test_key,
         test_value_of, TestIteratorBuilder, TEST_KEYS_COUNT,
@@ -240,9 +240,9 @@ mod tests {
     use crate::hummock::iterator::variants::FORWARD;
     use crate::hummock::iterator::BoxedHummockIterator;
     use crate::hummock::key::user_key;
-    use crate::hummock::table::{Table, TableIterator};
+    use crate::hummock::sstable::{SSTable, SSTableIterator};
     use crate::hummock::value::HummockValue;
-    use crate::hummock::TableBuilder;
+    use crate::hummock::SSTableBuilder;
     use crate::object::{InMemObjectStore, ObjectStore};
 
     #[tokio::test]
@@ -355,8 +355,8 @@ mod tests {
         let table1 = add_kv_pair(kv_pairs).await;
 
         let iters: Vec<BoxedHummockIterator> = vec![
-            Box::new(TableIterator::new(Arc::new(table0))),
-            Box::new(TableIterator::new(Arc::new(table1))),
+            Box::new(SSTableIterator::new(Arc::new(table0))),
+            Box::new(SSTableIterator::new(Arc::new(table1))),
         ];
         let mi = MergeIterator::new(iters);
         let mut ui = UserIterator::new(mi, (Unbounded, Unbounded));
@@ -394,7 +394,8 @@ mod tests {
             (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
         ];
         let table = add_kv_pair(kv_pairs).await;
-        let iters: Vec<BoxedHummockIterator> = vec![Box::new(TableIterator::new(Arc::new(table)))];
+        let iters: Vec<BoxedHummockIterator> =
+            vec![Box::new(SSTableIterator::new(Arc::new(table)))];
         let mi = MergeIterator::new(iters);
 
         let begin_key = Included(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
@@ -469,7 +470,8 @@ mod tests {
             (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
         ];
         let table = add_kv_pair(kv_pairs).await;
-        let iters: Vec<BoxedHummockIterator> = vec![Box::new(TableIterator::new(Arc::new(table)))];
+        let iters: Vec<BoxedHummockIterator> =
+            vec![Box::new(SSTableIterator::new(Arc::new(table)))];
         let mi = MergeIterator::new(iters);
 
         let begin_key = Included(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
@@ -545,7 +547,8 @@ mod tests {
             (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
         ];
         let table = add_kv_pair(kv_pairs).await;
-        let iters: Vec<BoxedHummockIterator> = vec![Box::new(TableIterator::new(Arc::new(table)))];
+        let iters: Vec<BoxedHummockIterator> =
+            vec![Box::new(SSTableIterator::new(Arc::new(table)))];
         let mi = MergeIterator::new(iters);
         let end_key = Included(user_key(key_range_test_key(0, 7, 0).as_slice()).to_vec());
 
@@ -623,7 +626,8 @@ mod tests {
             (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
         ];
         let table = add_kv_pair(kv_pairs).await;
-        let iters: Vec<BoxedHummockIterator> = vec![Box::new(TableIterator::new(Arc::new(table)))];
+        let iters: Vec<BoxedHummockIterator> =
+            vec![Box::new(SSTableIterator::new(Arc::new(table)))];
         let mi = MergeIterator::new(iters);
         let begin_key = Included(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
 
@@ -685,15 +689,15 @@ mod tests {
     }
 
     // key=[table, idx, epoch], value
-    async fn add_kv_pair(kv_pairs: Vec<(u64, usize, u64, HummockValue<Vec<u8>>)>) -> Table {
-        let mut b = TableBuilder::new(default_builder_opt_for_test());
+    async fn add_kv_pair(kv_pairs: Vec<(u64, usize, u64, HummockValue<Vec<u8>>)>) -> SSTable {
+        let mut b = SSTableBuilder::new(default_builder_opt_for_test());
         for kv in kv_pairs {
             b.add(key_range_test_key(kv.0, kv.1, kv.2).as_slice(), kv.3);
         }
         let (data, meta) = b.finish();
         // get remote table
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        gen_remote_table(obj_client, 0, data, meta, None)
+        gen_remote_sstable(obj_client, 0, data, meta, None)
             .await
             .unwrap()
     }

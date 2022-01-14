@@ -86,7 +86,7 @@ fn get_state_store_impl(opts: &Opts) -> StateStoreImpl {
                     minio.strip_prefix("hummock+").unwrap(),
                 )),
                 HummockOptions {
-                    table_size: opts.table_size_mb * (1 << 20),
+                    sstable_size: opts.table_size_mb * (1 << 20),
                     block_size: opts.block_size_kb * (1 << 10),
                     bloom_false_positive: opts.bloom_false_positive,
                     remote_dir: "hummock_001".to_string(),
@@ -104,7 +104,7 @@ fn get_state_store_impl(opts: &Opts) -> StateStoreImpl {
             StateStoreImpl::Hummock(HummockStateStore::new(HummockStorage::new(
                 Arc::new(s3_store),
                 HummockOptions {
-                    table_size: opts.table_size_mb * (1 << 20),
+                    sstable_size: opts.table_size_mb * (1 << 20),
                     block_size: opts.block_size_kb * (1 << 10),
                     bloom_false_positive: opts.bloom_false_positive,
                     remote_dir: "hummock_001".to_string(),

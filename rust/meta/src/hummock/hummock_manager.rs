@@ -21,7 +21,7 @@ use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 
 use crate::hummock::compaction::{CompactStatus, CompactionInner};
-use crate::hummock::level_handler::{LevelHandler, TableStat};
+use crate::hummock::level_handler::{LevelHandler, SSTableStat};
 use crate::hummock::{
     HummockContextId, HummockEpoch, HummockSnapshotId, HummockTTL, HummockVersionId,
 };
@@ -749,7 +749,7 @@ impl HummockManager for DefaultHummockManager {
     ) -> Result<HummockVersionId> {
         let stats = tables
             .iter()
-            .map(|table| TableStat {
+            .map(|table| SSTableStat {
                 key_range: KeyRange::new(
                     Bytes::copy_from_slice(&table.meta.as_ref().unwrap().smallest_key),
                     Bytes::copy_from_slice(&table.meta.as_ref().unwrap().largest_key),
@@ -767,7 +767,7 @@ impl HummockManager for DefaultHummockManager {
             LevelHandler::Overlapping(vec_tier, _) => {
                 for stat in stats {
                     let insert_point = vec_tier.partition_point(
-                        |TableStat {
+                        |SSTableStat {
                              key_range: other_key_range,
                              ..
                          }| { other_key_range <= &stat.key_range },
@@ -944,7 +944,7 @@ impl HummockManager for DefaultHummockManager {
         let output_table_compact_entries: Vec<_> = compact_task
             .sorted_output_ssts
             .iter()
-            .map(|table| TableStat {
+            .map(|table| SSTableStat {
                 key_range: KeyRange::new(
                     Bytes::copy_from_slice(&table.meta.as_ref().unwrap().smallest_key),
                     Bytes::copy_from_slice(&table.meta.as_ref().unwrap().largest_key),
@@ -977,14 +977,14 @@ impl HummockManager for DefaultHummockManager {
                             level_type: LevelType::Overlapping as i32,
                             table_ids: l_n
                                 .iter()
-                                .map(|TableStat { table_id, .. }| *table_id)
+                                .map(|SSTableStat { table_id, .. }| *table_id)
                                 .collect(),
                         },
                         LevelHandler::Nonoverlapping(l_n, _) => Level {
                             level_type: LevelType::Nonoverlapping as i32,
                             table_ids: l_n
                                 .iter()
-                                .map(|TableStat { table_id, .. }| *table_id)
+                                .map(|SSTableStat { table_id, .. }| *table_id)
                                 .collect(),
                         },
                     })

@@ -6,11 +6,11 @@ use super::iterator::{
     BoxedHummockIterator, ConcatIterator, HummockIterator, MergeIterator, UserIterator,
 };
 use super::key::{key_with_epoch, user_key};
-use super::utils::bloom_filter_tables;
+use super::utils::bloom_filter_sstables;
 use super::version_manager::{Level, Snapshot, VersionManager};
-use super::{HummockResult, TableIterator};
+use super::{HummockResult, SSTableIterator};
 use crate::hummock::iterator::{ReverseMergeIterator, ReverseUserIterator};
-use crate::hummock::ReverseTableIterator;
+use crate::hummock::ReverseSSTableIterator;
 
 pub struct HummockSnapshot {
     /// [`epoch`] is served as epoch and indicates when a new log appends to a SST.
@@ -57,15 +57,15 @@ impl HummockSnapshot {
         for level in &snapshot.levels {
             match level {
                 Level::Tiering(table_ids) => {
-                    let tables = bloom_filter_tables(self.vm.pick_few_tables(table_ids)?, key)?;
+                    let tables = bloom_filter_sstables(self.vm.pick_few_tables(table_ids)?, key)?;
                     table_iters.extend(
                         tables.into_iter().map(|table| {
-                            Box::new(TableIterator::new(table)) as BoxedHummockIterator
+                            Box::new(SSTableIterator::new(table)) as BoxedHummockIterator
                         }),
                     )
                 }
                 Level::Leveling(table_ids) => {
-                    let tables = bloom_filter_tables(self.vm.pick_few_tables(table_ids)?, key)?;
+                    let tables = bloom_filter_sstables(self.vm.pick_few_tables(table_ids)?, key)?;
                     table_iters.push(Box::new(ConcatIterator::new(tables)))
                 }
             }
@@ -124,7 +124,7 @@ impl HummockSnapshot {
         });
 
         let table_iters =
-            overlapped_tables.map(|t| Box::new(TableIterator::new(t)) as BoxedHummockIterator);
+            overlapped_tables.map(|t| Box::new(SSTableIterator::new(t)) as BoxedHummockIterator);
         let mi = MergeIterator::new(table_iters);
 
         // TODO: avoid this clone
@@ -175,7 +175,7 @@ impl HummockSnapshot {
         });
 
         let reverse_table_iters = overlapped_tables
-            .map(|t| Box::new(ReverseTableIterator::new(t)) as BoxedHummockIterator);
+            .map(|t| Box::new(ReverseSSTableIterator::new(t)) as BoxedHummockIterator);
         let reverse_merge_iterator = ReverseMergeIterator::new(reverse_table_iters);
 
         // TODO: avoid this clone
@@ -193,12 +193,12 @@ impl HummockSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hummock::cloud::gen_remote_table;
+    use crate::hummock::cloud::gen_remote_sstable;
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, iterator_test_key_of, iterator_test_key_of_epoch,
     };
     use crate::hummock::value::HummockValue;
-    use crate::hummock::TableBuilder;
+    use crate::hummock::SSTableBuilder;
     use crate::object::{InMemObjectStore, ObjectStore};
 
     const TEST_KEY_TABLE_ID: u64 = 233;
@@ -214,7 +214,7 @@ mod tests {
         }
         let table_id = vm.generate_table_id().await;
 
-        let mut b = TableBuilder::new(default_builder_opt_for_test());
+        let mut b = SSTableBuilder::new(default_builder_opt_for_test());
         for kv in kv_pairs {
             b.add(
                 &iterator_test_key_of_epoch(TEST_KEY_TABLE_ID, kv.0, epoch),
@@ -223,7 +223,7 @@ mod tests {
         }
         let (data, meta) = b.finish();
         // get remote table
-        let table = gen_remote_table(obj_client, table_id, data, meta, None)
+        let table = gen_remote_sstable(obj_client, table_id, data, meta, None)
             .await
             .unwrap();
         vm.add_single_l0_sst(table, epoch).await.unwrap();

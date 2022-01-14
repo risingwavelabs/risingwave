@@ -135,7 +135,7 @@ impl FromStr for StateStoreImpl {
                         minio.strip_prefix("hummock+").unwrap(),
                     )),
                     HummockOptions {
-                        table_size: 256 * (1 << 20),
+                        sstable_size: 256 * (1 << 20),
                         block_size: 64 * (1 << 10),
                         bloom_false_positive: 0.1,
                         remote_dir: "hummock_001".to_string(),
@@ -157,7 +157,7 @@ impl FromStr for StateStoreImpl {
                 StateStoreImpl::HummockStateStore(HummockStateStore::new(HummockStorage::new(
                     Arc::new(s3_store),
                     HummockOptions {
-                        table_size: 256 * (1 << 20),
+                        sstable_size: 256 * (1 << 20),
                         block_size: 64 * (1 << 10),
                         bloom_false_positive: 0.1,
                         remote_dir: "hummock_001".to_string(),
