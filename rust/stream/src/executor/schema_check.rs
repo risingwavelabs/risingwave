@@ -47,14 +47,17 @@ impl Executor for SchemaCheckExecutor {
                 self.schema().fields()
             );
 
-            for (i, (column, field)) in chunk
+            for (i, pair) in chunk
                 .columns()
                 .iter()
-                .zip_eq(self.schema().fields())
+                .zip_longest(self.schema().fields())
                 .enumerate()
             {
-                let array = column.array_ref();
-                let builder = field.data_type.create_array_builder(0)?; // TODO: check `data_type` directly
+                let array = pair.as_ref().left().map(|c| c.array_ref());
+                let builder = pair
+                    .as_ref()
+                    .right()
+                    .map(|f| f.data_type.create_array_builder(0).unwrap()); // TODO: check `data_type` directly
 
                 macro_rules! check_schema {
           ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
@@ -62,9 +65,9 @@ impl Executor for SchemaCheckExecutor {
             use risingwave_common::array::ArrayImpl;
 
             match (array, &builder) {
-              $( (ArrayImpl::$variant_name(_), ArrayBuilderImpl::$variant_name(_)) => {} ),*
-              _ => panic!("schema check failed on {}: column {} should be {}, while stream chunk gives {}",
-                          self.input.identity(), i, builder.get_ident(), array.get_ident()),
+              $( (Some(ArrayImpl::$variant_name(_)), Some(ArrayBuilderImpl::$variant_name(_))) => {} ),*
+              _ => panic!("schema check failed on {}: column {} should be {:?}, while stream chunk gives {:?}",
+                          self.input.identity(), i, builder.map(|b| b.get_ident()), array.map(|a| a.get_ident())),
             }
           };
         }
