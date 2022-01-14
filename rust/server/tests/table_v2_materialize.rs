@@ -7,7 +7,7 @@ use risingwave_batch::executor::{
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{Array, DataChunk, F64Array};
 use risingwave_common::array_nonnull;
-use risingwave_common::catalog::{Field, Schema, TableId};
+use risingwave_common::catalog::{Field, Schema, SchemaId, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::types::{Float64Type, Int64Type, IntoOrdered};
 use risingwave_common::util::sort_util::OrderType;
@@ -19,6 +19,7 @@ use risingwave_stream::executor::{
     Barrier, Executor as StreamExecutor, MaterializeExecutor, Message, Mutation, PkIndices,
     StreamSourceExecutor,
 };
+use risingwave_stream::task::StreamTableManager;
 
 struct SingleChunkExecutor {
     chunk: Option<DataChunk>,
@@ -61,7 +62,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     let store = StateStoreImpl::MemoryStateStore(memory_state_store.clone());
     let source_manager = Arc::new(MemSourceManager::new());
     let table_manager = Arc::new(SimpleTableManager::new(store));
-    let table_id = TableId::default();
+    let source_table_id = TableId::default();
     let column_descs = vec![
         TableColumnDesc {
             // data column
@@ -77,7 +78,7 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Create table v2 using `CreateTableExecutor`
     let mut create_table = CreateTableExecutor::new_v2(
-        table_id.clone(),
+        source_table_id.clone(),
         table_manager.clone(),
         source_manager.clone(),
         column_descs,
@@ -88,7 +89,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     create_table.close().await?;
 
     // Ensure the source exists
-    let source_desc = source_manager.get_source(&table_id)?;
+    let source_desc = source_manager.get_source(&source_table_id)?;
     let get_schema = |column_ids: &[i32]| {
         let mut fields = Vec::with_capacity(column_ids.len());
         for &column_id in column_ids {
@@ -102,12 +103,17 @@ async fn test_table_v2_materialize() -> Result<()> {
         Schema::new(fields)
     };
 
+    // Register associated materialized view
+    let mview_id = TableId::new(SchemaId::default(), 1);
+    table_manager.register_associated_materialized_view(&source_table_id, &mview_id)?;
+    source_manager.register_associated_materialized_view(&source_table_id, &mview_id)?;
+
     // Create a `StreamSourceExecutor` to read the changes
     let all_column_ids = vec![233, 0];
     let all_schema = get_schema(&all_column_ids);
     let (barrier_tx, barrier_rx) = unbounded();
     let stream_source = StreamSourceExecutor::new(
-        table_id.clone(),
+        source_table_id.clone(),
         source_desc.clone(),
         all_column_ids.clone(),
         all_schema.clone(),
@@ -116,8 +122,8 @@ async fn test_table_v2_materialize() -> Result<()> {
         1,
     )?;
 
-    // Create a `Materialize` (`Materialize`) to write the changes to storage
-    let keyspace = Keyspace::table_root(memory_state_store, &table_id);
+    // Create a `Materialize` to write the changes to storage
+    let keyspace = Keyspace::table_root(memory_state_store, &source_table_id);
     let mut materialize = MaterializeExecutor::new(
         Box::new(stream_source),
         keyspace.clone(),
@@ -127,14 +133,14 @@ async fn test_table_v2_materialize() -> Result<()> {
         2,
     );
 
-    // Add some data using `InsertExecutor`
+    // Add some data using `InsertExecutor`, assuming we are inserting into the "mv"
     let columns = vec![Column::new(Arc::new(
         array_nonnull! { F64Array, [1.14, 5.14] }.into(),
     ))];
     let chunk = DataChunk::builder().columns(columns.clone()).build();
     let insert_inner = SingleChunkExecutor::new(chunk, all_schema);
     let mut insert = InsertExecutor::new(
-        table_id.clone(),
+        mview_id.clone(),
         source_manager.clone(),
         Box::new(insert_inner),
     );
@@ -144,7 +150,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     insert.close().await?;
 
     // Since we have not polled `Materialize`, we cannot scan anything from this table
-    let table = table_manager.get_table(&table_id)?;
+    let table = table_manager.get_table(&mview_id)?;
     let data_column_ids = vec![233];
     let data_schema = get_schema(&data_column_ids);
 

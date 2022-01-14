@@ -624,10 +624,10 @@ impl StreamManagerCore {
                     // create associated materialized view
                     let associated_table_id =
                         TableId::from(&materialized_view_node.associated_table_ref_id);
-
-                    let table = table_manager
-                        .create_associated_materialized_view(&associated_table_id, &table_id)?;
-                    source_manager.create_table_source_v2(&table_id, table)?;
+                    table_manager
+                        .register_associated_materialized_view(&associated_table_id, &table_id)?;
+                    source_manager
+                        .register_associated_materialized_view(&associated_table_id, &table_id)?;
 
                     // share the keyspace between mview and table v2
                     Keyspace::table_root(store, &associated_table_id)

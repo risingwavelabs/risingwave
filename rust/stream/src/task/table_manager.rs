@@ -25,7 +25,7 @@ pub trait StreamTableManager: TableManager {
     ) -> Result<()>;
 
     /// Create materialized view associated to table v2
-    fn create_associated_materialized_view(
+    fn register_associated_materialized_view(
         &self,
         associated_table_id: &TableId,
         mview_id: &TableId,
@@ -64,7 +64,7 @@ impl StreamTableManager for SimpleTableManager {
         Ok(())
     }
 
-    fn create_associated_materialized_view(
+    fn register_associated_materialized_view(
         &self,
         associated_table_id: &TableId,
         mview_id: &TableId,

@@ -189,9 +189,13 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
   }
 
   private void registerColumn(ColumnCatalog column) {
-    columns.add(column);
     columnByName.put(column.getEntityName(), column);
     columnById.put(column.getId(), column);
+    if (isAssociatedMaterializedView() && column.getName().equals(ROWID_COLUMN)) {
+      // ignore row id column for associated mview
+    } else {
+      columns.add(column);
+    }
   }
 
   @Override

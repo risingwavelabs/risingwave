@@ -29,6 +29,11 @@ pub trait SourceManager: Sync + Send {
     ) -> Result<()>;
     fn create_table_source(&self, table_id: &TableId, table: Arc<BummockTable>) -> Result<()>;
     fn create_table_source_v2(&self, table_id: &TableId, table: ScannableTableRef) -> Result<()>;
+    fn register_associated_materialized_view(
+        &self,
+        associated_table_id: &TableId,
+        mview_id: &TableId,
+    ) -> Result<()>;
     fn get_source(&self, source_id: &TableId) -> Result<SourceDesc>;
     fn drop_source(&self, source_id: &TableId) -> Result<()>;
 }
@@ -173,6 +178,22 @@ impl SourceManager for MemSourceManager {
             .get(table_id)
             .cloned()
             .ok_or_else(|| InternalError(format!("Table id not exists: {:?}", table_id)).into())
+    }
+
+    fn register_associated_materialized_view(
+        &self,
+        associated_table_id: &TableId,
+        mview_id: &TableId,
+    ) -> Result<()> {
+        let mut sources = self.get_sources()?;
+        let source = sources
+            .get(associated_table_id)
+            .expect("no associated table")
+            .clone();
+
+        // Simply associate the mview id to the table source
+        sources.insert(mview_id.clone(), source);
+        Ok(())
     }
 
     fn drop_source(&self, table_id: &TableId) -> Result<()> {
