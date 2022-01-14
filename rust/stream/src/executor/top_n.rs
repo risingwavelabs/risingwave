@@ -42,6 +42,9 @@ pub struct TopNExecutor<S: StateStore> {
     /// Marks whether this is first-time execution. If yes, we need to fill in the cache from
     /// storage.
     first_execution: bool,
+
+    /// Identity string.
+    identity: String,
 }
 
 impl<S: StateStore> std::fmt::Debug for TopNExecutor<S> {
@@ -57,6 +60,7 @@ impl<S: StateStore> std::fmt::Debug for TopNExecutor<S> {
 }
 
 impl<S: StateStore> TopNExecutor<S> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         input: Box<dyn Executor>,
         order_types: Vec<OrderType>,
@@ -65,6 +69,7 @@ impl<S: StateStore> TopNExecutor<S> {
         keyspace: Keyspace<S>,
         cache_size: Option<usize>,
         total_count: (usize, usize, usize),
+        executor_id: u64,
     ) -> Self {
         let data_type_kinds = pk_indices
             .iter()
@@ -108,6 +113,7 @@ impl<S: StateStore> TopNExecutor<S> {
             managed_highest_state,
             pk_indices,
             first_execution: false,
+            identity: format!("TopNExecutor {}", executor_id),
         }
     }
 
@@ -132,8 +138,8 @@ impl<S: StateStore> Executor for TopNExecutor<S> {
         &self.pk_indices
     }
 
-    fn identity(&self) -> &'static str {
-        "TopNExecutor"
+    fn identity(&self) -> &str {
+        self.identity.as_str()
     }
 }
 
@@ -448,6 +454,7 @@ mod tests {
             keyspace,
             Some(2),
             (0, 0, 0),
+            1,
         );
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));
@@ -541,6 +548,7 @@ mod tests {
             keyspace,
             Some(2),
             (0, 0, 0),
+            1,
         );
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));
@@ -672,6 +680,7 @@ mod tests {
             keyspace,
             Some(2),
             (0, 0, 0),
+            1,
         );
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));

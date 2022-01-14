@@ -169,7 +169,7 @@ pub trait Executor: Send + Debug + 'static {
     }
 
     /// Identity string of the executor
-    fn identity(&self) -> &'static str;
+    fn identity(&self) -> &str;
 }
 
 pub type PkIndices = Vec<usize>;

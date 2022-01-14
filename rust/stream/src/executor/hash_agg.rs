@@ -56,6 +56,9 @@ pub struct HashAggExecutor<S: StateStore> {
     /// Indices of the columns
     /// all of the aggregation functions in this executor should depend on same group of keys
     key_indices: Vec<usize>,
+
+    /// Identity string
+    identity: String,
 }
 
 impl<S: StateStore> HashAggExecutor<S> {
@@ -65,6 +68,7 @@ impl<S: StateStore> HashAggExecutor<S> {
         key_indices: Vec<usize>,
         keyspace: Keyspace<S>,
         pk_indices: PkIndices,
+        executor_id: u64,
     ) -> Self {
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
 
@@ -77,6 +81,7 @@ impl<S: StateStore> HashAggExecutor<S> {
             key_indices,
             state_map: EvictableHashMap::new(1 << 16), // TODO: decide the target cap
             pk_indices,
+            identity: format!("HashAggExecutor {}", executor_id),
         }
     }
 
@@ -300,8 +305,8 @@ impl<S: StateStore> Executor for HashAggExecutor<S> {
         agg_executor_next(self).await
     }
 
-    fn identity(&self) -> &'static str {
-        "HashAggExecutor"
+    fn identity(&self) -> &str {
+        self.identity.as_str()
     }
 }
 
@@ -382,7 +387,7 @@ mod tests {
         ];
 
         let mut hash_agg =
-            HashAggExecutor::new(Box::new(source), agg_calls, keys, keyspace, vec![]);
+            HashAggExecutor::new(Box::new(source), agg_calls, keys, keyspace, vec![], 1);
 
         let msg = hash_agg.next().await.unwrap();
         if let Message::Chunk(chunk) = msg {
@@ -489,8 +494,14 @@ mod tests {
             },
         ];
 
-        let mut hash_agg =
-            HashAggExecutor::new(Box::new(source), agg_calls, key_indices, keyspace, vec![]);
+        let mut hash_agg = HashAggExecutor::new(
+            Box::new(source),
+            agg_calls,
+            key_indices,
+            keyspace,
+            vec![],
+            1,
+        );
 
         if let Message::Chunk(chunk) = hash_agg.next().await.unwrap() {
             let (data_chunk, ops) = chunk.into_parts();
@@ -600,7 +611,7 @@ mod tests {
         ];
 
         let mut hash_agg =
-            HashAggExecutor::new(Box::new(source), agg_calls, keys, keyspace, vec![]);
+            HashAggExecutor::new(Box::new(source), agg_calls, keys, keyspace, vec![], 1);
 
         let msg = hash_agg.next().await.unwrap();
         if let Message::Chunk(chunk) = msg {

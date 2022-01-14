@@ -367,6 +367,7 @@ mod tests {
                             column_orders: vec![],
                         },
                     )),
+                    node_id: 1,
                 }),
                 dispatcher: None,
                 downstream_actor_id: vec![],

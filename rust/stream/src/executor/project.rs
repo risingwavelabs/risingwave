@@ -20,6 +20,9 @@ pub struct ProjectExecutor {
     input: Box<dyn Executor>,
     /// Expressions of the current projection.
     exprs: Vec<BoxedExpression>,
+
+    /// Identity string
+    identity: String,
 }
 
 impl std::fmt::Debug for ProjectExecutor {
@@ -38,6 +41,7 @@ impl ProjectExecutor {
         input: Box<dyn Executor>,
         pk_indices: PkIndices,
         exprs: Vec<BoxedExpression>,
+        executor_id: u64,
     ) -> Self {
         let schema = Schema {
             fields: exprs
@@ -52,6 +56,7 @@ impl ProjectExecutor {
             pk_indices,
             input,
             exprs,
+            identity: format!("ProjectExecutor {}", executor_id),
         }
     }
 }
@@ -70,8 +75,8 @@ impl Executor for ProjectExecutor {
         &self.pk_indices
     }
 
-    fn identity(&self) -> &'static str {
-        "ProjectExecutor"
+    fn identity(&self) -> &str {
+        self.identity.as_str()
     }
 }
 
@@ -163,7 +168,7 @@ mod tests {
             Box::new(right_expr),
         );
 
-        let mut project = ProjectExecutor::new(Box::new(source), vec![], vec![test_expr]);
+        let mut project = ProjectExecutor::new(Box::new(source), vec![], vec![test_expr], 1);
 
         if let Message::Chunk(chunk) = project.next().await.unwrap() {
             assert_eq!(chunk.ops(), vec![Op::Insert, Op::Insert, Op::Insert]);

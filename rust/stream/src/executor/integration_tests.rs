@@ -78,6 +78,7 @@ async fn test_merger_sum_aggr() {
             ],
             create_in_memory_keyspace(),
             vec![],
+            1,
         );
         let (tx, rx) = channel(16);
         let consumer = SenderConsumer::new(Box::new(aggregator), Box::new(ChannelOutput::new(tx)));
@@ -143,6 +144,7 @@ async fn test_merger_sum_aggr() {
         ],
         create_in_memory_keyspace(),
         vec![],
+        2,
     );
 
     let projection = ProjectExecutor::new(
@@ -152,6 +154,7 @@ async fn test_merger_sum_aggr() {
             // TODO: use the new streaming_if_null expression here, and add `None` tests
             Box::new(InputRefExpression::new(Int64Type::create(false), 1)),
         ],
+        3,
     );
     let items = Arc::new(Mutex::new(vec![]));
     let consumer = MockConsumer::new(Box::new(projection), items.clone());
@@ -342,8 +345,8 @@ async fn test_tpch_q6() {
         let (and, multiply) = make_tpchq6_expr();
         let input = ReceiverExecutor::new(schema.clone(), vec![], input_rx);
 
-        let filter = FilterExecutor::new(Box::new(input), and);
-        let projection = ProjectExecutor::new(Box::new(filter), vec![], vec![multiply]);
+        let filter = FilterExecutor::new(Box::new(input), and, 1);
+        let projection = ProjectExecutor::new(Box::new(filter), vec![], vec![multiply], 2);
 
         // for local aggregator, we need to sum data and count rows
         let aggregator = SimpleAggExecutor::new(
@@ -362,6 +365,7 @@ async fn test_tpch_q6() {
             ],
             create_in_memory_keyspace(),
             vec![],
+            3,
         );
         let (tx, rx) = channel(16);
         let consumer = SenderConsumer::new(Box::new(aggregator), Box::new(ChannelOutput::new(tx)));
@@ -421,6 +425,7 @@ async fn test_tpch_q6() {
         ],
         create_in_memory_keyspace(),
         vec![],
+        4,
     );
     let projection = ProjectExecutor::new(
         Box::new(aggregator),
@@ -429,6 +434,7 @@ async fn test_tpch_q6() {
             // TODO: use the new streaming_if_null expression here, and add `None` tests
             Box::new(InputRefExpression::new(Float64Type::create(false), 1)),
         ],
+        5,
     );
 
     let items = Arc::new(Mutex::new(vec![]));

@@ -18,11 +18,18 @@ pub struct FilterExecutor {
     /// Expression of the current filter, note that the filter must always have the same output for
     /// the same input.
     expr: BoxedExpression,
+
+    /// Identity string
+    identity: String,
 }
 
 impl FilterExecutor {
-    pub fn new(input: Box<dyn Executor>, expr: BoxedExpression) -> Self {
-        Self { input, expr }
+    pub fn new(input: Box<dyn Executor>, expr: BoxedExpression, executor_id: u64) -> Self {
+        Self {
+            input,
+            expr,
+            identity: format!("FilterExecutor {}", executor_id),
+        }
     }
 }
 
@@ -49,8 +56,8 @@ impl Executor for FilterExecutor {
         self.input.pk_indices()
     }
 
-    fn identity(&self) -> &'static str {
-        "FilterExecutor"
+    fn identity(&self) -> &str {
+        self.identity.as_str()
     }
 }
 
@@ -210,7 +217,7 @@ mod tests {
             Box::new(left_expr),
             Box::new(right_expr),
         );
-        let mut filter = FilterExecutor::new(Box::new(source), test_expr);
+        let mut filter = FilterExecutor::new(Box::new(source), test_expr, 1);
 
         if let Message::Chunk(chunk) = filter.next().await.unwrap() {
             assert_eq!(

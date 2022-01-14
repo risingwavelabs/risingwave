@@ -64,6 +64,7 @@ async fn test_stream_mv_proto() {
         })),
         input: vec![],
         pk_indices: vec![],
+        node_id: 1,
     };
     let expr_proto = ExprNode {
         expr_type: InputRef as i32,
@@ -87,6 +88,7 @@ async fn test_stream_mv_proto() {
         })),
         input: vec![source_proto],
         pk_indices: vec![],
+        node_id: 2,
     };
     let mview_proto = StreamNode {
         node: Some(Node::MviewNode(MViewNode {
@@ -105,6 +107,7 @@ async fn test_stream_mv_proto() {
         })),
         input: vec![project_proto],
         pk_indices: vec![],
+        node_id: 3,
     };
     let actor_proto = StreamActor {
         actor_id: 1,

@@ -50,6 +50,9 @@ pub struct SimpleAggExecutor<S: StateStore> {
 
     /// An operator will support multiple aggregation calls.
     agg_calls: Vec<AggCall>,
+
+    /// Identity string
+    identity: String,
 }
 
 impl<S: StateStore> std::fmt::Debug for SimpleAggExecutor<S> {
@@ -69,6 +72,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         agg_calls: Vec<AggCall>,
         keyspace: Keyspace<S>,
         pk_indices: PkIndices,
+        executor_id: u64,
     ) -> Self {
         // simple agg does not have group key
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
@@ -81,6 +85,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             states: None,
             input,
             agg_calls,
+            identity: format!("SimpleAggExecutor {}", executor_id),
         }
     }
 }
@@ -191,8 +196,8 @@ impl<S: StateStore> Executor for SimpleAggExecutor<S> {
         &self.pk_indices
     }
 
-    fn identity(&self) -> &'static str {
-        "SimpleAggExecutor"
+    fn identity(&self) -> &str {
+        self.identity.as_str()
     }
 }
 
@@ -280,7 +285,8 @@ mod tests {
             },
         ];
 
-        let mut simple_agg = SimpleAggExecutor::new(Box::new(source), agg_calls, keyspace, vec![]);
+        let mut simple_agg =
+            SimpleAggExecutor::new(Box::new(source), agg_calls, keyspace, vec![], 1);
 
         let msg = simple_agg.next().await.unwrap();
         if let Message::Chunk(chunk) = msg {

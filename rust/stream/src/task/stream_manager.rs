@@ -409,6 +409,9 @@ impl StreamManagerCore {
             .map(|idx| *idx as usize)
             .collect::<Vec<_>>();
 
+        // We assume that the node_id of different instances from the same RelNode will be the same.
+        let executor_id = ((actor_id as u64) << 32) + node.get_node_id();
+
         let executor: Result<Box<dyn Executor>> = match node.get_node() {
             TableSourceNode(node) => {
                 let source_id = TableId::from(&node.table_ref_id);
@@ -438,6 +441,7 @@ impl StreamManagerCore {
                     schema,
                     pk_indices,
                     barrier_receiver,
+                    executor_id,
                 )?))
             }
             ProjectNode(project_node) => {
@@ -450,6 +454,7 @@ impl StreamManagerCore {
                     input.remove(0),
                     pk_indices,
                     project_exprs,
+                    executor_id,
                 )))
             }
             FilterNode(filter_node) => {
@@ -457,6 +462,7 @@ impl StreamManagerCore {
                 Ok(Box::new(FilterExecutor::new(
                     input.remove(0),
                     search_condition,
+                    executor_id,
                 )))
             }
             SimpleAggNode(aggr_node) => {
@@ -471,6 +477,7 @@ impl StreamManagerCore {
                     agg_calls,
                     Keyspace::executor_root(store.clone(), self.generate_mock_executor_id()),
                     pk_indices,
+                    executor_id,
                 )))
             }
             HashAggNode(aggr_node) => {
@@ -492,6 +499,7 @@ impl StreamManagerCore {
                     keys,
                     Keyspace::executor_root(store.clone(), self.generate_mock_executor_id()),
                     pk_indices,
+                    executor_id,
                 )))
             }
             AppendOnlyTopNNode(top_n_node) => {
@@ -516,6 +524,7 @@ impl StreamManagerCore {
                     Keyspace::executor_root(store.clone(), self.generate_mock_executor_id()),
                     cache_size,
                     total_count,
+                    executor_id,
                 )))
             }
             TopNNode(top_n_node) => {
@@ -540,6 +549,7 @@ impl StreamManagerCore {
                     Keyspace::executor_root(store.clone(), self.generate_mock_executor_id()),
                     cache_size,
                     total_count,
+                    executor_id,
                 )))
             }
             HashJoinNode(hash_join_node) => {
@@ -570,6 +580,7 @@ impl StreamManagerCore {
                 params_r,
                 pk_indices,
                 Keyspace::executor_root(store.clone(), self.generate_mock_executor_id()),
+                executor_id,
               )) as Box<dyn Executor>, )*
               _ => todo!("Join type {:?} not inplemented", typ),
             }
@@ -638,6 +649,7 @@ impl StreamManagerCore {
                     Schema::try_from(columns)?,
                     pks,
                     orderings,
+                    executor_id,
                 ));
                 Ok(executor)
             }

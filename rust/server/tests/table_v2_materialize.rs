@@ -113,6 +113,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         all_schema.clone(),
         PkIndices::from([0]),
         barrier_rx,
+        1,
     )?;
 
     // Create a `Materialize` (`Materialize`) to write the changes to storage
@@ -123,6 +124,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         all_schema.clone(),
         vec![0],
         vec![OrderType::Ascending],
+        2,
     );
 
     // Add some data using `InsertExecutor`

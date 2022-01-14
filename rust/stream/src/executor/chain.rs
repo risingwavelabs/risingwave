@@ -71,7 +71,7 @@ impl Executor for ChainExecutor {
         self.mview.pk_indices()
     }
 
-    fn identity(&self) -> &'static str {
+    fn identity(&self) -> &str {
         "Chain"
     }
 }

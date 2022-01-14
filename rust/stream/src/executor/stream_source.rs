@@ -27,6 +27,9 @@ pub struct StreamSourceExecutor {
     /// current allocated row id
     next_row_id: AtomicU64,
     first_execution: bool,
+
+    /// Identity string
+    identity: String,
 }
 
 impl StreamSourceExecutor {
@@ -37,6 +40,7 @@ impl StreamSourceExecutor {
         schema: Schema,
         pk_indices: PkIndices,
         barrier_receiver: UnboundedReceiver<Message>,
+        executor_id: u64,
     ) -> Result<Self> {
         let source = source_desc.clone().source;
         let reader: Box<dyn StreamSourceReader> = match source.as_ref() {
@@ -65,6 +69,7 @@ impl StreamSourceExecutor {
             barrier_receiver,
             next_row_id: AtomicU64::from(0u64),
             first_execution: true,
+            identity: format!("StreamSourceExecutor {}", executor_id),
         })
     }
 
@@ -136,8 +141,8 @@ impl Executor for StreamSourceExecutor {
         &self.pk_indices
     }
 
-    fn identity(&self) -> &'static str {
-        "StreamSourceExecutor"
+    fn identity(&self) -> &str {
+        self.identity.as_str()
     }
 }
 
@@ -251,6 +256,7 @@ mod tests {
             schema,
             pk_indices,
             barrier_receiver,
+            1,
         )
         .unwrap();
 
@@ -375,6 +381,7 @@ mod tests {
             schema,
             pk_indices,
             barrier_receiver,
+            1,
         )
         .unwrap();
 

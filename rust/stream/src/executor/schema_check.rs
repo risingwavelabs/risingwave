@@ -84,7 +84,7 @@ impl Executor for SchemaCheckExecutor {
         self.input.pk_indices()
     }
 
-    fn identity(&self) -> &'static str {
+    fn identity(&self) -> &str {
         "SchemaCheckExecutor"
     }
 }

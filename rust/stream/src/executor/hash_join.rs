@@ -208,6 +208,9 @@ pub struct HashJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
     debug_l: String,
     /// Debug info for the right executor
     debug_r: String,
+
+    /// Identity string
+    identity: String,
 }
 
 impl<S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug for HashJoinExecutor<S, T> {
@@ -252,8 +255,8 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
         &self.pk_indices
     }
 
-    fn identity(&self) -> &'static str {
-        "HashJoinExecutor"
+    fn identity(&self) -> &str {
+        self.identity.as_str()
     }
 }
 
@@ -265,6 +268,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
         params_r: JoinParams,
         pk_indices: PkIndices,
         keyspace: Keyspace<S>,
+        executor_id: u64,
     ) -> Self {
         let debug_l = format!("{:#?}", &input_l);
         let debug_r = format!("{:#?}", &input_r);
@@ -326,6 +330,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
             pk_indices,
             debug_l,
             debug_r,
+            identity: format!("HashJoinExecutor {}", executor_id),
         }
     }
 
@@ -595,6 +600,7 @@ mod tests {
             params_r,
             vec![],
             keyspace,
+            1,
         );
 
         // push the 1st left chunk
@@ -741,6 +747,7 @@ mod tests {
             params_r,
             vec![],
             keyspace,
+            1,
         );
 
         // push the 1st left chunk
@@ -914,6 +921,7 @@ mod tests {
             params_r,
             vec![],
             keyspace,
+            1,
         );
 
         // push the 1st left chunk
@@ -1080,6 +1088,7 @@ mod tests {
             params_r,
             vec![],
             keyspace,
+            1,
         );
 
         // push the 1st left chunk
@@ -1226,6 +1235,7 @@ mod tests {
             params_r,
             vec![],
             keyspace,
+            1,
         );
 
         // push the 1st left chunk
