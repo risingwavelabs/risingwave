@@ -56,7 +56,7 @@ impl ProjectExecutor {
             pk_indices,
             input,
             exprs,
-            identity: format!("ProjectExecutor {}", executor_id),
+            identity: format!("ProjectExecutor {:X}", executor_id),
         }
     }
 }

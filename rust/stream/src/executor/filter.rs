@@ -28,7 +28,7 @@ impl FilterExecutor {
         Self {
             input,
             expr,
-            identity: format!("FilterExecutor {}", executor_id),
+            identity: format!("FilterExecutor {:X}", executor_id),
         }
     }
 }

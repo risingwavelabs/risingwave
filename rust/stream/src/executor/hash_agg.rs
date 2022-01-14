@@ -81,7 +81,7 @@ impl<S: StateStore> HashAggExecutor<S> {
             key_indices,
             state_map: EvictableHashMap::new(1 << 16), // TODO: decide the target cap
             pk_indices,
-            identity: format!("HashAggExecutor {}", executor_id),
+            identity: format!("HashAggExecutor {:X}", executor_id),
         }
     }
 

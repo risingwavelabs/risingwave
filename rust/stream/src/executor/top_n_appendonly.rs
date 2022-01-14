@@ -132,7 +132,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
             pk_indices,
             keyspace,
             first_execution: true,
-            identity: format!("AppendOnlyTopNExecutor {}", executor_id),
+            identity: format!("AppendOnlyTopNExecutor {:X}", executor_id),
         }
     }
 

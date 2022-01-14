@@ -69,7 +69,7 @@ impl StreamSourceExecutor {
             barrier_receiver,
             next_row_id: AtomicU64::from(0u64),
             first_execution: true,
-            identity: format!("StreamSourceExecutor {}", executor_id),
+            identity: format!("StreamSourceExecutor {:X}", executor_id),
         })
     }
 

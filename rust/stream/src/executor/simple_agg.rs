@@ -85,7 +85,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             states: None,
             input,
             agg_calls,
-            identity: format!("SimpleAggExecutor {}", executor_id),
+            identity: format!("SimpleAggExecutor {:X}", executor_id),
         }
     }
 }

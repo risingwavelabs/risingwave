@@ -330,7 +330,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
             pk_indices,
             debug_l,
             debug_r,
-            identity: format!("HashJoinExecutor {}", executor_id),
+            identity: format!("HashJoinExecutor {:X}", executor_id),
         }
     }
 

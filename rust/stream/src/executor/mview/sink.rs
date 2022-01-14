@@ -41,7 +41,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
             ),
             schema,
             pk_columns,
-            identity: format!("MaterializeExecutor {}", executor_id),
+            identity: format!("MaterializeExecutor {:X}", executor_id),
         }
     }
 

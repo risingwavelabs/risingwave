@@ -113,7 +113,7 @@ impl<S: StateStore> TopNExecutor<S> {
             managed_highest_state,
             pk_indices,
             first_execution: false,
-            identity: format!("TopNExecutor {}", executor_id),
+            identity: format!("TopNExecutor {:X}", executor_id),
         }
     }
 
