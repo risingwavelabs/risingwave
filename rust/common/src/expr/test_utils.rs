@@ -31,8 +31,6 @@ pub fn make_input_ref(idx: i32, ret: TypeName) -> ExprNode {
             type_name: ret as i32,
             ..Default::default()
         }),
-        rex_node: Some(RexNode::InputRef {
-            0: InputRefExpr { column_idx: idx },
-        }),
+        rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: idx })),
     }
 }

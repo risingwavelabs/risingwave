@@ -342,6 +342,7 @@ impl Decimal {
             _ => 0,
         }
     }
+
     /// TODO: handle nan and inf
     pub fn scale(&self) -> u32 {
         match self {
@@ -356,6 +357,7 @@ impl Decimal {
         Self::from(0)
     }
 
+    #[must_use]
     pub fn round_dp(&self, dp: u32) -> Self {
         match self {
             Self::Normalized(d) => Self::Normalized(
@@ -364,9 +366,12 @@ impl Decimal {
             d => *d,
         }
     }
+
     pub fn from_i128_with_scale(num: i128, scale: u32) -> Self {
         Decimal::Normalized(RustDecimal::from_i128_with_scale(num, scale))
     }
+
+    #[must_use]
     pub fn normalize(&self) -> Self {
         match self {
             Self::Normalized(d) => Self::Normalized(d.normalize()),
@@ -383,6 +388,7 @@ impl Decimal {
             Self::NegativeINF => [vec![3u8], vec![0u8; 15]].concat().try_into().unwrap(),
         }
     }
+
     pub fn deserialize(bytes: [u8; 16]) -> Self {
         match bytes[0] {
             0u8 => Self::Normalized(RustDecimal::deserialize(bytes)),

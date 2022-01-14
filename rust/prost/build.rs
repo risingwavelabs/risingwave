@@ -46,7 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for serde_proto_file in &rewrite_files {
         let out_file = out_dir.join(format!("{}.serde.rs", serde_proto_file));
         let file_content = String::from_utf8(std::fs::read(&out_file)?)?;
-        let module_path_id = serde_proto_file.replace(".", "::");
+        let module_path_id = serde_proto_file.replace('.', "::");
         std::fs::write(
             &out_file,
             format!("use crate::{}::*;\n{}", module_path_id, file_content),

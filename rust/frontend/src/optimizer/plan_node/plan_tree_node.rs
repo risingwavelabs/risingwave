@@ -55,6 +55,7 @@ pub trait PlanTreeNodeLeaf: Clone {}
 /// See [`PlanTreeNode`](super)
 pub trait PlanTreeNodeUnary {
     fn input(&self) -> PlanRef;
+    #[must_use]
     fn clone_with_input(&self, input: PlanRef) -> Self;
     fn input_dist_required(&self) -> Distribution {
         self.input().distribution()
@@ -71,17 +72,22 @@ pub trait PlanTreeNodeUnary {
 pub trait PlanTreeNodeBinary {
     fn left(&self) -> PlanRef;
     fn right(&self) -> PlanRef;
+
+    #[must_use]
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self;
 
     fn left_dist_required(&self) -> Distribution {
         self.left().distribution()
     }
+
     fn right_dist_required(&self) -> Distribution {
         self.right().distribution()
     }
+
     fn left_order_required(&self) -> Order {
         self.left().order()
     }
+
     fn right_order_required(&self) -> Order {
         self.right().order()
     }

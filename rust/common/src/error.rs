@@ -153,7 +153,7 @@ impl Debug for RwError {
             "{}\n{}",
             self.inner,
             // Use inner error's backtrace by default, otherwise use the generated one in `From`.
-            self.inner.backtrace().unwrap_or_else(|| &*self.backtrace)
+            self.inner.backtrace().unwrap_or(&*self.backtrace)
         )
     }
 }

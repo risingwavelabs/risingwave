@@ -41,7 +41,7 @@ impl IdExpander {
                 let mut ny = y;
                 for (_, v) in &mut ny {
                     let result = if let Some(v) = v.as_str() {
-                        if let Some((before, after)) = v.split_once("*") {
+                        if let Some((before, after)) = v.split_once('*') {
                             let regex = Regex::new(&format!("^{}(.*){}$", before, after))?;
                             let mut matched_ids = vec![];
                             for id in &self.ids {
