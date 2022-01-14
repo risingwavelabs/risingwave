@@ -7,6 +7,8 @@ option java_package = "com.risingwave.proto.streaming.streamnode";
 option optimize_for = SPEED;
 
 import "common.proto";
+import "data.proto";
+import "plan.proto";
 import "stream_plan.proto";
 
 // Describe the fragments which will be running on this node
@@ -19,14 +21,8 @@ message UpdateActorsResponse {
   common.Status status = 1;
 }
 
-// Encode which host machine an actor resides.
-message ActorInfo {
-  uint32 actor_id = 1;
-  common.HostAddress host = 2;
-}
-
 message BroadcastActorInfoTableRequest {
-  repeated ActorInfo info = 1;
+  repeated common.ActorInfo info = 1;
 }
 
 // Create channels and gRPC connections for a fragment
@@ -37,17 +33,28 @@ message BuildActorsRequest {
 
 message BuildActorsResponse {
   string request_id = 1;
-  repeated uint32 actor_id = 2;
+  common.Status status = 2;
 }
 
 message DropActorsRequest {
   string request_id = 1;
-  repeated uint32 actor_ids = 2;
+  plan.TableRefId table_ref_id = 2;
+  repeated uint32 actor_ids = 3;
 }
 
 message DropActorsResponse {
   string request_id = 1;
-  repeated uint32 actor_ids = 2;
+  common.Status status = 2;
+}
+
+message InjectBarrierRequest {
+  string request_id = 1;
+  data.Barrier barrier = 2;
+}
+
+message InjectBarrierResponse {
+  string request_id = 1;
+  common.Status status = 2;
 }
 
 // Before starting streaming, the leader node broadcast the actor-host table to needed workers.
@@ -60,6 +67,7 @@ service StreamService {
   rpc BuildActors(BuildActorsRequest) returns (BuildActorsResponse);
   rpc BroadcastActorInfoTable(BroadcastActorInfoTableRequest) returns (BroadcastActorInfoTableResponse);
   rpc DropActors(DropActorsRequest) returns (DropActorsResponse);
+  rpc InjectBarrier(InjectBarrierRequest) returns (InjectBarrierResponse);
 }
 
 // TODO: Lifecycle management for actors.

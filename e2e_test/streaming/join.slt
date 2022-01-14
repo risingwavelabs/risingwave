@@ -120,13 +120,13 @@ drop table t8
 
 
 statement ok
-drop table mv1
+drop materialized view mv1
 
 statement ok
-drop table mv2
+drop materialized view mv2
 
 statement ok
-drop table mv3
+drop materialized view mv3
 
 statement ok
-drop table mv4
+drop materialized view mv4

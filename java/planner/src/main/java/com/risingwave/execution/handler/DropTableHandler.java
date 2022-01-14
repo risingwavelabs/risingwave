@@ -24,9 +24,13 @@ import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.rpc.ComputeClient;
 import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.Messages;
+import com.risingwave.scheduler.streaming.RemoteStreamManager;
+import com.risingwave.scheduler.streaming.StreamManager;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlDropTable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * DropTableHandler is the handler of both DropTable and DropSource. It determines the type by
@@ -34,6 +38,8 @@ import org.apache.calcite.sql.ddl.SqlDropTable;
  */
 @HandlerSignature(sqlKinds = {SqlKind.DROP_TABLE})
 public class DropTableHandler implements SqlHandler {
+  private static final Logger log = LoggerFactory.getLogger(DropMaterializedViewHandler.class);
+
   @Override
   public PgResult handle(SqlNode ast, ExecutionContext context) {
     var planFragments = execute(ast, context);
@@ -108,6 +114,18 @@ public class DropTableHandler implements SqlHandler {
     for (var table : tables) {
       var name = table.getEntityName();
       context.getCatalogService().dropTable(name);
+      log.debug("drop table:\n" + name);
+      if (table.isAssociatedMaterializedView()) {
+        log.debug("drop associated materialized view:\n" + name);
+        StreamManager streamManager = context.getStreamManager();
+        if (streamManager instanceof RemoteStreamManager) {
+          RemoteStreamManager remoteStreamManager = (RemoteStreamManager) streamManager;
+          remoteStreamManager.dropMaterializedView(Messages.getTableRefId(table.getId()));
+        } else {
+          throw new PgException(
+              PgErrorCode.INTERNAL_ERROR, "Not available in local stream manager");
+        }
+      }
       var planFragment = serialize(table);
       builder.add(planFragment);
     }

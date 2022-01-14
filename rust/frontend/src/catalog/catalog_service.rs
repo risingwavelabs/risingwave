@@ -288,6 +288,7 @@ impl RemoteCatalogManager {
                 row_format: "".to_string(),
                 row_schema_location: "".to_string(),
                 column_orders: vec![],
+                is_associated: false,
                 version: 0,
             })),
         };

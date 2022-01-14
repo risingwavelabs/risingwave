@@ -1,8 +1,9 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use futures::{SinkExt, StreamExt};
 use risingwave_common::util::addr::get_host_port;
-use risingwave_pb::common::HostAddress;
+use risingwave_pb::common::{ActorInfo, HostAddress};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::plan::ColumnDesc;
@@ -231,7 +232,7 @@ async fn test_stream_proto() {
             sink.next().await.unwrap(),
             Message::Barrier(Barrier {
                 epoch: 0,
-                mutation: Mutation::Stop
+                mutation: Mutation::Stop(_)
             })
         ));
     });
@@ -255,7 +256,7 @@ async fn test_stream_proto() {
         timeout,
         source.send(Message::Barrier(Barrier {
             epoch: 0,
-            mutation: Mutation::Stop,
+            mutation: Mutation::Stop(HashSet::from([1, 3, 7, 11, 13, 233])),
         })),
     )
     .await

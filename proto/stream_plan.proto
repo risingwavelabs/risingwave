@@ -83,8 +83,6 @@ message ExchangeNode {
 }
 
 message StreamNode {
-  // Some nodes we can reuse plan nodes from plan.proto.
-  // TODO: should we enforce strong typed body on nodes?
   oneof node {
     TableSourceNode table_source_node = 4;
     ProjectNode project_node = 5;

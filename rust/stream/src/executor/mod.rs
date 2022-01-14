@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
 pub use actor::Actor;
@@ -18,9 +18,13 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataTypeKind;
+use risingwave_pb::common::ActorInfo;
+use risingwave_pb::data::barrier::Mutation as ProstMutation;
 use risingwave_pb::data::stream_message::StreamMessage;
-use risingwave_pb::data::{Barrier as ProstBarrier, StreamMessage as ProstStreamMessage};
-use risingwave_pb::stream_service::ActorInfo;
+use risingwave_pb::data::{
+    Actors as MutationActors, AddMutation, Barrier as ProstBarrier, NothingMutation, StopMutation,
+    StreamMessage as ProstStreamMessage, UpdateMutation,
+};
 pub use schema_check::*;
 pub use simple_agg::*;
 use smallvec::SmallVec;
@@ -56,10 +60,10 @@ mod test_utils;
 
 pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Mutation {
     Nothing,
-    Stop,
+    Stop(HashSet<u32>),
     UpdateOutputs(HashMap<u32, Vec<ActorInfo>>),
     AddOutput(u32, Vec<ActorInfo>),
 }
@@ -69,7 +73,7 @@ impl Default for Mutation {
     }
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq)]
 pub struct Barrier {
     pub epoch: u64,
     pub mutation: Mutation,
@@ -77,25 +81,63 @@ pub struct Barrier {
 
 impl Mutation {
     fn is_stop(&self) -> bool {
-        matches!(self, Mutation::Stop)
+        matches!(self, Mutation::Stop(_))
     }
 }
 
 impl Barrier {
     fn to_protobuf(&self) -> ProstBarrier {
         let Barrier { epoch, mutation }: Barrier = self.clone();
-        let stop = matches!(mutation, Mutation::Nothing);
-        ProstBarrier { epoch, stop }
+        ProstBarrier {
+            epoch,
+            mutation: match mutation {
+                Mutation::Nothing => Some(ProstMutation::Nothing(NothingMutation {})),
+                Mutation::Stop(actors) => Some(ProstMutation::Stop(StopMutation {
+                    actors: actors.iter().cloned().collect::<Vec<_>>(),
+                })),
+                Mutation::UpdateOutputs(update) => Some(ProstMutation::Update(UpdateMutation {
+                    actors: update
+                        .iter()
+                        .map(|(&f, actors)| {
+                            (
+                                f,
+                                MutationActors {
+                                    info: actors.clone(),
+                                },
+                            )
+                        })
+                        .collect(),
+                })),
+                Mutation::AddOutput(actor_id, downstream_actors) => {
+                    Some(ProstMutation::Add(AddMutation {
+                        actor_id,
+                        downstream_actors: Some(MutationActors {
+                            info: downstream_actors,
+                        }),
+                    }))
+                }
+            },
+        }
     }
 
-    fn from_protobuf(prost: &ProstBarrier) -> Self {
-        let ProstBarrier { epoch, stop } = *prost;
+    pub fn from_protobuf(prost: &ProstBarrier) -> Self {
         Barrier {
-            epoch,
-            mutation: if stop {
-                Mutation::Stop
-            } else {
-                Mutation::Nothing
+            epoch: prost.get_epoch(),
+            mutation: match prost.get_mutation() {
+                ProstMutation::Nothing(_) => Mutation::Nothing,
+                ProstMutation::Stop(stop) => {
+                    Mutation::Stop(HashSet::from_iter(stop.get_actors().clone()))
+                }
+                ProstMutation::Update(update) => Mutation::UpdateOutputs(
+                    update
+                        .actors
+                        .iter()
+                        .map(|(&f, actors)| (f, actors.get_info().clone()))
+                        .collect::<HashMap<u32, Vec<ActorInfo>>>(),
+                ),
+                ProstMutation::Add(add) => {
+                    Mutation::AddOutput(add.actor_id, add.get_downstream_actors().info.clone())
+                }
             },
         }
     }
@@ -115,7 +157,7 @@ impl Message {
             self,
             Message::Barrier(Barrier {
                 epoch: _,
-                mutation: Mutation::Stop,
+                mutation: Mutation::Stop(..),
             })
         )
     }
@@ -139,10 +181,7 @@ impl Message {
             StreamMessage::StreamChunk(stream_chunk) => {
                 Message::Chunk(StreamChunk::from_protobuf(stream_chunk)?)
             }
-            StreamMessage::Barrier(epoch) => Message::Barrier(Barrier {
-                epoch: epoch.get_epoch(),
-                ..Barrier::default()
-            }),
+            StreamMessage::Barrier(barrier) => Message::Barrier(Barrier::from_protobuf(barrier)),
         };
         Ok(res)
     }

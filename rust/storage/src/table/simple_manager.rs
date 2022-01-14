@@ -84,6 +84,7 @@ impl TableManager for SimpleTableManager {
             .ok_or_else(|| InternalError(format!("Table id not exists: {:?}", table_id)).into())
     }
 
+    // TODO: the data in StateStore should also be dropped directly/through unpin or some other way.
     async fn drop_table(&self, table_id: &TableId) -> Result<()> {
         let mut tables = self.get_tables();
         ensure!(

@@ -6,6 +6,8 @@ import com.risingwave.common.exception.PgException;
 import com.risingwave.proto.common.Status;
 import com.risingwave.proto.metanode.CreateMaterializedViewRequest;
 import com.risingwave.proto.metanode.CreateMaterializedViewResponse;
+import com.risingwave.proto.metanode.DropMaterializedViewRequest;
+import com.risingwave.proto.metanode.DropMaterializedViewResponse;
 import com.risingwave.proto.plan.TableRefId;
 import com.risingwave.proto.streaming.plan.StreamNode;
 import com.risingwave.rpc.MetaClient;
@@ -27,6 +29,15 @@ public class RemoteStreamManager implements StreamManager {
     CreateMaterializedViewResponse response = metaClient.createMaterializedView(builder.build());
     if (response.getStatus().getCode() != Status.Code.OK) {
       throw new PgException(PgErrorCode.INTERNAL_ERROR, "Create materialized view failed");
+    }
+  }
+
+  public void dropMaterializedView(TableRefId tableRefId) {
+    DropMaterializedViewRequest.Builder builder = DropMaterializedViewRequest.newBuilder();
+    DropMaterializedViewResponse response =
+        metaClient.dropMaterializedView(builder.setTableRefId(tableRefId).build());
+    if (response.getStatus().getCode() != Status.Code.OK) {
+      throw new PgException(PgErrorCode.INTERNAL_ERROR, "Drop materialized view failed");
     }
   }
 }

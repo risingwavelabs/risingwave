@@ -79,10 +79,10 @@ statement ok
 drop table t4
 
 statement ok
-drop table mv1
+drop materialized view mv1
 
 statement ok
-drop table mv2
+drop materialized view mv2
 
 statement ok
-drop table mv3
+drop materialized view mv3

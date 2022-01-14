@@ -29,8 +29,11 @@ impl Actor {
             let message = self.consumer.next().instrument(span.clone()).await;
             match message {
                 Ok(Some(barrier)) => {
-                    if matches!(barrier.mutation, Mutation::Stop) {
-                        break;
+                    if let Mutation::Stop(actors) = barrier.mutation {
+                        if actors.contains(&self.id) {
+                            debug!("actor exit: {}", self.id);
+                            break;
+                        }
                     }
                     span = tracing::trace_span!(
                         "actor_poll",

@@ -12,6 +12,7 @@ use crate::manager::{Config, Epoch, MetaSrvEnv, SINGLE_VERSION_EPOCH};
 use crate::storage::MetaStoreRef;
 
 #[async_trait]
+// TODO: refactor this trait, it's too ugly!!
 pub trait StreamMetaManager: Sync + Send + 'static {
     /// [`add_actors_to_node`] adds actors to its belonging node.
     async fn add_actors_to_node(&self, location: &ActorLocation) -> Result<()>;

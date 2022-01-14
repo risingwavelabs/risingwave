@@ -7,19 +7,23 @@ use log::debug;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::util::addr::get_host_port;
-use risingwave_pb::common::WorkerNode;
+use risingwave_pb::common::{ActorInfo, WorkerNode};
+use risingwave_pb::data::barrier::Mutation;
+use risingwave_pb::data::{Barrier, StopMutation};
 use risingwave_pb::meta::{ActorLocation, TableActors};
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::StreamActor;
 use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
 use risingwave_pb::stream_service::{
-    ActorInfo, BroadcastActorInfoTableRequest, BuildActorsRequest, UpdateActorsRequest,
+    BroadcastActorInfoTableRequest, BuildActorsRequest, DropActorsRequest, InjectBarrierRequest,
+    UpdateActorsRequest,
 };
 use tokio::sync::RwLock;
 use tonic::transport::{Channel, Endpoint};
 use uuid::Uuid;
 
 use crate::cluster::StoredClusterManager;
+use crate::manager::Epoch;
 use crate::stream::{ScheduleCategory, Scheduler, StreamMetaManagerRef};
 
 #[async_trait]
@@ -32,7 +36,7 @@ pub trait StreamManager: Sync + Send + 'static {
         actors: &mut [StreamActor],
     ) -> Result<()>;
     /// [`drop_materialized_view`] drops materialized view.
-    async fn drop_materialized_view(&self, table_id: &TableRefId, actors: &[u32]) -> Result<()>;
+    async fn drop_materialized_view(&self, table_id: &TableRefId, epoch: Epoch) -> Result<()>;
 }
 
 pub type StreamManagerRef = Arc<dyn StreamManager>;
@@ -53,7 +57,7 @@ impl DefaultStreamManager {
         }
     }
 
-    async fn get_client(&self, node: WorkerNode) -> Result<StreamServiceClient<Channel>> {
+    async fn get_client(&self, node: &WorkerNode) -> Result<StreamServiceClient<Channel>> {
         {
             let guard = self.clients.read().await;
             let client = guard.get(&node.get_id());
@@ -152,9 +156,9 @@ impl StreamManager for DefaultStreamManager {
             .collect::<Vec<_>>();
 
         for (node_id, actors) in node_actors_map {
-            let node = node_map.get(&node_id).cloned().unwrap();
+            let node = node_map.get(&node_id).unwrap();
 
-            let client = self.get_client(node.clone()).await?;
+            let client = self.get_client(node).await?;
             client
                 .to_owned()
                 .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
@@ -192,7 +196,7 @@ impl StreamManager for DefaultStreamManager {
 
             self.smm
                 .add_actors_to_node(&ActorLocation {
-                    node: Some(node),
+                    node: Some(node.clone()),
                     actors: stream_actors,
                 })
                 .await?;
@@ -215,8 +219,52 @@ impl StreamManager for DefaultStreamManager {
     /// 1. notify related node local stream manger to drop actor by inject barrier.
     /// 2. wait and collect drop state from local stream manager.
     /// 3. delete actor location and node/table actors info.
-    async fn drop_materialized_view(&self, _table_id: &TableRefId, _actors: &[u32]) -> Result<()> {
-        todo!()
+    async fn drop_materialized_view(&self, table_id: &TableRefId, epoch: Epoch) -> Result<()> {
+        let table_actors = self.smm.get_table_actors(table_id).await?;
+        let mut node_actors = HashMap::new();
+        let mut node_map = HashMap::new();
+        for id in table_actors.actor_ids {
+            let node = self.smm.get_actor_node(id).await?;
+            node_actors
+                .entry(node.get_id())
+                .or_insert_with(Vec::new)
+                .push(id);
+            node_map.insert(node.get_id(), node);
+        }
+        for (node_id, actors) in node_actors {
+            let client = self.get_client(node_map.get(&node_id).unwrap()).await?;
+            let request_id = Uuid::new_v4().to_string();
+            debug!("[{}]inject stop barrier at: {}", request_id, node_id);
+            client
+                .to_owned()
+                .inject_barrier(InjectBarrierRequest {
+                    request_id: request_id.clone(),
+                    barrier: Some(Barrier {
+                        epoch: epoch.into_inner(),
+                        mutation: Some(Mutation::Stop(StopMutation {
+                            actors: actors.clone(),
+                        })),
+                    }),
+                })
+                .await
+                .to_rw_result_with(format!("failed to connect to {}", node_id))?;
+
+            debug!("[{}]drop actors: {:?}", request_id, actors);
+            client
+                .to_owned()
+                .drop_actors(DropActorsRequest {
+                    request_id,
+                    table_ref_id: Some(table_id.clone()),
+                    actor_ids: actors,
+                })
+                .await
+                .to_rw_result_with(format!("failed to connect to {}", node_id))?;
+        }
+
+        // TODO: add drop_actors interface, including drop node_actors/actor_node/table_actors.
+        self.smm.drop_table_actors(table_id).await?;
+
+        Ok(())
     }
 }
 
@@ -233,7 +281,7 @@ mod tests {
     };
     use risingwave_pb::stream_service::{
         BroadcastActorInfoTableResponse, BuildActorsResponse, DropActorsRequest,
-        DropActorsResponse, UpdateActorsResponse,
+        DropActorsResponse, InjectBarrierRequest, InjectBarrierResponse, UpdateActorsResponse,
     };
     use tonic::{Request, Response, Status};
 
@@ -279,7 +327,7 @@ mod tests {
 
             Ok(Response::new(BuildActorsResponse {
                 request_id: "".to_string(),
-                actor_id: vec![],
+                status: None,
             }))
         }
 
@@ -302,6 +350,13 @@ mod tests {
             &self,
             _request: Request<DropActorsRequest>,
         ) -> std::result::Result<Response<DropActorsResponse>, Status> {
+            panic!("not implemented")
+        }
+
+        async fn inject_barrier(
+            &self,
+            _request: Request<InjectBarrierRequest>,
+        ) -> std::result::Result<Response<InjectBarrierResponse>, Status> {
             panic!("not implemented")
         }
     }

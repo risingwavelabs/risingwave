@@ -551,8 +551,7 @@ mod tests {
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, I64Array, Op};
     use risingwave_common::buffer::Bitmap;
     use risingwave_common::catalog::Schema;
-    use risingwave_pb::common::HostAddress;
-    use risingwave_pb::stream_service::ActorInfo;
+    use risingwave_pb::common::{ActorInfo, HostAddress};
 
     use super::*;
     use crate::executor::ReceiverExecutor;

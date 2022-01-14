@@ -72,7 +72,7 @@ impl MockSource {
         self.msgs.push_back(Message::Barrier(Barrier {
             epoch,
             mutation: if stop {
-                Mutation::Stop
+                Mutation::Stop(HashSet::default())
             } else {
                 Mutation::Nothing
             },
@@ -88,7 +88,7 @@ impl Executor for MockSource {
             Some(msg) => Ok(msg),
             None => Ok(Message::Barrier(Barrier {
                 epoch: self.epoch,
-                mutation: Mutation::Stop,
+                mutation: Mutation::Stop(HashSet::default()),
             })),
         }
     }
@@ -159,7 +159,7 @@ impl MockAsyncSource {
         tx.send(Message::Barrier(Barrier {
             epoch,
             mutation: if stop {
-                Mutation::Stop
+                Mutation::Stop(HashSet::default())
             } else {
                 Mutation::Nothing
             },
@@ -176,7 +176,7 @@ impl Executor for MockAsyncSource {
             Some(msg) => Ok(msg),
             None => Ok(Message::Barrier(Barrier {
                 epoch: self.epoch,
-                mutation: Mutation::Stop,
+                mutation: Mutation::Stop(HashSet::default()),
             })),
         }
     }

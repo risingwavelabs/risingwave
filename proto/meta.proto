@@ -29,7 +29,8 @@ message Table {
   string row_schema_location = 11;
   // Fields for materialized view
   repeated plan.ColumnOrder column_orders = 12;
-  uint64 version = 13;
+  bool is_associated = 13;
+  uint64 version = 14;
 }
 
 message Database {
@@ -41,25 +42,6 @@ message Database {
 message Schema {
   plan.SchemaRefId schema_ref_id = 1;
   string schema_name = 2;
-  uint64 version = 3;
-}
-
-message EpochState {
-  uint64 current_epoch = 1;
-  uint64 stable_epoch = 2;
-}
-
-message SST {
-  uint64 version = 1;
-  uint64 sequence_start = 2;
-  uint64 sequence_end = 3;
-  uint64 backend_no = 4;
-  string location = 5;
-}
-
-message Location {
-  plan.TableRefId table_ref_id = 1;
-  repeated SST ssts = 2;
   uint64 version = 3;
 }
 

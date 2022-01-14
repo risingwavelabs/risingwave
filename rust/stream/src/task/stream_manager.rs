@@ -3,7 +3,7 @@ use std::convert::TryFrom;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use async_std::net::SocketAddr;
-use futures::channel::mpsc::{channel, unbounded, Receiver, Sender, UnboundedSender};
+use futures::channel::mpsc::{channel, unbounded, Receiver, Sender};
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -13,6 +13,7 @@ use risingwave_common::util::addr::{get_host_port, is_local_address};
 use risingwave_common::util::sort_util::{
     build_from_prost as build_order_type_from_prost, fetch_orders,
 };
+use risingwave_pb::common::ActorInfo;
 use risingwave_pb::plan::JoinType as JoinTypeProto;
 use risingwave_pb::{expr, stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
@@ -20,7 +21,7 @@ use tokio::task::JoinHandle;
 
 use crate::executor::snapshot::BatchQueryExecutor;
 use crate::executor::*;
-use crate::task::StreamTaskEnv;
+use crate::task::{BarrierManager, StreamTaskEnv};
 
 /// Default capacity of channel if two actors are on the same node
 pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
@@ -90,12 +91,12 @@ pub struct StreamManagerCore {
     context: Arc<SharedContext>,
 
     /// Stores all actor information.
-    actor_infos: HashMap<u32, stream_service::ActorInfo>,
+    actor_infos: HashMap<u32, ActorInfo>,
 
     /// Stores all actor information.
     actors: HashMap<u32, stream_plan::StreamActor>,
 
-    sender_placeholder: Vec<UnboundedSender<Message>>,
+    barrier_manager: BarrierManager,
 
     /// Mock source, `actor_id = 0`.
     /// TODO: remove this
@@ -122,16 +123,17 @@ impl StreamManager {
         Self::new(addr, StateStoreImpl::shared_in_memory_store())
     }
 
-    // TODO: We will refine this method when the meta service is ready.
-    pub fn send_barrier(&self, epoch: u64) {
-        let core = self.core.lock().unwrap();
-        core.send_barrier(epoch);
+    pub fn checkpoint(&self, epoch: u64) -> Result<()> {
+        let mut core = self.core.lock().unwrap();
+        core.barrier_manager.send_barrier(&Barrier {
+            epoch,
+            mutation: Mutation::Nothing,
+        })
     }
 
-    // TODO: We will refine this method when the meta service is ready.
-    pub fn send_stop_barrier(&self) {
-        let core = self.core.lock().unwrap();
-        core.send_stop_barrier()
+    pub fn send_barrier(&self, barrier: &Barrier) -> Result<()> {
+        let mut core = self.core.lock().unwrap();
+        core.barrier_manager.send_barrier(barrier)
     }
 
     pub fn drop_actor(&self, actors: &[u32]) -> Result<()> {
@@ -140,6 +142,15 @@ impl StreamManager {
             core.drop_actor(*id);
         }
         Ok(())
+    }
+
+    pub async fn drop_materialized_view(
+        &self,
+        table_id: &TableId,
+        env: StreamTaskEnv,
+    ) -> Result<()> {
+        let table_manager = env.table_manager();
+        table_manager.drop_materialized_view(table_id).await
     }
 
     pub fn take_receiver(&self, ids: UpDownActorIds) -> Result<Receiver<Message>> {
@@ -241,7 +252,7 @@ impl StreamManagerCore {
             context: Arc::new(SharedContext::new(addr)),
             actor_infos: HashMap::new(),
             actors: HashMap::new(),
-            sender_placeholder: vec![],
+            barrier_manager: BarrierManager::new(),
             mock_source: (Some(tx), Some(rx)),
             state_store,
         }
@@ -340,41 +351,9 @@ impl StreamManagerCore {
         Ok(dispatcher)
     }
 
-    /// broadcast a barrier to all senders with specific epoch.
-    // TODO: We will refine this method when the meta service is ready.
-    fn send_barrier(&self, epoch: u64) {
-        for sender in &self.sender_placeholder {
-            sender
-                .unbounded_send(Message::Barrier(Barrier {
-                    epoch,
-                    ..Barrier::default()
-                }))
-                .unwrap();
-        }
-    }
-
-    // TODO: We will refine this method when the meta service is ready.
-    fn send_stop_barrier(&self) {
-        for sender in &self.sender_placeholder {
-            sender
-                .unbounded_send(Message::Barrier(Barrier {
-                    epoch: 0,
-                    mutation: Mutation::Stop,
-                }))
-                .unwrap();
-        }
-    }
-
-    // TODO: We will refine this method when the meta service is ready.
-    fn send_conf_change_barrier(&self, mutation: Mutation) {
-        for sender in &self.sender_placeholder {
-            sender
-                .unbounded_send(Message::Barrier(Barrier {
-                    epoch: 0,
-                    mutation: mutation.clone(),
-                }))
-                .unwrap();
-        }
+    fn send_conf_change_barrier(&mut self, mutation: Mutation) -> Result<()> {
+        self.barrier_manager
+            .send_barrier(&Barrier { epoch: 0, mutation })
     }
 
     /// Create a chain(tree) of nodes, with given `store`.
@@ -425,10 +404,8 @@ impl StreamManagerCore {
                 let source_id = TableId::from(&node.table_ref_id);
                 let source_desc = source_manager.get_source(&source_id)?;
 
-                // TODO: The channel pair should be created by the Checkpoint manger. So this line
-                // may be removed later.
                 let (sender, barrier_receiver) = unbounded();
-                self.sender_placeholder.push(sender);
+                self.barrier_manager.register_sender(actor_id, sender);
 
                 let column_ids = node.get_column_ids().to_vec();
                 let mut fields = Vec::with_capacity(column_ids.len());
@@ -707,7 +684,7 @@ impl StreamManagerCore {
                 self.send_conf_change_barrier(Mutation::AddOutput(
                     chain_node.upstream_actor_id,
                     vec![self.actor_infos.get(&actor_id).unwrap().to_owned()],
-                ));
+                ))?;
 
                 Ok(Box::new(ChainExecutor::new(snapshot, mview)))
             }
@@ -837,7 +814,9 @@ impl StreamManagerCore {
                 rxs.remove(0),
             )))
         } else {
-            Ok(Box::new(MergeExecutor::new(schema, pk_indices, rxs)))
+            Ok(Box::new(MergeExecutor::new(
+                schema, pk_indices, actor_id, rxs,
+            )))
         }
     }
 

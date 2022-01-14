@@ -1,6 +1,8 @@
+mod barrier_manager;
 mod env;
 mod stream_manager;
 mod table_manager;
+pub use barrier_manager::*;
 pub use env::*;
 pub use stream_manager::*;
 pub use table_manager::*;

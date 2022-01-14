@@ -6,6 +6,7 @@ option java_multiple_files = true;
 option java_package = "com.risingwave.proto.data";
 option optimize_for = SPEED;
 
+import "common.proto";
 import "google/protobuf/any.proto";
 
 message Buffer {
@@ -117,9 +118,33 @@ message StreamChunk {
   repeated Column columns = 3;
 }
 
+message NothingMutation {}
+
+message StopMutation {
+  repeated uint32 actors = 1;
+}
+
+message Actors {
+  repeated common.ActorInfo info = 1;
+}
+
+message UpdateMutation {
+  map<uint32, Actors> actors = 1;
+}
+
+message AddMutation {
+  uint32 actor_id = 1;
+  Actors downstream_actors = 2;
+}
+
 message Barrier {
   uint64 epoch = 1;
-  bool stop = 2;
+  oneof mutation {
+    NothingMutation nothing = 2;
+    StopMutation stop = 3;
+    UpdateMutation update = 4;
+    AddMutation add = 5;
+  }
 }
 
 message Terminate {}

@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -7,7 +8,7 @@ use risingwave_common::catalog::{SchemaId, TableId};
 use risingwave_common::types::Int32Type;
 use risingwave_common::util::addr::get_host_port;
 use risingwave_common::util::downcast_arc;
-use risingwave_pb::common::HostAddress;
+use risingwave_pb::common::{ActorInfo, HostAddress};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::expr::expr_node::RexNode;
@@ -23,14 +24,14 @@ use risingwave_pb::stream_plan::table_source_node::SourceType;
 use risingwave_pb::stream_plan::{
     Dispatcher, MViewNode, ProjectNode, StreamActor, StreamNode, TableSourceNode,
 };
-use risingwave_pb::stream_service::{ActorInfo, BroadcastActorInfoTableRequest};
+use risingwave_pb::stream_service::BroadcastActorInfoTableRequest;
 use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::bummock::BummockTable;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::{SimpleTableManager, TableManager};
 use risingwave_storage::{Table, TableColumnDesc};
 
-use crate::executor::MViewTable;
+use crate::executor::{Barrier, MViewTable, Mutation};
 use crate::task::{StreamManager, StreamTaskEnv};
 
 fn make_int32_type_pb() -> DataType {
@@ -197,7 +198,12 @@ async fn test_stream_mv_proto() {
     // FIXME: We have to make sure that `append_chunk` has been processed by the actor first,
     // then we can send the stop barrier.
     tokio::time::sleep(Duration::from_millis(500)).await;
-    stream_manager.send_stop_barrier();
+    stream_manager
+        .send_barrier(&Barrier {
+            epoch: 0,
+            mutation: Mutation::Stop(HashSet::from([1])),
+        })
+        .unwrap();
     // TODO(MrCroxx): fix this
     // FIXME: use channel when testing hummock to make sure local state has already flushed.
     tokio::time::sleep(Duration::from_millis(500)).await;

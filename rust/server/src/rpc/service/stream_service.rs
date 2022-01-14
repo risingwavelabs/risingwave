@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
+use risingwave_common::catalog::TableId;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BroadcastActorInfoTableResponse, BuildActorsRequest,
-    BuildActorsResponse, DropActorsRequest, DropActorsResponse, UpdateActorsRequest,
-    UpdateActorsResponse,
+    BuildActorsResponse, DropActorsRequest, DropActorsResponse, InjectBarrierRequest,
+    InjectBarrierResponse, UpdateActorsRequest, UpdateActorsResponse,
 };
+use risingwave_stream::executor::Barrier;
 use risingwave_stream::task::{StreamManager, StreamTaskEnv};
 use tonic::{Request, Response, Status};
 
@@ -54,8 +56,8 @@ impl StreamService for StreamServiceImpl {
                 Err(e.to_grpc_status())
             }
             Ok(()) => Ok(Response::new(BuildActorsResponse {
-                request_id: "".to_string(),
-                actor_id: Vec::new(),
+                request_id: req.request_id,
+                status: None,
             })),
         }
     }
@@ -84,10 +86,33 @@ impl StreamService for StreamServiceImpl {
         &self,
         request: Request<DropActorsRequest>,
     ) -> std::result::Result<Response<DropActorsResponse>, Status> {
-        let actors = request.into_inner().actor_ids;
+        let req = request.into_inner();
+        let actors = req.actor_ids;
         self.mgr
             .drop_actor(&actors)
             .map_err(|e| e.to_grpc_status())?;
-        Ok(Response::new(DropActorsResponse::default()))
+        self.mgr
+            .drop_materialized_view(&TableId::from(&req.table_ref_id), self.env.clone())
+            .await
+            .map_err(|e| e.to_grpc_status())?;
+        Ok(Response::new(DropActorsResponse {
+            request_id: req.request_id,
+            status: None,
+        }))
+    }
+
+    async fn inject_barrier(
+        &self,
+        request: Request<InjectBarrierRequest>,
+    ) -> Result<Response<InjectBarrierResponse>, Status> {
+        let req = request.into_inner();
+        let barrier = Barrier::from_protobuf(req.get_barrier());
+        self.mgr
+            .send_barrier(&barrier)
+            .map_err(|e| e.to_grpc_status())?;
+        Ok(Response::new(InjectBarrierResponse {
+            request_id: req.request_id,
+            status: None,
+        }))
     }
 }

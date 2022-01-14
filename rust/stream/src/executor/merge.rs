@@ -169,8 +169,11 @@ pub struct MergeExecutor {
     /// until all barriers reached
     blocked: Vec<Receiver<Message>>,
 
-    /// Current barrier epoch (for assertion)
-    next_epoch: Option<u64>,
+    /// Current barrier.
+    next_barrier: Option<Barrier>,
+
+    /// Belonged actor id.
+    actor_id: u32,
 }
 
 impl std::fmt::Debug for MergeExecutor {
@@ -184,7 +187,12 @@ impl std::fmt::Debug for MergeExecutor {
 }
 
 impl MergeExecutor {
-    pub fn new(schema: Schema, pk_indices: PkIndices, inputs: Vec<Receiver<Message>>) -> Self {
+    pub fn new(
+        schema: Schema,
+        pk_indices: PkIndices,
+        actor_id: u32,
+        inputs: Vec<Receiver<Message>>,
+    ) -> Self {
         Self {
             schema,
             pk_indices,
@@ -192,7 +200,8 @@ impl MergeExecutor {
             active: inputs,
             blocked: vec![],
             terminated: 0,
-            next_epoch: None,
+            next_barrier: None,
+            actor_id,
         }
     }
 }
@@ -218,21 +227,18 @@ impl Executor for MergeExecutor {
                     self.active.push(from);
                     return Ok(Message::Chunk(chunk));
                 }
-                Message::Barrier(Barrier {
-                    epoch,
-                    mutation: Mutation::Stop,
-                }) => {
-                    // Drop the terminated channel
-                    self.next_epoch = Some(epoch);
-                    self.terminated += 1;
-                }
-                Message::Barrier(Barrier { epoch, mutation: _ }) => {
+                Message::Barrier(barrier) => {
+                    if let Mutation::Stop(actors) = barrier.mutation.clone() {
+                        if actors.contains(&self.actor_id) {
+                            self.terminated += 1;
+                        }
+                    }
                     // Move this channel into the `blocked` list
                     if self.blocked.is_empty() {
-                        assert_eq!(self.next_epoch, None);
-                        self.next_epoch = Some(epoch);
+                        assert_eq!(self.next_barrier, None);
+                        self.next_barrier = Some(barrier.clone());
                     } else {
-                        assert_eq!(self.next_epoch, Some(epoch));
+                        assert_eq!(self.next_barrier, Some(barrier.clone()));
                     }
 
                     self.blocked.push(from);
@@ -240,20 +246,14 @@ impl Executor for MergeExecutor {
             }
 
             if self.terminated == self.num_inputs {
-                return Ok(Message::Barrier(Barrier {
-                    epoch: self.next_epoch.unwrap(),
-                    mutation: Mutation::Stop,
-                }));
+                return Ok(Message::Barrier(self.next_barrier.take().unwrap()));
             }
             if self.blocked.len() == self.num_inputs {
                 // Emit the barrier to downstream once all barriers collected from upstream
                 assert!(self.active.is_empty());
                 self.active = std::mem::take(&mut self.blocked);
-                let epoch = self.next_epoch.take().unwrap();
-                return Ok(Message::Barrier(Barrier {
-                    epoch,
-                    ..Barrier::default()
-                }));
+                let barrier = self.next_barrier.take().unwrap();
+                return Ok(Message::Barrier(barrier));
             }
             assert!(!self.active.is_empty())
         }
@@ -274,6 +274,7 @@ impl Executor for MergeExecutor {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use std::thread::sleep;
@@ -310,7 +311,7 @@ mod tests {
             txs.push(tx);
             rxs.push(rx);
         }
-        let mut merger = MergeExecutor::new(Schema::default(), vec![], rxs);
+        let mut merger = MergeExecutor::new(Schema::default(), vec![], 0, rxs);
 
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
@@ -333,7 +334,7 @@ mod tests {
                 }
                 tx.send(Message::Barrier(Barrier {
                     epoch: 1000,
-                    mutation: Mutation::Stop,
+                    mutation: Mutation::Stop(HashSet::default()),
                 }))
                 .await
                 .unwrap();
@@ -357,7 +358,7 @@ mod tests {
             merger.next().await.unwrap(),
             Message::Barrier(Barrier {
                 epoch: _,
-                mutation: Mutation::Stop,
+                mutation: Mutation::Stop(_),
             })
         );
 

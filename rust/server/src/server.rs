@@ -52,7 +52,7 @@ pub async fn compute_node_serve(
     tokio::spawn(async move {
         let mut epoch = 0u64;
         loop {
-            stream_mgr1.send_barrier(epoch);
+            stream_mgr1.checkpoint(epoch).unwrap();
             epoch += 1;
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }

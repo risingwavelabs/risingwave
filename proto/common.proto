@@ -19,6 +19,12 @@ message HostAddress {
   int32 port = 2;
 }
 
+// Encode which host machine an actor resides.
+message ActorInfo {
+  uint32 actor_id = 1;
+  HostAddress host = 2;
+}
+
 message WorkerNode {
   uint32 id = 1;
   HostAddress host = 2;

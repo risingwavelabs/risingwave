@@ -30,6 +30,9 @@ pub trait StreamTableManager: TableManager {
         associated_table_id: &TableId,
         mview_id: &TableId,
     ) -> Result<ScannableTableRef>;
+
+    /// Drop materialized view.
+    async fn drop_materialized_view(&self, table_id: &TableId) -> Result<()>;
 }
 
 #[async_trait::async_trait]
@@ -78,6 +81,10 @@ impl StreamTableManager for SimpleTableManager {
         // Simply associate the mview id to the table
         tables.insert(mview_id.clone(), table.clone());
         Ok(table)
+    }
+
+    async fn drop_materialized_view(&self, table_id: &TableId) -> Result<()> {
+        self.drop_table(table_id).await
     }
 }
 

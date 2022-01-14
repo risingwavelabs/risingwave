@@ -1,6 +1,5 @@
 package com.risingwave.catalog;
 
-import com.risingwave.common.datatype.RisingWaveTypeFactory;
 import com.risingwave.proto.expr.InputRefExpr;
 import com.risingwave.proto.metanode.Database;
 import com.risingwave.proto.metanode.Schema;
@@ -102,6 +101,7 @@ public class CatalogCast {
               ColumnOrder.newBuilder().setOrderType(orderType).setInputRef(inputRefExpr).build();
           builder.addColumnOrders(columnOrder);
         }
+        builder.setIsAssociated(materializedViewCatalog.isAssociatedMaterializedView());
       }
     }
 
@@ -128,7 +128,6 @@ public class CatalogCast {
     if (!table.getIsMaterializedView()) {
       return builder.build();
     }
-    var typeFactory = RisingWaveTypeFactory.INSTANCE;
     var fieldCollations = new ArrayList<RelFieldCollation>();
     for (var columnOrder : table.getColumnOrdersList()) {
       var orderType = columnOrder.getOrderType();
@@ -147,6 +146,7 @@ public class CatalogCast {
       ((CreateMaterializedViewInfo.Builder) builder)
           .setCollation(RelCollations.of(fieldCollations));
     }
+    ((CreateMaterializedViewInfo.Builder) builder).setAssociated(table.getIsAssociated());
     return builder.build();
   }
 }

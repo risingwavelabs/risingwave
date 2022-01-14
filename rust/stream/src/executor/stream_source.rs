@@ -158,6 +158,7 @@ impl Debug for StreamSourceExecutor {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::sync::Arc;
 
     use futures::channel::mpsc::unbounded;
@@ -391,7 +392,7 @@ mod tests {
         barrier_sender
             .unbounded_send(Message::Barrier(Barrier {
                 epoch: 1,
-                mutation: Mutation::Stop,
+                mutation: Mutation::Stop(HashSet::default()),
             }))
             .unwrap();
 

@@ -8,7 +8,7 @@ use risingwave_pb::meta::{
 use tonic::{Request, Response, Status};
 
 use crate::cluster::{StoredClusterManager, WorkerNodeMetaManager};
-use crate::manager::{IdGeneratorManagerRef, MetaSrvEnv};
+use crate::manager::{EpochGeneratorRef, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::stream::{StreamFragmenter, StreamManagerRef};
 
 #[derive(Clone)]
@@ -17,6 +17,7 @@ pub struct StreamServiceImpl {
 
     id_gen_manager_ref: IdGeneratorManagerRef,
     cluster_manager: Arc<StoredClusterManager>,
+    epoch_generator: EpochGeneratorRef,
 }
 
 impl StreamServiceImpl {
@@ -29,6 +30,7 @@ impl StreamServiceImpl {
             sm,
             id_gen_manager_ref: env.id_gen_manager_ref(),
             cluster_manager,
+            epoch_generator: env.epoch_generator_ref(),
         }
     }
 }
@@ -70,8 +72,23 @@ impl StreamManagerService for StreamServiceImpl {
     #[cfg(not(tarpaulin_include))]
     async fn drop_materialized_view(
         &self,
-        _request: Request<DropMaterializedViewRequest>,
+        request: Request<DropMaterializedViewRequest>,
     ) -> Result<Response<DropMaterializedViewResponse>, Status> {
-        todo!()
+        let req = request.into_inner();
+        // TODO: make sure only one running epoch injected. This will be achieved in checkpoint
+        //  manager(or barrier manager), only mv related node will be inject stop barrier, other
+        //  nodes should inject nothing barrier. Thus all node will be in the same stabled epoch.
+        let epoch = self
+            .epoch_generator
+            .generate()
+            .map_err(|e| e.to_grpc_status())?;
+        match self
+            .sm
+            .drop_materialized_view(req.get_table_ref_id(), epoch)
+            .await
+        {
+            Ok(()) => Ok(Response::new(DropMaterializedViewResponse { status: None })),
+            Err(e) => Err(e.to_grpc_status()),
+        }
     }
 }
