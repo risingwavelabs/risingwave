@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::str::FromStr;
 
+use futures_retry::{ErrorHandler, FutureRetry, RetryPolicy};
 use risingwave_common::array::RwError;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
@@ -64,6 +65,31 @@ impl ConnectionInfo {
     }
 }
 
+struct RusotoHandler {
+    max_attempts: usize,
+}
+
+impl<E> ErrorHandler<RusotoError<E>> for RusotoHandler {
+    type OutError = RusotoError<E>;
+    fn handle(&mut self, attempt: usize, err: RusotoError<E>) -> RetryPolicy<Self::OutError> {
+        if attempt >= self.max_attempts {
+            return RetryPolicy::ForwardError(err);
+        }
+        match err {
+            RusotoError::Credentials(_) | RusotoError::Validation(_) => {
+                RetryPolicy::ForwardError(err)
+            }
+            RusotoError::Service(_)
+            | RusotoError::HttpDispatch(_)
+            | RusotoError::ParseError(_)
+            | RusotoError::Unknown(_)
+            | RusotoError::Blocking => RetryPolicy::Repeat,
+        }
+    }
+}
+
+const DEFAULT_HANDLER: RusotoHandler = RusotoHandler { max_attempts: 3 };
+
 #[async_trait::async_trait]
 impl ObjectStore for S3ObjectStore {
     async fn upload(&self, path: &str, obj: Bytes) -> Result<()> {
@@ -71,20 +97,22 @@ impl ObjectStore for S3ObjectStore {
         ensure!(self.client.is_some());
 
         // TODO(xiangyhu): what if the blob existed?
-        let data = ByteStream::from(obj.as_ref().to_vec());
-        self.client
-            .as_ref()
-            .unwrap()
-            .put_object(PutObjectRequest {
-                bucket: self.bucket.clone(),
-                key: path.to_string(),
-                body: Some(data),
-                ..Default::default()
-            })
-            .await
-            .map_err(|err| {
-                RwError::from(InternalError(format!("S3 put failure with error: {}", err)))
-            })?;
+        FutureRetry::new(
+            || {
+                self.client.as_ref().unwrap().put_object(PutObjectRequest {
+                    bucket: self.bucket.clone(),
+                    key: path.to_string(),
+                    body: Some(ByteStream::from(obj.as_ref().to_vec())),
+                    ..Default::default()
+                })
+            },
+            DEFAULT_HANDLER,
+        )
+        .await
+        .map_err(|(err, _attempt)| err)
+        .map_err(|err| {
+            RwError::from(InternalError(format!("S3 put failure with error: {}", err)))
+        })?;
 
         Ok(())
     }
@@ -94,17 +122,20 @@ impl ObjectStore for S3ObjectStore {
         ensure!(self.client.is_some());
         let block_loc = block_loc.as_ref().unwrap();
 
-        let response = self
-            .client
-            .as_ref()
-            .unwrap()
-            .get_object(GetObjectRequest {
-                bucket: self.bucket.clone(),
-                key: path.to_string(),
-                range: block_loc.byte_range_specifier(),
-                ..Default::default()
-            })
-            .await;
+        let response = FutureRetry::new(
+            || {
+                self.client.as_ref().unwrap().get_object(GetObjectRequest {
+                    bucket: self.bucket.clone(),
+                    key: path.to_string(),
+                    range: block_loc.byte_range_specifier(),
+                    ..Default::default()
+                })
+            },
+            DEFAULT_HANDLER,
+        )
+        .await
+        .map(|(data, _attempt)| data)
+        .map_err(|(err, _attempt)| err);
 
         match response {
             Ok(data) => {
@@ -154,22 +185,28 @@ impl ObjectStore for S3ObjectStore {
     async fn metadata(&self, path: &str) -> Result<ObjectMetadata> {
         ensure!(self.client.is_some());
 
-        let response = self
-            .client
-            .as_ref()
-            .unwrap()
-            .head_object(HeadObjectRequest {
-                bucket: self.bucket.clone(),
-                key: path.to_string(),
-                ..Default::default()
-            })
-            .await
-            .map_err(|err| {
-                RwError::from(InternalError(format!(
-                    "S3 fetch metadata failure with error: {}",
-                    err
-                )))
-            })?;
+        let response = FutureRetry::new(
+            || {
+                self.client
+                    .as_ref()
+                    .unwrap()
+                    .head_object(HeadObjectRequest {
+                        bucket: self.bucket.clone(),
+                        key: path.to_string(),
+                        ..Default::default()
+                    })
+            },
+            DEFAULT_HANDLER,
+        )
+        .await
+        .map_err(|(err, _attempt)| err)
+        .map_err(|err| {
+            RwError::from(InternalError(format!(
+                "S3 fetch metadata failure with error: {}",
+                err
+            )))
+        })?
+        .0;
 
         match response.content_length {
             Some(len) => Ok(ObjectMetadata {
@@ -186,21 +223,27 @@ impl ObjectStore for S3ObjectStore {
     async fn delete(&self, path: &str) -> Result<()> {
         ensure!(self.client.is_some());
 
-        self.client
-            .as_ref()
-            .unwrap()
-            .delete_object(DeleteObjectRequest {
-                bucket: self.bucket.clone(),
-                key: path.to_string(),
-                ..Default::default()
-            })
-            .await
-            .map_err(|err| {
-                RwError::from(InternalError(format!(
-                    "S3 delete failure with error: {}",
-                    err
-                )))
-            })?;
+        FutureRetry::new(
+            || {
+                self.client
+                    .as_ref()
+                    .unwrap()
+                    .delete_object(DeleteObjectRequest {
+                        bucket: self.bucket.clone(),
+                        key: path.to_string(),
+                        ..Default::default()
+                    })
+            },
+            DEFAULT_HANDLER,
+        )
+        .await
+        .map_err(|(err, _attempt)| err)
+        .map_err(|err| {
+            RwError::from(InternalError(format!(
+                "S3 delete failure with error: {}",
+                err
+            )))
+        })?;
 
         Ok(())
     }
