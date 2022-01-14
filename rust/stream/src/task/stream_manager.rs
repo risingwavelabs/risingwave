@@ -103,10 +103,6 @@ pub struct StreamManagerCore {
 
     /// The state store of Hummuck
     state_store: StateStoreImpl,
-
-    /// Next executor id for mock purpose.
-    // TODO: this should be replaced with real id from frontend
-    next_mock_executor_id: u32,
 }
 
 /// `StreamManager` manages all stream executors in this project.
@@ -248,7 +244,6 @@ impl StreamManagerCore {
             sender_placeholder: vec![],
             mock_source: (Some(tx), Some(rx)),
             state_store,
-            next_mock_executor_id: 0,
         }
     }
 
@@ -411,6 +406,7 @@ impl StreamManagerCore {
 
         // We assume that the node_id of different instances from the same RelNode will be the same.
         let executor_id = ((actor_id as u64) << 32) + node.get_node_id();
+        let node_id = node.get_node_id().try_into().unwrap();
 
         let executor: Result<Box<dyn Executor>> = match node.get_node() {
             TableSourceNode(node) => {
@@ -475,7 +471,7 @@ impl StreamManagerCore {
                 Ok(Box::new(SimpleAggExecutor::new(
                     input.remove(0),
                     agg_calls,
-                    Keyspace::executor_root(store.clone(), self.generate_mock_executor_id()),
+                    Keyspace::executor_root(store.clone(), node_id),
                     pk_indices,
                     executor_id,
                 )))
@@ -497,7 +493,7 @@ impl StreamManagerCore {
                     input.remove(0),
                     agg_calls,
                     keys,
-                    Keyspace::executor_root(store.clone(), self.generate_mock_executor_id()),
+                    Keyspace::executor_root(store.clone(), node_id),
                     pk_indices,
                     executor_id,
                 )))
@@ -521,7 +517,7 @@ impl StreamManagerCore {
                     order_types,
                     (top_n_node.offset as usize, limit),
                     pk_indices,
-                    Keyspace::executor_root(store.clone(), self.generate_mock_executor_id()),
+                    Keyspace::executor_root(store.clone(), node_id),
                     cache_size,
                     total_count,
                     executor_id,
@@ -546,7 +542,7 @@ impl StreamManagerCore {
                     order_types,
                     (top_n_node.offset as usize, limit),
                     pk_indices,
-                    Keyspace::executor_root(store.clone(), self.generate_mock_executor_id()),
+                    Keyspace::executor_root(store.clone(), node_id),
                     cache_size,
                     total_count,
                     executor_id,
@@ -579,7 +575,7 @@ impl StreamManagerCore {
                 params_l,
                 params_r,
                 pk_indices,
-                Keyspace::executor_root(store.clone(), self.generate_mock_executor_id()),
+                Keyspace::executor_root(store.clone(), node_id),
                 executor_id,
               )) as Box<dyn Executor>, )*
               _ => todo!("Join type {:?} not inplemented", typ),
@@ -940,11 +936,5 @@ impl StreamManagerCore {
             }
         }
         Ok(())
-    }
-
-    fn generate_mock_executor_id(&mut self) -> u32 {
-        let id = self.next_mock_executor_id;
-        self.next_mock_executor_id += 1;
-        id
     }
 }
