@@ -5,7 +5,7 @@ name:
 on:
 
 env:
-  RUST_TOOLCHAIN: nightly-2021-11-30
+  RUST_TOOLCHAIN: nightly-2022-01-13
 
 jobs:
   frontend-check:
@@ -324,7 +324,7 @@ jobs:
     needs: start-runner # required to start the main job when the runner is ready
     runs-on: ${{ needs.start-runner.outputs.label }} # run the job on the newly created runner
     env:
-      CACHE_KEY_SUFFIX: v20220105 # change this to invalidate previous cache
+      CACHE_KEY_SUFFIX: v20220113 # change this to invalidate previous cache
     container:
       image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
       options: --security-opt seccomp=unconfined
@@ -407,7 +407,7 @@ jobs:
       - compute-node-build
     runs-on: ${{ needs.start-runner.outputs.label }} # run the job on the newly created runner
     env:
-      CACHE_KEY_SUFFIX: v20220105 # change this to invalidate previous cache
+      CACHE_KEY_SUFFIX: v20220113 # change this to invalidate previous cache
     container:
       image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
       options: --security-opt seccomp=unconfined

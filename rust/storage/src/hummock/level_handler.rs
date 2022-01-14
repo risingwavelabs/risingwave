@@ -10,7 +10,6 @@ pub struct TableStat {
 
 #[derive(Clone)]
 pub enum LevelHandler {
-    /// 
     /// * `Vec<TableStat>` - existing SSTs in this level, arranged in order no matter Tiering or
     ///   Leveling
     /// * `Vec<(KeyRange, u64)>` - key ranges (and corresponding compaction task id) to be merged
