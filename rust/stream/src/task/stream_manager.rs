@@ -460,7 +460,7 @@ impl StreamManagerCore {
                 Ok(Box::new(SimpleAggExecutor::new(
                     input.remove(0),
                     agg_calls,
-                    Keyspace::executor_root(store.clone(), node_id),
+                    Keyspace::executor_root(store.clone(), executor_id),
                     pk_indices,
                     executor_id,
                 )))
@@ -482,7 +482,7 @@ impl StreamManagerCore {
                     input.remove(0),
                     agg_calls,
                     keys,
-                    Keyspace::executor_root(store.clone(), node_id),
+                    Keyspace::shared_executor_root(store.clone(), node_id),
                     pk_indices,
                     executor_id,
                 )))
@@ -506,7 +506,7 @@ impl StreamManagerCore {
                     order_types,
                     (top_n_node.offset as usize, limit),
                     pk_indices,
-                    Keyspace::executor_root(store.clone(), node_id),
+                    Keyspace::executor_root(store.clone(), executor_id),
                     cache_size,
                     total_count,
                     executor_id,
@@ -531,7 +531,7 @@ impl StreamManagerCore {
                     order_types,
                     (top_n_node.offset as usize, limit),
                     pk_indices,
-                    Keyspace::executor_root(store.clone(), node_id),
+                    Keyspace::executor_root(store.clone(), executor_id),
                     cache_size,
                     total_count,
                     executor_id,
@@ -564,7 +564,7 @@ impl StreamManagerCore {
                 params_l,
                 params_r,
                 pk_indices,
-                Keyspace::executor_root(store.clone(), node_id),
+                Keyspace::shared_executor_root(store.clone(), node_id),
                 executor_id,
               )) as Box<dyn Executor>, )*
               _ => todo!("Join type {:?} not inplemented", typ),

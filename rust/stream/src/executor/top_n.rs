@@ -77,9 +77,9 @@ impl<S: StateStore> TopNExecutor<S> {
             .collect::<Vec<_>>();
         let ordered_row_deserializer =
             OrderedRowDeserializer::new(data_type_kinds.clone(), order_types.clone());
-        let lower_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"l/".to_vec()));
-        let middle_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"m/".to_vec()));
-        let higher_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"h/".to_vec()));
+        let lower_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"l".to_vec()));
+        let middle_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"m".to_vec()));
+        let higher_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"h".to_vec()));
         let managed_lowest_state = ManagedTopNState::<S, TOP_N_MAX>::new(
             cache_size,
             total_count.0,

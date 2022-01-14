@@ -15,11 +15,19 @@ pub enum Segment {
 }
 
 impl Segment {
+    fn root(prefix: u8) -> Self {
+        Self::FixedLength(prefix.to_be_bytes().to_vec())
+    }
+
     pub fn u16(id: u16) -> Self {
         Self::FixedLength(id.to_be_bytes().to_vec())
     }
 
     pub fn u32(id: u32) -> Self {
+        Self::FixedLength(id.to_be_bytes().to_vec())
+    }
+
+    pub fn u64(id: u64) -> Self {
         Self::FixedLength(id.to_be_bytes().to_vec())
     }
 
@@ -50,17 +58,31 @@ pub struct Keyspace<S: StateStore> {
 }
 
 impl<S: StateStore> Keyspace<S> {
-    /// Create a root [`Keyspace`] for an executor.
+    /// Create a shared root [`Keyspace`] for all executors in the same node.
     ///
     /// By design, all executors in the same node should share the same keyspace in order to support
     /// scaling out, and ensure not to overlap with each other. So we use `node_id` here.
-    pub fn executor_root(store: S, node_id: u32) -> Self {
+    ///
+    /// Note: when using shared keyspace, be caution to scan the keyspace since states of other
+    /// executors might be scanned as well.
+    pub fn shared_executor_root(store: S, node_id: u32) -> Self {
         let mut root = Self {
             store,
             prefix: Vec::with_capacity(5),
         };
-        root.push(Segment::FixedLength(b"e".to_vec()));
+        root.push(Segment::root(b's'));
         root.push(Segment::u32(node_id));
+        root
+    }
+
+    /// Create a root [`Keyspace`] for an executor.
+    pub fn executor_root(store: S, executor_id: u64) -> Self {
+        let mut root = Self {
+            store,
+            prefix: Vec::with_capacity(9),
+        };
+        root.push(Segment::root(b'e'));
+        root.push(Segment::u64(executor_id));
         root
     }
 
@@ -68,9 +90,9 @@ impl<S: StateStore> Keyspace<S> {
     pub fn table_root(store: S, id: &TableId) -> Self {
         let mut root = Self {
             store,
-            prefix: Vec::new(),
+            prefix: Vec::with_capacity(5),
         };
-        root.push(Segment::FixedLength(b"t".to_vec()));
+        root.push(Segment::root(b't'));
         root.push(Segment::u32(id.table_id() as u32));
         root
     }
