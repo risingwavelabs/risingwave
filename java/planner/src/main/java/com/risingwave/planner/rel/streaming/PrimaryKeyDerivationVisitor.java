@@ -646,10 +646,18 @@ public class PrimaryKeyDerivationVisitor
     LOGGER.debug("visit RwStreamChain");
     var viewCatalog = chain.getTable().unwrapOrThrow(MaterializedViewCatalog.class);
     var primaryKeyColumnIds = viewCatalog.getPrimaryKeyColumnIds();
+    var newChain =
+        new RwStreamChain(
+            chain.getCluster(),
+            chain.getTraitSet(),
+            chain.getHints(),
+            chain.getTable(),
+            chain.getTableId(),
+            primaryKeyColumnIds);
     var info =
         new PrimaryKeyIndicesAndPositionMap(
             ImmutableList.copyOf(primaryKeyColumnIds), ImmutableMap.of());
     LOGGER.debug("leave RwStreamChain");
-    return new Result<>(chain, info);
+    return new Result<>(newChain, info);
   }
 }

@@ -1,7 +1,7 @@
 <Root>
     <Resource>
         <![CDATA[
-create table t(v1 int not null, v2 int not null)
+create table t(v1 int not null, v2 int not null);
         ]]>
     </Resource>
 

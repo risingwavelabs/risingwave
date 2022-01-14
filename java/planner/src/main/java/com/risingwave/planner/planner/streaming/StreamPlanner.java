@@ -36,6 +36,7 @@ import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlCreateMaterializedView;
+import org.apache.calcite.util.ImmutableIntList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -82,14 +83,21 @@ public class StreamPlanner implements Planner<StreamingPlan> {
     RisingWaveStreamingRel rawPlan =
         (RisingWaveStreamingRel) program.optimize(logicalPlan, context);
     log.debug("Before adding Materialized View, the plan:\n" + ExplainWriter.explainPlan(rawPlan));
+    resolveMaterializedViewOnMaterializedView(rawPlan, null, -1, context);
     RwStreamMaterializedView materializedViewPlan = addMaterializedViewNode(rawPlan, name);
-    resolveMaterializedViewOnMaterializedView(materializedViewPlan, null, -1, context);
     log.debug("Create streaming plan:\n" + ExplainWriter.explainPlan(materializedViewPlan));
     log.debug(
         "Primary key of Materialized View is:\n" + materializedViewPlan.getPrimaryKeyIndices());
     return materializedViewPlan;
   }
 
+  /**
+   * Replace materialized view table source node with chain node.
+   *
+   * @param node current node
+   * @param parent parent node of current node
+   * @param indexInParent input index of the current node in parent node.
+   */
   private void resolveMaterializedViewOnMaterializedView(
       RisingWaveStreamingRel node,
       RisingWaveStreamingRel parent,
@@ -119,7 +127,8 @@ public class StreamPlanner implements Planner<StreamingPlan> {
                 node.getTraitSet(),
                 ((RwStreamTableSource) node).getHints(),
                 node.getTable(),
-                ((RwStreamTableSource) node).getTableId());
+                ((RwStreamTableSource) node).getTableId(),
+                ImmutableIntList.of());
         parent.replaceInput(indexInParent, chain);
       }
     }

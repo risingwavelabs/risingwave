@@ -11,6 +11,7 @@ import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.core.TableScan;
 import org.apache.calcite.rel.hint.RelHint;
+import org.apache.calcite.util.ImmutableIntList;
 
 /**
  * Chain Node
@@ -21,15 +22,22 @@ import org.apache.calcite.rel.hint.RelHint;
 public class RwStreamChain extends TableScan implements RisingWaveStreamingRel {
 
   private final TableCatalog.TableId tableId;
+  private final ImmutableIntList primaryKeyIndices;
 
   public RwStreamChain(
       RelOptCluster cluster,
       RelTraitSet traitSet,
       List<RelHint> hints,
       RelOptTable table,
-      TableCatalog.TableId tableId) {
+      TableCatalog.TableId tableId,
+      ImmutableIntList primaryKeyIndices) {
     super(cluster, traitSet, hints, table);
     this.tableId = tableId;
+    this.primaryKeyIndices = primaryKeyIndices;
+  }
+
+  public TableCatalog.TableId getTableId() {
+    return tableId;
   }
 
   /** Explain */
@@ -42,7 +50,10 @@ public class RwStreamChain extends TableScan implements RisingWaveStreamingRel {
   @Override
   public StreamNode serialize() {
     ChainNode chainNode =
-        ChainNode.newBuilder().setTableRefId(Messages.getTableRefId(tableId)).build();
+        ChainNode.newBuilder()
+            .setTableRefId(Messages.getTableRefId(tableId))
+            .addAllPkIndices(primaryKeyIndices)
+            .build();
     return StreamNode.newBuilder().setChainNode(chainNode).build();
   }
 

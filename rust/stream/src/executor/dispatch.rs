@@ -134,8 +134,12 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                     let actor_id = self.actor_id;
 
                     // delete the old local connections in both local and remote pools;
-                    channel_pool_guard.retain(|(x, _), _| *x != actor_id);
-                    exchange_pool_guard.retain(|(x, _), _| *x != actor_id);
+                    channel_pool_guard.retain(|(up_id, down_id), _| {
+                        *up_id != actor_id || v.iter().any(|info| info.actor_id == *down_id)
+                    });
+                    exchange_pool_guard.retain(|(up_id, down_id), _| {
+                        *up_id != actor_id || v.iter().any(|info| info.actor_id == *down_id)
+                    });
 
                     for act in v.iter() {
                         let down_id = act.get_actor_id();
@@ -145,10 +149,6 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                             format!("{}:{}", host_addr.get_host(), host_addr.get_port());
 
                         if is_local_address(&get_host_port(&downstream_addr)?, &self.context.addr) {
-                            // insert new connection
-                            let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                            channel_pool_guard.insert(up_down_ids, (Some(tx), Some(rx)));
-
                             let tx = channel_pool_guard
                                 .get_mut(&(actor_id, down_id))
                                 .ok_or_else(|| {
@@ -169,12 +169,52 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                         } else {
                             let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
                             exchange_pool_guard.insert(up_down_ids, rx);
-
                             new_outputs.push(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
                         }
                     }
                     self.inner.update_outputs(new_outputs)
                 }
+                Ok(())
+            }
+            Mutation::AddOutput(actor_id, downstream_actor_infos) => {
+                if self.actor_id != *actor_id {
+                    return Ok(());
+                }
+                let mut channel_pool_guard = self.context.channel_pool.lock().unwrap();
+                let mut exchange_pool_guard =
+                    self.context.receivers_for_exchange_service.lock().unwrap();
+                let mut outputs_to_add = Vec::with_capacity(downstream_actor_infos.len());
+                for downstream_actor_info in downstream_actor_infos {
+                    let down_id = downstream_actor_info.get_actor_id();
+                    let up_down_ids = (*actor_id, down_id);
+                    let host_addr = downstream_actor_info.get_host();
+                    let downstream_addr =
+                        format!("{}:{}", host_addr.get_host(), host_addr.get_port());
+                    if is_local_address(&get_host_port(&downstream_addr)?, &self.context.addr) {
+                        let tx = channel_pool_guard
+                            .get_mut(&(*actor_id, down_id))
+                            .ok_or_else(|| {
+                                RwError::from(ErrorCode::InternalError(format!(
+                                    "channel between {} and {} does not exist",
+                                    actor_id, down_id
+                                )))
+                            })?
+                            .0
+                            .take()
+                            .ok_or_else(|| {
+                                RwError::from(ErrorCode::InternalError(format!(
+                                    "sender from {} to {} does no exist",
+                                    actor_id, down_id
+                                )))
+                            })?;
+                        outputs_to_add.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
+                    } else {
+                        let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+                        exchange_pool_guard.insert(up_down_ids, rx);
+                        outputs_to_add.push(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
+                    }
+                }
+                self.inner.add_outputs(outputs_to_add);
                 Ok(())
             }
             _ => Ok(()),
@@ -210,6 +250,7 @@ pub trait DataDispatcher: Debug + 'static {
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()>;
     fn get_outputs(&mut self) -> &mut [Box<dyn Output>];
     fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>);
+    fn add_outputs(&mut self, outputs: Vec<Box<dyn Output>>);
 }
 
 pub struct RoundRobinDataDispatcher {
@@ -236,6 +277,11 @@ impl DataDispatcher for RoundRobinDataDispatcher {
     fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
         self.outputs = outputs
     }
+
+    fn add_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
+        self.outputs.extend(outputs.into_iter());
+    }
+
     fn get_outputs(&mut self) -> &mut [Box<dyn Output>] {
         &mut self.outputs
     }
@@ -278,6 +324,11 @@ impl DataDispatcher for HashDataDispatcher {
     fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
         self.outputs = outputs
     }
+
+    fn add_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
+        self.outputs.extend(outputs.into_iter());
+    }
+
     fn get_outputs(&mut self) -> &mut [Box<dyn Output>] {
         &mut self.outputs
     }
@@ -405,6 +456,11 @@ impl DataDispatcher for BroadcastDispatcher {
     fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
         self.outputs = outputs
     }
+
+    fn add_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
+        self.outputs.extend(outputs.into_iter());
+    }
+
     fn get_outputs(&mut self) -> &mut [Box<dyn Output>] {
         &mut self.outputs
     }
@@ -439,6 +495,10 @@ impl SimpleDispatcher {
 #[async_trait]
 impl DataDispatcher for SimpleDispatcher {
     fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
+        self.output = outputs.into_iter().next().unwrap();
+    }
+
+    fn add_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
         self.output = outputs.into_iter().next().unwrap();
     }
 
@@ -606,6 +666,22 @@ mod tests {
         }
     }
 
+    fn add_local_channels(ctx: Arc<SharedContext>, up_down_ids: Vec<(u32, u32)>) {
+        let mut guard = ctx.channel_pool.lock().unwrap();
+        for up_down_id in up_down_ids {
+            let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+            guard.insert(up_down_id, (Some(tx), Some(rx)));
+        }
+    }
+
+    fn add_remote_channels(ctx: Arc<SharedContext>, up_id: u32, down_ids: Vec<u32>) {
+        let mut guard = ctx.receivers_for_exchange_service.lock().unwrap();
+        for down_id in down_ids {
+            let (_, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+            guard.insert((up_id, down_id), rx);
+        }
+    }
+
     #[tokio::test]
     async fn test_configuration_change() {
         let schema = Schema { fields: vec![] };
@@ -651,6 +727,9 @@ mod tests {
                 },
             ],
         );
+        add_local_channels(ctx.clone(), vec![(233, 234), (233, 235)]);
+        add_remote_channels(ctx.clone(), 233, vec![238]);
+
         let b1 = Barrier {
             epoch: 0,
             mutation: Mutation::UpdateOutputs(updates1),
@@ -676,6 +755,7 @@ mod tests {
                 }),
             }],
         );
+        add_local_channels(ctx.clone(), vec![(233, 235)]);
         let b2 = Barrier {
             epoch: 0,
             mutation: Mutation::UpdateOutputs(updates2),
@@ -689,6 +769,41 @@ mod tests {
             let ex_guard = tctx.receivers_for_exchange_service.lock().unwrap();
             assert_eq!(cp_guard.len(), 1);
             assert_eq!(ex_guard.len(), 0);
+        }
+
+        add_local_channels(ctx.clone(), vec![(233, 245)]);
+        add_remote_channels(ctx.clone(), 233, vec![246]);
+        tx.send(Message::Barrier(Barrier {
+            epoch: 0,
+            mutation: Mutation::AddOutput(
+                233,
+                vec![
+                    ActorInfo {
+                        actor_id: 245,
+                        host: Some(HostAddress {
+                            host: String::from("127.0.0.1"),
+                            port: 2333,
+                        }),
+                    },
+                    ActorInfo {
+                        actor_id: 246,
+                        host: Some(HostAddress {
+                            host: String::from("172.1.1.2"),
+                            port: 2334,
+                        }),
+                    },
+                ],
+            ),
+        }))
+        .await
+        .unwrap();
+        executor.next().await.unwrap();
+        let tctx = ctx.clone();
+        {
+            let cp_guard = tctx.channel_pool.lock().unwrap();
+            let ex_guard = tctx.receivers_for_exchange_service.lock().unwrap();
+            assert_eq!(cp_guard.len(), 2);
+            assert_eq!(ex_guard.len(), 1);
         }
     }
 

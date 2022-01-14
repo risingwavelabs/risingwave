@@ -61,6 +61,7 @@ pub enum Mutation {
     Nothing,
     Stop,
     UpdateOutputs(HashMap<u32, Vec<ActorInfo>>),
+    AddOutput(u32, Vec<ActorInfo>),
 }
 impl Default for Mutation {
     fn default() -> Self {

@@ -1,64 +1,43 @@
 {
   "input": [{
-    "pkIndices": [1],
     "input": [{
-      "input": [{
-        "pkIndices": [2],
-        "tableSourceNode": {
-          "tableRefId": {
-            "schemaRefId": {
-              "databaseRefId": {
-              }
+      "pkIndices": [2],
+      "tableSourceNode": {
+        "tableRefId": {
+          "schemaRefId": {
+            "databaseRefId": {
             }
-          },
-          "columnIds": [1, 2, 0]
-        }
-      }],
-      "filterNode": {
-        "searchCondition": {
-          "exprType": "GREATER_THAN",
-          "returnType": {
-            "typeName": "BOOLEAN"
-          },
-          "funcCall": {
-            "children": [{
-              "exprType": "INPUT_REF",
-              "returnType": {
-                "typeName": "INT32"
-              },
-              "inputRef": {
-                "columnIdx": 1
-              }
-            }, {
-              "exprType": "INPUT_REF",
-              "returnType": {
-                "typeName": "INT32"
-              },
-              "inputRef": {
-              }
-            }]
           }
-        }
+        },
+        "columnIds": [1, 2, 0]
       }
     }],
-    "projectNode": {
-      "selectList": [{
-        "exprType": "INPUT_REF",
+    "filterNode": {
+      "searchCondition": {
+        "exprType": "EQUAL",
         "returnType": {
-          "typeName": "INT32"
+          "typeName": "BOOLEAN"
         },
-        "inputRef": {
-          "columnIdx": 1
+        "funcCall": {
+          "children": [{
+            "exprType": "INPUT_REF",
+            "returnType": {
+              "typeName": "INT32"
+            },
+            "inputRef": {
+              "columnIdx": 1
+            }
+          }, {
+            "exprType": "CONSTANT_VALUE",
+            "returnType": {
+              "typeName": "INT32"
+            },
+            "constant": {
+              "body": "AAAAAQ=="
+            }
+          }]
         }
-      }, {
-        "exprType": "INPUT_REF",
-        "returnType": {
-          "typeName": "INT64"
-        },
-        "inputRef": {
-          "columnIdx": 2
-        }
-      }]
+      }
     }
   }],
   "mviewNode": {
@@ -76,15 +55,20 @@
       "encoding": "RAW"
     }, {
       "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW"
+    }, {
+      "columnType": {
         "typeName": "INT64"
       },
       "encoding": "RAW"
     }],
-    "pkIndices": [1],
+    "pkIndices": [2],
     "columnOrders": [{
       "orderType": "ASCENDING",
       "inputRef": {
-        "columnIdx": 1
+        "columnIdx": 2
       },
       "returnType": {
         "typeName": "INT64"

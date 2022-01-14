@@ -365,6 +365,18 @@ impl StreamManagerCore {
         }
     }
 
+    // TODO: We will refine this method when the meta service is ready.
+    fn send_conf_change_barrier(&self, mutation: Mutation) {
+        for sender in &self.sender_placeholder {
+            sender
+                .unbounded_send(Message::Barrier(Barrier {
+                    epoch: 0,
+                    mutation: mutation.clone(),
+                }))
+                .unwrap();
+        }
+    }
+
     /// Create a chain(tree) of nodes, with given `store`.
     fn create_nodes_inner(
         &mut self,
@@ -657,10 +669,7 @@ impl StreamManagerCore {
             ChainNode(chain_node) => {
                 let table_id = TableId::from(&chain_node.table_ref_id);
                 let table = table_manager.get_table(&table_id)?;
-                let snapshot = Box::new(BatchQueryExecutor::new(table.clone(), pk_indices.clone()));
-                // TODO(MrCroxx): replace with real mview.
-                // let mview = Box::new(BatchQueryExecutor::new(table, pk_indices));
-                let schema = table.schema();
+                let snapshot = Box::new(BatchQueryExecutor::new(table.clone(), pk_indices));
                 let up_id = chain_node.upstream_actor_id;
                 let rx = {
                     let mut guard = self.context.lock_channel_pool();
@@ -681,7 +690,25 @@ impl StreamManagerCore {
                             )))
                         })?
                 };
-                let mview = Box::new(ReceiverExecutor::new(schema.into_owned(), pk_indices, rx));
+                let pk_indices = chain_node
+                    .pk_indices
+                    .iter()
+                    .map(|x| *x as usize)
+                    .collect_vec();
+                let mut schema = table.schema().into_owned();
+                let pk_fields = pk_indices
+                    .iter()
+                    .map(|col| schema.fields[*col].clone())
+                    .collect_vec();
+                schema.fields.extend(pk_fields);
+                let mview = Box::new(ReceiverExecutor::new(schema, pk_indices, rx));
+
+                // TODO(MrCroxx): ConfChange should be triggered by meta when it's done.
+                self.send_conf_change_barrier(Mutation::AddOutput(
+                    chain_node.upstream_actor_id,
+                    vec![self.actor_infos.get(&actor_id).unwrap().to_owned()],
+                ));
+
                 Ok(Box::new(ChainExecutor::new(snapshot, mview)))
             }
             _ => Err(RwError::from(ErrorCode::InternalError(format!(
@@ -922,7 +949,6 @@ impl StreamManagerCore {
                 let up_down_ids = (chain.upstream_actor_id, *current_id);
                 let mut guard = self.context.lock_channel_pool();
                 guard.insert(up_down_ids, (Some(tx), Some(rx)));
-                debug!("create channel from {} to {}", up_down_ids.0, up_down_ids.1);
             }
 
             for downstream_id in actor.get_downstream_actor_id() {
@@ -932,7 +958,6 @@ impl StreamManagerCore {
                 let up_down_ids = (*current_id, *downstream_id);
                 let mut guard = self.context.lock_channel_pool();
                 guard.insert(up_down_ids, (Some(tx), Some(rx)));
-                debug!("create channel from {} to {}", up_down_ids.0, up_down_ids.1);
             }
         }
         Ok(())

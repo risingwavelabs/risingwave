@@ -109,14 +109,14 @@ impl StreamManager for DefaultStreamManager {
                 actor.nodes.as_mut().unwrap().node.as_mut().unwrap()
             {
                 // TODO(MrCroxx): A create materialized view plan will be splited into multiple
-                // stages. Currently, we simply assume that MView lays on the first
-                // actor. We need an interface in [`StreamMetaManager`] to query the
-                // actor id of the MView node.
+                // stages. Currently, we simply assume that MView lays on the actor
+                // with min actor id. We need an interface in [`StreamMetaManager`]
+                // to query the actor id of the MView node.
                 let table_fragments = self
                     .smm
                     .get_table_actors(&chain.table_ref_id.clone().unwrap())
                     .await?;
-                chain.upstream_actor_id = table_fragments.actor_ids[0];
+                chain.upstream_actor_id = *table_fragments.actor_ids.iter().min().unwrap();
             }
         }
 
