@@ -189,10 +189,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      - uses: actions/setup-go@v2
-        with:
-          go-version: "1.13"
-
       # Install latest postgresql client, our tests requires 14.1+
       - name: Install postgres client
         run: |

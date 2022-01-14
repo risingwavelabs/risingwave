@@ -13,21 +13,21 @@ git clone https://github.com/singularity-data/risingwave.git
 * OS: macOS, Linux, or Windows (WSL or Cygwin)
 * Java 11
 * Rust
-* Go
 * CMake
 * Protocol Buffers
 * OpenSSL
 * PostgreSQL (psql) (>= 14.1)
 
 To install compilers in macOS, run:
+
 ```shell
 brew install java11
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-brew install golang
 brew install cmake
 brew install protobuf
 brew install openssl
 ```
+
 Note that we only tested our code against Java 11. So please use the specific version!
 
 ## Development
