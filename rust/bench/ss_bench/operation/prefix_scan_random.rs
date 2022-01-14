@@ -58,7 +58,17 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
     let stat = LatencyStat::new(latencies);
 
     println!(
-    "Prefix scan latency:\n\tmean: {};\n\tp50: {};\n\tp90: {};\n\tp99: {};\n\tstd dev: {:.3}\nOPS: {}",
-    stat.mean, stat.p50, stat.p90, stat.p99, stat.std_dev, ops
-  );
+        "
+    Prefix scan
+      latency:
+        min: {},
+        mean: {},
+        p50: {},
+        p90: {},
+        p99: {},
+        max: {},
+        std_dev: {:.3};
+      OPS: {}",
+        stat.min, stat.mean, stat.p50, stat.p90, stat.p99, stat.max, stat.std_dev, ops
+    );
 }

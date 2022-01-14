@@ -10,6 +10,8 @@ use risingwave_storage::hummock::version_manager::VersionManager;
 use risingwave_storage::hummock::{HummockOptions, HummockStateStore, HummockStorage};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::object::{ConnectionInfo, S3ObjectStore};
+use risingwave_storage::rocksdb_local::RocksDBStateStore;
+use risingwave_storage::tikv::TikvStateStore;
 use risingwave_storage::StateStore;
 
 #[derive(Parser, Debug)]
@@ -65,15 +67,21 @@ fn get_checksum_algo(algo: &str) -> ChecksumAlg {
 
 #[derive(Clone)]
 pub(crate) enum StateStoreImpl {
-    HummockStateStore(HummockStateStore),
-    MemoryStateStore(MemoryStateStore),
+    Hummock(HummockStateStore),
+    Memory(MemoryStateStore),
+    RocksDB(RocksDBStateStore),
+    Tikv(TikvStateStore),
 }
 
 fn get_state_store_impl(opts: &Opts) -> StateStoreImpl {
     match opts.store.as_ref() {
-        "in-memory" | "in_memory" => StateStoreImpl::MemoryStateStore(MemoryStateStore::new()),
+        "in-memory" | "in_memory" => StateStoreImpl::Memory(MemoryStateStore::new()),
+        tikv if tikv.starts_with("tikv") => StateStoreImpl::Tikv(TikvStateStore::new(vec![tikv
+            .strip_prefix("tikv://")
+            .unwrap()
+            .to_string()])),
         minio if minio.starts_with("hummock+minio://") => {
-            StateStoreImpl::HummockStateStore(HummockStateStore::new(HummockStorage::new(
+            StateStoreImpl::Hummock(HummockStateStore::new(HummockStorage::new(
                 Arc::new(S3ObjectStore::new_with_minio(
                     minio.strip_prefix("hummock+").unwrap(),
                 )),
@@ -93,7 +101,7 @@ fn get_state_store_impl(opts: &Opts) -> StateStoreImpl {
                 s3_test_conn_info,
                 s3.strip_prefix("hummock+s3://").unwrap().to_string(),
             );
-            StateStoreImpl::HummockStateStore(HummockStateStore::new(HummockStorage::new(
+            StateStoreImpl::Hummock(HummockStateStore::new(HummockStorage::new(
                 Arc::new(s3_store),
                 HummockOptions {
                     table_size: opts.table_size_mb * (1 << 20),
@@ -105,6 +113,9 @@ fn get_state_store_impl(opts: &Opts) -> StateStoreImpl {
                 Arc::new(VersionManager::new()),
             )))
         }
+        rocksdb if rocksdb.starts_with("rocksdb_local://") => StateStoreImpl::RocksDB(
+            RocksDBStateStore::new(rocksdb.strip_prefix("rocksdb_local://").unwrap()),
+        ),
         other => unimplemented!("state store \"{}\" is not supported", other),
     }
 }
@@ -144,7 +155,9 @@ async fn main() {
     println!("Input configurations: {:?}", &opts);
 
     match get_state_store_impl(&opts) {
-        StateStoreImpl::HummockStateStore(store) => run_op(store, &opts).await,
-        StateStoreImpl::MemoryStateStore(store) => run_op(store, &opts).await,
+        StateStoreImpl::Hummock(store) => run_op(store, &opts).await,
+        StateStoreImpl::Memory(store) => run_op(store, &opts).await,
+        StateStoreImpl::RocksDB(store) => run_op(store, &opts).await,
+        StateStoreImpl::Tikv(store) => run_op(store, &opts).await,
     };
 }

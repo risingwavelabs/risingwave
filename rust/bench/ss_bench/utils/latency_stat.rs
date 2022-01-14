@@ -11,9 +11,11 @@ pub(crate) fn time_to_str(time_nano: u128) -> String {
 
 pub(crate) struct LatencyStat {
     pub mean: String,
+    pub min: String,
     pub p50: String,
     pub p90: String,
     pub p99: String,
+    pub max: String,
     pub std_dev: f64,
 }
 
@@ -23,10 +25,12 @@ impl LatencyStat {
         latencies.sort_unstable();
 
         LatencyStat {
+            min: time_to_str(latencies[0]),
             mean: time_to_str(latencies.iter().sum::<u128>() / latencies.len() as u128),
             p50: time_to_str(latencies[(latencies.len() as f64 * 0.5) as usize]),
             p90: time_to_str(latencies[(latencies.len() as f64 * 0.9) as usize]),
             p99: time_to_str(latencies[(latencies.len() as f64 * 0.99) as usize]),
+            max: time_to_str(latencies[latencies.len() - 1]),
             std_dev: LatencyStat::std_deviation(&latencies),
         }
     }
