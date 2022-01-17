@@ -10,7 +10,6 @@ pub use sstable::*;
 mod cloud;
 mod compactor;
 mod error;
-pub mod hummock_client;
 mod iterator;
 pub mod key;
 pub mod key_range;
@@ -43,6 +42,15 @@ use self::version_manager::VersionManager;
 use super::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 use crate::hummock::iterator::ReverseUserIterator;
 use crate::object::ObjectStore;
+
+pub type HummockTTL = u64;
+pub type HummockSSTableId = u64;
+pub type HummockRefCount = u64;
+pub type HummockVersionId = u64;
+pub type HummockSnapshotId = u64;
+pub type HummockContextId = i32;
+pub type HummockEpoch = u64;
+pub const INVALID_EPOCH: HummockEpoch = 0;
 
 pub static REMOTE_DIR: &str = "/test/";
 

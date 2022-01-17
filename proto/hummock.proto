@@ -8,9 +8,9 @@ option optimize_for = SPEED;
 
 import "common.proto";
 
-message Table {
+message SstableInfo {
   uint64 id = 1;
-  SstableMeta meta = 2;
+  KeyRange key_range = 2;
 }
 
 message BlockMeta {
@@ -106,7 +106,7 @@ message RemoveTableWatermarkResponse {
 
 message AddTablesRequest {
   int32 context_identifier = 1;
-  repeated Table tables = 2;
+  repeated SstableInfo tables = 2;
   uint64 epoch = 3;
 }
 
@@ -161,16 +161,6 @@ message UnpinSnapshotResponse {
   common.Status status = 1;
 }
 
-message GetTablesRequest {
-  int32 context_identifier = 1;
-  HummockVersion pinned_version = 2;
-}
-
-message GetTablesResponse {
-  common.Status status = 1;
-  repeated Table tables = 2;
-}
-
 message LevelEntry {
   uint32 level_idx = 1;
   Level level = 2;
@@ -191,7 +181,7 @@ message CompactTask {
   // low watermark in 'ts-aware compaction'
   uint64 watermark = 3;
   // compacion output, which will be added to [`target_level`] of LSM after compaction
-  repeated Table sorted_output_ssts = 4;
+  repeated SstableInfo sorted_output_ssts = 4;
   // task id assigned by hummock storage service
   uint64 task_id = 5;
   // compacion output will be added to [`target_level`] of LSM after compaction
@@ -254,7 +244,6 @@ service HummockManagerService {
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
   rpc AddTables(AddTablesRequest) returns (AddTablesResponse);
-  rpc GetTables(GetTablesRequest) returns (GetTablesResponse);
   rpc AddTableWatermark(AddTableWatermarkRequest) returns (AddTableWatermarkResponse);
   rpc RemoveTableWatermark(RemoveTableWatermarkRequest) returns (RemoveTableWatermarkResponse);
   rpc GetCompactionTasks(GetCompactionTasksRequest) returns (GetCompactionTasksResponse);

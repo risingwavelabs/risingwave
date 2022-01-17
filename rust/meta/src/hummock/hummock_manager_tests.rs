@@ -6,10 +6,13 @@ use assert_matches::assert_matches;
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::hummock::Table;
+use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
 use risingwave_storage::hummock::key::key_with_epoch;
 use risingwave_storage::hummock::value::HummockValue;
-use risingwave_storage::hummock::{SSTableBuilder, SSTableBuilderOptions};
+use risingwave_storage::hummock::{
+    HummockSSTableId, HummockSnapshotId, HummockVersionId, SSTableBuilder, SSTableBuilderOptions,
+    INVALID_EPOCH,
+};
 use tokio::task::JoinHandle;
 
 use super::*;
@@ -25,6 +28,7 @@ async fn create_hummock_manager(
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_hummock_context_management() -> Result<()> {
     let hummock_config = hummock::Config {
         context_ttl: 1000,
@@ -126,8 +130,8 @@ async fn test_hummock_pin_unpin() -> Result<()> {
     Ok(())
 }
 
-/// Generate keys like `001_key_test_00002` with timestamp `ts`.
-pub fn iterator_test_key_of_ts(table: u64, idx: usize, ts: HummockSnapshotId) -> Vec<u8> {
+/// Generate keys like `001_key_test_00002` with timestamp `epoch`.
+fn iterator_test_key_of_epoch(table: u64, idx: usize, ts: HummockSnapshotId) -> Vec<u8> {
     // key format: {prefix_index}_version
     key_with_epoch(
         format!("{:03}_key_test_{:05}", table, idx)
@@ -137,7 +141,20 @@ pub fn iterator_test_key_of_ts(table: u64, idx: usize, ts: HummockSnapshotId) ->
     )
 }
 
-fn generate_test_tables(epoch: u64, table_id: &mut u64) -> Vec<Table> {
+fn get_sorted_sstable_ids(sstables: &[SstableInfo]) -> Vec<HummockSSTableId> {
+    sstables.iter().map(|table| table.id).sorted().collect_vec()
+}
+
+fn get_sorted_committed_sstable_ids(hummock_version: HummockVersion) -> Vec<HummockSSTableId> {
+    hummock_version
+        .levels
+        .iter()
+        .flat_map(|level| level.table_ids.clone())
+        .sorted()
+        .collect_vec()
+}
+
+fn generate_test_tables(epoch: u64, table_id: &mut u64) -> Vec<SstableInfo> {
     // Tables to add
     let opt = SSTableBuilderOptions {
         bloom_false_positive: 0.1,
@@ -154,12 +171,16 @@ fn generate_test_tables(epoch: u64, table_id: &mut u64) -> Vec<Table> {
             (i * 10, HummockValue::Put(b"test".to_vec())),
         ];
         for kv in kv_pairs {
-            b.add(&iterator_test_key_of_ts(*table_id, kv.0, epoch), kv.1);
+            b.add(&iterator_test_key_of_epoch(*table_id, kv.0, epoch), kv.1);
         }
         let (_data, meta) = b.finish();
-        tables.push(Table {
+        tables.push(SstableInfo {
             id: *table_id,
-            meta: Some(meta),
+            key_range: Some(KeyRange {
+                left: meta.smallest_key,
+                right: meta.largest_key,
+                inf: false,
+            }),
         });
         (*table_id) += 1;
     }
@@ -179,7 +200,7 @@ async fn test_hummock_table() -> Result<()> {
 
     let epoch: u64 = 1;
     let mut table_id = 1;
-    let original_tables: Vec<Table> = generate_test_tables(epoch, &mut table_id);
+    let original_tables = generate_test_tables(epoch, &mut table_id);
     let result = hummock_manager
         .add_tables(context.identifier, original_tables.clone(), epoch)
         .await;
@@ -196,9 +217,9 @@ async fn test_hummock_table() -> Result<()> {
         .meta_store()
         .list_cf(env.config().get_hummock_table_cf())
         .await?;
-    let fetched_tables: Vec<Table> = fetched_tables
+    let fetched_tables: Vec<SstableInfo> = fetched_tables
         .iter()
-        .map(|v| -> Table { Table::decode(v.as_slice()).unwrap() })
+        .map(|v| -> SstableInfo { SstableInfo::decode(v.as_slice()).unwrap() })
         .sorted_by_key(|t| t.id)
         .collect();
     assert_eq!(original_tables, fetched_tables);
@@ -218,11 +239,10 @@ async fn test_hummock_table() -> Result<()> {
     );
 
     // Confirm tables got are equal to original tables
-    let got_tables: Vec<Table> = hummock_manager
-        .get_tables(context.identifier, pinned_version)
-        .await
-        .map(|tv| tv.into_iter().sorted_by_key(|t| t.id).collect())?;
-    assert_eq!(original_tables, got_tables);
+    assert_eq!(
+        get_sorted_sstable_ids(&original_tables),
+        get_sorted_committed_sstable_ids(pinned_version)
+    );
 
     // TODO should use strong cases after compactor is ready so that real compact_tasks are
     // reported.
@@ -259,7 +279,7 @@ async fn test_hummock_transaction() -> Result<()> {
     let epoch1: u64 = 1;
     {
         // Add tables in epoch1
-        let tables_in_epoch1: Vec<Table> = generate_test_tables(epoch1, &mut table_id);
+        let tables_in_epoch1 = generate_test_tables(epoch1, &mut table_id);
         let result = hummock_manager
             .add_tables(context.identifier, tables_in_epoch1.clone(), epoch1)
             .await;
@@ -274,11 +294,7 @@ async fn test_hummock_transaction() -> Result<()> {
         uncommitted_epoch.table_ids.sort_unstable();
         let table_ids_in_epoch1: Vec<u64> = tables_in_epoch1.iter().map(|t| t.id).collect();
         assert_eq!(table_ids_in_epoch1, uncommitted_epoch.table_ids);
-        let got_tables: Vec<Table> = hummock_manager
-            .get_tables(context.identifier, pinned_version)
-            .await
-            .map(|tv| tv.into_iter().sorted_by_key(|t| t.id).collect())?;
-        assert!(got_tables.is_empty());
+        assert!(get_sorted_committed_sstable_ids(pinned_version).is_empty());
 
         hummock_manager
             .unpin_version(context.identifier, pinned_version_id)
@@ -296,11 +312,11 @@ async fn test_hummock_transaction() -> Result<()> {
             hummock_manager.pin_version(context.identifier).await?;
         assert!(pinned_version.uncommitted_epochs.is_empty());
         assert_eq!(pinned_version.max_committed_epoch, epoch1);
-        let got_tables: Vec<Table> = hummock_manager
-            .get_tables(context.identifier, pinned_version.clone())
-            .await
-            .map(|tv| tv.into_iter().sorted_by_key(|t| t.id).collect())?;
-        assert_eq!(committed_tables, got_tables);
+        assert_eq!(
+            get_sorted_sstable_ids(&committed_tables),
+            get_sorted_committed_sstable_ids(pinned_version)
+        );
+
         hummock_manager
             .unpin_version(context.identifier, pinned_version_id)
             .await?;
@@ -313,7 +329,7 @@ async fn test_hummock_transaction() -> Result<()> {
     let epoch2 = epoch1 + 1;
     {
         // Add tables in epoch2
-        let tables_in_epoch2: Vec<Table> = generate_test_tables(epoch2, &mut table_id);
+        let tables_in_epoch2 = generate_test_tables(epoch2, &mut table_id);
         let result = hummock_manager
             .add_tables(context.identifier, tables_in_epoch2.clone(), epoch2)
             .await;
@@ -329,11 +345,10 @@ async fn test_hummock_transaction() -> Result<()> {
         let table_ids_in_epoch2: Vec<u64> = tables_in_epoch2.iter().map(|t| t.id).collect();
         assert_eq!(table_ids_in_epoch2, uncommitted_epoch.table_ids);
         assert_eq!(pinned_version.max_committed_epoch, epoch1);
-        let got_tables: Vec<Table> = hummock_manager
-            .get_tables(context.identifier, pinned_version)
-            .await
-            .map(|tv| tv.into_iter().sorted_by_key(|t| t.id).collect())?;
-        assert_eq!(committed_tables, got_tables);
+        assert_eq!(
+            get_sorted_sstable_ids(&committed_tables),
+            get_sorted_committed_sstable_ids(pinned_version)
+        );
         hummock_manager
             .unpin_version(context.identifier, pinned_version_id)
             .await?;
@@ -351,11 +366,10 @@ async fn test_hummock_transaction() -> Result<()> {
             hummock_manager.pin_version(context.identifier).await?;
         assert!(pinned_version.uncommitted_epochs.is_empty());
         assert_eq!(pinned_version.max_committed_epoch, epoch2);
-        let got_tables: Vec<Table> = hummock_manager
-            .get_tables(context.identifier, pinned_version)
-            .await
-            .map(|tv| tv.into_iter().sorted_by_key(|t| t.id).collect())?;
-        assert_eq!(committed_tables, got_tables);
+        assert_eq!(
+            get_sorted_sstable_ids(&committed_tables),
+            get_sorted_committed_sstable_ids(pinned_version)
+        );
         hummock_manager
             .unpin_version(context.identifier, pinned_version_id)
             .await?;
@@ -369,12 +383,12 @@ async fn test_hummock_transaction() -> Result<()> {
     let epoch4 = epoch3 + 1;
     {
         // Add tables in epoch3 and epoch4
-        let tables_in_epoch3: Vec<Table> = generate_test_tables(epoch3, &mut table_id);
+        let tables_in_epoch3 = generate_test_tables(epoch3, &mut table_id);
         let result = hummock_manager
             .add_tables(context.identifier, tables_in_epoch3.clone(), epoch3)
             .await;
         assert!(result.is_ok());
-        let tables_in_epoch4: Vec<Table> = generate_test_tables(epoch4, &mut table_id);
+        let tables_in_epoch4 = generate_test_tables(epoch4, &mut table_id);
         let result = hummock_manager
             .add_tables(context.identifier, tables_in_epoch4.clone(), epoch4)
             .await;
@@ -401,11 +415,10 @@ async fn test_hummock_transaction() -> Result<()> {
         let table_ids_in_epoch4: Vec<u64> = tables_in_epoch4.iter().map(|t| t.id).collect();
         assert_eq!(table_ids_in_epoch4, uncommitted_epoch4.table_ids);
         assert_eq!(pinned_version.max_committed_epoch, epoch2);
-        let got_tables: Vec<Table> = hummock_manager
-            .get_tables(context.identifier, pinned_version)
-            .await
-            .map(|tv| tv.into_iter().sorted_by_key(|t| t.id).collect())?;
-        assert_eq!(committed_tables, got_tables);
+        assert_eq!(
+            get_sorted_sstable_ids(&committed_tables),
+            get_sorted_committed_sstable_ids(pinned_version)
+        );
         hummock_manager
             .unpin_version(context.identifier, pinned_version_id)
             .await?;
@@ -432,11 +445,10 @@ async fn test_hummock_transaction() -> Result<()> {
         uncommitted_epoch4.table_ids.sort_unstable();
         assert_eq!(table_ids_in_epoch4, uncommitted_epoch4.table_ids);
         assert_eq!(pinned_version.max_committed_epoch, epoch2);
-        let got_tables: Vec<Table> = hummock_manager
-            .get_tables(context.identifier, pinned_version)
-            .await
-            .map(|tv| tv.into_iter().sorted_by_key(|t| t.id).collect())?;
-        assert_eq!(committed_tables, got_tables);
+        assert_eq!(
+            get_sorted_sstable_ids(&committed_tables),
+            get_sorted_committed_sstable_ids(pinned_version)
+        );
         hummock_manager
             .unpin_version(context.identifier, pinned_version_id)
             .await?;
@@ -454,11 +466,10 @@ async fn test_hummock_transaction() -> Result<()> {
             hummock_manager.pin_version(context.identifier).await?;
         assert!(pinned_version.uncommitted_epochs.is_empty());
         assert_eq!(pinned_version.max_committed_epoch, epoch4);
-        let got_tables: Vec<Table> = hummock_manager
-            .get_tables(context.identifier, pinned_version)
-            .await
-            .map(|tv| tv.into_iter().sorted_by_key(|t| t.id).collect())?;
-        assert_eq!(committed_tables, got_tables);
+        assert_eq!(
+            get_sorted_sstable_ids(&committed_tables),
+            get_sorted_committed_sstable_ids(pinned_version)
+        );
         hummock_manager
             .unpin_version(context.identifier, pinned_version_id)
             .await?;

@@ -1,14 +1,13 @@
 use bytes::Bytes;
 use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::error::Result;
-use risingwave_pb::hummock::{CompactTask, Level, LevelEntry, LevelType, Table};
+use risingwave_pb::hummock::{CompactTask, Level, LevelEntry, LevelType, SstableInfo};
 use risingwave_storage::hummock::key::{user_key, FullKey};
 use risingwave_storage::hummock::key_range::KeyRange;
-use risingwave_storage::hummock::HummockError;
+use risingwave_storage::hummock::{HummockError, HummockSSTableId, HummockSnapshotId};
 use serde::{Deserialize, Serialize};
 
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
-use crate::hummock::{HummockSSTableId, HummockSnapshotId};
 use crate::manager::{MetaSrvEnv, SINGLE_VERSION_EPOCH};
 use crate::storage::{ColumnFamilyUtils, Operation, Transaction};
 
@@ -304,7 +303,7 @@ impl CompactionInner {
         output_table_compact_entries: Vec<SSTableStat>,
         compact_task: CompactTask,
         task_result: bool,
-    ) -> (CompactStatus, Vec<Table>, Vec<HummockSSTableId>) {
+    ) -> (CompactStatus, Vec<SstableInfo>, Vec<HummockSSTableId>) {
         let mut delete_table_ids = vec![];
         match task_result {
             true => {

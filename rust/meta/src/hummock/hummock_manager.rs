@@ -11,24 +11,22 @@ use risingwave_common::array::RwError;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::hummock::{
     CompactTask, HummockContext, HummockContextPinnedSnapshot, HummockContextPinnedVersion,
-    HummockSnapshot, HummockTablesToDelete, HummockVersion, Level, LevelType, Table,
+    HummockSnapshot, HummockTablesToDelete, HummockVersion, Level, LevelType, SstableInfo,
     UncommittedEpoch,
 };
 use risingwave_pb::meta::get_id_request::IdCategory;
 use risingwave_storage::hummock::key_range::KeyRange;
-use risingwave_storage::hummock::HummockError;
+use risingwave_storage::hummock::{
+    HummockContextId, HummockEpoch, HummockError, HummockSnapshotId, HummockTTL, HummockVersionId,
+    INVALID_EPOCH,
+};
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 
 use crate::hummock::compaction::{CompactStatus, CompactionInner};
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
-use crate::hummock::{
-    HummockContextId, HummockEpoch, HummockSnapshotId, HummockTTL, HummockVersionId,
-};
 use crate::manager::{MetaSrvEnv, SINGLE_VERSION_EPOCH};
-use crate::storage::{ColumnFamilyUtils, Operation, Precondition, Transaction};
-
-pub const INVALID_EPOCH: HummockEpoch = 0;
+use crate::storage::{ColumnFamilyUtils, Operation, Transaction};
 
 #[derive(Clone)]
 pub struct Config {
@@ -67,15 +65,9 @@ pub trait HummockManager: Sync + Send + 'static {
     async fn add_tables(
         &self,
         context_id: HummockContextId,
-        tables: Vec<Table>,
+        tables: Vec<SstableInfo>,
         epoch: HummockEpoch,
     ) -> Result<HummockVersionId>;
-    /// Get the iterators on the underlying tables.
-    async fn get_tables(
-        &self,
-        context_id: HummockContextId,
-        hummock_version: HummockVersion,
-    ) -> Result<Vec<Table>>;
     async fn pin_snapshot(&self, context_id: HummockContextId) -> Result<HummockSnapshot>;
     async fn unpin_snapshot(
         &self,
@@ -124,16 +116,16 @@ impl DefaultHummockManagerInner {
         DefaultHummockManagerInner { env }
     }
 
-    async fn pick_few_tables(&self, table_ids: &[u64]) -> Result<Vec<Table>> {
+    async fn pick_few_tables(&self, table_ids: &[u64]) -> Result<Vec<SstableInfo>> {
         let mut ret = Vec::with_capacity(table_ids.len());
         for &table_id in table_ids {
-            let table: Table = self.get_table_data(table_id).await?;
+            let table: SstableInfo = self.get_table_data(table_id).await?;
             ret.push(table);
         }
         Ok(ret)
     }
 
-    async fn get_table_data(&self, table_id: u64) -> Result<Table> {
+    async fn get_table_data(&self, table_id: u64) -> Result<SstableInfo> {
         self.env
             .meta_store_ref()
             .get_cf(
@@ -142,7 +134,7 @@ impl DefaultHummockManagerInner {
                 SINGLE_VERSION_EPOCH,
             )
             .await
-            .map(|t| Table::decode(t.as_slice()).unwrap())
+            .map(|t| SstableInfo::decode(t.as_slice()).unwrap())
     }
 
     async fn get_current_version_id(&self) -> Result<HummockVersionId> {
@@ -169,7 +161,7 @@ impl DefaultHummockManagerInner {
             .map(|s| HummockVersion::decode(s.as_slice()).unwrap())
     }
 
-    fn add_table_in_trx(&self, trx: &mut Box<dyn Transaction>, table: &Table) {
+    fn add_table_in_trx(&self, trx: &mut Box<dyn Transaction>, table: &SstableInfo) {
         trx.add_operations(vec![Operation::Put(
             ColumnFamilyUtils::prefix_key_with_cf(
                 table.id.to_be_bytes().as_slice(),
@@ -386,7 +378,7 @@ impl DefaultHummockManagerInner {
         )]);
     }
 
-    async fn get_tables(&self) -> Result<Vec<Table>> {
+    async fn get_tables(&self) -> Result<Vec<SstableInfo>> {
         let table_list = self
             .env
             .meta_store_ref()
@@ -394,7 +386,7 @@ impl DefaultHummockManagerInner {
             .await?;
         Ok(table_list
             .iter()
-            .map(|v| Table::decode(v.as_slice()).unwrap())
+            .map(|v| SstableInfo::decode(v.as_slice()).unwrap())
             .collect())
     }
 
@@ -630,13 +622,14 @@ impl DefaultHummockManager {
     ) -> Result<()> {
         if context_id != RESERVED_HUMMOCK_CONTEXT_ID {
             // check context validity
-            trx.add_preconditions(vec![Precondition::KeyExists {
-                key: ColumnFamilyUtils::prefix_key_with_cf(
-                    context_id.to_be_bytes().as_slice(),
-                    self.env.config().get_hummock_context_cf().as_bytes(),
-                ),
-                version: None,
-            }]);
+            // TODO disable hummock context validation until we decide to adopt it.
+            // trx.add_preconditions(vec![Precondition::KeyExists {
+            //   key: ColumnFamilyUtils::prefix_key_with_cf(
+            //     context_id.to_be_bytes().as_slice(),
+            //     self.env.config().get_hummock_context_cf().as_bytes(),
+            //   ),
+            //   version: None,
+            // }]);
         }
         trx.commit().map_err(|e| e.into())
     }
@@ -747,15 +740,16 @@ impl HummockManager for DefaultHummockManager {
     async fn add_tables(
         &self,
         context_id: HummockContextId,
-        tables: Vec<Table>,
+        tables: Vec<SstableInfo>,
         epoch: HummockEpoch,
     ) -> Result<HummockVersionId> {
+        // TODO #2156 the types will be unified to prost
         let stats = tables
             .iter()
             .map(|table| SSTableStat {
                 key_range: KeyRange::new(
-                    Bytes::copy_from_slice(&table.meta.as_ref().unwrap().smallest_key),
-                    Bytes::copy_from_slice(&table.meta.as_ref().unwrap().largest_key),
+                    Bytes::copy_from_slice(&table.key_range.as_ref().unwrap().left),
+                    Bytes::copy_from_slice(&table.key_range.as_ref().unwrap().right),
                 ),
                 table_id: table.id,
                 compact_task: None,
@@ -809,7 +803,7 @@ impl HummockManager for DefaultHummockManager {
         // add tables
         tables
             .iter()
-            .for_each(|t: &Table| inner_guard.add_table_in_trx(&mut transaction, t));
+            .for_each(|t: &SstableInfo| inner_guard.add_table_in_trx(&mut transaction, t));
         let new_version_id = old_version_id + 1;
 
         // create new_version by adding tables in UncommittedEpoch
@@ -849,32 +843,6 @@ impl HummockManager for DefaultHummockManager {
         self.commit_trx(&mut transaction, context_id).await?;
 
         Ok(new_version_id)
-    }
-
-    async fn get_tables(
-        &self,
-        _context_id: HummockContextId,
-        hummock_version: HummockVersion,
-    ) -> Result<Vec<Table>> {
-        let inner_guard = self.inner.read().await;
-        let mut out: Vec<Table> = vec![];
-        for level in hummock_version.levels {
-            match level.get_level_type() {
-                LevelType::Overlapping => {
-                    let mut tables = inner_guard
-                        .pick_few_tables(level.table_ids.as_slice())
-                        .await?;
-                    out.append(&mut tables);
-                }
-                LevelType::Nonoverlapping => {
-                    let mut tables = inner_guard
-                        .pick_few_tables(level.table_ids.as_slice())
-                        .await?;
-                    out.append(&mut tables);
-                }
-            }
-        }
-        Ok(out)
     }
 
     async fn pin_snapshot(&self, context_id: HummockContextId) -> Result<HummockSnapshot> {
@@ -944,13 +912,14 @@ impl HummockManager for DefaultHummockManager {
         compact_task: CompactTask,
         task_result: bool,
     ) -> Result<()> {
+        // TODO #2156 the types will be unified to prost
         let output_table_compact_entries: Vec<_> = compact_task
             .sorted_output_ssts
             .iter()
             .map(|table| SSTableStat {
                 key_range: KeyRange::new(
-                    Bytes::copy_from_slice(&table.meta.as_ref().unwrap().smallest_key),
-                    Bytes::copy_from_slice(&table.meta.as_ref().unwrap().largest_key),
+                    Bytes::copy_from_slice(&table.key_range.as_ref().unwrap().left),
+                    Bytes::copy_from_slice(&table.key_range.as_ref().unwrap().right),
                 ),
                 table_id: table.id,
                 compact_task: None,

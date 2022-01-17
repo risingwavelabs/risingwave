@@ -4,7 +4,7 @@ use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServic
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
 
-use crate::hummock::{HummockManager, INVALID_EPOCH};
+use crate::hummock::HummockManager;
 
 pub struct HummockServiceImpl {
     hummock_manager: Arc<dyn HummockManager>,
@@ -114,31 +114,6 @@ impl HummockManagerService for HummockServiceImpl {
             Ok(version_id) => Ok(Response::new(AddTablesResponse {
                 status: None,
                 version_id,
-            })),
-            Err(e) => Err(e.to_grpc_status()),
-        }
-    }
-
-    async fn get_tables(
-        &self,
-        request: Request<GetTablesRequest>,
-    ) -> Result<Response<GetTablesResponse>, Status> {
-        let req = request.into_inner();
-        let result = self
-            .hummock_manager
-            .get_tables(
-                req.context_identifier,
-                req.pinned_version.unwrap_or(HummockVersion {
-                    levels: vec![],
-                    uncommitted_epochs: vec![],
-                    max_committed_epoch: INVALID_EPOCH,
-                }),
-            )
-            .await;
-        match result {
-            Ok(tables) => Ok(Response::new(GetTablesResponse {
-                status: None,
-                tables,
             })),
             Err(e) => Err(e.to_grpc_status()),
         }
