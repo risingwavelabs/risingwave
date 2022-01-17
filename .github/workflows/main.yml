@@ -308,10 +308,10 @@ jobs:
           make rust_cargo_sort_check
       - name: Run rust format check
         run: |
-          make rust_fmt
+          make rust_fmt_check
       - name: Run rust clippy check
         run: |
-          make rust_check
+          make rust_clippy_check
       - name: Build compute-node and meta-node
         run: make rust_build
       - uses: actions/upload-artifact@v2
