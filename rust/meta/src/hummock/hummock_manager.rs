@@ -352,6 +352,9 @@ impl DefaultHummockManagerInner {
     }
 
     async fn get_snapshot_low_watermark(&self) -> Result<HummockSnapshotId> {
+        let version_data = self
+            .get_version_data(self.get_current_version_id().await?)
+            .await?;
         let result = self
             .env
             .meta_store_ref()
@@ -364,7 +367,7 @@ impl DefaultHummockManagerInner {
                     .unwrap()
                     .snapshot_id
             })
-            .fold(HummockSnapshotId::MAX, std::cmp::min);
+            .fold(version_data.max_committed_epoch, std::cmp::min);
         Ok(low_watermark)
     }
 
