@@ -26,6 +26,7 @@ use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;
 use crate::executor::join::sort_merge_join::SortMergeJoinExecutor;
 use crate::executor::join::HashJoinExecutorBuilder;
 pub use crate::executor::stream_scan::StreamScanExecutor;
+use crate::executor::trace::TraceExecutor;
 use crate::executor::values::ValuesExecutor;
 use crate::task::{BatchTaskEnv, TaskId};
 
@@ -50,6 +51,7 @@ mod stream_scan;
 #[cfg(test)]
 mod test_utils;
 mod top_n;
+mod trace;
 mod values;
 
 /// `Executor` is an operator in the query execution.
@@ -68,6 +70,9 @@ pub trait Executor: Send {
     ///
     /// Schema must be available before `init`.
     fn schema(&self) -> &Schema;
+
+    /// Identity string of the executor
+    fn identity(&self) -> &str;
 }
 
 pub type BoxedExecutor = Box<dyn Executor>;
@@ -123,7 +128,7 @@ impl<'a> ExecutorBuilder<'a> {
     }
 
     fn try_build(&self) -> Result<BoxedExecutor> {
-        build_executor! { self,
+        let real_executor = build_executor! { self,
           PlanNodeType::CreateTable => CreateTableExecutor,
           PlanNodeType::SeqScan => SeqScanExecutor,
           PlanNodeType::RowSeqScan => RowSeqScanExecutor,
@@ -146,7 +151,9 @@ impl<'a> ExecutorBuilder<'a> {
           PlanNodeType::HashAgg => HashAggExecutorBuilder,
           PlanNodeType::MergeSortExchange => MergeSortExchangeExecutor,
           PlanNodeType::GenerateSeries => GenerateSeriesI32Executor
-        }
+        }?;
+        let input_desc = real_executor.identity().to_string();
+        Ok(Box::new(TraceExecutor::new(real_executor, input_desc)))
     }
 
     pub fn plan_node(&self) -> &PlanNode {

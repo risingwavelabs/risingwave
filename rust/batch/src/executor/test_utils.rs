@@ -14,6 +14,7 @@ use crate::executor::Executor;
 pub struct MockExecutor {
     chunks: VecDeque<DataChunk>,
     schema: Schema,
+    identity: String,
 }
 
 impl MockExecutor {
@@ -21,6 +22,7 @@ impl MockExecutor {
         Self {
             chunks: VecDeque::new(),
             schema,
+            identity: "MockExecutor".to_string(),
         }
     }
 
@@ -55,6 +57,10 @@ impl Executor for MockExecutor {
 
     fn schema(&self) -> &Schema {
         &self.schema
+    }
+
+    fn identity(&self) -> &str {
+        &self.identity
     }
 }
 

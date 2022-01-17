@@ -3180,6 +3180,8 @@ dependencies = [
  "tokio-stream",
  "tokio-test",
  "tonic",
+ "tracing",
+ "tracing-futures",
  "twox-hash",
  "url",
 ]

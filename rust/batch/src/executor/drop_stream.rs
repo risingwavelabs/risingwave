@@ -13,6 +13,7 @@ pub(super) struct DropStreamExecutor {
     table_id: TableId,
     source_manager: SourceManagerRef,
     schema: Schema,
+    identity: String,
 }
 
 #[async_trait::async_trait]
@@ -35,6 +36,10 @@ impl Executor for DropStreamExecutor {
     fn schema(&self) -> &Schema {
         &self.schema
     }
+
+    fn identity(&self) -> &str {
+        &self.identity
+    }
 }
 
 impl BoxedExecutorBuilder for DropStreamExecutor {
@@ -50,6 +55,7 @@ impl BoxedExecutorBuilder for DropStreamExecutor {
             table_id,
             source_manager: source.global_task_env().source_manager_ref(),
             schema: Schema { fields: vec![] },
+            identity: format!("DropStreamExecutor{:?}", source.task_id),
         }))
     }
 }

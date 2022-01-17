@@ -20,6 +20,7 @@ pub struct CreateTableExecutor {
     source_manager: SourceManagerRef,
     table_columns: Vec<TableColumnDesc>,
     v2: bool,
+    identity: String,
 }
 
 impl CreateTableExecutor {
@@ -28,6 +29,7 @@ impl CreateTableExecutor {
         table_manager: TableManagerRef,
         source_manager: SourceManagerRef,
         table_columns: Vec<TableColumnDesc>,
+        identity: String,
     ) -> Self {
         Self {
             table_id,
@@ -35,6 +37,7 @@ impl CreateTableExecutor {
             source_manager,
             table_columns,
             v2: true,
+            identity,
         }
     }
 }
@@ -65,6 +68,7 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
             source_manager: source.global_task_env().source_manager_ref(),
             table_columns,
             v2: node.v2,
+            identity: format!("CreateTableExecutor{:?}", source.task_id),
         }))
     }
 }
@@ -108,5 +112,9 @@ impl Executor for CreateTableExecutor {
 
     fn schema(&self) -> &Schema {
         panic!("create table executor does not have schema!");
+    }
+
+    fn identity(&self) -> &str {
+        &self.identity
     }
 }

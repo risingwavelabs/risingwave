@@ -20,6 +20,7 @@ use crate::executor::join::hash_join::HashJoinState::{Done, FirstProbe, Probe, P
 use crate::executor::join::hash_join_state::{BuildTable, ProbeTable};
 use crate::executor::join::JoinType;
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
+use crate::task::TaskId;
 
 /// Parameters of equi-join.
 ///
@@ -89,6 +90,7 @@ pub(super) struct HashJoinExecutor<K> {
     right_child: BoxedExecutor,
     state: HashJoinState<K>,
     schema: Schema,
+    identity: String,
 }
 
 impl EquiJoinParams {
@@ -168,6 +170,10 @@ impl<K: HashKey + Send + Sync> Executor for HashJoinExecutor<K> {
 
     fn schema(&self) -> &Schema {
         &self.schema
+    }
+
+    fn identity(&self) -> &str {
+        &self.identity
     }
 }
 
@@ -251,12 +257,14 @@ impl<K> HashJoinExecutor<K> {
         right_child: BoxedExecutor,
         params: EquiJoinParams,
         schema: Schema,
+        identity: String,
     ) -> Self {
         HashJoinExecutor {
             left_child,
             right_child,
             state: HashJoinState::Build(BuildTable::with_params(params)),
             schema,
+            identity,
         }
     }
 }
@@ -266,6 +274,7 @@ pub struct HashJoinExecutorBuilder {
     left_child: BoxedExecutor,
     right_child: BoxedExecutor,
     schema: Schema,
+    task_id: TaskId,
 }
 
 struct HashJoinExecutorBuilderDispatcher<K> {
@@ -283,6 +292,7 @@ impl<K: HashKey> HashKeyDispatcher<K> for HashJoinExecutorBuilderDispatcher<K> {
             input.right_child,
             input.params,
             input.schema,
+            format!("HashJoinExecutor{:?}", input.task_id),
         ))
     }
 }
@@ -362,6 +372,7 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
             left_child,
             right_child,
             schema: Schema { fields },
+            task_id: context.task_id.clone(),
         };
 
         Ok(hash_key_dispatch!(
@@ -389,6 +400,7 @@ mod tests {
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::BoxedExecutor;
+    use crate::task::TaskId;
 
     struct DataChunkMerger {
         data_types: Vec<DataTypeKind>,
@@ -637,6 +649,7 @@ mod tests {
                 right_child,
                 params,
                 schema,
+                format!("HashJoinExecutor{:?}", TaskId::default()),
             )) as BoxedExecutor
         }
 

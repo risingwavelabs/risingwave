@@ -15,6 +15,7 @@ pub struct StreamScanExecutor {
     reader: Box<dyn BatchSourceReader>,
     done: bool,
     schema: Schema,
+    identity: String,
 }
 
 impl BoxedExecutorBuilder for StreamScanExecutor {
@@ -71,6 +72,7 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
             reader,
             done: false,
             schema: Schema { fields },
+            identity: format!("StreamScanExecutor{:?}", source.task_id),
         }))
     }
 }
@@ -91,6 +93,10 @@ impl Executor for StreamScanExecutor {
 
     fn schema(&self) -> &Schema {
         &self.schema
+    }
+
+    fn identity(&self) -> &str {
+        &self.identity
     }
 }
 
@@ -114,6 +120,7 @@ mod tests {
     use risingwave_common::types::Int32Type;
 
     use super::*;
+    use crate::task::TaskId;
 
     struct MockSourceReader {}
 
@@ -144,6 +151,7 @@ mod tests {
             reader: Box::new(reader),
             done: false,
             schema: Schema::new(vec![Field::new(Int32Type::create(false))]),
+            identity: format!("StreamScanExecutor{:?}", TaskId::default()),
         };
         executor.open().await.unwrap();
 

@@ -22,6 +22,7 @@ pub struct RowSeqScanExecutor {
     data_types: Vec<DataTypeKind>,
     column_ids: Vec<usize>,
     schema: Schema,
+    identity: String,
 }
 
 impl RowSeqScanExecutor {
@@ -30,6 +31,7 @@ impl RowSeqScanExecutor {
         data_types: Vec<DataTypeKind>,
         column_ids: Vec<usize>,
         schema: Schema,
+        identity: String,
     ) -> Self {
         Self {
             table,
@@ -37,6 +39,7 @@ impl RowSeqScanExecutor {
             data_types,
             column_ids,
             schema,
+            identity,
         }
     }
 }
@@ -69,7 +72,13 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
             .map(|i| *i as usize)
             .collect_vec();
 
-        Ok(Box::new(Self::new(table, data_types, column_ids, schema)))
+        Ok(Box::new(Self::new(
+            table,
+            data_types,
+            column_ids,
+            schema,
+            format!("RowSeqScanExecutor{:?}", source.task_id),
+        )))
     }
 }
 
@@ -120,5 +129,9 @@ impl Executor for RowSeqScanExecutor {
 
     fn schema(&self) -> &Schema {
         &self.schema
+    }
+
+    fn identity(&self) -> &str {
+        &self.identity
     }
 }

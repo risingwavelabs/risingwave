@@ -20,6 +20,7 @@ use risingwave_pb::plan::HashAggNode;
 
 use super::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
 use crate::executor::BoxedExecutor;
+use crate::task::TaskId;
 
 type AggHashMap<K> = HashMap<K, Vec<BoxedAggState>, PrecomputedBuildHasher>;
 
@@ -42,10 +43,15 @@ pub(super) struct HashAggExecutorBuilder {
     child: BoxedExecutor,
     group_key_types: Vec<DataTypeKind>,
     schema: Schema,
+    task_id: TaskId,
 }
 
 impl HashAggExecutorBuilder {
-    fn deserialize(hash_agg_node: &HashAggNode, child: BoxedExecutor) -> Result<BoxedExecutor> {
+    fn deserialize(
+        hash_agg_node: &HashAggNode,
+        child: BoxedExecutor,
+        task_id: TaskId,
+    ) -> Result<BoxedExecutor> {
         let group_key_columns = hash_agg_node
             .get_group_keys()
             .iter()
@@ -82,6 +88,7 @@ impl HashAggExecutorBuilder {
             child,
             group_key_types,
             schema: Schema { fields },
+            task_id,
         };
 
         Ok(hash_key_dispatch!(
@@ -105,7 +112,7 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
 
         let hash_agg_node = HashAggNode::decode(&(source.plan_node()).get_body().value[..])
             .map_err(|e| RwError::from(ErrorCode::ProstError(e)))?;
-        Self::deserialize(&hash_agg_node, child)
+        Self::deserialize(&hash_agg_node, child, source.task_id.clone())
     }
 }
 /// `HashAggExecutor` implements the hash aggregate algorithm.
@@ -123,6 +130,7 @@ pub(super) struct HashAggExecutor<K> {
     /// the data types of key columns
     group_key_types: Vec<DataTypeKind>,
     schema: Schema,
+    identity: String,
 }
 
 impl<K> HashAggExecutor<K> {
@@ -135,6 +143,7 @@ impl<K> HashAggExecutor<K> {
             group_key_types: builder.group_key_types,
             result: None,
             schema: builder.schema,
+            identity: format!("HashAggExecutor{:?}", builder.task_id),
         }
     }
 }
@@ -222,6 +231,10 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
     fn schema(&self) -> &Schema {
         &self.schema
     }
+
+    fn identity(&self) -> &str {
+        &self.identity
+    }
 }
 
 #[cfg(test)]
@@ -291,7 +304,8 @@ mod tests {
         };
 
         let actual_exec =
-            HashAggExecutorBuilder::deserialize(&agg_prost, Box::new(src_exec)).unwrap();
+            HashAggExecutorBuilder::deserialize(&agg_prost, Box::new(src_exec), TaskId::default())
+                .unwrap();
 
         let schema = Schema {
             fields: vec![
@@ -353,7 +367,8 @@ mod tests {
         };
 
         let actual_exec =
-            HashAggExecutorBuilder::deserialize(&agg_prost, Box::new(src_exec)).unwrap();
+            HashAggExecutorBuilder::deserialize(&agg_prost, Box::new(src_exec), TaskId::default())
+                .unwrap();
         let schema = Schema {
             fields: vec![Field {
                 data_type: t32.clone(),

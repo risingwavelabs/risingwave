@@ -29,6 +29,7 @@ pub(super) struct SortAggExecutor {
     child: BoxedExecutor,
     child_done: bool,
     schema: Schema,
+    identity: String,
 }
 
 impl BoxedExecutorBuilder for SortAggExecutor {
@@ -79,6 +80,7 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             child,
             child_done: false,
             schema: Schema { fields },
+            identity: format!("SortAggExecutor{:?}", source.task_id),
         }))
     }
 }
@@ -165,6 +167,10 @@ impl Executor for SortAggExecutor {
     fn schema(&self) -> &Schema {
         &self.schema
     }
+
+    fn identity(&self) -> &str {
+        &self.identity
+    }
 }
 
 #[cfg(test)]
@@ -183,6 +189,7 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
+    use crate::task::TaskId;
 
     #[tokio::test]
     #[allow(clippy::many_single_char_names)]
@@ -231,6 +238,7 @@ mod tests {
             child: Box::new(child),
             child_done: false,
             schema: Schema { fields },
+            identity: format!("SortAggExecutor{:?}", TaskId::default()),
         };
 
         executor.open().await?;
@@ -335,6 +343,7 @@ mod tests {
             child: Box::new(child),
             child_done: false,
             schema: Schema { fields },
+            identity: format!("SortAggExecutor{:?}", TaskId::default()),
         };
 
         executor.open().await?;

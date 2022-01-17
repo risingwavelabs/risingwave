@@ -41,6 +41,7 @@ pub(super) struct CreateSourceExecutor {
     schema_location: String,
     schema: Schema,
     row_id_index: Option<usize>,
+    identity: String,
 }
 
 macro_rules! get_from_properties {
@@ -134,6 +135,7 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
             schema_location: schema_location.clone(),
             parser: None,
             row_id_index,
+            identity: format!("CreateSourceExecutor{:?}", source.task_id),
         }))
     }
 }
@@ -193,5 +195,9 @@ impl Executor for CreateSourceExecutor {
 
     fn schema(&self) -> &Schema {
         &self.schema
+    }
+
+    fn identity(&self) -> &str {
+        &self.identity
     }
 }

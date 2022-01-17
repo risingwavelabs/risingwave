@@ -31,6 +31,7 @@ pub struct GenericExchangeExecutor<C> {
     source_creator: PhantomData<C>,
     schema: Schema,
     task_id: TaskId,
+    identity: String,
 }
 
 /// `CreateSource` determines the right type of `ExchangeSource` to create.
@@ -104,6 +105,7 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for GenericExchangeExecuto
             current_source: None,
             schema: Schema { fields },
             task_id: source.task_id.clone(),
+            identity: format!("GenericExchangeExecutor{:?}", source.task_id),
         }))
     }
 }
@@ -147,6 +149,10 @@ impl<CS: CreateSource> Executor for GenericExchangeExecutor<CS> {
 
     fn schema(&self) -> &Schema {
         &self.schema
+    }
+
+    fn identity(&self) -> &str {
+        &self.identity
     }
 }
 
@@ -211,6 +217,7 @@ mod tests {
                 }],
             },
             task_id: TaskId::default(),
+            identity: format!("GenericExchangeExecutor{:?}", TaskId::default()),
         };
 
         let mut chunks: usize = 0;

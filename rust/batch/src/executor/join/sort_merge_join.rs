@@ -39,6 +39,8 @@ pub struct SortMergeJoinExecutor {
     build_key_idxs: Vec<usize>,
     /// Record the index that have been written into chunk builder.
     last_join_results_write_idx: usize,
+    /// Identity string of the executor
+    identity: String,
 }
 
 #[async_trait::async_trait]
@@ -177,6 +179,10 @@ impl Executor for SortMergeJoinExecutor {
     fn schema(&self) -> &Schema {
         &self.schema
     }
+
+    fn identity(&self) -> &str {
+        &self.identity
+    }
 }
 
 impl SortMergeJoinExecutor {
@@ -187,6 +193,7 @@ impl SortMergeJoinExecutor {
         build_side_source: RowLevelIter,
         probe_key_idxs: Vec<usize>,
         build_key_idxs: Vec<usize>,
+        identity: String,
     ) -> Self {
         Self {
             join_type,
@@ -200,6 +207,7 @@ impl SortMergeJoinExecutor {
             last_join_results: vec![],
             last_probe_key: None,
             sort_order: OrderType::Ascending,
+            identity,
         }
     }
     fn compare_with_last_row(&self, cur_row: Option<RowRef>) -> bool {
@@ -277,6 +285,7 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
                             build_table_source,
                             probe_key_idxs,
                             build_key_idxs,
+                            format!("SortMergeJoinExecutor{:?}", source.task_id),
                         )))
                     }
                     _ => unimplemented!("Do not support {:?} join type now.", join_type),
@@ -301,6 +310,7 @@ mod tests {
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
     use crate::executor::BoxedExecutor;
+    use crate::task::TaskId;
 
     struct TestFixture {
         left_types: Vec<DataTypeKind>,
@@ -458,6 +468,7 @@ mod tests {
                 RowLevelIter::new(right_child),
                 vec![0],
                 vec![0],
+                format!("SortMergeJoinExecutor{:?}", TaskId::default()),
             ))
         }
 

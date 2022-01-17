@@ -26,10 +26,16 @@ pub struct InsertExecutor {
     child: BoxedExecutor,
     executed: bool,
     schema: Schema,
+    identity: String,
 }
 
 impl InsertExecutor {
-    pub fn new(table_id: TableId, source_manager: SourceManagerRef, child: BoxedExecutor) -> Self {
+    pub fn new(
+        table_id: TableId,
+        source_manager: SourceManagerRef,
+        child: BoxedExecutor,
+        identity: String,
+    ) -> Self {
         Self {
             table_id,
             source_manager,
@@ -40,6 +46,7 @@ impl InsertExecutor {
                     data_type: Int64Type::create(false),
                 }],
             },
+            identity,
         }
     }
 }
@@ -157,6 +164,10 @@ impl Executor for InsertExecutor {
     fn schema(&self) -> &Schema {
         &self.schema
     }
+
+    fn identity(&self) -> &str {
+        &self.identity
+    }
 }
 
 impl BoxedExecutorBuilder for InsertExecutor {
@@ -178,6 +189,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             table_id,
             source.global_task_env().source_manager_ref(),
             child,
+            format!("InsertExecutor{:?}", source.task_id),
         )))
     }
 }
@@ -201,6 +213,7 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
+    use crate::task::TaskId;
     use crate::*;
 
     #[tokio::test]
@@ -271,6 +284,7 @@ mod tests {
                     data_type: Int64Type::create(false),
                 }],
             },
+            identity: format!("InsertExecutor{:?}", TaskId::default()),
         };
         insert_executor.open().await.unwrap();
         let fields = &insert_executor.schema().fields;
@@ -346,6 +360,7 @@ mod tests {
                     data_type: Int64Type::create(false),
                 }],
             },
+            identity: format!("InsertExecutor{:?}", TaskId::default()),
         };
         insert_executor.open().await.unwrap();
         let fields = &insert_executor.schema().fields;
@@ -401,6 +416,7 @@ mod tests {
                     data_type: Int64Type::create(false),
                 }],
             },
+            identity: format!("InsertExecutor{:?}", TaskId::default()),
         };
         let table2 = downcast_arc::<BummockTable>(
             table_manager
@@ -532,6 +548,7 @@ mod tests {
             table_id.clone(),
             source_manager.clone(),
             Box::new(mock_executor),
+            format!("InsertExecutor{:?}", TaskId::default()),
         );
         insert_executor.open().await.unwrap();
         let fields = &insert_executor.schema().fields;

@@ -15,6 +15,7 @@ pub(super) struct ProjectionExecutor {
     expr: Vec<BoxedExpression>,
     child: BoxedExecutor,
     schema: Schema,
+    identity: String,
 }
 
 #[async_trait::async_trait]
@@ -47,6 +48,10 @@ impl Executor for ProjectionExecutor {
 
     fn schema(&self) -> &Schema {
         &self.schema
+    }
+
+    fn identity(&self) -> &str {
+        &self.identity
     }
 }
 
@@ -81,6 +86,7 @@ impl BoxedExecutorBuilder for ProjectionExecutor {
             expr: project_exprs,
             child: child_node,
             schema: Schema { fields },
+            identity: format!("ProjectionExecutor{:?}", source.task_id),
         }))
     }
 }
@@ -95,6 +101,7 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
+    use crate::task::TaskId;
     use crate::*;
 
     #[tokio::test]
@@ -130,6 +137,7 @@ mod tests {
             expr: expr_vec,
             child: Box::new(mock_executor),
             schema: Schema { fields },
+            identity: format!("ProjectionExecutor{:?}", TaskId::default()),
         };
         proj_executor.open().await.unwrap();
 

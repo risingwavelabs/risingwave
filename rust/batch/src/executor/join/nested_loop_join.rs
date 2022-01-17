@@ -52,6 +52,9 @@ pub struct NestedLoopJoinExecutor {
     /// Used in probe remaining iteration.
     probe_remain_chunk_idx: usize,
     probe_remain_row_idx: usize,
+
+    /// Identity string of the executor
+    identity: String,
 }
 
 /// If current row finished probe, executor will advance to next row.
@@ -144,6 +147,10 @@ impl Executor for NestedLoopJoinExecutor {
     fn schema(&self) -> &Schema {
         &self.schema
     }
+
+    fn identity(&self) -> &str {
+        &self.identity
+    }
 }
 
 impl NestedLoopJoinExecutor {
@@ -226,6 +233,7 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                             build_table: RowLevelIter::new(right_child),
                             probe_remain_chunk_idx: 0,
                             probe_remain_row_idx: 0,
+                            identity: format!("NestedLoopJoinExecutor{:?}", source.task_id),
                         }))
                     }
                     _ => unimplemented!("Do not support {:?} join type now.", join_type),
@@ -442,6 +450,7 @@ mod tests {
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
     use crate::executor::BoxedExecutor;
+    use crate::task::TaskId;
 
     /// Test combine two chunk into one.
     #[test]
@@ -498,6 +507,7 @@ mod tests {
             build_table: RowLevelIter::new(build_source),
             probe_remain_chunk_idx: 0,
             probe_remain_row_idx: 0,
+            identity: format!("NestedLoopJoinExecutor{:?}", TaskId::default()),
         };
         let const_row_chunk = source.convert_row_to_chunk(&row, 5).unwrap();
         assert_eq!(const_row_chunk.capacity(), 5);
@@ -674,6 +684,7 @@ mod tests {
                 build_table: RowLevelIter::new(right_child),
                 probe_remain_chunk_idx: 0,
                 probe_remain_row_idx: 0,
+                identity: format!("NestedLoopJoinExecutor{:?}", TaskId::default()),
             })
         }
 

@@ -45,6 +45,7 @@ pub(super) struct MergeSortExchangeExecutorImpl<C> {
     schema: Schema,
     first_execution: bool,
     task_id: TaskId,
+    identity: String,
 }
 
 impl<CS: 'static + CreateSource> MergeSortExchangeExecutorImpl<CS> {
@@ -177,6 +178,10 @@ impl<CS: 'static + CreateSource> Executor for MergeSortExchangeExecutorImpl<CS> 
     fn schema(&self) -> &Schema {
         &self.schema
     }
+
+    fn identity(&self) -> &str {
+        &self.identity
+    }
 }
 
 impl<CS: 'static + CreateSource> BoxedExecutorBuilder for MergeSortExchangeExecutorImpl<CS> {
@@ -212,6 +217,7 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for MergeSortExchangeExecu
             schema: Schema { fields },
             first_execution: true,
             task_id: source.task_id.clone(),
+            identity: format!("MergeSortExchangeExecutor{:?}", source.task_id),
         }))
     }
 }
@@ -289,6 +295,7 @@ mod tests {
             },
             first_execution: true,
             task_id: TaskId::default(),
+            identity: format!("MergeSortExchangeExecutor{:?}", TaskId::default()),
         };
 
         let res = executor.next().await.unwrap();

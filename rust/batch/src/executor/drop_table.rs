@@ -14,6 +14,7 @@ pub(super) struct DropTableExecutor {
     table_id: TableId,
     table_manager: TableManagerRef,
     schema: Schema,
+    identity: String,
 }
 
 impl BoxedExecutorBuilder for DropTableExecutor {
@@ -29,6 +30,7 @@ impl BoxedExecutorBuilder for DropTableExecutor {
             table_id,
             table_manager: source.global_task_env().table_manager_ref(),
             schema: Schema { fields: vec![] },
+            identity: format!("DropTableExecutor{:?}", source.task_id),
         }))
     }
 }
@@ -53,5 +55,9 @@ impl Executor for DropTableExecutor {
 
     fn schema(&self) -> &Schema {
         &self.schema
+    }
+
+    fn identity(&self) -> &str {
+        &self.identity
     }
 }

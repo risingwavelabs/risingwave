@@ -69,6 +69,7 @@ impl TopNHeap {
 pub(super) struct TopNExecutor {
     child: BoxedExecutor,
     top_n_heap: TopNHeap,
+    identity: String,
 }
 
 impl BoxedExecutorBuilder for TopNExecutor {
@@ -84,6 +85,7 @@ impl BoxedExecutorBuilder for TopNExecutor {
                 child,
                 order_pairs,
                 top_n_node.get_limit() as usize,
+                format!("TopNExecutor{:?}", source.task_id),
             )));
         }
         Err(InternalError("TopN must have one child".to_string()).into())
@@ -91,7 +93,12 @@ impl BoxedExecutorBuilder for TopNExecutor {
 }
 
 impl TopNExecutor {
-    fn new(child: BoxedExecutor, order_pairs: Vec<OrderPair>, limit: usize) -> Self {
+    fn new(
+        child: BoxedExecutor,
+        order_pairs: Vec<OrderPair>,
+        limit: usize,
+        identity: String,
+    ) -> Self {
         Self {
             top_n_heap: TopNHeap {
                 min_heap: BinaryHeap::new(),
@@ -99,6 +106,7 @@ impl TopNExecutor {
                 order_pairs: Arc::new(order_pairs),
             },
             child,
+            identity,
         }
     }
 }
@@ -131,6 +139,10 @@ impl Executor for TopNExecutor {
     fn schema(&self) -> &Schema {
         self.child.schema()
     }
+
+    fn identity(&self) -> &str {
+        &self.identity
+    }
 }
 
 #[cfg(test)]
@@ -146,6 +158,7 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
+    use crate::task::TaskId;
 
     fn create_column(vec: &[Option<i32>]) -> Result<Column> {
         let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
@@ -181,7 +194,12 @@ mod tests {
                 order_type: OrderType::Ascending,
             },
         ];
-        let mut top_n_executor = TopNExecutor::new(Box::new(mock_executor), order_pairs, 2usize);
+        let mut top_n_executor = TopNExecutor::new(
+            Box::new(mock_executor),
+            order_pairs,
+            2usize,
+            format!("TopNExecutor{:?}", TaskId::default()),
+        );
         let fields = &top_n_executor.schema().fields;
         assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
         assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Int32);

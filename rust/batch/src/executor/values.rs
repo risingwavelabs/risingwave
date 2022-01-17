@@ -17,6 +17,7 @@ use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBui
 pub(super) struct ValuesExecutor {
     rows: Vec<Vec<BoxedExpression>>,
     schema: Schema,
+    identity: String,
 }
 
 #[async_trait::async_trait]
@@ -84,6 +85,10 @@ impl Executor for ValuesExecutor {
     fn schema(&self) -> &Schema {
         &self.schema
     }
+
+    fn identity(&self) -> &str {
+        &self.identity
+    }
 }
 
 impl BoxedExecutorBuilder for ValuesExecutor {
@@ -117,6 +122,7 @@ impl BoxedExecutorBuilder for ValuesExecutor {
         Ok(Box::new(Self {
             rows,
             schema: Schema { fields },
+            identity: format!("ValuesExecutor{:?}", source.task_id),
         }))
     }
 }
@@ -128,6 +134,7 @@ mod tests {
     use risingwave_common::types::{DataTypeKind, ScalarImpl};
 
     use super::*;
+    use crate::task::TaskId;
 
     #[tokio::test]
     async fn test_values_executor() -> Result<()> {
@@ -157,6 +164,7 @@ mod tests {
         let mut values_executor = ValuesExecutor {
             rows: exprs,
             schema: Schema { fields },
+            identity: format!("ValuesExecutor{:?}", TaskId::default()),
         };
         values_executor.open().await.unwrap();
 

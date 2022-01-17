@@ -20,6 +20,7 @@ pub(super) struct GenerateSeriesI32Executor {
     cur: i32, // Current value in the series.
 
     schema: Schema,
+    identity: String,
 }
 
 impl BoxedExecutorBuilder for GenerateSeriesI32Executor {
@@ -37,6 +38,7 @@ impl BoxedExecutorBuilder for GenerateSeriesI32Executor {
             schema: Schema::new(vec![Field {
                 data_type: Int32Type::create(false),
             }]),
+            identity: format!("GenerateSeriesI32Executor{:?}", source.task_id),
         }))
     }
 }
@@ -74,6 +76,10 @@ impl Executor for GenerateSeriesI32Executor {
     fn schema(&self) -> &Schema {
         &self.schema
     }
+
+    fn identity(&self) -> &str {
+        &self.identity
+    }
 }
 
 impl GenerateSeriesI32Executor {
@@ -95,6 +101,7 @@ mod tests {
     use risingwave_common::try_match_expand;
 
     use super::*;
+    use crate::task::TaskId;
 
     #[tokio::test]
     async fn test_generate_series() {
@@ -112,6 +119,7 @@ mod tests {
             schema: Schema::new(vec![Field {
                 data_type: Int32Type::create(false),
             }]),
+            identity: format!("GenerateSeriesI32Executor{:?}", TaskId::default()),
         };
         let mut remained_values = ((stop - start) / step + 1) as usize;
         while remained_values > 0 {
