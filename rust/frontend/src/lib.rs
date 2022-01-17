@@ -2,6 +2,7 @@
 
 #[macro_use]
 pub mod catalog;
+pub mod binder;
 pub mod expr;
 pub mod handler;
 pub mod optimizer;
