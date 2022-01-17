@@ -1,16 +1,16 @@
-use risingwave_common::types::DataTypeRef;
+use risingwave_common::types::DataTypeKind;
 
 use crate::catalog::ColumnId;
 
 /// A descriptor of a column.
 #[derive(Debug, Clone)]
 pub struct ColumnDesc {
-    data_type: DataTypeRef,
+    data_type: DataTypeKind,
     is_primary: bool,
 }
 
 impl ColumnDesc {
-    pub fn new(data_type: DataTypeRef, is_primary: bool) -> Self {
+    pub fn new(data_type: DataTypeKind, is_primary: bool) -> Self {
         ColumnDesc {
             data_type,
             is_primary,
@@ -25,8 +25,8 @@ impl ColumnDesc {
         self.data_type.is_nullable()
     }
 
-    pub fn data_type_ref(&self) -> &DataTypeRef {
-        &self.data_type
+    pub fn data_type(&self) -> DataTypeKind {
+        self.data_type
     }
 }
 
@@ -51,8 +51,8 @@ impl ColumnCatalog {
         &self.name
     }
 
-    pub fn data_type_clone(&self) -> DataTypeRef {
-        self.desc.data_type.clone()
+    pub fn data_type(&self) -> DataTypeKind {
+        self.desc.data_type
     }
 
     pub fn is_primary(&self) -> bool {

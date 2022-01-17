@@ -432,9 +432,8 @@ impl RemoteCatalogManager {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
-    use risingwave_common::types::{DataTypeKind, Int32Type};
+    use risingwave_common::types::DataTypeKind;
     use risingwave_common::util::addr::get_host_port;
 
     use crate::catalog::catalog_service::{
@@ -464,11 +463,11 @@ mod tests {
         let columns = vec![
             (
                 "v1".to_string(),
-                ColumnDesc::new(Arc::new(Int32Type::new(true)), false),
+                ColumnDesc::new(DataTypeKind::Int32, false),
             ),
             (
                 "v2".to_string(),
-                ColumnDesc::new(Arc::new(Int32Type::new(false)), false),
+                ColumnDesc::new(DataTypeKind::Int32, false),
             ),
         ];
         catalog_manager
@@ -485,7 +484,7 @@ mod tests {
         let col1 = table.get_column_by_id(0).unwrap();
         assert!(col1.is_nullable());
         assert_eq!(col1.id(), 0);
-        assert_eq!(col1.data_type_clone().data_type_kind(), DataTypeKind::Int32);
+        assert_eq!(col1.data_type(), DataTypeKind::Int32);
         assert_eq!(col2.name(), "v2");
         assert_eq!(col2.id(), 1);
 
@@ -560,11 +559,11 @@ mod tests {
         let columns = vec![
             (
                 "v1".to_string(),
-                ColumnDesc::new(Arc::new(Int32Type::new(true)), false),
+                ColumnDesc::new(DataTypeKind::Int32, false),
             ),
             (
                 "v2".to_string(),
-                ColumnDesc::new(Arc::new(Int32Type::new(false)), false),
+                ColumnDesc::new(DataTypeKind::Int32, false),
             ),
         ];
         let mut remote_catalog_manager =

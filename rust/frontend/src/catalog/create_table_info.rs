@@ -36,7 +36,7 @@ impl CreateTableInfo {
         let mut ret = Vec::with_capacity(self.columns.len());
         for (idx, (col_name, col_desc)) in self.columns.iter().enumerate() {
             ret.push(ColumnDescProst {
-                column_type: Some(col_desc.data_type_ref().to_protobuf()?),
+                column_type: Some(col_desc.data_type().to_protobuf()?),
                 encoding: 1,
                 is_primary: col_desc.is_primary(),
                 name: col_name.into(),
