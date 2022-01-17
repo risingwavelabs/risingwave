@@ -21,6 +21,7 @@ import org.apache.calcite.rel.RelDistribution;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.core.Exchange;
+import org.apache.calcite.util.Pair;
 
 /** The exchange node in a streaming plan. */
 public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel {
@@ -45,13 +46,14 @@ public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel
         ((RisingWaveRelMetadataQuery) getCluster().getMetadataQuery()).getPrimaryKeyIndices(this);
     var mergerBuilder = MergeNode.newBuilder();
     this.upstreamSet.forEach(mergerBuilder::addUpstreamActorId);
-    for (ColumnDesc columnDesc : this.getSchema()) {
+    for (Pair<String, ColumnDesc> pair : this.getSchema()) {
       com.risingwave.proto.plan.ColumnDesc.Builder columnDescBuilder =
           com.risingwave.proto.plan.ColumnDesc.newBuilder();
       columnDescBuilder
+          .setName(pair.getKey())
           .setEncoding(com.risingwave.proto.plan.ColumnDesc.ColumnEncodingType.RAW)
-          .setColumnType(columnDesc.getDataType().getProtobufType())
-          .setIsPrimary(columnDesc.isPrimary());
+          .setColumnType(pair.getValue().getDataType().getProtobufType())
+          .setIsPrimary(pair.getValue().isPrimary());
       mergerBuilder.addInputColumnDescs(columnDescBuilder.build());
     }
     var mergeNode = mergerBuilder.build();
@@ -67,13 +69,14 @@ public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel
     var primaryKeyIndices =
         ((RisingWaveRelMetadataQuery) getCluster().getMetadataQuery()).getPrimaryKeyIndices(this);
 
-    for (ColumnDesc columnDesc : this.getSchema()) {
+    for (Pair<String, ColumnDesc> pair : this.getSchema()) {
       com.risingwave.proto.plan.ColumnDesc.Builder columnDescBuilder =
           com.risingwave.proto.plan.ColumnDesc.newBuilder();
       columnDescBuilder
+          .setName(pair.getKey())
           .setEncoding(com.risingwave.proto.plan.ColumnDesc.ColumnEncodingType.RAW)
-          .setColumnType(columnDesc.getDataType().getProtobufType())
-          .setIsPrimary(columnDesc.isPrimary());
+          .setColumnType(pair.getValue().getDataType().getProtobufType())
+          .setIsPrimary(pair.getValue().isPrimary());
       exchangeBuilder.addInputColumnDescs(columnDescBuilder);
     }
 
@@ -119,20 +122,20 @@ public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel
     return upstreamSet;
   }
 
-  private List<ColumnDesc> getSchema() {
+  private List<Pair<String, ColumnDesc>> getSchema() {
     // Add every column from its upstream root node.
     // Here root node would suffice as the streaming plan is still reversed.
     // E.g. Source -> Filter -> Proj. The root will be project and the schema of project is
     // what we needed.
     var rowType = this.getRowType();
-    List<ColumnDesc> schema = new ArrayList<>();
+    List<Pair<String, ColumnDesc>> list = new ArrayList<>();
     for (int i = 0; i < rowType.getFieldCount(); i++) {
       var field = rowType.getFieldList().get(i);
       ColumnDesc columnDesc =
           new ColumnDesc((RisingWaveDataType) field.getType(), false, ColumnEncoding.RAW);
-      schema.add(columnDesc);
+      list.add(Pair.of(field.getName(), columnDesc));
     }
-    return schema;
+    return list;
   }
 
   public static RwStreamExchange create(RelNode input, RwDistributionTrait distribution) {

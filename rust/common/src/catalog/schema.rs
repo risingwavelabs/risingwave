@@ -1,7 +1,6 @@
 use std::ops::Index;
 
-use risingwave_pb::data::DataType as ProstDataType;
-use risingwave_pb::plan::ColumnDesc;
+use risingwave_pb::plan::{ColumnDesc, Field as ProstField};
 
 use crate::array::ArrayBuilderImpl;
 use crate::error::Result;
@@ -11,12 +10,17 @@ use crate::types::{build_from_prost, DataType, DataTypeKind, DataTypeRef};
 #[derive(Clone)]
 pub struct Field {
     pub data_type: DataTypeRef,
+    pub name: String,
 }
 
 impl std::fmt::Debug for Field {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // force it to display in single-line style
-        write!(f, "Field {{ {:?} }}", self.data_type)
+        write!(
+            f,
+            "Field {{ name = {}, data_type = {:?} }}",
+            self.name, self.data_type
+        )
     }
 }
 
@@ -64,6 +68,7 @@ impl Schema {
                 .map(|col| {
                     Ok(Field {
                         data_type: build_from_prost(col.get_column_type())?,
+                        name: col.get_name().to_string(),
                     })
                 })
                 .collect::<Result<Vec<_>>>()?,
@@ -80,14 +85,22 @@ impl Schema {
 }
 
 impl Field {
-    pub fn new(data_type: DataTypeRef) -> Self {
-        Self { data_type }
+    pub fn new(data_type: DataTypeRef, name: String) -> Self {
+        Self { data_type, name }
     }
 
-    pub fn try_from(data_type: &ProstDataType) -> Result<Self> {
-        Ok(Field {
-            data_type: build_from_prost(data_type)?,
-        })
+    pub fn new_without_name(data_type: DataTypeRef) -> Self {
+        Self {
+            data_type,
+            name: String::new(),
+        }
+    }
+
+    pub fn from(prost_field: &ProstField) -> Self {
+        Self {
+            data_type: build_from_prost(prost_field.get_data_type()).unwrap(),
+            name: prost_field.get_name().clone(),
+        }
     }
 
     pub fn data_type(&self) -> DataTypeRef {

@@ -60,12 +60,14 @@
       "columnType": {
         "typeName": "INT32"
       },
-      "encoding": "RAW"
+      "encoding": "RAW",
+      "name": "v"
     }, {
       "columnType": {
         "typeName": "INT64"
       },
-      "encoding": "RAW"
+      "encoding": "RAW",
+      "name": "_row_id"
     }],
     "pkIndices": [1],
     "columnOrders": [{

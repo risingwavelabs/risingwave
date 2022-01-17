@@ -6,10 +6,9 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::Result;
-use risingwave_common::types::build_from_prost as type_build_from_prost;
 use risingwave_common::util::addr::{get_host_port, is_local_address};
 use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::task_service::exchange_node::Field as ExchangeNodeField;
+use risingwave_pb::plan::Field as NodeField;
 use risingwave_pb::task_service::{ExchangeNode, ExchangeSource as ProstExchangeSource};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
@@ -89,13 +88,8 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for GenericExchangeExecuto
 
         ensure!(!node.get_sources().is_empty());
         let sources: Vec<ProstExchangeSource> = node.get_sources().to_vec();
-        let input_schema: Vec<ExchangeNodeField> = node.get_input_schema().to_vec();
-        let fields = input_schema
-            .iter()
-            .map(|f| Field {
-                data_type: type_build_from_prost(f.get_data_type()).unwrap(),
-            })
-            .collect::<Vec<Field>>();
+        let input_schema: Vec<NodeField> = node.get_input_schema().to_vec();
+        let fields = input_schema.iter().map(Field::from).collect::<Vec<Field>>();
         Ok(Box::new(Self {
             sources,
             server_addr,
@@ -212,9 +206,7 @@ mod tests {
             source_creator: PhantomData,
             env: BatchTaskEnv::for_test(),
             schema: Schema {
-                fields: vec![Field {
-                    data_type: Int32Type::create(false),
-                }],
+                fields: vec![Field::new_without_name(Int32Type::create(false))],
             },
             task_id: TaskId::default(),
             identity: format!("GenericExchangeExecutor{:?}", TaskId::default()),

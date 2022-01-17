@@ -45,6 +45,7 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
                     .find(|c| c.column_id == *id)
                     .map(|col| Field {
                         data_type: col.data_type.clone(),
+                        name: col.name.clone(),
                     })
                     .ok_or_else(|| {
                         RwError::from(InternalError(format!(
@@ -150,7 +151,7 @@ mod tests {
         let mut executor = StreamScanExecutor {
             reader: Box::new(reader),
             done: false,
-            schema: Schema::new(vec![Field::new(Int32Type::create(false))]),
+            schema: Schema::new(vec![Field::new_without_name(Int32Type::create(false))]),
             identity: format!("StreamScanExecutor{:?}", TaskId::default()),
         };
         executor.open().await.unwrap();

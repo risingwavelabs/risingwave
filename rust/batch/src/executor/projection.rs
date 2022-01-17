@@ -77,9 +77,7 @@ impl BoxedExecutorBuilder for ProjectionExecutor {
 
         let fields = project_exprs
             .iter()
-            .map(|expr| Field {
-                data_type: expr.return_type().to_data_type(),
-            })
+            .map(|expr| Field::new_without_name(expr.return_type().to_data_type()))
             .collect::<Vec<Field>>();
 
         Ok(Box::new(Self {
@@ -115,12 +113,8 @@ mod tests {
 
         let schema = Schema {
             fields: vec![
-                Field {
-                    data_type: Int32Type::create(false),
-                },
-                Field {
-                    data_type: Int32Type::create(false),
-                },
+                Field::new(Int32Type::create(false), String::from("")),
+                Field::new(Int32Type::create(false), String::from("")),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema);
@@ -128,9 +122,7 @@ mod tests {
 
         let fields = expr_vec
             .iter()
-            .map(|expr| Field {
-                data_type: expr.return_type().to_data_type(),
-            })
+            .map(|expr| Field::new_without_name(expr.return_type().to_data_type()))
             .collect::<Vec<Field>>();
 
         let mut proj_executor = ProjectionExecutor {

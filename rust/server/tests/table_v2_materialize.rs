@@ -71,16 +71,8 @@ async fn test_table_v2_materialize() -> Result<()> {
     let table_manager = Arc::new(SimpleTableManager::new(store));
     let source_table_id = TableId::default();
     let column_descs = vec![
-        TableColumnDesc {
-            // data column
-            data_type: Arc::new(Float64Type::new(false)),
-            column_id: 233,
-        },
-        TableColumnDesc {
-            // row id column
-            data_type: Arc::new(Int64Type::new(false)),
-            column_id: 0,
-        },
+        TableColumnDesc::new_for_test::<Float64Type>(233), // data column
+        TableColumnDesc::new_for_test::<Int64Type>(0),     // row id column
     ];
 
     // Create table v2 using `CreateTableExecutor`
@@ -106,7 +98,7 @@ async fn test_table_v2_materialize() -> Result<()> {
                 .iter()
                 .find(|c| c.column_id == column_id)
                 .unwrap();
-            fields.push(Field::new(column_desc.data_type.clone()));
+            fields.push(Field::new(column_desc.data_type.clone(), String::from("")));
         }
         Schema::new(fields)
     };

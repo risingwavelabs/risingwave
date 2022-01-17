@@ -61,6 +61,7 @@ public class CreateTableHandler implements SqlHandler {
     for (ColumnCatalog c : table.getAllColumns(true)) {
       var columnDesc =
           com.risingwave.proto.plan.ColumnDesc.newBuilder()
+              .setName(c.getName())
               .setEncoding(com.risingwave.proto.plan.ColumnDesc.ColumnEncodingType.RAW)
               .setColumnType(c.getDesc().getDataType().getProtobufType())
               .setIsPrimary(table.getPrimaryKeyColumnIds().contains(c.getId().getValue()))

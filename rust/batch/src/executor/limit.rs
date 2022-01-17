@@ -153,9 +153,7 @@ mod tests {
         )
         .unwrap();
         let schema = Schema {
-            fields: vec![Field {
-                data_type: Int32Type::create(false),
-            }],
+            fields: vec![Field::new_without_name(Int32Type::create(false))],
         };
         let mut mock_executor = MockExecutor::new(schema);
 
@@ -283,12 +281,8 @@ mod tests {
         let col1 = Column::new(Arc::new(visible_array.into()));
         let schema = Schema {
             fields: vec![
-                Field {
-                    data_type: Int32Type::create(false),
-                },
-                Field {
-                    data_type: BoolType::create(false),
-                },
+                Field::new_without_name(Int32Type::create(false)),
+                Field::new_without_name(BoolType::create(false)),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema);

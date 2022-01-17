@@ -68,9 +68,7 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             .iter()
             .map(|e| e.return_type())
             .chain(agg_states.iter().map(|e| e.return_type()))
-            .map(|t| Field {
-                data_type: t.to_data_type(),
-            })
+            .map(|t| Field::new_without_name(t.to_data_type()))
             .collect::<Vec<Field>>();
 
         Ok(Box::new(Self {
@@ -197,9 +195,7 @@ mod tests {
         let a = Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into());
         let chunk = DataChunk::builder().columns(vec![Column::new(a)]).build();
         let schema = Schema {
-            fields: vec![Field {
-                data_type: Int32Type::create(false),
-            }],
+            fields: vec![Field::new_without_name(Int32Type::create(false))],
         };
         let mut child = MockExecutor::new(schema);
         child.add(chunk);
@@ -227,9 +223,7 @@ mod tests {
             .iter()
             .map(|e| e.return_type())
             .chain(agg_states.iter().map(|e| e.return_type()))
-            .map(|t| Field {
-                data_type: t.to_data_type(),
-            })
+            .map(|t| Field::new_without_name(t.to_data_type()))
             .collect::<Vec<Field>>();
         let mut executor = SortAggExecutor {
             agg_states,
@@ -270,15 +264,9 @@ mod tests {
             .build();
         let schema = Schema {
             fields: vec![
-                Field {
-                    data_type: Int32Type::create(false),
-                },
-                Field {
-                    data_type: Int32Type::create(false),
-                },
-                Field {
-                    data_type: Int32Type::create(false),
-                },
+                Field::new_without_name(Int32Type::create(false)),
+                Field::new_without_name(Int32Type::create(false)),
+                Field::new_without_name(Int32Type::create(false)),
             ],
         };
         let mut child = MockExecutor::new(schema);
@@ -331,9 +319,7 @@ mod tests {
             .iter()
             .map(|e| e.return_type())
             .chain(agg_states.iter().map(|e| e.return_type()))
-            .map(|t| Field {
-                data_type: t.to_data_type(),
-            })
+            .map(|t| Field::new_without_name(t.to_data_type()))
             .collect::<Vec<Field>>();
 
         let mut executor = SortAggExecutor {

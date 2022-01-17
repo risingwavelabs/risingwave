@@ -8,17 +8,20 @@
           "columnType": {
             "typeName": "INT32"
           },
-          "encoding": "RAW"
+          "encoding": "RAW",
+          "name": "v1"
         }, {
           "columnType": {
             "typeName": "INT32"
           },
-          "encoding": "RAW"
+          "encoding": "RAW",
+          "name": "v2"
         }, {
           "columnType": {
             "typeName": "INT64"
           },
-          "encoding": "RAW"
+          "encoding": "RAW",
+          "name": "_row_id"
         }]
       }
     }, {
@@ -28,17 +31,20 @@
           "columnType": {
             "typeName": "INT32"
           },
-          "encoding": "RAW"
+          "encoding": "RAW",
+          "name": "v1"
         }, {
           "columnType": {
             "typeName": "INT32"
           },
-          "encoding": "RAW"
+          "encoding": "RAW",
+          "name": "v2"
         }, {
           "columnType": {
             "typeName": "INT64"
           },
-          "encoding": "RAW"
+          "encoding": "RAW",
+          "name": "_row_id"
         }]
       }
     }],
@@ -59,32 +65,38 @@
       "columnType": {
         "typeName": "INT32"
       },
-      "encoding": "RAW"
+      "encoding": "RAW",
+      "name": "v1"
     }, {
       "columnType": {
         "typeName": "INT32"
       },
-      "encoding": "RAW"
+      "encoding": "RAW",
+      "name": "v2"
     }, {
       "columnType": {
         "typeName": "INT64"
       },
-      "encoding": "RAW"
+      "encoding": "RAW",
+      "name": "_row_id"
     }, {
       "columnType": {
         "typeName": "INT32"
       },
-      "encoding": "RAW"
+      "encoding": "RAW",
+      "name": "v10"
     }, {
       "columnType": {
         "typeName": "INT32"
       },
-      "encoding": "RAW"
+      "encoding": "RAW",
+      "name": "v20"
     }, {
       "columnType": {
         "typeName": "INT64"
       },
-      "encoding": "RAW"
+      "encoding": "RAW",
+      "name": "_row_id0"
     }],
     "pkIndices": [2, 5],
     "columnOrders": [{

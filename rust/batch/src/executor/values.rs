@@ -7,7 +7,6 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::expr::{build_from_prost, BoxedExpression};
-use risingwave_common::types::DataTypeKind;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::ValuesNode;
 
@@ -107,16 +106,10 @@ impl BoxedExecutorBuilder for ValuesExecutor {
             rows.push(expr_row);
         }
 
-        let data_types = value_node
-            .get_column_types()
+        let fields = value_node
+            .get_fields()
             .iter()
-            .map(DataTypeKind::from)
-            .collect::<Vec<DataTypeKind>>();
-        let fields = data_types
-            .iter()
-            .map(|data_type| Field {
-                data_type: data_type.to_data_type(),
-            })
+            .map(Field::from)
             .collect::<Vec<Field>>();
 
         Ok(Box::new(Self {
@@ -157,9 +150,7 @@ mod tests {
             .first()
             .ok_or_else(|| RwError::from(InternalError("Can't values empty rows!".to_string())))?
             .iter() // for each column
-            .map(|col| Field {
-                data_type: col.return_type().to_data_type(),
-            })
+            .map(|col| Field::new_without_name(col.return_type().to_data_type()))
             .collect::<Vec<Field>>();
         let mut values_executor = ValuesExecutor {
             rows: exprs,

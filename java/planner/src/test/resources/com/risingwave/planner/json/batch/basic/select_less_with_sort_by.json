@@ -36,10 +36,16 @@
           }
         },
         "columnIds": [1, 2],
-        "columnType": [{
-          "typeName": "INT32"
+        "fields": [{
+          "dataType": {
+            "typeName": "INT32"
+          },
+          "name": "v1"
         }, {
-          "typeName": "INT32"
+          "dataType": {
+            "typeName": "INT32"
+          },
+          "name": "v2"
         }]
       }
     }]

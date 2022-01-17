@@ -203,7 +203,7 @@ pub mod schemas {
     use risingwave_common::types::{DataTypeKind, DataTypeRef, Int32Type, StringType};
 
     fn field_n<const N: usize>(data_type: DataTypeRef) -> Schema {
-        Schema::new(vec![Field::new(data_type); N])
+        Schema::new(vec![Field::new(data_type, String::from("")); N])
     }
 
     fn int32_n<const N: usize>() -> Schema {

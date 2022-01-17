@@ -197,12 +197,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field {
-                    data_type: Int64Type::create(false),
-                },
-                Field {
-                    data_type: Int64Type::create(false),
-                },
+                Field::new_without_name(Int64Type::create(false)),
+                Field::new_without_name(Int64Type::create(false)),
             ],
         };
         let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);

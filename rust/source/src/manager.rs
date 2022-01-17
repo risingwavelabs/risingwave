@@ -52,7 +52,7 @@ pub struct SourceColumnDesc {
 impl From<&TableColumnDesc> for SourceColumnDesc {
     fn from(c: &TableColumnDesc) -> Self {
         Self {
-            name: "".to_owned(),
+            name: c.name.clone(),
             data_type: c.data_type.clone(),
             column_id: c.column_id,
             skip_parse: false,
@@ -268,10 +268,7 @@ mod tests {
 
         let table = Arc::new(BummockTable::new(
             &TableId::default(),
-            vec![TableColumnDesc {
-                data_type: Arc::new(Int64Type::new(false)),
-                column_id: 0,
-            }],
+            vec![TableColumnDesc::new_for_test::<Int64Type>(0)],
         ));
 
         let chunk0 = StreamChunk::new(vec![Op::Insert], vec![column_nonnull!(I64Array, [0])], None);
@@ -321,12 +318,8 @@ mod tests {
 
         let schema = Schema {
             fields: vec![
-                Field {
-                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
-                },
-                Field {
-                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
-                },
+                Field::new_without_name(Arc::new(DecimalType::new(false, 10, 5)?)),
+                Field::new_without_name(Arc::new(DecimalType::new(false, 10, 5)?)),
             ],
         };
 
@@ -337,6 +330,7 @@ mod tests {
             .map(|(i, f)| TableColumnDesc {
                 data_type: f.data_type.clone(),
                 column_id: i as i32, // use column index as column id
+                name: f.name.clone(),
             })
             .collect();
 
@@ -364,12 +358,8 @@ mod tests {
 
         let schema = Schema {
             fields: vec![
-                Field {
-                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
-                },
-                Field {
-                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
-                },
+                Field::new_without_name(Arc::new(DecimalType::new(false, 10, 5)?)),
+                Field::new_without_name(Arc::new(DecimalType::new(false, 10, 5)?)),
             ],
         };
 
@@ -380,6 +370,7 @@ mod tests {
             .map(|(i, f)| TableColumnDesc {
                 data_type: f.data_type.clone(),
                 column_id: i as i32, // use column index as column id
+                name: f.name.clone(),
             })
             .collect();
 

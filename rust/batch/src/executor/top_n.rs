@@ -172,12 +172,8 @@ mod tests {
         let data_chunk = DataChunk::builder().columns(vec![col0, col1]).build();
         let schema = Schema {
             fields: vec![
-                Field {
-                    data_type: Int32Type::create(false),
-                },
-                Field {
-                    data_type: Int32Type::create(false),
-                },
+                Field::new_without_name(Int32Type::create(false)),
+                Field::new_without_name(Int32Type::create(false)),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema);

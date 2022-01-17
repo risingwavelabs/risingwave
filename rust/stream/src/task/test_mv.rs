@@ -125,14 +125,8 @@ async fn test_stream_mv_proto() {
     let source_manager = Arc::new(MemSourceManager::new());
     let table_id = TableId::default();
     let table_columns = vec![
-        TableColumnDesc {
-            column_id: 0,
-            data_type: Arc::new(Int32Type::new(false)),
-        },
-        TableColumnDesc {
-            column_id: 1,
-            data_type: Arc::new(Int32Type::new(false)),
-        },
+        TableColumnDesc::new_for_test::<Int32Type>(0),
+        TableColumnDesc::new_for_test::<Int32Type>(1),
     ];
     let table = table_manager
         .create_table(&table_id, table_columns)

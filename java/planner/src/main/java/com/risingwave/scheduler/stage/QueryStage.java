@@ -15,6 +15,7 @@ import com.risingwave.proto.computenode.ExchangeNode;
 import com.risingwave.proto.computenode.ExchangeSource;
 import com.risingwave.proto.computenode.MergeSortExchangeNode;
 import com.risingwave.proto.computenode.TaskSinkId;
+import com.risingwave.proto.plan.Field;
 import com.risingwave.proto.plan.PlanFragment;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.scheduler.exchange.Distribution;
@@ -212,9 +213,10 @@ public class QueryStage {
     return builder.build();
   }
 
-  private static ExchangeNode.Field convert(RelDataTypeField field) {
-    return ExchangeNode.Field.newBuilder()
+  private static Field convert(RelDataTypeField field) {
+    return Field.newBuilder()
         .setDataType(((RisingWaveDataType) field.getType()).getProtobufType())
+        .setName(field.getName())
         .build();
   }
 }

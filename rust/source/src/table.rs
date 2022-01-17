@@ -274,10 +274,7 @@ mod tests {
     async fn test_table_source() {
         let table = Arc::new(BummockTable::new(
             &TableId::default(),
-            vec![TableColumnDesc {
-                data_type: Arc::new(Int64Type::new(false)),
-                column_id: 0,
-            }],
+            vec![TableColumnDesc::new_for_test::<Int64Type>(0)],
         ));
 
         // Some existing data

@@ -63,7 +63,7 @@ impl<S: StateStore> MViewTable<S> {
         let schema = {
             let fields = column_descs
                 .iter()
-                .map(|c| Field::new(c.data_type.clone()))
+                .map(|c| Field::new(c.data_type.clone(), c.name.clone()))
                 .collect();
             Schema::new(fields)
         };

@@ -315,12 +315,8 @@ mod tests {
     fn create_schema() -> Schema {
         Schema {
             fields: vec![
-                Field {
-                    data_type: Int64Type::create(false),
-                },
-                Field {
-                    data_type: Int64Type::create(false),
-                },
+                Field::new_without_name(Int64Type::create(false)),
+                Field::new_without_name(Int64Type::create(false)),
             ],
         }
     }

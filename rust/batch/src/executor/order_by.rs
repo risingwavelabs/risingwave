@@ -272,12 +272,8 @@ mod tests {
         let data_chunk = DataChunk::builder().columns([col0, col1].to_vec()).build();
         let schema = Schema {
             fields: vec![
-                Field {
-                    data_type: Int32Type::create(false),
-                },
-                Field {
-                    data_type: Int32Type::create(false),
-                },
+                Field::new_without_name(Int32Type::create(false)),
+                Field::new_without_name(Int32Type::create(false)),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema);
@@ -330,12 +326,8 @@ mod tests {
         let data_chunk = DataChunk::builder().columns([col0, col1].to_vec()).build();
         let schema = Schema {
             fields: vec![
-                Field {
-                    data_type: Float32Type::create(false),
-                },
-                Field {
-                    data_type: Float64Type::create(false),
-                },
+                Field::new_without_name(Float32Type::create(false)),
+                Field::new_without_name(Float64Type::create(false)),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema);
@@ -397,12 +389,8 @@ mod tests {
         let data_chunk = DataChunk::builder().columns([col0, col1].to_vec()).build();
         let schema = Schema {
             fields: vec![
-                Field {
-                    data_type: StringType::create(false, 0, DataTypeKind::Varchar),
-                },
-                Field {
-                    data_type: StringType::create(false, 0, DataTypeKind::Varchar),
-                },
+                Field::new_without_name(StringType::create(false, 0, DataTypeKind::Varchar)),
+                Field::new_without_name(StringType::create(false, 0, DataTypeKind::Varchar)),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema);
@@ -484,18 +472,10 @@ mod tests {
                 .build();
             let schema = Schema {
                 fields: vec![
-                    Field {
-                        data_type: Int16Type::create(false),
-                    },
-                    Field {
-                        data_type: BoolType::create(false),
-                    },
-                    Field {
-                        data_type: Float32Type::create(false),
-                    },
-                    Field {
-                        data_type: StringType::create(false, 0, DataTypeKind::Varchar),
-                    },
+                    Field::new_without_name(Int16Type::create(false)),
+                    Field::new_without_name(BoolType::create(false)),
+                    Field::new_without_name(Float32Type::create(false)),
+                    Field::new_without_name(StringType::create(false, 0, DataTypeKind::Varchar)),
                 ],
             };
             let mut mock_executor = MockExecutor::new(schema);

@@ -9,12 +9,11 @@ use risingwave_common::array::{ArrayBuilderImpl, DataChunk, DataChunkRef};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::Result;
-use risingwave_common::types::{build_from_prost as type_build_from_prost, ToOwnedDatum};
+use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::sort_util::{
     fetch_orders, HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE,
 };
 use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::task_service::exchange_node::Field as ExchangeNodeField;
 use risingwave_pb::task_service::{ExchangeSource as ProstExchangeSource, MergeSortExchangeNode};
 
 use crate::execution::exchange_source::ExchangeSource;
@@ -196,12 +195,10 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for MergeSortExchangeExecu
         let exchange_node = sort_merge_node.get_exchange_node();
         let proto_sources: Vec<ProstExchangeSource> = exchange_node.get_sources().to_vec();
         ensure!(!exchange_node.get_sources().is_empty());
-        let input_schema: Vec<ExchangeNodeField> = exchange_node.get_input_schema().to_vec();
-        let fields = input_schema
+        let fields = exchange_node
+            .get_input_schema()
             .iter()
-            .map(|f| Field {
-                data_type: type_build_from_prost(f.get_data_type()).unwrap(),
-            })
+            .map(Field::from)
             .collect::<Vec<Field>>();
 
         let num_sources = proto_sources.len();
@@ -289,9 +286,7 @@ mod tests {
             sources: vec![],
             source_creator: PhantomData,
             schema: Schema {
-                fields: vec![Field {
-                    data_type: Int32Type::create(false),
-                }],
+                fields: vec![Field::new_without_name(Int32Type::create(false))],
             },
             first_execution: true,
             task_id: TaskId::default(),

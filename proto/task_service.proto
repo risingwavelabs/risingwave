@@ -49,15 +49,11 @@ message ExchangeSource {
 }
 
 message ExchangeNode {
-  message Field {
-    // TODO: Add field name
-    data.DataType data_type = 1;
-  }
   repeated ExchangeSource sources = 1;
   // An exchange only links to one stage, but a stage could be
   // linked by multiple exchanges.
   StageId source_stage_id = 2;
-  repeated Field input_schema = 3;
+  repeated plan.Field input_schema = 3;
 }
 
 message MergeSortExchangeNode {

@@ -63,8 +63,11 @@
           }
         }]
       }],
-      "columnTypes": [{
-        "typeName": "INT32"
+      "fields": [{
+        "dataType": {
+          "typeName": "INT32"
+        },
+        "name": "ZERO"
       }]
     }
   }]

@@ -46,9 +46,7 @@ impl ProjectExecutor {
         let schema = Schema {
             fields: exprs
                 .iter()
-                .map(|e| Field {
-                    data_type: e.return_type().to_data_type(),
-                })
+                .map(|e| Field::new_without_name(e.return_type().to_data_type()))
                 .collect_vec(),
         };
         Self {
@@ -147,12 +145,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field {
-                    data_type: Int64Type::create(false),
-                },
-                Field {
-                    data_type: Int64Type::create(false),
-                },
+                Field::new_without_name(Int64Type::create(false)),
+                Field::new_without_name(Int64Type::create(false)),
             ],
         };
         let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);

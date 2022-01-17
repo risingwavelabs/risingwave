@@ -58,6 +58,7 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
                 Ok(TableColumnDesc {
                     data_type: build_from_prost(col.get_column_type())?,
                     column_id: col.get_column_id(),
+                    name: col.get_name().to_string(),
                 })
             })
             .collect::<Result<Vec<_>>>()?;

@@ -187,14 +187,17 @@ mod tests {
             TableColumnDesc {
                 column_id: 0,
                 data_type: rowid_type.clone(),
+                name: String::new(),
             },
             TableColumnDesc {
                 column_id: 1,
                 data_type: col1_type.clone(),
+                name: String::new(),
             },
             TableColumnDesc {
                 column_id: 2,
                 data_type: col2_type.clone(),
+                name: String::new(),
             },
         ];
         let table = Arc::new(BummockTable::new(&table_id, table_columns));
@@ -233,15 +236,9 @@ mod tests {
 
         let schema = Schema {
             fields: vec![
-                Field {
-                    data_type: rowid_type.clone(),
-                },
-                Field {
-                    data_type: col1_type.clone(),
-                },
-                Field {
-                    data_type: col2_type.clone(),
-                },
+                Field::new_without_name(rowid_type.clone()),
+                Field::new_without_name(col1_type.clone()),
+                Field::new_without_name(col2_type.clone()),
             ],
         };
 
@@ -325,14 +322,17 @@ mod tests {
             TableColumnDesc {
                 column_id: 0,
                 data_type: rowid_type.clone(),
+                name: String::new(),
             },
             TableColumnDesc {
                 column_id: 1,
                 data_type: col1_type.clone(),
+                name: String::new(),
             },
             TableColumnDesc {
                 column_id: 2,
                 data_type: col2_type.clone(),
+                name: String::new(),
             },
         ];
         let table = Arc::new(BummockTable::new(&table_id, table_columns));
@@ -359,15 +359,9 @@ mod tests {
 
         let schema = Schema {
             fields: vec![
-                Field {
-                    data_type: rowid_type.clone(),
-                },
-                Field {
-                    data_type: col1_type.clone(),
-                },
-                Field {
-                    data_type: col2_type.clone(),
-                },
+                Field::new_without_name(rowid_type.clone()),
+                Field::new_without_name(col1_type.clone()),
+                Field::new_without_name(col2_type.clone()),
             ],
         };
 

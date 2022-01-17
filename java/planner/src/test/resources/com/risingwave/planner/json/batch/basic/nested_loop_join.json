@@ -38,12 +38,21 @@
         }
       },
       "columnIds": [1, 2, 3],
-      "columnType": [{
-        "typeName": "INT32"
+      "fields": [{
+        "dataType": {
+          "typeName": "INT32"
+        },
+        "name": "v1"
       }, {
-        "typeName": "INT32"
+        "dataType": {
+          "typeName": "INT32"
+        },
+        "name": "v2"
       }, {
-        "typeName": "FLOAT"
+        "dataType": {
+          "typeName": "FLOAT"
+        },
+        "name": "v3"
       }]
     }
   }, {
@@ -58,8 +67,11 @@
         "tableId": 2
       },
       "columnIds": [1],
-      "columnType": [{
-        "typeName": "INT32"
+      "fields": [{
+        "dataType": {
+          "typeName": "INT32"
+        },
+        "name": "v1"
       }]
     }
   }]

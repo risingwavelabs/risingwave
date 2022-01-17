@@ -10,6 +10,11 @@ import "data.proto";
 import "expr.proto";
 import "google/protobuf/any.proto";
 
+message Field {
+  data.DataType data_type = 1;
+  string name = 2;
+}
+
 message DatabaseRefId {
   int32 database_id = 1;
 }
@@ -46,7 +51,7 @@ message ColumnDesc {
 message SeqScanNode {
   TableRefId table_ref_id = 1;
   repeated int32 column_ids = 2;
-  repeated data.DataType column_type = 3;
+  repeated plan.Field fields = 3;
 }
 
 message RowSeqScanNode {
@@ -84,7 +89,7 @@ message ValuesNode {
     repeated expr.ExprNode cells = 1;
   }
   repeated ExprTuple tuples = 1;
-  repeated data.DataType column_types = 2;
+  repeated plan.Field fields = 2;
 }
 
 message CreateTableNode {

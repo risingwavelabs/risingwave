@@ -75,9 +75,7 @@ impl HashAggExecutorBuilder {
             .iter()
             .cloned()
             .chain(agg_factories.iter().map(|e| e.get_return_type()))
-            .map(|t| Field {
-                data_type: t.to_data_type(),
-            })
+            .map(|t| Field::new_without_name(t.to_data_type()))
             .collect::<Vec<Field>>();
 
         let hash_key_kind = calc_hash_key_kind(&group_key_types);
@@ -270,15 +268,9 @@ mod tests {
                 .build(),
             Schema {
                 fields: vec![
-                    Field {
-                        data_type: t32.clone(),
-                    },
-                    Field {
-                        data_type: t32.clone(),
-                    },
-                    Field {
-                        data_type: t32.clone(),
-                    },
+                    Field::new_without_name(t32.clone()),
+                    Field::new_without_name(t32.clone()),
+                    Field::new_without_name(t32.clone()),
                 ],
             },
         );
@@ -309,15 +301,9 @@ mod tests {
 
         let schema = Schema {
             fields: vec![
-                Field {
-                    data_type: t32.clone(),
-                },
-                Field {
-                    data_type: t32.clone(),
-                },
-                Field {
-                    data_type: t64.clone(),
-                },
+                Field::new_without_name(t32.clone()),
+                Field::new_without_name(t32.clone()),
+                Field::new_without_name(t64.clone()),
             ],
         };
 
@@ -346,9 +332,7 @@ mod tests {
         let src_exec = MockExecutor::with_chunk(
             DataChunk::builder().columns(vec![Column::new(col)]).build(),
             Schema {
-                fields: vec![Field {
-                    data_type: t32.clone(),
-                }],
+                fields: vec![Field::new_without_name(t32.clone())],
             },
         );
 
@@ -370,9 +354,7 @@ mod tests {
             HashAggExecutorBuilder::deserialize(&agg_prost, Box::new(src_exec), TaskId::default())
                 .unwrap();
         let schema = Schema {
-            fields: vec![Field {
-                data_type: t32.clone(),
-            }],
+            fields: vec![Field::new_without_name(t32.clone())],
         };
         let res = Arc::new(array_nonnull! { I64Array, [8] }.into());
 

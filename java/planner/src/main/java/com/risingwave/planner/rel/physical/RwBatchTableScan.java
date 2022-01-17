@@ -6,6 +6,7 @@ import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.planner.rel.common.RwScan;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
+import com.risingwave.proto.plan.Field;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.proto.plan.SeqScanNode;
 import com.risingwave.proto.plan.TableRefId;
@@ -64,7 +65,12 @@ public class RwBatchTableScan extends RwScan implements RisingWaveBatchPhyRel {
         c -> {
           seqScanNodeBuilder.addColumnIds(c.getValue());
           var dataType = table.getColumnChecked(c).getDesc().getDataType().getProtobufType();
-          seqScanNodeBuilder.addColumnType(dataType);
+          seqScanNodeBuilder.addFields(
+              Field.newBuilder()
+                  .setDataType(dataType)
+                  .setName(table.getColumnChecked(c).getName())
+                  .build());
+          ;
         });
     return PlanNode.newBuilder()
         .setNodeType(PlanNode.PlanNodeType.SEQ_SCAN)

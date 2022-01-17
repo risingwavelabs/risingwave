@@ -42,9 +42,7 @@ impl InsertExecutor {
             child,
             executed: false,
             schema: Schema {
-                fields: vec![Field {
-                    data_type: Int64Type::create(false),
-                }],
+                fields: vec![Field::new_without_name(Int64Type::create(false))],
             },
             identity,
         }
@@ -224,12 +222,8 @@ mod tests {
         // Schema for mock executor.
         let schema = Schema {
             fields: vec![
-                Field {
-                    data_type: Int64Type::create(false),
-                },
-                Field {
-                    data_type: Int64Type::create(false),
-                },
+                Field::new_without_name(Int64Type::create(false)),
+                Field::new_without_name(Int64Type::create(false)),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema.clone());
@@ -237,15 +231,9 @@ mod tests {
         // Schema of first table
         let schema = Schema {
             fields: vec![
-                Field {
-                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
-                },
-                Field {
-                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
-                },
-                Field {
-                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
-                },
+                Field::new_without_name(Arc::new(DecimalType::new(false, 10, 5)?)),
+                Field::new_without_name(Arc::new(DecimalType::new(false, 10, 5)?)),
+                Field::new_without_name(Arc::new(DecimalType::new(false, 10, 5)?)),
             ],
         };
 
@@ -256,6 +244,7 @@ mod tests {
             .map(|(i, f)| TableColumnDesc {
                 data_type: f.data_type.clone(),
                 column_id: i as i32, // use column index as column id
+                name: f.name.clone(),
             })
             .collect();
 
@@ -280,9 +269,7 @@ mod tests {
             child: Box::new(mock_executor),
             executed: false,
             schema: Schema {
-                fields: vec![Field {
-                    data_type: Int64Type::create(false),
-                }],
+                fields: vec![Field::new_without_name(Int64Type::create(false))],
             },
             identity: format!("InsertExecutor{:?}", TaskId::default()),
         };
@@ -356,9 +343,7 @@ mod tests {
             child: Box::new(mock_executor),
             executed: false,
             schema: Schema {
-                fields: vec![Field {
-                    data_type: Int64Type::create(false),
-                }],
+                fields: vec![Field::new_without_name(Int64Type::create(false))],
             },
             identity: format!("InsertExecutor{:?}", TaskId::default()),
         };
@@ -412,9 +397,7 @@ mod tests {
             child: Box::new(mock_executor),
             executed: false,
             schema: Schema {
-                fields: vec![Field {
-                    data_type: Int64Type::create(false),
-                }],
+                fields: vec![Field::new_without_name(Int64Type::create(false))],
             },
             identity: format!("InsertExecutor{:?}", TaskId::default()),
         };
@@ -497,12 +480,8 @@ mod tests {
         // Schema for mock executor.
         let schema = Schema {
             fields: vec![
-                Field {
-                    data_type: Int64Type::create(false),
-                },
-                Field {
-                    data_type: Int64Type::create(false),
-                },
+                Field::new_without_name(Int64Type::create(false)),
+                Field::new_without_name(Int64Type::create(false)),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema.clone());
@@ -510,15 +489,9 @@ mod tests {
         // Schema of first table
         let schema = Schema {
             fields: vec![
-                Field {
-                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
-                },
-                Field {
-                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
-                },
-                Field {
-                    data_type: Arc::new(DecimalType::new(false, 10, 5)?),
-                },
+                Field::new_without_name(Arc::new(DecimalType::new(false, 10, 5)?)),
+                Field::new_without_name(Arc::new(DecimalType::new(false, 10, 5)?)),
+                Field::new_without_name(Arc::new(DecimalType::new(false, 10, 5)?)),
             ],
         };
 
@@ -529,6 +502,7 @@ mod tests {
             .map(|(i, f)| TableColumnDesc {
                 data_type: f.data_type.clone(),
                 column_id: i as i32, // use column index as column id
+                name: f.name.clone(),
             })
             .collect();
 

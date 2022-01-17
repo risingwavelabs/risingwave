@@ -14,8 +14,8 @@ use risingwave_pb::plan::exchange_info::{Distribution, DistributionMode};
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::values_node::ExprTuple;
 use risingwave_pb::plan::{
-    exchange_info, ColumnDesc, CreateTableNode, ExchangeInfo, InsertNode, PlanFragment, PlanNode,
-    SeqScanNode, ValuesNode,
+    exchange_info, ColumnDesc, CreateTableNode, ExchangeInfo, Field as NodeField, InsertNode,
+    PlanFragment, PlanNode, SeqScanNode, ValuesNode,
 };
 use risingwave_pb::task_service::{
     GetDataResponse, QueryId, StageId, TaskId as ProstTaskId, TaskSinkId as ProstSinkId,
@@ -240,12 +240,15 @@ impl<'a> TableBuilder<'a> {
             .iter()
             .map(|tuple| TableBuilder::build_values(tuple.clone()))
             .collect_vec();
-        let column_types = tuples
+        let fields = tuples
             .first()
             .unwrap()
             .cells
             .iter()
-            .map(|cell| cell.get_return_type().clone())
+            .map(|cell| NodeField {
+                data_type: Some(cell.get_return_type().clone()),
+                name: String::new(),
+            })
             .collect::<Vec<_>>();
         PlanFragment {
             root: Some(PlanNode {
@@ -258,11 +261,7 @@ impl<'a> TableBuilder<'a> {
                     node_type: PlanNodeType::Value as i32,
                     body: Some(Any {
                         type_url: "/".to_string(),
-                        value: ValuesNode {
-                            tuples,
-                            column_types,
-                        }
-                        .encode_to_vec(),
+                        value: ValuesNode { tuples, fields }.encode_to_vec(),
                     }),
                     children: vec![],
                 }],
@@ -365,7 +364,7 @@ impl<'a> SelectBuilder<'a> {
             let scan = SeqScanNode {
                 table_ref_id: None,
                 column_ids,
-                column_type: vec![],
+                fields: vec![],
             };
 
             self.plan = PlanFragment {

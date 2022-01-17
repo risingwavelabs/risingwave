@@ -45,11 +45,14 @@
         "tableId": 4
       },
       "columnIds": [1],
-      "columnType": [{
-        "typeName": "DECIMAL",
-        "precision": 28,
-        "scale": 10,
-        "isNullable": true
+      "fields": [{
+        "dataType": {
+          "typeName": "DECIMAL",
+          "precision": 28,
+          "scale": 10,
+          "isNullable": true
+        },
+        "name": "v1"
       }]
     }
   }]

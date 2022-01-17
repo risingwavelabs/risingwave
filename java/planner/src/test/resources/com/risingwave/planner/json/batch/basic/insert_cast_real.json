@@ -33,8 +33,11 @@
           }
         }]
       }],
-      "columnTypes": [{
-        "typeName": "FLOAT"
+      "fields": [{
+        "dataType": {
+          "typeName": "FLOAT"
+        },
+        "name": "v1"
       }]
     }
   }]

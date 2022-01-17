@@ -210,6 +210,7 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                     .chain(right_child.schema().fields.iter())
                     .map(|f| Field {
                         data_type: f.data_type.clone(),
+                        name: f.name.clone(),
                     })
                     .collect();
                 let schema = Schema { fields };
@@ -487,9 +488,7 @@ mod tests {
     fn test_convert_row_to_chunk() {
         let row = RowRef::new(vec![Some(ScalarRefImpl::Int32(3))]);
         let probe_side_schema = Schema {
-            fields: vec![Field {
-                data_type: Arc::new(Int32Type::new(false)),
-            }],
+            fields: vec![Field::new_without_name(Arc::new(Int32Type::new(false)))],
         };
         let probe_source = Box::new(MockExecutor::new(probe_side_schema.clone()));
         let build_source = Box::new(MockExecutor::new(probe_side_schema.clone()));
@@ -550,12 +549,8 @@ mod tests {
         fn create_left_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
-                    Field {
-                        data_type: Int32Type::create(false),
-                    },
-                    Field {
-                        data_type: Float32Type::create(true),
-                    },
+                    Field::new_without_name(Int32Type::create(false)),
+                    Field::new_without_name(Float32Type::create(true)),
                 ],
             };
             let mut executor = MockExecutor::new(schema);
@@ -593,12 +588,8 @@ mod tests {
         fn create_right_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
-                    Field {
-                        data_type: Int32Type::create(false),
-                    },
-                    Field {
-                        data_type: Float64Type::create(true),
-                    },
+                    Field::new_without_name(Int32Type::create(false)),
+                    Field::new_without_name(Float64Type::create(true)),
                 ],
             };
             let mut executor = MockExecutor::new(schema);
@@ -660,9 +651,7 @@ mod tests {
                 .fields
                 .iter()
                 .chain(right_child.schema().fields.iter())
-                .map(|f| Field {
-                    data_type: f.data_type.clone(),
-                })
+                .cloned()
                 .collect();
             let schema = Schema { fields };
             let probe_side_schema = left_child.schema().data_types();

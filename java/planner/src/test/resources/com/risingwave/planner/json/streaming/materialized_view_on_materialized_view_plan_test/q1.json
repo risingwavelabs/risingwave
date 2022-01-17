@@ -51,17 +51,20 @@
       "columnType": {
         "typeName": "INT32"
       },
-      "encoding": "RAW"
+      "encoding": "RAW",
+      "name": "v1"
     }, {
       "columnType": {
         "typeName": "INT32"
       },
-      "encoding": "RAW"
+      "encoding": "RAW",
+      "name": "v2"
     }, {
       "columnType": {
         "typeName": "INT64"
       },
-      "encoding": "RAW"
+      "encoding": "RAW",
+      "name": "_row_id"
     }],
     "pkIndices": [2],
     "columnOrders": [{

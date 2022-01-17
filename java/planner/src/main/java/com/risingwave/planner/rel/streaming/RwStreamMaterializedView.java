@@ -93,6 +93,7 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
       com.risingwave.proto.plan.ColumnDesc.Builder columnDescBuilder =
           com.risingwave.proto.plan.ColumnDesc.newBuilder();
       columnDescBuilder
+          .setName(pair.getKey())
           .setEncoding(com.risingwave.proto.plan.ColumnDesc.ColumnEncodingType.RAW)
           .setColumnType(pair.getValue().getDataType().getProtobufType())
           .setIsPrimary(false);

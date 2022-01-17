@@ -486,12 +486,8 @@ mod tests {
         fn create_left_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
-                    Field {
-                        data_type: Int32Type::create(false),
-                    },
-                    Field {
-                        data_type: Float32Type::create(false),
-                    },
+                    Field::new_without_name(Int32Type::create(false)),
+                    Field::new_without_name(Float32Type::create(false)),
                 ],
             };
             let mut executor = MockExecutor::new(schema);
@@ -530,12 +526,8 @@ mod tests {
         fn create_right_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
-                    Field {
-                        data_type: Int32Type::create(false),
-                    },
-                    Field {
-                        data_type: Float64Type::create(false),
-                    },
+                    Field::new_without_name(Int32Type::create(false)),
+                    Field::new_without_name(Float64Type::create(false)),
                 ],
             };
             let mut executor = MockExecutor::new(schema);

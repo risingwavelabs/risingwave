@@ -5,6 +5,7 @@ use risingwave_common::array::{DataChunk, DataChunkRef};
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::types::build_from_prost;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::SeqScanNode;
 use risingwave_storage::bummock::BummockResult;
@@ -57,9 +58,14 @@ impl BoxedExecutorBuilder for SeqScanExecutor {
 
         let schema = Schema::new(
             seq_scan_node
-                .get_column_type()
+                .get_fields()
                 .iter()
-                .map(Field::try_from)
+                .map(|f| {
+                    Ok(Field {
+                        data_type: build_from_prost(f.get_data_type())?,
+                        name: f.get_name().clone(),
+                    })
+                })
                 .collect::<Result<Vec<Field>>>()?,
         );
 
@@ -125,9 +131,9 @@ mod tests {
     async fn test_seq_scan_executor() -> Result<()> {
         let table_id = TableId::default();
         let schema = Schema {
-            fields: vec![Field {
-                data_type: Arc::new(DecimalType::new(false, 10, 5)?),
-            }],
+            fields: vec![Field::new_without_name(Arc::new(DecimalType::new(
+                false, 10, 5,
+            )?))],
         };
         let table_columns = schema
             .fields
@@ -136,6 +142,7 @@ mod tests {
             .map(|(i, f)| TableColumnDesc {
                 data_type: f.data_type.clone(),
                 column_id: i as i32, // use column index as column id
+                name: f.name.clone(),
             })
             .collect();
         let table = BummockTable::new(&table_id, table_columns);

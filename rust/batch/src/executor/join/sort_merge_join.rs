@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 
 use prost::Message;
 use risingwave_common::array::{DataChunk, Row, RowRef};
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -256,9 +256,7 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
                     .fields
                     .iter()
                     .chain(right_child.schema().fields.iter())
-                    .map(|f| Field {
-                        data_type: f.data_type.clone(),
-                    })
+                    .cloned()
                     .collect();
                 let schema = Schema { fields };
 
@@ -345,12 +343,8 @@ mod tests {
         fn create_left_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
-                    Field {
-                        data_type: Int32Type::create(false),
-                    },
-                    Field {
-                        data_type: Float32Type::create(true),
-                    },
+                    Field::new_without_name(Int32Type::create(false)),
+                    Field::new_without_name(Float32Type::create(true)),
                 ],
             };
             let mut executor = MockExecutor::new(schema);
@@ -388,12 +382,8 @@ mod tests {
         fn create_right_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
-                    Field {
-                        data_type: Int32Type::create(false),
-                    },
-                    Field {
-                        data_type: Float64Type::create(true),
-                    },
+                    Field::new_without_name(Int32Type::create(false)),
+                    Field::new_without_name(Float64Type::create(true)),
                 ],
             };
             let mut executor = MockExecutor::new(schema);
@@ -455,9 +445,7 @@ mod tests {
                 .fields
                 .iter()
                 .chain(right_child.schema().fields.iter())
-                .map(|f| Field {
-                    data_type: f.data_type.clone(),
-                })
+                .cloned()
                 .collect();
             let schema = Schema { fields };
 
